@@ -304,6 +304,49 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         "/cost_breakdown", "/objective_decomposition", "/economics_by_carrier",
         "/statistics", "/lcoh", "/ac_pf/status", "/losses", "/carrier_kpis",
         "/emissions", "/line_duals", "/price_drivers", "/asset_economics",
+        # AdequacyReport — a structured report, not a time series (adequacy
+        # plan Phase 1 Task 3).
+        "/adequacy",
+        # COPT screening adequacy + FMECA ranking (Phase 2) — structured.
+        "/copt",
+        # The firm-capacity (reserve-margin) result (Phase 8 §4) — the
+        # PERSISTED solve-time stash: one row per investment period plus the
+        # derating table. `peak_snapshots` names the hours the credit was
+        # measured over, but the payload carries no per-snapshot series, so a
+        # snapshot range would have nothing to slice.
+        "/reserve_margin",
+        # Contingency-sweep lifecycle (Phase 4) — status + rows, no series.
+        "/fmea_sweep",
+        # All computed failure-mode rows on one list (Phase 4 Task 4).
+        "/fmea_modes",
+        # Reliability/cost frontier lifecycle (Phase 5) — status + the
+        # target→(cost, EUE) points, no per-snapshot series. Registered late:
+        # the endpoint landed without a line here, which is exactly the drift
+        # this test exists to catch.
+        "/frontier",
+        # Sequential-MC study lifecycle (Phase 6) — status + a metrics/ELCC
+        # sibling payload. `by_period` is a per-BLOCK roll-up, not a snapshot
+        # series, so a snapshot range would have nothing to slice.
+        "/mc",
+        # The ELCC candidate list for the panel's asset picker (Phase 6) — one
+        # row per eligible asset with its nameplate, no snapshot axis at all.
+        "/mc/elcc_candidates",
+        # Coupling-loop lifecycle (Phase 7) — status, verdict and one row per
+        # ITERATE (an ε and the MC metrics of the plan it produced). The axis
+        # is the search, not the horizon, so a snapshot range would have
+        # nothing to slice. The POST and the /coupling_loop/abort POST are not
+        # scanned by this test at all (it reads `@results_router.get` only);
+        # both carry their ROUTE_SURFACES entries in test_golden_coverage.py,
+        # which is the registry that sees every method.
+        "/coupling_loop",
+        # Margin-loop lifecycle (Phase 9) — the same shape on the other
+        # lever: status, verdict and one row per ITERATE (a reserve
+        # margin and the MC metrics of the plan it produced). The axis is
+        # the search, not the horizon. The POST and the
+        # /margin_loop/abort POST are not scanned by this test at all (it
+        # reads `@results_router.get` only); both carry their
+        # ROUTE_SURFACES entries in test_golden_coverage.py.
+        "/margin_loop",
     }
 
     unclassified = declared - ranged - aggregates

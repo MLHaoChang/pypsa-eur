@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
@@ -11,6 +11,14 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_valida
 # the schema boundary so the rest of the backend sees a plain `float`.
 # Without this, every "Apply" with one of those fields blanked 422s the
 # whole PUT — surfaced by QA G1.
+# Phase 12g: a float field that maps onto a PyPSA attribute whose class
+# default is FINITE. pydantic's plain `float` accepts the JSON `NaN`/`Infinity`
+# literals and the strings "nan"/"inf", and a non-finite value in such an
+# attribute is never PyPSA's "unset" (its unset IS the finite default) — it
+# drops a term or a constraint row at solve time. Refused at the boundary, 422.
+# The `int` fields of the same set (`build_year`, `min_up_time`, `tap_side`…)
+# already refuse non-finite values as `int` and stay `int`.
+Finite = Annotated[float, Field(allow_inf_nan=False)]
 _NoneToPosInf = Annotated[float, BeforeValidator(
     lambda v: float("inf") if v is None else v
 )]
@@ -55,19 +63,30 @@ class CarrierCreate(BaseModel):
 
 class LineCreate(BaseModel):
     name: str
+    # ── Adequacy occurrence attributes (design spec §5.4) ──────────────────
+    # Custom GUI columns, same pattern as curtailment_cost: stored on the
+    # component DataFrame, no PyPSA meaning, netCDF round-trip for free.
+    # None/NaN = unset → solve-time fallback to the per-carrier default
+    # library (services/adequacy/occurrence.py). The basis is a LABEL:
+    # FOR (service-hours, what NERC GADS class averages publish) and EFORd
+    # (demand-based, what adequacy math wants) differ materially for units
+    # with reserve-shutdown hours and are never silently converted.
+    outage_rate_value: float | None = None
+    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    mttr_hours: float | None = None
     bus0: str
     bus1: str
-    length: float = 1.0
+    length: Finite = 1.0
     type: str = ""
-    r: float = 0.0
-    x: float = 0.01
-    b: float = 0.0
-    s_nom: float = 0.0
+    r: Finite = 0.0
+    x: Finite = 0.01
+    b: Finite = 0.0
+    s_nom: Finite = 0.0
     s_nom_extendable: bool = False
-    s_nom_min: float = 0.0
+    s_nom_min: Finite = 0.0
     s_nom_max: _NoneToPosInf = Field(default=float("inf"))
-    capital_cost: float = 0.0
-    fom_cost: float = 0.0   # fixed O&M, €/MVA/yr (PyPSA-native)
+    capital_cost: Finite = 0.0
+    fom_cost: Finite = 0.0   # fixed O&M, €/MVA/yr (PyPSA-native)
     # Lump-sum construction cost (€/MVA). NaN means "unset" — PyPSA's
     # native annuity (overnight × annuity(rate, life)) takes over when
     # this is set; otherwise capital_cost is used directly.
@@ -76,7 +95,7 @@ class LineCreate(BaseModel):
     # discount_rate at solve time. PyPSA's consistency check requires this
     # to be set per-asset whenever overnight_cost is.
     discount_rate: float | None = None
-    terrain_factor: float = 1.0
+    terrain_factor: Finite = 1.0
     carrier: str = "AC"
     # PyPSA vintage attributes — same defaults as Generators / Storage /
     # Links / Stores so multi-period validators don't single lines out.
@@ -99,13 +118,24 @@ class ImpedanceRescaleRequest(BaseModel):
 
 class LinkCreate(BaseModel):
     name: str
+    # ── Adequacy occurrence attributes (design spec §5.4) ──────────────────
+    # Custom GUI columns, same pattern as curtailment_cost: stored on the
+    # component DataFrame, no PyPSA meaning, netCDF round-trip for free.
+    # None/NaN = unset → solve-time fallback to the per-carrier default
+    # library (services/adequacy/occurrence.py). The basis is a LABEL:
+    # FOR (service-hours, what NERC GADS class averages publish) and EFORd
+    # (demand-based, what adequacy math wants) differ materially for units
+    # with reserve-shutdown hours and are never silently converted.
+    outage_rate_value: float | None = None
+    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    mttr_hours: float | None = None
     bus0: str
     bus1: str
     bus2: str = ""
     bus3: str = ""
     bus4: str = ""
     carrier: str = ""
-    efficiency: float = 1.0
+    efficiency: Finite = 1.0
     # Secondary efficiencies for multi-output Links (CHP plants etc).
     # Only enter the energy balance when the corresponding bus2/bus3/bus4 is
     # set. `_NoneToOne` coerces null → 1.0 so the frontend's full-object
@@ -113,26 +143,51 @@ class LinkCreate(BaseModel):
     # configured (heat-pump case).
     efficiency2: _NoneToOne = 1.0
     efficiency3: _NoneToOne = 1.0
-    p_nom: float = 0.0
+    p_nom: Finite = 0.0
     p_nom_extendable: bool = False
-    p_nom_min: float = 0.0
+    p_nom_min: Finite = 0.0
     p_nom_max: _NoneToPosInf = Field(default=float("inf"))
-    marginal_cost: float = 0.0
-    capital_cost: float = 0.0
-    fom_cost: float = 0.0   # fixed O&M, €/MW/yr (PyPSA-native)
+    marginal_cost: Finite = 0.0
+    capital_cost: Finite = 0.0
+    fom_cost: Finite = 0.0   # fixed O&M, €/MW/yr (PyPSA-native)
     overnight_cost: float | None = None  # €/MW; NaN = unset
     # Per-asset discount rate used by PyPSA's native annuity when
     # overnight_cost is set. NaN ⇒ fall back to solver config's global
     # discount_rate at solve time (transient fill).
     discount_rate: float | None = None
-    p_min_pu: float = 0.0
-    p_max_pu: float = 1.0
+    # Phase 12f: `allow_inf_nan=False` because pydantic's `float` accepts the
+    # JSON `NaN`/`Infinity` literals and the strings "nan"/"inf", and a
+    # non-finite value in a finite-default LP bound MASKS its constraint
+    # row rather than defaulting — the asset is left unbounded. Refused at
+    # the boundary (422) as `PUT /timeseries` and `PATCH /_bulk` refuse it.
+    p_min_pu: Finite = Field(default=0.0, allow_inf_nan=False)
+    p_max_pu: Finite = Field(default=1.0, allow_inf_nan=False)
     build_year: int = 0
     lifetime: _NoneToPosInf = Field(default=float("inf"))
 
 
 class GeneratorCreate(BaseModel):
     name: str
+    # ── Adequacy occurrence attributes (design spec §5.4) ──────────────────
+    # Custom GUI columns, same pattern as curtailment_cost: stored on the
+    # component DataFrame, no PyPSA meaning, netCDF round-trip for free.
+    # None/NaN = unset → solve-time fallback to the per-carrier default
+    # library (services/adequacy/occurrence.py). The basis is a LABEL:
+    # FOR (service-hours, what NERC GADS class averages publish) and EFORd
+    # (demand-based, what adequacy math wants) differ materially for units
+    # with reserve-shutdown hours and are never silently converted.
+    outage_rate_value: float | None = None
+    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    mttr_hours: float | None = None
+    # Phase 12h. "The availability I gave this asset ALREADY includes forced
+    # outages" — PyPSA-Eur's nuclear capacity-factor table is the case. Set,
+    # the adequacy engines and the reserve margin alike credit the unit at
+    # its availability and apply NO outage rate on top; clear, both are
+    # applied. Generator only: the finding is about generators, and the
+    # other occurrence-bearing classes carry no availability read this way.
+    # Typed `bool | None` so an explicit `null` from a scripted PUT or the
+    # chat tools is 200 and means the default rather than a 422.
+    p_max_pu_includes_outages: bool | None = None
     bus: str
     carrier: str = ""
     # PyPSA control mode for power flow / unit commitment. PQ = fixed P & Q,
@@ -141,15 +196,15 @@ class GeneratorCreate(BaseModel):
     # the auto-slack picker in solver_service. Validation in Phase 7 will
     # ensure at least one Slack exists when run_ac_pf_after_lopf is on.
     control: str = "PQ"
-    p_nom: float = 0.0
+    p_nom: Finite = 0.0
     p_nom_extendable: bool = False
-    p_nom_min: float = 0.0
+    p_nom_min: Finite = 0.0
     p_nom_max: _NoneToPosInf = Field(default=float("inf"))
-    p_min_pu: float = 0.0
-    p_max_pu: float = 1.0
-    marginal_cost: float = 0.0
-    capital_cost: float = 0.0
-    fom_cost: float = 0.0           # fixed O&M, €/MW/yr (PyPSA-native)
+    p_min_pu: Finite = Field(default=0.0, allow_inf_nan=False)
+    p_max_pu: Finite = Field(default=1.0, allow_inf_nan=False)
+    marginal_cost: Finite = 0.0
+    capital_cost: Finite = 0.0
+    fom_cost: Finite = 0.0           # fixed O&M, €/MW/yr (PyPSA-native)
     overnight_cost: float | None = None  # €/MW; NaN = unset
     # Per-asset discount rate used by PyPSA's native annuity when
     # overnight_cost is set. NaN ⇒ fall back to solver config's global
@@ -161,12 +216,12 @@ class GeneratorCreate(BaseModel):
     #   Σ curtailment_cost × (p_max_pu × p_nom_opt − p)
     # to the objective. Only honoured for generators where the value is > 0.
     curtailment_cost: float = 0.0   # €/MWh of curtailed renewable energy
-    efficiency: float = 1.0
+    efficiency: Finite = 1.0
     committable: bool = False
     ramp_limit_up: float | None = None
     ramp_limit_down: float | None = None
-    start_up_cost: float = 0.0
-    shut_down_cost: float = 0.0
+    start_up_cost: Finite = 0.0
+    shut_down_cost: Finite = 0.0
     min_up_time: int = 0
     min_down_time: int = 0
     # Per-generator annual energy floor / ceiling (MWh). PyPSA enforces
@@ -180,29 +235,48 @@ class GeneratorCreate(BaseModel):
     lifetime: _NoneToPosInf = Field(default=float("inf"))
     unit: str = "MW"
 
+    @field_validator("p_max_pu_includes_outages", mode="before")
+    @classmethod
+    def _flag_none_is_false(cls, v):
+        """An explicit ``null`` means the column's default, not a missing
+        value: the flag is a bool column and a None in it would make the
+        column ``object``, which netCDF refuses on the next project save."""
+        return False if v is None else v
+
 
 class StorageUnitCreate(BaseModel):
     name: str
+    # ── Adequacy occurrence attributes (design spec §5.4) ──────────────────
+    # Custom GUI columns, same pattern as curtailment_cost: stored on the
+    # component DataFrame, no PyPSA meaning, netCDF round-trip for free.
+    # None/NaN = unset → solve-time fallback to the per-carrier default
+    # library (services/adequacy/occurrence.py). The basis is a LABEL:
+    # FOR (service-hours, what NERC GADS class averages publish) and EFORd
+    # (demand-based, what adequacy math wants) differ materially for units
+    # with reserve-shutdown hours and are never silently converted.
+    outage_rate_value: float | None = None
+    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    mttr_hours: float | None = None
     bus: str
     carrier: str = ""
-    p_nom: float = 0.0
+    p_nom: Finite = 0.0
     p_nom_extendable: bool = False
-    p_nom_min: float = 0.0
+    p_nom_min: Finite = 0.0
     p_nom_max: _NoneToPosInf = Field(default=float("inf"))
-    max_hours: float = 6.0
-    efficiency_store: float = 0.9
-    efficiency_dispatch: float = 0.9
-    standing_loss: float = 0.0
+    max_hours: Finite = 6.0
+    efficiency_store: Finite = 0.9
+    efficiency_dispatch: Finite = 0.9
+    standing_loss: Finite = 0.0
     cyclic_state_of_charge: bool = True
-    state_of_charge_initial: float = 0.5
+    state_of_charge_initial: Finite = 0.5
     # Exogenous energy input to the storage SoC equation (MW). Constant value
     # set here; time-varying inflows go through `storage_units_t.inflow` via
     # the generic /timeseries upload endpoint. Required to model hydro
     # reservoirs — without it a "reservoir" is just a battery with no fuel.
-    inflow: float = 0.0
-    capital_cost: float = 0.0
-    marginal_cost: float = 0.0
-    fom_cost: float = 0.0   # fixed O&M, €/MW/yr (PyPSA-native)
+    inflow: Finite = 0.0
+    capital_cost: Finite = 0.0
+    marginal_cost: Finite = 0.0
+    fom_cost: Finite = 0.0   # fixed O&M, €/MW/yr (PyPSA-native)
     overnight_cost: float | None = None  # €/MW; NaN = unset
     # Per-asset discount rate used by PyPSA's native annuity when
     # overnight_cost is set. NaN ⇒ fall back to solver config's global
@@ -214,24 +288,35 @@ class StorageUnitCreate(BaseModel):
 
 class StoreCreate(BaseModel):
     name: str
+    # ── Adequacy occurrence attributes (design spec §5.4) ──────────────────
+    # Custom GUI columns, same pattern as curtailment_cost: stored on the
+    # component DataFrame, no PyPSA meaning, netCDF round-trip for free.
+    # None/NaN = unset → solve-time fallback to the per-carrier default
+    # library (services/adequacy/occurrence.py). The basis is a LABEL:
+    # FOR (service-hours, what NERC GADS class averages publish) and EFORd
+    # (demand-based, what adequacy math wants) differ materially for units
+    # with reserve-shutdown hours and are never silently converted.
+    outage_rate_value: float | None = None
+    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    mttr_hours: float | None = None
     bus: str
     carrier: str = ""
-    e_nom: float = 0.0
+    e_nom: Finite = 0.0
     e_nom_extendable: bool = False
-    e_nom_min: float = 0.0
+    e_nom_min: Finite = 0.0
     e_nom_max: _NoneToPosInf = Field(default=float("inf"))
-    e_min_pu: float = 0.0
-    e_max_pu: float = 1.0
-    e_initial: float = 0.0
+    e_min_pu: Finite = Field(default=0.0, allow_inf_nan=False)
+    e_max_pu: Finite = Field(default=1.0, allow_inf_nan=False)
+    e_initial: Finite = 0.0
     e_cyclic: bool = False
-    capital_cost: float = 0.0
-    marginal_cost: float = 0.0
-    fom_cost: float = 0.0   # fixed O&M, €/MWh/yr (PyPSA-native)
+    capital_cost: Finite = 0.0
+    marginal_cost: Finite = 0.0
+    fom_cost: Finite = 0.0   # fixed O&M, €/MWh/yr (PyPSA-native)
     overnight_cost: float | None = None  # €/MWh; NaN = unset
     # Per-asset discount rate; NaN ⇒ fall back to solver config's global
     # discount_rate at solve time (transient fill).
     discount_rate: float | None = None
-    standing_loss: float = 0.0
+    standing_loss: Finite = 0.0
     build_year: int = 0
     lifetime: _NoneToPosInf = Field(default=float("inf"))
 
@@ -240,9 +325,9 @@ class LoadCreate(BaseModel):
     name: str
     bus: str
     carrier: str = ""
-    p_set: float = 0.0
-    q_set: float = 0.0
-    sign: float = -1.0
+    p_set: Finite = 0.0
+    q_set: Finite = 0.0
+    sign: Finite = -1.0
 
 
 class TransformerCreate(BaseModel):
@@ -250,17 +335,17 @@ class TransformerCreate(BaseModel):
     bus0: str
     bus1: str
     type: str = ""
-    s_nom: float = 0.0
-    r: float = 0.0
-    x: float = 0.1
-    tap_ratio: float = 1.0
+    s_nom: Finite = 0.0
+    r: Finite = 0.0
+    x: Finite = 0.1
+    tap_ratio: Finite = 1.0
     tap_side: int = 0
-    phase_shift: float = 0.0
+    phase_shift: Finite = 0.0
     s_nom_extendable: bool = False
-    s_nom_min: float = 0.0
+    s_nom_min: Finite = 0.0
     s_nom_max: _NoneToPosInf = Field(default=float("inf"))
-    capital_cost: float = 0.0
-    fom_cost: float = 0.0   # fixed O&M, €/MVA/yr (PyPSA-native)
+    capital_cost: Finite = 0.0
+    fom_cost: Finite = 0.0   # fixed O&M, €/MVA/yr (PyPSA-native)
     overnight_cost: float | None = None  # €/MVA; NaN = unset
     # Per-asset discount rate; NaN ⇒ fall back to solver config's global
     # discount_rate at solve time (transient fill).
@@ -331,7 +416,10 @@ class GlobalConstraintCreate(BaseModel):
     name: str
     type: str = "primary_energy"
     sense: str = "<="
-    constant: float = 0.0
+    # Phase 12g (shipped-code review, finding 3): a NaN `constant` DELETES the
+    # cap — measured gas 100 → 300 MWh — and `n.add` would silently coerce it
+    # to a 0 t cap. Refused at the boundary like every finite-default input.
+    constant: Finite = 0.0
     carrier_attribute: str | None = None      # for primary_energy
     carrier: str | None = None                # for tech / operational / etc.
     investment_period: int | None = None      # multi-period only
@@ -368,6 +456,52 @@ class SolverConfigSchema(BaseModel):
     # networks (warning emitted to the solver log).
     co2_price_per_period: dict[str, float] = {}
     voll: float = 0.0
+    # Reliability target (adequacy spec §5.1): unserved electrical energy cap
+    # in parts per ten thousand (‱) of period electrical demand; None = off.
+    #
+    # Bounded at the API boundary, not merely downstream. Both the solver
+    # wrapper (`_wrap_with_ens_cap`) and the coherence validator treat a
+    # non-positive cap as "no target", which is right for 0/None and WRONG
+    # for a negative: a user who types -1 into the reliability target would
+    # otherwise get a solve with no reliability constraint at all, no report
+    # and no warning — indistinguishable from having set nothing. A nonsense
+    # value must be rejected where it is entered, never silently coerced to
+    # off (spec: nothing is silently converted).
+    ens_cap_permyriad: float | None = Field(default=None, ge=0)
+    # Per-zone ceiling as a multiple of the system target (zone = bus
+    # `country`); None = no zone ceilings. Requires ens_cap_permyriad.
+    # `gt=0`, not `ge=0`: a zero multiple is a zero-ENS ceiling per zone,
+    # which is a different (and almost certainly unintended) request than
+    # "no zone ceilings" — that is what None is for.
+    ens_zone_cap_multiple: float | None = Field(default=None, gt=0)
+    # ── Planning reserve margin (Phase 8 spec §1) ─────────────────────────
+    # Firm-capacity standard as a FRACTION (0.15 == 15 %); None/0 = off.
+    #
+    # `ge=0` for the same reason the ENS target has it: the wrapper reads a
+    # non-positive margin as "no margin", which is right for 0/None and WRONG
+    # for a negative — a user who types -1 would otherwise get a solve with no
+    # standard at all, no report and no warning, indistinguishable from having
+    # set nothing. `le=5` catches the units mistake: 15 typed for 15 % is a
+    # 1500 % margin, which is not a margin, and a plan sized against it is a
+    # fiction the LP would spend an hour building.
+    reserve_margin: float | None = Field(default=None, ge=0, le=5)
+    # Peak-coincidence window (snapshots) for must-take VRE credit; None ⇒ the
+    # spec §2.3 scaling rule. `ge=1`: a window of zero snapshots has no mean.
+    prm_peak_hours: int | None = Field(default=None, ge=1)
+    # Reference duration (hours) for the storage capacity haircut. `gt=0`:
+    # `min(1, max_hours / duration)` divides by it.
+    prm_storage_duration_h: float = Field(default=4.0, gt=0)
+    # Demand-response tier (spec §4.4): voluntary, volume-capped, opt-in per
+    # bus; 0 = off. Never applied globally.
+    # `ge=0`: a negative DSR price pays the model to curtail, so it would
+    # dispatch the full voluntary volume every hour and report a plan built
+    # on that revenue.
+    dsr_price_eur_per_mwh: float = Field(default=0.0, ge=0)
+    # A SHARE of load, so it cannot exceed 1: you cannot curtail more demand
+    # than exists. Unbounded, a share of 5 silently invents a resource five
+    # times the load and the plan is sized against a fiction.
+    dsr_share_of_load: float = Field(default=0.0, ge=0, le=1)
+    dsr_buses: list[str] = []
     investment_periods: list[int] = []
     # Per-investment-period load multiplier, keyed by period year (str). 1.0 =
     # unchanged. Applied transiently at solve time — see SolverConfig.load_scalers.
@@ -1031,6 +1165,11 @@ class LostLoadComparison(BaseModel):
     # (electrical / H2 / heat / gas etc.). Lets the Compare View answer
     # "is shedding concentrated on one carrier?" without scanning every bus.
     by_carrier: list[LostLoadByCarrier] = Field(default_factory=list)
+    # Weighted loss-of-load hours over ELECTRICAL buses only (spec §5.1's
+    # reported reliability number — see services/adequacy/metrics.shed_hours
+    # for the definition and the threshold). Additive: older consumers
+    # ignore it; None distinguishes "not computed" from a genuine 0.0.
+    shed_hours: CarrierPeriodValue | None = None
 
 
 class StorageUnitCycles(BaseModel):

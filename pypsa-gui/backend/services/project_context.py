@@ -123,7 +123,8 @@ class ProjectContext:
     storage_dir: str | None = None
 
     # Transient LP-scaffolding rows the solver adds for the duration of one solve
-    # (vintage clones `parent@<year>`, VOLL slacks `__voll_<bus>`) and reverts in
+    # (vintage clones `parent@<year>`, VOLL slacks `__voll_<bus>` — convention
+    # owned by services/adequacy/slack.py) and reverts in
     # restore(). Keyed `{component_class: {name, …}}`. Hidden from GET reads so a
     # user never sees solver internals as asset rows. Per-network by construction
     # — each context's expansion is its own.
@@ -217,10 +218,142 @@ LIFECYCLE_KEYS = (
 RESULT_STATE_KEYS = (
     "lopf_results", "ac_pf_results",
     "last_lost_load",
+    "adequacy_report",
+    "last_reserve_margin",
     "ac_pf_convergence", "ac_pf_convergence_list",
     "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks",
     "ac_pf_converged_count", "ac_pf_total_snapshots",
 )
+
+
+# The keys under a project's solver state that hold a long-running STUDY
+# record — the class-B/C sweep, the frontier, the sequential MC and the two
+# planning loops.
+#
+# ★ Here rather than in `services/study_state.py` (which re-exports it) for two
+# reasons. It is the same KIND of datum as RESULT_STATE_KEYS above — the
+# enumerated contents of a solver_state — and keeping the two side by side is
+# what makes it visible that the study keys are NOT in the result keys, which
+# is precisely the bug this list was moved for: `reset_network` reset one list
+# and not the other, so a finished study outlived the network it measured.
+# And it keeps the import graph acyclic — `study_state` imports PyPSAService,
+# so `pypsa_service` cannot import `study_state`, but it already imports this
+# module.
+STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop")
+
+# What each study is called in a refusal. A user who is told "a study is
+# running" cannot act; one who is told WHICH can go and deal with it.
+STUDY_LABELS = {
+    "fmea_sweep": "an FMEA sweep",
+    "frontier": "a frontier study",
+    "mc": "a sequential-MC study",
+    "coupling_loop": "a coupling-loop study",
+    "margin_loop": "a margin-loop study",
+}
+
+# The studies a user can actually STOP.
+#
+# ★ Every study has an `/abort` route and a `stop_event` since Phase 12e.
+# This was load-bearing for the copy while it was NOT true: the Phase-7
+# refusal sentence said "Wait for it to finish, or abort it" for every study,
+# naming a control that did not exist for three of the five, and the two-branch
+# remedy below existed to stop the refusal inventing an action the user could
+# not take. It is one sentence again — because the control now exists, not
+# because the distinction was dropped.
+#
+# Pinned by a test against the routes that actually exist, so this cannot
+# drift the day someone REMOVES an abort.
+ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
+                     "fmea_sweep")
+
+
+def record_is_running(record) -> bool:
+    """True while a study record's worker thread is genuinely alive.
+
+    ONE definition, called by `study_state.study_running` (the 409 mesh) and by
+    `PyPSAService.reset_network` (which must not clear a live study out from
+    under that mesh). study_state's own docstring makes the argument: a guard
+    that differs between callers is not a guard.
+
+    Testing `thread.is_alive()` and not just the status string matters: a
+    crashed worker that never got to write its terminal status would otherwise
+    wedge the surface permanently, and the user's only recovery would be a
+    process restart.
+    """
+    if not record:
+        return False
+    try:
+        thread = record.get("thread")
+        if thread is None or record.get("status") != "running":
+            return False
+        # ★ A record can be PUBLISHED before its thread is STARTED. `post_mc`,
+        # `post_frontier` and `post_fmea_sweep` do
+        #     record["thread"] = t; _state[key] = record; t.start()
+        # with no lock, so in that gap the record is visible while
+        # `is_alive()` is still False. Reading that as "not running" was a
+        # real hole: a swap was allowed AND Phase 10's clear nulled the live
+        # study's record, after which the 409 mesh could no longer see it and
+        # would admit a second study on the same network.
+        #
+        # `Thread.ident` is None until `start()` and set forever after, so it
+        # distinguishes NEVER-STARTED from ran-and-finished exactly. That
+        # distinction is what keeps this from re-introducing the wedge Phase
+        # 11 avoided: a worker that died without writing a terminal status has
+        # `ident` set, so it still reads as NOT running and cannot block every
+        # network-replacing route for the rest of the session.
+        return bool(thread.is_alive() or thread.ident is None)
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
+def running_study_key(state) -> str | None:
+    """The key of the first live study in ``state``, or None.
+
+    Pure: takes the state dict rather than reaching for the active project, so
+    `pypsa_service` can call it without importing `study_state` (which imports
+    PyPSAService — the cycle Phase 10 already had to route around).
+    """
+    if not state:
+        return None
+    for key in STUDY_KEYS:
+        try:
+            if record_is_running(state.get(key)):
+                return key
+        except Exception:                                     # noqa: BLE001
+            continue
+    return None
+
+
+def study_swap_refusal(state, action: str) -> str | None:
+    """The 409 detail for an action that would REPLACE the network, or None.
+
+    ``action`` is what the user was trying to do ("load a project", "undo",
+    "restore a snapshot"), because a refusal that does not say what it refused
+    is a worse error than the bug it prevents.
+
+    Why the swap is refused at all: a study's worker closes over the
+    `pypsa.Network` object captured before it started, so replacing the
+    network does not STOP the study — it DETACHES it. The study keeps solving
+    the old object and keeps publishing into the solver state the swap carries
+    forward, so the new project's Adequacy tab fills in live with the old
+    project's study, and a `restore="final"` loop writes its certified value
+    into the new project's solver config.
+    """
+    key = running_study_key(state)
+    if key is None:
+        return None
+    label = STUDY_LABELS.get(key, key)
+    remedy = ("Wait for it to finish, or abort it."
+              if key in ABORTABLE_STUDIES else
+              # Unreachable since Phase 12e gave every study an abort, and
+              # kept rather than deleted: the branch is what makes the claim
+              # falsifiable if a study ever loses its route again.
+              "It cannot be aborted, so wait for it to finish.")
+    return (f"{label} is running on this network. Trying to {action} now "
+            "would not stop it — the study holds the network it started on, "
+            "so it would keep running against a network you are no longer "
+            "looking at, and would publish its result over the new one. "
+            + remedy)
 
 
 @dataclass
@@ -260,6 +393,12 @@ class ProjectSolverState:
     solver_config: Any = None
     # Result-state (persisted to results_state.pkl)
     last_lost_load: Any = None
+    adequacy_report: Any = None   # minimal AdequacyReport dict (target solves)
+    # The firm-capacity (reserve-margin) result of the last solve that
+    # enforced one — the PERSISTED solve-time stash `/results/reserve_margin`
+    # serves. Reset with the rest each solve, so a margin can never outlive
+    # the plan that met it.
+    last_reserve_margin: Any = None
     lopf_results: Any = None
     ac_pf_results: Any = None
     ac_pf_convergence: Any = None        # dict[snapshot_iso, bool] (legacy)
@@ -268,6 +407,28 @@ class ProjectSolverState:
     ac_pf_stripped_voll_slacks: Any = None
     ac_pf_converged_count: Any = None
     ac_pf_total_snapshots: Any = None
+    # ── Study records (STUDY_KEYS) — NOT persisted, NOT lifecycle ────────────
+    # Each holds the record of one long-running adequacy study: status, its
+    # result, the worker thread the 409 mesh tests for liveness.
+    #
+    # ★ Declared here for the same reason `last_failure` and
+    # `last_reserve_margin` above are: so they are part of the canonical state
+    # shape and NOT orphan keys. They were undeclared until Phase 10, and that
+    # is precisely why nothing ever reset them — every reset path iterates
+    # declared fields (LIFECYCLE_KEYS, RESULT_STATE_KEYS), so a key in neither
+    # list is a key that survives forever. A finished study therefore outlived
+    # the network it measured: project A's MC study was served for project B,
+    # and a study of a discarded network survived "New". Both reproduced over
+    # HTTP in `tests/test_adequacy_study_scoping.py`.
+    #
+    # They are deliberately in NO persistence group: a study measures a
+    # network in memory and must not be restored from disk beside a network it
+    # may no longer describe.
+    fmea_sweep: Any = None
+    frontier: Any = None
+    mc: Any = None
+    coupling_loop: Any = None
+    margin_loop: Any = None
 
     def as_dict(self) -> dict[str, Any]:
         """A plain dict with the same keys/values — the legacy `_state` shape."""

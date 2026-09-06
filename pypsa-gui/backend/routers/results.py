@@ -17,13 +17,20 @@ header.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
-from fastapi import APIRouter, Query, Response
+import contextvars as _contextvars
+import threading as _threading
+
+from pydantic import BaseModel as _BaseModel
+
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.economics import co2_intensity_map
 from services.pypsa_service import PyPSAService
+from services.adequacy.coupling import snapshot_hash as _snapshot_hash
 from services.serialization import (
     df_to_json,
     safe_float as _safe_float,
@@ -58,6 +65,8 @@ from services.period_utils import (
 )
 
 from routers.simulation import _state, _state_snapshot
+from services import study_state as _study_state
+from services.adequacy import slack as _slack
 
 logger = logging.getLogger("pypsa_gui.results")
 
@@ -2711,7 +2720,10 @@ def get_price_drivers(threshold: float = 2000.0, limit: int = 200):
                         continue
                     mc = float(gens.at[g, "marginal_cost"]) if "marginal_cost" in gens.columns else 0.0
                     carrier = str(gens.at[g, "carrier"]) if "carrier" in gens.columns else ""
-                    if g.startswith("__voll_") or carrier == "load_shedding":
+                    # Membership tests via the shared convention owner
+                    # (services/adequacy/slack.py) — also catches the legacy
+                    # voll_slack spellings the AC-PF strip defends against.
+                    if _slack.is_slack_name(g) or _slack.is_slack_carrier(carrier):
                         voll_slack_active = True
                         voll_dispatch = disp
                         # VOLL slack wins unconditionally for diagnosis — any
@@ -2925,6 +2937,2565 @@ def get_curtailment(
         return _not_solved()
 
 
+@results_router.get("/fmea_modes")
+def get_fmea_modes():
+    """
+    Every COMPUTED failure-mode row on one list (adequacy Phase 4 Task 4):
+    class A from the COPT engine (regenerated on every call — zero solves)
+    plus the last contingency sweep's class B/C rows, criticality-sorted.
+    The worksheet merges this with the per-project sidecar's expert rows
+    client-side. 204 only when every source is empty.
+    """
+    per_mode: list = []
+    copt = get_copt()
+    if isinstance(copt, dict):
+        per_mode.extend(copt["per_mode"])
+    sweep = _state.get("fmea_sweep")
+    # Phase 12e: an ABORTED sweep measured real contingencies before it was
+    # stopped, and the worksheet is where those rows are read. Dropping them
+    # here would make the abort silently lose work the user paid solves for.
+    if sweep and sweep.get("status") in ("done", "aborted"):
+        for r in sweep.get("rows", []):
+            if r.get("failure_mode"):
+                per_mode.append({**r["failure_mode"],
+                                 "delta_eue_mwh": r.get("delta_eue_mwh")})
+    if not per_mode:
+        return Response(status_code=204)
+    # Phase 12e (shipped-code review, finding 11): `(-criticality, mode_id)`,
+    # which is what the spec claimed and the code did not do. Sorting on
+    # criticality alone left exactly-tied rows in SOURCE order — class A from
+    # the COPT engine, then the sweep's B and C — and the tie is not a corner
+    # case here: with no VoLL set every criticality is €0/yr (see below), so
+    # the whole ranking ties and the order the worksheet renders depended on
+    # which classes happened to have been computed. `reverse=True` cannot be
+    # used with a tuple key: it would reverse the mode_id order too.
+    per_mode.sort(key=lambda r: (-float(r.get("criticality_eur_per_year", 0.0)),
+                                 str(r.get("mode_id", ""))))
+    # VOLL travels with the rows so the worksheet can say WHY every
+    # criticality is zero. Criticality is ΔEUE × VoLL × occurrence, so with
+    # no VoLL set the whole ranking collapses to €0/yr — modes whose ΔEUE
+    # differs by 4× tie at zero, and the table reads "these failure modes
+    # cost nothing" when the truth is "these failure modes cannot be priced".
+    # The sweep already refuses outright (422) without a VoLL; this surface
+    # still has LOLE/EUE worth serving, so it reports the condition instead.
+    _cfg = _state.get("solver_config")
+    try:
+        _voll = float(getattr(_cfg, "voll", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        _voll = 0.0
+    return {"per_mode": per_mode,
+            "voll_eur_per_mwh": _voll,
+            "sweep_status": (sweep or {}).get("status"),
+            # Phase 12e (shipped-code review, finding 14): the worksheet is
+            # where the sweep's rows are read, so it is where a failed closing
+            # re-solve has to be said. The record has carried these since the
+            # review's finding 1; this surface used to drop them, leaving the
+            # user reading contingency rows with no sign that the network is
+            # still on the last contingency.
+            "sweep_base_restored": (sweep or {}).get("base_restored"),
+            "sweep_base_restore_status": (sweep or {}).get("base_restore_status"),
+            "sweep_error": (sweep or {}).get("error")}
+
+
+# One predicate for the whole mutual-exclusion mesh (sweep / frontier / mc /
+# coupling loop), MOVED to services/study_state.py so the foreground solve
+# entrypoints in routers/simulation.py can enforce the same mesh without a
+# circular import (this module already imports `_state` from that one). The
+# alias is kept because every guard below reads better with it, and because a
+# second definition here is exactly how the two sides of a mesh drift apart.
+_study_running = _study_state.study_running
+
+
+@results_router.get("/fmea_sweep")
+def get_fmea_sweep():
+    """
+    Status + rows of the last class-B/C contingency sweep (adequacy plan
+    Phase 4). 204 = never run. The stored state carries a worker-thread
+    handle that must not leak into the payload.
+    """
+    st = _state.get("fmea_sweep")
+    if not st:
+        return Response(status_code=204)
+    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+
+
+class FmeaSweepRequest(_BaseModel):
+    # Class-C scenarios, passed by the client from the authorized registry
+    # GET (/api/projects/{name}/stress_scenarios) — this route operates on
+    # the FOREGROUND network and carries no project name, so the sidecar is
+    # read where authorization lives and re-validated here before running.
+    scenarios: list = []
+
+
+@results_router.post("/fmea_sweep/abort")
+def post_fmea_sweep_abort():
+    """
+    Ask a running FMEA sweep to stop (Phase 12e).
+
+    The shipped loop routes' contract verbatim: 200 sets the record's stop
+    event and the engine stops at its next boundary — so an abort costs at
+    most the work already in flight, plus the closing restore, which still
+    runs. IDEMPOTENT and 200 even when the run is already finishing or
+    finished: "stop" on something that has stopped is satisfied, and a 409
+    there would make the button flicker into an error at exactly the moment it
+    worked. 404 only when no run has ever been recorded — a client bug, not a
+    race.
+
+    Deliberately NOT folded into ``/simulation/abort``: that route's stop
+    event belongs to the foreground solver thread and nothing in it reaches a
+    study worker, so a user pressing it would be told the abort succeeded
+    while the study kept running.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("fmea_sweep")
+        if not st:
+            raise HTTPException(
+                404, "no FMEA sweep has been run in this session")
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
+
+
+@results_router.post("/fmea_sweep")
+def post_fmea_sweep(body: FmeaSweepRequest | None = None):
+    """
+    Start the contingency sweep — class B (link outages) plus any class-C
+    scenarios in the body — in a worker thread: a sweep is several LP
+    solves and must never block a request. 409 while a sweep or a
+    foreground solve is running. The closing base re-solve leaves the
+    network AND the foreground results in base state (it writes through
+    the real state sink).
+    """
+    import time
+
+    from services.adequacy.stress import (
+        StressValidationError,
+        run_class_c_sweep,
+    )
+    from services.adequacy.sweep import SweepBudgetError, run_class_b_sweep
+    from routers.simulation import _state_update
+
+    if _study_running("fmea_sweep"):
+        raise HTTPException(409, "an FMEA sweep is already running")
+    # MESH HOLE, fixed in Phase 7: this guard was simply missing. The frontier
+    # re-solves the foreground network once per target while the sweep freezes
+    # capacities and re-solves it once per contingency — whichever lost the
+    # race was measuring a network the other was rebuilding, and both reported
+    # numbers with no sign of it.
+    if _study_running("frontier"):
+        raise HTTPException(409, "a frontier study is running — wait for it to finish")
+    if _study_running("mc"):
+        raise HTTPException(409, "a sequential-MC study is running — wait for it to finish")
+    if _study_running("coupling_loop"):
+        raise HTTPException(409, "a coupling-loop study is running — wait for it to finish")
+    if _study_running("margin_loop"):
+        raise HTTPException(409, "a margin-loop study is running — wait for it to finish")
+    if _state.get("status") == "running":
+        raise HTTPException(409, "a solve is running — wait for it to finish")
+    cfg = _state.get("solver_config")
+    if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
+        raise HTTPException(422, "the sweep requires a VOLL > 0 in solver settings")
+    n = PyPSAService.get_network()
+    lock = PyPSAService.get_lock()
+
+    scenarios = list(getattr(body, "scenarios", None) or [])
+
+    stop_event = _threading.Event()
+    record: dict = {"status": "running", "rows": [], "error": None,
+                    "base_restored": None, "base_restore_status": None,
+                    "started_at": time.time(), "thread": None,
+                    "stop_event": stop_event}
+
+    def worker():
+        try:
+            # Class B first with a private final sink; the LAST sweep's
+            # closing base re-solve writes the REAL state sink, so
+            # /results/lost_load etc. reflect base afterwards.
+            rows, restore_b = run_class_b_sweep(
+                n, lock, cfg, stop_event=stop_event,
+                final_state_update=None if scenarios else _state_update,
+            )
+            restore = restore_b
+            # Phase 12e: the worker runs TWO sweeps, so the flag is checked
+            # BETWEEN them. Without this, breaking out of class B's
+            # contingency loop returns here and class C runs in full — the
+            # abort would stop one sweep, not the study. When class C is
+            # skipped, class B ran with a private final sink, so the
+            # foreground results are the pre-study ones; that is correct and
+            # is what the user is looking at.
+            if scenarios and not stop_event.is_set():
+                rows_c, restore = run_class_c_sweep(
+                    n, lock, cfg, scenarios, stop_event=stop_event,
+                    final_state_update=_state_update,
+                )
+                rows = rows + rows_c
+            record.update(
+                status="aborted" if stop_event.is_set() else "done",
+                rows=rows, finished_at=time.time(), error=None,
+                # Phase 12e (shipped-code review, finding 1): whether the
+                # closing base re-solve ran, and what the solver said. A
+                # sweep whose restore FAILED leaves the network on the last
+                # contingency while the foreground results describe another
+                # plan — the user has to be told, and before this the guard
+                # swallowed the exception and the record still read `done`.
+                base_restored=restore.get("base_restored"),
+                base_restore_status=restore.get("base_restore_status"))
+        except (SweepBudgetError, StressValidationError) as exc:
+            record.update(
+                status="failed", rows=[], error=str(exc), finished_at=time.time())
+        except Exception as exc:  # noqa: BLE001
+            record.update(
+                status="failed", rows=[], error=str(exc), finished_at=time.time())
+
+    # The loops' pattern (see post_coupling_loop): the record is CLOSED OVER
+    # so a context switch cannot redirect the worker's writes away from the
+    # dict the poller reads, the request's context is carried so the closing
+    # restore's `_state_update` lands in the right project, and the record is
+    # published and the thread started under ONE lock hold.
+    _ctx = _contextvars.copy_context()
+    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
+                          name="fmea-sweep")
+    record["thread"] = t
+    with PyPSAService.get_solver_state_lock():
+        _state["fmea_sweep"] = record
+        t.start()
+    return {"status": "running"}
+
+
+class FrontierRequest(_BaseModel):
+    # Reliability targets (‱) to sweep. Omitted → the default spread across
+    # the decade where the cost gradient is steep enough to show a knee.
+    targets_permyriad: list[float] | None = None
+
+
+@results_router.get("/frontier")
+def get_frontier():
+    """
+    Status + points of the last cost-vs-availability study (spec §5.6).
+    204 when none has been run in this session.
+    """
+    st = _state.get("frontier")
+    if not st:
+        return Response(status_code=204)
+    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+
+
+@results_router.post("/frontier/abort")
+def post_frontier_abort():
+    """
+    Ask a running frontier study to stop (Phase 12e).
+
+    The shipped loop routes' contract verbatim: 200 sets the record's stop
+    event and the engine stops at its next boundary — so an abort costs at
+    most the work already in flight, plus the closing restore, which still
+    runs. IDEMPOTENT and 200 even when the run is already finishing or
+    finished: "stop" on something that has stopped is satisfied, and a 409
+    there would make the button flicker into an error at exactly the moment it
+    worked. 404 only when no run has ever been recorded — a client bug, not a
+    race.
+
+    Deliberately NOT folded into ``/simulation/abort``: that route's stop
+    event belongs to the foreground solver thread and nothing in it reaches a
+    study worker, so a user pressing it would be told the abort succeeded
+    while the study kept running.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("frontier")
+        if not st:
+            raise HTTPException(
+                404, "no frontier study has been run in this session")
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
+
+
+@results_router.post("/frontier")
+def post_frontier(body: FrontierRequest | None = None):
+    """
+    Start the ε-constraint frontier study in a worker thread: one full
+    capacity-expansion solve per target, so it must never block a request.
+    409 while a study, a sweep or a foreground solve is running.
+
+    Unlike the class-B/C sweep this does NOT freeze capacities — the study
+    asks what plan you would BUILD for each standard, so expansion has to
+    re-optimise at every point.
+    """
+    import time
+
+    from services.adequacy.frontier import (
+        DEFAULT_TARGETS_PERMYRIAD,
+        FrontierBudgetError,
+        FrontierConfigError,
+        knee_index,
+        run_frontier_sweep,
+    )
+    from routers.simulation import _state_update
+
+    if _study_running("frontier"):
+        raise HTTPException(409, "a frontier study is already running")
+    if _study_running("fmea_sweep"):
+        raise HTTPException(409, "an FMEA sweep is running — wait for it to finish")
+    if _study_running("mc"):
+        raise HTTPException(409, "a sequential-MC study is running — wait for it to finish")
+    if _study_running("coupling_loop"):
+        raise HTTPException(409, "a coupling-loop study is running — wait for it to finish")
+    if _study_running("margin_loop"):
+        raise HTTPException(409, "a margin-loop study is running — wait for it to finish")
+    if _state.get("status") == "running":
+        raise HTTPException(409, "a solve is running — wait for it to finish")
+    cfg = _state.get("solver_config")
+    if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
+        raise HTTPException(422, "the frontier requires a VOLL > 0 in solver settings")
+
+    targets = list(getattr(body, "targets_permyriad", None)
+                   or DEFAULT_TARGETS_PERMYRIAD)
+    n = PyPSAService.get_network()
+    lock = PyPSAService.get_lock()
+
+    stop_event = _threading.Event()
+    record: dict = {"status": "running", "points": [], "error": None,
+                    "warning": None, "knee": None,
+                    "targets_permyriad": targets, "base_restored": None,
+                    "base_restore_status": None,
+                    "started_at": time.time(), "thread": None,
+                    "stop_event": stop_event}
+
+    def worker():
+        try:
+            res = run_frontier_sweep(n, lock, cfg, targets, stop_event=stop_event,
+                                     final_state_update=_state_update)
+            voll = float(getattr(cfg, "voll", 0.0) or 0.0)
+            record.update(
+                status="aborted" if res.get("aborted") else "done",
+                points=res["points"], warning=res["warning"],
+                knee=knee_index(res["points"], voll), voll_eur_per_mwh=voll,
+                # Phase 12e: the engine has always computed this and the route
+                # threw it away. It says whether the closing re-solve RAN —
+                # not that the plan is back — and a study that could not
+                # restore the user's plan must say so.
+                base_restored=res.get("base_restored"),
+                base_restore_status=res.get("base_restore_status"),
+                finished_at=time.time(), error=None)
+        except (FrontierBudgetError, FrontierConfigError) as exc:
+            record.update(status="failed", points=[], error=str(exc),
+                          finished_at=time.time())
+        except Exception as exc:                              # noqa: BLE001
+            # The engine attaches its partial record to the exception so the
+            # completed points and the restore's outcome are not lost with it.
+            partial = getattr(exc, "frontier_result", None) or {}
+            record.update(status="failed", points=partial.get("points") or [],
+                          base_restored=partial.get("base_restored"),
+                          base_restore_status=partial.get("base_restore_status"),
+                          error=str(exc), finished_at=time.time())
+
+    _ctx = _contextvars.copy_context()
+    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
+                          name="adequacy-frontier")
+    record["thread"] = t
+    with PyPSAService.get_solver_state_lock():
+        _state["frontier"] = record
+        t.start()
+    return {"status": "running", "targets_permyriad": targets}
+
+
+class McElccAsset(_BaseModel):
+    # ``kind`` is a plain str rather than a Literal: the authoritative kind
+    # list lives in services/adequacy/elcc.py, and duplicating it in a pydantic
+    # Literal here would fork it — the day a fourth kind lands, the route would
+    # reject it with a schema error that names no asset. An unknown kind still
+    # ends up a 422, raised by the resolver that owns the list.
+    kind: str
+    name: str
+
+
+class McRequest(_BaseModel):
+    # All optional: the bare POST is the useful default (a headline LOLE/EUE
+    # with no ELCC study), and every field below has an engine-side default
+    # that this route must not fork.
+    draws: int | None = None
+    seed: int | None = None
+    cov_target: float | None = None
+    elcc_assets: list[McElccAsset] | None = None
+    # Phase 12c: price the whole profile-bearing fleet as one portfolio, per
+    # period, beside the reserve margin's own credit for the same group. A
+    # boolean, not a pseudo-asset: the row must never land in `elcc` (a
+    # consumer summing that list would double-count), and the population is
+    # the engines' to derive, not the caller's to name.
+    elcc_portfolio: bool | None = None
+
+
+@results_router.get("/mc")
+def get_mc():
+    """
+    Status + payload of the last sequential-MC study (spec §4).
+
+    204 = never run in this session. While the worker runs this serves
+    ``{"status": "running", "result": None, ...}`` — same shape as the
+    frontier surface, so the panel polls one contract. The stored record
+    carries the worker-thread handle, which must never reach the wire.
+    """
+    st = _state.get("mc")
+    if not st:
+        return Response(status_code=204)
+    # `stop_event` is a threading.Event: unserialisable, and the abort route's
+    # only handle on a live run. Same filter the loops' GETs use.
+    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+
+
+@results_router.post("/mc/abort")
+def post_mc_abort():
+    """
+    Ask a running sequential-MC study to stop (Phase 12e).
+
+    The shipped loop routes' contract verbatim: 200 sets the record's stop
+    event and the engine stops at its next boundary — so an abort costs at
+    most the work already in flight, plus the closing restore, which still
+    runs. IDEMPOTENT and 200 even when the run is already finishing or
+    finished: "stop" on something that has stopped is satisfied, and a 409
+    there would make the button flicker into an error at exactly the moment it
+    worked. 404 only when no run has ever been recorded — a client bug, not a
+    race.
+
+    Deliberately NOT folded into ``/simulation/abort``: that route's stop
+    event belongs to the foreground solver thread and nothing in it reaches a
+    study worker, so a user pressing it would be told the abort succeeded
+    while the study kept running.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("mc")
+        if not st:
+            raise HTTPException(
+                404, "no sequential-MC study has been run in this session")
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
+
+
+@results_router.post("/mc")
+def post_mc(body: McRequest | None = None):
+    """
+    Start a sequential-MC adequacy study — optionally with an ELCC table —
+    in a worker thread (spec §4).
+
+    ASYNCHRONOUS BY CONSTRUCTION, not as an optimisation: a ten-asset ELCC
+    run is a baseline plus ~10 bisected MC evaluations per asset, i.e. minutes
+    of arithmetic. Running it inline would hold a request open long past every
+    proxy and browser timeout, and would block the event loop for the whole
+    process while doing it.
+
+    Unlike the frontier and the class-B/C sweep this engine SOLVES NOTHING and
+    never mutates the network, so it does NOT require a VoLL (spec §4): its
+    metrics are hours and MWh, not euros. It is still in the mutual-exclusion
+    mesh — the snapshot it takes must not be a half-mutated network, and the
+    sweep/frontier re-solve the one it is reading.
+
+    Validation is deliberately SYNCHRONOUS wherever it is cheap: an empty
+    fleet, an inconsistent (q, MTTR) pair and an unknown ELCC asset are all
+    knowable from the snapshot alone, and a user who typed a wrong asset name
+    must learn that now rather than after seven minutes of spinner. The
+    in-thread KeyError/ValueError mapping stays as belt-and-braces for the
+    cases only the run can discover.
+    """
+    import time
+
+    from services.adequacy.elcc import (
+        MAX_ELCC_ASSETS,
+        elcc_for_asset,
+    )
+    # Private on purpose: it is the ONE place asset-kind resolution lives, and
+    # re-implementing the name lookup here to keep the import public would fork
+    # the very mapping (kind → removal semantics) the 404/422 split depends on.
+    from services.adequacy.elcc import _resolve as _resolve_elcc_asset
+    from services.adequacy.mc import (
+        MAX_DRAWS,
+        MC_WARNING_V1,
+        mc_adequacy,
+        snapshot_inputs,
+        transition_probs,
+    )
+
+    if _study_running("mc"):
+        raise HTTPException(409, "a sequential-MC study is already running")
+    if _study_running("frontier"):
+        raise HTTPException(409, "a frontier study is running — wait for it to finish")
+    if _study_running("fmea_sweep"):
+        raise HTTPException(409, "an FMEA sweep is running — wait for it to finish")
+    if _study_running("coupling_loop"):
+        raise HTTPException(409, "a coupling-loop study is running — wait for it to finish")
+    if _study_running("margin_loop"):
+        raise HTTPException(409, "a margin-loop study is running — wait for it to finish")
+    if _state.get("status") == "running":
+        raise HTTPException(409, "a solve is running — wait for it to finish")
+
+    draws = getattr(body, "draws", None)
+    draws = 500 if draws is None else int(draws)
+    if draws < 1:
+        raise HTTPException(422, "draws must be a positive number of samples")
+    if draws > MAX_DRAWS:
+        # A product cap, not a numerical one: the benchmark harness runs far
+        # deeper budgets by calling the engine directly (spec §7).
+        raise HTTPException(
+            422,
+            f"draws={draws} exceeds the engine cap of {MAX_DRAWS} draws per "
+            "study — the adaptive batching stops at that budget anyway")
+    seed = getattr(body, "seed", None)
+    seed = 0 if seed is None else int(seed)
+    cov_target = getattr(body, "cov_target", None)
+    cov_target = 0.05 if cov_target is None else float(cov_target)
+
+    assets = [(a.kind, a.name) for a in (getattr(body, "elcc_assets", None) or [])]
+    want_portfolio = bool(getattr(body, "elcc_portfolio", None) or False)
+    if len(assets) > MAX_ELCC_ASSETS:
+        raise HTTPException(
+            422,
+            f"{len(assets)} ELCC assets requested; the cap is "
+            f"{MAX_ELCC_ASSETS} (each asset costs a baseline plus ~10 full "
+            "MC evaluations)")
+
+    # The ONE snapshot, taken under the mutation lock (spec §1). Everything
+    # after this line — validation and the worker alike — reads plain arrays,
+    # so the network is free the moment the lock is released.
+    from services.adequacy.activity import activity_summary as _activity_summary
+
+    n = PyPSAService.get_network()
+    population = None
+    snapshot_fp = None
+    margin_payload = None
+    with PyPSAService.get_lock():
+        vre_names = [nm for kind, nm in assets if kind == "vre"]
+        if want_portfolio:
+            # The portfolio's must-take half needs its profiles PRESERVED in
+            # the snapshot (`snapshot_inputs` keeps only the names it is
+            # asked for): every must-take whose column is informative.
+            from services.adequacy.copt import (
+                must_take_generators,
+                series_is_informative,
+            )
+            pmp = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
+            for nm in must_take_generators(n):
+                if (nm not in vre_names and pmp is not None
+                        and nm in getattr(pmp, "columns", [])
+                        and series_is_informative(pmp[nm])):
+                    vre_names.append(nm)
+        try:
+            inputs = snapshot_inputs(
+                n, vre_assets=vre_names, cfg=_state.get("solver_config"))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        # Phase 12d: computed HERE, from the network, under the lock — the
+        # worker never touches `n` (plan A9), and the must-take half of the
+        # disclosure is not in the fleet (shipped-code review, finding 1).
+        activity_block = _activity_summary(n, inputs.periods)
+        if want_portfolio:
+            # Everything the worker needs from the NETWORK and from request-
+            # scoped state is captured here (plan 12c v3.1 A9): the
+            # population with the engines' capacity rule, the fingerprint the
+            # margin payload is checked against, and that payload itself —
+            # the worker never touches `_state` or `n`.
+            import copy as _copy
+
+            from services.adequacy.portfolio import (
+                network_fingerprint,
+                portfolio_population,
+            )
+            population = portfolio_population(n, inputs)
+            snapshot_fp = network_fingerprint(n)
+            margin_payload = _copy.deepcopy(_state.get("last_reserve_margin"))
+
+    if not inputs.units:
+        raise HTTPException(
+            422,
+            "nothing to sample: no electrical generator carries resolvable "
+            "occurrence data (unavailability + MTTR), so the sampled fleet is "
+            "empty — an empty fleet would report the entire horizon as loss of "
+            "load, which is a statement about missing input data, not about "
+            "the system")
+
+    # §2.2's inconsistent-pair rejection, pulled forward: it is a property of
+    # the (q, MTTR) pair alone, so there is no reason to discover it a batch
+    # into a background run and report it as a failed study.
+    for u in inputs.units:
+        try:
+            transition_probs(u.q, u.mttr_hours, name=u.name)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    for kind, name in assets:
+        try:
+            _resolve_elcc_asset(inputs, kind, name)
+        except KeyError as exc:
+            msg = str(exc.args[0]) if exc.args else str(exc)
+            raise HTTPException(
+                404, f"unknown ELCC asset {name!r} (kind {kind!r}): {msg}"
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    # The record is closed over by the worker rather than reached through
+    # `_state` inside it: `_state` resolves the *request-scoped* project
+    # context, and a worker thread has no request context — it would resolve a
+    # different dict and write its result where no reader looks.
+    stop_event = _threading.Event()
+    record: dict = {"status": "running", "result": None, "error": None,
+                    "started_at": time.time(), "thread": None,
+                    "stop_event": stop_event}
+
+    def worker():
+        # Phase 12h: the rule that decides which profiled units had no
+        # outages sampled. Imported from the COPT so `/mc`'s lists and
+        # `split_fleet`'s buckets cannot disagree about the same fleet.
+        from services.adequacy.copt import rate_is_zero as _rate_is_zero
+        try:
+            # The ONLY call in the codebase that may carry the flag: this
+            # is the study's own baseline, not a replay of one. Every ELCC
+            # and loop call passes `stop_event=None` (see `mc_adequacy`).
+            metrics = mc_adequacy(inputs, draws=draws, seed=seed,
+                                  cov_target=cov_target, stop_event=stop_event)
+            # Phase 12c: the headline metrics ARE the baseline every ELCC
+            # row needs, argument for argument; injected with a content key
+            # the callee recomputes (the N+1 baseline, closed with CRN kept).
+            from services.adequacy.elcc import baseline_key as _baseline_key
+            from services.adequacy.mc import MAX_DRAWS as _MAX_DRAWS
+            key = _baseline_key(inputs, draws=draws, seed=seed,
+                                cov_target=cov_target, max_draws=_MAX_DRAWS,
+                                batch=250)
+            rows = []
+            for kind, name in assets:
+                # Between assets: a stopped study keeps the rows it priced and
+                # never starts another. The bisection inside each asset is
+                # checked too, so the worst case is one probe, not one asset.
+                if stop_event.is_set():
+                    break
+                try:
+                    rows.append(elcc_for_asset(
+                        inputs, kind, name, seed=seed, draws=draws,
+                        cov_target=cov_target, baseline=metrics,
+                        baseline_key=key, stop_event=stop_event))
+                except KeyError as exc:
+                    # Belt-and-braces for the 404 the POST already raised
+                    # synchronously: the only way to reach this is a name that
+                    # resolved at POST and stopped resolving mid-run. Caught
+                    # HERE rather than around the whole worker so an internal
+                    # KeyError from the sampler cannot be mislabelled as a
+                    # missing asset — and so the message names WHICH asset.
+                    msg = str(exc.args[0]) if exc.args else str(exc)
+                    record.update(
+                        status="failed", result=None, finished_at=time.time(),
+                        error=f"unknown ELCC asset {name!r} "
+                              f"(kind {kind!r}): {msg}")
+                    return
+            portfolio = None
+            if want_portfolio:
+                from services.adequacy.portfolio import portfolio_block
+                portfolio = portfolio_block(
+                    inputs, population, margin_payload=margin_payload,
+                    snapshot_fingerprint=snapshot_fp, seed=seed, draws=draws,
+                    cov_target=cov_target, baseline=metrics, baseline_key=key,
+                    stop_event=stop_event)
+            record.update(
+                status="aborted" if stop_event.is_set() else "done",
+                error=None, finished_at=time.time(),
+                result={
+                    # A SIBLING payload, deliberately not folded into
+                    # AdequacyReport: the MC is an engine-local study (like the
+                    # COPT), and merging it would grow the one report shape
+                    # every other consumer parses (spec §4, recorded decision).
+                    "engine": "mc",
+                    "fidelity": "sequential_mc",
+                    "metrics": metrics,
+                    "elcc": rows,
+                    # Phase 12c: a SIBLING of `elcc`, never a row in it.
+                    "elcc_portfolio": portfolio,
+                    "warning": MC_WARNING_V1,
+                    # Phase 12c-pre: the units whose outages were sampled ON
+                    # their availability series rather than at nameplate.
+                    #
+                    # Phase 12h: a rate-zero unit carries a profile but has
+                    # NO outages sampled on it, so leaving it here would
+                    # make this list's documented meaning false. The MC
+                    # never calls `split_fleet`, so the two lists are built
+                    # here and are DISJOINT by construction.
+                    "profile_units": [
+                        str(u.name) for u in inputs.units
+                        if getattr(u, "profile", None) is not None
+                        and not _rate_is_zero(u)],
+                    "deterministic_units": [
+                        str(u.name) for u in inputs.units
+                        if getattr(u, "profile", None) is not None
+                        and _rate_is_zero(u)],
+                    "folded_units": [
+                        {"name": str(u.name),
+                         "folded_constant": float(u.folded_constant),
+                         "source": "static"}
+                        for u in inputs.units
+                        if getattr(u, "folded_constant", None) is not None],
+                    # Phase 12d: the activity disclosure (see /copt),
+                    # captured in the request.
+                    "activity": activity_block,
+                })
+        except Exception as exc:                              # noqa: BLE001
+            record.update(status="failed", result=None, error=str(exc),
+                          finished_at=time.time())
+
+    # The loops' pattern: the record is already closed over; Phase 12e adds
+    # the request's context (a bare Thread does not inherit the ContextVar the
+    # active project lives in) and publish-and-start under one lock hold.
+    _ctx = _contextvars.copy_context()
+    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
+                          name="adequacy-mc")
+    record["thread"] = t
+    with PyPSAService.get_solver_state_lock():
+        _state["mc"] = record
+        t.start()
+    return {"status": "running", "draws": draws, "seed": seed,
+            "cov_target": cov_target, "elcc_assets": len(assets),
+            "elcc_portfolio": want_portfolio}
+
+
+@results_router.get("/mc/elcc_candidates")
+def get_mc_elcc_candidates():
+    """
+    The assets an ELCC study may be asked for, for the panel's picker.
+
+    ``{"assets": [{kind, name, nameplate_mw}, …], "max_assets": N}``, sorted by
+    nameplate descending, ties by name. `elcc_assets` was API-only until this
+    endpoint existed: the panel could render a credit table it had no way to
+    request, and a user would have had to type asset names and kinds copied out
+    of the network editor — including the kind distinction (an occurrence-
+    bearing "generator" vs a must-take "vre") which is a property of the
+    OCCURRENCE DATA, not of anything the editor shows.
+
+    Membership AGREES BY CONSTRUCTION with what ``post_mc`` accepts — see
+    ``elcc.elcc_candidates``, which reads it off the same snapshot the run
+    resolves against. That is the whole point: a candidate this endpoint offers
+    and the run then 404s on is the failure mode it exists to prevent.
+
+    Synchronous and read-only: one snapshot, no sampling, no solve. Hence NO
+    409 guard — unlike ``post_mc`` this starts nothing and mutates nothing, and
+    refusing to list assets while some other study runs would disable the
+    picker for minutes at a time for no gain. The lock is still taken for the
+    snapshot itself (same discipline as ``post_mc``): the frames must not be
+    read half-mutated.
+
+    200 with an EMPTY list — never 204 — when nothing qualifies. "This network
+    has no asset whose capacity credit could be measured" is an answer, and the
+    panel renders an explanatory line from it; a 204 would collapse it into the
+    client's "never fetched" case and leave an empty box on screen.
+    """
+    from services.adequacy.elcc import MAX_ELCC_ASSETS, elcc_candidates
+
+    n = PyPSAService.get_network()
+    with PyPSAService.get_lock():
+        assets = elcc_candidates(n, cfg=_state.get("solver_config"))
+    return {"assets": assets, "max_assets": MAX_ELCC_ASSETS}
+
+
+# ── the coupling loop (Phase 7) ───────────────────────────────────────────
+#
+# The route BINDS the pure controller in services/adequacy/coupling.py to this
+# process's network, config and solver: `solve_at` is one capped
+# capacity-expansion solve, `evaluate` is one sequential-MC run over the plan
+# that solve produced, and everything about storage, locking, aborting and
+# restoring lives here rather than in the controller (spec §§2–3).
+
+# The loop's own caveats, appended to the MC's standing warning. Not a
+# restatement of it: these three are properties of the SEARCH, and each one is
+# a way a reader could over-read the answer.
+LOOP_WARNING_V1 = (
+    "The map from the energy cap to MC-LOLE is a step function, not a curve: "
+    "a range of caps produces the identical plan and therefore the identical "
+    "LOLE, so ε* is the cheapest cap this search VERIFIED, not the largest cap "
+    "that would still pass. Every iterate is a genuine optimum of its own "
+    "constrained problem, but only iterates whose own MC evaluation met the "
+    "target are answers — the bracket is a search heuristic, and tightening ε "
+    "can raise MC-LOLE."
+)
+
+# [N5]. Stated where the number is read, because the mismatch is structural
+# and no choice of ε can remove it.
+MULTI_PERIOD_WARNING_V1 = (
+    "This network has more than one period: the energy cap is enforced per "
+    "period against each period's own demand, while the target is a horizon "
+    "SUM of LOLE — a single scalar ε cannot say 'fix period 3 only', so an "
+    "unreachable or budget-exhausted verdict is structurally likelier here. "
+    "The per-iterate by_period rows are the diagnostic."
+)
+
+# [N6]. Three mechanisms, named, because the user's NEXT ACTION differs by
+# which one is operating and a bare "unreachable" is unactionable.
+# The margin-loop panel's OWN heading, verbatim.
+#
+# ★ A verdict that diagnoses a dead end and names the way out is only useful
+# if the way out can be FOUND: "a planning reserve margin" is a lever, and the
+# user still has to know the tool will search for one. This names the control
+# they must click. `MarginLoopPanel.test.tsx` pins the panel to the same
+# string, because a verdict naming a control that does not exist under that
+# name is worse than no pointer at all.
+MARGIN_LOOP_PANEL_LABEL = "Reliability-targeted reserve margin loop"
+
+NEVER_BOUND_WITH_MARGIN_COPY_V1 = (
+    "The cap never bound. On every iterate that solved, the LP's own shed "
+    "energy stayed under the ceiling, so tightening the cap could not change "
+    "the plan — and no cap can. What DID shape this plan is the firm-capacity "
+    "standard: a reserve margin is already in force, and the loop is reporting "
+    "the cap's failure, not the margin's. The loss of load the MC still sees "
+    "comes from outages beyond what that margin buys. Raise the margin (or "
+    "lower the target) rather than capping harder; the cap has no leverage "
+    "here either way. HOW MUCH to raise it by is what the \""
+    + MARGIN_LOOP_PANEL_LABEL + "\" on this tab searches for: the same "
+    "target and the same sampler, on the lever that is actually shaping "
+    "this plan."
+)
+
+NEVER_BOUND_COPY_V1 = (
+    "The cap never bound. On every iterate that solved, the LP's own shed "
+    "energy stayed under the ceiling (the binding column reads something "
+    "other than 'system_cap' throughout), so tightening the cap could not "
+    "change the plan — and no cap can. The loss of load the MC reports here "
+    "comes from OUTAGES the LP does not model at all, not from energy the LP "
+    "chose to shed: its deterministic view already covers demand, which is "
+    "exactly why the cap has no leverage. What would move this number is firm "
+    "capacity the LP sees no deterministic reason to build — a planning "
+    "reserve margin, or the candidate unit itself. Capping harder will not. "
+    "You do not have to size that margin by hand: the \""
+    + MARGIN_LOOP_PANEL_LABEL + "\" on this tab runs this same search on "
+    "that lever and certifies what it finds against this same MC-LOLE "
+    "target."
+)
+
+UNREACHABLE_COPY_V1 = (
+    "No cap this search could reach produced a plan that met the target on "
+    "the MC's own LOLE. Three mechanisms produce this, and they call for "
+    "different responses: (a) the LP has perfect FORESIGHT over storage while "
+    "the MC dispatches greedily, so a plan that leans on storage looks "
+    "adequate to the solver and is not; (b) demand response serves the LP's "
+    "cap but is EXCLUDED as a resource in the MC, so tightening ε buys cost "
+    "without buying MC-LOLE and the plan stops changing; (c) tightening ε can "
+    "substitute storage for thermal capacity and RAISE MC-LOLE. Check the "
+    "per-iterate binding column and by_period rows before raising the target."
+)
+
+
+class CouplingLoopRequest(_BaseModel):
+    # `target_lole_h` is the only required field, and it is HORIZON-basis
+    # hours (the panel does the h/yr conversion so the wire stays unit-safe).
+    # Optional here rather than required-by-pydantic so a missing target is
+    # refused with the route's own sentence instead of a schema dump.
+    target_lole_h: float | None = None
+    draws: int | None = None
+    seed: int | None = None
+    eps0: float | None = None
+    max_solves: int | None = None
+    restore: str | None = None
+
+
+@results_router.get("/coupling_loop")
+def get_coupling_loop():
+    """
+    Status + payload of the last coupling-loop study (spec §3).
+
+    204 = never run in this session. While the worker runs, this serves the
+    SAME record with ``status: "running"`` and an ``iterations`` list that
+    grows between polls — that is the whole point of the surface, since a run
+    is minutes long and the panel renders each iterate as it lands.
+
+    The record carries a worker-thread handle AND the abort stop-event, and
+    neither may reach the wire: both are unserialisable, and the stop event in
+    particular is the abort route's only handle on a live run.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("coupling_loop")
+        if not st:
+            return Response(status_code=204)
+        # Shallow copy under the lock; `iterations` is REBOUND by the worker,
+        # never mutated, so the list this copy captures is frozen for ever.
+        return {k: v for k, v in st.items()
+                if k not in ("thread", "stop_event")}
+
+
+@results_router.post("/coupling_loop/abort")
+def post_coupling_loop_abort():
+    """
+    Ask a running coupling loop to stop (spec §3, plan [S8]).
+
+    200 sets the record's stop event; the controller checks it before each
+    solve, so an abort costs at most the iterate already in flight and the
+    closing restore still runs. IDEMPOTENT and 200 even when the run is
+    already finishing or finished: "stop" on something that has stopped is
+    satisfied, and a 409 there would make the button flicker into an error at
+    exactly the moment it worked. 404 only when no run has ever been recorded
+    — that is a client bug, not a race.
+
+    Deliberately NOT folded into ``/simulation/abort``: that route's stop
+    event belongs to the foreground solver thread and nothing in it reaches a
+    study worker, so a user pressing it would be told the abort succeeded
+    while the loop kept solving.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("coupling_loop")
+        if not st:
+            raise HTTPException(
+                404, "no coupling-loop study has been run in this session")
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
+
+
+@results_router.post("/coupling_loop")
+def post_coupling_loop(body: CouplingLoopRequest | None = None):
+    """
+    Start the adequacy-coupled planning loop in a worker thread (spec §3).
+
+    Solve the LP under an energy cap, run the sequential MC on the PLAN it
+    produced, retune the cap, re-solve — until the plan meets the user's
+    target on the MC's own LOLE rather than on the LP proxy's shed energy.
+    The two are not the same standard: the LP has perfect foresight over
+    storage and no outages at all, so a plan that sheds exactly its cap in the
+    LP can lose load for tens of hours in the MC.
+
+    ASYNCHRONOUS BY CONSTRUCTION: up to ``max_solves`` full capacity-expansion
+    solves plus an MC evaluation each, plus the closing restore — minutes to
+    tens of minutes.
+
+    VALIDATION IS SYNCHRONOUS WHEREVER IT IS CHEAP, and here that is the whole
+    set. Every refusal below is knowable from the config and one snapshot, and
+    the alternative is not "a slower error" but a WRONG ANSWER: under a
+    rolling or myopic strategy every capped solve fails validation, so the
+    loop would burn its budget and report ``unreachable`` — "no plan meets
+    this standard" — when the truth is "this strategy cannot enforce a cap".
+    """
+    import dataclasses
+    import hashlib
+    import queue as _queue
+    import time
+
+    from services.adequacy.coupling import MAX_LOOP_SOLVES, run_coupling_loop
+    from services.adequacy.lever_text import format_lever_value
+    from services.adequacy.mc import (
+        MAX_DRAWS,
+        MC_WARNING_V1,
+        mc_adequacy,
+        snapshot_inputs,
+    )
+    from services.adequacy.metrics import horizon_years, resolve_time_basis
+    from services.adequacy.sweep import _solve_once
+    from routers.simulation import _state_update
+
+    # ── the 409 mesh ──────────────────────────────────────────────────────
+    if _study_running("coupling_loop"):
+        raise HTTPException(409, "a coupling-loop study is already running")
+    if _study_running("margin_loop"):
+        raise HTTPException(409, "a margin-loop study is running — wait for it to finish")
+    if _study_running("frontier"):
+        raise HTTPException(409, "a frontier study is running — wait for it to finish")
+    if _study_running("mc"):
+        raise HTTPException(409, "a sequential-MC study is running — wait for it to finish")
+    if _study_running("fmea_sweep"):
+        raise HTTPException(409, "an FMEA sweep is running — wait for it to finish")
+    if _state.get("status") == "running":
+        raise HTTPException(409, "a solve is running — wait for it to finish")
+
+    # ── the synchronous 422 set ───────────────────────────────────────────
+    target = getattr(body, "target_lole_h", None)
+    try:
+        target = float(target) if target is not None else None
+    except (TypeError, ValueError):
+        target = None
+    if target is None or not (target > 0):
+        raise HTTPException(
+            422,
+            "target_lole_h is required and must be > 0: the loop searches for "
+            "the cheapest cap whose plan meets a RELIABILITY STANDARD, and a "
+            "target of zero (or none) is not a standard — it is the demand "
+            "that no draw ever sheds an hour, which no finite plan can buy")
+
+    draws = getattr(body, "draws", None)
+    draws = 500 if draws is None else int(draws)
+    if draws < 1:
+        raise HTTPException(422, "draws must be a positive number of samples")
+    if draws > MAX_DRAWS:
+        raise HTTPException(
+            422,
+            f"draws={draws} exceeds the engine cap of {MAX_DRAWS} draws per "
+            "evaluation — and the loop pays that cost once per iterate")
+    seed = getattr(body, "seed", None)
+    seed = 0 if seed is None else int(seed)
+
+    max_solves = getattr(body, "max_solves", None)
+    max_solves = MAX_LOOP_SOLVES if max_solves is None else int(max_solves)
+    if not (1 <= max_solves <= MAX_LOOP_SOLVES):
+        raise HTTPException(
+            422,
+            f"max_solves must be between 1 and {MAX_LOOP_SOLVES} (got "
+            f"{max_solves}) — each solve is a full capacity expansion, so the "
+            "budget is the wall-clock promise this request makes")
+
+    restore = getattr(body, "restore", None) or "base"
+    if restore not in ("base", "final"):
+        raise HTTPException(
+            422,
+            f"restore must be 'base' or 'final' (got {restore!r}): 'base' "
+            "re-solves with your original config, 'final' leaves you holding "
+            "the certified plan at ε*")
+
+    cfg = _state.get("solver_config")
+    if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
+        raise HTTPException(
+            422, "the coupling loop requires a VOLL > 0 in solver settings — "
+                 "with no load-shedding slacks the cap constrains nothing and "
+                 "every iterate collapses to the same unconstrained plan")
+
+    strategy = str(getattr(cfg, "solve_strategy", "full") or "full")
+    if strategy in ("rolling", "myopic"):
+        raise HTTPException(
+            422,
+            f"the reliability target is not supported with the {strategy!r} "
+            "solve strategy: each LP window would need its own demand "
+            "denominator, so every capped solve fails validation. The loop "
+            "would spend its whole budget on failed iterates and report "
+            "'unreachable' — which is a statement about the strategy, not "
+            "about the network. Use the full strategy, or unset the target.")
+
+    # The ONE snapshot the validation reads, taken under the mutation lock.
+    # `keep_zero_capacity=True` from the very first call (spec §1.2): the
+    # sampled fleet's MEMBERSHIP must be invariant across iterates or the
+    # positional CRN substreams shift under it, and a fleet that is empty here
+    # would be empty for every evaluation too.
+    n = PyPSAService.get_network()
+    # Phase 12f: the same up-front refusal the margin loop makes, for the same
+    # reason and against the same defect. A non-finite value in one of the five
+    # finite-default LP bounds is a blocking preflight error, so EVERY iterate
+    # would come back `validation_failed`, the loop would spend its whole
+    # budget, and the verdict copy would advise "Raise max_solves, or start
+    # from a tighter eps0" — advice that can never work here.
+    #
+    # Guarded at BOTH loops deliberately: this codebase already learned that a
+    # guard repeated at seven call sites is the one the eighth route forgets.
+    from services.validation_service import _check_nonfinite_bounds as _cnb
+    for _iss in _cnb(n):
+        raise HTTPException(422, _iss.message)
+    with PyPSAService.get_lock():
+        try:
+            # Phase 12c-0: the LP's demand basis — the plan the loop
+            # certifies was built on it (the fifteenth finding).
+            inputs = snapshot_inputs(n, keep_zero_capacity=True, cfg=cfg)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        nyears = float(horizon_years(n))
+
+    if not inputs.units:
+        raise HTTPException(
+            422,
+            "nothing to sample: no electrical generator carries resolvable "
+            "occurrence data (unavailability + MTTR), so the sampled fleet is "
+            "empty — an empty fleet would report the entire horizon as loss of "
+            "load, which is a statement about missing input data, not about "
+            "the system")
+
+    # [S11] the up-front resolution floor. One shortfall hour in one draw
+    # contributes that hour's WEIGHT to the mean, so the smallest non-zero
+    # LOLE these draws can resolve is `min positive weight / draws`. A target
+    # under it is undecidable: every verdict the run could reach — met or
+    # missed — would be an artefact of the sample size, and the study would
+    # answer with a confident number that means nothing.
+    _w = inputs.weights[inputs.weights > 0]
+    floor_h = (float(_w.min()) / draws) if _w.size else None
+    if floor_h is not None and target < floor_h:
+        need = int(math.ceil(float(_w.min()) / target))
+        raise HTTPException(
+            422,
+            f"target_lole_h={target:g} h is below this study's resolution "
+            f"floor of {floor_h:g} h at {draws} draws: a single shortfall "
+            "hour in a single draw already exceeds it, so no verdict here "
+            "could distinguish a compliant plan from a lucky sample. About "
+            f"{need} draws would resolve it.")
+
+    eps0 = getattr(body, "eps0", None)
+    if eps0 is None:
+        eps0 = getattr(cfg, "ens_cap_permyriad", None)
+    try:
+        eps0 = float(eps0) if eps0 is not None else None
+    except (TypeError, ValueError):
+        eps0 = None
+    # An unset cap reaches the loop as the ≤ 0 NO-TARGET sentinel, which the
+    # controller would clamp to its hard backstop and start the search two
+    # decades tighter than any real plan needs. 100‱ is the loose end of the
+    # frontier's own default spread — the cheap side, where a solve is fast.
+    if eps0 is None or not (eps0 > 0):
+        eps0 = 100.0
+
+    lock = PyPSAService.get_lock()
+    base_cfg = cfg
+    basis = resolve_time_basis(nyears)
+
+    # ── the bindings (spec §3) ────────────────────────────────────────────
+
+    def _snapshot():
+        # `base_cfg` is captured in the request — the worker never reads
+        # `_state` — and the scalers do not change across iterates.
+        with lock:
+            return snapshot_inputs(n, keep_zero_capacity=True, cfg=base_cfg)
+
+    def _hash(mc_inputs) -> str:
+        """sha256 over exactly what the MC reads — the sorted
+        ``(name, capacity_mw)`` unit vector, the sorted
+        ``(name, p_nom_mw, e_nom_mwh)`` storage vector, and the residual bytes.
+
+        NOT the objective (plan [B3]): degenerate optima give equal cost for
+        different plans, and with DSR configured the objective moves (variable
+        cost) while the plan stands still. Equal hash ⇒ bit-identical MC under
+        the same seed and draw count, so reuse is exact where cost equality
+        was a guess.
+        """
+        # Phase 12d: one implementation for both loops, testable
+        # (`tests/test_adequacy_activity.py` E8).
+        return _snapshot_hash(mc_inputs)
+
+    _margin_bound_flag = [False]
+
+    def solve_at(eps: float) -> dict:
+        """One capped capacity-expansion solve into a PRIVATE sink, read out
+        exactly as ``run_frontier_sweep`` reads its points. Solve failures
+        come back as a status — the controller is specified never to see an
+        exception from here, and a raise would cost the whole study."""
+        sink: dict = {}
+        _solve_once(dataclasses.replace(base_cfg, ens_cap_permyriad=float(eps)),
+                    n, lock, None, sink)
+        status = sink.get("_status")
+        out = {"status": status, "condition": sink.get("_condition"),
+               "cost_eur": None, "ens_mwh": None, "cap_mwh": None,
+               "binding": None, "report": None}
+        if status not in ("ok", "optimal"):
+            return out
+        rep = sink.get("adequacy_report")
+        if not rep:
+            # A target WAS set and the solve succeeded, so the report is the
+            # contract. Its absence is a defect, and reporting it as a failed
+            # iterate keeps the loop from evaluating a plan it cannot describe.
+            out["status"] = "no_report"
+            out["condition"] = "the solve returned no adequacy report"
+            return out
+        # Did a reserve margin shape this iterate? The controller's row keeps
+        # nine fixed keys and drops the report, and `coupling.py` is
+        # deliberately not touched (it is the regression oracle for the margin
+        # loop), so the answer is captured HERE, where the report is in hand.
+        # `binding` itself can never say this: it is computed purely from the
+        # ENS caps and reads "voll" even when a margin is what bound.
+        _rm = (rep.get("reserve_margin") or {}).get("by_period") or []
+        if any(bool(p.get("binding")) for p in _rm):
+            _margin_bound_flag[0] = True
+        sysblk = rep["target"]["system"]
+        out.update(
+            report=rep,
+            cost_eur=float(rep["cost"]["total_system_cost_eur"]),
+            ens_mwh=float(sysblk["achieved_ens_mwh"]),
+            cap_mwh=float(sysblk["cap_mwh"]),
+            binding=rep["target"]["binding"],
+        )
+        return out
+
+    # The floor the payload reports, refreshed by every evaluation so the
+    # value that ships is the FINAL evaluation's own (spec v1.2 §3) rather
+    # than the up-front estimate. With `draws == max_draws` the sample count
+    # is pinned, so the two agree — which is the point: a drifting n_samples
+    # would mean the floor under the verdict was not the floor that was
+    # validated.
+    eval_state: dict = {"floor": floor_h}
+
+    def evaluate():
+        mc_inputs = _snapshot()
+        # §3's normative call. `max_draws=N` is what PINS the sample count:
+        # merely ignoring cov_target leaves the adaptive 2000-draw cap in play
+        # and n_samples drifts between iterates, which breaks the common
+        # random numbers the plateau reuse rests on.
+        # `stop_event` is NEVER passed here: this is a REPLAY of one batch
+        # sequence (see `mc_adequacy`'s note), and the loop's own abort is
+        # checked between iterates, never inside an evaluation.
+        metrics = mc_adequacy(mc_inputs, draws=draws, seed=seed,
+                              max_draws=draws, stop_event=None)
+        try:
+            eval_state["floor"] = metrics.get("resolution_floor_h")
+        except AttributeError:                                # noqa: BLE001
+            pass
+        return _hash(mc_inputs), metrics
+
+    def _plan_hash():
+        """The duck-typed probe of spec v1.2 §1. The hash comes from the
+        snapshot alone, so the controller can skip an MC on a plateau instead
+        of running one and throwing the result away."""
+        return _hash(_snapshot())
+
+    evaluate.plan_hash = _plan_hash
+
+    # ── the record (closed over, never reached through `_state`) ──────────
+    stop_event = _threading.Event()
+    record: dict = {
+        "study": "coupling_loop",
+        "status": "running",
+        "target_lole_h": target,
+        "basis": basis,
+        "horizon_years": nyears,
+        "draws": draws,
+        "seed": seed,
+        "eps0": eps0,
+        "max_solves": max_solves,
+        "restore": restore,
+        "base_restored": False,
+        "confident": False,
+        "eps_star": None,
+        "resolution_floor_h": floor_h,
+        "solves_used": 0,
+        "iterations": [],
+        "final": None,
+        "verdict": None,
+        "warning": MC_WARNING_V1 + " " + LOOP_WARNING_V1,
+        "error": None,
+        "started_at": time.time(),
+        "finished_at": None,
+        "thread": None,
+        "stop_event": stop_event,
+    }
+
+    def on_iteration(row: dict) -> None:
+        """Grow the record by REBINDING, never by appending in place.
+
+        ``get_coupling_loop`` serves a shallow copy, so an in-place append
+        hands the serializer the very list this thread is mutating: a mid-run
+        GET can then be written half-way through an append, and a client
+        polling every second can watch its own earlier history change. A fresh
+        list per iterate makes every snapshot immutable by construction — each
+        GET's list is a prefix of the next, permanently.
+        """
+        with PyPSAService.get_solver_state_lock():
+            record["iterations"] = record["iterations"] + [row]
+
+    # The solver's own word on the closing re-solve, for the payload. A cell
+    # rather than a return value because `_restore_closing` returns a bool
+    # that four call sites already read (12e shipped-code review, S1).
+    _restore_word: list = [None]
+
+    def _restore_closing(met: bool, eps_star) -> bool:
+        """The closing re-solve — the route's job, on EVERY path (spec §3,
+        §1.3's pattern). The loop mutates the network once per iterate, so
+        without this it is left on whichever ε happened to be last while the
+        foreground results still describe the pre-study solve: the study
+        silently rewrites the user's plan and says nothing.
+
+        ``"final"`` is only meaningful on a met verdict — there is no
+        certified cap otherwise — so it falls back to base rather than
+        applying a cap nothing verified.
+        """
+        from services.adequacy.sweep import restore_is_clean
+        from services.solver_service import run_simulation
+
+        use_final = (restore == "final" and met and eps_star is not None)
+        if use_final:
+            final_cfg = dataclasses.replace(
+                base_cfg, ens_cap_permyriad=float(eps_star))
+            # Persisted through the normal config path (read-modify-write
+            # under the solver-state lock, exactly as PUT /solver_config
+            # does) BEFORE the solve: the user asked to hold ε*, and a
+            # restore whose solve fails must still leave the setting they
+            # will re-run with, with `base_restored` reporting the failure.
+            with PyPSAService.get_solver_state_lock():
+                _state["solver_config"] = dataclasses.replace(
+                    _state["solver_config"],
+                    ens_cap_permyriad=float(eps_star))
+        else:
+            final_cfg = base_cfg
+        try:
+            status, condition = run_simulation(
+                final_cfg, n, lock, _threading.Event(), _queue.SimpleQueue(),
+                state_update=_state_update)
+        except Exception as exc:                              # noqa: BLE001
+            logger.exception(
+                "coupling loop: the closing re-solve FAILED — the network is "
+                "left on the last iterate's cap and the foreground results do "
+                "not describe the plan the verdict is about")
+            _restore_word[0] = f"raised: {exc}"
+            return False
+        # The CONDITION, through the shared predicate — never `status`. This
+        # read `status in ("ok", "optimal")`, and linopy's `SolverStatus.ok`
+        # also covers `time_limit`, `iteration_limit`, `terminated_by_limit`,
+        # `suboptimal` and `imprecise`: a closing re-solve that hit the MIP
+        # time limit (`mip_time_limit_s` is a shipped setting) reported `ok`,
+        # so the panel said "restored" while the foreground was a time-limited
+        # dispatch. The frontier and the contingency sweep had the same bug and
+        # it was found there first (12e shipped-code review, S1); this is the
+        # same defect in the two loops, fixed the same way and through the same
+        # one predicate rather than a fourth copy of the vocabulary.
+        word = str(condition or status)
+        _restore_word[0] = word
+        if not restore_is_clean(word):
+            logger.warning(
+                "coupling loop: the closing re-solve returned %r — it ran but "
+                "did not restore the plan the verdict is about", word)
+        return restore_is_clean(word)
+
+    def _verdict_copy(status: str, eps_star, rows=None) -> str:
+        _margin_bound = _margin_bound_flag[0]
+        if status == "unreachable":
+            # WHICH unreachable? The three-mechanism copy assumes the cap was
+            # doing something and the MC disagreed with it. The commonest case
+            # in practice (QA round S17) is that the cap never bound at all —
+            # the LP sheds nothing at any ceiling because its outage-free view
+            # already covers demand — and telling that user to check storage
+            # foresight and DSR sends them after mechanisms that are not
+            # happening. It is diagnosable from the rows, so diagnose it.
+            solved = [r for r in (rows or [])
+                      if r.get("solve_status") in ("ok", "optimal")]
+            if solved and not any(r.get("binding") == "system_cap"
+                                  for r in solved):
+                # WHICH never-bound? `report.binding` is computed purely from
+                # the ENS caps, so it reads "voll" even when a reserve margin
+                # is what actually shaped the plan. Prescribing a margin to a
+                # user who already set one reads as the tool not knowing what
+                # they configured — the diagnosis is right, only the
+                # recommendation is stale. The margin's own block says whether
+                # it was in force, so ask it.
+                if _margin_bound:
+                    return NEVER_BOUND_WITH_MARGIN_COPY_V1
+                return NEVER_BOUND_COPY_V1
+            return UNREACHABLE_COPY_V1
+        if status == "met" and eps_star is not None:
+            # `format_lever_value`, never `%g` — and never the badge's two
+            # significant figures either. The panel's own restore explainer
+            # prints this same number, and the two disagreed IN THE SAME
+            # PANEL: the verdict said 0.0347281 where the explainer said
+            # 0.035. An ENS cap is a CEILING on unserved energy, so a value
+            # rounded UP is a strictly LOOSER standard that need not
+            # reproduce the certified plan. One number, spelled once.
+            cap_text = format_lever_value(eps_star)
+            if restore == "final":
+                return (
+                    f"A plan meeting {target:g} h was verified at ε* = "
+                    f"{cap_text}‱, and that cap has been APPLIED to your "
+                    f"solver settings (ens_cap_permyriad = {cap_text}) and "
+                    "re-solved — the network you are holding is the certified "
+                    "plan.")
+            return (
+                f"A plan meeting {target:g} h was verified at ε* = "
+                f"{cap_text}‱. Your original config has been re-solved, so "
+                "the network you are holding is NOT that plan: to keep it, set "
+                f"ens_cap_permyriad = {cap_text} and re-solve.")
+        if status == "aborted":
+            return ("The study was aborted between iterates. Any iterates "
+                    "already evaluated are shown; the closing restore ran, so "
+                    "the network is back on your own config.")
+        if status == "budget_exhausted":
+            return (
+                f"The solve budget ({max_solves}) was spent without verifying "
+                "a plan that meets the target. Nothing here says the target is "
+                "unreachable — only that this search did not reach it. Raise "
+                "max_solves, or start from a tighter eps0.")
+        return ("The study did not complete. The iterates recorded below are "
+                "what it managed before it stopped.")
+
+    def worker():
+        res: dict | None = None
+        err: str | None = None
+        try:
+            try:
+                res = run_coupling_loop(
+                    solve_at, evaluate, target_lole_h=target, eps0=eps0,
+                    max_solves=max_solves, stop_event=stop_event,
+                    on_iteration=on_iteration)
+            except BaseException as exc:                      # noqa: BLE001
+                # The controller is total by construction; this is the belt
+                # for a broken binding above, and it must never leave the
+                # record stuck on "running" for the rest of the session.
+                logger.exception("coupling loop: the controller raised")
+                err = str(exc)
+        finally:
+            status = (res or {}).get("status") or "failed"
+            eps_star = (res or {}).get("eps_star")
+            try:
+                base_restored = _restore_closing(status == "met", eps_star)
+            except BaseException:                             # noqa: BLE001
+                logger.exception("coupling loop: the restore itself raised")
+                base_restored = False
+            iterations = (res or {}).get("iterations")
+            if iterations is None:
+                iterations = record["iterations"]
+            warning = MC_WARNING_V1 + " " + LOOP_WARNING_V1
+            if any(len((r.get("mc") or {}).get("by_period") or {}) > 1
+                   for r in iterations):
+                warning += " " + MULTI_PERIOD_WARNING_V1
+            # ONE atomic apply, under the same lock `on_iteration` rebinds
+            # under: a GET landing between the status flip and the verdict
+            # would otherwise serve a finished study with a running study's
+            # empty final, which is the one shape the panel cannot render.
+            with PyPSAService.get_solver_state_lock():
+                record.update(
+                    status=status,
+                    iterations=iterations,
+                    final=(res or {}).get("final"),
+                    confident=bool((res or {}).get("confident")),
+                    eps_star=eps_star,
+                    solves_used=int((res or {}).get("solves_used") or 0),
+                    resolution_floor_h=eval_state["floor"],
+                    base_restored=bool(base_restored),
+                    # The solver's word, so a restore that RAN and still did
+                    # not put the plan back can be named rather than merely
+                    # denied (12e shipped-code review, S1).
+                    base_restore_status=_restore_word[0],
+                    verdict=_verdict_copy(
+                        status, eps_star,
+                        (res or {}).get("iterations")),
+                    warning=warning,
+                    error=err,
+                    finished_at=time.time(),
+                )
+
+    # The worker carries the REQUEST's context (the /simulation/run pattern):
+    # the active project lives in a ContextVar and a bare Thread does not
+    # inherit it, so without this the closing restore's `_state_update` and
+    # the `restore="final"` config write would land in the PROCESS foreground
+    # — a different project's state from the one the caller is polling. The
+    # study record itself is CLOSED OVER rather than reached through `_state`
+    # (post_mc's pattern), so it cannot be redirected by a context switch at
+    # all; post_frontier's in-thread `_state["frontier"].update(...)` is the
+    # anti-pattern this deliberately does not copy.
+    _ctx = _contextvars.copy_context()
+    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
+                          name="adequacy-coupling-loop")
+    record["thread"] = t
+    # Publish and START under one lock hold. `_study_running` tests
+    # `thread.is_alive()`, and a registered-but-not-yet-started thread reports
+    # False — so a second POST arriving in that window would read the record as
+    # stale state, claim the surface, and put two loops on the same network.
+    with PyPSAService.get_solver_state_lock():
+        _state["coupling_loop"] = record
+        t.start()
+    return {"status": "running", "target_lole_h": target, "draws": draws,
+            "seed": seed, "eps0": eps0, "max_solves": max_solves,
+            "restore": restore, "basis": basis,
+            "resolution_floor_h": floor_h}
+
+
+# ── the margin loop (Phase 9) ─────────────────────────────────────────────
+#
+# The SAME controller as the coupling loop, on a different lever. Nothing in
+# `services/adequacy/coupling.py` is touched (margin-loop spec §0): the margin
+# reaches it through the reciprocal substitution of
+# `services/adequacy/margin_lever.py`, under which every comparison the
+# controller makes — the multiplicative shrink, the strictly-positive assert,
+# the geometric midpoint, the `miss > met` test and the `(cost, -x)` tie-break
+# — is already correct for a lever that gets stricter as it GROWS. What lives
+# here is what the controller cannot know: that this lever has no energy cap
+# (§2.2), that its `binding` comes from the margin's own block (§2.1), where
+# the search should START (§2.3), which refusals are knowable before the first
+# solve (§2.4), that an out-of-reach margin arrives as `validation_failed`
+# rather than as an infeasible LP (§2.5), and that the controller's `x` must
+# never reach the wire (§2.6).
+
+# The search's own caveats — properties of THIS lever's search, not of the MC.
+MARGIN_LOOP_WARNING_V1 = (
+    "The map from the reserve margin to MC-LOLE is a step function, not a "
+    "curve: a range of margins forces the identical build and therefore the "
+    "identical LOLE, so m* is the cheapest margin this search VERIFIED, not "
+    "the smallest margin that would still pass. Every iterate is a genuine "
+    "optimum of its own constrained problem, but only iterates whose own MC "
+    "evaluation met the target are answers — the bracket is a search "
+    "heuristic. The margin buys FIRM CAPACITY against a peak the LP already "
+    "covers deterministically, which is why it can move a number no energy "
+    "cap can; it does not buy energy, so a network short of energy rather "
+    "than of capacity will not respond to it."
+)
+
+MARGIN_MULTI_PERIOD_WARNING_V1 = (
+    "This network has more than one period: the margin is enforced per "
+    "period against each period's own peak, while the target is a horizon "
+    "SUM of LOLE — a single scalar margin cannot say 'fix period 3 only', so "
+    "an unreachable or budget-exhausted verdict is structurally likelier "
+    "here. The per-iterate by_period rows are the diagnostic. Note also that "
+    "when the ACTIVE EXTENDABLE SET is identical in every period the LP has "
+    "one horizon-wide nominal variable, so the standard degenerates to a "
+    "single one at the largest peak (the report's `horizon_wide` flag)."
+)
+
+# The probe of §2.3 runs at the user's own margin — but at exactly 0 there is
+# no standard at all (`_prm_margin` reads `<= 0` as "no margin"), the wrapper
+# installs nothing and the report carries no reserve-margin block, so there
+# would be nothing to read the incumbent's tight margin OFF. A margin this
+# small is numerically "no margin" for every purpose except that it makes the
+# standard — and therefore its report block — exist.
+PROBE_MARGIN = 1e-4
+
+
+class MarginLoopRequest(_BaseModel):
+    # No `m0`: the starting margin is not a user parameter but a MEASUREMENT
+    # (§2.3, the probing solve). A user-supplied start would be the one number
+    # in this request that can silently make the study worthless — too small
+    # and the search walks through a region where the plan does not change,
+    # too large and it overshoots the bracket entirely.
+    target_lole_h: float | None = None
+    draws: int | None = None
+    seed: int | None = None
+    max_solves: int | None = None
+    restore: str | None = None
+
+
+@results_router.get("/margin_loop")
+def get_margin_loop():
+    """
+    Status + payload of the last margin-loop study (spec §2.6).
+
+    204 = never run in this session. While the worker runs, this serves the
+    SAME record with ``status: "running"`` and an ``iterations`` list that
+    grows between polls. The thread handle and the abort stop-event never
+    reach the wire: both are unserialisable, and the stop event is the abort
+    route's only handle on a live run.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("margin_loop")
+        if not st:
+            return Response(status_code=204)
+        # Shallow copy under the lock; `iterations` is REBOUND by the worker,
+        # never mutated, so the list this copy captures is frozen for ever.
+        return {k: v for k, v in st.items()
+                if k not in ("thread", "stop_event")}
+
+
+@results_router.post("/margin_loop/abort")
+def post_margin_loop_abort():
+    """
+    Ask a running margin loop to stop (the coupling loop's contract, §2).
+
+    200 sets the record's stop event; the controller checks it before each
+    solve, so an abort costs at most the iterate already in flight and the
+    closing restore still runs. IDEMPOTENT and 200 even when the run is
+    already finishing: "stop" on something that has stopped is satisfied.
+    404 only when no run has ever been recorded.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("margin_loop")
+        if not st:
+            raise HTTPException(
+                404, "no margin-loop study has been run in this session")
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
+
+
+@results_router.post("/margin_loop")
+def post_margin_loop(body: MarginLoopRequest | None = None):
+    """
+    Drive the PLANNING RESERVE MARGIN until the plan meets the user's target
+    on the sequential MC's own LOLE (margin-loop spec §2).
+
+    The sibling of ``POST /results/coupling_loop`` and the answer to the case
+    that one cannot serve: on a network whose firm capacity already covers
+    demand deterministically, the LP sheds nothing at any energy cap, so no ε
+    changes the plan and the cap loop can only report ``unreachable``. The
+    loss of load the MC sees there comes from OUTAGES the LP does not model at
+    all, and the lever that buys firm capacity the LP sees no deterministic
+    reason to build is the margin.
+
+    ASYNCHRONOUS BY CONSTRUCTION: one probing solve plus up to ``max_solves``
+    full capacity expansions with an MC evaluation each, plus the closing
+    restore.
+
+    VALIDATION IS SYNCHRONOUS WHEREVER IT IS CHEAP, and for this lever that is
+    the whole set — ``reserve_margin_facts`` is explicitly preflight-callable
+    ("nothing in this function touches ``n.model``"), so the ceiling and the
+    unpriceable-asset refusal both cost zero solves. Two of the cap loop's
+    refusals are deliberately NOT copied: a VoLL is not required (the margin
+    is a constraint, not a price), and ``myopic`` is allowed (each myopic
+    iteration's snapshots are exactly one investment period, which is the peak
+    the standard is defined against — the margin's own validator downgrades it
+    to a warning, and refusing it here would deny a supported configuration).
+    """
+    import dataclasses
+    import hashlib
+    import queue as _queue
+    import time
+
+    from services.adequacy.coupling import MAX_LOOP_SOLVES, run_coupling_loop
+    from services.adequacy.lever_text import format_lever_value
+    from services.adequacy.margin_lever import (
+        MAX_MARGIN,
+        STEP_OVERSHOOT,
+        to_margin,
+        to_x,
+    )
+    from services.adequacy.mc import (
+        MAX_DRAWS,
+        MC_WARNING_V1,
+        mc_adequacy,
+        snapshot_inputs,
+    )
+    from services.adequacy.metrics import horizon_years, resolve_time_basis
+    from services.adequacy.sweep import _solve_once
+    from services.solver_service import _prm_margin, reserve_margin_facts
+    from services.validation_service import (
+        _check_nonfinite_bounds,
+        _check_reserve_margin,
+    )
+    from routers.simulation import _state_update
+
+    # ── the 409 mesh ──────────────────────────────────────────────────────
+    if _study_running("margin_loop"):
+        raise HTTPException(409, "a margin-loop study is already running")
+    if _study_running("coupling_loop"):
+        raise HTTPException(409, "a coupling-loop study is running — wait for it to finish")
+    if _study_running("frontier"):
+        raise HTTPException(409, "a frontier study is running — wait for it to finish")
+    if _study_running("mc"):
+        raise HTTPException(409, "a sequential-MC study is running — wait for it to finish")
+    if _study_running("fmea_sweep"):
+        raise HTTPException(409, "an FMEA sweep is running — wait for it to finish")
+    if _state.get("status") == "running":
+        raise HTTPException(409, "a solve is running — wait for it to finish")
+
+    # ── the synchronous 422 set (§2.4) ────────────────────────────────────
+    target = getattr(body, "target_lole_h", None)
+    try:
+        target = float(target) if target is not None else None
+    except (TypeError, ValueError):
+        target = None
+    if target is None or not (target > 0):
+        raise HTTPException(
+            422,
+            "target_lole_h is required and must be > 0: the loop searches for "
+            "the cheapest reserve margin whose plan meets a RELIABILITY "
+            "STANDARD, and a target of zero (or none) is not a standard — it "
+            "is the demand that no draw ever sheds an hour, which no finite "
+            "plan can buy")
+
+    draws = getattr(body, "draws", None)
+    draws = 500 if draws is None else int(draws)
+    if draws < 1:
+        raise HTTPException(422, "draws must be a positive number of samples")
+    if draws > MAX_DRAWS:
+        raise HTTPException(
+            422,
+            f"draws={draws} exceeds the engine cap of {MAX_DRAWS} draws per "
+            "evaluation — and the loop pays that cost once per iterate")
+    seed = getattr(body, "seed", None)
+    seed = 0 if seed is None else int(seed)
+
+    max_solves = getattr(body, "max_solves", None)
+    max_solves = MAX_LOOP_SOLVES if max_solves is None else int(max_solves)
+    if not (1 <= max_solves <= MAX_LOOP_SOLVES):
+        raise HTTPException(
+            422,
+            f"max_solves must be between 1 and {MAX_LOOP_SOLVES} (got "
+            f"{max_solves}) — each solve is a full capacity expansion, so the "
+            "budget is the wall-clock promise this request makes (the probing "
+            "solve of the informed step is one more, outside it)")
+
+    restore = getattr(body, "restore", None) or "base"
+    if restore not in ("base", "final"):
+        raise HTTPException(
+            422,
+            f"restore must be 'base' or 'final' (got {restore!r}): 'base' "
+            "re-solves with your original config, 'final' leaves you holding "
+            "the certified plan at m*")
+
+    cfg = _state.get("solver_config")
+    if cfg is None:
+        raise HTTPException(
+            422, "no solver configuration is set for this project — the loop "
+                 "builds every iterate from it")
+
+    # NO VoLL REQUIREMENT (§2.4). The cap loop needs one because without
+    # load-shedding slacks its lever constrains nothing; the margin is a
+    # CONSTRAINT on installed firm capacity and binds whether or not unserved
+    # energy carries a price.
+
+    strategy = str(getattr(cfg, "solve_strategy", "full") or "full")
+    if strategy == "rolling":
+        raise HTTPException(
+            422,
+            "the reserve margin is not supported with the 'rolling' solve "
+            "strategy: PyPSA solves each window independently, so the "
+            "constraint would be built against that WINDOW's peak demand "
+            "rather than the period's — a weaker standard than the one you "
+            "set, enforced under its name. Every iterate would fail the same "
+            "blocking validation and the loop would report 'unreachable', "
+            "which is a statement about the strategy, not about the network. "
+            "Use the full strategy. ('myopic' IS supported: each iteration's "
+            "snapshots are exactly one investment period, which is the peak "
+            "the standard is defined against — only its report is partial.)")
+
+    # The ONE snapshot the validation reads, taken under the mutation lock.
+    # `keep_zero_capacity=True` from the very first call (coupling spec §1.2):
+    # the sampled fleet's MEMBERSHIP must be invariant across iterates or the
+    # positional CRN substreams shift under it — and it is what keeps the
+    # UNBUILT peaker, the very asset a margin exists to force into being, in
+    # the fleet at all.
+    n = PyPSAService.get_network()
+    lock = PyPSAService.get_lock()
+    with lock:
+        try:
+            # Phase 12c-0: the LP's demand basis — the plan the loop
+            # certifies was built on it (the fifteenth finding).
+            inputs = snapshot_inputs(n, keep_zero_capacity=True, cfg=cfg)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        nyears = float(horizon_years(n))
+
+    if not inputs.units:
+        raise HTTPException(
+            422,
+            "nothing to sample: no electrical generator carries resolvable "
+            "occurrence data (unavailability + MTTR), so the sampled fleet is "
+            "empty — an empty fleet would report the entire horizon as loss of "
+            "load, which is a statement about missing input data, not about "
+            "the system")
+
+    # The up-front resolution floor. One shortfall hour in one draw
+    # contributes that hour's WEIGHT to the mean, so the smallest non-zero
+    # LOLE these draws can resolve is `min positive weight / draws`. A target
+    # under it is undecidable.
+    _w = inputs.weights[inputs.weights > 0]
+    floor_h = (float(_w.min()) / draws) if _w.size else None
+    if floor_h is not None and target < floor_h:
+        need = int(math.ceil(float(_w.min()) / target))
+        raise HTTPException(
+            422,
+            f"target_lole_h={target:g} h is below this study's resolution "
+            f"floor of {floor_h:g} h at {draws} draws: a single shortfall "
+            "hour in a single draw already exceeds it, so no verdict here "
+            "could distinguish a compliant plan from a lucky sample. About "
+            f"{need} draws would resolve it.")
+
+    base_cfg = cfg
+    basis = resolve_time_basis(nyears)
+
+    # ── the facts the standard knows before an LP exists (§2.4) ───────────
+    #
+    # `reserve_margin_facts` returns None for a config with no margin set, so
+    # the preflight reads it at a NOMINAL margin. Only `required_mw` scales
+    # with that number; the peaks, the derates, the unpriceable list and
+    # `max_achievable_mw` — everything read below — do not.
+    m_user = _prm_margin(base_cfg) or 0.0
+    probe_margin = max(m_user, PROBE_MARGIN)
+    facts_cfg = dataclasses.replace(base_cfg, reserve_margin=probe_margin)
+    with lock:
+        try:
+            facts = reserve_margin_facts(n, facts_cfg)
+        except Exception as exc:                              # noqa: BLE001
+            raise HTTPException(
+                422,
+                "the firm-capacity standard could not be measured on this "
+                f"network, so the loop has no ceiling to search under: {exc}"
+            ) from exc
+        # Unpriceable assets — refused with the VALIDATOR'S OWN SENTENCE, not
+        # a second one. The loop's own gate would pass (it needs one priceable
+        # unit, not all of them) and then EVERY iterate would fail the same
+        # blocking validation, ending `budget_exhausted` and advising "raise
+        # max_solves", which can never work here.
+        margin_issues = _check_reserve_margin(n, facts_cfg)
+        # Phase 12f: the SAME up-front refusal, for the same reason. A
+        # non-finite value in one of the five finite-default LP bounds is a
+        # blocking preflight error, so every iterate would fail validation and
+        # the loop would end `budget_exhausted` advising "raise max_solves" —
+        # `_margin_out_of_reach` only relabels `validation_failed` when the
+        # MARGIN is the cause, and it is not here. This check has to be CALLED,
+        # not merely allowed through the filter below: `_check_reserve_margin`
+        # is one sub-validator, not `validate_for_run`, so a code it never
+        # produces can never appear in `margin_issues`.
+        margin_issues = margin_issues + _check_nonfinite_bounds(n)
+    for iss in margin_issues:
+        # Phase 12g: every `nonfinite_*` code, by prefix. The first version
+        # listed the two 12f codes literally, so each category 12g adds would
+        # have slipped past this guard and the loop would have spent its
+        # budget refusing — the K6 outcome this guard exists to prevent.
+        if iss.code == "reserve_margin_unpriceable_assets" \
+                or iss.code.startswith("nonfinite_"):
+            raise HTTPException(422, iss.message)
+
+    # The ceiling: a margin is achievable iff EVERY period can reach it, so
+    # the binding period is the one that fails first and the aggregate is
+    # `min`, not `max` (plan §2.2 — `max` would let the search run past a
+    # margin one period already makes impossible). `max_achievable_mw` is
+    # `inf` on the ordinary network (PyPSA's default `p_nom_max`), where the
+    # ceiling is the schema's own bound instead.
+    m_max = math.inf
+    m_max_where: tuple[str, float, float] | None = None
+    for P, per in ((facts or {}).get("stash", {}).get("periods") or {}).items():
+        try:
+            peak = float(per.get("peak_mw") or 0.0)
+            reach = float(per.get("max_achievable_mw") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if peak <= 0:
+            continue
+        here = reach / peak - 1.0
+        if here < m_max:
+            m_max, m_max_where = here, (str(P), peak, reach)
+    if m_max <= 0:
+        where = ""
+        if m_max_where is not None and m_max_where[0] != "ALL":
+            where = f" in period {m_max_where[0]}"
+        peak_mw = m_max_where[1] if m_max_where else 0.0
+        reach_mw = m_max_where[2] if m_max_where else 0.0
+        raise HTTPException(
+            422,
+            f"no reserve margin is reachable on this network{where}: the "
+            f"whole fleet — every extendable at its p_nom_max, derated — tops "
+            f"out at {reach_mw:,.1f} MW against a {peak_mw:,.1f} MW peak, a "
+            f"margin of {m_max:.1%}, so even a margin of 0 % (firm capacity "
+            "equal to the peak) is out of reach. Every iterate would be "
+            "refused by the same blocking preflight the solver runs, and the "
+            "loop would spend its whole budget proving it. Raise a p_nom_max, "
+            "add candidate capacity, or enter outage data for assets the "
+            "standard currently cannot price.")
+    # The search's own upper bound: the fleet ceiling, or the schema's `le=5`
+    # when the fleet is unbounded.
+    m_ceiling = min(m_max, MAX_MARGIN)
+
+    # ── the bindings (§2.1) ───────────────────────────────────────────────
+
+    def _snapshot():
+        # `base_cfg` is captured in the request — the worker never reads
+        # `_state` — and the scalers do not change across iterates.
+        with lock:
+            return snapshot_inputs(n, keep_zero_capacity=True, cfg=base_cfg)
+
+    def _hash(mc_inputs) -> str:
+        """sha256 over exactly what the MC reads — the sorted
+        ``(name, capacity_mw)`` unit vector, the sorted
+        ``(name, p_nom_mw, e_nom_mwh)`` storage vector, and the residual
+        bytes. NOT the objective: degenerate optima give equal cost for
+        different plans. Equal hash ⇒ bit-identical MC under the same seed and
+        draw count, so the controller's plateau reuse is exact."""
+        # Phase 12d: one implementation for both loops, testable
+        # (`tests/test_adequacy_activity.py` E8).
+        return _snapshot_hash(mc_inputs)
+
+    def _margin_out_of_reach(m: float) -> str | None:
+        """Is THIS margin impossible from the candidate set — the same
+        constant arithmetic `_check_reserve_margin` blocks on, asked at a
+        specific margin (§2.5)?
+
+        A second implementation of the derating chain here would be a second
+        standard, so the numbers come from `reserve_margin_facts` — the very
+        function the validator and the LP wrapper share.
+        """
+        try:
+            with lock:
+                f = reserve_margin_facts(
+                    n, dataclasses.replace(base_cfg, reserve_margin=float(m)))
+        except Exception:                                     # noqa: BLE001
+            return None
+        if not f:
+            return None
+        for P, per in (f["stash"].get("periods") or {}).items():
+            try:
+                required = float(per.get("required_mw") or 0.0)
+                reach = float(per.get("max_achievable_mw") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if required <= 0 or not math.isfinite(required):
+                continue
+            if reach < required:
+                where = "" if str(P) == "ALL" else f" in period {P}"
+                return (
+                    f"infeasible: no plan built from this candidate set "
+                    f"reaches a {m:.1%} reserve margin{where} — it needs "
+                    f"{required:,.1f} MW of derated firm capacity and the "
+                    f"whole fleet tops out at {reach:,.1f} MW")
+        return None
+
+    _ceiling_missed = [False]
+    _last_at_ceiling = [False]
+
+    def solve_at(x: float) -> dict:
+        _last_at_ceiling[0] = False
+        """One capacity-expansion solve at the margin ``x`` stands for, read
+        out exactly as ``run_frontier_sweep`` reads its points. Solve failures
+        come back as a status — the controller is specified never to see an
+        exception from here, and a raise would cost the whole study."""
+        m = to_margin(x)
+        out = {"status": None, "condition": None, "cost_eur": None,
+               "ens_mwh": None, "cap_mwh": None, "binding": None,
+               "report": None}
+
+        if m > MAX_MARGIN * (1.0 + 1e-9):
+            # The controller's blind step multiplies the margin by ~4 per
+            # iterate, so it can walk past the schema's own bound in two
+            # steps. Solving there would build a plan against a margin the
+            # config schema refuses — and `restore="final"` would then persist
+            # a value the next PUT rejects. Stopping is honest and free.
+            out.update(
+                status="error",
+                condition=(
+                    f"infeasible: a reserve margin of {m:.1%} is beyond the "
+                    f"configured maximum of {MAX_MARGIN:.0%} — the search has "
+                    "run out of lever, not out of budget"))
+            return out
+
+        # THE CLAMP, and it is the difference between a verdict and a guess.
+        # The controller's blind step multiplies the margin ~4x per iterate, so
+        # from a small start it can leap clean over `m_ceiling` — and an
+        # over-ceiling solve fails validation, gets relabelled `infeasible`
+        # below, and the nesting logic then (correctly, given what it was told)
+        # concludes every stricter margin is infeasible too. The loop reports
+        # `unreachable` having never evaluated the reachable region at all.
+        # Found live in S19.3: ceiling 271%, last evaluated margin 18%, verdict
+        # "unreachable" — with a plan that meets the target sitting between
+        # them. Clamping makes the strictest REACHABLE margin the thing that
+        # gets evaluated, so an `unreachable` verdict is one this study
+        # actually verified.
+        if m > m_ceiling:
+            if _ceiling_missed[0]:
+                # Already evaluated AT the ceiling and it missed. Nothing
+                # stricter exists to try, so this is a real refusal rather
+                # than another clamp to the same plan.
+                out.update(
+                    status="error",
+                    condition=(
+                        f"infeasible: the strictest reachable margin "
+                        f"({m_ceiling:.1%}) was evaluated and still missed the "
+                        "target — the candidate set, not the search, is the "
+                        "limit"))
+                return out
+            m = m_ceiling
+            _last_at_ceiling[0] = True
+        sink: dict = {}
+        _solve_once(dataclasses.replace(base_cfg, reserve_margin=m),
+                    n, lock, None, sink)
+        status = sink.get("_status")
+        condition = sink.get("_condition")
+        out.update(status=status, condition=condition)
+
+        if status not in ("ok", "optimal"):
+            # §2.5. An out-of-reach margin is a BLOCKING PREFLIGHT ERROR, not
+            # an infeasible LP (linopy raises TypeError on a constant
+            # constraint and `Generator-p_nom` does not exist when nothing
+            # extendable is active), so it arrives as `validation_failed` —
+            # which `_is_infeasible` matches on neither the status nor the
+            # condition. The controller would treat it as transient, keep
+            # stepping, and end `budget_exhausted` advising "raise
+            # max_solves", which can never work. Relabel it — but ONLY when
+            # the facts confirm the margin is the cause: a validation failure
+            # from anything else is not monotone in the margin and proves
+            # nothing about tighter ones.
+            if "validation_failed" in str(condition).lower():
+                why = _margin_out_of_reach(m)
+                if why is not None:
+                    out["condition"] = why
+            return out
+
+        rep = sink.get("adequacy_report")
+        if not rep:
+            # A margin WAS set and the solve succeeded, so the report is the
+            # contract. Its absence is a defect, and reporting it as a failed
+            # iterate keeps the loop from evaluating a plan it cannot describe.
+            out.update(status="no_report",
+                       condition="the solve returned no adequacy report")
+            return out
+
+        # §2.1: `binding` comes from the MARGIN's own block. `target.binding`
+        # is computed purely from the ENS caps and reads "voll" on every
+        # margin run, which would make the controller's `reusable` pre-test
+        # (`binding != "system_cap"`) permanently true and offer plateau reuse
+        # on iterates where the margin demonstrably rebuilt the plan.
+        rm_rows = ((rep.get("reserve_margin") or {}).get("by_period")) or []
+        binding = ("system_cap" if any(bool(r.get("binding")) for r in rm_rows)
+                   else "voll")
+
+        metrics_blk = rep.get("metrics") or {}
+        ens = metrics_blk.get("ens_mwh")
+        if ens is None:
+            ens = ((rep.get("target") or {}).get("system") or {}).get(
+                "achieved_ens_mwh")
+        try:
+            ens = float(ens) if ens is not None else None
+        except (TypeError, ValueError):
+            ens = None
+
+        out.update(
+            report=rep,
+            cost_eur=float(rep["cost"]["total_system_cost_eur"]),
+            ens_mwh=ens,
+            # §2.2, and it is LOAD-BEARING. The controller ends the search
+            # with `unreachable` when `cap_mwh is not None and cap_mwh <
+            # ENERGY_FLOOR_MWH`. On a margin-only report `cap_mwh` is `0.0` —
+            # the ENS cap's per-period loop never runs, so `SystemTarget.
+            # cap_mwh` is emitted as its initialised zero — so passing it
+            # through fires that test on the FIRST miss and every run ends
+            # `unreachable` after one solve, indistinguishable in the payload
+            # from the real thing. None makes the test a genuine no-op, which
+            # is the only correct reading for a lever with no energy cap.
+            cap_mwh=None,
+            binding=binding,
+        )
+        return out
+
+    eval_state: dict = {"floor": floor_h}
+
+    def evaluate():
+        """IDENTICAL to the coupling loop's (§2.1): the same snapshot with
+        `keep_zero_capacity=True`, the same pinned
+        `mc_adequacy(inputs, draws=N, seed=S, max_draws=N)` call — merely
+        ignoring `cov_target` would leave the adaptive cap in play and
+        `n_samples` would drift between iterates, breaking the common random
+        numbers the plateau reuse rests on — and the same plan hash."""
+        mc_inputs = _snapshot()
+        # `stop_event` is NEVER passed here: this is a REPLAY of one batch
+        # sequence (see `mc_adequacy`'s note), and the loop's own abort is
+        # checked between iterates, never inside an evaluation.
+        metrics = mc_adequacy(mc_inputs, draws=draws, seed=seed,
+                              max_draws=draws, stop_event=None)
+        try:
+            eval_state["floor"] = metrics.get("resolution_floor_h")
+        except AttributeError:                                # noqa: BLE001
+            pass
+        return _hash(mc_inputs), metrics
+
+    def _plan_hash():
+        return _hash(_snapshot())
+
+    evaluate.plan_hash = _plan_hash
+
+    def _position_x0() -> tuple[float, float | None]:
+        """§2.3 — the informed step, done by PRE-POSITIONING x0 rather than by
+        changing the controller.
+
+        With `cap_mwh=None` the controller's informed term is skipped and
+        `_tighten` degrades to the blind `x/4`, which in margin terms is
+        `m: 0 → 3` — a large but safe first jump that spends a solve learning
+        nothing when the incumbent plan already carries a comfortable margin.
+        So the route measures the incumbent first:
+
+            m_tight = min over P of (firm_mw_P / peak_mw_P) − 1
+            x0      = to_x(m_tight · (1 + STEP_OVERSHOOT))
+
+        `m_tight` is the smallest margin at which the incumbent plan is TIGHT
+        — at exactly that value the plan is feasible, unchanged, same hash,
+        same LOLE, and flagged `binding` while nothing moved — so the step
+        must STRICTLY exceed it, hence the overshoot. The aggregate is `min`
+        because the first period to bind is the binding one; `max` would step
+        past it and overshoot the bracket entirely.
+
+        Returns ``(x0, m_tight)``.
+        """
+        res = solve_at(to_x(probe_margin))
+        tights: list[float] = []
+        if res.get("status") in ("ok", "optimal"):
+            rows = ((res.get("report") or {}).get("reserve_margin") or {}).get(
+                "by_period") or []
+            for row in rows:
+                try:
+                    peak = float(row.get("peak_mw") or 0.0)
+                    firm = float(row.get("firm_mw") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if peak > 0 and math.isfinite(firm):
+                    tights.append(firm / peak - 1.0)
+        if not tights:
+            # No measurement (a failed probe, or a report with no usable
+            # period): fall back to the user's own margin and let the
+            # controller's blind step do the searching. A guess here would be
+            # a worse start than no start.
+            logger.info("margin loop: no tight margin measurable from the "
+                        "probing solve; starting from the configured margin")
+            m_start = min(max(probe_margin, STEP_OVERSHOOT), m_ceiling)
+            return to_x(max(m_start, PROBE_MARGIN)), None
+        m_tight = min(tights)
+        base = max(m_tight, 0.0)
+        m_start = base * (1.0 + STEP_OVERSHOOT)
+        if not m_start > base:
+            # `base == 0`: the incumbent is tight at (or below) a zero margin,
+            # where a multiplicative overshoot is still zero — and a margin of
+            # 0 installs no standard at all. The smallest step that changes
+            # anything is the overshoot itself.
+            m_start = STEP_OVERSHOOT
+        m_start = max(min(m_start, m_ceiling), PROBE_MARGIN)
+        return to_x(m_start), m_tight
+
+    def _translate(row: dict) -> dict:
+        """§2.6: the controller's `eps_permyriad` IS the substitution's `x`,
+        an internal coordinate with no meaning to a user — 0.76 is not a
+        margin, not a percentage and not a per-myriad ENS cap. Every row is
+        translated on its way into the record, so `x` never reaches the wire
+        at all."""
+        return {
+            "lever_value": to_margin(row["eps_permyriad"]),
+            "solve_status": row["solve_status"],
+            "condition": row["condition"],
+            "cost_eur": row["cost_eur"],
+            "ens_mwh": row["ens_mwh"],
+            "cap_mwh": row["cap_mwh"],
+            "binding": row["binding"],
+            "plateau": row["plateau"],
+            "mc": row["mc"],
+        }
+
+    # ── the record (closed over, never reached through `_state`) ──────────
+    stop_event = _threading.Event()
+    record: dict = {
+        "study": "margin_loop",
+        # The frontend discriminator (spec §3): the column header, the badge
+        # suffix and `restoreSentence`'s CONFIG FIELD NAME all come off these,
+        # so a margin run can never tell the user to set the cap's field.
+        "lever": "reserve_margin",
+        "lever_label": "planning reserve margin",
+        "lever_unit": "%",
+        "status": "running",
+        "target_lole_h": target,
+        "basis": basis,
+        "horizon_years": nyears,
+        "draws": draws,
+        "seed": seed,
+        "margin0": None,
+        "margin_tight": None,
+        "margin_ceiling": (None if not math.isfinite(m_ceiling)
+                           else float(m_ceiling)),
+        "max_solves": max_solves,
+        "restore": restore,
+        "base_restored": False,
+        "confident": False,
+        "lever_star": None,
+        "resolution_floor_h": floor_h,
+        "solves_used": 0,
+        # The probing solve of §2.3 is OUTSIDE the controller's budget, so it
+        # is reported separately rather than folded into `solves_used`: the
+        # budget is a promise about the search, and a user timing the run
+        # should be able to account for every solve it made.
+        "probe_solves": 0,
+        "iterations": [],
+        "final": None,
+        "verdict": None,
+        "warning": MC_WARNING_V1 + " " + MARGIN_LOOP_WARNING_V1,
+        "error": None,
+        "started_at": time.time(),
+        "finished_at": None,
+        "thread": None,
+        "stop_event": stop_event,
+    }
+
+    def on_iteration(row: dict) -> None:
+        """Grow the record by REBINDING, never by appending in place.
+
+        `get_margin_loop` serves a shallow copy, so an in-place append hands
+        the serializer the very list this thread is mutating: a mid-run GET
+        can then be written half-way through an append, and a client polling
+        every second can watch its own earlier history change. A fresh list
+        per iterate makes every snapshot immutable by construction.
+        """
+        # Did the iterate that just finished sit AT the ceiling and miss? If
+        # so no stricter margin exists to try, and `solve_at` refuses the next
+        # request outright rather than clamping to the same plan forever.
+        mc = row.get("mc") or {}
+        lole = mc.get("lole_hours")
+        if (_last_at_ceiling[0] and lole is not None
+                and float(lole) > target):
+            _ceiling_missed[0] = True
+        with PyPSAService.get_solver_state_lock():
+            record["iterations"] = record["iterations"] + [_translate(row)]
+
+    # The solver's own word on the closing re-solve, for the payload. A cell
+    # rather than a return value because `_restore_closing` returns a bool
+    # that four call sites already read (12e shipped-code review, S1).
+    _restore_word: list = [None]
+
+    def _restore_closing(met: bool, m_star) -> bool:
+        """The closing re-solve — the route's job, on EVERY path. The loop
+        mutates the network once per iterate, so without this it is left on
+        whichever margin happened to be last while the foreground results
+        still describe the pre-study solve.
+
+        `"final"` writes **`reserve_margin`** and nothing else: a user-set ENS
+        cap is carried through untouched (every config here is built from
+        `base_cfg`), because the study tuned one standard and the user asked
+        for both.
+        """
+        from services.adequacy.sweep import restore_is_clean
+        from services.solver_service import run_simulation
+
+        use_final = (restore == "final" and met and m_star is not None)
+        if use_final:
+            final_cfg = dataclasses.replace(
+                base_cfg, reserve_margin=float(m_star))
+            # Persisted through the normal config path (read-modify-write
+            # under the solver-state lock, exactly as PUT /solver_config does)
+            # BEFORE the solve: the user asked to hold m*, and a restore whose
+            # solve fails must still leave the setting they will re-run with,
+            # with `base_restored` reporting the failure.
+            with PyPSAService.get_solver_state_lock():
+                _state["solver_config"] = dataclasses.replace(
+                    _state["solver_config"], reserve_margin=float(m_star))
+        else:
+            final_cfg = base_cfg
+        try:
+            status, condition = run_simulation(
+                final_cfg, n, lock, _threading.Event(), _queue.SimpleQueue(),
+                state_update=_state_update)
+        except Exception as exc:                              # noqa: BLE001
+            logger.exception(
+                "margin loop: the closing re-solve FAILED — the network is "
+                "left on the last iterate's margin and the foreground results "
+                "do not describe the plan the verdict is about")
+            _restore_word[0] = f"raised: {exc}"
+            return False
+        # The CONDITION, through the shared predicate — see the coupling
+        # loop's twin for why the status is the wrong half to read.
+        word = str(condition or status)
+        _restore_word[0] = word
+        if not restore_is_clean(word):
+            logger.warning(
+                "margin loop: the closing re-solve returned %r — it ran but "
+                "did not restore the plan the verdict is about", word)
+        return restore_is_clean(word)
+
+    def _both_standards_clause() -> str:
+        try:
+            cap = float(getattr(base_cfg, "ens_cap_permyriad", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            cap = 0.0
+        if cap <= 0:
+            return ""
+        return (
+            f" Your energy cap (ens_cap_permyriad = {cap:g}‱) was left in "
+            "force for every iterate and was never rewritten, so the "
+            "certified plan meets BOTH standards.")
+
+    def _verdict_copy(status: str, m_star, rows=None) -> str:
+        if status == "met" and m_star is not None:
+            if restore == "final":
+                return (
+                    f"A plan meeting {target:g} h was verified at a reserve "
+                    f"margin of {m_star:.1%}, and that margin has been "
+                    f"APPLIED to your solver settings (reserve_margin = "
+                    f"{format_lever_value(m_star)}) and re-solved — the "
+                    "network you are holding "
+                    "is the certified plan." + _both_standards_clause())
+            return (
+                f"A plan meeting {target:g} h was verified at a reserve "
+                f"margin of {m_star:.1%}. Your original config has been "
+                "re-solved, so the network you are holding is NOT that plan: "
+                # `format_lever_value`, never `%g`: the panel's own
+                # restore explainer prints this same number two lines
+                # above, and `%g`'s six significant figures made the
+                # two disagree IN THE SAME PANEL — the verdict said
+                # 0.6716 where the explainer said 0.671600430725. A
+                # margin is a THRESHOLD on required firm capacity, so
+                # the shorter value is a strictly LOOSER standard that
+                # need not reproduce the certified plan.
+                f"to keep it, set reserve_margin = "
+                f"{format_lever_value(m_star)} and re-solve."
+                + _both_standards_clause())
+        if status == "unreachable":
+            ceiling = (f"{m_ceiling:.1%}" if math.isfinite(m_ceiling)
+                       else "unbounded")
+            reason = (
+                "the largest margin your candidate set can reach"
+                if m_max <= MAX_MARGIN else
+                "the largest margin the configuration schema allows")
+            return (
+                "No reserve margin this search could reach produced a plan "
+                f"that met {target:g} h on the MC's own LOLE. The search is "
+                f"bounded above by {ceiling} — {reason} — and beyond it no "
+                "plan exists at all: the margin is refused by the same "
+                "blocking preflight the solver runs, rather than by an "
+                "infeasible LP. Under that ceiling, three mechanisms produce "
+                "a miss and they call for different responses: (a) the added "
+                "firm capacity is DERATED by the same outage data the MC "
+                "samples, so a fleet of unreliable units buys less than its "
+                "nameplate; (b) the standard is enforced at the PEAK, while "
+                "loss of load in the MC can fall in hours the peak-"
+                "coincidence window never measured; (c) energy-limited "
+                "resources take a duration haircut, so a plan that meets the "
+                "margin on storage can still run out of energy in a long "
+                "outage. Check the per-iterate binding column and the "
+                "by_period rows, then consider raising a p_nom_max, adding "
+                "candidate capacity, or lowering the target.")
+        if status == "aborted":
+            return ("The study was aborted between iterates. Any iterates "
+                    "already evaluated are shown; the closing restore ran, so "
+                    "the network is back on your own config.")
+        if status == "budget_exhausted":
+            return (
+                f"The solve budget ({max_solves}) was spent without verifying "
+                "a plan that meets the target. Nothing here says the target "
+                "is unreachable — only that this search did not reach it. "
+                "Raise max_solves.")
+        return ("The study did not complete. The iterates recorded below are "
+                "what it managed before it stopped.")
+
+    def worker():
+        res: dict | None = None
+        err: str | None = None
+        try:
+            try:
+                x0, m_tight = _position_x0()
+                with PyPSAService.get_solver_state_lock():
+                    record["probe_solves"] = 1
+                    record["margin0"] = to_margin(x0)
+                    record["margin_tight"] = m_tight
+                res = run_coupling_loop(
+                    solve_at, evaluate, target_lole_h=target, eps0=x0,
+                    max_solves=max_solves, stop_event=stop_event,
+                    on_iteration=on_iteration)
+            except BaseException as exc:                      # noqa: BLE001
+                # The controller is total by construction; this is the belt
+                # for a broken binding above, and it must never leave the
+                # record stuck on "running" for the rest of the session.
+                logger.exception("margin loop: the controller raised")
+                err = str(exc)
+        finally:
+            status = (res or {}).get("status") or "failed"
+            x_star = (res or {}).get("eps_star")
+            m_star = None
+            if x_star is not None:
+                try:
+                    m_star = to_margin(x_star)
+                except ValueError:                            # noqa: BLE001
+                    logger.exception("margin loop: unusable eps_star %r",
+                                     x_star)
+            try:
+                base_restored = _restore_closing(status == "met", m_star)
+            except BaseException:                             # noqa: BLE001
+                logger.exception("margin loop: the restore itself raised")
+                base_restored = False
+
+            src_rows = (res or {}).get("iterations")
+            if src_rows is None:
+                rows_out = record["iterations"]
+                final_out = None
+            else:
+                rows_out = [_translate(r) for r in src_rows]
+                final_src = (res or {}).get("final")
+                # Identity, not equality: two rows CAN carry the same numbers
+                # (a plateau iterate differs only in its lever value, and a
+                # broken binding could make even that equal), and picking the
+                # wrong one would report a different iterate as the answer.
+                final_out = next(
+                    (out for src, out in zip(src_rows, rows_out)
+                     if src is final_src), None)
+
+            warning = MC_WARNING_V1 + " " + MARGIN_LOOP_WARNING_V1
+            if any(len((r.get("mc") or {}).get("by_period") or {}) > 1
+                   for r in rows_out):
+                warning += " " + MARGIN_MULTI_PERIOD_WARNING_V1
+            # ONE atomic apply, under the same lock `on_iteration` rebinds
+            # under: a GET landing between the status flip and the verdict
+            # would otherwise serve a finished study with a running study's
+            # empty final, which is the one shape the panel cannot render.
+            with PyPSAService.get_solver_state_lock():
+                record.update(
+                    status=status,
+                    iterations=rows_out,
+                    final=final_out,
+                    confident=bool((res or {}).get("confident")),
+                    lever_star=m_star,
+                    solves_used=int((res or {}).get("solves_used") or 0),
+                    resolution_floor_h=eval_state["floor"],
+                    base_restored=bool(base_restored),
+                    base_restore_status=_restore_word[0],
+                    verdict=_verdict_copy(status, m_star, rows_out),
+                    warning=warning,
+                    error=err,
+                    finished_at=time.time(),
+                )
+
+    # The worker carries the REQUEST's context (the /simulation/run pattern):
+    # the active project lives in a ContextVar and a bare Thread does not
+    # inherit it, so without this the closing restore's `_state_update` and
+    # the `restore="final"` config write would land in the PROCESS foreground
+    # — a different project's state from the one the caller is polling.
+    _ctx = _contextvars.copy_context()
+    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
+                          name="adequacy-margin-loop")
+    record["thread"] = t
+    # Publish and START under one lock hold. `_study_running` tests
+    # `thread.is_alive()`, and a registered-but-not-yet-started thread reports
+    # False — so a second POST arriving in that window would read the record as
+    # stale state, claim the surface, and put two loops on the same network.
+    with PyPSAService.get_solver_state_lock():
+        _state["margin_loop"] = record
+        t.start()
+    return {"status": "running", "study": "margin_loop",
+            "lever": "reserve_margin", "target_lole_h": target,
+            "draws": draws, "seed": seed, "max_solves": max_solves,
+            "restore": restore, "basis": basis,
+            "margin_ceiling": (None if not math.isfinite(m_ceiling)
+                               else float(m_ceiling)),
+            "resolution_floor_h": floor_h}
+
+
+@results_router.get("/copt")
+def get_copt():
+    """
+    Screening adequacy + the class-A FMECA ranking from the COPT engine
+    (adequacy plan Phase 2), computed ON DEMAND from the current network —
+    no solve required, zero LP solves involved. fidelity =
+    "analytic_convolution": thermal-only, storage-excluded, network-free;
+    NOT comparable to a statutory standard, and its divergence from the
+    LP proxy is the diagnostic (spec §5.3).
+
+    204 = nothing to convolve: no electrical generator carries resolvable
+    occurrence data (see services/adequacy/occurrence.py).
+    """
+    from services.adequacy.activity import activity_summary as _activity_summary
+    from services.adequacy.activity import period_blocks as _period_blocks
+    from services.adequacy.copt import (
+        K_EXACT,
+        fleet_and_residual,
+        must_take_generators,
+        screening_analysis,
+    )
+
+    n = PyPSAService.get_network()
+    cfg = _state.get("solver_config")
+    # Phase 12c-0: under the mutation lock, like /mc — a solve scales the
+    # load frame IN PLACE for its duration, and a bare read mid-solve saw a
+    # half-transformed network (v3 review, finding 8); and on the LP's
+    # demand basis.
+    with PyPSAService.get_lock():
+        units, residual, w = fleet_and_residual(n, cfg=cfg)
+        # …and the membership read for `must_take`, under the same hold
+        # (12c-0 shipped-code review, finding 4).
+        n_must_take = len(must_take_generators(n))
+        # Phase 12d: the activity disclosure reads the NETWORK (must-take
+        # farms and rows dropped at zero capacity are not in the fleet —
+        # shipped-code review, finding 1), so it is taken under the same
+        # hold as the fleet it describes.
+        activity = _activity_summary(n, _period_blocks(residual.index))
+    if not units:
+        return Response(status_code=204)
+    voll = float(getattr(cfg, "voll", 0.0) or 0.0)
+    # Phase 12c-pre: split, net the remainder, table, mixture, attribution —
+    # one call so this route and the engine tests see the same arithmetic.
+    analysis = screening_analysis(units, residual, weights=w, voll=voll,
+                                  delta_mw=1.0)
+    metrics = analysis["metrics"]
+    rows = analysis["rows"]
+    split = analysis["split"]
+    # The must-take count comes from the SAME walk that decided membership.
+    # The previous `electrical non-slack gens − len(units)` subtraction
+    # miscounted zero-capacity generators, which the walk skips and the
+    # subtraction did not (plan 12c-pre v2 review, finding 8).
+    from services.adequacy.metrics import horizon_years, resolve_time_basis
+    _copt_nyears = horizon_years(n)
+    _copt_basis = resolve_time_basis(_copt_nyears)
+    return {
+        "engine": "copt",
+        "fidelity": "analytic_convolution",
+        "metrics": {
+            "lole_hours": metrics["lole_hours"],
+            "eue_mwh": metrics["eue_mwh"],
+            "lolp_max": metrics["lolp_max"],
+            "by_period": metrics["by_period"],
+            # Derived, not asserted. The COPT sums over whatever horizon the
+            # model spans, weighted; calling that "hours_per_year" on a
+            # 168 h week reported 80.86 for a system whose annual LOLE is
+            # ~4216 — and understating LOLE is the direction that gets a
+            # number compared to a 3 h/yr standard it has no relation to.
+            "time_basis": _copt_basis,
+            "horizon_years": _copt_nyears,
+        },
+        "per_mode": [
+            {**r["failure_mode"],
+             "delta_eue_mwh": r["delta_eue_mwh"],
+             **({"note": r["note"]} if "note" in r else {})}
+            for r in rows
+        ],
+        "fleet": {
+            "units": len(units),
+            "must_take": n_must_take,
+            "delta_mw": 1.0,
+            # Phase 12c-pre disclosure: which units carry a profile INTO the
+            # sampled fleet, which of those were netted beyond the exact
+            # cap, and the sentence that says so. `fidelity` above stays the
+            # engine enum the comparison table keys on.
+            "profile_units": [u.name for u in split.mixed] + [u.name for u in split.netted],
+            "netted_beyond_cap": [u.name for u in split.netted],
+            "k_exact": K_EXACT,
+            # Phase 12h. Two units the lists above cannot describe:
+            #  * a unit whose STATIC p_max_pu was folded into its capacity
+            #    has no profile at all, so it is in no existing list — the
+            #    `source` field is here so a later phase can add another
+            #    fold without changing the shape;
+            #  * a unit whose outage rate is zero because its availability
+            #    is declared to include outages carries a profile but is in
+            #    neither `mixed` nor `netted` — it is netted exactly, at
+            #    full availability, and no outages are sampled for it.
+            "folded_units": [
+                {"name": u.name, "folded_constant": float(u.folded_constant),
+                 "source": "static"}
+                for u in units
+                if getattr(u, "folded_constant", None) is not None],
+            "deterministic_units": [u.name for u in split.deterministic],
+        },
+        "fidelity_note": analysis["fidelity_note"],
+        # Phase 12d: which units the engines masked in which period, by
+        # build year / lifetime (and which are below nameplate, a later
+        # vintage not yet built), with the sentence that says so.
+        "activity": activity,
+        "voll_eur_per_mwh": voll,
+    }
+
+
+@results_router.get("/adequacy")
+def get_adequacy():
+    """
+    The minimal AdequacyReport from the last target-constrained solve
+    (adequacy plan Phase 1 Task 3): which standard actually bound
+    (system cap / zone ceiling / VoLL), achieved ENS + shed-hours vs the
+    target, cost excluding shed by construction, all provenance-tagged
+    (engine="lp_proxy" — a deterministic proxy, not comparable to a
+    statutory standard, and the UI must say so at the point of display).
+
+    204 = no report: the solve ran without a target, or nothing has been
+    solved. Same convention as /results/lost_load.
+    """
+    report = _state.get("adequacy_report")
+    if not report:
+        return Response(status_code=204)
+    return report
+
+
+@results_router.get("/reserve_margin")
+def get_reserve_margin():
+    """
+    The firm-capacity (planning reserve margin) standard the last solve
+    enforced, and what met it (Phase 8 §4): one row per investment period —
+    peak, requirement, achieved firm MW, `met`, `binding` — plus the derating
+    table (name, kind, built capacity, derate, basis, source, energy_limited)
+    and the `derating_bases` roll-up.
+
+    Serves the PERSISTED solve-time stash, emitted into solver state like
+    `last_lost_load`, and NEVER a recomputation: the wrapper measured its
+    peaks with the load-scaling transforms applied, and the post-solve restore
+    has since reverted them — recomputing here would report a standard the LP
+    never enforced.
+
+    A met margin is NOT a met reliability target. It is a proxy standard
+    justified by convention and by the derating factors, not by a sampler, and
+    the panel says so at the point of display.
+
+    204 = no margin result: nothing solved yet, the last solve set no margin,
+    or it did not produce a dispatch to judge one against. Same convention as
+    /results/lost_load and /results/adequacy.
+    """
+    from services.adequacy.report import sanitize_reserve_margin_payload
+
+    payload = _state.get("last_reserve_margin")
+    if not payload:
+        return Response(status_code=204)
+    # `max_achievable_mw` is `inf` whenever an active extendable has an
+    # unbounded `p_nom_max` — the honest value, and not JSON: Starlette dumps
+    # with `allow_nan=False`, so serving it untouched raises inside the
+    # response and the panel gets a 500 instead of a report.
+    return sanitize_reserve_margin_payload(payload)
+
+
 @results_router.get("/lost_load")
 def get_lost_load(
     from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
@@ -2956,7 +5527,11 @@ def get_lost_load(
     # Surface VOLL directly so the frontend doesn't infer it via division
     # (which crashes on zero-MWh edge cases). Cost / MWh recovers the
     # per-MWh VOLL price the solver used.
-    voll = (total_cost / total_mwh) if total_mwh > 0 else 0.0
+    # Prefer the capture's explicit VoLL (present since the weighted-totals
+    # change); older captures lack it — fall back to the cost/energy ratio.
+    voll = float(cap.get("voll_eur_per_mwh") or 0.0) or (
+        (total_cost / total_mwh) if total_mwh > 0 else 0.0
+    )
 
     # Per-column bus carrier. solver_service adds a VOLL slack on EVERY bus
     # (not just electricity), so `lost_load_t.columns` carries bus names
@@ -2972,13 +5547,27 @@ def get_lost_load(
             except KeyError:
                 bus_carriers[str(col)] = ""
     range_meta = None
+    full_df = df   # bind BEFORE slicing — shed-hours is horizon-scope
     if _wants_slice(from_, to_):
         df, range_meta = _slice_ts(df, from_, to_)
+    # Shed-hours (spec §5.1) — electrical buses only, weighted on the same
+    # energy basis as dispatch. Computed on the FULL frame, not the sliced
+    # range: it is a horizon reliability number, not a window statistic.
+    from services.adequacy.metrics import electrical_columns, shed_hours
+    from services.period_utils import snapshot_weights
+    sh = shed_hours(
+        full_df[electrical_columns(n, list(full_df.columns))],
+        weights=snapshot_weights(n, "generators", sns=full_df.index),
+    )
     return _ts_payload(df, extra={
         "total_mwh": total_mwh,
         "total_cost_eur": total_cost,
         "voll_eur_per_mwh": voll,
         "bus_carriers": bus_carriers,
+        "shed_hours": {
+            "total": sh["total"],
+            "by_period": {str(k): v for k, v in sh["by_period"].items()},
+        },
     }, range_meta=range_meta)
 
 
@@ -2993,6 +5582,9 @@ def lp_scaled_load_frame(n, cfg=None, source: str = "lopf", from_state: bool = T
     ``loads_t.p_set`` (the BASE input profile) and re-applies the per-carrier /
     per-period scalers from ``cfg``. Returns a DataFrame (snapshots × loads) or
     ``None``. Never mutates the source frame.
+
+    The returned frame MAY BE THE LIVE ``loads_t.p_set`` when nothing is
+    scaled (Phase 12c-0) — read-only for every consumer; never mutate it.
 
     ``from_state``: when True (default, live network) the LP-stage `_state`
     result snapshot takes priority via ``_result_df``. When False (e.g. a
@@ -3013,56 +5605,15 @@ def lp_scaled_load_frame(n, cfg=None, source: str = "lopf", from_state: bool = T
         df = getattr(getattr(n, "loads_t", None), "p_set", None)
     if df is None or df.empty:
         return None
-    load_scalers = getattr(cfg, "load_scalers", {}) if cfg is not None else {}
-    by_carrier = getattr(cfg, "load_scalers_by_carrier", {}) if cfg is not None else {}
-    multi_periods = isinstance(df.index, _pd.MultiIndex)
-    has_any_scaling = bool(load_scalers) or bool(by_carrier)
-    if not already_scaled and multi_periods and has_any_scaling:
-        from services.solver_service import _canonical_load_carrier_key
-        df = df.copy(deep=True)
-        carrier_by_col: dict = {}
-        try:
-            loads_df = n.loads
-            if "carrier" in loads_df.columns:
-                for col in df.columns:
-                    carrier_by_col[col] = (
-                        _canonical_load_carrier_key(loads_df.at[col, "carrier"])
-                        if col in loads_df.index else "electrical"
-                    )
-            else:
-                for col in df.columns:
-                    carrier_by_col[col] = "electrical"
-        except Exception:
-            carrier_by_col = {col: "electrical" for col in df.columns}
-        period_level = df.index.get_level_values(0)
-        for period in sorted(set(period_level)):
-            mask = period_level == period
-            p_str = str(period)
-            for col in df.columns:
-                carrier_key = carrier_by_col.get(col, "electrical")
-                factor = None
-                car_block = by_carrier.get(carrier_key) if isinstance(by_carrier, dict) else None
-                if isinstance(car_block, dict):
-                    raw = car_block.get(p_str)
-                    if raw is not None:
-                        try:
-                            f = float(raw)
-                            if f == f:
-                                factor = f
-                        except (TypeError, ValueError):
-                            pass
-                if factor is None and load_scalers:
-                    raw = load_scalers.get(p_str)
-                    if raw is not None:
-                        try:
-                            f = float(raw)
-                            if f == f:
-                                factor = f
-                        except (TypeError, ValueError):
-                            pass
-                if factor is None or factor == 1.0:
-                    continue
-                df.loc[mask, col] = df.loc[mask, col] * factor
+    if not already_scaled:
+        # Phase 12c-0: the fallback is the LP's own resolution, from the one
+        # module that owns it — the previous inline copy diverged from the LP
+        # (no `multi_investment_periods` gate, `f == f` for `isfinite`, an
+        # `"electrical"` carrier fallback; v3 review, finding 7).
+        from services.adequacy.demand import lp_demand_frame
+        df = lp_demand_frame(n, cfg)
+        if df is None or df.empty:
+            return None
     return df
 
 

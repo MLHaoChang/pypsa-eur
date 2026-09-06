@@ -19,6 +19,7 @@ import re
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 
 from services.carrier_catalog import CARRIER_CATALOG
@@ -317,13 +318,34 @@ def _check_loads_p_set(n) -> list[Issue]:
         return out
     static = n.loads["p_set"] if "p_set" in n.loads.columns else None
     ts = n.loads_t.p_set if hasattr(n.loads_t, "p_set") else pd.DataFrame()
+    snaps = getattr(n, "snapshots", None)
     for name in n.loads.index:
+        vals = None
         if name in ts.columns:
-            col = ts[name]
-            bad = col[~col.apply(_is_finite)]
-            if len(bad) > 0:
+            # Judged AS PyPSA READS IT over the horizon, not over the frame's
+            # own rows (Phase 12g shipped-code review, finding 1): a 2-of-3-row
+            # `loads_t.p_set` holds no NaN cell, so the old check was silent,
+            # the generic walk deferred to it as the owner, and the reindex
+            # then dropped the demand for the uncovered hour — measured
+            # `load p = [100, 100, 0]`, status `optimal`.
+            try:
+                vals = _dynamic_column_as_read(ts, name, snaps)
+            except (TypeError, ValueError):
+                vals = ts[name].to_numpy(dtype=float)
+        if vals is not None:
+            n_bad = int((~np.isfinite(vals)).sum())
+            n_total = int(len(vals))
+            if n_bad and n_total > 1 and n_bad < n_total:
                 out.append(_err("load_p_set_nan", "Load", str(name),
-                    f"time-varying p_set has {len(bad)} NaN/inf value(s)."))
+                    f"time-varying p_set covers {n_total - n_bad} of {n_total} "
+                    f"snapshots — {n_bad} hour(s) have no value. PyPSA does not "
+                    "fall back to the static value for those hours: the demand "
+                    "is dropped from the nodal balance and the load is served as "
+                    "zero. Extend the series to the full horizon, or shorten the "
+                    "horizon to match it."))
+            elif n_bad:
+                out.append(_err("load_p_set_nan", "Load", str(name),
+                    f"time-varying p_set has {n_bad} NaN/inf value(s)."))
         else:
             v = static.loc[name] if static is not None else None
             if v is None or not _is_finite(v):
@@ -1228,6 +1250,447 @@ def _check_p_max_pu_bounds(n) -> list[Issue]:
     return out
 
 
+# Phase 12f. The five LP bounds whose PyPSA class default is FINITE, and in
+# which a non-finite value therefore has no meaning.
+#
+# linopy does not clamp a bound it cannot read — it MASKS THAT CONSTRAINT ROW
+# OUT OF THE PROBLEM, so the asset is unconstrained there. Measured on PyPSA
+# 1.3.0 / HiGHS: `p_max_pu = [0.5, NaN, 1.0]` on a 100 MW unit against a 500 MW
+# load dispatches `[50, 500, 100]` — five times nameplate; `p_min_pu` with a
+# NaN hour runs a generator as a −900 MW load; a NaN STATIC `p_max_pu` gives
+# five times nameplate in every hour.
+#
+# The set is exactly these five because the defect is "NaN where NaN has no
+# meaning". `ramp_limit_up`/`down` are NOT here and must never be added: their
+# class default IS NaN, and `pypsa/optimization/constraints.py:1046` masks the
+# row on purpose — `no_up_limit = limit_up.isnull() & limit_start.isnull()` —
+# so a null ramp limit is the documented way to say "this unit has no ramp
+# limit". Including them would block every network in this repository: the
+# golden fixture alone carries eight non-finite `ramp_limit_*` cells and zero
+# on the five.
+#
+# Three more finite-default attributes mask a storage ENERGY-BALANCE row and
+# are deliberately out of scope, recorded rather than forgotten (plan v6,
+# amendment 2): `StorageUnit.inflow`, `StorageUnit.state_of_charge_initial`,
+# `Store.e_initial` — measured objective 40 000 → 10 000, a 200 MWh battery
+# becoming a free 300 MWh source. They are constraint constants, not bounds.
+#
+# Not duplicated here because each is already a blocking ERROR of its own:
+# `p_nom_min`/`s_nom_min`/`e_nom_min` (`_check_extendable_bounds`), `max_hours`
+# (`storage_max_hours_invalid`), `Load.p_set` (`load_p_set_nan`).
+FINITE_DEFAULT_BOUNDS = ("p_max_pu", "p_min_pu", "s_max_pu",
+                         "e_max_pu", "e_min_pu")
+
+# ── Phase 12g: the rule, widened to every finite-default LP input ──────────
+#
+# 12f refused NaN in five BOUNDS. Measuring the premise of the next backlog
+# item ("three storage constants mask an energy-balance row") widened it: on
+# two fixtures a NaN in twenty-three distinct finite-default attributes changes
+# the plan silently and one crashes the build, through five mechanisms — a
+# cost term dropped (the unit is free), a conversion term dropped, the SoC
+# carry-over dropped (the store forgets its charge), a balance right-hand side
+# dropped (the store is a free source; a CO2 cap vanishes), an asset dropped
+# from the nodal balance (`sign`). What they share: PyPSA's own `n.add(attr=None)`
+# and `n.add(attr=NaN)` both write the class default for every one of them, so
+# for an attribute whose default is FINITE, NaN is never PyPSA's spelling of
+# "unset" — its spelling of unset IS the default. A NaN cell there can only be
+# manufactured by a write that bypasses `n.add`.
+#
+# The set is read from PyPSA's component metadata, never enumerated by hand:
+# `status` starts with "Input", numeric type, finite default. Every attribute
+# whose default is NaN or ±inf is out by construction — `ramp_limit_*`,
+# `Generator.p_set`, `state_of_charge_set`, `*_nom_max`, `lifetime` — and so
+# is every custom GUI column (`outage_rate_value`, `discount_rate`, …), which
+# the table does not describe. Censused before it was trusted: 392 of 392
+# networks reaching `optimize()` in the full suite carry no such cell, and
+# neither does the golden fixture.
+#
+# The component set is PINNED, not "everything": the review of plan v1 found
+# the walk would otherwise reach `Bus.v_nom` (checked elsewhere), Carrier
+# (checked elsewhere), Shunt and LineType (PF-only) — and found that
+# `GlobalConstraint.constant`, finite default 0.0, silently DELETES a CO2 cap
+# when NaN (measured gas 100 → 300 MWh), so it is in.
+NONFINITE_INPUT_COMPONENTS = ("Generator", "Link", "Line", "Transformer",
+                              "StorageUnit", "Store", "Load", "GlobalConstraint")
+
+# `(component, attribute)` pairs a SPECIFIC check already refuses when NaN
+# (`*_efficiency_invalid`, `storage_max_hours_invalid`, `line_x_invalid`,
+# `load_p_set_nan`). The generic walk skips them so the user reads one
+# sentence. The review of plan v1 rejected the alternative — dropping the
+# generic issue when an existing message "names the attribute" — because
+# Line's attributes are single letters and `line_x_invalid`'s message contains
+# `b` (in "be"), `r` ("reactance") and `g` ("got"). `*_nom` is owned
+# row-conditionally: `_check_extendable_bounds` refuses a non-finite nominal
+# only on a NON-extendable row, so an extendable row's NaN `p_nom` is the
+# generic walk's (with the neutral sentence — the LP does not read it there).
+_OWNED_BY_SPECIFIC_CHECK = frozenset({
+    ("Generator", "efficiency"), ("Link", "efficiency"),
+    # `link_efficiency_invalid` also refuses NaN in `efficiency{i}` on rows whose
+    # `bus{i}` is populated (12g shipped-code review, finding 2: without these
+    # a three-port link's NaN `efficiency2` was reported twice).
+    ("Link", "efficiency2"), ("Link", "efficiency3"), ("Link", "efficiency4"),
+    ("StorageUnit", "efficiency_store"), ("StorageUnit", "efficiency_dispatch"),
+    ("StorageUnit", "max_hours"),
+    ("Line", "x"), ("Transformer", "x"),
+    ("Load", "p_set"),
+})
+_NOM_ATTR = {"Generator": "p_nom", "Link": "p_nom", "StorageUnit": "p_nom",
+             "Store": "e_nom", "Line": "s_nom", "Transformer": "s_nom"}
+
+_COST_ATTRS = frozenset({"marginal_cost", "marginal_cost_quadratic",
+                         "marginal_cost_storage", "spill_cost", "stand_by_cost",
+                         "start_up_cost", "shut_down_cost", "capital_cost",
+                         "fom_cost"})
+_STORAGE_CONSTANTS = frozenset({"inflow", "state_of_charge_initial", "e_initial"})
+_MULTIPORT_RE = re.compile(r"^(efficiency|delay)(\d+)$")
+
+
+def _nonfinite_category(component: str, attr: str, default) -> tuple[str, str]:
+    """``(code, consequence)`` for a non-finite cell in ``attr``.
+
+    One code per consequence CATEGORY, because "a 100 MW unit can dispatch
+    500 MW" is the wrong sentence for a missing cost; and one consequence
+    sentence per attribute within it, because the review of plan v1 measured
+    three of the category sentences false (`standing_loss` NaN does not make a
+    store lossless — it drops the carry-over, so the store forgets its charge
+    every hour; `up_time_before` NaN ADDS a ramp constraint; `delay` NaN drops
+    the receiving end). Attributes the LP never reads get a neutral sentence
+    rather than a consequence that is not true.
+    """
+    dflt = f"{default:g}" if isinstance(default, (int, float)) else str(default)
+    if attr in FINITE_DEFAULT_BOUNDS:
+        return ("nonfinite_bound",
+                "PyPSA drops the constraint rather than defaulting it, so the "
+                "asset would be unconstrained (a 100 MW unit can dispatch 500 MW)")
+    if attr in _COST_ATTRS:
+        return ("nonfinite_cost",
+                "the cost term is dropped from the objective, so the asset is "
+                "dispatched or built as if it were free")
+    if attr == "standing_loss":
+        return ("nonfinite_efficiency",
+                "the carry-over of stored energy between hours is dropped, so "
+                "the store forgets its charge every hour and cannot shift energy")
+    if attr in ("efficiency", "efficiency_store", "efficiency_dispatch") \
+            or _MULTIPORT_RE.match(attr) and attr.startswith("efficiency"):
+        return ("nonfinite_efficiency",
+                "the conversion term is dropped from the energy balance")
+    if attr in _STORAGE_CONSTANTS:
+        return ("nonfinite_storage_constant",
+                "the energy balance's right-hand side is dropped for that row, "
+                "so the store becomes a free source of energy")
+    if component == "GlobalConstraint" and attr == "constant":
+        return ("nonfinite_storage_constant",
+                "the constraint row is dropped, so the cap or floor it "
+                "expresses vanishes from the problem")
+    if attr in ("up_time_before", "down_time_before"):
+        return ("nonfinite_input",
+                "PyPSA reads it as 'the unit was off', which adds a start-up "
+                "ramp constraint the plan did not ask for")
+    if _MULTIPORT_RE.match(attr) or attr == "delay":
+        return ("nonfinite_input",
+                "the receiving end is dropped from the nodal balance, so the "
+                "link consumes and delivers nothing")
+    if attr == "sign":
+        return ("nonfinite_input",
+                "the asset is dropped from the nodal balance entirely")
+    return ("nonfinite_input",
+            f"PyPSA gives this attribute a finite default ({dflt}) and cannot "
+            "represent 'unset' here")
+
+
+_NUMERIC_TYPES = ("float", "int", "static or series", "series",
+                  "static or piecewise or series")
+
+
+def finite_default_inputs(comp_or_defaults) -> dict[str, tuple[float, bool, str]]:
+    """``{attribute: (default, varying, type)}`` for every numeric INPUT
+    attribute of a component whose class default is finite — read from the
+    component's own metadata (``defaults``, or the older ``attrs``) so the set
+    follows the installed PyPSA and a multi-port link's ``efficiency2``/``delay2``
+    appear when the network has one.
+
+    Falls back to 12f's five bounds when the table is unreadable: a check
+    that quietly covered nothing on a PyPSA that reshaped its metadata would
+    be a check removed without a trace.
+    """
+    d = getattr(comp_or_defaults, "defaults", None)
+    if d is None:
+        d = getattr(comp_or_defaults, "attrs", None)
+    if d is None:
+        d = comp_or_defaults
+    out: dict[str, tuple[float, bool, str]] = {}
+    try:
+        for attr, row in d.iterrows():
+            status = str(row.get("status", "")).strip()
+            if not status.startswith("Input"):
+                continue
+            typ = str(row.get("type", "")).strip()
+            if typ not in _NUMERIC_TYPES:
+                continue
+            try:
+                dv = float(row.get("default"))
+            except (TypeError, ValueError):
+                continue
+            if not np.isfinite(dv):
+                continue
+            out[str(attr)] = (dv, bool(row.get("varying", False)), typ)
+    except Exception:                                         # noqa: BLE001
+        return {b: (1.0 if b.endswith("max_pu") else 0.0, True, "static or series")
+                for b in FINITE_DEFAULT_BOUNDS}
+    return out
+
+
+def _dynamic_frame_as_read(frame, snaps):
+    """The frame PyPSA would READ over ``snaps``, aligned ONCE for every
+    column, or ``None`` when the frame is not in force for this network.
+
+    A dynamic frame is judged against the horizon, not against itself: the
+    LP reads `_t` reindexed onto `n.snapshots` (measured — a 2-row frame on a
+    3-snapshot network dispatches `[50, 60, 500]`, and a zero-row frame with
+    a column is NaN in every hour), so a column that merely holds finite
+    cells has not been checked. The alignment mirrors
+    `routers.network._reapply_user_ts_to_network`, which is what the
+    foreground solve applies before the LP:
+
+      * index equals the snapshots → as is;
+      * flat frame, MultiIndex snapshots → broadcast by the timestep level
+        (positional lookup, since the level carries duplicate labels);
+      * MultiIndex frame, flat snapshots → the reapply DROPS the frame, so
+        it is not in force and the static cell governs → ``None``;
+      * anything else → ``reindex`` (a duplicate-label index cannot be
+        reindexed and is judged as it stands).
+
+    Aligned per frame rather than per column (plan-v1 review, finding 11):
+    on an 8 760 h network with 900 assets the per-column form cost 117 ms
+    per call against 21 ms.
+    """
+    if snaps is None or not len(snaps) or frame.index.equals(snaps):
+        return frame
+    frame_multi = isinstance(frame.index, pd.MultiIndex)
+    snaps_multi = isinstance(snaps, pd.MultiIndex)
+    if frame_multi and not snaps_multi:
+        return None
+    if snaps_multi and not frame_multi:
+        pos = frame.index.get_indexer(snaps.get_level_values(-1))
+        out = frame.iloc[np.where(pos >= 0, pos, 0)].to_numpy(dtype=float, copy=True)
+        out[pos < 0, :] = np.nan
+        return pd.DataFrame(out, index=snaps, columns=frame.columns)
+    try:
+        return frame.reindex(snaps)
+    except Exception:                                         # noqa: BLE001
+        return frame
+
+
+def _dynamic_column_as_read(frame, name, snaps):
+    """Single-column form of `_dynamic_frame_as_read`, kept for callers that
+    judge one series."""
+    aligned = _dynamic_frame_as_read(frame[[name]], snaps)
+    return None if aligned is None else aligned[name].to_numpy(dtype=float)
+
+
+def _nonfinite_input_hits(n) -> list[tuple[str, str, str, int, int]]:
+    """``(component, attribute, name, n_bad, n_total)`` per offending cell or
+    column, over every finite-default numeric input of the pinned components.
+
+    ``n_total`` is 1 for a static cell and the snapshot count for a dynamic
+    column, so the caller can say "3 of 5 hours" without re-deriving it.
+    """
+    hits: list[tuple[str, str, str, int, int]] = []
+    # `n.components.values()` first: `iterate_components` is deprecated in
+    # PyPSA 1.0 and removed in 2.0. The old call stays as the fallback for an
+    # older PyPSA. (The first version iterated `n.components` itself, which
+    # yields the unhashable `Components` objects, raised every time and ran
+    # the fallback with its DeprecatedWarning.) When neither path works this
+    # RAISES rather than returning an empty list.
+    try:
+        comps = list(n.components.values())
+    except Exception:                                         # noqa: BLE001
+        comps = list(n.iterate_components())
+    # `or ()` would raise here: a pandas Index has no truth value, and a
+    # multi-period network's snapshots are a MultiIndex.
+    _snaps = getattr(n, "snapshots", None)
+    n_snap = 0 if _snaps is None else int(len(_snaps))
+    for comp in comps:
+        cname = str(getattr(comp, "name", None) or getattr(comp, "list_name", ""))
+        if cname not in NONFINITE_INPUT_COMPONENTS:
+            continue
+        static = getattr(comp, "static", None)
+        if static is None:
+            static = getattr(comp, "df", None)
+        dynamic = getattr(comp, "dynamic", None)
+        if dynamic is None:
+            dynamic = getattr(comp, "pnl", None)
+        inputs = finite_default_inputs(comp)
+        static_names: set[str] = set()
+        if static is not None:
+            try:
+                static_names = {str(x) for x in static.index}
+            except Exception:                                 # noqa: BLE001
+                static_names = set()
+        nom = _NOM_ATTR.get(cname)
+        ext_col = f"{nom}_extendable" if nom else None
+
+        def _owned(attr: str, name, dynamic: bool = False) -> bool:
+            """Whether a specific check already refuses NaN in this cell.
+
+            The efficiency checks read the STATIC column only — the anti-gap
+            test found a dynamic NaN `efficiency` refused by nobody on its
+            first run — so ownership of a dynamic cell is narrower: only
+            `Load.p_set`, whose `load_p_set_nan` reads the series.
+            """
+            if (cname, attr) in _OWNED_BY_SPECIFIC_CHECK:
+                if not dynamic:
+                    return True
+                return (cname, attr) == ("Load", "p_set")
+            if nom and attr == nom and static is not None \
+                    and ext_col in getattr(static, "columns", []):
+                try:
+                    return not bool(static.at[name, ext_col])
+                except Exception:                             # noqa: BLE001
+                    return False
+            return False
+
+        def _port_absent(attr: str, name) -> bool:
+            """`efficiency{i}`/`delay{i}` on a row whose `bus{i}` is empty is
+            inert (the port does not exist) — the same gate
+            `link_efficiency_invalid` applies."""
+            m = _MULTIPORT_RE.match(attr)
+            if not m or static is None:
+                return False
+            bus_col = f"bus{m.group(2)}"
+            if bus_col not in getattr(static, "columns", []):
+                return True
+            try:
+                v = static.at[name, bus_col]
+            except Exception:                                 # noqa: BLE001
+                return True
+            return v is None or (isinstance(v, float) and np.isnan(v)) or str(v) == ""
+
+        for attr in inputs:
+            # The dynamic frame is resolved FIRST because the static branch
+            # needs to know which names it shadows.
+            frame = None
+            if dynamic is not None:
+                try:
+                    frame = dynamic.get(attr)
+                except AttributeError:
+                    frame = getattr(dynamic, attr, None)
+            if frame is not None and not len(getattr(frame, "columns", [])):
+                frame = None
+            aligned = None
+            if frame is not None:
+                try:
+                    aligned = _dynamic_frame_as_read(frame, _snaps)
+                except Exception:                             # noqa: BLE001
+                    aligned = None
+            dyn_names: set[str] = set()
+            if aligned is not None:
+                try:
+                    dyn_names = {str(x) for x in aligned.columns}
+                except Exception:                             # noqa: BLE001
+                    dyn_names = set()
+            # static — SKIPPING any asset that carries a dynamic column in
+            # force for the same attribute: PyPSA reads `_t` first, so the
+            # static cell is inert beneath it and the dynamic branch judges
+            # the column against the horizon instead.
+            if static is not None and attr in getattr(static, "columns", []):
+                try:
+                    col = static[attr].to_numpy(dtype=float)
+                except (TypeError, ValueError):
+                    col = None
+                if col is not None:
+                    bad = ~np.isfinite(col)
+                    for name in static.index[bad]:
+                        if str(name) in dyn_names or _owned(attr, name) \
+                                or _port_absent(attr, name):
+                            continue
+                        hits.append((cname, attr, str(name), 1, 1))
+            # dynamic — vectorised over the aligned block; SKIPPING a column
+            # whose name is not an asset of the component (a ghost column
+            # PyPSA warns about and ignores).
+            if aligned is None:
+                continue
+            try:
+                block = aligned.to_numpy(dtype=float)
+            except (TypeError, ValueError):
+                continue
+            if block.ndim != 2 or not block.size:
+                if block.ndim == 2 and block.shape[0] == 0:
+                    # zero-row frame: every column is NaN over the horizon
+                    for name in aligned.columns:
+                        if static is not None and str(name) not in static_names:
+                            continue
+                        if _owned(attr, name, dynamic=True) or _port_absent(attr, name):
+                            continue
+                        hits.append((cname, attr, str(name), n_snap, n_snap))
+                continue
+            n_bad_per_col = (~np.isfinite(block)).sum(axis=0)
+            n_total = int(block.shape[0]) or n_snap
+            for k, name in enumerate(aligned.columns):
+                n_bad = int(n_bad_per_col[k])
+                if not n_bad:
+                    continue
+                if static is not None and str(name) not in static_names:
+                    continue
+                if _owned(attr, name, dynamic=True) or _port_absent(attr, name):
+                    continue
+                hits.append((cname, attr, str(name), n_bad, n_total))
+    return hits
+
+
+def _check_nonfinite_inputs(n) -> list[Issue]:
+    """★ Phase 12f/12g. A non-finite value in a finite-default LP input is an
+    ERROR, not a warning: the LP will otherwise build a plan the network
+    cannot deliver (five times nameplate, a free store, a vanished cap), and
+    this codebase reserves ERROR for exactly that.
+
+    Two shapes, because they read differently to the user. A column that
+    covers only part of the horizon is a COVERAGE problem — the user uploaded
+    a representative week and then extended the snapshots, which is a routine
+    workflow and not corrupt data — and its message says how much is covered.
+    Anything else is a value that has no meaning where it sits.
+    """
+    issues: list[Issue] = []
+    meta_cache: dict[str, dict] = {}
+    for comp, attr, name, n_bad, n_total in _nonfinite_input_hits(n):
+        if comp not in meta_cache:
+            try:
+                meta_cache[comp] = finite_default_inputs(n.components[comp])
+            except Exception:                                 # noqa: BLE001
+                meta_cache[comp] = {}
+        default = meta_cache[comp].get(attr, (None, None, None))[0]
+        code, consequence = _nonfinite_category(comp, attr, default)
+        where = f"{comp} '{name}'"
+        restore = (f"clear the field to restore its default ({default:g})"
+                   if isinstance(default, (int, float)) else
+                   "clear the field to restore its default")
+        if n_total > 1 and n_bad < n_total:
+            covered = n_total - n_bad
+            issues.append(_err(
+                f"{code}_partial_coverage", comp, name,
+                f"{where}: the '{attr}' series covers {covered} of {n_total} "
+                f"snapshots — {n_bad} hour(s) have no value. PyPSA does not "
+                f"fall back to a default for those hours: {consequence}. "
+                "Extend the series to the full horizon, or shorten the "
+                "horizon to match it.",
+            ))
+        else:
+            issues.append(_err(
+                code, comp, name,
+                f"{where}: '{attr}' is not a finite number"
+                + (f" in {n_bad} of {n_total} snapshots" if n_total > 1 else "")
+                + f". PyPSA does not default it at solve time: {consequence}. "
+                f"Enter a value, or {restore}.",
+            ))
+    return issues
+
+
+# 12f's names, kept: the three solver checkpoints and both loop guards import
+# them, and through the alias they now cover the whole input set.
+_nonfinite_bound_hits = _nonfinite_input_hits
+_check_nonfinite_bounds = _check_nonfinite_inputs
+
+
 def _check_lopf(n, solver_config) -> list[Issue]:
     out: list[Issue] = []
 
@@ -1239,6 +1702,10 @@ def _check_lopf(n, solver_config) -> list[Issue]:
     out += _check_extendable_bounds(n.transformers, "Transformer", "s_nom", True)
     out += _check_transformer_types(n)
     out += _check_pmin_pmax(n)
+    # Phase 12f: LOPF-only, like the reserve-margin check below it — a PF run
+    # reads none of these bounds, so blocking one on them would be a refusal
+    # with no standard behind it.
+    out += _check_nonfinite_inputs(n)
     out += _check_unbounded_costs(n)
     out += _check_modelling_assumptions(n, solver_config)
     out += _check_sclopf(n, solver_config)
@@ -1431,6 +1898,470 @@ def _check_lopf(n, solver_config) -> list[Issue]:
 
 # ── public entry point ───────────────────────────────────────────────────────
 
+def _check_dsr_coherence(n, solver_config) -> list[Issue]:
+    """
+    Demand-response tier coherence (spec §4.4). Warnings only.
+    """
+    issues: list[Issue] = []
+    price = float(getattr(solver_config, "dsr_price_eur_per_mwh", 0.0) or 0.0)
+    if price <= 0:
+        return issues
+    share = float(getattr(solver_config, "dsr_share_of_load", 0.0) or 0.0)
+    buses = [str(b) for b in (getattr(solver_config, "dsr_buses", None) or [])]
+    if not buses:
+        issues.append(_warn(
+            "dsr_enabled_without_buses", "", "",
+            "A demand-response price is set but no buses are opted in — the "
+            "tier is OFF. DSR is deliberately never applied globally: on a "
+            "network that already models flexibility as a real asset it "
+            "would count the same response twice. Pick the buses under "
+            "Reliability settings.",
+        ))
+        return issues
+    if share <= 0:
+        issues.append(_warn(
+            "dsr_zero_volume", "", "",
+            "Demand response is enabled but its volume share is 0 — the "
+            "tier can never dispatch. Set 'dsr_share_of_load' > 0.",
+        ))
+    su_buses: set[str] = set()
+    if not n.storage_units.empty and "bus" in n.storage_units.columns:
+        su_buses = set(n.storage_units["bus"].astype(str))
+    link_buses: set[str] = set()
+    if not n.links.empty:
+        for col in ("bus0", "bus1"):
+            if col in n.links.columns:
+                link_buses |= set(n.links[col].astype(str))
+    for bus in buses:
+        if bus not in n.buses.index:
+            issues.append(_warn(
+                "dsr_unknown_bus", "Bus", bus,
+                f"DSR opt-in bus '{bus}' does not exist on the network.",
+            ))
+            continue
+        if bus in su_buses or bus in link_buses:
+            issues.append(_warn(
+                "dsr_double_count_risk", "Bus", bus,
+                f"Bus '{bus}' is opted into demand response but already "
+                "hosts modelled flexibility (a storage unit or link). The "
+                "DSR slack would count the same flexibility twice — either "
+                "remove the opt-in or accept the deliberate double count.",
+            ))
+    return issues
+
+
+def _check_ens_cap_coherence(solver_config) -> list[Issue]:
+    """
+    Reliability-target coherence (adequacy spec §5.1 / plan Phase 1 Task 1).
+    Pure config checks — no network needed.
+    """
+    issues: list[Issue] = []
+    cap = getattr(solver_config, "ens_cap_permyriad", None)
+    try:
+        cap = float(cap) if cap is not None else None
+    except (TypeError, ValueError):
+        cap = None
+    zone_mult = getattr(solver_config, "ens_zone_cap_multiple", None)
+    if cap is None or cap <= 0:
+        if zone_mult is not None:
+            issues.append(_warn(
+                "ens_zone_multiple_without_cap", "", "",
+                "A per-zone ENS ceiling multiple is set but no system ENS "
+                "target is — zone ceilings are defined relative to the "
+                "target, so nothing is enforced. Set 'ens_cap_permyriad'.",
+            ))
+        return issues
+    voll = float(getattr(solver_config, "voll", 0.0) or 0.0)
+    if voll <= 0:
+        issues.append(_warn(
+            "ens_cap_without_voll", "", "",
+            f"An ENS target ({cap:g}‱) is set but VOLL is 0, so no load-"
+            "shedding slack generators exist: the LP either serves all "
+            "demand or is infeasible, and the cap constrains nothing. Set a "
+            "VOLL (typical 3 000–10 000 €/MWh) to make the target meaningful.",
+        ))
+    if cap > 100.0:
+        issues.append(_warn(
+            "ens_cap_generous", "", "",
+            f"The ENS target is {cap:g}‱ = {cap / 100.0:g}% of demand — "
+            "planning NOT to serve that share. Real reliability standards "
+            "are 2–3 orders of magnitude tighter (adequate systems run "
+            "around 0.1–1‱ of energy; GB's standard is 3 loss-of-load "
+            "hours/yr). A generous cap yields a cheap-looking, badly "
+            "under-built plan.",
+        ))
+    strategy = str(getattr(solver_config, "solve_strategy", "full") or "full")
+    if strategy in ("rolling", "myopic"):
+        issues.append(_err(
+            "ens_cap_unsupported_strategy", "", "",
+            f"The ENS target is not supported with the '{strategy}' solve "
+            "strategy yet: each LP window would need its own demand "
+            "denominator, and a per-window cap is not the per-period "
+            "standard the target promises. Use the full strategy, or unset "
+            "the target.",
+        ))
+    return issues
+
+
+def _check_reserve_margin(n, solver_config) -> list[Issue]:
+    """
+    Firm-capacity (reserve-margin) coherence — Phase 8 spec §3.
+
+    Three findings, all of which have to be made BEFORE the solve because
+    after it they are either unsayable or too late:
+
+    * **unpriceable assets (ERROR).** A generator with no outage data AND no
+      availability profile is EXCLUDED from the standard's left-hand side
+      (§2.2 — crediting it would mean defaulting its derate to 1.0, giving a
+      unit the tool knows nothing about MORE firm credit than a gas unit on a
+      class average). The wrapper logs the exclusion, but a log line is not a
+      decision point: the user would be committing to a plan built against a
+      fleet the tool silently shrank.
+    * **an unreachable margin (ERROR).** This is the answer that REPLACES
+      "let the LP go infeasible", which is not implementable: linopy raises
+      ``TypeError`` on a constant constraint and ``Generator-p_nom`` does not
+      exist when nothing extendable is active. Every term of
+      ``max_achievable < required`` is a constant before the solve, so the
+      question is fully decidable here — and the answer here is the more
+      useful one ("no plan built from your candidate set can reach this
+      margin", with both numbers) than an infeasible LP.
+    * **carrier-default derating (WARNING).** Publishing ``source`` in the
+      post-solve table is necessary but not sufficient: a class average the
+      user never entered changes what gets BUILT, and by the time the table
+      exists the plan is already built around it.
+
+    Every number comes from ``solver_service.reserve_margin_facts`` — the
+    SAME function the wrapper builds its constraint from. A second
+    implementation of the derating chain here would be a second standard: the
+    one this blocks on and the one the LP enforces.
+    """
+    from services.solver_service import _prm_margin, reserve_margin_facts
+
+    margin = _prm_margin(solver_config)
+    if margin is None:
+        return []
+    issues: list[Issue] = []
+
+    # ── the rolling/myopic question, adjudicated (spec §3, last bullet).
+    #
+    # `_check_ens_cap_coherence` refuses BOTH strategies for the energy cap.
+    # The margin mirrors that for ROLLING and diverges for MYOPIC, and the
+    # reason is the denominator. `optimize_with_rolling_horizon` calls
+    # `extra_functionality` once per WINDOW with that window's snapshots, so
+    # §2.5's `peak_P` silently becomes the window's peak: a weaker standard
+    # than the one asked for, enforced under its name, and re-stashed by every
+    # window so the report describes only the last one. A myopic iteration's
+    # snapshots, by contrast, ARE one investment period — exactly the
+    # denominator the standard is defined against — so the constraint it
+    # installs is the right one. What breaks under myopic is only the REPORT:
+    # each iteration overwrites `_reserve_margin_targets`, so the published
+    # block covers the final period alone. A correct standard with an
+    # incomplete report is a warning; a silently different standard is not.
+    strategy = str(getattr(solver_config, "solve_strategy", "full") or "full")
+    if strategy == "rolling":
+        issues.append(_err(
+            "reserve_margin_unsupported_strategy", "", "",
+            "The reserve margin is not supported with the 'rolling' solve "
+            "strategy: PyPSA solves each window independently and the "
+            "constraint would be built against that WINDOW's peak demand, "
+            "not the period's — a weaker standard than the one you set, "
+            "enforced under its name. Use the full strategy, or unset the "
+            "margin.",
+        ))
+    elif strategy == "myopic":
+        issues.append(_warn(
+            "reserve_margin_myopic_report_is_partial", "", "",
+            "With myopic foresight the reserve margin IS enforced in every "
+            "investment period (each iteration's snapshots are exactly one "
+            "period, which is the peak the standard is defined against), but "
+            "each iteration overwrites the solve-time record: the adequacy "
+            "report and /results/reserve_margin will describe only the LAST "
+            "period solved. Read the [PRM] log lines for the earlier ones.",
+        ))
+
+    try:
+        facts = reserve_margin_facts(n, solver_config)
+    except Exception:
+        # A diagnosis that crashed must never block a run it cannot judge.
+        return issues
+    if facts is None:
+        return issues
+
+    unpriceable = list(facts.get("unpriceable") or [])
+    if unpriceable:
+        names = ", ".join(sorted(unpriceable)[:20])
+        more = " …" if len(unpriceable) > 20 else ""
+        issues.append(_err(
+            "reserve_margin_unpriceable_assets", "", "",
+            f"The reserve margin cannot price {len(unpriceable)} asset(s) "
+            f"(no outage data, no availability profile): {names}{more}. They "
+            "are excluded from the firm-capacity total — never credited at "
+            "1.0 — so the margin would be enforced against a fleet smaller "
+            "than the one you built. Enter an outage rate and basis, or an "
+            "availability profile, or unset the margin.",
+        ))
+
+    for P, per in (facts["stash"].get("periods") or {}).items():
+        required = float(per.get("required_mw", 0.0))
+        reachable = float(per.get("max_achievable_mw", 0.0))
+        if required <= 0 or not math.isfinite(required):
+            continue
+        if reachable < required:
+            where = "" if P == "ALL" else f" in period {P}"
+            issues.append(_err(
+                "reserve_margin_unreachable", "", "",
+                f"No plan built from your candidate set can reach the "
+                f"{margin:.1%} reserve margin{where}: it requires "
+                f"{required:,.1f} MW of derated firm capacity against a "
+                f"{float(per.get('peak_mw', 0.0)):,.1f} MW peak, and the "
+                f"whole fleet — every extendable at its p_nom_max, derated — "
+                f"tops out at {reachable:,.1f} MW. Raise a p_nom_max, add "
+                "candidate capacity, or lower the margin. (This is a "
+                "preflight error rather than an infeasible LP because every "
+                "term of it is a constant before the solve.)",
+            ))
+
+    defaults = list(facts.get("carrier_default") or [])
+    if defaults:
+        names = ", ".join(sorted(defaults)[:20])
+        more = " …" if len(defaults) > 20 else ""
+        issues.append(_warn(
+            "reserve_margin_carrier_default_derating", "", "",
+            f"The reserve margin derates {len(defaults)} asset(s) using "
+            f"carrier class averages you did not enter: {names}{more}. Those "
+            "numbers change what gets built — a unit credited at 0.95 buys "
+            "5 % less firm capacity than one credited at 1.0. Enter "
+            "asset-level outage rates for anything the plan turns on.",
+        ))
+
+    return issues
+
+
+def _check_profiled_occurrence_units(n) -> list[Issue]:
+    """Phase 12c-pre / 12h: how a unit that carries BOTH a ``p_max_pu`` and
+    outage data is modelled — the disclosure that replaced 12a's shadowed-
+    profile warning once the engines modelled the series.
+
+    Walks the SAME membership the engines use (``copt.occurrence_units``), so
+    it fires on carrier-default-only networks too — a PyPSA-Eur import has
+    no outage columns at all, and the column-gated ``_check_outage_params``
+    below could never reach it (plan 12c-pre v2 review, finding 3).
+
+    * ``profile_and_outage_modelled`` — the unit's availability SERIES is
+      informative (constant *or* varying) and the engines honour it:
+      outages are sampled on the series and the COPT mixes the unit exactly
+      per hour. Emitted only when the outage data was typed by the user
+      (``source == "asset"``): they entered it and deserve to be told how it
+      is used. For a library (carrier-default) rate — a hydro carrier with
+      an inflow series — the ``/copt`` and ``/mc`` payloads carry the
+      disclosure and preflight is silent, because a warning on every hydro
+      project is one nobody reads.
+    * ``availability_may_include_outages`` (Phase 12h) — a STATIC
+      ``p_max_pu < 1`` with NO ``p_max_pu`` column, on a unit with a live
+      outage rate. That is exactly the population the engines now fold the
+      static factor for, so both the CF and the rate are applied. Which is
+      right for a typed capacity factor and wrong for a historical one that
+      already contains forced outages, so the message names the flag.
+    * ``outages_folded_into_availability`` (Phase 12h) — the flag is set and
+      the unit has a sub-1 availability: no outages are sampled for it.
+      Variant ``…_ignored`` when the flag is set but there is nothing for it
+      to act on — an availability of 1, or no outage data at all. The second
+      case is walked from ``_membership_walk`` directly, because
+      ``occurrence_units`` drops a ``source == "missing"`` row.
+
+    12c-pre's ``static_p_max_pu_not_applied`` is RETIRED: its sentence ("the
+    engines do NOT apply it") became false when 12h shipped the fold.
+    """
+    try:
+        from services.adequacy.copt import (
+            _membership_walk, occurrence_units, series_is_informative)
+        from services.adequacy.metrics import electrical_columns
+        from services.adequacy.occurrence import FLAG_COL, flag_is_set
+        rows = occurrence_units(n)
+    except Exception:                                         # noqa: BLE001
+        return []
+    gens = getattr(n, "generators", None)
+    p_max_pu_t = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
+    static = getattr(gens, "get", lambda *_a, **_k: None)("p_max_pu") \
+        if gens is not None else None
+    flags = getattr(gens, "get", lambda *_a, **_k: None)(FLAG_COL) \
+        if gens is not None else None
+
+    def _flagged(name) -> bool:
+        if flags is None:
+            return False
+        try:
+            return flag_is_set(flags.get(name))
+        except Exception:                                     # noqa: BLE001
+            return False
+
+    def _static_of(name) -> float:
+        if static is None:
+            return 1.0
+        try:
+            sv = float(static.get(name, 1.0))
+        except (TypeError, ValueError):
+            return 1.0
+        return sv if math.isfinite(sv) else 1.0
+
+    modelled: list[str] = []
+    may_include: list[str] = []
+    folded: list[str] = []
+    ignored: list[str] = []
+    seen: set[str] = set()
+    for name, _cap, row in rows:
+        seen.add(str(name))
+        has_column = (p_max_pu_t is not None
+                      and name in getattr(p_max_pu_t, "columns", []))
+        has_series = has_column and series_is_informative(p_max_pu_t[name])
+        try:
+            q = float(row["rate"])
+        except (KeyError, TypeError, ValueError):
+            q = float("nan")
+        # The SAME rule as `occurrence._availability_is_sub_one`, and it has
+        # to be: preflight's sentence must describe what the resolver did.
+        # A `p_max_pu` COLUMN supersedes the static cell everywhere, so when
+        # one exists it alone decides — falling back to the superseded cell
+        # made preflight report a fold on a unit whose rate was never zeroed
+        # (shipped-code review, finding 1, second site).
+        sub_one = has_series if has_column else _static_of(name) < 1.0 - 1e-9
+        if _flagged(name):
+            # H2 already zeroed this unit's rate iff its availability is
+            # sub-1, so the two branches never both fire for one unit.
+            (folded if sub_one else ignored).append(name)
+            continue
+        # A typed q of 0 has no outages to sample; the series is honoured
+        # exactly as a must-take unit's would be, and a sentence about
+        # sampled outages would be false (shipped-code review, finding 4).
+        if has_series and str(row["source"]) == "asset" and q > 0.0:
+            modelled.append(name)
+        # The fold's own population: a static below 1 with NO column. A
+        # static beside ANY column is inert everywhere — PyPSA reads the
+        # column, so does the margin, and so does the fold (shipped-code
+        # review, finding 3; plan v6 §H3).
+        if not has_column and q > 0.0 and _static_of(name) < 1.0 - 1e-9:
+            may_include.append(name)
+
+    # A flagged unit with NO outage data at all never reaches `rows`, so its
+    # "the flag does nothing here" sentence has to come from the membership
+    # walk itself.
+    #
+    # Gated on a flag being SET, not on the column existing: the normaliser
+    # creates that column on essentially every network, so gating on its
+    # presence ran a second full membership walk — which re-resolves the
+    # outage params and rebuilds an activity context — on every preflight and
+    # every solve. Measured on 300 generators x 8760 snapshots, with no flag
+    # set anywhere: 423 ms without the second walk against 963 ms with it
+    # (shipped-code review, finding 6). The `any` is one pass over a bool
+    # column.
+    if flags is not None and any(flag_is_set(v) for v in flags):
+        try:
+            buses = getattr(n, "buses", None)
+            elec = set(electrical_columns(n, list(buses.index))) \
+                if buses is not None else set()
+            for g, _cap, _series, mrow in _membership_walk(n, elec):
+                if str(g) in seen or not _flagged(g):
+                    continue
+                if str(mrow["source"]) == "missing":
+                    ignored.append(str(g))
+        except Exception:                                     # noqa: BLE001
+            pass
+
+    def _names(hits: list[str]) -> tuple[str, str]:
+        return ", ".join(sorted(hits)[:20]), (" …" if len(hits) > 20 else "")
+
+    issues: list[Issue] = []
+    if modelled:
+        names, more = _names(modelled)
+        issues.append(_warn(
+            "profile_and_outage_modelled", "Generator", "",
+            f"{len(modelled)} generator(s) carry BOTH an availability profile "
+            f"and outage data you entered: {names}{more}. The adequacy "
+            "engines model both: outages are sampled on the availability "
+            "series (available at the series' value when up, zero when "
+            "down) and the COPT mixes the unit exactly per hour over its "
+            "outage states. The reserve margin credits the same unit at "
+            "(1 - q) x the profile's mean over its peak window, the same "
+            "expectation (on a NaN hour the engines count 0 availability "
+            "while the margin's mean skips it). If the profile is a "
+            "historical capacity factor that already accounts for outages, "
+            "set p_max_pu_includes_outages on the asset so the rate is not "
+            "applied on top of it.",
+        ))
+    if may_include:
+        names, more = _names(may_include)
+        issues.append(_warn(
+            "availability_may_include_outages", "Generator", "",
+            f"{len(may_include)} generator(s) with outage data carry a STATIC "
+            f"p_max_pu below 1: {names}{more}. Every surface now applies both "
+            "— the engines and the reserve margin credit the unit at "
+            "nameplate x p_max_pu x (1 - q). That is right for a typed "
+            "capacity factor. If the value is a historical capacity factor "
+            "that ALREADY contains forced outages (PyPSA-Eur's nuclear table "
+            "is one), the outage rate is applied twice: set "
+            "p_max_pu_includes_outages on the asset and the rate is dropped "
+            "instead.",
+        ))
+    if folded:
+        names, more = _names(folded)
+        issues.append(_warn(
+            "outages_folded_into_availability", "Generator", "",
+            f"{len(folded)} generator(s) are modelled WITHOUT sampled outages "
+            f"because their availability is declared to already include them: "
+            f"{names}{more} (p_max_pu_includes_outages is set). The COPT and "
+            "the sequential MC credit them at their availability alone, and "
+            "the reserve margin derates them by the same availability with no "
+            "outage term. Clear the flag if the rate should be applied on top "
+            "of the availability.",
+        ))
+    if ignored:
+        names, more = _names(ignored)
+        issues.append(_warn(
+            "outages_folded_into_availability_ignored", "Generator", "",
+            f"{len(ignored)} generator(s) have p_max_pu_includes_outages set "
+            f"but nothing for it to act on: {names}{more}. The flag drops an "
+            "outage rate into an availability below 1, and these assets have "
+            "an availability of 1, no outage data, or both — so they are "
+            "modelled exactly as they would be with the flag clear.",
+        ))
+    return issues
+
+
+def _check_outage_params(n) -> list[Issue]:
+    """
+    Adequacy occurrence attributes (design spec §5.4): warn on implausible
+    (rate, MTTR) pairs and malformed values. Warnings only, never blocking —
+    a solve without outage data is still a valid solve; the data only feeds
+    the adequacy/FMEA analysis. Asset names are embedded in the message
+    (the shared validator speaks in whole sentences); component_class is set
+    so the UI can group them.
+    """
+    from services.adequacy.occurrence import (
+        resolve_outage_params,
+        validate_outage_params,
+    )
+
+    issues: list[Issue] = []
+    for component, cls in (
+        ("generators", "Generator"), ("storage_units", "StorageUnit"),
+        ("stores", "Store"), ("links", "Link"), ("lines", "Line"),
+    ):
+        df = getattr(n, component, None)
+        if df is None or df.empty or "outage_rate_value" not in df.columns:
+            # Only networks where someone actually entered outage data get
+            # validated — carrier defaults alone are library values and
+            # already plausible by construction.
+            continue
+        try:
+            all_params = resolve_outage_params(n, component)
+            params = all_params[all_params["source"] == "asset"]
+            for msg in validate_outage_params(params):
+                issues.append(_warn("outage_params_implausible", cls, "", msg))
+        except Exception:
+            continue
+    return issues
+
+
 def validate_for_run(n, solver_config) -> list[Issue]:
     """Return all issues. Empty list = ready to run."""
     issues: list[Issue] = []
@@ -1444,6 +2375,15 @@ def validate_for_run(n, solver_config) -> list[Issue]:
     # conditioned on co2_price or a global constraint, unlike the
     # carrier_co2_nan check further down in _check_lopf.
     issues += _check_carrier_emissions(n)
+    # Adequacy occurrence data — warnings only, any mode.
+    issues += _check_outage_params(n)
+    # Phase 12c-pre: how a unit with BOTH a profile and outage data is
+    # modelled — from the membership walk, NOT gated on an outage column.
+    issues += _check_profiled_occurrence_units(n)
+    # Reliability-target coherence — pure config checks.
+    issues += _check_ens_cap_coherence(solver_config)
+    # Demand-response tier coherence (spec §4.4).
+    issues += _check_dsr_coherence(n, solver_config)
 
     mode = solver_config.mode
     if mode == "pf":
@@ -1469,6 +2409,11 @@ def validate_for_run(n, solver_config) -> list[Issue]:
         # accidentally request the strategy when it doesn't apply.
         if getattr(solver_config, "solve_strategy", "full") == "myopic":
             issues += _check_myopic_foresight(n, solver_config)
+        # Firm-capacity standard (Phase 8 §3). LOPF-only on purpose: the
+        # margin is an LP constraint, and a `pf` run enforces nothing — so a
+        # margin left in the config cannot make an AC power flow wrong, and
+        # blocking one on it would be a refusal with no standard behind it.
+        issues += _check_reserve_margin(n, solver_config)
     else:
         issues.append(_err("unknown_mode", "", "",
             f"Solver mode '{mode}' not recognised (expected lopf/pf)."))

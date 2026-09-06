@@ -857,6 +857,12 @@ async def import_bundle(
     not interpret ``import_bundle`` as a value for the ``name`` path parameter
     of the save endpoint (which would silently call save_project).
     """
+    # ★ Precheck BEFORE any destructive work (Phase 11 review).
+    # The guard inside `reset_network` fires too late here: by then this
+    # route has already committed the project row and written its files. Worse, the retry the
+    # refusal advises then fails FOREVER, because the committed row makes
+    # every attempt 409 with "already exists" instead.
+    PyPSAService.refuse_if_study_running("import a project bundle")
     from services.upload_guard import read_capped
     data = await read_capped(file)
 
@@ -961,7 +967,7 @@ async def import_bundle(
         PyPSAService.reset_network()
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
-            n.import_from_netcdf(str(nc_path))
+            PyPSAService.import_network_from_netcdf(n, nc_path)
         # Bind identity atomically with the swap (see load_project for the
         # rationale on why this must be inside the lock, not after).
         project_registry.bind_context(
@@ -1133,6 +1139,12 @@ def create_from_template(
     MUST be registered before `POST /{name}` so FastAPI does not interpret
     `from_template` as a value for the `name` path parameter of save_project.
     """
+    # ★ Precheck BEFORE any destructive work (Phase 11 review).
+    # The guard inside `reset_network` fires too late here: by then this
+    # route has already committed the project row and written its files. Worse, the retry the
+    # refusal advises then fails FOREVER, because the committed row makes
+    # every attempt 409 with "already exists" instead.
+    PyPSAService.refuse_if_study_running("create a project from a template")
     if template_id not in _TEMPLATE_DEFAULT_NAMES:
         raise HTTPException(
             404,
@@ -1167,7 +1179,7 @@ def create_from_template(
         PyPSAService.reset_network()
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
-            n.import_from_netcdf(str(dest / "network.nc"))
+            PyPSAService.import_network_from_netcdf(n, dest / "network.nc")
         # Bind identity atomically with the swap (see load_project rationale).
         project_registry.bind_context(
             PyPSAService.get_active_context(), _created_project
@@ -1517,7 +1529,9 @@ def _save_context(
 
         # Atomic replace so a crash mid-save leaves the previous file intact.
         with PyPSAService.get_netcdf_io_lock():
-            _atomic_write_with(nc_path, lambda p: n.export_to_netcdf(str(p)))
+            _atomic_write_with(
+                nc_path,
+                lambda p: PyPSAService.export_network_to_netcdf(n, p))
 
         # Bind/claim — atomic with the export, keyed off the binding read at the
         # top of THIS lock block (it can't have changed; we hold the lock
@@ -1842,7 +1856,7 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
     nc_path = src / "network.nc"
     with ctx.mutation_lock:
         with PyPSAService.get_netcdf_io_lock():
-            ctx.network.import_from_netcdf(str(nc_path))
+            PyPSAService.import_network_from_netcdf(ctx.network, nc_path)
         ctx.loaded_project = name
 
     # Solver config (legacy-tolerant; default when absent).
@@ -2087,6 +2101,13 @@ def load_project(
     if not nc_path.exists():
         raise HTTPException(404, f"Project '{name}' not found")
 
+    # ★ Precheck BEFORE any destructive work (Phase 11 review, BLOCKER 3b).
+    # The guard inside `reset_network` fires too late: by then this route
+    # has already called `undo_service.clear()`, so a REFUSED load destroys
+    # the undo history of the project the user is still looking at. Placed
+    # after the 404 so a missing project is still reported as missing.
+    PyPSAService.refuse_if_study_running("load a project")
+
     # Crash-recovery surface. `_atomic_write_with` renames `.tmp → final` as
     # the last step; a `.tmp` sibling means a prior save was killed mid-write.
     # The main file is still the previous good version, but warn so the user
@@ -2111,7 +2132,7 @@ def load_project(
         PyPSAService.reset_network()
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
-            n.import_from_netcdf(str(nc_path))
+            PyPSAService.import_network_from_netcdf(n, nc_path)
         # Bind identity atomically with the swap — inside the SAME lock that
         # `reset_network()` just set to None. Otherwise a concurrent save could
         # observe the transient unbound state (loaded is None) and wrongly

@@ -1,0 +1,54 @@
+# Roy Billinton Test System (RBTS) — generating unit reliability data.
+# 11 units, 240 MW installed, 185 MW annual system peak.
+#
+# PRIMARY SOURCE
+#   R. Billinton, S. Kumar, N. Chowdhury, K. Chu, K. Debnath, L. Goel, E. Khan,
+#   P. Kos, G. Nourbakhsh, J. Oteng-Adjei, "A reliability test system for
+#   educational purposes - basic data", IEEE Transactions on Power Systems,
+#   Vol. 4, No. 3, pp. 1238-1244, August 1989 — the generating unit data table.
+#   Retrieved 2026-08-28 through the WebSearch tool's server-side reader over
+#   the RBTS literature (open-access reproductions of the 1989 table, incl.
+#   https://www.academia.edu/3223643/A_reliability_test_system_for_educational_purposes_basic_data
+#   and https://www.researchgate.net/figure/RBTS-summary-of-system-data-83_tbl1_277861342).
+#   RETRIEVAL CAVEAT: every non-GitHub host is refused by this session's egress
+#   proxy (403 on CONNECT), so no RBTS source could be downloaded directly. The
+#   chain of custody here is weaker than for RTS-79, which had a byte-verifiable
+#   second source. It is compensated by the two checks below.
+#
+# SECOND SOURCE / CROSS-CHECK — no independent machine-readable RBTS dataset was
+# reachable (RTS-GMLC contains no RBTS units, and it would be inadmissible for a
+# load model in any case). Instead, two internal checks stand in:
+#   (1) FOR vs MTTF/MTTR consistency, which is a genuine over-determination of
+#       the table because both columns are printed independently:
+#         5  MW: 45/(4380+45) = 0.01017 -> 0.010  OK
+#         10 MW: 45/(2190+45) = 0.02013 -> 0.020  OK
+#         20 MW hydro:   55/(3650+55) = 0.01484 -> 0.015  OK
+#         20 MW lignite: 45/(1752+45) = 0.02504 -> 0.025  OK
+#         40 MW hydro:   60/(2920+60) = 0.02013 -> 0.020  OK
+#         40 MW lignite: 45/(1460+45) = 0.02990 -> 0.030  OK
+#       All six classes agree to the printed rounding. Unit count 11 and
+#       installed capacity 240 MW both check out against the system description.
+#   (2) Reproduction of the published index — see rbts_load.py.
+#   DISCREPANCY FOUND: none at cell level. One SEMANTIC discrepancy that matters
+#   and is recorded rather than smoothed over: the FOR column is ROUNDED. Using
+#   the rounded FORs below reproduces the published LOEE to five decimals
+#   (9.86135 vs 9.8613 MWh/yr); using exact MTTR/(MTTF+MTTR) instead gives
+#   LOLE 1.08805 h/yr and EUE 9.82323 MWh/yr, ~0.3-0.4% low. The published
+#   results were therefore computed on the ROUNDED FORs, and those are what this
+#   fixture carries. forced_outage_rate is CoptUnit.q with basis="FOR" pinned.
+#
+# PUBLISHED ADEQUACY RESULT THIS FIXTURE IS TESTED AGAINST
+#   see rbts_load.py's header.
+#
+name,size_class,fuel,capacity_mw,forced_outage_rate,mttf_hours,mttr_hours
+G05-1,5MW,Hydro,5,0.010,4380,45
+G05-2,5MW,Hydro,5,0.010,4380,45
+G10-1,10MW,Thermal (lignite),10,0.020,2190,45
+G20-1,20MW-H,Hydro,20,0.015,3650,55
+G20-2,20MW-H,Hydro,20,0.015,3650,55
+G20-3,20MW-H,Hydro,20,0.015,3650,55
+G20-4,20MW-H,Hydro,20,0.015,3650,55
+G20-5,20MW-T,Thermal (lignite),20,0.025,1752,45
+G40-1,40MW-H,Hydro,40,0.020,2920,60
+G40-2,40MW-T,Thermal (lignite),40,0.030,1460,45
+G40-3,40MW-T,Thermal (lignite),40,0.030,1460,45

@@ -7,7 +7,12 @@ from contextvars import ContextVar
 
 import pypsa
 
-from services.project_context import ProjectContext
+from services.project_context import (
+    STUDY_KEYS,
+    ProjectContext,
+    record_is_running,
+    study_swap_refusal,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -272,7 +277,34 @@ class PyPSAService:
         return cls._ensure_active()
 
     @classmethod
-    def reset_network(cls) -> None:
+    def refuse_if_study_running(cls, action: str = "replace the network",
+                                *, ctx=None) -> None:
+        """Raise 409 if a study is live — WITHOUT swapping anything.
+
+        ★ Phase 11 put this check inside `reset_network` and asserted the 409
+        was "raised BEFORE any mutation". That is true INSIDE `reset_network`
+        and false at four of its seven call sites, which do destructive work
+        first: `undo_last` pops the undo entry (destroying the step it then
+        refuses to apply), `restore_snapshot` overwrites the project's files
+        on disk, and `import_bundle` / `create_from_template` commit the
+        project row — so the retry the refusal advises fails forever with
+        "already exists".
+
+        A route that mutates anything before swapping must call THIS first.
+        The check is pure: it reads the state and raises, and touches nothing.
+        """
+        prev = ctx if ctx is not None else (cls._request_ctx.get() or cls._active)
+        if prev is None:
+            return
+        detail = study_swap_refusal(prev.solver_state, action)
+        if detail:
+            from fastapi import HTTPException
+
+            raise HTTPException(409, detail)
+
+    @classmethod
+    def reset_network(cls, *, allow_during_study: bool = False,
+                      action: str = "replace the network") -> None:
         # Swap in a fresh, UNBOUND context — no on-disk project owns it yet.
         # reset_network runs at the START of every load/import/restore (which
         # then re-bind via set_loaded_project at the end), and on explicit
@@ -281,6 +313,35 @@ class PyPSAService:
         # identity unbound (rather than dangling on the previous project) and a
         # subsequent autosave can't misdirect.
         prev = cls._request_ctx.get() or cls._active
+        # ★ REFUSE BY DEFAULT while a study is live (Phase 11).
+        #
+        # A study's worker closes over the `pypsa.Network` object captured
+        # before it started, so replacing the network does not STOP it — it
+        # DETACHES it. The study keeps solving the old object and keeps
+        # publishing into the solver_state carried forward below, so the new
+        # project's Adequacy tab fills in LIVE with the old project's study,
+        # and a `restore="final"` loop writes its certified cap or margin into
+        # the NEW project's solver config and re-solves there.
+        #
+        # The guard is here, at the one choke point every network-replacing
+        # route already goes through, and not repeated at those seven call
+        # sites — a guard repeated seven times is a guard the eighth route
+        # forgets. `allow_during_study=True` is the explicit opt-out for a
+        # caller that genuinely must proceed.
+        #
+        # Raised BEFORE any mutation, so a refusal leaves the swap
+        # `action` DEFAULTS to a correct-if-generic phrase rather than being
+        # required: the guard then works with no call-site changes at all, and
+        # a route that forgets to describe itself still gets a true sentence
+        # instead of no protection. Sharpening the wording per route is a copy
+        # improvement, never a correctness dependency.
+        #
+        # not-started rather than half-done. HTTPException from a service is
+        # the established pattern here (project_registry, project_acl,
+        # upload_service, storage_paths, chat_service, …), so FastAPI returns
+        # the 409 with no handler to register.
+        if not allow_during_study:
+            cls.refuse_if_study_running(action, ctx=prev)
         n = pypsa.Network()
         n.name = "Untitled Project"
         # Carry the solver-state object (+ its lock) AND the undo stack forward so
@@ -291,9 +352,56 @@ class PyPSAService:
         # intentionally keeps the prior lifecycle + undo, as before. B2's registry
         # replaces this carry-forward with per-project selection.
         if prev is not None:
+            # ★ A finished STUDY must not outlive the network it measured.
+            #
+            # The carried-forward solver_state below is the SAME dict object,
+            # and load_project re-hydrates only `solver_config` and
+            # RESULT_STATE_KEYS — the five study keys are in neither list. So
+            # without this, project A's completed MC study is served for
+            # project B, and a study of a discarded network survives "New".
+            # Both were reproduced over HTTP before this line existed
+            # (`tests/test_adequacy_study_scoping.py`), and it is the unfixed
+            # half of the QA-round-7 defect that put a 3.5x wrong reliability
+            # standard on the wire.
+            #
+            # This is the ONE choke point — every path that replaces the
+            # foreground network comes through here — so the fix cannot be
+            # bypassed by a caller that forgets.
+            #
+            # A RUNNING record is left ALONE, deliberately: clearing it would
+            # make `study_running()` False while the worker thread is still
+            # alive and still mutating a network, breaking the 409 mesh and
+            # admitting a SECOND study — the exact corruption the mesh exists
+            # to prevent. A study running ACROSS a network swap is a real
+            # defect and a separate fix (a 409 at the eight routes that
+            # replace the network); leaking its record keeps the mutex honest
+            # and the panel reads "running" rather than showing a fabricated
+            # result. A test pins this choice.
+            for key in STUDY_KEYS:
+                if not record_is_running(prev.solver_state.get(key)):
+                    prev.solver_state[key] = None
             cls._publish_active(ProjectContext(
                 network=n,
-                solver_state=prev.solver_state,
+                # ★ A COPY, not the same dict (Phase 11 review, BLOCKER 5).
+                #
+                # Carrying the object itself left the outgoing project's
+                # context and the fresh one pointing at ONE dict, so the clear
+                # above — which runs once, at swap time — cleared what was
+                # there THEN, and any study written AFTER the swap landed in a
+                # dict the old project still read. Reproduced over HTTP: load
+                # A, press "New", run a study, re-activate A, and A is served
+                # the scratch network's study. That is Phase 10's headline
+                # symptom with the order reversed.
+                #
+                # Copying is safe precisely because nothing depends on the
+                # dict's IDENTITY surviving a swap: `simulation._state` is
+                # `_ActiveStateProxy`, which resolves through
+                # `PyPSAService.get_solver_state()` on every access. The
+                # carry-forward's actual purpose — the user's solver_config
+                # and lifecycle surviving "New" — is preserved by the copy's
+                # VALUES. The lock stays shared: it guards both dicts, which
+                # is coarser than necessary and never wrong.
+                solver_state=dict(prev.solver_state),
                 solver_state_lock=prev.solver_state_lock,
                 undo=prev.undo,
                 # Carry the mutation_lock forward too (B4 Inc 2): the foreground
@@ -318,7 +426,8 @@ class PyPSAService:
         cls._clear_swap_caches()
 
     @classmethod
-    def set_network(cls, n: pypsa.Network) -> None:
+    def set_network(cls, n: pypsa.Network, *,
+                    allow_during_study: bool = False) -> None:
         """
         Replace the in-memory network with a new one (e.g. the output of a
         spatial clustering operation). Preserves the existing display name AND
@@ -327,7 +436,29 @@ class PyPSAService:
         pointed at the old network).
         """
         prev = cls._ensure_active()
+        # ★ The EIGHTH network-replacing path (Phase 11 review, BLOCKER 4).
+        # Phase 11's spec asserted `reset_network` was the only one; clustering
+        # replaces the network through HERE, and had neither the refusal nor
+        # Phase 10's study-record clear. So clustering during a study returned
+        # 200 and DETACHED it — verbatim the defect the guard exists to
+        # prevent — and a finished study of the pre-clustering network
+        # survived onto the clustered one.
+        if not allow_during_study:
+            cls.refuse_if_study_running("re-cluster the network", ctx=prev)
+        for key in STUDY_KEYS:
+            if not record_is_running(prev.solver_state.get(key)):
+                prev.solver_state[key] = None
         n.name = prev.network.name
+        # Phase 12h: the replacement network was built by a clustering pass
+        # that aggregates rows and never carries a custom bool column's dtype
+        # — so put `p_max_pu_includes_outages` back to `bool` here, at the one
+        # network-replacing path that does not go through the netCDF import
+        # helper. Without it the flag is silently dropped by the swap.
+        try:
+            from services.adequacy.occurrence import normalise_flag_column
+            normalise_flag_column(n)
+        except Exception:                                     # noqa: BLE001
+            pass
         # Same project (clustering swaps the network in place): carry identity,
         # solver_state AND undo forward so the user's solver_config / status /
         # undo history survive the swap, matching the pre-split module globals.
@@ -450,6 +581,45 @@ class PyPSAService:
     @classmethod
     def get_netcdf_io_lock(cls) -> threading.Lock:
         return cls._netcdf_io_lock
+
+    @staticmethod
+    def export_network_to_netcdf(n, path) -> None:
+        """The ONE runtime path from a live network to a ``.nc`` file.
+
+        Phase 12h: a custom BOOL column survives the round trip only while
+        it stays ``bool`` dtype, and the solve itself breaks that — the VOLL
+        and DSR slack rows are added on a frame lacking the column and then
+        removed, leaving an ``object`` column of pure bools, which netCDF
+        refuses outright (``unsupported dtype for netCDF4 variable: bool``).
+        Normalising HERE fixes the project save, the io export and the undo
+        snapshot at once, and a fourth caller added later inherits it.
+
+        It deliberately does NOT take ``get_netcdf_io_lock()``: that lock is
+        not reentrant and all three callers already hold it, so taking it
+        again would deadlock the save while the mutation lock is held — the
+        app would wedge rather than error.
+        """
+        from services.adequacy.occurrence import normalise_flag_column
+        normalise_flag_column(n)
+        n.export_to_netcdf(str(path))
+
+    @staticmethod
+    def import_network_from_netcdf(n, path) -> None:
+        """The mirror of ``export_network_to_netcdf``: the ONE runtime path
+        from a ``.nc`` file into a live network.
+
+        A clean ``bool`` column round-trips on its own, but an older save (or
+        an externally produced netCDF) can carry
+        ``p_max_pu_includes_outages`` as ``float64`` or ``object``, and every
+        later write would then keep it that way. Normalising on the way IN
+        means the dtype is right from the first request after a load.
+
+        Like the export helper it does NOT take ``get_netcdf_io_lock()`` —
+        the lock is not reentrant and every caller already holds it.
+        """
+        from services.adequacy.occurrence import normalise_flag_column
+        n.import_from_netcdf(str(path))
+        normalise_flag_column(n)
 
     # ── Active-context solver state ──────────────────────────────────────────
     # The solver lifecycle + result state of the ACTIVE project. The simulation
@@ -905,7 +1075,8 @@ class PyPSAService:
     #   * Vintage expansion — one row per (parent_asset, investment_period)
     #     named `parent@<year>`. Created in vintage_service.py.
     #   * VOLL slack generators — one per bus, named `__voll_<bus>`. Created
-    #     in solver_service._apply_modelling_assumptions step 3.
+    #     in solver_service._apply_modelling_assumptions step 3; the naming/
+    #     carrier convention is owned by services/adequacy/slack.py.
     #
     # These leak into GET /api/network/{component} responses because reads
     # don't acquire the PyPSA lock (per the project's read-never-locks

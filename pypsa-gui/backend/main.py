@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import math
 import os
 import time
 from contextlib import asynccontextmanager
@@ -52,6 +53,8 @@ local_settings_store.migrate_api_key_to_app_secrets()
 
 import pypsa
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -70,6 +73,7 @@ from routers import (
     changelog,
     chat,
     clustering,
+    adequacy_worksheet,
     compare,
     io,
     local_settings,
@@ -341,6 +345,32 @@ app = FastAPI(
     # per-user instead of through a process global (Step 0b).
     dependencies=[Depends(bind_active_project)],
 )
+
+
+def _json_safe(obj):
+    """Replace a non-finite float anywhere in ``obj`` with its repr string,
+    so the object can be serialised by a JSON encoder that refuses NaN/inf."""
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return repr(obj)
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
+@app.exception_handler(RequestValidationError)
+async def _request_validation_as_422(request: Request, exc: RequestValidationError):
+    """Phase 12f. A pydantic refusal echoes the offending ``input`` in its
+    error list, and when that input is ``inf`` or ``NaN`` (the create
+    schemas refuse those in the five finite-default LP bounds) starlette's
+    JSON encoder raises ``Out of range float values are not JSON compliant``
+    while writing the 422 — so the client saw a 500 (measured live, S29.6).
+    Same body FastAPI's default handler builds, with non-finite inputs
+    rendered as their repr."""
+    return JSONResponse(
+        status_code=422,
+        content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
 
 def _csrf_rejection(request: Request) -> JSONResponse | None:
     """
@@ -780,6 +810,11 @@ app.include_router(project_network.router, prefix="/api/projects", tags=["projec
 # `/{name}/results-summary` paths) — registered before projects.router for
 # clarity; the extra path segment means the `/{name}` catch-all never shadows it.
 app.include_router(compare.router, prefix="/api/projects", tags=["compare"])
+# FMEA worksheet sidecar (adequacy Phase 3) — specific `/{name}/worksheet`
+# path, registered before projects.router so the `/{name}` catch-all never
+# shadows it. Manual rows + overlays only; computed rows come from
+# /results/copt and merge client-side.
+app.include_router(adequacy_worksheet.router, prefix="/api/projects", tags=["adequacy"])
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(snapshots.router, prefix="/api/projects", tags=["snapshots"])
 # Chatbot file uploads (Phase A) — per-project file storage at

@@ -168,6 +168,508 @@ export interface LcohPeriodEntry {
   lcoh_eur_per_kg_h2: number | null
 }
 
+// ── GET/POST /results/mc — the sequential-MC study (adequacy spec §4/§5) ────
+//
+// A SIBLING payload, deliberately not folded into AdequacyReport: the MC is an
+// engine-local study like the COPT, so its keys mirror
+// `services/adequacy/mc.py`'s metrics dict and `services/adequacy/elcc.py`'s
+// nine-key row VERBATIM. Renaming anything here would fork the contract.
+
+/** §2.5 metrics dict. Both intervals arrive as 2-element lists over JSON. */
+export interface McMetrics {
+  lole_hours: number
+  /** [lo, hi] — an INTERVAL, not a half-width. May be asymmetric. */
+  lole_ci: [number, number] | null
+  eue_mwh: number
+  eue_ci: [number, number] | null
+  /** Phase 12c: each period carries its own interval (a per-period ELCC row
+   *  reports it beside the period's LOLE, never the horizon's). */
+  by_period?: Record<string, {
+    lole_hours: number; eue_mwh: number
+    lole_ci?: [number, number]; eue_ci?: [number, number]
+  }>
+  n_samples: number
+  converged?: boolean
+  /** "hours_per_year" only when the modelled horizon really is a year. */
+  time_basis: string
+  horizon_years?: number | null
+  /**
+   * Smallest NONZERO LOLE this many draws can resolve, in the SAME units as
+   * `lole_hours`. `null` when the horizon carries no positive weight — a
+   * horizon of unknown length cannot state a floor, and saying so beats
+   * printing an infinity.
+   */
+  resolution_floor_h: number | null
+  warning?: string
+}
+
+/** One ELCC row — nine keys, always all present (spec §3, [v1.2]). */
+export interface ElccRow {
+  kind: string
+  name: string
+  nameplate_mw: number
+  /** null on every non-"ok" status; `reason` carries the refusal instead. */
+  elcc_mw: number | null
+  elcc_share: number | null
+  status: 'ok' | 'unidentifiable' | 'not_bracketed' | 'aborted'
+  /** null iff status === "ok". */
+  reason: string | null
+  baseline_lole_h: number
+  baseline_lole_ci: [number, number]
+}
+
+/** Phase 12d: the engines' activity disclosure, on `/results/copt` and the
+ *  MC result alike. `note` is null when nothing is masked anywhere. */
+export interface ActivitySummary {
+  by_period: Record<string, { inactive: string[]; partial: string[] }>
+  note: string | null
+}
+
+export interface McResult {
+  engine: string
+  fidelity: string
+  metrics: McMetrics
+  elcc: ElccRow[]
+  /** MC_WARNING_V1, shipped with every payload — render it, never inline it. */
+  warning: string
+  /** Phase 12c-pre: units whose outages were sampled ON their availability
+   *  series rather than at nameplate. Absent on pre-phase payloads. */
+  profile_units?: string[]
+  /** Phase 12d: which units / stores the engines masked in which period by
+   *  build year, lifetime or the active flag (`inactive`), or scored below nameplate because
+   *  a later vintage is not yet built (`partial`), with the one sentence that
+   *  says so. Absent on pre-phase payloads. */
+  activity?: ActivitySummary
+  /** Phase 12c: the profile-bearing fleet priced as ONE portfolio, per
+   *  period, beside the reserve margin's own credit for the same group. A
+   *  SIBLING of `elcc`, never a row in it; `null` when not requested. */
+  elcc_portfolio?: ElccPortfolioBlock | null
+}
+
+export type ElccPortfolioStatus =
+  | 'ok' | 'no_population' | 'activity_mismatch' | 'capacity_basis_mismatch'
+  | 'stale_report' | 'margin_unavailable'
+export type ElccPortfolioPeriodStatus =
+  | 'ok' | 'unidentifiable' | 'not_bracketed' | 'no_contribution' | 'aborted'
+
+export interface ElccPortfolioPeriod {
+  period: string
+  nameplate_mw: number
+  elcc_mw: number | null
+  elcc_share: number | null
+  status: ElccPortfolioPeriodStatus
+  reason: string | null
+  baseline_lole_h: number
+  baseline_lole_ci: [number, number]
+  /** The margin's own credit for the group in this period: Σ derate × built
+   *  capacity over its payload rows; null when no margin was set. */
+  credit_gross_mw: number | null
+  /** The same on the net-load window; null unless that window is `ok`. */
+  credit_net_mw: number | null
+}
+
+export interface ElccPortfolioBlock {
+  status: ElccPortfolioStatus
+  /** null iff status === "ok"; a refusal names what it saw. */
+  reason: string | null
+  population: {
+    members: Array<{
+      kind: string; name: string; capacity_mw: number
+      /** Phase 12d: what the engines gave the member in each period — the
+       *  quantity the block's comparison actually uses. */
+      capacity_by_period?: Array<{ period: string; capacity_mw: number }>
+    }>
+    unbuilt: string[]
+    n_vre: number
+    n_generator: number
+  }
+  margin_available: boolean
+  periods: ElccPortfolioPeriod[]
+  /** Phase 12e: the run was stopped before every period was priced, so
+   *  `periods` is short. A BOOLEAN beside the status, not a status of its
+   *  own — `status` already carries refusals like `margin_unavailable` that
+   *  coexist with real period rows. */
+  truncated?: boolean
+  load_basis: string
+}
+
+export interface McStatus {
+  /** `aborted` since Phase 12e: stopped by `/results/mc/abort`, carrying the
+   *  headline metrics and whichever ELCC rows completed first. */
+  status: 'running' | 'done' | 'failed' | 'aborted'
+  result: McResult | null
+  error: string | null
+  started_at?: number
+  finished_at?: number
+}
+
+export interface McRequestBody {
+  /** Phase 12c: price the profile-bearing fleet as one portfolio, per period. */
+  elcc_portfolio?: boolean
+  draws?: number
+  seed?: number
+  cov_target?: number
+  elcc_assets?: Array<{ kind: string; name: string }>
+}
+
+/**
+ * One row of GET /results/mc/elcc_candidates — an asset the study may be asked
+ * to price. `kind` is the ELCC kind, NOT a component class: an electrical
+ * generator is `"generator"` when it carries occurrence data and `"vre"` when
+ * it does not (must-take, netted into the residual), and the removal semantics
+ * differ. `nameplate_mw` is the bracket top the bisection actually prices —
+ * capacity for a unit, p_nom for a store, and the PEAK must-take contribution
+ * (profile × capacity) for a vre asset, which is why it can be well below the
+ * installed capacity.
+ */
+export interface ElccCandidate {
+  kind: string
+  name: string
+  nameplate_mw: number
+}
+
+export interface ElccCandidatesPayload {
+  /** Sorted by nameplate descending, ties by name. Possibly empty. */
+  assets: ElccCandidate[]
+  /** services/adequacy/elcc.py MAX_ELCC_ASSETS — never hardcode it here. */
+  max_assets: number
+}
+
+// ── GET/POST /results/coupling_loop — the adequacy-coupled planning loop ────
+//
+// Phase 7. Solve the LP under an energy cap, run the sequential MC on the PLAN
+// it produced, retune the cap, re-solve — until the plan meets the user's
+// target on the MC's own LOLE rather than on the LP proxy's shed energy.
+//
+// Keys are copied VERBATIM from routers/results.py `post_coupling_loop`'s
+// record and services/adequacy/coupling.py's `_row` / `_mc_block`. Renaming
+// one here would fork the contract silently, and this payload is the only
+// place several of these quantities exist at all.
+//
+// NOTE the deliberate absence of a top-level `engine` / `fidelity` pair
+// ([N4]): the study's product is a CAP and a VERDICT, not a metric, so the
+// sibling convention would misdescribe it. The engine labels live on each
+// iterate's own `mc` block, which is where a metric actually is.
+
+/** One iterate's MC evaluation — a PROJECTION of mc_adequacy's dict. */
+export interface CouplingMcBlock {
+  engine: string
+  fidelity: string
+  lole_hours: number
+  /** [lo, hi] — an INTERVAL, not a half-width. May be asymmetric. */
+  lole_ci: [number, number] | null
+  eue_mwh: number
+  eue_ci: [number, number] | null
+  n_samples: number
+  /** Rides on every evaluated iterate: on a multi-period network it is the
+   *  only way to see WHICH period drives a miss ([N4]/[N5]). */
+  by_period: Record<string, { lole_hours: number; eue_mwh: number }>
+}
+
+/** One row of `iterations` — services/adequacy/coupling.py `_row`. */
+export interface CouplingIteration {
+  eps_permyriad: number
+  solve_status: string
+  condition: string | null
+  /** null on every non-solved iterate — an infeasible solve has no cost. */
+  cost_eur: number | null
+  ens_mwh: number | null
+  cap_mwh: number | null
+  binding: string | null
+  /** true when the plan hash repeated and the metrics were REUSED, not sampled. */
+  plateau: boolean
+  /** null when the iterate was never evaluated (failed / infeasible solve). */
+  mc: CouplingMcBlock | null
+}
+
+export type CouplingLoopStatus =
+  | 'running' | 'met' | 'unreachable' | 'budget_exhausted' | 'aborted' | 'failed'
+
+export interface CouplingLoopPayload {
+  study: 'coupling_loop'
+  status: CouplingLoopStatus
+  /** HORIZON-basis hours — the panel converts the user's h/yr entry. */
+  target_lole_h: number
+  /** "hours_per_year" | "hours_per_horizon" — feeds `basisSuffix`. */
+  basis: string
+  horizon_years?: number | null
+  draws: number
+  seed: number
+  eps0: number
+  max_solves: number
+  restore: 'base' | 'final'
+  base_restored: boolean
+  /** Phase 12e (shipped-code review, S1): the solver's own word on that
+   *  closing re-solve. `base_restored` used to read the solver STATUS, and
+   *  linopy's `SolverStatus.ok` also covers `time_limit` and `suboptimal` —
+   *  so a re-solve that hit the MIP time limit said "restored" while the
+   *  foreground was a time-limited dispatch. The backend now judges on the
+   *  termination CONDITION and this carries the word for the message. */
+  base_restore_status?: string | null
+  /** 95% CI upper bound cleared the target. Reported, never iterated for. */
+  confident: boolean
+  eps_star: number | null
+  /** Smallest NONZERO LOLE these draws can resolve; null when unknowable. */
+  resolution_floor_h: number | null
+  solves_used: number
+  /** REBOUND by the worker between iterates, so a mid-run GET sees a prefix
+   *  of the next one — the list GROWS while the study runs. */
+  iterations: CouplingIteration[]
+  final: CouplingIteration | null
+  /** A ready sentence ([N6]/v1.3 §4) — RENDER IT, never re-word it here. */
+  verdict: string | null
+  warning: string
+  error: string | null
+  started_at?: number
+  finished_at?: number | null
+}
+
+export interface CouplingLoopRequestBody {
+  /** REQUIRED and horizon-basis. The h/yr → horizon conversion is the
+   *  panel's job (plan [S12]); the wire stays unit-safe. */
+  target_lole_h: number
+  draws?: number
+  seed?: number
+  eps0?: number
+  max_solves?: number
+  restore?: 'base' | 'final'
+}
+
+// ── GET/POST /results/margin_loop — the SAME loop on the OTHER lever ────────
+//
+// Phase 9 (margin-loop spec §2.6). The controller is `coupling.py`, unchanged
+// and unmodifiable; only the lever differs. The route substitutes
+// `x = 1/(1+m)` so the controller's "smaller is stricter" ordering holds for a
+// reserve MARGIN, and translates every row back to a margin before storing it
+// — so the controller's internal `x` never reaches this file at all.
+//
+// ★ THE PAYLOADS ARE NOT THE SAME SHAPE and no alias joins them. The cap loop
+// carries `eps_permyriad` / `eps0` / `eps_star`; this one carries
+// `lever_value` / `margin0` / `lever_star` plus `probe_solves`, `margin_tight`
+// and `margin_ceiling` (amendment v1.1(5)). A "nullable alias" that let one
+// row type stand for both would put a `null` where the panel's `compact()` is
+// typed `number` — and `isFinite(null)` is TRUE in JS, so the guard passes it
+// through to `.toPrecision(2)`, which throws inside `rows.map` and unmounts
+// the panel. Both value types below are NON-NULLABLE for that reason.
+//
+// Keys are copied VERBATIM from routers/results.py `post_margin_loop`'s
+// record and its `_translate`.
+
+/** One row of `iterations` — routers/results.py `post_margin_loop._translate`.
+ *
+ *  The controller's `_row` with `eps_permyriad` REPLACED by `lever_value`.
+ *  There is no `eps_permyriad` key on the wire and there must be none here. */
+export interface MarginIteration {
+  /** The planning reserve margin as a FRACTION (0.15 = 15%), never `x` and
+   *  never a per-myriad cap. Always a number: the route translates every row
+   *  it stores, so a row without one is a row that does not exist. */
+  lever_value: number
+  solve_status: string
+  condition: string | null
+  /** null on every non-solved iterate — an infeasible solve has no cost. */
+  cost_eur: number | null
+  ens_mwh: number | null
+  /** ALWAYS null for this lever (spec §2.2): the margin has no energy cap,
+   *  and the route returns `cap_mwh=None` deliberately so the controller's
+   *  ENERGY_FLOOR test stays a genuine no-op instead of ending every run
+   *  `unreachable` after one solve. */
+  cap_mwh: number | null
+  binding: string | null
+  /** true when the plan hash repeated and the metrics were REUSED. */
+  plateau: boolean
+  /** null when the iterate was never evaluated (failed / refused solve). */
+  mc: CouplingMcBlock | null
+}
+
+export type MarginLoopStatus = CouplingLoopStatus
+
+export interface MarginLoopPayload {
+  study: 'margin_loop'
+  /** ★ THE DISCRIMINATOR (spec §3). The solver-config FIELD this study
+   *  writes — `restoreSentence` takes its field name from here, so a margin
+   *  run can never tell the user to set the energy cap's field. */
+  lever: string
+  /** Human copy for the column header, e.g. "planning reserve margin". */
+  lever_label: string
+  /** The badge/column suffix — "%" here, "‱" on the cap loop. */
+  lever_unit: string
+  status: MarginLoopStatus
+  /** HORIZON-basis hours — the panel converts the user's h/yr entry. */
+  target_lole_h: number
+  basis: string
+  horizon_years?: number | null
+  draws: number
+  seed: number
+  /** The margin the search STARTED from — measured by the probing solve
+   *  (spec §2.3), never a user parameter. Null until the probe lands. */
+  margin0: number | null
+  /** The smallest margin at which the incumbent plan is already tight. */
+  margin_tight: number | null
+  /** The largest margin the fleet can reach; null = unbounded. */
+  margin_ceiling: number | null
+  max_solves: number
+  restore: 'base' | 'final'
+  base_restored: boolean
+  /** Phase 12e (shipped-code review, S1): the solver's own word on that
+   *  closing re-solve. `base_restored` used to read the solver STATUS, and
+   *  linopy's `SolverStatus.ok` also covers `time_limit` and `suboptimal` —
+   *  so a re-solve that hit the MIP time limit said "restored" while the
+   *  foreground was a time-limited dispatch. The backend now judges on the
+   *  termination CONDITION and this carries the word for the message. */
+  base_restore_status?: string | null
+  confident: boolean
+  /** The CERTIFIED MARGIN (a fraction), not `x` and not a cap. */
+  lever_star: number | null
+  resolution_floor_h: number | null
+  solves_used: number
+  /** The probing solve is OUTSIDE the controller's budget (amendment
+   *  v1.1(5)): folding it into `solves_used` would break the budget's
+   *  meaning, hiding it would misreport the wall-clock. */
+  probe_solves: number
+  /** REBOUND by the worker between iterates — the list GROWS mid-run. */
+  iterations: MarginIteration[]
+  final: MarginIteration | null
+  /** A ready sentence — RENDER IT, never re-word it here. */
+  verdict: string | null
+  warning: string
+  error: string | null
+  started_at?: number
+  finished_at?: number | null
+}
+
+export interface MarginLoopRequestBody {
+  /** REQUIRED and horizon-basis; the h/yr conversion is the panel's job. */
+  target_lole_h: number
+  draws?: number
+  seed?: number
+  max_solves?: number
+  restore?: 'base' | 'final'
+  // NO `m0`. The starting margin is a MEASUREMENT, not a parameter
+  // (`MarginLoopRequest` in routers/results.py refuses to take one): too
+  // small and the search walks a region where the plan does not change, too
+  // large and it overshoots the bracket entirely.
+}
+
+// ── The firm-capacity (planning reserve margin) standard, Phase 8 §4 ────────
+//
+// KEY NAMES ARE VERBATIM from the backend and must stay that way: they come
+// from `services/adequacy/report.py::reserve_margin_payload` and its
+// `sanitize_reserve_margin_payload` wire pass, and the identical shape is
+// published a second time as `AdequacyReport.reserve_margin` (amendment
+// v1.2(7)) so the two surfaces cannot drift. The panel is the only reader, so
+// a rename here would fork the contract with nothing going red.
+
+/** One derating row — per (asset, PERIOD): a must-take credit is measured over
+ *  that period's peak hours, so the same unit derates differently per period
+ *  (amendment v1.1(3)). */
+export interface ReserveMarginAsset {
+  name: string
+  period: string
+  kind: 'generator' | 'storage'
+  /** The BUILT capacity in the solved plan — `p_nom_opt` for an extendable
+   *  (which is the point of the standard: the capacity it forced into being),
+   *  the fixed constant otherwise. `null` when the solve has no number for it. */
+  capacity_mw: number | null
+  /** (1 − outage rate) × availability, clamped to [0, 1]. A PROXY — see
+   *  `basis`/`source`, which are what make it inspectable. */
+  derate: number
+  /** "FOR" | "EFORd" — never silently converted. `1 − FOR` is not a UCAP
+   *  derate: FOR excludes reserve-shutdown hours and is optimistic exactly
+   *  for the peakers that sit at the margin. */
+  basis: string
+  /** "asset" (the user entered it) | "carrier_default" (a class average they
+   *  did not) | "missing". */
+  source: string
+  extendable: boolean
+  /** derate × capacity_mw. */
+  firm_mw: number
+  /** A reservoir takes full POWER credit while its ENERGY limit is what binds
+   *  it — recorded, not fixed (plan §1.4). */
+  energy_limited: boolean
+  /** Phase 12b — what this row's availability looked like IN THIS PERIOD:
+   *  "none" (no time series — storage, a static p_max_pu), "constant" (a
+   *  series that does not vary here — window-independent), or "varying".
+   *  Optional: a payload persisted before 12b lacks it. */
+  profile_kind?: 'none' | 'constant' | 'varying'
+  /** `profile_kind === "varying"`. */
+  nettable?: boolean
+  /** `nettable` AND built — the row actually shaped the net-load window. */
+  netted?: boolean
+  /** What `derate` would have been had the standard been built on the
+   *  net-load window. A SECOND PROXY, never a correction. null when the row
+   *  has no varying profile or the period has no `ok` net window. */
+  derate_net?: number | null
+}
+
+/** Phase 12b — the net-load window for one period. ALWAYS present on a
+ *  period row served by a 12b backend, with a status rather than a null:
+ *  `nothing_netted` = no row is both nettable and built (the net window IS
+ *  the gross window; no zero-delta "finding" is published);
+ *  `no_finite_demand` = the stashed demand had no finite value. "Netted
+ *  capacity" is NOT "VRE": every unit whose availability varies over the
+ *  period is netted, a thermal maintenance schedule included. */
+export interface NetWindowBlock {
+  status: 'ok' | 'nothing_netted' | 'no_finite_demand' | 'empty_window'
+  netted_assets: string[]
+  snapshots: string[]
+  n_hours: number
+  net_peak_mw: number | null
+  gross_at_net_peak_mw: number | null
+  netted_mw: number | null
+  overlap_hours: number | null
+  firm_gross_mw: number | null
+  firm_net_mw: number | null
+}
+
+/** One investment period's standard and what met it. */
+export interface ReserveMarginPeriod {
+  period: string
+  /** Unweighted MW maximum of electrical demand — never a weighted sum.
+   *  null when the stashed demand had no finite value (Phase 12b widened it
+   *  so the report surface degrades as the route already did). */
+  peak_mw: number | null
+  required_mw: number | null
+  firm_mw: number
+  /** firm_mw / peak_mw − 1; null when the period has no demand. */
+  margin_achieved: number | null
+  /** The plan REACHES the standard. */
+  met: boolean
+  /** The standard SHAPED the plan — firm capacity on the bound. SEPARATE from
+   *  `met` (amendment v1.2(5)): a margin the fixed fleet already satisfies is
+   *  met and NOT binding, and reporting it as binding would credit the margin
+   *  for capacity that was always there. */
+  binding: boolean
+  /** N, the number of peak hours the must-take credit was measured over. */
+  n_peak_hours: number
+  /** The selected timestamps — longer than N when snapshots tie. Published
+   *  because a proxy nobody can inspect is a number nobody can check. */
+  peak_snapshots: string[]
+  /** null when an active extendable has an unbounded `p_nom_max`: "unbounded"
+   *  is not a number and `inf` is not JSON (amendment v1.2(4)). The flag below
+   *  says which case the null is — a clamp would have invented a ceiling
+   *  nobody entered. */
+  max_achievable_mw: number | null
+  max_achievable_unbounded: boolean
+  /** Phase 12b. Optional: a payload persisted before 12b lacks it. */
+  net_window?: NetWindowBlock | null
+}
+
+export interface ReserveMarginPayload {
+  /** Fraction: 0.15 == 15 %. */
+  margin: number
+  /** True under the myopic strategy: the block describes the LAST period
+   *  solved only. Optional: a payload persisted before 12b lacks it. */
+  partial_periods?: boolean
+  /** True when the periods share ONE `Generator-p_nom` variable set and the
+   *  system degenerates to a single standard at `max_P peak_P`. Calling that
+   *  "per period" would be a claim the constraint does not support. */
+  horizon_wide: boolean
+  by_period: ReserveMarginPeriod[]
+  assets: ReserveMarginAsset[]
+  /** basis → how many credited assets carried it. */
+  derating_bases: Record<string, number>
+}
+
 export const resultsApi = {
   getCostBreakdown: () => client.get<CostBreakdown>('/results/cost_breakdown').then(r => r.status === 204 ? null : r.data),
   getStatistics: () => client.get('/results/statistics').then(r => r.status === 204 ? null : r.data),
@@ -379,10 +881,134 @@ export const resultsApi = {
   // caller (AggregatedOverview.tsx, Dispatch.tsx) has been updated to wrap
   // this in an arrow; calling with no arguments is still byte-identical to
   // before.
+  // Minimal AdequacyReport from the last target-constrained solve
+  // (GET /results/adequacy; 204 = no target / not solved). Shape:
+  // pages/results/adequacy.tsx AdequacyReportPayload.
+  getAdequacy: () => client.get('/results/adequacy')
+    .then(r => (r.status === 204 ? null : r.data)),
+  // COPT screening adequacy + FMECA ranking (Phase 2; 204 = no occurrence
+  // data). Shape: pages/results/adequacy.tsx CoptPayload.
+  getCopt: () => client.get('/results/copt')
+    .then(r => (r.status === 204 ? null : r.data)),
+  // The firm-capacity (planning reserve margin) standard the last solve
+  // enforced (Phase 8 §4; 204 = nothing solved, no margin set, or no dispatch
+  // to judge one against). The endpoint serves the PERSISTED solve-time stash
+  // and never a recomputation — the wrapper measured its peaks with the
+  // load-scaling transforms applied and the restore has since reverted them.
+  // Shape: `ReserveMarginPayload` above.
+  getReserveMargin: () => client.get('/results/reserve_margin')
+    .then(r => (r.status === 204 ? null : r.data as ReserveMarginPayload)),
+  // Cost-vs-availability frontier (Phase 5; 204 = no study run this session).
+  // Shape: pages/results/FrontierPanel.tsx FrontierPayload.
+  getFrontier: () => client.get('/results/frontier')
+    .then(r => (r.status === 204 ? null : r.data)),
+  // Starts the epsilon-constraint study in a backend worker thread and
+  // returns immediately; poll getFrontier for progress. Omitting targets uses
+  // the backend's default spread.
+  startFrontier: (targets_permyriad?: number[]) =>
+    client.post('/results/frontier',
+      targets_permyriad ? { targets_permyriad } : {}).then(r => r.data),
+  // Sequential Monte-Carlo adequacy study, optionally with an ELCC table
+  // (Phase 6; 204 = no study run this session). Shape: `McStatus` below.
+  getMc: () => client.get('/results/mc')
+    .then(r => (r.status === 204 ? null : r.data as McStatus)),
+  // Starts the sampler in a backend worker thread and returns immediately;
+  // poll getMc for progress. A bare POST is the useful default — every field
+  // has an engine-side default this client must not fork, so `{}` is sent
+  // rather than a hand-rolled set of frontend defaults. Rejects with the
+  // axios error on 409 (a solve/sweep/frontier/MC is running); the detail
+  // string NAMES the blocker and the panel renders it (see McPanel's
+  // `blockerMessage`).
+  startMc: (body?: McRequestBody) =>
+    client.post('/results/mc', body ?? {}).then(r => r.data),
+  // The assets an ELCC study may be asked for, for McPanel's picker. Always
+  // 200 — an EMPTY `assets` list is an answer ("nothing in this network has a
+  // capacity credit that could be measured"), not a 204, so there is no null
+  // case to unwrap here. Membership agrees by construction with what
+  // `startMc` accepts as `elcc_assets`, which is the whole reason the endpoint
+  // exists: a name the picker offers and the run 404s on would be worse than
+  // no picker at all.
+  getElccCandidates: () => client.get('/results/mc/elcc_candidates')
+    .then(r => r.data as ElccCandidatesPayload),
+  // The adequacy-coupled planning loop (Phase 7; 204 = no loop has been run in
+  // this session). While the worker runs, the SAME record is served with
+  // `status: "running"` and an `iterations` list that GROWS between polls —
+  // that is the whole point of the surface, since a run is up to eight full
+  // capacity expansions plus an MC evaluation each.
+  getCouplingLoop: () => client.get('/results/coupling_loop')
+    .then(r => (r.status === 204 ? null : r.data as CouplingLoopPayload)),
+  // Starts the loop in a backend worker thread and returns immediately; poll
+  // getCouplingLoop for progress. `target_lole_h` is REQUIRED and is the
+  // horizon-basis number (LoopPanel's `wireTarget` does the conversion) —
+  // every other field has an engine-side default this client must not fork.
+  // Rejects with the axios error on 409 (a solve/sweep/frontier/MC/loop is
+  // running) and on the route's 422 set; the detail string NAMES the blocker
+  // and the panel renders it through McPanel's `blockerMessage`.
+  startCouplingLoop: (body: CouplingLoopRequestBody) =>
+    client.post('/results/coupling_loop', body).then(r => r.data),
+  // Asks a running loop to stop. IDEMPOTENT and 200 even when the run is
+  // already finishing: the controller checks the stop event between iterates,
+  // so an abort costs at most the iterate in flight and the closing restore
+  // still runs. 404 only when no loop has ever been recorded.
+  // Phase 12e: every study can be stopped. Same contract as the loops' —
+  // 200 and idempotent whatever the run's state, 404 only if none was ever run.
+  abortMc: () => client.post('/results/mc/abort')
+    .then(r => r.data as { status: string; aborting: boolean }),
+  abortFrontier: () => client.post('/results/frontier/abort')
+    .then(r => r.data as { status: string; aborting: boolean }),
+  abortFmeaSweep: () => client.post('/results/fmea_sweep/abort')
+    .then(r => r.data as { status: string; aborting: boolean }),
+
+  abortCouplingLoop: () => client.post('/results/coupling_loop/abort')
+    .then(r => r.data),
+  // The MARGIN-driven loop (Phase 9; 204 = no margin loop has been run in
+  // this session). A SEPARATE study key from the coupling loop — both are in
+  // the 409 mesh in both directions — serving its own record with its own
+  // growing `iterations` list.
+  getMarginLoop: () => client.get('/results/margin_loop')
+    .then(r => (r.status === 204 ? null : r.data as MarginLoopPayload)),
+  // Starts the margin loop in a backend worker thread and returns
+  // immediately; poll getMarginLoop for progress. `target_lole_h` is REQUIRED
+  // and horizon-basis. Rejects with the axios error on 409 (a
+  // solve/sweep/frontier/MC/coupling-loop/margin-loop is running) and on the
+  // route's 422 set — the unreachable ceiling and the unpriceable-asset
+  // refusal both name themselves in the detail, which the panel renders
+  // through McPanel's `blockerMessage`.
+  startMarginLoop: (body: MarginLoopRequestBody) =>
+    client.post('/results/margin_loop', body).then(r => r.data),
+  // Asks a running margin loop to stop. IDEMPOTENT and 200 even when the run
+  // is already finishing; 404 only when no margin loop has ever been
+  // recorded. NOT folded into the coupling loop's abort: that route's stop
+  // event belongs to a different record, and pressing it would report success
+  // while this loop kept solving.
+  abortMarginLoop: () => client.post('/results/margin_loop/abort')
+    .then(r => r.data),
+  // FMEA worksheet sidecar (Phase 3): manual class-D rows + mitigability
+  // overlays, persisted per project. Computed rows come from getCopt and
+  // merge client-side (pages/results/fmea.ts).
+  getWorksheet: (project: string) =>
+    client.get(`/projects/${encodeURIComponent(project)}/worksheet`).then(r => r.data),
+  putWorksheet: (project: string, body: {
+    manual_rows: Array<Record<string, unknown>>
+    overlays: Record<string, { mitigability?: string; notes?: string }>
+  }) => client.put(`/projects/${encodeURIComponent(project)}/worksheet`, body).then(r => r.data),
+  // All computed failure-mode rows (A + last sweep's B/C) on one list.
+  getFmeaModes: () => client.get('/results/fmea_modes')
+    .then(r => (r.status === 204 ? null : r.data)),
+  // Contingency sweep lifecycle (class B links + class C scenarios).
+  getFmeaSweep: () => client.get('/results/fmea_sweep')
+    .then(r => (r.status === 204 ? null : r.data)),
+  postFmeaSweep: (scenarios: Array<Record<string, unknown>>) =>
+    client.post('/results/fmea_sweep', { scenarios }).then(r => r.data),
+  getStressScenarios: (project: string) =>
+    client.get(`/projects/${encodeURIComponent(project)}/stress_scenarios`).then(r => r.data),
   getLostLoad: (range?: TSRange) => client.get<{
     index: string[]; columns: string[]; data: number[][];
     total_mwh: number; total_cost_eur: number;
     voll_eur_per_mwh: number;
+    // Weighted loss-of-load hours, electrical buses, horizon scope (not the
+    // sliced range). Absent on payloads from older backends.
+    shed_hours?: { total: number; by_period: Record<string, number> };
     // Per-bus carrier ("AC" / "H2" / "heat" / …). Solver adds VOLL slacks on
     // every bus, so lost load is captured for ALL energy carriers; this map
     // lets the frontend split the total per carrier.

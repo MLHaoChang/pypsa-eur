@@ -68,7 +68,10 @@ def list_vintage_results():
     Per-vintage solve results captured at the end of the last LP run.
 
     Shape: `{component_class: {parent_name: {capacity_field, initial_capacity,
-    periods: [{build_year, p_nom_opt, p_nom_min, p_nom_max}, ...]}}}`.
+    periods: [{build_year, lifetime, p_nom_opt, p_nom_min, p_nom_max}, ...]}}}`
+    (`lifetime` since Phase 12d — the vintage row's, read before the row is
+    dropped, so the adequacy engines can mask the vintage per period; absent
+    on breakdowns written before it, and on the myopic strategy's entries).
     Used by the Capacity Expansion view to emit one row per (asset, period)
     build year instead of collapsing every vintage onto the parent's row
     (which only has a single, pre-expansion build_year).
