@@ -50,8 +50,12 @@ Steps (landed 2026-09-05, same session as F1):
 
 ## Task F4 — v4 artifacts: re-study the v3 dispatch
 
-- After F1–F3: `--from-dispatch results/gridspine_year_v3 --k 5` into `results/gridspine_year_v4`. ~15 min (AC year pass + 20–25 selected hours of N-2 + fault levels). Hand over `selected.csv`, `metrics.csv`, `manifest.json`, bundles tarball.
-- Report against v3: which hours changed and why (criterion or fix), corrected prune thresholds, the year-wide DC-vs-AC rho, and whether the min-inertia hours' overvoltage (ruling 30) survives the fix. Update the handoff doc: ruling 31 (the lightsim2grid bug), ruling 30's numbers, §2 status, §7 list. Mark the v3 tarball's screening files superseded.
+- [x] `--from-dispatch results/gridspine_year_v3 --out results/gridspine_year_v4 --k 5` from `1c4a30b7` + F3 (2026-09-06 15:58–16:14 UTC, 16 min: AC year pass 954 s under CPU contention with a gate, then 23 hours of N-2, fault levels and bundles). Handed over `selected.csv`, `metrics.csv`, `manifest.json`, tarball (23 bundles). `manifest.dispatch_source` names the v3 directory and both file hashes.
+- [x] **Selection:** 23 hours, all converged, 18 in common with v3. Gone: v3's DC-severity picks 203, 274, 275, 707, 731 (winter heavy-load hours the DC proxy liked). In: 4323, 4683, 4827, 5187, 5331 — summer light-load hours with seven units off, AC severity 61.6–62.6 (the year's top five), driven by overvoltage. The other four criteria selected the same hours as v3 (the dispatch is the same solve).
+- [x] **DC vs AC over the whole year:** Spearman rho **−0.13**, worst rank gap 8680 of 8760. On the selected hours rho −0.91. The DC proxy is not a usable ranking signal on this fixture; it stays in `metrics.csv` as the record of that.
+- [x] **N-2 prune threshold:** 86.0–102.6 % over the 23 hours, prunes nothing — unchanged by the fix (the threshold is set by the pairs' DC loading, which the fix does not touch).
+- [x] **Ruling 30 survives the fix:** the min-inertia / max-IBR hours' AC severity is 33–47 (unit rows, pandapower — unaffected), and the branch rows at those hours moved by less than the unit rows dominate.
+- [x] **New finding (ruling 32):** with decommitted units modelled correctly, **N-2 pairs collapse at the heavy-load hours** — 81 diverged pairs at each of 355/379/427/451/523, 140 at 1605, 138 at 8086 (v3 showed 1–2, because the phantom PV generators held the voltages up). Twelve sampled diverged pairs at 1605 all diverge in pandapower too (50 iterations): these are voltage-collapse results, not solver failures, and they are recorded with the sentinel severity as the schema requires. The heavy-load hours are therefore N-2 insecure in this model with two units off — a modelling statement about case39's ratings and reactive reserves, for the owner.
 
 ## Task F5 — Inverter reactive control (owner decision first)
 
@@ -73,7 +77,7 @@ The five RES units are PQ `sgen` rows with `q_mvar = 0`. Ruling 30: with the syn
 
 ## Task F9 — Increment-4 plan
 
-Spec phase 3's remainder: the action layer (`create_study`, `run_pipeline`, `list_ranked_snapshots`, `export_handoff_bundle`, …), then GUI wiring, then chat tool registration — "a thin, late, path-limited backend change — deliberately the last increment". Plan it in the increment-3 plan's format from `docs/superpowers/specs/2026-08-27-gridspine-design.md` §phase 3 and the handoff's §4 API table. F3's `study_dispatch` is the seam the action layer calls.
+- [x] Written: `docs/superpowers/plans/2026-09-06-gridspine-increment-4.md` (2026-09-06) — seven tasks (job-shaped driver entry with progress/abort; stage status from artifacts + `ledger.json`; the action layer `services/gridspine_service.py`; the solve queue gains a job kind; router; chat tools with the `_h`/`_service_call_` conventions and a per-project-kind tool gate; frontend last), four owner decisions (project kind column, queue generalisation, dispatch source, template overlay), and the sequencing constraint that Tasks 4 and 6 wait for PR #6's backend decomposition.
 
 ## Owner questions (unchanged from the handoff §6, plus one)
 
@@ -85,4 +89,4 @@ Spec phase 3's remainder: the action layer (`create_study`, `run_pipeline`, `lis
 
 ## Order and dependencies
 
-F1 → F2 → F3 → F4 (this order; F4 is the first artifact a PowerFactory validation should use). F5 waits on the owner. F6 after F4's validation. F7, F8 any time. F9 after F3.
+F1 → F2 → F3 → F4 → F7 → F9 done 2026-09-05/06 (commits `9c08b9a6`, `1c4a30b7`, `b7eab3e5`, `335ca911`; v4 handed over). F5 waits on the owner. F6 after F4's validation. F8 any time; increment 4 starts after PR #6 and the owner's D1–D4.

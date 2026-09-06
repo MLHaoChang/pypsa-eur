@@ -24,6 +24,10 @@ Branch **`gridspine-inc2`** on `MLHaoChang/pypsa-eur`. Everything below is lande
 | `d65f915f` | T8 | DC N-1 severity as the fifth ranking criterion |
 | `37f8727b` | T9 | boundary-tie spreading |
 | `9ca6e14c` | T13 | driver v3: screening, fault levels, SCR, bundles, measurements |
+| `9c08b9a6` | F1 | lightsim2grid in-service fix (`gridmodel_for`), decommitted-hour tests |
+| `1c4a30b7` | F2 | AC N-1 screen at every hour; `max_n1_severity` ranks on `n1_severity_ac`; unit outages on the GridModel |
+| `b7eab3e5` | F3 | `dispatch_year` / `study_dispatch` / `resume_from_dispatch`, CLI `--from-dispatch` |
+| `335ca911` | F7 | one `check_net_carries_hour` in `static/loadflow` |
 
 (Task numbers are the plan's; T7, SCR, is in `e8d6f516`'s neighbour `static/strength.py` — see the plan's per-task notes, each annotated with what was measured when it landed.)
 
@@ -39,7 +43,8 @@ The two skips are unchanged from increment 2 (no `from_psse` in pandapower 3.1.2
 - **Increments 1, 2 and 3 are complete.** Every task landed with RED evidence, GREEN, a mutation that turned exactly the intended test red, and a full gate before its path-limited commit.
 - **The full-year v3 run is done** (`--hours 8760 --k 5`, screening on, from `9ca6e14c`; 14:24–16:17 UTC 2026-09-05, 61 windows all "Optimization successful", `STUDY_EXIT=0`). It selected **23 hours, all converged**: 146, 147, 203, 274, 275, 355, 379, 403, 427, 451, 523, 707, 731, 1605, 1803, 4324, 6697, 7851, 8086, 8211, 8355, 8715, 8716. By criterion: min-inertia 146/1803/4324/6697/8716; max-IBR 147/7851/8211/8355/8715; max-load 355/379/403/427/451; max-import 379/451/523/1605/8086; max-N-1-severity (DC) 203/274/275/707/731. The spread rule works — the five min-inertia hours span January to December instead of five adjacent January hours as in the 2026-09-04 run. Output `results/gridspine_year_v3/` (18 MB, 23 bundles) is gitignored; the session handed over `selected.csv`, `metrics.csv`, `manifest.json` and a tarball of the whole directory.
 - **Two measurements from that run (ruling 30 below):** the N-2 prune threshold measured per hour ranges 86.0–102.6 % and never prunes anything; the DC-severity blind spot is Spearman rho **−0.57** with worst rank gap 21 over the 23 hours (−0.77 over the 11 hours with no diverging N-1 case). The DC proxy ranks the wrong hours for AC severity. Read ruling 30 before trusting `max_n1_severity` as a criterion.
-- **Still the owner's:** PowerFactory validation, now of a *bundle* from the v3 run (`.raw` + `.dyr` + `contingencies.csv` + `ledger.md`), not the increment-1 peak hour. Increment 1's <1 % gate has still never been closed against an independent oracle.
+- **v4 (2026-09-06) supersedes v3's screening.** After ruling 31's fix, F2 (AC severity ranks) and F3 (resume), the v3 dispatch was re-studied as `results/gridspine_year_v4` (`manifest.dispatch_source` carries the v3 hashes) and handed over. 23 hours, 18 in common with v3; the five DC-severity picks are replaced by five summer light-load hours (4323, 4683, 4827, 5187, 5331; AC severity 61.6–62.6, overvoltage). Year-wide DC-vs-AC rho −0.13 (selected hours −0.91). Rulings 30 and 32.
+- **Still the owner's:** PowerFactory validation, now of a *bundle* from the **v4** run (`.raw` + `.dyr` + `contingencies.csv` + `ledger.md`), not the increment-1 peak hour. Increment 1's <1 % gate has still never been closed against an independent oracle.
 - `GRIDSPINE_HANDOFF.md` on `master` is stale on four counts (8 of 9; Task 9 remaining; 52 windows — it is 61; ruling 4's "near-constant floor"). Replace it with this file at merge.
 
 ## 3. Environment
@@ -160,6 +165,8 @@ Each was paid for once this increment. Numbering continues from 13.
 
 31. **lightsim2grid 0.10.1 drops `gen.in_service` when the slack comes from `ext_grid`.** `init_from_pandapower` applies the flags, then `_aux_add_slack.py` calls `init_generators` a second time over every pandapower gen plus the slack and never re-applies them; every decommitted unit comes back as a live PV bus at its setpoint (`sgen` is not re-initialised and is fine). Found the evening after the v3 handover, probing the DC/AC mismatch of ruling 30: at v3 hour 1803 the lightsim2grid base case is 0.14 pu off pandapower, branch N-1 rows up to 12 severity units off. **8754 of 8760 hours have a unit off, so every branch N-1 row, every N-2 row, every prune threshold and the blind-spot rho in the v3 bundles were solved on the wrong grid**; unit rows, `.raw`, `.dyr`, dispatch, loads, fault levels and SCR are unaffected. Hour 0 has every unit on — which is why the increment-3 tests, all at hour 0, matched pandapower to 1e-10 and saw nothing. Fixed in `static/contingency.gridmodel_for` (re-applies both flag vectors and refuses a model whose status disagrees with the net; `tests/gridspine/test_contingency_decommitted.py`). The v3 screening files are superseded by the v4 re-study (follow-ups plan F4). Lesson for the fixture set: **every engine-agreement test needs one case with a unit off**; the native peak is the one hour on which this bug is invisible.
 
+32. **Correctly decommitted, case39 is N-2 insecure at its heavy-load hours.** v4: 81 diverged N-2 pairs at each of hours 355/379/427/451/523 (two units off, ~5 GW), 140 at 1605, 138 at 8086; v3 had shown 1–2 because ruling 31's phantom PV generators held the voltages. Twelve sampled pairs at 1605 diverge in pandapower as well (50 iterations) — voltage collapse, recorded with the sentinel severity, not a solver failure. At the light hours the count is 1–6. Whether this is the fixture's ratings and reactive reserves or a real statement depends on the inverter reactive-control decision (follow-ups F5) and the equivalent's role (§6); it is not a code defect.
+
 ## 6. Open modelling questions — for the owner, not a task
 
 - **Should the aggregated interconnection equivalent (G_BUS_39, h = 500 s) be a committable unit at all?** It is decommitted 56 % of the year (which makes every min-inertia hour an equivalent-off hour), and outaging it collapses the system. Both facts follow from modelling an interconnection as one machine.
@@ -170,11 +177,11 @@ Each was paid for once this increment. Numbering continues from 13.
 
 ## 7. After increment 3
 
-1. ~~Hand over and inspect the v3 year~~ — done, see §2 and ruling 30. Next code change on the ranking side: replace or supplement the DC severity criterion (ruling 30a). Do it *after* the PowerFactory validation of a v3 bundle so the validated artifact stays reproducible from `9ca6e14c`.
+1. ~~Hand over and inspect the v3 year~~; ~~replace the DC severity criterion~~ — done (F1–F4, F7; `docs/superpowers/plans/2026-09-05-gridspine-follow-ups.md`). The artifact to validate is now **v4**; it is reproducible from `335ca911` with `--from-dispatch` on the v3 dispatch (hashes in its manifest).
 2. **PowerFactory validation of one v3 bundle** — a selected min-inertia or max-severity hour. The `.dyr` is new; import both files together.
 3. **Increment 4, per spec phase 3's remainder:** the action layer (`create_study`, `run_pipeline`, `list_ranked_snapshots`, `export_handoff_bundle`, …), then GUI wiring, then chat tool registration. The spec calls GUI wiring "a thin, late, path-limited backend change — deliberately the last increment."
 4. **Between runs, never between a run and its validation:** decorrelate `wind_cf` across the three farms (it is one series; fleet variability is understated and biases exactly the two criteria the study ranks on).
-5. Consolidate the two copies of the "net carries the hour" guard (`static/contingency.py` and `handoff/bundle.py`) into one.
+5. ~~Consolidate the two copies of the "net carries the hour" guard~~ — done (F7, `335ca911`).
 6. Replace `GRIDSPINE_HANDOFF.md` on `master` with this file at merge; merge `master` into the branch first (two commits: the old handoff and the pypsa-gui fix from PR #4).
 
 ## 8. How this work was run
