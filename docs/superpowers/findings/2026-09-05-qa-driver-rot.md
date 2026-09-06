@@ -2,7 +2,9 @@
 
 **Date:** 2026-09-05
 **Found while:** answering "does it make sense to do e2e QA of the backend decomposition?"
-**Status:** the mechanical rot is fixed; five drivers remain blocked on preconditions (below)
+**Status:** resolved on 2026-09-06 — the mechanical rot was fixed first, then the
+four auth-blocked drivers were unblocked (see the follow-up at the bottom). One
+driver remains blocked, and cannot be fixed by editing.
 
 ## What these files are
 
@@ -160,3 +162,118 @@ Three options, in increasing order of effort:
 
 Whatever is chosen, the thing worth keeping is the `_crashed()` change: without
 it, any future rot in these files is silent again.
+
+
+---
+
+# Follow-up, 2026-09-06: the four auth-blocked drivers now run
+
+Option 2 above, taken — and it turned out to be more than a login helper,
+because the diagnosis in the table above was incomplete in two ways. Recording
+both, since the second is the one that would have bitten anyone who took the
+table at face value.
+
+## What the diagnosis got wrong
+
+**It said three drivers "call project handlers directly". Only one does.**
+`qa_save_load_roundtrip` calls `save_project` / `load_project` as plain
+functions. `qa_rename_project` and `qa_results_summary_compare` drive HTTP for
+their assertions and only reach for a direct `save_project()` in their SETUP
+helper — so they had BOTH failures at once, the `Depends` sentinel first and
+then a wall of 401s.
+
+**It missed that the drivers write into the developer's checkout.**
+`qa_layout_persistence` computed its project paths as
+`backend/tests/../projects/<name>` and `rmtree`'d them; `qa_rename_project` and
+`qa_results_summary_compare` used `routers.projects.PROJECTS_DIR`. Nothing
+sandboxed any of it. That is independent of auth and was the more urgent of the
+two problems.
+
+## The shape of the fix
+
+`tests/qa_support.py` — new. A driver imports it BEFORE `main`, which is what
+pins `DATABASE_URL`, `PROJECTS_ROOT` and `PYPSAGUI_APP_DATA_DIR` at throwaway
+locations, seeds an org, and hands back a signed-in `TestClient`.
+
+It gets that by importing `tests/conftest.py` rather than restating it. Two
+helpers were extracted there from fixture bodies into plain functions —
+`make_auth_db()` and `install_network_into_backend()` — with the fixtures now
+thin wrappers around them, so the drivers and the suite share ONE copy of the
+sandbox. A second copy would drift, and would drift silently: miss `StaticPool`
+and the seeded user simply is not there for the request that needs it, which
+reads as an auth bug.
+
+## Three things that only surfaced by running them
+
+**`PyPSAService.set_network()` is not how you install a network any more.** It
+writes the process foreground, which a session adopts exactly ONCE. A driver
+calling it twice keeps saving the first network while believing it swapped. The
+suite's `install_network` fixture already handled this — dropping resident
+scratch contexts and un-binding live sessions — which is why extracting it
+mattered more than the auth wiring did.
+
+**Reading `PyPSAService.get_network()` reads the wrong context.** The active
+project is per session, so a driver checking the process foreground after an
+HTTP call is looking at a different context from the one the route just mutated.
+`qa_rename_project`'s "in-memory n.name syncs" scenario looked like a broken
+product hook; it was the driver looking in the wrong place.
+`qa_support.session_context()` resolves the client's own context, the way
+`conftest`'s `session_ctx` fixture does.
+
+**Two assertions were pinning pre-tenancy semantics, not product behaviour.**
+
+* `qa_rename_project` asserted "old project dir removed / new project dir
+  exists". Directory movement on rename is LOCAL-mode only
+  (`project_registry._may_move_directory`); in web mode the directory is
+  UUID-keyed and stays put while the row's `name` changes. Rewritten to assert
+  what the mode under test actually contracts: the renamed project resolves, its
+  directory exists and still holds `network.nc`, and the old name resolves to
+  nothing.
+* `qa_rename_project` asserted `400` for a traversal-shaped rename. It is `200`
+  now, and the traversal is contained by `safe_names.safe_dir_name`. The
+  assertion was rewritten to check the property the status code was defending —
+  the directory stays inside the projects root — and the contract change is
+  written up separately in
+  `2026-09-06-rename-accepts-any-name-and-it-reaches-a-header.md`, along with
+  the thing that chase turned up: the project name reaches
+  `Content-Disposition` unescaped.
+
+`qa_rename_project`'s child-reparent scenario also had to be rebuilt: it wrote
+`parent_project` into `metadata.json`, but `_rename_project_db` reparents
+`direct_children(db, project)` — a query on `Project.parent_project_id`. The
+tree is now built through `POST /{base}/scenarios`, so the DB link exists.
+
+## Where the drivers stand
+
+| driver | before | after |
+|---|---|---|
+| `qa_rename_project` | crashed in setup, 0 assertions | **23, all pass** |
+| `qa_results_summary_compare` | crashed in setup, 0 assertions | **53, all pass** |
+| `qa_save_load_roundtrip` | 1 (the crash), 0 real | **52, all pass** |
+| `qa_layout_persistence` | 27, 26 fail | **30, all pass** |
+
+All nineteen drivers were then run: **eighteen exit 0**.
+
+## The one that stays blocked
+
+`qa_phase4_compare` still exits 1, and editing cannot change that. It reads two
+SOLVED scenario projects by name out of a server on `127.0.0.1:8000`, and its
+central check is a concurrency smoke test whose whole point is real HTTP against
+real uvicorn — an in-process `TestClient` would not exercise the HDF5 race it
+was written to catch. It also acquired a second precondition at the auth
+migration that this document did not previously record: even with a server
+running, its `urllib` requests are unauthenticated and get 401.
+
+It now says so. A `preflight()` reports the one blocking reason in a single
+line — no server, no session, or no such project — instead of twenty-two
+identical `Connection refused` entries, and `PYPSA_GUI_QA_COOKIE` lets an
+operator hand it a session cookie.
+
+## What is still open
+
+Option 3 — converting these to pytest tests, so they run in the
+`gui-backend-tests` CI job — is still open and still contradicts the explicit
+decision in `pytest.ini`. It is a smaller job than it was: the drivers now share
+one sandbox with the suite, so the conversion is mostly mechanical. But nothing
+runs them automatically, which means the rot this document describes can start
+over the moment someone stops typing the command by hand.
