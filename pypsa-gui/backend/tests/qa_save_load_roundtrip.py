@@ -20,7 +20,6 @@ at the end. Test is hermetic — leaves no state in the live backend.
 from __future__ import annotations
 
 import pathlib
-import shutil
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
@@ -32,6 +31,11 @@ except (AttributeError, ValueError):
 
 import pandas as pd
 import pypsa
+
+# Before `routers` / `main`: pins the sandbox (throwaway DB, projects root and
+# app-data dir) and seeds the org this driver signs in as. See tests/qa_support.py.
+from tests import qa_support  # noqa: E402  (ordering is the point)
+
 from routers import projects as projects_router
 from routers import simulation as sim_router
 from services.pypsa_service import PyPSAService
@@ -51,6 +55,16 @@ def _step(label: str, ok: bool, msg: str = "") -> None:
         FAIL += 1
         print(f"  [FAIL] {label}" + (f" — {msg}" if msg else ""))
 
+
+def _crashed(label: str, exc: BaseException) -> None:
+    """
+    A scenario that raised never ran its assertions, so it must COUNT as a
+    failure — printing the traceback and moving on leaves the driver exiting 0
+    while testing nothing. That is exactly how the stale
+    `routers.simulation.get_*` references below went unnoticed: the scenarios
+    crashed on every run and the summary still read "Fail: 0".
+    """
+    _step(f"{label} ran without crashing", False, f"{type(exc).__name__}: {exc}")
 
 def _approx(a: float, b: float, rel: float = 1e-6, abs_eps: float = 1e-6) -> bool:
     if abs(a - b) <= abs_eps:
@@ -196,14 +210,28 @@ def _assert_network_round_trip() -> None:
 def test_round_trip() -> None:
     print("\n[1] Build → save → reset → load → verify")
     cfg_before = _build_pre_save_state()
-    # Save (force=True bypasses the empty-network safety check).
-    projects_router.save_project(PROJECT_NAME, force=True, clear_undo=False)
+    # Save through the real route, as an authenticated caller. Calling
+    # `save_project()` as a plain function stopped working at the tenancy
+    # migration: its `db`/`user` parameters are `Depends(...)` defaults, and a
+    # direct call hands those sentinels to `project_registry`, which asks the
+    # `Depends` object for `.id`.
+    qa_support.save_project(PROJECT_NAME)
     print(f"  saved project '{PROJECT_NAME}'")
     _wipe_in_memory()
     print("  wiped in-memory state")
-    summary = projects_router.load_project(PROJECT_NAME)
-    print(f"  loaded project — {summary.buses} buses, "
-          f"{summary.snapshots} snapshots")
+    # Load stays a DIRECT call — the assertions below read `summary.buses` off
+    # the `ImportSummary` object, which the HTTP route would have serialised to
+    # a dict. Direct is fine as long as the dependencies it declares are passed
+    # for real, which is what `Depends(...)` stands in for.
+    with qa_support.db_session() as db:
+        summary = projects_router.load_project(
+            PROJECT_NAME, db=db, user=qa_support.user()
+        )
+    # A dict, not the `ImportSummary` model: the route returns
+    # `{**summary.model_dump(), "lock": lock_info}` so callers get the project
+    # lock alongside the import counts.
+    print(f"  loaded project — {summary['buses']} buses, "
+          f"{summary['snapshots']} snapshots")
 
     cfg_after = sim_router._state["solver_config"]
     _assert_cfg_round_trip(cfg_before, cfg_after)
@@ -211,21 +239,22 @@ def test_round_trip() -> None:
 
 
 def _cleanup() -> None:
-    """Remove the test project dir."""
-    try:
-        # Find project dir using the same helper save_project uses.
-        project_dir = projects_router._safe_project_dir(PROJECT_NAME)  # type: ignore[attr-defined]
-        if project_dir.exists():
-            shutil.rmtree(project_dir, ignore_errors=True)
-    except Exception:
-        pass
+    """
+    Remove the test project — row AND directory.
+
+    `_safe_project_dir(name)` used to be the answer; it resolves
+    `PROJECTS_DIR / name`, which is not where an org-scoped project lives any
+    more. Worse, dropping only the directory leaves the DB row behind, and the
+    next run of this driver then collides on the name.
+    """
+    qa_support.delete_project(PROJECT_NAME)
 
 
 def main() -> int:
     try:
         test_round_trip()
     except Exception as e:
-        print(f"  test crashed: {type(e).__name__}: {e}")
+        _crashed("test", e)
         import traceback; traceback.print_exc()
     finally:
         _cleanup()

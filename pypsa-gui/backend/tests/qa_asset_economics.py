@@ -31,6 +31,11 @@ except (AttributeError, ValueError):
     pass
 
 from routers import simulation as sim_router
+# The results serializers live in `routers/results.py` — they were carved out
+# of `routers/simulation.py` and this driver still reached for them there, so
+# every scenario below crashed on an AttributeError. `sim_router` is still the
+# right home for `_state`, which is why both imports are here.
+from routers import results as results_router
 from services.pypsa_service import PyPSAService
 from services.solver_service import SolverConfig
 
@@ -66,6 +71,16 @@ def _step(label: str, ok: bool, msg: str = "") -> None:
     print(f"  [{tag}] {label}" + (f" — {msg}" if msg else ""))
 
 
+def _crashed(label: str, exc: BaseException) -> None:
+    """
+    A scenario that raised never ran its assertions, so it must COUNT as a
+    failure — printing the traceback and moving on leaves the driver exiting 0
+    while testing nothing. That is exactly how the stale
+    `routers.simulation.get_*` references below went unnoticed: the scenarios
+    crashed on every run and the summary still read "Fail: 0".
+    """
+    _step(f"{label} ran without crashing", False, f"{type(exc).__name__}: {exc}")
+
 PASS_COUNT = 0
 FAIL_COUNT = 0
 
@@ -97,7 +112,7 @@ def _call_endpoint() -> dict:
     Invoke the endpoint function the FastAPI handler wraps, returning
     the raw dict the router would return.
     """
-    return sim_router.get_asset_economics()  # type: ignore[return-value]
+    return results_router.get_asset_economics()  # type: ignore[return-value]
 
 
 # ── Scenario 1: Single-bus generators (LCOE & revenue) ───────────────────
@@ -493,15 +508,31 @@ def scenario_multi_period_distribution() -> None:
     payload = _call_endpoint()
     therm = payload["generators"][0]
 
-    assert_close("multi-period fixed total €", therm["fixed_cost_eur"], 1_000_000.0, abs_eps=1.0)
+    # HORIZON cost, not an annual one. `capital_cost` is 100_000 €/MW/yr and
+    # p_nom is 10 MW, so the annual figure is 1_000_000 € — but the reporting
+    # layer multiplies by `investment_period_weightings["years"]` (2 + 5), which
+    # is the repo's settled convention: `tests/golden/oracle.py::horizon_capex`
+    # is `rate * p_nom_opt * sum(years)`, and `services/period_utils.py` calls
+    # omitting that multiplier "the ~5x too small bug class this module exists
+    # to prevent".
+    #
+    # This scenario expected the pre-fix semantics — 1_000_000 split
+    # proportionally as 2/7 and 5/7 — and never caught up, because it crashed on
+    # a stale `sim_router.get_asset_economics` reference before reaching the
+    # assertion and the crash was not counted as a failure. Both branches of the
+    # 2026-09-04 decomposition produce these same numbers, so this is a stale
+    # expectation, not a regression.
+    assert_close("multi-period fixed total €", therm["fixed_cost_eur"], 7_000_000.0, abs_eps=1.0)
     if not therm["by_period"]:
         global FAIL_COUNT
         FAIL_COUNT += 1
         _step("by_period populated", False, "got empty list on multi-period run")
         return
     by_p = {row["period"]: row for row in therm["by_period"]}
-    assert_close("by_period[2025].fixed €", by_p[2025]["fixed_cost_eur"], 1_000_000.0 * (2 / 7), abs_eps=200.0)
-    assert_close("by_period[2030].fixed €", by_p[2030]["fixed_cost_eur"], 1_000_000.0 * (5 / 7), abs_eps=200.0)
+    # Per period: the annual cost times THAT period's years, summing to the
+    # horizon total above — not the total sliced into proportional shares.
+    assert_close("by_period[2025].fixed €", by_p[2025]["fixed_cost_eur"], 1_000_000.0 * 2, abs_eps=200.0)
+    assert_close("by_period[2030].fixed €", by_p[2030]["fixed_cost_eur"], 1_000_000.0 * 5, abs_eps=200.0)
 
 
 # ── Driver ────────────────────────────────────────────────────────────────
@@ -511,27 +542,27 @@ def main() -> int:
     try:
         scenario_generator_lcoe()
     except Exception as e:
-        print(f"  Scenario 1 crashed: {type(e).__name__}: {e}")
+        _crashed("Scenario 1", e)
     try:
         scenario_storage_arbitrage()
     except Exception as e:
-        print(f"  Scenario 2 crashed: {type(e).__name__}: {e}")
+        _crashed("Scenario 2", e)
     try:
         scenario_storage_with_curtailment_subsidy()
     except Exception as e:
-        print(f"  Scenario 3 crashed: {type(e).__name__}: {e}")
+        _crashed("Scenario 3", e)
     try:
         scenario_subsidy_no_overcorrect()
     except Exception as e:
-        print(f"  Scenario 3b crashed: {type(e).__name__}: {e}")
+        _crashed("Scenario 3b", e)
     try:
         scenario_flat_period_no_by_period()
     except Exception as e:
-        print(f"  Scenario 4 crashed: {type(e).__name__}: {e}")
+        _crashed("Scenario 4", e)
     try:
         scenario_multi_period_distribution()
     except Exception as e:
-        print(f"  Scenario 5 crashed: {type(e).__name__}: {e}")
+        _crashed("Scenario 5", e)
 
     print()
     print("=" * 72)

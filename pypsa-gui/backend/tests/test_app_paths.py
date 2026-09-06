@@ -69,6 +69,34 @@ def test_env_overrides_win(monkeypatch, tmp_path):
 # ── the rename to "PyPSA Studio" ────────────────────────────────────────────
 
 
+def _app_data_base(tmp_path, monkeypatch) -> Path:
+    """
+    The platform's app-data PARENT under a pinned `home`, mirroring
+    `app_paths.app_data_dir()`'s own `sys.platform` branch.
+
+    The two rename tests below are about `_preferred()` — old location wins
+    while only it exists, new location wins as soon as it appears — and that
+    logic is platform-independent. They used to hard-code macOS's
+    `Library/Application Support`, so they could only ever pass on a Mac: red
+    on Linux, and therefore red in any CI that ran this suite. Deriving the
+    base the way the code derives it keeps exactly what they assert and lets
+    them assert it everywhere, which is the same correction
+    `test_app_data_dir_is_platform_correct` already documents ("the test was
+    reading the machine, not the code").
+
+    `default_projects_root()` needs no equivalent: it is `home/Documents` on
+    every platform.
+    """
+    if sys.platform == "darwin":
+        return tmp_path / "Library" / "Application Support"
+    if sys.platform == "win32":
+        base = tmp_path / "AppData" / "Local"
+        monkeypatch.setenv("LOCALAPPDATA", str(base))
+        return base
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    return tmp_path / ".local" / "share"
+
+
 def test_a_fresh_install_uses_the_new_name(monkeypatch, tmp_path):
     """The product is PyPSA Studio; a machine with no history says so."""
     import app_paths
@@ -95,7 +123,7 @@ def test_an_EXISTING_install_keeps_its_data_after_the_rename(monkeypatch, tmp_pa
     monkeypatch.delenv("PYPSAGUI_APP_DATA_DIR", raising=False)
     monkeypatch.setattr(app_paths.Path, "home", staticmethod(lambda: tmp_path))
 
-    legacy_data = tmp_path / "Library" / "Application Support" / "PyPSA GUI"
+    legacy_data = _app_data_base(tmp_path, monkeypatch) / "PyPSA GUI"
     legacy_data.mkdir(parents=True)
     (legacy_data / "pypsa-gui.db").write_text("")
     legacy_projects = tmp_path / "Documents" / "PyPSA GUI" / "Projects"
@@ -115,8 +143,9 @@ def test_the_new_location_wins_once_it_exists(monkeypatch, tmp_path):
     monkeypatch.delenv("PYPSAGUI_APP_DATA_DIR", raising=False)
     monkeypatch.setattr(app_paths.Path, "home", staticmethod(lambda: tmp_path))
 
-    (tmp_path / "Library" / "Application Support" / "PyPSA GUI").mkdir(parents=True)
-    new = tmp_path / "Library" / "Application Support" / "PyPSA Studio"
+    base = _app_data_base(tmp_path, monkeypatch)
+    (base / "PyPSA GUI").mkdir(parents=True)
+    new = base / "PyPSA Studio"
     new.mkdir(parents=True)
 
     assert app_paths.app_data_dir() == new.resolve()

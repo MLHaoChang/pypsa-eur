@@ -26,6 +26,11 @@ except (AttributeError, ValueError):
 import pandas as pd
 import pypsa
 from routers import simulation as sim_router
+# The results serializers live in `routers/results.py` — they were carved out
+# of `routers/simulation.py` and this driver still reached for them there, so
+# every scenario below crashed on an AttributeError. `sim_router` is still the
+# right home for `_state`, which is why both imports are here.
+from routers import results as results_router
 from services.pypsa_service import PyPSAService
 from services.solver_service import SolverConfig, run_simulation
 
@@ -42,6 +47,16 @@ def _step(label: str, ok: bool, msg: str = "") -> None:
         FAIL += 1
         print(f"  [FAIL] {label}" + (f" — {msg}" if msg else ""))
 
+
+def _crashed(label: str, exc: BaseException) -> None:
+    """
+    A scenario that raised never ran its assertions, so it must COUNT as a
+    failure — printing the traceback and moving on leaves the driver exiting 0
+    while testing nothing. That is exactly how the stale
+    `routers.simulation.get_*` references below went unnoticed: the scenarios
+    crashed on every run and the summary still read "Fail: 0".
+    """
+    _step(f"{label} ran without crashing", False, f"{type(exc).__name__}: {exc}")
 
 def _approx(a: float, b: float, rel: float = 0.01, abs_eps: float = 0.5) -> bool:
     if abs(a - b) <= abs_eps:
@@ -103,7 +118,7 @@ def test_multi_period_emissions() -> None:
     n = _build_multi_period()
     _solve(n)
     _install(n)
-    payload = sim_router.get_emissions()
+    payload = results_router.get_emissions()
     if not isinstance(payload, dict):
         _step("emissions endpoint returns dict", False, str(payload)[:120])
         return
@@ -136,7 +151,7 @@ def test_horizon_co2_cap() -> None:
           sense="<=", constant=10_000.0)
     _solve(n)
     _install(n)
-    payload = sim_router.get_emissions()
+    payload = results_router.get_emissions()
     caps = payload.get("caps", []) if isinstance(payload, dict) else []
     _step("caps[] contains the horizon-wide cap",
           any(c["scope"] == "horizon" for c in caps),
@@ -157,7 +172,7 @@ def test_per_period_co2_cap() -> None:
           sense="<=", constant=800.0, investment_period=2030)
     _solve(n)
     _install(n)
-    payload = sim_router.get_emissions()
+    payload = results_router.get_emissions()
     caps = payload.get("caps", []) if isinstance(payload, dict) else []
     per_period_caps = [c for c in caps if c["scope"] == "period"]
     _step("caps[] contains a period-scoped cap",
@@ -183,7 +198,7 @@ def main() -> int:
         try:
             fn()
         except Exception as e:
-            print(f"  scenario crashed: {type(e).__name__}: {e}")
+            _crashed("scenario", e)
             import traceback
             traceback.print_exc()
     print()
