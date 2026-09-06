@@ -2257,3 +2257,57 @@ def test_the_turn_ceiling_does_not_fire_when_usage_IS_reported(appdata, monkeypa
         "it must only cover the case where tokens cannot be counted"
     )
     assert provider.calls == 8
+
+
+def test_turn_done_carries_the_usage_availability_flag(appdata):
+    """
+    W-3's BACKEND half had no coverage. A mutation audit replaced both
+    `usage_snapshot["reported"] = session.usage_reported` assignments with
+    `pass` and every suite stayed green — `grep -rn reported tests/*.py`
+    found zero references.
+
+    That mutant is not cosmetic: `ChatPanel.tsx` reads
+    `reported: d.usage.reported ?? true`, so an omitted flag renders as
+    REPORTED, restoring the exact "0 in / 0 out · 0 cached" that ADR-0001
+    forbids — end to end, with a green suite.
+
+    Both directions asserted on a real turn through `run_turn`.
+    """
+    from services import llm_config
+    from services.llm_provider import LLMEvent
+
+    profile = llm_config.LLMProfile(
+        id="flagged", label="Flagged", preset="custom", wire="anthropic",
+        base_url=None, model="claude-sonnet-5", tools=False, vision=True,
+        auth="none", fallback_model=None, max_output_tokens=None)
+    llm_config.save_profiles([profile], "anthropic-sonnet")
+
+    def _run(usage):
+        class _P:
+            name = "p"
+
+            def stream(self, request):
+                yield LLMEvent(type="text_delta", text="ok")
+                yield LLMEvent(type="message_done",
+                               blocks=[{"type": "text", "text": "ok"}],
+                               usage=usage)
+
+        session = chat_service.ChatSession(model="claude-sonnet-5")
+        session.profile_id = "flagged"
+        done = [p for n, p in chat_service.run_turn(session, "hi", provider=_P())
+                if n == "turn_done"]
+        assert done, "no turn_done frame"
+        return done[0]["usage"]
+
+    reporting = _run({"input_tokens": 3, "output_tokens": 4})
+    assert reporting["reported"] is True, (
+        f"an endpoint that DID report usage was marked unreported: {reporting!r}"
+    )
+    assert reporting["output_tokens"] == 4
+
+    silent = _run({})
+    assert silent["reported"] is False, (
+        "an endpoint that reported NOTHING was marked as having reported — "
+        "the client renders the zero-initialised totals as a real measurement"
+    )
+    assert silent["output_tokens"] == 0

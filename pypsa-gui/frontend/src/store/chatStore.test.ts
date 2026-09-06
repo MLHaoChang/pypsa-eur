@@ -170,3 +170,57 @@ describe('chatStore profile switching (Task 13)', () => {
     expect(msgs[0].content).toBe('The answer is 42.')
   })
 })
+
+// W-3's STORE half had no coverage. A mutation audit replaced
+// `reported: s.usage.reported || (delta.reported ?? false)` with a constant
+// `false` — so the flag could never become true and the shipped app would
+// permanently read "tokens n/a" — and 100/100 tests across ten usage-touching
+// files still passed. The two tests that exist set `usage.reported` via
+// `setState` and assert the render branch, which cannot see the accumulator.
+describe('usage.reported (W-3)', () => {
+  it('a reported delta makes the totals meaningful', () => {
+    useChatStore.setState({
+      usage: {
+        input_tokens: 0, output_tokens: 0,
+        cache_read_tokens: 0, cache_create_tokens: 0, reported: false,
+      },
+    })
+    useChatStore.getState().accrueUsage({
+      input_tokens: 5, output_tokens: 2,
+      cache_read_tokens: 0, cache_create_tokens: 0, reported: true,
+    })
+    expect(useChatStore.getState().usage.reported).toBe(true)
+    expect(useChatStore.getState().usage.input_tokens).toBe(5)
+  })
+
+  it('is sticky — a later silent turn does not erase what was measured', () => {
+    // An endpoint may report on one turn and not the next. Once anything real
+    // has been measured the totals stay meaningful, so the flag must OR, not
+    // overwrite.
+    useChatStore.setState({
+      usage: {
+        input_tokens: 5, output_tokens: 2,
+        cache_read_tokens: 0, cache_create_tokens: 0, reported: true,
+      },
+    })
+    useChatStore.getState().accrueUsage({
+      input_tokens: 0, output_tokens: 0,
+      cache_read_tokens: 0, cache_create_tokens: 0, reported: false,
+    })
+    expect(useChatStore.getState().usage.reported).toBe(true)
+  })
+
+  it('stays false while nothing has ever been reported', () => {
+    useChatStore.setState({
+      usage: {
+        input_tokens: 0, output_tokens: 0,
+        cache_read_tokens: 0, cache_create_tokens: 0, reported: false,
+      },
+    })
+    useChatStore.getState().accrueUsage({
+      input_tokens: 0, output_tokens: 0,
+      cache_read_tokens: 0, cache_create_tokens: 0, reported: false,
+    })
+    expect(useChatStore.getState().usage.reported).toBe(false)
+  })
+})
