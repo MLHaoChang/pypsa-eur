@@ -39,8 +39,10 @@ new slots, but every check — read, write, and the four call-site guards below
 — still runs every name through `is_managed_key` rather than trusting a fixed
 list to have already been iterated.
 
-STORAGE. Plaintext, mode 0600, created with `O_CREAT|O_EXCL`-style flags so the
-key is never briefly world-readable. Not the OS keychain: `keyring` would need
+STORAGE. Plaintext, mode 0600. Written to a temp file opened `O_CREAT|O_EXCL`
+at 0600 and `os.replace`d into place, so the key is never briefly
+world-readable AND a failed or interrupted write cannot destroy the previous
+contents (A3/A5 — the earlier in-place `O_TRUNC` write did both). Not the OS keychain: `keyring` would need
 bundling plus a platform backend on each of macOS and Windows, and the threat
 model here is the same one `backend/.env` already accepts — an attacker who can
 read files as this user has already lost the game. Documented rather than
@@ -52,6 +54,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 from pathlib import Path
 
 import app_paths
@@ -108,6 +111,13 @@ def is_managed_key(name: str) -> bool:
 # `user.env` overrides these. Empty until bootstrap runs, which is correct for
 # tests: they get file-wins semantics unless they say otherwise.
 _SHELL_NAMES: frozenset[str] = frozenset()
+
+# A2 — read-modify-write serialisation. `set_secret`/`clear_secret` read the
+# whole file, mutate a dict and rewrite the whole file; `put_llm_profile_key`
+# and `put_anthropic_key` are plain `def`, so FastAPI dispatches them on the
+# AnyIO threadpool and two saves from the Settings UI are genuinely
+# concurrent. Measured: four concurrent saves lost keys on every trial.
+_WRITE_LOCK = threading.Lock()
 
 
 class SecretValueError(ValueError):
@@ -176,18 +186,37 @@ def _write_managed(values: dict[str, str]) -> None:
         "# Edit by hand only if you know what you are doing; the app rewrites\n"
         "# this file whenever a key is saved or cleared from Settings.\n"
     )
-    # Open with the mode up front rather than write-then-chmod: the latter
-    # leaves a window where the key is on disk under the process umask.
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(header + body)
-    # O_CREAT only applies the mode to a file it CREATES, so a file that already
-    # existed keeps whatever mode it had. Re-assert it — the common case is
-    # overwriting, not creating.
+    # A3 + A5 — write a fresh temp file, then rename it over the target.
+    #
+    # This used to open the LIVE file `O_TRUNC` and write in place, so a
+    # failure between open and flush (ENOSPC, SIGTERM, power loss) left
+    # `user.env` empty — and it is the only copy of the operator's keys, now
+    # one slot per provider profile. Measured: an injected write error took a
+    # two-key file to `{}`.
+    #
+    # It also closes the mode window A5 found. `O_CREAT` applies its mode only
+    # to a file it CREATES, so re-saving over a pre-existing 0644 file wrote
+    # the secret first and chmodded after; a watcher observed 0644 with the
+    # value already on disk. The docstring above claimed `O_EXCL`-style flags
+    # were preventing exactly that, which was never true. A temp file created
+    # with `O_EXCL` at 0600 and `os.replace`d into place is atomic for
+    # readers, never world-readable for any window, and leaves the previous
+    # contents intact if anything fails.
+    tmp = path.with_name(path.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_TRUNC, 0o600)
     try:
-        os.chmod(path, 0o600)
-    except OSError:  # pragma: no cover — Windows / exotic filesystems
-        logger.debug("could not chmod %s", path, exc_info=True)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(header + body)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        # Leave the previous file untouched, and do not strand the temp.
+        try:
+            tmp.unlink()
+        except OSError:  # pragma: no cover
+            pass
+        raise
 
 
 def validate_value(value: str) -> str:
@@ -220,7 +249,28 @@ def bootstrap_environment(backend_env: Path | None = None) -> None:
     global _SHELL_NAMES
     # Captured before any file is applied: this is the set the shell supplied,
     # and the one thing no file may override.
-    _SHELL_NAMES = frozenset(os.environ)
+    #
+    # A1 — a name whose LIVE value already equals what `user.env` holds was
+    # injected by a previous run of this function, not supplied by the shell,
+    # and must not be counted here. Without that subtraction a second
+    # `bootstrap_environment()` re-snapshotted an `os.environ` that already
+    # contained everything the first call injected, so every stored key looked
+    # shell-supplied — and `clear_secret` then removed it from the file while
+    # leaving it LIVE in the process, so revoking a leaked key did nothing
+    # until restart. `set_secret` silently no-opped in-process for the same
+    # reason.
+    #
+    # Stateless on purpose: a module-level "already bootstrapped" flag would
+    # have to be reset by every test that resets `_SHELL_NAMES`, and four
+    # fixtures already do the latter by hand. A shell that happens to export
+    # exactly the stored value is indistinguishable here and is treated as
+    # file-supplied — harmless, since the value in effect is the same either
+    # way.
+    _stored_now = _read_managed()
+    _SHELL_NAMES = frozenset(
+        name for name in os.environ
+        if not (name in _stored_now and os.environ.get(name) == _stored_now[name])
+    )
 
     if backend_env is not None and backend_env.exists():
         try:
@@ -286,7 +336,10 @@ def status(name: str = "ANTHROPIC_API_KEY") -> dict[str, object]:
     return {
         "configured": bool(live),
         "source": source,
-        "hint": f"…{live[-4:]}" if len(live) >= 4 else None,
+        # A9 — `>= 4` returned a 4-character key IN FULL as its own
+        # "non-reversible" hint, and this reaches an HTTP response. The hint
+        # must always be a strict suffix.
+        "hint": f"…{live[-4:]}" if len(live) > 4 else None,
         # True when a shell-set value is masking a stored one, so the UI can
         # explain why saving appeared to do nothing.
         "overridden_by_environment": bool(stored) and name in _SHELL_NAMES,
@@ -299,9 +352,13 @@ def set_secret(name: str, value: str) -> dict[str, object]:
     if not is_managed_key(name):
         raise SecretValueError(f"{name} is not a managed setting.")
     cleaned = validate_value(value)
-    values = _read_managed()
-    values[name] = cleaned
-    _write_managed(values)
+    # A2 — read + mutate + write under one lock, or a concurrent save of a
+    # DIFFERENT key reads the file before this one has written it and then
+    # rewrites the whole thing without it.
+    with _WRITE_LOCK:
+        values = _read_managed()
+        values[name] = cleaned
+        _write_managed(values)
     if name in _SHELL_NAMES:
         # Persist it — the operator asked — but do NOT clobber the shell value
         # in this process, or a restart would change behaviour without anyone
@@ -321,9 +378,10 @@ def clear_secret(name: str) -> dict[str, object]:
     """Forget `name` — remove it from the file and from this process."""
     if not is_managed_key(name):
         raise SecretValueError(f"{name} is not a managed setting.")
-    values = _read_managed()
-    values.pop(name, None)
-    _write_managed(values)
+    with _WRITE_LOCK:  # A2 — same read-modify-write hazard as `set_secret`.
+        values = _read_managed()
+        values.pop(name, None)
+        _write_managed(values)
     if name not in _SHELL_NAMES:
         os.environ.pop(name, None)
     return status(name)

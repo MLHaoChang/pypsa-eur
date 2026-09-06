@@ -294,3 +294,130 @@ def test_live_secret_values_covers_shell_only_keys(tmp_path, monkeypatch):
     vals = s.live_secret_values()
     assert "shell-only-value-99" in vals      # env-only, never in user.env
     assert "file-value-1234" in vals
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# The WRITE and BOOTSTRAP paths, which no review had examined until round 4.
+# `user.env` is the only copy of the operator's keys, and this branch turned
+# it from "one Anthropic key" into "one slot per provider profile".
+# ═════════════════════════════════════════════════════════════════════════
+
+
+def test_a_failed_write_does_not_destroy_the_existing_keys(monkeypatch):
+    """
+    A3 — `_write_managed` opened the live file `O_TRUNC` with no temp-file +
+    replace, so ENOSPC, SIGTERM or a power loss between open and flush left
+    `user.env` EMPTY. Every stored credential, gone, with no backup anywhere.
+    """
+    from services import app_secrets
+
+    app_secrets.set_secret("ANTHROPIC_API_KEY", "realkey12345")
+    app_secrets.set_secret("PYPSA_GUI_LLM_KEY__A", "slotkey12345")
+    before = app_secrets._read_managed()
+    assert len(before) == 2
+
+    real_fdopen = os.fdopen
+    armed = {"on": True}
+
+    def _explode(fd, *a, **kw):
+        handle = real_fdopen(fd, *a, **kw)
+        if not armed["on"]:
+            return handle
+        original_write = handle.write
+
+        def _boom(_data):
+            original_write("")          # keep the fd consistent
+            raise OSError(28, "No space left on device")
+
+        handle.write = _boom
+        return handle
+
+    # NOT `monkeypatch.undo()` afterwards: that would also revert the autouse
+    # fixture's PYPSAGUI_APP_DATA_DIR redirect, and the assertion below would
+    # then read a different (empty) location and "pass" for the wrong reason.
+    monkeypatch.setattr(os, "fdopen", _explode)
+    with pytest.raises(OSError):
+        app_secrets.set_secret("ANTHROPIC_API_KEY", "newvalue12345")
+    armed["on"] = False
+
+    after = app_secrets._read_managed()
+    assert after == before, (
+        f"a failed write destroyed the stored credentials: {before} -> {after}"
+    )
+
+
+def test_concurrent_saves_do_not_lose_keys():
+    """
+    A2 — read-modify-write with no lock, and `_write_managed` rewrites the
+    whole file. Four threads saving four different slots lost keys on every
+    trial. Reachable: `put_llm_profile_key` and `put_anthropic_key` are plain
+    `def`, so FastAPI dispatches them on the AnyIO threadpool — two saves from
+    the Settings UI really are concurrent.
+    """
+    import threading
+
+    from services import app_secrets
+
+    names = [f"PYPSA_GUI_LLM_KEY__C{i}" for i in range(4)]
+    barrier = threading.Barrier(len(names))
+
+    def _save(name):
+        barrier.wait()
+        app_secrets.set_secret(name, f"value-for-{name}-0123456789")
+
+    threads = [threading.Thread(target=_save, args=(n,)) for n in names]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    stored = app_secrets._read_managed()
+    missing = [n for n in names if n not in stored]
+    assert not missing, f"concurrent saves lost {missing}; kept {sorted(stored)}"
+
+
+def test_bootstrap_is_idempotent_so_clearing_a_key_really_clears_it(monkeypatch):
+    """
+    A1 — `bootstrap_environment` re-snapshotted `_SHELL_NAMES` from the live
+    `os.environ`, which by then already contained everything the FIRST call
+    injected from `user.env`. Every stored key then looked shell-supplied, so:
+
+      * `clear_secret` removed it from the file but LEFT IT IN `os.environ` —
+        a user revoking a leaked key kept using it until restart;
+      * `set_secret` silently no-opped in-process, defeating the whole reason
+        this module applies keys immediately;
+      * Settings reported a shell override that did not exist.
+
+    Latent in production (`main.py` bootstraps once), but four test fixtures
+    reset `_SHELL_NAMES` by hand — callers were already tripping over it.
+    """
+    from services import app_secrets
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    app_secrets._SHELL_NAMES = frozenset()
+    app_secrets.set_secret("ANTHROPIC_API_KEY", "fromfile12345")
+
+    app_secrets.bootstrap_environment()
+    app_secrets.bootstrap_environment()   # a second call must change nothing
+
+    assert app_secrets.status("ANTHROPIC_API_KEY")["source"] == "settings", (
+        "a stored key was misreported as shell-supplied after a re-bootstrap"
+    )
+    app_secrets.clear_secret("ANTHROPIC_API_KEY")
+    assert os.environ.get("ANTHROPIC_API_KEY") is None, (
+        "clear_secret left the revoked key live in os.environ"
+    )
+
+
+def test_a_short_key_is_not_returned_in_full_as_its_own_hint():
+    """
+    A9 — `hint` is `live[-4:]` guarded by `len(live) >= 4`, so a 4-character
+    key was returned IN FULL as the "non-reversible" hint, and that hint
+    reaches an HTTP response.
+    """
+    from services import app_secrets
+
+    app_secrets.set_secret("PYPSA_GUI_LLM_KEY__SHORT", "abcd")
+    hint = app_secrets.status("PYPSA_GUI_LLM_KEY__SHORT")["hint"]
+    assert hint != "…abcd", "the whole key was returned as its own hint"
+    assert hint is None or "abcd" not in hint
