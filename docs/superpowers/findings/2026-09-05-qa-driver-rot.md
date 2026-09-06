@@ -269,11 +269,37 @@ line — no server, no session, or no such project — instead of twenty-two
 identical `Connection refused` entries, and `PYPSA_GUI_QA_COOKIE` lets an
 operator hand it a session cookie.
 
-## What is still open
+## Closed: CI runs them now, without reversing `pytest.ini`
 
-Option 3 — converting these to pytest tests, so they run in the
-`gui-backend-tests` CI job — is still open and still contradicts the explicit
-decision in `pytest.ini`. It is a smaller job than it was: the drivers now share
-one sandbox with the suite, so the conversion is mostly mechanical. But nothing
-runs them automatically, which means the rot this document describes can start
-over the moment someone stops typing the command by hand.
+The last paragraph of this section used to read "nothing runs them
+automatically, which means the rot this document describes can start over the
+moment someone stops typing the command by hand." That was the real problem —
+bigger than any individual driver being broken — and it is fixed.
+
+Option 3 as originally framed (convert them to pytest tests) is still NOT taken,
+because the decision recorded in `pytest.ini` is a reasonable one: these are
+PASS/FAIL scripts, not pytest functions. What was wrong was never that decision;
+it was that the decision had no counterpart. It has one now:
+
+* `tests/run_qa_drivers.py` runs all eighteen runnable drivers as subprocesses
+  and fails if any exits non-zero. **~2 minutes** for the set.
+* `pixi run gui-qa-drivers` invokes it, from `[feature.test.tasks]` — same
+  placement, and the same reason, as `gui-tests`.
+* The `gui-backend-tests` CI job runs that task after the pytest step.
+
+Skipping is explicit and checked. `_EXCLUDED` in the runner is the only escape,
+every entry states its reason, and both the runner and a collected test fail if
+an entry names a file that no longer exists. New drivers are picked up by glob,
+so adding one requires no registration — only removing one from coverage takes a
+deliberate act.
+
+`tests/test_qa_driver_coverage.py` guards the arrangement itself, and is a
+normal collected test so CI runs it: the skip list is not stale, every exclusion
+has a real reason, `pytest.ini` still collects `test_*.py` alone, the pixi task
+is still under `[feature.test.tasks]` with the right `cwd`, and the CI job still
+calls it. All five checks were verified by mutation — and the mutation run
+earned its keep: the `pytest.ini` check was passing **vacuously**, because that
+file names `python_files = test_*.py` in a comment as well as in the setting and
+a substring search matched the comment. It reads the parsed setting now.
+
+`qa_phase4_compare` remains the one excluded driver, for the reason above.
