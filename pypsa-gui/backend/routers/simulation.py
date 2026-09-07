@@ -379,8 +379,8 @@ def preflight():
     def _deferred_payload() -> dict:
         """The answer this route gives when a solver worker is alive.
 
-        Factored out because it is now returned from TWO places: the guard
-        below, and the re-check AFTER validation — see the note there.
+        Factored out because it is returned from two of the three gates
+        below: the worker check, and the non-blocking lock acquire.
         """
         # Two distinct stuck states map to different remediation:
         #   * status == "running"  — solve genuinely in progress; wait.
@@ -417,32 +417,54 @@ def preflight():
             "deferred_stuck": current_status == "aborted",
         }
 
+    # Three gates, because three different things mutate the foreground
+    # network and no single check sees them all.
+    #
+    # 1. A solver worker. The pre-existing guard, kept first because it is
+    #    the one that can tell a stuck abort from a running solve.
     if _solver_in_flight():
         return _deferred_payload()
-    n = PyPSAService.get_network()
-    config = _state["solver_config"]
-    issues = validate_for_run(n, config)
-    # The guard above is a CHECK, and validation is the ACT: a solve that
-    # starts in between applies its transforms — vintage rows, slack
-    # generators, and the in-place demand scaling — under a route that
-    # deliberately does not take the mutation lock (so a long solve returns
-    # `deferred` instead of blocking the UI for minutes).
+    # 2. An adequacy study. The frontier, the sweep, the stress scenarios and
+    #    the loops mutate the foreground network BETWEEN their own solves,
+    #    with no lock held (`sweep.py`'s `c["mutate"](network)`), so neither
+    #    the worker check nor the lock below can see them. `/run` already
+    #    refuses on this; preflight did not, and answered from a network a
+    #    study was mid-way through rewriting (shipped-code review of 5e32f02,
+    #    finding 2: a live sweep, `_solver_in_flight()` False, and a
+    #    `reserve_margin_unreachable` invented from study-scaled demand).
+    _study = _study_state.blocking_study_detail()
+    if _study:
+        return {
+            "ok": True, "errors": 0, "warnings": 0, "issues": [],
+            "deferred": True, "deferred_reason": _study,
+            "deferred_stuck": False,
+        }
+    # 3. The mutation lock, held for the validation span and taken WITHOUT
+    #    blocking. This is what actually closes the check-then-act window:
+    #    a solve that begins after gate 1 cannot mutate until we release,
+    #    and a solve already holding the lock makes us return `deferred`
+    #    instantly rather than block the UI for its whole duration — the
+    #    reason this route never took the lock before. `lock_status` uses
+    #    the same idiom. A `/run` arriving mid-validation waits for one
+    #    validation (~80 ms measured), not the other way round.
     #
-    # The window cannot corrupt anything: `lp_demand_frame` deep-copies
-    # before scaling, so every consumer here is read-only on the live frame
-    # (12c-0 shipped-code review, finding 2). What it CAN do is answer from a
-    # half-transformed network — most visibly by scaling an already-scaled
-    # demand, which is not idempotent (measured x1.25^2, 12c v3 review,
-    # finding 6) and can invent a `reserve_margin_unreachable` that is not
-    # true of the user's network.
-    #
-    # So re-check, and prefer the answer this route already has for exactly
-    # this state. Advice computed against transient LP scaffolding is worse
-    # than "deferred — click Revalidate", which is what the user would have
-    # got had the solve started one millisecond earlier (12c v3 review,
-    # finding 6, recorded then as backlog).
-    if _solver_in_flight():
+    #    An earlier fix (5e32f02) re-checked gate 1 AFTER validating instead.
+    #    That only narrows the window: a worker whose whole transient fits
+    #    inside the validation span starts after the guard, restores, and
+    #    exits before the re-check — measured at 24 of 27 non-deferred
+    #    answers wrong on a harness with a 40 ms transient against an 80 ms
+    #    validation. `/run` survived it only because `run_simulation`
+    #    happens to validate under the lock before mutating; the AC-PF
+    #    worker does not.
+    lock = PyPSAService.get_lock()
+    if not lock.acquire(blocking=False):
         return _deferred_payload()
+    try:
+        n = PyPSAService.get_network()
+        config = _state["solver_config"]
+        issues = validate_for_run(n, config)
+    finally:
+        lock.release()
     return {
         "ok": not has_errors(issues),
         "errors": sum(1 for i in issues if i.severity == "error"),
