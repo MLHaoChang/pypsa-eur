@@ -78,6 +78,18 @@ class Project(Base):
     # than break the row. `_SCENARIO_TYPES` in routers/projects.py is the
     # validating edge.
     scenario_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # What KIND of study this project is: 'capacity_expansion' (the existing
+    # flow), 'planning_dynamics' (gridspine), or 'connection' (later). NULL
+    # means capacity_expansion — every project that existed before migration
+    # 0006 is one, and backfilling a literal would only invent a distinction
+    # between "chose the default" and "predates the column".
+    #
+    # A plain string for `scenario_type`'s reason: the set is presentational
+    # and will grow, an unknown value must degrade to the default rather than
+    # break the row, and `services/gridspine_service.PROJECT_KINDS` is the
+    # validating edge. Orthogonal to `scenario_type`: a planning → dynamics
+    # project can still be a baseline or a stress scenario.
+    project_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 

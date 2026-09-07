@@ -52,6 +52,16 @@ NOT_SHIPPED = {"tests", "smoke"}
 # reviewing. A guarded import missing from this map fails the test: adding an
 # optional dependency should be a decision someone wrote down, not a default.
 OPTIONAL_AT_RUNTIME = {
+    "gridspine": (
+        "gridspine_service catches ImportError and every action answers 503 "
+        "`planning → dynamics not available in this build`. It is a SIBLING "
+        "PACKAGE in this repository, not a PyPI distribution, so it can never "
+        "be pinned here — the frozen app would have to bundle the repo-root "
+        "`gridspine/` package AND its engines (pandapower, lightsim2grid, "
+        "highspy), which the pip venv does not carry. Until that is a "
+        "deliberate build decision (increment-4 plan, D5) the desktop app "
+        "ships without the planning pipeline and says so."
+    ),
     "tsam": (
         "time_aggregation_service catches ImportError and falls back to the "
         "full period. Correct result, slower solve — but the fallback is "

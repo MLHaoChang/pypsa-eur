@@ -1,0 +1,292 @@
+"""The gridspine action layer — the ONE set of functions the router and the
+copilot both call (increment 4, task 3).
+
+The spec's parity rule is structural, not disciplinary: "every study operation
+is a backend function first; UI endpoints and chat tools are both thin
+wrappers". These tests hold that seam from the service side — every function
+works with no request, no `Depends`, no HTTP — so a later router or chat tool
+can only be a wrapper, never a second implementation.
+
+THE KIND CHECK IS THE FIRST ASSERTION OF EVERY ACTION. A capacity-expansion
+project reaching a gridspine function is a bug in the caller, and it must
+fail loudly rather than write a `gridspine/` directory into an unrelated
+project.
+
+Runtime: one real 24-hour study with screening on (the only test here that
+solves — ~20 s), reused by every read-side test. Everything else is metadata.
+"""
+import json
+import shutil
+import uuid
+
+import pytest
+from fastapi import HTTPException
+
+from db.models import Project, User
+from services import gridspine_service as gs
+from services import project_registry
+
+
+@pytest.fixture
+def user_and_db(_auth_db, seeded_identity):
+    _engine, session_local = _auth_db
+    with session_local() as db:
+        yield db, db.get(User, seeded_identity["user_id"])
+
+
+@pytest.fixture
+def study(user_and_db):
+    db, user = user_and_db
+    return gs.create_study(db, user, "Gridspine Study", config={"hours": 24, "k": 1, "window": 24, "overlap": 0})
+
+
+@pytest.fixture
+def plain_project(user_and_db):
+    db, user = user_and_db
+    return project_registry.create_root(db, user, "Capacity Project")
+
+
+#: One real study, solved once and copied into each test's fresh project.
+#: The project ROWS cannot be shared — `_reset_tenant_tables` truncates
+#: `projects` after every test — but the artifacts can, and they are the
+#: expensive half. That the copy works at all is the point of task 2: a study
+#: directory is readable with no reference to the run that produced it.
+_RUN_CACHE = {}
+
+
+@pytest.fixture
+def ran(user_and_db, tmp_path_factory):
+    db, user = user_and_db
+    project = gs.create_study(
+        db, user, "Gridspine Ran",
+        config={"hours": 24, "k": 1, "window": 24, "overlap": 0},
+    )
+    row = db.get(Project, uuid.UUID(project["id"]))
+    target = gs.gridspine_dir(row)
+    if "dir" not in _RUN_CACHE:
+        gs.run_pipeline(db, row)
+        cache = tmp_path_factory.mktemp("gridspine_cache") / "gridspine"
+        shutil.copytree(target, cache)
+        _RUN_CACHE["dir"] = cache
+    else:
+        shutil.copytree(_RUN_CACHE["dir"], target, dirs_exist_ok=True)
+    return db, row
+
+
+# --------------------------------------------------------------------------
+# create / kind
+# --------------------------------------------------------------------------
+
+def test_create_study_makes_a_planning_project_carrying_its_config(study, user_and_db):
+    db, _user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    assert row is not None
+    assert row.project_kind == gs.PLANNING_DYNAMICS
+    assert study["kind"] == gs.PLANNING_DYNAMICS
+    config = json.loads((gs.gridspine_dir(row) / "config.json").read_text())
+    assert (config["hours"], config["k"], config["window"], config["overlap"]) == (24, 1, 24, 0)
+    assert config["outdir"] == str(gs.gridspine_dir(row) / "run")
+
+
+def test_a_new_study_reports_not_started(study, user_and_db):
+    db, _user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    status = gs.get_stage_status(row)
+    assert status["status"] == "not started"
+    assert all(s["state"] == "pending" for s in status["stages"].values())
+
+
+def test_an_ordinary_project_defaults_to_capacity_expansion(plain_project):
+    assert plain_project.project_kind is None
+    assert gs.kind_of(plain_project) == gs.CAPACITY_EXPANSION
+
+
+@pytest.mark.parametrize("action", [
+    lambda db, p: gs.run_pipeline(db, p),
+    lambda db, p: gs.get_stage_status(p),
+    lambda db, p: gs.list_ranked_snapshots(p),
+    lambda db, p: gs.get_assumption_ledger(p),
+    lambda db, p: gs.export_handoff_bundle(p, 0),
+    lambda db, p: gs.set_dispatch_source(db, p, "generate"),
+    lambda db, p: gs.edit_template_param(p, "G_BUS_32", "h_s", 4.0, "datasheet", "user"),
+])
+def test_every_action_refuses_a_project_of_the_wrong_kind(plain_project, user_and_db, action):
+    db, _user = user_and_db
+    with pytest.raises(HTTPException) as exc:
+        action(db, plain_project)
+    assert exc.value.status_code == 409
+    assert "planning" in str(exc.value.detail).lower()
+    assert not (project_registry.project_dir(plain_project) / "gridspine").exists()
+
+
+def test_the_config_is_validated_at_creation_not_at_run_time(user_and_db):
+    db, user = user_and_db
+    with pytest.raises(HTTPException) as exc:
+        gs.create_study(db, user, "Bad Config", config={"hours": 0})
+    assert exc.value.status_code == 422
+    from sqlalchemy import select
+    assert db.scalar(select(Project).where(Project.name == "Bad Config")) is None
+
+
+# --------------------------------------------------------------------------
+# dispatch source
+# --------------------------------------------------------------------------
+
+def test_set_dispatch_source_switches_between_generating_and_resuming(study, user_and_db, ran):
+    db, _user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    _ran_db, ran_row = ran
+    src = gs.gridspine_dir(ran_row) / "run"
+
+    updated = gs.set_dispatch_source(db, row, {"from_dispatch": str(src)})
+    assert updated["from_dispatch"] == str(src)
+    assert json.loads((gs.gridspine_dir(row) / "config.json").read_text())["from_dispatch"] == str(src)
+
+    back = gs.set_dispatch_source(db, row, "generate")
+    assert back["from_dispatch"] is None
+
+
+def test_a_dispatch_source_without_a_dispatch_is_refused(study, user_and_db, tmp_path):
+    db, _user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    with pytest.raises(HTTPException) as exc:
+        gs.set_dispatch_source(db, row, {"from_dispatch": str(tmp_path)})
+    assert exc.value.status_code == 422
+    assert "dispatch.csv" in str(exc.value.detail)
+
+
+# --------------------------------------------------------------------------
+# run / read
+# --------------------------------------------------------------------------
+
+def test_a_finished_run_reports_done_at_every_stage(ran):
+    _db, row = ran
+    status = gs.get_stage_status(row)
+    assert status["status"] == "completed"
+    assert {s["state"] for s in status["stages"].values()} == {"done"}
+    assert status["selected_hours"]
+
+
+def test_ranked_snapshots_come_back_as_rows_with_reasons_and_metrics(ran):
+    _db, row = ran
+    rows = gs.list_ranked_snapshots(row)
+    assert rows and isinstance(rows, list)
+    first = rows[0]
+    assert set(first) >= {"hour", "reasons", "converged", "n1_severity_ac", "load_mw"}
+    assert isinstance(first["reasons"], list) and first["reasons"]
+    assert json.dumps(rows)          # the router and the chat tool both serialise this
+
+
+def test_the_ledger_comes_back_as_data_with_provenance_counts(ran):
+    _db, row = ran
+    ledger = gs.get_assumption_ledger(row)
+    assert set(ledger["provenance_counts"]) == {"measured", "datasheet", "assumed"}
+    assert sum(ledger["provenance_counts"].values()) > 0
+    assert any("assumed" in e for e in ledger["entries"])
+    assert ledger["edits"] == []
+
+
+def test_export_writes_a_zip_holding_the_whole_bundle(ran, tmp_path):
+    import zipfile
+
+    from gridspine.handoff.bundle import BUNDLE_FILES
+
+    _db, row = ran
+    hour = gs.get_stage_status(row)["selected_hours"][0]
+    path = gs.export_handoff_bundle(row, hour)
+    assert path.suffix == ".zip"
+    names = zipfile.ZipFile(path).namelist()
+    for required in BUNDLE_FILES:
+        assert any(n.endswith(required) for n in names), required
+    assert any(n.endswith(".raw") for n in names) and any(n.endswith(".dyr") for n in names)
+
+
+def test_exporting_an_hour_that_was_not_selected_is_a_404(ran):
+    _db, row = ran
+    with pytest.raises(HTTPException) as exc:
+        gs.export_handoff_bundle(row, 4242)
+    assert exc.value.status_code == 404
+
+
+def test_result_figures_are_typed_as_not_available_until_read_back_exists(ran):
+    _db, row = ran
+    answer = gs.fetch_result_figure(row, "voltage_profile")
+    assert answer["available"] is False
+    assert "read-back" in answer["reason"].lower() or "readback" in answer["reason"].lower()
+
+
+# --------------------------------------------------------------------------
+# template edits — the ledger provenance the spec asks for
+# --------------------------------------------------------------------------
+
+def test_a_template_edit_is_recorded_with_who_made_it(study, user_and_db):
+    db, _user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    gs.edit_template_param(row, "G_BUS_32", "h_s", 4.2, "datasheet", "chat")
+    overlay = json.loads((gs.gridspine_dir(row) / "templates_overlay.json").read_text())
+    entry = overlay["G_BUS_32"]["h_s"]
+    assert entry["value"] == 4.2
+    assert entry["source"] == "datasheet"
+    assert entry["edited_by"] == "chat"
+    assert entry["at"]
+
+
+def test_an_edit_reaches_the_templates_and_the_ledger(study, user_and_db):
+    from gridspine.templates.unit_params import load_unit_templates
+
+    db, _user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    def _cell(templates, column):
+        rows = templates.params
+        hit = rows[(rows["unit_id"] == "G_BUS_32") & (rows["param"] == "h_s")]
+        assert len(hit) == 1
+        return hit.iloc[0][column]
+
+    before = load_unit_templates()
+    gs.edit_template_param(row, "G_BUS_32", "h_s", 4.2, "datasheet", "user")
+    after = load_unit_templates(overlay=gs.overlay_path(row))
+    assert _cell(before, "value") != 4.2
+    assert _cell(after, "value") == 4.2
+    assert _cell(after, "source") == "datasheet"
+    edits = gs.get_assumption_ledger(row)["edits"]
+    assert edits and edits[0]["unit_id"] == "G_BUS_32" and edits[0]["edited_by"] == "user"
+
+
+@pytest.mark.parametrize("bad", [
+    ("NO_SUCH_UNIT", "h_s", 4.0, "datasheet", "user"),
+    ("G_BUS_32", "no_such_param", 4.0, "datasheet", "user"),
+    ("G_BUS_32", "h_s", 4.0, "invented", "user"),
+    ("G_BUS_32", "h_s", 4.0, "datasheet", "someone_else"),
+    ("G_BUS_32", "h_s", "not a number", "datasheet", "user"),
+])
+def test_a_nonsense_edit_is_refused_and_writes_no_overlay(study, user_and_db, bad):
+    db, _user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    with pytest.raises(HTTPException) as exc:
+        gs.edit_template_param(row, *bad)
+    assert exc.value.status_code in (404, 422)
+    assert not gs.overlay_path(row).exists()
+
+
+# --------------------------------------------------------------------------
+# the cage, both directions
+# --------------------------------------------------------------------------
+
+def test_the_service_touches_only_the_driver_and_schema_layers_of_gridspine():
+    """`drivers/` is the only surface the backend calls (spec, "One tool")."""
+    import ast
+    import pathlib
+
+    src = pathlib.Path(gs.__file__).read_text()
+    tree = ast.parse(src)
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("gridspine"):
+            imported.add(node.module)
+        elif isinstance(node, ast.Import):
+            imported.update(a.name for a in node.names if a.name.startswith("gridspine"))
+    assert imported, "the service is supposed to call gridspine"
+    for module in imported:
+        assert module.startswith(("gridspine.drivers", "gridspine.schema", "gridspine.templates")), module
+    for banned in ("gridspine.static", "gridspine.producers", "gridspine.handoff", "gridspine.ingest"):
+        assert banned not in imported, banned

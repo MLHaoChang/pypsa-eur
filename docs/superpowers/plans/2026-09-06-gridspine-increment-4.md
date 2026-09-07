@@ -1,6 +1,6 @@
 # gridspine Increment 4 Implementation Plan — Action Layer, GUI Wiring, Chat Tools
 
-> **Status 2026-09-06: PLAN, nothing landed. Written from the spec's phase-3 remainder ("action layer; GUI wiring; chat tools"), the increment-3 handoff (§4 API, rulings 14–32) and a read of the pypsa-gui backend as it stands on `master`. Two things gate the start: the owner's answers in §Decisions below, and PR #6 (backend god-file decomposition), which is rewriting the two files this increment must touch.**
+> **Status 2026-09-07: tasks 1–3 landed. D1–D4 answered as recommended (the owner asked to proceed); D5 is NEW and open.** Tasks 4–7 remain. **The sequencing premise below was wrong and is corrected:** PR #6 decomposes `solver_service.py`, the results/compare routers, `conftest.py` and `pixi.toml` — it does **not** touch `solve_queue.py`, `chat_tools*.py`, `db/models.py` or `routers/projects.py`, so tasks 4 and 6 are not blocked by it. Checked against the PR's own file list rather than assumed; the earlier claim was an assumption written as a fact.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -18,7 +18,7 @@
 The spec's sketch and the code differ in three places that shape every task below.
 
 1. **There is no action layer today.** Chat tools call the FastAPI route handlers *directly as Python functions* (`services/chat_tools.py::_route(handler, ...)` resolves `Depends` by signature; every wrapper does a function-local `from routers.x import handler as _h`). A minority call a service helper and are tagged `_service_call_` in `TOOL_ROUTES`. So "parity is structural" is already the house style, but with the route as the shared callee, not a service function. This increment introduces the service-function pattern for gridspine only and leaves the rest alone.
-2. **The queue runs one kind of job.** `services/solve_queue.py::SolveQueue._run_job` builds a `ProjectContext` and calls `services/solver_service.py::run_simulation(config, network, lock, stop_event, log_queue, state_update)`. `SolveJob` has `stop_event`, `log_queue`, `status ∈ queued|running|completed|failed|aborted|interrupted`, persistence via `services/solve_job_store.py` and `db/models.py::SolveJobRow`, HTTP at `/api/simulation/queue`, SSE log stream. A gridspine run needs the queue to accept a second job kind (Task 4). **PR #6 decomposes `solver_service.py`/`solve_queue.py`; do not touch them until it merges.**
+2. **The queue runs one kind of job.** `services/solve_queue.py::SolveQueue._run_job` builds a `ProjectContext` and calls `services/solver_service.py::run_simulation(config, network, lock, stop_event, log_queue, state_update)`. `SolveJob` has `stop_event`, `log_queue`, `status ∈ queued|running|completed|failed|aborted|interrupted`, persistence via `services/solve_job_store.py` and `db/models.py::SolveJobRow`, HTTP at `/api/simulation/queue`, SSE log stream. A gridspine run needs the queue to accept a second job kind (Task 4). PR #6 decomposes `solver_service.py` but NOT `solve_queue.py`; task 4 adds the job kind to the queue and never touches the solver service.
 3. **"Study" does not exist; "Project" does.** `db/models.py::Project` with `scenario_type ∈ baseline|scenario|stress|NULL`, a per-project directory (`services/storage_paths.py`, `project_registry.project_dir`) holding `network.nc`, `solver_config.json`, `results_state.pkl`, `metadata.json`, `chat.jsonl`, `uploads/`, snapshots. The spec's "new study → pick type" becomes "new Project of kind planning→dynamics", with gridspine's file artifacts in a `gridspine/` subdirectory of the project directory — a kind, not a new table (§Decisions, D1).
 
 Also: `gridspine` is referenced nowhere in `pypsa-gui` (clean seam), the copilot sends `list(TOOLS)` in full every turn (no per-context subsetting — the spec's "toolset matching the open study" needs a gate, Task 6), safety tiers are a `Safety: <tier>` marker parsed from the description text, and `len(TOOLS) == len(DISPATCHERS)` plus the `_h` AST scan are enforced by tests.
@@ -27,46 +27,50 @@ Also: `gridspine` is referenced nowhere in `pypsa-gui` (clean seam), the copilot
 
 - gridspine side: ALL commands via `pixi run …`; gate `pixi run gridspine-tests` (502 passed, 2 skipped at `335ca911`); TDD with RED/GREEN evidence; a mutation per task; path-limited commits; the engine cage (`pypsa` only under `producers/`; `pandapower`/`lightsim2grid` only under `ingest/`, `static/`, `handoff/`). **`drivers/` must not import anything from `pypsa-gui`**, and `pypsa-gui` imports only `gridspine.drivers` and `gridspine.schema` (never `static/`, `producers/`, `handoff/` internals) — a cage test on both sides.
 - backend side: `pixi run gui-tests` (the `test` feature environment; `tests/test_desktop_environment.py` asserts the task placement) green before every commit; chat-tool changes need the live API probe (ADR 0002) recorded in the task report; every new tool has a `Safety:` tier, a `TOOL_ROUTES` row and a `DISPATCHERS` entry; the `_h` alias convention.
-- **Sequencing against PR #6:** Tasks 1–3 touch only new files and gridspine; Task 4 (queue) and Task 6 (chat tools) touch files #6 rewrites. Land 1–3 on a branch off `master` now; rebase for 4–7 after #6 merges. Do not open a second decomposition.
+- **Sequencing against PR #6 (corrected 2026-09-07):** #6 touches `services/solver_service.py`, `services/solver/*`, `services/results/*`, `services/compare/*`, `routers/{results,compare,network}.py`, `tests/conftest.py`, `pixi.toml` and the workflow. Tasks 4 and 6 touch `solve_queue.py` and `chat_tools*.py`, which #6 does NOT touch, so they are unblocked; avoid `solver_service.py`, the results/compare routers, `conftest.py` and `pixi.toml` until it merges. Do not open a second decomposition.
 - No frontend change before Task 5's backend contract is committed and its tests green; the frontend task is one path-limited commit under `pypsa-gui/frontend` only.
 - Runtime discipline: no backend test runs a unit commitment longer than 48 h or AC screening on more than one hour; the driver tests already own the long fixtures.
 
-## Decisions the owner must make before Task 4 (ask; do not resolve inside a task)
+## Decisions — D1–D4 taken 2026-09-07, D5 new and open
 
-- **D1 — Project kind.** Add `project_kind ∈ {capacity_expansion (default), planning_dynamics, connection}` as a column beside `scenario_type` (alembic migration, `Project` model, `routers/projects.py` validation), or store the kind only in `metadata.json`? Recommendation: a column — the router and the copilot need to filter on it, and `scenario_type` set the precedent. Vocabulary stays "Project"; the UI label may say "Planning → dynamics study" (CONTEXT.md governs identifiers, not labels).
-- **D2 — Queue generalisation.** Give `SolveJob` a `kind` and a `runner` (a callable taking `stop_event`, `log_queue`, `progress`) so `_run_job` dispatches on kind, or add a second, smaller queue class for gridspine? Recommendation: one queue, one dispatcher thread, `kind` field — the spec's "no second job system" is explicit, and abort/status/SSE come for free. This is the change that must wait for PR #6.
-- **D3 — Where the dispatch comes from in a planning project.** The spec's variant 1 generates the dispatch with PyPSA nodal UC (what `dispatch_year` does on case39). In the app, a project already holds a PyPSA network (`network.nc`). Increment 4 keeps the case39 driver path (network from `load_case39_res`) and exposes `from_dispatch` (F3) as the second source; wiring a project's own `network.nc` through `producers/pypsa_nodal.to_pypsa` is its own increment (ingest of a real grid is spec phase 4).
-- **D4 — Template edits.** `edit_template_param` writes a project-local overlay (`gridspine/templates_overlay.yaml`) with per-field `{value, source, edited_by: user|chat, at}`; the base YAML in `gridspine/templates/data` is never written by the app. Confirm.
+The owner said to proceed, so each was taken as the plan recommended. They are decisions of record now, not open questions; a different answer is a change, not a correction.
+
+- **D1 — Project kind: TAKEN, a column.** `Project.project_kind` (`String(32)`, nullable, migration `0006_project_kind`) with `capacity_expansion | planning_dynamics | connection`; NULL resolves to `capacity_expansion`, so no backfill and no existing write path learns a new field. Orthogonal to `scenario_type`. The vocabulary stays **Project** (CONTEXT.md); "study" is the UI label only.
+- **D2 — Queue: TAKEN, one queue with a job kind.** Task 4 gives `SolveJob` a `kind` and dispatches the runner on it. Unblocked: `solve_queue.py` is not in PR #6.
+- **D3 — Dispatch source: TAKEN as scoped.** `"generate"` (case39 + rolling UC) or `{"from_dispatch": dir}` (F3). A project's own `network.nc` is a later increment (spec phase 4 ingest).
+- **D4 — Template edits: TAKEN, a per-project overlay** at `gridspine/templates_overlay.json` — **JSON, not YAML** as the plan first wrote it: the service already writes `config.json`, and one serialisation in the project directory beats two. `{unit_id: {param: {value, source, edited_by, at}}}`; `load_unit_templates(overlay=…)` applies it through the same physics checks, and the shipped library is never written.
+- **D5 — NEW, open: how does the backend import `gridspine`?** This repository packages nothing: `pixi run gridspine-tests` works only because it runs from the root, and the backend runs from `pypsa-gui/backend`, where `import gridspine` fails. Task 3 inserts the repo root into `sys.path` in `services/gridspine_service.py` — explicit, one place, loudly commented, and **a stopgap**. The real answer is a `pyproject.toml` for gridspine and an editable install, which touches `pixi.toml` and the lockfile (and PR #6 touches `pixi.toml`, so it should land after). Until then the desktop build has to reproduce that path or the service will not import.
 
 ---
+
 
 ## Task 1 — `drivers/study.py`: a job-shaped entry with progress and abort
 
 **Files:** `gridspine/drivers/study.py` (new), `gridspine/drivers/year_study.py` (progress/stop hooks only), `tests/gridspine/test_study_job.py` (new).
 
-- [ ] `StudyConfig` (frozen dataclass; validated): `outdir`, `hours=8760`, `k=5`, `window=168`, `overlap=24`, `screen=True`, `n2_prune_threshold_pct=0.0`, `from_dispatch: Path|None`. `to_json`/`from_json` (the backend stores it in the project directory).
-- [ ] `run_study(config, progress=None, stop_event=None) -> StudyResult`. `progress(stage: str, done: int, total: int)` is called at every stage boundary and inside the two loops that take time: per rolling window (`run_uc_rolling` gains an optional callback — `producers/` change, cage-safe) and per selected hour in `study_dispatch`. `stop_event.is_set()` is polled at the same points; an abort raises `StudyAborted` after writing a `StageError(stage=..., cause="aborted")` artifact, so the UI renders it like any failure and `resume_from_dispatch` can pick up a finished dispatch.
-- [ ] Manifest gains `"config": config.to_json()` and `"status": completed|aborted`.
-- [ ] Tests (48 h / 24 h windows, k=1, the F3 fixture size): the progress sequence is exactly `ingest, dispatch×windows, ranking, loadflow×selected, screening×selected, handoff×selected` with monotone `done`; a stop set before the second window aborts with the artifact written and `dispatch.csv` absent; a stop set after the dispatch aborts in `loadflow` and the run resumes with `from_dispatch` to the same selection as an unaborted run; `StudyConfig.from_json(to_json(c)) == c`; an invalid config is a `ContractError` before anything is written.
-- [ ] Mutation: drop the stop poll inside the window loop → the first abort test red.
+- [x] `StudyConfig` (frozen dataclass; validated): `outdir`, `hours=8760`, `k=5`, `window=168`, `overlap=24`, `screen=True`, `n2_prune_threshold_pct=0.0`, `from_dispatch: Path|None`. `to_json`/`from_json` (the backend stores it in the project directory).
+- [x] `run_study(config, progress=None, stop_event=None) -> StudyResult`. `progress(stage: str, done: int, total: int)` is called at every stage boundary and inside the two loops that take time: per rolling window (`run_uc_rolling` gains an optional callback — `producers/` change, cage-safe) and per selected hour in `study_dispatch`. `stop_event.is_set()` is polled at the same points; an abort raises `StudyAborted` after writing a `StageError(stage=..., cause="aborted")` artifact, so the UI renders it like any failure and `resume_from_dispatch` can pick up a finished dispatch.
+- [x] Manifest gains `"config": config.to_json()` and `"status": completed|aborted`.
+- [x] Tests (48 h / 24 h windows, k=1, the F3 fixture size): the progress sequence is exactly `ingest, dispatch×windows, ranking, loadflow×selected, screening×selected, handoff×selected` with monotone `done`; a stop set before the second window aborts with the artifact written and `dispatch.csv` absent; a stop set after the dispatch aborts in `loadflow` and the run resumes with `from_dispatch` to the same selection as an unaborted run; `StudyConfig.from_json(to_json(c)) == c`; an invalid config is a `ContractError` before anything is written.
+- [x] Mutation: drop the stop poll inside the window loop → the first abort test red.
 - [ ] Gate, path-limited commit.
 
 ## Task 2 — Stage status from artifacts, and the ledger as data
 
 **Files:** `gridspine/drivers/status.py` (new), `gridspine/handoff/bundle.py` (a `ledger.json` beside `ledger.md`), `tests/gridspine/test_study_status.py` (new).
 
-- [ ] `stage_status(outdir) -> dict`: for each of `STAGES`, `pending|running|done|failed|aborted` derived ONLY from files — `loads.csv`, `dispatch.csv`, `metrics.csv`, `selected.csv`, `lf_*_bus.csv`, `bundle_h*/`, `manifest.json`, the `StageError` artifact — plus `selected_hours`, `converged_hours`, `bundles`. No process state: the queue's status and this must agree by construction, and a restarted backend reads the same answer.
-- [ ] `ranked_snapshots(outdir) -> DataFrame`: `selected.csv` joined to `metrics.csv` (every ranked column, converged flag, reasons as a list) — the table `list_ranked_snapshots` returns.
-- [ ] `ledger.json` written by `export_bundle` with the same entries as `ledger.md` plus `provenance_counts` — the copilot's `get_assumption_ledger` returns data, not a Markdown blob.
-- [ ] Tests on the F3 fixture's output directory: status after a complete run; after deleting `manifest.json` (handoff `running`); with a `StageError` present (`failed` at that stage, later stages `pending`); `ranked_snapshots` columns and reasons equal `selected.csv`/`metrics.csv`; `ledger.json` entries == `ledger.md` entries.
-- [ ] Mutation: `stage_status` ignores the `StageError` artifact → the failed-stage test red.
+- [x] `stage_status(outdir) -> dict`: for each of `STAGES`, `pending|running|done|failed|aborted` derived ONLY from files — `loads.csv`, `dispatch.csv`, `metrics.csv`, `selected.csv`, `lf_*_bus.csv`, `bundle_h*/`, `manifest.json`, the `StageError` artifact — plus `selected_hours`, `converged_hours`, `bundles`. No process state: the queue's status and this must agree by construction, and a restarted backend reads the same answer.
+- [x] `ranked_snapshots(outdir) -> DataFrame`: `selected.csv` joined to `metrics.csv` (every ranked column, converged flag, reasons as a list) — the table `list_ranked_snapshots` returns.
+- [x] `ledger.json` written by `export_bundle` with the same entries as `ledger.md` plus `provenance_counts` — the copilot's `get_assumption_ledger` returns data, not a Markdown blob.
+- [x] Tests on the F3 fixture's output directory: status after a complete run; after deleting `manifest.json` (handoff `running`); with a `StageError` present (`failed` at that stage, later stages `pending`); `ranked_snapshots` columns and reasons equal `selected.csv`/`metrics.csv`; `ledger.json` entries == `ledger.md` entries.
+- [x] Mutation: `stage_status` ignores the `StageError` artifact → the failed-stage test red.
 - [ ] Gate, path-limited commit.
 
 ## Task 3 — The action layer: `pypsa-gui/backend/services/gridspine_service.py`
 
 **Files:** `pypsa-gui/backend/services/gridspine_service.py` (new), `pypsa-gui/backend/tests/test_gridspine_service.py` (new). Depends on D1, D3, D4 for shapes; buildable before PR #6 (no queue yet: `run_pipeline` runs synchronously in this task, queued in Task 4).
 
-- [ ] Functions, all plain Python, all taking `(db, project, ...)` and returning JSON-able dicts — the same functions the router AND the chat tools will call:
+- [x] Functions, all plain Python, all taking `(db, project, ...)` and returning JSON-able dicts — the same functions the router AND the chat tools will call:
   `create_study(db, user, name, kind, config) -> project` (a Project of kind `planning_dynamics`, directory created, `gridspine/config.json` written);
   `set_dispatch_source(db, project, source: "generate"|{"from_dispatch": path})`;
   `run_pipeline(db, project) -> job` (Task 3: synchronous `run_study`; Task 4: enqueued);
@@ -76,10 +80,10 @@ Also: `gridspine` is referenced nowhere in `pypsa-gui` (clean seam), the copilot
   `edit_template_param(db, project, unit_id, field, value, source, edited_by)` (overlay, D4);
   `export_handoff_bundle(project, hour) -> Path` (zip of `bundle_h<hour>/`);
   `fetch_result_figure` — **not in this increment** (read-back is spec phase 4); the function exists and returns a typed "not available" so the tool surface is complete.
-- [ ] Every function validates the project's kind and refuses the wrong kind with the same error type the routers use.
-- [ ] Cage test: `gridspine_service.py` imports only `gridspine.drivers.*` and `gridspine.schema.*`; and `gridspine/` imports nothing from `pypsa-gui` (`tests/gridspine/test_contracts.py` gains the reverse check).
-- [ ] Tests (backend, `pixi run gui-tests`): create → status pending; run (48 h, k=1, screening off — the only backend test that solves) → status done, ranked snapshots non-empty, export writes a zip whose members are `BUNDLE_FILES`; edit_template_param writes the overlay with `edited_by`, re-read through `load_unit_templates(overlay=...)`, the ledger's provenance counts change; wrong project kind refused; a `StageError` from a broken config surfaces as the status's `failed` stage.
-- [ ] Mutation: `edit_template_param` drops `edited_by` → the overlay/ledger test red.
+- [x] Every function validates the project's kind and refuses the wrong kind with the same error type the routers use.
+- [x] Cage test: `gridspine_service.py` imports only `gridspine.drivers.*` and `gridspine.schema.*`; and `gridspine/` imports nothing from `pypsa-gui` (`tests/gridspine/test_contracts.py` gains the reverse check).
+- [x] Tests (backend, `pixi run gui-tests`): create → status pending; run (48 h, k=1, screening off — the only backend test that solves) → status done, ranked snapshots non-empty, export writes a zip whose members are `BUNDLE_FILES`; edit_template_param writes the overlay with `edited_by`, re-read through `load_unit_templates(overlay=...)`, the ledger's provenance counts change; wrong project kind refused; a `StageError` from a broken config surfaces as the status's `failed` stage.
+- [x] Mutation: `edit_template_param` drops `edited_by` → the overlay/ledger test red.
 - [ ] `pixi run gui-tests`, path-limited commit.
 
 ## Task 4 — Runs go through the existing solve queue (after PR #6)

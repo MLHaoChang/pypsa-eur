@@ -290,3 +290,89 @@ def test_v1_flat_unit_loads_as_a_legacy_model_with_h_only(tmp_path):
     assert t.params["param"].tolist() == ["h_s"]
     assert t.params["source"].tolist() == ["assumed"]
     assert load_unit_params(f).at["G_X", "source"] == "assumed"
+
+
+# ==========================================================================
+# Per-study overlays (increment 4, task 3)
+# ==========================================================================
+#
+# A study must be able to correct a machine's number without editing the
+# shipped library: two projects may legitimately disagree about the same unit,
+# and each has to keep its own provenance for the ledger. So the overlay is
+# applied at LOAD time and goes through the same physics checks the file's own
+# values do — an edit that makes a machine impossible has to fail here, not in
+# a `.dyr` three stages later.
+
+_OVERLAY_UNIT = "G_BUS_32"
+
+
+def test_an_overlay_replaces_the_value_and_the_source_tag():
+    base = load_unit_templates()
+    edited = load_unit_templates(
+        overlay={_OVERLAY_UNIT: {"h_s": {"value": 4.25, "source": "datasheet"}}}
+    )
+
+    def cell(t, column):
+        rows = t.params
+        hit = rows[(rows["unit_id"] == _OVERLAY_UNIT) & (rows["param"] == "h_s")]
+        assert len(hit) == 1
+        return hit.iloc[0][column]
+
+    assert cell(base, "value") != 4.25
+    assert cell(edited, "value") == 4.25
+    assert cell(edited, "source") == "datasheet"
+    # every other unit is untouched
+    other = edited.params[edited.params["unit_id"] != _OVERLAY_UNIT]
+    base_other = base.params[base.params["unit_id"] != _OVERLAY_UNIT]
+    assert other.reset_index(drop=True).equals(base_other.reset_index(drop=True))
+
+
+def test_an_overlay_changes_the_provenance_counts_the_ledger_quotes():
+    base = provenance_counts(load_unit_templates())
+    edited = provenance_counts(load_unit_templates(
+        overlay={_OVERLAY_UNIT: {"xd": {"value": 2.0, "source": "measured"}}}
+    ))
+    assert int(edited["measured"]) == int(base["measured"]) + 1
+    assert int(edited.sum()) == int(base.sum())
+
+
+def test_no_overlay_and_an_empty_overlay_are_the_same():
+    plain = load_unit_templates()
+    for overlay in (None, {}):
+        assert load_unit_templates(overlay=overlay).params.equals(plain.params), overlay
+
+
+def test_an_overlay_path_that_does_not_exist_is_refused():
+    """Silently ignoring it would make the ledger report the shipped
+    provenance for a study whose edits were dropped."""
+    with pytest.raises(ContractError, match="not found"):
+        load_unit_templates(overlay="/nonexistent/templates_overlay.json")
+
+
+def test_an_overlay_is_read_from_a_json_file(tmp_path):
+    import json
+
+    path = tmp_path / "templates_overlay.json"
+    path.write_text(json.dumps({_OVERLAY_UNIT: {"h_s": {"value": 4.25, "source": "datasheet"}}}))
+    rows = load_unit_templates(overlay=path).params
+    hit = rows[(rows["unit_id"] == _OVERLAY_UNIT) & (rows["param"] == "h_s")]
+    assert hit.iloc[0]["value"] == 4.25
+
+
+@pytest.mark.parametrize("bad, match", [
+    ({_OVERLAY_UNIT: {"not_a_param": {"value": 1.0, "source": "assumed"}}}, "does not declare"),
+    ({_OVERLAY_UNIT: {"h_s": {"value": 4.0, "source": "invented"}}}, "unknown source"),
+    ({_OVERLAY_UNIT: {"h_s": {"value": "four", "source": "assumed"}}}, "must be a number"),
+    ({_OVERLAY_UNIT: {"h_s": 4.0}}, "must be a mapping"),
+    ("not a mapping at all", "not found"),
+])
+def test_a_malformed_overlay_is_refused(bad, match):
+    with pytest.raises(ContractError, match=match):
+        load_unit_templates(overlay=bad)
+
+
+def test_an_overlay_that_breaks_the_physics_is_refused_at_load():
+    """The edit goes through `_check_physics`, so a non-positive inertia is
+    caught here and never reaches a `.dyr`."""
+    with pytest.raises(ContractError):
+        load_unit_templates(overlay={_OVERLAY_UNIT: {"h_s": {"value": -1.0, "source": "assumed"}}})

@@ -235,9 +235,15 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     from db.models import User
     from db.session import enable_sqlite_foreign_keys
 
-    # Added by 0005_solve_jobs. Update this alongside the seed data below
+    # What the migration under test adds. Update alongside the seed data below
     # whenever a later migration becomes the one this test exercises.
-    NEW_TABLE_NAME = "solve_jobs"
+    #
+    # 0006_project_kind adds a COLUMN, not a table — the first migration in
+    # this chain to do so, which is why this test now carries both forms and
+    # asserts whichever one the head migration uses. A column migration also
+    # changes what "byte-identical rows" can mean: see NEW_COLUMN below.
+    NEW_TABLE_NAME = None                       # 0006 adds no table
+    NEW_COLUMN = ("projects", "project_kind")   # (table, column) or None
     PRE_EXISTING_TABLES = ["organizations", "users", "org_memberships", "projects", "sessions"]
 
     def _dump_rows(engine, table_names):
@@ -277,20 +283,46 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     enable_sqlite_foreign_keys(engine)
     command.upgrade(cfg, predecessor)
 
+    # Seeded through the REFLECTED predecessor schema, not the ORM. The models
+    # in `db/models.py` describe the schema AFTER the migration, so any
+    # column-adding migration makes an ORM INSERT name a column the
+    # predecessor database does not have (SQLAlchemy 2 emits every mapped
+    # column, one row at a time or batched alike) — which is a failure of the
+    # test harness, not of the migration. The rows are still built as ORM
+    # objects, so they stay readable and typed; only the columns the
+    # predecessor actually has are written. Same reasoning as `_dump_rows`
+    # above: this test must not lean on the current models.
+    #
+    # UUIDs go in as `.hex`: `UUID(as_uuid=True)` is CHAR(32) on SQLite and
+    # stores 32 undashed characters, so passing the object through an untyped
+    # reflected column would store the DASHED form and every foreign key would
+    # miss (migration 0004's note records the same trap).
+    pre_md = MetaData()
+    pre_md.reflect(bind=engine, only=PRE_EXISTING_TABLES)
+
+    def _seed(conn, objs):
+        for obj in objs:
+            table = pre_md.tables[obj.__table__.name]
+            values = {}
+            for column in obj.__table__.columns:
+                if column.key not in table.c:
+                    continue                    # added by the migration under test
+                value = getattr(obj, column.key, None)
+                values[column.key] = value.hex if isinstance(value, uuid.UUID) else value
+            conn.execute(table.insert().values(**values))
+
     org_id, user_id = uuid.uuid4(), uuid.uuid4()
     project1_id, project2_id = uuid.uuid4(), uuid.uuid4()
     now = datetime.now(tz=timezone.utc)
-    Session_ = sessionmaker(bind=engine)
-    with Session_() as db:
-        db.add_all([
+    with engine.begin() as conn:
+        _seed(conn, [
             Organization(id=org_id, name="Predecessor Org", created_at=now),
             User(
                 id=user_id, email="predecessor-seed@example.com", password_hash=None,
                 status="active", is_super_admin=False, created_at=now,
             ),
         ])
-        db.flush()
-        db.add_all([
+        _seed(conn, [
             # role="admin" — the pairing `project_acl` actually needs.
             OrgMembership(id=uuid.uuid4(), user_id=user_id, org_id=org_id, role="admin"),
             # Two projects, both with a real `created_by` FK. A fabricated
@@ -305,11 +337,10 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
                 storage_path="predecessor-org/project-two", created_at=now, updated_at=now,
             ),
         ])
-        db.flush()
         session_live_id, session_expired_id, session_revoked_id = (
             uuid.uuid4(), uuid.uuid4(), uuid.uuid4(),
         )
-        db.add_all([
+        _seed(conn, [
             # Live: not revoked, expiry in the future. `active_project_id` is
             # the column CLAUDE.md flags as the one test harnesses forget —
             # populated here (pointed at a real project, so the FK is real)
@@ -340,7 +371,6 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
                 active_project_id=None,
             ),
         ])
-        db.commit()
 
     with engine.connect() as conn:
         version_before = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
@@ -366,8 +396,15 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
 
     after_engine = create_engine(url)
     try:
-        table_names = set(inspect(after_engine).get_table_names())
-        assert NEW_TABLE_NAME in table_names, f"{NEW_TABLE_NAME} missing after upgrade to head"
+        inspector = inspect(after_engine)
+        table_names = set(inspector.get_table_names())
+        if NEW_TABLE_NAME is not None:
+            assert NEW_TABLE_NAME in table_names, f"{NEW_TABLE_NAME} missing after upgrade to head"
+        if NEW_COLUMN is not None:
+            table, column = NEW_COLUMN
+            assert column in {c["name"] for c in inspector.get_columns(table)}, (
+                f"{table}.{column} missing after upgrade to head"
+            )
 
         with after_engine.connect() as conn:
             version_after = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
@@ -378,6 +415,26 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     finally:
         after_engine.dispose()
 
+    if NEW_COLUMN is not None:
+        # A column migration adds a KEY to every row of one table, so the
+        # byte-identical comparison below has to be told which key that is —
+        # and gets to assert the more interesting thing while it is here: that
+        # 0006 backfills nothing. NULL on every pre-existing row is the
+        # migration's stated design (NULL means capacity_expansion), and a
+        # migration that quietly wrote a literal into existing rows would be
+        # inventing a distinction the data does not have.
+        table, column = NEW_COLUMN
+        added = {k for row in after[table] for k in row} - {k for row in before[table] for k in row}
+        assert added == {column}, f"the migration added unexpected column(s) to {table}: {sorted(added)}"
+        assert all(row[column] is None for row in after[table]), (
+            f"{table}.{column} was backfilled on pre-existing rows; 0006 backfills nothing"
+        )
+        after = {
+            name: [{k: v for k, v in row.items() if k != column} for row in rows]
+            if name == table else rows
+            for name, rows in after.items()
+        }
+
     # The load-bearing assertion: full row content, not counts. A migration
     # that dropped and silently recreated a table (e.g. an errant
     # `batch_alter_table` touching the wrong table) would still pass a count
@@ -385,7 +442,9 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     # sessions in different states, this also catches a migration that
     # preserves the clean live row but mangles the expired or revoked one —
     # a uniform single-row fixture could not.
-    assert before == after, "0005 did not preserve pre-existing rows byte-for-byte across the upgrade"
+    assert before == after, (
+        f"{head_id} did not preserve pre-existing rows byte-for-byte across the upgrade"
+    )
 
     sessions_after = {row["id"]: row for row in after["sessions"]}
     assert sessions_after[session_live_id.hex]["active_project_id"] == project1_id.hex, (

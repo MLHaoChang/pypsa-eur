@@ -45,6 +45,8 @@ import math
 from pathlib import Path
 
 import pandas as pd
+import json
+
 import yaml
 
 from gridspine.schema.contracts import ContractError
@@ -206,7 +208,73 @@ def _check_physics(uid, model, values, include_in_inertia, mbase):
             )
 
 
-def load_unit_templates(path=None) -> UnitTemplates:
+def _overlay_for(overlay) -> dict:
+    """Normalise an overlay to `{unit_id: {param: {"value", "source"}}}`.
+
+    An overlay is how a STUDY carries an edit without rewriting the shipped
+    template library: `templates/data/*.yaml` is the reference set and stays
+    read-only, so two projects can disagree about a machine's inertia and both
+    keep their provenance. `None` means no overlay; a path that does not exist
+    is an ERROR, not an empty one.
+    """
+    if overlay is None:
+        return {}
+    if isinstance(overlay, (str, Path)):
+        path = Path(overlay)
+        if not path.is_file():
+            # NOT an empty overlay. A mistyped or moved path would otherwise
+            # drop every edit silently and the ledger would report the shipped
+            # provenance as if nobody had changed anything — the one failure
+            # mode an assumptions ledger must not have. Callers that mean "no
+            # overlay" pass None.
+            raise ContractError(f"overlay file not found: {path}")
+        overlay = json.loads(path.read_text())
+    if not isinstance(overlay, dict):
+        raise ContractError(f"overlay must be a mapping, got {type(overlay).__name__}")
+    return overlay
+
+
+def _apply_overlay(uid, parsed, entries):
+    """Overwrite parsed (value, source) pairs for one unit. Edits only.
+
+    A parameter the template does not already declare is refused rather than
+    added: the model's parameter set is a physics contract (`MODEL_PARAMS`),
+    and an overlay is for correcting a number, not for inventing a field the
+    `.dyr` writer would not know where to put.
+    """
+    for name, spec in entries.items():
+        if name not in parsed:
+            raise ContractError(
+                f"overlay for unit {uid} names parameter {name!r}, which the template "
+                f"does not declare; allowed {sorted(parsed)}"
+            )
+        if not isinstance(spec, dict) or "value" not in spec or "source" not in spec:
+            raise ContractError(
+                f"overlay entry {uid}.{name} must be a mapping with 'value' and 'source'"
+            )
+        if spec["source"] not in SOURCES:
+            raise ContractError(
+                f"overlay entry {uid}.{name} has unknown source {spec['source']!r}; "
+                f"allowed {sorted(SOURCES)}"
+            )
+        try:
+            value = float(spec["value"])
+        except (TypeError, ValueError) as exc:
+            raise ContractError(
+                f"overlay entry {uid}.{name} value must be a number, got {spec['value']!r}"
+            ) from exc
+        parsed[name] = (value, spec["source"])
+    return parsed
+
+
+def load_unit_templates(path=None, overlay=None) -> UnitTemplates:
+    """The template library, optionally with a study's own edits applied.
+
+    `overlay` is a mapping or the path to one (see `_overlay_for`). Overlaid
+    values go through the SAME physics checks as the file's own, so an edit
+    that makes a machine impossible fails at load, not in the `.dyr`.
+    """
+    overlay = _overlay_for(overlay)
     raw = yaml.safe_load(Path(path or _DEFAULT).read_text())
     units = raw.get("units") if isinstance(raw, dict) else None
     if not isinstance(units, dict) or not units:
@@ -220,6 +288,8 @@ def load_unit_templates(path=None) -> UnitTemplates:
             model, parsed = _parse_v2(uid, spec)
         else:
             model, parsed = _parse_v1(uid, spec)
+        if uid in overlay:
+            parsed = _apply_overlay(uid, parsed, overlay[uid])
         if "include_in_inertia" not in spec or not isinstance(spec["include_in_inertia"], bool):
             raise ContractError(f"unit {uid}: include_in_inertia must be a bool")
         include = spec["include_in_inertia"]
