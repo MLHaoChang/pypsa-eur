@@ -413,7 +413,14 @@ reproduced against the code before it was recorded.
 combine_first` on the second period, on the reviewer's fixture and on the
 tree's own `test_myopic_feasibility.py::test_myopic_feasible_no_extendable_produces_dispatch`
 — reproduced with 12f's walk swapped in, so pre-existing (in the 43-failure
-baseline), not 12g's. Backlog.
+baseline), not 12g's. **Investigated and closed** (2026-09-07):
+`notes/2026-09-07-myopic-assign-solution-investigation.md`. It is not this
+repo's defect — four bare-PyPSA reproductions of the myopic shape all pass, a
+pure-pandas reconstruction of the exact failing `combine_first` succeeds, and
+the two operands are structurally identical in every inspectable property at
+the moment it raises. It needs the pinned pixi env to confirm as a pip-stack
+artifact; the note says explicitly not to work around it in
+`solver_service.py`, whose inputs are provably correct.
 
 **Probed and clean:** PyPSA's own writes (`add`/`remove`/`copy`/`merge`/
 `consistency_check`/post-`optimize`/`set_snapshots` widening/`set_investment_periods`)
