@@ -94,6 +94,28 @@ def test_a_plain_name_is_byte_identical_to_the_old_format(name):
     assert content_disposition(name) == f'attachment; filename="{name}"'
 
 
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("naïve.zip", "naive.zip"),
+        ("café_report.csv", "cafe_report.csv"),
+        ("Grüße.xlsx", "Grue.xlsx"),
+        ("Ångström.csv", "Angstrom.csv"),
+    ],
+)
+def test_accents_are_transliterated_not_dropped(name, expected):
+    """
+    The fallback has to stay legible for the users this product actually has.
+    Dropping non-ASCII outright — the first cut — turned `naïve.zip` into
+    `nave.zip` and `café_report.csv` into `caf_report.csv`, which reads as a
+    typo rather than a transliteration. NFKD keeps the base letter.
+
+    Only the fallback is lossy; `filename*` still carries the exact name, and
+    `test_the_real_name_survives_in_filename_star` pins that.
+    """
+    assert content_disposition(name).split('"')[1] == expected
+
+
 def test_the_real_name_survives_in_filename_star():
     """
     The fallback is lossy on purpose; `filename*` is where the true name lives,

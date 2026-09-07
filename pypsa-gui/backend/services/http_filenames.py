@@ -43,6 +43,7 @@ not churn just because this helper exists.
 """
 from __future__ import annotations
 
+import unicodedata
 import urllib.parse
 
 # RFC 5987 attr-char: what may appear un-encoded in `filename*`. Everything
@@ -55,11 +56,24 @@ def _ascii_fallback(filename: str) -> str:
     The `filename="..."` value: ASCII, no control characters, no quote or
     backslash, no path separators.
 
-    Non-ASCII is dropped rather than transliterated — `filename*` carries the
-    real name, so the fallback only has to be a legible, safe approximation.
-    A name that scrubs away entirely becomes `download`, because
+    Non-ASCII is TRANSLITERATED, not dropped. Dropping is what the first cut
+    did, and it turns `naïve.zip` into `nave.zip` and `café_report.csv` into
+    `caf_report.csv` — names a European user would reasonably call wrong.
+    NFKD decomposition first gives `naive.zip` and `cafe_report.csv`, which is
+    the same approach `services/filename_service.py::safe_upload_filename`
+    already takes for upload names.
+
+    Known limitation: a stem with NO Latin base characters at all still scrubs
+    to nothing, so `日本語.xlsx` falls back to `xlsx`. `filename*` carries the
+    real name and every browser since IE9 prefers it, so this only shows up on
+    a client that ignores RFC 5987 entirely.
+
+    A name that scrubs away completely becomes `download`, because
     `filename=""` is worse than a generic name.
     """
+    # NFKD splits an accented letter into base + combining mark; the ASCII
+    # encode then keeps the base and drops the mark.
+    filename = unicodedata.normalize("NFKD", filename)
     out = []
     for ch in filename:
         if ch in '"\\/':
