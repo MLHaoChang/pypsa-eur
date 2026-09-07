@@ -1,6 +1,24 @@
 # Phase 12i — a constant availability series replaces the NETTING approximation, not the exact mixture (plan v2)
 
-**Status:** plan v2, for review before a line is written.
+**Status:** **REJECTED** — and the phase was then closed unbuilt. See
+`2026-09-07-fmea-phase12i-constant-series-fold-v3-do-not-build.md`.
+
+> **Two blockers, both reproduced.** (1) "It is never worse" is false: on this
+> plan's own first fleet, at load 667, the fold reads 48.7435 h against the
+> exact 62.1181 — an error of 13.37 h where shipped's is 5.57, i.e. **2.4×
+> worse**. The mechanism is that the table apportions a non-grid capacity
+> across two grid states and the upper one is capacity the fleet cannot reach,
+> so the fold *manufactures* capacity by rounding up. Worse, §0.3's evidence
+> table is **not reproducible from the method this plan states**: it says it
+> swept `[0.45,0.80] × total capacity` but the script swept `[0.45,0.80] ×
+> Σ(cap × cf)` — the derated total — and load 667 lies inside the claimed
+> window and outside the measured one. (2) H5 asks `split.table[i].capacity_mw`
+> to carry the nameplate, but `_screen_block` passes `split.table` straight to
+> `build_copt`: it is the math input, so H5 is either a `ValueError` or a −72 %
+> LOLE error. Four serious findings besides. v3 records why no remedy was worth
+> building.
+
+**Status when written:** plan v2, for review before a line is written.
 **Supersedes v1** (`…-v1.md`), which was **REJECTED** with three blockers. The
 review's findings are recorded in §6 and every one of them is reproduced in
 §0 — none is taken on trust, and two of them killed v1's headline claim.

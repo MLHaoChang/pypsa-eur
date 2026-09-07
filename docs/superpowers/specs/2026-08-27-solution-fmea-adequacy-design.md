@@ -394,6 +394,27 @@ contains outages) and preflight says so (`static_p_max_pu_not_applied`); the res
 margin applies it, so the margin and the engines disagree about such a unit by a
 recorded 25 % / 2 % on the nuclear import — an open item, not this amendment's.
 
+**[Phase 12i — closed UNBUILT, and what the netting error actually is.]**
+The exact-mixture cap means surplus profiled units are netted at expected
+output, and for a **constant** availability series that approximation is worse
+than this spec says. 12c-pre measured that netting a *varying* profile
+UNDERSTATES LOLE by convexity; that does **not** carry to a constant series.
+There the netting subtracts a constant from the residual while the mixture's
+states are discrete steps of `cap × cf`, so whether the netted residual crosses
+a step decides the sign: measured −19.6 %, −9.0 %, −26.8 % and **+192.5 %** on
+four cap-saturating fleets — an overstatement of nearly 3× in the last.
+
+Two remedies were planned, reviewed and rejected, and the phase was closed
+unbuilt (`plans/2026-09-07-fmea-phase12i-constant-series-fold-v3-do-not-build.md`):
+folding the netted constant units into the table is much better in aggregate
+(mean error 18–105× lower) but **pointwise worse** at specific loads, because
+the table apportions a non-grid capacity across two grid states and the upper
+one is capacity the fleet cannot reach; and refining the grid until the fold is
+exact costs **5.4 s → 76.8 s** on a 200-unit system. Neither closes a
+disagreement between surfaces — the MC and the reserve margin are already right
+about a constant series — so the shipped approximation, which discloses itself
+in `fidelity_note`, stands.
+
 **[Phase 12h — the static CF is applied, and the ambiguity has a name.]**
 The open item above is closed. A static `p_max_pu` on a unit with **no
 `p_max_pu` column** is folded into the unit's CAPACITY (`cap x cf`), so both
