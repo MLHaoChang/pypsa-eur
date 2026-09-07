@@ -2311,3 +2311,47 @@ def test_turn_done_carries_the_usage_availability_flag(appdata):
         "the client renders the zero-initialised totals as a real measurement"
     )
     assert silent["output_tokens"] == 0
+
+
+def test_one_wrongly_typed_label_does_not_empty_the_awareness_block(appdata):
+    """
+    S-L3/C-22 — the consequence that makes an unchecked `label` more than a
+    cosmetic problem: it does not break the entry that carries it, it breaks
+    a SHARED consumer, for everyone.
+
+    `_profile_awareness_block` does `sorted(p.label for p in profiles)`, so
+    one non-string label raises `TypeError: '<' not supported between
+    instances of 'int' and 'str'`, the blanket `except Exception` swallows
+    it, and the block comes back "". Every chatting user then loses the
+    active model's name and the instructions for switching it — INSTANCE-
+    WIDE, from one hand-edited entry, with a single `logger.warning` as the
+    only trace.
+
+    The fix is in `llm_config`: such an entry never becomes a profile. This
+    test names the consequence so a regression there is legible as an
+    outage, not as a validation nitpick.
+    """
+    import json
+
+    from services import chat_service, llm_config
+
+    base = {"preset": "custom", "wire": "openai",
+            "base_url": "http://localhost:11434/v1", "model": "m",
+            "tools": True, "vision": False, "auth": "none",
+            "fallback_model": None, "max_output_tokens": None}
+    llm_config.profiles_path().write_text(json.dumps({
+        "version": 1, "active_profile_id": "anthropic-sonnet",
+        "profiles": [
+            dict(base, id="good", label="Perfectly Fine"),
+            dict(base, id="broken", label=123),
+        ],
+    }), encoding="utf-8")
+
+    block = chat_service._profile_awareness_block()
+
+    assert block, "one bad label emptied the block for every user and profile"
+    assert "Active model profile:" in block
+    assert "Perfectly Fine" in block, (
+        "a healthy profile lost its awareness because of an unrelated entry"
+    )
+    assert "set_active_profile" in block, "the switching instructions went too"

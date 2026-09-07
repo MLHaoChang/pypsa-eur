@@ -934,3 +934,155 @@ def test_namespaced_key_env_ignores_auth_and_preset_unlike_key_env():
     # The owned slot is the same in all three cases. That is the point.
     for p in (_profile(), _profile(auth="none"), _profile(preset="openai")):
         assert llm_config.namespaced_key_env(p.id) == owned
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# S-L3 / C-22 — `_profile_from_dict` type-checks only `tools`/`vision`, and
+# `_validate_profile` only enum-checks `wire`/`auth` and type-checks
+# `base_url` (W-5). Everything else is taken from JSON verbatim.
+#
+# W-5's own comment claimed "every other field is already contained by
+# `_strict_bool` or an enum check, and base_url was the only escape". That
+# is false, and believing it is why this survived: `label`, `model`,
+# `preset`, `fallback_model` and `max_output_tokens` are all uncontained.
+#
+# A non-string `label` is the sharpest, because it does not fail the entry
+# that carries it — it takes out a shared consumer. See
+# `test_chat_profile_binding.py`'s instance-wide test for that consequence;
+# these pin the predicate that must refuse it in the first place.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("field,value", [
+    ("label", 123),
+    ("label", None),
+    ("label", ["a"]),
+    ("label", {"a": 1}),
+    ("model", 123),
+    ("model", ["m"]),
+    ("preset", 7),
+    ("preset", ["custom"]),          # unhashable: breaks the catalogue lookup
+    ("fallback_model", 5),
+    ("fallback_model", ["m"]),
+    ("max_output_tokens", "1024"),
+    ("max_output_tokens", 1.5),
+    ("max_output_tokens", True),     # bool IS an int in Python — not a count
+    ("id", 5),
+])
+def test_a_wrongly_typed_field_is_skipped_not_loaded(appdata, field, value):
+    """
+    Every one of these currently LOADS and becomes a live profile.
+
+    Skipping is the right outcome rather than coercing: this build cannot
+    know what a `label` of `123` was meant to say, and since C-14 a skipped
+    entry is preserved on disk for the operator to repair rather than
+    deleted.
+    """
+    from services import llm_config
+
+    entry = {"id": "typed-wrong", "label": "Fine", "preset": "custom",
+             "wire": "openai", "base_url": "http://localhost:11434/v1",
+             "model": "m", "tools": True, "vision": False, "auth": "none",
+             "fallback_model": None, "max_output_tokens": None}
+    entry[field] = value
+    good = dict(entry, id="good-one", label="Fine")
+    good[field] = {"id": "good-one", "label": "Fine", "preset": "custom",
+                   "model": "m", "fallback_model": None,
+                   "max_output_tokens": None}.get(field, entry[field])
+    llm_config.profiles_path().write_text(json.dumps({
+        "version": 1, "active_profile_id": "anthropic-sonnet",
+        "profiles": [entry, good],
+    }), encoding="utf-8")
+
+    ids = {p.id for p in llm_config.load_profiles()[0]}
+    assert "typed-wrong" not in ids, f"{field}={value!r} loaded as a profile"
+    assert "good-one" in ids, "one bad entry took a good one down with it"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("label", 123),
+    ("model", 123),
+    ("preset", 7),
+    ("fallback_model", 5),
+    ("max_output_tokens", "1024"),
+])
+def test_a_wrongly_typed_field_cannot_be_SAVED_either(appdata, field, value):
+    """
+    The sibling path. `_validate_profile` is the single source of truth for
+    both directions (`save_profiles` calls it too, and `ProfileIn`'s
+    docstring says validation is deliberately not duplicated at the route),
+    so a check that only fires on load would let the same value in through
+    the PUT route and back out to every reader.
+    """
+    from services import llm_config
+
+    kwargs = dict(id="typed-wrong", label="Fine", preset="custom",
+                  wire="openai", base_url="http://localhost:11434/v1",
+                  model="m", tools=True, vision=False, auth="none",
+                  fallback_model=None, max_output_tokens=None)
+    kwargs[field] = value
+    with pytest.raises(llm_config.ProfileValidationError):
+        llm_config.save_profiles([llm_config.LLMProfile(**kwargs)], "typed-wrong")
+
+
+def test_the_types_that_are_legitimately_optional_still_load(appdata):
+    """
+    DISCRIMINATION. The fix must not turn `None` into an error for the two
+    fields that are genuinely nullable, nor reject a real integer count.
+    """
+    from services import llm_config
+
+    llm_config.profiles_path().write_text(json.dumps({
+        "version": 1, "active_profile_id": "anthropic-sonnet",
+        "profiles": [{"id": "nullable", "label": "Fine", "preset": "custom",
+                      "wire": "openai", "base_url": None, "model": "m",
+                      "tools": True, "vision": False, "auth": "none",
+                      "fallback_model": None, "max_output_tokens": 4096}],
+    }), encoding="utf-8")
+
+    got = {p.id: p for p in llm_config.load_profiles()[0]}
+    assert "nullable" in got
+    assert got["nullable"].max_output_tokens == 4096
+    assert got["nullable"].fallback_model is None
+
+
+def test_a_wrongly_typed_entry_is_preserved_on_disk_not_deleted(appdata):
+    """
+    THE JOIN, and the reason this had to land after C-14 rather than before.
+
+    These two changes are individually right and, in the other order, wrong
+    together: tightening the type checks turns entries that used to LOAD into
+    entries that get SKIPPED, and before C-14 a skipped entry was deleted by
+    the next write. Landing this first would have meant one hand-edited
+    `label` silently costing the operator the whole profile the moment they
+    switched models.
+
+    Asserted at the join rather than on either half: both sides can pass
+    their own tests while the combination destroys data.
+    """
+    from services import llm_config
+
+    base = {"preset": "custom", "wire": "openai",
+            "base_url": "http://localhost:11434/v1", "model": "m",
+            "tools": True, "vision": False, "auth": "none",
+            "fallback_model": None, "max_output_tokens": None}
+    path = llm_config.profiles_path()
+    path.write_text(json.dumps({
+        "version": 1, "active_profile_id": "anthropic-sonnet",
+        "profiles": [dict(base, id="good-one", label="Fine"),
+                     dict(base, id="typed-wrong", label=123)],
+    }), encoding="utf-8")
+
+    assert "typed-wrong" not in {p.id for p in llm_config.load_profiles()[0]}, (
+        "precondition: the new type check must be what skips this entry"
+    )
+
+    llm_config.set_active("anthropic-opus")
+
+    raw = json.loads(path.read_text())["profiles"]
+    kept = next((e for e in raw if e.get("id") == "typed-wrong"), None)
+    assert kept is not None, (
+        f"a switch deleted the entry the type check rejected: "
+        f"{[e.get('id') for e in raw]}"
+    )
+    assert kept["label"] == 123, "the entry must be preserved VERBATIM to repair"

@@ -272,9 +272,9 @@ class ProfileIn(BaseModel):
     primitive for whatever secret already lives in that env var.
 
     No per-field validation beyond typing is duplicated here on purpose:
-    `llm_config._validate_profile` (wire/auth enum membership, base_url
-    shape, the preset/base_url lock) is the single source of truth for what
-    makes a profile valid, and its `ProfileValidationError` is translated to
+    `llm_config._validate_profile` (field types, wire/auth enum membership,
+    base_url shape, the preset/wire and preset/base_url locks) is the single
+    source of truth for what makes a profile valid, and its `ProfileValidationError` is translated to
     422 below — the same "don't split one rule across two layers" doctrine
     `ApiKeyRequest`'s docstring states for `app_secrets.validate_value`.
     """

@@ -262,7 +262,64 @@ def _builtin_profiles() -> list[LLMProfile]:
     ]
 
 
+def _validate_field_types(profile: LLMProfile) -> None:
+    """
+    S-L3/C-22 — the fields JSON could put ANY type into.
+
+    W-5 type-checked `base_url` and its comment claimed "every other field is
+    already contained by `_strict_bool` or an enum check, and base_url was
+    the only escape". That was wrong: `tools`/`vision` are contained by
+    `_strict_bool` and `wire`/`auth` by their enum membership tests, but
+    `label`, `model`, `preset`, `fallback_model` and `max_output_tokens`
+    were read out of the file verbatim and became live profiles.
+
+    `label` is the one that bites hardest, because a wrong type there does
+    not break the profile carrying it — it breaks a SHARED consumer.
+    `chat_service._profile_awareness_block` sorts every label, so one
+    non-string raises inside a blanket `except Exception` and the block
+    comes back empty for EVERY user and every profile: the active model's
+    name and the switching instructions vanish instance-wide from one
+    hand-edited entry.
+
+    Checked here rather than in `_profile_from_dict` so the SAVE path is
+    covered by the same rule — `save_profiles` calls this too, and
+    `ProfileIn`'s docstring states validation is deliberately not duplicated
+    at the route. A check that only fired on load would let the same value
+    in through PUT and back out to every reader.
+
+    Rejected, never coerced: this build cannot know what a `label` of `123`
+    was meant to say. Since C-14 a rejected entry is preserved on disk for
+    the operator to repair rather than deleted, which is what makes refusing
+    it the safe answer rather than a data-loss one.
+    """
+    def _require(name: str, value: object, types: tuple, described: str,
+                 *, optional: bool = False) -> None:
+        if optional and value is None:
+            return
+        # `bool` is a subclass of `int`, so `True` satisfies an isinstance
+        # check for a token count. It is not a count.
+        if isinstance(value, bool) and bool not in types:
+            raise ProfileValidationError(
+                f"profile {profile.id!r}: {name} must be {described}, got bool"
+            )
+        if not isinstance(value, types):
+            raise ProfileValidationError(
+                f"profile {profile.id!r}: {name} must be {described}, got "
+                f"{type(value).__name__}"
+            )
+
+    _require("id", profile.id, (str,), "a string")
+    _require("label", profile.label, (str,), "a string")
+    _require("preset", profile.preset, (str,), "a string")
+    _require("model", profile.model, (str,), "a string")
+    _require("fallback_model", profile.fallback_model, (str,),
+             "a string or null", optional=True)
+    _require("max_output_tokens", profile.max_output_tokens, (int,),
+             "an integer or null", optional=True)
+
+
 def _validate_profile(profile: LLMProfile) -> None:
+    _validate_field_types(profile)
     if not _SLUG_RE.match(profile.id):
         raise ProfileValidationError(
             f"profile id {profile.id!r} must match [a-z0-9-]{{1,48}}"
@@ -374,8 +431,12 @@ def _validate_base_url(profile_id: str, base_url: str) -> None:
         # An unquoted JSON scalar (`"base_url": 8080`) reaches `urlsplit` as an
         # int/bool/float and raises AttributeError, not ValueError — so the
         # W-5 translation below never saw it and `load_profiles` still raised.
-        # Type-check first: every other field is already contained by
-        # `_strict_bool` or an enum check, and base_url was the only escape.
+        # Type-check first, because `urlsplit` is reached before any other
+        # guard here. (This comment used to claim base_url was the ONLY
+        # uncontained field. It was not — `label`, `model`, `preset`,
+        # `fallback_model` and `max_output_tokens` were uncontained too, and
+        # believing this line is why S-L3/C-22 survived. They are now checked
+        # in `_validate_field_types`.)
         raise ProfileValidationError(
             f"profile {profile_id!r}: base_url must be a string or null, got "
             f"{type(base_url).__name__}"
