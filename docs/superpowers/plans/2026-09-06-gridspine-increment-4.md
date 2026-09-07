@@ -1,6 +1,6 @@
 # gridspine Increment 4 Implementation Plan — Action Layer, GUI Wiring, Chat Tools
 
-> **Status 2026-09-07: tasks 1–3 landed. D1–D4 answered as recommended (the owner asked to proceed); D5 is NEW and open.** Tasks 4–7 remain. **The sequencing premise below was wrong and is corrected:** PR #6 decomposes `solver_service.py`, the results/compare routers, `conftest.py` and `pixi.toml` — it does **not** touch `solve_queue.py`, `chat_tools*.py`, `db/models.py` or `routers/projects.py`, so tasks 4 and 6 are not blocked by it. Checked against the PR's own file list rather than assumed; the earlier claim was an assumption written as a fact.
+> **Status 2026-09-07: tasks 1–5 landed. D1–D4 answered as recommended (the owner asked to proceed); D5 is NEW and open.** Tasks 6 and 7 remain — and task 6 carries a blocker this session cannot clear: ADR 0002 requires a LIVE API probe for chat changes, which needs an Anthropic key. **The sequencing premise below was wrong and is corrected:** PR #6 decomposes `solver_service.py`, the results/compare routers, `conftest.py` and `pixi.toml` — it does **not** touch `solve_queue.py`, `chat_tools*.py`, `db/models.py` or `routers/projects.py`, so tasks 4 and 6 are not blocked by it. Checked against the PR's own file list rather than assumed; the earlier claim was an assumption written as a fact.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -84,26 +84,26 @@ The owner said to proceed, so each was taken as the plan recommended. They are d
 - [x] Cage test: `gridspine_service.py` imports only `gridspine.drivers.*` and `gridspine.schema.*`; and `gridspine/` imports nothing from `pypsa-gui` (`tests/gridspine/test_contracts.py` gains the reverse check).
 - [x] Tests (backend, `pixi run gui-tests`): create → status pending; run (48 h, k=1, screening off — the only backend test that solves) → status done, ranked snapshots non-empty, export writes a zip whose members are `BUNDLE_FILES`; edit_template_param writes the overlay with `edited_by`, re-read through `load_unit_templates(overlay=...)`, the ledger's provenance counts change; wrong project kind refused; a `StageError` from a broken config surfaces as the status's `failed` stage.
 - [x] Mutation: `edit_template_param` drops `edited_by` → the overlay/ledger test red.
-- [ ] `pixi run gui-tests`, path-limited commit.
+- [x] `pixi run gui-tests`, path-limited commit.
 
-## Task 4 — Runs go through the existing solve queue (after PR #6)
+## Task 4 — Runs go through the existing solve queue — LANDED
 
 **Files:** `pypsa-gui/backend/services/solve_queue.py` (post-#6 layout), `services/solve_job_store.py` + `db/models.py::SolveJobRow` + an alembic migration (a `kind` column), `services/gridspine_service.py::run_pipeline`, `tests/test_solve_queue*.py`, `tests/test_gridspine_service.py`.
 
-- [ ] D2: `SolveJob.kind ∈ {solve (default), gridspine}` and a `runner` resolved from the kind in `_run_job`; the gridspine runner calls `run_study(config, progress, stop_event)` with `progress` writing to the job's `log_queue` (one line per stage boundary, machine-parsable prefix) — the existing SSE stream shows stage progress with no new endpoint. `enqueue_unique` semantics unchanged (one active job per project).
-- [ ] Abort → `stop_event` → `StudyAborted` → job `aborted`; the `StageError` artifact and `stage_status` agree.
-- [ ] Boot reconciliation (`reconcile_on_boot`) marks an interrupted gridspine job `interrupted`; `stage_status` then shows where it stopped, and `run_pipeline` on such a project offers `from_dispatch` when `dispatch.csv` exists.
-- [ ] Tests: enqueue a gridspine job on a 48 h config, watch status through `queued → running → completed`, abort one mid-dispatch, and the existing queue tests unchanged.
-- [ ] Mutation: the runner ignores `stop_event` → the abort test red.
+- [x] D2: `SolveJob.kind ∈ {solve (default), gridspine}` and a `runner` resolved from the kind in `_run_job`; the gridspine runner calls `run_study(config, progress, stop_event)` with `progress` writing to the job's `log_queue` (one line per stage boundary, machine-parsable prefix) — the existing SSE stream shows stage progress with no new endpoint. `enqueue_unique` semantics unchanged (one active job per project).
+- [x] Abort → `stop_event` → `StudyAborted` → job `aborted`; the `StageError` artifact and `stage_status` agree.
+- [x] Boot reconciliation (`reconcile_on_boot`) marks an interrupted gridspine job `interrupted`; `stage_status` then shows where it stopped, and `run_pipeline` on such a project offers `from_dispatch` when `dispatch.csv` exists.
+- [x] Tests: enqueue a gridspine job on a 48 h config, watch status through `queued → running → completed`, abort one mid-dispatch, and the existing queue tests unchanged.
+- [x] Mutation: the runner ignores `stop_event` → the abort test red.
 - [ ] `pixi run gui-tests`, path-limited commit.
 
-## Task 5 — Router: `/api/gridspine`
+## Task 5 — Router: `/api/gridspine` — LANDED
 
 **Files:** `pypsa-gui/backend/routers/gridspine.py` (new), app registration, `tests/test_gridspine_router.py` (new).
 
-- [ ] One endpoint per action-layer function, each a thin wrapper (auth/`Depends` resolution, then the service call); `POST /api/gridspine/projects` (create), `POST …/{project}/dispatch-source`, `POST …/{project}/run` (returns the job), `GET …/{project}/status`, `GET …/{project}/snapshots`, `GET …/{project}/ledger`, `PUT …/{project}/templates/{unit_id}/{field}`, `GET …/{project}/bundles/{hour}` (zip download).
-- [ ] Authorization follows the project membership rules the other routers use (`_may_see`-style helpers, not new ones).
-- [ ] Tests: every endpoint calls its service function (patch the service, assert the call) and the download streams the zip; unauthorised project → 403/404 as elsewhere.
+- [x] One endpoint per action-layer function, each a thin wrapper (auth/`Depends` resolution, then the service call); `POST /api/gridspine/projects` (create), `POST …/{project}/dispatch-source`, `POST …/{project}/run` (returns the job), `GET …/{project}/status`, `GET …/{project}/snapshots`, `GET …/{project}/ledger`, `PUT …/{project}/templates/{unit_id}/{field}`, `GET …/{project}/bundles/{hour}` (zip download).
+- [x] Authorization follows the project membership rules the other routers use (`_may_see`-style helpers, not new ones).
+- [x] Tests: every endpoint calls its service function (patch the service, assert the call) and the download streams the zip; unauthorised project → 403/404 as elsewhere.
 - [ ] `pixi run gui-tests`, path-limited commit.
 
 ## Task 6 — Chat tools (after PR #6; ADR 0002 live probe)

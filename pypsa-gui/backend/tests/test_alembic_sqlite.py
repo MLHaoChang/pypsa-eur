@@ -232,19 +232,25 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
     import local_bootstrap
     from db.models import OrgMembership, Organization, Project
     from db.models import Session as SessionRow
-    from db.models import User
+    from db.models import SolveJobRow, User
     from db.session import enable_sqlite_foreign_keys
 
     # What the migration under test adds. Update alongside the seed data below
     # whenever a later migration becomes the one this test exercises.
     #
-    # 0006_project_kind adds a COLUMN, not a table — the first migration in
-    # this chain to do so, which is why this test now carries both forms and
-    # asserts whichever one the head migration uses. A column migration also
-    # changes what "byte-identical rows" can mean: see NEW_COLUMN below.
-    NEW_TABLE_NAME = None                       # 0006 adds no table
-    NEW_COLUMN = ("projects", "project_kind")   # (table, column) or None
-    PRE_EXISTING_TABLES = ["organizations", "users", "org_memberships", "projects", "sessions"]
+    # 0006_project_kind and 0007_solve_job_kind add a COLUMN, not a table —
+    # the first migrations in this chain to do so, which is why this test
+    # carries both forms and asserts whichever one the head migration uses. A
+    # column migration also changes what "byte-identical rows" can mean: see
+    # NEW_COLUMN below.
+    NEW_TABLE_NAME = None                       # 0007 adds no table
+    NEW_COLUMN = ("solve_jobs", "kind")         # (table, column) or None
+    # `solve_jobs` joined this list with 0007: the column under test is on it,
+    # and a QUEUED job row surviving the migration is the thing that matters —
+    # a restart restores those rows into the in-memory queue.
+    PRE_EXISTING_TABLES = [
+        "organizations", "users", "org_memberships", "projects", "sessions", "solve_jobs",
+    ]
 
     def _dump_rows(engine, table_names):
         """
@@ -371,13 +377,22 @@ def test_upgrade_preserves_a_populated_predecessor_database(tmp_path):
                 active_project_id=None,
             ),
         ])
+        # One QUEUED job — the row `SolveQueue.restore` reads on boot, and the
+        # one whose meaning 0007's new column carries.
+        _seed(conn, [
+            SolveJobRow(
+                id=uuid.uuid4(), project_id="Project One", project_key=None,
+                storage_dir=None, status="queued", enqueued_by_user_id=user_id,
+                solver_config=None, enqueued_at=now,
+            ),
+        ])
 
     with engine.connect() as conn:
         version_before = conn.execute(text("SELECT version_num FROM alembic_version")).scalar()
     assert version_before == predecessor
 
     before = _dump_rows(engine, PRE_EXISTING_TABLES)
-    assert [len(before[t]) for t in PRE_EXISTING_TABLES] == [1, 1, 1, 2, 3], (
+    assert [len(before[t]) for t in PRE_EXISTING_TABLES] == [1, 1, 1, 2, 3, 1], (
         "seeding produced the wrong row counts — the byte-identical comparison below "
         "would be vacuous against an empty or partially-seeded table"
     )

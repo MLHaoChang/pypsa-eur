@@ -64,7 +64,7 @@ def ran(user_and_db, tmp_path_factory):
     row = db.get(Project, uuid.UUID(project["id"]))
     target = gs.gridspine_dir(row)
     if "dir" not in _RUN_CACHE:
-        gs.run_pipeline(db, row)
+        gs.run_pipeline(db, row, queued=False)
         cache = tmp_path_factory.mktemp("gridspine_cache") / "gridspine"
         shutil.copytree(target, cache)
         _RUN_CACHE["dir"] = cache
@@ -102,7 +102,7 @@ def test_an_ordinary_project_defaults_to_capacity_expansion(plain_project):
 
 
 @pytest.mark.parametrize("action", [
-    lambda db, p: gs.run_pipeline(db, p),
+    lambda db, p: gs.run_pipeline(db, p, queued=False),
     lambda db, p: gs.get_stage_status(p),
     lambda db, p: gs.list_ranked_snapshots(p),
     lambda db, p: gs.get_assumption_ledger(p),

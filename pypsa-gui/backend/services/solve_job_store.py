@@ -82,6 +82,7 @@ def record_enqueued(
                 project_id=job.project_id,
                 project_key=job.project_key,
                 storage_dir=job.storage_dir,
+                kind=getattr(job, "kind", None),
                 status=job.status,
                 enqueued_by_user_id=enqueued_by_user_id,
                 solver_config=solver_config_json,
@@ -179,6 +180,9 @@ def load_by_status(statuses: tuple[str, ...], *, limit: int | None = None) -> li
                     "project_id": r.project_id,
                     "project_key": r.project_key,
                     "storage_dir": r.storage_dir,
+                    # NULL for every row written before the column: `restore`
+                    # reads that as a network solve, which is what they are.
+                    "kind": r.kind,
                     "status": r.status,
                     "solver_config": r.solver_config,
                     "objective": r.objective,

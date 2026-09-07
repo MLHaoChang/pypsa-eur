@@ -188,6 +188,15 @@ class SolveJobRow(Base):
     # information a job carries.
     project_key: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
     storage_dir: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # What this job RUNS: 'solve' (a PyPSA network solve) or 'gridspine' (a
+    # planning → dynamics study). NULL means 'solve' — every row written
+    # before migration 0007 is one, and the restore path reads it that way, so
+    # a restart cannot turn a study into a network solve or the reverse.
+    #
+    # A plain string, like `status` above and for the same reasons: the set
+    # will grow, an unknown value must degrade rather than break the row, and
+    # `services/solve_queue.KINDS` is the validating edge.
+    kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(32), index=True)
     enqueued_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True

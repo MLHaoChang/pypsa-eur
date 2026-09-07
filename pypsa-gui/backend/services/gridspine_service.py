@@ -101,6 +101,11 @@ PLANNING_DYNAMICS = "planning_dynamics"
 CONNECTION = "connection"
 PROJECT_KINDS = (CAPACITY_EXPANSION, PLANNING_DYNAMICS, CONNECTION)
 
+#: The per-project subdirectory holding everything gridspine. Named here
+#: because the queue's dispatcher reaches it from an authorized `storage_dir`
+#: with no Project row in hand.
+GRIDSPINE_SUBDIR = "gridspine"
+
 #: Who made a template edit. The spec asks for exactly this distinction so the
 #: ledger audits both interfaces: chat edits carry `chat`, UI edits `user`.
 EDITORS = ("user", "chat")
@@ -132,7 +137,7 @@ def require_planning(project):
 
 def gridspine_dir(project) -> Path:
     """`<project dir>/gridspine`, created. Callers here are always about to write."""
-    path = project_registry.ensure_project_dir(project) / "gridspine"
+    path = project_registry.ensure_project_dir(project) / GRIDSPINE_SUBDIR
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -153,22 +158,51 @@ def config_path(project) -> Path:
 # config
 # --------------------------------------------------------------------------
 
+def config_for_dir(gs_dir, data: dict = None) -> StudyConfig:
+    """The config for the study in `gs_dir`, from its own `config.json` unless
+    `data` overrides it.
+
+    Path-only: the queue's dispatcher has an authorized directory and no
+    Project row, so this is the seam it runs through. `outdir` and
+    `templates_overlay` are always derived from `gs_dir` — a stored absolute
+    path survives a copy, a restore or a rename as a lie, and an overlay path
+    from another project would apply that project's edits to this one.
+    """
+    gs_dir = Path(gs_dir)
+    if data is None:
+        stored = gs_dir / "config.json"
+        data = json.loads(stored.read_text()) if stored.is_file() else {}
+    data = dict(data)
+    data["outdir"] = str(gs_dir / "run")
+    overlay = gs_dir / "templates_overlay.json"
+    data["templates_overlay"] = str(overlay) if overlay.is_file() else None
+    try:
+        return StudyConfig.from_json(data)
+    except ContractError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def run_study_dir(gs_dir, progress=None, stop_event=None) -> dict:
+    """Run the study in `gs_dir` to completion. The queue runner's entry point.
+
+    Raises whatever the driver raises — `StudyAborted` on a stop, a
+    `ContractError` on a config the run cannot honour — because the caller is
+    a job runner that has to record which of those happened.
+    """
+    require_gridspine()
+    gs_dir = Path(gs_dir)
+    config = config_for_dir(gs_dir)
+    run_study(config, progress=progress, stop_event=stop_event)
+    return _stage_status(gs_dir / "run")
+
+
 def _config_from(project, data: dict) -> StudyConfig:
     """Build the config with the project's OWN outdir, whatever the file says.
 
     A stored absolute path survives a copy, a restore and a rename as a lie;
     the run directory is derived from the project every time.
     """
-    data = dict(data or {})
-    data["outdir"] = str(run_dir(project))
-    # The overlay is this project's, always — a stored path from a copied or
-    # restored project would apply another study's edits to this one.
-    overlay = overlay_path(project)
-    data["templates_overlay"] = str(overlay) if overlay.is_file() else None
-    try:
-        return StudyConfig.from_json(data)
-    except ContractError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return config_for_dir(gridspine_dir(project), dict(data or {}))
 
 
 def read_config(project) -> StudyConfig:
@@ -241,19 +275,58 @@ def set_dispatch_source(db, project, source) -> dict:
     return _write_config(project, updated)
 
 
-def run_pipeline(db, project, progress=None, stop_event=None) -> dict:
-    """Run the study to completion, here on this thread.
+def run_pipeline(db, project, user=None, *, queued: bool = True,
+                 progress=None, stop_event=None) -> dict:
+    """Run the study — through the SOLVE QUEUE by default.
 
-    Task 4 moves the call into the solve queue; the signature already carries
-    what the queue gives a job, so that change is a runner, not a rewrite.
+    The spec asks for exactly one job system ("chat-triggered runs go through
+    the same solve queue — status, abort included"), so a run is a job of kind
+    `gridspine`: one at a time, abortable, its log on the existing SSE stream,
+    its status surviving a restart. Returns the job's public view.
+
+    `queued=False` runs it here and returns the stage status instead. That is
+    for callers that want the answer rather than a job — the CLI, and tests
+    that would otherwise have to poll a background thread.
+
+    The job carries the authorized `storage_dir` resolved HERE, where the
+    caller's ACL has been checked; the dispatcher never derives a path from a
+    project name.
     """
     require_planning(project)
-    config = read_config(project)
-    try:
-        run_study(config, progress=progress, stop_event=stop_event)
-    except ContractError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return get_stage_status(project)
+    if not queued:
+        config = read_config(project)
+        try:
+            run_study(config, progress=progress, stop_event=stop_event)
+        except ContractError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return get_stage_status(project)
+
+    from services import solve_queue as sq
+
+    # Validate before queueing: a job that cannot start is worse than an
+    # error, because it fails on a worker thread minutes later.
+    read_config(project)
+    job, _created = sq.solve_queue.enqueue_unique(
+        project.name,
+        project_key=project_registry.registry_key(project),
+        storage_dir=str(project_registry.ensure_project_dir(project)),
+        kind=sq.KIND_GRIDSPINE,
+    )
+    if _created:
+        try:
+            from services import solve_job_store
+
+            solve_job_store.record_enqueued(
+                job,
+                enqueued_by_user_id=getattr(user, "id", None),
+                solver_config_json=None,
+            )
+        except Exception:  # noqa: BLE001 - durability is an upgrade, not a precondition
+            pass
+    # `get_job` already answers with the public view AND the live queue
+    # position; recomputing it here would be a second implementation of
+    # `_position_locked` that could disagree with the listing endpoint.
+    return sq.solve_queue.get_job(job.id) or job.to_public(None)
 
 
 def get_stage_status(project) -> dict:

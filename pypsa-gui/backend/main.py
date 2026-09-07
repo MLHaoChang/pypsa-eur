@@ -74,6 +74,7 @@ from routers import (
     chat,
     clustering,
     compare,
+    gridspine,
     io,
     local_settings,
     network,
@@ -1046,6 +1047,11 @@ app.include_router(
     dependencies=[Depends(fs_permission.require_file_access)],
 )
 app.include_router(snapshots.router, prefix="/api/projects", tags=["snapshots"])
+# The planning → dynamics pipeline (gridspine). Its own prefix rather than
+# /api/projects: the resource is a STUDY's stages, snapshots and handoff
+# bundles, not the project's network, and every handler is a thin wrapper over
+# services/gridspine_service.py — the same functions the copilot's tools call.
+app.include_router(gridspine.router, prefix="/api/gridspine", tags=["gridspine"])
 # Chatbot file uploads (Phase A) — per-project file storage at
 # `projects/<name>/uploads/`. Mounted under the same /api/projects prefix
 # so its routes (`/{name}/uploads`, `/{name}/uploads/{file_id}/...`) follow
