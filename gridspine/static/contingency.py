@@ -267,7 +267,7 @@ def _screen_units(work, gm, v0, unit_rows, hour, nl) -> dict:
     return out
 
 
-def n1_severity_ac(net, contingencies, dispatch, loads, registry, hours=None) -> pd.Series:
+def n1_severity_ac(net, contingencies, dispatch, loads, registry, hours=None, on_hour=None) -> pd.Series:
     """The AC screen's worst N-1 severity per hour, over the year — the column
     `max_n1_severity` ranks on.
 
@@ -280,6 +280,10 @@ def n1_severity_ac(net, contingencies, dispatch, loads, registry, hours=None) ->
 
     Cost measured on case39 (2026-09-05, 4 cores): ~70 ms per hour, ~10 min for
     8760 h — the reason F2 could replace the DC proxy of increment 3.
+
+    `on_hour(done, total)` is called after each hour; it is how a 20-minute
+    pass reports progress and how a caller stops it (raising from the callback
+    leaves nothing half-written — the Series is returned only at the end).
     """
     dispatch = validate_dispatch(dispatch)
     loads = validate_loads(loads)
@@ -299,9 +303,13 @@ def n1_severity_ac(net, contingencies, dispatch, loads, registry, hours=None) ->
             rows = screen_n1(work, contingencies, dispatch, loads, hour, registry)
         except BaseCaseNotConverged:
             out[hour] = np.nan
-            continue
-        ok = rows[rows["converged"] & ~rows["islanded"]]
-        out[hour] = float(ok["severity"].max()) if len(ok) else np.nan
+        else:
+            ok = rows[rows["converged"] & ~rows["islanded"]]
+            out[hour] = float(ok["severity"].max()) if len(ok) else np.nan
+        # reported for EVERY hour, a non-convergent one included: a progress
+        # bar that skips the bad hours cannot reach its own total
+        if on_hour is not None:
+            on_hour(len(out), len(hours))
     return pd.Series(out, name="n1_severity_ac", dtype=float).rename_axis("hour")
 
 

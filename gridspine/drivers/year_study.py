@@ -35,6 +35,7 @@ import pandas as pd
 
 from gridspine.drivers.planning import CASE39_F_HZ
 from gridspine.drivers.planning import LEDGER as PLANNING_LEDGER
+from gridspine.drivers.progress import NULL_PROGRESS
 from gridspine.handoff.bundle import BundleInputs, export_bundle
 from gridspine.handoff.raw_writer import write_raw
 from gridspine.ingest.pandapower_source import (
@@ -219,7 +220,8 @@ def _ledger(unit_params, screen: bool = True, ac_pass: dict | None = None) -> li
     ]
 
 
-def dispatch_year(outdir, hours: int = 8760, window: int = 168, overlap: int = 24):
+def dispatch_year(outdir, hours: int = 8760, window: int = 168, overlap: int = 24,
+                  *, progress=NULL_PROGRESS):
     """Stages ingest and dispatch: the case, its registry, and the rolling unit
     commitment for `hours` hours. Writes `loads.csv` (before the solve — demand
     is an INPUT) and `dispatch.csv` into `outdir`. Returns
@@ -232,6 +234,7 @@ def dispatch_year(outdir, hours: int = 8760, window: int = 168, overlap: int = 2
     try:
         net = load_case39_res()
         registry = registry_from_net(net)
+        progress.tick("ingest", 1, 1)
 
         stage = "dispatch"
         n = to_pypsa(
@@ -246,7 +249,10 @@ def dispatch_year(outdir, hours: int = 8760, window: int = 168, overlap: int = 2
         loads = to_loads_table(n, net)
         loads.to_csv(outdir / "loads.csv", index=False)
 
-        dispatch = to_dispatch_table(run_uc_rolling(n, window=window, overlap=overlap))
+        dispatch = to_dispatch_table(run_uc_rolling(
+            n, window=window, overlap=overlap,
+            on_window=lambda done, total: progress.tick("dispatch", done, total),
+        ))
         dispatch.to_csv(outdir / "dispatch.csv", index=False)
         return net, registry, dispatch, loads
     except Exception as exc:
@@ -264,6 +270,10 @@ def resume_from_dispatch(
     k: int = 5,
     screen: bool = True,
     n2_prune_threshold_pct: float = 0.0,
+    *,
+    progress=NULL_PROGRESS,
+    config_json: dict = None,
+    templates_overlay=None,
 ) -> StudyResult:
     """Follow-ups F3: stages ranking to handoff from another run's `dispatch.csv`
     and `loads.csv`, without re-solving the unit commitment (~2 h for a year
@@ -301,12 +311,14 @@ def resume_from_dispatch(
         }
         net = load_case39_res()
         registry = registry_from_net(net)
+        progress.tick("ingest", 1, 1)
     except Exception as exc:
         StageError(stage=stage, element_ids=[], cause=repr(exc)).write(outdir)
         raise
     return study_dispatch(
         outdir, net, registry, dispatch, loads, k=k, screen=screen,
         n2_prune_threshold_pct=n2_prune_threshold_pct, dispatch_source=dispatch_source,
+        progress=progress, config_json=config_json, templates_overlay=templates_overlay,
     )
 
 
@@ -343,6 +355,9 @@ def study_dispatch(
     window: int | None = None,
     overlap: int | None = None,
     dispatch_source: dict | None = None,
+    progress=NULL_PROGRESS,
+    config_json: dict | None = None,
+    templates_overlay=None,
 ) -> StudyResult:
     """Stages ranking, loadflow, screening and handoff for a dispatch that is
     already solved and already written to `outdir` as `dispatch.csv` and
@@ -377,7 +392,10 @@ def study_dispatch(
             [branch_contingencies(net), unit_contingencies(registry)], ignore_index=True
         )
         t_ac = time.perf_counter()
-        metrics["n1_severity_ac"] = n1_severity_ac(net, n1_set, dispatch, loads, registry)
+        metrics["n1_severity_ac"] = n1_severity_ac(
+            net, n1_set, dispatch, loads, registry,
+            on_hour=lambda done, total: progress.tick("ranking", done, total),
+        )
         ac_seconds = time.perf_counter() - t_ac
         art["metrics"] = outdir / "metrics.csv"
         metrics.to_csv(art["metrics"])
@@ -390,19 +408,21 @@ def study_dispatch(
 
         selection = validate_selection(select_snapshots(metrics, k=k), metrics)
 
-        templates = load_unit_templates()
+        templates = load_unit_templates(overlay=templates_overlay)
         if screen:
             n2_set = n2_candidates(branch_contingencies(net))
         screening, faults, strength, thresholds, ac_severity = {}, {}, {}, {}, {}
 
         converged = []
-        for hour in selection["hour"]:
+        n_selected = len(selection)
+        for i, hour in enumerate(selection["hour"], start=1):
             hour = int(hour)
             stage = "loadflow"
             apply_snapshot(net, dispatch, loads, hour=hour, registry=registry)
             lf = run_lf(net)
             lf_results[hour] = lf
             converged.append(bool(lf.converged))
+            progress.tick("loadflow", i, n_selected)
             art[f"lf_{hour}_bus"] = outdir / f"lf_{hour}_bus.csv"
             lf.bus.to_csv(art[f"lf_{hour}_bus"])
 
@@ -417,6 +437,12 @@ def study_dispatch(
                     net, n2_set, dispatch, loads, hour, registry
                 )
                 screening[hour] = pd.concat([n1, n2], ignore_index=True)
+                # Written to the STUDY directory as soon as the hour is screened,
+                # not only into the bundle at the end: it is the on-disk signal
+                # that the screening stage finished this hour (drivers/status.py),
+                # and a run that stops during the bundle pass keeps the work.
+                art[f"screening_{hour}"] = outdir / f"screening_h{hour}.csv"
+                screening[hour].to_csv(art[f"screening_{hour}"], index=False)
                 ok = n1[n1["converged"] & ~n1["islanded"]]
                 ac_severity[hour] = float(ok["severity"].max()) if len(ok) else np.nan
                 faults[hour] = pd.concat(
@@ -425,6 +451,7 @@ def study_dispatch(
                     ignore_index=True,
                 )
                 strength[hour] = scr(faults[hour][faults[hour]["case"] == "min"], registry, templates)
+                progress.tick("screening", i, n_selected)
 
             stage = "handoff"
             # The export is written whether or not the flow converged: the
@@ -438,6 +465,10 @@ def study_dispatch(
                 title=f"case39_res UC dispatch hour {hour}",
                 f_hz=CASE39_F_HZ,
             )
+            if not screen:
+                # With screening off the RAW write is the last touch of this
+                # hour; with it on, the bundle pass below is, and reports there.
+                progress.tick("handoff", i, n_selected)
 
         stage = "ranking"
         selection = selection.assign(converged=converged)
@@ -481,7 +512,7 @@ def study_dispatch(
             }
             ledger = _ledger(unit_params, screen=True, ac_pass=ac_pass)
             stage = "handoff"
-            for hour in hours_selected:
+            for i, hour in enumerate(hours_selected, start=1):
                 apply_snapshot(net, dispatch, loads, hour=hour, registry=registry)
                 bundles[hour] = export_bundle(outdir, BundleInputs(
                     net=net, hour=hour, dispatch=dispatch, loads=loads, registry=registry,
@@ -491,6 +522,7 @@ def study_dispatch(
                     screening=screening[hour], fault_levels=faults[hour],
                 ))
                 art[f"bundle_{hour}"] = bundles[hour]
+                progress.tick("handoff", i, len(hours_selected))
             per_hour = {}
             for hour in hours_selected:
                 rows = screening[hour]
@@ -518,6 +550,8 @@ def study_dispatch(
         art["manifest"] = outdir / "manifest.json"
         art["manifest"].write_text(json.dumps({
             "screen": bool(screen),
+            "status": "completed",
+            "config": config_json,
             "n1_severity_ac_pass": ac_pass,
             **extra,
             "stages": STAGES,

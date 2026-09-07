@@ -72,7 +72,8 @@ README_SECTIONS = (
 #: Hour-independent required files. The .raw, .dyr, dispatch and loads files
 #: are named for the case and hour and are checked alongside these.
 BUNDLE_FILES = (
-    "contingencies.csv", "ledger.md", "lf_bus.csv", "lf_branch_flow.csv", "manifest.json",
+    "contingencies.csv", "ledger.md", "ledger.json", "lf_bus.csv", "lf_branch_flow.csv",
+    "manifest.json",
 )
 
 
@@ -174,6 +175,26 @@ def write_ledger_readme(entries, templates: UnitTemplates, measurements: dict, p
     return text
 
 
+def write_ledger_json(entries, templates: UnitTemplates, measurements: dict, hour, path) -> dict:
+    """`ledger.md`'s content as data. Written from the same inputs, never parsed
+    back out of the prose."""
+    counts = provenance_counts(templates)
+    assumed = templates.params[templates.params["source"] == "assumed"]
+    data = {
+        "hour": int(hour),
+        "entries": list(entries),
+        "provenance_counts": {k: int(counts.get(k, 0)) for k in ("measured", "datasheet", "assumed")},
+        "assumed_values": [
+            {"unit_id": r.unit_id, "param": r.param, "value": float(r.value)}
+            for r in assumed.sort_values(["unit_id", "param"]).itertuples(index=False)
+        ],
+        "measurements": {k: measurements[k] for k in REQUIRED_MEASUREMENTS},
+        "units_by_model": {m: int(n) for m, n in templates.units["model"].value_counts().sort_index().items()},
+    }
+    Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
+    return data
+
+
 @dataclasses.dataclass
 class BundleInputs:
     net: object
@@ -217,7 +238,13 @@ def export_bundle(outdir, inp: BundleInputs) -> Path:
     files.append("contingencies.csv")
 
     write_ledger_readme(inp.ledger_entries, inp.templates, inp.measurements, bundle / "ledger.md")
-    files.append("ledger.md")
+    # The same ledger as DATA. `ledger.md` is prose for the engineer who opens
+    # the bundle; the GUI and the copilot need the entries, the provenance
+    # counts and the measurements as fields they can render and compare, and a
+    # reader that has to parse Markdown to answer "how many assumed values?"
+    # will eventually parse it wrong.
+    write_ledger_json(inp.ledger_entries, inp.templates, inp.measurements, hour, bundle / "ledger.json")
+    files += ["ledger.md", "ledger.json"]
 
     inp.lf.bus.to_csv(bundle / "lf_bus.csv", index_label="bus")
     inp.lf.branch_flow.to_csv(bundle / "lf_branch_flow.csv", index=False)

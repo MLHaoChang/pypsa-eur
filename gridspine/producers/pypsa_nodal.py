@@ -276,6 +276,7 @@ def run_uc_rolling(
     window: int = 168,
     overlap: int = 24,
     mip_rel_gap: float = DEFAULT_MIP_REL_GAP,
+    on_window=None,
 ) -> pypsa.Network:
     """Solve committable UC over `n.snapshots` in overlapping windows.
 
@@ -294,6 +295,12 @@ def run_uc_rolling(
     A window is a real MILP over its own snapshots, so the seam is the only
     place commitment can go wrong; `tests/gridspine/test_producer_year.py`
     asserts run lengths over the ASSEMBLED series for exactly that reason.
+
+    `on_window(done, total)` is called after each window is solved and frozen —
+    the only progress this loop can honestly report, since a window is one
+    MILP. A caller that wants to stop raises from it (the driver's `Progress`
+    does exactly that): the next window is never started and nothing partial
+    is written, because the dispatch table is assembled only at the end.
     """
     if window <= 0 or window % 24 != 0:
         raise ContractError(
@@ -310,8 +317,10 @@ def run_uc_rolling(
 
     sns = n.snapshots
     step = window - overlap
+    n_windows = 1 + -(-max(0, len(sns) - window) // step)   # ceil division
     frozen_status, dispatch = [], []
     t0 = 0
+    solved = 0
     while True:
         w_sns = sns[t0:t0 + window]
         status, condition = n.optimize(
@@ -329,6 +338,9 @@ def run_uc_rolling(
         keep = w_sns if last else sns[t0:t0 + step]
         frozen_status.append(_rounded_status(n, keep))
         dispatch.append(n.generators_t.p.loc[keep])
+        solved += 1
+        if on_window is not None:
+            on_window(solved, n_windows)
         if last:
             break
         t0 += step
