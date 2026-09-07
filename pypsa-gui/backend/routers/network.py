@@ -32,6 +32,7 @@ from services.transient_rows import filter_transient_names
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
 from services.upload_guard import read_capped
+from services.http_filenames import content_disposition
 
 # ── Re-export façade: the extracted helper services ──────────────────────────
 # These names are DEFINED under `services/` now (see the decomposition spec,
@@ -374,10 +375,17 @@ _COMPONENT_ATTRS: dict[str, str] = {
 
 def _xlsx_response(df: pd.DataFrame, fname: str) -> StreamingResponse:
     """
-    Serialise `df` to an .xlsx StreamingResponse with a quoted attachment
-    filename. Shared tail of the load/generator/link profile-template download
-    endpoints (filename is quoted per RFC 6266 — all template names are
-    space-free so this is byte-equivalent for browsers).
+    Serialise `df` to an .xlsx StreamingResponse with a safely-encoded
+    attachment filename. Shared tail of the load/generator/link profile-template
+    download endpoints.
+
+    The filename embeds a COMPONENT NAME, and component names are created
+    through `POST /api/network/loads` (and friends) with no character
+    validation at all — so a load called `ev"il` used to close the header's
+    quoted-string early, and one containing a newline made uvicorn raise
+    `RuntimeError: Invalid HTTP header value.` mid-send and the browser get an
+    empty reply. `content_disposition` is byte-identical to the old f-string
+    for every ordinary template name.
     """
     buf = io.BytesIO()
     df.to_excel(buf, engine="openpyxl")
@@ -385,7 +393,7 @@ def _xlsx_response(df: pd.DataFrame, fname: str) -> StreamingResponse:
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        headers={"Content-Disposition": content_disposition(fname)},
     )
 
 

@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Query
 from services.asset_results import service as svc
 from services.asset_results.registry import ALL_CLASSES, CATEGORY_IDS
 from services.pypsa_service import PyPSAService
+from services.http_filenames import content_disposition
 
 logger = logging.getLogger("pypsa_gui.asset_results")
 
@@ -68,7 +69,7 @@ def export_asset_results_xlsx(
     return Response(
         content=blob,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        headers={"Content-Disposition": content_disposition(fname)},
     )
 
 
