@@ -58,8 +58,14 @@ cannot do:
 | **load 667** | 62.1181 | 56.5454 | 5.5727 | 48.7435 | **13.3746** | **fold 2.4× worse** |
 | load 680 | 62.1181 | 56.5454 | 5.5727 | 62.1181 | 0.0000 | fold wins |
 
-The review found worse: 3.8× on a 20-unit fleet, 8.7× on a 40-unit fleet, and
-fold-worse points in 8 of 11 randomised heterogeneous fleets.
+The review found worse: 3.8× on a 20-unit fleet, 8.7× on a 40-unit fleet.
+And on a **60-fleet randomised heterogeneous search** (n ∈ 9…12; capacities
+∈ {50, 75, 100, 120, 200} MW; cf ∈ {0.3 … 0.95}; q ∈ {0.02 … 0.2}; every
+integer load with a material exact LOLE), **47 of 60 fleets — 78 % — contain
+at least one load at which the fold's absolute error exceeds the shipped
+code's.** One fleet had 25 such loads. So the pointwise regression is not an
+artifact of a narrow search: it is the common case, and it is invisible only
+inside the truncated window §2's process finding describes.
 
 **And on realistic mixed fleets it is frequently a no-op.** `split_fleet`
 orders by `−mean(a)·cap`, so constant units at a high `cf` sort *into* the

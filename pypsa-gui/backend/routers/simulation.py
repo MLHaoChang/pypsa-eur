@@ -376,7 +376,12 @@ def preflight():
     (orphan vintages, slack-on-every-bus, …) that vanish the moment the
     worker exits.
     """
-    if _solver_in_flight():
+    def _deferred_payload() -> dict:
+        """The answer this route gives when a solver worker is alive.
+
+        Factored out because it is now returned from TWO places: the guard
+        below, and the re-check AFTER validation — see the note there.
+        """
         # Two distinct stuck states map to different remediation:
         #   * status == "running"  — solve genuinely in progress; wait.
         #   * status == "aborted"  — user clicked Abort but HiGHS/Gurobi is
@@ -411,9 +416,33 @@ def preflight():
             "deferred_reason": reason,
             "deferred_stuck": current_status == "aborted",
         }
+
+    if _solver_in_flight():
+        return _deferred_payload()
     n = PyPSAService.get_network()
     config = _state["solver_config"]
     issues = validate_for_run(n, config)
+    # The guard above is a CHECK, and validation is the ACT: a solve that
+    # starts in between applies its transforms — vintage rows, slack
+    # generators, and the in-place demand scaling — under a route that
+    # deliberately does not take the mutation lock (so a long solve returns
+    # `deferred` instead of blocking the UI for minutes).
+    #
+    # The window cannot corrupt anything: `lp_demand_frame` deep-copies
+    # before scaling, so every consumer here is read-only on the live frame
+    # (12c-0 shipped-code review, finding 2). What it CAN do is answer from a
+    # half-transformed network — most visibly by scaling an already-scaled
+    # demand, which is not idempotent (measured x1.25^2, 12c v3 review,
+    # finding 6) and can invent a `reserve_margin_unreachable` that is not
+    # true of the user's network.
+    #
+    # So re-check, and prefer the answer this route already has for exactly
+    # this state. Advice computed against transient LP scaffolding is worse
+    # than "deferred — click Revalidate", which is what the user would have
+    # got had the solve started one millisecond earlier (12c v3 review,
+    # finding 6, recorded then as backlog).
+    if _solver_in_flight():
+        return _deferred_payload()
     return {
         "ok": not has_errors(issues),
         "errors": sum(1 for i in issues if i.severity == "error"),
