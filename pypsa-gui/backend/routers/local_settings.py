@@ -36,6 +36,8 @@ from pydantic import BaseModel
 import app_paths
 import local_mode
 import local_settings
+import os
+
 from services import app_secrets
 
 logger = logging.getLogger(__name__)
@@ -151,17 +153,36 @@ def reveal_log() -> dict:
     Show the log file in the platform file manager.
 
     This is the only `subprocess` invocation in the application. It is
-    acceptable for one specific reason: NOTHING from the request reaches the
-    command. This route takes no parameters and the path is computed here from
-    `app_paths`. There is no argument to inject into because there is no
-    argument — and `test_reveal_runs_a_fixed_command_with_no_request_input`
-    exists to keep it that way.
+    acceptable for two reasons.
+
+    NOTHING FROM THE REQUEST REACHES THE COMMAND. This route takes no
+    parameters and the path is computed here from `app_paths`. There is no
+    argument to inject into because there is no argument — and
+    `test_reveal_runs_a_fixed_command_with_no_request_input` exists to keep it
+    that way.
+
+    AND NO CREDENTIAL REACHES THE CHILD (C-18). `app_secrets.bootstrap_
+    environment` pushes every managed name from `user.env` into `os.environ`,
+    and inheriting that whole environment would hand all four provider keys
+    plus every `PYPSA_GUI_LLM_KEY__*` slot to `xdg-open`/`open`/`explorer` —
+    a long-lived desktop file manager, not a short-lived helper. On master
+    this argument was weak enough to skip: there was one key in the
+    environment. This branch put one there per profile. The filter uses
+    `is_managed_key`, the same membership rule that decides what may be
+    written to `user.env`, so a new slot shape cannot silently start leaking.
     """
     path = app_paths.app_data_dir() / LOG_FILENAME
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch(exist_ok=True)
-        subprocess.run(_reveal_argv(path), shell=False, check=False, timeout=10)
+        child_env = {
+            name: value for name, value in os.environ.items()
+            if not app_secrets.is_managed_key(name)
+        }
+        subprocess.run(
+            _reveal_argv(path), shell=False, check=False, timeout=10,
+            env=child_env,
+        )
     except Exception as exc:  # noqa: BLE001 — reported, never fatal
         logger.warning("local settings: reveal-log failed: %s", exc)
         return {"revealed": False, "detail": str(exc), "log_path": str(path)}

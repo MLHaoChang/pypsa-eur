@@ -15,8 +15,13 @@ from typing import Any
 # Module-level so the patterns compile once. SECRET_KV catches
 # password=/passwd=/secret=/api_key=/token= followed by a value; BEARER
 # catches 'bearer <token>'; the sk-ant-* pattern is shared with redact_for_log.
+# A6 — the optional quotes are load-bearing. This used to require `=`/`:`
+# IMMEDIATELY after the keyword, so `{"api_key": "sk-…"}` did not match: the
+# closing quote sat between them. That is exactly the shape of a provider
+# error body, and `llm_openai_compat` wraps `str(exc)` from an SDK whose
+# `APIStatusError.__str__` renders precisely that JSON.
 SECRET_KV_RE = re.compile(
-    r"(?i)\b(password|passwd|secret|api[_-]?key|token)\s*[=:]\s*(\S+)"
+    r"(?i)\b(password|passwd|secret|api[_-]?key|token)[\"\']?\s*[=:]\s*[\"\']?([^\s\"\',}]+)"
 )
 BEARER_RE = re.compile(r"(?i)\bbearer\s+\S+")
 SK_ANT_RE = re.compile(r"sk-ant-[A-Za-z0-9_\-]+")
@@ -96,6 +101,13 @@ def redact_secrets_in_str(text: str, _values: frozenset[str] | None = None) -> s
     if _values is None:
         _values = _snapshot_values()
     text = _substitute_managed_values(text, _values)
+    # A7 — unconditional, i.e. NOT subject to MIN_SUBSTITUTION_LENGTH. The
+    # length floor exists so a short COMMON word (an Ollama user's
+    # `OPENAI_API_KEY=ollama`) is not rewritten everywhere; it must never
+    # exempt the one variable the Phase 3 invariant names by hand.
+    _anthropic = os.environ.get("ANTHROPIC_API_KEY")
+    if _anthropic:
+        text = text.replace(_anthropic, "[REDACTED-API-KEY]")
     text = SECRET_KV_RE.sub(r"\1=[REDACTED]", text)
     text = BEARER_RE.sub("bearer [REDACTED]", text)
     text = SK_ANT_RE.sub("[REDACTED-API-KEY]", text)
@@ -114,13 +126,18 @@ def redact_for_log(value: Any, _values: frozenset[str] | None = None) -> str:
     the Fix round 1 note on why value-substitution must run before the
     shape-based patterns below).
     """
-    text = str(value)
-    if _values is None:
-        _values = _snapshot_values()
-    text = _substitute_managed_values(text, _values)
-    key = os.environ.get("ANTHROPIC_API_KEY")
-    if key:
-        text = text.replace(key, "[REDACTED-API-KEY]")
-    # Generic shape: sk-ant-<...non-whitespace...>
-    text = re.sub(r"sk-ant-[A-Za-z0-9_\-]+", "[REDACTED-API-KEY]", text)
-    return text
+    # A7 / C-15 — delegate, do not reimplement.
+    #
+    # These two functions were asymmetric in BOTH directions. `redact_for_log`
+    # omitted `SECRET_KV_RE`/`BEARER_RE`, so an unmanaged bearer token or
+    # `api_key=` pair survived into the log. But it ALSO replaced the
+    # `ANTHROPIC_API_KEY` literal unconditionally, where `redact_secrets_in_str`
+    # reached it only through `_substitute_managed_values` — which is gated on
+    # `MIN_SUBSTITUTION_LENGTH`. So for a short live key the DURABLE
+    # `chat.jsonl` path was weaker than the log: the file you keep was less
+    # scrubbed than the line you print, which inverts the intent.
+    #
+    # `redact_secrets_in_str` now owns every pass, including the unconditional
+    # literal replace, and this is a thin `str()` wrapper over it. One
+    # pipeline, so neither sink can be weaker than the other again.
+    return redact_secrets_in_str(str(value), _values)

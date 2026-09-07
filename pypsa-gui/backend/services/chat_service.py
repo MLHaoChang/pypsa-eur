@@ -369,7 +369,17 @@ def _redact_for_persist(value: Any, _values: frozenset[str] | None = None) -> An
     if isinstance(value, str):
         return _redact_secrets_in_str(value, _values)
     if isinstance(value, dict):
-        return {k: _redact_for_persist(v, _values) for k, v in value.items()}
+        # C-16 — KEYS are scrubbed too. Recursing only into values let the
+        # live provider key land verbatim in `chat.jsonl` when it appeared in
+        # a key position, because the gap swallowed the managed-value
+        # SUBSTITUTION and not merely the shape regexes. Reachable through
+        # `POST /api/chat/import` and through model-authored `tool_use.input`
+        # keys, and it propagates onward into snapshot/copy bundles.
+        return {
+            (_redact_secrets_in_str(k, _values) if isinstance(k, str) else k):
+                _redact_for_persist(v, _values)
+            for k, v in value.items()
+        }
     if isinstance(value, (list, tuple)):
         return [_redact_for_persist(v, _values) for v in value]
     return value

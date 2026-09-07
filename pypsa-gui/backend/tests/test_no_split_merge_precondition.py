@@ -50,6 +50,7 @@ coincidence.
 """
 from __future__ import annotations
 
+import json
 import logging
 import sys
 import types
@@ -315,3 +316,86 @@ def test_without_the_value_substitution_widening_the_same_secret_leaks(
         "to chat.jsonl — if it didn't, the persist assertion above proves "
         "nothing"
     )
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Round-4 findings against the redaction control ITSELF — the sole
+# compensating control this file's precondition depends on. Prior reviews
+# only checked that it catches managed values; nobody read the algorithm.
+# ═════════════════════════════════════════════════════════════════════════
+
+
+def test_a_secret_in_a_dict_KEY_is_redacted_before_persist(monkeypatch):
+    """
+    C-16, worse than filed. `_redact_for_persist` recursed dict VALUES but not
+    dict KEYS, and the gap swallows the managed-value substitution too — not
+    just the shape regexes. So the actual configured provider key could land
+    verbatim in `chat.jsonl` and propagate into snapshot/copy bundles.
+
+    Reachable via `POST /api/chat/import` (member auth is enough, and the
+    route's own docstring claims the opposite), and organically through
+    model-authored `tool_use.input` keys.
+    """
+    from services import chat_service
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-LIVEKEY0000000000")
+    payload = {
+        "input": {
+            "sk-ant-LIVEKEY0000000000": "value-position-is-fine",
+            "Authorization: Bearer sk-ant-LIVEKEY0000000000": "see above",
+        },
+    }
+    out = chat_service._redact_for_persist(payload)
+    flat = json.dumps(out)
+    assert "sk-ant-LIVEKEY0000000000" not in flat, (
+        f"the live provider key survived in a dict KEY: {flat}"
+    )
+
+
+def test_a_json_quoted_credential_field_is_redacted(monkeypatch):
+    """
+    A6 — `SECRET_KV_RE` required `=`/`:` IMMEDIATELY after the keyword, so a
+    quote between them defeated it. That is exactly the shape of a provider
+    error body, and `llm_openai_compat` wraps `str(exc)` from an SDK whose
+    `APIStatusError.__str__` renders precisely that JSON.
+    """
+    from services import redaction
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    body = '{"api_key": "sk-proj-SECRET123", "token":"tokSECRET456"}'
+    out = redaction.redact_secrets_in_str(body, frozenset())
+    assert "sk-proj-SECRET123" not in out, out
+    assert "tokSECRET456" not in out, out
+
+
+def test_the_durable_path_is_never_weaker_than_the_log(monkeypatch):
+    """
+    A7 / C-15. The two redactors were asymmetric in BOTH directions:
+
+      * `redact_for_log` omitted the shape patterns entirely, so an unmanaged
+        bearer token or `api_key=` pair survived into the log; while
+      * `redact_for_log` alone replaced the ANTHROPIC_API_KEY literal
+        unconditionally, where `redact_secrets_in_str` reached it only through
+        `_substitute_managed_values` — which is gated on a length floor.
+
+    So for a short live key the DURABLE `chat.jsonl` path was weaker than the
+    log, inverting the intent: the file you keep was less scrubbed than the
+    line you print.
+    """
+    from services import redaction
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "shortk")
+    text = (
+        "boom: key shortk rejected; "
+        "password=hunter2secret; bearer glpat-UNMANAGED-abcdef123456"
+    )
+    for_log = redaction.redact_for_log(text)
+    for_persist = redaction.redact_secrets_in_str(text)
+
+    for name, out in (("redact_for_log", for_log),
+                      ("redact_secrets_in_str", for_persist)):
+        assert "shortk" not in out, f"{name} leaked the live key: {out}"
+        assert "hunter2secret" not in out, f"{name} leaked a password: {out}"
+        assert "glpat-UNMANAGED-abcdef123456" not in out, (
+            f"{name} leaked a bearer token: {out}"
+        )
