@@ -216,12 +216,22 @@ def test_run_turn_accepts_a_provider_and_emits_identical_frames():
     assert req.system_blocks[-1]["stable"] is True
     assert req.tools_stable is True
     assert req.max_tokens == chat_service.MAX_OUTPUT_TOKENS_PER_TURN
-    # Against the registry, never a literal — chat_tools_schema's own doctrine
-    # is "len(TOOLS) is the only source of truth". A hardcoded 117 broke the
-    # first time this branch merged into a trunk whose other waves had grown
-    # the registry (to 120), with a green branch gate on both sides.
+    # Against the payload function, never a literal — chat_tools_schema's own
+    # doctrine is "len(TOOLS) is the only source of truth". A hardcoded 117
+    # broke the first time this branch merged into a trunk whose other waves
+    # had grown the registry (to 120), with a green branch gate on both sides.
+    #
+    # Since increment 4 the request carries `_tools_payload(turn_ctx)`, the
+    # registry FILTERED for the turn's project kind (the seven project-scoped
+    # gridspine tools are offered only on a planning → dynamics project). This
+    # turn runs on the unbound scratch context, so the expectation is the
+    # unbound payload — and it is asserted through the same function run_turn
+    # uses, so a change to the gate moves both sides together.
     from services.chat_tools_schema import TOOLS
-    assert len(req.tools) == len(TOOLS)
+    expected = chat_service._tools_payload(None)
+    assert len(req.tools) == len(expected)
+    assert len(expected) < len(TOOLS)          # the gate did something on an unbound turn
+    assert {t["name"] for t in req.tools} == {t["name"] for t in expected}
 
 
 def _sse_bytes(*chunks):

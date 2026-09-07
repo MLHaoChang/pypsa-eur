@@ -1,6 +1,6 @@
 # gridspine Increment 4 Implementation Plan — Action Layer, GUI Wiring, Chat Tools
 
-> **Status 2026-09-07: tasks 1–5 landed. D1–D4 answered as recommended (the owner asked to proceed); D5 is NEW and open.** Tasks 6 and 7 remain — and task 6 carries a blocker this session cannot clear: ADR 0002 requires a LIVE API probe for chat changes, which needs an Anthropic key. **The sequencing premise below was wrong and is corrected:** PR #6 decomposes `solver_service.py`, the results/compare routers, `conftest.py` and `pixi.toml` — it does **not** touch `solve_queue.py`, `chat_tools*.py`, `db/models.py` or `routers/projects.py`, so tasks 4 and 6 are not blocked by it. Checked against the PR's own file list rather than assumed; the earlier claim was an assumption written as a fact.
+> **Status 2026-09-07: tasks 1–6 landed; task 6 UNVERIFIED against a live model (below). D1–D4 answered as recommended (the owner asked to proceed); D5 is NEW and open.** Task 7 (frontend) remains. **Task 6 is implemented and unit-tested but has NOT had the live API probe ADR 0002 requires** — this session had no Anthropic key — so the eight `gridspine_*` tools must be treated as unverified against a real model until the owner runs it: create a study, run it, read status/snapshots/ledger, edit a template value, export a bundle, each through the chat panel, and record the transcript here. **The sequencing premise below was wrong and is corrected:** PR #6 decomposes `solver_service.py`, the results/compare routers, `conftest.py` and `pixi.toml` — it does **not** touch `solve_queue.py`, `chat_tools*.py`, `db/models.py` or `routers/projects.py`, so tasks 4 and 6 are not blocked by it. Checked against the PR's own file list rather than assumed; the earlier claim was an assumption written as a fact.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -95,7 +95,7 @@ The owner said to proceed, so each was taken as the plan recommended. They are d
 - [x] Boot reconciliation (`reconcile_on_boot`) marks an interrupted gridspine job `interrupted`; `stage_status` then shows where it stopped, and `run_pipeline` on such a project offers `from_dispatch` when `dispatch.csv` exists.
 - [x] Tests: enqueue a gridspine job on a 48 h config, watch status through `queued → running → completed`, abort one mid-dispatch, and the existing queue tests unchanged.
 - [x] Mutation: the runner ignores `stop_event` → the abort test red.
-- [ ] `pixi run gui-tests`, path-limited commit.
+- [x] `pixi run gui-tests`, path-limited commit.
 
 ## Task 5 — Router: `/api/gridspine` — LANDED
 
@@ -106,15 +106,16 @@ The owner said to proceed, so each was taken as the plan recommended. They are d
 - [x] Tests: every endpoint calls its service function (patch the service, assert the call) and the download streams the zip; unauthorised project → 403/404 as elsewhere.
 - [ ] `pixi run gui-tests`, path-limited commit.
 
-## Task 6 — Chat tools (after PR #6; ADR 0002 live probe)
+## Task 6 — Chat tools — LANDED, live probe (ADR 0002) NOT RUN
 
 **Files:** `services/chat_tools_schema.py` (`TOOLS` entries via `_t`), `services/chat_tools.py` (`DISPATCHERS`, `TOOL_ROUTES`, wrappers with the `_h` alias), `tests/test_chat_tools_endpoint_map.py`, `tests/test_chat_tools_imports.py`, `CHATBOT_TOOLS_AUDIT.md`.
 
-- [ ] Tools, one per action-layer function, calling the SERVICE function (tagged `_service_call_` in `TOOL_ROUTES`, the sanctioned pattern for non-route callees) — never the router: `gridspine_create_study` (`Safety: write`), `gridspine_set_dispatch_source` (`write`), `gridspine_run_pipeline` (`execution_long_running`), `gridspine_get_stage_status` (`read`), `gridspine_list_ranked_snapshots` (`read`), `gridspine_get_assumption_ledger` (`read`), `gridspine_edit_template_param` (`write`, `edited_by="chat"` hard-coded — the ledger provenance the spec asks for), `gridspine_export_handoff_bundle` (`read`; returns the path/size, the download stays a UI action).
-- [ ] The spec's "toolset matching the open study": a gate in `chat_service` that drops `gridspine_*` tools when the bound project's kind is not `planning_dynamics`, and drops the solve tools when it is. Smallest possible change, with a test on the sent tool list per project kind.
-- [ ] Invariants kept: `len(TOOLS) == len(DISPATCHERS)`, every tool in `TOOL_ROUTES`, `_h` alias AST scan green, lock-gate derivation unchanged for existing tools (gridspine writes are project-scoped and go through the same `_lock_gated` derivation).
-- [ ] Live API probe per ADR 0002: create, run (48 h), status, snapshots, ledger, edit — transcript in the task report.
-- [ ] Mutation: drop one tool from `DISPATCHERS` → the registry-invariant test red.
+- [x] Tools, one per action-layer function, calling the SERVICE function (tagged `_service_call_` in `TOOL_ROUTES`, the sanctioned pattern for non-route callees) — never the router: `gridspine_create_study` (`Safety: write`), `gridspine_set_dispatch_source` (`write`), `gridspine_run_pipeline` (`execution_long_running`), `gridspine_get_stage_status` (`read`), `gridspine_list_ranked_snapshots` (`read`), `gridspine_get_assumption_ledger` (`read`), `gridspine_edit_template_param` (`write`, `edited_by="chat"` hard-coded — the ledger provenance the spec asks for), `gridspine_export_handoff_bundle` (`read`; returns the path/size, the download stays a UI action).
+- [x] The spec's "toolset matching the open study": a gate in `chat_service` that drops `gridspine_*` tools when the bound project's kind is not `planning_dynamics`, and drops the solve tools when it is. Smallest possible change, with a test on the sent tool list per project kind.
+- [x] Invariants kept: `len(TOOLS) == len(DISPATCHERS)`, every tool in `TOOL_ROUTES`, `_h` alias AST scan green, lock-gate derivation unchanged for existing tools (gridspine writes are project-scoped and go through the same `_lock_gated` derivation).
+- [ ] **Live API probe per ADR 0002 — NOT RUN (no key in this session).** Owner: create, run (48 h), status, snapshots, ledger, edit, export through the chat panel; paste the transcript here. Until then the tools are unverified against a model.
+- Notes from landing: the toolset gate filters ONE registry rather than keeping one per kind — only the seven project-scoped `gridspine_*` tools are dropped when the bound project is not `planning_dynamics` (or the session is unbound); `gridspine_create_study` is always offered, since it is how a planning project comes to exist; the solve tools are NOT dropped on a planning project (they already report "no network" cleanly, and dropping them would need a second definition of "solve tool"). The kind lookup never raises: a bad binding degrades to the unbound toolset. `CHATBOT_TOOLS_AUDIT.md` was left untouched — it is the record of a resolved defect audit, not a surface inventory; the registry and `tests/test_chat_tools_gridspine.py` are the inventory.
+- [x] Mutation: drop one tool from `DISPATCHERS` → the registry-invariant test red.
 - [ ] `pixi run gui-tests`, path-limited commit.
 
 ## Task 7 — Frontend: new project kind, form, stage progress, downloads (thin, last)

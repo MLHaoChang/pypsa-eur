@@ -1432,6 +1432,115 @@ TOOLS: list[dict[str, Any]] = [
         },
         ["component_class", "name"],
     ),
+
+    # ── gridspine: planning → dynamics studies (8) ─────────────────────────
+    # Wrappers over services/gridspine_service.py — the SAME functions
+    # /api/gridspine calls, so the copilot and the UI cannot drift (spec,
+    # "Copilot parity"). Every project-scoped tool takes the project by name
+    # and is only offered when the session's bound project is a
+    # planning_dynamics one (chat_service._tools_payload); create is always
+    # offered. NOT verified by a live API probe yet (ADR 0002) — see the
+    # increment-4 plan, task 6.
+    _t(
+        "gridspine_create_study",
+        "Create a NEW planning → dynamics project (kind planning_dynamics) "
+        "with a study config: hours (default 8760), k (extreme hours per "
+        "criterion, default 5), window and overlap (rolling unit-commitment "
+        "window in hours, defaults 168/24), screen (run N-1/N-2 screening, "
+        "default true). The project is created but not run. Returns {id, "
+        "name, kind, config, status}. Safety: write.",
+        {
+            "name": {"type": "string"},
+            "config": {"type": "object"},
+        },
+        ["name"],
+    ),
+    _t(
+        "gridspine_set_dispatch_source",
+        "Choose where a planning → dynamics project's dispatch comes from: "
+        "omit from_dispatch to generate it with the rolling unit commitment, "
+        "or give the directory of a finished study (holding dispatch.csv and "
+        "loads.csv) to reuse that dispatch and re-run only ranking, load flow, "
+        "screening and handoff. Returns the updated config. Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "from_dispatch": {"type": "string"},
+        },
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_run_pipeline",
+        "Run a planning → dynamics study through the solve queue: unit "
+        "commitment, ranking (AC N-1 severity at every hour), load flow, "
+        "N-1/N-2 screening, fault levels and handoff bundles. Returns the "
+        "queue job {id, kind, status, position}; watch or abort it with the "
+        "solve_queue_* tools. A year takes ~2 h; one job per project at a "
+        "time. Safety: execution_long_running.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_get_stage_status",
+        "Per-stage state of a planning → dynamics study, read from its "
+        "artifacts (valid after a restart): {status, resumable, error, "
+        "selected_hours, converged_hours, bundles, stages: {ingest, dispatch, "
+        "ranking, loadflow, screening, handoff: {state, done, total}}}. "
+        "Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_list_ranked_snapshots",
+        "The selected extreme hours of a finished study with why each was "
+        "chosen (reasons: min_inertia_excl_equiv_mws, max_ibr_share, "
+        "max_load_mw, max_import_mw, max_n1_severity) and every ranking metric "
+        "(load_mw, import_mw, inertia_mws, inertia_excl_equiv_mws, ibr_share, "
+        "n1_severity_dc, n1_severity_ac) plus the load-flow converged flag. "
+        "One row per hour. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_get_assumption_ledger",
+        "The study's assumptions ledger as data: entries (what was measured, "
+        "what was assumed), provenance_counts of template values by tag "
+        "(measured/datasheet/assumed), the screening measurements, and edits "
+        "(this project's template edits with who made them: user or chat). "
+        "Answers before the first run too, from the templates it will use. "
+        "Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_edit_template_param",
+        "Change one dynamic-model parameter of one unit for THIS project only "
+        "(e.g. unit_id G_BUS_32, param h_s), recorded in the project's "
+        "template overlay with provenance edited_by=chat. source is the value's "
+        "own provenance tag: measured, datasheet or assumed. The shipped "
+        "template library is never modified. Refused if the unit or parameter "
+        "does not exist or the value breaks the model's physics checks. "
+        "Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "unit_id": {"type": "string"},
+            "param": {"type": "string"},
+            "value": {"type": "number"},
+            "source": {"type": "string", "enum": ["measured", "datasheet", "assumed"]},
+        },
+        ["project_id", "unit_id", "param", "value", "source"],
+    ),
+    _t(
+        "gridspine_export_handoff_bundle",
+        "Zip one selected hour's handoff bundle (.raw, .dyr, contingencies, "
+        "screening, fault levels, ledger) inside the project directory and "
+        "return {path, filename, bytes}. The user downloads it from the "
+        "study view; this tool prepares it. Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "hour": {"type": "integer"},
+        },
+        ["project_id", "hour"],
+    ),
 ]
 
 
@@ -1677,6 +1786,17 @@ TOOL_ROUTES: dict[str, list] = {
     "get_asset_results": _SERVICE_CALL,
     "ui_open_asset_detail": _UI_EVENT,
     "export_asset_results": _SERVICE_CALL,
+    # gridspine (8) — service calls, like dispatch_status: the tools call
+    # services/gridspine_service.py directly, not /api/gridspine, so the
+    # route table records the pattern rather than a URL.
+    "gridspine_create_study": _SERVICE_CALL,
+    "gridspine_set_dispatch_source": _SERVICE_CALL,
+    "gridspine_run_pipeline": _SERVICE_CALL,
+    "gridspine_get_stage_status": _SERVICE_CALL,
+    "gridspine_list_ranked_snapshots": _SERVICE_CALL,
+    "gridspine_get_assumption_ledger": _SERVICE_CALL,
+    "gridspine_edit_template_param": _SERVICE_CALL,
+    "gridspine_export_handoff_bundle": _SERVICE_CALL,
 }
 
 

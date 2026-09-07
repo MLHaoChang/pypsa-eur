@@ -1422,6 +1422,76 @@ def set_acting_session(session_id) -> None:
     _ACTING_SESSION_ID.set(str(session_id) if session_id is not None else None)
 
 
+# ── gridspine: planning → dynamics studies (8) ─────────────────────────────
+#
+# These call services/gridspine_service.py DIRECTLY — the same functions the
+# /api/gridspine router wraps — so the copilot and the UI share one
+# implementation (spec, "Copilot parity"). `_service_call_` in TOOL_ROUTES.
+# The project is resolved through `project_registry.resolve_project` under the
+# acting identity, exactly as `require_project_access` does for the router:
+# 404 for "no such project" and "not yours" alike.
+#
+# `gridspine_edit_template_param` hard-codes edited_by="chat": the ledger
+# provenance the spec asks for, and the one thing the router's `user` default
+# and this wrapper must never share.
+
+
+def _gridspine_project(db, user, project_id: str):
+    from services import project_registry
+    return project_registry.resolve_project(db, user, project_id)
+
+
+def gridspine_create_study(name: str, config: dict | None = None) -> dict:
+    from services.gridspine_service import create_study as _h
+    with _acting() as (db, user):
+        return _h(db, user, name, config=config)
+
+
+def gridspine_set_dispatch_source(project_id: str, from_dispatch: str | None = None) -> dict:
+    from services.gridspine_service import set_dispatch_source as _h
+    with _acting() as (db, user):
+        source = "generate" if from_dispatch is None else {"from_dispatch": from_dispatch}
+        return _h(db, _gridspine_project(db, user, project_id), source)
+
+
+def gridspine_run_pipeline(project_id: str) -> dict:
+    from services.gridspine_service import run_pipeline as _h
+    with _acting() as (db, user):
+        return _h(db, _gridspine_project(db, user, project_id), user=user)
+
+
+def gridspine_get_stage_status(project_id: str) -> dict:
+    from services.gridspine_service import get_stage_status as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def gridspine_list_ranked_snapshots(project_id: str) -> list:
+    from services.gridspine_service import list_ranked_snapshots as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def gridspine_get_assumption_ledger(project_id: str) -> dict:
+    from services.gridspine_service import get_assumption_ledger as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def gridspine_edit_template_param(project_id: str, unit_id: str, param: str,
+                                  value: float, source: str) -> dict:
+    from services.gridspine_service import edit_template_param as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), unit_id, param, value, source, "chat")
+
+
+def gridspine_export_handoff_bundle(project_id: str, hour: int) -> dict:
+    from services.gridspine_service import export_handoff_bundle as _h
+    with _acting() as (db, user):
+        path = _h(_gridspine_project(db, user, project_id), int(hour))
+        return {"path": str(path), "filename": path.name, "bytes": path.stat().st_size}
+
+
 @contextlib.contextmanager
 def _acting():
     """Yield ``(db, user)`` for one project-scoped call."""
@@ -3495,6 +3565,15 @@ DISPATCHERS: dict[str, Any] = {
     "solve_queue_list": solve_queue_list,
     "solve_queue_abort": solve_queue_abort,
     "solve_queue_clear_finished": solve_queue_clear_finished,
+    # gridspine (8)
+    "gridspine_create_study": gridspine_create_study,
+    "gridspine_set_dispatch_source": gridspine_set_dispatch_source,
+    "gridspine_run_pipeline": gridspine_run_pipeline,
+    "gridspine_get_stage_status": gridspine_get_stage_status,
+    "gridspine_list_ranked_snapshots": gridspine_list_ranked_snapshots,
+    "gridspine_get_assumption_ledger": gridspine_get_assumption_ledger,
+    "gridspine_edit_template_param": gridspine_edit_template_param,
+    "gridspine_export_handoff_bundle": gridspine_export_handoff_bundle,
     # project_mgmt (21)
     "list_projects": list_projects,
     "load_project": load_project,
