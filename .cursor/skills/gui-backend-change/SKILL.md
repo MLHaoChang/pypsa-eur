@@ -118,7 +118,7 @@ pinned, not conventional.
    not bound yet for any module-level dict or constant that references them.
 7. The `tests/qa_*.py` drivers are NOT collected by pytest (`pytest.ini` sets
    `python_files = test_*.py`), so `pixi run gui-tests` says nothing about them.
-   Run them with `pixi run gui-qa-drivers` (~2 min, all 18 of them; CI runs the
+   Run them with `pixi run gui-qa-drivers` (~2.5 min, all 19 of them; CI runs the
    same task). For a quick loop, run just the one covering your area:
    `python tests/qa_x.py`, exit 0 = pass. If you touch project save/load,
    rename, layout or `/results-summary`, that is `qa_save_load_roundtrip`,

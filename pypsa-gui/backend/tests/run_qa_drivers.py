@@ -44,12 +44,6 @@ _EXCLUDED: dict[str, str] = {
     "qa_support.py": (
         "a library, not a driver — the sandbox + signed-in client the others import"
     ),
-    "qa_phase4_compare.py": (
-        "needs a backend on 127.0.0.1:8000 holding two SOLVED scenario projects, "
-        "and its central check is a concurrency smoke test that only means "
-        "something against real uvicorn. Run it by hand against a live server; "
-        "it reports its own precondition in one line"
-    ),
 }
 
 
@@ -67,6 +61,9 @@ def main() -> int:
 
     print(f"Running {len(drivers) - len(_EXCLUDED)} qa_*.py drivers "
           f"from {_BACKEND}\n")
+    # `qa_phase4_compare` boots its own uvicorn and solves a scenario first, so
+    # it is the slow one (~30s). It used to be excluded for needing an operator's
+    # server; it self-hosts now.
     for name, reason in sorted(_EXCLUDED.items()):
         print(f"  [SKIP] {name} — {reason}")
     print()
