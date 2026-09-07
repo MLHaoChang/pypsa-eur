@@ -252,15 +252,15 @@ tree is now built through `POST /{base}/scenarios`, so the DB link exists.
 | `qa_save_load_roundtrip` | 1 (the crash), 0 real | **52, all pass** |
 | `qa_layout_persistence` | 27, 26 fail | **30, all pass** |
 
-All nineteen drivers were then run: **eighteen exit 0**.
+All nineteen drivers were then run: **eighteen exit 0**, with `qa_phase4_compare` the one exception — see the 2026-09-07 follow-up at the bottom, which closes it.
 
-## The one that stays blocked
+## The one that stays blocked — *for now; see the 2026-09-07 section*
 
-`qa_phase4_compare` still exits 1, and editing cannot change that. It reads two
-SOLVED scenario projects by name out of a server on `127.0.0.1:8000`, and its
-central check is a concurrency smoke test whose whole point is real HTTP against
-real uvicorn — an in-process `TestClient` would not exercise the HDF5 race it
-was written to catch. It also acquired a second precondition at the auth
+`qa_phase4_compare` still exits 1, and **editing cannot change that**. It reads
+two SOLVED scenario projects by name out of a server on `127.0.0.1:8000`, and
+its central check is a concurrency smoke test whose whole point is real HTTP
+against real uvicorn — an in-process `TestClient` would not exercise the HDF5
+race it was written to catch. It also acquired a second precondition at the auth
 migration that this document did not previously record: even with a server
 running, its `urllib` requests are unauthenticated and get 401.
 
@@ -268,6 +268,9 @@ It now says so. A `preflight()` reports the one blocking reason in a single
 line — no server, no session, or no such project — instead of twenty-two
 identical `Connection refused` entries, and `PYPSA_GUI_QA_COOKIE` lets an
 operator hand it a session cookie.
+
+> **This paragraph was wrong**, and the follow-up at the bottom of this document
+> corrects it. "Editing cannot change that" was an assumption I never tested.
 
 ## Closed: CI runs them now, without reversing `pytest.ini`
 
@@ -281,7 +284,7 @@ because the decision recorded in `pytest.ini` is a reasonable one: these are
 PASS/FAIL scripts, not pytest functions. What was wrong was never that decision;
 it was that the decision had no counterpart. It has one now:
 
-* `tests/run_qa_drivers.py` runs all eighteen runnable drivers as subprocesses
+* `tests/run_qa_drivers.py` runs all runnable drivers as subprocesses
   and fails if any exits non-zero. **~2 minutes** for the set.
 * `pixi run gui-qa-drivers` invokes it, from `[feature.test.tasks]` — same
   placement, and the same reason, as `gui-tests`.
@@ -302,4 +305,98 @@ earned its keep: the `pytest.ini` check was passing **vacuously**, because that
 file names `python_files = test_*.py` in a comment as well as in the setting and
 a substring search matched the comment. It reads the parsed setting now.
 
-`qa_phase4_compare` remains the one excluded driver, for the reason above.
+`qa_phase4_compare` remained the one excluded driver at that point. It no
+longer is — see below.
+
+---
+
+# 2026-09-07: the last driver, and a wrong call I made about it
+
+`qa_phase4_compare` runs now. All nineteen drivers pass, and CI runs all
+nineteen.
+
+## What I got wrong
+
+The section above says, of that driver: *"editing cannot change that"*. I wrote
+it confidently and never tested it. Both halves of the reasoning were wrong:
+
+**"It needs an operator to start a server."** It does need a real server — but
+nothing stops the driver from starting one itself. `uvicorn` runs fine in a
+daemon thread inside the driver's own process, and doing it IN-PROCESS is what
+makes it work at all: the thread shares `tests/qa_support.py`'s sandbox, so it
+serves the same in-memory database and seeded org the driver signs in against.
+A subprocess would have come up with an empty database and 404'd on every
+scenario, which is probably the shape I was imagining when I called it
+impossible.
+
+I had in fact already booted a real uvicorn against this backend twice while
+investigating an unrelated finding, three days before writing that the driver
+could not have one. The evidence was sitting in my own transcript.
+
+**"It reads two SOLVED scenario projects by name."** True, and irrelevant. Every
+check in the driver is a SELF-CONSISTENCY assertion on the payload — per-carrier
+sums reconcile with totals, rates land in [0, 100], `by_unit` is sorted by
+cycles, period keys are a subset of the project's periods. Not one of them reads
+a number that depends on which network produced it. Any solved network with
+renewables and storage satisfies them. I never checked that before concluding
+the specific `4_nodes` data was required.
+
+## What it does now
+
+Default: builds a three-period network shaped so the payloads are non-trivial —
+400 MW of solar against a 100 MW evening-peaked load so the LP spills some
+(curtailment **69.9%**, 6.4 GWh), plus a cyclic battery so `by_unit` has a real
+cycle count — solves it, saves it as both scenarios, boots uvicorn on an
+ephemeral port, and runs every check over real HTTP. The concurrency smoke test
+keeps the property that made it worth having: **20 concurrent reads in 4.7s
+against a real ASGI server**, not a `TestClient`.
+
+Lost load stays `available=False`. That is the check's own documented happy path
+(the LP met all demand), not a gap.
+
+The operator path is preserved rather than replaced: set `PYPSA_GUI_QA_BASE` to
+an API root and the driver skips all seeding and tests that server instead, with
+`PYPSA_GUI_QA_COOKIE` for the session and `PYPSA_GUI_QA_SCENARIOS` to name real
+projects. Checking real scenarios on a real deployment is still worth doing;
+it is just no longer the only way to run the file.
+
+## Cost
+
+The runner goes from 18 drivers in 2m10s to **19 in 2m35s** — the new driver
+costs 13s, most of it the solve. `_EXCLUDED` in `tests/run_qa_drivers.py` is now
+empty of drivers: the only entry left is `qa_support.py`, which is a library.
+
+## An unrelated thing this turned up: the `PYPSA_GUI_` env-var prefix
+
+The first cut named the new variables `PYPSA_GUI_QA_BASE` and friends. Running
+the driver then printed, before anything else:
+
+```
+Unknown option 'gui_qa_base' from env var 'PYPSA_GUI_QA_BASE'.
+Use pypsa.options.describe() to see valid options.
+```
+
+pypsa parses **every** `PYPSA_*` environment variable as one of its own options
+and warns on anything it does not recognise. So this is not about the QA vars:
+it applies to every `PYPSA_GUI_*` variable the product defines —
+`PYPSA_GUI_ALLOW_USER_CODE`, `PYPSA_GUI_API_ORIGIN`,
+`PYPSA_GUI_CHAT_DAILY_TOKEN_CAP` and the rest each emit a line like that
+whenever they are set and pypsa is imported.
+
+The repo already has a collision-free convention in `PYPSAGUI_APP_DATA_DIR`,
+`PYPSAGUI_LOCAL_MODE`, `PYPSAGUI_PROJECTS_ROOT` — no underscore after `PYPSA`,
+so pypsa's parser ignores them. The new QA variables use that form.
+
+Renaming the EXISTING `PYPSA_GUI_*` variables was not done and should not be
+done casually: they are a deployment interface, and the cost is a log line, not
+a malfunction. Recorded so the next person choosing a variable name picks
+`PYPSAGUI_` and does not have to rediscover why.
+
+## The lesson worth keeping
+
+The two claims that made this driver unfixable were an assumption about the
+runtime and an assumption about the data, neither tested, both written into a
+findings document where they then read as established fact for two days. A
+finding that says "cannot" should carry the check that established it, or say
+plainly that it did not.
+

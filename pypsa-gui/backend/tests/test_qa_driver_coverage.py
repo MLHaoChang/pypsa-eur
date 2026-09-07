@@ -72,7 +72,8 @@ def test_every_exclusion_carries_a_reason():
 
 def test_the_runner_is_not_collected_by_pytest():
     """
-    `run_qa_drivers.py` spawns eighteen subprocesses that each solve networks.
+    `run_qa_drivers.py` spawns nineteen subprocesses that each solve networks
+    (one of them also boots a uvicorn).
     If it were ever renamed to `test_*.py` it would be collected AND still run
     by the CI step, doubling a two-minute cost and interleaving its output with
     the suite's.
