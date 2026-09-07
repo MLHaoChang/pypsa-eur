@@ -1,0 +1,131 @@
+// The planning → dynamics pipeline (gridspine), `/api/gridspine/*`.
+//
+// Every thunk here maps to ONE handler in `backend/routers/gridspine.py`, which
+// is itself a wrapper over one function in `services/gridspine_service.py` —
+// the same functions the copilot's `gridspine_*` tools call. So this module is
+// the UI's half of the spec's parity rule and nothing more: no client-side
+// derivation of state that the backend already reports.
+//
+// Status, snapshots and ledger are polled or re-read while a study runs, and a
+// capacity-expansion project answers 409 to all of them by design (the panel
+// renders that inline), so those GETs pass `skipErrorToast` — a toast per poll
+// would be the wrong surface for an expected answer.
+import client from './client'
+
+export type StageName = 'ingest' | 'dispatch' | 'ranking' | 'loadflow' | 'screening' | 'handoff'
+export const STAGES: readonly StageName[] = ['ingest', 'dispatch', 'ranking', 'loadflow', 'screening', 'handoff']
+
+export type StageState = 'pending' | 'running' | 'done' | 'failed' | 'aborted'
+export type StudyStatus = 'not started' | 'running' | 'completed' | 'failed' | 'aborted'
+
+export interface StudyConfig {
+  hours: number
+  k: number
+  window: number
+  overlap: number
+  screen: boolean
+  n2_prune_threshold_pct: number
+  from_dispatch: string | null
+  outdir?: string
+  templates_overlay?: string | null
+}
+
+export interface StageError { stage: string; cause: string; element_ids: string[] }
+
+export interface StageStatus {
+  status: StudyStatus
+  resumable: boolean
+  error: StageError | null
+  selected_hours: number[]
+  converged_hours: number[]
+  bundles: Record<string, string>
+  stages: Record<StageName, { state: StageState; done: number; total: number }>
+}
+
+export interface RankedSnapshot {
+  hour: number
+  reasons: string[]
+  converged: boolean
+  load_mw: number
+  import_mw: number
+  inertia_mws: number
+  inertia_excl_equiv_mws: number
+  ibr_share: number
+  n1_severity_dc: number
+  n1_severity_ac: number
+}
+
+export interface TemplateEdit {
+  unit_id: string; param: string; value: number; source: string; edited_by: 'user' | 'chat'; at: string
+}
+
+export interface Ledger {
+  entries: string[]
+  provenance_counts: { measured: number; datasheet: number; assumed: number }
+  measurements: Record<string, unknown>
+  hour: number | null
+  from_run?: boolean
+  edits: TemplateEdit[]
+}
+
+export interface CreateStudyResponse {
+  id: string
+  name: string
+  kind: 'planning_dynamics'
+  config: StudyConfig
+  status: StageStatus
+}
+
+/** The public view of a solve-queue job (`SolveJob.to_public`). */
+export interface StudyJob {
+  id: string
+  project_id: string | null
+  kind: 'solve' | 'gridspine'
+  status: string
+  position: number | null
+}
+
+const quiet = { skipErrorToast: true } as const
+
+export const gridspineApi = {
+  createStudy: (name: string, config: Partial<StudyConfig>) =>
+    client.post<CreateStudyResponse>('/gridspine/projects', { name, config }, quiet).then(r => r.data),
+
+  setDispatchSource: (project: string, fromDispatch: string | null) =>
+    client.post<StudyConfig>(
+      `/gridspine/${encodeURIComponent(project)}/dispatch-source`,
+      fromDispatch ? { source: 'from_dispatch', from_dispatch: fromDispatch } : { source: 'generate' },
+      quiet,
+    ).then(r => r.data),
+
+  run: (project: string) =>
+    client.post<StudyJob>(`/gridspine/${encodeURIComponent(project)}/run`, undefined, quiet).then(r => r.data),
+
+  status: (project: string) =>
+    client.get<StageStatus>(`/gridspine/${encodeURIComponent(project)}/status`, quiet).then(r => r.data),
+
+  snapshots: (project: string) =>
+    client.get<RankedSnapshot[]>(`/gridspine/${encodeURIComponent(project)}/snapshots`, quiet).then(r => r.data),
+
+  ledger: (project: string) =>
+    client.get<Ledger>(`/gridspine/${encodeURIComponent(project)}/ledger`, quiet).then(r => r.data),
+
+  editTemplateParam: (project: string, unitId: string, param: string, value: number, source: string) =>
+    client.put<TemplateEdit>(
+      `/gridspine/${encodeURIComponent(project)}/templates/${encodeURIComponent(unitId)}/${encodeURIComponent(param)}`,
+      { value, source, edited_by: 'user' },
+      quiet,
+    ).then(r => r.data),
+
+  /** The handoff bundle for one selected hour, as a zip blob. */
+  bundle: (project: string, hour: number) =>
+    client.get<Blob>(`/gridspine/${encodeURIComponent(project)}/bundles/${hour}`, {
+      responseType: 'blob', ...quiet,
+    }).then(r => r.data),
+}
+
+/** True when the error is the backend saying "not a planning → dynamics project". */
+export function isNotAStudy(err: unknown): boolean {
+  const status = (err as { response?: { status?: number } } | null)?.response?.status
+  return status === 409
+}

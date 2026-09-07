@@ -8,7 +8,7 @@ import {
   MousePointer, ZoomIn, ZoomOut, AlertTriangle,
   Thermometer, Zap, Camera, LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
-  GitBranch as GitBranchIcon, ListChecks,
+  GitBranch as GitBranchIcon, ListChecks, FlaskConical,
   MessageSquare, LayoutGrid, Users, SlidersHorizontal,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -1336,6 +1336,11 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
           >{activeQueueCount}</span>
         ) : undefined}
         onClick={() => { setSlidePanel(activeSlidePanel === 'solveQueue' ? null : 'solveQueue'); onCloseModal?.() }}
+      />
+      <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
+        title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
+        active={activeSlidePanel === 'gridspine'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'gridspine' ? null : 'gridspine'); onCloseModal?.() }}
       />
       {/* The Assistant row used to live here, as the last of seven. It is not
           a simulation feature — it answers questions about the network and

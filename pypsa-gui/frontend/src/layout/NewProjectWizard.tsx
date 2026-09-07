@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   FolderInput,
   FilePlus, FolderOpen, BookOpen, Upload, Copy as CopyIcon, X, AlertTriangle,
-  Sparkles,
+  Sparkles, FlaskConical,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { ProjectInfo } from '../api/types'
@@ -18,6 +18,7 @@ import { invalidateNetworkQueries, formatRelativeTime } from '../utils/projectAc
 import { nk } from '../utils/queryKeys'
 import { appLog } from '../store/simulationStore'
 import { Dialog } from '../components/Dialog'
+import { gridspineApi } from '../api/gridspine'
 
 // NewProjectWizard — replaces the single-input NewProjectModal with a 4-tab
 // flow per the design spec. Tabs:
@@ -43,7 +44,7 @@ export interface NewProjectWizardProps {
   initialTab?: NewProjectTab
 }
 
-export type NewProjectTab = 'blank' | 'template' | 'file' | 'clone' | 'folder'
+export type NewProjectTab = 'blank' | 'template' | 'file' | 'clone' | 'folder' | 'study'
 type Tab = NewProjectTab
 
 // Curated example networks. `available: true` templates are backed by a real
@@ -93,6 +94,7 @@ export default function NewProjectWizard({
         <TabBtn id="template" active={tab === 'template'} onClick={() => setTab('template')} icon={<BookOpen size={12} />}    label="From template" />
         <TabBtn id="file"     active={tab === 'file'}     onClick={() => setTab('file')}     icon={<Upload size={12} />}     label="From file" />
         <TabBtn id="clone"    active={tab === 'clone'}    onClick={() => setTab('clone')}    icon={<CopyIcon size={12} />}   label="Clone" />
+        <TabBtn id="study"    active={tab === 'study'}    onClick={() => setTab('study')}    icon={<FlaskConical size={12} />} label="Study" />
         {/* DESKTOP ONLY. The route it calls takes a server-side path, so it
             404s when auth is on — offering the tab there would be a dead end
             of exactly the kind the "Open admin" button turned out to be. */}
@@ -107,6 +109,7 @@ export default function NewProjectWizard({
         {tab === 'template' && <TemplateTab onClose={onClose} />}
         {tab === 'file'     && <FromFileTab onClose={onClose} />}
         {tab === 'clone'    && <CloneTab    existingProjects={existingProjects} onClose={onClose} />}
+        {tab === 'study'    && <StudyTab    existingProjects={existingProjects} onClose={onClose} />}
         {tab === 'folder' && !authEnabled && <FromFolderTab onClose={onClose} />}
       </div>
     </Dialog>
@@ -628,5 +631,94 @@ function CloneTab({ existingProjects, onClose }: {
         </button>
       </div>
     </div>
+  )
+}
+
+
+// ── Tab: Study — a planning → dynamics project (gridspine, increment 4) ─────
+// A different PROJECT KIND, not a different network: the backend creates a row
+// of kind `planning_dynamics` with the study config beside it and no
+// network.nc. The form is `StudyConfig` as the driver validates it (a positive
+// number of hours and of extreme hours per criterion; a window that is a whole
+// number of days; an overlap shorter than the window) — the backend refuses a
+// bad config with 422 BEFORE a row exists, and that message is rendered inline.
+// Connection studies ([3] in the spec) are not built yet and are not offered.
+export const STUDY_DEFAULTS = { hours: 8760, k: 5, window: 168, overlap: 24, screen: true }
+const STUDY_INPUT = 'px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 font-mono'
+
+function StudyTab({ existingProjects, onClose }: { existingProjects: ProjectInfo[]; onClose: () => void }) {
+  const qc = useQueryClient()
+  const setCurrentProject = useUIStore(s => s.setCurrentProject)
+  const setProjectName    = useUIStore(s => s.setProjectName)
+  const setSlidePanel     = useUIStore(s => s.setSlidePanel)
+  const [name, setName] = useState('')
+  const [hours, setHours] = useState(String(STUDY_DEFAULTS.hours))
+  const [k, setK] = useState(String(STUDY_DEFAULTS.k))
+  const [window_, setWindow] = useState(String(STUDY_DEFAULTS.window))
+  const [overlap, setOverlap] = useState(String(STUDY_DEFAULTS.overlap))
+  const [screen, setScreen] = useState(STUDY_DEFAULTS.screen)
+  const [error, setError] = useState<string | null>(null)
+  const trimmed = name.trim()
+  const taken = existingProjects.some(p => p.name === trimmed)
+
+  const create = useMutation({
+    mutationFn: () => gridspineApi.createStudy(trimmed, {
+      hours: Number(hours), k: Number(k), window: Number(window_), overlap: Number(overlap), screen,
+    }),
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['projects'] })
+      setCurrentProject(res.name, res.id)
+      setProjectName(res.name)
+      setSlidePanel('gridspine')
+      appLog('INFO', `Created planning → dynamics study '${res.name}' (${res.config.hours} h, k=${res.config.k})`)
+      toast.success(`Created study '${res.name}'`)
+      onClose()
+    },
+    onError: (e: unknown) => {
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      setError(formatApiDetail(detail, (e as Error)?.message ?? 'Could not create the study'))
+    },
+  })
+
+  const canSubmit = trimmed.length > 0 && !taken && !create.isPending
+
+  return (
+    <form
+      className="p-4 flex flex-col gap-3"
+      onSubmit={e => { e.preventDefault(); if (canSubmit) { setError(null); create.mutate() } }}
+    >
+      <p className="text-[12px] text-muted">
+        A planning → dynamics study: a year of unit commitment, the extreme hours ranked and
+        screened (N-1/N-2, fault levels), and PowerFactory handoff bundles. This project kind has
+        no network canvas — its results open in the Planning → dynamics panel.
+      </p>
+      <label className="flex flex-col gap-1 text-[12px]">
+        <span className="text-muted">Study name</span>
+        <input className={STUDY_INPUT} value={name} onChange={e => setName(e.target.value)} autoFocus aria-label="Study name" />
+        {taken && <span className="text-[11px] text-danger">A project with this name already exists.</span>}
+      </label>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="flex flex-col gap-1 text-[12px]"><span className="text-muted">Hours</span>
+          <input className={STUDY_INPUT} type="number" min={1} value={hours} onChange={e => setHours(e.target.value)} aria-label="Hours" /></label>
+        <label className="flex flex-col gap-1 text-[12px]"><span className="text-muted">Extreme hours per criterion (k)</span>
+          <input className={STUDY_INPUT} type="number" min={1} value={k} onChange={e => setK(e.target.value)} aria-label="k" /></label>
+        <label className="flex flex-col gap-1 text-[12px]"><span className="text-muted">UC window (hours, whole days)</span>
+          <input className={STUDY_INPUT} type="number" min={24} step={24} value={window_} onChange={e => setWindow(e.target.value)} aria-label="Window" /></label>
+        <label className="flex flex-col gap-1 text-[12px]"><span className="text-muted">UC overlap (hours)</span>
+          <input className={STUDY_INPUT} type="number" min={0} value={overlap} onChange={e => setOverlap(e.target.value)} aria-label="Overlap" /></label>
+      </div>
+      <label className="flex items-center gap-2 text-[12px]">
+        <input type="checkbox" checked={screen} onChange={e => setScreen(e.target.checked)} aria-label="Screen contingencies" />
+        <span>Screen N-1/N-2, fault levels and SCR on the selected hours</span>
+      </label>
+      {error && <p className="text-[11px] text-danger" role="alert">{error}</p>}
+      <div className="flex justify-end gap-2">
+        <button type="button" onClick={onClose} className="px-3 py-1.5 text-[12px] text-muted hover:text-text">Cancel</button>
+        <button type="submit" disabled={!canSubmit}
+          className="px-3 py-1.5 text-[12px] rounded bg-accent text-white disabled:opacity-40">
+          {create.isPending ? 'Creating…' : 'Create study'}
+        </button>
+      </div>
+    </form>
   )
 }

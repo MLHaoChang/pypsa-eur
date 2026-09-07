@@ -1,6 +1,6 @@
 # gridspine Increment 4 Implementation Plan — Action Layer, GUI Wiring, Chat Tools
 
-> **Status 2026-09-07: tasks 1–6 landed; task 6 UNVERIFIED against a live model (below). D1–D4 answered as recommended (the owner asked to proceed); D5 is NEW and open.** Task 7 (frontend) remains. **Task 6 is implemented and unit-tested but has NOT had the live API probe ADR 0002 requires** — this session had no Anthropic key — so the eight `gridspine_*` tools must be treated as unverified against a real model until the owner runs it: create a study, run it, read status/snapshots/ledger, edit a template value, export a bundle, each through the chat panel, and record the transcript here. **The sequencing premise below was wrong and is corrected:** PR #6 decomposes `solver_service.py`, the results/compare routers, `conftest.py` and `pixi.toml` — it does **not** touch `solve_queue.py`, `chat_tools*.py`, `db/models.py` or `routers/projects.py`, so tasks 4 and 6 are not blocked by it. Checked against the PR's own file list rather than assumed; the earlier claim was an assumption written as a fact.
+> **Status 2026-09-07: all seven tasks landed; task 6 UNVERIFIED against a live model (below), task 7 verified by component tests only (no browser run in this session). D1–D4 answered as recommended (the owner asked to proceed); D5 is NEW and open.** **Task 6 is implemented and unit-tested but has NOT had the live API probe ADR 0002 requires** — this session had no Anthropic key — so the eight `gridspine_*` tools must be treated as unverified against a real model until the owner runs it: create a study, run it, read status/snapshots/ledger, edit a template value, export a bundle, each through the chat panel, and record the transcript here. **The sequencing premise below was wrong and is corrected:** PR #6 decomposes `solver_service.py`, the results/compare routers, `conftest.py` and `pixi.toml` — it does **not** touch `solve_queue.py`, `chat_tools*.py`, `db/models.py` or `routers/projects.py`, so tasks 4 and 6 are not blocked by it. Checked against the PR's own file list rather than assumed; the earlier claim was an assumption written as a fact.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -118,15 +118,17 @@ The owner said to proceed, so each was taken as the plan recommended. They are d
 - [x] Mutation: drop one tool from `DISPATCHERS` → the registry-invariant test red.
 - [ ] `pixi run gui-tests`, path-limited commit.
 
-## Task 7 — Frontend: new project kind, form, stage progress, downloads (thin, last)
+## Task 7 — Frontend: new project kind, form, stage progress, downloads — LANDED
 
 **Files:** `pypsa-gui/frontend/src/...` (one feature directory), one path-limited commit.
 
-- [ ] New-project flow gains the kind picker ([1] capacity expansion unchanged, [2] planning → dynamics; [3] connection is greyed with "later"); the [2] form is `StudyConfig` (hours, k, window, overlap, screen, N-2 threshold, dispatch source dropdown with "generate with PyPSA" and "from an existing run").
-- [ ] Run button → `POST …/run`; the existing queue panel shows the job; stage progress rendered from `GET …/status` polled while the job is active (the SSE log already carries the stage lines).
-- [ ] Results view: ranked snapshots table (reasons, converged, every ranked column), the ledger with provenance counts, bundle download per selected hour. Read-back upload: placeholder only (phase 4).
-- [ ] Frontend tests as the repo does them (component tests for the form and the table; no e2e that solves).
-- [ ] Commit.
+- [x] New-project flow gains the kind picker ([1] capacity expansion unchanged, [2] planning → dynamics; [3] connection is greyed with "later"); the [2] form is `StudyConfig` (hours, k, window, overlap, screen, N-2 threshold, dispatch source dropdown with "generate with PyPSA" and "from an existing run").
+- [x] Run button → `POST …/run`; the existing queue panel shows the job; stage progress rendered from `GET …/status` polled while the job is active (the SSE log already carries the stage lines).
+- [x] Results view: ranked snapshots table (reasons, converged, every ranked column), the ledger with provenance counts, bundle download per selected hour. Read-back upload: placeholder only (phase 4).
+- [x] Frontend tests as the repo does them (component tests for the form and the table; no e2e that solves).
+- [x] Commit.
+
+**Task 7 as landed (2026-09-07).** One API module (`src/api/gridspine.ts`), one panel (`src/pages/GridspinePanel.tsx`, full-width, registered in `SlidePanel` / `PANEL_META` / `fullPageContent` / the Sidebar's Simulation section), a **Study** tab in `NewProjectWizard` (the spec's "pick type [2]"; connection [3] is not offered rather than greyed — there is nothing behind it yet), and a `study` label on `kind: 'gridspine'` rows in the Solve Queue panel, whose completed line no longer shows a solve objective. Scope notes: the study config (hours, k, window, overlap, screen) is set at CREATION in the wizard — the backend exposes no config read, so the panel edits only the dispatch source, which has an endpoint; polling is 1.5 s while this project has an active queue job or the status says `running`, and `/gridspine/` GETs are quiet polls (no toast per tick); a capacity-expansion project's 409 renders as guidance; the read-back section is a placeholder (spec phase 4); no per-project kind badge on the project cards, because `ProjectInfo` does not carry `project_kind` yet (a backend change, out of this task). Tests: 21 across `api/gridspine.test.ts`, `pages/GridspinePanel.test.tsx`, `layout/NewProjectWizard.study.test.tsx`, `pages/SolveQueuePanel.kind.test.tsx`; `npx tsc -b` clean. Mutation: the wizard posting the typed strings instead of numbers turns exactly the config test red. **Not done: a browser run against the live backend** — this session has no display; the first person to open the panel should check the stage rows against a real queued study.
 
 ## Reporting per task (unchanged from increment 3)
 

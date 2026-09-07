@@ -21,7 +21,7 @@ export const client = axios.create({
 
 // URLs that the UI polls in the background — failures during a backend reload
 // window must NOT pop a toast or tear down the React Query cache.
-const QUIET_POLL_URLS = ['/network/undo/info', '/changelog']
+const QUIET_POLL_URLS = ['/network/undo/info', '/changelog', '/gridspine/']
 
 function isQuietPoll(url: string | undefined, method: string): boolean {
   if (method !== 'GET') return false
