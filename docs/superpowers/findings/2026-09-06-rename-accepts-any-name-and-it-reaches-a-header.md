@@ -3,8 +3,11 @@
 **Date:** 2026-09-06
 **Found while:** unblocking `tests/qa_rename_project.py`, whose "400 for invalid
 characters (path traversal)" assertion now gets a `200`
-**Status:** recorded, not fixed — this branch is a test-repair branch, and the
-fix is a product change
+**Status:** FIXED 2026-09-07 in **PR #7** (`claude/fix-download-filename-headers`,
+branched off `master` so it does not ride along with the decomposition). See
+"How it was actually fixed" at the bottom. Two things in the original write-up below were wrong, and are
+corrected there: the affected surface is four routes, not one, and the
+real-server behaviour is now verified rather than inferred.
 
 ## What the driver expected, and what happens
 
@@ -118,3 +121,85 @@ Two independent halves, and the second is the one that matters:
 
 Worth a test either way: rename to `a\nb`, request the bundle, assert the
 response header carries no control character.
+
+---
+
+# How it was actually fixed, 2026-09-07
+
+## Correction 1: four routes, not one
+
+The write-up above named the project bundle and said three other routes "build
+`Content-Disposition` by f-string from a caller-influenced value". That
+undersold it — three of those four are genuinely exploitable, and I had not
+checked which:
+
+| route | caller-controlled? | verdict |
+|---|---|---|
+| `routers/projects.py` bundle | project name | **vulnerable** |
+| `routers/network.py::_xlsx_response` | component name, via 3 template routes | **vulnerable** |
+| `routers/asset_results.py` | component name | safe — a strict `isalnum() or in "-_"` allow-list |
+| `routers/uploads.py` blob | upload filename | safe in practice — written through `safe_upload_filename` |
+
+The `_xlsx_response` one is the more reachable of the two. Component names are
+created through `POST /api/network/loads` (and generators, links) with **no
+character validation at all** — verified by creating loads named `ev"il`,
+`a\nb` and `../esc`, all of which returned `201`. Then
+`GET /api/network/loads/template?load_name=ev"il` returned
+
+```
+attachment; filename="load_ev"il_template.xlsx"
+```
+
+so the defect was one API call away, not gated behind a rename.
+
+## Correction 2: the real-server behaviour, verified
+
+The original said the newline case was "not verified" and guessed that h11
+would reject it. Tested against a real uvicorn:
+
+| name | over real uvicorn |
+|---|---|
+| `ev"il` | **sent verbatim** — `filename="ev"il.zip"`; a conforming parser reads `ev` |
+| `a\nb` | `RuntimeError: Invalid HTTP header value.` mid-send; client gets **an empty reply** |
+
+So the guess was right and the severity is what it looked like: **not response
+splitting**. It is a correctness bug with two faces — a truncated filename for
+quotes, and a download that simply breaks for control characters. Worth fixing,
+not worth alarm.
+
+## The fix — PR #7
+
+`services/http_filenames.py::content_disposition()` builds an RFC 6266 value
+for **any** input string:
+
+```
+attachment; filename="<ascii-safe>"; filename*=UTF-8''<percent-encoded>
+```
+
+Applied at all four sites — including the two that were already safe, because
+"is this one safe?" should not be a question a reader has to re-answer per
+route.
+
+Only the header half of the two-part fix proposed above was done. Name
+validation was deliberately NOT added: with the header encoded, a hostile name
+can no longer break anything, so which names are legal becomes a product-policy
+question (is `Q1/Q2 scenarios` a name a user may want?) rather than a security
+one. That belongs to whoever owns the product, not to this fix.
+
+**The output is byte-identical to the old f-string for any plain ASCII name** —
+`filename*` is only added when it says something the fallback does not. That
+property is itself a test, because the helper touches every download in the
+product and a reshaped header for ordinary names would be a behaviour change
+for every user rather than a fix for an edge case.
+
+Verified: the helper against 20 hostile inputs; each route through the
+TestClient; the previously-broken `a\nb` project bundle over a **real uvicorn**,
+which now returns `200` with
+`filename="a_b.pypsaproj.zip"; filename*=UTF-8''a%0Ab.pypsaproj.zip` and no
+server error. Both call-site fixes were mutation-tested by reverting them and
+confirming the route tests go red.
+
+A static sweep (`test_no_download_route_builds_the_header_by_interpolation`)
+guards the next download route somebody adds, because this defect is invisible
+to the test suite: `TestClient` sends a malformed header perfectly happily and
+only a real server refuses it.
