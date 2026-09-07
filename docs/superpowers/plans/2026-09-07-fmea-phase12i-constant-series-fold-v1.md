@@ -1,6 +1,22 @@
 # Phase 12i — a CONSTANT availability series is folded into capacity, inside the COPT's own split (plan v1)
 
-**Status:** plan v1, for review before a line is written.
+**Status:** **REJECTED** — superseded by
+`2026-09-07-fmea-phase12i-constant-series-fold-v2.md`. Kept as the record.
+
+> **Three blockers, all reproduced.** (1) The headline claim below — "the fold
+> is exact, 0.000 % on every row" — is FALSE. It is exact in mean and
+> grid-discretised in LOLE; §0's evidence used `100 × 0.8 = 80` MW, which lands
+> on the 1 MW grid and cannot see the error. Off-grid at `cf = 0.833` the fold
+> reads +247.6 % at one load and −31.1 % at the next. (2) ★I1b's control claim
+> is false in the other direction: folding a fleet that does NOT saturate
+> `K_EXACT` — the ordinary case, since `K_EXACT = 8` — makes an already-exact
+> answer wrong by −48 %. (3) H3's reversal is an accuracy regression sold as a
+> relabelling: the `deterministic` bucket reads the true 8.40 h where the fold
+> reads 5.88 h, and the fold also drops the FMECA note. Six further findings
+> in v2 §5. v2 folds only what would otherwise be NETTED, which makes (2)
+> impossible by construction and beats netting on both max and mean error.
+
+**Status when written:** plan v1, for review before a line is written.
 **Closes:** the item Phase 12h recorded out of scope
 (`2026-09-06-fmea-phase12h-static-cf-includes-outages-v6.md` §5). 12h folded
 the STATIC `p_max_pu` cell; a constant *series* is still mixed per hour, which
@@ -227,4 +243,4 @@ negative: `/results/mc`'s numbers are unchanged by this phase.
 
 | plan | verdict | findings | what it was rejected on |
 |---|---|---|---|
-| v1 | *(awaiting review)* | — | — |
+| v1 | **REJECT** | 9 (3 blockers) | see the banner at the top of this file, and v2 §5 for the full list |
