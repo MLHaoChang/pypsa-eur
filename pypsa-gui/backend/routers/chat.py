@@ -364,6 +364,26 @@ def _get_llm_profile_or_404(profile_id: str) -> llm_config.LLMProfile:
     )
 
 
+def _clear_namespaced_slot(profile_id: str) -> None:
+    """
+    Forget the private key slot `profile_id` owns, if anything is in it.
+
+    Safe unconditionally, which is the point of C-13: the name is derived
+    from the id alone, so it can never be a SHARED provider key
+    (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …) that other profiles — the
+    built-ins included — still read from. The previous guard asked the
+    profile for its CURRENT `key_env` and skipped when that had become None,
+    which is exactly the orphan.
+
+    The `get_stored` check is not an optimisation to drop: `clear_secret`
+    rewrites `user.env` unconditionally, and a profile save should not
+    rewrite the credential file when it has no credential to remove.
+    """
+    slot = llm_config.namespaced_key_env(profile_id)
+    if app_secrets.get_stored(slot) is not None:
+        app_secrets.clear_secret(slot)
+
+
 @router.get("/settings/llm")
 def get_llm_settings(
     user: User | None = Depends(optional_user),
@@ -418,6 +438,15 @@ def put_llm_profile(
         llm_config.save_profiles(file_profiles, active_id)
     except llm_config.ProfileValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # C-13 — this edit may have moved the profile OFF its private slot, to
+    # `auth="none"` (no key at all) or onto a cataloged preset's shared key.
+    # Either way the slot is now unreachable: `DELETE .../key` 409s in the
+    # first case and aims at the shared key in the second. Clear it here or
+    # it survives every later save and silently re-arms if the profile is
+    # ever edited back. Only AFTER the save succeeds — a 422 must not have
+    # taken the key with it.
+    if profile.key_env != llm_config.namespaced_key_env(profile_id):
+        _clear_namespaced_slot(profile_id)
     return _profile_out(profile)
 
 
@@ -434,16 +463,22 @@ def delete_llm_profile(
     active resets to `anthropic-sonnet` (the one profile guaranteed to
     always exist) rather than leaving `active_profile_id` dangling.
 
-    Key-slot cleanup is scoped to a NAMESPACED slot
+    Key-slot cleanup is scoped to the NAMESPACED slot
     (`PYPSA_GUI_LLM_KEY__<SLUG>`) only — never a shared provider key
     (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …). A custom profile using a
     cataloged bearer preset shares that preset's key with every OTHER
     profile on the same preset (including the built-ins, for
     `ANTHROPIC_API_KEY`); wiping it here on one profile's deletion would
-    silently break every other profile still relying on it. Only
-    `preset="custom"` (or an uncatalogued preset id) gets a private,
-    per-profile slot — see `llm_config.derive_key_env` — and that is exactly
-    the case this clears.
+    silently break every other profile still relying on it.
+
+    That scoping now comes from `llm_config.namespaced_key_env`, which is
+    derived from the ID ALONE, rather than from asking the profile for its
+    current `key_env` and checking the prefix. The old form skipped the
+    clear whenever `key_env` had become None — a profile edited to
+    `auth="none"` after being given a key — leaving a credential no route
+    could reach and re-arming it if a profile of the same id was ever
+    recreated (C-13). Deriving the slot from the id cannot name a shared
+    key at all, so the clear is unconditional and the check is gone.
     """
     _require_super_admin(user)
     if profile_id in _BUILTIN_PROFILE_IDS:
@@ -462,8 +497,7 @@ def delete_llm_profile(
         active_id if active_id != profile_id else llm_config.BUILTIN_SONNET_ID
     )
     llm_config.save_profiles(file_profiles, new_active)
-    if target.key_env is not None and target.key_env.startswith("PYPSA_GUI_LLM_KEY__"):
-        app_secrets.clear_secret(target.key_env)
+    _clear_namespaced_slot(profile_id)
     return {"ok": True, "active_profile_id": new_active}
 
 

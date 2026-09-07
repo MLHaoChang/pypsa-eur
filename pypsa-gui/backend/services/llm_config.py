@@ -202,6 +202,28 @@ def derive_key_env(profile_id: str, preset: str) -> str | None:
         entry = _preset_catalogue().get(preset)
         if entry is not None:
             return entry.get("key_env")
+    return namespaced_key_env(profile_id)
+
+
+def namespaced_key_env(profile_id: str) -> str:
+    """
+    The PRIVATE key slot `profile_id` owns — whether or not it uses it today.
+
+    `derive_key_env` answers "where does this profile read its key from RIGHT
+    NOW", which is None at `auth="none"` and a SHARED provider variable on a
+    cataloged preset. That is the wrong question for cleanup (C-13): a
+    profile created with `auth="bearer"`, given a key, then edited to
+    `auth="none"` or onto `preset="openai"` leaves this slot behind with no
+    route that can reach it — `DELETE .../key` 409s on `auth=none` and aims
+    at the shared key otherwise, and the profile-delete guard read a
+    `key_env` that had already become None.
+
+    This name is a pure function of the id, so the slot can only ever belong
+    to that one profile. That is what makes it always safe to clear on that
+    profile's behalf, and never safe to leave behind once the profile stops
+    using it: recreating a profile under the same id would otherwise re-arm a
+    credential the operator believes they deleted.
+    """
     return "PYPSA_GUI_LLM_KEY__" + profile_id.upper().replace("-", "_")
 
 

@@ -634,3 +634,240 @@ def test_a_percent_encoded_newline_in_the_profile_id_is_refused(
     ids = {p.id for p in llm_config.load_profiles()[0]}
     assert "custom\n" not in ids
     assert super_admin_client.get("/api/chat/settings/llm").status_code == 200
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# C-13 — a namespaced key slot outliving the profile that owned it.
+#
+# `LLMProfile.key_env` returns None when `auth == "none"`, and every cleanup
+# path asks the profile what its `key_env` is RIGHT NOW. So a profile that
+# was created with `auth="bearer"`, given a key, and later edited to
+# `auth="none"` (or onto a cataloged preset with its own shared key) leaves
+# `PYPSA_GUI_LLM_KEY__<SLUG>` behind with no route that can reach it:
+#
+#   * DELETE .../key  → 409, "has auth=none and takes no key"
+#   * DELETE the profile → the guard reads `key_env is None` and skips
+#
+# `_write_managed` iterates the stored values, so the orphan is re-persisted
+# on every later save, forever. The sharp end is not the stale byte: it is
+# that recreating a profile under the same id re-arms the OLD credential,
+# so the app authenticates with a key the operator believes they deleted.
+#
+# The invariant these pin: `PYPSA_GUI_LLM_KEY__<SLUG>` is a pure function of
+# the profile id, so it can only ever belong to that one profile — which
+# makes it always safe to clear on that profile's behalf, and never safe to
+# leave behind once that profile stops using it.
+# ─────────────────────────────────────────────────────────────────────────
+
+NAMESPACED = "PYPSA_GUI_LLM_KEY__MY_CUSTOM"
+
+
+def _create_with_key(client, secret="sk-namespaced-secret-999", **overrides):
+    client.put(
+        "/api/chat/settings/llm/profiles/my-custom",
+        json=_custom_profile_body(**overrides),
+    )
+    client.put(
+        "/api/chat/settings/llm/profiles/my-custom/key", json={"value": secret}
+    )
+    assert app_secrets.get_stored(NAMESPACED) == secret
+    return secret
+
+
+def test_deleting_a_profile_that_flipped_to_auth_none_still_clears_its_slot(
+    super_admin_client,
+):
+    """The finding as filed: the delete guard reads a `key_env` that is now None."""
+    _create_with_key(super_admin_client)
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/my-custom",
+        json=_custom_profile_body(auth="none"),
+    )
+
+    resp = super_admin_client.delete("/api/chat/settings/llm/profiles/my-custom")
+    assert resp.status_code == 200, resp.text
+    assert app_secrets.get_stored(NAMESPACED) is None, (
+        "deleting the profile left its namespaced key behind"
+    )
+
+
+def test_flipping_a_profile_to_auth_none_clears_its_now_unreachable_slot(
+    super_admin_client,
+):
+    """
+    The sibling path: the profile still EXISTS, so nothing will ever delete
+    it on the profile's behalf. `DELETE .../key` 409s on `auth=none`, so the
+    operator has no route to the key at all while the profile lives.
+    """
+    _create_with_key(super_admin_client)
+    resp = super_admin_client.put(
+        "/api/chat/settings/llm/profiles/my-custom",
+        json=_custom_profile_body(auth="none"),
+    )
+    assert resp.status_code == 200, resp.text
+
+    assert super_admin_client.delete(
+        "/api/chat/settings/llm/profiles/my-custom/key"
+    ).status_code == 409, "precondition: the key route is closed at auth=none"
+    assert app_secrets.get_stored(NAMESPACED) is None, (
+        "the key survives with no route that can reach it"
+    )
+
+
+def test_moving_a_profile_onto_a_shared_preset_clears_its_namespaced_slot(
+    super_admin_client,
+):
+    """
+    Same orphaning by the other transition. On `preset="openai"` the profile's
+    `key_env` becomes the SHARED `OPENAI_API_KEY`, so its private slot is
+    just as unreachable as under `auth="none"` — and `DELETE .../key` now
+    aims at the shared key instead, never at the orphan.
+    """
+    _create_with_key(super_admin_client)
+    resp = super_admin_client.put(
+        "/api/chat/settings/llm/profiles/my-custom",
+        json=_custom_profile_body(preset="openai", base_url=None),
+    )
+    assert resp.status_code == 200, resp.text
+    assert app_secrets.get_stored(NAMESPACED) is None, (
+        "the namespaced key survives a move onto a shared provider key"
+    )
+
+
+def test_recreating_a_profile_does_not_silently_rearm_the_old_key(
+    super_admin_client,
+):
+    """
+    The consequence that makes this more than a stale byte: the operator
+    removes a profile believing its credential went with it, then makes a new
+    profile of the same name — and the app authenticates with the old key,
+    which no screen ever showed them.
+    """
+    _create_with_key(super_admin_client)
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/my-custom",
+        json=_custom_profile_body(auth="none"),
+    )
+    super_admin_client.delete("/api/chat/settings/llm/profiles/my-custom")
+
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/my-custom", json=_custom_profile_body()
+    )
+    listing = super_admin_client.get("/api/chat/settings/llm").json()
+    recreated = next(p for p in listing["profiles"] if p["id"] == "my-custom")
+    assert recreated["key_present"] is False, (
+        "a recreated profile inherited the deleted profile's key"
+    )
+
+
+def test_deleting_a_shared_preset_profile_leaves_the_provider_key_alone(
+    super_admin_client,
+):
+    """
+    The property the OLD guard existed for, which nothing tested — so
+    replacing that guard had to bring its own proof. A profile on
+    `preset="openai"` shares `OPENAI_API_KEY` with every other openai
+    profile; deleting one must not disarm the rest. (C-6 turns on the same
+    fact from the other side: `DELETE .../key` is the ONLY route that can
+    clear a shared key, so it must keep aiming at it.)
+    """
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/shared-one",
+        json=_custom_profile_body(preset="openai", base_url=None),
+    )
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/shared-two",
+        json=_custom_profile_body(preset="openai", base_url=None),
+    )
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/shared-one/key",
+        json={"value": "sk-shared-openai-key-1"},
+    )
+    assert app_secrets.get_stored("OPENAI_API_KEY") == "sk-shared-openai-key-1"
+
+    resp = super_admin_client.delete("/api/chat/settings/llm/profiles/shared-one")
+    assert resp.status_code == 200, resp.text
+    assert app_secrets.get_stored("OPENAI_API_KEY") == "sk-shared-openai-key-1", (
+        "deleting one profile disarmed every other profile on that provider"
+    )
+
+
+def test_deleting_a_profile_clears_its_own_slot_and_nothing_else(
+    super_admin_client,
+):
+    """
+    Blast radius, asserted as a whole rather than one name at a time.
+
+    Cleanup now fires unconditionally, so the question is no longer "does it
+    skip the shared keys" but "does it touch anything beyond the one slot it
+    owns". `ANTHROPIC_API_KEY` is the worst thing it could reach: the two
+    built-in profiles read it, and neither can be re-keyed from these
+    routes, so disarming it would take the chat panel down with no way back.
+    A second custom profile's slot covers the neighbouring case.
+    """
+    app_secrets.set_secret("ANTHROPIC_API_KEY", "sk-ant-builtin-key-123")
+    app_secrets.set_secret("OPENAI_API_KEY", "sk-openai-shared-key-1")
+    _create_with_key(super_admin_client)
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/other-custom",
+        json=_custom_profile_body(),
+    )
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/other-custom/key",
+        json={"value": "sk-other-custom-key-2"},
+    )
+    survivors = {
+        "ANTHROPIC_API_KEY": "sk-ant-builtin-key-123",
+        "OPENAI_API_KEY": "sk-openai-shared-key-1",
+        "PYPSA_GUI_LLM_KEY__OTHER_CUSTOM": "sk-other-custom-key-2",
+    }
+    assert {k: app_secrets.get_stored(k) for k in survivors} == survivors
+
+    resp = super_admin_client.delete("/api/chat/settings/llm/profiles/my-custom")
+    assert resp.status_code == 200, resp.text
+
+    assert app_secrets.get_stored(NAMESPACED) is None, "its own slot must go"
+    assert {k: app_secrets.get_stored(k) for k in survivors} == survivors, (
+        "deleting one profile reached beyond its own key slot"
+    )
+
+
+def test_editing_a_shared_preset_profile_leaves_the_provider_key_alone(
+    super_admin_client,
+):
+    """
+    The new PUT-side cleanup fires whenever a profile does not use its own
+    slot — which is EVERY save of a cataloged-preset profile, not just the
+    edit that moved it there. It must still clear only the private slot.
+    """
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/shared-one",
+        json=_custom_profile_body(preset="openai", base_url=None),
+    )
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/shared-one/key",
+        json={"value": "sk-shared-openai-key-1"},
+    )
+    resp = super_admin_client.put(
+        "/api/chat/settings/llm/profiles/shared-one",
+        json=_custom_profile_body(preset="openai", base_url=None, label="Renamed"),
+    )
+    assert resp.status_code == 200, resp.text
+    assert app_secrets.get_stored("OPENAI_API_KEY") == "sk-shared-openai-key-1"
+
+
+def test_a_rejected_profile_edit_does_not_take_the_key_with_it(
+    super_admin_client,
+):
+    """
+    Ordering. The cleanup runs only after `save_profiles` succeeds, so a 422
+    leaves both the stored profile and its key exactly as they were — a
+    validation error must not be a way to destroy a credential.
+    """
+    _create_with_key(super_admin_client)
+    resp = super_admin_client.put(
+        "/api/chat/settings/llm/profiles/my-custom",
+        json=_custom_profile_body(auth="none", base_url="ftp://nope.example/v1"),
+    )
+    assert resp.status_code == 422, resp.text
+    assert app_secrets.get_stored(NAMESPACED) == "sk-namespaced-secret-999"

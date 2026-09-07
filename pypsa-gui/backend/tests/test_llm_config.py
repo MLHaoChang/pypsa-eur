@@ -870,3 +870,67 @@ def test_deleting_a_profile_does_not_resurrect_a_shadowed_duplicate(appdata):
     assert "twice" not in {p.id for p in llm_config.load_profiles()[0]}, (
         "the deleted profile came back from its shadowed duplicate"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# C-13 — `namespaced_key_env` is what cleanup is allowed to delete, so the
+# property that matters is what it can NEVER name. Asserted here at the
+# definition, not through a route: a call site can only show the ids it
+# happens to pass.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_namespaced_key_env_can_never_name_a_shared_provider_key():
+    """
+    Cleanup clears this slot unconditionally, so if any id could steer it
+    onto `ANTHROPIC_API_KEY` (or a provider key added to the allowlist
+    LATER, which is the case no route test can reach today) then deleting
+    one profile would silently disarm every other profile on that provider —
+    the built-ins included.
+
+    The guarantee is structural: the value always carries the private
+    prefix, and no shared key may ever be spelled with it. Both halves are
+    asserted, so adding a provider key that collides fails HERE.
+    """
+    from services import app_secrets, llm_config
+
+    prefix = "PYPSA_GUI_LLM_KEY__"
+    assert not [k for k in app_secrets.KNOWN_PROVIDER_KEYS if k.startswith(prefix)], (
+        "a shared provider key was given the private slot prefix; profile "
+        "cleanup would now delete it"
+    )
+
+    for profile_id in ("a", "my-custom", "openai", "anthropic",
+                       "anthropic-sonnet", "x" * 48, "0-9", "a-b-c"):
+        slot = llm_config.namespaced_key_env(profile_id)
+        assert slot.startswith(prefix), slot
+        assert slot not in app_secrets.KNOWN_PROVIDER_KEYS, slot
+        # It must also stay inside the allowlist, or cleanup raises instead
+        # of clearing and the orphan survives anyway.
+        assert app_secrets.is_managed_key(slot), slot
+
+
+def test_namespaced_key_env_ignores_auth_and_preset_unlike_key_env():
+    """
+    The distinction the fix turns on. `key_env` answers "where does this
+    profile read its key from now" — None at `auth="none"`, a shared name on
+    a cataloged preset. `namespaced_key_env` answers "which slot does this
+    id own", which is the only question cleanup may ask.
+    """
+    from services import llm_config
+
+    def _profile(**kw):
+        base = dict(id="my-custom", label="L", preset="custom", wire="openai",
+                    base_url="http://localhost:11434/v1", model="m",
+                    tools=True, vision=False, auth="bearer",
+                    fallback_model=None, max_output_tokens=None)
+        base.update(kw)
+        return llm_config.LLMProfile(**base)
+
+    owned = llm_config.namespaced_key_env("my-custom")
+    assert _profile().key_env == owned                      # uses its slot
+    assert _profile(auth="none").key_env is None            # …and stops
+    assert _profile(preset="openai").key_env == "OPENAI_API_KEY"
+    # The owned slot is the same in all three cases. That is the point.
+    for p in (_profile(), _profile(auth="none"), _profile(preset="openai")):
+        assert llm_config.namespaced_key_env(p.id) == owned
