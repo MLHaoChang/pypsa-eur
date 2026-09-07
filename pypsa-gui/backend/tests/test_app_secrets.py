@@ -421,3 +421,24 @@ def test_a_short_key_is_not_returned_in_full_as_its_own_hint():
     hint = app_secrets.status("PYPSA_GUI_LLM_KEY__SHORT")["hint"]
     assert hint != "…abcd", "the whole key was returned as its own hint"
     assert hint is None or "abcd" not in hint
+
+
+def test_a_leftover_temp_file_from_a_killed_write_does_not_brick_saving():
+    """
+    Sibling of the same hazard in `llm_config.save_profiles`.
+
+    `_write_managed` creates its temp with `O_EXCL`. A SIGKILL or power loss
+    between that open and the `os.replace` leaves the temp on disk — which is
+    exactly the crash the atomic write exists to survive. If the next write
+    then refuses because the temp is in the way, one crash permanently bricks
+    every key save, and `user.env` is the only copy of the operator's keys.
+    """
+    app_secrets.set_secret(KEY, "sk-ant-first-value-here")
+    path = app_paths.user_env_file()
+    for stale in (path.name + ".tmp", path.name + ".ab12cd.tmp"):
+        path.with_name(stale).write_text("partial", encoding="utf-8")
+
+    app_secrets.set_secret(KEY, "sk-ant-second-value-here")
+    assert os.environ[KEY] == "sk-ant-second-value-here"
+    assert "sk-ant-second-value-here" in path.read_text(encoding="utf-8")
+    assert path.with_name(path.name + ".tmp").read_text() == "partial"

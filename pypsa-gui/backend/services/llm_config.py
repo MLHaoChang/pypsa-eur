@@ -42,6 +42,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
@@ -522,6 +523,58 @@ def load_profiles() -> tuple[list[LLMProfile], str]:
     return profiles, active_id
 
 
+def _entries_a_load_would_skip(written_ids: set[str]) -> list:
+    """
+    Raw file entries `load_profiles` refuses, that this write is not replacing.
+
+    C-14 — `load_profiles` skips an entry it cannot validate (right: one bad
+    profile must not take the others down) and `save_profiles` rewrites the
+    whole file from the list it is handed (right: it is the authority on what
+    a profile IS). Each half is correct; together they silently deleted every
+    entry this build could not parse.
+
+    Worse than it first looked: `set_active` does the same load→filter→save,
+    so merely SWITCHING the active profile destroyed them — and
+    `set_active_profile` is a chat tool, so the assistant could do it on the
+    user's behalf. The realistic trigger is a downgrade or one hand-edited
+    entry, and the only trace was a `logger.warning` nobody reads.
+
+    Entries are carried through VERBATIM, never re-serialised: this build does
+    not understand them, so it is in no position to normalise them. An entry
+    whose id the caller IS writing is dropped, so repairing a broken profile
+    replaces it rather than duplicating the id.
+    """
+    data = _read_file()
+    if data is None:
+        return []
+    raw = data.get("profiles")
+    if not isinstance(raw, list):
+        return []
+
+    preserved: list = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            # Not a profile at all. Kept anyway: a write must not destroy
+            # bytes it cannot interpret.
+            preserved.append(entry)
+            continue
+        entry_id = entry.get("id")
+        # `in` on a set raises TypeError for a list or dict id, which a
+        # hand-edited file can hold. `load_profiles` tolerates such an entry,
+        # so the write side must too: a store this build cannot READ must not
+        # become one it cannot WRITE. Only a string can match a profile id.
+        if isinstance(entry_id, str) and entry_id in written_ids:
+            continue
+        try:
+            candidate = _profile_from_dict(entry)
+            if candidate.id in _BUILTIN_IDS:
+                raise ProfileValidationError("reserved id")
+            _validate_profile(candidate)
+        except (KeyError, TypeError, ValueError):
+            preserved.append(entry)
+    return preserved
+
+
 def save_profiles(profiles: list[LLMProfile], active_id: str) -> None:
     """
     Validate every profile, then write `llm-profiles.json` at 0600.
@@ -551,10 +604,16 @@ def save_profiles(profiles: list[LLMProfile], active_id: str) -> None:
     if active_id not in seen_ids and active_id not in _BUILTIN_IDS:
         raise ProfileValidationError(f"active_profile_id {active_id!r} is not a known profile")
 
+    # C-14 — re-emit the entries this build cannot load, so a write does not
+    # silently delete them. Appended after the known-good ones; `load_profiles`
+    # will skip them again on the next read, exactly as before.
     payload = {
         "version": _FILE_VERSION,
         "active_profile_id": active_id,
-        "profiles": [_profile_to_dict(p) for p in profiles],
+        "profiles": (
+            [_profile_to_dict(p) for p in profiles]
+            + _entries_a_load_would_skip({p.id for p in profiles})
+        ),
     }
 
     path = profiles_path()
@@ -563,15 +622,43 @@ def save_profiles(profiles: list[LLMProfile], active_id: str) -> None:
     # `app_secrets._write_managed`: the alternative leaves a window where the
     # file (which may hold a base_url a user considers private, even though
     # never a raw key) is briefly world-readable under the process umask.
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2)
-    # O_CREAT only sets the mode on a file it CREATES; re-assert it for the
-    # overwrite case, which is the common one once a file already exists.
+    # Temp file + `os.replace`, the sibling of the same fix in
+    # `app_secrets._write_managed`. This used to open the LIVE file `O_TRUNC`
+    # and write in place, so a failure between open and flush (ENOSPC,
+    # SIGTERM, power loss) left `llm-profiles.json` truncated — taking every
+    # profile with it, which is the same data loss C-14 describes arriving by
+    # a different route. A fresh temp at 0600 also removes the window
+    # where an overwrite of a pre-existing file sat under the process umask;
+    # `O_CREAT` applies its mode only on creation, so the old write-then-chmod
+    # left the contents briefly readable.
+    #
+    # The temp name is UNIQUE per write, not a fixed `.tmp`. A fixed name
+    # opened `O_EXCL` turns the one crash this routine exists to survive into
+    # a permanent brick: the temp a SIGKILL leaves behind makes every later
+    # save raise `FileExistsError`, with no route to recovery from inside the
+    # app. `mkstemp` keeps the `O_EXCL` and the 0600 and drops the collision.
+    #
+    # NOT `services.atomic_io`: that helper deliberately has no `fsync` and no
+    # mode control, and its FIXED `.tmp` sibling is a documented contract there
+    # (a leftover one is the crash signal `storage_reconcile` reports). Neither
+    # fits a 0600 credential file, and its scan covers the projects root, not
+    # app-data — so nothing reaps what is written here either way.
+    fd, tmp_name = tempfile.mkstemp(
+        dir=path.parent, prefix=path.name + ".", suffix=".tmp"
+    )
+    tmp = Path(tmp_name)
     try:
-        os.chmod(path, 0o600)
-    except OSError:  # pragma: no cover — Windows / exotic filesystems
-        logger.debug("could not chmod %s", path, exc_info=True)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:  # pragma: no cover
+            pass
+        raise
 
 
 def resolve_profile(profile_id: str | None) -> LLMProfile:

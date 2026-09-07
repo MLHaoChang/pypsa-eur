@@ -39,7 +39,7 @@ new slots, but every check — read, write, and the four call-site guards below
 — still runs every name through `is_managed_key` rather than trusting a fixed
 list to have already been iterated.
 
-STORAGE. Plaintext, mode 0600. Written to a temp file opened `O_CREAT|O_EXCL`
+STORAGE. Plaintext, mode 0600. Written to a uniquely-named temp file created
 at 0600 and `os.replace`d into place, so the key is never briefly
 world-readable AND a failed or interrupted write cannot destroy the previous
 contents (A3/A5 — the earlier in-place `O_TRUNC` write did both). Not the OS keychain: `keyring` would need
@@ -54,6 +54,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import tempfile
 import threading
 from pathlib import Path
 
@@ -202,8 +203,23 @@ def _write_managed(values: dict[str, str]) -> None:
     # with `O_EXCL` at 0600 and `os.replace`d into place is atomic for
     # readers, never world-readable for any window, and leaves the previous
     # contents intact if anything fails.
-    tmp = path.with_name(path.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_TRUNC, 0o600)
+    #
+    # The temp name is UNIQUE per write, not a fixed `.tmp`. A fixed name
+    # opened `O_EXCL` turns the one crash this routine exists to survive into
+    # a permanent brick: the temp a SIGKILL leaves behind makes every later
+    # save raise `FileExistsError`, and `user.env` is the only copy of the
+    # operator's keys. `mkstemp` keeps the `O_EXCL` and the 0600 and drops
+    # the collision.
+    #
+    # NOT `services.atomic_io`: that helper deliberately has no `fsync` and no
+    # mode control, and its FIXED `.tmp` sibling is a documented contract there
+    # (a leftover one is the crash signal `storage_reconcile` reports). Neither
+    # fits a 0600 credential file, and its scan covers the projects root, not
+    # app-data — so nothing reaps what is written here either way.
+    fd, tmp_name = tempfile.mkstemp(
+        dir=path.parent, prefix=path.name + ".", suffix=".tmp"
+    )
+    tmp = Path(tmp_name)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(header + body)

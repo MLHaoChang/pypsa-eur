@@ -624,3 +624,249 @@ def test_a_non_string_base_url_entry_is_skipped_not_fatal(appdata, bad_value):
     ids = {p.id for p in profiles}
     assert "typed-wrong" not in ids
     assert "good-three" in ids
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# C-14 — a write erased every profile entry that failed validation on load.
+#
+# `load_profiles` skips an unloadable entry (correct: one bad profile must not
+# take the others down). `save_profiles` rewrites the whole file from the list
+# it is handed (correct: it is the authority on what a profile is). Each half
+# is right; together they silently delete data.
+#
+# WORSE than filed in two ways the original missed. It is not only "any
+# profile write": `set_active` does the same load→filter→save, so merely
+# SWITCHING the active profile destroys them. And `set_active_profile` is a
+# CHAT TOOL, so the assistant can trigger the deletion on the user's behalf.
+#
+# Realistic trigger: a user downgrades a build, or hand-edits one entry wrong.
+# The next model switch deletes it permanently, with only a `logger.warning`
+# nobody reads — no backup, no 422, nothing in the UI.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _file_with_one_unloadable_entry():
+    return {
+        "version": 1,
+        "active_profile_id": "anthropic-sonnet",
+        "profiles": [
+            {"id": "good-one", "label": "Good", "preset": "custom",
+             "wire": "openai", "base_url": "http://localhost:11434/v1",
+             "model": "m", "tools": True, "vision": False, "auth": "none",
+             "fallback_model": None, "max_output_tokens": None},
+            # A wire this build does not know — e.g. written by a newer build.
+            {"id": "future-one", "label": "From a newer build",
+             "preset": "custom", "wire": "gemini", "base_url": None,
+             "model": "gemini-3", "tools": True, "vision": True,
+             "auth": "bearer", "fallback_model": None,
+             "max_output_tokens": None},
+        ],
+    }
+
+
+def _raw_ids(path):
+    return [e.get("id") for e in json.loads(path.read_text())["profiles"]]
+
+
+def test_switching_the_active_profile_does_not_delete_unloadable_entries(appdata):
+    """The path the finding understated: `set_active`, reachable from a tool."""
+    from services import llm_config
+
+    path = llm_config.profiles_path()
+    path.write_text(json.dumps(_file_with_one_unloadable_entry()), encoding="utf-8")
+
+    loaded = {p.id for p in llm_config.load_profiles()[0]}
+    assert "good-one" in loaded and "future-one" not in loaded, (
+        "fixture is wrong: the entry under test must be skipped on load"
+    )
+
+    llm_config.set_active("anthropic-opus")
+
+    assert "future-one" in _raw_ids(path), (
+        f"switching the active profile deleted an unloadable entry: "
+        f"{_raw_ids(path)}"
+    )
+    assert "good-one" in _raw_ids(path)
+
+
+def test_saving_a_profile_does_not_delete_unloadable_entries(appdata):
+    """The path as filed: an ordinary profile write."""
+    from services import llm_config
+
+    path = llm_config.profiles_path()
+    path.write_text(json.dumps(_file_with_one_unloadable_entry()), encoding="utf-8")
+
+    profiles, active = llm_config.load_profiles()
+    file_profiles = [p for p in profiles if p.id not in ("anthropic-sonnet",
+                                                        "anthropic-opus")]
+    llm_config.save_profiles(file_profiles, active)
+
+    assert "future-one" in _raw_ids(path), (
+        f"a profile write deleted an unloadable entry: {_raw_ids(path)}"
+    )
+
+
+def test_writing_over_an_unloadable_id_replaces_it_rather_than_duplicating(appdata):
+    """
+    DISCRIMINATION. Preserving must not resurrect an entry the operator is
+    deliberately overwriting, nor leave two entries sharing one id.
+    """
+    from services import llm_config
+
+    path = llm_config.profiles_path()
+    path.write_text(json.dumps(_file_with_one_unloadable_entry()), encoding="utf-8")
+
+    fixed = llm_config.LLMProfile(
+        id="future-one", label="Repaired", preset="custom", wire="openai",
+        base_url="http://localhost:11434/v1", model="m",
+        tools=True, vision=False, auth="none",
+        fallback_model=None, max_output_tokens=None)
+    llm_config.save_profiles([fixed], "anthropic-sonnet")
+
+    ids = _raw_ids(path)
+    assert ids.count("future-one") == 1, f"id duplicated on repair: {ids}"
+    assert {p.id for p in llm_config.load_profiles()[0]} >= {"future-one"}
+
+
+def test_a_failed_profile_write_does_not_destroy_the_file(appdata, monkeypatch):
+    """
+    The sibling of the `app_secrets` A3 finding, in the other store this
+    branch introduced. `save_profiles` also opened the live file `O_TRUNC`
+    and wrote in place, so a failure mid-write left `llm-profiles.json`
+    truncated — taking every profile with it.
+    """
+    import os as _os
+
+    from services import llm_config
+
+    path = llm_config.profiles_path()
+    path.write_text(json.dumps(_file_with_one_unloadable_entry()), encoding="utf-8")
+    before = path.read_text()
+
+    real_fdopen = _os.fdopen
+    armed = {"on": True}
+
+    def _explode(fd, *a, **kw):
+        handle = real_fdopen(fd, *a, **kw)
+        if not armed["on"]:
+            return handle
+        original_write = handle.write
+
+        def _boom(_data):
+            original_write("")
+            raise OSError(28, "No space left on device")
+
+        handle.write = _boom
+        return handle
+
+    monkeypatch.setattr(_os, "fdopen", _explode)
+    with pytest.raises(OSError):
+        llm_config.save_profiles([], "anthropic-sonnet")
+    armed["on"] = False
+
+    assert path.read_text() == before, "a failed write truncated the profile store"
+
+
+def test_a_leftover_temp_file_from_a_killed_write_does_not_brick_saving(appdata):
+    """
+    The atomic write creates its temp with `O_EXCL`. A SIGKILL or power loss
+    between that open and the `os.replace` leaves the temp behind — which is
+    precisely the crash the atomic write exists to survive. If the next write
+    then refuses because the temp is in the way, one crash permanently bricks
+    every profile save with no route to recovery from inside the app.
+    """
+    from services import llm_config
+    p = llm_config.LLMProfile(
+        id="ollama-local", label="Ollama (local)", preset="custom",
+        wire="openai", base_url="http://localhost:11434/v1", model="qwen3:8b",
+        tools=True, vision=False, auth="none",
+        fallback_model=None, max_output_tokens=None)
+    llm_config.save_profiles([p], "ollama-local")
+
+    # Leftovers a killed write could plausibly have left. The fixed name is
+    # the regression this test was written against; the second covers a fix
+    # that merely derives ONE name some other way, which bricks identically.
+    path = llm_config.profiles_path()
+    for stale in (path.name + ".tmp", path.name + ".ab12cd.tmp"):
+        path.with_name(stale).write_text("partial", encoding="utf-8")
+
+    llm_config.save_profiles([p], "anthropic-sonnet")
+    _, active = llm_config.load_profiles()
+    assert active == "anthropic-sonnet"
+
+    # And the write must not have been "atomic" by clobbering a stale temp it
+    # had no business touching — the point is a name nothing else can hold.
+    assert path.with_name(path.name + ".tmp").read_text() == "partial"
+
+
+def test_an_entry_with_an_unhashable_id_does_not_break_saving(appdata):
+    """
+    The C-14 preservation asks `entry.get("id") in written_ids` of every raw
+    entry. A hand-edited file whose `id` is a list or a dict makes that
+    membership test raise `TypeError` — turning a store this build merely
+    could not READ into one it can no longer WRITE. `load_profiles` already
+    tolerates the same entry, so the two halves must agree.
+    """
+    from services import llm_config
+
+    path = llm_config.profiles_path()
+    path.write_text(json.dumps({
+        "version": 1,
+        "active_profile_id": "anthropic-sonnet",
+        "profiles": [
+            {"id": ["not", "a", "string"], "label": "Broken", "preset": "custom",
+             "wire": "openai", "base_url": None, "model": "m", "tools": True,
+             "vision": False, "auth": "none", "fallback_model": None,
+             "max_output_tokens": None},
+        ],
+    }), encoding="utf-8")
+
+    # Precondition: the load side survives it. The write side must too.
+    llm_config.load_profiles()
+
+    llm_config.set_active("anthropic-opus")
+    assert json.loads(path.read_text())["active_profile_id"] == "anthropic-opus"
+
+
+def test_deleting_a_profile_does_not_resurrect_a_shadowed_duplicate(appdata):
+    """
+    A hand-edited file can hold two entries sharing an id. `load_profiles`
+    keeps the first and SKIPS the second, so "an entry the load skipped" now
+    describes a live, valid profile the user cannot see.
+
+    Deleting that profile is the case where it bites: the delete rewrites the
+    file without that id, so the shadowed twin is no longer one the caller is
+    replacing. Preserve it and the delete does not delete — the profile comes
+    back on the next load wearing the SECOND entry's settings, which is worse
+    than the data loss C-14 fixed: silently restoring a base_url the operator
+    just removed.
+    """
+    from services import llm_config
+
+    path = llm_config.profiles_path()
+    base = {"label": "Dup", "preset": "custom", "wire": "openai",
+            "base_url": "http://localhost:11434/v1", "tools": True,
+            "vision": False, "auth": "none", "fallback_model": None,
+            "max_output_tokens": None}
+    path.write_text(json.dumps({
+        "version": 1,
+        "active_profile_id": "anthropic-sonnet",
+        "profiles": [
+            {"id": "twice", "model": "first", **base},
+            {"id": "twice", "model": "second", **base},
+        ],
+    }), encoding="utf-8")
+
+    profiles, _ = llm_config.load_profiles()
+    visible = {p.id: p for p in profiles}
+    assert visible["twice"].model == "first", "fixture: the load must shadow one"
+
+    # The delete: rewrite the store with that profile removed.
+    llm_config.save_profiles([], "anthropic-sonnet")
+
+    assert "twice" not in _raw_ids(path), (
+        f"deleting a profile left a shadowed twin behind: {_raw_ids(path)}"
+    )
+    assert "twice" not in {p.id for p in llm_config.load_profiles()[0]}, (
+        "the deleted profile came back from its shadowed duplicate"
+    )
