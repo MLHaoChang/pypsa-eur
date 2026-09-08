@@ -162,7 +162,7 @@ describe('CommandPalette on Dialog', () => {
 // `CommandPalette`, so it cannot catch a regression reached through this
 // door. Same gate as the Sidebar row: `useLocalSettingsAvailable()`, backed
 // by the shared `['localSettings']` query.
-const SETTINGS_STATE: LocalSettingsState = { key_set: false, key_hint: null, log_path: '/tmp/pypsa-gui.log' }
+const SETTINGS_STATE: LocalSettingsState = { key_set: false, key_hint: null, key_redactable: null, log_path: '/tmp/pypsa-gui.log' }
 const LLM_PAYLOAD: LLMSettingsPayload = { active_profile_id: 'anthropic-sonnet', profiles: [], presets: [] }
 
 describe('act-settings entry (⌘K) tracks local-settings availability', () => {

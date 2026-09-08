@@ -1313,3 +1313,127 @@ def appdata_seam(tmp_path, monkeypatch):
     """Per-test app-data dir, so profile writes never touch the session one."""
     monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path / "appdata"))
     return tmp_path
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# A8 — the write side accepts values the read side cannot protect.
+#
+# `MIN_SUBSTITUTION_LENGTH` exists for a real reason: an Ollama user sets
+# `OPENAI_API_KEY=ollama`, and blotting out a 6-character common word would
+# rewrite it everywhere in transcripts, not only where it is a secret. But
+# `app_secrets.validate_value` has a MAXIMUM length and no minimum, so a
+# short key saved through the ordinary route is stored, applied, sent to the
+# provider — and travels verbatim into logs and `chat.jsonl`, with nothing
+# anywhere saying so.
+#
+# Closing it by refusing short values would break the case the floor was
+# written for. So the asymmetry is DISCLOSED instead: `status()` reports
+# whether the live value is one redaction can actually blot out.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_the_floor_is_one_predicate_not_two_copies_of_eight(tmp_path, monkeypatch):
+    """
+    Anti-drift. Two modules now care where the floor is, so the substitution
+    pass and the disclosure must ask the SAME question — a second literal
+    `8` would let them separate silently, and the failure mode of that is a
+    UI promising redaction that does not happen.
+    """
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    from services import redaction
+
+    for length in range(1, 16):
+        value = "z" * length
+        monkeypatch.setenv("PYPSA_GUI_LLM_KEY__DRIFT", value)
+        actually_blotted = value not in redaction.redact_for_log(f"key={value}")
+        assert redaction.will_be_substituted(value) is actually_blotted, (
+            f"the predicate and the substitution pass disagree at {length} chars"
+        )
+
+
+def test_status_does_not_promise_redaction_it_cannot_deliver(tmp_path, monkeypatch):
+    """
+    The join. A flag that is merely CONSISTENT with itself is decorative;
+    what matters is that it predicts what `redact_for_log` really does to a
+    value stored through the ordinary route.
+    """
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    from services import app_secrets, redaction
+
+    # Includes the value EXACTLY at the floor and one just above it: an
+    # off-by-one lives there, and a sample of only very-short and very-long
+    # values agrees with a wrong floor as readily as with the right one.
+    for value in ("sk-x9k2", "ollama", "sk-x9k2a", "sk-x9k2ab",
+                  "sk-x9k2aaaaaaaa", "averylongsecretvalue"):
+        app_secrets.set_secret("OPENAI_API_KEY", value)
+        claimed = app_secrets.status("OPENAI_API_KEY")["redactable"]
+        leaked = value in redaction.redact_for_log(f"calling with key={value}")
+        assert claimed is not leaked, (
+            f"status claims redactable={claimed!r} for a {len(value)}-char "
+            f"value that {'leaks' if leaked else 'does not leak'}"
+        )
+
+
+def test_an_unconfigured_key_claims_neither(tmp_path, monkeypatch):
+    """
+    ADR-0001. "Not configured" is not "will not be redacted" — shipping
+    False here would render an absent key exactly like a leaking one, which
+    is the confusion that ADR forbids. Absent ships as null.
+    """
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    from services import app_secrets
+
+    assert app_secrets.status("OPENAI_API_KEY")["redactable"] is None
+
+
+def test_storing_an_unredactable_value_warns_without_quoting_it(tmp_path, monkeypatch, caplog):
+    """
+    The operator is the only one who can act on this, and they are at the
+    keyboard when they save. A log line at write time is the one moment the
+    disclosure is free.
+
+    The warning must NAME the key and never the value: a log line written to
+    explain that a value cannot be redacted would otherwise be the thing
+    that leaks it, and this line is emitted from inside the module that
+    knows the plaintext.
+    """
+    import logging
+
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    from services import app_secrets
+
+    with caplog.at_level(logging.WARNING, logger="services.app_secrets"):
+        app_secrets.set_secret("OPENAI_API_KEY", "sk-x9k2")
+    text = caplog.text
+    assert "OPENAI_API_KEY" in text
+    assert "sk-x9k2" not in text, "the warning about a leak leaked the value"
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="services.app_secrets"):
+        app_secrets.set_secret("OPENAI_API_KEY", "sk-x9k2aaaaaaaa")
+    assert "redact" not in caplog.text.lower(), (
+        "a normal-length key must not warn — a warning nobody can act on "
+        "trains the operator to ignore the one that matters"
+    )
+
+
+def test_redactability_follows_the_live_value_not_the_stored_one(tmp_path, monkeypatch):
+    """
+    A shell-exported value wins over the file (`app_secrets` precedence), and
+    redaction sees the LIVE one. So a short shell value masking a long stored
+    one leaks, and reading `stored` here would report the safe value while
+    the dangerous one is what reaches the logs — the shell/file split is
+    exactly where the two disagree.
+    """
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    from services import app_secrets, redaction
+
+    app_secrets.set_secret("OPENAI_API_KEY", "storedlongsecret1")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-x9k2")
+    monkeypatch.setattr(app_secrets, "_SHELL_NAMES", frozenset({"OPENAI_API_KEY"}))
+
+    assert app_secrets.status("OPENAI_API_KEY")["redactable"] is False
+    assert "sk-x9k2" in redaction.redact_for_log("key=sk-x9k2"), (
+        "precondition: the live short value is the one that leaks"
+    )

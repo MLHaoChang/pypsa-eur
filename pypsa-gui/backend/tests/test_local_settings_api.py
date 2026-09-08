@@ -538,3 +538,29 @@ def test_reveal_does_not_hand_provider_keys_to_the_spawned_process(
     assert leaked == [], f"managed credentials handed to the child: {leaked}"
     # DISCRIMINATION — the child must still be able to run.
     assert "PATH" in child_env
+
+
+# ── A8 — the same disclosure, on the pane that shares the same store ──────
+#
+# `local_settings.stored_api_key()` IS `app_secrets.get_stored`, so a short
+# key saved here is unredactable in exactly the way one saved on the
+# profiles pane is. Disclosing on one surface and not the other would be
+# worse than either: an operator who checked the screen that stays silent
+# would reasonably conclude there was nothing to know.
+
+
+def test_the_state_reports_whether_the_key_can_be_redacted(local_client, no_probe):
+    local_client.put(
+        "/api/local-settings/anthropic-key", json={"api_key": "sk-x9k2"},
+    )
+    assert local_client.get("/api/local-settings").json()["key_redactable"] is False
+
+    local_client.put(
+        "/api/local-settings/anthropic-key", json={"api_key": "sk-ant-abc123def456"},
+    )
+    assert local_client.get("/api/local-settings").json()["key_redactable"] is True
+
+
+def test_an_unset_key_claims_neither_here_either(local_client):
+    """ADR-0001: absent is not 'will leak'."""
+    assert local_client.get("/api/local-settings").json()["key_redactable"] is None

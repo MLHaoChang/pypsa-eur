@@ -34,6 +34,25 @@ SK_ANT_RE = re.compile(r"sk-ant-[A-Za-z0-9_\-]+")
 MIN_SUBSTITUTION_LENGTH = 8
 
 
+def will_be_substituted(value: str) -> bool:
+    """
+    Whether the substitution pass can actually blot `value` out of a string.
+
+    A8 — the floor above is a real trade-off, but it was invisible: nothing
+    on the WRITE side stopped an operator storing a value below it, and
+    nothing anywhere told them that value would travel verbatim into logs
+    and `chat.jsonl`. `app_secrets.status` now reports this so the UI can
+    say so; exposing it as a PREDICATE rather than re-testing the constant
+    at the call site is what stops the two from drifting apart, because
+    `_substitute_managed_values` asks the same question below.
+
+    Refusing short values instead was the obvious alternative and is wrong:
+    `OPENAI_API_KEY=ollama` is six characters and is exactly the case the
+    floor exists to protect.
+    """
+    return len(value) >= MIN_SUBSTITUTION_LENGTH
+
+
 def _substitute_managed_values(text: str, values: frozenset[str]) -> str:
     """
     Blot out every value in `values` that is >= the length floor.
@@ -48,7 +67,7 @@ def _substitute_managed_values(text: str, values: frozenset[str]) -> str:
     a whole unit before any of its substrings get a turn.
     """
     for value in sorted(values, key=len, reverse=True):
-        if len(value) < MIN_SUBSTITUTION_LENGTH or value not in text:
+        if not will_be_substituted(value) or value not in text:
             continue
         # A managed value that is itself shaped like an Anthropic key (the
         # common case: ANTHROPIC_API_KEY's live value) keeps the specific

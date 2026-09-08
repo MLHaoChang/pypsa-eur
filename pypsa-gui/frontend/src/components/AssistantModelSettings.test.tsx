@@ -52,12 +52,14 @@ function payload(over: Partial<LLMSettingsPayload> = {}): LLMSettingsPayload {
         wire: 'anthropic', base_url: null, model: 'claude-sonnet-5',
         tools: true, vision: true, auth: 'bearer', fallback_model: null, max_output_tokens: null,
         key_required: true, key_present: true, key_hint: '…wxyz',
+        key_redactable: true,
       },
       {
         id: 'ollama-local', label: 'Local Ollama', preset: 'custom',
         wire: 'openai', base_url: 'http://localhost:11434/v1', model: 'qwen3:8b',
         tools: false, vision: false, auth: 'none', fallback_model: null, max_output_tokens: null,
         key_required: false, key_present: false, key_hint: null,
+        key_redactable: null,
       },
     ],
     presets: [
@@ -183,7 +185,7 @@ describe('AssistantModelSettings', () => {
 
   it('saves a typed key via putLLMProfileKey and clears the draft afterwards', async () => {
     vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
-    vi.mocked(putLLMProfileKey).mockResolvedValue({ key_required: true, key_present: true, key_hint: '…nEwK' })
+    vi.mocked(putLLMProfileKey).mockResolvedValue({ key_required: true, key_present: true, key_hint: '…nEwK', key_redactable: true })
     renderSection()
     const user = userEvent.setup()
 
@@ -201,7 +203,7 @@ describe('AssistantModelSettings', () => {
 
   it('clears a key through confirmToast, matching the LocalSettings clear-key pattern', async () => {
     vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
-    vi.mocked(deleteLLMProfileKey).mockResolvedValue({ key_required: true, key_present: false, key_hint: null })
+    vi.mocked(deleteLLMProfileKey).mockResolvedValue({ key_required: true, key_present: false, key_hint: null, key_redactable: null })
     renderSection()
     const user = userEvent.setup()
 
@@ -278,6 +280,7 @@ describe('AssistantModelSettings', () => {
       base_url: 'http://localhost:8000/v1', model: 'llama3', tools: false, vision: false,
       auth: 'none', fallback_model: null, max_output_tokens: null,
       key_required: false, key_present: false, key_hint: null,
+      key_redactable: null,
     })
     renderSection()
     const user = userEvent.setup()
@@ -342,6 +345,7 @@ describe('C-7 / W-4 — key status follows key_present', () => {
         tools: true, vision: true, auth: 'bearer',
         fallback_model: null, max_output_tokens: null,
         key_required: true, key_present: false, key_hint: null,
+        key_redactable: null,
       }],
       presets: [],
     })
@@ -360,11 +364,71 @@ describe('C-7 / W-4 — key status follows key_present', () => {
         tools: true, vision: false, auth: 'bearer',
         fallback_model: null, max_output_tokens: null,
         key_required: true, key_present: true, key_hint: null,
+        key_redactable: true,
       }],
       presets: [],
     })
     renderSection()
     expect(await screen.findByText('My Endpoint')).toBeTruthy()
     expect(document.body.textContent).not.toContain('No key set')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// A8 — a key too short for the redaction floor travels verbatim into logs
+// and chat.jsonl. The backend now reports `key_redactable`; this pane is
+// where the super-admin who saved it is looking, so it is where the fact
+// has to appear. A flag nothing renders is not a disclosure.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('A8 — unredactable key disclosure', () => {
+  it('warns when a stored key is too short to be redacted from logs', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload({
+      profiles: [{
+        id: 'short-key', label: 'Short Key', preset: 'custom',
+        wire: 'openai', base_url: 'http://localhost:11434/v1', model: 'm',
+        tools: false, vision: false, auth: 'bearer',
+        fallback_model: null, max_output_tokens: null,
+        key_required: true, key_present: true, key_hint: null,
+        key_redactable: false,
+      }],
+    }))
+    renderSection()
+    const warning = await screen.findByTestId('assistant-model-key-unredactable-short-key')
+    expect(warning.textContent ?? '').toMatch(/log/i)
+  })
+
+  it('says nothing for a key that redaction can blot out', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload({
+      profiles: [{
+        id: 'long-key', label: 'Long Key', preset: 'custom',
+        wire: 'openai', base_url: 'http://localhost:11434/v1', model: 'm',
+        tools: false, vision: false, auth: 'bearer',
+        fallback_model: null, max_output_tokens: null,
+        key_required: true, key_present: true, key_hint: '…wxyz',
+        key_redactable: true,
+      }],
+    }))
+    renderSection()
+    await screen.findByText('Long Key')
+    expect(screen.queryByTestId('assistant-model-key-unredactable-long-key')).toBeNull()
+  })
+
+  it('says nothing when no key is set, rather than claiming it is safe', async () => {
+    // ADR-0001 at the render layer: `key_redactable: null` is "no value to
+    // describe", and must not render like either answer.
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload({
+      profiles: [{
+        id: 'no-key', label: 'No Key', preset: 'custom',
+        wire: 'openai', base_url: 'http://localhost:11434/v1', model: 'm',
+        tools: false, vision: false, auth: 'bearer',
+        fallback_model: null, max_output_tokens: null,
+        key_required: true, key_present: false, key_hint: null,
+        key_redactable: null,
+      }],
+    }))
+    renderSection()
+    await screen.findByText('No Key')
+    expect(screen.queryByTestId('assistant-model-key-unredactable-no-key')).toBeNull()
   })
 })

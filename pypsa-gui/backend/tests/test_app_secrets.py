@@ -102,6 +102,10 @@ def test_status_is_empty_before_anything_is_set():
         "hint": None,
         "overridden_by_environment": False,
         "storage_path": str(app_paths.user_env_file()),
+        # A8. Null, not False: nothing is configured, so there is no value to
+        # say anything about — and False here would render an absent key
+        # exactly like one that leaks (ADR-0001).
+        "redactable": None,
     }
 
 

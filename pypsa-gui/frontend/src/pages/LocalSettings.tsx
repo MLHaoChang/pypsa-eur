@@ -163,6 +163,18 @@ function LocalSettingsBody({
             </button>
           )}
         </div>
+        {/*
+          A8 — see `LocalSettingsState.key_redactable`. Gated on `=== false`,
+          never falsiness: `null` is "no key to describe" and must render as
+          nothing, not as a warning (ADR-0001).
+        */}
+        {state.key_redactable === false && (
+          <p className="text-xs text-warning" data-testid="local-settings-key-unredactable">
+            This key is too short to be hidden from logs — it will appear in
+            full in the app log and in saved chat transcripts. Use a longer
+            key if that matters here.
+          </p>
+        )}
         {message && (
           <p className={`text-xs ${TONE_CLASS[message.tone]}`}>{message.text}</p>
         )}

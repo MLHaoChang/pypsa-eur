@@ -31,6 +31,16 @@ export interface LocalSettingsState {
   key_set: boolean
   /** Last four characters, or null — including when the key is too short to hint safely. */
   key_hint: string | null
+  /**
+   * A8 — whether redaction can blot this key out of logs and chat
+   * transcripts. `false` means it CANNOT: the value is below the server's
+   * substitution floor and appears in them verbatim. `null` when no key is
+   * set — which per ADR-0001 is NOT `false`.
+   *
+   * This pane writes the same `ANTHROPIC_API_KEY` slot the assistant-model
+   * pane does, so both disclose it or neither is trustworthy.
+   */
+  key_redactable: boolean | null
   log_path: string
 }
 

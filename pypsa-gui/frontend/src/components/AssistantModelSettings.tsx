@@ -202,6 +202,27 @@ function ProfileRow({
 
       <p className="text-xs text-muted">{keyStatusText(profile)}</p>
 
+      {/*
+        A8 — a key below the server's redaction floor cannot be blotted out
+        of logs or chat transcripts and appears in them verbatim. The person
+        who can act on that is the admin reading this pane, and this is the
+        only screen that knows.
+
+        Gated on `=== false`, never on falsiness: `null` means "no value to
+        describe" (no key set, or a keyless profile) and must render as
+        nothing at all, not as a warning (ADR-0001).
+      */}
+      {profile.key_redactable === false && (
+        <p
+          className="text-xs text-warning"
+          data-testid={`assistant-model-key-unredactable-${profile.id}`}
+        >
+          This key is too short to be hidden from logs — it will appear in
+          full in the app log and in saved chat transcripts. Use a longer key
+          if that matters here.
+        </p>
+      )}
+
       {profile.auth === 'bearer' && (
         <div className="flex items-center gap-2">
           <input

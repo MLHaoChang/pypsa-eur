@@ -39,7 +39,7 @@ vi.mock('../api/llmSettings', async (orig) => ({
   fetchLLMSettingsOrNull: vi.fn(),
 }))
 
-const STATE: LocalSettingsState = { key_set: true, key_hint: '7f3a', log_path: '/tmp/app.log' }
+const STATE: LocalSettingsState = { key_set: true, key_hint: '7f3a', key_redactable: true, log_path: '/tmp/app.log' }
 
 const LLM_PAYLOAD: LLMSettingsPayload = {
   active_profile_id: 'anthropic-sonnet',
@@ -47,7 +47,7 @@ const LLM_PAYLOAD: LLMSettingsPayload = {
     id: 'anthropic-sonnet', label: 'Claude Sonnet', preset: 'anthropic-sonnet',
     wire: 'anthropic', base_url: null, model: 'claude-sonnet-5',
     tools: true, vision: true, auth: 'bearer', fallback_model: null, max_output_tokens: null,
-    key_required: true, key_present: false, key_hint: null,
+    key_required: true, key_present: false, key_hint: null, key_redactable: null,
   }],
   presets: [],
 }
@@ -152,5 +152,46 @@ describe('desktop-vs-web visibility', () => {
     expect(container.firstChild).not.toBeNull()
     resolve(null)
     await waitFor(() => expect(screen.queryByText('Loading…')).toBeNull())
+  })
+})
+
+// A8 — the same disclosure as the profiles pane, on the surface that writes
+// the same ANTHROPIC_API_KEY slot. Silent here would be worse than silent
+// everywhere: an operator who checked this screen would reasonably conclude
+// there was nothing to know.
+describe('A8 — unredactable key disclosure', () => {
+  it('warns when the stored key is too short to be redacted from logs', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue({
+      key_set: true, key_hint: null, key_redactable: false, log_path: '/tmp/pypsa-gui.log',
+    })
+    renderPane()
+    const warning = await screen.findByTestId('local-settings-key-unredactable')
+    expect(warning.textContent ?? '').toMatch(/log/i)
+  })
+
+  it('says nothing for a key redaction can blot out', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue({
+      key_set: true, key_hint: '…wxyz', key_redactable: true, log_path: '/tmp/pypsa-gui.log',
+    })
+    renderPane()
+    // Anchor on rendered CONTENT, not on the fetch having been called: the
+    // call happens on mount, before the data resolves and the pane
+    // re-renders, so asserting absence there passes against an empty pane
+    // and proves nothing. `findByText` waits for the loaded state.
+    await screen.findByText('Anthropic API key')
+    expect(screen.queryByTestId('local-settings-key-unredactable')).toBeNull()
+  })
+
+  it('says nothing when no key is set, rather than claiming it is safe', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue({
+      key_set: false, key_hint: null, key_redactable: null, log_path: '/tmp/pypsa-gui.log',
+    })
+    renderPane()
+    // Anchor on rendered CONTENT, not on the fetch having been called: the
+    // call happens on mount, before the data resolves and the pane
+    // re-renders, so asserting absence there passes against an empty pane
+    // and proves nothing. `findByText` waits for the loaded state.
+    await screen.findByText('Anthropic API key')
+    expect(screen.queryByTestId('local-settings-key-unredactable')).toBeNull()
   })
 })

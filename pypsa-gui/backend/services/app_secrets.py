@@ -327,6 +327,29 @@ def get_stored(name: str = "ANTHROPIC_API_KEY") -> str | None:
     return _read_managed().get(name) or None
 
 
+def _redaction_floor() -> int:
+    """The floor, for messages only — see `_is_redactable` on the import."""
+    from services.redaction import MIN_SUBSTITUTION_LENGTH  # noqa: PLC0415
+
+    return MIN_SUBSTITUTION_LENGTH
+
+
+def _is_redactable(value: str) -> bool:
+    """
+    Whether `redaction` can blot `value` out of a log line or a transcript.
+
+    Function-local import, mirroring `redaction._snapshot_values`' import of
+    THIS module in the other direction and for the same reason: `redaction`
+    is imported by `chat_service` and by the provider modules, and keeping
+    both edges deferred means neither module has to stay clear of a cycle
+    forever. The floor itself is deliberately not duplicated here — see
+    `redaction.will_be_substituted`.
+    """
+    from services.redaction import will_be_substituted  # noqa: PLC0415
+
+    return will_be_substituted(value)
+
+
 def status(name: str = "ANTHROPIC_API_KEY") -> dict[str, object]:
     """
     Whether `name` is configured, where it came from, and a non-reversible hint.
@@ -359,6 +382,19 @@ def status(name: str = "ANTHROPIC_API_KEY") -> dict[str, object]:
         # True when a shell-set value is masking a stored one, so the UI can
         # explain why saving appeared to do nothing.
         "overridden_by_environment": bool(stored) and name in _SHELL_NAMES,
+        # A8 — whether redaction can actually blot this value out of logs and
+        # `chat.jsonl`. False means it cannot: the value is below
+        # `redaction.MIN_SUBSTITUTION_LENGTH` and will travel verbatim.
+        #
+        # NULL when nothing is configured, per ADR-0001: "not configured" is
+        # not "will leak", and shipping False for an absent key would render
+        # it exactly like a leaking one.
+        #
+        # Computed from the LIVE value, which is what redaction sees — a
+        # shell-set short key is just as unredactable as a stored one, and
+        # reading `stored` here would report the wrong one whenever the shell
+        # is masking the file.
+        "redactable": _is_redactable(live) if live else None,
         "storage_path": str(app_paths.user_env_file()),
     }
 
@@ -368,6 +404,19 @@ def set_secret(name: str, value: str) -> dict[str, object]:
     if not is_managed_key(name):
         raise SecretValueError(f"{name} is not a managed setting.")
     cleaned = validate_value(value)
+    if not _is_redactable(cleaned):
+        # A8 — the operator is the only one who can act on this and they are
+        # at the keyboard right now. NAME ONLY, never the value: a warning
+        # written to say a value cannot be redacted must not be the thing
+        # that leaks it, and this is emitted from the one module holding the
+        # plaintext. `status()["redactable"]` carries the same fact to the UI.
+        logger.warning(
+            "%s is shorter than the redaction floor (%d characters): it "
+            "cannot be blotted out of logs or chat transcripts and will "
+            "appear in them verbatim.",
+            name,
+            _redaction_floor(),
+        )
     # A2 — read + mutate + write under one lock, or a concurrent save of a
     # DIFFERENT key reads the file before this one has written it and then
     # rewrites the whole thing without it.

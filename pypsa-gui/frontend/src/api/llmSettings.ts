@@ -41,6 +41,16 @@ export interface LLMProfileOut {
   key_present: boolean
   /** Last four characters, e.g. `…wxyz`. NEVER the key. */
   key_hint: string | null
+  /**
+   * A8 — whether redaction can blot this key out of logs and chat
+   * transcripts. `false` means it CANNOT: the value is below the server's
+   * substitution floor and appears in them verbatim.
+   *
+   * `null` when there is no value to describe (no key set, or a keyless
+   * profile). Per ADR-0001 that is NOT `false` — rendering an absent key
+   * like a leaking one is exactly the confusion the ADR forbids.
+   */
+  key_redactable: boolean | null
 }
 
 /** Body for create/update. Deliberately has no `key_env` and no key. */
@@ -82,6 +92,8 @@ export interface KeyStatus {
   key_required: boolean
   key_present: boolean
   key_hint: string | null
+  /** See `LLMProfileOut.key_redactable`. */
+  key_redactable: boolean | null
 }
 
 /**

@@ -871,3 +871,70 @@ def test_a_rejected_profile_edit_does_not_take_the_key_with_it(
     )
     assert resp.status_code == 422, resp.text
     assert app_secrets.get_stored(NAMESPACED) == "sk-namespaced-secret-999"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# A8 — the disclosure has to reach the surface the operator is looking at.
+# `/settings/api-key` returns `app_secrets.status` verbatim so it carries
+# the flag already; `_profile_out` picks fields by hand and does not.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_a_profile_reports_whether_its_key_can_be_redacted(super_admin_client):
+    """
+    A super-admin who saved a short key has no way to learn it will appear
+    in logs unless the surface they saved it on says so.
+    """
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/my-custom", json=_custom_profile_body()
+    )
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/my-custom/key", json={"value": "sk-x9k2"}
+    )
+    listing = super_admin_client.get("/api/chat/settings/llm").json()
+    profile = next(p for p in listing["profiles"] if p["id"] == "my-custom")
+    assert profile["key_present"] is True
+    assert profile["key_redactable"] is False, (
+        "a key too short to be redacted is reported as if it were safe"
+    )
+
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/my-custom/key",
+        json={"value": "sk-x9k2aaaaaaaa"},
+    )
+    listing = super_admin_client.get("/api/chat/settings/llm").json()
+    profile = next(p for p in listing["profiles"] if p["id"] == "my-custom")
+    assert profile["key_redactable"] is True
+
+
+def test_a_profile_with_no_key_claims_neither(super_admin_client):
+    """
+    ADR-0001 again, at the route. An `auth="none"` profile has no key
+    concept at all and an unset bearer profile has no value yet; neither is
+    "will leak", so both ship null rather than False.
+    """
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/no-key",
+        json=_custom_profile_body(auth="none"),
+    )
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/unset-key", json=_custom_profile_body()
+    )
+    listing = super_admin_client.get("/api/chat/settings/llm").json()
+    by_id = {p["id"]: p for p in listing["profiles"]}
+    assert by_id["no-key"]["key_redactable"] is None
+    assert by_id["unset-key"]["key_redactable"] is None
+
+
+def test_the_key_routes_report_redactability_at_the_moment_of_saving(
+    super_admin_client,
+):
+    """The PUT response is what the pane renders right after a save."""
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/my-custom", json=_custom_profile_body()
+    )
+    resp = super_admin_client.put(
+        "/api/chat/settings/llm/profiles/my-custom/key", json={"value": "sk-x9k2"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["key_redactable"] is False

@@ -323,11 +323,20 @@ def _profile_out(profile: llm_config.LLMProfile) -> dict[str, Any]:
         status = app_secrets.status(key_env)
         key_present = bool(status["configured"])
         key_hint = status["hint"]
+        # A8 — whether redaction can blot this key out of logs and
+        # transcripts, or it will appear in them verbatim. Null for a profile
+        # with no key concept and for one whose key is unset: neither is
+        # "will leak", and False would render them like one that does
+        # (ADR-0001). Read from the same `app_secrets.status` as the rest,
+        # not recomputed, so it cannot disagree with `/settings/api-key`.
+        key_redactable = status["redactable"]
     else:
         key_present = False
         key_hint = None
+        key_redactable = None
     return {
         "id": profile.id,
+        "key_redactable": key_redactable,
         "label": profile.label,
         "preset": profile.preset,
         "wire": profile.wire,
@@ -519,7 +528,11 @@ def put_llm_profile_key(
         status = app_secrets.set_secret(profile.key_env, body.value)
     except app_secrets.SecretValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"key_present": bool(status["configured"]), "key_hint": status["hint"]}
+    return {
+        "key_present": bool(status["configured"]),
+        "key_hint": status["hint"],
+        "key_redactable": status["redactable"],
+    }
 
 
 @router.delete("/settings/llm/profiles/{profile_id}/key")
@@ -536,7 +549,11 @@ def delete_llm_profile_key(
             detail=f"profile {profile_id!r} has auth=none and takes no key",
         )
     status = app_secrets.clear_secret(profile.key_env)
-    return {"key_present": bool(status["configured"]), "key_hint": status["hint"]}
+    return {
+        "key_present": bool(status["configured"]),
+        "key_hint": status["hint"],
+        "key_redactable": status["redactable"],
+    }
 
 
 @router.post("/settings/llm/active")

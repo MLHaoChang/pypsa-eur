@@ -57,9 +57,16 @@ class ApiKeyBody(BaseModel):
 
 def _state() -> dict:
     key = local_settings.stored_api_key()
+    # A8 — this pane writes the SAME `ANTHROPIC_API_KEY` slot the profiles
+    # pane does (`stored_api_key` is `app_secrets.get_stored`), so a key
+    # short enough to defeat redaction is just as unredactable when saved
+    # here. Read through `app_secrets.status` rather than recomputed, so the
+    # two surfaces cannot disagree; null when nothing is set (ADR-0001).
+    status = app_secrets.status("ANTHROPIC_API_KEY")
     return {
         "key_set": key is not None,
         "key_hint": local_settings.api_key_hint(key),
+        "key_redactable": status["redactable"],
         "log_path": str(app_paths.app_data_dir() / LOG_FILENAME),
     }
 
