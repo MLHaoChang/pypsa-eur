@@ -77,7 +77,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 from db.base import Base
 import main
@@ -145,10 +145,10 @@ def reset_backend():
 _SEED = {"password": "test-password-123"}
 
 
-def make_auth_db():
+def make_auth_db(url: str | None = None):
     """
-    Build the in-memory SQLite database the harness runs against, and install
-    its sessionmaker as `db.session.SessionLocal`.
+    Build the SQLite database the harness runs against, and install its
+    sessionmaker as `db.session.SessionLocal`.
 
     Returns `(engine, session_local, previous_session_local)` — the caller owns
     teardown, because the two callers own it differently: the `_auth_db`
@@ -160,18 +160,46 @@ def make_auth_db():
     would drift is silent: miss StaticPool below and the seeded user simply
     isn't there for the request that needs it, which reads as an auth bug.
 
-    StaticPool is load-bearing: `:memory:` gives each *connection* its own
+    **Default (`url=None`) — one `:memory:` database behind a `StaticPool`.**
+    StaticPool is load-bearing there: `:memory:` gives each *connection* its own
     database, and the app opens connections from several places (the auth
     middleware, `get_db`, the solve dispatcher). Without a single pooled
     connection the seeded user would be invisible to the request that needs it.
+    The suite drives the app through `TestClient`, one request at a time, so
+    nothing ever uses that one connection from two threads at once.
+
+    **A file URL — a normal connection per checkout, no StaticPool.**
+    For a caller that DOES touch the database from several threads:
+    `tests/qa_phase4_compare.py` boots a real uvicorn and fires concurrent
+    requests, so its handlers run on anyio worker threads. Handing those threads
+    one shared `sqlite3.Connection` is unsafe, and how it fails depends on the
+    interpreter — measured on SQLAlchemy 2.0.50, twelve threads mixing reads and
+    writes: Python 3.11 came through clean, Python 3.12 raised
+    `sqlite3.InterfaceError: bad parameter or other API misuse`. A file needs no
+    shared connection to be one database, which is also how the product runs on
+    SQLite (`db/session.py::get_engine`).
+
+    See `tests/test_qa_support_sandbox.py`.
     """
     from db import session as db_session_module
 
-    engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    if url is None:
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    else:
+        # Mirrors `db/session.py::get_engine`'s file-backed branch. NullPool so
+        # a connection is opened and closed per checkout rather than parked in a
+        # pool; `check_same_thread=False` because FastAPI serves sync handlers
+        # from a worker thread, which is safe now that no two of them share one
+        # connection.
+        engine = create_engine(
+            url,
+            connect_args={"check_same_thread": False, "timeout": 30},
+            poolclass=NullPool,
+        )
     db_session_module.enable_sqlite_foreign_keys(engine)
     Base.metadata.create_all(engine)
     testing_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)

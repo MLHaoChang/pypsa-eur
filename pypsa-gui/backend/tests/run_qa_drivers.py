@@ -84,9 +84,23 @@ def main() -> int:
             failed.append(path.stem)
             # Only on failure, and only the tail — a driver prints a line per
             # assertion, and nineteen full transcripts would bury the summary.
+            #
+            # The two streams are tailed SEPARATELY. Concatenating them and
+            # tailing the result is what hid the diagnosis of the first real
+            # failure this runner caught: a driver's own PASS/FAIL summary goes
+            # to stdout and a server thread's traceback to stderr, so the joined
+            # tail showed a decapitated traceback and none of the summary that
+            # said which check had failed.
             print(f"        exit={proc.returncode}")
-            for line in (proc.stdout + proc.stderr).splitlines()[-40:]:
-                print(f"        | {line}")
+            for label, stream in (("stdout", proc.stdout), ("stderr", proc.stderr)):
+                lines = stream.splitlines()
+                if not lines:
+                    continue
+                elided = max(0, len(lines) - 40)
+                print(f"        --- {label}"
+                      + (f" (last 40 of {len(lines)} lines)" if elided else ""))
+                for line in lines[-40:]:
+                    print(f"        | {line}")
 
     print()
     if failed:
