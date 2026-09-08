@@ -244,9 +244,19 @@ def test_s0_6_solve_log_excludes_other_threads_but_keeps_pypsa_lines():
     `pypsa.*` / `linopy.*` / HiGHS output emitted under third-party logger
     names. This asserts the fix cannot regress into that.
     """
+    from routers.simulation import BufferedLogQueue
     from services.solver_service import _ThreadScopedQueueHandler
 
-    sink: queue.SimpleQueue = queue.SimpleQueue()
+    # The PRODUCTION type, not a `queue.SimpleQueue` stand-in.
+    #
+    # This test's second half asserts the solve log still contains solver
+    # output, and it passed for the whole time that log was empty in
+    # production: `QueueHandler.enqueue` calls `put_nowait`, `SimpleQueue`
+    # has one and `BufferedLogQueue` did not, so every record raised inside
+    # `Handler.emit` and the logging module swallowed it. A substitute
+    # collaborator cannot show a defect that lives in the real one's
+    # interface, however exactly the assertion is worded.
+    sink = BufferedLogQueue()
     handler = _ThreadScopedQueueHandler(sink)
     root = logging.getLogger()
     root.addHandler(handler)
@@ -279,14 +289,26 @@ def test_s0_6_solve_log_excludes_other_threads_but_keeps_pypsa_lines():
         except queue.Empty:
             break
 
+    # Assert over the queue AND the history buffer. `_history` is what the
+    # SSE replay and `/log_history` actually serve, so a `put_nowait` that
+    # reached the queue while skipping the history would leave the user's
+    # log just as empty while this test went green on the queue alone.
     joined = "\n".join(captured)
+    replayed = "\n".join(sink.history())
     assert "TENANT_B_SECRET" not in joined, (
         "another tenant's log record reached this solve's stream"
+    )
+    assert "TENANT_B_SECRET" not in replayed, (
+        "another tenant's log record reached this solve's SSE replay buffer"
     )
     for marker in ("PYPSA_LINE", "LINOPY_LINE", "HIGHS_LINE"):
         assert marker in joined, (
             f"{marker} missing — the leak fix emptied the solve log, which is "
             f"the regression v2's remedy would have introduced"
+        )
+        assert marker in replayed, (
+            f"{marker} reached the queue but not the history buffer — the SSE "
+            f"replay and /log_history would serve an empty solve log"
         )
 
 
