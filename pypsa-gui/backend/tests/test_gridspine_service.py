@@ -109,6 +109,8 @@ def test_an_ordinary_project_defaults_to_capacity_expansion(plain_project):
     lambda db, p: gs.export_handoff_bundle(p, 0),
     lambda db, p: gs.set_dispatch_source(db, p, "generate"),
     lambda db, p: gs.edit_template_param(p, "G_BUS_32", "h_s", 4.0, "datasheet", "user"),
+    lambda db, p: gs.get_config(p),
+    lambda db, p: gs.update_config(p, {"k": 2}),
 ])
 def test_every_action_refuses_a_project_of_the_wrong_kind(plain_project, user_and_db, action):
     db, _user = user_and_db
@@ -290,3 +292,53 @@ def test_the_service_touches_only_the_driver_and_schema_layers_of_gridspine():
         assert module.startswith(("gridspine.drivers", "gridspine.schema", "gridspine.templates")), module
     for banned in ("gridspine.static", "gridspine.producers", "gridspine.handoff", "gridspine.ingest"):
         assert banned not in imported, banned
+
+
+# --------------------------------------------------------------------------
+# config read / update (follow-up A)
+# --------------------------------------------------------------------------
+
+def test_get_config_returns_the_stored_config_with_the_projects_own_paths(study, user_and_db):
+    db, _user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    cfg = gs.get_config(row)
+    assert (cfg["hours"], cfg["k"], cfg["window"], cfg["overlap"]) == (24, 1, 24, 0)
+    assert cfg["outdir"] == str(gs.run_dir(row))
+    assert cfg["templates_overlay"] is None
+
+
+def test_update_config_changes_only_what_it_is_given_and_persists(study, user_and_db):
+    db, _user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    out = gs.update_config(row, {"k": 3, "screen": False})
+    assert (out["k"], out["screen"], out["hours"]) == (3, False, 24)
+    again = json.loads((gs.gridspine_dir(row) / "config.json").read_text())
+    assert (again["k"], again["screen"]) == (3, False)
+
+
+@pytest.mark.parametrize("bad, status", [
+    ({"window": 25}, 422),
+    ({"hours": 0}, 422),
+    ({"overlap": 24}, 422),
+    ({"outdir": "/elsewhere"}, 422),
+    ({"from_dispatch": "/nowhere"}, 422),
+    ("not a dict", 422),
+])
+def test_update_config_refuses_a_bad_patch_and_writes_nothing(study, user_and_db, bad, status):
+    db, _user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    before = (gs.gridspine_dir(row) / "config.json").read_text()
+    with pytest.raises(HTTPException) as exc:
+        gs.update_config(row, bad)
+    assert exc.value.status_code == status
+    assert (gs.gridspine_dir(row) / "config.json").read_text() == before
+
+
+def test_update_config_is_refused_while_a_study_is_queued(study, user_and_db, monkeypatch):
+    db, _user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    monkeypatch.setattr(gs, "_active_job_for", lambda project: {"id": "job", "status": "queued"})
+    with pytest.raises(HTTPException) as exc:
+        gs.update_config(row, {"k": 2})
+    assert exc.value.status_code == 409
+

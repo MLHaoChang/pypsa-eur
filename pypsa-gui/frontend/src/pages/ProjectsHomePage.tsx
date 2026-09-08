@@ -585,7 +585,12 @@ export default function ProjectsHomePage() {
                             <h3 className="min-w-0 break-words text-lg font-semibold tracking-[-0.02em]">
                               {project.name}
                             </h3>
-                            <Badge>Root</Badge>
+                            <span className="flex shrink-0 items-center gap-1.5">
+                              {project.project_kind === 'planning_dynamics' && (
+                                <Badge tone="mint" title="Planning → dynamics study">Study</Badge>
+                              )}
+                              <Badge>Root</Badge>
+                            </span>
                           </div>
                           <StatChips
                             project={project}

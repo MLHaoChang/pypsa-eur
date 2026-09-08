@@ -51,6 +51,25 @@ describe('gridspineApi', () => {
     )
   })
 
+  it('reads the config from its own endpoint', async () => {
+    await gridspineApi.config('Winter 2030/a')
+    expect(get).toHaveBeenCalledWith('/gridspine/Winter%202030%2Fa/config', expect.objectContaining({ skipErrorToast: true }))
+  })
+
+  it('PUTs only the fields in the patch, and marks from_dispatch explicitly when it is present', async () => {
+    await gridspineApi.updateConfig('S', { k: 3 })
+    expect(put).toHaveBeenLastCalledWith('/gridspine/S/config', { k: 3 }, expect.anything())
+    // `null` means "generate": without the marker the backend would read it as "leave as is"
+    await gridspineApi.updateConfig('S', { from_dispatch: null })
+    expect(put).toHaveBeenLastCalledWith(
+      '/gridspine/S/config', { from_dispatch: null, set_from_dispatch: true }, expect.anything(),
+    )
+    await gridspineApi.updateConfig('S', { hours: 48, from_dispatch: '/runs/v3' })
+    expect(put).toHaveBeenLastCalledWith(
+      '/gridspine/S/config', { hours: 48, from_dispatch: '/runs/v3', set_from_dispatch: true }, expect.anything(),
+    )
+  })
+
   it('asks for the bundle as a blob', async () => {
     await gridspineApi.bundle('S', 7)
     expect(get).toHaveBeenCalledWith('/gridspine/S/bundles/7', expect.objectContaining({ responseType: 'blob' }))

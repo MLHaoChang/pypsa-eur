@@ -97,6 +97,8 @@ def test_a_capacity_expansion_project_is_409_through_the_api(client, api_project
     ("get", "/ledger", None, "get_assumption_ledger", {"entries": []}),
     ("post", "/run", None, "run_pipeline", {"id": "job-1", "kind": "gridspine"}),
     ("post", "/dispatch-source", {"source": "generate"}, "set_dispatch_source", {"from_dispatch": None}),
+    ("get", "/config", None, "get_config", {"hours": 24}),
+    ("put", "/config", {"k": 3}, "update_config", {"k": 3}),
 ])
 def test_each_endpoint_calls_its_service_function_and_returns_its_answer(
     client, study, monkeypatch, method, path, payload, function, expected
@@ -166,3 +168,14 @@ def test_the_bundle_endpoint_streams_the_zip_the_service_wrote(client, study, ro
 
 def test_an_unselected_hour_is_404_through_the_api(client, study):
     assert client.get("/api/gridspine/Router Study/bundles/4242").status_code == 404
+
+
+def test_the_config_patch_carries_only_the_fields_that_were_sent(client, study, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gs, "update_config", lambda project, patch: seen.update(patch=patch) or patch)
+    resp = client.put("/api/gridspine/Router Study/config", json={"k": 3, "screen": False})
+    assert resp.status_code == 200, resp.text
+    assert seen["patch"] == {"k": 3, "screen": False}
+    resp = client.put("/api/gridspine/Router Study/config", json={"set_from_dispatch": True, "from_dispatch": None})
+    assert seen["patch"] == {"from_dispatch": None}
+

@@ -586,8 +586,14 @@ class ProjectInfo(BaseModel):
     # project has never been categorised. Was a `[type]` prefix on the
     # description until migration 0004; see `Project.scenario_type`.
     scenario_type: str | None = None
+    # What KIND of study this project is — 'capacity_expansion' (the existing
+    # flow), 'planning_dynamics' (gridspine), 'connection' (later). NULL means
+    # capacity_expansion, exactly as `Project.project_kind` stores it (migration
+    # 0006): the DTO carries the raw column and the client resolves the default,
+    # so an old row and a row that chose the default look the same, as they are.
+    project_kind: str | None = None
 
-    @field_validator("parent_project", "scenario_description", "scenario_type", mode="before")
+    @field_validator("parent_project", "scenario_description", "scenario_type", "project_kind", mode="before")
     @classmethod
     def _empty_str_is_none(cls, v):
         # Coerce empty / whitespace-only strings to None so downstream

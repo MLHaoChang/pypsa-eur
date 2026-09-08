@@ -1454,6 +1454,18 @@ def gridspine_set_dispatch_source(project_id: str, from_dispatch: str | None = N
         return _h(db, _gridspine_project(db, user, project_id), source)
 
 
+def gridspine_get_config(project_id: str) -> dict:
+    from services.gridspine_service import get_config as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def gridspine_update_config(project_id: str, **patch) -> dict:
+    from services.gridspine_service import update_config as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), {k: v for k, v in patch.items() if v is not None})
+
+
 def gridspine_run_pipeline(project_id: str) -> dict:
     from services.gridspine_service import run_pipeline as _h
     with _acting() as (db, user):
@@ -3565,9 +3577,11 @@ DISPATCHERS: dict[str, Any] = {
     "solve_queue_list": solve_queue_list,
     "solve_queue_abort": solve_queue_abort,
     "solve_queue_clear_finished": solve_queue_clear_finished,
-    # gridspine (8)
+    # gridspine (10)
     "gridspine_create_study": gridspine_create_study,
     "gridspine_set_dispatch_source": gridspine_set_dispatch_source,
+    "gridspine_get_config": gridspine_get_config,
+    "gridspine_update_config": gridspine_update_config,
     "gridspine_run_pipeline": gridspine_run_pipeline,
     "gridspine_get_stage_status": gridspine_get_stage_status,
     "gridspine_list_ranked_snapshots": gridspine_list_ranked_snapshots,

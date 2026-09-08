@@ -13,6 +13,8 @@ is fetched after that check, never from client input.
 
     POST   /api/gridspine/projects                       create a study
     POST   /api/gridspine/{name}/dispatch-source         generate | from an existing run
+    GET    /api/gridspine/{name}/config                  the study config as the next run uses it
+    PUT    /api/gridspine/{name}/config                  change some of it (refused while a job is active)
     POST   /api/gridspine/{name}/run                     enqueue (returns the job)
     GET    /api/gridspine/{name}/status                  per-stage state
     GET    /api/gridspine/{name}/snapshots               ranked selection
@@ -54,6 +56,30 @@ class DispatchSource(BaseModel):
     from_dispatch: str | None = None
 
 
+class ConfigPatch(BaseModel):
+    """Any subset of the editable study config. `None` means "leave as is" for
+    every field but `from_dispatch`, where it means "generate" — so that one
+    is carried explicitly by `set_from_dispatch`."""
+    hours: int | None = None
+    k: int | None = None
+    window: int | None = None
+    overlap: int | None = None
+    screen: bool | None = None
+    n2_prune_threshold_pct: float | None = None
+    from_dispatch: str | None = None
+    set_from_dispatch: bool = False
+
+    def as_patch(self) -> dict:
+        patch = {
+            key: getattr(self, key)
+            for key in ("hours", "k", "window", "overlap", "screen", "n2_prune_threshold_pct")
+            if getattr(self, key) is not None
+        }
+        if self.set_from_dispatch:
+            patch["from_dispatch"] = self.from_dispatch
+        return patch
+
+
 class TemplateEdit(BaseModel):
     value: float
     source: str
@@ -91,6 +117,20 @@ def set_dispatch_source(
         else {"from_dispatch": body.from_dispatch}
     )
     return gs.set_dispatch_source(db, _row(proj, db), source)
+
+
+@router.get("/{name}/config")
+def get_config(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    return gs.get_config(_row(proj, db))
+
+
+@router.put("/{name}/config")
+def update_config(
+    body: ConfigPatch,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
+    return gs.update_config(_row(proj, db), body.as_patch())
 
 
 @router.post("/{name}/run")

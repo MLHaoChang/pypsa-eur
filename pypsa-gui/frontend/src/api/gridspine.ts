@@ -30,6 +30,11 @@ export interface StudyConfig {
   templates_overlay?: string | null
 }
 
+/** Any subset of the editable config. Present `from_dispatch` (even `null`,
+ *  meaning "generate") is sent explicitly; absent means "leave as is". */
+export type StudyConfigPatch = Partial<Pick<StudyConfig,
+  'hours' | 'k' | 'window' | 'overlap' | 'screen' | 'n2_prune_threshold_pct' | 'from_dispatch'>>
+
 export interface StageError { stage: string; cause: string; element_ids: string[] }
 
 export interface StageStatus {
@@ -97,6 +102,20 @@ export const gridspineApi = {
       fromDispatch ? { source: 'from_dispatch', from_dispatch: fromDispatch } : { source: 'generate' },
       quiet,
     ).then(r => r.data),
+
+  /** The config the NEXT run will use. */
+  config: (project: string) =>
+    client.get<StudyConfig>(`/gridspine/${encodeURIComponent(project)}/config`, quiet).then(r => r.data),
+
+  /** Change part of it. The backend refuses (409) while a job for the project
+   *  is queued or running, and validates values (422) the way the wizard does. */
+  updateConfig: (project: string, patch: StudyConfigPatch) => {
+    const { from_dispatch, ...rest } = patch
+    const body = 'from_dispatch' in patch
+      ? { ...rest, from_dispatch: from_dispatch ?? null, set_from_dispatch: true }
+      : rest
+    return client.put<StudyConfig>(`/gridspine/${encodeURIComponent(project)}/config`, body, quiet).then(r => r.data)
+  },
 
   run: (project: string) =>
     client.post<StudyJob>(`/gridspine/${encodeURIComponent(project)}/run`, undefined, quiet).then(r => r.data),

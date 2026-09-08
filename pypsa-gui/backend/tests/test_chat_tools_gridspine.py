@@ -27,6 +27,8 @@ from services.chat_tools_schema import TOOL_ROUTES, TOOLS, safety_tier_for
 GRIDSPINE_TOOLS = (
     "gridspine_create_study",
     "gridspine_set_dispatch_source",
+    "gridspine_get_config",
+    "gridspine_update_config",
     "gridspine_run_pipeline",
     "gridspine_get_stage_status",
     "gridspine_list_ranked_snapshots",
@@ -63,10 +65,11 @@ def test_every_gridspine_tool_is_registered_routed_and_tiered():
 def test_the_run_is_long_running_and_the_reads_are_reads():
     assert safety_tier_for("gridspine_run_pipeline") == "execution_long_running"
     for name in ("gridspine_get_stage_status", "gridspine_list_ranked_snapshots",
-                 "gridspine_get_assumption_ledger"):
+                 "gridspine_get_assumption_ledger", "gridspine_get_config"):
         assert safety_tier_for(name) == "read", name
     for name in ("gridspine_create_study", "gridspine_set_dispatch_source",
-                 "gridspine_edit_template_param", "gridspine_export_handoff_bundle"):
+                 "gridspine_edit_template_param", "gridspine_export_handoff_bundle",
+                 "gridspine_update_config"):
         assert safety_tier_for(name) == "write", name
 
 
@@ -92,6 +95,7 @@ def test_project_scoped_tools_take_the_project_by_name():
     ("gridspine_get_assumption_ledger", {"project_id": "Chat Study"}, "get_assumption_ledger"),
     ("gridspine_run_pipeline", {"project_id": "Chat Study"}, "run_pipeline"),
     ("gridspine_set_dispatch_source", {"project_id": "Chat Study"}, "set_dispatch_source"),
+    ("gridspine_get_config", {"project_id": "Chat Study"}, "get_config"),
 ])
 def test_each_dispatcher_resolves_the_project_and_calls_its_service_function(
     study, monkeypatch, tool, args, function
@@ -203,3 +207,11 @@ def test_a_bad_binding_degrades_to_the_unbound_toolset_rather_than_failing():
     names = _names(chat_service._tools_payload(_Ctx("not-a-uuid")))
     assert "gridspine_create_study" in names
     assert not (names & set(PROJECT_SCOPED))
+
+
+def test_update_config_forwards_only_the_fields_the_model_set(study, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gs, "update_config", lambda project, patch: seen.update(patch=patch) or patch)
+    chat_tools.DISPATCHERS["gridspine_update_config"](project_id="Chat Study", k=3, screen=None)
+    assert seen["patch"] == {"k": 3}
+

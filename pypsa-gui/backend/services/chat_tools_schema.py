@@ -778,7 +778,8 @@ TOOLS: list[dict[str, Any]] = [
         "All projects on disk as ProjectInfo entries: name, id, created_at, "
         "has_solver_config, bus_count, snapshot_count, objective, "
         "has_orphan_tmp, missing, parent_project, scenario_description, "
-        "scenario_type (per "
+        "scenario_type, project_kind (null = capacity_expansion; "
+        "'planning_dynamics' for a gridspine study) (per "
         "schemas.py:467-491). `id` is the DB-registry UUID when multi-user "
         "auth is enabled and null in single-user mode. Each entry is "
         "augmented with `resident: bool` "
@@ -887,7 +888,7 @@ TOOLS: list[dict[str, Any]] = [
         "list_projects filtered to entries where parent_project == name. Each "
         "entry is a ProjectInfo {name, id, created_at, has_solver_config, "
         "bus_count, snapshot_count, objective, has_orphan_tmp, missing, "
-        "parent_project, scenario_description, scenario_type} per "
+        "parent_project, scenario_description, scenario_type, project_kind} per "
         "schemas.py:467-491. "
         "Safety: read.",
         {"name": {"type": "string"}},
@@ -1469,6 +1470,32 @@ TOOLS: list[dict[str, Any]] = [
         ["project_id"],
     ),
     _t(
+        "gridspine_get_config",
+        "The study config a planning → dynamics project will run with: hours, "
+        "k, window, overlap, screen, n2_prune_threshold_pct, from_dispatch. "
+        "Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_update_config",
+        "Change some of a planning → dynamics project's study config after "
+        "creation — any subset of hours, k, window (hours, a whole number of "
+        "days), overlap, screen, n2_prune_threshold_pct. Validated as a whole; "
+        "refused while a study for the project is queued or running. Returns "
+        "the updated config. Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "hours": {"type": "integer"},
+            "k": {"type": "integer"},
+            "window": {"type": "integer"},
+            "overlap": {"type": "integer"},
+            "screen": {"type": "boolean"},
+            "n2_prune_threshold_pct": {"type": "number"},
+        },
+        ["project_id"],
+    ),
+    _t(
         "gridspine_run_pipeline",
         "Run a planning → dynamics study through the solve queue: unit "
         "commitment, ranking (AC N-1 severity at every hour), load flow, "
@@ -1786,11 +1813,13 @@ TOOL_ROUTES: dict[str, list] = {
     "get_asset_results": _SERVICE_CALL,
     "ui_open_asset_detail": _UI_EVENT,
     "export_asset_results": _SERVICE_CALL,
-    # gridspine (8) — service calls, like dispatch_status: the tools call
+    # gridspine (10) — service calls, like dispatch_status: the tools call
     # services/gridspine_service.py directly, not /api/gridspine, so the
     # route table records the pattern rather than a URL.
     "gridspine_create_study": _SERVICE_CALL,
     "gridspine_set_dispatch_source": _SERVICE_CALL,
+    "gridspine_get_config": _SERVICE_CALL,
+    "gridspine_update_config": _SERVICE_CALL,
     "gridspine_run_pipeline": _SERVICE_CALL,
     "gridspine_get_stage_status": _SERVICE_CALL,
     "gridspine_list_ranked_snapshots": _SERVICE_CALL,

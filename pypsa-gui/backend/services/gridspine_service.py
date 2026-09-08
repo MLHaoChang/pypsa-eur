@@ -251,6 +251,64 @@ def create_study(db, user, name: str, config: dict = None, kind: str = PLANNING_
     }
 
 
+#: The config fields a caller may change after creation. `outdir` and
+#: `templates_overlay` are derived from the project and never accepted.
+EDITABLE_CONFIG_FIELDS = frozenset({
+    "hours", "k", "window", "overlap", "screen", "n2_prune_threshold_pct", "from_dispatch",
+})
+
+
+def get_config(project) -> dict:
+    """The study config as the next run will use it (project-derived paths included)."""
+    require_planning(project)
+    return read_config(project).to_json()
+
+
+def _active_job_for(project):
+    from services import solve_queue as sq
+
+    return next(
+        (j for j in sq.solve_queue.list_jobs()
+         if j.get("project_id") == project.name and j.get("status") in ("queued", "running")),
+        None,
+    )
+
+
+def update_config(project, patch: dict) -> dict:
+    """Change some of the study config after creation. Validated as a whole
+    through StudyConfig (422 on a bad value, nothing written), refused while a
+    job for this project is queued or running (409): the queue snapshotted the
+    directory, not the config, so an edit mid-run would change what the running
+    job reads at its next stage.
+    """
+    require_planning(project)
+    if not isinstance(patch, dict):
+        raise HTTPException(status_code=422, detail="config patch must be an object")
+    unknown = sorted(set(patch) - EDITABLE_CONFIG_FIELDS)
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"config field(s) not editable: {unknown}; editable: {sorted(EDITABLE_CONFIG_FIELDS)}",
+        )
+    if _active_job_for(project) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Project '{project.name}' has a queued or running study; abort it before changing the config.",
+        )
+    current = read_config(project).to_json()
+    if patch.get("from_dispatch"):
+        src = Path(patch["from_dispatch"])
+        missing = [n for n in ("dispatch.csv", "loads.csv") if not (src / n).is_file()]
+        if missing:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{src} is not a finished study directory: missing {', '.join(missing)}",
+            )
+    merged = {**current, **patch}
+    config = _config_from(project, merged)          # validates; 422 on a bad value
+    return _write_config(project, config)
+
+
 def set_dispatch_source(db, project, source) -> dict:
     """`"generate"` to solve the unit commitment, or `{"from_dispatch": dir}`
     to study a finished run's dispatch (drivers F3)."""

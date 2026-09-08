@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render, screen, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { Ledger, RankedSnapshot, StageStatus } from '../api/gridspine'
+import type { Ledger, RankedSnapshot, StageStatus, StudyConfig } from '../api/gridspine'
 import GridspinePanel from './GridspinePanel'
 
 const store = vi.hoisted(() => ({ currentProject: 'Study A' as string | null }))
@@ -19,10 +19,11 @@ vi.mock('../store/uiStore', () => ({
   useUIStore: (sel: (s: { currentProject: string | null }) => unknown) => sel({ currentProject: store.currentProject }),
 }))
 
+const queue = vi.hoisted(() => ({ activeJob: undefined as { id: string } | undefined }))
 vi.mock('../hooks/useSolveQueue', () => ({
   QUEUE_KEY: ['solveQueue'],
   useSolveQueue: () => ({ data: { jobs: [], current: null }, isLoading: false, isError: false }),
-  activeJobForProject: () => undefined,
+  activeJobForProject: () => queue.activeJob,
 }))
 
 // `vi.mock` factories are hoisted above every import and const, so the mock
@@ -34,6 +35,8 @@ const api = vi.hoisted(() => ({
   run: vi.fn(),
   setDispatchSource: vi.fn(),
   bundle: vi.fn(),
+  config: vi.fn(),
+  updateConfig: vi.fn(),
 }))
 vi.mock('../api/gridspine', async () => {
   const real = await vi.importActual<typeof import('../api/gridspine')>('../api/gridspine')
@@ -65,6 +68,10 @@ const ledger: Ledger = {
   edits: [{ unit_id: 'G_BUS_32', param: 'h_s', value: 4.25, source: 'datasheet', edited_by: 'chat', at: 'now' }],
 }
 
+const config: StudyConfig = {
+  hours: 8760, k: 5, window: 168, overlap: 24, screen: true, n2_prune_threshold_pct: 0, from_dispatch: null,
+}
+
 function renderPanel() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={client}><GridspinePanel /></QueryClientProvider>)
@@ -72,7 +79,10 @@ function renderPanel() {
 
 beforeEach(() => {
   store.currentProject = 'Study A'
+  queue.activeJob = undefined
   vi.clearAllMocks()
+  api.config.mockResolvedValue(config)
+  api.updateConfig.mockImplementation(async (_p: string, patch: Partial<StudyConfig>) => ({ ...config, ...patch }))
   api.status.mockResolvedValue(completed)
   api.snapshots.mockResolvedValue(snapshots)
   api.ledger.mockResolvedValue(ledger)
@@ -142,6 +152,33 @@ describe('GridspinePanel', () => {
     renderPanel()
     expect(await screen.findByText(/not a planning → dynamics project/i)).toBeTruthy()
     expect(api.snapshots).not.toHaveBeenCalled()
+  })
+
+  it('shows the config the next run will use and PUTs only the fields that were edited', async () => {
+    renderPanel()
+    const k = await screen.findByLabelText('k (hours per criterion)') as HTMLInputElement
+    expect(k.value).toBe('5')
+    expect((screen.getByLabelText('Hours') as HTMLInputElement).value).toBe('8760')
+    const save = screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement
+    expect(save.disabled).toBe(true)                       // nothing changed yet
+    await userEvent.clear(k)
+    await userEvent.type(k, '3')
+    await userEvent.click(screen.getByLabelText(/screen n-1/i))
+    await waitFor(() => expect(save.disabled).toBe(false))
+    await userEvent.click(save)
+    await waitFor(() => expect(api.updateConfig).toHaveBeenCalledWith('Study A', { k: 3, screen: false }))
+    expect(api.updateConfig).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(save.disabled).toBe(true))  // the draft is spent
+    expect(api.config).toHaveBeenCalledWith('Study A')
+  })
+
+  it('locks the config while a job for this project is queued or running', async () => {
+    queue.activeJob = { id: 'job-9' }
+    renderPanel()
+    const k = await screen.findByLabelText('k (hours per criterion)') as HTMLInputElement
+    expect(k.disabled).toBe(true)
+    expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByText(/locked while the study is queued or running/i)).toBeTruthy()
   })
 
   it('asks for a project when none is open', () => {

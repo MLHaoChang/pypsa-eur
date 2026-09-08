@@ -17,7 +17,7 @@ import { Download, Play, RefreshCw, FlaskConical } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   gridspineApi, isNotAStudy, STAGES,
-  type RankedSnapshot, type StageState, type StageStatus,
+  type RankedSnapshot, type StageState, type StageStatus, type StudyConfig, type StudyConfigPatch,
 } from '../api/gridspine'
 import { formatApiDetail } from '../api/client'
 import { useUIStore } from '../store/uiStore'
@@ -27,6 +27,7 @@ import { PageBody, PageSection, Btn, Tag, Field } from '../components/PageKit'
 export const STATUS_KEY = (name: string) => ['gridspine', 'status', name] as const
 export const SNAPSHOTS_KEY = (name: string) => ['gridspine', 'snapshots', name] as const
 export const LEDGER_KEY = (name: string) => ['gridspine', 'ledger', name] as const
+export const CONFIG_KEY = (name: string) => ['gridspine', 'config', name] as const
 
 const STAGE_LABEL: Record<string, string> = {
   ingest: 'Ingest', dispatch: 'Unit commitment', ranking: 'Ranking (AC N-1 at every hour)',
@@ -101,6 +102,12 @@ function StudyView({ name }: { name: string }) {
     enabled: status.isSuccess,
     retry: false,
   })
+  const config = useQuery({
+    queryKey: CONFIG_KEY(name),
+    queryFn: () => gridspineApi.config(name),
+    enabled: status.isSuccess,
+    retry: false,
+  })
 
   const run = useMutation({
     mutationFn: () => gridspineApi.run(name),
@@ -166,6 +173,14 @@ function StudyView({ name }: { name: string }) {
         )}
       </PageSection>
 
+      {config.data && (
+        <ConfigEditor
+          name={name}
+          config={config.data}
+          locked={activeJob != null || status.data?.status === 'running'}
+        />
+      )}
+
       <PageSection title="Dispatch source" hint="Applies to the next run">
         <div className="flex items-end gap-2">
           <Field label="Reuse a finished study's dispatch (directory), or leave empty to generate it">
@@ -225,6 +240,84 @@ function StudyView({ name }: { name: string }) {
         </p>
       </PageSection>
     </PageBody>
+  )
+}
+
+// The editable part of the study config, after creation. Only the fields the
+// user actually changed are PUT — the backend merges a patch, and sending the
+// whole form back would silently overwrite a value the copilot changed in
+// between. Locked while a job is queued or running: the backend answers 409
+// then, and a disabled form says why before the request rather than after.
+const NUMERIC_FIELDS: readonly { key: 'hours' | 'k' | 'window' | 'overlap' | 'n2_prune_threshold_pct'; label: string; step?: string }[] = [
+  { key: 'hours', label: 'Hours' },
+  { key: 'k', label: 'k (hours per criterion)' },
+  { key: 'window', label: 'UC window (h)' },
+  { key: 'overlap', label: 'UC overlap (h)' },
+  { key: 'n2_prune_threshold_pct', label: 'N-2 prune threshold (%)', step: '0.1' },
+]
+
+function ConfigEditor({ name, config, locked }: { name: string; config: StudyConfig; locked: boolean }) {
+  const qc = useQueryClient()
+  const [draft, setDraft] = useState<StudyConfigPatch>({})
+  const dirty = Object.keys(draft).length > 0
+
+  const save = useMutation({
+    mutationFn: () => gridspineApi.updateConfig(name, draft),
+    onSuccess: (cfg) => {
+      qc.setQueryData(CONFIG_KEY(name), cfg)
+      setDraft({})
+      toast.success('Study configuration saved')
+    },
+    onError: (e) => toast.error(`Could not save the configuration: ${errorText(e)}`),
+  })
+
+  const value = <K extends keyof StudyConfigPatch>(key: K): StudyConfig[K] =>
+    (key in draft ? draft[key] : config[key]) as StudyConfig[K]
+
+  return (
+    <PageSection
+      title="Configuration"
+      hint={locked ? 'Locked while the study is queued or running' : 'Applies to the next run'}
+      right={
+        <Btn
+          variant="primary"
+          onClick={() => save.mutate()}
+          disabled={locked || !dirty || save.isPending}
+          title={locked ? 'A job for this project is queued or running' : dirty ? 'Save the changed fields' : 'Nothing changed'}
+        >
+          Save
+        </Btn>
+      }
+    >
+      <div className="flex flex-wrap items-end gap-3" data-testid="config-editor">
+        {NUMERIC_FIELDS.map(f => (
+          <Field key={f.key} label={f.label}>
+            <input
+              type="number"
+              step={f.step}
+              className="px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 font-mono w-[120px]"
+              value={value(f.key)}
+              disabled={locked}
+              aria-label={f.label}
+              onChange={e => {
+                const n = Number(e.target.value)
+                setDraft(d => ({ ...d, [f.key]: Number.isFinite(n) ? n : config[f.key] }))
+              }}
+            />
+          </Field>
+        ))}
+        <label className="inline-flex items-center gap-2 text-[12px] pb-2">
+          <input
+            type="checkbox"
+            checked={value('screen')}
+            disabled={locked}
+            aria-label="Screen N-1 / N-2 at the selected hours"
+            onChange={e => setDraft(d => ({ ...d, screen: e.target.checked }))}
+          />
+          Screen N-1 / N-2 at the selected hours
+        </label>
+      </div>
+    </PageSection>
   )
 }
 

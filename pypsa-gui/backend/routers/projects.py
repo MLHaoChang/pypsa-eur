@@ -616,6 +616,7 @@ def _project_info_db(db, project) -> ProjectInfo:
     # down there must not override a category the user has since edited.
     info.scenario_description = project.scenario_description
     info.scenario_type = project.scenario_type
+    info.project_kind = project.project_kind
     parent_name = None
     if project.parent_project_id is not None:
         parent = db.get(_Project, project.parent_project_id)
