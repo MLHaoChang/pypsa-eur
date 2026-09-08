@@ -8,13 +8,18 @@ investigation, so the next person does not repeat it.
 
 ## What fails
 
-12 of the 43 environmental baseline failures are myopic tests, all one cause:
+14 of the 43 environmental baseline failures are myopic tests, all one cause
+(**corrected from 12** by the full characterisation in
+`2026-09-08-baseline-failures-characterised.md`: the two
+`test_cost_totals_contract` tests are myopic solves and had been grouped by
+filename rather than by traceback):
 
 ```
 tests/test_myopic_build_period_visibility.py   (5)
-tests/test_myopic_feasibility.py               (1)
 tests/test_myopic_horizon_cost.py              (4)
 tests/test_myopic_summary_log.py               (2)
+tests/test_cost_totals_contract.py             (2)
+tests/test_myopic_feasibility.py               (1)
 ```
 
 The traceback is identical in every one:
