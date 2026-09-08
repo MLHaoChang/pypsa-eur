@@ -400,3 +400,73 @@ findings document where they then read as established fact for two days. A
 finding that says "cannot" should carry the check that established it, or say
 plainly that it did not.
 
+
+---
+
+# Follow-up, 2026-09-08: the self-hosting driver was red in CI and green locally
+
+Making `qa_phase4_compare` self-hosting worked on the machine it was written on
+and failed on the first CI run, in the step this same work had just added:
+
+```
+[FAIL] qa_phase4_compare  (9s)
+      exit=1
+      | ValueError: badly formed hexadecimal UUID string
+```
+
+raised inside SQLAlchemy's `Uuid.result_processor` while loading an ORM row.
+
+## What it actually was
+
+The sandbox in `tests/qa_support.py` is `tests/conftest.py`'s database, and
+that is one `:memory:` SQLite behind a `StaticPool` — deliberately, because
+`:memory:` gives each *connection* its own database, so the seeded user is only
+visible to the request that needs it if every caller shares one connection.
+
+That is safe for the suite, which drives the app through `TestClient` one
+request at a time. It is not safe for a driver that boots a REAL uvicorn and
+fires 20 concurrent requests at it, because those handlers run on anyio worker
+threads — several threads on one `sqlite3.Connection`, with nothing serialising
+them.
+
+How badly that fails depends on the interpreter. Same SQLAlchemy (2.0.50),
+twelve threads doing mixed reads and writes through a StaticPool `:memory:`
+engine, reduced to a 40-line script with no product code in it:
+
+| interpreter | result |
+|---|---|
+| Python 3.11.15 | 0 errors |
+| Python 3.12.3 | 4 errors, `sqlite3.InterfaceError: bad parameter or other API misuse` |
+
+The local verification venv is 3.11; the pixi `test` environment CI runs is
+3.12. The `ValueError` was the same corruption wearing a different hat — a
+value from the wrong place reaching a UUID column's result processor.
+
+**Not a product defect.** The product never runs this way: on SQLite it uses a
+file with `NullPool` (`db/session.py::get_engine`), and otherwise Postgres.
+The shared connection is a test-harness artifact, and the driver was the first
+thing to use it concurrently.
+
+## The fix
+
+`make_auth_db()` takes an optional URL. Default unchanged — the suite keeps its
+in-memory StaticPool database. `tests/qa_support.py` passes a file in a
+temporary directory, so every thread gets its own connection, which is what the
+product does. `tests/test_qa_support_sandbox.py` pins both halves.
+
+Verified: 640 requests at 32-way concurrency against the self-hosted server,
+zero failures and zero server-side tracebacks, where the driver itself only
+does 20 at 8-way.
+
+## Two lessons, and the second is about this runner
+
+**A single-threaded harness is not a server.** The sandbox had one documented
+constraint (`StaticPool` is load-bearing) and one undocumented one (it is
+single-threaded). Adding a real server to a driver quietly violated the second.
+
+**The runner hid its own diagnosis.** `run_qa_drivers.py` tailed
+`stdout + stderr` as one blob, so what reached CI was the bottom 40 lines of
+that concatenation: a decapitated traceback with no exception line above it,
+and none of the driver's own PASS/FAIL summary — which is on stdout and was
+truncated away entirely. It tails the two streams separately now, each labelled
+and each reporting how much it elided.

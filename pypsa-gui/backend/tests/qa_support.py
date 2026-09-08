@@ -62,6 +62,7 @@ import contextlib
 import pathlib
 import shutil
 import sys
+import tempfile
 
 # The drivers add this themselves, but this module must survive being imported
 # first, from anywhere.
@@ -82,7 +83,24 @@ import main  # noqa: E402
 _EMAIL = "qa-driver@example.com"
 _ORG = "QA Driver Org"
 
-_engine, _session_local, _ = _harness.make_auth_db()
+# A FILE, not `:memory:`. The suite's sandbox is one in-memory database behind a
+# StaticPool — one `sqlite3.Connection` shared by everything — which is safe
+# there because `TestClient` drives one request at a time. It is not safe here:
+# `qa_phase4_compare` boots a real uvicorn and fires concurrent requests, so its
+# handlers run on anyio worker threads. Python 3.12 does not tolerate that:
+# a reduced repro raises `sqlite3.InterfaceError: bad parameter or other API
+# misuse` where 3.11 comes through clean, and in CI it surfaced as
+# `ValueError: badly formed hexadecimal UUID string` — a value from the wrong
+# place reaching a UUID column's result processor — while the same driver passed
+# on a local 3.11 interpreter.
+#
+# A file needs no shared connection to be one database, so every thread gets its
+# own — which is how the product itself runs on SQLite. See
+# `tests/test_qa_support_sandbox.py`.
+_DB_DIR = pathlib.Path(tempfile.mkdtemp(prefix="pypsagui-qa-db-"))
+_engine, _session_local, _ = _harness.make_auth_db(
+    f"sqlite+pysqlite:///{_DB_DIR / 'qa.db'}"
+)
 _user_id, _org_id = _harness._seed_org_and_user(
     _session_local, email=_EMAIL, org_name=_ORG
 )
@@ -97,6 +115,7 @@ def _close_clients() -> None:
             c.__exit__(None, None, None)
     with contextlib.suppress(Exception):
         _engine.dispose()
+    shutil.rmtree(_DB_DIR, ignore_errors=True)
 
 
 def _new_client(authenticate: bool) -> TestClient:
