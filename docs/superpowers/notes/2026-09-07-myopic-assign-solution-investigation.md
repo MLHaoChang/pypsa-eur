@@ -79,14 +79,15 @@ with those exact properties combines fine.
 The failure needs the real PyPSA call stack to reproduce and cannot be
 reproduced from the outside with structurally identical data. It is therefore
 **an interaction inside the installed PyPSA/pandas pair, not a defect in this
-repository's code**, and it belongs to the same class as the other 43
-environmental baseline failures the PR documents.
+repository's code**, and it belongs to the same class as the other
+environmental baseline failures the PR documents (all 43 are attributed in
+`2026-09-08-baseline-failures-characterised.md`).
 
 Two things would settle it, neither available here:
 
 1. **Run the suite in the repo's pinned pixi environment.** If the myopic tests
    pass there, the matter is closed as a pip-stack artifact and the baseline
-   count drops by 12.
+   count drops by 14.
 2. **If they fail there too**, the next step is to bisect `pandas` (3.0.5 is
    recent and `combine_first`'s index-union path changed in 3.x) against
    `pypsa` 1.3.0, and report upstream with the frame dump above — which is
