@@ -102,10 +102,21 @@ _MOVED: dict[str, str] = {
 # CRUD factory, the HTTP-response helpers, and every route.
 _STAYS = [
     "_serialize_component", "_get_component", "_meta_payload",
-    "_filter_transient_names", "_create_component", "_merge_partial_update",
+    "_create_component", "_merge_partial_update",
     "_update_component", "_delete_component", "_xlsx_response",
     "_push_undo_snapshot", "_apply_profile_upload",
 ]
+
+# `_filter_transient_names` was in the list above until Phase 5, and came out
+# deliberately rather than quietly. It is a pure domain helper over
+# `PyPSAService` with no HTTP in it, and Phase 5 gave it a SECOND caller in
+# `routers/network_time_axis.py` — which must not import back from the router it
+# was split out of, because that is a cycle. It now lives in
+# `services/transient_rows.py`; `routers.network` keeps the private name as an
+# alias, so nothing that referenced it changed. The router-scoped assertion
+# below no longer applies to it, which is why it is named here instead of
+# silently dropped.
+_MOVED_OUT_IN_PHASE_5 = {"_filter_transient_names": "services.transient_rows"}
 
 
 @pytest.mark.parametrize("name,origin", sorted(_MOVED.items()))
@@ -192,3 +203,19 @@ def test_the_extracted_services_never_import_routers(module):
         if pat.match(line)
     ]
     assert not offenders, f"{module} imports a router:\n  " + "\n  ".join(offenders)
+
+
+@pytest.mark.parametrize("name,origin", sorted(_MOVED_OUT_IN_PHASE_5.items()))
+def test_a_name_phase_5_moved_out_is_still_reachable_from_the_router(name, origin):
+    """
+    Phase 5 relocated it, but `routers.network` still has to answer to the name:
+    the router's own call sites use it, and dropping the alias would be a silent
+    behaviour change rather than a move.
+    """
+    import importlib
+
+    svc = getattr(importlib.import_module(origin), name.lstrip("_"))
+    assert getattr(NET, name) is svc, (
+        f"routers.network.{name} is not {origin}.{name.lstrip('_')} — the alias "
+        f"must re-export the moved function, not redefine it"
+    )
