@@ -10,15 +10,20 @@ arrives here as plain parameters.
 """
 from __future__ import annotations
 
+import logging
+
 from services.compare.economics import _compute_economics_summary
+
+logger = logging.getLogger("pypsa_gui.results")
 
 
 def compute_economics_by_carrier(n, cfg, lost_load_cap, *, result_df):
     """
-    Return ``{"by_carrier": {carrier: {...}}}``, or an ``{"error", "trace"}``
-    dict if the roll-up raises — the same graceful degradation the endpoint has
-    always had. Never returns ``None``: the not-solved case is ``{}`` and is
-    decided by the router's gate.
+    Return ``{"by_carrier": {carrier: {...}}}``, or an ``{"error"}`` dict if the
+    roll-up raises — the same graceful degradation the endpoint has always had.
+    The traceback that used to ride along in a ``"trace"`` key goes to the log
+    instead; see the except-branch. Never returns ``None``: the not-solved case
+    is ``{}`` and is decided by the router's gate.
     """
     try:
         import pandas as _pd
@@ -40,6 +45,18 @@ def compute_economics_by_carrier(n, cfg, lost_load_cap, *, result_df):
         return {
             "by_carrier": {k: v.model_dump() for k, v in result.by_carrier.items()},
         }
-    except Exception as exc:
-        import traceback
-        return {"error": str(exc), "trace": traceback.format_exc().splitlines()[-5:]}
+    except Exception:
+        # The graceful degradation is deliberate — one bad carrier must not
+        # blank the Results tab — but it used to degrade into
+        # `{"error": str(exc), "trace": format_exc()[-5:]}`, handing any
+        # signed-in caller five frames of traceback: absolute paths, module
+        # layout, library versions. CodeQL's `py/stack-trace-exposure`, and
+        # correct; a `FileNotFoundError` alone renders as its path.
+        #
+        # Nothing consumed it. `frontend/src/api/simulation.ts` types the
+        # response with `error?: string` and no `trace`, and both readers take
+        # `econByCarrier?.by_carrier ?? null`. So the detail goes to the log,
+        # where whoever is debugging can actually find it, and the response
+        # says only that it failed.
+        logger.exception("economics_by_carrier roll-up failed")
+        return {"error": "the per-carrier economics roll-up failed; see the server log"}
