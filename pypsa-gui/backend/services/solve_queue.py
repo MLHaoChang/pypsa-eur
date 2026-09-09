@@ -400,9 +400,9 @@ class SolveQueue:
             #    (this thread) so a concurrent foreground /run on the SAME ctx
             #    409s, and wipe stale results so the fresh solve starts clean.
             # Fix review, F3: a live adequacy study on this ctx refuses the
-            # claim — checked under the same state lock the claim writes
-            # under, so a study publishing concurrently (which holds that
-            # lock too) cannot slip between the check and the claim.
+            # claim — checked and claimed under ONE hold of the state lock, so
+            # a study publishing concurrently (which holds that lock too)
+            # cannot slip between the check and the claim.
             from services.project_context import (
                 STUDY_LABELS as _STUDY_LABELS,
                 running_study_key as _running_study_key,
@@ -415,7 +415,12 @@ class SolveQueue:
                         "this project — a queued solve would re-solve the "
                         "network it is measuring. Wait for it to finish, or "
                         "abort it, and queue again.")
-            ctx_state_update(
+                # The claim, under the SAME hold. Fix review (second pass, P7):
+                # a separate `ctx_state_update(...)` call re-acquired the RLock
+                # after this block had released it, and a study POST landing
+                # in that gap was admitted and then solved over. One
+                # acquisition, check and claim.
+                ctx.solver_state.update(dict(
                 status="running", condition=None, objective=None, solve_time=None,
                 last_failure=None,
                 stop_event=stop_event, log_queue=log_queue,
@@ -426,7 +431,7 @@ class SolveQueue:
                 ac_pf_convergence=None, ac_pf_convergence_list=None,
                 ac_pf_slack_bus_used=None, ac_pf_stripped_voll_slacks=None,
                 ac_pf_converged_count=None, ac_pf_total_snapshots=None,
-            )
+                ))
 
             # 3. Solve (synchronous; honours stop_event). Writes LOPF dispatch
             #    onto n's _t tables and side-results into ctx.solver_state via the

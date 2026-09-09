@@ -419,6 +419,11 @@ def restore_snapshot(
 
     Step 2 is the safety net: a careless restore can't lose work because the
     pre-restore state is itself saved as a snapshot named "before-restore-...".
+
+    Files the snapshot does NOT carry are left as they are: a snapshot taken
+    before the adequacy worksheet and stress-scenario sidecars joined
+    `_BUNDLE_FILES` leaves the live worksheet and registry in place, the same
+    way an old snapshot without `layout.json` keeps the live layout.
     """
     # ★ Precheck BEFORE any destructive work (Phase 11 review).
     # The guard inside `reset_network` fires too late here: by then this

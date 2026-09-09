@@ -142,7 +142,15 @@ client.interceptors.response.use(
   (err) => {
     const data = err.response?.data
     const status = err.response?.status as number | undefined
-    const code = typeof data?.code === 'string' ? data.code : undefined
+    // A structured refusal carries its kind as `detail.error_kind` (the
+    // solver-in-flight and study-in-flight 409s); the middleware 409 carries
+    // a top-level `code`. Either names a quiet-toast code.
+    const code =
+      typeof data?.code === 'string'
+        ? data.code
+        : typeof data?.detail?.error_kind === 'string'
+          ? (data.detail.error_kind as string)
+          : undefined
     const msg = formatApiDetail(data?.detail ?? err.message)
     const method = (err.config?.method ?? '').toUpperCase()
     const url = err.config?.url ?? ''

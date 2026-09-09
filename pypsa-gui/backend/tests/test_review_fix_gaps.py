@@ -47,7 +47,7 @@ from services.pypsa_service import PyPSAService
 from tests.conftest import build_network
 from tests.test_outage_rate_range import _network as _rate_network
 from tests.test_save_activate_during_study import _FakeStudy
-from tests.test_study_mesh_claim import _drain, _voll
+from tests.test_study_mesh_claim import _drain, _slow_sweep, _voll
 
 
 # ── F1 ────────────────────────────────────────────────────────────────────
@@ -266,3 +266,89 @@ def test_dispatcher_refuses_the_claim_under_a_live_study(tmp_projects_dir,
             assert record_is_running(ctx.solver_state.get("mc"))
     finally:
         PyPSAService._contexts.pop("bg-key", None)
+
+
+class _LockProxy:
+    """Delegates to the dispatcher context's real state RLock; on the
+    dispatcher thread it blocks BEFORE the `n`-th acquisition, so a test can
+    park the dispatcher exactly between two lock holds."""
+
+    def __init__(self, real, hold_before: int):
+        self.real, self.hold_before, self.n = real, hold_before, 0
+        self.in_gap = threading.Event()
+        self.go = threading.Event()
+
+    def __enter__(self):
+        if threading.current_thread().name == "solve-queue-dispatcher":
+            self.n += 1
+            if self.n == self.hold_before:
+                self.in_gap.set()
+                self.go.wait(10.0)
+        return self.real.__enter__()
+
+    def __exit__(self, *a):
+        return self.real.__exit__(*a)
+
+    def acquire(self, *a, **k):
+        return self.real.acquire(*a, **k)
+
+    def release(self):
+        return self.real.release()
+
+
+def test_dispatcher_check_and_claim_are_one_lock_hold(
+        client, install_network, tmp_projects_dir, session_state, session_ctx,
+        monkeypatch):
+    """★ F3c (fix review, second pass, P7). The dispatcher's study check and
+    its claim must be ONE acquisition of the state lock: with two, a study
+    POST landing between them was admitted and the queued solve then ran on
+    the study's network.
+
+    Harness: the dispatcher's state lock is proxied to park the dispatcher
+    thread before its SECOND acquisition. With one hold, the second
+    acquisition is the post-solve status write — by then the claim is
+    published, so a study POST in the gap is refused (409) and the solve
+    runs alone. With the check and the claim as two holds, the gap sits
+    between them: the study is admitted (200) AND the solve runs.
+
+    Bite (verified): split the claim back out into `ctx_state_update(...)`
+    after the check block — the study POST answers 200 while the queued
+    solve also runs.
+    """
+    from services import solver_service as SS
+    import services.adequacy.sweep as SW
+    from tests.test_solve_queue import _save_project, _wait_for_terminal
+
+    install_network(build_network(), name="P1")
+    _save_project(client, "P1")
+    ctx = session_ctx(client)
+    st = ctx.solver_state
+    _voll(st)
+    ran = {"n": 0}
+
+    def stub(config, n, lock, stop_event, log_queue, state_update=None, **kw):
+        ran["n"] += 1
+        time.sleep(0.3)
+        return "ok", "optimal"
+
+    monkeypatch.setattr(SS, "run_simulation", stub)
+    monkeypatch.setattr(SW, "run_class_b_sweep", _slow_sweep)
+    proxy = _LockProxy(ctx.solver_state_lock, hold_before=2)
+    monkeypatch.setattr(ctx, "solver_state_lock", proxy)
+    r = client.post("/api/simulation/queue", json={"project_id": "P1"})
+    assert r.status_code == 200, r.text
+    try:
+        assert proxy.in_gap.wait(10.0), "dispatcher never reached the gap"
+        rs = client.post("/api/results/fmea_sweep", json={})
+        proxy.go.set()
+        done = _wait_for_terminal(r.json()["id"], timeout=30)
+        assert not (rs.status_code == 200 and ran["n"] == 1), (
+            "study admitted in the gap AND the queued solve ran on its network")
+        # With one hold the claim is visible in the gap: the study is refused
+        # and the solve completes.
+        assert rs.status_code == 409, rs.text
+        assert done["status"] == "completed", done
+        assert ran["n"] == 1
+    finally:
+        proxy.go.set()
+        _drain(st)

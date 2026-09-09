@@ -3072,7 +3072,13 @@ def _publish_study(key: str, record: dict, thread: "_threading.Thread") -> None:
     # exporting or after it has finished — never between the save's gate
     # and its export, which is where a sweep's first, lock-free contingency
     # mutation was landing on disk as the user's project.
-    with PyPSAService.get_lock():
+    lock = PyPSAService.get_lock()
+    # Bounded: a foreground solve that claimed between this POST's early
+    # gate and here holds the mutation lock for its whole run, and the POST
+    # must answer 409 in seconds rather than wait it out (fix review, note).
+    if not lock.acquire(timeout=5.0):
+        raise HTTPException(409, "a solve is running — wait for it to finish")
+    try:
         with PyPSAService.get_solver_state_lock():
             _refuse_if_mesh_busy(key)
             _state[key] = record
@@ -3081,6 +3087,8 @@ def _publish_study(key: str, record: dict, thread: "_threading.Thread") -> None:
             except BaseException:
                 _state[key] = None
                 raise
+    finally:
+        lock.release()
 
 
 @results_router.get("/fmea_sweep")
