@@ -99,6 +99,8 @@ def test_a_capacity_expansion_project_is_409_through_the_api(client, api_project
     ("post", "/dispatch-source", {"source": "generate"}, "set_dispatch_source", {"from_dispatch": None}),
     ("get", "/config", None, "get_config", {"hours": 24}),
     ("put", "/config", {"k": 3}, "update_config", {"k": 3}),
+    ("get", "/readback", None, "get_readback", {"19": {"pass": True}}),
+    ("get", "/figures/19/vm", None, "fetch_result_figure", {"available": False}),
 ])
 def test_each_endpoint_calls_its_service_function_and_returns_its_answer(
     client, study, monkeypatch, method, path, payload, function, expected
@@ -190,3 +192,26 @@ def test_the_config_patch_carries_only_the_fields_that_were_sent(client, study, 
     resp = client.put("/api/gridspine/Router Study/config", json={"set_from_dispatch": True, "from_dispatch": None})
     assert seen["patch"] == {"from_dispatch": None}
 
+
+
+def test_a_read_back_upload_reaches_the_service_with_both_files_and_their_names(client, study, monkeypatch):
+    seen = {}
+
+    def fake(project, hour, bus_csv, bus_name=None, branch_csv=None, branch_name=None):
+        seen.update(hour=hour, bus=bus_csv, bus_name=bus_name, branches=branch_csv, branch_name=branch_name)
+        return {"pass": True}
+
+    monkeypatch.setattr(gs, "upload_readback", fake)
+    resp = client.post(
+        "/api/gridspine/Router Study/readback/19",
+        files={"bus": ("case39_h19.csv", b"bus_name,vm_pu,va_degree\n", "text/csv"),
+               "branches": ("case39_h19_branches.csv", b"from_bus,to_bus,ckt\n", "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert seen["hour"] == 19 and seen["bus_name"] == "case39_h19.csv"
+    assert seen["bus"].startswith(b"bus_name") and seen["branches"].startswith(b"from_bus")
+    # the branch export is optional
+    resp = client.post("/api/gridspine/Router Study/readback/19",
+                       files={"bus": ("b.csv", b"bus_name,vm_pu,va_degree\n", "text/csv")})
+    assert resp.status_code == 200, resp.text
+    assert seen["branches"] is None and seen["branch_name"] is None

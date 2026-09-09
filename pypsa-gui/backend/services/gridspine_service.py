@@ -28,6 +28,7 @@ Nothing here is derived from a stored path: the run directory is always
 bundle or moved by a rename keeps working.
 """
 import json
+import re
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +45,9 @@ from services import project_registry
 # the repo root is gone, and `tests/test_gridspine_service.py` fails if it
 # comes back.
 try:
+    from gridspine.drivers.readback import ingest_powerfactory_results as _ingest_readback
+    from gridspine.drivers.readback import readback_status as _readback_status
+    from gridspine.drivers.readback import result_figure as _result_figure
     from gridspine.drivers.status import ledger_entries as _ledger_entries
     from gridspine.drivers.status import ranked_snapshots as _ranked_snapshots
     from gridspine.drivers.status import stage_status as _stage_status
@@ -556,19 +560,68 @@ def export_handoff_bundle(project, hour: int) -> Path:
     return target
 
 
-def fetch_result_figure(project, name: str) -> dict:
-    """Read-back figures are spec phase 4. Typed, so the tool surface is
-    complete and the answer is a fact rather than a missing endpoint."""
+def uploads_dir(project, hour: int) -> Path:
+    """`<project dir>/gridspine/uploads/h<hour>`, created: where the engineer's
+    PowerFactory exports land before the driver reads them into the bundle."""
+    path = gridspine_dir(project) / "uploads" / f"h{int(hour)}"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+_SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _safe_filename(name, fallback: str) -> str:
+    """The client's basename with anything path-like removed; the fallback when
+    nothing usable is left. The summary records it as the upload's name."""
+    base = Path(str(name or "")).name
+    cleaned = _SAFE_NAME.sub("_", base).strip("._")
+    return cleaned if cleaned and cleaned.lower().endswith(".csv") else fallback
+
+
+def upload_readback(project, hour: int, bus_csv: bytes, bus_name=None,
+                    branch_csv: bytes = None, branch_name=None) -> dict:
+    """Spec stage 6: read a PowerFactory export back against hour `hour`'s
+    handoff bundle. The bus CSV is required (the phase-1 gate), the branch CSV
+    optional; both are kept byte-for-byte under the study's uploads and in the
+    bundle. The comparison's refusals (no bundle for the hour, a load flow that
+    did not converge, a wrong header, a bus or branch set that disagrees) are
+    422 with the driver's message — they are the engineer's to fix."""
     require_planning(project)
-    return {
-        "available": False,
-        "name": name,
-        "reason": (
-            "PowerFactory read-back is not implemented yet (spec phase 4): result "
-            "figures come from exported PowerFactory CSVs, which are uploaded per "
-            "study once the read-back stage exists."
-        ),
-    }
+    hour = int(hour)
+    target = uploads_dir(project, hour)
+    bus_path = target / _safe_filename(bus_name, "pf_bus.csv")
+    bus_path.write_bytes(bus_csv)
+    branch_path = None
+    if branch_csv is not None:
+        branch_path = target / _safe_filename(branch_name, "pf_branches.csv")
+        if branch_path == bus_path:
+            branch_path = target / "pf_branches.csv"
+        branch_path.write_bytes(branch_csv)
+    try:
+        return _ingest_readback(run_dir(project), hour, bus_path, branch_path)
+    except ContractError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+def get_readback(project) -> dict:
+    """{hour: summary} for every bundle hour with a read-back — keys are
+    strings, as the status payload's are."""
+    require_planning(project)
+    return {str(h): s for h, s in _readback_status(run_dir(project)).items()}
+
+
+def fetch_result_figure(project, name: str, hour: int) -> dict:
+    """One read-back comparison as data (`vm`, `va`, `branch_p`, `branch_q`)
+    for hour `hour`; `available: False` with the reason when nothing has been
+    uploaded for that hour yet. An unknown figure is 422, an hour with no
+    bundle 404."""
+    require_planning(project)
+    try:
+        return _result_figure(run_dir(project), int(hour), name)
+    except ContractError as exc:
+        status = 404 if "no handoff bundle" in str(exc) else 422
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
 
 
 # --------------------------------------------------------------------------

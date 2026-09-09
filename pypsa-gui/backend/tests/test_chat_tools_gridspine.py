@@ -35,6 +35,8 @@ GRIDSPINE_TOOLS = (
     "gridspine_get_assumption_ledger",
     "gridspine_edit_template_param",
     "gridspine_export_handoff_bundle",
+    "gridspine_get_readback",
+    "gridspine_fetch_result_figure",
 )
 PROJECT_SCOPED = tuple(t for t in GRIDSPINE_TOOLS if t != "gridspine_create_study")
 CONFIG = {"hours": 24, "k": 1, "window": 24, "overlap": 0, "screen": False}
@@ -65,7 +67,8 @@ def test_every_gridspine_tool_is_registered_routed_and_tiered():
 def test_the_run_is_long_running_and_the_reads_are_reads():
     assert safety_tier_for("gridspine_run_pipeline") == "execution_long_running"
     for name in ("gridspine_get_stage_status", "gridspine_list_ranked_snapshots",
-                 "gridspine_get_assumption_ledger", "gridspine_get_config"):
+                 "gridspine_get_assumption_ledger", "gridspine_get_config",
+                 "gridspine_get_readback", "gridspine_fetch_result_figure"):
         assert safety_tier_for(name) == "read", name
     for name in ("gridspine_create_study", "gridspine_set_dispatch_source",
                  "gridspine_edit_template_param", "gridspine_export_handoff_bundle",
@@ -96,6 +99,8 @@ def test_project_scoped_tools_take_the_project_by_name():
     ("gridspine_run_pipeline", {"project_id": "Chat Study"}, "run_pipeline"),
     ("gridspine_set_dispatch_source", {"project_id": "Chat Study"}, "set_dispatch_source"),
     ("gridspine_get_config", {"project_id": "Chat Study"}, "get_config"),
+    ("gridspine_get_readback", {"project_id": "Chat Study"}, "get_readback"),
+    ("gridspine_fetch_result_figure", {"project_id": "Chat Study", "hour": 19, "name": "vm"}, "fetch_result_figure"),
 ])
 def test_each_dispatcher_resolves_the_project_and_calls_its_service_function(
     study, monkeypatch, tool, args, function
@@ -225,3 +230,11 @@ def test_update_config_forwards_only_the_fields_the_model_set(study, monkeypatch
     chat_tools.DISPATCHERS["gridspine_update_config"](project_id="Chat Study", k=3, screen=None)
     assert seen["patch"] == {"k": 3}
 
+
+
+def test_the_figure_tool_passes_name_and_hour_in_the_services_order(study, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gs, "fetch_result_figure",
+                        lambda project, name, hour: seen.update(name=name, hour=hour) or {})
+    chat_tools.DISPATCHERS["gridspine_fetch_result_figure"](project_id="Chat Study", hour="19", name="branch_p")
+    assert seen == {"name": "branch_p", "hour": 19}

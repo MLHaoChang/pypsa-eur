@@ -1574,6 +1574,32 @@ TOOLS: list[dict[str, Any]] = [
         },
         ["project_id", "hour"],
     ),
+    _t(
+        "gridspine_get_readback",
+        "What the engineer has read back from PowerFactory for a planning → "
+        "dynamics project, per bundle hour: {hour: {pass, bus: {n, n_ok, "
+        "max_vm_rel_err, max_va_abs_err_deg, worst, pass}, branches: {...} or "
+        "null when no branch export was uploaded, tolerances, sources, at}}. "
+        "The gate is <1 % |Vm| and 0.5° per bus, 1 % P (floored at 1 MW) and "
+        "5 Mvar Q per branch. Empty until a CSV is uploaded in the study view. "
+        "Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_fetch_result_figure",
+        "One read-back comparison as data for a bundle hour: name is vm, va, "
+        "branch_p or branch_q; returns {available, hour, tolerance, rows: "
+        "[{element, pandapower, powerfactory, err, ok}]}, or available=false "
+        "with the reason when nothing has been uploaded for that hour. "
+        "Safety: read.",
+        {
+            "project_id": {"type": "string"},
+            "hour": {"type": "integer"},
+            "name": {"type": "string", "enum": ["vm", "va", "branch_p", "branch_q"]},
+        },
+        ["project_id", "hour", "name"],
+    ),
 ]
 
 
@@ -1832,6 +1858,8 @@ TOOL_ROUTES: dict[str, list] = {
     "gridspine_get_assumption_ledger": _SERVICE_CALL,
     "gridspine_edit_template_param": _SERVICE_CALL,
     "gridspine_export_handoff_bundle": _SERVICE_CALL,
+    "gridspine_get_readback": _SERVICE_CALL,
+    "gridspine_fetch_result_figure": _SERVICE_CALL,
 }
 
 

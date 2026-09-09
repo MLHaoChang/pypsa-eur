@@ -210,11 +210,17 @@ def test_exporting_an_hour_that_was_not_selected_is_a_404(ran):
     assert exc.value.status_code == 404
 
 
-def test_result_figures_are_typed_as_not_available_until_read_back_exists(ran):
+def test_result_figures_are_typed_as_not_available_until_a_read_back_exists(ran):
+    """Increment 6 made the figures real; before an upload for a bundle hour
+    they still answer a typed fact rather than a missing endpoint."""
     _db, row = ran
-    answer = gs.fetch_result_figure(row, "voltage_profile")
-    assert answer["available"] is False
-    assert "read-back" in answer["reason"].lower() or "readback" in answer["reason"].lower()
+    hour = gs.get_stage_status(row)["selected_hours"][0]
+    answer = gs.fetch_result_figure(row, "vm", hour)
+    assert answer == {"available": False, "name": "vm", "hour": hour,
+                      "reason": f"no PowerFactory results uploaded for hour {hour} yet"}
+    with pytest.raises(HTTPException) as exc:
+        gs.fetch_result_figure(row, "voltage_profile", hour)       # not one of the four figures
+    assert exc.value.status_code == 422
 
 
 # --------------------------------------------------------------------------

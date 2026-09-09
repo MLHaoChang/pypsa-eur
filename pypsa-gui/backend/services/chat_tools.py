@@ -1504,6 +1504,18 @@ def gridspine_edit_template_param(project_id: str, unit_id: str, param: str,
         return _h(_gridspine_project(db, user, project_id), unit_id, param, value, source, "chat")
 
 
+def gridspine_get_readback(project_id: str) -> dict:
+    from services.gridspine_service import get_readback as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def gridspine_fetch_result_figure(project_id: str, hour: int, name: str) -> dict:
+    from services.gridspine_service import fetch_result_figure as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), name, int(hour))
+
+
 def gridspine_export_handoff_bundle(project_id: str, hour: int) -> dict:
     from services.gridspine_service import export_handoff_bundle as _h
     with _acting() as (db, user):
@@ -3584,7 +3596,7 @@ DISPATCHERS: dict[str, Any] = {
     "solve_queue_list": solve_queue_list,
     "solve_queue_abort": solve_queue_abort,
     "solve_queue_clear_finished": solve_queue_clear_finished,
-    # gridspine (10)
+    # gridspine (12)
     "gridspine_create_study": gridspine_create_study,
     "gridspine_set_dispatch_source": gridspine_set_dispatch_source,
     "gridspine_get_config": gridspine_get_config,
@@ -3595,6 +3607,8 @@ DISPATCHERS: dict[str, Any] = {
     "gridspine_get_assumption_ledger": gridspine_get_assumption_ledger,
     "gridspine_edit_template_param": gridspine_edit_template_param,
     "gridspine_export_handoff_bundle": gridspine_export_handoff_bundle,
+    "gridspine_get_readback": gridspine_get_readback,
+    "gridspine_fetch_result_figure": gridspine_fetch_result_figure,
     # project_mgmt (21)
     "list_projects": list_projects,
     "load_project": load_project,

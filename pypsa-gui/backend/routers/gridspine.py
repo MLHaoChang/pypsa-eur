@@ -21,6 +21,9 @@ is fetched after that check, never from client input.
     GET    /api/gridspine/{name}/ledger                  assumptions, as data
     PUT    /api/gridspine/{name}/templates/{unit}/{param} edit one value
     GET    /api/gridspine/{name}/bundles/{hour}          download a handoff bundle
+    POST   /api/gridspine/{name}/readback/{hour}         upload PowerFactory results for that bundle
+    GET    /api/gridspine/{name}/readback                what has been read back, per hour
+    GET    /api/gridspine/{name}/figures/{hour}/{figure} one comparison as data
 
 The run endpoint returns a solve-queue job: watching and aborting it are the
 EXISTING `/api/simulation/queue` endpoints, which is the point of giving the
@@ -30,7 +33,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
@@ -41,6 +44,7 @@ from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import gridspine_service as gs
 from services import project_registry
+from services.upload_guard import read_capped
 
 router = APIRouter()
 
@@ -188,3 +192,37 @@ def export_handoff_bundle(
     so the response never streams a path assembled from client input."""
     path = gs.export_handoff_bundle(_row(proj, db), hour)
     return FileResponse(path, media_type="application/zip", filename=path.name)
+
+
+@router.post("/{name}/readback/{hour}")
+async def upload_readback(
+    hour: int,
+    bus: UploadFile = File(...),
+    branches: UploadFile | None = File(None),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
+    """The engineer's PowerFactory export for hour `hour`'s bundle: the bus
+    CSV is required, the branch CSV optional (spec stage 6). Both are read
+    under the same size cap as every other upload."""
+    bus_bytes = await read_capped(bus)
+    branch_bytes = await read_capped(branches) if branches is not None else None
+    return gs.upload_readback(
+        _row(proj, db), hour, bus_bytes, bus.filename,
+        branch_bytes, branches.filename if branches is not None else None,
+    )
+
+
+@router.get("/{name}/readback")
+def get_readback(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
+    return gs.get_readback(_row(proj, db))
+
+
+@router.get("/{name}/figures/{hour}/{figure}")
+def fetch_result_figure(
+    hour: int,
+    figure: str,
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
+    return gs.fetch_result_figure(_row(proj, db), figure, hour)
