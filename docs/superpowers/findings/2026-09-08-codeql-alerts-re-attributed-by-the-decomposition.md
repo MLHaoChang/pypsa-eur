@@ -135,11 +135,19 @@ the fix lands would delete the fixed copy and keep this branch's unfixed one —
 a silent reintroduction, not a conflict, because the two sides touch different
 files.
 
-Whoever merges second owns re-applying it. The alternative is to port the two
-fixes onto this branch as their own clearly-labelled commit once they land on
-`master`, which also turns this PR's CodeQL check green; that is a behaviour
-change and therefore a decision for whoever owns the branch's contract, not a
-drive-by.
+**Closed by porting**, which is the alternative that removes the hazard rather
+than documenting it: both fixes are now on this branch too, as their own
+clearly-labelled commit, applied at this branch's locations (the traceback fix
+in `services/results/economics_by_carrier.py`, where the move put it). The port
+no-ops once `master` carries the same change, there is no longer an unfixed copy
+for a merge to prefer, and this PR's CodeQL check goes green.
+
+That is a behaviour change on a branch whose contract is behaviour-preserving,
+and it is a deliberate exception rather than a loosening of the contract: the
+change is already written, reviewed and tested on its own branch, it is labelled
+as a port rather than folded into a refactor commit, and the alternative was to
+leave a known silent-regression path open across a merge. A defect found FROM
+HERE still goes to a finding and a separate branch — that is what happened.
 
 ## Verification
 

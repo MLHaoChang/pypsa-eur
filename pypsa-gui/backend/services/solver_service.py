@@ -1,6 +1,7 @@
 import logging
 import logging.handlers
 import pathlib
+import shutil
 import queue
 import tempfile
 import threading
@@ -379,7 +380,7 @@ def run_simulation(
 
     t_start = time.time()
     status, condition = "error", "unknown"
-    tmp_log = pathlib.Path(tempfile.mktemp(suffix=".log"))
+    tmp_log, _drop_solve_log = _make_solve_log_path()
     tail_stop = threading.Event()
     tail_thread: threading.Thread | None = None
     # Abort watcher — injects KeyboardInterrupt into THIS (worker) thread when
@@ -1099,10 +1100,7 @@ def run_simulation(
         # tail_thread may be None if compile/wrap raised before we spawned it.
         if tail_thread is not None:
             tail_thread.join(timeout=2)
-        try:
-            tmp_log.unlink()
-        except OSError:
-            pass
+        _drop_solve_log()
         # Classify the terminal outcome into an actionable failure card (or
         # None on success/abort) and stash it on the lifecycle state via the
         # same sink the rest of the state flows through, so /status and the SSE
@@ -1120,6 +1118,40 @@ def run_simulation(
         log_queue.put(None)
 
     return status, condition
+
+
+def _make_solve_log_path() -> tuple[pathlib.Path, Callable[[], None]]:
+    """
+    A path for this solve's live log, plus the callable that removes it.
+
+    Returns the path of a file that does NOT exist yet, inside a directory that
+    does. That split is the whole point. pypsa hands the solver `log_fn` as a
+    NAME and the solver opens it itself, so there is no descriptor to pass
+    around and `mkstemp` buys nothing — the file has to be creatable by someone
+    else later. What must not be creatable by someone else is the DIRECTORY it
+    sits in, and `mkdtemp` makes that 0700 at creation, before anything can be
+    inside it.
+
+    The path this replaced came from `tempfile.mktemp`, which returns a name
+    that is free at that instant and leaves the caller to create the file. On a
+    shared host anything that can write the temp directory owns the gap
+    (CWE-377): pre-create the path to read a tenant's solve log, or point it at
+    a file the solver will overwrite. CodeQL reports it as
+    `py/insecure-temporary-file`.
+
+    One directory per solve, so two concurrent solves cannot interleave their
+    output into each other's log — and the caller must call the cleanup, or a
+    long-lived process accumulates one directory per solve.
+    """
+    directory = pathlib.Path(tempfile.mkdtemp(prefix="pypsagui-solve-"))
+
+    def _cleanup() -> None:
+        # `ignore_errors` covers the normal case (the solver never wrote the
+        # file, because compile raised before the solve) as well as a Windows
+        # handle still being open.
+        shutil.rmtree(directory, ignore_errors=True)
+
+    return directory / "solve.log", _cleanup
 
 
 def _tail_log_file(
