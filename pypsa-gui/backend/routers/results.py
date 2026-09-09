@@ -25,6 +25,15 @@ import threading as _threading
 
 from pydantic import BaseModel as _BaseModel
 
+# Whole-branch review, finding S6: the study request models typed their
+# floats as plain `float`, which accepts the JSON `Infinity`/`NaN` literals
+# (12f's finding, on the asset schemas). A frontier target of `Infinity`
+# passed, the study was PUBLISHED and RAN, the POST's own response then
+# failed to encode and every later GET on the record answered 500 until a
+# swap cleared it. `Finite` (12g's own type) on every study float; the 12f
+# handler renders the refusal.
+from models.schemas import Finite as _Finite
+
 from fastapi import APIRouter, HTTPException, Query, Response
 
 from services.dispatch_status import dispatch_status as _dispatch_status
@@ -3209,7 +3218,7 @@ def post_fmea_sweep(body: FmeaSweepRequest | None = None):
 class FrontierRequest(_BaseModel):
     # Reliability targets (‱) to sweep. Omitted → the default spread across
     # the decade where the cost gradient is steep enough to show a knee.
-    targets_permyriad: list[float] | None = None
+    targets_permyriad: list[_Finite] | None = None
 
 
 @results_router.get("/frontier")
@@ -3284,6 +3293,16 @@ def post_frontier(body: FrontierRequest | None = None):
 
     targets = list(getattr(body, "targets_permyriad", None)
                    or DEFAULT_TARGETS_PERMYRIAD)
+    # An ENS cap is a positive ceiling on unserved energy: a zero or negative
+    # target is not a point on the frontier (0 is "no shedding at all", which
+    # the LP cannot reach on any network that ever sheds, and a negative cap
+    # is infeasible by construction). Refused here, before the record is
+    # published, rather than discovered one infeasible solve later.
+    bad = [t for t in targets if not (math.isfinite(float(t)) and float(t) > 0)]
+    if bad:
+        raise HTTPException(
+            422, f"targets_permyriad must be positive finite numbers; got "
+                 f"{bad[:5]}{' …' if len(bad) > 5 else ''}")
     n = PyPSAService.get_network()
     lock = PyPSAService.get_lock()
 
@@ -3347,7 +3366,7 @@ class McRequest(_BaseModel):
     # that this route must not fork.
     draws: int | None = None
     seed: int | None = None
-    cov_target: float | None = None
+    cov_target: _Finite | None = None
     elcc_assets: list[McElccAsset] | None = None
     # Phase 12c: price the whole profile-bearing fleet as one portfolio, per
     # period, beside the reserve margin's own credit for the same group. A
@@ -3803,10 +3822,10 @@ class CouplingLoopRequest(_BaseModel):
     # hours (the panel does the h/yr conversion so the wire stays unit-safe).
     # Optional here rather than required-by-pydantic so a missing target is
     # refused with the route's own sentence instead of a schema dump.
-    target_lole_h: float | None = None
+    target_lole_h: _Finite | None = None
     draws: int | None = None
     seed: int | None = None
-    eps0: float | None = None
+    eps0: _Finite | None = None
     max_solves: int | None = None
     restore: str | None = None
 
@@ -4440,7 +4459,7 @@ class MarginLoopRequest(_BaseModel):
     # in this request that can silently make the study worthless — too small
     # and the search walks through a region where the plan does not change,
     # too large and it overshoots the bracket entirely.
-    target_lole_h: float | None = None
+    target_lole_h: _Finite | None = None
     draws: int | None = None
     seed: int | None = None
     max_solves: int | None = None
