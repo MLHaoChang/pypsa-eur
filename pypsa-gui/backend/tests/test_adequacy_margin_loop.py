@@ -1178,6 +1178,10 @@ def test_the_verdict_names_the_margin_the_panel_tells_you_to_type(
     body = _poll(client)
     assert body["status"] == "met", body
     m_star = float(body["lever_star"])
+    # IEEE 39-bus review, F1: this test already walks the ceiling-clamp path,
+    # and before F1 it certified 1.49 against this fixture's 1.34 ceiling
+    # without noticing — it asserts spelling, not reachability. Pin both.
+    assert m_star <= float(body["margin_ceiling"]) + 1e-9, body
     assert m_star != float(f"{m_star:g}"), (
         "the fixture certified a margin that six significant figures already "
         f"round-trip ({m_star!r}) — this test cannot see the defect it exists "
@@ -1186,3 +1190,61 @@ def test_the_verdict_names_the_margin_the_panel_tells_you_to_type(
     assert f"reserve_margin = {panel}" in body["verdict"], (
         "the verdict names a different number from the one the panel tells "
         f"the user to type: verdict={body['verdict']!r} panel={panel!r}")
+
+
+def test_a_clamped_iterate_reports_the_margin_it_SOLVED(
+        client, install_network, monkeypatch):
+    """★ IEEE 39-bus review, F1 (SERIOUS). When the controller's blind step
+    overshoots the fleet ceiling, `solve_at` clamps to `m_ceiling` and solves
+    THERE — but the controller records the coordinate it asked for, and every
+    user-facing number is built from that: the iterate rows, `lever_star`,
+    the verdict sentence, and on `restore="final"` the `reserve_margin`
+    written into the user's solver settings.
+
+    Found live on the stressed IEEE 39-bus network (fleet ceiling 19.9 %):
+    rows 15.75 % → 363 % → 131.5 %, status `met`, verdict "verified at a
+    reserve margin of 131.5%, and that margin has been APPLIED to your solver
+    settings (reserve_margin = 1.315)", closing re-solve `validation_failed`,
+    and the next preflight refusing the config with
+    `reserve_margin_unreachable`. The study left the user holding a plan its
+    own preflight rejects, having told them it was certified.
+
+    Nothing special is needed to reach the clamp: the default `lole_fn` misses
+    at the informed start, and the blind `x/4` step then asks for a margin
+    above this fixture's 1.34 ceiling but below `MAX_MARGIN`, so it is clamped
+    rather than refused by the schema.
+
+    Bites (verified): drop `_solved_margin` from `_translate` — row 1 reads
+    4.26 against a 1.34 ceiling; drop it from the `m_star` line — `lever_star`
+    is 1.63 and the config is left there.
+    """
+    stubs = _Stubs(firm_base=130.0)
+    _install_stubs(monkeypatch, stubs)
+    _setup(client, install_network, reserve_margin=0.10)
+
+    _start(client, max_solves=6, restore="final")
+    body = _poll(client)
+
+    assert body["status"] == "met", body
+    ceiling = float(body["margin_ceiling"])
+    # The clamp really fired: the controller asked for more than the ceiling,
+    # and the strictest margin actually solved IS the ceiling.
+    assert stubs.margins and max(stubs.margins) == pytest.approx(ceiling), (
+        f"no clamped solve in {stubs.margins!r} against ceiling {ceiling!r} — "
+        "this test cannot see the defect it exists for")
+    solved = {round(m, 12) for m in stubs.margins}
+
+    # Every margin on the wire is one that was solved, and none exceeds the
+    # ceiling the same record publishes.
+    for r in body["iterations"]:
+        assert r["lever_value"] <= ceiling + 1e-9, r
+        assert round(float(r["lever_value"]), 12) in solved, (r, sorted(solved))
+    assert float(body["lever_star"]) == pytest.approx(ceiling)
+    assert float(body["final"]["lever_value"]) == pytest.approx(ceiling)
+    assert f"{ceiling:.1%}" in body["verdict"], body["verdict"]
+
+    # …and the value the "final" restore persisted is that same margin, so the
+    # config the user is left holding is one the preflight accepts.
+    assert float(stubs.restore_cfgs[-1].reserve_margin) == pytest.approx(ceiling)
+    cfg = client.get("/api/simulation/solver_config").json()
+    assert float(cfg["reserve_margin"]) == pytest.approx(ceiling)

@@ -4846,6 +4846,21 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
 
     _ceiling_missed = [False]
     _last_at_ceiling = [False]
+    # IEEE 39-bus review, F1. The CLAMP below evaluates `m_ceiling` when the
+    # controller's step overshoots the fleet ceiling — but the controller
+    # records the coordinate it ASKED for (`coupling.py:_row`), and that
+    # coordinate is what `_translate`, `lever_star`, the verdict and the
+    # `restore="final"` config write all read. Measured on the stressed
+    # IEEE 39 network (ceiling 19.9 %): rows 15.75 % -> 363 % -> 131.5 %,
+    # verdict "verified at a reserve margin of 131.5%", `reserve_margin` left
+    # at 1.315, and the closing re-solve refused by the study's own preflight
+    # (`reserve_margin_unreachable`). The margin ACTUALLY solved is recorded
+    # here, keyed by the controller's `x`, and consulted at the two places a
+    # coordinate becomes a user-facing margin. The controller never solves one
+    # `x` twice and the pre-controller probe never becomes a row, so the map is
+    # unambiguous; an `x` not in it (a solve refused before it ran) still
+    # translates exactly as before.
+    _solved_margin: dict[float, float] = {}
 
     def solve_at(x: float) -> dict:
         _last_at_ceiling[0] = False
@@ -4899,6 +4914,7 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
                 return out
             m = m_ceiling
             _last_at_ceiling[0] = True
+        _solved_margin[float(x)] = float(m)
         sink: dict = {}
         _solve_once(dataclasses.replace(base_cfg, reserve_margin=m),
                     n, lock, None, sink)
@@ -5057,9 +5073,13 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         an internal coordinate with no meaning to a user — 0.76 is not a
         margin, not a percentage and not a per-myriad ENS cap. Every row is
         translated on its way into the record, so `x` never reaches the wire
-        at all."""
+        at all.
+
+        F1 (IEEE 39-bus review): the margin SOLVED, not the one the
+        controller asked for — they differ on a clamped iterate."""
         return {
-            "lever_value": to_margin(row["eps_permyriad"]),
+            "lever_value": _solved_margin.get(
+                float(row["eps_permyriad"]), to_margin(row["eps_permyriad"])),
             "solve_status": row["solve_status"],
             "condition": row["condition"],
             "cost_eur": row["cost_eur"],
@@ -5291,7 +5311,12 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
             m_star = None
             if x_star is not None:
                 try:
-                    m_star = to_margin(x_star)
+                    # F1: the margin that iterate actually solved (they differ
+                    # when the ceiling clamp fired), so the verdict names — and
+                    # `restore="final"` persists — a margin the preflight
+                    # accepts.
+                    m_star = _solved_margin.get(float(x_star),
+                                                to_margin(x_star))
                 except ValueError:                            # noqa: BLE001
                     logger.exception("margin loop: unusable eps_star %r",
                                      x_star)

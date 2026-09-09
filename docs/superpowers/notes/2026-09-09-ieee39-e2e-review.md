@@ -1,6 +1,6 @@
 # IEEE 39-bus end-to-end review — `claude/solution-fmea-integration-0mx5lc` @ 60c4106
 
-**Status:** review complete. **2 SERIOUS** (one branch-owned, one pre-existing on
+**Status:** review complete; **F1 is FIXED** (§7). **2 SERIOUS** (one branch-owned, one pre-existing on
 master), **3 MINOR**, **4 notes** — every one reproduced live against a running
 backend and read against the code. The whole solution-FMEA journey was driven on
 a real test system rather than on hand-built fixtures: the IEEE 39-bus (New
@@ -83,7 +83,7 @@ renders the same numbers (screenshots in §5).
 
 | # | Rank | Where | What | Reproduction |
 |---|---|---|---|---|
-| **F1** | **SERIOUS** | `routers/results.py:4887-4901` (clamp) → `services/adequacy/coupling.py:195-197,470` → `results.py:5062,5294,5158-5169,5205-5213`; `MarginLoopPanel.tsx:333,453` | **The margin loop certifies, displays and PERSISTS a reserve margin it never solved.** When the controller's blind step overshoots the fleet ceiling, `solve_at` clamps to `m_ceiling` and solves there — but returns nothing about which margin it evaluated, so the controller records the margin it *asked* for. Every downstream consumer is faithful to that wrong number: the iterate rows, `lever_star`, the verdict sentence, and on `restore="final"` the value written into the user's solver config. | Live, stressed IEEE 39 (ceiling **19.9 %**): `POST /results/margin_loop {"target_lole_h":0.7,…,"restore":"final"}` → status `met`, rows 15.75 % → **363 %** → **131.5 %**, verdict "verified at a reserve margin of 131.5%, and that margin has been APPLIED to your solver settings", `reserve_margin` left at 1.315, closing re-solve `base_restore_status: validation_failed`, and the next preflight refuses the config with `reserve_margin_unreachable`. Record: `scratchpad/ieee39/margin_loop_repro.json`. Also reproduced through the repo's own stub suite. |
+| **F1** | **SERIOUS — FIXED, §7** | `routers/results.py:4887-4901` (clamp) → `services/adequacy/coupling.py:195-197,470` → `results.py:5062,5294,5158-5169,5205-5213`; `MarginLoopPanel.tsx:333,453` | **The margin loop certifies, displays and PERSISTS a reserve margin it never solved.** When the controller's blind step overshoots the fleet ceiling, `solve_at` clamps to `m_ceiling` and solves there — but returns nothing about which margin it evaluated, so the controller records the margin it *asked* for. Every downstream consumer is faithful to that wrong number: the iterate rows, `lever_star`, the verdict sentence, and on `restore="final"` the value written into the user's solver config. | Live, stressed IEEE 39 (ceiling **19.9 %**): `POST /results/margin_loop {"target_lole_h":0.7,…,"restore":"final"}` → status `met`, rows 15.75 % → **363 %** → **131.5 %**, verdict "verified at a reserve margin of 131.5%, and that margin has been APPLIED to your solver settings", `reserve_margin` left at 1.315, closing re-solve `base_restore_status: validation_failed`, and the next preflight refuses the config with `reserve_margin_unreachable`. Record: `scratchpad/ieee39/margin_loop_repro.json`. Also reproduced through the repo's own stub suite. |
 | **F2** | **SERIOUS (pre-existing on master — NOT introduced by this branch)** | `routers/network.py:238-291` (`_update_component` = `n.remove` + `n.add`; same on master) | **Editing any component through the Properties panel destroys its time series, silently changing every adequacy answer.** A full-row `PUT /network/generators/W16` with *no field changed* drops `generators_t.p_max_pu["W16"]`: the 500 MW wind farm becomes a firm must-take at `p_max_pu` 1.0. The Time Series view can still show the profile (it is re-served from the saved project), so the two disagree with no error anywhere. | Live, base IEEE 39: COPT LOLE **0.8312 → 0.3185 h** (−62 %), ELCC candidate nameplate **306.3 → 500.0 MW**, and the next full solve is refused — `reserve_margin_unpriceable_assets: … (no outage data, no availability profile): W16`. Same for loads: a full-row `PUT /network/loads/D39` drops `loads_t.p_set` from 20 columns to 19. |
 | **F3** | MINOR | `services/adequacy/frontier.py:221,283`; `FrontierPanel.tsx:84-88`; plan `2026-08-29-fmea-phase8-reserve-margin.md:222` | **The frontier under a standing reserve margin is a flat curve that says the opposite.** The margin is deliberately *not* stripped (unlike the contingency sweep), which the phase-8 plan calls correct "**but must be stated on the panel**" — the record carries no margin field and the panel never mentions it. With the margin already covering every swept ε the three points are identical, `knee` is null, and the panel's null-knee copy reads "every step still buys more avoided-shed value than it costs. Sweep tighter targets to find one." Nothing was bought and tighter targets cannot change that. | Live, both runs: targets 10‱/3‱/1‱ → identical `total_system_cost_eur`, `achieved_ens_mwh` 0.0, `warning: null`, `knee: null`. No frontier test covers a margin or a flat curve. |
 | **F4** | MINOR | `results.py:4936-4942,5069`; `MarginLoopPanel.tsx:460` | The margin loop borrows the cap loop's `binding` vocabulary to drive the controller's plateau pre-test, and the panel renders it raw under "Bound by" — so on a study with no energy cap the user reads **`system_cap`** for every iterate where the *margin* bound, and `voll` when it did not. | Live, stressed: both iterates `"binding": "system_cap"` with `cap_mwh: null`. A label map in the panel is the cheap fix (two tests pin the wire value). |
@@ -139,3 +139,53 @@ and the minors shipped in `60c4106` behaving as designed under load. The one
 branch-owned defect (F1) is narrow, fully traced, and has a route-only fix with
 a test that bites; the other serious finding (F2) is the network editor's, older
 than this branch, and reported for its own change.
+
+## 7. F1 fixed
+
+`routers/results.py`, route-only — `services/adequacy/coupling.py` is the shared
+controller and stays untouched:
+
+* `_solved_margin: dict[float, float]` beside `_ceiling_missed` / `_last_at_ceiling`;
+* one line in `solve_at`, after the clamp and before the solve, recording the
+  margin that call is about to evaluate against the controller's `x`;
+* `_translate` and the `m_star` line read that map, falling back to
+  `to_margin(x)` for an `x` that never reached a solve.
+
+The map is unambiguous because the controller never solves one `x` twice and
+the pre-controller probe never becomes a row.
+
+**Test:** `tests/test_adequacy_margin_loop.py::test_a_clamped_iterate_reports_the_margin_it_SOLVED`
+— the existing `_Stubs` harness reaches the clamp with no special setup (the
+default `lole_fn` misses at the informed start, the blind `x/4` step then asks
+for 4.26 against the fixture's 1.34 ceiling, inside `MAX_MARGIN` so it is
+clamped rather than schema-refused). It asserts every published `lever_value`
+is a margin that was solved and is at or under the published ceiling, that
+`lever_star`, `final` and the verdict name the ceiling, and that
+`restore="final"` persisted that same margin.
+
+**Bites (both verified, file restored byte-identical afterwards):** restore
+`_translate` to `to_margin(row["eps_permyriad"])` → `assert 4.26 <= 1.34`;
+restore the `m_star` line → `assert 1.63 == 1.34`.
+
+The neighbouring spelling test (`test_the_verdict_names_the_margin_the_panel_tells_you_to_type`)
+walked this same clamp path and certified 1.49 against a 1.34 ceiling without
+noticing, because it asserts spelling only; it now also asserts
+`lever_star <= margin_ceiling`.
+
+**Live re-run**, stressed IEEE 39, same request that produced the defect
+(`target_lole_h` 0.7, `restore="final"`):
+
+| | before | after |
+|---|---|---|
+| iterate rows | 15.75 %, 363 %, 131.5 % | 15.75 %, 19.9 %, 19.9 % |
+| `lever_star` | 1.315 (ceiling 0.1988) | 0.198772 = the ceiling |
+| verdict | "verified at a reserve margin of 131.5%" | "verified at a reserve margin of 19.9%" |
+| closing re-solve | `base_restored: false`, `validation_failed` | `base_restored: true`, `optimal` |
+| preflight on the config left behind | refused, `reserve_margin_unreachable` | `ok: true`, 0 errors |
+
+Suites: `test_adequacy_margin_loop.py` 60 passed, plus the coupling and
+frontier suites (134 passed together).
+
+F5 (the one wasted solve per clamped met run) is unchanged and still stands —
+the two ceiling iterates above are it. F2, F3, F4 and the notes stand as
+recorded.
