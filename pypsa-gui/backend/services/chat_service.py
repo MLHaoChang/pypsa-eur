@@ -2579,27 +2579,64 @@ def _profile_awareness_block() -> str:
     content ever needs constraining, constrain it at the PUT route where it
     is authored, not here where it is read.
     """
+    # Staged, not one blanket try. The catch below is required — "a broken
+    # profile store must not cost a turn" — but wrapping the WHOLE builder in
+    # it meant any failure anywhere discarded everything, for every user, and
+    # returned a value indistinguishable from "no profiles configured". That
+    # shape is what made S-L3 invisible: one hand-edited label emptied the
+    # block instance-wide behind a `logger.warning` nobody reads.
+    #
+    # So: resolving the active profile is all-or-nothing (without it there is
+    # genuinely nothing to say), and everything after it degrades instead.
     try:
         from services import llm_config
         profiles, active_id = llm_config.load_profiles()
         by_id = {p.id: p for p in profiles}
         active = by_id.get(active_id)
-        if active is None:
-            return ""
-        others = sorted(p.label for p in profiles if p.id != active_id)
-        block = f"Active model profile: {active.label}."
-        if others:
-            block += " Also configured: " + ", ".join(others) + "."
-        block += (
-            " To switch, call set_active_profile with the chosen profile's id"
-            " — it takes effect in a new chat, not this one. To add a profile"
-            " or set an API key, direct the user to Settings; you cannot do"
-            " either yourself."
-        )
-        return block
     except Exception:  # noqa: BLE001 — prompt meta must never abort a turn
         logger.warning("chat: profile awareness block unavailable", exc_info=True)
         return ""
+    if active is None:
+        # Not reachable today — `load_profiles` synthesizes the built-ins on
+        # every read and only accepts a stored active id that is among the
+        # ids it actually loaded, so the lookup always hits. Kept because
+        # this function's contract is "never raises", and a KeyError here
+        # would be a turn-level failure rather than a missing sentence.
+        return ""
+
+    block = f"Active model profile: {active.label}."
+
+    # The active profile's name is already in hand by this point. A failure
+    # building the LIST of other profiles must not take it back out — that
+    # name is the question this block exists to answer.
+    #
+    # The sort AND the join are inside ONE guard on purpose: they are the
+    # single fallible act of "describe the other profiles". Guarding only the
+    # sort (my first attempt) left a hole the old blanket catch had covered —
+    # a homogeneous list of non-string labels sorts fine and then raises
+    # TypeError in `join`, so the turn would die where it used to lose a
+    # sentence. Narrowing a safety net is only safe where nothing still falls
+    # through it.
+    try:
+        others = sorted(p.label for p in profiles if p.id != active_id)
+        listed = " Also configured: " + ", ".join(others) + "." if others else ""
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "chat: could not list the other profiles; naming the active one only",
+            exc_info=True,
+        )
+        listed = ""
+    block += listed
+
+    # A constant. No amount of broken store makes it untrue, so nothing in
+    # the store's state may delete it.
+    block += (
+        " To switch, call set_active_profile with the chosen profile's id"
+        " — it takes effect in a new chat, not this one. To add a profile"
+        " or set an API key, direct the user to Settings; you cannot do"
+        " either yourself."
+    )
+    return block
 
 
 # Thinking blocks the API will reject on replay. `thinking` requires both

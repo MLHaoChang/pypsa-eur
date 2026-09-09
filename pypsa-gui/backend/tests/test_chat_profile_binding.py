@@ -2355,3 +2355,138 @@ def test_one_wrongly_typed_label_does_not_empty_the_awareness_block(appdata):
         "a healthy profile lost its awareness because of an unrelated entry"
     )
     assert "set_active_profile" in block, "the switching instructions went too"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# The awareness block's blanket `except Exception: return ""`.
+#
+# HARDENING, not a live bug: S-L3 removed the one trigger that existed (a
+# non-string `label` reaching `sorted`), and `active_id` is always in
+# `seen_ids` because the built-ins are synthesized on every load. These
+# pin the STRUCTURE instead, because that structure is what made S-L3
+# invisible — one failure anywhere in the builder discarded everything,
+# for every user, leaving a `logger.warning` nobody reads and a result
+# indistinguishable from "no profiles configured".
+#
+# Two things should survive a partial failure. The active profile's name,
+# because it is already computed by the time the rest can fail and it is
+# the question the block exists to answer. And the switching instructions,
+# which are a CONSTANT — they depend on no profile data at all, so no
+# amount of broken store makes them untrue.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def _profiles_where_listing_others_explodes(appdata):
+    """A store that loads fine but breaks the `others` list mid-build."""
+    from services import llm_config
+
+    class _Hostile(str):
+        # Sorts fine against itself, raises the moment it meets a real label —
+        # standing in for any future failure between "we know the active
+        # profile" and "we have finished the sentence".
+        def __lt__(self, other):
+            raise RuntimeError("label comparison blew up")
+
+        def __gt__(self, other):
+            raise RuntimeError("label comparison blew up")
+
+    good = llm_config.LLMProfile(
+        id="active-one", label="The Active One", preset="custom", wire="openai",
+        base_url="http://localhost:11434/v1", model="m", tools=True,
+        vision=False, auth="none", fallback_model=None, max_output_tokens=None)
+    hostile = llm_config.LLMProfile(
+        id="other-one", label=_Hostile("Other"), preset="custom", wire="openai",
+        base_url="http://localhost:11434/v1", model="m", tools=True,
+        vision=False, auth="none", fallback_model=None, max_output_tokens=None)
+    another = llm_config.LLMProfile(
+        id="third-one", label="Third", preset="custom", wire="openai",
+        base_url="http://localhost:11434/v1", model="m", tools=True,
+        vision=False, auth="none", fallback_model=None, max_output_tokens=None)
+    return [good, hostile, another], "active-one"
+
+
+def test_a_failure_listing_the_others_still_names_the_active_profile(
+    appdata, monkeypatch,
+):
+    """
+    The active profile's label is known BEFORE the list of others is built.
+    Throwing it away because a later step failed answers "which model am I?"
+    with silence when the answer was already in hand.
+    """
+    from services import chat_service, llm_config
+
+    monkeypatch.setattr(
+        llm_config, "load_profiles",
+        lambda: _profiles_where_listing_others_explodes(appdata))
+
+    block = chat_service._profile_awareness_block()
+
+    assert "The Active One" in block, (
+        f"the active profile's name was discarded with the failure: {block!r}"
+    )
+
+
+def test_a_failure_listing_the_others_still_explains_how_to_switch(
+    appdata, monkeypatch,
+):
+    """
+    The switching instructions are a constant. No store failure makes them
+    untrue, so none should be able to delete them.
+    """
+    from services import chat_service, llm_config
+
+    monkeypatch.setattr(
+        llm_config, "load_profiles",
+        lambda: _profiles_where_listing_others_explodes(appdata))
+
+    assert "set_active_profile" in chat_service._profile_awareness_block()
+
+
+def test_the_block_still_never_raises_when_the_store_itself_fails(
+    appdata, monkeypatch,
+):
+    """
+    DISCRIMINATION. The docstring's promise — "a broken profile store must
+    not cost a turn" — is the reason the blanket catch exists, and staging
+    the builder must not quietly drop it. When there is genuinely nothing to
+    say, "" is still the right answer.
+    """
+    from services import chat_service, llm_config
+
+    def _explode():
+        raise RuntimeError("the profile store is unreadable")
+
+    monkeypatch.setattr(llm_config, "load_profiles", _explode)
+    assert chat_service._profile_awareness_block() == ""
+
+
+def test_others_that_sort_but_cannot_be_joined_still_leave_the_block_intact(
+    appdata, monkeypatch,
+):
+    """
+    The gap my first staging left. `sorted()` succeeds on a homogeneous list
+    of non-strings — several int labels compare fine — and then `", ".join`
+    raises TypeError on the very next line. Guarding only the sort moved that
+    failure OUT from under the blanket catch the old code had, so the whole
+    turn would die where it previously lost a sentence. Both steps belong
+    inside one guard, because together they are the single fallible act of
+    "describe the other profiles".
+    """
+    from services import chat_service, llm_config
+
+    def _int_labelled():
+        base = dict(preset="custom", wire="openai",
+                    base_url="http://localhost:11434/v1", model="m", tools=True,
+                    vision=False, auth="none", fallback_model=None,
+                    max_output_tokens=None)
+        return [
+            llm_config.LLMProfile(id="active-one", label="The Active One", **base),
+            llm_config.LLMProfile(id="other-one", label=1, **base),
+            llm_config.LLMProfile(id="third-one", label=2, **base),
+        ], "active-one"
+
+    monkeypatch.setattr(llm_config, "load_profiles", _int_labelled)
+
+    block = chat_service._profile_awareness_block()  # must not raise
+    assert "The Active One" in block
+    assert "set_active_profile" in block
