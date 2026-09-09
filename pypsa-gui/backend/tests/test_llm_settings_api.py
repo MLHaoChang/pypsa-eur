@@ -938,3 +938,94 @@ def test_the_key_routes_report_redactability_at_the_moment_of_saving(
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["key_redactable"] is False
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Review finding (2026-09-09 security pass) — the shared-credential blast
+# radius has to be VISIBLE to the client.
+#
+# `DELETE .../key` clears the environment variable, and for a cataloged
+# provider preset that variable is shared with every other profile on it,
+# the two built-ins included. The backend keeps it aimed there on purpose
+# (it is the only route that can revoke a shared key — see
+# `test_deleting_a_shared_preset_profile_leaves_the_provider_key_alone`),
+# so the confirmation the operator sees has to be able to name what else
+# goes dark. It cannot do that unless the response says which profiles
+# share one key.
+#
+# Exposed as the DERIVED `key_env`, not re-derived client-side: the
+# built-ins' `preset` is not a catalogue id, so a client-side rule would be
+# wrong for exactly the two profiles whose silent loss matters most.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_profile_out_names_the_key_env_so_shared_keys_are_visible(
+    super_admin_client,
+):
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/side-car",
+        json=_custom_profile_body(preset="anthropic", wire="anthropic",
+                                  base_url=None),
+    )
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/own-slot",
+        json=_custom_profile_body(preset="custom"),
+    )
+    super_admin_client.put(
+        "/api/chat/settings/llm/profiles/keyless",
+        json=_custom_profile_body(preset="ollama", auth="none",
+                                  base_url=None),
+    )
+    by_id = {
+        p["id"]: p
+        for p in super_admin_client.get("/api/chat/settings/llm").json()["profiles"]
+    }
+
+    # The built-ins resolve through the `anthropic` catalogue entry even
+    # though their own preset id is not in the catalogue. This is the case a
+    # client-side derivation gets wrong.
+    assert by_id["anthropic-sonnet"]["key_env"] == "ANTHROPIC_API_KEY"
+    assert by_id["anthropic-opus"]["key_env"] == "ANTHROPIC_API_KEY"
+    # …so the side profile is visibly on the SAME key as both built-ins.
+    assert by_id["side-car"]["key_env"] == "ANTHROPIC_API_KEY"
+    # A custom profile owns a private slot, shared with nothing.
+    assert by_id["own-slot"]["key_env"] == "PYPSA_GUI_LLM_KEY__OWN_SLOT"
+    # No key concept at all.
+    assert by_id["keyless"]["key_env"] is None
+
+
+def test_key_env_is_a_name_never_a_value(super_admin_client):
+    """The field must not become a second way to read a key."""
+    app_secrets.set_secret("ANTHROPIC_API_KEY", "sk-ant-secret-value-999")
+    body = super_admin_client.get("/api/chat/settings/llm").text
+    assert "sk-ant-secret-value-999" not in body
+    assert "ANTHROPIC_API_KEY" in body
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Review finding (2026-09-09) — `max_output_tokens` was type-checked but not
+# range-checked, and the two ends failed in opposite silent ways: a negative
+# reached the wire and killed every turn on the profile as an opaque
+# upstream `invalid_request`; a 0 was swallowed by `chat_service`'s
+# `profile.max_output_tokens or MAX_OUTPUT_TOKENS_PER_TURN` and quietly
+# meant "the default", so Settings showed a limit that was not in effect.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("value", [-1, 0])
+def test_a_nonsense_output_token_budget_is_refused(super_admin_client, value):
+    resp = super_admin_client.put(
+        "/api/chat/settings/llm/profiles/budget",
+        json=_custom_profile_body(max_output_tokens=value),
+    )
+    assert resp.status_code == 422, resp.text
+    assert "max_output_tokens" in resp.text
+
+
+def test_a_real_output_token_budget_is_still_accepted(super_admin_client):
+    resp = super_admin_client.put(
+        "/api/chat/settings/llm/profiles/budget",
+        json=_custom_profile_body(max_output_tokens=1),
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["max_output_tokens"] == 1

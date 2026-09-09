@@ -51,6 +51,7 @@ function payload(over: Partial<LLMSettingsPayload> = {}): LLMSettingsPayload {
         id: 'anthropic-sonnet', label: 'Claude Sonnet', preset: 'anthropic-sonnet',
         wire: 'anthropic', base_url: null, model: 'claude-sonnet-5',
         tools: true, vision: true, auth: 'bearer', fallback_model: null, max_output_tokens: null,
+        key_env: 'ANTHROPIC_API_KEY',
         key_required: true, key_present: true, key_hint: '…wxyz',
         key_redactable: true,
       },
@@ -58,6 +59,7 @@ function payload(over: Partial<LLMSettingsPayload> = {}): LLMSettingsPayload {
         id: 'ollama-local', label: 'Local Ollama', preset: 'custom',
         wire: 'openai', base_url: 'http://localhost:11434/v1', model: 'qwen3:8b',
         tools: false, vision: false, auth: 'none', fallback_model: null, max_output_tokens: null,
+        key_env: null,
         key_required: false, key_present: false, key_hint: null,
         key_redactable: null,
       },
@@ -216,6 +218,91 @@ describe('AssistantModelSettings', () => {
     expect(deleteLLMProfileKey).toHaveBeenCalledWith('anthropic-sonnet')
   })
 
+  // Review finding (2026-09-09 security pass) — the confirmation stated a
+  // blast radius that is false for a SHARED key. `DELETE .../key` clears the
+  // environment variable, and for a cataloged provider preset that variable
+  // is the provider-wide key: removing it for a side profile silently takes
+  // both built-ins with it. The copy said "This model will stop working",
+  // naming one model for an instance-wide effect — in the one dialog whose
+  // whole job is telling an operator what they are about to break.
+  it('names every model that loses the key, when the key is shared', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload({
+      profiles: [
+        ...payload().profiles,
+        {
+          id: 'side-car', label: 'Side Car', preset: 'anthropic',
+          wire: 'anthropic', base_url: null, model: 'claude-sonnet-5',
+          tools: true, vision: true, auth: 'bearer',
+          fallback_model: null, max_output_tokens: null,
+          key_env: 'ANTHROPIC_API_KEY',
+          key_required: true, key_present: true, key_hint: '…wxyz',
+          key_redactable: true,
+        },
+      ],
+    }))
+    renderSection()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByTestId('assistant-model-key-clear-side-car'))
+    const message = String(CONFIRM_TOAST.mock.calls[0][0])
+    expect(message).toMatch(/shared/i)
+    expect(message).toContain('"Claude Sonnet"')
+    expect(message).not.toMatch(/This model will stop working/)
+  })
+
+  it('still says "this model" when the key is the profile\'s own private slot', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload({
+      profiles: [{
+        id: 'own-slot', label: 'Own Slot', preset: 'custom',
+        wire: 'openai', base_url: 'http://localhost:11434/v1', model: 'm',
+        tools: false, vision: false, auth: 'bearer',
+        fallback_model: null, max_output_tokens: null,
+        key_env: 'PYPSA_GUI_LLM_KEY__OWN_SLOT',
+        key_required: true, key_present: true, key_hint: '…wxyz',
+        key_redactable: true,
+      }],
+    }))
+    renderSection()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByTestId('assistant-model-key-clear-own-slot'))
+    const message = String(CONFIRM_TOAST.mock.calls[0][0])
+    expect(message).toMatch(/This model will stop working/)
+    expect(message).not.toMatch(/shared/i)
+  })
+
+  // A keyless profile shares `key_env === null` with every other keyless
+  // profile. Grouping on the raw value would report them as sharing a
+  // credential none of them has.
+  it('does not treat two keyless profiles as sharing a key', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload({
+      profiles: [
+        {
+          id: 'k1', label: 'Keyless One', preset: 'ollama', wire: 'openai',
+          base_url: 'http://localhost:11434/v1', model: 'm',
+          tools: false, vision: false, auth: 'none',
+          fallback_model: null, max_output_tokens: null,
+          key_env: null, key_required: false, key_present: false,
+          key_hint: null, key_redactable: null,
+        },
+        {
+          id: 'k2', label: 'Keyless Two', preset: 'ollama', wire: 'openai',
+          base_url: 'http://localhost:11434/v1', model: 'm',
+          tools: false, vision: false, auth: 'none',
+          fallback_model: null, max_output_tokens: null,
+          key_env: null, key_required: false, key_present: false,
+          key_hint: null, key_redactable: null,
+        },
+      ],
+    }))
+    renderSection()
+    await screen.findByText('Keyless One')
+    // Neither renders a clear-key control at all, which is the real
+    // guarantee — but assert the grouping directly too, so a future change
+    // that adds the control cannot quietly claim a shared key.
+    expect(screen.queryByTestId('assistant-model-key-clear-k1')).toBeNull()
+  })
+
   it.each([
     ['ok', { verdict: 'ok', latency_ms: 42, models: null }, /connected/i],
     ['unauthorized', { verdict: 'unauthorized', latency_ms: null, models: null }, /rejected the key/i],
@@ -279,6 +366,7 @@ describe('AssistantModelSettings', () => {
       id: 'my-endpoint', label: 'My Endpoint', preset: 'custom', wire: 'openai',
       base_url: 'http://localhost:8000/v1', model: 'llama3', tools: false, vision: false,
       auth: 'none', fallback_model: null, max_output_tokens: null,
+      key_env: null,
       key_required: false, key_present: false, key_hint: null,
       key_redactable: null,
     })
@@ -344,6 +432,7 @@ describe('C-7 / W-4 — key status follows key_present', () => {
         wire: 'anthropic', base_url: null, model: 'claude-sonnet-5',
         tools: true, vision: true, auth: 'bearer',
         fallback_model: null, max_output_tokens: null,
+        key_env: 'ANTHROPIC_API_KEY',
         key_required: true, key_present: false, key_hint: null,
         key_redactable: null,
       }],
@@ -363,6 +452,7 @@ describe('C-7 / W-4 — key status follows key_present', () => {
         wire: 'openai', base_url: 'https://example.invalid/v1', model: 'm',
         tools: true, vision: false, auth: 'bearer',
         fallback_model: null, max_output_tokens: null,
+        key_env: 'PYPSA_GUI_LLM_KEY__CUSTOM_ONE',
         key_required: true, key_present: true, key_hint: null,
         key_redactable: true,
       }],
@@ -389,6 +479,7 @@ describe('A8 — unredactable key disclosure', () => {
         wire: 'openai', base_url: 'http://localhost:11434/v1', model: 'm',
         tools: false, vision: false, auth: 'bearer',
         fallback_model: null, max_output_tokens: null,
+        key_env: 'PYPSA_GUI_LLM_KEY__SHORT_KEY',
         key_required: true, key_present: true, key_hint: null,
         key_redactable: false,
       }],
@@ -405,6 +496,7 @@ describe('A8 — unredactable key disclosure', () => {
         wire: 'openai', base_url: 'http://localhost:11434/v1', model: 'm',
         tools: false, vision: false, auth: 'bearer',
         fallback_model: null, max_output_tokens: null,
+        key_env: 'PYPSA_GUI_LLM_KEY__LONG_KEY',
         key_required: true, key_present: true, key_hint: '…wxyz',
         key_redactable: true,
       }],
@@ -423,6 +515,7 @@ describe('A8 — unredactable key disclosure', () => {
         wire: 'openai', base_url: 'http://localhost:11434/v1', model: 'm',
         tools: false, vision: false, auth: 'bearer',
         fallback_model: null, max_output_tokens: null,
+        key_env: 'PYPSA_GUI_LLM_KEY__NO_KEY',
         key_required: true, key_present: false, key_hint: null,
         key_redactable: null,
       }],

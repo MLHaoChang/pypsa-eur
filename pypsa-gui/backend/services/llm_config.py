@@ -316,6 +316,30 @@ def _validate_field_types(profile: LLMProfile) -> None:
              "a string or null", optional=True)
     _require("max_output_tokens", profile.max_output_tokens, (int,),
              "an integer or null", optional=True)
+    # The RANGE, not just the type. S-L3/C-22 contained what JSON could put
+    # in these fields and stopped there, which left the one field whose
+    # nonsense values are silently harmful.
+    #
+    # `chat_service` reads it as `profile.max_output_tokens or
+    # MAX_OUTPUT_TOKENS_PER_TURN`, so the two ends fail in opposite and
+    # equally quiet ways. A NEGATIVE value is truthy: it reaches the wire as
+    # `max_tokens=-1` and every turn on that profile dies as an opaque
+    # upstream `invalid_request`, with Settings showing a budget that looks
+    # deliberate. ZERO is falsy: it is swallowed by the `or` and silently
+    # means "the default", so Settings displays a limit that is not the one
+    # in effect. Neither was reachable only by hand-editing the file —
+    # `PUT /settings/llm/profiles/{id}` accepted both.
+    #
+    # Refused on BOTH paths, same rule as the type checks above: a check that
+    # only fired on save would let a downgrade or a hand edit put the value
+    # back. A stored 0 or negative therefore becomes a skipped entry with a
+    # warning rather than a silent surprise, and C-14 keeps its bytes on disk
+    # for the operator to repair.
+    if profile.max_output_tokens is not None and profile.max_output_tokens < 1:
+        raise ProfileValidationError(
+            f"profile {profile.id!r}: max_output_tokens must be at least 1 "
+            f"(or null for the default), got {profile.max_output_tokens}"
+        )
 
 
 def _validate_profile(profile: LLMProfile) -> None:

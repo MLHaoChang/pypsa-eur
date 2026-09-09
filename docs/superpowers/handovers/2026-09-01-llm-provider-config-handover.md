@@ -2,9 +2,12 @@
 
 **Branch:** `feature/llm-provider-config` (36 commits ahead of local `master`)
 **Head at handover:** `cf3d3102`
-**Status:** all 16 planned tasks implemented and individually reviewed.
-**NOT done:** the two closing reviews. (The ADR-0002 live probes WERE the other
-open item; both wires passed — openai 2026-09-04, anthropic 2026-09-09.) See
+**Status:** all 16 planned tasks implemented and individually reviewed; both
+closing reviews run 2026-09-09, three findings, all fixed.
+**NOT done:** the deferred-item triage (its ledger is git-ignored and not in
+this checkout) and `pixi run gui-tests`, which has never been run. (The
+ADR-0002 live probes were the other open item; both wires passed — openai
+2026-09-04, anthropic 2026-09-09.) See
 [What is genuinely not finished](#what-is-genuinely-not-finished) — read that
 section before deciding this is ready to merge, because a green suite here
 does **not** mean what it usually means.
@@ -175,11 +178,42 @@ pixi run -e test python pypsa-gui/backend/smoke/run_chat_smoke.py --profile <id>
 Note this debt predates the branch: the already-merged provider **seam** also
 shipped without a live probe. These probes close both.
 
-### 2. The two closing reviews never completed
+### 2. The two closing reviews — RUN 2026-09-09. One half still open.
 
-The final whole-branch review and the adversarial security pass were dispatched
-and **killed by an API session limit**, along with four sub-agents. Neither
-produced a verdict. Re-run both before merging:
+> **Update 2026-09-09.** Both reviews were run. Verdict, findings and the
+> full attack list:
+> `docs/superpowers/findings/2026-09-09-llm-provider-config-closing-reviews.md`.
+>
+> **Three findings, all fixed.** None is a privilege boundary. The one that
+> matters: the key-removal confirmation said *"This model will stop
+> working"* for a key that is shared with every other profile on that
+> provider, the two built-ins included — an instance-wide effect described
+> as a single-model one, in the dialog whose job is to state the blast
+> radius. The backend behaviour was right and stays; the copy is now derived
+> from a server-supplied `key_env` so it names what actually goes dark. The
+> other two: `max_output_tokens` was type-checked but never range-checked
+> (a negative reached the wire and killed every turn; a 0 was silently
+> swallowed into "the default"), and one stale rationale comment.
+>
+> **The security controls held.** Nine attack classes were EXECUTED against
+> the real routes, provider and profile store — cross-host redirect with the
+> auth header, `base_url` retargeting, preset spoofing by case/whitespace/
+> NUL/homoglyph, a key echoed back in an error body and as model output, an
+> unoffered tool from a hostile endpoint, that endpoint looping forever, the
+> C-13 orphan slot, and `set_active_profile` driven by a member. All
+> repelled. The handover's "not yet attacked" item — preset spoofing via
+> unicode/case tricks — is answered structurally: a near-miss preset id
+> cannot inherit a shared credential, only fail to inherit one.
+>
+> **Still open:** the deferred-item triage. Its ledger is git-ignored and
+> exists only on the machine that ran the plan, so it is not in this
+> checkout and could not be re-adjudicated. And `pixi run gui-tests` has
+> still never been run — here or at the handover.
+
+The original state, kept for the record: the final whole-branch review and the
+adversarial security pass were dispatched and **killed by an API session
+limit**, along with four sub-agents. Neither produced a verdict. What they
+were scoped to cover:
 
 - Whole-branch review over `master..HEAD` (36 commits) — cross-task coherence,
   dead code, surviving false-fact comments, and triage of the deferred items in
@@ -278,9 +312,12 @@ work that had passing tests.
    is the full decision record — every finding, adjudication, deferred minor,
    and correction. It is git-ignored, so it exists only on the machine that ran
    the plan; copy it out if you need it elsewhere.
-2. **Re-run the two killed reviews** (above). Do not merge on the strength of
-   green gates alone — this plan's reviews found defects in green code more
-   than a dozen times.
+2. ~~**Re-run the two killed reviews**~~ **Done 2026-09-09** — three findings,
+   all fixed; see the finding record. What is left of that item is the
+   **deferred-minor triage**, which needs the git-ignored ledger from the
+   machine that ran the plan. Still do not merge on the strength of green
+   gates alone: this plan's reviews found defects in green code more than a
+   dozen times, and the 2026-09-09 pass found three more.
 3. ~~**Close ADR-0002** with at least the Anthropic probe.~~ **Done
    2026-09-09** — both wires passed. Re-run the anthropic probe on any later
    change to the chat path; the ADR's rule is per-change, not per-branch.

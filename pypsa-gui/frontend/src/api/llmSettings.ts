@@ -36,6 +36,16 @@ export interface LLMProfileOut {
   auth: 'bearer' | 'none'
   fallback_model: string | null
   max_output_tokens: number | null
+  /**
+   * The NAME of the environment variable this profile's key lives in, or
+   * `null` when it has no key concept (`auth === 'none'`). Never the value.
+   *
+   * Two profiles with the same `key_env` share ONE credential: removing it
+   * for either removes it for both. Group on this string rather than
+   * re-deriving it from `preset` — the built-ins are a special case the
+   * server resolves and a client-side rule would get wrong.
+   */
+  key_env: string | null
   /** `auth === 'bearer'`. A keyless local endpoint has no key concept. */
   key_required: boolean
   key_present: boolean

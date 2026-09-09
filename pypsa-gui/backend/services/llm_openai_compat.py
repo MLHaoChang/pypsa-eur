@@ -7,9 +7,17 @@ seam is not secretly Anthropic-shaped (seam spec): tool-call framing differs
 structurally, and there is no cache_control at all — `stable` is silently
 dropped, which is exactly what the annotation design absorbs.
 
-httpx is imported function-locally: it is a dev dependency until plan 2 adds
-it to gui-requirements.txt, and this module must import cleanly in the
-frozen app regardless.
+httpx is imported function-locally so this module imports cleanly even where
+httpx is absent — the module is reachable at import time from `chat_service`,
+which the app loads at startup.
+
+The original reason ("a dev dependency until plan 2 adds it to
+gui-requirements.txt") EXPIRED on this branch: plan 2 added it, and
+`gui-requirements.txt:101` now pins `httpx==0.28.1` and states why the import
+must stay UNGUARDED — a missing httpx has to fail the build rather than leave
+every OpenAI-compatible provider silently dead in the shipped app. Function-
+local placement and a guarded import are different things; this is the
+former only.
 
 History translation notes (request.messages arrive Anthropic-block-shaped):
   * assistant tool_use blocks   → assistant message with tool_calls[]

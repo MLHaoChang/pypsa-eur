@@ -47,6 +47,7 @@ const LLM_PAYLOAD: LLMSettingsPayload = {
     id: 'anthropic-sonnet', label: 'Claude Sonnet', preset: 'anthropic-sonnet',
     wire: 'anthropic', base_url: null, model: 'claude-sonnet-5',
     tools: true, vision: true, auth: 'bearer', fallback_model: null, max_output_tokens: null,
+    key_env: 'ANTHROPIC_API_KEY',
     key_required: true, key_present: false, key_hint: null, key_redactable: null,
   }],
   presets: [],

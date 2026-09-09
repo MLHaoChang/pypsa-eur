@@ -336,6 +336,25 @@ def _profile_out(profile: llm_config.LLMProfile) -> dict[str, Any]:
         key_redactable = None
     return {
         "id": profile.id,
+        # The NAME of the variable this profile's key lives in — never its
+        # value. Exposed so the client can tell which profiles SHARE one
+        # credential, which is the difference between "removing this key
+        # stops this model" and "…stops every model on this provider,
+        # including the built-ins". `DELETE .../key` is deliberately the one
+        # route that can clear a shared provider key (see
+        # `delete_llm_profile`'s docstring), so the blast radius is real and
+        # the confirmation has to be able to state it.
+        #
+        # Derived server-side by the same `derive_key_env` that decides the
+        # behaviour, rather than re-derived in TypeScript: the built-in
+        # profiles are a special case (`preset="anthropic-sonnet"` is not a
+        # catalogue id, yet they read the `anthropic` entry's `key_env`), so
+        # a client-side re-derivation would get exactly the two profiles
+        # wrong that matter most here.
+        #
+        # Not a secret: these names already ship to the client inside
+        # `presets.json`, which `GET /settings/llm` returns verbatim.
+        "key_env": key_env,
         "key_redactable": key_redactable,
         "label": profile.label,
         "preset": profile.preset,

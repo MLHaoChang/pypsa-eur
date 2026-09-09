@@ -525,12 +525,46 @@ export default function AssistantModelSettings() {
     }
   }
 
-  function requestClearKey(profile: LLMProfileOut) {
-    confirmToast(
-      `Remove the stored key for "${profile.label}"? This model will stop working until a new key is set.`,
-      () => clearKeyMutation.mutate(profile.id),
-      { confirmLabel: 'Remove', danger: true },
+  /**
+   * The OTHER models that read the same credential as `profile`.
+   *
+   * `DELETE .../key` clears the environment variable, not "this profile's
+   * copy" — there is only one copy. For a profile on a cataloged provider
+   * preset that variable is the provider-wide key (`ANTHROPIC_API_KEY`,
+   * `OPENAI_API_KEY`, …), shared with every other profile on it, the two
+   * built-ins included. That is deliberate: the backend keeps `DELETE
+   * .../key` aimed at the shared key precisely because it is the only route
+   * that can revoke one (see `delete_llm_profile`'s docstring, and the
+   * narrower `_clear_namespaced_slot` that profile DELETION uses instead).
+   *
+   * Grouped on the server-supplied `key_env` string, never re-derived here.
+   * The rule has a special case — the built-ins' `preset` is not a catalogue
+   * id, yet they resolve to the `anthropic` entry's `key_env` — so a
+   * client-side re-derivation would miss exactly the profiles whose silent
+   * loss matters most.
+   */
+  function alsoLoseTheirKey(profile: LLMProfileOut): LLMProfileOut[] {
+    if (!profile.key_env) return []
+    return (data?.profiles ?? []).filter(
+      p => p.id !== profile.id && p.key_env === profile.key_env,
     )
+  }
+
+  function requestClearKey(profile: LLMProfileOut) {
+    const others = alsoLoseTheirKey(profile)
+    // Naming them, not counting them: "and 2 others" does not tell an
+    // operator that what is about to stop working includes the default the
+    // whole instance falls back to.
+    const message = others.length
+      ? `Remove the stored key for "${profile.label}"? It is shared, so ` +
+        `${others.map(p => `"${p.label}"`).join(', ')} will stop working ` +
+        'too, until a new key is set.'
+      : `Remove the stored key for "${profile.label}"? This model will ` +
+        'stop working until a new key is set.'
+    confirmToast(message, () => clearKeyMutation.mutate(profile.id), {
+      confirmLabel: 'Remove',
+      danger: true,
+    })
   }
 
   if (isLoading) return null
