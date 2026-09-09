@@ -28,6 +28,7 @@ Nothing here is derived from a stored path: the run directory is always
 bundle or moved by a rename keeps working.
 """
 import json
+import os
 import re
 import zipfile
 from datetime import datetime, timezone
@@ -288,6 +289,19 @@ def _active_job_for(project):
     )
 
 
+def _normalized(value) -> str:
+    """An absolute, `..`-free spelling of `value` — WITHOUT touching the disk.
+
+    `os.path.abspath` only joins the process CWD; `normpath` is string
+    arithmetic. Neither reads the named path, which is the point: this runs on
+    caller-supplied input before anything has authorized it. A value that is
+    not a path at all (the chat tool takes `**patch`, so a model can put a
+    list or an object there) stringifies into something that matches no
+    project, which is the refusal we want.
+    """
+    return os.path.normpath(os.path.abspath(str(value)))
+
+
 def _authorized_dispatch_dir(db, user, project, raw) -> Path:
     """The finished study directory `from_dispatch` names — resolved back to a
     PROJECT THE CALLER MAY READ, and returned as the path derived from that
@@ -304,6 +318,14 @@ def _authorized_dispatch_dir(db, user, project, raw) -> Path:
     The refusal is one message for "no such directory", "not a project's" and
     "not yours": the same reason `resolve_project` answers 404 for all three,
     so a study cannot be used to probe what else is on the disk.
+
+    SPELLINGS ARE COMPARED, NOT RESOLVED TARGETS. `Path(raw).resolve()` walks
+    the caller's path and reads its symlinks — a filesystem access on input
+    that has not been authorized yet, which is what CodeQL flagged the second
+    time round. `_normalized` is pure string arithmetic, so the raw value
+    never reaches a path expression at all. The cost is that a SYMLINK to a
+    run directory the caller may read is refused too; that is the right
+    trade, and `tests/test_gridspine_service.py` pins both halves of it.
     """
     if db is None or user is None:
         raise HTTPException(status_code=422, detail="from_dispatch needs an acting user")
@@ -312,15 +334,10 @@ def _authorized_dispatch_dir(db, user, project, raw) -> Path:
         detail=f"'{raw}' is not the study directory of a project you can read; a dispatch "
                f"source is the `gridspine/run` directory of one of your studies",
     )
-    try:
-        target = Path(raw).resolve()
-    except (OSError, TypeError, ValueError):
-        # TypeError included on purpose: the chat tool takes `**patch`, so a
-        # model can put a list or an object where the directory should be.
-        raise refused from None
+    target = _normalized(raw)
     for row in db.query(Project).filter(Project.org_id == project.org_id):
         candidate = project_registry.project_dir(row) / GRIDSPINE_SUBDIR / "run"
-        if candidate.resolve() == target and project_acl.can_access_project(db, user, row):
+        if _normalized(candidate) == target and project_acl.can_access_project(db, user, row):
             return candidate
     raise refused
 

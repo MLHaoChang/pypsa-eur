@@ -237,6 +237,65 @@ def test_a_dispatch_source_the_caller_cannot_read_is_refused(study, user_and_db,
     assert "study directory" in str(exc.value.detail)
 
 
+def test_the_dispatch_source_never_reaches_the_filesystem_before_it_is_authorized():
+    """`_authorized_dispatch_dir` compares SPELLINGS, not resolved targets.
+
+    `Path(raw).resolve()` walks the caller's path and reads its symlinks — a
+    filesystem access on unauthorized input, which is what CodeQL
+    `py/path-injection` flagged the second time round. Normalizing both sides
+    as strings needs no syscall at all, so the tainted value never reaches a
+    path expression. This is an AST scan rather than a comment because the
+    property is invisible at the call site and easy to reintroduce.
+    """
+    import ast
+    import inspect
+
+    tree = ast.parse(inspect.getsource(gs._authorized_dispatch_dir))
+    called = {
+        node.func.attr for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    }
+    assert "resolve" not in called, "resolve() touches the caller's path on disk"
+    assert not called & {"is_file", "is_dir", "exists", "stat", "iterdir", "glob"}, called
+
+
+@pytest.mark.parametrize("spelling", [
+    "{run}/",                      # trailing slash
+    "{gs}/../gridspine/run",       # a `..` that comes back to the same place
+    "{gs}/./run",                  # a no-op segment
+])
+def test_a_run_directory_spelled_differently_is_still_accepted(
+    study, user_and_db, ran, spelling,
+):
+    """The normalization is load-bearing, not decorative: the same directory
+    written three other ways still resolves to the same project. Without it a
+    trailing slash alone would be a refusal, and the stored config would carry
+    whatever the caller typed."""
+    db, user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    _ran_db, ran_row = ran
+    raw = spelling.format(run=gs.run_dir(ran_row), gs=gs.gridspine_dir(ran_row))
+
+    out = gs.set_dispatch_source(db, row, {"from_dispatch": raw}, user=user)
+    assert out["from_dispatch"] == str(gs.run_dir(ran_row))     # the canonical one, not `raw`
+
+
+def test_a_symlink_to_a_run_directory_is_refused(study, user_and_db, ran, tmp_path):
+    """The consequence of comparing spellings, stated out loud: a symlink that
+    points at a run directory you CAN read is still refused, because following
+    it would mean reading the caller's path off the disk first."""
+    db, user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    _ran_db, ran_row = ran
+    link = tmp_path / "shortcut"
+    link.symlink_to(gs.run_dir(ran_row), target_is_directory=True)
+
+    with pytest.raises(HTTPException) as exc:
+        gs.set_dispatch_source(db, row, {"from_dispatch": str(link)}, user=user)
+    assert exc.value.status_code == 422
+    assert "study directory" in str(exc.value.detail)
+
+
 @pytest.mark.parametrize("raw", [{"nested": "object"}, ["a", "list"], 7, "\x00null-byte"])
 def test_a_dispatch_source_that_is_not_a_path_at_all_is_refused(study, user_and_db, raw):
     """The chat tool takes `**patch`, so a model can put anything here. Every
