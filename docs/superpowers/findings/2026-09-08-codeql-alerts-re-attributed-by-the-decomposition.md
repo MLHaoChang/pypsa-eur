@@ -3,8 +3,10 @@
 **Date:** 2026-09-08
 **Found by:** the `CodeQL` check on PR #6, head `23efc6c` — *"2 new alerts
 including 1 high severity security vulnerability"*
-**Status:** open. Recorded, not fixed here — this branch's contract is
-strictly behaviour-preserving, and both fixes change observable behaviour.
+**Status:** FIXED 2026-09-09 on `claude/fix-codeql-tempfile-and-trace-exposure`,
+branched off `master` — not here, because this branch's contract is strictly
+behaviour-preserving and both fixes change observable behaviour. See "How they
+were fixed" at the bottom, which also records a merge hazard this creates.
 
 ## What the check reported
 
@@ -83,3 +85,72 @@ the same two alerts. There is no flake to wait out and nothing to port from
 master, because master is where they already live. The check goes green when
 the two are fixed or dismissed, and the fixes belong in a PR whose contract
 allows a behaviour change, not in this one.
+
+---
+
+# How they were fixed, 2026-09-09
+
+On `claude/fix-codeql-tempfile-and-trace-exposure`, off `master`, because that
+is where both defects live.
+
+## `tempfile.mktemp` → a private directory
+
+`mkstemp` was not available as a fix: pypsa passes `log_fn` down to the solver
+as a NAME and the solver opens it itself, so there is no descriptor to hand
+anyone and the file has to be creatable later by design. What must not be
+creatable by anyone else is the directory it sits in.
+
+`_make_solve_log_path()` returns `mkdtemp()/solve.log` plus its cleanup
+callable. The directory is 0700 from the moment it exists, so the log file's own
+mode stops mattering; one directory per solve, so two concurrent solves cannot
+interleave into one log; and `rmtree` replaces the old `tmp_log.unlink()`, which
+would now leave the directory behind.
+
+The permissions worry in the write-up above turned out not to apply. It assumed
+`mkstemp`'s 0600 on the FILE; a private directory changes no mode any legitimate
+reader depends on, and nothing outside the process reads that file at all — the
+tail thread streams it to the UI, the solver writes it, and it is deleted when
+the solve ends.
+
+## The traceback → the log
+
+The graceful degradation stays (one bad carrier must not blank the Results tab);
+`logger.exception` takes the detail. `str(exc)` went too — it was the second
+flow CodeQL reported on that line, and a `FileNotFoundError` renders as its
+path.
+
+Checked before changing a route the Results tab consumes, which the write-up
+above said had to be done first: `frontend/src/api/simulation.ts` types the
+response as `error?: string` with **no `trace`**, and both readers
+(`pages/results/Dispatch.tsx`, `pages/results/CapacityExpansion.tsx`) take
+`econByCarrier?.by_carrier ?? null`. Nothing in the frontend reads either key.
+
+## The merge hazard this creates
+
+Worth stating plainly, because it is the cost of fixing these off `master`
+while this branch is open: **this branch MOVES both fixed lines.** The
+traceback return is at `routers/results.py:857` on `master` and at
+`services/results/economics_by_carrier.py:45` here. So merging this branch after
+the fix lands would delete the fixed copy and keep this branch's unfixed one —
+a silent reintroduction, not a conflict, because the two sides touch different
+files.
+
+Whoever merges second owns re-applying it. The alternative is to port the two
+fixes onto this branch as their own clearly-labelled commit once they land on
+`master`, which also turns this PR's CodeQL check green; that is a behaviour
+change and therefore a decision for whoever owns the branch's contract, not a
+drive-by.
+
+## Verification
+
+Both tripwires written first, red for the right reasons, and mutation-checked
+after: a 0755 temp directory and a `logger.error` without `exc_info` each make
+them fail. The `mktemp` guard reads the AST rather than the file text, so the
+docstring explaining why `mktemp` is not used cannot satisfy it.
+
+A real solve through `run_simulation`: `ok`/`optimal`, 49 log lines captured
+including HiGHS output — so the tail thread does read what the solver wrote into
+the private directory — and no leftover `pypsagui-solve-*` directories. Full
+suite failing set unchanged at 2, both pre-existing on `master` (the macOS-only
+assertions in `test_app_paths.py`, which this branch already fixed and `master`
+has not).
