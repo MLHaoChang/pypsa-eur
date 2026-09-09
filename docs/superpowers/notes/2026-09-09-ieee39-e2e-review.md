@@ -189,3 +189,30 @@ frontier suites (134 passed together).
 F5 (the one wasted solve per clamped met run) is unchanged and still stands —
 the two ceiling iterates above are it. F2, F3, F4 and the notes stand as
 recorded.
+
+## 8. The minors commit reviewed as shipped code
+
+`60c4106` was also read adversarially as shipped code, against the whole-branch
+note's definition of each finding, with edge probes on the head
+(`scratchpad/ieee39/review/minors_review.md`). **No serious finding.** It closes
+M3, M5, M6, M7, M9, M10, M11, M13, M14 and N1 as defined, and M2 and M4 for the
+engine surfaces; every number-bearing change was checked against its neighbours
+(the storage derate reads the same resolver row the margin does and is hashed
+into both CRN keys; the fold clamp matches the margin's `[0, 1]` clamp; the
+all-NaN rule matches the must-take `fillna(0)` and the margin's `_finite(mean, 0)`;
+the disclosure lists are disjoint from `profile_units` by construction). All ten
+new tests and the three updated ones go red against the pre-fix version of their
+own fix's files.
+
+Three MINOR follow-ups, none a silent number change, recorded rather than fixed:
+
+| # | Where | What |
+|---|---|---|
+| **F6** | `copt.py:772-776` (must-take branch) | M2 clamps the *occurrence-bearing* branch of the membership walk. A **must-take** generator (no outage data) with a negative static `p_max_pu` still nets NEGATIVELY into the residual in both engines — residual 120 for a demand of 100 — while the margin lists it unpriceable. Same defect class, the other branch of the same walk; pre-existing, not opened by `60c4106`. |
+| **F7** | `validation_service.py:2243-2244,2295-2299` | M2's expected fix had two halves: fold `max(cf, 0)` **and** exclude negatives from the `availability_may_include_outages` sentence. The engine half shipped; the preflight sentence still names a negative-static unit and states a formula no surface applies. |
+| **F8** | `results.py:3683` (`/mc` payload) | M4's fix traded a wrong reason for no reason on one shape: a unit whose rate is **typed** 0 (flag not set) *with* a profile used to appear in `/mc`'s `deterministic_units` — true that no outages were sampled, false about why — and now appears in no `/mc` list at all. `/copt` still names it, through the rate-zero row note that M4 added. Strictly more correct and slightly less complete; closing it means a second list (`rate_zero_units`) on both payloads and a third clause in the chip, which is new API surface and is left as the maintainer's call. |
+
+Plus nine NITs in the report (a vacuous final assertion in one new test, a stale
+comment after M5, the blank-basis spelling tuple now written in three files, an
+import placement, no frontend test for M10, and a folded-to-zero unit still
+offered as a 0 MW ELCC candidate).
