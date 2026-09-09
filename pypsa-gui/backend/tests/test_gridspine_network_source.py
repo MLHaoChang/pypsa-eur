@@ -172,7 +172,7 @@ def test_the_study_runs_from_the_projects_network_and_the_source_is_exclusive(us
     assert manifest["window"] is None                          # the solve happened in the GUI, not here
 
     # a study directory as the source clears the network …
-    out = gs.update_config(study, {"from_dispatch": str(gs.run_dir(study))})
+    out = gs.update_config(study, {"from_dispatch": str(gs.run_dir(study))}, db=db, user=user)
     assert out["from_dispatch"] == str(gs.run_dir(study)) and out["from_network"] is None
     # … the project clears the directory …
     out = gs.set_dispatch_source(db, study, {"from_project": "Solved 39"}, user=user)

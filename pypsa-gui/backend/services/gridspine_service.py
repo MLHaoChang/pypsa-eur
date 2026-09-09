@@ -36,6 +36,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from db.models import Project
+from services import project_acl
 from services import project_registry
 
 # `gridspine` is the repository's own package, installed EDITABLE into every
@@ -230,6 +231,15 @@ def create_study(db, user, name: str, config: dict = None, kind: str = PLANNING_
             detail="from_network is not set directly; choose a source project with "
                    "set_dispatch_source({'from_project': name}) after creation",
         )
+    if data.get("from_dispatch") is not None:
+        # There is no project yet to authorize the path against, and the row is
+        # committed before the config is written — so a raw path here would be
+        # stored unchecked. Same answer `from_network` gives.
+        raise HTTPException(
+            status_code=422,
+            detail="from_dispatch is not set at creation; pick the source with "
+                   "set_dispatch_source({'from_dispatch': dir}) afterwards",
+        )
     data["outdir"] = "."          # replaced by the project's own directory below
     try:
         StudyConfig.from_json(data)
@@ -278,12 +288,67 @@ def _active_job_for(project):
     )
 
 
-def update_config(project, patch: dict) -> dict:
+def _authorized_dispatch_dir(db, user, project, raw) -> Path:
+    """The finished study directory `from_dispatch` names — resolved back to a
+    PROJECT THE CALLER MAY READ, and returned as the path derived from that
+    project's row rather than as the string the caller sent.
+
+    Same reasoning `set_dispatch_source` states for `from_project`, applied to
+    the older field: a raw path would let a caller read any directory the
+    server can, and the contents come back to them through the ranked metrics
+    and the handoff bundle. Every real study directory is
+    `<project dir>/gridspine/run`, so that — for a project the ACL admits — is
+    the only shape accepted. CodeQL `py/path-injection` flagged the two reads
+    this replaces, and it was right.
+
+    The refusal is one message for "no such directory", "not a project's" and
+    "not yours": the same reason `resolve_project` answers 404 for all three,
+    so a study cannot be used to probe what else is on the disk.
+    """
+    if db is None or user is None:
+        raise HTTPException(status_code=422, detail="from_dispatch needs an acting user")
+    refused = HTTPException(
+        status_code=422,
+        detail=f"'{raw}' is not the study directory of a project you can read; a dispatch "
+               f"source is the `gridspine/run` directory of one of your studies",
+    )
+    try:
+        target = Path(raw).resolve()
+    except (OSError, TypeError, ValueError):
+        # TypeError included on purpose: the chat tool takes `**patch`, so a
+        # model can put a list or an object where the directory should be.
+        raise refused from None
+    for row in db.query(Project).filter(Project.org_id == project.org_id):
+        candidate = project_registry.project_dir(row) / GRIDSPINE_SUBDIR / "run"
+        if candidate.resolve() == target and project_acl.can_access_project(db, user, row):
+            return candidate
+    raise refused
+
+
+def _finished_dispatch_dir(db, user, project, raw) -> Path:
+    """`_authorized_dispatch_dir`, plus the two files a resumed study reads.
+    Authorization first: a caller must not learn what a directory contains by
+    reading the difference between the two refusals."""
+    src = _authorized_dispatch_dir(db, user, project, raw)
+    missing = [n for n in ("dispatch.csv", "loads.csv") if not (src / n).is_file()]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{src} is not a finished study directory: missing {', '.join(missing)}",
+        )
+    return src
+
+
+def update_config(project, patch: dict, *, db=None, user=None) -> dict:
     """Change some of the study config after creation. Validated as a whole
     through StudyConfig (422 on a bad value, nothing written), refused while a
     job for this project is queued or running (409): the queue snapshotted the
     directory, not the config, so an edit mid-run would change what the running
     job reads at its next stage.
+
+    `db` and `user` are needed only for `from_dispatch`, which is
+    authorization-bearing (`_authorized_dispatch_dir`); a patch without it is
+    the plain-argument call the parity rule asks for.
     """
     require_planning(project)
     if not isinstance(patch, dict):
@@ -300,16 +365,10 @@ def update_config(project, patch: dict) -> dict:
             detail=f"Project '{project.name}' has a queued or running study; abort it before changing the config.",
         )
     current = read_config(project).to_json()
-    if patch.get("from_dispatch"):
-        src = Path(patch["from_dispatch"])
-        missing = [n for n in ("dispatch.csv", "loads.csv") if not (src / n).is_file()]
-        if missing:
-            raise HTTPException(
-                status_code=422,
-                detail=f"{src} is not a finished study directory: missing {', '.join(missing)}",
-            )
     merged = {**current, **patch}
     if patch.get("from_dispatch"):
+        src = _finished_dispatch_dir(db, user, project, patch["from_dispatch"])
+        merged["from_dispatch"] = str(src)       # the resolved path, never the caller's string
         merged["from_network"] = None            # one dispatch source at a time
     config = _config_from(project, merged)          # validates; 422 on a bad value
     return _write_config(project, config)
@@ -378,20 +437,17 @@ def set_dispatch_source(db, project, source, user=None) -> dict:
 
     `from_project` is the only way to point a study at a network. A raw path
     would let a caller read any file the server can; the project route goes
-    through the ACL and the kind check.
+    through the ACL and the kind check. `from_dispatch` IS a path, for
+    historical reasons, and is held to the same line by
+    `_authorized_dispatch_dir`: it is accepted only when it resolves to the
+    run directory of a project the caller may read.
     """
     require_planning(project)
     base = {**read_config(project).to_json(), "from_dispatch": None, "from_network": None}
     if source == "generate" or source is None:
         updated = StudyConfig.from_json(base)
     elif isinstance(source, dict) and "from_dispatch" in source:
-        src = Path(source["from_dispatch"])
-        missing = [n for n in ("dispatch.csv", "loads.csv") if not (src / n).is_file()]
-        if missing:
-            raise HTTPException(
-                status_code=422,
-                detail=f"{src} is not a finished study directory: missing {', '.join(missing)}",
-            )
+        src = _finished_dispatch_dir(db, user, project, source["from_dispatch"])
         updated = StudyConfig.from_json({**base, "from_dispatch": str(src)})
     elif isinstance(source, dict) and "from_project" in source:
         row = _source_project(db, user, project, str(source["from_project"] or ""))

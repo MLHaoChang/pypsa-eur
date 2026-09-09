@@ -226,9 +226,15 @@ def test_a_bad_binding_degrades_to_the_unbound_toolset_rather_than_failing():
 
 def test_update_config_forwards_only_the_fields_the_model_set(study, monkeypatch):
     seen = {}
-    monkeypatch.setattr(gs, "update_config", lambda project, patch: seen.update(patch=patch) or patch)
+    monkeypatch.setattr(
+        gs, "update_config",
+        lambda project, patch, *, db=None, user=None: seen.update(patch=patch, db=db, user=user) or patch,
+    )
     chat_tools.DISPATCHERS["gridspine_update_config"](project_id="Chat Study", k=3, screen=None)
     assert seen["patch"] == {"k": 3}
+    # Same authorization context the router hands over: the copilot is a
+    # wrapper, and a `from_dispatch` patch with no acting user is refused.
+    assert seen["db"] is not None and seen["user"] is not None
 
 
 

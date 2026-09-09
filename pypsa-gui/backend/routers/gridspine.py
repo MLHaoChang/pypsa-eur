@@ -140,8 +140,11 @@ def update_config(
     body: ConfigPatch,
     proj: AuthorizedProject = ProjectAccessDep,
     db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
 ):
-    return gs.update_config(_row(proj, db), body.as_patch())
+    # `db`/`user` are the service's authorization context for `from_dispatch`,
+    # which names a directory; every other field in the patch is a scalar.
+    return gs.update_config(_row(proj, db), body.as_patch(), db=db, user=user)
 
 
 @router.post("/{name}/run")

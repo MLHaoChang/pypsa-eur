@@ -1470,7 +1470,11 @@ def gridspine_get_config(project_id: str) -> dict:
 def gridspine_update_config(project_id: str, **patch) -> dict:
     from services.gridspine_service import update_config as _h
     with _acting() as (db, user):
-        return _h(_gridspine_project(db, user, project_id), {k: v for k, v in patch.items() if v is not None})
+        return _h(
+            _gridspine_project(db, user, project_id),
+            {k: v for k, v in patch.items() if v is not None},
+            db=db, user=user,
+        )
 
 
 def gridspine_run_pipeline(project_id: str) -> dict:

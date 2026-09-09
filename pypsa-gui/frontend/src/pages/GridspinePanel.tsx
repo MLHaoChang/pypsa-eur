@@ -298,7 +298,7 @@ function DispatchSourcePicker({ name, config, locked }: { name: string; config: 
           </select>
         </Field>
         {mode === 'from_dispatch' && (
-          <Field label="Study directory (holding dispatch.csv and loads.csv)">
+          <Field label="Study directory — the gridspine/run of one of your studies">
             <input
               className={`${INPUT} font-mono w-[380px]`}
               value={dir}

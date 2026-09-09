@@ -185,10 +185,17 @@ def test_an_unselected_hour_is_404_through_the_api(client, study):
 
 def test_the_config_patch_carries_only_the_fields_that_were_sent(client, study, monkeypatch):
     seen = {}
-    monkeypatch.setattr(gs, "update_config", lambda project, patch: seen.update(patch=patch) or patch)
+    monkeypatch.setattr(
+        gs, "update_config",
+        lambda project, patch, *, db=None, user=None: seen.update(patch=patch, db=db, user=user) or patch,
+    )
     resp = client.put("/api/gridspine/Router Study/config", json={"k": 3, "screen": False})
     assert resp.status_code == 200, resp.text
     assert seen["patch"] == {"k": 3, "screen": False}
+    # `from_dispatch` is authorization-bearing, so the route must hand the
+    # service a `db` and a `user` to check it against — without them every
+    # patch carrying one is refused.
+    assert seen["db"] is not None and seen["user"] is not None
     resp = client.put("/api/gridspine/Router Study/config", json={"set_from_dispatch": True, "from_dispatch": None})
     assert seen["patch"] == {"from_dispatch": None}
 

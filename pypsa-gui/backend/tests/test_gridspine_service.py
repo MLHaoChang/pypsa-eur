@@ -18,6 +18,7 @@ solves — ~20 s), reused by every read-side test. Everything else is metadata.
 import json
 import shutil
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 from fastapi import HTTPException
@@ -135,12 +136,12 @@ def test_the_config_is_validated_at_creation_not_at_run_time(user_and_db):
 # --------------------------------------------------------------------------
 
 def test_set_dispatch_source_switches_between_generating_and_resuming(study, user_and_db, ran):
-    db, _user = user_and_db
+    db, user = user_and_db
     row = db.get(Project, uuid.UUID(study["id"]))
     _ran_db, ran_row = ran
     src = gs.gridspine_dir(ran_row) / "run"
 
-    updated = gs.set_dispatch_source(db, row, {"from_dispatch": str(src)})
+    updated = gs.set_dispatch_source(db, row, {"from_dispatch": str(src)}, user=user)
     assert updated["from_dispatch"] == str(src)
     assert json.loads((gs.gridspine_dir(row) / "config.json").read_text())["from_dispatch"] == str(src)
 
@@ -148,13 +149,130 @@ def test_set_dispatch_source_switches_between_generating_and_resuming(study, use
     assert back["from_dispatch"] is None
 
 
-def test_a_dispatch_source_without_a_dispatch_is_refused(study, user_and_db, tmp_path):
-    db, _user = user_and_db
+def test_a_dispatch_source_without_a_dispatch_is_refused(study, user_and_db, tmp_path, ran):
+    db, user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    _ran_db, ran_row = ran
+    empty = gs.gridspine_dir(ran_row) / "run" / "nothing-here"
+    empty.mkdir(parents=True, exist_ok=True)
+    with pytest.raises(HTTPException) as exc:
+        gs.set_dispatch_source(db, row, {"from_dispatch": str(empty)}, user=user)
+    assert exc.value.status_code == 422
+
+
+# `from_dispatch` names a DIRECTORY, and the study reads whatever CSVs are in
+# it: the dispatch and the loads reach the caller again through the ranked
+# metrics and the handoff bundle. So the path is authorization-bearing input,
+# exactly like `from_project`, and these hold the same line for it — CodeQL
+# `py/path-injection` on the two `Path(<client string>)` reads that used to be
+# here was right, and this is the fix.
+
+def _org_member(db, project) -> User:
+    """A plain member of the project's org: in the org, admin of nothing, the
+    creator of nothing. `can_access_project` admits an org admin outright, so
+    an admin cannot express "same org, no access" — this user can."""
+    from db.models import OrgMembership
+
+    user = User(
+        id=uuid.uuid4(), email=f"gridspine-member-{uuid.uuid4().hex[:8]}@example.com",
+        password_hash=None, status="active", is_super_admin=False,
+        created_at=datetime.now(tz=timezone.utc),
+    )
+    db.add(user)
+    db.flush()
+    db.add(OrgMembership(id=uuid.uuid4(), user_id=user.id, org_id=project.org_id, role="member"))
+    db.commit()
+    return user
+
+
+def test_a_dispatch_source_is_the_run_directory_of_a_project_the_caller_can_read(
+    study, user_and_db, ran,
+):
+    db, user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    _ran_db, ran_row = ran
+
+    updated = gs.set_dispatch_source(db, row, {"from_dispatch": str(gs.run_dir(ran_row))}, user=user)
+    assert updated["from_dispatch"] == str(gs.run_dir(ran_row))
+
+
+@pytest.mark.parametrize("action", ["set", "patch"])
+def test_a_dispatch_source_outside_the_projects_root_is_refused(
+    study, user_and_db, tmp_path, action,
+):
+    """A finished-looking directory the server can read but no project owns.
+    The two CSVs are really there, so the ONLY thing that can refuse this is
+    the authorization — not the is-it-finished check."""
+    db, user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    (tmp_path / "dispatch.csv").write_text("unit,hour,p_mw\n")
+    (tmp_path / "loads.csv").write_text("bus,hour,p_mw\n")
+
+    with pytest.raises(HTTPException) as exc:
+        if action == "set":
+            gs.set_dispatch_source(db, row, {"from_dispatch": str(tmp_path)}, user=user)
+        else:
+            gs.update_config(row, {"from_dispatch": str(tmp_path)}, db=db, user=user)
+    assert exc.value.status_code == 422
+    assert "study directory" in str(exc.value.detail)
+    assert json.loads((gs.gridspine_dir(row) / "config.json").read_text())["from_dispatch"] is None
+
+
+@pytest.mark.parametrize("action", ["set", "patch"])
+def test_a_dispatch_source_the_caller_cannot_read_is_refused(study, user_and_db, ran, action):
+    """The run directory of a real project in the caller's own org — which the
+    caller has no access to. The org filter alone would let this through; the
+    ACL is what refuses it."""
+    db, _admin = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    _ran_db, ran_row = ran
+    outsider = _org_member(db, ran_row)
+
+    with pytest.raises(HTTPException) as exc:
+        if action == "set":
+            gs.set_dispatch_source(db, row, {"from_dispatch": str(gs.run_dir(ran_row))}, user=outsider)
+        else:
+            gs.update_config(row, {"from_dispatch": str(gs.run_dir(ran_row))}, db=db, user=outsider)
+    assert exc.value.status_code == 422
+    assert "study directory" in str(exc.value.detail)
+
+
+@pytest.mark.parametrize("raw", [{"nested": "object"}, ["a", "list"], 7, "\x00null-byte"])
+def test_a_dispatch_source_that_is_not_a_path_at_all_is_refused(study, user_and_db, raw):
+    """The chat tool takes `**patch`, so a model can put anything here. Every
+    shape gets the one refusal, never a TypeError three frames down."""
+    db, user = user_and_db
     row = db.get(Project, uuid.UUID(study["id"]))
     with pytest.raises(HTTPException) as exc:
-        gs.set_dispatch_source(db, row, {"from_dispatch": str(tmp_path)})
+        gs.update_config(row, {"from_dispatch": raw}, db=db, user=user)
     assert exc.value.status_code == 422
-    assert "dispatch.csv" in str(exc.value.detail)
+
+
+def test_a_dispatch_source_needs_an_acting_user(study, user_and_db, ran):
+    """No `db`/`user` means nothing to authorize against, so the answer is a
+    refusal rather than a raw filesystem read — the same posture
+    `from_project` takes."""
+    db, _user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    _ran_db, ran_row = ran
+    for call in (
+        lambda: gs.set_dispatch_source(db, row, {"from_dispatch": str(gs.run_dir(ran_row))}),
+        lambda: gs.update_config(row, {"from_dispatch": str(gs.run_dir(ran_row))}),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            call()
+        assert exc.value.status_code == 422
+        assert "acting user" in str(exc.value.detail)
+
+
+def test_a_study_is_not_created_with_a_raw_dispatch_path(user_and_db):
+    """`from_dispatch` at creation would store an unauthorized path before the
+    project exists to authorize against. Same answer `from_network` gives."""
+    db, user = user_and_db
+    with pytest.raises(HTTPException) as exc:
+        gs.create_study(db, user, "Raw Path Study", config={"from_dispatch": "/etc"})
+    assert exc.value.status_code == 422
+    assert "set_dispatch_source" in str(exc.value.detail)
 
 
 # --------------------------------------------------------------------------
