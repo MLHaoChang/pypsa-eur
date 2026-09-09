@@ -119,14 +119,40 @@ The attachment block: split `attachment_file_ids` into multimodal blocks
 tool-accessible files (xlsx/docx/csv/txt, annotated into the text rather than
 sent as content, because the multimodal API 415s on them).
 
-**Why first:** it contains no `yield` and touches no loop state. Inputs
-`message` + `attachment_file_ids`, output a content list. The one genuinely
-pure-ish seam in the function, and `tests/test_chat_multimodal.py` (675 lines)
-already covers the behaviour.
+**Correction, made on reading it rather than on planning it:** this section
+first said the block "contains no `yield` and touches no loop state". Half
+wrong. It has no loop state, but its `except HTTPException` branch yields
+`error` + `session_done` and RETURNS — it can abort the whole turn. So it is
+not the pure seam advertised.
 
-**Guard:** the extracted function called directly with each attachment
-category, asserting block order (references first, text last) and the
-tool-accessible annotation text; plus the SSE recording unchanged.
+That changes the shape of the cut, not its order. Three ways to extract a
+fragment that both computes a value and can abort:
+
+* a generator the caller drives with `yield from`, returning a sentinel through
+  `StopIteration` — hides the abort in a mechanism most readers have to look up;
+* raising an internal exception carrying the frames — control flow by exception
+  for an expected case;
+* **returning `(user_content, abort_frames)`**, where `abort_frames` is `None`
+  on success and otherwise the frames the caller yields before returning.
+
+The third. The helper stays an ordinary function (so it is callable directly
+from a test, which is the point of extracting it), and the abort stays visible
+at the call site instead of being buried in the helper's control flow.
+
+**Why still first:** no loop state, no mutation of the turn's frame, and
+`tests/test_chat_multimodal.py` (675 lines) already covers the behaviour.
+
+**Do not restructure the text block.** The prefix+message concatenation is
+pinned by substring assertions in two existing multimodal tests, and the
+untrusted-delimiter placement is a security boundary: the trusted instruction
+line sits OUTSIDE the delimiters, the per-file lines echoing user-controlled
+filenames sit INSIDE. Moving a line across that boundary is a behaviour change
+wearing a refactor's clothes.
+
+**Guard:** the extracted function called directly for each attachment category,
+asserting block order (references first, text last), the tool-accessible
+annotation text, the delimiter placement, and the abort tuple on a bad
+attachment; plus the SSE recording unchanged.
 
 ### Phase B — `_turn_budget_block()` (~25 lines, 1895–1919)
 

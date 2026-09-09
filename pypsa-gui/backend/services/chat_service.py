@@ -1755,6 +1755,137 @@ def _serialise_for_anthropic(content_block: Any) -> dict[str, Any]:
         if hasattr(content_block, attr):
             out[attr] = getattr(content_block, attr)
     return out
+def _build_user_content(
+    project: str,
+    attachment_file_ids: list[str] | None,
+    message: str,
+) -> tuple[
+    list[dict[str, Any]] | str,
+    list[tuple[str, dict[str, Any]]] | None,
+]:
+    """
+    Turn this turn's attachments into Anthropic content.
+
+    Returns ``(user_content, abort_frames)``. ``abort_frames`` is ``None`` on
+    every normal turn; when the upload layer rejects an attachment it is the
+    exact frames the caller must yield before ending the turn. A tuple rather
+    than a generator so this is callable straight from a test — which is most
+    of why it was lifted out of `_run_turn_body` (Phase A of
+    `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`).
+
+    The text block's layout is a security boundary, not formatting: the
+    instruction line we author is trusted and stays OUTSIDE the untrusted
+    delimiters, the per-file lines echo user-controlled filenames and stay
+    INSIDE, and the user's own message is appended after. Two multimodal tests
+    also assert substring membership on the result, so the prefix+message
+    concatenation is load-bearing. See `tests/test_chat_user_content_seam.py`.
+    """
+    # Phase C — multimodal pass-through + tool-accessible-file annotation.
+    #
+    # Files the user attached split into two categories:
+    #   * MULTIMODAL — images (png/jpeg/webp/gif) and PDFs. These go
+    #     through Anthropic's native vision/document content blocks,
+    #     PREPENDED to the user's text block (text last so the model
+    #     reads the question after seeing the references).
+    #   * TOOL-ACCESSIBLE — xlsx/docx/csv/txt. Anthropic's multimodal
+    #     API doesn't accept these (it'd return 415); instead we
+    #     mention them in the user-text prefix so the agent knows to
+    #     call read_excel_sheet / read_upload_meta / apply_demand_from_excel
+    #     against the referenced file_ids.
+    #
+    # Both kinds are persisted into the turn record so chip rehydration
+    # on reload still shows them.
+    if attachment_file_ids:
+        try:
+            from services import upload_service
+            multimodal_mimes = {
+                "image/png", "image/jpeg", "image/webp", "image/gif",
+                "application/pdf",
+            }
+            multimodal_ids: list[str] = []
+            tool_meta: list[dict[str, Any]] = []
+            for fid in attachment_file_ids:
+                meta = upload_service.get_upload_meta(
+                    project, fid,
+                )
+                if meta.mime in multimodal_mimes:
+                    multimodal_ids.append(fid)
+                else:
+                    tool_meta.append({
+                        "file_id": meta.file_id,
+                        "filename": meta.filename,
+                        "mime": meta.mime,
+                        "size": meta.size,
+                    })
+            multimodal_blocks = upload_service.build_multimodal_content_blocks(
+                project, multimodal_ids,
+            ) if multimodal_ids else []
+        except HTTPException as exc:
+            # The one path that ends the turn. An extracted plain function
+            # cannot yield, so the frames come back in the return value and the
+            # caller emits them — which keeps the abort visible at the call
+            # site rather than buried in a generator's control flow.
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            _metric_error(detail.get("error_kind", "invalid_attachment"))
+            return message, [
+                ("error", {
+                    "error_kind": detail.get("error_kind", "invalid_attachment"),
+                    "message": detail.get("message", str(exc.detail)),
+                }),
+                ("session_done", {"reason": "invalid_attachment"}),
+            ]
+
+        # Build the text block: tool-accessible files surfaced as a
+        # bracketed prefix the model treats as part of its instructions,
+        # followed by the actual user message.
+        if tool_meta:
+            # The leading instruction line is TRUSTED (we author it) and stays
+            # OUTSIDE the untrusted delimiters; the per-file bracketed lines
+            # echo user-controlled filenames (an injection vector) so they go
+            # INSIDE. The user's actual `message` is the trusted turn and is
+            # appended AFTER the prefix, also outside the delimiters. Keep this
+            # wrap purely additive — two existing multimodal tests assert
+            # substring-membership on the final text block
+            # (test_chat_multimodal.py: 'demand.xlsx'/file_id/'read_excel_sheet'
+            # /the user message all `in` content[-1]['text']); do NOT restructure
+            # the prefix+message concatenation or those substrings move.
+            attachment_lines = [
+                "Files the user attached (use the listed tools to read / use them):",
+                _UNTRUSTED_OPEN,
+            ]
+            for m in tool_meta:
+                # Pick the most useful tool hint per MIME.
+                if m["mime"] in (
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "application/vnd.ms-excel",
+                    "text/csv",
+                ):
+                    hint = "read_excel_sheet / apply_demand_from_excel"
+                elif m["mime"] == (
+                    "application/vnd.openxmlformats-officedocument."
+                    "wordprocessingml.document"
+                ):
+                    hint = "read_upload_meta (then use the file_id with future tools)"
+                else:
+                    hint = "read_upload_meta"
+                attachment_lines.append(
+                    f"  - {m['filename']} "
+                    f"(mime={m['mime']}, size={m['size']} bytes, "
+                    f"file_id={m['file_id']}) — {hint}"
+                )
+            attachment_lines.append(_UNTRUSTED_CLOSE)
+            prefix = "\n".join(attachment_lines) + "\n\n"
+            text_payload = prefix + message
+        else:
+            text_payload = message
+
+        user_content: list[dict[str, Any]] | str = list(multimodal_blocks)
+        user_content.append({"type": "text", "text": text_payload})
+    else:
+        user_content = message
+    return user_content, None
+
+
 
 
 def run_turn(
@@ -1949,105 +2080,13 @@ def _run_turn_body(
         with session._lock:
             messages = list(session.messages)
 
-    # Phase C — multimodal pass-through + tool-accessible-file annotation.
-    #
-    # Files the user attached split into two categories:
-    #   * MULTIMODAL — images (png/jpeg/webp/gif) and PDFs. These go
-    #     through Anthropic's native vision/document content blocks,
-    #     PREPENDED to the user's text block (text last so the model
-    #     reads the question after seeing the references).
-    #   * TOOL-ACCESSIBLE — xlsx/docx/csv/txt. Anthropic's multimodal
-    #     API doesn't accept these (it'd return 415); instead we
-    #     mention them in the user-text prefix so the agent knows to
-    #     call read_excel_sheet / read_upload_meta / apply_demand_from_excel
-    #     against the referenced file_ids.
-    #
-    # Both kinds are persisted into the turn record so chip rehydration
-    # on reload still shows them.
-    user_content: list[dict[str, Any]] | str
-    if attachment_file_ids:
-        try:
-            from services import upload_service
-            multimodal_mimes = {
-                "image/png", "image/jpeg", "image/webp", "image/gif",
-                "application/pdf",
-            }
-            multimodal_ids: list[str] = []
-            tool_meta: list[dict[str, Any]] = []
-            for fid in attachment_file_ids:
-                meta = upload_service.get_upload_meta(
-                    turn_project_holder[0] or "", fid,
-                )
-                if meta.mime in multimodal_mimes:
-                    multimodal_ids.append(fid)
-                else:
-                    tool_meta.append({
-                        "file_id": meta.file_id,
-                        "filename": meta.filename,
-                        "mime": meta.mime,
-                        "size": meta.size,
-                    })
-            multimodal_blocks = upload_service.build_multimodal_content_blocks(
-                turn_project_holder[0] or "", multimodal_ids,
-            ) if multimodal_ids else []
-        except HTTPException as exc:
-            detail = exc.detail if isinstance(exc.detail, dict) else {}
-            _metric_error(detail.get("error_kind", "invalid_attachment"))
-            yield "error", {
-                "error_kind": detail.get("error_kind", "invalid_attachment"),
-                "message": detail.get("message", str(exc.detail)),
-            }
-            yield "session_done", {"reason": "invalid_attachment"}
-            return
-
-        # Build the text block: tool-accessible files surfaced as a
-        # bracketed prefix the model treats as part of its instructions,
-        # followed by the actual user message.
-        if tool_meta:
-            # The leading instruction line is TRUSTED (we author it) and stays
-            # OUTSIDE the untrusted delimiters; the per-file bracketed lines
-            # echo user-controlled filenames (an injection vector) so they go
-            # INSIDE. The user's actual `message` is the trusted turn and is
-            # appended AFTER the prefix, also outside the delimiters. Keep this
-            # wrap purely additive — two existing multimodal tests assert
-            # substring-membership on the final text block
-            # (test_chat_multimodal.py: 'demand.xlsx'/file_id/'read_excel_sheet'
-            # /the user message all `in` content[-1]['text']); do NOT restructure
-            # the prefix+message concatenation or those substrings move.
-            attachment_lines = [
-                "Files the user attached (use the listed tools to read / use them):",
-                _UNTRUSTED_OPEN,
-            ]
-            for m in tool_meta:
-                # Pick the most useful tool hint per MIME.
-                if m["mime"] in (
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    "application/vnd.ms-excel",
-                    "text/csv",
-                ):
-                    hint = "read_excel_sheet / apply_demand_from_excel"
-                elif m["mime"] == (
-                    "application/vnd.openxmlformats-officedocument."
-                    "wordprocessingml.document"
-                ):
-                    hint = "read_upload_meta (then use the file_id with future tools)"
-                else:
-                    hint = "read_upload_meta"
-                attachment_lines.append(
-                    f"  - {m['filename']} "
-                    f"(mime={m['mime']}, size={m['size']} bytes, "
-                    f"file_id={m['file_id']}) — {hint}"
-                )
-            attachment_lines.append(_UNTRUSTED_CLOSE)
-            prefix = "\n".join(attachment_lines) + "\n\n"
-            text_payload = prefix + message
-        else:
-            text_payload = message
-
-        user_content = list(multimodal_blocks)
-        user_content.append({"type": "text", "text": text_payload})
-    else:
-        user_content = message
+    user_content, attachment_abort = _build_user_content(
+        turn_project_holder[0] or "", attachment_file_ids, message,
+    )
+    if attachment_abort is not None:
+        for _frame in attachment_abort:
+            yield _frame
+        return
 
     # Improvement #18 — anchor the history cache breakpoint at the last
     # COMPLETED message, captured BEFORE this turn's user message is appended
