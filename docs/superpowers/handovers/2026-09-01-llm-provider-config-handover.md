@@ -259,6 +259,17 @@ undone by another's code.
 
 ## Verification status
 
+> **Update 2026-09-09.** Both wires have also been driven END TO END through
+> `POST /api/chat/stream` against a live backend, which nothing had ever
+> done on this branch — the ADR-0002 probes call `run_turn` directly, the
+> backend suite mocks the provider, the frontend suite mocks the API.
+> `run_chat_smoke.py`: **anthropic 13/13** (26 tool calls, 0 tool errors),
+> **openai 1/1** through a saved profile (SSE tool_call -> confirmation card
+> -> destructive tool -> on-disk effect -> `turn_done`). 0 tracebacks, 0
+> `ERROR` lines, 0 5xx across every run. Details and the caveat on the
+> scripted openai model:
+> `docs/superpowers/findings/2026-09-09-llm-provider-config-closing-reviews.md`.
+
 | Gate | Result at `cf3d3102` |
 |---|---|
 | `pixi run gui-tests` (canonical backend) | 3100 passed, 21 skipped |

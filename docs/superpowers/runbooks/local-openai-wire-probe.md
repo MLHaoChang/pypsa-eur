@@ -38,6 +38,20 @@ wire it had never touched.)
 Optional overrides: `_BASE_URL` (default: the preset's own endpoint),
 `_PRESET` (default `ollama`), `_AUTH` (default `none`).
 
+## If you only need the ROUTER path, not a model
+
+Installing Ollama is the right answer for probing the WIRE. It is the wrong
+answer for probing the chain around it — `POST /api/chat/stream` -> profile
+resolution -> provider -> SSE tool_call -> confirmation -> dispatch ->
+`turn_done` — because a tiny local model cannot reliably pick the tool
+`run_chat_smoke.py` asserts on, and its failures then read as code defects.
+
+`backend/smoke/stub_openai_endpoint.py` scripts the model and leaves the rest
+real. See its docstring for the three commands. Run 2026-09-09: 1/1, with the
+full confirmation lifecycle and the on-disk side effect.
+
+**It does not close ADR-0002** — only the live probe on this page does.
+
 ## Other endpoints
 
 | Endpoint | Extra env |

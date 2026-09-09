@@ -162,6 +162,63 @@ discrimination test.
   guarantee are identical across both surfaces" (both go through
   `app_secrets.status`).
 
+## End-to-end, added after the reviews
+
+The reviews and the gate both left one gap, and it was worth naming rather
+than living with: **no turn had ever crossed `POST /api/chat/stream` on this
+branch.** The ADR-0002 probes call `chat_service.run_turn` directly and stop
+there; the 3,252 backend tests use `TestClient` with mocked providers; the
+1,481 frontend tests mock the API. Real HTTP -> real SSE bytes -> profile
+resolution from the request body was tested on neither side, and no tool had
+round-tripped through a live provider (the probe sends 121 tool schemas and
+asks for one word with "No tools").
+
+`backend/smoke/run_chat_smoke.py` already existed for exactly this and the
+handover names it, unrun. Both wires have now been driven through it against
+a live backend in local mode.
+
+**Anthropic wire — 13/13 passed, 86.7 s, 26 tool calls, 0 tool errors.**
+The full battery: save/create/update/delete, multi-turn edits, validation,
+diagnosis, pagination, batch create and batch delete, each asserting its
+on-disk side effect. First time any token has crossed the router here.
+
+**OpenAI wire — 1/1 passed**, through a profile saved via the real
+super-admin route and selected by `profile_id` on the wire. The frame
+sequence is the whole point:
+
+```
+session_init  profile_id=stub-openai  model=stub-model  tool_count=121
+tool_preparing -> tool_request (safety_tier: destructive)
+tool_pending_confirmation (token) -> tool_running -> tool_result (on disk)
+token -> turn_done  (usage reported)
+```
+
+So on the openai wire: an SSE `tool_call` was parsed, a confirmation card was
+issued and resolved, a destructive tool ran and wrote to disk, the
+`tool_result` went back to the endpoint, and the turn ended on `turn_done` —
+the pinned invariant — through the router. The connection-test route was
+exercised in the same run (`verdict: ok`, latency, model list), which is
+`probe` and `probe_models` on a real socket.
+
+Across every run: **0 tracebacks, 0 `ERROR` log lines, 0 5xx responses.**
+
+**The model on the openai side is scripted, and that is deliberate.** The
+runbook's answer to "you need a local endpoint" is to install Ollama, which
+is a heavy prerequisite for something that is not testing the model — and a
+tiny local model cannot reliably choose the tool `run_chat_smoke.py` asserts
+on, so its failures read as code defects when they are capability limits.
+`backend/smoke/stub_openai_endpoint.py` (added here) speaks the wire honestly
+and scripts only the model, so a red run means our code. It is a complement
+to the live probe, never a substitute: **a green run here does not close
+ADR-0002**, and the provider itself was already proven against a live Ollama
+on 2026-09-04.
+
+Still not covered, and not attempted: **browser-level**. There is no
+Playwright config in this repo at all, so that is a project-level investment
+rather than a branch-closing step. Finding 1 above was a frontend defect,
+caught by reading and now pinned by a vitest test — which is a fair
+illustration of both the risk and its current mitigation.
+
 ## What these reviews do NOT cover
 
 * **The deferred-item triage the handover asks for.** Its ledger,
