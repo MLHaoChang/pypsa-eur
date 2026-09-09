@@ -74,6 +74,26 @@ describe('gridspineApi', () => {
     )
   })
 
+  it('uploads the PowerFactory export as multipart with the bus file required and the branch file optional', async () => {
+    const bus = new File(['bus_name,vm_pu,va_degree\n'], 'case39_h19.csv', { type: 'text/csv' })
+    const br = new File(['from_bus,to_bus,ckt\n'], 'case39_h19_branches.csv', { type: 'text/csv' })
+    await gridspineApi.uploadReadback('S', 19, bus)
+    let [url, body] = post.mock.lastCall as [string, FormData]
+    expect(url).toBe('/gridspine/S/readback/19')
+    expect(body.get('bus')).toBe(bus)
+    expect(body.has('branches')).toBe(false)
+    await gridspineApi.uploadReadback('S', 19, bus, br)
+    ;[url, body] = post.mock.lastCall as [string, FormData]
+    expect(body.get('branches')).toBe(br)
+  })
+
+  it('reads the read-back summary and one figure from their own endpoints', async () => {
+    await gridspineApi.readback('S')
+    expect(get).toHaveBeenLastCalledWith('/gridspine/S/readback', expect.anything())
+    await gridspineApi.figure('S', 19, 'branch_p')
+    expect(get).toHaveBeenLastCalledWith('/gridspine/S/figures/19/branch_p', expect.anything())
+  })
+
   it('asks for the bundle as a blob', async () => {
     await gridspineApi.bundle('S', 7)
     expect(get).toHaveBeenCalledWith('/gridspine/S/bundles/7', expect.objectContaining({ responseType: 'blob' }))

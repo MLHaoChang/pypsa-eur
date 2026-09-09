@@ -11,13 +11,14 @@
 // rule `useSolveQueue` applies to the queue list — and stops on any terminal
 // state. A study is a `kind: 'gridspine'` job in the ordinary queue, so
 // watching and aborting it are the Solve Queue panel's job, not this one's.
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, Play, RefreshCw, FlaskConical } from 'lucide-react'
+import { Download, Play, RefreshCw, FlaskConical, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   gridspineApi, isNotAStudy, STAGES,
-  type DispatchSource, type RankedSnapshot, type StageState, type StageStatus, type StudyConfig, type StudyConfigPatch,
+  type DispatchSource, type FigureName, type RankedSnapshot, type ReadbackShort, type StageState, type StageStatus,
+  type StudyConfig, type StudyConfigPatch,
 } from '../api/gridspine'
 import { projectsApi } from '../api/projects'
 import { formatApiDetail } from '../api/client'
@@ -29,6 +30,7 @@ export const STATUS_KEY = (name: string) => ['gridspine', 'status', name] as con
 export const SNAPSHOTS_KEY = (name: string) => ['gridspine', 'snapshots', name] as const
 export const LEDGER_KEY = (name: string) => ['gridspine', 'ledger', name] as const
 export const CONFIG_KEY = (name: string) => ['gridspine', 'config', name] as const
+export const FIGURE_KEY = (name: string, hour: number, figure: FigureName) => ['gridspine', 'figure', name, hour, figure] as const
 
 const STAGE_LABEL: Record<string, string> = {
   ingest: 'Ingest', dispatch: 'Unit commitment', ranking: 'Ranking (AC N-1 at every hour)',
@@ -220,12 +222,9 @@ function StudyView({ name }: { name: string }) {
         </PageSection>
       )}
 
-      <PageSection title="PowerFactory read-back" hint="Not available yet">
-        <p className="text-[12px] text-muted">
-          Import a bundle into PowerFactory manually; uploading its exported results here is spec
-          phase 4 and not built yet.
-        </p>
-      </PageSection>
+      {done && status.data && Object.keys(status.data.bundles).length > 0 && (
+        <ReadbackSection name={name} status={status.data} />
+      )}
     </PageBody>
   )
 }
@@ -409,6 +408,116 @@ function ConfigEditor({ name, config, locked }: { name: string; config: StudyCon
         </label>
       </div>
     </PageSection>
+  )
+}
+
+// Spec stage 6 (increment 6): the engineer imports a bundle's .raw into
+// PowerFactory, runs the load flow, exports the bus CSV (and, same session,
+// the branch CSV) the fixture runbook specifies, and uploads them here. The
+// backend compares them with the bundle's OWN load flow and records the
+// verdict in the bundle; this section shows that verdict per hour and the
+// per-element comparison on demand. Nothing is computed client-side.
+const FIGURE_LABEL: Record<FigureName, string> = {
+  vm: '|V| (p.u.)', va: 'angle (°)', branch_p: 'P from-end (MW)', branch_q: 'Q from-end (Mvar)',
+}
+
+function verdict(short: ReadbackShort | undefined): { tone: 'ok' | 'err' | 'neutral'; text: string } {
+  if (!short) return { tone: 'neutral', text: 'not uploaded' }
+  const bus = short.bus ? `${short.bus.n_ok}/${short.bus.n} buses` : ''
+  const br = short.branches ? `, ${short.branches.n_ok}/${short.branches.n} branches` : ''
+  return { tone: short.pass ? 'ok' : 'err', text: `${short.pass ? 'pass' : 'fail'} — ${bus}${br}` }
+}
+
+function ReadbackSection({ name, status }: { name: string; status: StageStatus }) {
+  const hours = Object.keys(status.bundles).map(Number).sort((a, b) => a - b)
+  return (
+    <PageSection
+      title="PowerFactory read-back"
+      hint="Import a bundle's .raw, run the load flow, export the bus CSV (and the branch CSV) per the runbook, upload them here"
+    >
+      <ul className="flex flex-col gap-2" aria-label="Read-back per hour">
+        {hours.map(hour => <ReadbackRow key={hour} name={name} hour={hour} short={status.readback?.[String(hour)]} />)}
+      </ul>
+    </PageSection>
+  )
+}
+
+function ReadbackRow({ name, hour, short }: { name: string; hour: number; short: ReadbackShort | undefined }) {
+  const qc = useQueryClient()
+  const busRef = useRef<HTMLInputElement>(null)
+  const branchRef = useRef<HTMLInputElement>(null)
+  const [figure, setFigure] = useState<FigureName | null>(null)
+  const v = verdict(short)
+
+  const upload = useMutation({
+    mutationFn: () => {
+      const bus = busRef.current?.files?.[0]
+      if (!bus) throw new Error('Choose the PowerFactory bus CSV first')
+      return gridspineApi.uploadReadback(name, hour, bus, branchRef.current?.files?.[0] ?? null)
+    },
+    onSuccess: (summary) => {
+      qc.invalidateQueries({ queryKey: STATUS_KEY(name) })
+      qc.invalidateQueries({ queryKey: ['gridspine', 'figure', name, hour] })
+      toast.success(summary.pass ? `Hour ${hour}: PowerFactory agrees within the gate` : `Hour ${hour}: outside the gate — see the table`)
+    },
+    onError: (e) => toast.error(`Read-back failed: ${errorText(e)}`),
+  })
+
+  const fig = useQuery({
+    queryKey: FIGURE_KEY(name, hour, figure ?? 'vm'),
+    queryFn: () => gridspineApi.figure(name, hour, figure ?? 'vm'),
+    enabled: figure != null,
+    retry: false,
+  })
+
+  return (
+    <li className="flex flex-col gap-1.5 text-[12px]" data-testid={`readback-${hour}`}>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-mono w-[60px]">h{hour}</span>
+        <Tag tone={v.tone}>{v.text}</Tag>
+        <input ref={busRef} type="file" accept=".csv,text/csv" aria-label={`PowerFactory bus CSV for hour ${hour}`} className="text-[11px]" />
+        <input ref={branchRef} type="file" accept=".csv,text/csv" aria-label={`PowerFactory branch CSV for hour ${hour} (optional)`} className="text-[11px]" />
+        <Btn onClick={() => upload.mutate()} disabled={upload.isPending} title="Compare with this bundle's load flow">
+          <Upload size={12} /> Upload
+        </Btn>
+        {short && (
+          <select
+            className="px-2 py-1 text-[11px] border border-border rounded"
+            aria-label={`Comparison for hour ${hour}`}
+            value={figure ?? ''}
+            onChange={e => setFigure((e.target.value || null) as FigureName | null)}
+          >
+            <option value="">Show comparison…</option>
+            {(Object.keys(FIGURE_LABEL) as FigureName[]).map(f => <option key={f} value={f}>{FIGURE_LABEL[f]}</option>)}
+          </select>
+        )}
+      </div>
+      {figure && fig.data && (
+        fig.data.available && fig.data.rows ? (
+          <div className="overflow-x-auto" data-testid={`figure-${hour}`}>
+            <table className="text-[11px]">
+              <thead className="text-muted text-left">
+                <tr><th className="pr-3">Element</th><th className="pr-3 text-right">pandapower</th><th className="pr-3 text-right">PowerFactory</th><th className="pr-3 text-right">error</th><th></th></tr>
+              </thead>
+              <tbody>
+                {fig.data.rows.map(r => (
+                  <tr key={r.element} className="border-t border-border">
+                    <td className="pr-3 font-mono">{r.element}</td>
+                    <td className="pr-3 text-right font-mono">{fmt(r.pandapower, 4)}</td>
+                    <td className="pr-3 text-right font-mono">{fmt(r.powerfactory, 4)}</td>
+                    <td className="pr-3 text-right font-mono">{fmt(r.err, 4)}</td>
+                    <td>{r.ok ? <Tag tone="ok">ok</Tag> : <Tag tone="err">out</Tag>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="text-[10.5px] text-muted mt-1">tolerance {Object.entries(fig.data.tolerance ?? {}).map(([k, t]) => `${k} < ${t}`).join(', ')}</p>
+          </div>
+        ) : (
+          <p className="text-[11px] text-muted">{fig.data.reason}</p>
+        )
+      )}
+    </li>
   )
 }
 

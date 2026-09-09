@@ -7,7 +7,7 @@
 // no open project, and a capacity-expansion project's 409 — render as guidance
 // rather than as an error toast per poll.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, cleanup, waitFor } from '@testing-library/react'
+import { render, screen, cleanup, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Ledger, RankedSnapshot, StageStatus, StudyConfig } from '../api/gridspine'
@@ -37,6 +37,9 @@ const api = vi.hoisted(() => ({
   bundle: vi.fn(),
   config: vi.fn(),
   updateConfig: vi.fn(),
+  uploadReadback: vi.fn(),
+  readback: vi.fn(),
+  figure: vi.fn(),
 }))
 const projectsList = vi.hoisted(() => vi.fn())
 vi.mock('../api/projects', async () => {
@@ -230,6 +233,44 @@ describe('GridspinePanel', () => {
     renderPanel()
     expect((await screen.findByTestId('dispatch-source-current')).textContent).toContain('the solved network of Solved 39')
     expect((screen.getByLabelText('Dispatch source') as HTMLSelectElement).value).toBe('from_project')
+  })
+
+  it('shows a read-back row per bundle hour with the recorded verdict, and uploads a CSV for one hour', async () => {
+    api.status.mockResolvedValue({
+      ...completed,
+      readback: { '7': { pass: false, bus: { n: 39, n_ok: 38 }, branches: null } },
+    })
+    api.uploadReadback.mockResolvedValue({ hour: 19, pass: true })
+    renderPanel()
+    const h7 = await screen.findByTestId('readback-7')
+    expect(h7.textContent).toContain('fail — 38/39 buses')
+    const h19 = screen.getByTestId('readback-19')
+    expect(h19.textContent).toContain('not uploaded')
+    const file = new File(['bus_name,vm_pu,va_degree\n'], 'case39_h19.csv', { type: 'text/csv' })
+    await userEvent.upload(screen.getByLabelText('PowerFactory bus CSV for hour 19'), file)
+    await userEvent.click(within(h19).getByRole('button', { name: /upload/i }))
+    await waitFor(() => expect(api.uploadReadback).toHaveBeenCalledWith('Study A', 19, file, null))
+    expect(api.uploadReadback).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders one comparison as a per-element table when asked', async () => {
+    api.status.mockResolvedValue({
+      ...completed,
+      readback: { '7': { pass: true, bus: { n: 39, n_ok: 39 }, branches: { n: 46, n_ok: 46 } } },
+    })
+    api.figure.mockResolvedValue({
+      available: true, name: 'vm', hour: 7, tolerance: { vm_rel_err: 0.01 },
+      rows: [{ element: 'BUS_02', pandapower: 0.985, powerfactory: 0.9846, err: 0.0004, ok: true }],
+    })
+    renderPanel()
+    const h7 = await screen.findByTestId('readback-7')
+    expect(h7.textContent).toContain('pass — 39/39 buses, 46/46 branches')
+    await userEvent.selectOptions(within(h7).getByLabelText('Comparison for hour 7'), 'vm')
+    const table = await screen.findByTestId('figure-7')
+    expect(api.figure).toHaveBeenCalledWith('Study A', 7, 'vm')
+    expect(table.textContent).toContain('BUS_02')
+    expect(table.textContent).toContain('0.9846')
+    expect(table.textContent).toContain('vm_rel_err < 0.01')
   })
 
   it('asks for a project when none is open', () => {

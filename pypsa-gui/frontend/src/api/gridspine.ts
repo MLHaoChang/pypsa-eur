@@ -55,6 +55,13 @@ export type StudyConfigPatch = Partial<Pick<StudyConfig,
 
 export interface StageError { stage: string; cause: string; element_ids: string[] }
 
+/** The short form of a read-back, per bundle hour, carried by the status. */
+export interface ReadbackShort {
+  pass: boolean
+  bus: { n: number; n_ok: number } | null
+  branches: { n: number; n_ok: number } | null
+}
+
 export interface StageStatus {
   status: StudyStatus
   resumable: boolean
@@ -63,6 +70,31 @@ export interface StageStatus {
   converged_hours: number[]
   bundles: Record<string, string>
   stages: Record<StageName, { state: StageState; done: number; total: number }>
+  // Spec stage 6 (increment 6): hours whose PowerFactory export has been read
+  // back, with the verdict. Absent on a status written before the field.
+  readback?: Record<string, ReadbackShort>
+}
+
+/** `readback.json`, as the backend returns it per hour. */
+export interface ReadbackSummary {
+  hour: number
+  pass: boolean
+  bus: { n: number; n_ok: number; max_vm_rel_err: number; max_va_abs_err_deg: number; worst: string; pass: boolean }
+  branches: { n: number; n_ok: number; max_p_rel_err: number; max_q_abs_err_mvar: number; worst: string[]; pass: boolean } | null
+  tolerances: { bus: Record<string, number>; branches: Record<string, number> }
+  sources: { bus_csv: { filename: string; sha256: string; bytes: number } | null; branch_csv: { filename: string; sha256: string; bytes: number } | null }
+  at: string
+}
+
+export type FigureName = 'vm' | 'va' | 'branch_p' | 'branch_q'
+
+export interface ReadbackFigure {
+  available: boolean
+  name: FigureName
+  hour: number
+  reason?: string
+  tolerance?: Record<string, number>
+  rows?: { element: string; pandapower: number; powerfactory: number; err: number; ok: boolean }[]
 }
 
 export interface RankedSnapshot {
@@ -151,6 +183,21 @@ export const gridspineApi = {
       { value, source, edited_by: 'user' },
       quiet,
     ).then(r => r.data),
+
+  /** Upload the engineer's PowerFactory export for one bundle hour: the bus
+   *  CSV is required, the branch CSV optional (spec stage 6). */
+  uploadReadback: (project: string, hour: number, bus: File, branches?: File | null) => {
+    const fd = new FormData()
+    fd.append('bus', bus)
+    if (branches) fd.append('branches', branches)
+    return client.post<ReadbackSummary>(`/gridspine/${encodeURIComponent(project)}/readback/${hour}`, fd, quiet).then(r => r.data)
+  },
+
+  readback: (project: string) =>
+    client.get<Record<string, ReadbackSummary>>(`/gridspine/${encodeURIComponent(project)}/readback`, quiet).then(r => r.data),
+
+  figure: (project: string, hour: number, name: FigureName) =>
+    client.get<ReadbackFigure>(`/gridspine/${encodeURIComponent(project)}/figures/${hour}/${name}`, quiet).then(r => r.data),
 
   /** The handoff bundle for one selected hour, as a zip blob. */
   bundle: (project: string, hour: number) =>
