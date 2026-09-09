@@ -260,3 +260,22 @@ and API trees with `tsc` clean.
 What remains open from this review is F5 (a clamped met run spends one
 redundant solve, bounded by the controller's own plan-hash check) and F9
 above.
+
+## 10. Full-suite parity on the merge candidate
+
+The branch's parity claim was last proven at `177c9a4`. Three commits touched
+backend source after it (`60c4106`, `210eb09`, `c2915cf`), so it was re-proven
+on the head that would actually merge, `42c24c0`:
+
+| | result |
+|---|---|
+| backend, whole suite | **3309 passed, 43 failed, 19 skipped** (27 min) |
+| the 43 | byte-identical to pristine `master`'s baseline — `branch − master` and `master − branch` are **both empty** |
+| frontend | **922 passed** across 96 files |
+| `tsc --noEmit` | clean |
+
+The 43 are the environmental set characterised in
+`2026-09-08-baseline-failures-characterised.md` (39 environmental, 4 the
+pandas-3 unpickler); none is introduced or masked by this branch. The passing
+count rose from 3285 to 3309 with the 24 tests the minors and this review's
+fixes added.
