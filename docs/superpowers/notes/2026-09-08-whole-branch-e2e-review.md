@@ -1,6 +1,6 @@
 # Whole-branch end-to-end review — `claude/solution-fmea-integration-0mx5lc` @ 81bdf53 vs master 07b32c2
 
-**Status:** review complete; NO code changed by this review; 7 SERIOUS, 14 MINOR, 8 notes, all reproduced. Findings below are
+**Status:** review complete; 7 SERIOUS, 14 MINOR, 8 notes, all reproduced. **The seven SERIOUS findings are FIXED** (§6, seven commits `b6800b7..177c9a4`), each fix reviewed as shipped code in two passes and the gaps those passes found closed. M1, M8, M12, U2 and one note are closed with them; the remaining minors and notes stand as recorded. Findings below are
 every one reproduced by a script or probe test named in the table, then read
 against the code. Nothing here was accepted on a reviewer's word.
 
@@ -173,3 +173,68 @@ The four reports, their scripts, captured payloads and probe tests are in the
 session scratch directory (`e2e_review/agent{A,B,C,D}/`) and are not
 committed; every claim in §2 carries the script that produced it and was
 re-run by me.
+
+## 6. The fixes — and what reviewing them found
+
+Built in the order §4 recommended, one commit per finding, every fix with a
+test demonstrated red against the named removal and the source restored by
+saved copy and verified by hash; then reviewed as shipped code, twice.
+
+| finding | commit | what ships | tests / bites |
+|---|---|---|---|
+| S4, S2, S3, M1 | `b6800b7` | One predicate for the study mesh (`_study_mesh_blocker`: the other studies, then `_solver_in_flight()` — the status string is gone), called early and again INSIDE the publish hold (`_publish_study`); `/run` and `/run_ac_pf` re-check the mesh inside their claim; a `start()` that raises rolls the record back. Three existing mesh tests had pinned the status-string shape with no worker thread and now park a live thread. | 9 tests; 4 bites |
+| S1 | `be449eb` | `OutageRate = Annotated[float, Field(ge=0, lt=1, allow_inf_nan=False)]` on all five schemas; the same 422 in `PATCH /_bulk`; `fleet_and_residual` raises `OutageRateError` naming the unit before any unit is built (so `/copt`, `/mc`, both loops answer 422); `build_copt` refuses a bad `q`; the margin marks a rate outside [0, 1) unpriceable. Correction to §2.1 S1: through the network a NaN rate is "unset" (resolver `_is_set`), so the NaN case was reachable only by direct `CoptUnit` construction — closed too. | 61 tests; 4 bites |
+| S5, M12, U2, M8 | `9d44a7c` | `_save_context` refuses with a structured 409 (`error_kind: "study_in_flight"`, the study's sentence) for every caller; the save wrapper refuses BEFORE `create_root`; `activate` refuses the same way; `_evict_if_over_cap` protects a context with a live study; the frontend maps that kind to `'busy-study'` and toasts the sentence in all four switch entry points. | 7 + 4 tests; 5 bites |
+| S6 | `9959394` | `Finite` on every study request float; the frontier refuses a non-positive or non-finite target before publishing. | 12 tests; 2 bites |
+| S7 | `99733a9` | Both sidecars in `_BUNDLE_FILES`; every loop tolerates absence, so an older bundle or snapshot still imports. | 5 tests; 1 bite |
+
+**Verification on the fixed head.** Full backend suite 3285 passed / 43
+failed — the failure set identical to master's 43 in both directions; frontend
+910/910 and tsc clean; the 17 branch-added live suites 74 pass / 0 fail / 1
+fixture-shape skip, as before the fixes.
+
+**The fix review, first pass** (an adversarial reviewer over `20835e4..99733a9`,
+every finding reproduced, all 32 of the original concurrency probes re-run
+green) confirmed S1, S2, S4, S6 and S7 closed and found three things:
+
+- F1 — the S1 refusal was caught by `/copt`, `/mc` and both loops and NOT by
+  `GET /results/mc/elcc_candidates`, which let `OutageRateError` out as a 500.
+  A new defect from the fix.
+- F2 — S5 only narrowed: the save gate ran before `_save_context` took
+  `ctx.mutation_lock` and shared no lock with the study publish, so a save
+  that had passed its gate could export a network a sweep had meanwhile begun
+  mutating lock-free — measured as the study's `p_nom` on disk as the user's
+  project.
+- F3 — S3 only narrowed: `POST /simulation/queue`, the Run button's real path,
+  had no study gate; the dispatcher claimed the resident context and re-solved
+  the network a live study was measuring, failing only at its post-solve save.
+
+`5f6f4c9`: the candidates route answers 422; `_save_context` re-checks the
+study INSIDE the mutation lock and `_publish_study` takes that same lock
+outside the state lock, so a study publishes either before a save has begun
+exporting or after it has finished; the enqueue route and the dispatcher
+refuse a live study. Six tests. **My first F2 test did not bite** — its
+harness held the save before the pre-lock gate, which caught the study either
+way — and was rewritten into the two windows the review had measured, each
+now red against its own removal.
+
+**Second pass** (over `5f6f4c9`, plus the reviewer's own re-baselined bites
+of every earlier fix, all red): a lock audit found no order inversion or
+deadlock (mutation-outer, state-inner everywhere; both RLocks); and two more
+things. The dispatcher's study check and its claim were two acquisitions of
+the state RLock — the comment said "the same hold" and it was not — and a
+study POST landing between them was admitted and then solved over (probe P7).
+And the quiet-toast change was a no-op: the interceptor keyed on a top-level
+`code` that only the middleware 409 carries, while the save's structured 409
+carries `detail.error_kind`, so the autosave and the pre-switch save still
+toasted the study sentence — and, it turned out, the pre-existing
+solver-in-flight one too. `177c9a4`: check and claim under one hold (a test
+parks the dispatcher before its second acquisition); the interceptor reads
+either field; `_publish_study`'s mutation-lock acquire is bounded at 5 s and
+answers 409 rather than waiting out a solve; the snapshot-restore docstring
+states that a snapshot predating the sidecars leaves the live worksheet in
+place.
+
+**Final verdicts:** S1–S7 closed; F1–F3 and the second pass's two findings
+closed; M1, M8, M12, U2 closed. Still open, as recorded: M2–M7, M9–M11, M13,
+M14, N1–N8 (none user-reachable silent defects; each has its fix in §2.2).
