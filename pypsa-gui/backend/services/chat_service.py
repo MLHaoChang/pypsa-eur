@@ -2631,6 +2631,73 @@ def _run_turn_body(
             return
 
 
+def _confirm_destructive_tool(
+    session: ChatSession,
+    *,
+    tool_use_id: str,
+    tool_name: str,
+    args: dict[str, Any],
+    tier: str,
+    tool_results_collector: list[dict[str, Any]],
+) -> Generator[tuple[str, dict[str, Any]], None, bool]:
+    """
+    Gate a destructive tool on the user's confirmation. Returns whether to
+    proceed.
+
+    Yields `tool_pending_confirmation` (carrying the token and TTL), BLOCKS on
+    the decision, and on anything but approval emits `tool_error` and pairs an
+    `is_error` result for this `tool_use_id`. That pairing is not optional:
+    Anthropic requires one result per `tool_use`, and a gap surfaces on the NEXT
+    turn as an SDK 400 rather than as a permissions problem.
+
+    Returning False aborts THIS tool, not the turn — the turn loop carries on
+    with the remaining tool calls.
+
+    Not every destructive tool is gated: `AUTO_APPROVE_TIERS` exempts some, and
+    dropping either half of `tier in DESTRUCTIVE_TIERS and tier not in
+    AUTO_APPROVE_TIERS` fails in a different direction — one blocks exempt tools
+    on a prompt nobody sent, the other runs destructive tools unprompted.
+
+    Phase E of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`;
+    see `tests/test_chat_confirmation_gate_seam.py`.
+    """
+    if tier in DESTRUCTIVE_TIERS and tier not in AUTO_APPROVE_TIERS:
+        pc = session.issue_confirmation(
+            tool_name=tool_name, args=args, safety_tier=tier,
+        )
+        yield "tool_pending_confirmation", {
+            "tool_use_id": tool_use_id,
+            "tool_name": tool_name,
+            "args": args,
+            "safety_tier": tier,
+            "confirmation_token": pc.token,
+            "ttl_seconds": CONFIRMATION_TTL_SECONDS,
+        }
+        decision = session.wait_for_decision(pc.token)
+        if decision != "approve":
+            error_kind = {
+                "deny": "confirmation_denied",
+                "expired": "confirmation_expired",
+                "aborted": "aborted",
+            }.get(decision, "unknown_decision")
+            yield "tool_error", {
+                "tool_use_id": tool_use_id,
+                "tool_name": tool_name,
+                "error_kind": error_kind,
+                "message": f"{decision} on confirmation for {tool_name!r}",
+            }
+            tool_results_collector.append({
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "is_error": True,
+                "content": error_kind,
+            })
+            return False
+    return True
+
+
+
+
 def _dispatch_real_tool_call(
     session: ChatSession,
     tu: dict[str, Any],
@@ -2712,38 +2779,16 @@ def _dispatch_real_tool_call(
     # monkeypatches it) and defaults empty → existing confirmation behaviour.
     # The M7 parallel-destructive pre-scan is upstream of this and is NOT
     # relaxed — auto-approve drops the human round-trip, not the serialisation.
-    if tier in DESTRUCTIVE_TIERS and tier not in AUTO_APPROVE_TIERS:
-        pc = session.issue_confirmation(
-            tool_name=tool_name, args=args, safety_tier=tier,
-        )
-        yield "tool_pending_confirmation", {
-            "tool_use_id": tool_use_id,
-            "tool_name": tool_name,
-            "args": args,
-            "safety_tier": tier,
-            "confirmation_token": pc.token,
-            "ttl_seconds": CONFIRMATION_TTL_SECONDS,
-        }
-        decision = session.wait_for_decision(pc.token)
-        if decision != "approve":
-            error_kind = {
-                "deny": "confirmation_denied",
-                "expired": "confirmation_expired",
-                "aborted": "aborted",
-            }.get(decision, "unknown_decision")
-            yield "tool_error", {
-                "tool_use_id": tool_use_id,
-                "tool_name": tool_name,
-                "error_kind": error_kind,
-                "message": f"{decision} on confirmation for {tool_name!r}",
-            }
-            tool_results_collector.append({
-                "type": "tool_result",
-                "tool_use_id": tool_use_id,
-                "is_error": True,
-                "content": error_kind,
-            })
-            return
+    approved = yield from _confirm_destructive_tool(
+        session,
+        tool_use_id=tool_use_id,
+        tool_name=tool_name,
+        args=args,
+        tier=tier,
+        tool_results_collector=tool_results_collector,
+    )
+    if not approved:
+        return
 
     yield "tool_running", {"tool_use_id": tool_use_id, "tool_name": tool_name}
 

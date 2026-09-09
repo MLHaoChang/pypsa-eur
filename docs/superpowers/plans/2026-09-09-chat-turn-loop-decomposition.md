@@ -3,7 +3,9 @@
 **Target:** `pypsa-gui/backend/services/chat_service.py` — specifically
 `_run_turn_body` (566 lines) and `_dispatch_real_tool_call` (292 lines).
 
-**Status:** specced 2026-09-09. Not started.
+**Status:** Phases 0, A, B, C, D done; Phase E's confirmation gate done, its
+result-shaping join still open. `_run_turn_body` 566 -> 289 lines,
+`_dispatch_real_tool_call` 292 -> 270.
 
 **Why this and not "the next three god files":** the backend god-file
 decomposition (`docs/superpowers/plans/2026-09-04-backend-god-file-decomposition.md`)
@@ -229,3 +231,58 @@ show up as a permissions bug, not a refactor bug.
 4. Recording identical; the 521 chat tests' failing set unchanged; full backend
    suite's failing set unchanged; the 19 QA drivers pass.
 5. Mutation-test each new guard.
+
+---
+
+# Where this stands, 2026-09-09
+
+| phase | seam | `_run_turn_body` after |
+|---|---|---:|
+| 0 | the frame recording (instrument, no production code) | 566 |
+| A | `_build_user_content` | 474 |
+| B | `_turn_budget_block` | 451 |
+| C | `_dispatch_tool_uses` + `_ToolDispatchOutcome` | 394 |
+| D | `_stream_assistant_message` + `_StreamOutcome` | 289 |
+| E (part) | `_confirm_destructive_tool` (from `_dispatch_real_tool_call`, 292 -> 270) | 289 |
+
+## Still open
+
+**Phase E's second join — result shaping** (~50 lines in
+`_dispatch_real_tool_call`): the `_ui_event` extraction, `result_for_model`, the
+`push_result_ref`, the `tool_result` frame and the char-budget application. Less
+valuable than the gate — most of its length is one dict literal rather than
+branching — which is why it went second and is not done.
+
+## What the phases actually taught
+
+Three things, none of which was in the plan.
+
+**The frame recording is a floor, not a proof.** Phase C's extraction lost
+`PyPSAService` — imported in `_run_turn_body`'s BODY, so the name was a local the
+new function did not have — and the recording passed, because none of its five
+scenarios rebinds a project. Only the phase's own guard caught it. A contract
+recording tells you the paths it covers are unchanged; it says nothing about the
+paths it does not.
+
+**A mutation that changes nothing looks exactly like a test that checks
+nothing.** This happened three times, for two different reasons, and the
+distinction matters both times:
+
+* Phase C: three of four `sed` patterns carried the pre-extraction indentation
+  and matched nothing. Three tests looked vacuous and were not. Confirm the edit
+  landed before reading the result.
+* Phase D: resetting `model_fallback_used` left its guard passing — because the
+  flag is redundant with the `session.model == OPUS_MODEL` check beside it. The
+  test was right; the code has two guards where one suffices. Recorded in
+  `docs/superpowers/findings/2026-09-09-chat-stream-loop-two-vestigial-guards.md`.
+* Phase E: deleting the `AUTO_APPROVE_TIERS` exemption changed nothing because
+  that set is EMPTY by default (an operator opt-in via
+  `PYPSA_GUI_CHAT_AUTO_APPROVE_TIERS`), and the test skipped rather than setting
+  it. That one was a real hole in the guard, and it is fixed: the test
+  monkeypatches the set, which the module's own comment invites.
+
+**Every cut so far returned a value rather than a tuple or a mutated frame.**
+`(user_content, abort_frames)`, `_ToolDispatchOutcome`, `_StreamOutcome`, a bare
+`bool`. That was not a style decision at the start; it is what fell out of the
+constraint that a generator cannot end its caller's turn. Worth stating for the
+next phase.
