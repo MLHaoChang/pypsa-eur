@@ -216,3 +216,47 @@ Plus nine NITs in the report (a vacuous final assertion in one new test, a stale
 comment after M5, the blank-basis spelling tuple now written in three files, an
 import placement, no frontend test for M10, and a folded-to-zero unit still
 offered as a 0 MW ELCC candidate).
+
+## 9. The rest of the findings closed
+
+`c2915cf` closes F2, F3, F4, F6, F7 and F8. Every fix has a test demonstrated
+red against the named removal, and the source file was restored byte-identical
+(sha256) after each bite.
+
+| # | Fix | Test |
+|---|---|---|
+| **F2** | The component's time-varying INPUT columns are carried across `_update_component`'s remove+add and put back under the OLD name, so the rename below re-keys them with everything else that refers to the component. Outputs are deliberately not carried — an edit invalidates the solve, and one component holding stale dispatch the rest of the network no longer has is a worse answer than none. | `test_review_ieee39.py`: a full-row PUT, a one-field edit, and the residual the engines build being identical either side. Bite: `saved_series = []` → the fixture's EUE goes 4.89 → 0.0. |
+| **F6** | Both branches of the membership walk clip availability at 0 — the static cell and the column alike. | Residual 100 for a demand of 100 on each shape. Bite: unclamp → 350. |
+| **F7** | `availability_may_include_outages` names a static in `[0, 1)` only. | `neg` absent, `half` present. Bite: drop the lower bound → both named. |
+| **F8** | `rate_zero_units` on `/copt` and `/mc`, disjoint from `deterministic_units` and from `profile_units`; the chip reads "1 static CF folded · 1 includes outages · 2 rate 0" and its tooltip gives each reason. | Both routes driven; bite: drop either list → `KeyError`. |
+| **F3** | The record carries the `reserve_margin` the sweep ran under (null when none), and a flat curve says so — naming the standard already covering every swept target instead of claiming every step still pays. | Backend: the field, set and null. Frontend: `curveIsFlat` plus the message. Bite: drop the field → `KeyError`. |
+| **F4** | The panel maps the borrowed vocabulary: `system_cap` → "reserve margin", `voll` → "not binding". The wire is unchanged, so the controller's plateau pre-test and the two tests that pin it still hold. | `bindingLabel` unit test plus the row assertion, which used to pin the raw `voll`. |
+
+**A new finding, pinned rather than fixed — F9.** Renaming any NON-Bus
+component through the update route raises `KeyError` on pypsa 1.3.0:
+`rename_component_names` derives the cross-reference column from the renamed
+class (`generator`, `load`, `line`) and then indexes EVERY component's static
+frame with it, so the first frame without that column raises. Verified on bare
+PyPSA: Generator, Load and Line renames all raise; a Bus rename succeeds,
+because `bus` is a column the frames that refer to it actually have. That call
+is on master too, so renaming a generator from the Properties panel is a 500
+today, before any of this branch's code runs. It is pinned as a known defect
+(`test_renaming_a_non_bus_component_is_a_500_on_pypsa_1_3`) so that fixing it
+— in PyPSA, or by re-pointing dependents here — fails the test and says so.
+
+**Live re-run**, IEEE 39-bus base network, the same edit that produced F2:
+
+| | before | after |
+|---|---|---|
+| COPT after a full-row PUT of `W16` | LOLE 0.319 h, EUE 98 MWh | LOLE 0.831 h, EUE 292 MWh — unchanged by the edit |
+| `W16` ELCC candidate | 500.0 MW (nameplate) | 306.3 MW (its profile's peak) |
+| preflight after the edit | 1 error, `reserve_margin_unpriceable_assets` | ok, 0 errors |
+| next solve | `validation_failed` | `completed` |
+
+Regression: 850 backend tests over every adequacy, review, validation and
+editor suite the fixes touch; frontend 456 tests across the results, layout
+and API trees with `tsc` clean.
+
+What remains open from this review is F5 (a clamped met run spends one
+redundant solve, bounded by the controller's own plan-hash check) and F9
+above.
