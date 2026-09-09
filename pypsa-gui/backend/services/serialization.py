@@ -139,6 +139,32 @@ def slice_ts(
     }
 
 
+def wants_slice(from_: int | None, to_: int | None) -> bool:
+    """
+    True when the caller actually asked for a `from`/`to` window.
+
+    Deliberately `isinstance(x, int)`, not `x is None` / `x is not None`:
+    when a route function decorated with a `Query(None, ...)` default is
+    called directly as plain Python — bypassing FastAPI's request handling,
+    which is the only place that actually resolves the query string into an
+    int-or-None — the unset parameter's value is the `fastapi.params.Query`
+    sentinel object itself, not `None`. `x is not None` is then True for a
+    bound the caller never supplied, and `_slice_ts` chokes on a non-int
+    bound. `tests/test_compare_cross_surface.py` calls
+    `get_prices`/`get_curtailment` exactly this way; nothing calls one of
+    the `_serve_ts`-backed endpoints directly today, but the guard is kept
+    identical across every call site on purpose — a reader who "fixes" one
+    back to `is not None` because it looks simpler must not have a second,
+    correct form to copy from.
+
+    When both bounds are absent, the caller should leave `range_meta` as
+    `None` so the payload stays byte-identical to the pre-range response —
+    that is what keeps every consumer that has not been converted to ask
+    for a slice working unchanged.
+    """
+    return isinstance(from_, int) or isinstance(to_, int)
+
+
 def df_to_json(df: pd.DataFrame) -> list[dict]:
     """Static component / statistics DataFrame → list of NaN-safe row dicts."""
     out = df.reset_index()
