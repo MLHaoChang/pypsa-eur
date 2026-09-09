@@ -17,8 +17,9 @@ import { Download, Play, RefreshCw, FlaskConical } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   gridspineApi, isNotAStudy, STAGES,
-  type RankedSnapshot, type StageState, type StageStatus, type StudyConfig, type StudyConfigPatch,
+  type DispatchSource, type RankedSnapshot, type StageState, type StageStatus, type StudyConfig, type StudyConfigPatch,
 } from '../api/gridspine'
+import { projectsApi } from '../api/projects'
 import { formatApiDetail } from '../api/client'
 import { useUIStore } from '../store/uiStore'
 import { useSolveQueue, activeJobForProject, QUEUE_KEY } from '../hooks/useSolveQueue'
@@ -119,13 +120,6 @@ function StudyView({ name }: { name: string }) {
     onError: (e) => toast.error(`Could not start the study: ${errorText(e)}`),
   })
 
-  const [fromDispatch, setFromDispatch] = useState('')
-  const source = useMutation({
-    mutationFn: () => gridspineApi.setDispatchSource(name, fromDispatch.trim() || null),
-    onSuccess: (cfg) => toast.success(cfg.from_dispatch ? `Will reuse the dispatch in ${cfg.from_dispatch}` : 'Will generate the dispatch'),
-    onError: (e) => toast.error(errorText(e)),
-  })
-
   if (notAStudy) {
     return (
       <PageBody>
@@ -181,20 +175,13 @@ function StudyView({ name }: { name: string }) {
         />
       )}
 
-      <PageSection title="Dispatch source" hint="Applies to the next run">
-        <div className="flex items-end gap-2">
-          <Field label="Reuse a finished study's dispatch (directory), or leave empty to generate it">
-            <input
-              className="px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 font-mono w-[420px]"
-              value={fromDispatch}
-              onChange={e => setFromDispatch(e.target.value)}
-              placeholder="e.g. /path/to/other-study/gridspine/run"
-              aria-label="Dispatch source directory"
-            />
-          </Field>
-          <Btn onClick={() => source.mutate()} disabled={source.isPending}>Apply</Btn>
-        </div>
-      </PageSection>
+      {config.data && (
+        <DispatchSourcePicker
+          name={name}
+          config={config.data}
+          locked={activeJob != null || status.data?.status === 'running'}
+        />
+      )}
 
       {done && (
         <PageSection
@@ -240,6 +227,110 @@ function StudyView({ name }: { name: string }) {
         </p>
       </PageSection>
     </PageBody>
+  )
+}
+
+// Where the next run's dispatch comes from (increment 5, D3 added the third
+// option). Three sources, one at a time: generate it here (case39 + the
+// rolling unit commitment), reuse a finished study's tables, or study the
+// SOLVED network of one of the user's own projects — the flow the product is
+// for: solve a capacity-expansion project, save it, study its dispatch. The
+// project list is the ordinary projects query; studies are not offered (a
+// study has no network) and an unsolved project is shown but not selectable,
+// with the reason, because the backend would refuse it with the same reason.
+type SourceKind = DispatchSource['kind']
+
+const INPUT = 'px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
+
+function currentSourceKind(config: StudyConfig): SourceKind {
+  if (config.from_network) return 'from_project'
+  if (config.from_dispatch) return 'from_dispatch'
+  return 'generate'
+}
+
+function describeSource(config: StudyConfig): string {
+  if (config.from_network) return `the solved network of ${config.from_project ?? config.from_network}`
+  if (config.from_dispatch) return `the dispatch in ${config.from_dispatch}`
+  return 'generated here (IEEE 39-bus, rolling unit commitment)'
+}
+
+function DispatchSourcePicker({ name, config, locked }: { name: string; config: StudyConfig; locked: boolean }) {
+  const qc = useQueryClient()
+  const [kind, setKind] = useState<SourceKind | null>(null)
+  const [dir, setDir] = useState(config.from_dispatch ?? '')
+  const [project, setProject] = useState(config.from_project ?? '')
+  const mode: SourceKind = kind ?? currentSourceKind(config)
+
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => projectsApi.list(), enabled: mode === 'from_project' })
+  const candidates = (projects.data ?? []).filter(p => p.project_kind !== 'planning_dynamics' && p.name !== name)
+
+  const source: DispatchSource | null =
+    mode === 'generate' ? { kind: 'generate' }
+    : mode === 'from_dispatch' ? (dir.trim() ? { kind: 'from_dispatch', dir: dir.trim() } : null)
+    : (project ? { kind: 'from_project', project } : null)
+
+  const apply = useMutation({
+    mutationFn: (s: DispatchSource) => gridspineApi.setDispatchSource(name, s),
+    onSuccess: (cfg) => {
+      qc.setQueryData(CONFIG_KEY(name), cfg)
+      setKind(null)
+      toast.success(`Dispatch source: ${describeSource(cfg)}`)
+    },
+    onError: (e) => toast.error(errorText(e)),
+  })
+
+  return (
+    <PageSection title="Dispatch source" hint={locked ? 'Locked while the study is queued or running' : 'Applies to the next run'}>
+      <p className="text-[11px] text-muted mb-2" data-testid="dispatch-source-current">
+        Current: {describeSource(config)}
+      </p>
+      <div className="flex flex-wrap items-end gap-2">
+        <Field label="Source">
+          <select
+            className={`${INPUT} w-[260px]`}
+            value={mode}
+            disabled={locked}
+            aria-label="Dispatch source"
+            onChange={e => setKind(e.target.value as SourceKind)}
+          >
+            <option value="generate">Generate here (unit commitment)</option>
+            <option value="from_project">A solved project's network</option>
+            <option value="from_dispatch">A finished study's directory</option>
+          </select>
+        </Field>
+        {mode === 'from_dispatch' && (
+          <Field label="Study directory (holding dispatch.csv and loads.csv)">
+            <input
+              className={`${INPUT} font-mono w-[380px]`}
+              value={dir}
+              disabled={locked}
+              onChange={e => setDir(e.target.value)}
+              placeholder="e.g. /path/to/other-study/gridspine/run"
+              aria-label="Dispatch source directory"
+            />
+          </Field>
+        )}
+        {mode === 'from_project' && (
+          <Field label="Project (solved and saved; generators must be the IEEE 39-bus units)">
+            <select
+              className={`${INPUT} w-[300px]`}
+              value={project}
+              disabled={locked}
+              aria-label="Source project"
+              onChange={e => setProject(e.target.value)}
+            >
+              <option value="">{projects.isLoading ? 'Loading projects…' : 'Choose a project'}</option>
+              {candidates.map(p => (
+                <option key={p.name} value={p.name} disabled={p.objective == null}>
+                  {p.name}{p.objective == null ? ' (not solved yet)' : ''}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+        <Btn onClick={() => source && apply.mutate(source)} disabled={locked || !source || apply.isPending}>Apply</Btn>
+      </div>
+    </PageSection>
   )
 }
 

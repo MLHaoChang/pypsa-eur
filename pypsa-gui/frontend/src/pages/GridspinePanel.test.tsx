@@ -38,6 +38,12 @@ const api = vi.hoisted(() => ({
   config: vi.fn(),
   updateConfig: vi.fn(),
 }))
+const projectsList = vi.hoisted(() => vi.fn())
+vi.mock('../api/projects', async () => {
+  const real = await vi.importActual<typeof import('../api/projects')>('../api/projects')
+  return { ...real, projectsApi: { ...real.projectsApi, list: projectsList } }
+})
+
 vi.mock('../api/gridspine', async () => {
   const real = await vi.importActual<typeof import('../api/gridspine')>('../api/gridspine')
   return { ...real, gridspineApi: api }
@@ -70,7 +76,13 @@ const ledger: Ledger = {
 
 const config: StudyConfig = {
   hours: 8760, k: 5, window: 168, overlap: 24, screen: true, n2_prune_threshold_pct: 0, from_dispatch: null,
+  from_network: null, from_project: null,
 }
+
+const project = (name: string, extra: Record<string, unknown> = {}) => ({
+  id: name, name, created_at: '2026-09-01T00:00:00Z', has_solver_config: false,
+  bus_count: 39, snapshot_count: 24, objective: 1.0, parent_project: null, ...extra,
+})
 
 function renderPanel() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -82,6 +94,18 @@ beforeEach(() => {
   queue.activeJob = undefined
   vi.clearAllMocks()
   api.config.mockResolvedValue(config)
+  api.setDispatchSource.mockImplementation(async (_p: string, s: { kind: string; project?: string; dir?: string }) => ({
+    ...config,
+    from_network: s.kind === 'from_project' ? `/projects/${s.project}/network.nc` : null,
+    from_project: s.kind === 'from_project' ? s.project : null,
+    from_dispatch: s.kind === 'from_dispatch' ? s.dir : null,
+  }))
+  projectsList.mockResolvedValue([
+    project('Solved 39'),
+    project('Unsolved 39', { objective: null }),
+    project('Another Study', { project_kind: 'planning_dynamics' }),
+    project('Study A', { project_kind: 'planning_dynamics' }),
+  ])
   api.updateConfig.mockImplementation(async (_p: string, patch: Partial<StudyConfig>) => ({ ...config, ...patch }))
   api.status.mockResolvedValue(completed)
   api.snapshots.mockResolvedValue(snapshots)
@@ -178,7 +202,34 @@ describe('GridspinePanel', () => {
     const k = await screen.findByLabelText('k (hours per criterion)') as HTMLInputElement
     expect(k.disabled).toBe(true)
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
-    expect(screen.getByText(/locked while the study is queued or running/i)).toBeTruthy()
+    expect(screen.getAllByText(/locked while the study is queued or running/i).length).toBeGreaterThan(0)
+  })
+
+  it('offers a solved project as the dispatch source, never a study or an unsolved one, and posts the choice', async () => {
+    renderPanel()
+    expect((await screen.findByTestId('dispatch-source-current')).textContent).toContain('generated here')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_project')
+    const picker = await screen.findByLabelText('Source project') as HTMLSelectElement
+    await waitFor(() => expect(projectsList).toHaveBeenCalled())
+    await screen.findByRole('option', { name: 'Solved 39' })
+    const names = Array.from(picker.options).map(o => o.textContent)
+    expect(names).toContain('Solved 39')
+    expect(names).toContain('Unsolved 39 (not solved yet)')
+    expect(names.some(n => n?.includes('Study'))).toBe(false)
+    expect((screen.getByRole('option', { name: 'Unsolved 39 (not solved yet)' }) as HTMLOptionElement).disabled).toBe(true)
+    const apply = screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement
+    expect(apply.disabled).toBe(true)                    // nothing chosen yet
+    await userEvent.selectOptions(picker, 'Solved 39')
+    await userEvent.click(apply)
+    await waitFor(() => expect(api.setDispatchSource).toHaveBeenCalledWith('Study A', { kind: 'from_project', project: 'Solved 39' }))
+    await waitFor(() => expect(screen.getByTestId('dispatch-source-current').textContent).toContain('the solved network of Solved 39'))
+  })
+
+  it('shows the current source by project name when the config already names one', async () => {
+    api.config.mockResolvedValue({ ...config, from_network: '/projects/Solved 39/network.nc', from_project: 'Solved 39' })
+    renderPanel()
+    expect((await screen.findByTestId('dispatch-source-current')).textContent).toContain('the solved network of Solved 39')
+    expect((screen.getByLabelText('Dispatch source') as HTMLSelectElement).value).toBe('from_project')
   })
 
   it('asks for a project when none is open', () => {

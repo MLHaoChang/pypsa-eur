@@ -26,8 +26,26 @@ export interface StudyConfig {
   screen: boolean
   n2_prune_threshold_pct: number
   from_dispatch: string | null
+  // A solved project's saved network.nc as the dispatch source (increment 5,
+  // D3). The backend stores the path and, when it can, names the project.
+  from_network?: string | null
+  from_project?: string | null
   outdir?: string
   templates_overlay?: string | null
+}
+
+/** Where the next run's dispatch comes from — one of three, never two. */
+export type DispatchSource =
+  | { kind: 'generate' }
+  | { kind: 'from_dispatch'; dir: string }
+  | { kind: 'from_project'; project: string }
+
+function dispatchSourceBody(source: DispatchSource) {
+  switch (source.kind) {
+    case 'generate': return { source: 'generate' }
+    case 'from_dispatch': return { source: 'from_dispatch', from_dispatch: source.dir }
+    case 'from_project': return { source: 'from_project', from_project: source.project }
+  }
 }
 
 /** Any subset of the editable config. Present `from_dispatch` (even `null`,
@@ -96,11 +114,9 @@ export const gridspineApi = {
   createStudy: (name: string, config: Partial<StudyConfig>) =>
     client.post<CreateStudyResponse>('/gridspine/projects', { name, config }, quiet).then(r => r.data),
 
-  setDispatchSource: (project: string, fromDispatch: string | null) =>
+  setDispatchSource: (project: string, source: DispatchSource) =>
     client.post<StudyConfig>(
-      `/gridspine/${encodeURIComponent(project)}/dispatch-source`,
-      fromDispatch ? { source: 'from_dispatch', from_dispatch: fromDispatch } : { source: 'generate' },
-      quiet,
+      `/gridspine/${encodeURIComponent(project)}/dispatch-source`, dispatchSourceBody(source), quiet,
     ).then(r => r.data),
 
   /** The config the NEXT run will use. */

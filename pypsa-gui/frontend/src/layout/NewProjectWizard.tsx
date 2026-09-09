@@ -56,6 +56,10 @@ const TEMPLATES = [
   { id: '3bus',    name: '3-Bus Tutorial', description: 'Minimal AC network — 3 buses, 3 lines, 1 generator. Best starting point for learning PyPSA.', buses: 3,  lines: 3,  badge: 'simple',    available: true },
   { id: 'ieee14',  name: 'IEEE 14-Bus',    description: 'Classic test case. 14 buses, 20 lines, 5 generators. Stable baseline for benchmarking.',     buses: 14, lines: 20, badge: 'reference', available: true },
   { id: 'belgium', name: 'Belgium Grid',   description: "PyPSA-Eur's Belgian network — OSM-derived HV grid clustered to 5 nodes, with wind, solar, nuclear, gas, batteries and H2. Solves out of the box.", buses: 10, lines: 6, badge: 'PyPSA-Eur', available: true },
+  // Built by gridspine's own producer (project_templates/_build.py::build_ieee39),
+  // so a project made from it, solved and saved, is a valid dispatch source for
+  // a planning → dynamics study — its generators are the detailed grid's units.
+  { id: 'ieee39',  name: 'IEEE 39-Bus (New England)', description: 'The New England test system gridspine studies — 39 buses, 10 synchronous units (9 committable), 5 wind and solar sites, 24 h. Solve and save it, then pick it as a study\'s dispatch source.', buses: 39, lines: 35, badge: 'planning → dynamics', available: true },
 ] as const
 
 export default function NewProjectWizard({

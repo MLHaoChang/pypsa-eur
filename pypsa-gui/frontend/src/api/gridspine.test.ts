@@ -33,12 +33,16 @@ describe('gridspineApi', () => {
     expect(post).toHaveBeenCalledWith('/gridspine/projects', { name: 'S', config: { hours: 24, k: 1 } }, expect.anything())
   })
 
-  it('sends "generate" when no dispatch directory is given, and the directory when one is', async () => {
-    await gridspineApi.setDispatchSource('S', null)
+  it('sends one of the three dispatch sources in the shape the backend model expects', async () => {
+    await gridspineApi.setDispatchSource('S', { kind: 'generate' })
     expect(post).toHaveBeenLastCalledWith('/gridspine/S/dispatch-source', { source: 'generate' }, expect.anything())
-    await gridspineApi.setDispatchSource('S', '/runs/v3')
+    await gridspineApi.setDispatchSource('S', { kind: 'from_dispatch', dir: '/runs/v3' })
     expect(post).toHaveBeenLastCalledWith(
       '/gridspine/S/dispatch-source', { source: 'from_dispatch', from_dispatch: '/runs/v3' }, expect.anything(),
+    )
+    await gridspineApi.setDispatchSource('S', { kind: 'from_project', project: 'Solved 39' })
+    expect(post).toHaveBeenLastCalledWith(
+      '/gridspine/S/dispatch-source', { source: 'from_project', from_project: 'Solved 39' }, expect.anything(),
     )
   })
 
