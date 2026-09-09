@@ -1755,6 +1755,149 @@ def _serialise_for_anthropic(content_block: Any) -> dict[str, Any]:
         if hasattr(content_block, attr):
             out[attr] = getattr(content_block, attr)
     return out
+@dataclass
+class _ToolDispatchOutcome:
+    """
+    What `_dispatch_tool_uses` hands back through `yield from`.
+
+    A dataclass rather than a tuple on purpose: a later field would otherwise
+    reorder silently at the call site.
+    """
+
+    tool_call_count: int
+    stop_turn: bool = False
+    switched_mid_turn: bool = False
+
+
+def _dispatch_tool_uses(
+    session: ChatSession,
+    tool_uses: list[dict[str, Any]],
+    *,
+    tool_call_count: int,
+    turn_ctx: Any,
+    turn_project_holder: list[Any],
+    project_switched: Callable[[], bool],
+    tool_results_for_next_turn: list[dict[str, Any]],
+    char_budget: dict[str, int],
+) -> Generator[tuple[str, dict[str, Any]], None, "_ToolDispatchOutcome"]:
+    """
+    Dispatch one assistant step's tool calls, sequentially.
+
+    Yields the step's SSE frames — the caller forwards them with `yield from` —
+    and returns the state the turn loop needs afterwards.
+
+    Three pieces of that state are easy to lose in a refactor and are pinned by
+    `tests/test_chat_tool_dispatch_loop_seam.py`:
+
+    * `tool_call_count` arrives from the previous assistant step and leaves
+      incremented, because `MAX_TOOL_CALLS_PER_TURN` is per TURN. Reset it per
+      step and the cap looks enforced while a long agent loop dispatches
+      unboundedly.
+    * `turn_project_holder` is MUTATED (hence a list) when the agent calls a
+      legitimately rebinding tool, so the mid-turn-switch guard does not fire on
+      the agent's own rebind — and the frontend is told via `project_rebound`,
+      without which its autosave keeps sending the old name and the identity
+      guard 409s (incident 2026-06-08).
+    * `tool_results_for_next_turn` gets one `tool_result` per `tool_use_id`
+      WITHOUT exception, including for tools never dispatched because the
+      project switched. Anthropic requires the pairing; a gap makes the resumed
+      conversation invalid.
+
+    `char_budget` is one dict for the whole step, not one per tool, or the
+    per-turn result cap multiplies by the number of tools.
+
+    Phase C of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`.
+    The parallel-destructive `offenders` check above the call stays in
+    `_run_turn_body`: it ends in `continue`, and a generator cannot continue its
+    caller's loop.
+    """
+    # Imported in the function body, as `_run_turn_body` does: `pypsa_service`
+    # reaches back into the router layer, so a module-level import here risks a
+    # cycle. The extraction initially lost this — the name was a local of
+    # `_run_turn_body` — and only the rebinding-tool guard noticed, because no
+    # recorded frame scenario rebinds a project.
+    from services.pypsa_service import PyPSAService
+
+    switched = False
+    # Dispatch each tool sequentially. Before EACH dispatch, re-check that
+    # the active project hasn't changed since the turn started (P0): the
+    # dispatchers mutate the ACTIVE network, so a mid-turn switch would
+    # corrupt the wrong project. On a switch we synthesize an is_error
+    # tool_result for the current AND every remaining tool — Anthropic
+    # requires each tool_use_id have a matching tool_result, so this keeps
+    # the in-memory history valid for a resumed turn — then end the turn.
+    for idx, tu in enumerate(tool_uses):
+        if project_switched():
+            switched = True
+            for rem in tool_uses[idx:]:
+                rem_id = rem.get("id")
+                yield "tool_error", {
+                    "tool_use_id": rem_id,
+                    "tool_name": rem.get("name"),
+                    "error_kind": "project_switched_mid_turn",
+                    "message": (
+                        f"active project changed from {turn_project_holder[0]!r} "
+                        "during this turn; refusing to run tools against a "
+                        "different network."
+                    ),
+                }
+                tool_results_for_next_turn.append({
+                    "type": "tool_result",
+                    "tool_use_id": rem_id,
+                    "is_error": True,
+                    "content": "project_switched_mid_turn",
+                })
+            break
+        tool_call_count += 1
+        if tool_call_count > MAX_TOOL_CALLS_PER_TURN:
+            yield "tool_error", {
+                "tool_use_id": tu.get("id"),
+                "tool_name": tu.get("name"),
+                "error_kind": "tool_call_cap_exceeded",
+                "message": (
+                    f"more than {MAX_TOOL_CALLS_PER_TURN} tool calls in "
+                    "one turn; refusing further dispatch this turn."
+                ),
+            }
+            yield "session_done", {"reason": "tool_call_cap_exceeded"}
+            # Ends the whole turn, not just this loop — reported to the
+            # caller rather than returned from it, because a generator's
+            # `return` cannot end its caller's.
+            return _ToolDispatchOutcome(
+                tool_call_count=tool_call_count, stop_turn=True,
+            )
+        yield from _dispatch_real_tool_call(
+            session, tu, tool_results_for_next_turn, turn_ctx=turn_ctx,
+            result_char_budget=char_budget,
+        )
+        # If the agent just dispatched a rebinding tool (activate_project /
+        # load_project / save_project_as / rename_project /
+        # restore_project_snapshot), refresh the turn-project snapshot so
+        # the guard recognises the new binding as legitimate. We re-read
+        # from the live registry rather than guessing from the tool's args
+        # because activate_project on a non-resident project takes the
+        # cold path (v6-F2), and load_project may normalise the name.
+        tu_name = tu.get("name")
+        if tu_name in PROJECT_REBINDING_TOOLS:
+            new_bound = PyPSAService.get_active_context().loaded_project
+            if new_bound != turn_project_holder[0]:
+                # Tell the frontend the backend's active project just
+                # changed. Without this the React side keeps its
+                # `currentProject` on the OLD name; the autosave loop
+                # then sends `expect=<old>` and the backend's identity
+                # guard 409s with "Backend network is bound to project
+                # 'X', not 'Y'" — incident 2026-06-08.
+                yield "project_rebound", {
+                    "from": turn_project_holder[0],
+                    "to": new_bound,
+                    "via_tool": tu_name,
+                }
+                turn_project_holder[0] = new_bound
+    return _ToolDispatchOutcome(
+        tool_call_count=tool_call_count, switched_mid_turn=switched,
+    )
+
+
 def _turn_budget_block(
     session: ChatSession,
     turn_ctx: Any,
@@ -2388,79 +2531,22 @@ def _run_turn_body(
                 session.append_history_message({"role": "user", "content": tool_results})
             continue
 
-        # Dispatch each tool sequentially. Before EACH dispatch, re-check that
-        # the active project hasn't changed since the turn started (P0): the
-        # dispatchers mutate the ACTIVE network, so a mid-turn switch would
-        # corrupt the wrong project. On a switch we synthesize an is_error
-        # tool_result for the current AND every remaining tool — Anthropic
-        # requires each tool_use_id have a matching tool_result, so this keeps
-        # the in-memory history valid for a resumed turn — then end the turn.
         tool_results_for_next_turn: list[dict[str, Any]] = []
-        # A7 — shared across every tool in this assistant step / turn.
+        # A7 — one budget shared across every tool in this assistant step.
         tool_result_char_budget = {"used": 0}
-        switched_mid_turn = False
-        for idx, tu in enumerate(tool_uses):
-            if _project_switched():
-                switched_mid_turn = True
-                for rem in tool_uses[idx:]:
-                    rem_id = rem.get("id")
-                    yield "tool_error", {
-                        "tool_use_id": rem_id,
-                        "tool_name": rem.get("name"),
-                        "error_kind": "project_switched_mid_turn",
-                        "message": (
-                            f"active project changed from {turn_project_holder[0]!r} "
-                            "during this turn; refusing to run tools against a "
-                            "different network."
-                        ),
-                    }
-                    tool_results_for_next_turn.append({
-                        "type": "tool_result",
-                        "tool_use_id": rem_id,
-                        "is_error": True,
-                        "content": "project_switched_mid_turn",
-                    })
-                break
-            tool_call_count += 1
-            if tool_call_count > MAX_TOOL_CALLS_PER_TURN:
-                yield "tool_error", {
-                    "tool_use_id": tu.get("id"),
-                    "tool_name": tu.get("name"),
-                    "error_kind": "tool_call_cap_exceeded",
-                    "message": (
-                        f"more than {MAX_TOOL_CALLS_PER_TURN} tool calls in "
-                        "one turn; refusing further dispatch this turn."
-                    ),
-                }
-                yield "session_done", {"reason": "tool_call_cap_exceeded"}
-                return
-            yield from _dispatch_real_tool_call(
-                session, tu, tool_results_for_next_turn, turn_ctx=turn_ctx,
-                result_char_budget=tool_result_char_budget,
-            )
-            # If the agent just dispatched a rebinding tool (activate_project /
-            # load_project / save_project_as / rename_project /
-            # restore_project_snapshot), refresh the turn-project snapshot so
-            # the guard recognises the new binding as legitimate. We re-read
-            # from the live registry rather than guessing from the tool's args
-            # because activate_project on a non-resident project takes the
-            # cold path (v6-F2), and load_project may normalise the name.
-            tu_name = tu.get("name")
-            if tu_name in PROJECT_REBINDING_TOOLS:
-                new_bound = PyPSAService.get_active_context().loaded_project
-                if new_bound != turn_project_holder[0]:
-                    # Tell the frontend the backend's active project just
-                    # changed. Without this the React side keeps its
-                    # `currentProject` on the OLD name; the autosave loop
-                    # then sends `expect=<old>` and the backend's identity
-                    # guard 409s with "Backend network is bound to project
-                    # 'X', not 'Y'" — incident 2026-06-08.
-                    yield "project_rebound", {
-                        "from": turn_project_holder[0],
-                        "to": new_bound,
-                        "via_tool": tu_name,
-                    }
-                    turn_project_holder[0] = new_bound
+        dispatch = yield from _dispatch_tool_uses(
+            session, tool_uses,
+            tool_call_count=tool_call_count,
+            turn_ctx=turn_ctx,
+            turn_project_holder=turn_project_holder,
+            project_switched=_project_switched,
+            tool_results_for_next_turn=tool_results_for_next_turn,
+            char_budget=tool_result_char_budget,
+        )
+        tool_call_count = dispatch.tool_call_count
+        if dispatch.stop_turn:
+            return
+        switched_mid_turn = dispatch.switched_mid_turn
         messages.append({"role": "user", "content": tool_results_for_next_turn})
         with session._lock:
             session.append_history_message(
