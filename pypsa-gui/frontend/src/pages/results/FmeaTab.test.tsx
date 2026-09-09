@@ -206,6 +206,27 @@ it('shows the sweep as running and surfaces its error', async () => {
   expect(await screen.findByText(/exceeds the sweep budget of 20/)).toBeTruthy()
 })
 
+// Whole-branch review, M11: a refused sweep start showed axios' generic
+// "Request failed with status code 409" beside the interceptor's real detail;
+// the toast now carries the backend's own sentence, as the other panels do.
+it("toasts the backend's sentence when the sweep start is refused", async () => {
+  const toast = (await import('react-hot-toast')).default
+  const user = userEvent.setup()
+  vi.mocked(resultsApi.postFmeaSweep).mockRejectedValue(
+    Object.assign(new Error('Request failed with status code 409'), {
+      response: { status: 409, data: { detail: 'a sequential-MC study is running — wait for it to finish' } },
+    }),
+  )
+  renderTab()
+  await screen.findByText('g1')
+  await user.click(screen.getByRole('button', { name: /Run B\/C sweep/ }))
+  await waitFor(() => expect(toast.error).toHaveBeenCalled())
+  const calls = vi.mocked(toast.error).mock.calls
+  const msg = String(calls[calls.length - 1]?.[0])
+  expect(msg).toMatch(/a sequential-MC study is running/)
+  expect(msg).not.toMatch(/status code 409/)
+})
+
 it('renders the empty state when every source is empty', async () => {
   vi.mocked(resultsApi.getFmeaModes).mockResolvedValue(null)
   vi.mocked(resultsApi.getWorksheet).mockResolvedValue(

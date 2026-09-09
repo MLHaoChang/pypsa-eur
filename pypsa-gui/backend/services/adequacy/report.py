@@ -191,7 +191,7 @@ def reserve_margin_payload(n, targets: dict, *, partial: bool = False) -> dict:
     # reports what each member's derate would have been on it. A second
     # proxy, never a correction — and "netted capacity" is not "VRE": it is
     # every unit whose availability varies, thermal maintenance included.
-    from services.adequacy.window import peak_window
+    from services.adequacy.window import peak_window, snapshot_label
 
     net_by_period: dict[str, dict] = {}
     derate_net_by_row: dict[int, float | None] = {}
@@ -248,7 +248,7 @@ def reserve_margin_payload(n, targets: dict, *, partial: bool = False) -> dict:
                 block["status"] = "empty_window"
             else:
                 gross_snaps = set(per.get("peak_snapshots") or [])
-                net_snaps = [str(x) for x in net_idx]
+                net_snaps = [snapshot_label(x) for x in net_idx]
                 firm_gross = 0.0
                 firm_net = 0.0
                 for row, cap in rows:
@@ -336,7 +336,7 @@ def reserve_margin_payload(n, targets: dict, *, partial: bool = False) -> dict:
             # for capacity that was always there.
             "binding": bool(met and firm <= required * (1.0 + BINDING_TOLERANCE)),
             "n_peak_hours": int(per.get("n_peak_hours", 0) or 0),
-            "peak_snapshots": [str(x) for x in (per.get("peak_snapshots") or [])],
+            "peak_snapshots": [snapshot_label(x) for x in (per.get("peak_snapshots") or [])],
             "max_achievable_mw": float(per.get("max_achievable_mw", 0.0) or 0.0),
             "net_window": net_by_period.get(str(P)),
         })

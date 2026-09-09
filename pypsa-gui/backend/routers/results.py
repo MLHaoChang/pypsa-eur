@@ -3603,7 +3603,7 @@ def post_mc(body: McRequest | None = None):
         # Phase 12h: the rule that decides which profiled units had no
         # outages sampled. Imported from the COPT so `/mc`'s lists and
         # `split_fleet`'s buckets cannot disagree about the same fleet.
-        from services.adequacy.copt import rate_is_zero as _rate_is_zero
+        from services.adequacy.copt import is_flag_deterministic as _is_flag_deterministic, rate_is_zero as _rate_is_zero
         try:
             # The ONLY call in the codebase that may carry the flag: this
             # is the study's own baseline, not a replay of one. Every ELCC
@@ -3678,10 +3678,11 @@ def post_mc(body: McRequest | None = None):
                         str(u.name) for u in inputs.units
                         if getattr(u, "profile", None) is not None
                         and not _rate_is_zero(u)],
+                    # M5: EVERY unit the flag zeroed — profiled or folded —
+                    # so the disclosure is symmetric across the two shapes.
                     "deterministic_units": [
                         str(u.name) for u in inputs.units
-                        if getattr(u, "profile", None) is not None
-                        and _rate_is_zero(u)],
+                        if _is_flag_deterministic(u)],
                     "folded_units": [
                         {"name": str(u.name),
                          "folded_constant": float(u.folded_constant),
@@ -5087,8 +5088,11 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         "seed": seed,
         "margin0": None,
         "margin_tight": None,
-        "margin_ceiling": (None if not math.isfinite(m_ceiling)
-                           else float(m_ceiling)),
+        # M7: the FLEET ceiling, null when unbounded — `m_ceiling` also
+        # carries the schema cap the search stops at, which is not a
+        # ceiling any fleet has.
+        "margin_ceiling": (None if not math.isfinite(m_max)
+                           else float(m_max)),
         "max_solves": max_solves,
         "restore": restore,
         "base_restored": False,
@@ -5355,8 +5359,8 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
             "lever": "reserve_margin", "target_lole_h": target,
             "draws": draws, "seed": seed, "max_solves": max_solves,
             "restore": restore, "basis": basis,
-            "margin_ceiling": (None if not math.isfinite(m_ceiling)
-                               else float(m_ceiling)),
+            "margin_ceiling": (None if not math.isfinite(m_max)
+                               else float(m_max)),
             "resolution_floor_h": floor_h}
 
 
@@ -5378,6 +5382,7 @@ def get_copt():
     from services.adequacy.copt import (
         K_EXACT,
         fleet_and_residual,
+        is_flag_deterministic as _is_flag_deterministic,
         must_take_generators,
         screening_analysis,
     )
@@ -5468,7 +5473,8 @@ def get_copt():
                  "source": "static"}
                 for u in units
                 if getattr(u, "folded_constant", None) is not None],
-            "deterministic_units": [u.name for u in split.deterministic],
+            "deterministic_units": [u.name for u in units
+                                    if _is_flag_deterministic(u)],
         },
         "fidelity_note": analysis["fidelity_note"],
         # Phase 12d: which units the engines masked in which period, by

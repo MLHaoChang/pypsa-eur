@@ -307,7 +307,13 @@ export default function AppHeader() {
       ALL_NETWORK_KEYS.forEach(k => queryClient.invalidateQueries({ queryKey: nk(proj, k) }))
       toast.success(`Undone · ${data.remaining} step${data.remaining !== 1 ? 's' : ''} left`)
     },
-    onError: () => toast.error('Nothing to undo'),
+    // The interceptor already toasts a structured refusal's own sentence
+    // (a 409 while an adequacy study runs names the study — whole-branch
+    // review, M10); this fixed copy is for the plain "stack is empty" case.
+    onError: (e: unknown) => {
+      const status = (e as { response?: { status?: number } })?.response?.status
+      if (status !== 409) toast.error('Nothing to undo')
+    },
   })
 
   const handleUndo = useCallback(() => {

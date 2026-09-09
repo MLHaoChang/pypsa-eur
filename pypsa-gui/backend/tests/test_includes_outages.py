@@ -622,27 +622,37 @@ def test_R2_a_static_above_one_is_not_folded_so_the_margin_still_agrees(static):
         row["derate"] * 100.0, abs=1e-9)
 
 
-def test_R3_a_negative_static_does_not_fold_and_copt_still_serves():
-    """★ Shipped-code review, finding 3 (SERIOUS). The schema accepts a
-    negative `p_max_pu` — it checks finiteness, not range — and folding it
-    gave a NEGATIVE `capacity_mw`, which `_shift_deterministic` cannot index:
-    `GET /results/copt` became a 500 on a network that returned 200 before
-    12h.
+def test_R3_a_negative_static_folds_to_zero_and_copt_still_serves():
+    """★ Shipped-code review, finding 3 (SERIOUS), superseded by the
+    whole-branch review, M2. The schema accepts a negative `p_max_pu` — it
+    checks finiteness, not range — and folding it gave a NEGATIVE
+    `capacity_mw`, which `_shift_deterministic` cannot index: `GET
+    /results/copt` became a 500. The first fix declined to fold (nameplate
+    credit); M2 measured that the margin clamps the same cell to 0 and the LP
+    dispatches nothing from it, so the engines crediting 100 MW was the very
+    divergence 12h exists to close. A negative static now folds to 0 MW —
+    the number the other two surfaces already agree on — and the COPT still
+    serves.
 
-    Bite (verified): fold any finite `cf != 1` — `ValueError: operands could
-    not be broadcast together with shapes (0,) (52,) (0,)`.
+    Bite (verified, M2): return `cf` unclamped — a negative capacity again.
     """
     import routers.results as R
 
     n = s0_network()
     n.generators.at["nuc", "p_max_pu"] = -0.5
     unit = next(u for u in C.fleet_and_residual(n)[0] if u.name == "nuc")
-    assert unit.capacity_mw == pytest.approx(100.0)
-    assert unit.folded_constant is None
+    assert unit.capacity_mw == pytest.approx(0.0)
+    assert unit.folded_constant == pytest.approx(0.0)
 
     _install(n)
-    out = R.get_copt()                      # a 500 before the fix
+    out = R.get_copt()                      # a 500 before the first fix
     assert out["metrics"]["eue_mwh"] >= 0.0
+    # …and the margin reads the same 0 MW (its clamp), so the two agree.
+    from services.solver_service import SolverConfig, reserve_margin_facts
+    row = next(r for r in reserve_margin_facts(
+        n, SolverConfig(reserve_margin=0.1))["stash"]["assets"]
+        if r["name"] == "nuc")
+    assert row["derate"] * 100.0 == pytest.approx(0.0, abs=1e-9)
 
 
 def test_R3_a_static_of_ZERO_still_folds_to_nothing():
@@ -801,10 +811,17 @@ def test_H4d_copt_carries_folded_and_deterministic_units():
     deleting both keys from the route left it green (shipped-code review,
     finding 4).
 
-    A folded unit is in NO existing list (it has no profile), and a
+    A folded unit is in NO profile list (it has no profile), and a
     deterministic unit LEAVES `profile_units`, which is `mixed + netted`.
 
-    Bites (verified): drop either key from `get_copt`.
+    Whole-branch review, M5: `deterministic_units` is every unit the FLAG
+    zeroed, folded static or column alike — the first version listed only
+    profiled units, so the same flag on a static unit was disclosed nowhere
+    while on a column unit it was named twice. The flagged static `nuc` is
+    therefore in BOTH lists: folded (the CF) and deterministic (the flag).
+
+    Bites (verified): drop either key from `get_copt`; build the list from
+    `split.deterministic` again (M5).
     """
     import routers.results as R
 
@@ -813,9 +830,11 @@ def test_H4d_copt_carries_folded_and_deterministic_units():
     fleet = out["fleet"]
     assert fleet["folded_units"] == [
         {"name": "nuc", "folded_constant": 0.8, "source": "static"}]
-    # Static-folded but not deterministic: the fold and the bucket are
-    # different mechanisms, and this unit has no profile to be netted.
-    assert fleet["deterministic_units"] == []
+    assert fleet["deterministic_units"] == ["nuc"]
+    # …and the unflagged twin, whose rate is 0.05, is in neither list.
+    _install(s0_network(flag=False))
+    fleet0 = R.get_copt()["fleet"]
+    assert fleet0["deterministic_units"] == []
 
     # A profiled rate-zero unit is the other half.
     _install(nine_unit_network())

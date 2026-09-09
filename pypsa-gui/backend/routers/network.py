@@ -66,7 +66,17 @@ def _serialize_component(
         # large number of real rows.
         keep_idx = df.index.difference(pd.Index(list(transient)))
         df = df.loc[keep_idx]
-    return df_to_json(df)
+    rows = df_to_json(df)
+    # An unset outage basis is `null` on the wire whichever way the frame
+    # spells it — NaN before a save, "" after a netCDF round trip of a mixed
+    # column (whole-branch review, M13) — so a row read here can be sent
+    # back unchanged.
+    if "outage_rate_basis" in df.columns:
+        for row in rows:
+            v = row.get("outage_rate_basis")
+            if isinstance(v, str) and v.strip() in ("", "nan", "None"):
+                row["outage_rate_basis"] = None
+    return rows
 
 
 def _get_component(component_class: str, attr: str) -> list[dict]:

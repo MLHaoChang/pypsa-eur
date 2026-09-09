@@ -324,6 +324,27 @@ describe('McPanel', () => {
     expect(chip.textContent).toBe('1 inactive in 2030')
     expect(chip.getAttribute('title')).toMatch(/1 inactive \(new\)/)
   })
+  // Phase 12h disclosures (whole-branch review, M9).
+  it('renders the fold chip from the result payload, and none when both lists are empty', async () => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue({
+      ...DONE,
+      result: { ...DONE.result!,
+        folded_units: [{ name: 'nuc', folded_constant: 0.8, source: 'static' }],
+        deterministic_units: ['nuc', 'hydro'] },
+    })
+    await openPanel()
+    const chip = await screen.findByTestId('mc-fold-note')
+    expect(chip.textContent).toBe('1 static CF folded · 2 includes outages')
+    expect(chip.getAttribute('title')).toMatch(/nuc × 0\.8/)
+    expect(chip.getAttribute('title')).toMatch(/nuc, hydro/)
+    cleanup()
+    vi.mocked(resultsApi.getMc).mockResolvedValue({
+      ...DONE, result: { ...DONE.result!, folded_units: [], deterministic_units: [] },
+    })
+    await openPanel()
+    await screen.findByTestId('mc-metrics')
+    expect(screen.queryByTestId('mc-fold-note')).toBeNull()
+  })
   it('shows no activity chip on a pre-phase result or a null note', async () => {
     vi.mocked(resultsApi.getMc).mockResolvedValue(DONE)
     await openPanel()

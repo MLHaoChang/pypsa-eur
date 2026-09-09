@@ -1,6 +1,8 @@
 import logging
 import logging.handlers
 import math
+
+from services.adequacy.window import snapshot_label as _snapshot_label
 import pathlib
 import queue
 import tempfile
@@ -3696,7 +3698,7 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
         ext_sets.append(frozenset(m["name"] for m, _d in ext_here))
         stash["periods"][str(P)] = {
             "peak_mw": peak,
-            "peak_snapshots": [str(s) for s in peak_idx],
+            "peak_snapshots": [_snapshot_label(s) for s in peak_idx],
             "n_peak_hours": int(len(peak_idx)),
             "required_mw": required,
             "firm_fixed_mw": firm_fixed,

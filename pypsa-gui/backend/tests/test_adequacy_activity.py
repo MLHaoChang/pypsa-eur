@@ -261,12 +261,17 @@ def test_E5b_a_store_at_a_partial_vintage_dispatches_partial_energy():
     assert (s.p_nom_mw, s.e_nom_mwh) == (30.0, 60.0)
     assert (s.capacity_series[:H] == 10.0).all() and (s.capacity_series[H:] == 30.0).all()
 
-    # the arrays the dispatch actually runs on, per block
+    # the arrays the dispatch actually runs on, per block — at the store's
+    # availability (1 − q; whole-branch review M6: the battery's
+    # carrier-default 0.02, the rate the reserve margin already credits by)
+    assert s.q == pytest.approx(0.02) and s.source == "carrier_default"
+    avail = 1.0 - s.q
     for label, start, end in inp.periods:
         n_st, p, e, _es, _ed = M.block_store_arrays(
             inp.storage, start, end, any_series=True)
         want = (10.0, 20.0) if label == 2030 else (30.0, 60.0)   # 2 h × power
-        assert (n_st, p[0], e[0]) == (1, pytest.approx(want[0]), pytest.approx(want[1]))
+        assert (n_st, p[0], e[0]) == (
+            1, pytest.approx(want[0] * avail), pytest.approx(want[1] * avail))
 
     # …and it shows in the EUE: against a store held at the FULL reservoir
     # (the bite's behaviour) the 2030 shortfall is strictly larger.

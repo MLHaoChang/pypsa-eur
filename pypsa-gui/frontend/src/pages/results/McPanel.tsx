@@ -9,7 +9,7 @@ import { formatApiDetail } from '../../api/client'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import {
-  activityChipText, basisSuffix, type AdequacyReportPayload, type CoptPayload,
+  activityChipText, basisSuffix, foldChipText, foldChipTitle, type AdequacyReportPayload, type CoptPayload,
 } from './adequacy'
 
 // ── The sequential Monte-Carlo adequacy study (spec §5, Phase 6) ────────────
@@ -609,6 +609,16 @@ export function McPanel() {
               title={result.activity.note}
             >
               {activityChipText(result.activity)}
+            </span>
+          )}
+
+          {result && foldChipText(result) && (
+            <span
+              className="self-start px-2 py-0.5 rounded bg-panel border border-border text-[10px] text-muted"
+              data-testid="mc-fold-note"
+              title={foldChipTitle(result)}
+            >
+              {foldChipText(result)}
             </span>
           )}
 

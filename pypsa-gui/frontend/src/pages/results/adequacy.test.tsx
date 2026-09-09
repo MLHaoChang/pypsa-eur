@@ -115,6 +115,28 @@ describe('CoptChips — the screening row', () => {
     expect(chip.textContent).toBe('3 on a profile, 1 netted beyond the cap')
     expect(chip.getAttribute('title')).toMatch(/mixes them exactly per hour/)
   })
+  // Phase 12h disclosures (whole-branch review, M9): the two lists were on
+  // the wire and rendered nowhere.
+  it('names the folded and includes-outages units when the payload carries them', () => {
+    render(<CoptChips copt={coptPayload({
+      fleet: { units: 4, must_take: 0, delta_mw: 1,
+               folded_units: [{ name: 'nuc', folded_constant: 0.8, source: 'static' },
+                              { name: 'chp', folded_constant: 0.5, source: 'static' }],
+               deterministic_units: ['nuc'] },
+    })} proxyEnsMwh={null} />)
+    const chip = screen.getByTestId('copt-fold-note')
+    expect(chip.textContent).toBe('2 static CF folded · 1 includes outages')
+    expect(chip.getAttribute('title')).toMatch(/nuc × 0\.8, chp × 0\.5/)
+    expect(chip.getAttribute('title')).toMatch(/p_max_pu_includes_outages\): nuc/)
+  })
+  it('shows no fold chip on a pre-phase payload or empty lists', () => {
+    render(<CoptChips copt={coptPayload()} proxyEnsMwh={null} />)
+    expect(screen.queryByTestId('copt-fold-note')).toBeNull()
+    render(<CoptChips copt={coptPayload({
+      fleet: { units: 4, must_take: 0, delta_mw: 1, folded_units: [], deterministic_units: [] },
+    })} proxyEnsMwh={null} />)
+    expect(screen.queryByTestId('copt-fold-note')).toBeNull()
+  })
   // Phase 12d: the engines mask by build year / lifetime; the chip counts
   // what was masked per period and carries the payload's sentence.
   it('names the masked units per period when the payload discloses activity', () => {

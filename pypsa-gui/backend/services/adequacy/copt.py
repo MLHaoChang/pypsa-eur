@@ -98,6 +98,11 @@ class CoptUnit:
     # and its numbers, and the scaled capacity already carries the factor.
     folded_constant: float | None = field(default=None, compare=False,
                                           hash=False, repr=False)
+    # Phase 12h flag, carried so the disclosures can tell a rate zeroed by
+    # `p_max_pu_includes_outages` from a rate the user TYPED as 0 (whole-
+    # branch review, M4/M5): the row note and `deterministic_units` claim
+    # the flag only when it is set.
+    outages_in_availability: bool = field(default=False, compare=False)
 
 
 #: Exact per-hour mixture for up to this many profiled units (``2^K`` states
@@ -323,8 +328,10 @@ def hourly_adequacy(dist: CapacityDistribution, residual_load: pd.Series,
     w = weights.reindex(residual_load.index).fillna(0.0)
     lolp_arr, eue_arr = mixture_hourly(
         dist, residual_load.to_numpy(dtype=np.float64), mixed)
-    lolp = pd.Series(lolp_arr, index=residual_load.index)
-    eue_h = pd.Series(eue_arr, index=residual_load.index)
+    # Clamped at 0: the survival table's rounding can read −1.8e-15 when
+    # capacity exactly covers load (whole-branch review, N1).
+    lolp = pd.Series(np.maximum(lolp_arr, 0.0), index=residual_load.index)
+    eue_h = pd.Series(np.maximum(eue_arr, 0.0), index=residual_load.index)
     lole_t = lolp * w
     eue_t = eue_h * w
     if isinstance(residual_load.index, pd.MultiIndex):
@@ -530,9 +537,16 @@ def _occurrence_profile(p_max_pu_t, g, snapshots) -> np.ndarray | None:
         return None
     col = p_max_pu_t[g].reindex(snapshots)
     vals = col.to_numpy(dtype=np.float64)
+    finite = np.isfinite(vals)
+    if not finite.any():
+        # A column with NO finite hour (whole-branch review, M3): by rule 1
+        # every hour is unavailable, and the margin's window nets it at 0.
+        # `series_is_informative` reads an all-NaN column as "not
+        # informative" and the unit was then credited at nameplate.
+        return np.zeros_like(vals)
     if not series_is_informative(vals):
         return None
-    return np.where(np.isfinite(vals), vals, 0.0)
+    return np.where(finite, vals, 0.0)
 
 
 def static_fold_factor(gens, p_max_pu_t, g) -> float | None:
@@ -576,9 +590,13 @@ def static_fold_factor(gens, p_max_pu_t, g) -> float | None:
     # cf == 0.0 IS folded, to 0 MW: that is the honest reading of "this unit
     # is off for this study", and it was measured to reach the COPT, the MC
     # and `elcc_candidates` without raising.
-    if not math.isfinite(cf) or not (0.0 <= cf < 1.0):
+    if not math.isfinite(cf) or cf >= 1.0:
         return None
-    return cf
+    # cf < 0 folds to 0 MW (whole-branch review, M2): the margin clamps its
+    # `avail_static` to [0, 1], so a negative cell credits 0 there, and the
+    # LP can dispatch nothing from it; crediting the engines at nameplate
+    # for the same cell was the divergence 12h exists to close.
+    return max(cf, 0.0)
 
 
 def occurrence_units(n) -> list[tuple[str, float, object]]:
@@ -744,6 +762,7 @@ def fleet_and_residual(n, *, keep_zero_capacity: bool = False, cfg=None,
                 capacity_series=(series if cf is None or series is None
                                  else series * cf),
                 folded_constant=cf,
+                outages_in_availability=bool(row.get("outages_in_availability", False)),
             ))
         else:
             # Must-take: available output at its given hourly availability,
@@ -846,6 +865,25 @@ DETERMINISTIC_ROW_NOTE = (
     "no sampled outages: this unit's availability already includes them "
     "(p_max_pu_includes_outages), so it is netted at its full availability "
     "and its outage criticality is zero by construction")
+
+RATE_ZERO_ROW_NOTE = (
+    "no sampled outages: this unit's outage rate is 0 as entered, so it is "
+    "netted at its full availability and its outage criticality is zero by "
+    "construction")
+
+
+def deterministic_row_note(u) -> str:
+    """The note for a unit with no outages to sample — which of the two
+    reasons applies (whole-branch review, M4)."""
+    return (DETERMINISTIC_ROW_NOTE if getattr(u, "outages_in_availability", False)
+            else RATE_ZERO_ROW_NOTE)
+
+
+def is_flag_deterministic(u) -> bool:
+    """Whether the Phase 12h flag zeroed this unit's rate — profiled OR
+    folded (whole-branch review, M5: a flagged static-fold unit is a table
+    unit at q = 0 and was in neither disclosure)."""
+    return bool(getattr(u, "outages_in_availability", False)) and rate_is_zero(u)
 
 
 NETTED_ROW_NOTE = (
@@ -1028,8 +1066,11 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
         without = build_copt([v for v in units if v.name != u.name],
                              delta_mw=dist.delta_mw)
         perfect = _shift_deterministic(without, u.capacity_mw)
+        # A table unit at q = 0 has no outages to price either — say why
+        # (M5: the flagged static-fold case carried no note).
+        note = deterministic_row_note(u) if rate_is_zero(u) else None
         todo.append((u, _eue_binned(perfect, cells) if binned
-                     else _eue(perfect, r), None))
+                     else _eue(perfect, r), note))
     for i, u in enumerate(mixed):
         # A mixed unit's counterfactual FIXES its state up, which changes the
         # cells — so it needs its own binning pass (k of them, not n).
@@ -1056,7 +1097,7 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
     for u in deterministic:
         # No outages to price: the residual already nets this unit at its
         # full ``a_{i,h}``, so "perfectly available" is the fleet as-is.
-        todo.append((u, base_eue, DETERMINISTIC_ROW_NOTE))
+        todo.append((u, base_eue, deterministic_row_note(u)))
     for u, eue_perfect, note in todo:
         delta_eue = max(base_eue - eue_perfect, 0.0)
         crit_eur = delta_eue * max(float(voll), 0.0)

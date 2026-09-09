@@ -27,6 +27,20 @@ Finite = Annotated[float, Field(allow_inf_nan=False)]
 # margin credited 0. Refused at the boundary like every other finite-default
 # input (12g); `null` is still "unset → carrier default".
 OutageRate = Annotated[float, Field(ge=0.0, lt=1.0, allow_inf_nan=False)]
+
+
+def _blank_basis_is_none(v):
+    # An unset basis reloads from netCDF as "" in a mixed column (the
+    # helpers coerce NaN to "" on import), so a row read from GET and echoed
+    # into PUT carried "" where it had carried null — and was refused
+    # (whole-branch review, M13). Blank means unset.
+    if isinstance(v, str) and v.strip() in ("", "nan", "None"):
+        return None
+    return v
+
+
+OutageBasis = Annotated[Literal["FOR", "EFORd"] | None,
+                        BeforeValidator(_blank_basis_is_none)]
 _NoneToPosInf = Annotated[float, BeforeValidator(
     lambda v: float("inf") if v is None else v
 )]
@@ -80,7 +94,7 @@ class LineCreate(BaseModel):
     # (demand-based, what adequacy math wants) differ materially for units
     # with reserve-shutdown hours and are never silently converted.
     outage_rate_value: OutageRate | None = None
-    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    outage_rate_basis: OutageBasis = None
     mttr_hours: float | None = None
     bus0: str
     bus1: str
@@ -135,7 +149,7 @@ class LinkCreate(BaseModel):
     # (demand-based, what adequacy math wants) differ materially for units
     # with reserve-shutdown hours and are never silently converted.
     outage_rate_value: OutageRate | None = None
-    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    outage_rate_basis: OutageBasis = None
     mttr_hours: float | None = None
     bus0: str
     bus1: str
@@ -185,7 +199,7 @@ class GeneratorCreate(BaseModel):
     # (demand-based, what adequacy math wants) differ materially for units
     # with reserve-shutdown hours and are never silently converted.
     outage_rate_value: OutageRate | None = None
-    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    outage_rate_basis: OutageBasis = None
     mttr_hours: float | None = None
     # Phase 12h. "The availability I gave this asset ALREADY includes forced
     # outages" — PyPSA-Eur's nuclear capacity-factor table is the case. Set,
@@ -263,7 +277,7 @@ class StorageUnitCreate(BaseModel):
     # (demand-based, what adequacy math wants) differ materially for units
     # with reserve-shutdown hours and are never silently converted.
     outage_rate_value: OutageRate | None = None
-    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    outage_rate_basis: OutageBasis = None
     mttr_hours: float | None = None
     bus: str
     carrier: str = ""
@@ -305,7 +319,7 @@ class StoreCreate(BaseModel):
     # (demand-based, what adequacy math wants) differ materially for units
     # with reserve-shutdown hours and are never silently converted.
     outage_rate_value: OutageRate | None = None
-    outage_rate_basis: Literal["FOR", "EFORd"] | None = None
+    outage_rate_basis: OutageBasis = None
     mttr_hours: float | None = None
     bus: str
     carrier: str = ""

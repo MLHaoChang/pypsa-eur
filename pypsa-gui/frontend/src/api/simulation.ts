@@ -235,6 +235,10 @@ export interface McResult {
   /** Phase 12c-pre: units whose outages were sampled ON their availability
    *  series rather than at nameplate. Absent on pre-phase payloads. */
   profile_units?: string[]
+  /** Phase 12h: static-CF folds and units whose outage rate was zeroed by
+   *  `p_max_pu_includes_outages`. Absent on pre-phase payloads. */
+  folded_units?: { name: string; folded_constant: number; source: string }[]
+  deterministic_units?: string[]
   /** Phase 12d: which units / stores the engines masked in which period by
    *  build year, lifetime or the active flag (`inactive`), or scored below nameplate because
    *  a later vintage is not yet built (`partial`), with the one sentence that

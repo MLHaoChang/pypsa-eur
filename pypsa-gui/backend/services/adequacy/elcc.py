@@ -291,7 +291,8 @@ def baseline_key(inputs, *, draws, seed, cov_target, max_draws, batch,
     for st in inputs.storage:
         cs = getattr(st, "capacity_series", None)
         h.update(f"{st.name}\x1f{float(st.p_nom_mw)!r}\x1f{float(st.e_nom_mwh)!r}\x1f"
-                 f"{float(st.eff_store)!r}\x1f{float(st.eff_dispatch)!r}\x1e".encode())
+                 f"{float(st.eff_store)!r}\x1f{float(st.eff_dispatch)!r}\x1f"
+                 f"{float(getattr(st, 'q', 0.0))!r}\x1e".encode())
         h.update(b"" if cs is None else np.asarray(cs, dtype=np.float64).tobytes())
         h.update(b"\x1e")
     h.update(b"\x1d")

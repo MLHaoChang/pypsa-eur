@@ -100,6 +100,19 @@ class StorageSpec:
     # power fraction block by block. None is the scalar path.
     capacity_series: np.ndarray | None = field(default=None, compare=False,
                                                hash=False, repr=False)
+    # Whole-branch review, M6: ONE storage-outage rule across surfaces. The
+    # reserve margin derates a store by its resolved outage rate (the
+    # carrier default for a battery is 0.02) while the sampler dispatched it
+    # with no outages at all. The rate is read here from the same resolver
+    # and applied as an EXPECTED-VALUE derate of power and energy in
+    # `block_store_arrays` — the netting the engines already use beyond the
+    # exact-mixture cap — so the two surfaces agree by construction and the
+    # CRN stream is untouched (no new random draws). 0.0 when the store has
+    # no outage data (`source == "missing"`), which the margin refuses to
+    # price rather than credit at 1.0.
+    q: float = 0.0
+    basis: str = ""
+    source: str = "missing"
 
 
 @dataclass(frozen=True)
@@ -201,8 +214,15 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
     blocks = _period_blocks(snapshots)
     if su is not None and not su.empty:
         from services.adequacy.activity import ActivityContext
+        from services.adequacy.occurrence import (
+            OutageRateError,
+            rate_is_usable,
+            resolve_outage_params,
+        )
         elec_buses = set(electrical_columns(n, list(n.buses.index)))
         su_ctx = ActivityContext(n, "storage_units", blocks)
+        sparams = resolve_outage_params(n, "storage_units")
+        bad_rates: list[str] = []
         for s in su.index:
             row = su.loc[s]
             if is_slack_name(str(s)) or is_slack_carrier(row.get("carrier")):
@@ -221,6 +241,13 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
                 max_hours = 0.0
             if not math.isfinite(max_hours) or max_hours < 0:
                 max_hours = 0.0
+            occ = sparams.loc[s]
+            q_s = 0.0
+            if str(occ["source"]) != "missing":
+                if not rate_is_usable(occ["rate"]):
+                    bad_rates.append(f"{s} (rate {float(occ['rate']):g})")
+                    continue
+                q_s = float(occ["rate"])
             storage.append(StorageSpec(
                 name=str(s),
                 p_nom_mw=p_nom,
@@ -228,7 +255,17 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
                 eff_store=_efficiency(row, "efficiency_store"),
                 eff_dispatch=_efficiency(row, "efficiency_dispatch"),
                 capacity_series=su_series,
+                q=q_s,
+                basis=str(occ["basis"] or ""),
+                source=str(occ["source"]),
             ))
+        if bad_rates:
+            raise OutageRateError(
+                "outage rate outside [0, 1) on "
+                f"{len(bad_rates)} storage unit(s): {', '.join(bad_rates[:10])}"
+                f"{' …' if len(bad_rates) > 10 else ''}. An outage rate is a "
+                "probability-like unavailability; fix the value (or clear it "
+                "so the per-carrier default applies).")
 
     profiles: dict[str, np.ndarray] = {}
     gens = getattr(n, "generators", None)
@@ -534,10 +571,17 @@ def block_store_arrays(stores, start: int, end: int, *, any_series: bool):
     part-built vintage carries a proportionally smaller reservoir (Phase 12d;
     module-level so the arrays can be pinned directly — shipped-code review,
     finding 3)."""
+    # M6: the store's outage rate as an expected-value derate of BOTH power
+    # and energy — a forced outage takes the whole unit out — the rule the
+    # reserve margin already credits it by.
+    def _avail(s) -> float:
+        q = float(getattr(s, "q", 0.0) or 0.0)
+        return 1.0 - q if math.isfinite(q) and 0.0 <= q < 1.0 else 1.0
+
     if not any_series:
         kept = list(stores)
-        p = np.array([s.p_nom_mw for s in kept], dtype=np.float64)
-        e = np.array([s.e_nom_mwh for s in kept], dtype=np.float64)
+        p = np.array([s.p_nom_mw * _avail(s) for s in kept], dtype=np.float64)
+        e = np.array([s.e_nom_mwh * _avail(s) for s in kept], dtype=np.float64)
     else:
         from services.adequacy.activity import block_capacity
         kept, p_l, e_l = [], [], []
@@ -546,8 +590,9 @@ def block_store_arrays(stores, start: int, end: int, *, any_series: bool):
             if c <= 0.0:
                 continue
             kept.append(s)
-            p_l.append(c)
-            e_l.append(s.e_nom_mwh * (c / s.p_nom_mw) if s.p_nom_mw > 0 else 0.0)
+            p_l.append(c * _avail(s))
+            e_l.append((s.e_nom_mwh * (c / s.p_nom_mw) if s.p_nom_mw > 0 else 0.0)
+                       * _avail(s))
         p = np.array(p_l, dtype=np.float64)
         e = np.array(e_l, dtype=np.float64)
     es = np.array([max(s.eff_store, 1e-12) for s in kept], dtype=np.float64)

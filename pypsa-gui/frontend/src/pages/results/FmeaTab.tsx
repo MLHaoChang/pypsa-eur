@@ -12,6 +12,7 @@ import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { downloadCSV } from './shared'
+import { blockerMessage } from './McPanel'
 import { SortHeader, TableSearchBox, useFilterableTable } from './useFilterableTable'
 import {
   buildManualRow,
@@ -70,7 +71,7 @@ export default function FmeaTab() {
     mutationFn: (next: { manual_rows: Array<Record<string, unknown>>; overlays: WorksheetSidecar['overlays'] }) =>
       resultsApi.putWorksheet(currentProject ?? '', next),
     onSuccess: () => qc.invalidateQueries({ queryKey: sidecarKey }),
-    onError: (e: Error) => toast.error(`Worksheet save failed: ${e.message}`),
+    onError: (e: unknown) => toast.error(`Worksheet save failed: ${blockerMessage(e)}`),
   })
 
   const sc = (sidecar ?? null) as WorksheetSidecar | null
@@ -94,7 +95,10 @@ export default function FmeaTab() {
       return resultsApi.postFmeaSweep(reg?.scenarios ?? [])
     },
     onSuccess: () => { void refetchModes() },
-    onError: (e: Error) => toast.error(`Sweep failed to start: ${e.message}`),
+    // The backend's own sentence (a 409 names the study that blocks the
+    // sweep; a 422 names the missing VOLL), not axios' status-code line —
+    // the other panels already read it through `blockerMessage` (M11).
+    onError: (e: unknown) => toast.error(`Sweep failed to start: ${blockerMessage(e)}`),
   })
   const sweepRunning =
     (modes as ModesPayload | null | undefined)?.sweep_status === 'running' ||

@@ -508,7 +508,8 @@ def snapshot_hash(mc_inputs) -> str:
         h.update(f"{name}\x1f{cap!r}\x1f{q!r}\x1e".encode() + prof + b"\x1e")
     h.update(b"\x1d")
     for row, cs in sorted(
-            ((str(s.name), float(s.p_nom_mw), float(s.e_nom_mwh)),
+            ((str(s.name), float(s.p_nom_mw), float(s.e_nom_mwh),
+              float(getattr(s, "q", 0.0))),
              b"" if getattr(s, "capacity_series", None) is None
              else _np.asarray(s.capacity_series, dtype=_np.float64).tobytes())
             for s in mc_inputs.storage):

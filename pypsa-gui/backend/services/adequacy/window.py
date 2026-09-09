@@ -28,3 +28,15 @@ def peak_window(series: pd.Series, *, n_override: int | None = None) -> pd.Index
     n_target = max(1, min(n_target, n_snaps))
     threshold = float(series.sort_values(ascending=False).iloc[n_target - 1])
     return series.index[series >= threshold]
+
+
+def snapshot_label(x) -> str:
+    """The wire label for one snapshot: the timestep's ISO string. On a
+    MultiIndex snapshot ``x`` is a ``(period, timestep)`` tuple, and ``str``
+    rendered it as ``"(2030, Timestamp('2030-01-01 21:00:00'))"`` straight
+    into the panel (whole-branch review, M14); the period is already the
+    block's own key, so the timestep alone is the label."""
+    if isinstance(x, tuple) and x:
+        x = x[-1]
+    iso = getattr(x, "isoformat", None)
+    return iso(sep=" ") if callable(iso) else str(x)

@@ -166,6 +166,12 @@ export interface CoptPayload {
      *  the subset netted at expected output beyond the exact cap, and the
      *  cap. Absent on payloads from before the phase. */
     profile_units?: string[]
+    /** Phase 12h: units whose STATIC `p_max_pu` was folded into capacity
+     *  (no series), with the factor; and units whose outage rate was zeroed
+     *  because their availability is declared to include outages
+     *  (`p_max_pu_includes_outages`). Absent on pre-phase payloads. */
+    folded_units?: { name: string; folded_constant: number; source: string }[]
+    deterministic_units?: string[]
     netted_beyond_cap?: string[]
     k_exact?: number
   }
@@ -186,6 +192,37 @@ export function activityChipText(a: ActivitySummary | undefined | null): string 
     if (v.partial.length) bits.push(`${v.partial.length} partial in ${period}`)
   }
   return bits.join(', ')
+}
+
+/** Phase 12h disclosures (whole-branch review, M9 — the two lists were on
+ *  the wire and rendered nowhere): "2 folded · 1 includes outages". Empty
+ *  string when the payload carries neither, so the chip does not render. */
+export function foldChipText(
+  fleet: { folded_units?: { name: string }[]; deterministic_units?: string[] } | undefined | null,
+): string {
+  const folded = fleet?.folded_units?.length ?? 0
+  const det = fleet?.deterministic_units?.length ?? 0
+  const parts: string[] = []
+  if (folded) parts.push(`${folded} static CF folded`)
+  if (det) parts.push(`${det} includes outages`)
+  return parts.join(' · ')
+}
+
+export function foldChipTitle(
+  fleet: { folded_units?: { name: string; folded_constant: number }[]; deterministic_units?: string[] } | undefined | null,
+): string {
+  const lines: string[] = []
+  const folded = fleet?.folded_units ?? []
+  if (folded.length) {
+    lines.push('Static p_max_pu folded into capacity (no availability series): '
+      + folded.map((f) => `${f.name} × ${f.folded_constant}`).join(', '))
+  }
+  const det = fleet?.deterministic_units ?? []
+  if (det.length) {
+    lines.push('No outages sampled — availability already includes them '
+      + '(p_max_pu_includes_outages): ' + det.join(', '))
+  }
+  return lines.join('\n')
 }
 
 // The screening EUE dwarfing the LP proxy's ENS means storage/network are
@@ -247,6 +284,15 @@ export function CoptChips({ copt, proxyEnsMwh }: {
           title={copt.activity.note}
         >
           {activityChipText(copt.activity)}
+        </span>
+      )}
+      {foldChipText(copt.fleet) && (
+        <span
+          className="px-2 py-0.5 rounded bg-panel border border-border text-[10px] text-muted"
+          data-testid="copt-fold-note"
+          title={foldChipTitle(copt.fleet)}
+        >
+          {foldChipText(copt.fleet)}
         </span>
       )}
       {copt.fidelity_note && (
