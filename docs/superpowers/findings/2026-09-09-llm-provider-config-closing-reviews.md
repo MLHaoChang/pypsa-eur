@@ -195,5 +195,19 @@ carries, and for the same reason):
 Frontend: `npx tsc --noEmit` clean; `AssistantModelSettings.test.tsx` and
 `LocalSettings.test.tsx` — 34 passed.
 
-**The canonical `pixi run gui-tests` gate has still not been run**, here or at
-the handover. It remains a merge precondition.
+**The canonical `pixi run gui-tests` gate then ran, and is GREEN.** In the
+`test` environment built from this repo's `pixi.lock` with `--locked`, with
+the live anthropic probe enabled:
+
+    3,252 passed, 24 skipped, 0 failed, 0 errors  (3,276 collected)
+
+So the three fixes above are verified where it counts, not only in the pip
+venv. That venv's 14 failures are absent here, as diagnosed — `pywebview`,
+`libmagic` and `psycopg` are all in the pinned set — and
+`test_desktop_downloads.py`'s two tests RAN rather than skipped, which is the
+reason `pixi.toml` puts the task under `[feature.test.tasks]` at all. The
+environment is on Python 3.12.13 where the venv was on 3.11, so that venv was
+never this gate whatever it had installed.
+
+The one skip worth naming is the openai-wire live probe, which needs a local
+endpoint this container has not got; it passed against Ollama on 2026-09-04.

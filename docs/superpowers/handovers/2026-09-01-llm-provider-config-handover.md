@@ -4,10 +4,10 @@
 **Head at handover:** `cf3d3102`
 **Status:** all 16 planned tasks implemented and individually reviewed; both
 closing reviews run 2026-09-09, three findings, all fixed.
-**NOT done:** the deferred-item triage (its ledger is git-ignored and not in
-this checkout) and `pixi run gui-tests`, which has never been run. (The
-ADR-0002 live probes were the other open item; both wires passed — openai
-2026-09-04, anthropic 2026-09-09.) See
+**NOT done:** the deferred-item triage — its ledger is git-ignored and not in
+this checkout, and it is now the only open item. (`pixi run gui-tests` ran
+green on 2026-09-09: 3,252 passed, 24 skipped, 0 failed. The ADR-0002 live
+probes passed on both wires — openai 2026-09-04, anthropic 2026-09-09.) See
 [What is genuinely not finished](#what-is-genuinely-not-finished) — read that
 section before deciding this is ready to merge, because a green suite here
 does **not** mean what it usually means.
@@ -321,9 +321,26 @@ work that had passing tests.
 3. ~~**Close ADR-0002** with at least the Anthropic probe.~~ **Done
    2026-09-09** — both wires passed. Re-run the anthropic probe on any later
    change to the chat path; the ADR's rule is per-change, not per-branch.
-4. **Re-run `pixi run gui-tests`** in the canonical `test` environment. The
-   2026-09-09 probe run used a pip venv, which is sound for the probe and is
-   not the 3100-test gate.
+4. ~~**Re-run `pixi run gui-tests`**~~ **Done 2026-09-09 — GREEN.** In the
+   canonical `test` environment, built from this repo's own `pixi.lock` with
+   `--locked`: **3,252 passed, 24 skipped, 0 failed, 0 errors** (3,276
+   collected), with `PYPSA_GUI_TEST_LIVE_ANTHROPIC=1` set, so the live probe
+   ran inside the gate rather than beside it.
+
+   Two things this settled that the earlier pip-venv runs could not. The 14
+   failures those runs showed were all environmental and are simply absent
+   here — `pywebview`, `libmagic` and `psycopg` are in the pinned set. And
+   `test_desktop_downloads.py`'s two tests RAN rather than skipped, which is
+   the whole reason `pixi.toml` puts this task under `[feature.test.tasks]`:
+   its own comment calls a skip there "how a hole this size stays open".
+
+   The environment is also on **Python 3.12.13**, where the pip venv was on
+   3.11 — so that venv was never this gate whatever it had installed.
+
+   Bootstrapping note for whoever runs it next in a sandbox: `pixi.sh` and
+   GitHub releases are both 403 under this session's egress policy, but
+   conda-forge is permitted and ships pixi, so the binary came from there. No
+   policy was routed around.
 5. **Do not split the branch.** See the merge precondition.
 
 ### Carried follow-ups (recorded, out of this plan's scope)
