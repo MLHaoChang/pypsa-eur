@@ -2203,6 +2203,18 @@ def bulk_update(body: dict) -> dict:
                 # `null` branch above. It masks the LP row exactly as a cleared
                 # cell did, so it is refused here — the same answer the time-
                 # series routes give — rather than accepted and refused at solve.
+                # Whole-branch review S1: the outage rate is a probability-like
+                # unavailability — finite and in [0, 1) — and the engines
+                # convolve whatever number is here, so the bulk path refuses
+                # exactly what the create/update schemas refuse.
+                if col == "outage_rate_value" and not (
+                        math.isfinite(coerced[col]) and 0.0 <= coerced[col] < 1.0):
+                    raise HTTPException(
+                        422,
+                        f"Column 'outage_rate_value' must be a finite number in "
+                        f"[0, 1); got {value!r}. It is a probability-like "
+                        "unavailability, not a percentage or count. Send null "
+                        "to unset it (the per-carrier default then applies).")
                 if not math.isfinite(coerced[col]) and (
                         col in _FINITE_DEFAULT_BOUNDS
                         or _finite_input_meta(component_class, col) is not None):

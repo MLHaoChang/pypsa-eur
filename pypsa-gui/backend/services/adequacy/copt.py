@@ -62,6 +62,12 @@ from dataclasses import dataclass, field, replace
 import numpy as np
 import pandas as pd
 
+from services.adequacy.occurrence import (
+    OutageRateError,
+    _as_float,
+    rate_is_usable,
+)
+
 
 @dataclass(frozen=True)
 class CoptUnit:
@@ -239,6 +245,14 @@ def build_copt(units: list[CoptUnit], delta_mw: float = 1.0) -> CapacityDistribu
             "build_copt: units carry an availability profile and cannot be "
             f"convolved as two-state at nameplate: {profiled[:5]} — split the "
             "fleet with split_fleet() and mix them in hourly_adequacy()")
+    # Whole-branch review S1: a q outside [0, 1) (or NaN) is not a two-state
+    # unit — NaN poisons every cell and q > 1 gives negative mass — so the
+    # table refuses it here too, for callers that build units directly.
+    bad_q = [u.name for u in units if not rate_is_usable(u.q)]
+    if bad_q:
+        raise OutageRateError(
+            "build_copt: outage rate outside [0, 1) on "
+            f"{bad_q[:5]}{' …' if len(bad_q) > 5 else ''}")
     total_k = 1 + sum(int(math.ceil(u.capacity_mw / delta_mw)) + 1 for u in units)
     probs = np.zeros(max(total_k, 1))
     probs[0] = 1.0
@@ -700,9 +714,18 @@ def fleet_and_residual(n, *, keep_zero_capacity: bool = False, cfg=None,
 
     units: list[CoptUnit] = []
     must_take = pd.Series(0.0, index=snapshots)
+    unusable: list[str] = []
     for g, cap, series, row in _membership_walk(
             n, elec_buses, keep_zero_capacity=keep_zero_capacity):
         if row["source"] != "missing":
+            # Whole-branch review S1: a rate outside [0, 1) reaches here from
+            # a bundle or netCDF the schemas never saw. Convolving it turns
+            # the whole fleet's table into nonsense (LOLE −1.4 h measured
+            # for one q = 1.5 unit), so it is REFUSED, named, before any
+            # unit is built — the MC and both loops read this same walk.
+            if not rate_is_usable(row["rate"]):
+                unusable.append(f"{g} (rate {_as_float(row['rate']):g})")
+                continue
             # Phase 12h: fold a static ``p_max_pu`` into the CAPACITY (and
             # into the per-period capacity series 12d may have given the
             # unit), leaving ``profile`` None — a constant availability
@@ -737,6 +760,14 @@ def fleet_and_residual(n, *, keep_zero_capacity: bool = False, cfg=None,
                 avail = pd.Series(static * cap_h, index=snapshots)
             must_take = must_take.add(avail, fill_value=0.0)
 
+    if unusable:
+        raise OutageRateError(
+            "outage rate outside [0, 1) on "
+            f"{len(unusable)} generator(s): {', '.join(unusable[:10])}"
+            f"{' …' if len(unusable) > 10 else ''}. An outage rate is a "
+            "probability-like unavailability; fix the value (or clear it so "
+            "the per-carrier default applies) before running an adequacy "
+            "engine on this network.")
     demand = pd.Series(0.0, index=snapshots)
     if loads is not None and not loads.empty and "bus" in loads.columns:
         from services.adequacy.demand import demand_frame_for

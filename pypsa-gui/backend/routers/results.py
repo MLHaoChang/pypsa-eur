@@ -5348,7 +5348,13 @@ def get_copt():
     # half-transformed network (v3 review, finding 8); and on the LP's
     # demand basis.
     with PyPSAService.get_lock():
-        units, residual, w = fleet_and_residual(n, cfg=cfg)
+        try:
+            units, residual, w = fleet_and_residual(n, cfg=cfg)
+        except ValueError as exc:
+            # Whole-branch review S1: an outage rate outside [0, 1) is
+            # refused by the walk, named, and answered 422 — the same
+            # answer /mc and both loops already give a ValueError here.
+            raise HTTPException(422, str(exc)) from exc
         # …and the membership read for `must_take`, under the same hold
         # (12c-0 shipped-code review, finding 4).
         n_must_take = len(must_take_generators(n))

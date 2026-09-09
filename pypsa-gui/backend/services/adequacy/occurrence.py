@@ -260,6 +260,19 @@ def _availability_is_sub_one(n, component: str, name, row) -> bool:
     return math.isfinite(v) and v < 1.0 - 1e-9
 
 
+class OutageRateError(ValueError):
+    """An asset carries an outage rate no engine can use — non-finite, or
+    outside [0, 1). Raised by the engines' membership walk (never by the
+    resolver, which preflight and the margin also read and must not crash),
+    and mapped to a 422 by every study route. Whole-branch review, S1."""
+
+
+def rate_is_usable(rate: object) -> bool:
+    """Finite and in [0, 1) — the only shape a two-state unit can take."""
+    q = _as_float(rate)
+    return math.isfinite(q) and 0.0 <= q < 1.0
+
+
 def validate_outage_params(params: pd.DataFrame) -> list[str]:
     """
     Consistency warnings over a ``resolve_outage_params``-shaped frame.

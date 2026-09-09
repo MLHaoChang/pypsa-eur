@@ -19,6 +19,14 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_valida
 # The `int` fields of the same set (`build_year`, `min_up_time`, `tap_side`…)
 # already refuse non-finite values as `int` and stay `int`.
 Finite = Annotated[float, Field(allow_inf_nan=False)]
+# An outage rate is a probability-like unavailability: finite and in [0, 1).
+# Whole-branch review, finding S1: the five create/update models accepted any
+# float here, the occurrence validator only WARNED, and `/copt` runs on demand
+# with no gate — so a typed 1.5 (or −0.1) convolved into the table and turned
+# the whole fleet's LOLE negative, silently, while the MC asserted and the
+# margin credited 0. Refused at the boundary like every other finite-default
+# input (12g); `null` is still "unset → carrier default".
+OutageRate = Annotated[float, Field(ge=0.0, lt=1.0, allow_inf_nan=False)]
 _NoneToPosInf = Annotated[float, BeforeValidator(
     lambda v: float("inf") if v is None else v
 )]
@@ -71,7 +79,7 @@ class LineCreate(BaseModel):
     # FOR (service-hours, what NERC GADS class averages publish) and EFORd
     # (demand-based, what adequacy math wants) differ materially for units
     # with reserve-shutdown hours and are never silently converted.
-    outage_rate_value: float | None = None
+    outage_rate_value: OutageRate | None = None
     outage_rate_basis: Literal["FOR", "EFORd"] | None = None
     mttr_hours: float | None = None
     bus0: str
@@ -126,7 +134,7 @@ class LinkCreate(BaseModel):
     # FOR (service-hours, what NERC GADS class averages publish) and EFORd
     # (demand-based, what adequacy math wants) differ materially for units
     # with reserve-shutdown hours and are never silently converted.
-    outage_rate_value: float | None = None
+    outage_rate_value: OutageRate | None = None
     outage_rate_basis: Literal["FOR", "EFORd"] | None = None
     mttr_hours: float | None = None
     bus0: str
@@ -176,7 +184,7 @@ class GeneratorCreate(BaseModel):
     # FOR (service-hours, what NERC GADS class averages publish) and EFORd
     # (demand-based, what adequacy math wants) differ materially for units
     # with reserve-shutdown hours and are never silently converted.
-    outage_rate_value: float | None = None
+    outage_rate_value: OutageRate | None = None
     outage_rate_basis: Literal["FOR", "EFORd"] | None = None
     mttr_hours: float | None = None
     # Phase 12h. "The availability I gave this asset ALREADY includes forced
@@ -254,7 +262,7 @@ class StorageUnitCreate(BaseModel):
     # FOR (service-hours, what NERC GADS class averages publish) and EFORd
     # (demand-based, what adequacy math wants) differ materially for units
     # with reserve-shutdown hours and are never silently converted.
-    outage_rate_value: float | None = None
+    outage_rate_value: OutageRate | None = None
     outage_rate_basis: Literal["FOR", "EFORd"] | None = None
     mttr_hours: float | None = None
     bus: str
@@ -296,7 +304,7 @@ class StoreCreate(BaseModel):
     # FOR (service-hours, what NERC GADS class averages publish) and EFORd
     # (demand-based, what adequacy math wants) differ materially for units
     # with reserve-shutdown hours and are never silently converted.
-    outage_rate_value: float | None = None
+    outage_rate_value: OutageRate | None = None
     outage_rate_basis: Literal["FOR", "EFORd"] | None = None
     mttr_hours: float | None = None
     bus: str

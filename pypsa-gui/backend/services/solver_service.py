@@ -3479,7 +3479,9 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
                 q = 0.0          # no outage data — the profile is all we know
             else:
                 q = _finite(occ["rate"])
-                if math.isnan(q):
+                # Whole-branch review S1: a rate outside [0, 1) is as
+                # unpriceable as no rate — (1 − q) is not a derate then.
+                if math.isnan(q) or not (0.0 <= q < 1.0):
                     unpriceable.append(name)
                     continue
             # Availability: the profile when the unit has one (PyPSA caps
@@ -3526,7 +3528,7 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
                 unpriceable.append(name)
                 continue
             q = _finite(row["rate"])
-            if math.isnan(q):
+            if math.isnan(q) or not (0.0 <= q < 1.0):
                 unpriceable.append(name)
                 continue
             max_hours = _finite(sus.at[s, "max_hours"], 0.0) \
@@ -3561,7 +3563,8 @@ def reserve_margin_facts(n, cfg, snapshots=None, emit=None, *,
     if unpriceable and emit is not None:
         emit(
             f"Reserve margin cannot price {len(unpriceable)} asset(s) — no "
-            f"outage data and no availability profile: "
+            f"outage data (or an outage rate outside [0, 1)) and no "
+            f"availability profile: "
             f"{', '.join(sorted(unpriceable)[:20])}"
             f"{' …' if len(unpriceable) > 20 else ''}. They are EXCLUDED "
             "from the firm-capacity total (never credited at 1.0)."

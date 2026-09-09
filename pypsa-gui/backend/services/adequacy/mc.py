@@ -325,8 +325,10 @@ def transition_probs(q, mttr_hours, *, name: str = "") -> Transition:
     if not math.isfinite(q) or q < 0.0:
         raise ValueError(f"unit {name!r}: unavailability {q!r} is not a "
                          "probability")
-    # Upstream (occurrence.py) rejects q ≥ 1; assert anyway — a certainly-dead
-    # unit has no MTTF and must never reach the sampler as one.
+    # Upstream (`copt.fleet_and_residual`, which every sampler entry point
+    # walks through) refuses q outside [0, 1) with `OutageRateError`; assert
+    # anyway — a certainly-dead unit has no MTTF and must never reach the
+    # sampler as one.
     assert q < 1.0, (f"unit {name!r}: unavailability {q} ≥ 1 must be rejected "
                      "by the occurrence validator before sampling")
 
