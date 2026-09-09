@@ -3,7 +3,8 @@
 **Branch:** `feature/llm-provider-config` (36 commits ahead of local `master`)
 **Head at handover:** `cf3d3102`
 **Status:** all 16 planned tasks implemented and individually reviewed.
-**NOT done:** the two closing reviews and the ADR-0002 live probes. See
+**NOT done:** the two closing reviews. (The ADR-0002 live probes WERE the other
+open item; both wires passed — openai 2026-09-04, anthropic 2026-09-09.) See
 [What is genuinely not finished](#what-is-genuinely-not-finished) — read that
 section before deciding this is ready to merge, because a green suite here
 does **not** mean what it usually means.
@@ -72,7 +73,43 @@ test passes because of the control, not because there was nothing to redact.
 
 ## What is genuinely not finished
 
-### 1. ADR-0002 live probes — STILL UNMET. The plan cannot honestly be called done.
+### 1. ADR-0002 live probes — NOW MET, both wires. ~~STILL UNMET.~~
+
+> **Update 2026-09-09 — the anthropic wire passed, and this item is closed.**
+> A valid key was supplied and the probe was re-run. It **passed**: a token
+> streamed from a live vendor model through the production path, which had
+> never happened on this branch for this wire.
+>
+> ```
+> profile   : anthropic-sonnet | wire: anthropic | model: claude-sonnet-5
+>             | key_env: ANTHROPIC_API_KEY
+> provider  : AnthropicProvider  (built with no error)
+> HTTP      : POST https://api.anthropic.com/v1/messages 200
+> frames    : session_init -> token -> turn_done
+> token     : {'delta': 'ok'}
+> usage     : input 89, output 4, cache_create 2278, cache_read 22358
+> ```
+>
+> `pytest … -k live_probe_anthropic` reports **1 passed**, and the wider
+> `test_llm_provider_seam.py` + `test_no_split_merge_precondition.py` run with
+> the probe enabled is **51 passed, 2 skipped** — the two skips being the
+> openai/local-endpoint probes, which need an endpoint this container has not
+> got. Runbook: `docs/superpowers/runbooks/anthropic-wire-probe.md`.
+>
+> **Read the caveat before treating this as a full gate.** The run was made in
+> a pip venv built from `pypsa-gui/gui-requirements.txt` (plus `pytest`, minus
+> `pywebview`), not in the canonical pixi `test` environment — pixi is not
+> installed in that container. That is the right environment for *this* probe,
+> which exercises the anthropic SDK and the profile store and touches none of
+> the pinned numerics, but it is **not** a substitute for `pixi run gui-tests`.
+> The 3100-test gate still has to be run where the handover says to run it.
+>
+> What it does not establish: tool *execution* (the probe sends 121 tool
+> schemas and asks for one word with "No tools"), vision, or long turns. Those
+> stay unprobed, and are named in the runbook rather than left implied.
+>
+> With the openai wire already passed against Ollama on 2026-09-04, **both
+> wires have now been exercised live.** ADR-0002 is satisfied for this branch.
 
 > **Update 2026-09-04.** The Anthropic probe was RUN, not skipped, and it
 > **failed**: the machine's stored `ANTHROPIC_API_KEY` is revoked. Anthropic
@@ -108,13 +145,16 @@ test passes because of the control, not because there was nothing to redact.
 a chat change, and *"its absence is a defect in the change, not in the suite."*
 
 Both probes are written and drive the full production path (profile store →
-`_provider_for_profile` → `run_turn`). The anthropic probe now RUNS and fails
-on a revoked key (see the update above); the **openai probe still skips**,
-because no local endpoint is installed here. Their skip reasons say the
-requirement is UNMET rather than "not configured" — a skip that reads as a
-pass is the failure mode the ADR exists to prevent.
+`_provider_for_profile` → `run_turn`). Both have now been RUN and PASSED —
+openai against a local Ollama on 2026-09-04
+(`docs/superpowers/runbooks/local-openai-wire-probe.md`), anthropic against the
+vendor on 2026-09-09 (`docs/superpowers/runbooks/anthropic-wire-probe.md`).
+They still skip by default, and their skip reasons still say the requirement is
+UNMET rather than "not configured" — a skip that reads as a pass is the failure
+mode the ADR exists to prevent, and that gate does not relax just because the
+probe has passed once on someone else's machine.
 
-To close it:
+To re-run them:
 
 ```bash
 # Anthropic wire — one short turn, negligible credit.
@@ -241,8 +281,13 @@ work that had passing tests.
 2. **Re-run the two killed reviews** (above). Do not merge on the strength of
    green gates alone — this plan's reviews found defects in green code more
    than a dozen times.
-3. **Close ADR-0002** with at least the Anthropic probe.
-4. **Do not split the branch.** See the merge precondition.
+3. ~~**Close ADR-0002** with at least the Anthropic probe.~~ **Done
+   2026-09-09** — both wires passed. Re-run the anthropic probe on any later
+   change to the chat path; the ADR's rule is per-change, not per-branch.
+4. **Re-run `pixi run gui-tests`** in the canonical `test` environment. The
+   2026-09-09 probe run used a pip venv, which is sound for the probe and is
+   not the 3100-test gate.
+5. **Do not split the branch.** See the merge precondition.
 
 ### Carried follow-ups (recorded, out of this plan's scope)
 

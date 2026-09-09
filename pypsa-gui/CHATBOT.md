@@ -90,6 +90,13 @@ cannot take. PDFs need the Anthropic wire; images work on either.
 > `PYPSA_GUI_TEST_LIVE_OPENAI_PROFILE=<profile id>` for a saved
 > OpenAI-compatible profile. `backend/smoke/run_chat_smoke.py --profile <id>`
 > drives a fuller end-to-end pass against a running backend.
+>
+> Both probes have been run and passed — openai against a local Ollama on
+> 2026-09-04, anthropic against the vendor on 2026-09-09. Runbooks:
+> `docs/superpowers/runbooks/local-openai-wire-probe.md` and
+> `anthropic-wire-probe.md` (repo root `docs/`, not this directory). That is a
+> result for those commits, not standing coverage: they still skip by default,
+> so the ADR's per-change rule is unchanged.
 
 ### Supplying the key in the packaged app
 

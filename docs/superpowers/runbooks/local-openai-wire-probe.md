@@ -73,9 +73,10 @@ It does **not** establish:
 * anything about OpenAI's own parameter validation. That remains documentary,
   and C-2's `max_completion_tokens` branch is still unprobed against the
   vendor;
-* anything about the **anthropic** wire, which is still UNPROBED — its stored
-  key is revoked. That probe needs a valid `ANTHROPIC_API_KEY` and is the one
-  the zero-config default actually uses.
+* anything about the **anthropic** wire, which is the one the zero-config
+  default actually uses. It was UNPROBED when this was written — its stored key
+  was revoked — and was probed separately on 2026-09-09 with a valid key:
+  see `anthropic-wire-probe.md`.
 
 A local endpoint that speaks the OpenAI protocol is a real server, but it is
 not the vendor. Do not record this as closing ADR-0002 outright.
