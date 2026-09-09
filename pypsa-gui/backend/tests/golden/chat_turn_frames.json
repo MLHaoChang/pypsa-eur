@@ -1,0 +1,143 @@
+{
+ "daily_token_cap": [
+  [
+   "session_done",
+   {
+    "kind": "daily_tokens",
+    "limit": 5,
+    "reason": "daily_budget_exhausted",
+    "spent": 9
+   }
+  ]
+ ],
+ "no_client": [
+  [
+   "error",
+   {
+    "error_kind": "missing_api_key",
+    "message": "Anthropic client unavailable \u2014 chat is disabled until ANTHROPIC_API_KEY is set and the SDK is installed."
+   }
+  ],
+  [
+   "session_done",
+   {
+    "reason": "no_client"
+   }
+  ]
+ ],
+ "plain_text": [
+  [
+   "session_init",
+   {
+    "model": "claude-sonnet-4-6",
+    "session6": "<session6>",
+    "session_id": "<session_id>",
+    "tool_count": "<tool_count>"
+   }
+  ],
+  [
+   "token",
+   {
+    "delta": "hello there."
+   }
+  ],
+  [
+   "turn_done",
+   {
+    "usage": {
+     "cache_create_tokens": 0,
+     "cache_read_tokens": 0,
+     "input_tokens": 11,
+     "output_tokens": 7
+    }
+   }
+  ]
+ ],
+ "read_tier_tool": [
+  [
+   "session_init",
+   {
+    "model": "claude-sonnet-4-6",
+    "session6": "<session6>",
+    "session_id": "<session_id>",
+    "tool_count": "<tool_count>"
+   }
+  ],
+  [
+   "token",
+   {
+    "delta": "listing buses."
+   }
+  ],
+  [
+   "tool_request",
+   {
+    "args": {
+     "component_class": "Bus"
+    },
+    "safety_tier": "read",
+    "tool_name": "list_components",
+    "tool_use_id": "tu-1"
+   }
+  ],
+  [
+   "tool_running",
+   {
+    "tool_name": "list_components",
+    "tool_use_id": "tu-1"
+   }
+  ],
+  [
+   "tool_result",
+   {
+    "result": [
+     {
+      "carrier": "AC",
+      "control": "PQ",
+      "generator": "",
+      "location": "",
+      "name": "B1",
+      "sub_network": "",
+      "type": "",
+      "unit": "",
+      "v_mag_pu_max": null,
+      "v_mag_pu_min": 0.0,
+      "v_mag_pu_set": 1.0,
+      "v_nom": 1.0,
+      "x": 0.0,
+      "y": 0.0
+     }
+    ],
+    "tool_name": "list_components",
+    "tool_use_id": "tu-1"
+   }
+  ],
+  [
+   "token",
+   {
+    "delta": "done."
+   }
+  ],
+  [
+   "turn_done",
+   {
+    "usage": {
+     "cache_create_tokens": 0,
+     "cache_read_tokens": 0,
+     "input_tokens": 58,
+     "output_tokens": 15
+    }
+   }
+  ]
+ ],
+ "session_budget_exhausted": [
+  [
+   "session_done",
+   {
+    "kind": "output_tokens",
+    "limit": 200000,
+    "reason": "budget_exhausted"
+   }
+  ]
+ ]
+}
