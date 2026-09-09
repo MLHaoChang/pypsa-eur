@@ -555,8 +555,12 @@ def run():
     # and the loop's `evaluate` then samples whatever plan the network happens
     # to be holding — so an interleaved /run silently re-solves under the
     # user's config and the loop certifies a cap against a plan it never
-    # produced. Refused BEFORE the claim, so the study is never left racing a
-    # half-started worker.
+    # produced. Refused BEFORE the claim (cheap, before any work) AND AGAIN
+    # INSIDE it: the whole-branch review (finding S3) measured a study POST
+    # and a /run arriving together both admitted, because this check ran
+    # outside the lock the claim below holds while the study's own gates ran
+    # outside the lock its publish holds — two check-then-act windows facing
+    # each other. Both sides now re-check under their lock.
     _blocked = _study_state.blocking_study_detail()
     if _blocked:
         raise HTTPException(409, _blocked)
@@ -621,6 +625,9 @@ def run():
     # False and would be mistaken for stale state, re-opening the race.
     # _state_lock is an RLock, so the nested _state_update is safe.
     with PyPSAService.get_solver_state_lock():
+        _blocked = _study_state.blocking_study_detail()
+        if _blocked:
+            raise HTTPException(409, _blocked)
         if _state["status"] == "running":
             # Recover from stale state: if the worker thread died without
             # resetting status (uncaught exception, segfault, process restart
@@ -865,6 +872,10 @@ def run_ac_pf():
     # observes is_alive()==True. _state_lock is an RLock → nested _state_update
     # is safe; raising inside the block releases the lock via the context manager.
     with PyPSAService.get_solver_state_lock():
+        # The study mesh, re-checked under the claim lock (see /run).
+        _blocked = _study_state.blocking_study_detail()
+        if _blocked:
+            raise HTTPException(409, _blocked)
         if _state["status"] == "running":
             existing = _state.get("thread")
             if existing is not None and existing.is_alive():

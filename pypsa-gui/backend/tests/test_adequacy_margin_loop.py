@@ -626,11 +626,19 @@ def test_409_mesh_covers_every_study_pair_and_the_solve_entrypoints(
             r = client.post(LOOP_URL, json=body)
             assert r.status_code == 409, f"{key}: {r.text}"
 
+    # a foreground solve is a LIVE worker thread, not a status string
+    # (whole-branch review S4: the gate is `_solver_in_flight()`)
+    release = threading.Event()
+    worker = threading.Thread(target=release.wait, daemon=True)
+    worker.start()
     st["status"] = "running"
+    st["thread"] = worker
     try:
         assert client.post(LOOP_URL, json=body).status_code == 409
     finally:
+        release.set()
         st["status"] = "idle"
+        st["thread"] = None
 
 
 def test_the_study_key_is_registered_in_the_shared_mesh_module(client):

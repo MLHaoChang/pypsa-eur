@@ -64,7 +64,7 @@ from services.period_utils import (
     years_for_period,
 )
 
-from routers.simulation import _state, _state_snapshot
+from routers.simulation import _solver_in_flight, _state, _state_snapshot
 from services import study_state as _study_state
 from services.adequacy import slack as _slack
 
@@ -3006,6 +3006,66 @@ def get_fmea_modes():
 _study_running = _study_state.study_running
 
 
+def _study_mesh_blocker(self_key: str) -> str | None:
+    """The 409 detail that refuses a NEW `self_key` study, or None when the
+    surface is free. ONE predicate for all five studies.
+
+    Whole-branch review, findings S2/S4: each study POST carried its own six
+    `if` gates, run with NO lock, and they tested the foreground solve by its
+    status STRING. Two things were wrong with that. `/simulation/abort` flips
+    the status to `"aborted"` while the worker keeps running (the restore
+    phase, or HiGHS refusing to yield) — `_solver_in_flight()` exists for
+    exactly this and is what preflight, save and activate already use, so a
+    study could start on a network whose LP transforms were still being
+    reverted. And a gate that runs outside the lock that publishes is a
+    check-then-act window: two POSTs close together both passed and the
+    second overwrote the first's record, orphaning a worker nothing could
+    abort or see. This predicate is therefore called TWICE per POST: once
+    early (a cheap refusal before any synchronous work) and once INSIDE the
+    publish hold, in `_publish_study`, which is the claim.
+    """
+    label = _study_state.STUDY_LABELS
+    if _study_running(self_key):
+        return f"{label.get(self_key, self_key)} is already running"
+    for key in _study_state.STUDY_KEYS:
+        if key != self_key and _study_running(key):
+            return f"{label.get(key, key)} is running — wait for it to finish"
+    if _solver_in_flight():
+        if _state.get("status") == "aborted":
+            return ("a solve is still winding down after its abort — its "
+                    "worker is restoring the network; wait for it to exit")
+        return "a solve is running — wait for it to finish"
+    return None
+
+
+def _refuse_if_mesh_busy(self_key: str) -> None:
+    blocked = _study_mesh_blocker(self_key)
+    if blocked:
+        raise HTTPException(409, blocked)
+
+
+def _publish_study(key: str, record: dict, thread: "_threading.Thread") -> None:
+    """Claim the surface, publish the record and START the worker under ONE
+    `solver_state_lock` hold — the same shape as `/simulation/run`'s claim.
+
+    The mesh is re-checked inside the hold: that is what makes it a claim
+    rather than a check. `_study_running` tests `thread.is_alive()` (or
+    `ident is None` for a published-but-unstarted thread), so a competing
+    POST that takes the lock next reads this record as live. If `start()`
+    raises, the record is rolled back rather than left as a never-started
+    thread that `record_is_running` would count as running for the rest of
+    the process (review finding M1).
+    """
+    with PyPSAService.get_solver_state_lock():
+        _refuse_if_mesh_busy(key)
+        _state[key] = record
+        try:
+            thread.start()
+        except BaseException:
+            _state[key] = None
+            raise
+
+
 @results_router.get("/fmea_sweep")
 def get_fmea_sweep():
     """
@@ -3077,23 +3137,7 @@ def post_fmea_sweep(body: FmeaSweepRequest | None = None):
     from services.adequacy.sweep import SweepBudgetError, run_class_b_sweep
     from routers.simulation import _state_update
 
-    if _study_running("fmea_sweep"):
-        raise HTTPException(409, "an FMEA sweep is already running")
-    # MESH HOLE, fixed in Phase 7: this guard was simply missing. The frontier
-    # re-solves the foreground network once per target while the sweep freezes
-    # capacities and re-solves it once per contingency — whichever lost the
-    # race was measuring a network the other was rebuilding, and both reported
-    # numbers with no sign of it.
-    if _study_running("frontier"):
-        raise HTTPException(409, "a frontier study is running — wait for it to finish")
-    if _study_running("mc"):
-        raise HTTPException(409, "a sequential-MC study is running — wait for it to finish")
-    if _study_running("coupling_loop"):
-        raise HTTPException(409, "a coupling-loop study is running — wait for it to finish")
-    if _study_running("margin_loop"):
-        raise HTTPException(409, "a margin-loop study is running — wait for it to finish")
-    if _state.get("status") == "running":
-        raise HTTPException(409, "a solve is running — wait for it to finish")
+    _refuse_if_mesh_busy("fmea_sweep")
     cfg = _state.get("solver_config")
     if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
         raise HTTPException(422, "the sweep requires a VOLL > 0 in solver settings")
@@ -3158,9 +3202,7 @@ def post_fmea_sweep(body: FmeaSweepRequest | None = None):
     t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
                           name="fmea-sweep")
     record["thread"] = t
-    with PyPSAService.get_solver_state_lock():
-        _state["fmea_sweep"] = record
-        t.start()
+    _publish_study("fmea_sweep", record, t)
     return {"status": "running"}
 
 
@@ -3235,18 +3277,7 @@ def post_frontier(body: FrontierRequest | None = None):
     )
     from routers.simulation import _state_update
 
-    if _study_running("frontier"):
-        raise HTTPException(409, "a frontier study is already running")
-    if _study_running("fmea_sweep"):
-        raise HTTPException(409, "an FMEA sweep is running — wait for it to finish")
-    if _study_running("mc"):
-        raise HTTPException(409, "a sequential-MC study is running — wait for it to finish")
-    if _study_running("coupling_loop"):
-        raise HTTPException(409, "a coupling-loop study is running — wait for it to finish")
-    if _study_running("margin_loop"):
-        raise HTTPException(409, "a margin-loop study is running — wait for it to finish")
-    if _state.get("status") == "running":
-        raise HTTPException(409, "a solve is running — wait for it to finish")
+    _refuse_if_mesh_busy("frontier")
     cfg = _state.get("solver_config")
     if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
         raise HTTPException(422, "the frontier requires a VOLL > 0 in solver settings")
@@ -3296,9 +3327,7 @@ def post_frontier(body: FrontierRequest | None = None):
     t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
                           name="adequacy-frontier")
     record["thread"] = t
-    with PyPSAService.get_solver_state_lock():
-        _state["frontier"] = record
-        t.start()
+    _publish_study("frontier", record, t)
     return {"status": "running", "targets_permyriad": targets}
 
 
@@ -3420,18 +3449,7 @@ def post_mc(body: McRequest | None = None):
         transition_probs,
     )
 
-    if _study_running("mc"):
-        raise HTTPException(409, "a sequential-MC study is already running")
-    if _study_running("frontier"):
-        raise HTTPException(409, "a frontier study is running — wait for it to finish")
-    if _study_running("fmea_sweep"):
-        raise HTTPException(409, "an FMEA sweep is running — wait for it to finish")
-    if _study_running("coupling_loop"):
-        raise HTTPException(409, "a coupling-loop study is running — wait for it to finish")
-    if _study_running("margin_loop"):
-        raise HTTPException(409, "a margin-loop study is running — wait for it to finish")
-    if _state.get("status") == "running":
-        raise HTTPException(409, "a solve is running — wait for it to finish")
+    _refuse_if_mesh_busy("mc")
 
     draws = getattr(body, "draws", None)
     draws = 500 if draws is None else int(draws)
@@ -3650,9 +3668,7 @@ def post_mc(body: McRequest | None = None):
     t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
                           name="adequacy-mc")
     record["thread"] = t
-    with PyPSAService.get_solver_state_lock():
-        _state["mc"] = record
-        t.start()
+    _publish_study("mc", record, t)
     return {"status": "running", "draws": draws, "seed": seed,
             "cov_target": cov_target, "elcc_assets": len(assets),
             "elcc_portfolio": want_portfolio}
@@ -3890,18 +3906,7 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
     from routers.simulation import _state_update
 
     # ── the 409 mesh ──────────────────────────────────────────────────────
-    if _study_running("coupling_loop"):
-        raise HTTPException(409, "a coupling-loop study is already running")
-    if _study_running("margin_loop"):
-        raise HTTPException(409, "a margin-loop study is running — wait for it to finish")
-    if _study_running("frontier"):
-        raise HTTPException(409, "a frontier study is running — wait for it to finish")
-    if _study_running("mc"):
-        raise HTTPException(409, "a sequential-MC study is running — wait for it to finish")
-    if _study_running("fmea_sweep"):
-        raise HTTPException(409, "an FMEA sweep is running — wait for it to finish")
-    if _state.get("status") == "running":
-        raise HTTPException(409, "a solve is running — wait for it to finish")
+    _refuse_if_mesh_busy("coupling_loop")
 
     # ── the synchronous 422 set ───────────────────────────────────────────
     target = getattr(body, "target_lole_h", None)
@@ -4372,9 +4377,7 @@ def post_coupling_loop(body: CouplingLoopRequest | None = None):
     # `thread.is_alive()`, and a registered-but-not-yet-started thread reports
     # False — so a second POST arriving in that window would read the record as
     # stale state, claim the surface, and put two loops on the same network.
-    with PyPSAService.get_solver_state_lock():
-        _state["coupling_loop"] = record
-        t.start()
+    _publish_study("coupling_loop", record, t)
     return {"status": "running", "target_lole_h": target, "draws": draws,
             "seed": seed, "eps0": eps0, "max_solves": max_solves,
             "restore": restore, "basis": basis,
@@ -4545,18 +4548,7 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
     from routers.simulation import _state_update
 
     # ── the 409 mesh ──────────────────────────────────────────────────────
-    if _study_running("margin_loop"):
-        raise HTTPException(409, "a margin-loop study is already running")
-    if _study_running("coupling_loop"):
-        raise HTTPException(409, "a coupling-loop study is running — wait for it to finish")
-    if _study_running("frontier"):
-        raise HTTPException(409, "a frontier study is running — wait for it to finish")
-    if _study_running("mc"):
-        raise HTTPException(409, "a sequential-MC study is running — wait for it to finish")
-    if _study_running("fmea_sweep"):
-        raise HTTPException(409, "an FMEA sweep is running — wait for it to finish")
-    if _state.get("status") == "running":
-        raise HTTPException(409, "a solve is running — wait for it to finish")
+    _refuse_if_mesh_busy("margin_loop")
 
     # ── the synchronous 422 set (§2.4) ────────────────────────────────────
     target = getattr(body, "target_lole_h", None)
@@ -5317,9 +5309,7 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
     # `thread.is_alive()`, and a registered-but-not-yet-started thread reports
     # False — so a second POST arriving in that window would read the record as
     # stale state, claim the surface, and put two loops on the same network.
-    with PyPSAService.get_solver_state_lock():
-        _state["margin_loop"] = record
-        t.start()
+    _publish_study("margin_loop", record, t)
     return {"status": "running", "study": "margin_loop",
             "lever": "reserve_margin", "target_lole_h": target,
             "draws": draws, "seed": seed, "max_solves": max_solves,

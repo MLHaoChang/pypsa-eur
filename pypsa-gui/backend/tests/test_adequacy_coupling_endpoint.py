@@ -324,12 +324,19 @@ def test_409_mesh_covers_every_study_pair_and_the_solve_entrypoints(
         assert client.post("/api/results/frontier",
                            json={}).status_code == 409
 
-    # a foreground solve blocks the loop
+    # a foreground solve blocks the loop — a LIVE worker thread, not a
+    # status string (whole-branch review S4: the gate is `_solver_in_flight()`)
+    release = threading.Event()
+    worker = threading.Thread(target=release.wait, daemon=True)
+    worker.start()
     st["status"] = "running"
+    st["thread"] = worker
     try:
         assert client.post(LOOP_URL, json=body).status_code == 409
     finally:
+        release.set()
         st["status"] = "idle"
+        st["thread"] = None
 
 
 # ── ★ mid-run GET consistency ─────────────────────────────────────────────

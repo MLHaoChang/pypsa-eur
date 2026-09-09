@@ -274,12 +274,22 @@ def test_409_mesh_between_mc_frontier_sweep_and_solve(
         r = client.post("/api/results/mc", json={})
         assert r.status_code == 409, r.text
 
+    # A foreground solve is a LIVE worker thread, not a status string: the
+    # whole-branch review (S4) found the studies gating on the string, which
+    # `/abort` flips to "aborted" while the worker runs on. The gate is
+    # `_solver_in_flight()` now, so the fake solve must carry a thread.
+    release = threading.Event()
+    worker = threading.Thread(target=release.wait, daemon=True)
+    worker.start()
     st["status"] = "running"
+    st["thread"] = worker
     try:
         r = client.post("/api/results/mc", json={})
         assert r.status_code == 409, r.text
     finally:
+        release.set()
         st["status"] = "idle"
+        st["thread"] = None
 
 
 # ── ★ nothing to sample ───────────────────────────────────────────────────
