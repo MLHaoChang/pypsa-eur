@@ -1447,17 +1447,24 @@ def gridspine_create_study(name: str, config: dict | None = None) -> dict:
         return _h(db, user, name, config=config)
 
 
-def gridspine_set_dispatch_source(project_id: str, from_dispatch: str | None = None) -> dict:
+def gridspine_set_dispatch_source(
+    project_id: str, from_dispatch: str | None = None, from_project: str | None = None,
+) -> dict:
     from services.gridspine_service import set_dispatch_source as _h
     with _acting() as (db, user):
-        source = "generate" if from_dispatch is None else {"from_dispatch": from_dispatch}
-        return _h(db, _gridspine_project(db, user, project_id), source)
+        if from_project is not None:
+            source = {"from_project": from_project}
+        elif from_dispatch is not None:
+            source = {"from_dispatch": from_dispatch}
+        else:
+            source = "generate"
+        return _h(db, _gridspine_project(db, user, project_id), source, user=user)
 
 
 def gridspine_get_config(project_id: str) -> dict:
     from services.gridspine_service import get_config as _h
     with _acting() as (db, user):
-        return _h(_gridspine_project(db, user, project_id))
+        return _h(_gridspine_project(db, user, project_id), db=db)
 
 
 def gridspine_update_config(project_id: str, **patch) -> dict:

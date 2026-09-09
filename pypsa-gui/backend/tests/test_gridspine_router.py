@@ -136,16 +136,27 @@ def test_a_template_edit_reaches_the_service_with_its_provenance(client, study, 
                     "source": "datasheet", "edited_by": "user"}
 
 
-def test_a_dispatch_source_pointing_at_a_run_is_passed_through(client, study, monkeypatch):
+@pytest.mark.parametrize("body, source", [
+    ({"source": "from_dispatch", "from_dispatch": "/tmp/somewhere"}, {"from_dispatch": "/tmp/somewhere"}),
+    ({"source": "from_project", "from_project": "Solved 39"}, {"from_project": "Solved 39"}),
+    ({"from_project": "Solved 39"}, {"from_project": "Solved 39"}),
+    ({"source": "generate"}, "generate"),
+])
+def test_a_dispatch_source_is_passed_through_with_the_acting_user(client, study, monkeypatch, body, source):
     seen = {}
     monkeypatch.setattr(gs, "set_dispatch_source",
-                        lambda db, project, source: seen.update(source=source) or {"ok": True})
-    resp = client.post(
-        "/api/gridspine/Router Study/dispatch-source",
-        json={"source": "from_dispatch", "from_dispatch": "/tmp/somewhere"},
-    )
+                        lambda db, project, source, user=None: seen.update(source=source, user=user) or {"ok": True})
+    resp = client.post("/api/gridspine/Router Study/dispatch-source", json=body)
     assert resp.status_code == 200, resp.text
-    assert seen["source"] == {"from_dispatch": "/tmp/somewhere"}
+    assert seen["source"] == source
+    assert seen["user"] is not None        # from_project resolves under the caller, never anonymously
+
+
+def test_the_config_read_carries_the_db_so_the_source_project_can_be_named(client, study, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gs, "get_config", lambda project, db=None: seen.update(db=db) or {"hours": 24})
+    assert client.get("/api/gridspine/Router Study/config").status_code == 200
+    assert seen["db"] is not None
 
 
 # --------------------------------------------------------------------------

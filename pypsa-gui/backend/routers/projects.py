@@ -1141,6 +1141,7 @@ _TEMPLATE_DEFAULT_NAMES = {
     "3bus": "3-Bus Tutorial",
     "ieee14": "IEEE 14-Bus",
     "belgium": "Belgium Grid",
+    "ieee39": "IEEE 39-Bus (New England)",
 }
 
 

@@ -34,6 +34,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from db.models import Project
 from services import project_registry
 
 # `gridspine` is the repository's own package, installed EDITABLE into every
@@ -219,6 +220,12 @@ def create_study(db, user, name: str, config: dict = None, kind: str = PLANNING_
     if kind != PLANNING_DYNAMICS:
         raise HTTPException(status_code=422, detail=f"create_study makes {PLANNING_DYNAMICS} projects, not {kind!r}")
     data = dict(config or {})
+    if data.get("from_network") is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="from_network is not set directly; choose a source project with "
+                   "set_dispatch_source({'from_project': name}) after creation",
+        )
     data["outdir"] = "."          # replaced by the project's own directory below
     try:
         StudyConfig.from_json(data)
@@ -246,10 +253,15 @@ EDITABLE_CONFIG_FIELDS = frozenset({
 })
 
 
-def get_config(project) -> dict:
-    """The study config as the next run will use it (project-derived paths included)."""
+def get_config(project, db=None) -> dict:
+    """The study config as the next run will use it (project-derived paths
+    included). With `db`, also `from_project`: the NAME of the project whose
+    network `from_network` is, so the UI and the copilot can say which project
+    rather than which path."""
     require_planning(project)
-    return read_config(project).to_json()
+    data = read_config(project).to_json()
+    data["from_project"] = _project_for_network(db, project, data.get("from_network"))
+    return data
 
 
 def _active_job_for(project):
@@ -293,17 +305,81 @@ def update_config(project, patch: dict) -> dict:
                 detail=f"{src} is not a finished study directory: missing {', '.join(missing)}",
             )
     merged = {**current, **patch}
+    if patch.get("from_dispatch"):
+        merged["from_network"] = None            # one dispatch source at a time
     config = _config_from(project, merged)          # validates; 422 on a bad value
     return _write_config(project, config)
 
 
-def set_dispatch_source(db, project, source) -> dict:
-    """`"generate"` to solve the unit commitment, or `{"from_dispatch": dir}`
-    to study a finished run's dispatch (drivers F3)."""
+NETWORK_FILE = "network.nc"
+
+
+def _source_project(db, user, project, name: str):
+    """The capacity-expansion project whose saved network a study will read,
+    resolved under the ACTING USER — the same 404 for unknown and foreign that
+    every other lookup gives, so the study cannot be used to probe names."""
+    if user is None:
+        raise HTTPException(status_code=422, detail="from_project needs an acting user")
+    row = project_registry.resolve_project(db, user, name)
+    if row.id == project.id:
+        raise HTTPException(status_code=422, detail="a study cannot be its own dispatch source")
+    if kind_of(row) != CAPACITY_EXPANSION:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Project '{row.name}' is a {kind_of(row)} project; the dispatch source "
+                   f"must be a capacity-expansion project with a solved, saved network",
+        )
+    return row
+
+
+def _require_solved_network(nc: Path, row) -> None:
+    """A saved network with a dispatch in it. The identity map itself is the
+    driver's check (`producers.tables_from_network`, in the dispatch stage);
+    the two failures a user is most likely to make — never saved, never
+    solved — are answered here, before anything is written."""
+    if not nc.is_file():
+        raise HTTPException(
+            status_code=422,
+            detail=f"Project '{row.name}' has no saved network yet — save it first",
+        )
+    import pypsa
+    from services.pypsa_service import PyPSAService
+
+    with PyPSAService.get_netcdf_io_lock():
+        n = pypsa.Network(str(nc))
+    if n.generators_t.p.empty:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Project '{row.name}' is not solved — solve it and save, then pick it as the source",
+        )
+
+
+def _project_for_network(db, project, path):
+    """The org project whose saved network is `path`, by name; None when the
+    path is not one of them (a config written by hand, or a deleted project)."""
+    if db is None or not path:
+        return None
+    target = Path(path)
+    for row in db.query(Project).filter(Project.org_id == project.org_id):
+        if project_registry.project_dir(row) / NETWORK_FILE == target:
+            return row.name
+    return None
+
+
+def set_dispatch_source(db, project, source, user=None) -> dict:
+    """`"generate"` to solve the unit commitment; `{"from_dispatch": dir}` to
+    study a finished run's dispatch (drivers F3); `{"from_project": name}` to
+    study the SOLVED NETWORK of one of the caller's capacity-expansion projects
+    (increment 5, D3). One source at a time: setting any clears the others.
+
+    `from_project` is the only way to point a study at a network. A raw path
+    would let a caller read any file the server can; the project route goes
+    through the ACL and the kind check.
+    """
     require_planning(project)
-    config = read_config(project)
+    base = {**read_config(project).to_json(), "from_dispatch": None, "from_network": None}
     if source == "generate" or source is None:
-        updated = StudyConfig.from_json({**config.to_json(), "from_dispatch": None})
+        updated = StudyConfig.from_json(base)
     elif isinstance(source, dict) and "from_dispatch" in source:
         src = Path(source["from_dispatch"])
         missing = [n for n in ("dispatch.csv", "loads.csv") if not (src / n).is_file()]
@@ -312,11 +388,17 @@ def set_dispatch_source(db, project, source) -> dict:
                 status_code=422,
                 detail=f"{src} is not a finished study directory: missing {', '.join(missing)}",
             )
-        updated = StudyConfig.from_json({**config.to_json(), "from_dispatch": str(src)})
+        updated = StudyConfig.from_json({**base, "from_dispatch": str(src)})
+    elif isinstance(source, dict) and "from_project" in source:
+        row = _source_project(db, user, project, str(source["from_project"] or ""))
+        nc = project_registry.project_dir(row) / NETWORK_FILE
+        _require_solved_network(nc, row)
+        updated = StudyConfig.from_json({**base, "from_network": str(nc)})
     else:
         raise HTTPException(
             status_code=422,
-            detail='dispatch source must be "generate" or {"from_dispatch": "<directory>"}',
+            detail='dispatch source must be "generate", {"from_dispatch": "<directory>"} '
+                   'or {"from_project": "<project name>"}',
         )
     return _write_config(project, updated)
 

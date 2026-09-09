@@ -1459,21 +1459,27 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "gridspine_set_dispatch_source",
         "Choose where a planning → dynamics project's dispatch comes from: "
-        "omit from_dispatch to generate it with the rolling unit commitment, "
-        "or give the directory of a finished study (holding dispatch.csv and "
-        "loads.csv) to reuse that dispatch and re-run only ranking, load flow, "
-        "screening and handoff. Returns the updated config. Safety: write.",
+        "omit both arguments to generate it with the rolling unit commitment; "
+        "from_project = the name of one of the user's capacity-expansion "
+        "projects whose network is SOLVED AND SAVED (its generators must be "
+        "the IEEE 39-bus units, e.g. a project made from the 'IEEE 39-Bus' "
+        "template) to study that dispatch; from_dispatch = the directory of a "
+        "finished study (holding dispatch.csv and loads.csv) to reuse its "
+        "tables. One source at a time. Returns the updated config. "
+        "Safety: write.",
         {
             "project_id": {"type": "string"},
             "from_dispatch": {"type": "string"},
+            "from_project": {"type": "string"},
         },
         ["project_id"],
     ),
     _t(
         "gridspine_get_config",
         "The study config a planning → dynamics project will run with: hours, "
-        "k, window, overlap, screen, n2_prune_threshold_pct, from_dispatch. "
-        "Safety: read.",
+        "k, window, overlap, screen, n2_prune_threshold_pct, from_dispatch, "
+        "from_network (a saved network path) and from_project (that network's "
+        "project name, when it is one of the user's). Safety: read.",
         {"project_id": {"type": "string"}},
         ["project_id"],
     ),

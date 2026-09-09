@@ -155,14 +155,24 @@ def test_an_unknown_or_foreign_project_is_404_like_the_router(study):
     assert exc.value.status_code == 404
 
 
-def test_a_dispatch_source_omitting_the_directory_means_generate(study, monkeypatch):
+def test_a_dispatch_source_omitting_both_arguments_means_generate(study, monkeypatch, seeded_identity):
     seen = {}
     monkeypatch.setattr(gs, "set_dispatch_source",
-                        lambda db, project, source: seen.update(source=source) or {})
+                        lambda db, project, source, user=None: seen.update(source=source, user=user) or {})
     chat_tools.DISPATCHERS["gridspine_set_dispatch_source"](project_id="Chat Study")
     assert seen["source"] == "generate"
     chat_tools.DISPATCHERS["gridspine_set_dispatch_source"](project_id="Chat Study", from_dispatch="/x")
     assert seen["source"] == {"from_dispatch": "/x"}
+    chat_tools.DISPATCHERS["gridspine_set_dispatch_source"](project_id="Chat Study", from_project="Solved 39")
+    assert seen["source"] == {"from_project": "Solved 39"}
+    assert seen["user"].id == seeded_identity["user_id"]      # resolved under the acting user
+
+
+def test_the_config_read_names_the_source_project_through_the_db(study, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(gs, "get_config", lambda project, db=None: seen.update(db=db) or {})
+    chat_tools.DISPATCHERS["gridspine_get_config"](project_id="Chat Study")
+    assert seen["db"] is not None
 
 
 # --------------------------------------------------------------------------

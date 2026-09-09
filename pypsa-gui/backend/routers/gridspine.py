@@ -12,7 +12,7 @@ project-scoped router uses: 404 (never 403) for both "no such project" and
 is fetched after that check, never from client input.
 
     POST   /api/gridspine/projects                       create a study
-    POST   /api/gridspine/{name}/dispatch-source         generate | from an existing run
+    POST   /api/gridspine/{name}/dispatch-source         generate | a finished run | a solved project
     GET    /api/gridspine/{name}/config                  the study config as the next run uses it
     PUT    /api/gridspine/{name}/config                  change some of it (refused while a job is active)
     POST   /api/gridspine/{name}/run                     enqueue (returns the job)
@@ -51,9 +51,19 @@ class CreateStudy(BaseModel):
 
 
 class DispatchSource(BaseModel):
-    #: "generate" to solve the unit commitment, or a finished study directory.
+    #: "generate" to solve the unit commitment, "from_dispatch" for a finished
+    #: study directory, or "from_project" for the solved network of one of the
+    #: caller's capacity-expansion projects (increment 5, D3).
     source: str = "generate"
     from_dispatch: str | None = None
+    from_project: str | None = None
+
+    def as_source(self):
+        if self.from_project is not None or self.source == "from_project":
+            return {"from_project": self.from_project}
+        if self.from_dispatch is not None or self.source == "from_dispatch":
+            return {"from_dispatch": self.from_dispatch}
+        return "generate"
 
 
 class ConfigPatch(BaseModel):
@@ -111,17 +121,14 @@ def set_dispatch_source(
     body: DispatchSource,
     proj: AuthorizedProject = ProjectAccessDep,
     db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
 ):
-    source = (
-        "generate" if body.from_dispatch is None and body.source == "generate"
-        else {"from_dispatch": body.from_dispatch}
-    )
-    return gs.set_dispatch_source(db, _row(proj, db), source)
+    return gs.set_dispatch_source(db, _row(proj, db), body.as_source(), user=user)
 
 
 @router.get("/{name}/config")
 def get_config(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
-    return gs.get_config(_row(proj, db))
+    return gs.get_config(_row(proj, db), db=db)
 
 
 @router.put("/{name}/config")
