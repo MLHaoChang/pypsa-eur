@@ -1755,6 +1755,176 @@ def _serialise_for_anthropic(content_block: Any) -> dict[str, Any]:
         if hasattr(content_block, attr):
             out[attr] = getattr(content_block, attr)
     return out
+
+
+@dataclass
+class _StreamOutcome:
+    """What `_stream_assistant_message` returns through `yield from`."""
+
+    final_message: Any | None = None
+    pending_blocks: list[dict[str, Any]] = field(default_factory=list)
+    stop_turn: bool = False
+
+
+def _stream_assistant_message(
+    session: ChatSession,
+    client: Any,
+    *,
+    system_blocks: list[dict[str, Any]],
+    tools_with_cache: list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+    history_cache_anchor: int | None,
+) -> Generator[tuple[str, dict[str, Any]], None, "_StreamOutcome"]:
+    """
+    Drain ONE assistant message off the SDK stream, retrying transient failures.
+
+    Yields the stream's frames (`token`, `thinking`, `tool_preparing`, and the
+    terminal `error` / `session_done`); the caller forwards them with
+    `yield from`. Returns the final message, or `stop_turn=True` when the turn
+    is over — a generator cannot end its caller's turn.
+
+    **Retry is only safe before anything has been emitted.** Once a `token` or
+    `thinking` frame has reached the client, retrying replays the answer from the
+    start and the panel shows it twice. `emitted_this_attempt` is what prevents
+    that, and it is per ATTEMPT — hoisting it, or resetting it in the wrong
+    place, produces duplicated output under transient SDK load while every frame
+    stays individually well-formed. `tests/test_chat_stream_attempt_seam.py`
+    asserts on the COUNT of emitted text for that reason.
+
+    A persistent `rate_limited` on Opus buys exactly ONE attempt on Sonnet,
+    granted by widening `max_attempts` rather than resetting `attempt`, and it
+    mutates `session.model`, so the session stays downgraded after the turn.
+
+    `pending_blocks` is accumulated here and returned, but nothing reads it —
+    `assistant_blocks` is rebuilt from `final_message.content` instead. Preserved
+    as-is because this phase is behaviour-preserving; returned on the outcome so
+    the discard stays visible. See
+    `docs/superpowers/findings/2026-09-09-chat-stream-loop-two-vestigial-guards.md`,
+    which also records that `model_fallback_used` is redundant with the
+    `session.model == OPUS_MODEL` check beside it.
+
+    Phase D of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`.
+    """
+    # Inner retry loop. A transient SDK failure (rate-limit / Anthropic
+    # overload) BEFORE any token is emitted on this attempt is retried with
+    # capped exponential backoff. Once a token has been yielded to the
+    # client, retry is UNSAFE (it would duplicate already-streamed output),
+    # so we surface the error instead. The loop always either breaks (the
+    # stream completed) or returns (terminal/exhausted error).
+    final_message = None
+    # A8 — at most one Opus→Sonnet downgrade after rate_limited retries
+    # are exhausted (public cost/availability escape hatch).
+    model_fallback_used = False
+    attempt = 0
+    # +1 slot reserved so a late Opus→Sonnet fallback can still run once
+    # after the normal retry budget is spent.
+    max_attempts = MAX_STREAM_RETRIES + 1
+    while attempt < max_attempts:
+        emitted_this_attempt = False
+        # Drain the streaming events. We accumulate content blocks locally
+        # so we can replay them as a single assistant message back into the
+        # SDK on the next turn (tool-use convention).
+        pending_blocks: list[dict[str, Any]] = []
+        try:
+            with client.messages.stream(
+                model=session.model,
+                max_tokens=MAX_OUTPUT_TOKENS_PER_TURN,
+                system=system_blocks,
+                tools=tools_with_cache,
+                messages=_with_history_cache_breakpoint(
+                    messages, history_cache_anchor
+                ),
+            ) as stream:
+                for event in stream:
+                    if session.abort_event.is_set():
+                        yield "session_done", {"reason": "aborted"}
+                        return _StreamOutcome(stop_turn=True)
+                    etype = getattr(event, "type", None)
+                    if etype == "text":
+                        emitted_this_attempt = True
+                        yield "token", {"delta": getattr(event, "text", "") or ""}
+                    elif etype == "thinking":
+                        emitted_this_attempt = True
+                        yield "thinking", {
+                            "delta": getattr(event, "thinking", "") or "",
+                        }
+                    # Tool-arg streaming is silent on `token` — without a
+                    # signal the UI looks frozen after "I'll create them…".
+                    # Emit as soon as the model opens a tool_use block.
+                    elif etype == "content_block_start":
+                        block = getattr(event, "content_block", None)
+                        btype = getattr(block, "type", None) if block else None
+                        if btype == "tool_use":
+                            emitted_this_attempt = True
+                            yield "tool_preparing", {
+                                "tool_use_id": getattr(block, "id", "") or "",
+                                "tool_name": getattr(block, "name", "") or "",
+                            }
+                    # content_block_stop indicates a tool_use block has
+                    # fully accumulated. The SDK exposes it as
+                    # event.content_block.
+                    elif etype == "content_block_stop":
+                        block = getattr(event, "content_block", None)
+                        if block is not None:
+                            d = _serialise_for_anthropic(block)
+                            pending_blocks.append(d)
+
+                final_message = stream.get_final_message()
+            break  # stream completed — leave the retry loop
+        except Exception as exc:  # noqa: BLE001 — SDK error → typed frame
+            error_kind, msg = _map_sdk_exception(exc)
+            retriable = (
+                error_kind in _RETRYABLE_SDK_KINDS
+                and not emitted_this_attempt
+                and attempt < MAX_STREAM_RETRIES
+                and not session.abort_event.is_set()
+            )
+            if retriable:
+                _metric_incr("retries")
+                delay = min(
+                    MAX_STREAM_RETRY_DELAY,
+                    BASE_STREAM_RETRY_DELAY * (2 ** attempt),
+                )
+                logger.warning(
+                    "chat: transient SDK error %r — retry %d/%d in %.1fs",
+                    error_kind, attempt + 1, MAX_STREAM_RETRIES, delay,
+                )
+                time.sleep(delay)
+                attempt += 1
+                continue
+            # A8 — persistent rate_limited on Opus → one Sonnet attempt.
+            if (
+                error_kind == "rate_limited"
+                and not emitted_this_attempt
+                and session.model == OPUS_MODEL
+                and not model_fallback_used
+                and not session.abort_event.is_set()
+            ):
+                model_fallback_used = True
+                from_model = session.model
+                session.model = DEFAULT_MODEL
+                logger.warning(
+                    "chat: rate_limited on %s after retries — falling back to %s",
+                    from_model, DEFAULT_MODEL,
+                )
+                yield "model_fallback", {
+                    "from_model": from_model,
+                    "to_model": DEFAULT_MODEL,
+                    "reason": "rate_limited",
+                }
+                # Grant exactly one extra attempt on the cheaper model.
+                max_attempts = attempt + 2
+                attempt += 1
+                continue
+            _metric_error(error_kind)
+            yield "error", {"error_kind": error_kind, "message": msg}
+            yield "session_done", {"reason": error_kind}
+            return _StreamOutcome(stop_turn=True)
+    return _StreamOutcome(
+        final_message=final_message, pending_blocks=pending_blocks,
+    )
+
+
 @dataclass
 class _ToolDispatchOutcome:
     """
@@ -2301,121 +2471,16 @@ def _run_turn_body(
                 "cache_control": {"type": "ephemeral"},
             }
 
-        # Inner retry loop. A transient SDK failure (rate-limit / Anthropic
-        # overload) BEFORE any token is emitted on this attempt is retried with
-        # capped exponential backoff. Once a token has been yielded to the
-        # client, retry is UNSAFE (it would duplicate already-streamed output),
-        # so we surface the error instead. The loop always either breaks (the
-        # stream completed) or returns (terminal/exhausted error).
-        final_message = None
-        # A8 — at most one Opus→Sonnet downgrade after rate_limited retries
-        # are exhausted (public cost/availability escape hatch).
-        model_fallback_used = False
-        attempt = 0
-        # +1 slot reserved so a late Opus→Sonnet fallback can still run once
-        # after the normal retry budget is spent.
-        max_attempts = MAX_STREAM_RETRIES + 1
-        while attempt < max_attempts:
-            emitted_this_attempt = False
-            # Drain the streaming events. We accumulate content blocks locally
-            # so we can replay them as a single assistant message back into the
-            # SDK on the next turn (tool-use convention).
-            pending_blocks: list[dict[str, Any]] = []
-            try:
-                with client.messages.stream(
-                    model=session.model,
-                    max_tokens=MAX_OUTPUT_TOKENS_PER_TURN,
-                    system=system_blocks,
-                    tools=tools_with_cache,
-                    messages=_with_history_cache_breakpoint(
-                        messages, history_cache_anchor
-                    ),
-                ) as stream:
-                    for event in stream:
-                        if session.abort_event.is_set():
-                            yield "session_done", {"reason": "aborted"}
-                            return
-                        etype = getattr(event, "type", None)
-                        if etype == "text":
-                            emitted_this_attempt = True
-                            yield "token", {"delta": getattr(event, "text", "") or ""}
-                        elif etype == "thinking":
-                            emitted_this_attempt = True
-                            yield "thinking", {
-                                "delta": getattr(event, "thinking", "") or "",
-                            }
-                        # Tool-arg streaming is silent on `token` — without a
-                        # signal the UI looks frozen after "I'll create them…".
-                        # Emit as soon as the model opens a tool_use block.
-                        elif etype == "content_block_start":
-                            block = getattr(event, "content_block", None)
-                            btype = getattr(block, "type", None) if block else None
-                            if btype == "tool_use":
-                                emitted_this_attempt = True
-                                yield "tool_preparing", {
-                                    "tool_use_id": getattr(block, "id", "") or "",
-                                    "tool_name": getattr(block, "name", "") or "",
-                                }
-                        # content_block_stop indicates a tool_use block has
-                        # fully accumulated. The SDK exposes it as
-                        # event.content_block.
-                        elif etype == "content_block_stop":
-                            block = getattr(event, "content_block", None)
-                            if block is not None:
-                                d = _serialise_for_anthropic(block)
-                                pending_blocks.append(d)
-
-                    final_message = stream.get_final_message()
-                break  # stream completed — leave the retry loop
-            except Exception as exc:  # noqa: BLE001 — SDK error → typed frame
-                error_kind, msg = _map_sdk_exception(exc)
-                retriable = (
-                    error_kind in _RETRYABLE_SDK_KINDS
-                    and not emitted_this_attempt
-                    and attempt < MAX_STREAM_RETRIES
-                    and not session.abort_event.is_set()
-                )
-                if retriable:
-                    _metric_incr("retries")
-                    delay = min(
-                        MAX_STREAM_RETRY_DELAY,
-                        BASE_STREAM_RETRY_DELAY * (2 ** attempt),
-                    )
-                    logger.warning(
-                        "chat: transient SDK error %r — retry %d/%d in %.1fs",
-                        error_kind, attempt + 1, MAX_STREAM_RETRIES, delay,
-                    )
-                    time.sleep(delay)
-                    attempt += 1
-                    continue
-                # A8 — persistent rate_limited on Opus → one Sonnet attempt.
-                if (
-                    error_kind == "rate_limited"
-                    and not emitted_this_attempt
-                    and session.model == OPUS_MODEL
-                    and not model_fallback_used
-                    and not session.abort_event.is_set()
-                ):
-                    model_fallback_used = True
-                    from_model = session.model
-                    session.model = DEFAULT_MODEL
-                    logger.warning(
-                        "chat: rate_limited on %s after retries — falling back to %s",
-                        from_model, DEFAULT_MODEL,
-                    )
-                    yield "model_fallback", {
-                        "from_model": from_model,
-                        "to_model": DEFAULT_MODEL,
-                        "reason": "rate_limited",
-                    }
-                    # Grant exactly one extra attempt on the cheaper model.
-                    max_attempts = attempt + 2
-                    attempt += 1
-                    continue
-                _metric_error(error_kind)
-                yield "error", {"error_kind": error_kind, "message": msg}
-                yield "session_done", {"reason": error_kind}
-                return
+        stream_result = yield from _stream_assistant_message(
+            session, client,
+            system_blocks=system_blocks,
+            tools_with_cache=tools_with_cache,
+            messages=messages,
+            history_cache_anchor=history_cache_anchor,
+        )
+        if stream_result.stop_turn:
+            return
+        final_message = stream_result.final_message
 
         usage = getattr(final_message, "usage", None)
         if usage is not None:
