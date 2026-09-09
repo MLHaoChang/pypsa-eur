@@ -19,8 +19,9 @@ already rewrites the echoed non-finite input); and the frontier refuses a
 non-positive target before publishing.
 
 Bites (verified red against the named removal):
-* `_Finite` back to `float` → the parametrised 422 test sees 200/500 and a
-  published record;
+* `_Finite` back to `float` → the mc and coupling cases of the parametrised
+  422 test answer 500 (the frontier and margin cases are held by their
+  routes' own finite checks either way);
 * the positive-target check → `[-1, 0, 1]` is admitted.
 """
 from __future__ import annotations

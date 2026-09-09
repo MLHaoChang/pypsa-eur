@@ -74,7 +74,19 @@ PROJECTS_DIR = pathlib.Path(get_settings().flat_projects_root)
 # it is NEVER part of the network model / network API: it is pure
 # presentation state, decoupled from the geographic bus.x/y the map view and
 # clustering consume.
-_BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.json", "layout.json", "results_state.pkl")
+# `adequacy_worksheet.json` (the user-authored FMEA worksheet: expert rows +
+# overlays) and `adequacy_stress_scenarios.json` (the stress-scenario
+# registry) are per-project sidecars the adequacy routes write beside the
+# network. Whole-branch review, finding S7: they were NOT in this tuple, so a
+# bundle export/import, a project snapshot and a scenario fork all silently
+# dropped them — the shared bundle arrived with an empty worksheet and no
+# stress scenarios, and a snapshot restore could not bring them back. Every
+# loop over this tuple tolerates an absent file, so an older bundle or
+# snapshot without them still imports. Literals rather than the services'
+# `SIDECAR_NAME` constants (a router-level import of the adequacy services
+# is a cycle waiting to happen); `test_bundle_sidecars` pins them equal.
+_BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.json", "layout.json", "results_state.pkl",
+                 "adequacy_worksheet.json", "adequacy_stress_scenarios.json")
 
 # Per-project subdirectories that travel alongside the bundle FILES on every
 # project-to-project transition. Chatbot uploads (Phase A) live here under
