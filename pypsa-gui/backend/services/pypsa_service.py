@@ -11,6 +11,7 @@ from services.project_context import (
     STUDY_KEYS,
     ProjectContext,
     record_is_running,
+    running_study_key,
     study_swap_refusal,
 )
 
@@ -786,6 +787,17 @@ class PyPSAService:
 
         detached: list[tuple[str, ProjectContext]] = []
         with cls._registry_lock:
+            # A ctx carrying a LIVE adequacy study stays resident (whole-branch
+            # review, S5/U2): its worker re-solves that network between
+            # iterates, and the eviction save — which `_save_context` now
+            # refuses for exactly that reason — would otherwise fail and the
+            # ctx be dropped with the study still running on it.
+            for pid, c in cls._contexts.items():
+                try:
+                    if running_study_key(c.solver_state) is not None:
+                        protected.add(pid)
+                except Exception:                             # noqa: BLE001
+                    continue
             while len(cls._contexts) > cls.RESIDENT_CAP:
                 # Candidate victims = resident, not protected. Pick the smallest
                 # recency stamp (least-recently-interacted).

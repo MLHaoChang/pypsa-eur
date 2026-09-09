@@ -1273,6 +1273,10 @@ def save_project(
     from services import project_acl, project_registry
 
     project_registry.require_user(user)
+    # Refused BEFORE `create_root`, which commits a project row: a refusal
+    # after it would leave the row behind and the retry would fail with
+    # "already exists" — the Phase 11 review's own finding, in the save path.
+    _refuse_save_during_study(PyPSAService.get_active_context())
     project = project_registry.find_project(db, user, name)
     if project is None:
         # First save of a new project — register a root row in the DB.
@@ -1324,6 +1328,43 @@ def save_project(
         undo_service.clear()
     return result
 
+
+
+def _study_in_flight_detail(state, doing: str) -> dict | None:
+    """The structured 409 for an action a live study forbids, or None.
+
+    Whole-branch review, findings S5 and M12. Save and activate gated on
+    `_solver_in_flight` only — a study's worker is never `state["thread"]` —
+    while load, import, template and reset were guarded (Phase 11). A save
+    landing between a sweep's lock-free contingency mutations exported the
+    CONTINGENCY network, and its `results_state.pkl` with the contingency's
+    lost load, as the user's project; and a switch left the study running on
+    a project the user could no longer see or abort. Same shape as the
+    in-flight refusal so the chat agent and the frontend read one field.
+    """
+    from services.project_context import STUDY_LABELS, running_study_key
+    key = running_study_key(state)
+    if key is None:
+        return None
+    label = STUDY_LABELS.get(key, key)
+    verb = doing.split()[0]
+    return {
+        "error_kind": "study_in_flight",
+        "study": key,
+        "message": (
+            f"Cannot {doing} while {label} is running — it re-solves the "
+            "in-memory network between its own iterates (a sweep applies each "
+            "contingency in turn; a loop re-solves under each candidate), so "
+            f"a {verb} now would act on a mid-study plan rather than yours. "
+            "Wait for it to finish, or abort it, and retry."
+        ),
+    }
+
+
+def _refuse_save_during_study(ctx) -> None:
+    detail = _study_in_flight_detail(ctx.solver_state, "save the project")
+    if detail:
+        raise HTTPException(status_code=409, detail=detail)
 
 def _save_context(
     ctx,
@@ -1412,6 +1453,7 @@ def _save_context(
                 ),
             },
         )
+    _refuse_save_during_study(ctx)
 
     # `storage_dir` (auth mode) is a pre-resolved org-scoped path; legacy mode
     # falls back to the flat `PROJECTS_DIR / name`.
@@ -1995,6 +2037,15 @@ def activate_project(
                     ),
                 },
             )
+    # A study on the current project is the same refusal `GET /{name}` (load)
+    # already makes (M12): switching would leave it running on a project the
+    # user can neither see nor abort, and the eviction it can then suffer
+    # would save a mid-study network. The study's own sentence, so the user
+    # can abort it by name.
+    _study = _study_in_flight_detail(PyPSAService.get_solver_state(),
+                                     "switch projects")
+    if _study:
+        raise HTTPException(status_code=409, detail=_study)
 
     evicted: list[str] = []
     if PyPSAService.get_context(registry_id) is not None:

@@ -203,6 +203,11 @@ export async function abortRunningSim(): Promise<boolean> {
 //                 project is unchanged.
 //   'busy-solve' — a FOREGROUND solve is in flight (backend returned 409);
 //                 the user must finish/abort it before switching.
+//   'busy-study' — an adequacy study is running on the current project
+//                 (backend 409 with `error_kind: "study_in_flight"`); the
+//                 backend's own sentence names the study in `.message`, and
+//                 the Abort button the 'busy-solve' copy points at would NOT
+//                 stop it.
 //   'not-found' — `target` no longer exists on disk (backend 404).
 //   'error'     — any other failure (network, unexpected status); message in
 //                 `.message`.
@@ -211,6 +216,7 @@ export type SwitchResult =
   | { status: 'noop' }
   | { status: 'abort-failed' }
   | { status: 'busy-solve' }
+  | { status: 'busy-study'; message: string }
   | { status: 'not-found' }
   | { status: 'error'; message: string }
 
@@ -381,8 +387,16 @@ export async function switchToProject(target: string, qc: QueryClient): Promise<
     activated = res.activated
     evicted = res.evicted ?? []
   } catch (e) {
-    const status = (e as { response?: { status?: number } })?.response?.status
-    if (status === 409) return { status: 'busy-solve' }
+    const err = e as { response?: { status?: number; data?: { detail?: unknown } } }
+    const status = err?.response?.status
+    if (status === 409) {
+      const detail = err?.response?.data?.detail as
+        { error_kind?: string; message?: string } | undefined
+      if (detail?.error_kind === 'study_in_flight' && typeof detail.message === 'string') {
+        return { status: 'busy-study', message: detail.message }
+      }
+      return { status: 'busy-solve' }
+    }
     if (status === 404) return { status: 'not-found' }
     return { status: 'error', message: String((e as Error)?.message ?? e) }
   }
