@@ -100,7 +100,14 @@ ALLOWED_DESPITE_SUFFIX = {
 # What SHOULD be there. Absence is not fatal here — a missing template breaks
 # the app loudly on first use, which is a different (and recoverable) problem —
 # but reporting it turns one manual check into zero.
-EXPECTED = ("project_templates", "matpower.jinja2", "alembic", "spa.html")
+EXPECTED = (
+    "project_templates", "matpower.jinja2", "alembic", "spa.html",
+    # The planning → dynamics pipeline (increment 6): gridspine's unit-template
+    # library and pandapower's IEEE 39-bus case. Both are `__file__`-relative
+    # data the code reads at run time, so a bundle without them launches fine
+    # and 500s on the first study.
+    "case39_units.yaml", "case39.json",
+)
 
 # Info.plist usage-description keys macOS TCC requires before the app may
 # touch speech recognition / the microphone — see `pypsa-gui.spec`'s

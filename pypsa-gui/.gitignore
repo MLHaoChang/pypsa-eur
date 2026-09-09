@@ -19,6 +19,11 @@ frontend/dist/
 # "No module named 'encodings'" — a failure that names neither the venv nor
 # the missing Python. Both are re-provisionable; they rot together.
 .build-venv/
+# A Linux sibling made to MEASURE the frozen app's module closure (increment
+# 6): same requirements, same spec, no .app. Never the shipped build.
+.build-venv-linux/
+dist-linux/
+.build-work-linux/
 .build-python/
 .build-work/
 dist-app/

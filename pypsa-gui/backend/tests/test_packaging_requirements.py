@@ -54,14 +54,16 @@ NOT_SHIPPED = {"tests", "smoke"}
 OPTIONAL_AT_RUNTIME = {
     "gridspine": (
         "gridspine_service catches ImportError and every action answers 503 "
-        "`planning → dynamics not available in this build`. Since D5 (taken in "
-        "increment 5) gridspine is a distribution installed EDITABLE from the "
-        "root pyproject.toml into every pixi environment, so the dev server "
-        "and the suite always have it. The frozen desktop app is built from "
-        "the pip venv (`gui-requirements.txt`), which carries neither the "
-        "package nor its engines (pandapower, lightsim2grid); bundling them is "
-        "a build decision that needs a macOS build to verify, so the desktop "
-        "app ships without the planning pipeline and says so."
+        "`planning → dynamics not available in this build`. Since D5 gridspine "
+        "is installed EDITABLE into every pixi environment; since increment 6 "
+        "the frozen app freezes it too — from the repo root through the spec's "
+        "`pathex` (pixi's editable install is an import-finder hook PyInstaller "
+        "cannot follow), with its engines pinned in gui-requirements.txt and "
+        "its YAML library and pandapower's case data collected. The guard stays "
+        "as defence in depth: a build from a partial checkout would otherwise "
+        "500 on the first study instead of saying what is missing. Verified by "
+        "a Linux onedir freeze and a frozen-tree inspection; a macOS .app run "
+        "is still owed."
     ),
     "tsam": (
         "time_aggregation_service catches ImportError and falls back to the "
@@ -297,3 +299,54 @@ def test_requirements_parsing_ignores_comments_and_blank_lines():
     # The prose names modules it deliberately does NOT pin; they must not be
     # parsed as pins.
     assert "tsam" not in pinned
+
+
+# --------------------------------------------------------------------------
+# the planning → dynamics pipeline ships (increment 6)
+# --------------------------------------------------------------------------
+
+SPEC = BACKEND.parent / "pypsa-gui.spec"
+BUILD_SCRIPT = BACKEND.parent / "build-macos.sh"
+
+
+def test_the_planning_pipelines_engines_are_pinned_for_the_build():
+    """gridspine imports pandapower, lightsim2grid and yaml at module scope.
+    gridspine itself is frozen from source (see the spec), so it is not a pin;
+    what it imports must be."""
+    pinned = _pinned_distributions()
+    for dist in ("pandapower", "lightsim2grid", "pyyaml"):
+        assert dist in pinned, f"{dist} is missing from gui-requirements.txt"
+
+
+def test_the_spec_freezes_gridspine_from_the_repo_root_with_its_data():
+    """The spec cannot be imported (PyInstaller injects its globals), so its
+    text is held to the four things that make gridspine work frozen: the repo
+    root on pathex, the YAML library and pandapower's case data as datas, and
+    both packages written out as real directories for their `__file__`-relative
+    reads."""
+    text = SPEC.read_text(encoding="utf-8")
+    assert "pathex=[str(BACKEND), str(ROOT.parent)]" in text
+    assert '"gridspine/templates/data"' in text
+    assert 'collect_data_files("pandapower"' in text
+    assert '"gridspine": "pyz+py"' in text and '"pandapower": "pyz+py"' in text
+    # and the one exclusion the frozen probe found necessary: without it the
+    # frozen app's pandapower looks for case39.json one directory too deep
+    assert '"pandapower.__init__",' in text
+
+
+def test_the_build_script_builds_the_project_templates_with_gridspine_reachable():
+    """A fresh checkout ships no `network.nc` templates unless the build makes
+    them, and the IEEE 39-bus one needs gridspine on the path to be built
+    rather than skipped."""
+    text = BUILD_SCRIPT.read_text(encoding="utf-8")
+    assert "project_templates/_build.py" in text
+    assert 'PYTHONPATH="$REPO"' in text
+
+
+def test_the_bundle_check_expects_the_pipelines_data_files():
+    sys.path.insert(0, str(BACKEND / "smoke"))
+    try:
+        import check_bundle
+    finally:
+        sys.path.pop(0)
+    assert {"case39_units.yaml", "case39.json"} <= set(check_bundle.EXPECTED)
