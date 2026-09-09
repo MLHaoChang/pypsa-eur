@@ -182,6 +182,14 @@ pandapower = "==3.1.2"
 # `performance` extra, so the pair is the one pandapower tested against;
 # 1.0.0 is a major and is not adopted blind. Used only under gridspine/static/.
 lightsim2grid = "==0.10.1"
+# The repository's own `gridspine/` package, installed editable so that
+# `import gridspine` works from ANY working directory — the pypsa-gui backend
+# runs from `pypsa-gui/backend` (increment-4 decision D5; the alternative was a
+# `sys.path` insert in the backend, which the desktop build could not
+# reproduce). Editable, so the source tree is what runs and what
+# `gridspine-tests` tests. The distribution declares no dependencies (see
+# pyproject.toml): the engines are pinned here.
+gridspine = { path = ".", editable = true }
 pwdlib = { version = ">=0.2", extras = ["argon2"] }
 emails = ">=0.6"
 

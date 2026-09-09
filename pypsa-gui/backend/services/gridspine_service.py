@@ -28,7 +28,6 @@ Nothing here is derived from a stored path: the run directory is always
 bundle or moved by a rename keeps working.
 """
 import json
-import sys
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -37,23 +36,12 @@ from fastapi import HTTPException
 
 from services import project_registry
 
-# --------------------------------------------------------------------------
-# `gridspine` lives at the REPO ROOT, beside `pypsa-gui/`, and this repository
-# packages nothing — `pixi run gridspine-tests` works only because it runs from
-# the root, and the backend runs from `pypsa-gui/backend`. The same explicit
-# insert `tests/conftest.py` already does for the backend directory, in the one
-# module that needs it, rather than a hidden PYTHONPATH the desktop build would
-# have to reproduce by accident.
-#
-# THIS IS A STOPGAP, and it is the increment's open decision D5: the real fix
-# is to give gridspine a pyproject and install it, which touches pixi.toml and
-# the lockfile and should be done deliberately, not as a side effect of wiring
-# a service.
-# --------------------------------------------------------------------------
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
-
+# `gridspine` is the repository's own package, installed EDITABLE into every
+# pixi environment from the root `pyproject.toml` (increment-4 decision D5,
+# taken in increment 5). It imports like any other package from any working
+# directory; the `sys.path` insert that used to bridge `pypsa-gui/backend` to
+# the repo root is gone, and `tests/test_gridspine_service.py` fails if it
+# comes back.
 try:
     from gridspine.drivers.status import ledger_entries as _ledger_entries
     from gridspine.drivers.status import ranked_snapshots as _ranked_snapshots

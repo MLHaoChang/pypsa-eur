@@ -54,13 +54,14 @@ NOT_SHIPPED = {"tests", "smoke"}
 OPTIONAL_AT_RUNTIME = {
     "gridspine": (
         "gridspine_service catches ImportError and every action answers 503 "
-        "`planning → dynamics not available in this build`. It is a SIBLING "
-        "PACKAGE in this repository, not a PyPI distribution, so it can never "
-        "be pinned here — the frozen app would have to bundle the repo-root "
-        "`gridspine/` package AND its engines (pandapower, lightsim2grid, "
-        "highspy), which the pip venv does not carry. Until that is a "
-        "deliberate build decision (increment-4 plan, D5) the desktop app "
-        "ships without the planning pipeline and says so."
+        "`planning → dynamics not available in this build`. Since D5 (taken in "
+        "increment 5) gridspine is a distribution installed EDITABLE from the "
+        "root pyproject.toml into every pixi environment, so the dev server "
+        "and the suite always have it. The frozen desktop app is built from "
+        "the pip venv (`gui-requirements.txt`), which carries neither the "
+        "package nor its engines (pandapower, lightsim2grid); bundling them is "
+        "a build decision that needs a macOS build to verify, so the desktop "
+        "app ships without the planning pipeline and says so."
     ),
     "tsam": (
         "time_aggregation_service catches ImportError and falls back to the "

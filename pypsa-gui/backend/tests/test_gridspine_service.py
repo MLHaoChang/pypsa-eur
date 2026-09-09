@@ -294,6 +294,23 @@ def test_the_service_touches_only_the_driver_and_schema_layers_of_gridspine():
         assert banned not in imported, banned
 
 
+def test_the_service_does_not_edit_sys_path():
+    """D5, taken: gridspine is an installed (editable) distribution, so the
+    service imports it like any other package. The `sys.path` insert that
+    bridged the gap was a stopgap the desktop build could not reproduce; if it
+    comes back, the packaging has regressed and this is where it shows."""
+    import ast
+    import pathlib
+
+    tree = ast.parse(pathlib.Path(gs.__file__).read_text())
+    touches = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr == "path"
+        and isinstance(node.value, ast.Name) and node.value.id == "sys"
+    ]
+    assert not touches, "gridspine_service edits sys.path — the D5 stopgap is back"
+
+
 # --------------------------------------------------------------------------
 # config read / update (follow-up A)
 # --------------------------------------------------------------------------
