@@ -31,7 +31,14 @@ import pathlib
 
 import pytest
 
-ROUTERS = pathlib.Path(__file__).resolve().parents[1] / "routers"
+_BACKEND = pathlib.Path(__file__).resolve().parents[1]
+# The handlers kept their decorator and gate, but PR #6 moved the payload
+# assembly into `services/results/` and `services/compare/`. Scanning only
+# `routers/` would leave this guard looking at code that no longer builds the
+# response — it would pass while the flag it exists for was dropped.
+ROUTER_ROOTS = [_BACKEND / "routers", _BACKEND / "services" / "results",
+                _BACKEND / "services" / "compare"]
+ROUTERS = ROUTER_ROOTS[0]        # kept: other helpers below still read it
 
 # The flag under test, plus the sibling that qualifies it (Task 7's lost-load
 # `captured`, and curtailment's `partial`). Any ONE of these present means the

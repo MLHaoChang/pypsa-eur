@@ -49,6 +49,10 @@ import pypsa
 import pytest
 
 import routers.results as R
+# `_upfront_cost_series` is the deliberate fault-injection seam, and it
+# moved into the service with the walk it guards — patch it there or the
+# failure path these tests exist for is never reached (PR #6).
+from services.results import cost_breakdown as CB
 import routers.simulation as sim_router
 from routers.results import get_cost_breakdown
 from services.solver_service import SolverConfig
@@ -158,7 +162,7 @@ def line_unresolvable(install_network, monkeypatch) -> dict:
     n = _solved_network()
     install_network(n)
     sim_router._state["solver_config"] = SolverConfig()
-    monkeypatch.setattr(R, "_upfront_cost_series", _boom_for_lines)
+    monkeypatch.setattr(CB, "_upfront_cost_series", _boom_for_lines)
     out = get_cost_breakdown()
     assert isinstance(out, dict)
     return out
@@ -353,7 +357,7 @@ def test_a_nan_upfront_cost_is_null_not_a_partial_total(install_network, monkeyp
             return series * float("nan")
         return series
 
-    monkeypatch.setattr(R, "_upfront_cost_series", _nan_for_lines)
+    monkeypatch.setattr(CB, "_upfront_cost_series", _nan_for_lines)
     out = get_cost_breakdown()
     assert isinstance(out, dict)
 
@@ -389,7 +393,7 @@ def test_a_non_finite_total_is_null_not_zero(install_network, monkeypatch):
             return series * float("inf")
         return series
 
-    monkeypatch.setattr(R, "_upfront_cost_series", _inf_for_lines)
+    monkeypatch.setattr(CB, "_upfront_cost_series", _inf_for_lines)
     out = get_cost_breakdown()
     assert isinstance(out, dict)
 
@@ -431,7 +435,7 @@ def test_the_failed_resolve_is_logged_with_a_traceback(install_network, monkeypa
     n = _solved_network()
     install_network(n)
     sim_router._state["solver_config"] = SolverConfig()
-    monkeypatch.setattr(R, "_upfront_cost_series", _boom_for_lines)
+    monkeypatch.setattr(CB, "_upfront_cost_series", _boom_for_lines)
 
     with caplog.at_level(logging.ERROR, logger="pypsa_gui.results"):
         out = get_cost_breakdown()

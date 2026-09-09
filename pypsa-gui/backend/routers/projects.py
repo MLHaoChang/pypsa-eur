@@ -40,6 +40,7 @@ from services.atomic_io import (
 from services.dispatch_status import network_has_dispatch
 from services.project_context import RESULT_STATE_KEYS
 from services.pypsa_service import PyPSAService
+from services.http_filenames import content_disposition
 from settings import get_settings
 from starlette.responses import StreamingResponse
 
@@ -3114,7 +3115,7 @@ def download_bundle(
     return StreamingResponse(
         io.BytesIO(_project_bundle_bytes(name, src)),
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{name}.pypsaproj.zip"'},
+        headers={"Content-Disposition": content_disposition(f"{name}.pypsaproj.zip")},
     )
 
 

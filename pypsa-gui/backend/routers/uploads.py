@@ -40,6 +40,7 @@ from routers.deps import AuthorizedProject, ProjectAccessDep
 from routers.projects import _check_project_lock
 from services import upload_service
 from services.upload_guard import read_capped
+from services.http_filenames import content_disposition
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -277,7 +278,14 @@ def get_upload_blob(
         path=str(path),
         media_type=meta.mime,
         filename=meta.filename,
-        headers={"Content-Disposition": f'inline; filename="{meta.filename}"'},
+        headers={
+            # `meta.filename` is written through `safe_upload_filename`, but rows
+            # predating that are still on disk, and defence in depth here costs
+            # nothing: the output is byte-identical for an already-safe name.
+            "Content-Disposition": content_disposition(
+                meta.filename, disposition="inline"
+            )
+        },
     )
 
 

@@ -33,7 +33,6 @@ from __future__ import annotations
 import io
 import json
 import pathlib
-import shutil
 import sys
 import zipfile
 
@@ -45,7 +44,12 @@ except (AttributeError, ValueError):
     pass
 
 import pypsa
-from fastapi.testclient import TestClient
+
+# Before any `main` / `routers` / `services` import: pins the sandbox (throwaway
+# DB, projects root and app-data dir) and seeds the org this driver signs in as.
+# See tests/qa_support.py — without it this file wrote into backend/projects/.
+from tests import qa_support  # noqa: E402  (ordering is the point)
+
 from services.pypsa_service import PyPSAService
 
 PASS = 0
@@ -64,6 +68,16 @@ def _step(label: str, ok: bool, msg: str = "") -> None:
         print(f"  [FAIL] {label}" + (f" — {msg}" if msg else ""))
 
 
+def _crashed(label: str, exc: BaseException) -> None:
+    """
+    A scenario that raised never ran its assertions, so it must COUNT as a
+    failure — printing the traceback and moving on leaves the driver exiting 0
+    while testing nothing. That is exactly how the stale
+    `routers.simulation.get_*` references below went unnoticed: the scenarios
+    crashed on every run and the summary still read "Fail: 0".
+    """
+    _step(f"{label} ran without crashing", False, f"{type(exc).__name__}: {exc}")
+
 def _seed_minimal_network() -> pypsa.Network:
     """Save_project refuses an empty network — give it the smallest valid one."""
     import pandas as pd
@@ -75,21 +89,34 @@ def _seed_minimal_network() -> pypsa.Network:
     return n
 
 
-def _make_client() -> TestClient:
+def _make_client():
     """
-    FastAPI TestClient mounted on the live app — bypasses uvicorn so the
-    QA harness runs hermetically even when the dev server is restarted.
+    The signed-in TestClient — bypasses uvicorn so the QA harness runs
+    hermetically even when the dev server is restarted.
+
+    A bare `TestClient(app)` returns `401 Authentication required` on every
+    request since the auth migration, which is what made all ten scenarios
+    below fail at once.
     """
-    from main import app
-    return TestClient(app)
+    return qa_support.client()
+
+
+def _project_dir(name: str) -> pathlib.Path:
+    """
+    Where `name`'s files actually live.
+
+    NOT `backend/projects/<name>`, which is what this driver used to compute:
+    storage is org-scoped (`projects_root/<org>/<uuid>/`) and the old path both
+    missed the real directory and wrote into the developer's checkout.
+    """
+    d = qa_support.project_dir(name)
+    assert d is not None, f"no project named {name!r}"
+    return d
 
 
 def _cleanup_projects() -> None:
-    base = pathlib.Path(__file__).resolve().parent.parent / "projects"
-    for name in (PROJECT_A, PROJECT_B):
-        path = base / name
-        if path.exists():
-            shutil.rmtree(path, ignore_errors=True)
+    """Drop both test projects — rows AND directories."""
+    qa_support.delete_project(PROJECT_A, PROJECT_B)
 
 
 def _sample_layout() -> dict:
@@ -125,7 +152,7 @@ def test_put_and_get_round_trip() -> None:
     print("\n[1] PUT layout → GET layout round-trip")
     client = _make_client()
     _cleanup_projects()
-    PyPSAService.set_network(_seed_minimal_network())
+    qa_support.install_network(_seed_minimal_network())
     # Save the project so the layout endpoint has a directory to write into.
     r = client.post(f"/api/projects/{PROJECT_A}")
     _step("project save returns 200", r.status_code == 200,
@@ -159,7 +186,7 @@ def test_get_on_no_layout_returns_empty() -> None:
     print("\n[3] GET layout on project with no layout.json → {}")
     client = _make_client()
     _cleanup_projects()
-    PyPSAService.set_network(_seed_minimal_network())
+    qa_support.install_network(_seed_minimal_network())
     r = client.post(f"/api/projects/{PROJECT_A}")
     _step("project save returns 200", r.status_code == 200)
     # Don't PUT a layout — GET should return empty dict, not 404.
@@ -173,12 +200,11 @@ def test_get_on_corrupt_layout_returns_empty() -> None:
     print("\n[4] GET layout on corrupt layout.json → {} (no 500)")
     client = _make_client()
     _cleanup_projects()
-    PyPSAService.set_network(_seed_minimal_network())
+    qa_support.install_network(_seed_minimal_network())
     r = client.post(f"/api/projects/{PROJECT_A}")
     _step("project save returns 200", r.status_code == 200)
     # Write garbage to layout.json directly.
-    base = pathlib.Path(__file__).resolve().parent.parent / "projects"
-    layout_path = base / PROJECT_A / "layout.json"
+    layout_path = _project_dir(PROJECT_A) / "layout.json"
     layout_path.write_text("{ not valid json ::: }")
     r = client.get(f"/api/projects/{PROJECT_A}/layout")
     _step("GET on corrupt file returns 200 (defensive degradation)",
@@ -193,7 +219,7 @@ def test_layout_in_bundle() -> None:
     print("\n[5] Saved layout is included in the .pypsaproj.zip bundle")
     client = _make_client()
     _cleanup_projects()
-    PyPSAService.set_network(_seed_minimal_network())
+    qa_support.install_network(_seed_minimal_network())
     r = client.post(f"/api/projects/{PROJECT_A}")
     _step("project save returns 200", r.status_code == 200)
     r = client.put(f"/api/projects/{PROJECT_A}/layout", json=_sample_layout())
@@ -220,7 +246,7 @@ def test_re_put_overwrites() -> None:
     print("\n[6] Re-PUT overwrites (full replacement, not merge)")
     client = _make_client()
     _cleanup_projects()
-    PyPSAService.set_network(_seed_minimal_network())
+    qa_support.install_network(_seed_minimal_network())
     client.post(f"/api/projects/{PROJECT_A}")
 
     layout_v1 = _sample_layout()
@@ -245,9 +271,9 @@ def test_layout_per_project_isolation() -> None:
     print("\n[7] Per-project layout isolation: A and B never share state")
     client = _make_client()
     _cleanup_projects()
-    PyPSAService.set_network(_seed_minimal_network())
+    qa_support.install_network(_seed_minimal_network())
     client.post(f"/api/projects/{PROJECT_A}")
-    PyPSAService.set_network(_seed_minimal_network())
+    qa_support.install_network(_seed_minimal_network())
     client.post(f"/api/projects/{PROJECT_B}")
 
     layout_a = {**_sample_layout(), "savedAt": 111}
@@ -280,7 +306,7 @@ def test_save_load_cycle_preserves_layout() -> None:
     print("\n[8] Save → wipe in-memory → load: layout.json persists")
     client = _make_client()
     _cleanup_projects()
-    PyPSAService.set_network(_seed_minimal_network())
+    qa_support.install_network(_seed_minimal_network())
     r = client.post(f"/api/projects/{PROJECT_A}")
     _step("project save returns 200", r.status_code == 200)
     layout = _sample_layout()
@@ -321,7 +347,7 @@ def test_unload_keepalive_put_accepted() -> None:
     print("\n[10] Unload-path PUT accepted (browser refresh survives)")
     client = _make_client()
     _cleanup_projects()
-    PyPSAService.set_network(_seed_minimal_network())
+    qa_support.install_network(_seed_minimal_network())
     client.post(f"/api/projects/{PROJECT_A}")
     # Equivalent of fetch(... method:'PUT', body:JSON.stringify(layout),
     # headers:{Content-Type:'application/json'}, keepalive:true) — the
@@ -345,7 +371,7 @@ def test_oversized_payload_413() -> None:
     print("\n[9] Oversized layout payload returns 413")
     client = _make_client()
     _cleanup_projects()
-    PyPSAService.set_network(_seed_minimal_network())
+    qa_support.install_network(_seed_minimal_network())
     client.post(f"/api/projects/{PROJECT_A}")
     # Build a payload larger than _MAX_LAYOUT_BYTES — read the cap dynamically
     # so the test stays correct if the limit changes.
@@ -386,7 +412,7 @@ def main() -> int:
             try:
                 fn()
             except Exception as e:
-                print(f"  scenario crashed: {type(e).__name__}: {e}")
+                _crashed("scenario", e)
                 import traceback; traceback.print_exc()
     finally:
         _cleanup_projects()
