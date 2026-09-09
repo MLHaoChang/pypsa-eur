@@ -399,6 +399,22 @@ class SolveQueue:
             # 2. Claim the ctx lifecycle: status=running + a live worker handle
             #    (this thread) so a concurrent foreground /run on the SAME ctx
             #    409s, and wipe stale results so the fresh solve starts clean.
+            # Fix review, F3: a live adequacy study on this ctx refuses the
+            # claim — checked under the same state lock the claim writes
+            # under, so a study publishing concurrently (which holds that
+            # lock too) cannot slip between the check and the claim.
+            from services.project_context import (
+                STUDY_LABELS as _STUDY_LABELS,
+                running_study_key as _running_study_key,
+            )
+            with ctx.solver_state_lock:
+                _study = _running_study_key(ctx.solver_state)
+                if _study is not None:
+                    raise RuntimeError(
+                        f"{_STUDY_LABELS.get(_study, _study)} is running on "
+                        "this project — a queued solve would re-solve the "
+                        "network it is measuring. Wait for it to finish, or "
+                        "abort it, and queue again.")
             ctx_state_update(
                 status="running", condition=None, objective=None, solve_time=None,
                 last_failure=None,

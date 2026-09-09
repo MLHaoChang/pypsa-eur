@@ -1490,6 +1490,11 @@ def _save_context(
     # netcdf_io_lock INNER — the documented order) to keep the HDF5 write
     # serialised against concurrent compare-state / results-summary reads.
     with ctx.mutation_lock:
+        # Fix review, F2: re-checked INSIDE the lock the export holds. The
+        # gate above is the cheap early refusal; `_publish_study` takes this
+        # same lock to publish, so a study that was not live here cannot
+        # become live until the export below has finished.
+        _refuse_save_during_study(ctx)
         # `expect` lets a caller assert which project it believes is active
         # (autosave, explicit Ctrl+S). Refuse only when it asserted an identity
         # AND the backend is bound to a genuinely DIFFERENT project. `loaded is

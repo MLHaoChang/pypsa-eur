@@ -3065,14 +3065,22 @@ def _publish_study(key: str, record: dict, thread: "_threading.Thread") -> None:
     thread that `record_is_running` would count as running for the rest of
     the process (review finding M1).
     """
-    with PyPSAService.get_solver_state_lock():
-        _refuse_if_mesh_busy(key)
-        _state[key] = record
-        try:
-            thread.start()
-        except BaseException:
-            _state[key] = None
-            raise
+    # The MUTATION lock outside the state lock (the order every solver
+    # write already uses). Fix review, F2: the save gate (`_save_context`)
+    # re-checks the study INSIDE `ctx.mutation_lock` and holds that lock for
+    # its whole export, so a study can only publish before a save has begun
+    # exporting or after it has finished — never between the save's gate
+    # and its export, which is where a sweep's first, lock-free contingency
+    # mutation was landing on disk as the user's project.
+    with PyPSAService.get_lock():
+        with PyPSAService.get_solver_state_lock():
+            _refuse_if_mesh_busy(key)
+            _state[key] = record
+            try:
+                thread.start()
+            except BaseException:
+                _state[key] = None
+                raise
 
 
 @results_router.get("/fmea_sweep")
@@ -3727,7 +3735,13 @@ def get_mc_elcc_candidates():
 
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
-        assets = elcc_candidates(n, cfg=_state.get("solver_config"))
+        try:
+            assets = elcc_candidates(n, cfg=_state.get("solver_config"))
+        except ValueError as exc:
+            # The same walk `/copt` and `/mc` refuse through (S1's
+            # `OutageRateError`); the fix review found this route letting it
+            # out as a 500.
+            raise HTTPException(422, str(exc)) from exc
     return {"assets": assets, "max_assets": MAX_ELCC_ASSETS}
 
 

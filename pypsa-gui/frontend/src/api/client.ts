@@ -69,7 +69,11 @@ export function formatApiDetail(detail: unknown, fallback = 'Unknown error'): st
 const QUIET_MUTATION_URLS = ['/simulation/preflight']
 
 // Expected conflict codes — still log, but avoid toast spam during a solve.
-const QUIET_TOAST_CODES = new Set(['solver_in_flight'])
+// `study_in_flight` joins it (whole-branch review S5 fix, reviewed): a save
+// refused because an adequacy study is running is a structured 409 the
+// caller handles — the project switch toasts its own 'busy-study' sentence
+// and autosave must not toast it every interval.
+const QUIET_TOAST_CODES = new Set(['solver_in_flight', 'study_in_flight'])
 
 const AUTH_API_PREFIX = '/auth/'
 const AUTH_PAGES = new Set(['/login', '/set-password', '/reset-password'])
