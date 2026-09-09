@@ -769,14 +769,25 @@ def fleet_and_residual(n, *, keep_zero_capacity: bool = False, cfg=None,
             # times its capacity IN THAT HOUR (Phase 12d: the series in MW
             # when the row is not active, or not fully built, everywhere).
             cap_h = cap if series is None else series
+            # IEEE 39-bus review, F6: availability is clipped at 0 on BOTH
+            # branches. M2 clamped the fold (the occurrence-bearing branch
+            # above); a must-take farm with a negative `p_max_pu` still
+            # subtracted from the residual — measured as a residual of 120
+            # against a demand of 100, i.e. the farm CONSUMING, while the
+            # margin lists the same unit unpriceable and the LP dispatches
+            # nothing from it. An availability is a fraction of nameplate;
+            # below zero it is not a weaker one, it is meaningless.
             if p_max_pu_t is not None and g in getattr(p_max_pu_t, "columns", []):
-                avail = p_max_pu_t[g].reindex(snapshots).fillna(0.0) * cap_h
+                avail = (p_max_pu_t[g].reindex(snapshots).fillna(0.0)
+                         .clip(lower=0.0) * cap_h)
             else:
                 try:
                     static = float(gens.at[g, "p_max_pu"]) if "p_max_pu" in gens.columns else 1.0
                 except (TypeError, ValueError):
                     static = 1.0
-                avail = pd.Series(static * cap_h, index=snapshots)
+                if not math.isfinite(static):
+                    static = 1.0
+                avail = pd.Series(max(static, 0.0) * cap_h, index=snapshots)
             must_take = must_take.add(avail, fill_value=0.0)
 
     if unusable:

@@ -16,7 +16,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import { compact, restoreSentence, CAP_LEVER } from './LoopPanel'
-import { MarginLoopPanel, MARGIN_LEVER, leverPct } from './MarginLoopPanel'
+import { MarginLoopPanel, MARGIN_LEVER, bindingLabel, leverPct } from './MarginLoopPanel'
 import type {
   MarginIteration, MarginLoopPayload, McStatus,
 } from '../../api/simulation'
@@ -394,10 +394,22 @@ describe('MarginLoopPanel iteration table', () => {
     await openPanel()
     const first = (await screen.findByTestId('margin-loop-iter-0')).textContent ?? ''
     expect(first).toMatch(/21%/)
-    expect(first).toMatch(/voll/)
+    // IEEE 39-bus review, F4: the wire still says `voll`; the panel says what
+    // actually bound. A price the margin loop never sets is not a "bound by".
+    expect(first).toMatch(/not binding/)
+    expect(first).not.toMatch(/voll/)
     expect(first).toMatch(/9\.11–9\.54/)
     expect((await screen.findByTestId('margin-loop-iterations')).textContent)
       .not.toContain('‱')
+  })
+
+  // ★ IEEE 39-bus review, F4. Bite (verified): render `r.binding` raw — the
+  // row reads "system_cap" on a study that never set a cap.
+  it('names the MARGIN as what bound, not the cap loop\'s vocabulary', () => {
+    expect(bindingLabel('system_cap')).toBe('reserve margin')
+    expect(bindingLabel('voll')).toBe('not binding')
+    expect(bindingLabel(null)).toBe('—')
+    expect(bindingLabel('something_else')).toBe('something_else')
   })
 
   // ★ Bite: hardcode "ε ‱" as the column header. The column holds margins.

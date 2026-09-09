@@ -80,6 +80,19 @@ function leverCopy(payload: MarginLoopPayload | null): LeverCopy {
  * renames it here without a frontend edit; the ×100 belongs to the "%" it
  * ships with.
  */
+
+/** IEEE 39-bus review, F4: the wire's `binding` on THIS loop is the cap
+ *  loop's vocabulary, borrowed so the shared controller's plateau pre-test
+ *  (`binding !== 'system_cap'`) keeps working on a lever that has no cap.
+ *  Rendered raw it told the user "system_cap" on a study with no energy cap
+ *  at all, and "voll" — a price with no role here — when the margin was
+ *  slack. The wire keeps its word; the panel says what actually bound. */
+export function bindingLabel(binding: string | null | undefined): string {
+  if (binding === 'system_cap') return 'reserve margin'
+  if (binding === 'voll') return 'not binding'
+  return binding ?? '—'
+}
+
 export function leverPct(v: number, unit: string): string {
   return `${compact(v * 100)}${unit}`
 }
@@ -457,7 +470,7 @@ export function MarginLoopPanel() {
                         {r.condition && r.condition !== r.solve_status
                           ? ` (${r.condition})` : ''}
                       </td>
-                      <td className="py-0.5 pr-3 font-sans">{r.binding ?? '—'}</td>
+                      <td className="py-0.5 pr-3 font-sans">{bindingLabel(r.binding)}</td>
                       <td className="py-0.5 pr-3 text-right"
                           data-testid={`margin-loop-iter-${i}-cost`}>
                         {r.cost_eur != null ? eur(r.cost_eur) : '—'}

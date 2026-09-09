@@ -2239,7 +2239,16 @@ def _check_profiled_occurrence_units(n) -> list[Issue]:
         # static beside ANY column is inert everywhere — PyPSA reads the
         # column, so does the margin, and so does the fold (shipped-code
         # review, finding 3; plan v6 §H3).
-        if not has_column and q > 0.0 and _static_of(name) < 1.0 - 1e-9:
+        # IEEE 39-bus review, F7: M2's other half. A NEGATIVE static is not a
+        # capacity factor that might already contain outages — it is a value
+        # every surface now reads as 0 MW (the fold clamps it, the margin
+        # clamps it, the LP can dispatch nothing from it), so the sentence
+        # below — "credited at nameplate x p_max_pu x (1 - q)" — is false of
+        # it, and the remedy it offers (set the flag) is not the fix. The
+        # nonfinite-bound preflight already names that value for what it is.
+        _static = _static_of(name)
+        if (not has_column and q > 0.0
+                and 0.0 <= _static < 1.0 - 1e-9):
             may_include.append(name)
 
     # A flagged unit with NO outage data at all never reaches `rows`, so its

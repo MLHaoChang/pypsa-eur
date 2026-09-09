@@ -172,6 +172,7 @@ export interface CoptPayload {
      *  (`p_max_pu_includes_outages`). Absent on pre-phase payloads. */
     folded_units?: { name: string; folded_constant: number; source: string }[]
     deterministic_units?: string[]
+    rate_zero_units?: string[]
     netted_beyond_cap?: string[]
     k_exact?: number
   }
@@ -198,18 +199,31 @@ export function activityChipText(a: ActivitySummary | undefined | null): string 
  *  the wire and rendered nowhere): "2 folded · 1 includes outages". Empty
  *  string when the payload carries neither, so the chip does not render. */
 export function foldChipText(
-  fleet: { folded_units?: { name: string }[]; deterministic_units?: string[] } | undefined | null,
+  fleet: {
+    folded_units?: { name: string }[]
+    deterministic_units?: string[]
+    rate_zero_units?: string[]
+  } | undefined | null,
 ): string {
   const folded = fleet?.folded_units?.length ?? 0
   const det = fleet?.deterministic_units?.length ?? 0
+  // IEEE 39-bus review, F8: the two ways a unit reaches q = 0 are different
+  // facts about the user's own data — the flag they set, or the rate they
+  // typed as 0 — and the chip names them apart rather than pooling them.
+  const zero = fleet?.rate_zero_units?.length ?? 0
   const parts: string[] = []
   if (folded) parts.push(`${folded} static CF folded`)
   if (det) parts.push(`${det} includes outages`)
+  if (zero) parts.push(`${zero} rate 0`)
   return parts.join(' · ')
 }
 
 export function foldChipTitle(
-  fleet: { folded_units?: { name: string; folded_constant: number }[]; deterministic_units?: string[] } | undefined | null,
+  fleet: {
+    folded_units?: { name: string; folded_constant: number }[]
+    deterministic_units?: string[]
+    rate_zero_units?: string[]
+  } | undefined | null,
 ): string {
   const lines: string[] = []
   const folded = fleet?.folded_units ?? []
@@ -221,6 +235,11 @@ export function foldChipTitle(
   if (det.length) {
     lines.push('No outages sampled — availability already includes them '
       + '(p_max_pu_includes_outages): ' + det.join(', '))
+  }
+  const zero = fleet?.rate_zero_units ?? []
+  if (zero.length) {
+    lines.push('No outages sampled — the outage rate is 0 as entered: '
+      + zero.join(', '))
   }
   return lines.join('\n')
 }

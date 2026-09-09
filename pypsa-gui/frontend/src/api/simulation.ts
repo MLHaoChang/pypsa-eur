@@ -239,6 +239,10 @@ export interface McResult {
    *  `p_max_pu_includes_outages`. Absent on pre-phase payloads. */
   folded_units?: { name: string; folded_constant: number; source: string }[]
   deterministic_units?: string[]
+  /** IEEE 39-bus review, F8: q = 0 because the rate was TYPED 0, not
+   *  because `p_max_pu_includes_outages` is set — the other half of the
+   *  same disclosure, disjoint from `deterministic_units`. */
+  rate_zero_units?: string[]
   /** Phase 12d: which units / stores the engines masked in which period by
    *  build year, lifetime or the active flag (`inactive`), or scored below nameplate because
    *  a later vintage is not yet built (`partial`), with the one sentence that

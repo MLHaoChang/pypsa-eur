@@ -3323,8 +3323,20 @@ def post_frontier(body: FrontierRequest | None = None):
     lock = PyPSAService.get_lock()
 
     stop_event = _threading.Event()
+    # IEEE 39-bus review, F3: the standing reserve margin travels with the
+    # record. The frontier deliberately does NOT strip it (unlike the
+    # contingency sweep) — a margin is a standing standard, not a swept one —
+    # and the phase-8 plan says that is right "but must be stated on the
+    # panel, or the curve reads as cost-vs-eps when it is
+    # cost-vs-eps-at-margin-m". Measured on the IEEE 39-bus network: with the
+    # margin already covering every swept target, all three points came back
+    # with identical cost and zero ENS and nothing on the panel said why.
     record: dict = {"status": "running", "points": [], "error": None,
                     "warning": None, "knee": None,
+                    "reserve_margin": (
+                        float(getattr(cfg, "reserve_margin", None))
+                        if getattr(cfg, "reserve_margin", None) is not None
+                        else None),
                     "targets_permyriad": targets, "base_restored": None,
                     "base_restore_status": None,
                     "started_at": time.time(), "thread": None,
@@ -3683,6 +3695,14 @@ def post_mc(body: McRequest | None = None):
                     "deterministic_units": [
                         str(u.name) for u in inputs.units
                         if _is_flag_deterministic(u)],
+                    # F8: the typed-zero half of the same disclosure — see
+                    # `/copt`. Without it a unit whose rate the user typed
+                    # as 0 is in NO list here, and this payload has no row
+                    # note to fall back on.
+                    "rate_zero_units": [
+                        str(u.name) for u in inputs.units
+                        if _rate_is_zero(u)
+                        and not _is_flag_deterministic(u)],
                     "folded_units": [
                         {"name": str(u.name),
                          "folded_constant": float(u.folded_constant),
@@ -5409,6 +5429,7 @@ def get_copt():
         fleet_and_residual,
         is_flag_deterministic as _is_flag_deterministic,
         must_take_generators,
+        rate_is_zero as _rate_is_zero,
         screening_analysis,
     )
 
@@ -5500,6 +5521,15 @@ def get_copt():
                 if getattr(u, "folded_constant", None) is not None],
             "deterministic_units": [u.name for u in units
                                     if _is_flag_deterministic(u)],
+            # IEEE 39-bus review, F8. The OTHER way a unit reaches q = 0:
+            # the user typed the rate as 0. M4 stopped calling that "the
+            # flag", which was the defect — but on `/mc`, which has no rows
+            # to carry a note, it then left such a unit named nowhere at
+            # all. Same fleet, same q, different reason: two lists, both
+            # disjoint from `profile_units` and from each other.
+            "rate_zero_units": [u.name for u in units
+                                if _rate_is_zero(u)
+                                and not _is_flag_deterministic(u)],
         },
         "fidelity_note": analysis["fidelity_note"],
         # Phase 12d: which units the engines masked in which period, by

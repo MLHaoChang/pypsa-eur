@@ -235,6 +235,79 @@ def _merge_partial_update(n, attr: str, name: str, submitted: dict) -> dict:
     return {**current, **submitted}
 
 
+def _detach_component_series(n, attr: str, name: str) -> list[tuple[str, "pd.Series"]]:
+    """Every time-varying INPUT column this component owns, copied out before
+    a remove+add drops it (IEEE 39-bus review, F2).
+
+    ``_update_component`` updates by ``n.remove`` + ``n.add``, and PyPSA drops
+    the component's columns from every ``n.<attr>_t`` table when it is
+    removed — so saving a generator's row from the Properties panel, with no
+    field changed, silently deleted its availability profile. Measured on the
+    IEEE 39-bus network: the 500 MW wind farm became a firm must-take at
+    ``p_max_pu`` 1.0, the COPT LOLE fell 0.831 h -> 0.319 h, its ELCC
+    candidate nameplate went 306 MW -> 500 MW, and the next solve was refused
+    by the margin's own `reserve_margin_unpriceable_assets`. Nothing warned:
+    the Time Series view is served from the saved project and still showed the
+    profile.
+
+    INPUT attributes only, the same filter ``_backup_network_ts_to_user_ts``
+    documents: an edit invalidates the solve, so carrying a stale ``_t.p``
+    across it would leave one component holding dispatch the rest of the
+    network no longer has. If the component defaults cannot be read, every
+    column is carried — preserving is strictly safer than dropping, which is
+    the behaviour this exists to end.
+    """
+    ts_store = getattr(n, f"{attr}_t", None)
+    if ts_store is None:
+        return []
+    input_attrs: set[str] | None = None
+    try:
+        comp_defaults = getattr(n.components, attr).defaults
+        mask = comp_defaults["status"].astype(str).str.startswith("Input", na=False)
+        input_attrs = set(comp_defaults.index[mask])
+    except Exception:                                         # noqa: BLE001
+        input_attrs = None
+    saved: list[tuple[str, pd.Series]] = []
+    try:
+        ts_attrs = list(ts_store.keys()) if hasattr(ts_store, "keys") else []
+    except Exception:                                         # noqa: BLE001
+        return []
+    for ts_attr in ts_attrs:
+        if input_attrs is not None and ts_attr not in input_attrs:
+            continue
+        df = (ts_store.get(ts_attr) if hasattr(ts_store, "get")
+              else getattr(ts_store, ts_attr, None))
+        if df is None or not hasattr(df, "columns") or name not in df.columns:
+            continue
+        try:
+            saved.append((ts_attr, df[name].copy()))
+        except Exception:                                     # noqa: BLE001
+            continue
+    return saved
+
+
+def _reattach_component_series(n, attr: str, name: str,
+                               saved: list[tuple[str, "pd.Series"]]) -> None:
+    """Put back what ``_detach_component_series`` took out, under the SAME
+    name — a rename runs afterwards through ``rename_component_names``, which
+    re-keys the ``_t`` columns with everything else that refers to the
+    component (F2)."""
+    if not saved:
+        return
+    ts_store = getattr(n, f"{attr}_t", None)
+    if ts_store is None:
+        return
+    for ts_attr, series in saved:
+        df = (ts_store.get(ts_attr) if hasattr(ts_store, "get")
+              else getattr(ts_store, ts_attr, None))
+        if df is None or not hasattr(df, "columns"):
+            continue
+        try:
+            df[name] = series.reindex(df.index)
+        except Exception:                                     # noqa: BLE001
+            continue
+
+
 def _update_component(component_class: str, attr: str, name: str, kwargs: dict) -> dict:
     """
     Update by remove+add. `kwargs` should be the user's *partial* dict
@@ -261,6 +334,11 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         # merge the user never asked for, reported as a 200.
         if new_name != name and new_name in df.index:
             raise HTTPException(409, f"{component_class} '{new_name}' already exists")
+        # F2: PyPSA drops this component's columns from every `_t` table on
+        # remove, so carry them across the remove+add. Taken BEFORE the
+        # remove and put back straight after the add, under the old name, so
+        # the rename below re-keys them with everything else.
+        saved_series = _detach_component_series(n, attr, name)
         n.remove(component_class, name)
         # Re-add under the OLD name and rename separately. A rename by
         # remove+add does NOT re-point the components that REFER to this one:
@@ -275,6 +353,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         # already used it; this path is the one the Properties panel's edit
         # cards take, and it did not.
         n.add(component_class, name, **merged)
+        _reattach_component_series(n, attr, name, saved_series)
         # Re-key any saved per-period bounds so the modal data follows the
         # rename instead of stranding under the old key.
         if new_name != name:

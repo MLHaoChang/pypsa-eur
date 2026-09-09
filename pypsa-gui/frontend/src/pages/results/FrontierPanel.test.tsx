@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { resultsApi } from '../../api/simulation'
 import {
-  FrontierPanel, kneeMessage,
+  FrontierPanel, curveIsFlat, kneeMessage,
   type FrontierPayload, type FrontierRow,
 } from './FrontierPanel'
 
@@ -45,6 +45,26 @@ describe('kneeMessage', () => {
     expect(m).toMatch(/already past the economic optimum/i)
     expect(m).toMatch(/sweep looser targets/i)
     expect(m).not.toMatch(/Economic knee at/)
+  })
+
+  // ★ IEEE 39-bus review, F3. Measured live: with a 15 % reserve margin in
+  // force, three swept targets came back with identical cost and ENS 0 —
+  // and the panel said "every step still buys more avoided-shed value than
+  // it costs", which is false of a curve where no step bought anything.
+  it('says a flat curve is flat, and names the standard already doing the work', () => {
+    const flat = [row(300, 0, 5000), row(150, 0, 5000), row(80, 0, 5000)]
+    expect(curveIsFlat(flat)).toBe(true)
+    const m = kneeMessage(null, flat, 10000, 0.15)
+    expect(m).toMatch(/curve is flat/i)
+    expect(m).toMatch(/15\.0 % reserve margin/)
+    expect(m).not.toMatch(/still buys more/i)
+    expect(m).not.toMatch(/Sweep tighter targets to find one/i)
+    // …and with no margin set it still refuses the wrong sentence.
+    const m2 = kneeMessage(null, flat, 10000, null)
+    expect(m2).toMatch(/curve is flat/i)
+    expect(m2).not.toMatch(/reserve margin/i)
+    // A curve that DOES move keeps the original message.
+    expect(curveIsFlat(rows)).toBe(false)
   })
 
   it('says the knee is outside the range rather than inventing one', () => {

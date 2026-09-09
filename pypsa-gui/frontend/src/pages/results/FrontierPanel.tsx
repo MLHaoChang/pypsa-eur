@@ -41,6 +41,11 @@ export interface FrontierPayload {
   error?: string | null
   warning?: string | null
   knee?: number | null
+  /** IEEE 39-bus review, F3: the reserve margin IN FORCE while the sweep
+   *  ran. The frontier does not strip it — a margin is a standing standard,
+   *  not a swept one — so the curve is cost-vs-ε AT THAT MARGIN and the
+   *  panel has to say so. `null` when no margin was set. */
+  reserve_margin?: number | null
   voll_eur_per_mwh?: number
   targets_permyriad?: number[]
   /** Phase 12e: whether the closing base re-solve put the user's plan back —
@@ -77,15 +82,38 @@ const eur = (v: number) =>
  * saying differently — otherwise a user reads "knee at the first point" as
  * "tighten to here".
  */
+/** Whether NO swept target changed the plan's shed energy — the shape a
+ *  frontier takes when a standing reserve margin already covers every ε in
+ *  the range (IEEE 39-bus review, F3). Measured there: three targets, one
+ *  cost, ENS 0 throughout. */
+export function curveIsFlat(rows: FrontierRow[]): boolean {
+  const ok = rows.filter(r => r.status === 'ok' && r.point)
+  if (ok.length < 2) return false
+  return ok.every((r, i) => i === 0
+    || (ok[i - 1].point!.achieved_ens_mwh - r.point!.achieved_ens_mwh) <= 0)
+}
+
 export function kneeMessage(
   knee: number | null | undefined, rows: FrontierRow[], voll: number | undefined,
+  reserveMargin?: number | null,
 ): string | null {
   const ok = rows.filter(r => r.status === 'ok' && r.point)
   if (knee == null || ok.length < 2 || !voll) {
-    return ok.length >= 2
-      ? 'No economic knee inside the swept range — every step still buys more '
-        + 'avoided-shed value than it costs. Sweep tighter targets to find one.'
-      : null
+    if (ok.length < 2) return null
+    // F3: a flat curve is not "every step still buys more than it costs" —
+    // no step bought anything, and tighter targets cannot change that. Say
+    // which standard is already doing the work when one is in force.
+    if (curveIsFlat(rows)) {
+      return 'The curve is flat — no swept target changed the plan, so there '
+        + 'is no knee to find and tighter targets will not produce one. '
+        + (reserveMargin != null
+          ? `The ${(reserveMargin * 100).toFixed(1)} % reserve margin in force `
+            + 'already covers every target swept here: this is cost vs ε AT '
+            + 'that margin, and the margin is the standard shaping the plan.'
+          : 'The plan already meets every target swept here.')
+    }
+    return 'No economic knee inside the swept range — every step still buys more '
+      + 'avoided-shed value than it costs. Sweep tighter targets to find one.'
   }
   const a = ok[knee].point!, b = ok[knee + 1]?.point
   if (!b) return null
@@ -256,7 +284,7 @@ export function FrontierPanel() {
 
           {okRows.length > 0 && (
             <p className="text-[10px] text-muted">
-              {kneeMessage(knee, rows, payload?.voll_eur_per_mwh)}
+              {kneeMessage(knee, rows, payload?.voll_eur_per_mwh, payload?.reserve_margin)}
             </p>
           )}
 

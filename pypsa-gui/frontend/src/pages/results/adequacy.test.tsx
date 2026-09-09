@@ -129,11 +129,26 @@ describe('CoptChips — the screening row', () => {
     expect(chip.getAttribute('title')).toMatch(/nuc × 0\.8, chp × 0\.5/)
     expect(chip.getAttribute('title')).toMatch(/p_max_pu_includes_outages\): nuc/)
   })
+  // IEEE 39-bus review, F8: the two ways a unit reaches q = 0 are different
+  // facts about the user's data and the chip keeps them apart. Before F8 a
+  // typed-zero unit was named on /copt only by a row note, and on /mc by
+  // nothing at all.
+  it('names the typed-zero units apart from the flagged ones', () => {
+    render(<CoptChips copt={coptPayload({
+      fleet: { units: 4, must_take: 0, delta_mw: 1,
+               folded_units: [{ name: 'nuc', folded_constant: 0.8, source: 'static' }],
+               deterministic_units: ['nuc'], rate_zero_units: ['g0', 'g1'] },
+    })} proxyEnsMwh={null} />)
+    const chip = screen.getByTestId('copt-fold-note')
+    expect(chip.textContent).toBe('1 static CF folded · 1 includes outages · 2 rate 0')
+    expect(chip.getAttribute('title')).toMatch(/outage rate is 0 as entered: g0, g1/)
+  })
   it('shows no fold chip on a pre-phase payload or empty lists', () => {
     render(<CoptChips copt={coptPayload()} proxyEnsMwh={null} />)
     expect(screen.queryByTestId('copt-fold-note')).toBeNull()
     render(<CoptChips copt={coptPayload({
-      fleet: { units: 4, must_take: 0, delta_mw: 1, folded_units: [], deterministic_units: [] },
+      fleet: { units: 4, must_take: 0, delta_mw: 1, folded_units: [],
+               deterministic_units: [], rate_zero_units: [] },
     })} proxyEnsMwh={null} />)
     expect(screen.queryByTestId('copt-fold-note')).toBeNull()
   })
