@@ -51,7 +51,9 @@ from gridspine.ingest.synthetic_profiles import (
 )
 from gridspine.producers.pypsa_nodal import (
     DEFAULT_MIP_REL_GAP,
+    load_solved_network,
     run_uc_rolling,
+    tables_from_network,
     to_dispatch_table,
     to_loads_table,
     to_pypsa,
@@ -320,6 +322,45 @@ def resume_from_dispatch(
         n2_prune_threshold_pct=n2_prune_threshold_pct, dispatch_source=dispatch_source,
         progress=progress, config_json=config_json, templates_overlay=templates_overlay,
     )
+
+
+def dispatch_from_network(src, outdir, *, progress=NULL_PROGRESS):
+    """Increment 5, D3: stages ingest and dispatch from a SOLVED PyPSA network
+    — a project the GUI solved and saved — instead of solving here.
+
+    The identity map to the detailed grid is checked in the producer
+    (`tables_from_network`); a failure lands in the `dispatch` stage's error
+    artifact with the unmapped ids, and nothing is written. Returns
+    (net, registry, dispatch, loads, dispatch_source): the manifest record
+    names the file, its sha256, its hours and how commitment was obtained, so
+    a bundle made from it is traceable to the solve it came from.
+    """
+    src = Path(src)
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    stage = "ingest"
+    try:
+        net = load_case39_res()
+        registry = registry_from_net(net)
+        progress.tick("ingest", 1, 1)
+
+        stage = "dispatch"
+        n = load_solved_network(src)
+        dispatch, loads, commitment = tables_from_network(n, net, registry)
+        # Demand first, as in `dispatch_year`: the loads artifact is an input.
+        loads.to_csv(outdir / "loads.csv", index=False)
+        dispatch.to_csv(outdir / "dispatch.csv", index=False)
+        dispatch_source = {
+            "network": str(src),
+            "network_sha256": _sha256(src),
+            "hours": int(pd.Series(dispatch["hour"]).nunique()),
+            "commitment": commitment,
+        }
+        progress.tick("dispatch", 1, 1)
+        return net, registry, dispatch, loads, dispatch_source
+    except Exception as exc:
+        StageError(stage=stage, element_ids=[], cause=repr(exc)).write(outdir)
+        raise
 
 
 def run_year_study(
@@ -594,8 +635,21 @@ if __name__ == "__main__":
     ap.add_argument("--from-dispatch", metavar="DIR", default=None,
                     help="study the dispatch.csv/loads.csv in DIR instead of solving; "
                          "--hours/--window/--overlap are then ignored (follow-ups F3)")
+    ap.add_argument("--from-network", metavar="NC", default=None,
+                    help="study a SOLVED PyPSA network (a saved network.nc whose generators "
+                         "are case39 units) instead of solving; --hours/--window/--overlap "
+                         "are then ignored (increment 5, D3)")
     args = ap.parse_args()
-    if args.from_dispatch:
+    if args.from_dispatch and args.from_network:
+        ap.error("--from-dispatch and --from-network are exclusive")
+    if args.from_network:
+        net, registry, dispatch, loads, source = dispatch_from_network(args.from_network, args.out)
+        res = study_dispatch(
+            args.out, net, registry, dispatch, loads, k=args.k,
+            screen=not args.no_screen, n2_prune_threshold_pct=args.n2_prune_threshold,
+            dispatch_source=source,
+        )
+    elif args.from_dispatch:
         res = resume_from_dispatch(
             args.from_dispatch, args.out, k=args.k,
             screen=not args.no_screen, n2_prune_threshold_pct=args.n2_prune_threshold,

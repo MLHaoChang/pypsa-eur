@@ -15,7 +15,12 @@ import dataclasses
 from pathlib import Path
 
 from gridspine.drivers.progress import Progress
-from gridspine.drivers.year_study import dispatch_year, resume_from_dispatch, study_dispatch
+from gridspine.drivers.year_study import (
+    dispatch_from_network,
+    dispatch_year,
+    resume_from_dispatch,
+    study_dispatch,
+)
 from gridspine.schema.contracts import ContractError
 
 
@@ -34,6 +39,10 @@ class StudyConfig:
     #: a finished run's directory to study instead of solving (F3); when set,
     #: `hours`, `window` and `overlap` describe that run, not this one
     from_dispatch: Path = None
+    #: a SOLVED PyPSA network (a project's saved `network.nc` whose generators
+    #: are the detailed grid's units) to study instead of solving (increment
+    #: 5, D3); exclusive with `from_dispatch`, and `hours` then describes it
+    from_network: Path = None
     #: per-study template edits applied on top of the shipped library
     #: (`templates.unit_params.load_unit_templates(overlay=...)`); the library
     #: itself is never written, so two studies can disagree about a machine and
@@ -42,10 +51,14 @@ class StudyConfig:
 
     def __post_init__(self):
         object.__setattr__(self, "outdir", Path(self.outdir))
-        for name in ("from_dispatch", "templates_overlay"):
+        for name in ("from_dispatch", "from_network", "templates_overlay"):
             value = getattr(self, name)
             if value is not None:
                 object.__setattr__(self, name, Path(value))
+        if self.from_dispatch is not None and self.from_network is not None:
+            raise ContractError(
+                "from_dispatch and from_network are exclusive: a study has one dispatch source"
+            )
         for name in ("hours", "k"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -69,6 +82,7 @@ class StudyConfig:
         d = dataclasses.asdict(self)
         d["outdir"] = str(self.outdir)
         d["from_dispatch"] = None if self.from_dispatch is None else str(self.from_dispatch)
+        d["from_network"] = None if self.from_network is None else str(self.from_network)
         d["templates_overlay"] = None if self.templates_overlay is None else str(self.templates_overlay)
         d["n2_prune_threshold_pct"] = float(self.n2_prune_threshold_pct)
         return d
@@ -91,6 +105,10 @@ def run_study(config: StudyConfig, progress=None, stop_event=None):
     `StudyAborted` after the stage's `StageError` artifact is written, so the
     caller sees where it stopped and a run past the dispatch stage can be
     finished later with `from_dispatch`.
+
+    Three dispatch sources, in precedence order: `from_dispatch` (another
+    study's tables), `from_network` (a solved PyPSA network — D3), else the
+    rolling unit commitment on case39.
     """
     if not isinstance(config, StudyConfig):
         raise ContractError(f"run_study takes a StudyConfig, got {type(config).__name__}")
@@ -103,6 +121,13 @@ def run_study(config: StudyConfig, progress=None, stop_event=None):
     )
     if config.from_dispatch is not None:
         return resume_from_dispatch(config.from_dispatch, config.outdir, **common)
+    if config.from_network is not None:
+        net, registry, dispatch, loads, source = dispatch_from_network(
+            config.from_network, config.outdir, progress=bus,
+        )
+        return study_dispatch(
+            config.outdir, net, registry, dispatch, loads, dispatch_source=source, **common,
+        )
     net, registry, dispatch, loads = dispatch_year(
         config.outdir, hours=config.hours, window=config.window,
         overlap=config.overlap, progress=bus,

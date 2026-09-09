@@ -1,6 +1,8 @@
 """Detailed-grid -> PyPSA nodal converter + UC dispatch producer.
 Nodal = identity region map: every PyPSA element name equals the canonical
 detailed-grid name. The only module allowed to import pypsa."""
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pypsa
@@ -84,8 +86,15 @@ def _res_rows(net, res_cf, snapshots: int):
     ]
 
 
-def to_pypsa(net, snapshots: int = 24, load_shape=None, res_cf=None) -> pypsa.Network:
+def to_pypsa(net, snapshots=24, load_shape=None, res_cf=None) -> pypsa.Network:
     """Detailed grid -> PyPSA nodal network.
+
+    `snapshots` is a COUNT (the network gets `range(count)`, as every study so
+    far) or an INDEX — a `DatetimeIndex` for a network that will live in the
+    GUI, whose templates and results views expect one. Profiles align
+    positionally either way (`_profile`), so the two calls build the same
+    numbers under different labels; `tests/gridspine/test_network_source.py`
+    holds that.
 
     `load_shape=None` is the increment-1 default: the 24 h `LOAD_SHAPE`, so the
     two-argument call is unchanged. Supplying a `load_shape` of length
@@ -97,7 +106,11 @@ def to_pypsa(net, snapshots: int = 24, load_shape=None, res_cf=None) -> pypsa.Ne
     above the resource.
     """
     n = pypsa.Network()
-    n.set_snapshots(range(snapshots))
+    if isinstance(snapshots, (int, np.integer)) and not isinstance(snapshots, bool):
+        n.set_snapshots(range(int(snapshots)))
+    else:
+        n.set_snapshots(pd.Index(snapshots))
+    snapshots = len(n.snapshots)
     bus_name = net.bus["name"]
 
     res = _res_rows(net, res_cf, snapshots)
@@ -379,3 +392,95 @@ def to_dispatch_table(n: pypsa.Network) -> pd.DataFrame:
             rows.append({"unit_id": unit, "hour": hour, "p_mw": p_mw,
                          "q_mvar": 0.0, "status": st})
     return validate_dispatch(pd.DataFrame(rows))
+
+
+# --------------------------------------------------------------------------
+# A solved network as the dispatch source (increment 5, D3)
+# --------------------------------------------------------------------------
+
+#: Recorded in the manifest's `dispatch_source.commitment`. Measured 2026-09-08
+#: on a netcdf round-trip: PyPSA writes `generators_t.status` when at least one
+#: unit ever departs from the default (1), and writes NOTHING when every unit
+#: is on at every hour — then the saved project carries no commitment column
+#: and `to_dispatch_table` infers it from output. Exact for these units: a
+#: committed case39 machine runs at >= 30 % of p_nom (`p_min_pu=0.3`), so
+#: "producing" and "committed" coincide.
+COMMITMENT_SOLVED = "from generators_t.status of the solved network"
+COMMITMENT_INFERRED = (
+    "inferred from p_mw (status = 1 iff |p_mw| > 1e-4 MW): the saved network "
+    "carries no commitment status; exact for case39 units (p_min_pu = 0.3)"
+)
+
+
+def _commitment_note(n: pypsa.Network) -> str:
+    status = getattr(n.generators_t, "status", pd.DataFrame())
+    committable = [u for u in n.generators.index if bool(n.generators.at[u, "committable"])]
+    inferred = [u for u in committable if u not in status.columns]
+    if not inferred:
+        return COMMITMENT_SOLVED
+    if len(inferred) == len(committable):
+        return COMMITMENT_INFERRED
+    return f"{COMMITMENT_SOLVED} for {sorted(set(committable) - set(inferred))}; {COMMITMENT_INFERRED} for {inferred}"
+
+
+def load_solved_network(path) -> pypsa.Network:
+    """Read a saved network. Existence is a ContractError here rather than a
+    FileNotFoundError three frames down, because the path came from a config."""
+    path = Path(path)
+    if not path.is_file():
+        raise ContractError(
+            f"dispatch source network not found: {path} (expected a saved network.nc)"
+        )
+    return pypsa.Network(str(path))
+
+
+def tables_from_network(n: pypsa.Network, net, registry):
+    """Solved PyPSA network -> (DispatchTable, LoadsTable, commitment note).
+
+    The spec's IDENTITY MAP, checked rather than assumed. Everything after the
+    dispatch is the detailed grid `net`, so the network is a source exactly
+    when its generators are that grid's units:
+
+    - the same unit ids in BOTH directions — a unit the network lacks would
+      leave a machine with no dispatch row for `apply_snapshot` to set, and a
+      unit the grid lacks has no machine to be; both are named;
+    - each on the bus the grid says — a unit moved to another bus would enter
+      the load flow at a node it does not feed;
+    - solved: `generators_t.p` covers every unit with no NaN. An unsolved
+      project is the most likely mistake and gets the clearest message.
+
+    A PyPSA-Eur clustered network fails the first check by construction. That
+    is the point: disaggregating a clustered dispatch onto the detailed grid is
+    the spec's "clustered producer", a later item, not a silent best effort.
+
+    Loads take the detailed grid's constant power factor, exactly as a
+    generated dispatch does (`to_loads_table`); commitment comes from the
+    status column for the units that have one and is inferred from output for
+    the rest (`_commitment_note`, recorded in the manifest).
+    """
+    units = set(n.generators.index)
+    expected = set(registry.index)
+    missing = sorted(expected - units)
+    extra = sorted(units - expected)
+    if missing or extra:
+        raise ContractError(
+            "network is not the detailed grid's unit set (identity map): "
+            f"missing {missing}, unknown {extra}"
+        )
+    wrong_bus = [
+        (u, str(n.generators.at[u, "bus"]), str(registry.at[u, "bus"]))
+        for u in registry.index
+        if str(n.generators.at[u, "bus"]) != str(registry.at[u, "bus"])
+    ]
+    if wrong_bus:
+        raise ContractError(
+            "units sit on a different bus than the detailed grid: "
+            + "; ".join(f"{u} on {got}, grid has it on {want}" for u, got, want in wrong_bus)
+        )
+    p = n.generators_t.p
+    if p.empty or set(p.columns) != units or p.isna().any().any():
+        raise ContractError(
+            "network is not solved: generators_t.p does not cover every unit — "
+            "solve the project and save it, then pick it as the dispatch source"
+        )
+    return to_dispatch_table(n), to_loads_table(n, net), _commitment_note(n)
