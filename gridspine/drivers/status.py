@@ -143,7 +143,30 @@ def stage_status(outdir) -> dict:
         "converged_hours": [int(h) for h in manifest.get("converged_hours", [])],
         "bundles": {str(h): p.name for h, p in _bundles(outdir).items()},
         "stages": stages,
+        # Spec stage 6 (increment 6): per bundle hour, whether the engineer's
+        # PowerFactory export has been read back and how it did — the short
+        # form; `drivers.readback.readback_status` has the whole summary.
+        "readback": _readback_short(outdir),
     }
+
+
+def _readback_short(outdir: Path) -> dict:
+    out = {}
+    for hour, bundle in _bundles(outdir).items():
+        path = bundle / "readback.json"
+        if not path.is_file():
+            continue
+        try:
+            summary = json.loads(path.read_text())
+        except (OSError, ValueError):
+            continue
+        branches = summary.get("branches")
+        out[str(hour)] = {
+            "pass": bool(summary.get("pass")),
+            "bus": {k: summary["bus"][k] for k in ("n", "n_ok")} if summary.get("bus") else None,
+            "branches": {k: branches[k] for k in ("n", "n_ok")} if branches else None,
+        }
+    return out
 
 
 def _previous_done(stages: dict, stage: str, started: bool) -> bool:
