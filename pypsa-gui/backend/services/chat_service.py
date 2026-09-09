@@ -1755,6 +1755,54 @@ def _serialise_for_anthropic(content_block: Any) -> dict[str, Any]:
         if hasattr(content_block, attr):
             out[attr] = getattr(content_block, attr)
     return out
+def _turn_budget_block(
+    session: ChatSession,
+    turn_ctx: Any,
+) -> tuple[str, dict[str, Any]] | None:
+    """
+    The frame that refuses this turn on budget grounds, or ``None`` to proceed.
+
+    Both caps are checked here so that both short-circuit in the same place:
+    BEFORE `session_init` (the panel treats that frame as "a turn started" and
+    would have to tear it down again) and BEFORE the SDK client is built (a
+    capped turn must not reach the API). Moving either gate below the client
+    build would keep every frame assertion passing while still spending money.
+
+    `turn_ctx` is the P0-pinned context — the project this turn would PERSIST
+    to — so a mid-turn project switch cannot move the turn onto another
+    project's daily budget.
+
+    Phase B of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`;
+    see `tests/test_chat_budget_gates_seam.py`.
+    """
+    # Cap enforcement — refuse to start a new turn if the session output
+    # budget is already exhausted.
+    if session.usage_acc["output_tokens"] >= MAX_OUTPUT_TOKENS_PER_SESSION:
+        return "session_done", {
+            "reason": "budget_exhausted",
+            "kind": "output_tokens",
+            "limit": MAX_OUTPUT_TOKENS_PER_SESSION,
+        }
+
+    # #9 — cross-session durable per-project/per-day token spend cap. Checked
+    # against the P0-pinned turn_ctx (the project this turn would persist to),
+    # not the live active context. 0 = disabled (default), so zero disk cost
+    # unless ops opts in. Sits alongside the session-output ceiling so both
+    # budget gates short-circuit BEFORE the SDK client is built (no API call
+    # when capped). Reads the module attribute at call time (monkeypatchable).
+    daily_cap = PYPSA_GUI_CHAT_DAILY_TOKEN_CAP
+    if daily_cap > 0:
+        spent = _today_token_spend(turn_ctx)
+        if spent >= daily_cap:
+            return "session_done", {
+                "reason": "daily_budget_exhausted",
+                "kind": "daily_tokens",
+                "limit": daily_cap,
+                "spent": spent,
+            }
+    return None
+
+
 def _build_user_content(
     project: str,
     attachment_file_ids: list[str] | None,
@@ -2021,33 +2069,10 @@ def _run_turn_body(
     def _project_switched() -> bool:
         return PyPSAService.get_active_context().loaded_project != turn_project_holder[0]
 
-    # Cap enforcement — refuse to start a new turn if the session output
-    # budget is already exhausted.
-    if session.usage_acc["output_tokens"] >= MAX_OUTPUT_TOKENS_PER_SESSION:
-        yield "session_done", {
-            "reason": "budget_exhausted",
-            "kind": "output_tokens",
-            "limit": MAX_OUTPUT_TOKENS_PER_SESSION,
-        }
+    budget_block = _turn_budget_block(session, turn_ctx)
+    if budget_block is not None:
+        yield budget_block
         return
-
-    # #9 — cross-session durable per-project/per-day token spend cap. Checked
-    # against the P0-pinned turn_ctx (the project this turn would persist to),
-    # not the live active context. 0 = disabled (default), so zero disk cost
-    # unless ops opts in. Sits alongside the session-output ceiling so both
-    # budget gates short-circuit BEFORE the SDK client is built (no API call
-    # when capped). Reads the module attribute at call time (monkeypatchable).
-    daily_cap = PYPSA_GUI_CHAT_DAILY_TOKEN_CAP
-    if daily_cap > 0:
-        spent = _today_token_spend(turn_ctx)
-        if spent >= daily_cap:
-            yield "session_done", {
-                "reason": "daily_budget_exhausted",
-                "kind": "daily_tokens",
-                "limit": daily_cap,
-                "spent": spent,
-            }
-            return
 
     if client is None:
         client, err = _build_anthropic_client()
