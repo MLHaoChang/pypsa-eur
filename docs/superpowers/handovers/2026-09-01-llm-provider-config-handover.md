@@ -356,11 +356,34 @@ work that had passing tests.
 
 ### Carried follow-ups (recorded, out of this plan's scope)
 
-- **`TOOL_ERROR_BANNER_KINDS` drift, one direction unguarded.** The subset test
-  catches a routed kind losing its copy, but not a kind that *should* route and
-  doesn't — which is the direction that actually bit us. Closing it needs a
-  shared backend↔frontend manifest of kinds that can genuinely surface as
-  `tool_error`, populated by a backend test that empirically triggers each.
+- ~~**`TOOL_ERROR_BANNER_KINDS` drift, one direction unguarded.**~~ **CLOSED
+  2026-09-10.** The manifest is `pypsa-gui/tool-error-kinds.json`: all 51
+  kinds that can reach a `tool_error` frame, each with a `surface`
+  (`banner`/`inline`) and a written reason. Two guards hold it —
+  `backend/tests/test_tool_error_kind_manifest.py` derives the set from source
+  and fails when a new `error_kind` appears anywhere, and
+  `frontend/src/components/ChatPanel.manifest.test.tsx` asserts every `banner`
+  kind is routed AND has copy, and every `inline` kind is not routed. Both
+  were mutation-tested: injecting a new kind fails the backend guard, removing
+  a routing fails the frontend one.
+
+  **It found two defects the moment it existed**, both the same
+  unreachable-copy shape as the `inactive_acting_user` correction:
+  `no_acting_user` is that kind's literal twin — the SAME `_acting()` helper
+  raises both, seven lines apart in `chat_tools.py` — and Task 14 routed one
+  and left the other; and `capability_unsupported` already had copy with an
+  open-settings action that never rendered, so a turn refused for lacking
+  vision or tools showed a truncated gray tool line. Both now route.
+
+  One deviation from this document's proposal, recorded because it is a real
+  trade: the set is derived STATICALLY, not "populated by a backend test that
+  empirically triggers each". Triggering all 51 means building 51 failure
+  states across uploads, projects, solving and vision — mostly fixtures, and
+  with gaps invisible in exactly the way the guard exists to prevent. The
+  derivation cannot miss an emitter present in the source, which is the
+  property that matters, and it over-approximates instead (it includes kinds
+  raised only from routes, which are classified `inline` with that as the
+  reason). Over-including costs a line of JSON; under-including is the bug.
 - **`useLocalSettings` still collapses outage and unauthorized** into one state.
   Deliberately not widened into: it is pre-existing, its header defends the
   choice, and `useLLMSettings` documents the divergence as intentional.

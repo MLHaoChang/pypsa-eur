@@ -567,6 +567,12 @@ export const KIND_COPY: Record<
   missing_api_key: { title: 'API key missing' },
   // P-2 — the acting account stopped being active mid-turn.
   inactive_acting_user: { title: 'Account is no longer active' },
+  // Its twin, found by the tool-error manifest (2026-09-10). Both are raised
+  // by the SAME helper — `_acting()` in chat_tools.py, seven lines apart — so
+  // the reachability argument written out below for `inactive_acting_user`
+  // covers this one word for word. The Task 14 correction routed one and left
+  // the other, which is the asymmetry a subset test structurally cannot see.
+  no_acting_user: { title: 'Not signed in' },
   // W-1 — kinds the server can genuinely emit that had no entry, so the
   // banner printed the raw snake_case kind as its title with no action.
   // `unknown_profile_id` matters most: C-4 made it a REACHABLE path (before
@@ -681,6 +687,20 @@ export const TOOL_ERROR_BANNER_KINDS = new Set([
   // Emitted by the capability guard when an endpoint asks for a tool that was
   // never offered for this turn.
   'tool_not_offered',
+  // Found by `pypsa-gui/tool-error-kinds.json` and its two guards
+  // (2026-09-10), which are the first thing able to see this direction at all.
+  //
+  // `no_acting_user` is `inactive_acting_user`'s twin: the SAME `_acting()`
+  // helper raises both, seven lines apart in chat_tools.py, so every word of
+  // the reachability argument above applies unchanged. The Task 14 correction
+  // routed one and left the other.
+  //
+  // `capability_unsupported` already HAD copy right here in KIND_COPY and
+  // simply never routed, so a turn refused for lacking vision or tools showed
+  // a truncated gray tool line instead of the "This model doesn't support
+  // that." banner with its open-settings action — the same unreachable-copy
+  // shape, for the third time.
+  'no_acting_user', 'capability_unsupported',
   // Phase D — upload-tool errors. Same routing as the chat-stream 'error'
   // frame, so a single user mental model handles every failure surface.
   'file_too_large', 'empty_file', 'invalid_filename',
