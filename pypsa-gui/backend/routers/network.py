@@ -388,6 +388,52 @@ def _reattach_component_series(n, attr: str, name: str,
             continue
 
 
+def _rename_component_safely(n, component_class: str, old: str, new: str) -> None:
+    """Rename a component, re-pointing whatever refers to it — without the
+    ``KeyError`` PyPSA raises for every class but ``Bus``.
+
+    ``rename_component_names`` renames the static index and the dynamic
+    columns, then walks every component re-pointing cross references. That
+    walk derives the column from the RENAMED class and asks each component
+    for one per port:
+
+        col = self.name.lower()                       # "generator"
+        cols = [f"{col}{port}" for port in component.ports]
+        component.static[cols] = component.static[cols].replace(kwargs)
+
+    which holds only when the class's own name IS a port column. That is true
+    of ``Bus`` (`bus`, `bus0`, `bus1`) and of nothing else: a Generator rename
+    looks for a `generator` column, a Line rename for `line0`/`line1`, and a
+    Carrier rename for `carrier0`/`carrier1` on Lines — each a KeyError, so
+    renaming a generator from the Properties panel was a 500. Verified on
+    PyPSA 1.1.2 (the pinned version) and 1.3.0; PyPSA's own source carries a
+    "TODO: Generalize" on that line (IEEE 39-bus review, F9).
+
+    The predicate is the walk's own precondition rather than a hardcoded
+    "Bus": where every derived column exists, PyPSA's function runs and
+    re-points dependents as before; where one does not, the walk would have
+    nothing to re-point anyway — no component carries a `generator` column —
+    so the rename is completed here exactly as PyPSA does it before that walk,
+    the static index and every dynamic column. Our own references (the vintage
+    bounds and the `_user_ts` keys) are re-keyed by the callers, as they were.
+    """
+    col = component_class.lower()
+    for comp in n.components:
+        ports = list(getattr(comp, "ports", None) or [])
+        if not ports or comp.static.empty:
+            continue
+        if not all(f"{col}{port}" in comp.static.columns for port in ports):
+            break
+    else:
+        n.rename_component_names(component_class, **{old: new})
+        return
+
+    comp = n.components[component_class]
+    comp.static = comp.static.rename(index={old: new})
+    for key in list(comp.dynamic.keys()):
+        comp.dynamic[key] = comp.dynamic[key].rename(columns={old: new})
+
+
 def _update_component(component_class: str, attr: str, name: str, kwargs: dict) -> dict:
     """
     Update by remove+add. `kwargs` should be the user's *partial* dict
@@ -437,7 +483,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         # Re-key any saved per-period bounds so the modal data follows the
         # rename instead of stranding under the old key.
         if new_name != name:
-            n.rename_component_names(component_class, **{name: new_name})
+            _rename_component_safely(n, component_class, name, new_name)
             vintage_service.rename_asset(n, component_class, name, new_name)
             # Same fix for the time-series store — _user_ts keys carry the
             # column name, and without this the profile would be silently
