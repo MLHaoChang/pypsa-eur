@@ -80,6 +80,7 @@ from services.profile_shapes import (  # noqa: F401
 )
 from services.snapshot_index import (  # noqa: F401
     _build_period_multiindex,
+    _infer_snapshot_freq,
 )
 from services.user_timeseries import (  # noqa: F401
     _TS_COMPONENTS,

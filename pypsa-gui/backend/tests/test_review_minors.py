@@ -234,7 +234,12 @@ def test_copt_and_mc_payloads_list_every_flag_zeroed_unit(client, install_networ
     assert body["status"] == "done", body
     res = body["result"]
     assert sorted(res["deterministic_units"]) == ["flag_col", "flag_static"]
-    assert "typed0" in res["profile_units"] or "typed0" not in res["deterministic_units"]
+    # The typed-zero unit is named by its OWN list (F8) and by neither the
+    # flag's nor the profile one. Written as an `or` first, which no fleet
+    # could fail (IEEE 39-bus review, N-a).
+    assert "typed0" not in res["deterministic_units"]
+    assert "typed0" not in res["profile_units"]
+    assert res["rate_zero_units"] == ["typed0"]
 
 
 # ── M13 ───────────────────────────────────────────────────────────────────

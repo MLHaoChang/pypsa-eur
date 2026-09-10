@@ -1,0 +1,38 @@
+# SPDX-FileCopyrightText: Contributors to PyPSA-Eur <https://github.com/pypsa/pypsa-eur>
+#
+# SPDX-License-Identifier: MIT
+#
+# The `gridspine` distribution — and ONLY that. PyPSA-Eur itself is a Snakemake
+# workflow, not a package; nothing under `scripts/`, `rules/` or `config/` is
+# packaged here. The distribution exists so that `import gridspine` works from
+# any working directory in every pixi environment (increment-4 decision D5):
+# the pypsa-gui backend runs from `pypsa-gui/backend` and used to reach the
+# repo root through a `sys.path` insert in its gridspine service.
+#
+# Installed EDITABLE by pixi (`[pypi-dependencies] gridspine = { path = ".",
+# editable = true }` in pixi.toml), so the source tree is what runs — the
+# same files `pixi run gridspine-tests` tests.
+#
+# No runtime dependencies are declared on purpose. Every engine gridspine
+# imports (pypsa, pandapower, lightsim2grid, highspy, pandas, numpy, pyyaml) is
+# pinned in pixi.toml, which is the single place versions are decided in this
+# repository; a second list here could only drift from it, and uv would try to
+# satisfy it from PyPI against conda-provided packages. Anyone installing this
+# distribution outside pixi is on their own for the engines, and this comment
+# is the warning.
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gridspine"
+version = "0.4.0"
+description = "Planning → dynamics and connection-study pipeline: dispatch, static screening, snapshot ranking, PowerFactory handoff"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["gridspine", "gridspine.*"]
+
+[tool.setuptools.package-data]
+gridspine = ["templates/data/*.yaml"]

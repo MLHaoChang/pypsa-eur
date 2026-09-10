@@ -48,10 +48,6 @@ from routers.projects import (
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from routers.results import lp_scaled_load_frame
 
-import logging
-
-logger = logging.getLogger("pypsa_gui.compare")
-
 router = APIRouter()
 
 

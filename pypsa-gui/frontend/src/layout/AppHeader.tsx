@@ -83,6 +83,22 @@ function TypeIcon({ type }: { type: ResultType }) {
 }
 
 // ── AppHeader ──────────────────────────────────────────────────────────────────
+/** The undo mutation's error copy, or `null` to say nothing.
+ *
+ * A 409 here is a structured refusal the axios interceptor has already
+ * toasted in the words the backend chose — "a sequential-MC study is
+ * running", say (whole-branch review, M10). Adding "Nothing to undo" on top
+ * of it says something false and says it second. Everything else is the
+ * plain empty-stack case, which has no server sentence of its own.
+ *
+ * Exported as a pure function so the rule is testable without mounting the
+ * whole header (IEEE 39-bus review, N-f: M10 shipped without a test).
+ */
+export function undoErrorMessage(e: unknown): string | null {
+  const status = (e as { response?: { status?: number } })?.response?.status
+  return status === 409 ? null : 'Nothing to undo'
+}
+
 export default function AppHeader() {
   const { status, setStatus, clearLog, appendLog } = useSimulationStore()
   const {
@@ -322,8 +338,8 @@ export default function AppHeader() {
     // (a 409 while an adequacy study runs names the study — whole-branch
     // review, M10); this fixed copy is for the plain "stack is empty" case.
     onError: (e: unknown) => {
-      const status = (e as { response?: { status?: number } })?.response?.status
-      if (status !== 409) toast.error('Nothing to undo')
+      const msg = undoErrorMessage(e)
+      if (msg) toast.error(msg)
     },
   })
 

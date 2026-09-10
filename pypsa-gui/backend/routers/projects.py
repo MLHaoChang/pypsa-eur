@@ -629,6 +629,7 @@ def _project_info_db(db, project) -> ProjectInfo:
     # down there must not override a category the user has since edited.
     info.scenario_description = project.scenario_description
     info.scenario_type = project.scenario_type
+    info.project_kind = project.project_kind
     parent_name = None
     if project.parent_project_id is not None:
         parent = db.get(_Project, project.parent_project_id)
@@ -1159,6 +1160,7 @@ _TEMPLATE_DEFAULT_NAMES = {
     "3bus": "3-Bus Tutorial",
     "ieee14": "IEEE 14-Bus",
     "belgium": "Belgium Grid",
+    "ieee39": "IEEE 39-Bus (New England)",
 }
 
 
@@ -2368,6 +2370,17 @@ def load_project(
     if not nc_path.exists():
         raise HTTPException(404, f"Project '{name}' not found")
 
+    # TWO INDEPENDENT REFUSALS guard this route, for two different kinds of
+    # work in flight. A queued solve and a live study are separate states:
+    # neither check implies the other, so both run, and both sit here before
+    # `undo_service.clear()` so a refusal costs the caller nothing.
+    # ★ Precheck BEFORE any destructive work (Phase 11 review, BLOCKER 3b).
+    # The guard inside `reset_network` fires too late: by then this route
+    # has already called `undo_service.clear()`, so a REFUSED load destroys
+    # the undo history of the project the user is still looking at. Placed
+    # after the 404 so a missing project is still reported as missing.
+    PyPSAService.refuse_if_study_running("load a project")
+
     # ONE ProjectContext per project, always — and this route is the fifth path
     # that can break it. It builds nothing (so it satisfies R2 as worded), but
     # it ends by RE-REGISTERING the caller's own context under this project's
@@ -2394,12 +2407,6 @@ def load_project(
     # widest part of the window between the two).
     if _queue_solve_running(registry_id):
         raise _queue_solve_conflict(name)
-    # ★ Precheck BEFORE any destructive work (Phase 11 review, BLOCKER 3b).
-    # The guard inside `reset_network` fires too late: by then this route
-    # has already called `undo_service.clear()`, so a REFUSED load destroys
-    # the undo history of the project the user is still looking at. Placed
-    # after the 404 so a missing project is still reported as missing.
-    PyPSAService.refuse_if_study_running("load a project")
 
     # Crash-recovery surface. `_atomic_write_with` renames `.tmp → final` as
     # the last step; a `.tmp` sibling means a prior save was killed mid-write.

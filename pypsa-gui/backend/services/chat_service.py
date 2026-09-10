@@ -1855,10 +1855,52 @@ def _provider_for_profile(
     return None, "internal_error"
 
 
-def _tools_payload() -> list[dict[str, Any]]:
-    """The `tools` field of the neutral `LLMRequest` — exactly chat_tools_schema.TOOLS."""
+#: The one gridspine tool a session may use whatever project it is bound to:
+#: creating a study is how a user gets a planning → dynamics project at all.
+_GRIDSPINE_ALWAYS = frozenset({"gridspine_create_study"})
+
+
+def _bound_project_kind(turn_ctx) -> str | None:
+    """The kind of the project this turn is bound to, or None when unbound or
+    unknowable. Never raises — tool selection must not fail a turn."""
+    project_uuid = getattr(turn_ctx, "project_uuid", None)
+    if not project_uuid:
+        return None
+    try:
+        import uuid as _uuid
+
+        from db.models import Project
+        from db.session import SessionLocal
+        from services.gridspine_service import kind_of
+
+        with SessionLocal() as db:
+            row = db.get(Project, _uuid.UUID(str(project_uuid)))
+            return kind_of(row) if row is not None else None
+    except Exception:  # noqa: BLE001 - selection must degrade, not abort the turn
+        return None
+
+
+def _tools_payload(turn_ctx=None) -> list[dict[str, Any]]:
+    """The `tools` field of the neutral `LLMRequest`: chat_tools_schema.TOOLS,
+    minus the project-scoped gridspine tools unless the bound project is a
+    planning → dynamics one.
+
+    The spec's "the agent gets the toolset matching the open study", done as a
+    filter over ONE registry rather than a registry per kind: the registry
+    invariants (`len(TOOLS) == len(DISPATCHERS)`, every tool routed) keep
+    holding, and a study project still sees every ordinary tool — its
+    capacity-expansion tools simply find no network to act on, which they
+    already report. Only the gridspine tools are gated, because on any other
+    project every one of them would 409 before doing anything.
+    """
     from services.chat_tools_schema import TOOLS
-    return list(TOOLS)
+    tools = list(TOOLS)
+    if _bound_project_kind(turn_ctx) != "planning_dynamics":
+        tools = [
+            t for t in tools
+            if not t["name"].startswith("gridspine_") or t["name"] in _GRIDSPINE_ALWAYS
+        ]
+    return tools
 
 
 def _tools_payload_for_profile(profile: Any) -> list[dict[str, Any]]:
@@ -2747,10 +2789,15 @@ def _stream_assistant_message(
     **Retry is only safe before anything has been emitted.** Once a `token` or
     `thinking` frame has reached the client, retrying replays the answer from
     the start and the panel shows it twice. `emitted_this_attempt` is what
-    prevents that, and it is per ATTEMPT — hoisting it, or resetting it in the
-    wrong place, produces duplicated output under transient load while every
-    frame stays individually well-formed. `tests/test_chat_stream_attempt_seam.py`
+    prevents that, and it is per ATTEMPT. `tests/test_chat_stream_attempt_seam.py`
     asserts on the COUNT of emitted text for that reason.
+
+    Precisely: the tripwire is `and not emitted_this_attempt` in `retriable`
+    below, NOT the per-attempt reset. Master's prose said hoisting the reset
+    produces the duplicate; running that mutation shows it does not, because
+    the flag is only read inside the attempt that can set it and such an
+    attempt always leaves the loop. Dropping the `retriable` term is what
+    duplicates the answer. Keep both, and know which one is load-bearing.
 
     TAKES A `provider`, NOT AN SDK `client`. The extraction on master streamed
     through `client.messages.stream(...)` and returned the SDK's own message

@@ -370,6 +370,11 @@ export interface ProjectInfo {
   // presentational and can grow server-side without a frontend release: an
   // unrecognised value must show no badge, not break the row.
   scenario_type?: string | null
+  // Project kind — 'planning_dynamics' for a gridspine study, null/absent for
+  // an ordinary capacity-expansion project (backend migration 0006 leaves the
+  // column NULL for every pre-existing row). Bare string for the same reason
+  // as `scenario_type`: an unknown kind shows no badge, it does not break.
+  project_kind?: string | null
 }
 
 // Compact summary returned by GET /api/projects/{name}/compare-state.

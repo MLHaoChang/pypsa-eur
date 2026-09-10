@@ -29,6 +29,12 @@ from services import period_utils
 from services.serialization import safe_float as _safe_float
 
 
+
+#: The channel the Compare view logs to. Named explicitly rather than
+#: `__name__` so a log config keyed on it keeps working after the move out
+#: of `routers/compare.py`.
+logger = logging.getLogger("pypsa_gui.compare")
+
 def _bucket_add(d: dict, key: str, value: float, period: int | None) -> None:
     """
     Accumulate ``value`` into ``d[key]['total']`` (and ``by_period[period]``

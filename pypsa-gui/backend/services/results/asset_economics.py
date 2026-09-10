@@ -14,20 +14,20 @@ from __future__ import annotations
 
 import logging
 
-from services.results.load_frames import corrected_marginal_prices
-
-# The capital-cost resolver's failure is swallowed and reported as
-# `capital_costs_available: false`, so the traceback has to reach the log
-# or the cause is unavailable to anyone debugging a table of nulls.
-logger = logging.getLogger("pypsa_gui.results")
-
 from services.period_utils import (
     period_years_map,
     years_for_period,
 )
+from services.results.load_frames import corrected_marginal_prices
 from services.solver_service import periodized_capital_costs
 
 
+
+
+# The SAME logger the router used, not a child of it: the lifted bodies must
+# produce byte-identical log records — `tests/test_asset_economics_capital_costs.py`
+# asserts on the channel name.
+logger = logging.getLogger("pypsa_gui.results")
 
 def compute_asset_economics(n, cfg, *, result_df):
     """
@@ -209,7 +209,6 @@ def compute_asset_economics(n, cfg, *, result_df):
         if not capital_costs_available:
             return None
         return None if x is None else _safe_finite(x)
-
     def _accumulate_per_period(
         series: _pd.Series,
         weights: _np.ndarray,
@@ -237,7 +236,7 @@ def compute_asset_economics(n, cfg, *, result_df):
     # ── Marginal prices per bus, merit-order corrected ───────────────────
     # Was a third verbatim copy of the curtailment-subsidy correction. The
     # shared helper performs the IDENTICAL fetch this block used to do by
-    # hand — `_result_df(..., "lopf")`, zero-fallback on `n.snapshots`
+    # hand — `result_df(..., "lopf")`, zero-fallback on `n.snapshots`
     # (`snapshots` here is bound to exactly that), then `fillna(0.0)` — so
     # the collapse is behaviour-preserving, pinned by
     # tests/test_asset_economics_merit_order_parity.py.
@@ -380,7 +379,7 @@ def compute_asset_economics(n, cfg, *, result_df):
                 "fixed_cost_eur": _capital_derived(fixed_cost),
                 "fom_cost_eur": _capital_derived(fom_cost),
                 "net_profit_eur": _capital_derived(revenue_total - fixed_cost - vom_total),
-                "lcoe_eur_per_mwh": _capital_derived(lcoe),
+                "lcoe_eur_per_mwh": _capital_derived(lcoe) if lcoe is not None else None,
                 "avg_price_eur_per_mwh": _safe_finite(avg_price) if avg_price is not None else None,
                 "by_period": by_period_rows,
             })
@@ -513,7 +512,7 @@ def compute_asset_economics(n, cfg, *, result_df):
                         "fom_cost_eur": _capital_derived(fom_p),
                         "vom_cost_eur": _safe_finite(vp),
                         "net_profit_eur": _capital_derived(np_period),
-                        "lcos_eur_per_mwh": _capital_derived(lcos_p),
+                        "lcos_eur_per_mwh": _capital_derived(lcos_p) if lcos_p is not None else None,
                         "spread_eur_per_mwh": _safe_finite(spread_p) if spread_p is not None else None,
                     })
 
@@ -533,7 +532,7 @@ def compute_asset_economics(n, cfg, *, result_df):
                 "fixed_cost_eur": _capital_derived(fixed_cost),
                 "fom_cost_eur": _capital_derived(fom_cost),
                 "net_profit_eur": _capital_derived(net_profit),
-                "lcos_eur_per_mwh": _capital_derived(lcos),
+                "lcos_eur_per_mwh": _capital_derived(lcos) if lcos is not None else None,
                 "spread_eur_per_mwh": _safe_finite(spread) if spread is not None else None,
                 "avg_discharge_price_eur_per_mwh": _safe_finite(avg_discharge_price) if avg_discharge_price is not None else None,
                 "avg_charge_price_eur_per_mwh": _safe_finite(avg_charge_price) if avg_charge_price is not None else None,
@@ -644,7 +643,7 @@ def compute_asset_economics(n, cfg, *, result_df):
                         "fom_cost_eur": _capital_derived(fom_p),
                         "vom_cost_eur": _safe_finite(vp),
                         "net_profit_eur": _capital_derived(np_period),
-                        "lcos_eur_per_mwh": _capital_derived(lcos_p),
+                        "lcos_eur_per_mwh": _capital_derived(lcos_p) if lcos_p is not None else None,
                         "spread_eur_per_mwh": _safe_finite(spread_p) if spread_p is not None else None,
                     })
 
@@ -661,7 +660,7 @@ def compute_asset_economics(n, cfg, *, result_df):
                 "fixed_cost_eur": _capital_derived(fixed_cost),
                 "fom_cost_eur": _capital_derived(fom_cost),
                 "net_profit_eur": _capital_derived(net_profit),
-                "lcos_eur_per_mwh": _capital_derived(lcos),
+                "lcos_eur_per_mwh": _capital_derived(lcos) if lcos is not None else None,
                 "spread_eur_per_mwh": _safe_finite(spread) if spread is not None else None,
                 "avg_discharge_price_eur_per_mwh": _safe_finite(avg_discharge_price) if avg_discharge_price is not None else None,
                 "avg_charge_price_eur_per_mwh": _safe_finite(avg_charge_price) if avg_charge_price is not None else None,
@@ -865,7 +864,7 @@ def compute_asset_economics(n, cfg, *, result_df):
                 "fixed_cost_eur": _capital_derived(fixed_cost),
                 "fom_cost_eur": _capital_derived(fom_cost),
                 "net_profit_eur": _capital_derived(revenue_total - fixed_cost - vom_total),
-                "lcoe_eur_per_mwh": _capital_derived(lcoe),
+                "lcoe_eur_per_mwh": _capital_derived(lcoe) if lcoe is not None else None,
                 "avg_price_eur_per_mwh": _safe_finite(avg_price) if avg_price is not None else None,
                 "by_period": by_period_rows,
             })

@@ -21,7 +21,7 @@ export const client = axios.create({
 
 // URLs that the UI polls in the background — failures during a backend reload
 // window must NOT pop a toast or tear down the React Query cache.
-const QUIET_POLL_URLS = ['/network/undo/info', '/changelog']
+const QUIET_POLL_URLS = ['/network/undo/info', '/changelog', '/gridspine/']
 
 function isQuietPoll(url: string | undefined, method: string): boolean {
   if (method !== 'GET') return false
@@ -69,21 +69,18 @@ export function formatApiDetail(detail: unknown, fallback = 'Unknown error'): st
 // open and produces nothing the user can act on — exclude it.
 const QUIET_MUTATION_URLS = ['/simulation/preflight']
 
-// Expected conflict codes — still log, but avoid toast spam.
-//
-// `project_locked` is a STANDING condition, not an incident. While another
-// user holds the edit lock every autosave tick, every canvas drag and every
+// Expected conflict codes — still log, but avoid toast spam. All three are
+// STANDING conditions rather than incidents, which is the whole test for
+// belonging here: while one holds, every autosave tick, canvas drag and
 // solver-config change is refused, and one toast per refusal buries the
-// workbench. The read-only banner already says who holds it and is the
-// affordance the user can act on.
+// workbench.
 //
-// `study_in_flight` (whole-branch review S5) is the same shape for adequacy:
-// a save refused because a study is running is a structured 409 the caller
-// handles — the project switch toasts its own 'busy-study' sentence and
-// autosave must not toast it every interval.
-const QUIET_TOAST_CODES = new Set([
-  'solver_in_flight', 'project_locked', 'study_in_flight',
-])
+// `project_locked` — another user holds the edit lock. The read-only banner
+// already names the holder and is the affordance the user can act on.
+// `study_in_flight` — a save refused because an adequacy study is running is a
+// structured 409 the caller handles; the project switch toasts its own
+// 'busy-study' sentence, and autosave must not repeat it every interval.
+const QUIET_TOAST_CODES = new Set(['solver_in_flight', 'project_locked', 'study_in_flight'])
 
 const AUTH_API_PREFIX = '/auth/'
 const AUTH_PAGES = new Set(['/login', '/set-password', '/reset-password'])

@@ -26,6 +26,8 @@ from services.serialization import (
 # text inside the lifted bodies must produce byte-identical log records.
 logger = logging.getLogger("pypsa_gui.results")
 
+from services.results.load_frames import _apply_merit_order_correction
+
 
 
 # Moved out of `routers/results.py` in the 2026-09-10 merge. This branch
@@ -159,6 +161,20 @@ def compute_prices(n, source, from_, to_, *, result_df):
             except Exception:
                 fallback_per_snapshot = []
 
+        # Merit-order ("subsidy-removed") view: the curtailment_cost extra-
+        # functionality term in solver_service adds `-cost × p` to the LP
+        # objective for any renewable with curtailment_cost > 0. That makes
+        # the renewable's effective marginal cost `marginal_cost - cost`,
+        # and by LP duality the bus price equals that effective cost when
+        # the renewable is the marginal unit — i.e. it dispatches strictly
+        # between 0 and p_max_pu × p_nom_opt. The result reads as
+        # "negative price" even though physically nothing is being paid.
+        #
+        # To give users a "merit order" view that ignores the dispatch
+        # subsidy, add the curtailment_cost of the marginal renewable back
+        # to the LP dual for every (bus, snapshot) where one is active.
+        # When no renewable is marginal at that cell the LP dual already
+        # reflects the true merit order and we leave it alone.
         # Merit-order ("subsidy-removed") view. The correction itself lives in
         # `_apply_merit_order_correction` — shared with `corrected_marginal_prices`,
         # which `/asset_economics` and the Compare tabs use. This endpoint keeps

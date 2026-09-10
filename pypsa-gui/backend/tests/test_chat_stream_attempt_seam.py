@@ -25,6 +25,17 @@ a user under transient load — and every existing test still passes, because th
 frames are individually well-formed. So the guard here asserts on the COUNT of
 emitted text, not just its presence.
 
+ONE CORRECTION TO THAT REASONING, from actually running the mutation (master,
+same file). Hoisting `emitted_this_attempt` out of the attempt loop does NOT
+produce the duplicate: the flag is only ever read inside the same attempt that
+can set it, and any attempt that sets it then leaves the loop (terminal error,
+completed stream, or abort), so the hoist is inert and survives every case
+below. The term that actually carries the guarantee is
+`and not emitted_this_attempt` in the `retriable` condition; dropping THAT
+turns `test_a_retriable_error_AFTER_emission_does_not_retry` red with
+`attempts == 2`. The per-attempt reset stays, because it is what keeps the
+inert version inert — but the tripwire is on the condition, not the reset.
+
 Three exits, all of which must survive
 --------------------------------------
 * the stream completes -> `break`, and the turn continues to tool dispatch;
@@ -74,9 +85,13 @@ class _Provider:
     def __init__(self, script):
         self._script = list(script)
         self.attempts = 0
+        # What each attempt actually asked the provider for. The fallback only
+        # reaches the wire if `request.model` is re-read per attempt.
+        self.models_seen = []
 
     def stream(self, request):
         self.attempts += 1
+        self.models_seen.append(request.model)
         if not self._script:
             raise AssertionError("script exhausted")
         item = self._script.pop(0)
@@ -102,6 +117,14 @@ def _request():
 
 
 def _drive(provider, session=None, profile=None, model_fallback_used=False):
+    """
+    Run the seam to completion, returning (frames, outcome).
+
+    `request.model` is deliberately NOT set from the session here: the seam
+    re-reads `session.model` into the request on every attempt, which is the
+    mechanism the A8 fallback depends on, and `_Provider.models_seen` is what
+    checks it actually happened.
+    """
     session = session or chat_service.ChatSession()
     frames = []
     gen = _seam()(
@@ -218,7 +241,8 @@ def test_persistent_rate_limiting_buys_one_fallback_attempt():
     # Exhaust the retries, then the fallback attempt succeeds.
     script = [_rate_limited()] * (chat_service.MAX_STREAM_RETRIES + 1)
     script.append([_ev("text_delta", text="cheaper"), _ev("message_done")])
-    frames, out = _drive(_Provider(script), session=session, profile=profile)
+    provider = _Provider(script)
+    frames, out = _drive(provider, session=session, profile=profile)
 
     assert session.model == "small-model", (
         "the session was not downgraded; the fallback outlives the turn"
@@ -231,6 +255,11 @@ def test_persistent_rate_limiting_buys_one_fallback_attempt():
         "profile_id": "p1",
     }
     assert out.stop_turn is False
+    # Downgrading `session.model` is only half the job under this seam: the
+    # REQUEST carries the model to the provider, so it has to be re-read per
+    # attempt or the "fallback" would keep asking for the original model.
+    assert provider.models_seen[0] == "big-model"
+    assert provider.models_seen[-1] == "small-model"
 
 
 def test_a_profile_that_declares_no_fallback_never_downgrades():

@@ -99,27 +99,37 @@ def test_blanking_a_bound_writes_its_sentinel(client, net, col, expected):
 
 
 def test_blanking_a_finite_default_numeric_writes_that_default(client, net):
-    """
-    MERGE NOTE (2026-09-10): this asserted NaN, and master's Phase 12g changed
-    the behaviour deliberately — `_finite_input_meta` decides FIRST, and
-    `Generator.p_nom`'s PyPSA default is a finite 0.0. The rationale is
-    master's and it is the stronger one: NaN is not a "no value" sentinel to
-    PyPSA, which drops the term or the constraint that reads it rather than
-    falling back to a default, so clearing a finite-default input to NaN left
-    the network in a state the next solve would silently mis-model.
+    """Blanking `p_nom` writes 0.0 — its PyPSA CLASS DEFAULT — not NaN.
 
-    The property this test exists for — a blank goes through the numeric
-    branch and lands as a real number, not a string or an object-dtype cell —
-    is unchanged and still asserted. `test_nonfinite_inputs.py::test_J2a_*`
-    pins the same rule across the other finite-default columns.
+    This test characterized NaN when it was written, and master's Phase 12g
+    deliberately changed that: NaN is not a valid "unset" sentinel for an
+    attribute whose PyPSA default is finite, because PyPSA does not fall back
+    to the default, it drops the term or masks the constraint that reads it.
+    `Generator.p_nom` defaults to 0.0, so 0.0 is what "unset" means here, and
+    the route now reads it from PyPSA's own metadata rather than assuming.
+
+    The NaN path still exists and is still characterized — see
+    `test_blanking_a_ramp_limit_writes_nan` below — for attributes whose class
+    default IS NaN, where masking the row is the documented way to say "no
+    limit". That is the distinction Phase 12g drew, and this pair pins it.
     """
     r = client.patch(BULK, json={
         "component_class": "Generator", "names": ["gas"], "updates": {"p_nom": None},
     })
     assert r.status_code == 200
-    value = float(net.generators.at["gas", "p_nom"])
-    assert value == 0.0
-    assert not math.isnan(value)
+    assert float(net.generators.at["gas", "p_nom"]) == 0.0
+
+
+def test_blanking_a_ramp_limit_writes_nan(client, net):
+    """The other half of Phase 12g's distinction: `ramp_limit_up`'s class
+    default IS NaN, and PyPSA masking the ramp row is the documented way to
+    say "this unit has no ramp limit" — so blanking it still writes NaN."""
+    r = client.patch(BULK, json={
+        "component_class": "Generator", "names": ["gas"],
+        "updates": {"ramp_limit_up": None},
+    })
+    assert r.status_code == 200
+    assert math.isnan(float(net.generators.at["gas", "ramp_limit_up"]))
 
 
 def test_empty_string_takes_the_same_blank_path_as_null(client, net):

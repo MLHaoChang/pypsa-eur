@@ -23,6 +23,7 @@ import ScenariosPanel from './pages/ScenariosPanel'
 import WorkspacePanel from './pages/WorkspacePanel'
 import CompareView from './pages/CompareView'
 import SolveQueuePanel from './pages/SolveQueuePanel'
+import GridspinePanel from './pages/GridspinePanel'
 import LocalSettings from './pages/LocalSettings'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
@@ -107,6 +108,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   issues:     { eyebrow: 'SIMULATION', title: 'Issues' },
   results:    { eyebrow: 'SIMULATION', title: 'Results' },
   solveQueue: { eyebrow: 'SIMULATION', title: 'Solve queue' },
+  gridspine:  { eyebrow: 'SIMULATION', title: 'Planning → dynamics' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
 }
@@ -114,7 +116,7 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
 // half-width panel beside the canvas — their charts, tables, and two-column
 // layouts need the full width.
-const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds'])
+const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine'])
 
 function fullPageContent(panel: SlidePanel): React.ReactNode {
   switch (panel) {
@@ -133,6 +135,7 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'compare':    return <CompareView />
     case 'capacityBounds': return <CapacityBoundsEditor />
     case 'solveQueue': return <SolveQueuePanel />
+    case 'gridspine':  return <GridspinePanel />
     case 'settings':   return <LocalSettings />
     default:           return null
   }

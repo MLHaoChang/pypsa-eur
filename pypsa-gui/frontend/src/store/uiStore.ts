@@ -39,7 +39,7 @@ export type CanvasMode = 'select' | 'connect'
 // deliberately NOT among them: `activeSlidePanel` holds ONE value, so while
 // `'chat'` was a member the assistant was mutually exclusive with every view
 // it exists to explain. It lives in `assistantDockOpen` below instead.
-export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings'
+export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 'snapshots' | 'issues' | 'overview' | 'scenarios' | 'compare' | 'capacityBounds' | 'solveQueue' | 'workspace' | 'settings' | 'gridspine'
 // Command-palette open mode. `null` = closed. `'all'` = full surface (⌘K).
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null

@@ -34,7 +34,8 @@ def _blank_basis_is_none(v):
     # helpers coerce NaN to "" on import), so a row read from GET and echoed
     # into PUT carried "" where it had carried null — and was refused
     # (whole-branch review, M13). Blank means unset.
-    if isinstance(v, str) and v.strip() in ("", "nan", "None"):
+    from services.adequacy.occurrence import BLANK_SPELLINGS
+    if isinstance(v, str) and v.strip() in BLANK_SPELLINGS:
         return None
     return v
 
@@ -749,8 +750,14 @@ class ProjectInfo(BaseModel):
     # project has never been categorised. Was a `[type]` prefix on the
     # description until migration 0004; see `Project.scenario_type`.
     scenario_type: str | None = None
+    # What KIND of study this project is — 'capacity_expansion' (the existing
+    # flow), 'planning_dynamics' (gridspine), 'connection' (later). NULL means
+    # capacity_expansion, exactly as `Project.project_kind` stores it (migration
+    # 0006): the DTO carries the raw column and the client resolves the default,
+    # so an old row and a row that chose the default look the same, as they are.
+    project_kind: str | None = None
 
-    @field_validator("parent_project", "scenario_description", "scenario_type", mode="before")
+    @field_validator("parent_project", "scenario_description", "scenario_type", "project_kind", mode="before")
     @classmethod
     def _empty_str_is_none(cls, v):
         # Coerce empty / whitespace-only strings to None so downstream

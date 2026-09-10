@@ -81,6 +81,17 @@ fi
 step "Syncing the build venv to gui-requirements.txt"
 "$VENV/bin/pip" install --quiet -r "$HERE/gui-requirements.txt" pyinstaller
 
+# ── the bundled project templates ───────────────────────────────────────────
+#
+# `project_templates/*/network.nc` are gitignored and built by the script, so a
+# fresh checkout ships NO templates unless this runs — the template tab then
+# answers 404 "run project_templates/_build.py" for every card. Run from the
+# build venv (pypsa + highspy are in it) with the repo root on the path, so the
+# IEEE 39-bus template — built by gridspine's own producer (increment 5) — is
+# built too rather than skipped.
+step "Building the bundled project templates"
+( cd "$REPO" && PYTHONPATH="$REPO" "$VENV/bin/python" "$HERE/backend/project_templates/_build.py" )
+
 # ── the SPA ─────────────────────────────────────────────────────────────────
 # `dist/` is gitignored, so a checkout never has one, and a STALE one is worse
 # than a missing one: the app serves an old UI with no error anywhere.

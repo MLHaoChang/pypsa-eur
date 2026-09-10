@@ -37,17 +37,17 @@ def compute_lost_load_summary(
     The totals are SNAPSHOT-WEIGHTED (services/adequacy/metrics.py);
     ``voll_eur_per_mwh`` is explicit — captures from older builds lack it,
     and consumers keep the cost/energy-ratio fallback for those.
-    Returns ``available=False`` when the pickle is absent, the capture key
-    is missing, the DataFrame is empty, the reindex/weighting step raises,
-    or the reindexed total is non-finite (NaN/inf) — none of these are "no
-    shedding": they mean the capture was never usefully read, so the
-    project's actual shedding is unknown. ``captured`` (LostLoadComparison)
-    is what tells that apart from the one genuine zero (a FINITE total
-    energy at or below the 1e-9 threshold after reindex/weighting):
-    ``captured=False`` on every unread/unusable-capture return,
-    ``captured=True`` on that zero and on the success path. Multi-period
-    split uses the snapshot weight matrix the rest of the comparison view
-    shares.
+
+    Returns ``available=False`` when the caller passes no capture (the pickle
+    was absent or unreadable — see ``routers.compare._read_lost_load_capture``),
+    the capture key is missing, the DataFrame is empty, the reindex/weighting
+    step raises, or the reindexed total is non-finite (NaN/inf). NONE of these
+    is "no shedding": they mean the capture was never usefully read, so the
+    project's actual shedding is unknown. ``captured`` is what tells that apart
+    from the one genuine zero (a FINITE total at or below the 1e-9 threshold):
+    ``captured=False`` on every unread/unusable-capture return, ``captured=True``
+    on that zero and on the success path. Multi-period split uses the snapshot
+    weight matrix the rest of the comparison view shares.
     """
     from models.schemas import LostLoadBus, LostLoadByCarrier, LostLoadComparison
 

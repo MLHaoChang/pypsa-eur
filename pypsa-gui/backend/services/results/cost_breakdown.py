@@ -25,6 +25,7 @@ from services.period_utils import (
 )
 from services.serialization import safe_float as _safe_float
 from services.solver_service import (
+    upfront_cost_series as _upfront_cost_series,
     _pv_factor_series,
     _reference_build_year,
     with_periodized_cost_defaults,
@@ -41,6 +42,16 @@ logger = logging.getLogger("pypsa_gui.results")
 # caller, and a service reaching back into a router for them is the wrong
 # import direction. `routers/results.py` imports them back, so anything
 # that referenced them there still resolves.
+# ── Lifetime CAPEX: unavailable is a value, 0.00 is a claim ───────────────
+# Three helpers shared by `get_cost_breakdown`'s lifetime-CAPEX walk and its
+# emission. They exist to keep ONE rule in one place: a lifetime CAPEX that
+# could not be computed is `None` on the wire, and a `None` anywhere in a sum
+# makes the sum `None` too. The alternative — dropping the unknown term — is
+# the reported bug: a horizon total of EUR 1.37 bn published under a
+# whole-system label while the component worth EUR 8.07 bn was missing from it.
+# Same decision, naming and response shape as `capital_costs_available` /
+# `_capital_derived` in `get_asset_economics` (commit d11d4ee1).
+
 def _lifetime_total(series, cost_unresolved: bool) -> float | None:
     """
     Sum one component class's (upfront cost x capacity) column, or None.

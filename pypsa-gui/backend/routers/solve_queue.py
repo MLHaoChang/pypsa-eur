@@ -104,6 +104,12 @@ def enqueue_solve(
 
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, req.project_id)
+    # TWO INDEPENDENT PRE-CONDITIONS, both 409, checked in this order.
+    #
+    # The lock check goes first because its refusal is the more actionable one:
+    # it names the holder, so the UI's read-only banner can say who is editing
+    # rather than "another user".
+    #
     # Lock CHECK, not an acquire (design §Open items): enqueueing on your own
     # locked project must not steal or extend anything, and an unlocked
     # project must stay unlocked — the dispatcher's own completion save is
@@ -124,6 +130,7 @@ def enqueue_solve(
                 "lock": project_locks.serialize_lock(db, project.id, user.id),
             },
         )
+
     # Fix review, F3: the queue is the Run button's real path and had no
     # study gate at all — a queued solve re-solved the network a live study
     # was measuring and failed only at its post-solve save. Refused here

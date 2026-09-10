@@ -37,6 +37,11 @@ import pypsa
 import pytest
 
 import routers.results as R
+# The resolve this suite breaks on purpose moved with the arithmetic:
+# `periodized_capital_costs` is called in the service, so patching the
+# router would patch a name nobody reads and every test would pass
+# vacuously (PR #6 decomposition).
+from services.results import asset_economics as AE
 from services.pypsa_service import PyPSAService
 
 # The five fields that cannot be computed without the resolver. `fom_cost_eur`
@@ -151,16 +156,7 @@ def _run(n) -> dict:
 @pytest.fixture()
 def broken(monkeypatch) -> dict:
     """Response with the capital-cost resolver raising."""
-    # MERGE NOTE (2026-09-10): patched at `services.results.asset_economics`,
-    # not `routers.results`. The decomposition moved the CALL into that module,
-    # which binds `periodized_capital_costs` at its own module scope — so
-    # patching the router's name would no longer reach the caller, and this
-    # fixture would inject no fault at all while still reporting green. The
-    # property under test is unchanged: the resolver raises, and the response
-    # has to say so.
-    from services.results import asset_economics as _ae
-
-    monkeypatch.setattr(_ae, "periodized_capital_costs", _boom)
+    monkeypatch.setattr(AE, "periodized_capital_costs", _boom)
     return _run(_flat_network())
 
 
@@ -274,7 +270,7 @@ def test_by_period_entries_are_nulled_too(monkeypatch):
     reads when they expand an asset, so a fix that stops at the top level
     leaves the zeros exactly where they do the most damage.
     """
-    monkeypatch.setattr(_ae_module(), "periodized_capital_costs", _boom)
+    monkeypatch.setattr(AE, "periodized_capital_costs", _boom)
     payload = _run(_multi_period_network())
 
     assert payload["is_multi_period"] is True
@@ -326,7 +322,7 @@ def test_the_swallowed_exception_is_logged_with_a_traceback(monkeypatch, caplog)
     asserts the level, the logger, and the presence of exception info rather
     than just "something was logged".
     """
-    monkeypatch.setattr(_ae_module(), "periodized_capital_costs", _boom)
+    monkeypatch.setattr(AE, "periodized_capital_costs", _boom)
 
     with caplog.at_level(logging.ERROR, logger="pypsa_gui.results"):
         payload = _run(_flat_network())

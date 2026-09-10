@@ -99,6 +99,18 @@ def _row_epoch(value: Any) -> float:
 # dispatcher's pop-time re-check all treat it exactly like the other three.
 _TERMINAL = ("completed", "failed", "aborted", "interrupted")
 
+# What a job RUNS. The queue owns one dispatcher thread, one status vocabulary
+# and one abort; a second job system would duplicate all three, which the
+# gridspine spec rules out ("the backend wraps drivers in the existing solve
+# queue — same status/abort machinery, no second job system"). So the job says
+# what it is and `_run_job` picks the runner.
+#
+# NULL/absent means `solve`: rows written before the column, and every job any
+# existing caller creates, are network solves.
+KIND_SOLVE = "solve"
+KIND_GRIDSPINE = "gridspine"
+KINDS = (KIND_SOLVE, KIND_GRIDSPINE)
+
 
 @dataclass
 class SolveJob:
@@ -131,6 +143,10 @@ class SolveJob:
     # context's config", which is the pre-snapshot behaviour and what a
     # hand-made job gets.
     solver_config_json: str | None = None
+    # `solve` (a PyPSA network solve) or `gridspine` (a planning → dynamics
+    # study). Chosen at enqueue and persisted: a restart must not turn a study
+    # into a network solve.
+    kind: str = KIND_SOLVE
     status: str = "queued"          # queued | running | completed | failed | aborted
     objective: Any = None
     solve_time: Any = None
@@ -170,6 +186,7 @@ class SolveJob:
             "id": str(self.id),
             "project_id": self.project_id,
             "project_key": self.project_key,
+            "kind": self.kind,
             "status": self.status,
             "position": position,
             "objective": self.objective,
@@ -235,6 +252,7 @@ class SolveQueue:
         project_key: str | None = None,
         storage_dir: str | None = None,
         solver_config_json: str | None = None,
+        kind: str = KIND_SOLVE,
     ) -> SolveJob:
         """Append a job for `project_id` and ensure the dispatcher is running."""
         with self._lock:
@@ -245,6 +263,7 @@ class SolveQueue:
                 project_key=project_key,
                 storage_dir=storage_dir,
                 solver_config_json=solver_config_json,
+                kind=kind,
                 enqueued_at=time.time(),
             )
             self._jobs[jid] = job
@@ -262,6 +281,7 @@ class SolveQueue:
         storage_dir: str | None = None,
         solver_config_json: str | None = None,
         enqueued_by_user_id: Any = None,
+        kind: str = KIND_SOLVE,
     ) -> tuple[SolveJob, bool]:
         """
         Enqueue `project_id` UNLESS it already has a queued or running job.
@@ -338,6 +358,7 @@ class SolveQueue:
                 project_key=project_key,
                 storage_dir=storage_dir,
                 solver_config_json=solver_config_json,
+                kind=kind,
                 enqueued_at=time.time(),
                 enqueued_by_user_id=enqueued_by_user_id,
             )
@@ -782,6 +803,7 @@ class SolveQueue:
                 project_key=row.get("project_key"),
                 storage_dir=row.get("storage_dir"),
                 solver_config_json=row.get("solver_config"),
+                kind=row.get("kind") or KIND_SOLVE,
                 enqueued_at=_row_epoch(row.get("enqueued_at")),
             )
             self._jobs[job.id] = job
@@ -880,6 +902,106 @@ class SolveQueue:
                 self._q.task_done()
 
     def _run_job(self, job: SolveJob) -> None:
+        """Dispatch on the job's kind. Everything else about a job — claiming
+        it, the log queue, the stop event, the persisted status — is the same
+        whichever runner takes it."""
+        if job.kind == KIND_GRIDSPINE:
+            self._run_gridspine_job(job)
+        else:
+            self._run_solve_job(job)
+
+    def _claim(self, job: SolveJob, stop_event, log_queue) -> bool:
+        """Flip a popped job to `running` and publish its handles. False when an
+        abort landed in the pop→claim window.
+
+        Extracted from `_run_solve_job` so both runners claim identically: the
+        re-check, the single critical section for status + handles, and the
+        `running` row that boot reconciliation reads.
+        """
+        with self._lock:
+            if job.cancelled:
+                return False
+            job.status = "running"
+            job.started_at = time.time()
+            job.stop_event = stop_event
+            job.log_queue = log_queue
+        try:
+            from services import solve_job_store
+
+            solve_job_store.record_status(job)
+        except Exception:  # noqa: BLE001
+            logger.exception("solve_queue: could not persist job %s", job.id)
+        return True
+
+    def _finish(self, job: SolveJob, status: str, *, error: str | None = None) -> None:
+        """Record a terminal state once, the same way for both runners."""
+        with self._lock:
+            job.status = status
+            job.error = error
+            job.finished_at = time.time()
+        try:
+            from services import solve_job_store
+
+            solve_job_store.record_status(job)
+        except Exception:  # noqa: BLE001
+            logger.exception("solve_queue: could not persist job %s", job.id)
+
+    def _run_gridspine_job(self, job: SolveJob) -> None:
+        """Run one planning → dynamics study.
+
+        No `ProjectContext` and no `pypsa.Network`: a study is a directory of
+        artifacts, not a resident network, so none of the hydrate / adopt /
+        save machinery below applies. What it shares with a solve is exactly
+        what the queue provides — one at a time, a log the SSE endpoints
+        already stream, a stop event, and a persisted status.
+
+        The study directory comes from `storage_dir`, resolved by the route
+        that checked the caller's ACL. The dispatcher must not derive a path
+        from a project NAME: it runs with no request and no user, and cannot
+        authorize anything.
+        """
+        from routers import simulation as sim
+        from services import gridspine_service
+
+        stop_event = threading.Event()
+        log_queue = sim.BufferedLogQueue()
+        if not self._claim(job, stop_event, log_queue):
+            self._finish(job, "aborted")
+            return
+
+        def progress(stage: str, done: int, total: int) -> None:
+            # One line per event, machine-readable prefix first: the AppHeader
+            # and the chat SSE bridge both read this stream, and a stage line
+            # that needs parsing prose would break the moment the wording did.
+            log_queue.put(f"gridspine {stage} {done}/{total}")
+
+        if not job.storage_dir:
+            self._finish(job, "failed", error="gridspine job has no authorized storage directory")
+            return
+
+        status, error = "failed", None
+        try:
+            log_queue.put(f"gridspine study starting for {job.project_id!r}")
+            gridspine_service.run_study_dir(
+                pathlib.Path(job.storage_dir) / gridspine_service.GRIDSPINE_SUBDIR,
+                progress=progress,
+                stop_event=stop_event,
+            )
+            status = "completed"
+            log_queue.put("gridspine study completed")
+        except BaseException as exc:  # noqa: BLE001 - recorded, never re-raised
+            if type(exc).__name__ == "StudyAborted":
+                status = "aborted"
+                log_queue.put("gridspine study aborted")
+            else:
+                error = f"{type(exc).__name__}: {exc}"
+                log_queue.put(f"gridspine study failed: {error}")
+                logger.exception("solve_queue: gridspine job %s failed", job.id)
+        finally:
+            log_queue.put(None)          # close the SSE stream, as a solve does
+            self._finish(job, status, error=error)
+
+    def _run_solve_job(self, job: SolveJob) -> None:
         """
         Solve one queued project on ITS OWN ProjectContext and persist the
         result. Runs in the dispatcher thread; one job at a time.

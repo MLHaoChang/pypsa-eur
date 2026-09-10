@@ -53,11 +53,6 @@ from services.serialization import (
 from services.solver_service import (
     SolverConfig,
 )
-# Imported under a private alias so `get_cost_breakdown` has a module-level
-# seam a test can fault-inject (same idiom as `periodized_capital_costs` in
-# test_asset_economics_capital_costs.py) — the failure path it guards cannot
-# otherwise be reached without a network PyPSA itself refuses to build.
-from services.solver_service import upfront_cost_series as _upfront_cost_series
 # Multi-period years-weighting helpers (the unified `_years_for_period` /
 # `period_years` map + the bare-year-row filter). `is_period_only` is aliased to
 # the legacy underscore name so call sites are unchanged.
@@ -216,22 +211,6 @@ def _serve_ts(
         return _not_solved()
 
 
-# ── Lifetime CAPEX: unavailable is a value, 0.00 is a claim ───────────────
-# Three helpers shared by `get_cost_breakdown`'s lifetime-CAPEX walk and its
-# emission. They exist to keep ONE rule in one place: a lifetime CAPEX that
-# could not be computed is `None` on the wire, and a `None` anywhere in a sum
-# makes the sum `None` too. The alternative — dropping the unknown term — is
-# the reported bug: a horizon total of EUR 1.37 bn published under a
-# whole-system label while the component worth EUR 8.07 bn was missing from it.
-# Same decision, naming and response shape as `capital_costs_available` /
-# `_capital_derived` in `get_asset_economics` (commit d11d4ee1).
-
-
-
-
-
-
-
 @results_router.get("/cost_breakdown")
 def get_cost_breakdown():
     """
@@ -247,26 +226,6 @@ def get_cost_breakdown():
     The grand total here is the right thing to call "Total system cost"; the
     LOPF objective value alone is inferior because it can include additional
     penalty terms or omit certain costs depending on solver config.
-
-    Two CAPEX bases, and they are not interchangeable:
-
-      • `capex` / `capex_expansion` — ANNUALISED, straight from
-        `n.statistics()`. Always a number.
-      • `capex_lifetime` / `capex_expansion_lifetime` /
-        `storage_capex_expansion_lifetime` — the present value of the UPFRONT
-        (overnight) investment, `number | null`. `null` means PyPSA could not
-        resolve an upfront cost for at least one component class, and the
-        top-level `capex_lifetime_available` flag says so in one place. Nulls
-        propagate into every total that contains an unknown class: a horizon
-        figure that silently omits a component is the defect this contract
-        exists to prevent, not a smaller version of the right answer.
-
-    Most networks never see a null, because the upfront cost is DERIVED where
-    it can be: PyPSA back-calculates `capital_cost / (annuity x nyears)` for
-    assets priced without an `overnight_cost`, and the
-    `for_back_calculation=True` fill below supplies the `discount_rate` that
-    back-calculation needs from the solver config. A real number beats a null;
-    the null is for when there is genuinely nothing to compute from.
     """
     n = PyPSAService.get_network()
     # Tighter gate than n.is_solved alone: also reject stale dispatch (column-
@@ -3367,15 +3326,20 @@ def get_copt():
             "profile_units": [u.name for u in split.mixed] + [u.name for u in split.netted],
             "netted_beyond_cap": [u.name for u in split.netted],
             "k_exact": K_EXACT,
-            # Phase 12h. Two units the lists above cannot describe:
+            # Phase 12h, as M5 and F8 left it. Three kinds of unit the
+            # profile lists above cannot describe:
             #  * a unit whose STATIC p_max_pu was folded into its capacity
-            #    has no profile at all, so it is in no existing list — the
+            #    has no profile at all, so it is in no profile list — the
             #    `source` field is here so a later phase can add another
             #    fold without changing the shape;
-            #  * a unit whose outage rate is zero because its availability
-            #    is declared to include outages carries a profile but is in
-            #    neither `mixed` nor `netted` — it is netted exactly, at
-            #    full availability, and no outages are sampled for it.
+            #  * a unit the 12h FLAG zeroed — profiled OR folded (M5: the
+            #    disclosure is symmetric across the two shapes, where it
+            #    once named the column unit twice and the static one never);
+            #  * a unit whose rate the user TYPED as 0 (F8), which is the
+            #    same q by a different route and belongs in its own list
+            #    rather than under the flag's name.
+            # A unit in either of the last two is netted exactly, at full
+            # availability, and no outages are sampled for it.
             "folded_units": [
                 {"name": u.name, "folded_constant": float(u.folded_constant),
                  "source": "static"}
@@ -3590,8 +3554,6 @@ def get_load_results(
     return _not_solved() if payload is None else payload
 
 
-
-
 def corrected_marginal_prices(n, from_state: bool = True):
     """
     Bus marginal prices with the curtailment-cost subsidy distortion removed.
@@ -3616,17 +3578,7 @@ def corrected_marginal_prices(n, from_state: bool = True):
     return the LIVE network's cached `_state['lopf_results']` and contaminate
     the comparison.
     """
-    import pandas as _pd
-    if from_state:
-        try:
-            prices = _result_df(n, "buses_t", "marginal_price", "lopf")
-        except Exception:
-            prices = None
-    else:
-        prices = getattr(getattr(n, "buses_t", None), "marginal_price", None)
-    if prices is None or prices.empty:
-        return _pd.DataFrame(0.0, index=n.snapshots, columns=n.buses.index)
-    return _apply_merit_order_correction(n, prices)
+    return _lf_corrected_marginal_prices(n, from_state, result_df=_result_df)
 
 
 @results_router.get("/asset_economics")
@@ -3656,30 +3608,6 @@ def get_asset_economics():
     Multi-period response also emits `by_period[period] = {...}` per asset so
     the frontend can show both the horizon-wide total AND a per-period view
     without re-running the same arithmetic on the client.
-
-    What these numbers reconcile with (measured on a live network, not
-    inferred from the code):
-
-      • Σ `fixed_cost_eur` == Σ `economics_by_carrier.capex_meur` × 1e6
-        EXACTLY — both 352,864,456.77, Δ = 0.00. That is the Dispatch tab's
-        "CAPEX (annuitised)" KPI, and it is the reconciliation to quote.
-      • Σ `vom_cost_eur` == `cost_breakdown.opex` EXACTLY — both
-        691,055,137.75, Δ = 0.00.
-      • It does NOT reconcile with `cost_breakdown.capex`. That figure was
-        8,420,504,580.76 against Σ `fixed_cost_eur` of 352,864,456.77 — a
-        23.9× difference — because `cost_breakdown` includes Line capex
-        (8,067,640,123.99) and transformers, while this endpoint covers only
-        Generator / StorageUnit / Store / Link. An earlier version of this
-        docstring claimed `cost_breakdown.capex = Σ fixed_cost`; it was
-        false, and comparing against it will look like a bug that isn't one.
-
-    `capital_costs_available` (top level) is False when the capital-cost
-    resolver raised. In that case every capital-cost-derived field —
-    `fixed_cost_eur`, `fom_cost_eur`, `net_profit_eur`, `lcoe_eur_per_mwh`,
-    `lcos_eur_per_mwh` — is emitted as `null` rather than 0.0, at the top
-    level AND inside every `by_period` entry. Fields that owe nothing to
-    capital cost (revenue, VOM, energy, capacity factor, prices, spread) keep
-    their real values. See `_capital_derived` below for why.
     """
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):

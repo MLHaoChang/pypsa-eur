@@ -104,6 +104,22 @@ for dist in ("pypsa", "linopy", "xarray", "fastapi", "uvicorn", "starlette",
 datas += collect_data_files("xarray", includes=["**/*.yaml", "**/*.yml"])
 datas += collect_data_files("pypsa", includes=["**/*.csv", "**/*.yaml"])
 
+# ── the planning → dynamics pipeline (gridspine; increment 6) ───────────────
+#
+# `gridspine/` lives at the REPO ROOT, beside `pypsa-gui/`, and reaches the
+# bundle through `pathex` below rather than through the venv: pixi's editable
+# install is a setuptools import-finder hook, which PyInstaller cannot follow,
+# and a copy in site-packages would freeze stale code. Its unit-template
+# library is `__file__`-relative YAML; pandapower's IEEE 39-bus case is a
+# `__file__`-relative JSON (`pandapower/networks/_get_cases_path`). Both are
+# data, not code, so both are collected here and both packages are written
+# out as real directories below (`module_collection_mode`).
+GRIDSPINE = ROOT.parent / "gridspine"
+if not (GRIDSPINE / "templates" / "data" / "case39_units.yaml").is_file():
+    raise SystemExit(f"{GRIDSPINE} is missing or has no templates/data — build from a full checkout")
+datas += [(str(GRIDSPINE / "templates" / "data"), "gridspine/templates/data")]
+datas += collect_data_files("pandapower", includes=["**/*.json", "**/*.csv"])
+
 # ── hiddenimports: MEASURED, not guessed ────────────────────────────────────
 #
 # Taken from a run that built a tiny network, solved it with HiGHS, wrote a
@@ -141,6 +157,18 @@ hiddenimports = [
     "sqlalchemy.dialects.sqlite",
     # the desktop shell
     "webview", "webview.platforms.cocoa",
+    # the planning → dynamics pipeline (increment 6). Measured by diffing
+    # sys.modules across a 24 h study with screening on, in the Linux sibling
+    # of this venv (`.build-venv-linux`, same requirements): gridspine imports
+    # pandapower and lightsim2grid at MODULE scope, so static analysis sees
+    # them, and the only lazily loaded third-party module not already listed
+    # above was cloudpickle (dask's). The gridspine entry modules are named
+    # because the backend imports them inside a try/except — analysable today,
+    # spelled out so a future change to that guard cannot drop the package
+    # from the bundle without a build error.
+    "cloudpickle",
+    "gridspine.drivers.study", "gridspine.drivers.status",
+    "gridspine.schema.contracts", "gridspine.templates.unit_params",
 ]
 
 # Present in the CONDA env and pulled in by xarray's entry-point scan; absent
@@ -153,11 +181,24 @@ excludes = [
     "tkinter", "PyQt5", "PyQt6", "PySide2", "PySide6",
     "IPython", "jupyter", "notebook", "nbformat",
     "pytest", "_pytest",
+    # FOUND BY THE FROZEN PROBE (increment 6), not by analysis: pandapower's
+    # `networks/*.py` do `from pandapower.__init__ import pp_dir`. In a normal
+    # interpreter that re-executes `pandapower/__init__.py` as a module named
+    # `pandapower.__init__` with the SAME `__file__`, so `pp_dir` agrees.
+    # PyInstaller freezes `pandapower.__init__` as its own package-shaped
+    # module at `pandapower/__init__/__init__.py`, whose `pp_dir` is one level
+    # too deep — and `pn.case39()` then looks for its JSON under
+    # `pandapower/__init__/networks/…`, which does not exist. Excluding the
+    # name makes the frozen importer fall through to the on-disk source that
+    # `pyz+py` writes, which is exactly the normal-interpreter behaviour.
+    "pandapower.__init__",
 ]
 
 a = Analysis(                              # noqa: F821 - injected
     [str(BACKEND / "desktop" / "gui.py")],
-    pathex=[str(BACKEND)],
+    # The repo root SECOND: the backend's own modules win any name clash, and
+    # `gridspine` is the only thing the root contributes (see the datas note).
+    pathex=[str(BACKEND), str(ROOT.parent)],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
@@ -185,6 +226,11 @@ a = Analysis(                              # noqa: F821 - injected
     module_collection_mode={
         "pypsa": "pyz+py",
         "linopy": "pyz+py",
+        # Same `__file__`-relative data reads (increment 6): gridspine's
+        # `templates/unit_params.py` opens `Path(__file__).parent / "data"`,
+        # pandapower's `networks` opens `pp_dir/networks/...json`.
+        "gridspine": "pyz+py",
+        "pandapower": "pyz+py",
     },
 )
 

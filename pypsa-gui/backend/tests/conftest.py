@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shutil
 import sys
 
 # Make `main`, `routers`, `services` importable (mirrors the qa_*.py header).
@@ -224,20 +225,7 @@ def make_auth_db(url: str | None = None):
     SQLite (`db/session.py::get_engine`).
 
     See `tests/test_qa_support_sandbox.py`.
-    MERGE NOTE (2026-09-10). This branch had replaced the whole thing with
-    an always-file database, for a reason that still holds and is NOT
-    subsumed by the `url=` parameter above: `test_hydrate_or_adopt_cold_paths.py`
-    (which exists only on this branch) races real OS threads through
-    `_auth_db` itself, and the default `:memory:` + StaticPool hands them one
-    shared `sqlite3.Connection`. Measured symptoms were
-    `ValueError: badly formed hexadecimal UUID string` on a UUID column and a
-    committed `User` row intermittently reading back as absent — neither a bug
-    in the code under test. `_auth_db` therefore passes a file URL below, which
-    keeps master's parameterisation AND this branch's fix instead of choosing
-    between them.
-
     """
-    import shutil
     from db import session as db_session_module
 
     if url is None:
@@ -267,25 +255,42 @@ def make_auth_db(url: str | None = None):
 
 @pytest.fixture(scope="session")
 def _auth_db():
-    """
-    One FILE-BACKED SQLite database shared by every test in the session.
+    """One FILE-BACKED SQLite database shared by every test in the session.
 
-    The file URL is the point, and it is not the default — see the MERGE NOTE
-    in `make_auth_db`. `test_hydrate_or_adopt_cold_paths.py` drives genuinely
-    concurrent OS threads through this fixture, and the `:memory:` default
-    would hand them a single shared `sqlite3.Connection` via StaticPool. A
-    file needs no shared connection to be one database, which is also how the
-    product runs on SQLite (`db/session.py::get_engine`).
-    """
-    import shutil
+    A file, not `:memory:` + `StaticPool`, and the reason is thread safety
+    rather than taste. The old justification for the pool ("`:memory:` gives
+    each *connection* its own database, so every caller must be routed through
+    ONE shared pooled connection or the seeded user is invisible to it") stops
+    applying the moment the database is a real file: every connection then
+    opens the same file.
 
+    That funnelling was a latent hazard, not just an optimisation.
+    `test_hydrate_or_adopt_cold_paths.py` races real OS threads — a
+    `threading.Barrier`-synchronised `Session` per thread — and several
+    `Session`s issuing overlapping statements through ONE physical
+    `sqlite3.Connection` produced genuine corruption: `ValueError: badly formed
+    hexadecimal UUID string` reading back a UUID column, and a `User` row
+    committed session-scopes earlier intermittently reading back as absent
+    (`404 Project not found` / `401 Authentication required` from inside the
+    race). Neither was a bug in the code under test. `StaticPool` is the
+    textbook-safe pattern for a shared engine used SEQUENTIALLY across threads;
+    it was never safe for the genuinely CONCURRENT access those lock tests
+    deliberately drive.
+
+    This is the same conclusion `make_auth_db`'s file branch already reached
+    for `qa_phase4_compare.py`, applied to the suite itself — so both callers
+    now take the branch that matches how the product runs on SQLite
+    (`db/session.py::get_engine`). `enable_sqlite_foreign_keys` meanwhile
+    becomes meaningful per connection on a real file, giving reader/writer
+    concurrency arbitrated by SQLite's own file locking.
+
+    Lives in a session-scoped temp directory, removed on teardown.
+    """
     from db import session as db_session_module
 
     tmp_dir = _tempfile.mkdtemp(prefix="pypsa-gui-test-authdb-")
     db_path = pathlib.Path(tmp_dir) / "auth.db"
-    engine, testing_session_local, original = make_auth_db(
-        f"sqlite+pysqlite:///{db_path}"
-    )
+    engine, testing_session_local, original = make_auth_db(f"sqlite+pysqlite:///{db_path}")
     try:
         yield engine, testing_session_local
     finally:
@@ -406,7 +411,6 @@ def _reset_tenant_tables(_auth_db):
     with engine.begin() as conn:
         for table in ("project_locks", "project_memberships", "projects", "solve_jobs"):
             conn.execute(text(f"DELETE FROM {table}"))
-
 
 @pytest.fixture(autouse=True)
 def _acting_user(_auth_db, seeded_identity):

@@ -78,6 +78,7 @@ from routers import (
     clustering,
     adequacy_worksheet,
     compare,
+    gridspine,
     io,
     local_settings,
     network,
@@ -1100,26 +1101,33 @@ app.include_router(project_network.router, prefix="/api/projects", tags=["projec
 # `/{name}/results-summary` paths) — registered before projects.router for
 # clarity; the extra path segment means the `/{name}` catch-all never shadows it.
 app.include_router(compare.router, prefix="/api/projects", tags=["compare"])
-# FMEA worksheet sidecar (adequacy Phase 3) — specific `/{name}/worksheet`
-# path, registered before projects.router so the `/{name}` catch-all never
-# shadows it. Manual rows + overlays only; computed rows come from
-# /results/copt and merge client-side.
-app.include_router(adequacy_worksheet.router, prefix="/api/projects", tags=["adequacy"])
-# `require_file_access` guards the whole projects router because every route
-# on it resolves a path under the projects root. It is a no-op wherever the
-# grant is held; where it is not, it is the difference between a 503 that
-# says "click Allow" and a request that never returns.
+# `require_file_access` guards EVERY router mounted under /api/projects, because
+# every route on them resolves a path under the projects root. It is a no-op
+# wherever the grant is held; where it is not, it is the difference between a
+# 503 that says "click Allow" and a request that never returns.
 #
-# MERGE NOTE (2026-09-10): the worksheet router above deliberately does NOT
-# carry the guard. It is a sidecar that reads and writes its own JSON sidecar
-# through the same project path resolution, so it needs the grant too — but
-# adding a dependency to a router this branch never saw is a behaviour change,
-# not a merge. Recorded rather than done silently; see the merge commit.
+# That includes the FMEA worksheet sidecar: `get_worksheet`/`put_worksheet` and
+# the stress-scenario pair read and write under `project.directory`, so leaving
+# them off this list would have been a hole in the guarantee, not an exemption.
+#
+# The worksheet's specific `/{name}/worksheet` path is registered BEFORE
+# projects.router so the `/{name}` catch-all never shadows it. Manual rows +
+# overlays only; computed rows come from /results/copt and merge client-side.
+_projects_router_guard = [Depends(fs_permission.require_file_access)]
+app.include_router(
+    adequacy_worksheet.router, prefix="/api/projects", tags=["adequacy"],
+    dependencies=_projects_router_guard,
+)
 app.include_router(
     projects.router, prefix="/api/projects", tags=["projects"],
-    dependencies=[Depends(fs_permission.require_file_access)],
+    dependencies=_projects_router_guard,
 )
 app.include_router(snapshots.router, prefix="/api/projects", tags=["snapshots"])
+# The planning → dynamics pipeline (gridspine). Its own prefix rather than
+# /api/projects: the resource is a STUDY's stages, snapshots and handoff
+# bundles, not the project's network, and every handler is a thin wrapper over
+# services/gridspine_service.py — the same functions the copilot's tools call.
+app.include_router(gridspine.router, prefix="/api/gridspine", tags=["gridspine"])
 # Chatbot file uploads (Phase A) — per-project file storage at
 # `projects/<name>/uploads/`. Mounted under the same /api/projects prefix
 # so its routes (`/{name}/uploads`, `/{name}/uploads/{file_id}/...`) follow

@@ -56,6 +56,22 @@ ujson==5.12.1
 validators==0.35.0
 pywebview==6.2.1
 
+# ── planning → dynamics (gridspine; increment 6) ────────────────────────────
+#
+# gridspine itself is NOT a pip dependency of this venv. The repo-root package
+# is frozen FROM SOURCE through the spec's `pathex` — pixi's editable install
+# is a setuptools import-finder hook (`__editable__.gridspine-*.pth` runs
+# `finder.install()`), which PyInstaller's analysis cannot follow, so an
+# install here would buy nothing the spec does not already do. Its two engines
+# are real distributions and are pinned from the `desktop` environment like
+# everything else. lightsim2grid publishes cp313 macOS arm64 wheels
+# (macosx_11_0); pandapower is pure Python. Versions: pixi.toml's exact pins.
+pandapower==3.1.2
+lightsim2grid==0.10.1
+PyYAML==6.0.3        # gridspine's unit-template library is YAML. `yaml` was
+                     # already a hidden import (pypsa loads it lazily); it is
+                     # now a direct, unguarded import of shipped code too.
+
 # ── imported INSIDE a function body, so nothing above notices they are gone ──
 #
 # Added 2026-07-31 after a shipped build returned 500 on every "download

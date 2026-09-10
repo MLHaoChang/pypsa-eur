@@ -168,6 +168,28 @@ def with_periodized_cost_defaults(
         revert()
 
 
+def upfront_cost_series(n, comp_class: str) -> pd.Series:
+    """
+    Upfront (overnight) investment cost per unit of capacity, per asset.
+
+    A one-line named wrapper around PyPSA's `n.c[<class>].overnight_cost`, on
+    purpose: that property has two behaviours a caller must know about, and
+    naming the operation gives them one place to live.
+
+      • It returns the user-typed `overnight_cost` where there is one, and
+        back-calculates `capital_cost / (annuity x nyears)` where there is not.
+      • It raises ValueError for the WHOLE component class if any asset needs
+        the back-calculation and is missing `discount_rate` or `lifetime`. Wrap
+        the call in `with_periodized_cost_defaults(..., for_back_calculation=
+        True)` so the config defaults are in place, and treat a raise as "this
+        class's upfront cost is unknown" — never as zero.
+
+    Callers decide what unknown means for their response; this function has no
+    opinion and swallows nothing.
+    """
+    return n.c[comp_class].overnight_cost
+
+
 def _reference_build_year(n) -> float:
     """
     Reference year for discounting future-year investment to present value.
@@ -233,35 +255,6 @@ def _pv_factor_series(df, cfg: "SolverConfig", reference_year: float):
     else:
         drs = _pd.Series(cfg.discount_rate, index=df.index, dtype=float)
     return (1.0 + drs) ** (-years_future)
-
-
-# Moved here in the 2026-09-10 merge with master. It was added to
-# `solver_service.py` on this branch INSIDE the line range the
-# decomposition had already carved into this module, so it belongs
-# here with its only caller; `solver_service` re-exports it so the
-# import in `routers/results.py` (and the three tests that patch it)
-# keep working against the facade, which is the decomposition's
-# stated contract.
-def upfront_cost_series(n, comp_class: str) -> pd.Series:
-    """
-    Upfront (overnight) investment cost per unit of capacity, per asset.
-
-    A one-line named wrapper around PyPSA's `n.c[<class>].overnight_cost`, on
-    purpose: that property has two behaviours a caller must know about, and
-    naming the operation gives them one place to live.
-
-      • It returns the user-typed `overnight_cost` where there is one, and
-        back-calculates `capital_cost / (annuity x nyears)` where there is not.
-      • It raises ValueError for the WHOLE component class if any asset needs
-        the back-calculation and is missing `discount_rate` or `lifetime`. Wrap
-        the call in `with_periodized_cost_defaults(..., for_back_calculation=
-        True)` so the config defaults are in place, and treat a raise as "this
-        class's upfront cost is unknown" — never as zero.
-
-    Callers decide what unknown means for their response; this function has no
-    opinion and swallows nothing.
-    """
-    return n.c[comp_class].overnight_cost
 
 
 def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict[str, float | bool | None]]]:
