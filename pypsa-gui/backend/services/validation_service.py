@@ -2,6 +2,10 @@
 Pre-run consistency checks for the three simulation modes.
 
 Single source of truth: validate_for_run(n, solver_config) -> list[Issue].
+Data-quality checks on uploaded profiles live next door in
+`services/timeseries_qa.py` and are folded in by `validate_for_run`; this
+module asks whether PyPSA will fail, that one asks whether the series is what
+the user thinks it is.
 Used in two places:
   1. /api/simulation/preflight — manual "Validate" button before Run.
   2. solver_service.run_simulation — refuses to start if any error-severity
@@ -2386,6 +2390,12 @@ def validate_for_run(n, solver_config) -> list[Issue]:
     issues += _check_carrier_emissions(n)
     # Adequacy occurrence data — warnings only, any mode.
     issues += _check_outage_params(n)
+    # Uploaded-profile data quality — warnings only, any mode. Everything this
+    # finds passes the LP cleanly and produces a confident, wrong answer, so it
+    # belongs at preflight where the user still has a chance to look. Imported
+    # inside the function: `timeseries_qa` imports `Issue` from this module.
+    from services.timeseries_qa import check_timeseries_quality
+    issues += check_timeseries_quality(n)
     # Phase 12c-pre: how a unit with BOTH a profile and outage data is
     # modelled — from the membership walk, NOT gated on an outage column.
     issues += _check_profiled_occurrence_units(n)

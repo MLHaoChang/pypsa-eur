@@ -198,6 +198,34 @@ transition:
 All lineage operations are best-effort: a failure copying chat history
 NEVER aborts the underlying project save / rename / restore.
 
+## Uploaded-data QA
+
+`services/timeseries_qa.py` checks the time series a user uploads, and
+`validate_for_run` folds its findings into preflight — so they reach the
+Issues panel, the pre-solve log, and the agent's `validate_network` in one
+place.
+
+The distinction from `validation_service`: that module asks *will PyPSA fail
+on this?*; this one asks *is the series what the user thinks it is?* Every
+case here **solves cleanly** and produces a confident, wrong answer, which is
+exactly why nothing downstream of the LP would ever mention it.
+
+| Code | Catches |
+|---|---|
+| `timeseries_all_zero` | A profile of nothing — the asset can never dispatch, and the plan still reports optimal |
+| `timeseries_frozen` | One value pasted down a column, or a sensor that stopped reporting |
+| `timeseries_negative` | Availability below zero; negative demand (legal, but usually a sign error) |
+| `timeseries_spike` | One cell ≥ 50× the series' own median — a misplaced decimal, and the peak sizes the fleet |
+| `timeseries_scale_outlier` | A load three orders of magnitude from its peers — kW pasted into an MW column |
+
+All five are **warnings** by the module's severity policy (error = PyPSA will
+fail), so none can block a run: the user is told and decides.
+
+Two properties the tests pin. Findings never fire on a short horizon — a
+4-snapshot test network is legitimately flat, and that is not evidence. And a
+zero series is reported once, as `all_zero`, not also as `frozen`: two
+warnings for one defect is noise, and noise is how warnings die.
+
 ## Explaining a result
 
 `explain_investment(component_class, name)` (read tier) answers "why did the

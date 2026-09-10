@@ -644,8 +644,12 @@ TOOLS: list[dict[str, Any]] = [
     _empty(
         "validate_network",
         "Run preflight validation. Returns list[Issue {severity, code, "
-        "component_class, name, message}]. Lock-free, no side effects. "
-        "Safety: read.",
+        "component_class, name, message}]. Errors mean PyPSA will fail; "
+        "warnings mean the solve will RUN and the answer is probably nonsense "
+        "— the timeseries_* codes (all_zero / frozen / negative / spike / "
+        "scale_outlier) are uploaded-data defects that no downstream result "
+        "will ever mention, so report them BEFORE narrating any number that "
+        "depends on the series. Lock-free, no side effects. Safety: read.",
     ),
     _empty(
         "check_solver_availability",
