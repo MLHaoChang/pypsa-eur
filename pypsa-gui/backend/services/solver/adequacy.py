@@ -31,6 +31,7 @@ import logging
 import math
 
 import pandas as pd
+import pypsa  # noqa: F401  (string annotations below)
 
 from services import period_utils as _period_utils
 from services.adequacy.window import snapshot_label as _snapshot_label
