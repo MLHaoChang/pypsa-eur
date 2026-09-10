@@ -43,6 +43,10 @@ class StudyConfig:
     #: are the detailed grid's units) to study instead of solving (increment
     #: 5, D3); exclusive with `from_dispatch`, and `hours` then describes it
     from_network: Path = None
+    #: a CLIENT-supplied dispatch file (CSV/Excel) whose unit ids are the
+    #: detailed grid's, read by `producers.external` (increment 7, A1);
+    #: exclusive with the other two sources, and `hours` then describes it
+    from_external: Path = None
     #: per-study template edits applied on top of the shipped library
     #: (`templates.unit_params.load_unit_templates(overlay=...)`); the library
     #: itself is never written, so two studies can disagree about a machine and
@@ -51,13 +55,20 @@ class StudyConfig:
 
     def __post_init__(self):
         object.__setattr__(self, "outdir", Path(self.outdir))
-        for name in ("from_dispatch", "from_network", "templates_overlay"):
+        for name in ("from_dispatch", "from_network", "from_external", "templates_overlay"):
             value = getattr(self, name)
             if value is not None:
                 object.__setattr__(self, name, Path(value))
-        if self.from_dispatch is not None and self.from_network is not None:
+        # Every pair, not a hand-written pair at a time: increment 7 added a
+        # third source, and a pair left unchecked would silently pick one of
+        # them and study a dispatch the caller did not ask for.
+        sources = [
+            name for name in ("from_dispatch", "from_network", "from_external")
+            if getattr(self, name) is not None
+        ]
+        if len(sources) > 1:
             raise ContractError(
-                "from_dispatch and from_network are exclusive: a study has one dispatch source"
+                f"{', '.join(sources)} are exclusive: a study has one dispatch source"
             )
         for name in ("hours", "k"):
             value = getattr(self, name)
@@ -83,6 +94,7 @@ class StudyConfig:
         d["outdir"] = str(self.outdir)
         d["from_dispatch"] = None if self.from_dispatch is None else str(self.from_dispatch)
         d["from_network"] = None if self.from_network is None else str(self.from_network)
+        d["from_external"] = None if self.from_external is None else str(self.from_external)
         d["templates_overlay"] = None if self.templates_overlay is None else str(self.templates_overlay)
         d["n2_prune_threshold_pct"] = float(self.n2_prune_threshold_pct)
         return d
