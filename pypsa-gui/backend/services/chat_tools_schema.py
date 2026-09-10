@@ -283,6 +283,10 @@ TOOLS: list[dict[str, Any]] = [
         "forwarded where the underlying handler accepts it. "
         "Returns (dispatch kinds): {index:[iso], columns:[name], data:[[float]]}; "
         "(cost_breakdown): {total, capex, opex, by_component, by_carrier, by_period}. "
+        "Returns {status:'no_data', kind, message} when the underlying endpoint "
+        "has nothing to serve — an unsolved or stale network, or a solve that "
+        "produced none of this kind (lost_load on a run that shed nothing). "
+        "Read `message` and check dispatch_status; do NOT report it as a zero. "
         "Safety: read.",
         {
             "result_kind": {"type": "string", "enum": RESULTS_ENUM},

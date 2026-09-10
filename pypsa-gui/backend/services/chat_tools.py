@@ -426,6 +426,48 @@ def _resolve_results_handler(result_kind: str):
     return handler
 
 
+# A 204 answer — "nothing of this kind exists yet" — is the single most
+# common non-error outcome on the results surface, and a `Response` is not
+# JSON. `json.dumps(..., default=str)` in the chat layer turns one into
+# "<starlette.responses.Response object at 0x…>", which the model reads as
+# DATA: it cannot tell an unsolved network from a solved one, and narrates
+# whatever it can invent around a repr. This is the same defect class the
+# tools audit found in the five binary-export tools; it survived here because
+# the audit did not cover the results path.
+#
+# Every tool that can receive a 204 funnels through `_payload_or_no_data`.
+
+def _no_data(kind: str, message: str) -> dict:
+    """The model-facing shape of 'this exists, but is empty right now'."""
+    return {"status": "no_data", "kind": kind, "message": message}
+
+
+def _payload_or_no_data(kind: str, result: Any, message: str) -> Any:
+    """
+    Map a 204 `Response` to an explicit no_data dict; pass everything else
+    through untouched.
+
+    The check is on `status_code`, not `isinstance(result, Response)`: the
+    handlers build theirs with `fastapi.Response`, the chat layer must not
+    care which Response class that is, and no real payload here is an object
+    carrying a `status_code`.
+    """
+    if getattr(result, "status_code", None) == 204:
+        return _no_data(kind, message)
+    return result
+
+
+# What a 204 means on /api/results. Both halves are load-bearing: `lost_load`
+# and `adequacy` answer 204 on a perfectly good solve that simply shed nothing
+# / carried no target, so "not solved" alone would be a lie.
+_RESULTS_NO_DATA_MESSAGE = (
+    "no result of this kind: the network has not been solved, its dispatch is "
+    "stale relative to the current topology, or this solve produced none of "
+    "it. Call dispatch_status and get_simulation_status before reading further "
+    "— do NOT report this as a zero."
+)
+
+
 def get_results(result_kind: str, source: str = "lopf") -> Any:
     """
     v4-MAJOR-4 dispatcher: every results enum routes through the named
@@ -436,8 +478,10 @@ def get_results(result_kind: str, source: str = "lopf") -> Any:
     # Some handlers take `source` as a query param; pass via kwargs if the
     # function accepts it, else call bare. Inspect via __code__.co_varnames.
     if "source" in handler.__code__.co_varnames:
-        return handler(source=source)
-    return handler()
+        result = handler(source=source)
+    else:
+        result = handler()
+    return _payload_or_no_data(result_kind, result, _RESULTS_NO_DATA_MESSAGE)
 
 
 def results_path_for(result_kind: str) -> str:
@@ -989,12 +1033,11 @@ def force_reset_simulation() -> dict:
 # Two properties every caller here depends on:
 #
 #   * The GETs answer 204 when nothing has been computed (never run, or no
-#     solve to judge). A bare `Response` is not JSON — the chat layer's
-#     `json.dumps(..., default=str)` would stringify it to
-#     "<Response object at 0x…>" and the model would read that as data. Each
-#     one is mapped to an explicit `{"status": "no_data", …}` dict instead
-#     (`_adequacy_payload`), so "nothing has been run" is a fact the agent can
-#     act on rather than a blob it has to guess at.
+#     solve to judge), which `_adequacy_payload` maps to an explicit
+#     `{"status": "no_data", …}` dict — see `_payload_or_no_data` for why a
+#     bare `Response` must never reach the model. What is specific here is the
+#     MESSAGE: each kind names its own missing precondition, because "no
+#     frontier" and "no reserve margin" have different remedies.
 #   * The four POSTs are ASYNCHRONOUS by construction — each publishes a
 #     worker thread and returns `{"status": "running"}` immediately. The agent
 #     must poll the matching GET kind to see rows/points/iterations land. They
@@ -1082,23 +1125,17 @@ def _resolve_adequacy_handler(kind: str, table: dict[str, str] | None = None):
 
 def _adequacy_payload(kind: str, result: Any) -> Any:
     """
-    Map a 204 `Response` to an explicit no_data dict; pass everything else
-    through untouched.
+    `_payload_or_no_data` with the per-kind precondition as the message.
 
-    The check is on `status_code`, not `isinstance(result, Response)`: the
-    handlers build theirs with `fastapi.Response`, the chat layer must not
-    care which Response class that is, and every real payload here is a plain
-    dict with no `status_code` key of its own.
+    The reliability surface earns per-kind hints where /api/results makes do
+    with one sentence: "no frontier" and "no reserve margin" have different
+    remedies, and the agent is the one who has to name the missing one.
     """
-    code = getattr(result, "status_code", None)
-    if code == 204:
-        return {
-            "status": "no_data",
-            "kind": kind,
-            "message": _ADEQUACY_NO_DATA_HINTS.get(
-                kind, "nothing has been computed for this kind yet"),
-        }
-    return result
+    return _payload_or_no_data(
+        kind, result,
+        _ADEQUACY_NO_DATA_HINTS.get(
+            kind, "nothing has been computed for this kind yet"),
+    )
 
 
 def get_adequacy_results(kind: str) -> Any:
