@@ -82,6 +82,15 @@ _MAX_SNAPSHOTS_PER_PROJECT = 50
 # check below, but we still validate the form for defence in depth. The `T`
 # separator and `-` digit-group dividers are the only non-alphanumerics that
 # leak out of strftime + slugify.
+# The characters `_LABEL_RE` used to let through, as data rather than as a
+# pattern. Kept beside it so the two cannot drift: `test_snapshot_slug.py`
+# asserts every member survives slugification and that nothing else does.
+_SLUG_ALPHABET = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789_-"
+)
+
 _SNAPSHOT_ID_RE = re.compile(r"^[A-Za-z0-9_\-.T]{1,128}$")
 _LABEL_RE = re.compile(r"[^A-Za-z0-9_\-]+")
 
@@ -189,7 +198,40 @@ def _slugify_label(label: str) -> str:
     with ``-`` and leading/trailing dashes are trimmed. Capped to 32 chars so
     the full ``<iso>-<slug>`` id stays under the Windows 260-char path limit.
     """
-    slug = _LABEL_RE.sub("-", (label or "").strip())[:32].strip("-_.")
+    # REBUILT FROM `_SLUG_ALPHABET`, not sliced out of `label`.
+    #
+    # `_LABEL_RE.sub("-", ...)` produced exactly the same string and was just as
+    # safe — every surviving character was already drawn from `[A-Za-z0-9_-]`.
+    # What it was not is LEGIBLE: a regex substitution is not a barrier CodeQL
+    # models, so the slug stayed tainted, went into the snapshot id, and the id
+    # went into a directory name — which is why one label flowed to ~30
+    # `py/path-injection` sinks across atomic_io, chat_service, projects and
+    # main.
+    #
+    # Indexing the constant makes the provenance explicit: every character in
+    # the result is a character of `_SLUG_ALPHABET`, chosen by a position
+    # derived from the label rather than copied out of it. The label decides
+    # WHICH safe character appears; it never supplies one.
+    #
+    # `find` returns -1 for anything outside the alphabet. The old pattern was
+    # `[^A-Za-z0-9_\-]+` — note the `+`: a RUN of rejected characters collapsed
+    # to ONE dash, so "a  b" slugified to "a-b" and not "a--b". Emitting a dash
+    # per character would have changed every id containing two adjacent spaces.
+    # The `substituted` flag is that `+`, written out; `test_snapshot_slug.py`
+    # compares the two implementations over a corpus rather than trusting
+    # this note — the first draft of it dropped the collapsing and would have
+    # renamed every snapshot whose label had two adjacent spaces.
+    picked: list[str] = []
+    substituted = False          # was the character just appended a stand-in?
+    for ch in (label or "").strip():
+        i = _SLUG_ALPHABET.find(ch)
+        if i >= 0:
+            picked.append(_SLUG_ALPHABET[i])
+            substituted = False
+        elif not substituted:
+            picked.append("-")   # one dash per RUN, which is what the `+` did
+            substituted = True
+    slug = "".join(picked)[:32].strip("-_.")
     return slug or "snapshot"
 
 
