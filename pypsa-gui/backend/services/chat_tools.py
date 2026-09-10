@@ -2205,6 +2205,19 @@ def apply_demand_from_excel(
     # array is reindexed positionally against n.snapshots — works for both
     # flat DatetimeIndex AND MultiIndex(period, timestep) targets.
     aligned = _pd.Series(values_array, index=snaps)
+    # Phase 12f: this tool writes `loads_t.p_set` and `_user_ts` DIRECTLY,
+    # bypassing every HTTP handler and therefore every guard on them. Its only
+    # numeric gate is `pd.to_numeric(..., errors="raise")`, which passes NaN
+    # straight through — an empty spreadsheet cell yields `[1.0, nan, 3.0]`.
+    # A non-finite demand hour masks that snapshot's nodal balance, so refuse
+    # here too, with the same message the upload routes give.
+    try:
+        from routers.network import _reject_nonfinite_timeseries
+        _reject_nonfinite_timeseries(
+            _pd.DataFrame({load_name: aligned}), "Load", "p_set")
+    except ImportError:  # pragma: no cover — only if routers/network moves
+        pass
+
     with PyPSAService.get_lock():
         try:
             from routers.network import _user_ts, _user_ts_lock

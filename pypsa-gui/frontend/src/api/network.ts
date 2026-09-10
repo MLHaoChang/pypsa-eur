@@ -220,7 +220,9 @@ export const networkApi = {
     results: Record<string, Record<string, {
       capacity_field: string
       initial_capacity: number
-      periods: Array<{ build_year: number; p_nom_opt: number; p_nom_min: number; p_nom_max: number | null }>
+      // `lifetime` since Phase 12d (the vintage row's, for the adequacy
+      // engines); absent on older breakdowns and on myopic entries.
+      periods: Array<{ build_year: number; lifetime?: number | null; p_nom_opt: number; p_nom_min: number; p_nom_max: number | null }>
     }>>
   }>('/network/vintage_results').then(r => r.data),
 

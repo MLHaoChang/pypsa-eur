@@ -257,6 +257,25 @@ class _SolveHeartbeat:
                     pass  # never let a logging hiccup kill the heartbeat thread
 
 
+class ValidationRefused(Exception):
+    """Phase 12f: a non-finite LP bound found at a checkpoint AFTER
+    `restore_modelling` is bound, so the run must unwind through the outer
+    handler rather than bare-return. It is a user-input refusal, not a crash:
+    the handler restores the modelling transforms, logs the offending assets
+    the way preflight does, and reports `condition == "validation_failed"`
+    with no traceback. The first version raised a plain `ValueError`, which
+    the generic handler dumped as a `TRACEBACK:` block with the whole message
+    as the condition.
+    """
+
+    def __init__(self, where: str, issues: list):
+        self.where = where
+        self.issues = list(issues)
+        super().__init__(
+            f"validation_failed: {len(self.issues)} LP input(s) are not finite "
+            f"{where}")
+
+
 class SolveAborted(Exception):
     """
     Raised when the user-set stop_event is observed at a checkpoint.

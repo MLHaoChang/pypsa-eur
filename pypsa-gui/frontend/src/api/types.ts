@@ -6,6 +6,11 @@ export interface Carrier {
   name: string; co2_emissions: number; color: string; nice_name: string; unit: string
 }
 export interface Line {
+  // Adequacy occurrence attributes (custom GUI columns, spec §5.4).
+  // null/NaN = unset → per-carrier library default at analysis time.
+  outage_rate_value?: number | null
+  outage_rate_basis?: 'FOR' | 'EFORd' | null
+  mttr_hours?: number | null
   name: string; bus0: string; bus1: string; length: number; r: number; x: number
   b: number; s_nom: number; s_nom_extendable: boolean; s_nom_min: number
   s_nom_max: number | null; capital_cost: number; fom_cost: number
@@ -22,6 +27,11 @@ export interface Line {
   lifetime: number | null
 }
 export interface Link {
+  // Adequacy occurrence attributes (custom GUI columns, spec §5.4).
+  // null/NaN = unset → per-carrier library default at analysis time.
+  outage_rate_value?: number | null
+  outage_rate_basis?: 'FOR' | 'EFORd' | null
+  mttr_hours?: number | null
   name: string; bus0: string; bus1: string; carrier: string; efficiency: number
   p_nom: number; p_nom_extendable: boolean; p_nom_min: number; p_nom_max: number | null
   p_min_pu: number; p_max_pu: number
@@ -31,6 +41,15 @@ export interface Link {
   build_year: number; lifetime: number | null
 }
 export interface Generator {
+  // Adequacy occurrence attributes (custom GUI columns, spec §5.4).
+  // null/NaN = unset → per-carrier library default at analysis time.
+  outage_rate_value?: number | null
+  outage_rate_basis?: 'FOR' | 'EFORd' | null
+  mttr_hours?: number | null
+  // Phase 12h, Generator only: "the availability I gave this asset already
+  // includes forced outages". Set, the outage rate is not applied on top of
+  // it — by either adequacy engine or by the reserve margin.
+  p_max_pu_includes_outages?: boolean | null
   name: string; bus: string; carrier: string; p_nom: number; p_nom_extendable: boolean
   p_nom_min: number; p_nom_max: number | null; p_min_pu: number; p_max_pu: number
   // PyPSA AC control mode. Consumed by n.pf() in Stage 2; defaults to 'PQ'.
@@ -54,6 +73,11 @@ export interface Generator {
   build_year: number; lifetime: number | null; unit: string
 }
 export interface StorageUnit {
+  // Adequacy occurrence attributes (custom GUI columns, spec §5.4).
+  // null/NaN = unset → per-carrier library default at analysis time.
+  outage_rate_value?: number | null
+  outage_rate_basis?: 'FOR' | 'EFORd' | null
+  mttr_hours?: number | null
   name: string; bus: string; carrier: string; p_nom: number; p_nom_extendable: boolean
   p_nom_min: number; p_nom_max: number | null
   max_hours: number; efficiency_store: number; efficiency_dispatch: number
@@ -69,6 +93,11 @@ export interface StorageUnit {
   lifetime: number | null
 }
 export interface Store {
+  // Adequacy occurrence attributes (custom GUI columns, spec §5.4).
+  // null/NaN = unset → per-carrier library default at analysis time.
+  outage_rate_value?: number | null
+  outage_rate_basis?: 'FOR' | 'EFORd' | null
+  mttr_hours?: number | null
   name: string; bus: string; carrier: string; e_nom: number; e_nom_extendable: boolean
   e_nom_min: number; e_nom_max: number | null
   e_min_pu: number; e_max_pu: number; e_initial: number; e_cyclic: boolean
@@ -146,6 +175,19 @@ export interface SolverConfig {
   // back to the scalar `co2_price`. Ignored on flat (single-period) networks.
   co2_price_per_period?: Record<string, number>
   voll: number                       // €/MWh — when > 0, slack gens per bus
+  // Reliability target (adequacy spec §5.1): unserved electrical energy cap
+  // in parts per ten thousand (‱) of period demand; null = off.
+  ens_cap_permyriad?: number | null
+  // Per-zone ceiling as a multiple of the target (zone = bus country).
+  ens_zone_cap_multiple?: number | null
+  // Firm-capacity (planning reserve margin) standard, Phase 8 §1: a FRACTION
+  // (0.15 = 15%) of each active period's peak that derated firm capacity must
+  // cover; null = off. Schema bounds are ge=0, le=5.
+  reserve_margin?: number | null
+  // Demand-response tier (spec §4.4): voluntary, volume-capped, opt-in.
+  dsr_price_eur_per_mwh?: number
+  dsr_share_of_load?: number
+  dsr_buses?: string[]
   investment_periods: number[]       // list of years; honoured iff multi_investment_periods
   // Per-investment-period load multiplier, keyed by period year (string).
   // 1.0 = unchanged; 1.05 = +5% load growth. Applied transiently at solve
@@ -494,6 +536,9 @@ export interface LostLoadByCarrier {
 }
 
 export interface LostLoadComparison {
+  // Weighted loss-of-load hours over electrical buses (spec §5.1's reported
+  // reliability number). Optional: absent on payloads from older backends.
+  shed_hours?: CarrierPeriodValue | null
   available: boolean
   voll_eur_per_mwh: number
   total_mwh: CarrierPeriodValue

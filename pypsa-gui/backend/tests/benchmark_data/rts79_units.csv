@@ -1,0 +1,91 @@
+# IEEE Reliability Test System (RTS-79) — generating unit reliability data.
+# 32 units, 3405 MW installed, 2850 MW annual system peak.
+#
+# PRIMARY SOURCE (the 1979 original)
+#   IEEE Committee Report (Application of Probability Methods Subcommittee),
+#   "IEEE Reliability Test System", IEEE Transactions on Power Apparatus and
+#   Systems, Vol. PAS-98, No. 6, pp. 2047-2054, Nov/Dec 1979 — Table 8
+#   ("Generating Unit Reliability Data"), as reproduced verbatim in the
+#   University of Washington Power Systems Test Case Archive data file:
+#     http://labs.ece.uw.edu/pstca/rts/rts79/ieeerts79.txt
+#     (mirror: https://www2.ee.washington.edu/research/pstca/rts/rts79/ieeerts79.txt)
+#   Retrieved 2026-08-28.
+#   RETRIEVAL CAVEAT, stated plainly: both UW hosts are refused by this
+#   session's egress proxy (403 on CONNECT), so the archive file was read
+#   through the WebSearch tool's server-side reader rather than fetched here.
+#   The second source below WAS downloaded directly and is byte-verifiable.
+#
+# SECOND SOURCE (independent cross-check of FOR / MTTF / MTTR only)
+#   RTS-GMLC generator sheet, downloaded directly on 2026-08-28 from
+#     https://raw.githubusercontent.com/GridMod/RTS-GMLC/master/RTS_Data/SourceData/gen.csv
+#     (repository: https://github.com/GridMod/RTS-GMLC)
+#   Per the plan's Review-round item 2, RTS-GMLC is admissible for generator
+#   FOR/MTTR ONLY. It replaced the 1979 load model with real zonal traces and
+#   therefore CANNOT source the load model (see rts79_load.py).
+#
+# CROSS-CHECK RESULT (cell level)
+#   Seven of the nine 1979 size classes appear in RTS-GMLC. For all seven, every
+#   cell agrees EXACTLY — FOR, MTTF, MTTR and scheduled-maintenance weeks:
+#     U12  FOR 0.02 MTTF 2940 MTTR 60  maint 2
+#     U20  FOR 0.10 MTTF  450 MTTR 50  maint 2
+#     U50  FOR 0.01 MTTF 1980 MTTR 20  maint 2
+#     U76  FOR 0.02 MTTF 1960 MTTR 40  maint 3
+#     U155 FOR 0.04 MTTF  960 MTTR 40  maint 4
+#     U350 FOR 0.08 MTTF 1150 MTTR 100 maint 5
+#     U400 FOR 0.12 MTTF 1100 MTTR 150 maint 6
+#   No cell-level discrepancies were found. Two documented DIFFERENCES, both
+#   resolved toward the 1979 original (which is what this fixture is):
+#   (1) The 100 MW and 197 MW oil-steam classes DO NOT EXIST in RTS-GMLC — it
+#       retired them for U55 Gas CT (FOR 0.031) and U355 Gas CC (FOR 0.033).
+#       Those two 1979 classes therefore have NO second source in this
+#       environment; their values below come from the 1979 table alone.
+#   (2) Unit COUNTS differ throughout (RTS-GMLC is the 3-area RTS-96 derivative:
+#       7xU12, 12xU20, 20xU50, 7xU76, 7xU155, 2xU350, 1xU400). Counts were NOT
+#       cross-checked against it and must not be; the single-area 1979 counts
+#       below are what reproduce the published index.
+#   Internal consistency check on the 1979 table itself: FOR == MTTR/(MTTF+MTTR)
+#   to within the table's own rounding for all nine classes (e.g. 60/3000 = 0.02,
+#   150/1250 = 0.12), so the FOR column and the MTTF/MTTR columns agree.
+#
+# COLUMN SEMANTICS
+#   forced_outage_rate is the two-state UNAVAILABILITY q, i.e. CoptUnit.q with
+#   basis="FOR" pinned (spec §7). It is NOT EFORd; the RTS-79 published index is
+#   computed on this FOR, and swapping in an EFORd-style derating would move it.
+#
+# PUBLISHED ADEQUACY RESULT THIS FIXTURE IS TESTED AGAINST
+#   see rts79_load.py's header — the figure belongs to the (units + load model)
+#   pair, not to either one alone.
+#
+name,size_class,fuel,capacity_mw,forced_outage_rate,mttf_hours,mttr_hours,sched_maint_weeks
+U12-1,U12,Oil steam,12,0.02,2940,60,2
+U12-2,U12,Oil steam,12,0.02,2940,60,2
+U12-3,U12,Oil steam,12,0.02,2940,60,2
+U12-4,U12,Oil steam,12,0.02,2940,60,2
+U12-5,U12,Oil steam,12,0.02,2940,60,2
+U20-1,U20,Oil combustion turbine,20,0.10,450,50,2
+U20-2,U20,Oil combustion turbine,20,0.10,450,50,2
+U20-3,U20,Oil combustion turbine,20,0.10,450,50,2
+U20-4,U20,Oil combustion turbine,20,0.10,450,50,2
+U50-1,U50,Hydro,50,0.01,1980,20,2
+U50-2,U50,Hydro,50,0.01,1980,20,2
+U50-3,U50,Hydro,50,0.01,1980,20,2
+U50-4,U50,Hydro,50,0.01,1980,20,2
+U50-5,U50,Hydro,50,0.01,1980,20,2
+U50-6,U50,Hydro,50,0.01,1980,20,2
+U76-1,U76,Coal,76,0.02,1960,40,3
+U76-2,U76,Coal,76,0.02,1960,40,3
+U76-3,U76,Coal,76,0.02,1960,40,3
+U76-4,U76,Coal,76,0.02,1960,40,3
+U100-1,U100,Oil steam,100,0.04,1200,50,3
+U100-2,U100,Oil steam,100,0.04,1200,50,3
+U100-3,U100,Oil steam,100,0.04,1200,50,3
+U155-1,U155,Coal,155,0.04,960,40,4
+U155-2,U155,Coal,155,0.04,960,40,4
+U155-3,U155,Coal,155,0.04,960,40,4
+U155-4,U155,Coal,155,0.04,960,40,4
+U197-1,U197,Oil steam,197,0.05,950,50,4
+U197-2,U197,Oil steam,197,0.05,950,50,4
+U197-3,U197,Oil steam,197,0.05,950,50,4
+U350-1,U350,Coal,350,0.08,1150,100,5
+U400-1,U400,Nuclear,400,0.12,1100,150,6
+U400-2,U400,Nuclear,400,0.12,1100,150,6

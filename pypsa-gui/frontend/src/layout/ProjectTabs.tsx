@@ -210,6 +210,9 @@ export default function ProjectTabs() {
         case 'busy-solve':
           toast.error(`Finish or abort the running solve on '${currentProject}' before switching.`)
           break
+        case 'busy-study':
+          toast.error(r.message)
+          break
         case 'not-found':
           toast.error(`'${target}' no longer exists`)
           break
@@ -294,6 +297,9 @@ export default function ProjectTabs() {
           break
         case 'busy-solve':
           toast.error(`Finish or abort the running solve on '${currentProject}' before opening another project.`)
+          break
+        case 'busy-study':
+          toast.error(r.message)
           break
         case 'not-found':
           toast.error(`'${target}' no longer exists`)

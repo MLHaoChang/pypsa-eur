@@ -69,7 +69,11 @@ export function formatApiDetail(detail: unknown, fallback = 'Unknown error'): st
 const QUIET_MUTATION_URLS = ['/simulation/preflight']
 
 // Expected conflict codes — still log, but avoid toast spam during a solve.
-const QUIET_TOAST_CODES = new Set(['solver_in_flight'])
+// `study_in_flight` joins it (whole-branch review S5 fix, reviewed): a save
+// refused because an adequacy study is running is a structured 409 the
+// caller handles — the project switch toasts its own 'busy-study' sentence
+// and autosave must not toast it every interval.
+const QUIET_TOAST_CODES = new Set(['solver_in_flight', 'study_in_flight'])
 
 const AUTH_API_PREFIX = '/auth/'
 const AUTH_PAGES = new Set(['/login', '/set-password', '/reset-password'])
@@ -138,7 +142,15 @@ client.interceptors.response.use(
   (err) => {
     const data = err.response?.data
     const status = err.response?.status as number | undefined
-    const code = typeof data?.code === 'string' ? data.code : undefined
+    // A structured refusal carries its kind as `detail.error_kind` (the
+    // solver-in-flight and study-in-flight 409s); the middleware 409 carries
+    // a top-level `code`. Either names a quiet-toast code.
+    const code =
+      typeof data?.code === 'string'
+        ? data.code
+        : typeof data?.detail?.error_kind === 'string'
+          ? (data.detail.error_kind as string)
+          : undefined
     const msg = formatApiDetail(data?.detail ?? err.message)
     const method = (err.config?.method ?? '').toUpperCase()
     const url = err.config?.url ?? ''

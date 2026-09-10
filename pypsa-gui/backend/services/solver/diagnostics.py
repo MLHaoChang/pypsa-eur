@@ -27,10 +27,12 @@ enforces that.
 import pandas as pd
 
 from services import period_utils as _period_utils
+from services.adequacy.slack import DSR_SLACK_CARRIER, is_slack_carrier
 from services.solver.periodized_costs import _annuity
 
 
-def _diagnose_infeasibility(network, config, log_queue) -> None:
+def _diagnose_infeasibility(network, config, log_queue,
+                            margin_targets: dict | None = None) -> None:
     """
     Heuristic "why is it infeasible?" hints, emitted as ``[INFEASIBLE]`` lines.
 
@@ -38,7 +40,14 @@ def _diagnose_infeasibility(network, config, log_queue) -> None:
     (IIS), so on a CONFIRMED-infeasible LP we point at the common structural
     causes a modeller can act on: a bus carrying load with no way to serve it; a
     peak demand that exceeds all available + buildable generation with no VOLL;
-    and any active global constraint (CO2 cap, …) that may be infeasibly tight.
+    the firm-capacity standard, when one was enforced; and any active global
+    constraint (CO2 cap, …) that may be infeasibly tight.
+
+    ``margin_targets`` is the reserve-margin stash (§2.6), handed in rather
+    than read off the network: ``run_simulation`` deletes the attribute in the
+    report step, which runs BEFORE this. Reading it here would find nothing on
+    every run that has one — the failure mode is invisible, because the
+    diagnoser would simply fall through to the generic hint.
     Read-only, and it runs ONLY after the solver already returned infeasible — so
     every hint is a safe pointer, never a false block. When the solver is Gurobi,
     also surface its native infeasibility report.
@@ -119,6 +128,38 @@ def _diagnose_infeasibility(network, config, log_queue) -> None:
                  "Load is set. Add capacity, raise an extendable p_nom_max, or set a VOLL "
                  "to price unserved demand.")
             hints += 1
+    except Exception:
+        pass
+
+    # 2b) The firm-capacity standard, when one was enforced. Without this the
+    #     user of a PRM-infeasible run gets "check binding capacity bounds,
+    #     ramp limits, or a too-tight global constraint" — three wrong places
+    #     — and hint 2 above cannot help: it is gated on `voll <= 0`, so with a
+    #     VoLL set (the configuration a reliability study is most likely to be
+    #     in) it never fires at all.
+    try:
+        periods = (margin_targets or {}).get("periods") or {}
+        margin = float((margin_targets or {}).get("margin", 0.0) or 0.0)
+        for P, per in periods.items():
+            required = float(per.get("required_mw", 0.0) or 0.0)
+            reachable = float(per.get("max_achievable_mw", 0.0) or 0.0)
+            if required <= 0:
+                continue
+            where = "" if str(P) == "ALL" else f" in period {P}"
+            emit(
+                f"[INFEASIBLE]   • The reserve margin requires "
+                f"{required:,.1f} MW of derated capacity{where} "
+                f"({margin:.1%} above a {float(per.get('peak_mw', 0.0)):,.1f} MW "
+                f"peak); the maximum buildable derated capacity is "
+                f"{reachable:,.1f} MW."
+            )
+            hints += 1
+            if reachable + 1e-9 < required:
+                emit(
+                    "[INFEASIBLE]     No plan built from this candidate set "
+                    "can meet that standard — raise a p_nom_max, add "
+                    "candidate capacity, or lower the margin."
+                )
     except Exception:
         pass
 
@@ -905,6 +946,7 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
     period_data: dict = {
         p: {"opex_var_mc0": 0.0, "co2_surcharge": 0.0, "curt_penalty": 0.0,
             "voll_shed_cost": 0.0, "voll_shed_mwh": 0.0,
+            "dsr_cost": 0.0, "dsr_mwh": 0.0,
             "new_capex": 0.0,
             "co2_emitted_t": 0.0,
             "by_carrier_mwh": {}}
@@ -963,7 +1005,8 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
                 period_data.setdefault(p, {
                     "opex_var_mc0": 0.0, "co2_surcharge": 0.0,
                     "curt_penalty": 0.0, "voll_shed_cost": 0.0,
-                    "voll_shed_mwh": 0.0, "new_capex": 0.0,
+                    "voll_shed_mwh": 0.0, "dsr_cost": 0.0, "dsr_mwh": 0.0,
+                    "new_capex": 0.0,
                     "co2_emitted_t": 0.0, "by_carrier_mwh": {}})
                 period_data[p]["by_carrier_mwh"][carrier] = (
                     period_data[p]["by_carrier_mwh"].get(carrier, 0.0) + m
@@ -985,13 +1028,21 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
                     except (TypeError, ValueError):
                         price = float(co2_scalar)
                     period_data[p]["co2_surcharge"] += t_co2 * price
-            # VOLL load shedding — special-cased: carrier="load_shedding".
-            if carrier == "load_shedding":
+            # Slack carriers are split out of the normal opex buckets — and
+            # split from EACH OTHER (spec §4.4): demand response is a
+            # resource priced at its compensation, never lumped into the
+            # VOLL-shed bucket a reader treats as unserved energy.
+            if is_slack_carrier(carrier):
                 mwh_p = mwh_per_period
                 cost_p = _per_period_split(p_series * mc_scalar, weights)
-                for p in mwh_p:
-                    period_data[p]["voll_shed_mwh"] += mwh_p[p]
-                    period_data[p]["voll_shed_cost"] += cost_p[p]
+                if carrier == DSR_SLACK_CARRIER:
+                    for p in mwh_p:
+                        period_data[p]["dsr_mwh"] += mwh_p[p]
+                        period_data[p]["dsr_cost"] += cost_p[p]
+                else:
+                    for p in mwh_p:
+                        period_data[p]["voll_shed_mwh"] += mwh_p[p]
+                        period_data[p]["voll_shed_cost"] += cost_p[p]
 
     # ── New CAPEX by build_year ─────────────────────────────────────────
     # Capital expenditure for assets newly built (Δp_nom_opt > 0) and built
@@ -1120,13 +1171,15 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
                     key=lambda x: int(x) if isinstance(x, int) else 99999) + (
             ["ALL"] if "ALL" in period_data else []):
         d = period_data[p]
-        total = d["new_capex"] + d["opex_var_mc0"] + d["co2_surcharge"] + d["voll_shed_cost"]
+        total = (d["new_capex"] + d["opex_var_mc0"] + d["co2_surcharge"]
+                 + d["voll_shed_cost"] + d["dsr_cost"])
         # Highlight the dominant cost component so user can scan visually.
         components = [
             ("CAPEX(new)", d["new_capex"]),
             ("OPEX(mc)",   d["opex_var_mc0"]),
             ("CO2 surcharge", d["co2_surcharge"]),
             ("VOLL shed",  d["voll_shed_cost"]),
+            ("DSR",        d["dsr_cost"]),
         ]
         dominant = max(components, key=lambda x: abs(x[1]))[0]
         carrier_str = ", ".join(
@@ -1139,6 +1192,7 @@ def _log_cost_decomposition_post_solve(network, cfg, sns, current_period, phase)
             f"CO2_surcharge={d['co2_surcharge']/1e6:.2f}M€ "
             f"({d['co2_emitted_t']/1e3:.1f} kt) | "
             f"VOLL_shed={d['voll_shed_cost']/1e6:.2f}M€ ({d['voll_shed_mwh']:.1f} MWh) | "
+            f"DSR={d['dsr_cost']/1e6:.2f}M€ ({d['dsr_mwh']:.1f} MWh) | "
             f"dispatch: {carrier_str} | "
             f"dominant={dominant}, total={total/1e6:.2f}M€"
         )

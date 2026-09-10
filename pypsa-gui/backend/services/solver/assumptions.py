@@ -28,6 +28,14 @@ import math
 
 import pandas as pd
 
+from services import period_utils as _period_utils
+from services.adequacy.slack import (
+    DSR_SLACK_CARRIER,
+    DSR_SLACK_PREFIX,
+    INVOLUNTARY_SLACK_CARRIER,
+    VOLL_SLACK_PREFIX,
+    strip_slack_prefix,
+)
 from services.pypsa_service import PyPSAService
 from services.solver.periodized_costs import fill_periodized_cost_defaults
 from services.solver.vintage_store import _frozen_vintage_store
@@ -698,64 +706,23 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
     #      3. 1.0 — identity
     #    Multi-period only; ignored for flat networks. The whole p_set frame
     #    is snapshotted and restored wholesale.
-    by_carrier_cfg = getattr(cfg, "load_scalers_by_carrier", {}) or {}
-    if (
-        cfg.multi_investment_periods
-        and (cfg.load_scalers or by_carrier_cfg)
-        and isinstance(n.snapshots, pd.MultiIndex)
-        and not n.loads_t.p_set.empty
-    ):
+    # Phase 12c-0: the resolution lives in services/adequacy/demand.py and is
+    # SHARED with every adequacy engine and the Results/Compare tabs, so the
+    # demand the LP is built on and the demand the engines evaluate cannot
+    # drift (the fifteenth finding). The gate and the per-(period, carrier,
+    # column) rule are that module's, applied here in place with the same
+    # snapshot-and-restore as before.
+    from services.adequacy.demand import load_scale_factors
+    _factors = load_scale_factors(n, cfg)
+    if _factors:
         p_set = n.loads_t.p_set
         period_level = p_set.index.get_level_values(0)
-        # Build a per-column carrier-key map up front. We canonicalise to
-        # the same alias set the frontend uses (see loadCarrierKey in
-        # Dispatch.tsx) so 'AC' / 'electricity' / '' all map to 'electrical'.
-        carrier_by_col: dict[str, str] = {}
-        if "carrier" in n.loads.columns:
-            for col in p_set.columns:
-                if col in n.loads.index:
-                    carrier_by_col[col] = _canonical_load_carrier_key(n.loads.at[col, "carrier"])
-                else:
-                    carrier_by_col[col] = "unspecified"
-        else:
-            for col in p_set.columns:
-                carrier_by_col[col] = "unspecified"
-
         applied: list[str] = []
-        original_p_set = None
-        for period in sorted(set(period_level)):
-            mask = period_level == period
-            for col in p_set.columns:
-                carrier_key = carrier_by_col.get(col, "unspecified")
-                factor: float | None = None
-                # 1) per-carrier per-period
-                car_block = by_carrier_cfg.get(carrier_key)
-                if isinstance(car_block, dict):
-                    raw = car_block.get(str(period))
-                    if raw is not None:
-                        try:
-                            f = float(raw)
-                            if math.isfinite(f):
-                                factor = f
-                        except (TypeError, ValueError):
-                            pass
-                # 2) legacy global (applied to ALL carriers if no per-carrier override)
-                if factor is None and cfg.load_scalers:
-                    raw = cfg.load_scalers.get(str(period))
-                    if raw is not None:
-                        try:
-                            f = float(raw)
-                            if math.isfinite(f):
-                                factor = f
-                        except (TypeError, ValueError):
-                            pass
-                # 3) identity
-                if factor is None or factor == 1.0:
-                    continue
-                if original_p_set is None:
-                    original_p_set = p_set.copy(deep=True)
-                p_set.loc[mask, col] = p_set.loc[mask, col] * factor
-                applied.append(f"{period}/{carrier_key}/{col}×{factor:g}")
+        original_p_set = p_set.copy(deep=True)
+        _masks = {period: period_level == period for period, *_ in _factors}
+        for period, col, carrier_key, factor in _factors:
+            p_set.loc[_masks[period], col] = p_set.loc[_masks[period], col] * factor
+            applied.append(f"{period}/{carrier_key}/{col}×{factor:g}")
         if original_p_set is not None:
             def _restore_p_set(orig=original_p_set):
                 n.loads_t["p_set"] = orig
@@ -806,7 +773,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
             if str(bus) not in load_bus_set:
                 skipped_transit += 1
                 continue
-            name = f"__voll_{bus}"
+            name = f"{VOLL_SLACK_PREFIX}{bus}"
             if name in n.generators.index:
                 continue  # don't double-add if a previous run leaked
             # Mark BEFORE n.add so a GET landing during the add window
@@ -819,7 +786,8 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                     bus=bus,
                     p_nom=slack_pnom,
                     marginal_cost=cfg.voll,
-                    carrier="load_shedding",
+                    # The convention's owner is services/adequacy/slack.py.
+                    carrier=INVOLUNTARY_SLACK_CARRIER,
                 )
             except Exception:
                 PyPSAService.unmark_transient("Generator", name)
@@ -842,16 +810,57 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         live = [nm for nm in names if nm in df.columns]
                         if live:
                             sub = df[live].copy()
-                            # Strip the "__voll_" prefix so the bus name stands
+                            # Strip the slack prefix so the bus name stands
                             # alone in the result payload — friendlier to plot.
-                            sub.columns = [c.replace("__voll_", "") for c in sub.columns]
-                            # Aggregate stats for the KPI tiles in the UI.
-                            # Assumes hourly snapshots (MW=MWh/h) — matches the
-                            # convention used by the curtailment KPI.
-                            total_mwh = float(sub.values.clip(min=0).sum())
+                            sub.columns = [strip_slack_prefix(c) for c in sub.columns]
+                            # Aggregate stats for the KPI tiles. SNAPSHOT-
+                            # WEIGHTED (canonical, spec §6.3): the frame stays
+                            # unweighted MW, but the totals integrate over the
+                            # snapshot weights — "generators" for energy,
+                            # "objective" for cost, matching the solve-log
+                            # decomposition and the LP objective. The previous
+                            # unweighted sum ("assumes hourly snapshots")
+                            # under-reported by the weight factor on
+                            # representative-snapshot (tsam) runs.
+                            from services.adequacy.metrics import (
+                                lost_load_totals,
+                            )
+                            w_energy = _period_utils.snapshot_weights(
+                                n, "generators", sns=sub.index)
+                            totals = lost_load_totals(
+                                sub,
+                                energy_weights=w_energy,
+                                cost_weights=_period_utils.snapshot_weights(
+                                    n, "objective", sns=sub.index),
+                                voll=float(voll),
+                            )
                             captured["lost_load_t"] = sub
-                            captured["lost_load_total_mwh"] = total_mwh
-                            captured["lost_load_cost_eur"] = total_mwh * float(voll)
+                            captured["lost_load_total_mwh"] = totals["total_mwh"]
+                            captured["lost_load_cost_eur"] = totals["cost_eur"]
+                            # Solve-time achieved values for the adequacy
+                            # report: per-bus-per-period weighted MWh, and
+                            # the electrical shed-hours (spec §5.1).
+                            from services.adequacy.metrics import (
+                                electrical_columns,
+                                shed_hours,
+                            )
+                            bus_e = sub.clip(lower=0).mul(
+                                w_energy.reindex(sub.index).fillna(0.0), axis=0)
+                            if isinstance(sub.index, pd.MultiIndex):
+                                bp = bus_e.groupby(
+                                    sub.index.get_level_values(0)).sum()
+                            else:
+                                bp = pd.DataFrame(
+                                    [bus_e.sum()], index=["ALL"])
+                            captured["lost_load_bus_period_mwh"] = bp
+                            captured["shed_hours_electrical"] = shed_hours(
+                                sub[electrical_columns(n, list(sub.columns))],
+                                weights=w_energy,
+                            )
+                            # Explicit — consumers must not re-derive VoLL
+                            # from cost/energy, which skews whenever the two
+                            # weight columns differ.
+                            captured["voll_eur_per_mwh"] = float(voll)
                 except Exception:
                     pass
                 # Now remove the slack generators so they don't pollute
@@ -865,6 +874,99 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         n.remove("Generator", nm)
                     PyPSAService.unmark_transient("Generator", nm)
             undo_actions.append(("call", _capture_and_remove_slacks))
+
+    # 5c) Demand-response tier (spec §4.4): voluntary, volume-capped, OPT-IN
+    #    per bus. Independent of VOLL (a resource, not a failure valve).
+    #    Never silently global — an empty opt-in list keeps the tier off
+    #    (preflight warns). Same transient lifecycle as the VOLL slacks:
+    #    mark → add → capture (into its OWN keys) → remove.
+    dsr_price = float(getattr(cfg, "dsr_price_eur_per_mwh", 0.0) or 0.0)
+    dsr_share = float(getattr(cfg, "dsr_share_of_load", 0.0) or 0.0)
+    dsr_buses = [str(b) for b in (getattr(cfg, "dsr_buses", None) or [])]
+    if dsr_price > 0 and dsr_share > 0 and dsr_buses and not n.loads.empty:
+        dsr_added = []
+        loads_by_bus = n.loads.groupby("bus") if "bus" in n.loads.columns else None
+        p_set_t = getattr(n.loads_t, "p_set", None)
+        for bus in dsr_buses:
+            if bus not in n.buses.index or loads_by_bus is None:
+                continue
+            try:
+                bus_loads = list(loads_by_bus.get_group(bus).index)
+            except KeyError:
+                continue  # opt-in bus without a load — nothing to respond with
+            # Peak load at the bus: time-varying columns override statics.
+            peak = 0.0
+            per_snap = None
+            for l in bus_loads:
+                if p_set_t is not None and l in getattr(p_set_t, "columns", []):
+                    series = p_set_t[l]
+                else:
+                    try:
+                        series = float(n.loads.at[l, "p_set"] or 0.0)
+                    except (TypeError, ValueError):
+                        series = 0.0
+                per_snap = series if per_snap is None else per_snap + series
+            try:
+                peak = float(per_snap.max()) if hasattr(per_snap, "max") else float(per_snap or 0.0)
+            except (TypeError, ValueError):
+                peak = 0.0
+            if peak <= 0:
+                continue
+            name = f"{DSR_SLACK_PREFIX}{bus}"
+            if name in n.generators.index:
+                continue
+            PyPSAService.mark_transient("Generator", name)
+            try:
+                n.add(
+                    "Generator", name,
+                    bus=bus,
+                    p_nom=dsr_share * peak,
+                    marginal_cost=dsr_price,
+                    carrier=DSR_SLACK_CARRIER,
+                )
+            except Exception:
+                PyPSAService.unmark_transient("Generator", name)
+                raise
+            dsr_added.append(name)
+        if dsr_added:
+            phase(
+                f"Added {len(dsr_added)} demand-response slack(s) at "
+                f"{dsr_price:.0f} EUR/MWh, volume {dsr_share:.0%} of each "
+                f"bus's peak load (opt-in tier — NOT counted as unserved "
+                f"energy)."
+            )
+
+            def _capture_and_remove_dsr(names=dsr_added):
+                try:
+                    df = n.generators_t.p
+                    if df is not None and not df.empty:
+                        live = [nm for nm in names if nm in df.columns]
+                        if live:
+                            sub = df[live].copy()
+                            sub.columns = [
+                                c.removeprefix(DSR_SLACK_PREFIX) for c in sub.columns
+                            ]
+                            w_energy = _period_utils.snapshot_weights(
+                                n, "generators", sns=sub.index)
+                            captured["dsr_t"] = sub
+                            captured["dsr_total_mwh"] = float(
+                                sub.clip(lower=0)
+                                .mul(w_energy.reindex(sub.index).fillna(0.0), axis=0)
+                                .to_numpy().sum()
+                            )
+                except Exception:
+                    pass
+                for nm in names:
+                    if nm in n.generators.index:
+                        n.remove("Generator", nm)
+                    PyPSAService.unmark_transient("Generator", nm)
+
+            undo_actions.append(("call", _capture_and_remove_dsr))
+    elif dsr_price > 0 and not dsr_buses:
+        phase(
+            "Demand-response price is set but no buses are opted in — the "
+            "tier stays OFF (it is never applied globally; see preflight)."
+        )
 
     # 6) Multi-period activity guard. In a multi-period run PyPSA only lets an
     #    asset dispatch in period p when build_year <= p < build_year + lifetime.
@@ -1043,6 +1145,19 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         # next solve cycle on this same worker thread.
         try:
             _frozen_vintage_store().clear()
+        except Exception:
+            pass
+        # Phase 12h: the slack rows above were added on a frame that may
+        # have lacked the `p_max_pu_includes_outages` column and then
+        # removed, which leaves an OBJECT column of pure bools — the one
+        # shape netCDF refuses. The next project save or undo snapshot
+        # would be a 500, so put the dtype back here, at the end of the one
+        # callback every exit path runs (success, SolveAborted,
+        # ValidationRefused and the generic exception path all reach it
+        # through `_guarded_restore`).
+        try:
+            from services.adequacy.occurrence import normalise_flag_column
+            normalise_flag_column(n)
         except Exception:
             pass
 

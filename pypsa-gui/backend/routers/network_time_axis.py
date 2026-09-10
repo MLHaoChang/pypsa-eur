@@ -99,6 +99,7 @@ from services.user_timeseries import (  # noqa: F401
     _user_ts_extent,
     _user_ts_lock,
     _user_ts_rename_asset,
+    _reject_nonfinite_timeseries,
 )
 
 from services.transient_rows import filter_transient_names
@@ -990,6 +991,9 @@ def set_timeseries(component: str, attribute: str, body: dict):
         cols = body.get("columns", [])
         data = body.get("data", [])
         df = pd.DataFrame(data, index=idx, columns=cols)
+        # Phase 12f: refuse before the store is touched, so a rejected write
+        # leaves nothing behind.
+        _reject_nonfinite_timeseries(df, component, attribute)
         ts_store[attribute] = df
         # Persist edits in _user_ts so they survive project reload.
         # Hold _user_ts_lock for the mutation — autosave's
@@ -1062,6 +1066,11 @@ async def upload_timeseries(
             names=["period", "timestep"],
         )
         df.index = new_mi
+
+    # Phase 12f: refuse before the lock is taken and before `_user_ts` is
+    # written. A CSV's blank cell is a NaN by the time `read_csv` is done, and
+    # an entry that reaches `_user_ts` is re-injected on every solve.
+    _reject_nonfinite_timeseries(df, component, attribute)
 
     with PyPSAService.get_lock():
         with _user_ts_lock:
