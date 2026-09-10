@@ -150,6 +150,21 @@ def reset_backend():
 
 _SEED = {"password": "test-password-123"}
 
+def pytest_addoption(parser):
+    """
+    `--record-chat-frames` writes tests/golden/chat_turn_frames.json.
+
+    An option rather than an env var so it shows in `pytest --help`, and
+    off by default so an ordinary suite run cannot overwrite the recording it
+    is being gated against. See tests/test_chat_turn_frame_contract.py.
+    """
+    parser.addoption(
+        "--record-chat-frames", action="store_true", default=False,
+        help="re-record the chat turn frame contract (deliberate; read the diff)",
+    )
+
+
+
 
 def make_auth_db(url: str | None = None):
     """

@@ -1757,6 +1757,498 @@ def _serialise_for_anthropic(content_block: Any) -> dict[str, Any]:
     return out
 
 
+@dataclass
+class _StreamOutcome:
+    """What `_stream_assistant_message` returns through `yield from`."""
+
+    final_message: Any | None = None
+    pending_blocks: list[dict[str, Any]] = field(default_factory=list)
+    stop_turn: bool = False
+
+
+def _stream_assistant_message(
+    session: ChatSession,
+    client: Any,
+    *,
+    system_blocks: list[dict[str, Any]],
+    tools_with_cache: list[dict[str, Any]],
+    messages: list[dict[str, Any]],
+    history_cache_anchor: int | None,
+) -> Generator[tuple[str, dict[str, Any]], None, "_StreamOutcome"]:
+    """
+    Drain ONE assistant message off the SDK stream, retrying transient failures.
+
+    Yields the stream's frames (`token`, `thinking`, `tool_preparing`, and the
+    terminal `error` / `session_done`); the caller forwards them with
+    `yield from`. Returns the final message, or `stop_turn=True` when the turn
+    is over — a generator cannot end its caller's turn.
+
+    **Retry is only safe before anything has been emitted.** Once a `token` or
+    `thinking` frame has reached the client, retrying replays the answer from the
+    start and the panel shows it twice. `emitted_this_attempt` is what prevents
+    that, and it is per ATTEMPT — hoisting it, or resetting it in the wrong
+    place, produces duplicated output under transient SDK load while every frame
+    stays individually well-formed. `tests/test_chat_stream_attempt_seam.py`
+    asserts on the COUNT of emitted text for that reason.
+
+    A persistent `rate_limited` on Opus buys exactly ONE attempt on Sonnet,
+    granted by widening `max_attempts` rather than resetting `attempt`, and it
+    mutates `session.model`, so the session stays downgraded after the turn.
+
+    `pending_blocks` is accumulated here and returned, but nothing reads it —
+    `assistant_blocks` is rebuilt from `final_message.content` instead. Preserved
+    as-is because this phase is behaviour-preserving; returned on the outcome so
+    the discard stays visible. See
+    `docs/superpowers/findings/2026-09-09-chat-stream-loop-two-vestigial-guards.md`,
+    which also records that `model_fallback_used` is redundant with the
+    `session.model == OPUS_MODEL` check beside it.
+
+    Phase D of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`.
+    """
+    # Inner retry loop. A transient SDK failure (rate-limit / Anthropic
+    # overload) BEFORE any token is emitted on this attempt is retried with
+    # capped exponential backoff. Once a token has been yielded to the
+    # client, retry is UNSAFE (it would duplicate already-streamed output),
+    # so we surface the error instead. The loop always either breaks (the
+    # stream completed) or returns (terminal/exhausted error).
+    final_message = None
+    # A8 — at most one Opus→Sonnet downgrade after rate_limited retries
+    # are exhausted (public cost/availability escape hatch).
+    model_fallback_used = False
+    attempt = 0
+    # +1 slot reserved so a late Opus→Sonnet fallback can still run once
+    # after the normal retry budget is spent.
+    max_attempts = MAX_STREAM_RETRIES + 1
+    while attempt < max_attempts:
+        emitted_this_attempt = False
+        # Drain the streaming events. We accumulate content blocks locally
+        # so we can replay them as a single assistant message back into the
+        # SDK on the next turn (tool-use convention).
+        pending_blocks: list[dict[str, Any]] = []
+        try:
+            with client.messages.stream(
+                model=session.model,
+                max_tokens=MAX_OUTPUT_TOKENS_PER_TURN,
+                system=system_blocks,
+                tools=tools_with_cache,
+                messages=_with_history_cache_breakpoint(
+                    messages, history_cache_anchor
+                ),
+            ) as stream:
+                for event in stream:
+                    if session.abort_event.is_set():
+                        yield "session_done", {"reason": "aborted"}
+                        return _StreamOutcome(stop_turn=True)
+                    etype = getattr(event, "type", None)
+                    if etype == "text":
+                        emitted_this_attempt = True
+                        yield "token", {"delta": getattr(event, "text", "") or ""}
+                    elif etype == "thinking":
+                        emitted_this_attempt = True
+                        yield "thinking", {
+                            "delta": getattr(event, "thinking", "") or "",
+                        }
+                    # Tool-arg streaming is silent on `token` — without a
+                    # signal the UI looks frozen after "I'll create them…".
+                    # Emit as soon as the model opens a tool_use block.
+                    elif etype == "content_block_start":
+                        block = getattr(event, "content_block", None)
+                        btype = getattr(block, "type", None) if block else None
+                        if btype == "tool_use":
+                            emitted_this_attempt = True
+                            yield "tool_preparing", {
+                                "tool_use_id": getattr(block, "id", "") or "",
+                                "tool_name": getattr(block, "name", "") or "",
+                            }
+                    # content_block_stop indicates a tool_use block has
+                    # fully accumulated. The SDK exposes it as
+                    # event.content_block.
+                    elif etype == "content_block_stop":
+                        block = getattr(event, "content_block", None)
+                        if block is not None:
+                            d = _serialise_for_anthropic(block)
+                            pending_blocks.append(d)
+
+                final_message = stream.get_final_message()
+            break  # stream completed — leave the retry loop
+        except Exception as exc:  # noqa: BLE001 — SDK error → typed frame
+            error_kind, msg = _map_sdk_exception(exc)
+            retriable = (
+                error_kind in _RETRYABLE_SDK_KINDS
+                and not emitted_this_attempt
+                and attempt < MAX_STREAM_RETRIES
+                and not session.abort_event.is_set()
+            )
+            if retriable:
+                _metric_incr("retries")
+                delay = min(
+                    MAX_STREAM_RETRY_DELAY,
+                    BASE_STREAM_RETRY_DELAY * (2 ** attempt),
+                )
+                logger.warning(
+                    "chat: transient SDK error %r — retry %d/%d in %.1fs",
+                    error_kind, attempt + 1, MAX_STREAM_RETRIES, delay,
+                )
+                time.sleep(delay)
+                attempt += 1
+                continue
+            # A8 — persistent rate_limited on Opus → one Sonnet attempt.
+            if (
+                error_kind == "rate_limited"
+                and not emitted_this_attempt
+                and session.model == OPUS_MODEL
+                and not model_fallback_used
+                and not session.abort_event.is_set()
+            ):
+                model_fallback_used = True
+                from_model = session.model
+                session.model = DEFAULT_MODEL
+                logger.warning(
+                    "chat: rate_limited on %s after retries — falling back to %s",
+                    from_model, DEFAULT_MODEL,
+                )
+                yield "model_fallback", {
+                    "from_model": from_model,
+                    "to_model": DEFAULT_MODEL,
+                    "reason": "rate_limited",
+                }
+                # Grant exactly one extra attempt on the cheaper model.
+                max_attempts = attempt + 2
+                attempt += 1
+                continue
+            _metric_error(error_kind)
+            yield "error", {"error_kind": error_kind, "message": msg}
+            yield "session_done", {"reason": error_kind}
+            return _StreamOutcome(stop_turn=True)
+    return _StreamOutcome(
+        final_message=final_message, pending_blocks=pending_blocks,
+    )
+
+
+@dataclass
+class _ToolDispatchOutcome:
+    """
+    What `_dispatch_tool_uses` hands back through `yield from`.
+
+    A dataclass rather than a tuple on purpose: a later field would otherwise
+    reorder silently at the call site.
+    """
+
+    tool_call_count: int
+    stop_turn: bool = False
+    switched_mid_turn: bool = False
+
+
+def _dispatch_tool_uses(
+    session: ChatSession,
+    tool_uses: list[dict[str, Any]],
+    *,
+    tool_call_count: int,
+    turn_ctx: Any,
+    turn_project_holder: list[Any],
+    project_switched: Callable[[], bool],
+    tool_results_for_next_turn: list[dict[str, Any]],
+    char_budget: dict[str, int],
+) -> Generator[tuple[str, dict[str, Any]], None, "_ToolDispatchOutcome"]:
+    """
+    Dispatch one assistant step's tool calls, sequentially.
+
+    Yields the step's SSE frames — the caller forwards them with `yield from` —
+    and returns the state the turn loop needs afterwards.
+
+    Three pieces of that state are easy to lose in a refactor and are pinned by
+    `tests/test_chat_tool_dispatch_loop_seam.py`:
+
+    * `tool_call_count` arrives from the previous assistant step and leaves
+      incremented, because `MAX_TOOL_CALLS_PER_TURN` is per TURN. Reset it per
+      step and the cap looks enforced while a long agent loop dispatches
+      unboundedly.
+    * `turn_project_holder` is MUTATED (hence a list) when the agent calls a
+      legitimately rebinding tool, so the mid-turn-switch guard does not fire on
+      the agent's own rebind — and the frontend is told via `project_rebound`,
+      without which its autosave keeps sending the old name and the identity
+      guard 409s (incident 2026-06-08).
+    * `tool_results_for_next_turn` gets one `tool_result` per `tool_use_id`
+      WITHOUT exception, including for tools never dispatched because the
+      project switched. Anthropic requires the pairing; a gap makes the resumed
+      conversation invalid.
+
+    `char_budget` is one dict for the whole step, not one per tool, or the
+    per-turn result cap multiplies by the number of tools.
+
+    Phase C of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`.
+    The parallel-destructive `offenders` check above the call stays in
+    `_run_turn_body`: it ends in `continue`, and a generator cannot continue its
+    caller's loop.
+    """
+    # Imported in the function body, as `_run_turn_body` does: `pypsa_service`
+    # reaches back into the router layer, so a module-level import here risks a
+    # cycle. The extraction initially lost this — the name was a local of
+    # `_run_turn_body` — and only the rebinding-tool guard noticed, because no
+    # recorded frame scenario rebinds a project.
+    from services.pypsa_service import PyPSAService
+
+    switched = False
+    # Dispatch each tool sequentially. Before EACH dispatch, re-check that
+    # the active project hasn't changed since the turn started (P0): the
+    # dispatchers mutate the ACTIVE network, so a mid-turn switch would
+    # corrupt the wrong project. On a switch we synthesize an is_error
+    # tool_result for the current AND every remaining tool — Anthropic
+    # requires each tool_use_id have a matching tool_result, so this keeps
+    # the in-memory history valid for a resumed turn — then end the turn.
+    for idx, tu in enumerate(tool_uses):
+        if project_switched():
+            switched = True
+            for rem in tool_uses[idx:]:
+                rem_id = rem.get("id")
+                yield "tool_error", {
+                    "tool_use_id": rem_id,
+                    "tool_name": rem.get("name"),
+                    "error_kind": "project_switched_mid_turn",
+                    "message": (
+                        f"active project changed from {turn_project_holder[0]!r} "
+                        "during this turn; refusing to run tools against a "
+                        "different network."
+                    ),
+                }
+                tool_results_for_next_turn.append({
+                    "type": "tool_result",
+                    "tool_use_id": rem_id,
+                    "is_error": True,
+                    "content": "project_switched_mid_turn",
+                })
+            break
+        tool_call_count += 1
+        if tool_call_count > MAX_TOOL_CALLS_PER_TURN:
+            yield "tool_error", {
+                "tool_use_id": tu.get("id"),
+                "tool_name": tu.get("name"),
+                "error_kind": "tool_call_cap_exceeded",
+                "message": (
+                    f"more than {MAX_TOOL_CALLS_PER_TURN} tool calls in "
+                    "one turn; refusing further dispatch this turn."
+                ),
+            }
+            yield "session_done", {"reason": "tool_call_cap_exceeded"}
+            # Ends the whole turn, not just this loop — reported to the
+            # caller rather than returned from it, because a generator's
+            # `return` cannot end its caller's.
+            return _ToolDispatchOutcome(
+                tool_call_count=tool_call_count, stop_turn=True,
+            )
+        yield from _dispatch_real_tool_call(
+            session, tu, tool_results_for_next_turn, turn_ctx=turn_ctx,
+            result_char_budget=char_budget,
+        )
+        # If the agent just dispatched a rebinding tool (activate_project /
+        # load_project / save_project_as / rename_project /
+        # restore_project_snapshot), refresh the turn-project snapshot so
+        # the guard recognises the new binding as legitimate. We re-read
+        # from the live registry rather than guessing from the tool's args
+        # because activate_project on a non-resident project takes the
+        # cold path (v6-F2), and load_project may normalise the name.
+        tu_name = tu.get("name")
+        if tu_name in PROJECT_REBINDING_TOOLS:
+            new_bound = PyPSAService.get_active_context().loaded_project
+            if new_bound != turn_project_holder[0]:
+                # Tell the frontend the backend's active project just
+                # changed. Without this the React side keeps its
+                # `currentProject` on the OLD name; the autosave loop
+                # then sends `expect=<old>` and the backend's identity
+                # guard 409s with "Backend network is bound to project
+                # 'X', not 'Y'" — incident 2026-06-08.
+                yield "project_rebound", {
+                    "from": turn_project_holder[0],
+                    "to": new_bound,
+                    "via_tool": tu_name,
+                }
+                turn_project_holder[0] = new_bound
+    return _ToolDispatchOutcome(
+        tool_call_count=tool_call_count, switched_mid_turn=switched,
+    )
+
+
+def _turn_budget_block(
+    session: ChatSession,
+    turn_ctx: Any,
+) -> tuple[str, dict[str, Any]] | None:
+    """
+    The frame that refuses this turn on budget grounds, or ``None`` to proceed.
+
+    Both caps are checked here so that both short-circuit in the same place:
+    BEFORE `session_init` (the panel treats that frame as "a turn started" and
+    would have to tear it down again) and BEFORE the SDK client is built (a
+    capped turn must not reach the API). Moving either gate below the client
+    build would keep every frame assertion passing while still spending money.
+
+    `turn_ctx` is the P0-pinned context — the project this turn would PERSIST
+    to — so a mid-turn project switch cannot move the turn onto another
+    project's daily budget.
+
+    Phase B of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`;
+    see `tests/test_chat_budget_gates_seam.py`.
+    """
+    # Cap enforcement — refuse to start a new turn if the session output
+    # budget is already exhausted.
+    if session.usage_acc["output_tokens"] >= MAX_OUTPUT_TOKENS_PER_SESSION:
+        return "session_done", {
+            "reason": "budget_exhausted",
+            "kind": "output_tokens",
+            "limit": MAX_OUTPUT_TOKENS_PER_SESSION,
+        }
+
+    # #9 — cross-session durable per-project/per-day token spend cap. Checked
+    # against the P0-pinned turn_ctx (the project this turn would persist to),
+    # not the live active context. 0 = disabled (default), so zero disk cost
+    # unless ops opts in. Sits alongside the session-output ceiling so both
+    # budget gates short-circuit BEFORE the SDK client is built (no API call
+    # when capped). Reads the module attribute at call time (monkeypatchable).
+    daily_cap = PYPSA_GUI_CHAT_DAILY_TOKEN_CAP
+    if daily_cap > 0:
+        spent = _today_token_spend(turn_ctx)
+        if spent >= daily_cap:
+            return "session_done", {
+                "reason": "daily_budget_exhausted",
+                "kind": "daily_tokens",
+                "limit": daily_cap,
+                "spent": spent,
+            }
+    return None
+
+
+def _build_user_content(
+    project: str,
+    attachment_file_ids: list[str] | None,
+    message: str,
+) -> tuple[
+    list[dict[str, Any]] | str,
+    list[tuple[str, dict[str, Any]]] | None,
+]:
+    """
+    Turn this turn's attachments into Anthropic content.
+
+    Returns ``(user_content, abort_frames)``. ``abort_frames`` is ``None`` on
+    every normal turn; when the upload layer rejects an attachment it is the
+    exact frames the caller must yield before ending the turn. A tuple rather
+    than a generator so this is callable straight from a test — which is most
+    of why it was lifted out of `_run_turn_body` (Phase A of
+    `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`).
+
+    The text block's layout is a security boundary, not formatting: the
+    instruction line we author is trusted and stays OUTSIDE the untrusted
+    delimiters, the per-file lines echo user-controlled filenames and stay
+    INSIDE, and the user's own message is appended after. Two multimodal tests
+    also assert substring membership on the result, so the prefix+message
+    concatenation is load-bearing. See `tests/test_chat_user_content_seam.py`.
+    """
+    # Phase C — multimodal pass-through + tool-accessible-file annotation.
+    #
+    # Files the user attached split into two categories:
+    #   * MULTIMODAL — images (png/jpeg/webp/gif) and PDFs. These go
+    #     through Anthropic's native vision/document content blocks,
+    #     PREPENDED to the user's text block (text last so the model
+    #     reads the question after seeing the references).
+    #   * TOOL-ACCESSIBLE — xlsx/docx/csv/txt. Anthropic's multimodal
+    #     API doesn't accept these (it'd return 415); instead we
+    #     mention them in the user-text prefix so the agent knows to
+    #     call read_excel_sheet / read_upload_meta / apply_demand_from_excel
+    #     against the referenced file_ids.
+    #
+    # Both kinds are persisted into the turn record so chip rehydration
+    # on reload still shows them.
+    if attachment_file_ids:
+        try:
+            from services import upload_service
+            multimodal_mimes = {
+                "image/png", "image/jpeg", "image/webp", "image/gif",
+                "application/pdf",
+            }
+            multimodal_ids: list[str] = []
+            tool_meta: list[dict[str, Any]] = []
+            for fid in attachment_file_ids:
+                meta = upload_service.get_upload_meta(
+                    project, fid,
+                )
+                if meta.mime in multimodal_mimes:
+                    multimodal_ids.append(fid)
+                else:
+                    tool_meta.append({
+                        "file_id": meta.file_id,
+                        "filename": meta.filename,
+                        "mime": meta.mime,
+                        "size": meta.size,
+                    })
+            multimodal_blocks = upload_service.build_multimodal_content_blocks(
+                project, multimodal_ids,
+            ) if multimodal_ids else []
+        except HTTPException as exc:
+            # The one path that ends the turn. An extracted plain function
+            # cannot yield, so the frames come back in the return value and the
+            # caller emits them — which keeps the abort visible at the call
+            # site rather than buried in a generator's control flow.
+            detail = exc.detail if isinstance(exc.detail, dict) else {}
+            _metric_error(detail.get("error_kind", "invalid_attachment"))
+            return message, [
+                ("error", {
+                    "error_kind": detail.get("error_kind", "invalid_attachment"),
+                    "message": detail.get("message", str(exc.detail)),
+                }),
+                ("session_done", {"reason": "invalid_attachment"}),
+            ]
+
+        # Build the text block: tool-accessible files surfaced as a
+        # bracketed prefix the model treats as part of its instructions,
+        # followed by the actual user message.
+        if tool_meta:
+            # The leading instruction line is TRUSTED (we author it) and stays
+            # OUTSIDE the untrusted delimiters; the per-file bracketed lines
+            # echo user-controlled filenames (an injection vector) so they go
+            # INSIDE. The user's actual `message` is the trusted turn and is
+            # appended AFTER the prefix, also outside the delimiters. Keep this
+            # wrap purely additive — two existing multimodal tests assert
+            # substring-membership on the final text block
+            # (test_chat_multimodal.py: 'demand.xlsx'/file_id/'read_excel_sheet'
+            # /the user message all `in` content[-1]['text']); do NOT restructure
+            # the prefix+message concatenation or those substrings move.
+            attachment_lines = [
+                "Files the user attached (use the listed tools to read / use them):",
+                _UNTRUSTED_OPEN,
+            ]
+            for m in tool_meta:
+                # Pick the most useful tool hint per MIME.
+                if m["mime"] in (
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "application/vnd.ms-excel",
+                    "text/csv",
+                ):
+                    hint = "read_excel_sheet / apply_demand_from_excel"
+                elif m["mime"] == (
+                    "application/vnd.openxmlformats-officedocument."
+                    "wordprocessingml.document"
+                ):
+                    hint = "read_upload_meta (then use the file_id with future tools)"
+                else:
+                    hint = "read_upload_meta"
+                attachment_lines.append(
+                    f"  - {m['filename']} "
+                    f"(mime={m['mime']}, size={m['size']} bytes, "
+                    f"file_id={m['file_id']}) — {hint}"
+                )
+            attachment_lines.append(_UNTRUSTED_CLOSE)
+            prefix = "\n".join(attachment_lines) + "\n\n"
+            text_payload = prefix + message
+        else:
+            text_payload = message
+
+        user_content: list[dict[str, Any]] | str = list(multimodal_blocks)
+        user_content.append({"type": "text", "text": text_payload})
+    else:
+        user_content = message
+    return user_content, None
+
+
+
+
 def run_turn(
     session: ChatSession,
     message: str,
@@ -1890,33 +2382,10 @@ def _run_turn_body(
     def _project_switched() -> bool:
         return PyPSAService.get_active_context().loaded_project != turn_project_holder[0]
 
-    # Cap enforcement — refuse to start a new turn if the session output
-    # budget is already exhausted.
-    if session.usage_acc["output_tokens"] >= MAX_OUTPUT_TOKENS_PER_SESSION:
-        yield "session_done", {
-            "reason": "budget_exhausted",
-            "kind": "output_tokens",
-            "limit": MAX_OUTPUT_TOKENS_PER_SESSION,
-        }
+    budget_block = _turn_budget_block(session, turn_ctx)
+    if budget_block is not None:
+        yield budget_block
         return
-
-    # #9 — cross-session durable per-project/per-day token spend cap. Checked
-    # against the P0-pinned turn_ctx (the project this turn would persist to),
-    # not the live active context. 0 = disabled (default), so zero disk cost
-    # unless ops opts in. Sits alongside the session-output ceiling so both
-    # budget gates short-circuit BEFORE the SDK client is built (no API call
-    # when capped). Reads the module attribute at call time (monkeypatchable).
-    daily_cap = PYPSA_GUI_CHAT_DAILY_TOKEN_CAP
-    if daily_cap > 0:
-        spent = _today_token_spend(turn_ctx)
-        if spent >= daily_cap:
-            yield "session_done", {
-                "reason": "daily_budget_exhausted",
-                "kind": "daily_tokens",
-                "limit": daily_cap,
-                "spent": spent,
-            }
-            return
 
     if client is None:
         client, err = _build_anthropic_client()
@@ -1949,105 +2418,13 @@ def _run_turn_body(
         with session._lock:
             messages = list(session.messages)
 
-    # Phase C — multimodal pass-through + tool-accessible-file annotation.
-    #
-    # Files the user attached split into two categories:
-    #   * MULTIMODAL — images (png/jpeg/webp/gif) and PDFs. These go
-    #     through Anthropic's native vision/document content blocks,
-    #     PREPENDED to the user's text block (text last so the model
-    #     reads the question after seeing the references).
-    #   * TOOL-ACCESSIBLE — xlsx/docx/csv/txt. Anthropic's multimodal
-    #     API doesn't accept these (it'd return 415); instead we
-    #     mention them in the user-text prefix so the agent knows to
-    #     call read_excel_sheet / read_upload_meta / apply_demand_from_excel
-    #     against the referenced file_ids.
-    #
-    # Both kinds are persisted into the turn record so chip rehydration
-    # on reload still shows them.
-    user_content: list[dict[str, Any]] | str
-    if attachment_file_ids:
-        try:
-            from services import upload_service
-            multimodal_mimes = {
-                "image/png", "image/jpeg", "image/webp", "image/gif",
-                "application/pdf",
-            }
-            multimodal_ids: list[str] = []
-            tool_meta: list[dict[str, Any]] = []
-            for fid in attachment_file_ids:
-                meta = upload_service.get_upload_meta(
-                    turn_project_holder[0] or "", fid,
-                )
-                if meta.mime in multimodal_mimes:
-                    multimodal_ids.append(fid)
-                else:
-                    tool_meta.append({
-                        "file_id": meta.file_id,
-                        "filename": meta.filename,
-                        "mime": meta.mime,
-                        "size": meta.size,
-                    })
-            multimodal_blocks = upload_service.build_multimodal_content_blocks(
-                turn_project_holder[0] or "", multimodal_ids,
-            ) if multimodal_ids else []
-        except HTTPException as exc:
-            detail = exc.detail if isinstance(exc.detail, dict) else {}
-            _metric_error(detail.get("error_kind", "invalid_attachment"))
-            yield "error", {
-                "error_kind": detail.get("error_kind", "invalid_attachment"),
-                "message": detail.get("message", str(exc.detail)),
-            }
-            yield "session_done", {"reason": "invalid_attachment"}
-            return
-
-        # Build the text block: tool-accessible files surfaced as a
-        # bracketed prefix the model treats as part of its instructions,
-        # followed by the actual user message.
-        if tool_meta:
-            # The leading instruction line is TRUSTED (we author it) and stays
-            # OUTSIDE the untrusted delimiters; the per-file bracketed lines
-            # echo user-controlled filenames (an injection vector) so they go
-            # INSIDE. The user's actual `message` is the trusted turn and is
-            # appended AFTER the prefix, also outside the delimiters. Keep this
-            # wrap purely additive — two existing multimodal tests assert
-            # substring-membership on the final text block
-            # (test_chat_multimodal.py: 'demand.xlsx'/file_id/'read_excel_sheet'
-            # /the user message all `in` content[-1]['text']); do NOT restructure
-            # the prefix+message concatenation or those substrings move.
-            attachment_lines = [
-                "Files the user attached (use the listed tools to read / use them):",
-                _UNTRUSTED_OPEN,
-            ]
-            for m in tool_meta:
-                # Pick the most useful tool hint per MIME.
-                if m["mime"] in (
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    "application/vnd.ms-excel",
-                    "text/csv",
-                ):
-                    hint = "read_excel_sheet / apply_demand_from_excel"
-                elif m["mime"] == (
-                    "application/vnd.openxmlformats-officedocument."
-                    "wordprocessingml.document"
-                ):
-                    hint = "read_upload_meta (then use the file_id with future tools)"
-                else:
-                    hint = "read_upload_meta"
-                attachment_lines.append(
-                    f"  - {m['filename']} "
-                    f"(mime={m['mime']}, size={m['size']} bytes, "
-                    f"file_id={m['file_id']}) — {hint}"
-                )
-            attachment_lines.append(_UNTRUSTED_CLOSE)
-            prefix = "\n".join(attachment_lines) + "\n\n"
-            text_payload = prefix + message
-        else:
-            text_payload = message
-
-        user_content = list(multimodal_blocks)
-        user_content.append({"type": "text", "text": text_payload})
-    else:
-        user_content = message
+    user_content, attachment_abort = _build_user_content(
+        turn_project_holder[0] or "", attachment_file_ids, message,
+    )
+    if attachment_abort is not None:
+        for _frame in attachment_abort:
+            yield _frame
+        return
 
     # Improvement #18 — anchor the history cache breakpoint at the last
     # COMPLETED message, captured BEFORE this turn's user message is appended
@@ -2094,121 +2471,16 @@ def _run_turn_body(
                 "cache_control": {"type": "ephemeral"},
             }
 
-        # Inner retry loop. A transient SDK failure (rate-limit / Anthropic
-        # overload) BEFORE any token is emitted on this attempt is retried with
-        # capped exponential backoff. Once a token has been yielded to the
-        # client, retry is UNSAFE (it would duplicate already-streamed output),
-        # so we surface the error instead. The loop always either breaks (the
-        # stream completed) or returns (terminal/exhausted error).
-        final_message = None
-        # A8 — at most one Opus→Sonnet downgrade after rate_limited retries
-        # are exhausted (public cost/availability escape hatch).
-        model_fallback_used = False
-        attempt = 0
-        # +1 slot reserved so a late Opus→Sonnet fallback can still run once
-        # after the normal retry budget is spent.
-        max_attempts = MAX_STREAM_RETRIES + 1
-        while attempt < max_attempts:
-            emitted_this_attempt = False
-            # Drain the streaming events. We accumulate content blocks locally
-            # so we can replay them as a single assistant message back into the
-            # SDK on the next turn (tool-use convention).
-            pending_blocks: list[dict[str, Any]] = []
-            try:
-                with client.messages.stream(
-                    model=session.model,
-                    max_tokens=MAX_OUTPUT_TOKENS_PER_TURN,
-                    system=system_blocks,
-                    tools=tools_with_cache,
-                    messages=_with_history_cache_breakpoint(
-                        messages, history_cache_anchor
-                    ),
-                ) as stream:
-                    for event in stream:
-                        if session.abort_event.is_set():
-                            yield "session_done", {"reason": "aborted"}
-                            return
-                        etype = getattr(event, "type", None)
-                        if etype == "text":
-                            emitted_this_attempt = True
-                            yield "token", {"delta": getattr(event, "text", "") or ""}
-                        elif etype == "thinking":
-                            emitted_this_attempt = True
-                            yield "thinking", {
-                                "delta": getattr(event, "thinking", "") or "",
-                            }
-                        # Tool-arg streaming is silent on `token` — without a
-                        # signal the UI looks frozen after "I'll create them…".
-                        # Emit as soon as the model opens a tool_use block.
-                        elif etype == "content_block_start":
-                            block = getattr(event, "content_block", None)
-                            btype = getattr(block, "type", None) if block else None
-                            if btype == "tool_use":
-                                emitted_this_attempt = True
-                                yield "tool_preparing", {
-                                    "tool_use_id": getattr(block, "id", "") or "",
-                                    "tool_name": getattr(block, "name", "") or "",
-                                }
-                        # content_block_stop indicates a tool_use block has
-                        # fully accumulated. The SDK exposes it as
-                        # event.content_block.
-                        elif etype == "content_block_stop":
-                            block = getattr(event, "content_block", None)
-                            if block is not None:
-                                d = _serialise_for_anthropic(block)
-                                pending_blocks.append(d)
-
-                    final_message = stream.get_final_message()
-                break  # stream completed — leave the retry loop
-            except Exception as exc:  # noqa: BLE001 — SDK error → typed frame
-                error_kind, msg = _map_sdk_exception(exc)
-                retriable = (
-                    error_kind in _RETRYABLE_SDK_KINDS
-                    and not emitted_this_attempt
-                    and attempt < MAX_STREAM_RETRIES
-                    and not session.abort_event.is_set()
-                )
-                if retriable:
-                    _metric_incr("retries")
-                    delay = min(
-                        MAX_STREAM_RETRY_DELAY,
-                        BASE_STREAM_RETRY_DELAY * (2 ** attempt),
-                    )
-                    logger.warning(
-                        "chat: transient SDK error %r — retry %d/%d in %.1fs",
-                        error_kind, attempt + 1, MAX_STREAM_RETRIES, delay,
-                    )
-                    time.sleep(delay)
-                    attempt += 1
-                    continue
-                # A8 — persistent rate_limited on Opus → one Sonnet attempt.
-                if (
-                    error_kind == "rate_limited"
-                    and not emitted_this_attempt
-                    and session.model == OPUS_MODEL
-                    and not model_fallback_used
-                    and not session.abort_event.is_set()
-                ):
-                    model_fallback_used = True
-                    from_model = session.model
-                    session.model = DEFAULT_MODEL
-                    logger.warning(
-                        "chat: rate_limited on %s after retries — falling back to %s",
-                        from_model, DEFAULT_MODEL,
-                    )
-                    yield "model_fallback", {
-                        "from_model": from_model,
-                        "to_model": DEFAULT_MODEL,
-                        "reason": "rate_limited",
-                    }
-                    # Grant exactly one extra attempt on the cheaper model.
-                    max_attempts = attempt + 2
-                    attempt += 1
-                    continue
-                _metric_error(error_kind)
-                yield "error", {"error_kind": error_kind, "message": msg}
-                yield "session_done", {"reason": error_kind}
-                return
+        stream_result = yield from _stream_assistant_message(
+            session, client,
+            system_blocks=system_blocks,
+            tools_with_cache=tools_with_cache,
+            messages=messages,
+            history_cache_anchor=history_cache_anchor,
+        )
+        if stream_result.stop_turn:
+            return
+        final_message = stream_result.final_message
 
         usage = getattr(final_message, "usage", None)
         if usage is not None:
@@ -2324,79 +2596,22 @@ def _run_turn_body(
                 session.append_history_message({"role": "user", "content": tool_results})
             continue
 
-        # Dispatch each tool sequentially. Before EACH dispatch, re-check that
-        # the active project hasn't changed since the turn started (P0): the
-        # dispatchers mutate the ACTIVE network, so a mid-turn switch would
-        # corrupt the wrong project. On a switch we synthesize an is_error
-        # tool_result for the current AND every remaining tool — Anthropic
-        # requires each tool_use_id have a matching tool_result, so this keeps
-        # the in-memory history valid for a resumed turn — then end the turn.
         tool_results_for_next_turn: list[dict[str, Any]] = []
-        # A7 — shared across every tool in this assistant step / turn.
+        # A7 — one budget shared across every tool in this assistant step.
         tool_result_char_budget = {"used": 0}
-        switched_mid_turn = False
-        for idx, tu in enumerate(tool_uses):
-            if _project_switched():
-                switched_mid_turn = True
-                for rem in tool_uses[idx:]:
-                    rem_id = rem.get("id")
-                    yield "tool_error", {
-                        "tool_use_id": rem_id,
-                        "tool_name": rem.get("name"),
-                        "error_kind": "project_switched_mid_turn",
-                        "message": (
-                            f"active project changed from {turn_project_holder[0]!r} "
-                            "during this turn; refusing to run tools against a "
-                            "different network."
-                        ),
-                    }
-                    tool_results_for_next_turn.append({
-                        "type": "tool_result",
-                        "tool_use_id": rem_id,
-                        "is_error": True,
-                        "content": "project_switched_mid_turn",
-                    })
-                break
-            tool_call_count += 1
-            if tool_call_count > MAX_TOOL_CALLS_PER_TURN:
-                yield "tool_error", {
-                    "tool_use_id": tu.get("id"),
-                    "tool_name": tu.get("name"),
-                    "error_kind": "tool_call_cap_exceeded",
-                    "message": (
-                        f"more than {MAX_TOOL_CALLS_PER_TURN} tool calls in "
-                        "one turn; refusing further dispatch this turn."
-                    ),
-                }
-                yield "session_done", {"reason": "tool_call_cap_exceeded"}
-                return
-            yield from _dispatch_real_tool_call(
-                session, tu, tool_results_for_next_turn, turn_ctx=turn_ctx,
-                result_char_budget=tool_result_char_budget,
-            )
-            # If the agent just dispatched a rebinding tool (activate_project /
-            # load_project / save_project_as / rename_project /
-            # restore_project_snapshot), refresh the turn-project snapshot so
-            # the guard recognises the new binding as legitimate. We re-read
-            # from the live registry rather than guessing from the tool's args
-            # because activate_project on a non-resident project takes the
-            # cold path (v6-F2), and load_project may normalise the name.
-            tu_name = tu.get("name")
-            if tu_name in PROJECT_REBINDING_TOOLS:
-                new_bound = PyPSAService.get_active_context().loaded_project
-                if new_bound != turn_project_holder[0]:
-                    # Tell the frontend the backend's active project just
-                    # changed. Without this the React side keeps its
-                    # `currentProject` on the OLD name; the autosave loop
-                    # then sends `expect=<old>` and the backend's identity
-                    # guard 409s with "Backend network is bound to project
-                    # 'X', not 'Y'" — incident 2026-06-08.
-                    yield "project_rebound", {
-                        "from": turn_project_holder[0],
-                        "to": new_bound,
-                        "via_tool": tu_name,
-                    }
-                    turn_project_holder[0] = new_bound
+        dispatch = yield from _dispatch_tool_uses(
+            session, tool_uses,
+            tool_call_count=tool_call_count,
+            turn_ctx=turn_ctx,
+            turn_project_holder=turn_project_holder,
+            project_switched=_project_switched,
+            tool_results_for_next_turn=tool_results_for_next_turn,
+            char_budget=tool_result_char_budget,
+        )
+        tool_call_count = dispatch.tool_call_count
+        if dispatch.stop_turn:
+            return
+        switched_mid_turn = dispatch.switched_mid_turn
         messages.append({"role": "user", "content": tool_results_for_next_turn})
         with session._lock:
             session.append_history_message(
@@ -2414,6 +2629,73 @@ def _run_turn_body(
             }
             yield "session_done", {"reason": "project_switched_mid_turn"}
             return
+
+
+def _confirm_destructive_tool(
+    session: ChatSession,
+    *,
+    tool_use_id: str,
+    tool_name: str,
+    args: dict[str, Any],
+    tier: str,
+    tool_results_collector: list[dict[str, Any]],
+) -> Generator[tuple[str, dict[str, Any]], None, bool]:
+    """
+    Gate a destructive tool on the user's confirmation. Returns whether to
+    proceed.
+
+    Yields `tool_pending_confirmation` (carrying the token and TTL), BLOCKS on
+    the decision, and on anything but approval emits `tool_error` and pairs an
+    `is_error` result for this `tool_use_id`. That pairing is not optional:
+    Anthropic requires one result per `tool_use`, and a gap surfaces on the NEXT
+    turn as an SDK 400 rather than as a permissions problem.
+
+    Returning False aborts THIS tool, not the turn — the turn loop carries on
+    with the remaining tool calls.
+
+    Not every destructive tool is gated: `AUTO_APPROVE_TIERS` exempts some, and
+    dropping either half of `tier in DESTRUCTIVE_TIERS and tier not in
+    AUTO_APPROVE_TIERS` fails in a different direction — one blocks exempt tools
+    on a prompt nobody sent, the other runs destructive tools unprompted.
+
+    Phase E of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`;
+    see `tests/test_chat_confirmation_gate_seam.py`.
+    """
+    if tier in DESTRUCTIVE_TIERS and tier not in AUTO_APPROVE_TIERS:
+        pc = session.issue_confirmation(
+            tool_name=tool_name, args=args, safety_tier=tier,
+        )
+        yield "tool_pending_confirmation", {
+            "tool_use_id": tool_use_id,
+            "tool_name": tool_name,
+            "args": args,
+            "safety_tier": tier,
+            "confirmation_token": pc.token,
+            "ttl_seconds": CONFIRMATION_TTL_SECONDS,
+        }
+        decision = session.wait_for_decision(pc.token)
+        if decision != "approve":
+            error_kind = {
+                "deny": "confirmation_denied",
+                "expired": "confirmation_expired",
+                "aborted": "aborted",
+            }.get(decision, "unknown_decision")
+            yield "tool_error", {
+                "tool_use_id": tool_use_id,
+                "tool_name": tool_name,
+                "error_kind": error_kind,
+                "message": f"{decision} on confirmation for {tool_name!r}",
+            }
+            tool_results_collector.append({
+                "type": "tool_result",
+                "tool_use_id": tool_use_id,
+                "is_error": True,
+                "content": error_kind,
+            })
+            return False
+    return True
+
+
 
 
 def _dispatch_real_tool_call(
@@ -2497,38 +2779,16 @@ def _dispatch_real_tool_call(
     # monkeypatches it) and defaults empty → existing confirmation behaviour.
     # The M7 parallel-destructive pre-scan is upstream of this and is NOT
     # relaxed — auto-approve drops the human round-trip, not the serialisation.
-    if tier in DESTRUCTIVE_TIERS and tier not in AUTO_APPROVE_TIERS:
-        pc = session.issue_confirmation(
-            tool_name=tool_name, args=args, safety_tier=tier,
-        )
-        yield "tool_pending_confirmation", {
-            "tool_use_id": tool_use_id,
-            "tool_name": tool_name,
-            "args": args,
-            "safety_tier": tier,
-            "confirmation_token": pc.token,
-            "ttl_seconds": CONFIRMATION_TTL_SECONDS,
-        }
-        decision = session.wait_for_decision(pc.token)
-        if decision != "approve":
-            error_kind = {
-                "deny": "confirmation_denied",
-                "expired": "confirmation_expired",
-                "aborted": "aborted",
-            }.get(decision, "unknown_decision")
-            yield "tool_error", {
-                "tool_use_id": tool_use_id,
-                "tool_name": tool_name,
-                "error_kind": error_kind,
-                "message": f"{decision} on confirmation for {tool_name!r}",
-            }
-            tool_results_collector.append({
-                "type": "tool_result",
-                "tool_use_id": tool_use_id,
-                "is_error": True,
-                "content": error_kind,
-            })
-            return
+    approved = yield from _confirm_destructive_tool(
+        session,
+        tool_use_id=tool_use_id,
+        tool_name=tool_name,
+        args=args,
+        tier=tier,
+        tool_results_collector=tool_results_collector,
+    )
+    if not approved:
+        return
 
     yield "tool_running", {"tool_use_id": tool_use_id, "tool_name": tool_name}
 
