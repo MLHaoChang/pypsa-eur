@@ -198,6 +198,46 @@ transition:
 All lineage operations are best-effort: a failure copying chat history
 NEVER aborts the underlying project save / rename / restore.
 
+## Diagnosing an infeasible model
+
+`diagnose_network` (read tier) is the shape check `validate_network` does not
+do, and the system prompt routes every `infeasible` here before theorising.
+
+Value checks — bounds, finiteness, references — all pass on a network that is
+two disconnected halves, one holding the demand and the other the plant meant
+to serve it. The LP answers that with `infeasible` and a linopy traceback that
+names neither the island nor the demand, which is why "my model won't solve"
+is the most expensive question a modeller asks.
+
+`services/topology_analyzer.py` returns one row per island — `n_buses`,
+`peak_load_mw`, `nameplate_mw`, `extendable`, `verdict`, `reason` — where
+`verdict` is `ok` / `no_demand` / `no_supply` / `under_capacity`. Islanding and
+unservable islands also reach preflight as warnings.
+
+Three rules keep it from over-claiming:
+
+- **Links count as connections.** PyPSA's `sub_networks` deliberately exclude
+  them (a converter is not an impedance), but for the energy balance a link
+  plainly connects its buses — reporting an electrolyser bus as islanded would
+  send the user chasing a line that should not exist. Multi-port `bus2..bus4`
+  count too.
+- **A shortfall is claimed only when it is certain.** Nameplate is an upper
+  bound on dispatch, so "peak demand exceeds total nameplate" is
+  one-directional: when it fires the island genuinely cannot be served, and
+  when it doesn't, nothing is claimed. Anything extendable in the island — a
+  `Store` included, since it withdraws certainty without adding firm supply —
+  and no claim is made at all.
+- **Peak is per snapshot, not per load.** Two loads peaking in different hours
+  must not add into a peak that never happens; that would manufacture a
+  shortfall out of arithmetic.
+
+Findings are warnings, never errors: an unservable island is an infeasibility
+at VOLL = 0 and priced lost load above it, and the analyser does not know the
+solver config — so it says which it is and blocks neither.
+
+Bus membership is omitted from the tool's payload unless `include_buses=true`,
+because on a large network it would crowd out the verdicts.
+
 ## Asset health — outage-rate provenance
 
 `resolve_outage_params` resolves a per-asset failure rate three ways: `asset`

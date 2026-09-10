@@ -102,11 +102,12 @@ Synthesized and de-duplicated from 6 independent examiner passes (session lifecy
 - **First step:** Render an EmptyState when `messages.length===0` listing capabilities and the tool count from `session_init`.
 - **Evidence:** `ChatPanel.tsx:~604-623`.
 
-### 15. Network topology / connectivity diagnostic tool
+### 15. Network topology / connectivity diagnostic tool — **DONE**
 - **Category:** feature · **Value:** high · **Effort:** M
 - **Why:** `validate_network` runs preflight checks but there is no graph-level diagnostic (isolated buses, islands, orphan generators) — common modelling debug needs the agent must currently infer from raw `list_components`.
 - **First step:** Add a `topology_analyzer` service (connected components, orphan assets, island count) and a read-tier `diagnose_network` tool.
 - **Evidence:** `chat_tools.py:~717-719`.
+- **Shipped:** `services/topology_analyzer.py` + the read-tier `diagnose_network` tool, with islanding and unservable islands also reaching preflight as warnings, and the solver-error decoder routing `infeasible` here before theorising. Two departures from the first step as written: connectivity counts LINKS (and multi-port `bus2..bus4`) as edges, because PyPSA's `sub_networks` exclude them and an electrolyser bus reported as islanded sends the user chasing a line that should not exist; and "orphan assets" became per-island supply/demand verdicts, since an asset's problem is almost never that it is unattached — it is that its island cannot balance. See `CHATBOT.md`, "Diagnosing an infeasible model", and `tests/test_topology_analyzer.py`.
 
 ### 16. Result pagination / cursor for large reads
 - **Category:** ux · **Value:** high · **Effort:** M

@@ -667,6 +667,22 @@ TOOLS: list[dict[str, Any]] = [
         "check_solver_availability",
         "{highs, gurobi, scip, glpk} — which solvers are installed. Safety: read.",
     ),
+    _t(
+        "diagnose_network",
+        "Graph-level diagnosis — the shape check validate_network does not "
+        "do. Returns {islands: [{id, n_buses, peak_load_mw, nameplate_mw, "
+        "extendable, verdict, reason}], n_islands, isolated_buses, counts}. "
+        "verdict is ok / no_demand / no_supply / under_capacity. CALL THIS "
+        "FIRST on any 'why is my model infeasible' question: a network passes "
+        "every value check and is still two halves, one with the demand and "
+        "one with the plant, and the linopy traceback names neither. A "
+        "shortfall is only ever claimed when it is CERTAIN — nameplate is an "
+        "upper bound on dispatch — and never when anything in the island is "
+        "extendable. Bus membership is omitted unless include_buses=true, "
+        "because on a large network it would crowd out the verdicts. "
+        "Safety: read.",
+        {"include_buses": {"type": "boolean"}},
+    ),
     _empty(
         "dispatch_status",
         "{state: fresh|stale|none, mismatched_classes: [str]} — direct call to "
@@ -1766,6 +1782,7 @@ TOOL_ROUTES: dict[str, list] = {
     "validate_network": [("POST", "/api/simulation/preflight")],
     "check_solver_availability": [("GET", "/api/simulation/check_solvers")],
     "dispatch_status": _SERVICE_CALL,  # B3: NO HTTP endpoint exists
+    "diagnose_network": _SERVICE_CALL,  # backlog 15: no HTTP endpoint
     # execution_long_running (2)
     "run_simulation": [("POST", "/api/simulation/run")],
     "run_ac_pf_stage": [("POST", "/api/simulation/run_ac_pf")],

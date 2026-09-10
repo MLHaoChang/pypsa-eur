@@ -2396,6 +2396,12 @@ def validate_for_run(n, solver_config) -> list[Issue]:
     # inside the function: `timeseries_qa` imports `Issue` from this module.
     from services.timeseries_qa import check_timeseries_quality
     issues += check_timeseries_quality(n)
+    # Graph shape — islands and what each can serve. Value checks above cannot
+    # see it: a network passes every one of them and is still two halves, one
+    # with the demand and one with the plant. Warnings only; see
+    # `topology_issues` for why an unservable island is not an error here.
+    from services.topology_analyzer import topology_issues
+    issues += topology_issues(n)
     # Phase 12c-pre: how a unit with BOTH a profile and outage data is
     # modelled — from the membership walk, NOT gated on an outage column.
     issues += _check_profiled_occurrence_units(n)

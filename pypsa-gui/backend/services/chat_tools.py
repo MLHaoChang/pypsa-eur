@@ -3190,6 +3190,39 @@ def export_chat_summary(
     )
 
 
+def diagnose_network(include_buses: bool = False) -> dict:
+    """
+    Graph-level diagnosis: islands, what each can serve, and buses connected
+    to nothing.
+
+    Backlog item 15. `validate_network` checks VALUES — bounds, finiteness,
+    references — and a network can pass every one of them while being two
+    disconnected halves, one holding the demand and the other holding the
+    plant meant to serve it. The LP answers that with `infeasible` and a
+    linopy traceback naming neither the island nor the demand.
+
+    `include_buses` is off by default: on a 1000-bus network the membership
+    lists are the entire payload and would be cut by the result cap, taking
+    the verdicts with them. Ask for them once the island is identified.
+    """
+    from services.topology_analyzer import analyse_topology
+
+    report = analyse_topology(PyPSAService.get_network())
+    if include_buses:
+        return report
+    return {
+        **report,
+        "islands": [
+            {k: v for k, v in island.items() if k != "buses"}
+            for island in report["islands"]
+        ],
+        "note": (
+            "bus membership omitted — call again with include_buses=true for "
+            "the island you care about"
+        ),
+    }
+
+
 # ── Asset health / outage-rate provenance (2) ───────────────────────────────
 #
 # `resolve_outage_params` already resolves a rate as `asset`,
@@ -3683,6 +3716,7 @@ DISPATCHERS: dict[str, Any] = {
     "validate_network": validate_network,
     "check_solver_availability": check_solver_availability,
     "dispatch_status": dispatch_status,
+    "diagnose_network": diagnose_network,
     # execution_long_running (2)
     "run_simulation": run_simulation,
     "run_ac_pf_stage": run_ac_pf_stage,

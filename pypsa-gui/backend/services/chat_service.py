@@ -1569,7 +1569,11 @@ _DOMAIN_GUIDE = (
 _SOLVER_ERROR_DECODER = (
     "Solver-error decoding. On ANY failed or aborted run, call "
     "get_simulation_log_history BEFORE answering and quote the failing "
-    "TRACEBACK frame. Common causes: 'infeasible' = over-constrained bounds or "
+    "TRACEBACK frame. On 'infeasible' ALSO call diagnose_network before "
+    "theorising: the commonest cause is structural — an island holding demand "
+    "with no plant in it — and the linopy message names neither the island "
+    "nor the demand, so a bounds explanation offered without that check is a "
+    "guess. Common causes: 'infeasible' = over-constrained bounds or "
     "a CO2 cap too tight / capacities too small to meet load; 'dim_0' in a "
     "linopy/xarray error = a time-series (_t) frame lost its index name "
     "'snapshot'; \"cannot include dtype 'M' in a buffer\" = a multi-period → "
