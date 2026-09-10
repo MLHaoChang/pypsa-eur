@@ -1,0 +1,636 @@
+# Sequential MC Adequacy Engine — Implementation Spec (Phase 6)
+
+**Status:** binding contract for implementation workers. **v1.1** — amendments from
+the engine-core worker's flagged deviations are marked **[v1.1]**. **v1.2** —
+adjudications of the ELCC and MC-benchmark workers' flags, marked **[v1.2]**; binding
+on the endpoint/panel workers. The companion plan
+(`plans/2026-08-28-fmea-phase6-sequential-mc.md`, v2.1) carries the WHY and the review
+record; this document carries the exact WHAT. Where they disagree, this spec wins and
+the disagreement is a finding to raise, not to silently resolve.
+
+Workers implement AGAINST this spec. Deviations require a recorded reason in the
+commit message. No decision below is re-derivable during implementation.
+
+---
+
+## 1. Scope
+
+- Single-area (copper plate), electrical-only. One weather realisation (the modelled
+  horizon's profiles). Independent unit outages. DSR not modelled as a resource.
+- Engine id `"mc"`, fidelity `"sequential_mc"`. No per-mode € ranking.
+- The MC **never mutates the network**. All inputs are snapshotted under the
+  PyPSAService lock exactly once, into plain arrays; computation is lock-free.
+
+## 2. Module `services/adequacy/mc.py`
+
+### 2.1 Input snapshot
+
+```python
+@dataclass(frozen=True)
+class StorageSpec:
+    name: str
+    p_nom_mw: float          # p_nom_opt when finite & >0, else p_nom (CoptUnit rule)
+    e_nom_mwh: float         # max_hours * p_nom_mw
+    eff_store: float         # efficiency_store, default 1.0
+    eff_dispatch: float      # efficiency_dispatch, default 1.0
+
+@dataclass(frozen=True)
+class MCInputs:
+    units: tuple            # CoptUnit list from fleet_and_residual, VERBATIM
+    residual: np.ndarray    # float64 (H,) — load minus must-take, from fleet_and_residual
+    weights: np.ndarray     # float64 (H,) — same source
+    periods: tuple          # ((label, start_idx, end_idx_exclusive), ...) — contiguous
+                            # blocks of the (possibly MultiIndex) snapshot axis;
+                            # single-period networks carry one block labelled "ALL"
+    storage: tuple          # (StorageSpec, ...)
+    nyears: float           # horizon_years(n) — shared helper
+    vre_profiles: dict      # {name: np.ndarray (H,)} — ONLY for names requested via
+                            # snapshot_inputs(n, vre_assets=[...]); the asset's
+                            # must-take contribution (profile × capacity) so ELCC can
+                            # un-net it. Empty by default.
+```
+
+`snapshot_inputs(n, *, vre_assets=()) -> MCInputs`:
+- calls `fleet_and_residual(n)` (units/residual/weights identical to the COPT — the
+  provable-membership invariant).
+- storage rows: `n.storage_units` at electrical buses, excluding slack carriers/names
+  via `slack.py`'s `is_slack_carrier` / name-prefix tests applied to the storage frame
+  (no storage slack mask exists; DSR slacks are Generators and never reach here).
+- period blocks: from the snapshot MultiIndex level 0 in order; assert contiguity.
+- Everything copied (`np.ascontiguousarray`) — no live references escape the lock.
+
+### 2.2 Transition math (exact, no silent coercion)
+
+For a unit with `q ∈ (0,1)`:
+- `mttr = max(mttr_hours, 1.0)`; flooring logs a warning naming the unit.
+- `mttf = mttr * (1 - q) / q`. If `mttf < 1.0` → `ValueError` ("implied MTTF < 1 h —
+  inconsistent pair", surfaces as 422 at the route). Never clamp.
+- `p_fail = 1/mttf`, `p_repair = 1/mttr` (both now guaranteed ≤ 1).
+- Stationary identity to preserve (asserted in tests): `p_fail/(p_fail+p_repair) == q`
+  exactly in exact arithmetic given the floor.
+- `q == 0` → the unit is deterministically up (no RNG consumed — see 2.3!). `q >= 1`
+  rejected by the occurrence validator upstream; assert here anyway.
+
+Sojourns are geometric. `P(run = 1) = 1/mttr` per outage — persistence is a statement
+about the MEAN run, not a floor. Semi-Markov/minimum-duration is a recorded non-goal.
+
+### 2.3 Sampling — the CRN stream contract (load-bearing)
+
+**Every unit owns its own RNG substream, keyed by its position in the FULL fleet:**
+`children = rng.spawn(len(units))`, `children[i]` is unit *i*'s stream **whether or not
+unit i is excluded**. A `q == 0` unit still occupies its slot (stream never advanced —
+that is fine: identity is positional, consumption is per-stream, so other units'
+draws are unaffected either way).
+
+`sample_capacity(units, H, draws, seed, *, exclude=frozenset(), periods=None) -> np.ndarray (draws, H) float32`:
+- **[v1.1]** `periods` (block boundaries) lives HERE, not in `simulate`: per-block
+  stationary restarts must happen on each unit's OWN substream, or per-period
+  re-initialisation would need per-block seeds and destroy the CRN bit-identity.
+  Default `None` = one block.
+- accumulator (draws, H) float32, zero-initialised;
+- for each unit i **in the full fleet**: generate its (draws, H) availability path
+  from `children[i]` (state vector (draws,) bool, hour loop, initial state stationary);
+  if `i ∉ exclude`, add `capacity_mw * state` into the accumulator; **if `i ∈ exclude`,
+  generate and discard** — the draws must be consumed identically so every other
+  unit's path is bit-identical across exclusion sets.
+- Never materialise a (draws, H, units) cube.
+- Bit-identity guarantee (tested): for any `exclude`, each included unit's contribution
+  is bitwise identical to the full-fleet run at the same seed.
+
+### 2.4 Simulation
+
+`simulate(inputs, *, draws, seed, exclude=frozenset(), extra_firm_mw=0.0,
+storage_enabled=True, exclude_storage=frozenset(), initial_soc_frac=1.0)
+-> per-draw arrays (lole_h, eue_mwh) float64`
+
+Per period block, per draw (vectorised across draws; hour loop; storage loop inner):
+1. At block start: outage states re-drawn from stationary; SoC := `initial_soc_frac`.
+   **Nothing carries across period boundaries.**
+2. `deficit[d] = residual[h] − capacity[d,h] − extra_firm_mw`
+3. `deficit > 0`: discharge storage in **descending remaining-energy order**:
+   `give = min(p_nom, soc·eff_dispatch, deficit)`; `soc −= give/eff_dispatch`.
+4. `deficit < 0` (surplus `s = −deficit`): charge in **ascending remaining-energy
+   order**: `take = min(p_nom, (e_nom − soc)/eff_store, s)`; `soc += take·eff_store`.
+   (Sign conventions above are the spec; tests pin them with hand arithmetic.)
+5. Residual deficit after storage: `lole_h[d] += w[h]·(deficit > SHORTFALL_TOL)`,
+   `eue[d] += w[h]·max(deficit, 0)`. `SHORTFALL_TOL = 1e-6` MW.
+
+Weights scale ACCOUNTING only; MTTR/sojourns/SoC evolve in modelled hours.
+
+### 2.5 Aggregation & convergence
+
+`mc_adequacy(inputs, *, draws=500, seed=0, cov_target=0.05, max_draws=2000,
+batch=250, **sim_kwargs) -> dict`  (**[v1.1]** `sim_kwargs` forwarded to the
+simulation — `exclude` / `extra_firm_mw` / `exclude_storage` / `initial_soc_frac` —
+so ELCC can aggregate without re-implementing the loop):
+- run batches until `CoV(mean LOLE) ≤ cov_target` or `max_draws`;
+- outputs: `lole_hours` (mean), `lole_ci` = (max(0, m−1.96·s/√n), m+1.96·s/√n),
+  `eue_mwh` + `eue_ci` likewise, `by_period` (means per block), `n_samples`,
+  `converged: bool`, `time_basis`/`horizon_years` via the shared helpers,
+  `resolution_floor_h = min(positive weight)/n_samples` (**[v1.2]** — the original
+  `1/(n·nyears)` was per-YEAR against the per-HORIZON `lole_hours`; on sub-year
+  horizons it inflated the floor by 8760/H and made ELCC's refusal fire too eagerly;
+  found by the ELCC worker, fixed in mc.py with a bitten regression test) reported
+  always — **[v1.1]** the KEY is
+  always present but the value is `None` when `nyears ≤ 0` (no finite floor exists;
+  `inf` does not serialise); the panel renders "unknown", never 0 — and
+  `warning = MC_WARNING_V1`.
+- `MC_WARNING_V1` (module constant, one string, three clauses): single weather
+  realisation; independent unit outages (no common-mode); DSR excluded as a resource.
+
+## 3. Module `services/adequacy/elcc.py`
+
+`elcc_for_asset(inputs, kind, name, *, seed, draws, tol_mw=None) -> dict`
+- kinds: `"generator"` (exclude its unit index), `"storage_unit"`
+  (exclude from dispatch), `"vre"` (residual += `inputs.vre_profiles[name]`; KeyError
+  → the route's 404).
+- **[v1.1] CRN requires FIXED draw counts for candidate evaluations.** The adaptive
+  batching in `mc_adequacy` is CRN-hostile: two Δ evaluations stopping at different
+  `n_samples` draw from different sets, and `LOLE_reduced(Δ)` stops being the monotone
+  step function the predicate assumes. Every candidate-Δ evaluation therefore runs
+  `mc_adequacy(draws=N, max_draws=N, seed=seed, ...)` (fixed N = the baseline's final
+  `n_samples`); only the baseline may use the adaptive path. **[v1.2] Correction from
+  the ELCC worker (ratified):** a single batch of N is NOT batch-sequence-identical to
+  an adaptive run that reached N in several batches (batch k consumes the k-th spawned
+  child of SeedSequence(seed)). Candidates therefore REPLAY the baseline's batch
+  sequence (same draws/batch, `max_draws=N`, `cov_target=-1` so no early stop) — bit-
+  identical to the baseline AND to each other, which is what the predicate needs.
+- **[v1.1] `kind="vre"` is REJECTED for any name present in `inputs.units`** (an
+  occurrence-bearing generator was never netted into the residual; `residual +=
+  profile` would double-count it). 422 at the route with a message naming the unit.
+- baseline = `mc_adequacy` on full inputs at (seed, draws). If
+  `baseline lole ≤ resolution floor` → `{"status": "unidentifiable", "reason": ...}`.
+- Predicate: **smallest Δ with LOLE_reduced(Δ) ≤ LOLE_baseline** (LOLE_reduced is a
+  monotone non-increasing step function of Δ under CRN — equality is ill-posed).
+- Bracket `[0, nameplate]`; if unmet at nameplate → `{"status": "not_bracketed"}`
+  (never extrapolate beyond nameplate; exceedance rejected in v1).
+- `tol_mw = max(0.5, 0.001·nameplate)` default. All evaluations same seed (CRN).
+- Row (**[v1.2]** as delivered — nine keys, always all present): `{kind, name,
+  nameplate_mw, elcc_mw, elcc_share, status: "ok"|"unidentifiable"|"not_bracketed",
+  reason (None iff ok), baseline_lole_h, baseline_lole_ci}`. Route mapping: KeyError →
+  404 (unknown asset), ValueError → 422 (bad kind / vre double-count / bad tol).
+  **[v1.2] Known properties:** `not_bracketed` is provably unreachable for the three
+  v1 kinds (a full-nameplate firm block dominates any removed asset on identical
+  draws — kept as a CRN tripwire); `kind="vre"` nameplate is `max(profile)` (the peak
+  must-take contribution) — conservative when the profile never reaches 1.0; the
+  endpoint MAY later pass installed capacity to widen it.
+- `MAX_ELCC_ASSETS = 10`.
+
+## 4. API (routers/results.py)
+
+- `GET /results/mc` → 204 before any run; else the stored payload (no thread field).
+- `POST /results/mc` body `{draws?, seed?, cov_target?, elcc_assets?: [{kind, name}]}`
+  → 409 if solve/sweep/frontier/mc running (and mc registered in THEIR guards);
+  422 if `fleet_and_residual` yields zero occurrence-bearing units ("nothing to
+  sample"); 422 on inconsistent unit pairs (the 2.2 ValueError); VoLL NOT required.
+  Worker thread, `_state["mc"]` = `{status, result, error, started_at, thread}`.
+- Payload: `{engine: "mc", fidelity: "sequential_mc", metrics: {...per 2.5},
+  elcc: [...] | [], warning}` — a **sibling payload** like the COPT endpoint;
+  `AdequacyReport`'s "one shape" docstring is amended to say so (recorded decision:
+  no report bloat for engine-local studies).
+- `models/adequacy.py`: `Engine` += `"mc"`; `MetricsBlock` += `lole_ci`, `eue_ci`
+  (tuple|None); legacy `confidence_interval` docstring: "deprecated alias of lole_ci".
+  One comment on `TargetBlock.basis` reserving `"mc_lole"` for Phase 7.
+- `test_golden_coverage.ROUTE_SURFACES` += get_mc/post_mc.
+
+## 5. Frontend
+
+- `api/simulation.ts`: `getMc` (204→null), `startMc(body?)`.
+- `McPanel.tsx` (FrontierPanel pattern): run/poll; blocked button NAMES the blocker;
+  CI rendered as ranges (`9.1–9.8 h`, `n=…` beside) — never `±`; all-clear case
+  renders `< {floor} h`; the standing warning; the ELCC table (status rows render
+  reasons); non-additivity note.
+- Cross-engine comparison table (same file or `EngineComparison.tsx`): rows
+  lp_proxy / copt / mc; columns metric, value(+CI), fidelity, storage-aware?,
+  DSR-aware?, foresight, time-basis; header tooltips state ENS↔EUE and
+  shed-hours↔LOLE alignment; COPT storage cell is a structural dash.
+- Mounted in **both** LostLoadTab branches. IA decision comment in the header
+  (stay on Lost load; split condition verbatim from the plan).
+- Literal hex colours in any SVG (`var(--…)` does not resolve there).
+
+## 6. Test contract (file: `tests/test_adequacy_mc.py`, `tests/test_adequacy_elcc.py`)
+
+Every ★ test must be demonstrated RED before implementation and must FAIL against the
+named broken variant (bite check), with the variant documented in the test docstring.
+
+- ★ T-trans: transition math exact; MTTR floor at 1 h keeps stationary `q`; implied
+  MTTF < 1 h raises. Bite: remove the floor.
+- ★ T6: hour-0 availability ≈ 1−q (CI). Bite: init all-up.
+- ★ T3: mean run ≈ MTTR AND `P(run=1) ≈ 1/mttr` (CI). Bite: iid Bernoulli swap.
+- ★ T-CRN: bit-identity of every included unit's contribution under any `exclude`.
+  Bite: joint (draws×units) sampling.
+- ★ T1: q=0 fleet + storage → exact hand arithmetic (both efficiencies).
+- ★ T1b: start empty, surplus precedes deficit → charge path exact.
+- ★ T-period: two-block fixture where carrying SoC across the boundary would change
+  EUE; assert it does not. Bite: remove the reset.
+- ★ T4: ∞-duration ≡ +p_nom firm; zero-energy ≡ absent (identical draws).
+- ★ T2: thermal-only MC LOLE within 99% CI of COPT exact value (docstring states
+  persistence-blindness). Bite: broken-transition variant (p_fail = q).
+- ★ T2b: Dunkelflaute+battery fixture — EUE(persistent) ≠ EUE(iid) at same
+  stationary q. This is the metric-level persistence pin.
+- ★ T-elcc: perfect unit ELCC == capacity (tol) under CRN — bite: re-seed per
+  evaluation; declining credit; battery long/short fixtures (short at SoC 0.5);
+  unidentifiable; non-additivity on one fixture.
+- Weights test: doubling weights doubles LOLE/EUE, changes no dynamics.
+- Every stochastic test: fixed seed, draw counts sized so the assertion is stable.
+
+## 7. Benchmarks (`tests/test_adequacy_benchmarks.py`, `@pytest.mark.slow`)
+
+- Fixtures under `tests/benchmark_data/`: `rts79_units.csv` (32 units: name, MW, FOR,
+  MTTR), `rts79_load.py` (**[v1.1]** delivered name; the plan's `rts79_load_model.py`
+  is superseded) (the 1979 percentage tables + reconstruction:
+  Monday-start, week 1 = winter, 8736 h) — provenance header: source, retrieval date,
+  second-source cross-check. `basis="FOR"` pinned. RBTS likewise.
+- Order: COPT vs published FIRST; then MC vs published: inside 95% CI AND half-width
+  ≤ 5% of published. **[v1.2] Adjudications from the delivered gate:** (a) the RBTS
+  width criterion is a MEASURED miss at 5000 draws (11.6% — event-rate, not engine;
+  verified reachable at ~27k draws where it hits 4.6%) and is soft-asserted with the
+  shortfall printed, RTS-79's stays hard; (b) the "MC mean within the COPT tolerance
+  band" belt-and-braces is statistically unpurchasable at this budget (±1% on the mean
+  needs ~10⁵–10⁶ draws) and is ratified as
+  `|mean − published| ≤ 1%·published + 95% half-width`; (c) seeded anchors assert only
+  at BENCH_DRAWS=5000 (a different budget is a different estimator), skip loudly. Budget: `BENCH_DRAWS` env, default 5000 (independent of
+  MAX_DRAWS); print empirical CoV. After first green, pin the seeded value.
+- If tables cannot be sourced in-environment: the task records the gap loudly in the
+  PR body; the gate stays required and unmet (blocks the "done" claim, not the branch).
+
+## 8. Performance targets
+
+500 draws × 168 h × ≤10 units: < 5 s. 1000 × 8760 × 32 units: low tens of seconds.
+A miss is a finding to report, not to hide.
+
+## Amendment v1.3 — the ELCC candidates surface (shipped, recorded post-hoc)
+
+**`GET /results/mc/elcc_candidates`** (routers/results.py) — synchronous,
+read-only, no worker thread, deliberately **no 409 guard** (starts nothing,
+mutates nothing; refusing to list assets while another study runs would blank
+the picker for minutes for no gain). Takes the PyPSAService lock for the
+snapshot only. Response is always **200**, never 204 — an empty list is an
+answer the panel renders ("no eligible assets"), not a "never fetched":
+
+```json
+{"assets": [{"kind": "generator"|"storage_unit"|"vre",
+             "name": "...", "nameplate_mw": 0.0}, ...],
+ "max_assets": MAX_ELCC_ASSETS}
+```
+
+Sorted by `nameplate_mw` descending, ties by `name` ascending.
+`MAX_ELCC_ASSETS` stays owned by `services/adequacy/elcc.py`; the frontend
+reads the cap from the payload and never hardcodes it.
+
+**Agreement by construction, in BOTH directions**, is the whole contract:
+
+- `elcc.elcc_candidates(n)` does not re-derive membership — it reads it off
+  the structures the run resolves against (`fleet_and_residual` units,
+  `snapshot_inputs` storage rows, and `copt.must_take_generators` for vre,
+  whose profile peak is bit-for-bit the bracket top `_resolve` prices).
+  The generator-membership decision itself is one extracted walk
+  (`copt._membership_walk`) consumed by `fleet_and_residual` and the
+  enumeration alike. A must-take generator with an all-zero profile is
+  excluded (degenerate [0, 0] bracket; nothing to price).
+- The converse held only by UI convention until it was pinned: `snapshot_inputs`
+  built a `vre_profiles` entry for WHATEVER names the request asked, so
+  `{"kind": "vre", "name": "__voll_b"}` priced a 9999 MW LP slack as wind.
+  **Closed:** the `vre_assets` loop now admits only genuinely must-take
+  generators (same walk); anything else is absent from `vre_profiles`, which
+  `_resolve` turns into the KeyError the route maps to 404. Bitten test:
+  `test_a_slack_generator_cannot_be_priced_as_vre`.
+
+Frontend (`McPanel.tsx`): candidates fetched only while the panel is open
+(`enabled: open`); checkbox picker labelled name · kind · nameplate; selection
+capped at the payload's `max_assets` with the cap named in the disable
+message; selected assets go into the POST body as `{kind, name}` pairs; an
+empty selection sends no `elcc_assets` key at all, so the bare default run
+stays bare.
+
+**Registry note for future routes:** a new `/results/*` route needs TWO test
+registry entries — `test_golden_coverage.ROUTE_SURFACES` **and**
+`test_results_range.py`'s series/aggregate census — and each gate fails
+loudly when its own entry is missing.
+
+## Amendment v1.4 — a unit with BOTH a profile and outage data (Phase 12c-pre)
+
+**`CoptUnit.profile: np.ndarray | None`** (`field(default=None, compare=False,
+hash=False)`): the unit's availability fraction per modelled hour, attached by
+`fleet_and_residual` whenever the generator's `p_max_pu` **series** column is
+informative — not identically 1 (a constant 0.8 counts; an all-ones column does
+not; the static column is never read). A NaN hour is availability 0 at
+attachment, the reserve margin's rule.
+
+**§2.3 sampling, amended.** `sample_capacity` accumulates a profiled unit as
+`(H, 1) = profile × cap` broadcast over draws in the same
+`np.add(acc, cap, out=acc, where=state_path)`: UP is the series' value that
+hour, DOWN is zero. The chain, its substream and its consumption are
+untouched, and a unit without a profile takes the scalar path byte-for-byte
+(pin M2: RBTS fleet, H = 8736, draws = 64, seed = 20260828 →
+sha256 `aa4b3c0f…2394` under numpy 2.4.6; skipped, naming the version, on
+another numpy major — NEP 19). A profile of the wrong length is a
+`ValueError`, never a silent broadcast.
+
+**§3 ELCC, amended.** A profiled `kind="generator"` candidate's
+`nameplate_mw` is its best hour, `max_h(profile_h) × cap` — the firm block
+then dominates the unit hour by hour and the dominance tripwire holds; a
+`(1−q)`-derated peak would make `not_bracketed` reachable on the unit's best
+hour. A zero-peak profile is not a candidate, as the vre branch already
+excludes one. Removal semantics are unchanged (exclusion by position).
+
+**§4 API, amended.** The `/mc` result carries `profile_units: [names]`. The
+`/copt` payload carries `fleet.profile_units`, `fleet.netted_beyond_cap`,
+`fleet.k_exact` and a `fidelity_note` sentence; `fidelity` stays the engine
+enum. Preflight emits `profile_and_outage_modelled` (`warning`) for a
+profiled unit whose outage data the user typed, and
+`static_p_max_pu_not_applied` for a static derate on any occurrence unit —
+both from the membership walk, so they reach a network with no outage
+columns (the PyPSA-Eur import). `outage_shadows_profile` (12a) is retired:
+with the profile modelled it would be false.
+
+**[Phase 12h.]** `static_p_max_pu_not_applied` is retired in turn — the
+static factor IS applied now — and replaced by
+`availability_may_include_outages` (both the CF and the rate are applied;
+here is the flag if that double-counts) and
+`outages_folded_into_availability` (the flag is set, no outages are sampled
+for these units), with an `_ignored` variant when the flag has nothing to
+act on. Both `/mc` and `/copt` carry two new lists: `folded_units`
+(`name`, `folded_constant`, `source`) for a unit whose static CF was folded
+into its capacity, and `deterministic_units` for a rate-zero unit. On `/mc`
+the two lists are built without `split_fleet` and a deterministic name is
+REMOVED from `profile_units`, whose documented meaning ("outages were
+sampled on the availability series") is false of a `q = 0` unit.
+
+**§6 test contract, amended.** `tests/test_adequacy_profiled_units.py`:
+A1 (the MC samples on the series), A3′ (the COPT mixes exactly — RTS-79
+minus one 400 MW unit plus a 500 MW q = 0.05 mild-profile unit → 3.97 h,
+not netting's 1.28 nor the flat 3.88), A4′/M1 (which rows carry a profile,
+by hash), A5′ (expectation, pooled over per-draw means at 3σ, Bonferroni per
+hour), A6′ (the margin's derate is the window mean of the same expectation),
+A7 (continuity at the constant-series boundary, level 0.5), A8 (nameplate),
+A12 (vectorised survival/shortfall equal the scalar pair), A13 (the 256-state
+mixture on a 300-unit table under 1 s), M2, the cap and the route.
+
+## Amendment v1.5 — one demand basis (Phase 12c-0; the fifteenth finding)
+
+`load_scalers` / `load_scalers_by_carrier` are applied to `loads_t.p_set`
+in place inside `_apply_modelling_assumptions` and reverted after the LP.
+Until this amendment `snapshot_inputs` read the restored frame, so the MC
+study, every ELCC row and BOTH certifying loops evaluated the raw demand
+while the LP, the ENS cap and the reserve-margin constraint were built on
+the scaled one (measured: route-side peak 179.93 in both periods against a
+stashed 224.92 under a 2035 factor of 1.25; the post-solve snapshot equal
+to the pre-solve raw residual).
+
+**§2.1, amended.** `snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False,
+cfg=None, demand_scaled_in_place=False)`. The residual is built on the LP's
+demand basis through `services/adequacy/demand.py` — the ONE factor
+resolution, which `_apply_modelling_assumptions` itself now calls: gated on
+`cfg.multi_investment_periods`, a MultiIndex and a non-empty `loads_t.p_set`;
+series columns only (a static `loads.p_set` is never scaled by the LP and
+never scaled here); per-carrier, then legacy global, then identity;
+non-finite factors are identity. `cfg=None` reads the raw frame, which IS the
+LP's basis whenever no scaler is configured — pinned bit-identical
+(regression anchor D1). `demand_scaled_in_place=True` is the solve wrapper's
+switch: the transforms are already applied, and applying them twice is
+×1.25² (measured), so the switch is explicit rather than inferred. Every
+route that snapshots passes the solver config; `/copt` takes the mutation
+lock like `/mc`, since a solve scales the frame in place for its duration.
+
+**§4, amended.** `GET /results/mc/elcc_candidates` and the loops' initial
+and per-iterate snapshots pass the config captured in the request (the
+worker never reads request-scoped state).
+
+**§6, amended.** `tests/test_adequacy_demand_basis.py`: D1 (anchor), D2 (a
+scaler moves the MC, the COPT and the margin peak in its period only),
+D3/D3b (the in-place path and the route path stash one demand; a real
+solve stashes it once and the loops' snapshot reads it), D4 (a static load
+is untouched on every surface), the gate and the finiteness rule equal
+the LP's, D5 (`/copt` waits for the lock).
+
+**Consequence, stated.** On a project with scalers the MC's LOLE and every
+ELCC row move after this amendment — upward, as demand grows — and a
+coupling- or margin-loop value certified before it was certified against
+the wrong demand; re-run the loop.
+
+## Amendment v1.6 — the portfolio ELCC, per period (Phase 12c)
+
+**§3, amended.** `elcc_of_removal(..., period=None, baseline=None,
+baseline_key=None)`: with `period` the predicate compares
+`by_period[period]["lole_hours"]` and refuses against that period's floor
+(`min positive weight in the period / n_samples`); well-posed because a
+firm block in every hour cannot raise any period's LOLE, the periods are
+chronologically independent (states and SoC restart at the boundary), and
+CRN holds per period. With `baseline` the caller's `mc_adequacy` result is
+used instead of a fresh one — the `/mc` worker's headline metrics ARE that
+baseline, argument for argument — and `baseline_key(inputs, draws=, seed=,
+cov_target=, max_draws=, batch=, sim_kwargs=)` (a content hash over every
+unit incl. profile bytes, every store, the residual and weight bytes, the
+period blocks, the sampling parameters and the sim kwargs) must match the
+one the callee recomputes, else `ValueError`. The N+1 baseline is closed
+for every marginal row and the portfolio alike.
+
+**`portfolio.py`** (new). `portfolio_population(n, inputs)`: the members
+are the generators the walk admits whose `p_max_pu` COLUMN is informative
+(`series_is_informative`), for both halves — must-take farms (`kind="vre"`)
+and profiled occurrence units (`kind="generator"`) — with
+`solved_capacity`; zero-capacity members are listed as `unbuilt`, storage
+is out of scope. `elcc_of_portfolio(inputs, members, ...)`: one row per
+period; the removal un-nets every vre member and excludes every generator
+member in one `elcc_of_removal` call per period on one shared baseline and
+one shared Δ = 0 probe; the bracket top is `max_{h∈P} Σ a_{i,h}`, the
+group's physical maximum in the period; a period where that is zero is
+`no_contribution` (never `ok 0.0`). `portfolio_block(...)`: the comparison
+with the last solve's reserve-margin payload, captured IN THE REQUEST with
+the network fingerprint — block statuses `ok | no_population |
+activity_mismatch` (a member with no margin row in a period, or a
+capacity-bearing margin row absent from the snapshot; the engines ignore
+`build_year`/`lifetime`, the margin does not — recorded MC-wide item) `|
+capacity_basis_mismatch` (the payload's built capacity summed by PARENT
+per period ≠ `solved_capacity`; the vintage restore writes the parent's
+`p_nom_opt` as the aggregate) `| stale_report` (the payload's
+`fingerprint` ≠ the snapshot's) `| margin_unavailable` (ELCC rows still
+run; credits null). Per period: `credit_gross_mw = Σ derate × capacity_mw`
+over the payload rows whose parent is a member, `credit_net_mw` the same
+with `derate_net` where present, null unless the period's net window is
+`ok`. The reserve-margin payload gains `fingerprint` (`network_fingerprint(n)`
+at the report step: generator names, capacities, every `p_max_pu` column,
+loads, storage sizes).
+
+**§4, amended.** `McRequest.elcc_portfolio: bool | None`; the result gains
+the SIBLING key `elcc_portfolio` (never a row in `elcc`; `null` when not
+requested); the POST echoes the flag. Cost: one shared baseline plus
+`n_periods × ~10` full evaluations.
+
+**§5, amended.** A toggle beside the picker; a block under the ELCC table
+with one row per period and THREE MW figures (group peak, portfolio ELCC,
+margin credit gross / net-load window) and no ratio; every refusal renders
+with the engine's reason; the sentence: *"The margin credits this group by
+its peak-window mean × (1 − q); the sampler prices the same group by the
+firm block that restores its own loss-of-load. Two standards, neither a
+correction of the other."*
+
+**§6, amended.** `tests/test_adequacy_portfolio.py` (B1–B13 as numbered
+in the plan) and four `McPanel` cases; live S26.
+
+## Amendment v1.7 — activity and vintages (Phase 12d)
+
+**§2.1, amended — capacity is per period.** For a component row `i` and a
+period block `P` (`activity.period_blocks`, formerly `mc._period_blocks`):
+
+    c_{i,P} = cap_i · [i active in P]                             (plain row)
+    c_{i,P} = initial_i · [parent active in P]
+            + Σ_v opt_v · [by_v ≤ P < by_v + lt_v] · [parent.active]   (vintage-expanded parent)
+
+`cap_i = solved_capacity(row)`; `[i active in P]` is PyPSA's own
+`get_active_assets(P)` (the static `active` column alone for `"ALL"`) —
+`activity.active_mask`, the SAME call the reserve margin's `_active` now
+delegates to. The vintage line reads the persisted breakdown
+`n.meta["vintage_results"][cls][parent]` (`initial_capacity`; per vintage
+`build_year`, `p_nom_opt`, and `lifetime`, which the restore now persists
+and which falls back to the parent's finite positive lifetime, else `inf`),
+used only when `initial + Σ opt == p_nom_opt(parent)` (rel 1e-9 / abs
+1e-6); the myopic strategy's `source: "myopic_freeze"` entries are
+breakdowns under the same rule; `apply_vintage_bounds` clears its own
+entries at every solve start so a re-solve without bounds cannot keep one.
+
+`CoptUnit.capacity_series` / `StorageSpec.capacity_series`: the `(H,)` MW
+series `c_{i,P(h)}`, `None` when constant at `capacity_mw = max_P c_{i,P}`
+(`p_nom_mw` for a store) — the scalar path, byte for byte. Membership is
+NOT per period: a row is in the fleet when `cap_max > 0` (or under
+`keep_zero_capacity`), so the CRN substreams survive a solve that changes
+what is active. `_membership_walk` yields `(g, cap_max, capacity_series,
+row)` and every consumer reads that one walk. The residual nets a must-take
+at `p_max_pu_h × c_h`; `vre_profiles` preserve the same product.
+
+**§2.3, amended.** `sample_capacity`: the column is `(profile or 1) ×
+capacity_series` when a series is present — same `np.add(where=)`
+broadcast, chain and consumption untouched; an all-zero block is
+bit-identical to excluding the unit there (E3).
+
+**§2.4, amended.** `_simulate_blocks`: per block, each store enters at its
+capacity in the block (dropped at 0, energy bound following the power
+fraction); without a store series the arrays are the fleet as built, once.
+
+**§3, amended.** `unit_nameplate_mw` is the best ACTIVE hour,
+`max_h(profile_h × c_h)`; `baseline_key` hashes the capacity series of
+every unit and store; `elcc_of_removal` is unchanged.
+
+**COPT (design §3.1).** `screening_analysis` evaluates the fleet PER BLOCK
+when any unit carries a series (one table per block at the block's scalar
+capacities, profile sliced; exact for piecewise-constant capacity), merging
+LOLE/EUE by sum, `lolp_max` by max, `by_period` by union, criticality rows
+by name (ΔEUE and € summed, severity recomputed), the split de-duplicated
+(`netted` if netted in any block, else `mixed`), `dist`/`residual` as dicts
+keyed by block; with no series it is the single-block path it was.
+
+**`portfolio.py`, amended.** `Member.capacity_by_period`; the activity
+check refuses only a member the engines count in a period the margin has
+no row for (`c_P > 0`); the capacity check compares the by-parent aggregate
+with `c_P`; `activity_mismatch` stays reachable as a tripwire (a credited
+row the snapshot does not know). `network_fingerprint` adds the static
+`active` columns, storage `build_year`/`lifetime`, and the persisted
+breakdown.
+
+**§4, amended.** `/results/copt` and the MC result carry `activity:
+{by_period: {label: {inactive: [names], partial: [names]}}, note}` —
+`activity.activity_summary(n, blocks)`, which reads the NETWORK (the
+membership walk plus an `ActivityContext` over both frames), not the sampled
+fleet: a must-take farm commissioned later and any row masked in every period
+are absent from the fleet and are exactly the cases worth disclosing
+(shipped-code review, finding 1). A row is listed only when
+`solved_capacity > 0` — unbuilt is not masked. `note` null when nothing is
+masked. Both routes compute it under the lock. The loops' `_hash` is
+`coupling.snapshot_hash`, which hashes the series. `network_fingerprint` is
+VERSIONED (`v2:<hex>`) and `stale_report` distinguishes an earlier engine
+version from a changed network, because 12d moved every network's digest and
+the margin payload is persisted per project (finding 4).
+
+**§5, amended.** One chip on the COPT card (`copt-activity-note`) and on
+the MC panel (`mc-activity-note`): "n inactive in P, m partial in P", the
+sentence as title.
+
+**§6, amended.** `tests/test_adequacy_activity.py` (E1–E12 as numbered in
+the plan, every ★ bitten); B12 rewritten; live S27.
+
+## Amendment v1.8 — every study can be stopped; the attribution costs less (Phase 12e)
+
+**§4, amended — the abort surface.** All five studies now carry a
+`stop_event` and a `POST /results/{key}/abort` route with the loop routes'
+contract: body `{"status", "aborting"}`, 200 and idempotent even when the run
+is finishing or finished, 404 only when no run was ever recorded. The three
+new records' GETs filter `("thread", "stop_event")` — the event is a
+`threading.Event` and a GET that serialises it 500s on every poll.
+`ABORTABLE_STUDIES` is all five keys, so the blocked-action refusal is one
+sentence again; `blocking_study_detail` had offered an abort for all five
+since Phase 7, and that is true for the first time here.
+
+**The flag is cooperative and it is a `break`, never an exception.**
+`run_contingency_sweep`'s closing base re-solve sits OUTSIDE its
+`try/finally`, so an exception would skip the restore and leave the network
+on the last contingency. That re-solve is now guarded like the frontier's and
+reports `base_restored` plus the solver's own status — `True` never meant
+"the plan is back", only "it did not raise". `run_frontier_sweep` gains
+`aborted`; `run_class_b_sweep` / `run_class_c_sweep` skip ids a partial
+result dict does not carry (previously `KeyError`, surfaced as an opaque
+`failed`); `/results/fmea_modes` accepts `("done", "aborted")`, so an aborted
+sweep's rows still reach the worksheet. The three workers take the loops'
+pattern: a closed-over record, `copy_context()`, and publish-and-start under
+one `get_solver_state_lock()` hold.
+
+**Where the flag may NOT go.** `mc_adequacy(..., stop_event=None)` is
+honoured only for the `/mc` worker's own baseline. `elcc_of_removal`,
+`elcc_of_portfolio` and both certifying loops pass `None` explicitly: they
+call it to REPLAY a baseline's batch sequence bit for bit, and a truncated
+candidate measured against a full-budget baseline breaks common random
+numbers and returns a wrong `elcc_mw` with `status="ok"` — which
+`baseline_key` cannot catch, because it hashes the arguments and never the
+result. The check sits at the BOTTOM of the batch loop (at the top the
+per-period lists are empty and `np.concatenate` raises), between ELCC assets,
+between portfolio periods, and INSIDE the bisection `while` after both
+bracket ends are probed. A stopped bisection returns `status="aborted"` with
+`elcc_mw=None` and the bracket in its `reason` — the row's nine keys are a
+closed set. A stopped portfolio sets a boolean `truncated` on the block
+rather than a status, because `status` already carries refusals that coexist
+with real period rows.
+
+**§3.3 (COPT attribution), amended — two independent changes.**
+
+*`attribute_criticality` no longer calls `deconvolve`.* On the fleets measured
+(n = 2…300, q = 0.02…0.499, Δ = 1 MW and MW-scale capacities) the rebuild is
+3.3–5× faster, and it is the accurate side. `deconvolve` accepts any table
+whose mass lands in `0.999 ≤ total ≤ 1.001`; that guard bounds the table's
+MASS, and **no bound on the resulting ΔEUE error follows from it** — an
+earlier revision of this section presented `1e-3` as if it were such a bound,
+which it is not. What is known is measured: the largest relative ΔEUE
+disagreement observed between the two routes is **3.8e-5**, on 45 × 100 MW at
+q = 0.05 with the residual at full nameplate, where the deconvolved table
+carries 7.2e-4 of surplus mass. This CHANGES numbers, and the rebuild is the
+kept side. `deconvolve` remains public for its round-trip test.
+
+*The counterfactual evaluations are binned when `k ≥ 2`.*
+`ES_d(x) = x·F_d[j] − Δ·G_d[j]` with `j = clip(ceil(x/Δ − ε), 0, n_d)`, and
+the cells depend only on the residual and the mixed units — so they are
+binned once (`A[j] = Σ P[s]·w_h·x`, `B[j] = Σ P[s]·w_h`) and each
+counterfactual is a dot product, cells beyond a shorter table folded into its
+last index exactly as `clip` does. Exact: measured worst rel 6.2e-13 across
+off-grid, Δ ≠ 1, empty-table, fold and mixed+netted fixtures. The switch is
+CONSTANT-FREE (`BIN_MIN_MIXED = 2`) because the crossover is not a fixed
+ratio — the direct path costs `α + β·H` per state with a large fixed `α`, so
+the implied crossover measured from ~10 at k = 0 to >210 at k = 3 on one
+machine; `k ≥ 2` gives up at most 0.14 s anywhere in a 60-point sweep. Netted
+units keep the direct path (their counterfactual shifts the residual, so it
+changes every cell and would need its own binning pass). Their ΔEUE is
+therefore ASYMMETRIC on a binned call — `base_binned − perfect_direct`, one
+side from each evaluator — which is sound only because the binning is exact
+and not an approximation; were it ever approximate, that subtraction would
+carry the error with nothing to cancel it. F2i pins the netted rows against a
+fully-direct reference on a binned fixture. Rows
+sort on `(-ΔEUE, name)` here and at the 12d block merge, so exactly-tied rows
+order identically; `/fmea_modes` keeps its own key,
+`(-criticality_eur_per_year, mode_id)`, because that is the quantity it ranks
+on and mixes classes whose criticality is not monotone in ΔEUE.
+
+Measured end to end at 8760 h: 300 units / 0 profiled **12.2 → 4.2 s**;
+300 / 8 profiled **37.8 → 4.3 s**; 100 units 1.0 → 0.25 s and 9.9 → 0.58 s.
+The floor is now the O(n²·L) rebuild, recorded as the next cost item.
+
+**§6, amended.** `tests/test_adequacy_abort.py` (F1, F1b, F1b2, F1b3, F1c,
+F1e, F1f–F1f4, F1g) and `tests/test_adequacy_copt_cost.py` (F2 ×5, F2b, F2c,
+F2c2, F2d, F2e, F2f, F2g); live S28.

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { Plus, Trash2, AlertCircle, Leaf, ArrowRight } from 'lucide-react'
 import { simulationApi } from '../api/simulation'
+import { ensTargetWarning, RESERVE_MARGIN_CAVEAT } from './results/adequacy'
 import { networkApi } from '../api/network'
 import type { SolverConfig } from '../api/types'
 import { useUIStore } from '../store/uiStore'
@@ -1651,7 +1652,10 @@ function Co2PricePerPeriod({
 // ReliabilityAssumptions lives under the Network tab. Single field (VOLL) —
 // when > 0 the backend injects a slack 'load_shedding' generator on every bus,
 // so the LP can drop demand instead of failing when supply is tight.
-function ReliabilityAssumptions({
+// Exported so the reserve-margin field and its ★ caveat can be rendered (and
+// tested) without mounting the whole settings page: this component is pure
+// `(draft, patch)` with no hooks of its own.
+export function ReliabilityAssumptions({
   draft, patch,
 }: {
   draft: SolverConfig
@@ -1678,6 +1682,100 @@ function ReliabilityAssumptions({
           Lost-load energy + cost surface in the Results → LoadFlow tab when
           this is set and the LP actually sheds.
         </p>
+
+        {/* ── Reliability target (adequacy spec §5.1) ─────────────── */}
+        <div className="mt-3 pt-3 border-t border-border">
+          <NumberField
+            label="ENS target"
+            unit="‱ of demand"
+            value={draft.ens_cap_permyriad ?? 0}
+            step={0.1}
+            min={0}
+            onChange={v => patch({ ens_cap_permyriad: v > 0 ? v : null })}
+            hint="Caps unserved ELECTRICAL energy per investment period at this share (parts per ten thousand) of the period's demand. 0 = off. Adequate systems run ~0.1–1‱; GB's standard is 3 loss-of-load hours/yr. Requires a VOLL > 0."
+          />
+          {ensTargetWarning(draft.ens_cap_permyriad) && (
+            <p className="text-[10px] text-danger mt-1">
+              {ensTargetWarning(draft.ens_cap_permyriad)}
+            </p>
+          )}
+          <NumberField
+            label="Per-zone ceiling multiple"
+            unit="× target"
+            value={draft.ens_zone_cap_multiple ?? 0}
+            step={0.5}
+            min={0}
+            onChange={v => patch({ ens_zone_cap_multiple: v > 0 ? v : null })}
+            hint="Optional backstop so no single zone (bus `country`) absorbs the whole allowance: each zone's unserved energy ≤ multiple × target on its OWN demand. 3× is a reasonable default. With every bus's country blank, this collapses into a second system cap (the solver log says so)."
+          />
+          {/* ── Firm capacity (planning reserve margin), Phase 8 §1 ── */}
+          <NumberField
+            label="Reserve margin"
+            unit="fraction of peak"
+            // `?? 0` and the `> 0 ? v : null` below mirror the ENS target
+            // exactly: an unset knob is null on the wire (the backend's
+            // `reserve_margin: float | None`), and 0 is the same thing said
+            // out loud — the wrapper returns `user_fn` unchanged at ≤ 0.
+            value={draft.reserve_margin ?? 0}
+            step={0.05}
+            // The schema's own bounds (`ge=0, le=5`). Clamping here is not a
+            // duplicate of the backend check but its complement: an entry of
+            // 9 is a typo, and a 422 three clicks later is a worse way to
+            // learn that than a field that will not hold the number.
+            min={0}
+            max={5}
+            onChange={v => patch({ reserve_margin: v > 0 ? v : null })}
+            hint="Derated firm capacity must cover (1 + margin) x each active period's peak demand. 0.15 = 15%. 0 = off. Thermal units are credited at (1 - outage rate) x availability, must-take renewables at their mean output over the period's peak hours, storage with a duration haircut; a unit with neither outage data nor an availability profile is not credited at all and preflight says so."
+          />
+          {/* ★ The caveat is not decoration. A margin field with no caveat
+              sells its own output as a reliability result: the standard is
+              met by arithmetic over derating factors the user mostly did not
+              enter, and nothing on this path samples an outage. */}
+          <p
+            className="text-[10px] text-muted mt-1"
+            data-testid="reserve-margin-caveat-setting"
+          >
+            {RESERVE_MARGIN_CAVEAT}
+          </p>
+        </div>
+
+        {/* ── Demand-response tier (spec §4.4) — opt-in, never global ── */}
+        <div className="mt-3 pt-3 border-t border-border">
+          <NumberField
+            label="Demand-response price"
+            unit="€/MWh"
+            value={draft.dsr_price_eur_per_mwh ?? 0}
+            step={10}
+            min={0}
+            onChange={v => patch({ dsr_price_eur_per_mwh: v })}
+            hint="Contracted compensation for voluntary load reduction — a RESOURCE, priced well below VOLL and never counted as unserved energy. 0 = off."
+          />
+          <NumberField
+            label="DSR volume"
+            unit="share of bus peak"
+            value={draft.dsr_share_of_load ?? 0}
+            step={0.05}
+            min={0}
+            max={1}
+            onChange={v => patch({ dsr_share_of_load: v })}
+            hint="Each opted-in bus gets DSR capacity = share × its peak load (e.g. 0.2 = 20%)."
+          />
+          <label className="flex flex-col gap-0.5 mt-1.5">
+            <span className="text-[10px] text-muted">
+              DSR buses (comma-separated; opt-in — the tier is never applied
+              globally, and preflight warns where a bus already models
+              flexibility)
+            </span>
+            <input
+              className="bg-bg border border-border rounded px-2 py-1 text-xs font-mono text-text focus:outline-none focus:border-accent"
+              value={(draft.dsr_buses ?? []).join(', ')}
+              onChange={e => patch({
+                dsr_buses: e.target.value.split(',').map(x => x.trim()).filter(Boolean),
+              })}
+              placeholder="bus1, bus2"
+            />
+          </label>
+        </div>
       </div>
     </section>
   )
@@ -2144,8 +2242,14 @@ function Stage2Panel({
 // Small numeric input with label + unit + (?) tooltip. Local to this file
 // because it has slightly different sizing than the generic NumInput used
 // in the right Properties panel — denser, full-width, two-line layout.
+// `min`/`max` are OPTIONAL and clamp on the way out, not just on the input
+// element. The HTML attributes alone are cosmetic here: a typed out-of-range
+// value still fires onChange and still reaches the store, so a field with only
+// `min={0}` would happily ship -1 to the backend. Callers that pass bounds get
+// a value guaranteed inside them; callers that pass none behave exactly as
+// before.
 function NumberField({
-  label, unit, value, step, onChange, hint,
+  label, unit, value, step, onChange, hint, min, max,
 }: {
   label: string
   unit?: string
@@ -2153,6 +2257,8 @@ function NumberField({
   step?: number
   onChange: (v: number) => void
   hint?: string
+  min?: number
+  max?: number
 }) {
   return (
     <label className="flex flex-col gap-1">
@@ -2170,9 +2276,14 @@ function NumberField({
         type="number"
         value={value}
         step={step ?? 0.01}
+        min={min}
+        max={max}
         onChange={e => {
-          const v = parseFloat(e.target.value)
-          onChange(Number.isFinite(v) ? v : 0)
+          const raw = parseFloat(e.target.value)
+          let v = Number.isFinite(raw) ? raw : 0
+          if (min !== undefined) v = Math.max(min, v)
+          if (max !== undefined) v = Math.min(max, v)
+          onChange(v)
         }}
         className="px-2 py-1 border border-border rounded text-xs font-mono bg-bg focus:outline-none focus:border-accent"
       />

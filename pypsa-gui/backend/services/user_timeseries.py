@@ -23,6 +23,7 @@ from __future__ import annotations
 import io
 import math
 import threading as _ts_threading
+import numpy as _np
 import pandas as pd
 from fastapi import HTTPException
 from services.pypsa_service import PyPSAService
@@ -872,3 +873,83 @@ def _parse_upload(content: bytes, filename: str) -> pd.DataFrame:
     df = df[df.index.notna()]          # drop rows that didn't parse
     df.index.name = "timestamp"
     return df
+
+
+def _attribute_default_is_finite(component: str, attribute: str) -> bool:
+    """Whether PyPSA's class default for ``attribute`` is a finite number —
+    the rule that decides if a NaN there is corrupt (refuse) or the documented
+    "not set at this hour" (pass). ``component`` may be the list name
+    (``generators``) or the class name (``Generator``); PyPSA's component
+    registry resolves both. Unknown component or attribute → True, so an
+    attribute the metadata does not describe is still refused.
+    """
+    try:
+        n = PyPSAService.get_network()
+        d = n.components[component].defaults
+        if attribute not in d.index:
+            return True
+        return math.isfinite(float(d.at[attribute, "default"]))
+    except Exception:                                         # noqa: BLE001
+        return True
+
+
+def _reject_nonfinite_timeseries(df, component: str, attribute: str) -> None:
+    """Phase 12f: a time series with a non-finite cell is corrupt input, and it
+    is refused here rather than repaired later.
+
+    A NaN or ±inf in a `_pu` bound does not clamp anything — linopy MASKS that
+    constraint row out of the LP, so a 100 MW unit can dispatch 500 MW, and a
+    NaN `p_min_pu` hour will run a generator as a −900 MW load. There is no
+    honest repair value: `p_max_pu`'s default is 1.0 but an asset's own static
+    ceiling may be 0.4, and picking either silently rewrites the user's model.
+
+    Scoped by the SAME rule as the preflight: refuse where the attribute's
+    PyPSA class default is finite, because there NaN has no meaning — and
+    that is not only the five bounds: `Load.p_set` defaults to 0.0 and a NaN
+    demand hour masks that snapshot's nodal balance. Where the class default
+    IS NaN, NaN is the documented way to say "not fixed here" and must pass:
+    `ramp_limit_*` ("no ramp limit"), `Generator.p_set`/`Link.p_set` ("fix
+    dispatch at the other hours only"), `StorageUnit.state_of_charge_set`. The
+    first version refused every column and so blocked all three; the
+    shipped-code review measured each solving `optimal` with the NaN hours in
+    place. An attribute the component metadata does not know is refused, as
+    before. JSON carries both `null` (→ NaN via pandas) and the `Infinity`
+    literal, which is why the test is `isfinite` and not `isnan`.
+
+    Raises 422 naming the column and the first offending row labels, so the
+    user can find them. Called from the handler BODY at every write path
+    rather than as a dependency: the chat tools invoke these handlers directly,
+    and a FastAPI `Depends()` would be bypassed.
+    """
+
+    if df is None or not len(getattr(df, "columns", [])):
+        return
+    # A duplicated column label makes `df[col]` a DataFrame, and the row
+    # lookup below would then raise IndexError — a 500 where the user is owed
+    # a 422. `read_csv` mangles duplicates, so only the JSON PUT can send one.
+    if not df.columns.is_unique:
+        dups = sorted({str(c) for c in df.columns[df.columns.duplicated()]})
+        raise HTTPException(
+            422,
+            f"{component}.{attribute}: duplicate column label(s) "
+            f"{', '.join(dups)}. Each asset may appear once.")
+    if not _attribute_default_is_finite(component, attribute):
+        return
+    for col in df.columns:
+        try:
+            vals = df[col].to_numpy(dtype=float)
+        except (TypeError, ValueError):
+            continue
+        bad = ~_np.isfinite(vals)
+        if not bad.any():
+            continue
+        labels = [str(x) for x in df.index[bad][:5]]
+        more = " …" if int(bad.sum()) > 5 else ""
+        raise HTTPException(
+            422,
+            f"{component}.{attribute}: column '{col}' has {int(bad.sum())} "
+            f"non-finite value(s) (null, NaN or Infinity) at {', '.join(labels)}"
+            f"{more}. A time series must be finite at every snapshot: PyPSA "
+            "does not fall back to a default for a missing hour, it drops the "
+            "constraint, leaving the asset unbounded there. Supply a value for "
+            "every snapshot, or shorten the series and the horizon to match.")

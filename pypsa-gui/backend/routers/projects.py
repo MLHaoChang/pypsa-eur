@@ -75,7 +75,19 @@ PROJECTS_DIR = pathlib.Path(get_settings().flat_projects_root)
 # it is NEVER part of the network model / network API: it is pure
 # presentation state, decoupled from the geographic bus.x/y the map view and
 # clustering consume.
-_BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.json", "layout.json", "results_state.pkl")
+# `adequacy_worksheet.json` (the user-authored FMEA worksheet: expert rows +
+# overlays) and `adequacy_stress_scenarios.json` (the stress-scenario
+# registry) are per-project sidecars the adequacy routes write beside the
+# network. Whole-branch review, finding S7: they were NOT in this tuple, so a
+# bundle export/import, a project snapshot and a scenario fork all silently
+# dropped them — the shared bundle arrived with an empty worksheet and no
+# stress scenarios, and a snapshot restore could not bring them back. Every
+# loop over this tuple tolerates an absent file, so an older bundle or
+# snapshot without them still imports. Literals rather than the services'
+# `SIDECAR_NAME` constants (a router-level import of the adequacy services
+# is a cycle waiting to happen); `test_bundle_sidecars` pins them equal.
+_BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.json", "layout.json", "results_state.pkl",
+                 "adequacy_worksheet.json", "adequacy_stress_scenarios.json")
 
 # Per-project subdirectories that travel alongside the bundle FILES on every
 # project-to-project transition. Chatbot uploads (Phase A) live here under
@@ -858,6 +870,12 @@ async def import_bundle(
     not interpret ``import_bundle`` as a value for the ``name`` path parameter
     of the save endpoint (which would silently call save_project).
     """
+    # ★ Precheck BEFORE any destructive work (Phase 11 review).
+    # The guard inside `reset_network` fires too late here: by then this
+    # route has already committed the project row and written its files. Worse, the retry the
+    # refusal advises then fails FOREVER, because the committed row makes
+    # every attempt 409 with "already exists" instead.
+    PyPSAService.refuse_if_study_running("import a project bundle")
     from services.upload_guard import read_capped
     data = await read_capped(file)
 
@@ -962,7 +980,7 @@ async def import_bundle(
         PyPSAService.reset_network()
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
-            n.import_from_netcdf(str(nc_path))
+            PyPSAService.import_network_from_netcdf(n, nc_path)
         # Bind identity atomically with the swap (see load_project for the
         # rationale on why this must be inside the lock, not after).
         project_registry.bind_context(
@@ -1134,6 +1152,12 @@ def create_from_template(
     MUST be registered before `POST /{name}` so FastAPI does not interpret
     `from_template` as a value for the `name` path parameter of save_project.
     """
+    # ★ Precheck BEFORE any destructive work (Phase 11 review).
+    # The guard inside `reset_network` fires too late here: by then this
+    # route has already committed the project row and written its files. Worse, the retry the
+    # refusal advises then fails FOREVER, because the committed row makes
+    # every attempt 409 with "already exists" instead.
+    PyPSAService.refuse_if_study_running("create a project from a template")
     if template_id not in _TEMPLATE_DEFAULT_NAMES:
         raise HTTPException(
             404,
@@ -1168,7 +1192,7 @@ def create_from_template(
         PyPSAService.reset_network()
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
-            n.import_from_netcdf(str(dest / "network.nc"))
+            PyPSAService.import_network_from_netcdf(n, dest / "network.nc")
         # Bind identity atomically with the swap (see load_project rationale).
         project_registry.bind_context(
             PyPSAService.get_active_context(), _created_project
@@ -1262,6 +1286,10 @@ def save_project(
     from services import project_acl, project_registry
 
     project_registry.require_user(user)
+    # Refused BEFORE `create_root`, which commits a project row: a refusal
+    # after it would leave the row behind and the retry would fail with
+    # "already exists" — the Phase 11 review's own finding, in the save path.
+    _refuse_save_during_study(PyPSAService.get_active_context())
     project = project_registry.find_project(db, user, name)
     if project is None:
         # First save of a new project — register a root row in the DB.
@@ -1313,6 +1341,43 @@ def save_project(
         undo_service.clear()
     return result
 
+
+
+def _study_in_flight_detail(state, doing: str) -> dict | None:
+    """The structured 409 for an action a live study forbids, or None.
+
+    Whole-branch review, findings S5 and M12. Save and activate gated on
+    `_solver_in_flight` only — a study's worker is never `state["thread"]` —
+    while load, import, template and reset were guarded (Phase 11). A save
+    landing between a sweep's lock-free contingency mutations exported the
+    CONTINGENCY network, and its `results_state.pkl` with the contingency's
+    lost load, as the user's project; and a switch left the study running on
+    a project the user could no longer see or abort. Same shape as the
+    in-flight refusal so the chat agent and the frontend read one field.
+    """
+    from services.project_context import STUDY_LABELS, running_study_key
+    key = running_study_key(state)
+    if key is None:
+        return None
+    label = STUDY_LABELS.get(key, key)
+    verb = doing.split()[0]
+    return {
+        "error_kind": "study_in_flight",
+        "study": key,
+        "message": (
+            f"Cannot {doing} while {label} is running — it re-solves the "
+            "in-memory network between its own iterates (a sweep applies each "
+            "contingency in turn; a loop re-solves under each candidate), so "
+            f"a {verb} now would act on a mid-study plan rather than yours. "
+            "Wait for it to finish, or abort it, and retry."
+        ),
+    }
+
+
+def _refuse_save_during_study(ctx) -> None:
+    detail = _study_in_flight_detail(ctx.solver_state, "save the project")
+    if detail:
+        raise HTTPException(status_code=409, detail=detail)
 
 def _check_save_allowed(
     ctx,
@@ -1516,6 +1581,7 @@ def _save_context(
                 ),
             },
         )
+    _refuse_save_during_study(ctx)
 
     # `storage_dir` (auth mode) is a pre-resolved org-scoped path; legacy mode
     # falls back to the flat `PROJECTS_DIR / name`.
@@ -1540,6 +1606,11 @@ def _save_context(
     # netcdf_io_lock INNER — the documented order) to keep the HDF5 write
     # serialised against concurrent compare-state / results-summary reads.
     with ctx.mutation_lock:
+        # Fix review, F2: re-checked INSIDE the lock the export holds. The
+        # gate above is the cheap early refusal; `_publish_study` takes this
+        # same lock to publish, so a study that was not live here cannot
+        # become live until the export below has finished.
+        _refuse_save_during_study(ctx)
         # `expect` lets a caller assert which project it believes is active
         # (autosave, explicit Ctrl+S). Refuse only when it asserted an identity
         # AND the backend is bound to a genuinely DIFFERENT project. `loaded is
@@ -1570,7 +1641,9 @@ def _save_context(
 
         # Atomic replace so a crash mid-save leaves the previous file intact.
         with PyPSAService.get_netcdf_io_lock():
-            _atomic_write_with(nc_path, lambda p: n.export_to_netcdf(str(p)))
+            _atomic_write_with(
+                nc_path,
+                lambda p: PyPSAService.export_network_to_netcdf(n, p))
 
         # Bind/claim — atomic with the export, keyed off the binding read at the
         # top of THIS lock block (it can't have changed; we hold the lock
@@ -1895,7 +1968,7 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
     nc_path = src / "network.nc"
     with ctx.mutation_lock:
         with PyPSAService.get_netcdf_io_lock():
-            ctx.network.import_from_netcdf(str(nc_path))
+            PyPSAService.import_network_from_netcdf(ctx.network, nc_path)
         ctx.loaded_project = name
 
     # Solver config (legacy-tolerant; default when absent).
@@ -2034,6 +2107,15 @@ def activate_project(
                     ),
                 },
             )
+    # A study on the current project is the same refusal `GET /{name}` (load)
+    # already makes (M12): switching would leave it running on a project the
+    # user can neither see nor abort, and the eviction it can then suffer
+    # would save a mid-study network. The study's own sentence, so the user
+    # can abort it by name.
+    _study = _study_in_flight_detail(PyPSAService.get_solver_state(),
+                                     "switch projects")
+    if _study:
+        raise HTTPException(status_code=409, detail=_study)
 
     evicted: list[str] = []
     if PyPSAService.get_context(registry_id) is not None:
@@ -2140,6 +2222,13 @@ def load_project(
     if not nc_path.exists():
         raise HTTPException(404, f"Project '{name}' not found")
 
+    # ★ Precheck BEFORE any destructive work (Phase 11 review, BLOCKER 3b).
+    # The guard inside `reset_network` fires too late: by then this route
+    # has already called `undo_service.clear()`, so a REFUSED load destroys
+    # the undo history of the project the user is still looking at. Placed
+    # after the 404 so a missing project is still reported as missing.
+    PyPSAService.refuse_if_study_running("load a project")
+
     # Crash-recovery surface. `_atomic_write_with` renames `.tmp → final` as
     # the last step; a `.tmp` sibling means a prior save was killed mid-write.
     # The main file is still the previous good version, but warn so the user
@@ -2164,7 +2253,7 @@ def load_project(
         PyPSAService.reset_network()
         n = PyPSAService.get_network()
         with PyPSAService.get_netcdf_io_lock():
-            n.import_from_netcdf(str(nc_path))
+            PyPSAService.import_network_from_netcdf(n, nc_path)
         # Bind identity atomically with the swap — inside the SAME lock that
         # `reset_network()` just set to None. Otherwise a concurrent save could
         # observe the transient unbound state (loaded is None) and wrongly

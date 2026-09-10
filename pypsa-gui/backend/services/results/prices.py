@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 
+from services.adequacy import slack as _slack
 from services.serialization import (
     safe_values as _safe_values,
     slice_ts as _slice_ts,
@@ -261,7 +262,10 @@ def compute_price_drivers(n, threshold, limit):
                         continue
                     mc = float(gens.at[g, "marginal_cost"]) if "marginal_cost" in gens.columns else 0.0
                     carrier = str(gens.at[g, "carrier"]) if "carrier" in gens.columns else ""
-                    if g.startswith("__voll_") or carrier == "load_shedding":
+                    # Membership tests via the shared convention owner
+                    # (services/adequacy/slack.py) — also catches the legacy
+                    # voll_slack spellings the AC-PF strip defends against.
+                    if _slack.is_slack_name(g) or _slack.is_slack_carrier(carrier):
                         voll_slack_active = True
                         voll_dispatch = disp
                         # VOLL slack wins unconditionally for diagnosis — any
