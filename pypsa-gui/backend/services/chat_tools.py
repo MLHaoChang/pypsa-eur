@@ -1517,13 +1517,16 @@ def gridspine_get_readback(project_id: str) -> dict:
 def gridspine_fetch_result_figure(project_id: str, hour: int, name: str) -> dict:
     from services.gridspine_service import fetch_result_figure as _h
     with _acting() as (db, user):
-        return _h(_gridspine_project(db, user, project_id), name, int(hour))
+        # `hour` goes through UNCOALESCED: the service owns the 422 for an
+        # unparseable one, and `int()` here would raise before it could answer.
+        return _h(_gridspine_project(db, user, project_id), name, hour)
 
 
 def gridspine_export_handoff_bundle(project_id: str, hour: int) -> dict:
     from services.gridspine_service import export_handoff_bundle as _h
     with _acting() as (db, user):
-        path = _h(_gridspine_project(db, user, project_id), int(hour))
+        # Pass-through, as above: the service answers 422 on a bad hour.
+        path = _h(_gridspine_project(db, user, project_id), hour)
         return {"path": str(path), "filename": path.name, "bytes": path.stat().st_size}
 
 

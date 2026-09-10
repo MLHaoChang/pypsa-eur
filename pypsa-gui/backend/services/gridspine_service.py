@@ -618,7 +618,7 @@ def export_handoff_bundle(project, hour: int) -> Path:
     """Zip one selected hour's bundle. Returns the path; the download is the
     router's business."""
     require_planning(project)
-    hour = int(hour)
+    hour = _hour(hour)
     bundle = run_dir(project) / f"bundle_h{hour}"
     if not (bundle / "manifest.json").is_file():
         raise HTTPException(
@@ -633,10 +633,27 @@ def export_handoff_bundle(project, hour: int) -> Path:
     return target
 
 
+def _hour(value) -> int:
+    """A bundle hour as an int, or 422.
+
+    Every hour-taking action used to coerce with a bare `int()`. The ROUTER is
+    safe either way — its `hour: int` path parameter is validated by FastAPI
+    before the handler runs — but the copilot calls these functions directly
+    with whatever the model produced, so a bare `int()` turned "next hour" into
+    a ValueError three frames down and a 500 where the action layer owes a 422.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=422, detail=f"hour must be a whole number, not {value!r}",
+        ) from None
+
+
 def uploads_dir(project, hour: int) -> Path:
     """`<project dir>/gridspine/uploads/h<hour>`, created: where the engineer's
     PowerFactory exports land before the driver reads them into the bundle."""
-    path = gridspine_dir(project) / "uploads" / f"h{int(hour)}"
+    path = gridspine_dir(project) / "uploads" / f"h{_hour(hour)}"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -661,7 +678,7 @@ def upload_readback(project, hour: int, bus_csv: bytes, bus_name=None,
     did not converge, a wrong header, a bus or branch set that disagrees) are
     422 with the driver's message — they are the engineer's to fix."""
     require_planning(project)
-    hour = int(hour)
+    hour = _hour(hour)
     target = uploads_dir(project, hour)
     bus_path = target / _safe_filename(bus_name, "pf_bus.csv")
     bus_path.write_bytes(bus_csv)
@@ -691,7 +708,7 @@ def fetch_result_figure(project, name: str, hour: int) -> dict:
     bundle 404."""
     require_planning(project)
     try:
-        return _result_figure(run_dir(project), int(hour), name)
+        return _result_figure(run_dir(project), _hour(hour), name)
     except ContractError as exc:
         status = 404 if "no handoff bundle" in str(exc) else 422
         raise HTTPException(status_code=status, detail=str(exc)) from exc

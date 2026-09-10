@@ -239,8 +239,17 @@ def test_update_config_forwards_only_the_fields_the_model_set(study, monkeypatch
 
 
 def test_the_figure_tool_passes_name_and_hour_in_the_services_order(study, monkeypatch):
+    """Argument ORDER is the point here — the tool takes (hour, name) and the
+    service takes (name, hour), so a positional slip silently swaps them.
+
+    `hour` is forwarded UNCOALESCED. It used to be `int(hour)` here, which put
+    the coercion in the wrapper: a model sending "next" then raised ValueError
+    before the action layer could answer, which is a 500 where a 422 is owed.
+    `gridspine_service._hour` owns that now, so this asserts pass-through —
+    `test_gridspine_service.py` asserts the 422 on the other side of the seam.
+    """
     seen = {}
     monkeypatch.setattr(gs, "fetch_result_figure",
                         lambda project, name, hour: seen.update(name=name, hour=hour) or {})
     chat_tools.DISPATCHERS["gridspine_fetch_result_figure"](project_id="Chat Study", hour="19", name="branch_p")
-    assert seen == {"name": "branch_p", "hour": 19}
+    assert seen == {"name": "branch_p", "hour": "19"}

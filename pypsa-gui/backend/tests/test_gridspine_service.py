@@ -324,6 +324,50 @@ def test_a_dispatch_source_needs_an_acting_user(study, user_and_db, ran):
         assert "acting user" in str(exc.value.detail)
 
 
+@pytest.mark.parametrize("bad_hour", ["next", "", None, "1.5", "0x10", "  "])
+def test_an_unparseable_hour_is_refused_rather_than_crashing(study, user_and_db, bad_hour):
+    """Every hour-taking action coerces with `int()`. The ROUTER is safe — its
+    `hour: int` path parameter is validated by FastAPI — but the copilot hands
+    these functions whatever the model produced, so an unparseable hour has to
+    be a 422 from the action layer rather than a ValueError three frames down.
+    """
+    db, _user = user_and_db
+    row = db.get(Project, uuid.UUID(study["id"]))
+    for call in (
+        lambda: gs.export_handoff_bundle(row, bad_hour),
+        lambda: gs.fetch_result_figure(row, "vm", bad_hour),
+        lambda: gs.upload_readback(row, bad_hour, b"bus\n"),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            call()
+        assert exc.value.status_code == 422, (bad_hour, exc.value.detail)
+        assert "hour" in str(exc.value.detail).lower()
+
+
+def test_the_copilot_hands_an_unparseable_hour_to_the_service_untouched(study, monkeypatch, tmp_path):
+    """The chat tools must not coerce the hour themselves: `int(hour)` in the
+    wrapper raises before the service can answer, which is a 500 where the
+    action layer would have said 422. Parity means the tool is a pass-through."""
+    from services import chat_tools
+
+    seen = {}
+    monkeypatch.setattr(gs, "fetch_result_figure",
+                        lambda project, name, hour: seen.update(hour=hour) or {})
+    chat_tools.DISPATCHERS["gridspine_fetch_result_figure"](
+        project_id="Gridspine Study", hour="not-an-hour", name="vm")
+    assert seen["hour"] == "not-an-hour"
+
+    # The real wrapper reads `.name` and `.stat()` off the result, so the stub
+    # has to be a real file; the assertion is about `hour`, not the payload.
+    zipped = tmp_path / "bundle_h0.zip"
+    zipped.write_bytes(b"PK\x05\x06" + b"\0" * 18)
+    monkeypatch.setattr(gs, "export_handoff_bundle",
+                        lambda project, hour: seen.update(bundle_hour=hour) or zipped)
+    chat_tools.DISPATCHERS["gridspine_export_handoff_bundle"](
+        project_id="Gridspine Study", hour="not-an-hour")
+    assert seen["bundle_hour"] == "not-an-hour"
+
+
 def test_a_study_is_not_created_with_a_raw_dispatch_path(user_and_db):
     """`from_dispatch` at creation would store an unauthorized path before the
     project exists to authorize against. Same answer `from_network` gives."""
