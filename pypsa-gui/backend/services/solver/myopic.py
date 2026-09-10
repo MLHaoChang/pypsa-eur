@@ -32,7 +32,8 @@ from services.solver.diagnostics import (
     _log_sclopf_post_solve,
 )
 from services.solver.objective import _rescale_results_for_objective
-from services.solver.runtime import _check_stop
+from services.solver.runtime import _check_stop, ValidationRefused
+from services.validation_service import _check_nonfinite_bounds
 from services.solver.vintage_store import _MYOPIC_VINTAGE_SOURCE, _frozen_vintage_store
 
 
@@ -136,11 +137,11 @@ def _clear_myopic_build_periods(n) -> None:
     """
     Drop `vintage_results` entries left by a PREVIOUS myopic run.
 
-    `apply_vintage_bounds` resets the whole dict at solve start, but it returns
-    early when the user has no per-period bounds — which is exactly the case
-    this feature exists for. Without this, a myopic run's build periods would
-    accumulate across solves and the Capacity Expansion chart would show
-    capacity that is no longer there.
+    `apply_vintage_bounds` clears the entries IT wrote at solve start (Phase
+    12d moved that clear ahead of its early returns), but it never touches
+    entries tagged with a `source` — this function's own. Without this, a
+    myopic run's build periods would accumulate across solves and the
+    Capacity Expansion chart would show capacity that is no longer there.
     """
     meta = getattr(n, "meta", None)
     if not isinstance(meta, dict):
@@ -646,6 +647,15 @@ def _run_myopic_foresight(
                 f"Myopic [{i}/{len(periods)}] period {current_period}: "
                 f"normalised {fixed_idx} stale dynamic index/indexes pre-LP."
             )
+        # Phase 12f: the per-iteration twin of the pre-LP gate in
+        # `run_simulation`. This normalise reindexes to NaN exactly as the
+        # others do, so an iteration can be the first place a bound goes
+        # non-finite. RAISES, never returns: the caller is inside the modelling
+        # assumptions, and the driver's own handler is what unwinds them.
+        _nf = _check_nonfinite_bounds(network)
+        if _nf:
+            raise ValidationRefused(
+                f"at myopic period {current_period}", _nf)
         sns, weight_overrides = _build_iteration_snapshots(
             network, current_period, periods, cfg,
         )

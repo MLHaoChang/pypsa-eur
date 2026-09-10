@@ -187,6 +187,369 @@ than generators, the check that would catch it is `S11.generators.put_partial`
 | S14.9 | Delete without `cascade` is blocked (`409 descendants_exist`) |
 | S14.10 | Cascading delete removes both base and branch |
 
+### S15 — Solution FMEA / adequacy journey (area 15)
+
+Unlike S10–S14 this suite builds its network from scratch over the API
+rather than from the `3bus` template. Its assertions are exact arithmetic
+over particular assets — a generator carrying occurrence data, links to
+trip for class B, a load tight enough that shedding is forced — and a
+template that happened to ship no links would leave the class-B rows
+silently empty, i.e. a suite that passes because it has nothing to check.
+Building explicitly also keeps S15 runnable where template payloads are
+not installed.
+
+Two steps carry an explicit **non-vacuity** guard (`ENS > 0`,
+`shed_hours > 0`). Both first passed while checking nothing: with no
+shedding the S15.7 cost identity reduces to `0 == 0`. The fixture now
+prices the extendable peaker so that shedding beats building it under a
+deliberately loose cap, while the cap the sweep steps re-tighten stays
+feasible because that peaker remains extendable.
+
+| id | Assertion |
+|----|-----------|
+| S15.1 | Scratch project built over the API — every component call 2xx and preflight reports no errors |
+| S15.2 | The API boundary rejects nonsense reliability inputs (`422`): negative ENS cap, negative zone multiple, DSR share > 1, negative DSR price. A negative cap was previously accepted and then silently discarded downstream, making "target of −1" indistinguishable from "no target" |
+| S15.3 | The meaningful range is still accepted, `0` and `None` included — bounding the fields must not break turning the target off |
+| S15.4 | `/api/results/copt` returns a ranked COPT with **no solve at all** once one generator carries occurrence data |
+| S15.5 | Occurrence rate equals its closed form `FOR × 8760 / MTTR` exactly, so a rate conversion off by a factor cannot pass |
+| S15.6 | With a target set, a solve is optimal and `/api/results/adequacy` reports which standard actually bound |
+| S15.7 | **The cost axis excludes shed cost**: `objective − reported cost == ENS × VOLL` exactly, and `excludes_shed_cost is True`. Guarded non-vacuous by `ENS > 0` |
+| S15.8 | Shed-hours reaches `/api/results/lost_load` and agrees with the adequacy report — the two surfaces must not disagree on a metric neither had before. Guarded non-vacuous by `hours > 0` |
+| S15.9 | Worksheet sidecar round-trips manual class-D rows and mode-keyed overlays (the only persisted parts; computed rows regenerate from `/results/copt`, which is what makes annotations survive a re-solve) |
+| S15.10 | A negative criticality is rejected `422` and the previously stored rows are left intact — severity/criticality are `>= 0` by contract, so an out-of-scope P2X row can never rank as beneficial |
+| S15.11 | Stress-scenario registry round-trips; the id, frequency and cap guards each reject `422`; and a rejected write does **not** clobber the stored value |
+| S15.12 | Sweep guards: refused `422` without a VOLL, accepted `200`, and a concurrent sweep refused `409` |
+| S15.13 | Sweep completes with both class B and class C rows, and every row satisfies `criticality == occurrence × severity` (f×S by construction). Class C is additionally pinned to `ΔEUE × VoLL × frequency`. **The two classes reach f×S by genuinely different routes** — class B multiplies by the unavailability *probability* q (a link outage is a state the system sits in a fraction q of the time), class C by an annual *event frequency* — and asserting either route's formula on the other overstates class B by `8760/MTTR`, which is how this check was first written and what running it caught |
+| S15.14 | The sweep's closing base re-solve leaves the foreground results in base state (`condition == "optimal"`, report readable) |
+| S15.15 | A class-C scenario measures real degradation when the profiles were **uploaded**, which is how the GUI supplies them. Everything above uses a static `p_set`, and that blind spot let a real bug through: `run_simulation` re-broadcasts every user-uploaded series from `_user_ts` onto the live `_t` tables just before building the LP, restoring the pristine profile **over** the mutation each contingency had just made. The scenario solved an unmutated network, returned `ok`, and reported ΔEUE = 0 — a cold snap priced at exactly zero criticality. No in-process test reproduces it, because a network built in process has an empty `_user_ts` |
+
+### S16 — Sequential-MC adequacy study (area 16)
+
+Phase 6's live surface. The ~40 MC/ELCC unit tests and the 10 endpoint tests
+run in-process against constructed `MCInputs` or a `TestClient`; S16 is the
+only place the study runs in a genuine worker thread in a server process,
+with occurrence data resolved through the real defaults chain and the payload
+crossing real HTTP. Fixture: two 100 MW units (EFORd 0.10, MTTR 24 h) against
+a flat 120 MW load with a 60 MW / 4 h battery — any single outage is a 20 MW
+deficit the battery bridges until a persistent outage drains it, which is
+exactly the regime the COPT convolution cannot see.
+
+| Check | What it proves |
+| --- | --- |
+| S16.1 | The bare study completes with **VoLL = 0** (the MC prices nothing and must run without one, where the frontier and sweep both 422), the payload carries the full §2.5 metrics contract (`lole_ci`/`eue_ci` as 2-element intervals, `resolution_floor_h`, `time_basis`), all three clauses of the standing warning, no leaked `thread` — and `EUE > 0`, because persistent outages MUST shed on this fixture |
+| S16.2 | The synchronous rejection surface, live: draws over the engine cap `422`, eleven ELCC assets `422`, an unknown asset `404`, an unknown kind `422`, and an inconsistent (q, MTTR) pair `422` **at POST time** — a user with a wrong asset name or contradictory unit data learns now, not after minutes of spinner |
+| S16.3 | The mutual-exclusion mesh against a *really running* study (a full-budget ELCC bisection holds the surface busy for seconds): a concurrent MC POST and a frontier POST both refuse `409`, and the original run still completes |
+| S16.4 | The ELCC row carries exactly its nine contract keys, the status is from the closed set, an `ok` credit lies in `[0, nameplate]`, and `reason` is null **iff** the status is `ok` — a refusal is data, never a blank |
+| S16.5 | **Storage helps, CI-aware and seed-paired**: same seed, same fleet ⇒ identical outage paths, so deleting the battery is a paired comparison — and the no-storage interval's *lower* bound must clear the with-storage interval's *upper* bound. A point-estimate comparison could pass on noise; separated intervals cannot |
+| S16.6 | **The ELCC candidates surface and its agreement guarantee, live**: `GET /results/mc/elcc_candidates` enumerates the remaining kinds (two occurrence-bearing generators and a must-take wind generator as `vre`), the **entire** candidates list POSTed back resolves — every row prices, none 404s — and a unit asked for as `kind="vre"` is refused `422` (the double-count guard), not credited twice |
+
+### S17 — The adequacy-coupled planning loop (area 17)
+
+Phase 7's live surface. The controller has 22 unit tests against fake
+callables and the route has 26 through a `TestClient`, but neither drives what
+this study *is*: real HiGHS capacity expansions, re-solved under a retuned
+cap, evaluated by the real sampler on whatever plan the LP actually produced,
+in a worker thread in a server process. The mesh fixes in particular are HTTP
+facts, not unit-test facts.
+
+**Non-vacuity is self-calibrated.** The suite first runs a plain MC study to
+learn the fixture's own LOLE, then targets a *third* of it — so iterate 0 is
+guaranteed to miss and the loop cannot pass by doing nothing. A hardcoded
+target risks a fixture that meets immediately and a suite that proves nothing.
+
+| Check | What it proves |
+| --- | --- |
+| S17.1 | The whole synchronous rejection surface, live: no VoLL, no target, zero target, draws over the engine cap, budget over `MAX_LOOP_SOLVES`, an invalid `restore`, a target below the resolution floor, and the `myopic`/`rolling` strategy guard — all `422` **before** a solve is spent. The strategy guard is the one that matters most: without it every capped iterate fails validation and the loop reports "unreachable", a statement about the network, when the truth is a statement about the solve strategy |
+| S17.2 | Calibration: the baseline plan solves optimal and its measured MC-LOLE is > 0, so the target (a third of it) is one iterate 0 must miss |
+| S17.3 | The loop runs to a verdict **and the mesh holds while it runs**: a foreground solve, an MC study and a second loop are all refused `409` *during* the run — the Phase-7 hole fix, provable only here, because a solve interleaving between iterates rewrites the very `p_nom_opt` the next evaluation reads. Payload contract checked (`study` key, no top-level engine, verdict sentence, `resolution_floor_h`, warning clauses, `base_restored`, no leaked thread), every iterate row carries its full key set, and a `met` verdict must be **verified** — the final iterate's own evaluation, never an extrapolation between steps. And an `unreachable` verdict that names the never-bound mechanism must also name the WAY OUT by the heading of the panel the user has to click — until Phase 9 it named the lever ("a planning reserve margin") without naming the study that now searches for it |
+| S17.4 | Abort: a study whose wall-clock promise is "minutes to tens of minutes" must be cancellable, and the closing restore must still run so the network is not left on a swept cap. (The abort is posted *immediately*, not after a sleep: the record is published under the same lock hold that starts the thread, and this loop is fast enough that any sleep long enough to "let it get going" is long enough to let it finish — a first attempt aborted a study that had already terminated) |
+| S17.5 | `restore="final"` leaves the user **holding** the certified plan (`ens_cap_permyriad == ε*` read back from the config), and on a non-met verdict falls back to base rather than applying a cap no verdict certified |
+| S17.6 | the verdict names the SAME number the panel's restore explainer tells the user to type — one certified cap, one spelling. **SKIPs on this fixture**, and says so: S17's network is the one where the cap is unreachable by construction, so no run here certifies a cap and there is no number to check. Recording a PASS would read as live coverage this suite cannot provide; the bitten unit tests and S19.6 carry it |
+
+**What the first live run found.** The fixture returns `unreachable`, and
+correctly: `ens_mwh = 0` and `binding = "voll"` at *every* cap, because 200 MW
+of firm capacity covers a 150 MW load and the LP models no outages — so the
+LP sheds nothing at any ceiling, no cap can change the plan, and the MC's 10.9
+hours of loss of load come entirely from outages the proxy never sees. The
+loop reached that answer in **two solves** (the informed jump crossed the
+whole slack region in one step), which is the search discipline working. But
+the verdict copy named the three mechanisms the design had anticipated —
+storage foresight, DSR, storage-for-thermal substitution — and **none of them
+was what happened**, sending the reader after causes that were not there. The
+never-bound case is diagnosable from the rows (`binding` on every solved
+iterate), so it is now diagnosed by name, with the honest next action: an
+energy cap has no leverage on outage-driven risk; firm-capacity headroom does.
+S17.3 pins the copy live.
+
+### S18 — The firm-capacity reserve margin (area 18)
+
+Phase 8's live surface. The constraint has 55 unit tests, the
+preflight/report/endpoint 31 more, and three self-calibrated acceptance tests
+prove the lever moves MC-LOLE (12.41 h → 1.32 h with separated intervals) — but
+none of them crosses HTTP. This suite drives what a user touches: the config
+field at the API boundary, the preflight refusals that replace an
+unimplementable "let the LP go infeasible", and the derating table that makes
+the phase's proxies inspectable.
+
+**The margin is derived from the fixture, never chosen** — the same discipline
+the Phase-8 review forced onto the acceptance tests, for the same reason: a
+value inside the largest-unit step buys real megawatts and moves LOLE not at
+all.
+
+| Check | What it proves |
+| --- | --- |
+| S18.1 | The margin is bounded **at the API boundary** — `-1` and `600 %` refused `422`, `0` / `None` / `0.15` accepted. The Phase-1 QA round found four reliability fields accepted and then silently discarded; a margin that never reaches the solver is indistinguishable from no margin at all |
+| S18.2 | An unreachable margin is refused **before the solve**, as an error naming both numbers. This is the check that replaces "let the LP go infeasible", which was never implementable: linopy raises on a constant constraint and `Generator-p_nom` does not exist when nothing extendable is active |
+| S18.3 | At the derived `m*` the constraint **binds and builds**: 50 MW of peaker the LP had no economic reason to build, `required == firm == 223.5 MW` against a 150 MW peak, the `horizon_wide` label true (one `p_nom` variable, so one standard at the maximum peak), and **every credited asset carries its `basis` and `source`** — a derating proxy nobody can trace is a number nobody can check |
+| S18.4 | `met` and `binding` are different questions: at a margin the fixed fleet already satisfies, the standard is met and **not** binding, and nothing is built. Conflating them would credit the margin for capacity that was always there |
+| S18.5 | The margin does not leak into the contingency sweep. Without the strip, `freeze_capacities` pins the peaker and every contingency that removes derated capacity violates the standard — so the sweep dies infeasible and every severity would read as the standard rather than the outage |
+
+**What the first live run found:** nothing in the product — but S18.2 was
+initially **vacuous in a way worth recording**. It set a 900 % margin, which the
+schema correctly refuses (`le=5`), so the config never took and the preflight
+had nothing to complain about while the check reported a clean pass. It now
+uses 400 % (unreachable against a 651 MW maximum, inside the bound) **and
+asserts the config write returned 200**, so it cannot pass against a margin
+that was never set. The lesson generalises: a live check that configures
+something must assert the configuration took.
+
+### S19 — The margin loop (area 19)
+
+Phase 9's live surface, and the one suite whose job is a **comparative** claim
+rather than a contract: on ONE network with ONE derived target, the cap loop
+must report `unreachable` and the margin loop must report `met`. That is the
+whole reason Phase 9 exists — Phase 7's loop kept correctly answering "the cap
+never bound", and Phase 8 built the lever that moves the metric there.
+
+| Check | What it proves |
+| --- | --- |
+| S19.1 | The two loops refuse *different* things, and neither copies the other blindly: a margin loop runs on a VoLL-free network (a margin is a constraint, not a price) where the cap loop refuses `422`; `myopic` is allowed for the margin (each window is one period, which is the peak the standard is defined against) while `rolling` is refused |
+| S19.2 | Calibration: the incumbent plan's own measured MC-LOLE, targeted at a third, so neither loop can pass by doing nothing |
+| S19.3 | **The claim.** Same network, same target: cap loop `unreachable`, margin loop `met` at a certified `m*`, with the final iterate's own MC verifying it |
+| S19.4 | The payload contract, and the one thing that must never leak — the controller's internal reciprocal. Every number on the wire is a margin; every `cap_mwh` is `None` (spec §2.2); `m*` lies inside the schema bound the loop must respect |
+| S19.5 | `restore="final"` writes the **margin's** config field, never the cap's, and a user's own ENS cap survives the study untouched |
+| S19.6 | the verdict names the SAME number the panel's restore explainer tells the user to type — one certified margin, one spelling |
+
+### S20 — Refusing a network swap during a study (area 20)
+| id | Assertion |
+|----|-----------|
+| S20.1 | With **no** study running, `POST /api/network/reset` succeeds — the baseline, and it runs FIRST because it is itself a reset: after the fixture build it would wipe the very fixture the rest of the suite needs |
+| S20.2 | With a **verifiably live** MC study, the same route is refused `409`, the refusal **names** the study, and it offers only a remedy that exists — the MC has no `/abort`, so the sentence must say it cannot be aborted rather than pointing at a button that is not there. The check reads the study's own status immediately before the swap and **SKIPs rather than fails** if the study finished first, so it can never report a lost race as a broken guard |
+| S20.3 | …and the guard **lifts**: once the study finishes the route succeeds again. A refusal that never releases is an outage, not a guard |
+
+
+### S21 — Profile plus outage data: the preflight disclosure (area 21)
+
+*Re-scoped by Phase 12c-pre.* 12a warned that the engines discarded the
+profile (`outage_shadows_profile`); 12c-pre models it in both engines, so the
+preflight issue is now a disclosure of how (`profile_and_outage_modelled`),
+emitted for outage data the user typed. A library (carrier-default) rate on a
+profiled unit gets no preflight issue; the `/copt` and `/mc` payloads carry
+the disclosure instead (S24).
+| id | Assertion |
+|----|-----------|
+| S21.1 | The `profile_and_outage_modelled` disclosure reaches a **live preflight**, names the asset, is a `warning` (the only non-error severity on the wire), and the old `outage_shadows_profile` code is absent — with the profile modelled it would be a false statement |
+| S21.2 | It says **how** the unit is modelled (the COPT *mixes* it per hour; outages sampled on the series), and is silent both on a profiled farm with no outage data (must-take, netted as before) and on a thermal unit whose `p_max_pu` is a flat 1.0 — the false positive that would make this noise on every real project |
+
+**Why a live suite for a preflight warning.** The unit tests drive
+`_check_outage_params` directly; they cannot tell you whether the warning
+survives the route, the issue serialisation and the payload. The first attempt
+at this check was itself a false green: the fixture's `PUT
+/api/network/timeseries/...` returned **405** because the route takes
+`{index, columns, data}` rather than `{values}`, so the asset had no profile
+at all and the warning correctly did not fire — a passing-looking run that
+proved nothing. The suite now asserts the fixture build, so it cannot pass
+without the profile it is about.
+
+**What the first runs found — in the suite, not the code.** Three times, and
+each was the harness lying rather than the product: `draws=4000` exceeded the
+engine's 2000-draw cap so the study never started (the 422 said so plainly
+once the detail was surfaced instead of swallowed); the baseline reset was
+ordered *after* the fixture build and wiped it, so every later check failed on
+an empty network for reasons unrelated to the guard; and on a two-day horizon
+the MC finished before the swap was attempted, so a **passing** guard reported
+a failure. The fixture now spans a quarter and the check states whether the
+study was actually alive — the difference between a check and a coin toss.
+
+
+**What S19.6 found on its first run — and the near-miss that nearly hid it.**
+The check failed live while passing every unit test: the verdict said
+`reserve_margin = 0.6716` where the panel said `0.671600430725`. The cause was
+not the code — it was the **server**. A `uvicorn` started for this run had
+failed to bind (`address already in use`) behind a `nohup ... &`, and an older
+process from a previous session answered every request. Every "live" result in
+that run described code from before the fix.
+
+Two lessons, both cheap. **Starting the backend is not the same as answering
+on 8000**: after `uvicorn` starts, grep its log for `Application startup
+complete` AND for `address already in use` before running a single suite — a
+`curl /docs` returning 200 proves only that *some* process is listening. And a
+live check that cannot distinguish "passed" from "nothing to check" must
+**SKIP** rather than PASS, which is why S17.6 does.
+
+
+**What the first live run found — a real defect in the code it was testing.**
+S19.3 reported `unreachable` from the margin loop too. The cause: the
+controller's blind step multiplies the margin ~4× per iterate, so from a small
+start it leapt clean over the fleet ceiling; the over-ceiling solve failed
+validation, was relabelled `infeasible`, and the nesting logic then concluded
+— correctly, given what it had been told — that every stricter margin was
+infeasible. The loop reported `unreachable` **having never evaluated the
+reachable region at all**: ceiling 271 %, last evaluated margin 18 %, and a
+plan meeting the target sitting between them. The route now clamps a request
+to the ceiling and evaluates *there*, refusing only once the strictest
+reachable margin has itself been tried and missed. After the fix the same run
+reports `met` at m\* = 0.672. A unit test that had pinned the old solve count
+was updated to the corrected contract, with the reason recorded in the test.
+
+A second finding was the suite's own: S19.1 initially asserted `422` from the
+cap loop and got `409`, because the margin loop it had just started was still
+running — the 409 mesh working exactly as designed, and the test reaching the
+wrong question. Ordering fixed, with the reason in the code.
+
+### S22 — A vintage-expanded plan reports what it built (area 22)
+| id | Assertion |
+|----|-----------|
+| S22.1 | On a two-period network with per-period capacity bounds, a margin the LP **met** by building ~36.8 MW of `wind@2030` (35 MW firm at derate 0.95) is served by `GET /results/reserve_margin` as `met=True` in **both** periods at the firm capacity the plan actually has — not `met=False` at the fixed fleet's 190 MW |
+| S22.2 | The **vintage rows** carry their built sizes: `wind@2030` at ~36.8 MW in 2030 *and* in 2040 (a 2030 vintage is active later), and `wind@2040` at `0.0` — built-to-zero, never `null` |
+
+**Why this suite exists.** The Phase 12b (v3) plan claimed that
+`reserve_margin_payload` is the one post-solve point with built capacity in
+scope. Its review checked the premise on a vintage-expanded network and found
+the shipped payload wrong there: the solve expands `wind` into transient
+`wind@2030` / `wind@2040` rows, the wrapper stashes those names, and the
+restore drops the rows *before* the payload reads capacities, so `_built()`
+found nothing and credited zero. The reserve margin had mis-reported the
+network class it exists for since it landed. The unit test drives
+`run_simulation` directly; this suite drives the fixture, the bounds and the
+solve over HTTP and reads the surface a user reads.
+
+**Why the candidate carries outage data when the unit test's does not.**
+The unit test's wind is must-take: a time-series profile and no outage data.
+Over HTTP that cannot be built — the generator API takes a static `p_max_pu`,
+the margin's profile test is a time-series column check, and a per-period
+profile cannot be set over the API on a multi-period network (recorded above
+under S21). Without either, preflight correctly refuses the unit as
+`reserve_margin_unpriceable_assets` — the first run of this suite hit exactly
+that and read as `validation_failed`, so the suite now names the preflight
+refusal in its detail rather than leaving it opaque. The candidate carries
+outage data instead and is a sampled unit at derate 0.95; the thing under
+test — the vintage row's built capacity reaching the payload — does not
+depend on which membership the unit has. **Bitten live**: with the vintage
+lookup removed, both checks fail (`met=False`, firm 190, every vintage row
+`None`).
+
+**What is deliberately NOT here.** The companion defect found in the same
+review — a margin run that fails between optimize and the report step leaves
+its stash on the network, and the *next* solve, one that set no standard,
+publishes a margin verdict (or a full adequacy report claiming an energy
+target was set and binding) built on the dead run's targets — has no honest
+live reproduction: it needs an exception at a point no API input reaches. It
+is covered by two unit tests, one per stash, and this plan says so rather
+than shipping a check that could only pass.
+
+### S23 — The net-load window, live (area 23)
+| id | Assertion |
+|----|-----------|
+| S23.1 | On a flat-load network with one 100 MW wind farm whose profile is 1,0,1,0, `GET /results/reserve_margin` serves a `net_window` with `status="ok"`, the two hours the wind is **absent** as its snapshots, `netted_mw = 50`, and the farm's `derate_net = 0.0` beside its gross `derate = 0.5` — what the credit would have been on the hours the system actually runs short |
+| S23.2 | The same farm with a **flat 1.0** column reads `profile_kind = "constant"`, is not netted, and the block says `nothing_netted` with an empty window — never a zero-delta window dressed as a finding |
+
+**Why single-period.** A per-period profile cannot be set over the API on a
+multi-period network (recorded under S21 and S22), and the window is a
+per-period object regardless, so the flat network is the honest live surface
+for it. The vintage path — the net window on a row the restore has dropped —
+is covered by the unit test on the alternating-profile vintage fixture, whose
+built size (70 MW) and net derate (0.0) the plan review reproduced end to end.
+
+**Why the copy matters here.** The panel line and the "Net derate" column are
+a SECOND PROXY in the margin's own units, never a correction, and "netted
+capacity" is not "VRE" — a thermal maintenance schedule is netted too. Both
+are pinned by component tests that assert the words do not appear.
+
+### S24 — Profile plus outage data: the engines, live (area 24)
+| id | Assertion |
+|----|-----------|
+| S24.1 | On 12a's two-farm fixture (100 MW flat load; gas1 80 MW q = 0.10; two identical 100 MW farms on the profile 0.05/0.15/0.35/0.45, one with q = 0.10 entered), `GET /results/copt` equals the **mixture computed independently in the suite** from the fixture's numbers alone — `LOLP_h = 0.1·(1 − S(r_h)) + 0.9·(1 − S(r_h − a_h))` over the gas1-only table — **2.78 h**, not the **0.44 h** the flat two-state treatment gave; `fleet.profile_units` names `wind_with_for`, `netted_beyond_cap` is empty, `must_take` counts the other farm from the walk, and `fidelity_note` names the unit and says the COPT *mixes* it |
+| S24.2 | A small MC study on the same network finishes and its result's `profile_units` names `wind_with_for` (outages sampled on the series); preflight carries `profile_and_outage_modelled` and not `outage_shadows_profile` |
+
+**Bitten live** (recorded in the plan): with the series dropped at attachment
+the COPT reverts to the flat value and S24.1 fails on the number and the
+names.
+
+**What is not live here.** A fleet with more than `K_EXACT = 8` profiled
+units (the netted remainder) needs nine hand-entered outage rates on nine
+profiled farms; the split, the netting and the per-row `note` are pinned by
+unit tests on a 4-unit fleet with the cap overridden to 2.
+
+### S25 — One demand basis: the engines read the LP's demand, live (area 25)
+| id | Assertion |
+|----|-----------|
+| S25.1 | On a two-period network with a 24 h load ramp (100–123 MW, uploaded flat and replicated into both periods), two units of 130 and 100 MW at q = 0.10 and `load_scalers = {"2035": 1.25}`, `GET /results/copt` serves per-period LOLE equal to the four-state hand table on **each basis**: 2030 = **2.31 h** (raw: every hour above 100 MW loses the 100 MW state and the zero state), 2035 = **4.11 h** (the scaled hours above 130 MW lose the 130 MW state too) — where reading the raw frame gives 2.31 h in both |
+| S25.2 | The solve's `GET /results/reserve_margin` peaks are 123 MW (2030) and exactly 1.25 × 123 = 153.75 MW (2035) — the LP's basis, met by the fixed fleet so the solve needs no expansion — and a small MC study's 2035 LOLE exceeds its 2030 LOLE |
+
+**A corrected claim.** The first record of this phase said the basis had "no
+honest live reproduction" because `PUT /api/network/timeseries/…` builds a
+plain `DatetimeIndex`. The 12c-0 shipped-code review found that
+`POST /api/network/loads/upload_profile` replicates a flat upload across the
+periods — exactly the multi-period column the scalers gate on — and this
+suite is built on it. The earlier note was wrong on its premise, and is
+replaced rather than kept.
+
+**Bitten live** (recorded in the plan): with `/copt` reading the raw frame
+S25.1 fails on the 2035 value (2.4 against 19.5 on the first single-unit
+fixture, whose solve was infeasible under the margin; the two-unit fixture
+above replaced it).
+
+### S26 — Portfolio ELCC beside the reserve margin, live (area 26)
+| id | Assertion |
+|----|-----------|
+| S26.1 | On 12a's two-farm fixture (90 MW gas at q = 0.10, two 100 MW farms on the profile 0.05/0.15/0.35/0.45, one with outage data) solved under a 10 % margin (met by the fixed fleet: 81 MW firm gas + 47.5 MW of profile credit against 110 MW required), `POST /results/mc` with `elcc_portfolio: true` returns a block with `status = "ok"`, a population of exactly the two farms — one `vre`, one `generator`, both profile-bearing after 12c-pre — and a `credit_gross_mw` equal to the served `/results/reserve_margin` rows for those farms summed as derate × built capacity, recomputed in the suite |
+| S26.2 | The period row prices the group at its hand value: with the gas unit up the system is short only while the farms deliver under 10 MW, so the group's last-in credit is its minimum hourly contribution, **10 MW** exactly (0.05 × 200; the predicate's step edge, within the 0.5 MW tolerance) against a group peak of 90 MW — and the portfolio is a **sibling** of `elcc`: the `elcc` list carries only the requested marginal row |
+
+**A corrected fixture.** The first fixture used a 200 MW gas unit, under which the
+farms carry no loss-of-load credit at all (the system is fine whenever the unit
+is up and short regardless when it is down), and the engine correctly answered
+`ok 0.0`; the check that asserted a positive credit was wrong, not the engine.
+
+**Bitten live** (recorded in the plan): with the population's generator half
+dropped, the outage-bearing farm stays in the sampled fleet and the credit is
+the must-take farm's alone.
+
+**A harness lapse, recorded.** The live bite's restore used `git checkout`
+on the router, which reverted the file to its last COMMIT and silently
+discarded two uncommitted review fixes in it; the hash check caught the
+mismatch and the fixes were re-applied from their patch. Restores are by
+saved copy and hash, never by `git checkout` — the rule already in force
+for the unit bites, now also for live ones.
+
+### S27 — The engines honour activity, live (area 27)
+| id | Assertion |
+|----|-----------|
+| S27.1 | On the Phase 12d F1 fixture built over the API (two 24 h periods 2030 / 2035, a flat 80 MW load, two 50 MW gas units at q = 0.10 and `new`, 40 MW at q = 0.20 with `build_year = 2035`), `GET /results/copt` lands on the closed form PER PERIOD — 2030 LOLE **4.56 h** (two units: LOLP 1 − 0.81) and 2035 **1.104 h** (three units: 0.01 + 2·0.09·0.2) — and its `activity.by_period` lists `new` as `inactive` in 2030 and nothing in 2035, with the sentence naming build year and lifetime. Before 12d both periods read 1.104 h |
+| S27.2 | `POST /results/mc` (400 draws) reports each period's hand value INSIDE that period's own `lole_ci`, and the result carries the same `activity` disclosure |
+
+**Bitten live** (recorded in the plan): with `screening_analysis`'s per-block
+path replaced by the single-table path, 2030 reads the 2035 value and S27.1
+fails; restored by hash.
+
+### S28 — Every study can be stopped, live (area 28)
+| id | Assertion |
+|----|-----------|
+| S28.1 | A sequential-MC study started with an ELCC asset (a baseline plus ~10 bisected evaluations over an annual horizon, so it is minutes long) is stopped mid-run: `POST /results/mc/abort` returns 200 with `aborting: true`, and the record reaches `status = "aborted"` — not `done`, which is what it read before the flag existed |
+| S28.2 | The status GET answers 200 throughout, and never carries `stop_event` or `thread`. The record now holds a `threading.Event`, and a GET that serialises one 500s on **every poll** of the surface the panel refreshes every two seconds |
+| S28.3 | The mesh reopens: the next study POST is accepted rather than 409 — the failure this feature exists to prevent, since an unstoppable study refuses every other study AND the foreground solve. And `/results/copt` on the same project still answers with real rows and real metrics. **No wall-clock gate.** This row used to assert `/copt` finishes inside 10 s and called that a Part B cost check; it was neither, on two counts — the fixture is 12 generators with no profiles, so it answers in ~0.09 s and the gate had ~110× headroom, and with `k = 0` mixed units it never enters the binned path the cost claim is about. A timing gate on a live server cannot fail on a fast machine and cannot pass on a slow one, which is why F2c counts operations rather than timing them; the time is printed, and Part B's cost is measured where it can be measured |
+
+**Bitten live** (recorded in the plan): with the flag made inert in the `/mc`
+worker, S28.1 reads `status = "done"` — the study runs to completion and the
+abort does nothing.
+
+**A bite that did NOT bite, and why it is worth recording.** The first live
+bite removed the stop check from `mc_adequacy`'s batch loop, and S28 still
+passed: this fixture's study has an ELCC asset, so the *between-assets* check
+stops it even with the batch-loop check gone. That is defence in depth working
+as designed, not a test failing to test — but it means the bite has to target
+the boundary the fixture actually reaches, and the recorded bite does.
+
 ## Loop protocol
 
 Run all suites → triage failures → fix → **re-run the full set** (not just the
@@ -305,3 +668,118 @@ round-1 typo created one called `create_from_template`. It overwrote nothing
 here (no project had that name) and was removed, but the same typo against an
 existing name would overwrite it. Reserving route-like names, or requiring an
 explicit create flag, would close this. Out of scope for this pass.
+
+## S29 — a missing LP bound is refused (Phase 12f)
+
+A non-finite value in one of the five bounds whose PyPSA class default is
+FINITE (`p_max_pu`, `p_min_pu`, `s_max_pu`, `e_max_pu`, `e_min_pu`) does not
+clamp anything — linopy **masks that constraint row out of the problem**, so
+the asset is unconstrained there. Measured: `p_max_pu = [0.5, NaN, 1.0]` on a
+100 MW unit against a 500 MW load dispatches `[50, **500**, 100]`, and a NaN
+`p_min_pu` hour runs a generator as a **−900 MW** load.
+
+`ramp_limit_*` is deliberately **not** one of the five — its class default *is*
+NaN and PyPSA masks the row on purpose, which is the documented way to say
+"this unit has no ramp limit". S29.3 exists to pin that: the golden fixture
+alone carries eight non-finite `ramp_limit_*` cells, so a check that errored on
+any non-finite bound would have blocked every network in the repository.
+
+| id | check |
+|----|-------|
+| S29.1 | `PUT /timeseries` with one `null` cell → **422**, and the body names both the column and the asset |
+| S29.2 | `PATCH /_bulk` clearing `p_max_pu` → 200, and it reads back **1.0** — PyPSA's own `None` coercion — not `null` |
+| S29.3 | clearing `ramp_limit_up` → 200 and the network still solves `optimal`; a NaN ramp limit must never be refused |
+| S29.4 | the solved dispatch respects the asset's own ceiling: **100.0 MW** over 3 snapshots on a 100 MW unit against a 500 MW load |
+| S29.5 | `PATCH /_bulk` with a bare JSON `NaN` literal in `p_max_pu` → **422**, and the bound reads back **1.0**, untouched (the shipped-code review's bypass: `json.loads` accepts the literal and it went past the `null` branch) |
+| S29.6 | `POST /generators` with `p_max_pu: Infinity` → **422** and nothing is created (the create schema carries `allow_inf_nan=False`; before, `inf` was written into the static frame) |
+
+**Bitten live** (recorded in the plan): removing `_reject_nonfinite_timeseries`
+from `set_timeseries` and restoring the `float("nan")` fallthrough in `_bulk`
+fails **all four** of S29.1–S29.4, each with the exact pre-12f symptom — the
+PUT is accepted 200, `p_max_pu` reads back `null`, and the corrupt network is
+then refused at solve with `validation_failed`. S29.5 and S29.6 were bitten
+separately (the `_bulk` literal check off, `allow_inf_nan=True`): S29.5 reads
+`200` with `p_max_pu` back to `null`, S29.6 reads `201` with the generator
+created. And S29.6 earned its place before it was bitten: on the first fixed
+build it read **500**, because starlette's JSON encoder refuses to write the
+`inf` that pydantic echoes in its error body — the app owns that handler now.
+
+## S30 — a NaN in any finite-default LP input is refused (Phase 12g)
+
+12f refused NaN in five bounds. Measuring the next backlog item — three storage
+constants that mask an energy-balance row — widened it: on two fixtures a NaN in
+**23** distinct finite-default input attributes silently changes the plan and
+one crashes the build, and a NaN `GlobalConstraint.constant` **deletes a CO2
+cap** (gas 100 → 300 MWh). PyPSA's own `n.add(attr=None)` and `n.add(attr=NaN)`
+write the class default for every one, so NaN is never "unset" there. The set
+is read from PyPSA's metadata over a pinned component set (the seven LP
+components plus GlobalConstraint), censused clean on **392 of 392** suite
+networks and the golden fixture.
+
+| id | check |
+|----|-------|
+| S30.1 | `PATCH /_bulk` clearing `state_of_charge_initial` → 200 and it reads back **0.0**, not null (a NaN there masks the energy balance's right-hand side) |
+| S30.2 | clearing `marginal_cost` → 200 and it reads back **0.0** (a NaN cost drops the cost term — the unit is free) |
+| S30.3 | `_bulk` with a JSON `NaN` literal in `inflow` → **422**, value untouched |
+| S30.4 | `POST /storage_units` with `inflow: Infinity` → **422**, nothing created |
+| S30.5 | a 2-of-3-row `inflow` series is accepted at the PUT (coverage is preflight's call), and **Run refuses it** `validation_failed`, naming the unit and `inflow`. Before 12g the solve ran `optimal` dispatching from an empty store (measured on shipped code by the plan's review) |
+| S30.6 | `PUT /timeseries/storage_units/inflow` with a null hour → **422** (pin of the 12f-review rule for this phase's attributes) |
+
+**Bitten live** (recorded in the plan): restoring the five-only walk and the
+five-only `_bulk` mapping fails **S30.1, S30.2 and S30.5** with the exact
+pre-12g symptoms — `state_of_charge_initial` and `marginal_cost` read back
+`null`, and the 2-of-3 inflow series solves `optimal` with the balance masked —
+while S30.3, S30.4 and S30.6 stay green because the literal check, the schema
+and the time-series rule are separate guards the bite leaves in place.
+Restore by hash.
+
+## S31 — a static CF is applied, and a flag says whether it already includes outages (Phase 12h)
+
+12c-pre left the static `p_max_pu` column unread **on purpose**: folding it in
+*and* applying an outage rate double-counts PyPSA-Eur's `nuclear_p_max_pu.csv`,
+a historical capacity-factor table that already contains forced outages. That
+left the engines and the reserve margin disagreeing about the same unit by two
+errors of different size in opposite directions — measured on one fixture
+(168 h, load 100 MW; `nuc` 100 MW static `0.8`, `q = 0.05`):
+
+| how the unit is read | COPT LOLE | COPT EUE | margin derate |
+|---|---|---|---|
+| before 12h — the engines ignore the static CF | 8.40 h | 640.5 MWh | 0.76 |
+| the CF is an availability: applied **and** outages sampled | **16.38 h** | **800.1 MWh** | 0.76 |
+| the CF already includes outages: applied, rate zeroed | 8.40 h | **168.0 MWh** | **0.80** |
+
+Which reading applies is a question only the modeller can answer, so it became
+data: a per-asset bool `p_max_pu_includes_outages` on Generator. It zeroes the
+rate at `occurrence.resolve_outage_params` — the one place every consumer reads
+`q` from — so both engines, the margin's derate, the net-load window, the
+worksheet and the disclosures move together, by construction.
+
+`GET /results/reserve_margin` serves only the persisted solve-time stash (204
+otherwise), so S31 sets `solver_config.reserve_margin = 0.1` and solves before
+reading a derate — S23's pattern. Its fixture is the table's, with `gas` at
+**50 MW / marginal cost 20**: at 25 MW the derated firm capacity is 99.75 MW
+against a 110 MW requirement and preflight refuses `reserve_margin_unreachable`.
+The COPT hand values below are pinned by a unit test on the same fixture, so
+the live rows compare against numbers the suite owns.
+
+| id | check |
+|----|-------|
+| S31.1 | preflight names `nuc` under `availability_may_include_outages`, the message names the flag, and 12c-pre's `static_p_max_pu_not_applied` is **absent** — its sentence ("the engines do NOT apply it") stopped being true when the fold shipped |
+| S31.2 | `/results/copt` EUE reads the CF-and-outages value; before 12h it read the nameplate row |
+| S31.3 | `PATCH /_bulk` sets the flag **on a frame whose column the API POST never created** — the create-if-absent is what makes this a 200 rather than `has no column(s)`; preflight swaps to `outages_folded_into_availability` and `GET /generators` reads the flag back `true` |
+| S31.4 | `/results/copt` EUE reads the CF-alone value; after a solve under `reserve_margin = 0.1` the margin row for `nuc` reads derate **0.80**; and the project **saves** (200) after that solve — the slack rows the solve adds and removes leave an `object` column of pure bools, the one shape netCDF refuses |
+| S31.5 | clearing the flag through `_bulk` (an explicit `null`, which is what the bulk editor sends for a blank cell) reads back **`false`**, not null and not a 500, and a re-solve's margin row reads **0.76** again |
+
+**Bitten live**: dropping the capacity scaling fails **S31.2** with the pre-12h
+nameplate EUE of 441.0 (and S31.4 with 0.0); ignoring the flag in
+`resolve_outage_params` fails **S31.4** with the unflagged 600.6 and derate
+0.76.
+
+The save leg is **redundantly protected, and the measurement says so.** The
+plan expected dropping the export helper's normaliser alone to make S31.4's
+save a 500. It does not: by then the solver's restore callback has already put
+the dtype back, and either normaliser alone suffices. Dropping **both**
+reproduces the 500. Both are kept — the restore callback covers
+solve-then-save, the export helper covers every save, undo snapshot and io
+export that no solve preceded — but only the pair is load-bearing on this one
+route, and the suite does not claim otherwise. Restore by hash.

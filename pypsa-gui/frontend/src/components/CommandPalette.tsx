@@ -537,6 +537,9 @@ function useCommands(mode: PaletteMode): Command[] {
               case 'busy-solve':
                 toast.error(`Finish or abort the running solve on '${currentProject}' first.`, { id: tId })
                 break
+              case 'busy-study':
+                toast.error(r.message, { id: tId })
+                break
               case 'not-found':
                 toast.error(`'${p.name}' no longer exists`, { id: tId })
                 break

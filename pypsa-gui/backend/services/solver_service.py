@@ -1,5 +1,6 @@
 import logging
 import logging.handlers
+import math
 import pathlib
 import shutil
 import queue
@@ -48,6 +49,7 @@ from services.solver.objective import (  # noqa: F401
 )
 from services.solver.runtime import (  # noqa: F401
     SolveAborted,
+    ValidationRefused,
     _AbortWatcher,
     _RollingWindowFailureCatcher,
     _SolveHeartbeat,
@@ -82,6 +84,31 @@ from services.solver.periodized_costs import (  # noqa: F401
     with_periodized_cost_defaults,
 )
 from services.validation_service import has_errors, validate_for_run
+from services.solver.adequacy import (  # noqa: F401
+    _prm_margin,
+    _wrap_with_ens_cap,
+    _wrap_with_reserve_margin,
+    reserve_margin_facts,
+)
+# ── The branch's own dependencies ────────────────────────────────────────────
+# The adequacy standards below (`reserve_margin_facts`, the ENS-cap and
+# reserve-margin extra-functionality wrappers) are solver-layer code that
+# post-dates the decomposition; they live in `services/solver/adequacy.py`
+# and are re-exported here with the rest.
+from services import period_utils as _period_utils  # noqa: F401
+from services.adequacy.slack import (  # noqa: F401
+    DSR_SLACK_CARRIER,
+    DSR_SLACK_PREFIX,
+    INVOLUNTARY_SLACK_CARRIER,
+    INVOLUNTARY_SLACK_CARRIERS,
+    VOLL_SLACK_PREFIX,
+    is_slack_carrier,
+    strip_slack_prefix,
+)
+from services.adequacy.window import snapshot_label as _snapshot_label  # noqa: F401
+from services.pypsa_service import PyPSAService
+from services.validation_service import _check_nonfinite_bounds  # noqa: F401
+from services.vintage_service import apply_vintage_bounds  # noqa: F401
 
 
 
@@ -123,6 +150,42 @@ class SolverConfig:
     # at solve time so the user notices the silent no-op.
     co2_price_per_period: dict = field(default_factory=dict)
     voll: float = 0.0                   # €/MWh — when >0, slack gens get added per bus
+    # Reliability target (adequacy spec §5.1): unserved ELECTRICAL energy
+    # cap in parts per ten thousand (‱) of the period's weighted electrical
+    # demand. None = off. Enforced per investment period via
+    # _wrap_with_ens_cap; requires voll > 0 (preflight warns otherwise).
+    ens_cap_permyriad: float | None = None
+    # Per-zone ceiling as a multiple of the system target, applied to each
+    # zone's OWN demand (zone = bus `country`). None = no zone ceilings.
+    ens_zone_cap_multiple: float | None = None
+    # ── Planning reserve margin (Phase 8 spec §1) ─────────────────────────
+    # Firm-capacity standard as a FRACTION (0.15 == 15 %). None/0 = off.
+    # Enforced per active investment period by `_wrap_with_reserve_margin`:
+    #   Σ d_g·P_g (extendable) + Σ d_g·p_nom_g (fixed) ≥ (1 + m) · peak_P
+    # Bounds live on `SolverConfigSchema` — this dataclass validates nothing.
+    reserve_margin: float | None = None
+    # How many of the period's highest-demand snapshots define the
+    # peak-coincidence window used for must-take VRE credit. None ⇒ the
+    # spec §2.3 rule, N = min(100, max(1, round(0.01 · |P_snapshots|))), with
+    # every snapshot TIED at the Nth included.
+    prm_peak_hours: int | None = None
+    # Reference duration (hours) for the storage capacity haircut
+    # `min(1, max_hours / prm_storage_duration_h)`. 4 h is the common
+    # resource-adequacy convention.
+    #
+    # Both knobs live HERE and never as module constants: `InputsBlock.
+    # assumptions_hash` is computed from `asdict(cfg)`, so a constant would be
+    # invisible to it and two reports produced under different conventions
+    # would carry the SAME hash — the Compare tab silently diffing
+    # incomparable numbers.
+    prm_storage_duration_h: float = 4.0
+    # Demand-response tier (spec §4.4): voluntary, volume-capped, OPT-IN per
+    # bus. price 0 = off. Never silently global — price set with an empty
+    # bus list keeps the tier off and preflight warns (double-count hazard
+    # against networks that already model DSR as a real asset).
+    dsr_price_eur_per_mwh: float = 0.0
+    dsr_share_of_load: float = 0.0      # DSR p_nom = share × bus peak load
+    dsr_buses: list = field(default_factory=list)
     investment_periods: list = field(default_factory=list)  # list[int] of years
     # Per-investment-period load scaling. Keyed by period year as str (JSON
     # object keys are always strings), value is a multiplier (1.0 = 100 %,
@@ -423,6 +486,13 @@ def run_simulation(
         # so PyPSA's LP picks up the linopy constraint. Only adds work when
         # the config dict is non-empty.
         extra_fn = _wrap_with_capex_budget(network, extra_fn, config, log_queue=log_queue)
+        # Reliability target: per-period ENS cap (+ per-zone ceilings) on the
+        # involuntary slack dispatch. Adds work only when a target is set.
+        extra_fn = _wrap_with_ens_cap(network, extra_fn, config, log_queue=log_queue)
+        # Firm-capacity standard: a per-period planning reserve margin on
+        # derated installed capacity. Adds work only when a margin is set.
+        extra_fn = _wrap_with_reserve_margin(
+            network, extra_fn, config, log_queue=log_queue)
         # User-supplied numerical-conditioning scale on the LP objective.
         # Multiplies model.objective by a positive constant right before
         # solve. Adds work only when scale ≠ 1.0.
@@ -459,6 +529,26 @@ def run_simulation(
             phase(f"Validation passed ({warn_count} warning{'s' if warn_count != 1 else ''}).")
             _check_stop(stop_event, phase, "after validation, before modelling assumptions")
 
+            # The reserve-margin stash, once the LP build has written one. Bound
+            # here rather than inside the lopf branch because
+            # `_diagnose_infeasibility` (outside it) reads it: the report step
+            # deletes the network attribute, so an infeasible PRM run would
+            # otherwise get the generic "no obvious structural cause" hint.
+            _margin_targets = None
+            # A run that failed between the wrapper and the report step left
+            # its stash on the network: the delete at the report step is inside
+            # the try body and none of the outer handlers touch it, and each
+            # wrapper is a no-op without its standard so nothing overwrites it.
+            # The NEXT solve — one that set no standard — then published a
+            # result built on the dead run's targets: a margin verdict, or an
+            # adequacy report claiming an energy target was set and binding.
+            # Both stashes share the exposure; clear both before anything can
+            # read them.
+            for _stale in ("_reserve_margin_targets", "_ens_cap_targets"):
+                try:
+                    delattr(network, _stale)
+                except AttributeError:
+                    pass
             t_solve = time.time()
             # Clean up stale `transformer.type` strings that don't match any
             # row in n.transformer_types. The GUI's presets are display
@@ -493,7 +583,25 @@ def run_simulation(
                 _is_foreground = network is _PS.get_network()
             except Exception:
                 _is_foreground = True  # fail safe → preserve legacy reapply
-            if _is_foreground:
+            # ALSO gated on "is a deliberate transient profile mutation in
+            # force?" — the adequacy sweep (classes B and C) works by mutating
+            # the very `_t` tables this reapply restores: a class-C scenario
+            # scales loads_t.p_set / generators_t.p_max_pu, a class-B link
+            # outage zeroes links_t.p_max_pu. The sweep runs on the FOREGROUND
+            # network, so `_is_foreground` is True and the reapply overwrote
+            # every one of those mutations with the pristine uploaded profile
+            # before the LP was built.
+            #
+            # The contingency then solved an UNMUTATED network, came back
+            # "ok", and reported ΔEUE = 0 — so a cold snap + Dunkelflaute
+            # priced at exactly zero criticality. It only bit where the
+            # profiles came from `_user_ts`, i.e. anything uploaded through
+            # the GUI, which is the normal workflow; a network built in
+            # process (as every unit test does) has an empty store and was
+            # unaffected, which is why nothing caught it.
+            _transient_profiles = bool(
+                getattr(network, "_adequacy_transient_profiles", False))
+            if _is_foreground and not _transient_profiles:
                 try:
                     from routers.network import _reapply_user_ts_to_network as _reapply_ts
                     _reapply_ts(network)
@@ -501,6 +609,10 @@ def run_simulation(
                           "(_t tables aligned to current snapshots).")
                 except Exception as exc:
                     phase(f"WARN: could not re-apply user time series: {type(exc).__name__}: {exc}")
+            elif _transient_profiles:
+                phase("Skipped _user_ts reapply (adequacy sweep: a transient "
+                      "contingency mutation is in force and the uploaded "
+                      "profiles would overwrite it).")
             else:
                 phase("Skipped _user_ts reapply (background project solve — netcdf "
                       "carries baked profiles; the active _user_ts belongs to the "
@@ -512,6 +624,29 @@ def run_simulation(
             # `assign_duals` with `KeyError: DatetimeIndex(...) not in index`
             # after a successful solve.
             _normalise_dynamic_indexes(network, phase)
+            # Phase 12f: `validate_for_run` above ran BEFORE
+            # `_reapply_user_ts_to_network` and before the reindex just done,
+            # and both MANUFACTURE non-finite cells from perfectly legal input
+            # — a finite 3-hour profile against a 5-snapshot horizon reindexes
+            # to `[0.5, 0.6, 0.7, NaN, NaN]`, and a flat frame against
+            # MultiIndex snapshots reindexes to all-NaN. A non-finite value in
+            # one of the five finite-default bounds MASKS its LP row, so the
+            # solve would build a plan the network cannot deliver. Re-checked
+            # here, where those cells first exist.
+            #
+            # A bare return is safe at THIS point only: `restore_modelling` is
+            # not bound until later, so there is nothing to undo. The two later
+            # checkpoints must raise instead — see them.
+            if config.mode == "lopf":
+                _nf = _check_nonfinite_bounds(network)
+                if _nf:
+                    for _i in _nf:
+                        log_queue.put(
+                            f"[VALIDATION] ERROR: {_i.component_class} "
+                            f"'{_i.name}' — {_i.message} [{_i.code}]")
+                    phase(f"Validation failed: {len(_nf)} error(s). Aborting.")
+                    status, condition = "error", "validation_failed"
+                    return status, condition
             # Clear stale *_t.p_set persisted by a prior AC-PF dispatch fix.
             # PyPSA's create_model adds a `Generator-p_set` equality constraint
             # for every non-null row, locking dispatch. Plain LOPF still solves
@@ -733,6 +868,23 @@ def run_simulation(
                         f"Normalised {fixed_idx} stale dynamic index/indexes "
                         "after modelling assumptions, pre-LP."
                     )
+                # Phase 12f, the LAST gate before the LP. Step 4 of
+                # `_apply_modelling_assumptions` promotes flat snapshots to a
+                # MultiIndex, which is why the normalise above exists — and it
+                # reindexes to NaN exactly as the earlier one does, so a frame
+                # that was finite at the first two checkpoints can be
+                # non-finite here.
+                #
+                # This one RAISES rather than returning. `restore_modelling` is
+                # bound by now and the outer `finally` does NOT call it, so a
+                # bare return would leave the network carrying the vintage
+                # clones, the VOLL slack tier and recomputed capital costs that
+                # this run added. `except Exception` below restores them.
+                if config.mode == "lopf":
+                    _nf = _check_nonfinite_bounds(network)
+                    if _nf:
+                        raise ValidationRefused(
+                            "after modelling assumptions", _nf)
                 # Last cooperative checkpoint before kicking off the LP. ARM the
                 # abort watcher across the whole solve try-body (the long native
                 # n.optimize() is what matters; post-solve diagnostics are also in
@@ -897,6 +1049,104 @@ def run_simulation(
                         except Exception as exc:
                             phase(f"Myopic restore: skipped one entry ({exc})")
                     restore_modelling()
+                # Adequacy report — emitted whenever a target was enforced
+                # AND the solve actually produced a dispatch, INCLUDING the
+                # nothing-shed case (achieved 0, binding=voll).
+                #
+                # The status guard is load-bearing, not defensive. Without it
+                # an INFEASIBLE solve still built a report, and every number
+                # in it read as the best possible outcome: achieved ENS 0.0,
+                # shed hours 0.0, every zone at 0, target met — because there
+                # is no dispatch to measure, not because nothing was shed. The
+                # cost field carried over from the previous feasible solve, so
+                # the report was even internally consistent. A user who set an
+                # ambitious target and got an unsolvable LP would read
+                # "reliability target met" off a plan that does not exist,
+                # which is the exact inversion of the truth.
+                #
+                # 204 (no report) is the same convention /results/lost_load
+                # already used after a failed solve — the two surfaces
+                # disagreed, and lost_load was the one that was right.
+                _ens_targets = getattr(network, "_ens_cap_targets", None)
+                # The reserve-margin stash follows `_ens_cap_targets`'s
+                # lifecycle exactly: it is SOLVE-TIME truth (the peaks were
+                # measured against the load-scaling transforms, which restore
+                # has since reverted), so it must never outlive the solve that
+                # produced it — otherwise the next run's report would be built
+                # against this run's targets.
+                #
+                # It is read and deleted HERE, before the report, and kept in a
+                # local: `_diagnose_infeasibility` runs after this block and
+                # needs it, and the report fires when EITHER standard was
+                # enforced.
+                _margin_targets = getattr(network, "_reserve_margin_targets", None)
+                try:
+                    delattr(network, "_reserve_margin_targets")
+                except AttributeError:
+                    pass
+                # Published only on a solve that produced a dispatch — the
+                # identical guard the ENS cap carries below, for the identical
+                # reason: with no plan to measure, a margin block would report
+                # the previous solve's firm capacity as this one's.
+                _margin_payload = None
+                if not _margin_targets:
+                    # 12c-0 shipped-code review, finding 3: the HTTP route
+                    # clears `last_reserve_margin` at solve START, but the
+                    # loops call this function directly, so a margin-less
+                    # solve here left the PREVIOUS solve's payload on
+                    # `/results/reserve_margin` — a stale standard the plan
+                    # the loop built never met. Cleared from the one place
+                    # every solve passes through.
+                    _emit_state(last_reserve_margin=None)
+                if _margin_targets and status in ("ok", "optimal"):
+                    try:
+                        from services.adequacy.report import (
+                            reserve_margin_payload,
+                        )
+                        _margin_payload = reserve_margin_payload(
+                            network, _margin_targets,
+                            partial=getattr(config, "solve_strategy", "full") == "myopic")
+                        # Emitted into solver state like `last_lost_load`, so
+                        # /results/reserve_margin serves the PERSISTED stash
+                        # rather than recomputing peaks from restored loads.
+                        _emit_state(last_reserve_margin=_margin_payload)
+                        phase(
+                            "Reserve margin: firm-capacity result captured for "
+                            f"{len(_margin_payload.get('by_period') or [])} "
+                            "period(s)."
+                        )
+                    except Exception as exc:
+                        phase(f"Reserve-margin result skipped: {exc}")
+                if _ens_targets and status not in ("ok", "optimal"):
+                    phase(
+                        f"Adequacy report skipped: solve was {condition!r} — a "
+                        "target cannot be evaluated against a dispatch that "
+                        "does not exist."
+                    )
+                    try:
+                        delattr(network, "_ens_cap_targets")
+                    except AttributeError:
+                        pass
+                    _ens_targets = None
+                # EITHER standard, not just the energy cap: a margin-only run
+                # used to produce no report at all, leaving the margin
+                # invisible exactly when it was the only standard in force.
+                if _ens_targets or _margin_payload:
+                    try:
+                        from services.adequacy.report import (
+                            build_adequacy_report,
+                        )
+                        _emit_state(adequacy_report=build_adequacy_report(
+                            network, config, _ens_targets or {}, captured,
+                            margin_payload=_margin_payload, status=status))
+                        phase("Adequacy report built (target evaluation).")
+                    except Exception as exc:
+                        phase(f"Adequacy report skipped: {exc}")
+                    finally:
+                        try:
+                            delattr(network, "_ens_cap_targets")
+                        except AttributeError:
+                            pass
                 # Save captured lost-load (if any) into the simulation state
                 # so the /results/lost_load endpoint can serve it.
                 if captured.get("lost_load_t") is not None:
@@ -923,7 +1173,9 @@ def run_simulation(
             # block. Gurobi additionally gets its native infeasibility report.
             if status not in ("ok", "optimal") and "infeasible" in str(condition).lower():
                 try:
-                    _diagnose_infeasibility(network, config, log_queue)
+                    _diagnose_infeasibility(
+                        network, config, log_queue,
+                        margin_targets=_margin_targets)
                 except Exception as _dexc:
                     phase(f"Infeasibility diagnosis skipped: {_dexc}")
 
@@ -1069,6 +1321,25 @@ def run_simulation(
                 log_queue.put(f"[PHASE] WARN: modelling restore after abort failed: {_rexc}")
         log_queue.put(f"[PHASE] Aborted by user at: {exc}. Modelling assumptions reverted.")
         status, condition = "aborted", f"user_aborted:{exc}"
+    except ValidationRefused as exc:
+        # Phase 12f: a refusal, not a failure. Same restore as the generic
+        # handler (the network must not autosave carrying the run's vintage
+        # clones or VOLL slack tier), but logged the way preflight logs a
+        # validation error and reported under the same condition, with no
+        # traceback — nothing crashed.
+        if restore_modelling is not None:
+            try:
+                restore_modelling()
+            except Exception as _rexc:
+                log_queue.put(f"[PHASE] WARN: modelling restore after refusal failed: {_rexc}")
+        for _i in exc.issues:
+            log_queue.put(
+                f"[VALIDATION] ERROR: {_i.component_class} '{_i.name}' — "
+                f"{_i.message} [{_i.code}]")
+        log_queue.put(
+            f"[PHASE] Validation failed {exc.where}: {len(exc.issues)} "
+            "error(s). Aborting. Modelling assumptions reverted.")
+        status, condition = "error", "validation_failed"
     except Exception as exc:
         # Revert modelling transforms FIRST — a failure in the window between
         # _apply_modelling_assumptions and the solve try/finally skips the

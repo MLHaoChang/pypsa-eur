@@ -30,7 +30,6 @@ def lp_scaled_load_frame(n, cfg=None, source: str = "lopf", from_state: bool = T
     ``_result_df`` would otherwise return the LIVE network's cached
     `_state['lopf_results']` and cross-contaminate the comparison.
     """
-    import pandas as _pd
     if from_state:
         try:
             df = result_df(n, "loads_t", "p", source)
@@ -43,56 +42,15 @@ def lp_scaled_load_frame(n, cfg=None, source: str = "lopf", from_state: bool = T
         df = getattr(getattr(n, "loads_t", None), "p_set", None)
     if df is None or df.empty:
         return None
-    load_scalers = getattr(cfg, "load_scalers", {}) if cfg is not None else {}
-    by_carrier = getattr(cfg, "load_scalers_by_carrier", {}) if cfg is not None else {}
-    multi_periods = isinstance(df.index, _pd.MultiIndex)
-    has_any_scaling = bool(load_scalers) or bool(by_carrier)
-    if not already_scaled and multi_periods and has_any_scaling:
-        from services.solver_service import _canonical_load_carrier_key
-        df = df.copy(deep=True)
-        carrier_by_col: dict = {}
-        try:
-            loads_df = n.loads
-            if "carrier" in loads_df.columns:
-                for col in df.columns:
-                    carrier_by_col[col] = (
-                        _canonical_load_carrier_key(loads_df.at[col, "carrier"])
-                        if col in loads_df.index else "electrical"
-                    )
-            else:
-                for col in df.columns:
-                    carrier_by_col[col] = "electrical"
-        except Exception:
-            carrier_by_col = {col: "electrical" for col in df.columns}
-        period_level = df.index.get_level_values(0)
-        for period in sorted(set(period_level)):
-            mask = period_level == period
-            p_str = str(period)
-            for col in df.columns:
-                carrier_key = carrier_by_col.get(col, "electrical")
-                factor = None
-                car_block = by_carrier.get(carrier_key) if isinstance(by_carrier, dict) else None
-                if isinstance(car_block, dict):
-                    raw = car_block.get(p_str)
-                    if raw is not None:
-                        try:
-                            f = float(raw)
-                            if f == f:
-                                factor = f
-                        except (TypeError, ValueError):
-                            pass
-                if factor is None and load_scalers:
-                    raw = load_scalers.get(p_str)
-                    if raw is not None:
-                        try:
-                            f = float(raw)
-                            if f == f:
-                                factor = f
-                        except (TypeError, ValueError):
-                            pass
-                if factor is None or factor == 1.0:
-                    continue
-                df.loc[mask, col] = df.loc[mask, col] * factor
+    if not already_scaled:
+        # Phase 12c-0: the fallback is the LP's own resolution, from the one
+        # module that owns it — the previous inline copy diverged from the LP
+        # (no `multi_investment_periods` gate, `f == f` for `isfinite`, an
+        # `"electrical"` carrier fallback; v3 review, finding 7).
+        from services.adequacy.demand import lp_demand_frame
+        df = lp_demand_frame(n, cfg)
+        if df is None or df.empty:
+            return None
     return df
 
 

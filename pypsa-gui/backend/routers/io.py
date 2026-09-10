@@ -45,7 +45,7 @@ def _export_netcdf_bytes() -> bytes:
     with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as f:
         tmp = pathlib.Path(f.name)
     with PyPSAService.get_netcdf_io_lock():
-        n.export_to_netcdf(str(tmp))
+        PyPSAService.export_network_to_netcdf(n, tmp)
     data = tmp.read_bytes()
     tmp.unlink(missing_ok=True)
     change_log_service.log("export", "Network", "network.nc", "Exported network as NetCDF (.nc)")
@@ -203,7 +203,7 @@ async def import_netcdf(file: UploadFile = File(...)):
             _reset_with_ts_clear()
             n = PyPSAService.get_network()
             with PyPSAService.get_netcdf_io_lock():
-                n.import_from_netcdf(str(tmp))
+                PyPSAService.import_network_from_netcdf(n, tmp)
     finally:
         tmp.unlink(missing_ok=True)
     summary = _build_summary(n)

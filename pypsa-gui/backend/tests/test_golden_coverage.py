@@ -133,6 +133,30 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_price_drivers"):               frozenset(),
     ("routers/results.py", "get_curtailment"):                 frozenset(),
     ("routers/results.py", "get_lost_load"):                   frozenset(),
+    # Adequacy / solution-FMEA surfaces. None of them reports an economics
+    # SURFACE id: they carry reliability metrics and failure-mode rows, whose
+    # € figures are derived from VoLL × unserved energy inside the adequacy
+    # services rather than from the economics roll-ups this allowlist tracks.
+    ("routers/results.py", "get_adequacy"):                    frozenset(),
+    ("routers/results.py", "get_reserve_margin"):              frozenset(),
+    ("routers/results.py", "get_copt"):                        frozenset(),
+    ("routers/results.py", "get_fmea_modes"):                  frozenset(),
+    ("routers/results.py", "get_fmea_sweep"):                  frozenset(),
+    ("routers/results.py", "post_fmea_sweep"):                 frozenset(),
+    ("routers/results.py", "get_frontier"):                    frozenset(),
+    ("routers/results.py", "post_frontier"):                   frozenset(),
+    ("routers/results.py", "get_mc"):                          frozenset(),
+    ("routers/results.py", "post_mc"):                         frozenset(),
+    ("routers/results.py", "get_mc_elcc_candidates"):          frozenset(),
+    ("routers/results.py", "get_coupling_loop"):               frozenset(),
+    ("routers/results.py", "post_coupling_loop"):              frozenset(),
+    ("routers/results.py", "post_coupling_loop_abort"):        frozenset(),
+    ("routers/results.py", "post_mc_abort"):                   frozenset(),
+    ("routers/results.py", "post_frontier_abort"):             frozenset(),
+    ("routers/results.py", "post_fmea_sweep_abort"):           frozenset(),
+    ("routers/results.py", "get_margin_loop"):                 frozenset(),
+    ("routers/results.py", "post_margin_loop"):                frozenset(),
+    ("routers/results.py", "post_margin_loop_abort"):          frozenset(),
     ("routers/results.py", "get_load_results"):                frozenset(),
     ("routers/results.py", "get_asset_economics"):             frozenset({"asset_economics"}),
     # ── routers/simulation.py ───────────────────────────────────────────
