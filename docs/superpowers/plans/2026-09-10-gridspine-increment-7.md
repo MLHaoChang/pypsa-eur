@@ -44,13 +44,34 @@ Reading `docs/superpowers/specs/2026-08-27-gridspine-design.md` against the tree
 5. Backend: a fourth dispatch source in `gridspine_service`, going through `_authorized_dispatch_dir`'s ACL path like the others — an external file is an upload, so it lands under the study's `uploads/` with a sanitised basename, the way increment 6's read-back upload does.
 6. Frontend: a fourth radio in the dispatch-source picker, with the file input; chat: the source becomes an argument the existing `gridspine_create_study` already shapes, so no thirteenth tool.
 
+**Amended 2026-09-10, after A1 landed: demand is part of the source.** The plan
+as first written missed this, and building A2 surfaced it. An external dispatch
+carries only the GENERATION side, and neither route that exists elsewhere
+applies — a PyPSA network brings its own loads (`tables_from_network`), and a
+generated year synthesises them from `LOAD_SHAPE` (`dispatch_year`). Pairing a
+client's generation with gridspine's synthetic demand would leave the mismatch
+to the external grid's slack: the load flow converges, and its flows and N-1
+severities describe a grid state that never existed. The inertia and IBR-share
+metrics would still mean something, which is what makes it dangerous rather
+than obviously broken.
+
+So the source is TWO tables, and the absence of demand is a refusal rather than
+a fallback — the owner's decision, taken over a ledgered synthetic fallback and
+over a rank-but-do-not-screen variant. Either two files, or one Excel workbook
+with `dispatch` and `loads` sheets, because a client exporting one file is the
+common case and making them split it invites exactly the hand-edit the alias
+tables exist to avoid. The two tables must also cover the SAME hours: demand for
+an undispatched hour, or a dispatched hour with no demand, is a half-specified
+snapshot the slack would quietly balance. This widens A2 to two uploads and A3
+to two file inputs.
+
 **Evidence a headless session can produce.** Every one of these is a real gate here: `gridspine-tests` for the producer and its refusals, `gui-tests` for the service and router, `vitest`/`tsc` for the picker, and a vertical slice that runs a study end to end from a hand-written external CSV against the IEEE 39-bus template — the same shape the increment-5 `from_project` slice uses. A deliberate mutation per task, per the standing discipline.
 
 **What it will NOT prove.** That a real client export parses. The fixture is written here, so it is the *shape*, not the evidence — the same honest limit increment 6 recorded for the PowerFactory bundles. That gap closes when a client file lands, and the plan should not pretend otherwise.
 
 ## Tasks
 
-- [ ] A1 gridspine: `producers/external.py`, the two-directional registry check, the typed column contract, `StudyConfig.from_external` and its three-way exclusivity; tests incl. both directions of unit mismatch, a malformed column, an ambiguous power spec, and the artifact a stage failure writes. Mutation: dropping one direction of the unit check must turn exactly the "unknown unit" test red — the mutation that already works for `from_network`.
+- [x] A1 gridspine (`1eedeb82`, demand required in a follow-up commit): `producers/external.py`, the two-directional registry check, the typed column contract for both tables, the required loads table and the hours-agreement check, `StudyConfig.from_external` and its three-way exclusivity. 26 tests. Three mutations, each killing exactly its intended test: dropping the omitted-unit direction (only the "never mentions" test — and note the per-hour completeness check does NOT cover it, so that direction is load-bearing, not belt-and-braces); leaving `from_external` out of the exclusivity list (only the two parametrised exclusivity cases); disabling the hours-agreement check (only the hours test). Gate: `gridspine-tests` 593 passed / 2 skipped at A1, re-run after the demand change.
 - [ ] A2 backend: the fourth source in `gridspine_service` through the ACL path, upload storage with a sanitised basename, the driver's refusals as 422; router and chat argument rows. Mutation: an unsanitised upload name must turn the escape test red (increment 6 found this one needs a path-shaped name ending in `.csv` to bite).
 - [ ] A3 frontend: the fourth picker option and its file input, thin, last. Mutation: a picker that ignores the new source must turn exactly one test red.
 - [ ] Vertical slice: a 39-bus study from a hand-written external CSV, ranked, bundled.

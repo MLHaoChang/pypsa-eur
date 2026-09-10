@@ -26,6 +26,20 @@ ranks a grid that is not the one being studied, with the omitted machine absent
 from every snapshot. Completeness is checked per (unit, hour) for the same
 reason — a single missing hour leaves one snapshot quietly wrong.
 
+Demand is required, not assumed
+-------------------------------
+A snapshot is generation AND demand, and a client dispatch carries only the
+generation side. Neither route that exists elsewhere applies: a PyPSA network
+brings its own loads (`tables_from_network`), and a generated year synthesises
+them from `LOAD_SHAPE` (`dispatch_year`). Pairing a client's generation with
+gridspine's synthetic demand would leave the mismatch to the external grid's
+slack — the load flow would converge, and its flows and N-1 severities would
+describe a grid state that never existed. So a loads file is required and its
+absence is a refusal. Either two files, or one Excel workbook with `dispatch`
+and `loads` sheets, because a client exporting one file is the common case and
+making them split it invites exactly the hand-edit this module's aliases exist
+to avoid.
+
 Coercion is the enemy
 ---------------------
 `validate_dispatch` guards the values AS SUPPLIED, before `astype`, precisely
@@ -40,7 +54,12 @@ from pathlib import Path
 import pandas as pd
 
 from gridspine.schema.contracts import ContractError
-from gridspine.schema.dispatch import DISPATCH_COLUMNS, validate_dispatch
+from gridspine.schema.dispatch import (
+    DISPATCH_COLUMNS,
+    LOADS_COLUMNS,
+    validate_dispatch,
+    validate_loads,
+)
 
 #: Client spellings -> contract columns. Lower-cased and stripped of spaces,
 #: underscores and bracketed units before lookup, so "P [MW]", "p_mw" and
@@ -70,6 +89,31 @@ EXTERNAL_ALIASES = {
     "online": "status",
 }
 
+#: The same idea for the demand table. `bus` rather than `unit_id`, and no
+#: status: demand is not committed.
+LOADS_ALIASES = {
+    "bus": "bus",
+    "busname": "bus",
+    "busid": "bus",
+    "node": "bus",
+    "hour": "hour",
+    "h": "hour",
+    "timestep": "hour",
+    "snapshot": "hour",
+    "pmw": "p_mw",
+    "p": "p_mw",
+    "load": "p_mw",
+    "demand": "p_mw",
+    "activepower": "p_mw",
+    "qmvar": "q_mvar",
+    "q": "q_mvar",
+    "reactivepower": "q_mvar",
+}
+
+#: Sheet names looked for when one workbook carries both tables.
+DISPATCH_SHEET = "dispatch"
+LOADS_SHEET = "loads"
+
 _CSV_SUFFIXES = {".csv", ".txt"}
 _EXCEL_SUFFIXES = {".xlsx", ".xlsm", ".xls"}
 
@@ -84,15 +128,20 @@ def _normalise(name: object) -> str:
     return "".join(ch for ch in text if ch.isalnum())
 
 
-def _read_frame(path: Path) -> pd.DataFrame:
+def _read_frame(path: Path, sheet: str | None = None) -> pd.DataFrame:
     """The file as a frame, or a ContractError. Never a parser traceback: a bad
     client file is a stage failure the UI and copilot render, so it has to
     arrive as the same typed error every other refusal here uses."""
     suffix = path.suffix.lower()
     if suffix in _CSV_SUFFIXES:
+        if sheet is not None:
+            raise ContractError(
+                f"external dispatch: {path.name} is a CSV, so it cannot carry a "
+                f"{sheet!r} sheet; supply the two tables as two files"
+            )
         reader, kwargs = pd.read_csv, {}
     elif suffix in _EXCEL_SUFFIXES:
-        reader, kwargs = pd.read_excel, {}
+        reader, kwargs = pd.read_excel, ({} if sheet is None else {"sheet_name": sheet})
     else:
         raise ContractError(
             f"external dispatch: unsupported file type {path.suffix!r}; "
@@ -101,21 +150,24 @@ def _read_frame(path: Path) -> pd.DataFrame:
     try:
         frame = reader(path, **kwargs)
     except Exception as exc:  # noqa: BLE001 — any reader failure is one refusal
+        where = path.name if sheet is None else f"{path.name} sheet {sheet!r}"
         raise ContractError(
-            f"external dispatch: {path.name} could not be read: {exc}"
+            f"external dispatch: {where} could not be read: {exc}"
         ) from exc
     if frame.empty:
-        raise ContractError(f"external dispatch: {path.name} has no rows")
+        where = path.name if sheet is None else f"{path.name} sheet {sheet!r}"
+        raise ContractError(f"external dispatch: {where} has no rows")
     return frame
 
 
-def _map_columns(frame: pd.DataFrame, filename: str) -> pd.DataFrame:
+def _map_columns(frame: pd.DataFrame, filename: str, aliases: dict,
+                 contract: dict) -> pd.DataFrame:
     """Client headers -> contract columns, refusing ambiguity rather than
     picking. Two headers mapping to one contract column means one of them would
     be discarded silently, and the client would have no way to know which."""
     mapped: dict[str, list[object]] = {}
     for column in frame.columns:
-        target = EXTERNAL_ALIASES.get(_normalise(column))
+        target = aliases.get(_normalise(column))
         if target is not None:
             mapped.setdefault(target, []).append(column)
 
@@ -129,7 +181,7 @@ def _map_columns(frame: pd.DataFrame, filename: str) -> pd.DataFrame:
             f"same field, so reading either would discard the other: {detail}"
         )
 
-    missing = sorted(set(DISPATCH_COLUMNS) - set(mapped))
+    missing = sorted(set(contract) - set(mapped))
     if missing:
         raise ContractError(
             f"external dispatch: {filename} is missing {missing}; "
@@ -172,31 +224,78 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def tables_from_external(src, registry: pd.DataFrame):
-    """`(dispatch, dispatch_source)` from a client's CSV/Excel dispatch file.
+def _hours_of(frame: pd.DataFrame) -> list[int]:
+    return sorted(int(h) for h in pd.Series(frame["hour"]).unique())
 
-    `dispatch` is exactly what `validate_dispatch` returns, so it is
-    interchangeable with the nodal producer's output. `dispatch_source` is the
-    provenance record the manifest carries — the file, its sha256, its hours and
-    its unit count — so a handoff bundle built from it is traceable to the file
-    it came from, the way `from_network`'s record names the solve.
 
-    Loads are NOT read from here: the demand table belongs to the grid ingest,
-    and a client dispatch that also redefined demand would be two sources of
-    truth for the same snapshot.
+def tables_from_external(dispatch_src, loads_src, registry: pd.DataFrame):
+    """`(dispatch, loads, dispatch_source)` from a client's own tables.
+
+    `dispatch_src` is a CSV/Excel dispatch; `loads_src` is the matching demand,
+    or `None` when `dispatch_src` is one Excel workbook carrying both a
+    `dispatch` and a `loads` sheet. Demand is not optional — see the module
+    docstring on why synthesising it would produce a grid state that never
+    existed.
+
+    `dispatch` and `loads` are exactly what `validate_dispatch` and
+    `validate_loads` return, so they are interchangeable with every other
+    producer's output. `dispatch_source` is the provenance record the manifest
+    carries: both files, both sha256s, the hours and the unit count, so a
+    handoff bundle built from this is traceable to the files it came from.
     """
-    path = Path(src)
-    if not path.is_file():
-        raise ContractError(f"external dispatch: {path} is not a file")
+    dispatch_path = Path(dispatch_src)
+    if not dispatch_path.is_file():
+        raise ContractError(f"external dispatch: {dispatch_path} is not a file")
 
-    frame = _read_frame(path)
-    dispatch = validate_dispatch(_map_columns(frame, path.name))
+    if loads_src is None:
+        # One workbook, two sheets. A CSV cannot carry a second table, and
+        # saying so beats a KeyError from the reader.
+        if dispatch_path.suffix.lower() not in _EXCEL_SUFFIXES:
+            raise ContractError(
+                "external dispatch: a loads table is required — a snapshot is "
+                "generation AND demand, and synthesising the demand would "
+                "describe a grid state that never existed. Supply a loads file "
+                f"beside {dispatch_path.name}, or one Excel workbook with "
+                f"{DISPATCH_SHEET!r} and {LOADS_SHEET!r} sheets."
+            )
+        loads_path = dispatch_path
+        dispatch_frame = _read_frame(dispatch_path, DISPATCH_SHEET)
+        loads_frame = _read_frame(loads_path, LOADS_SHEET)
+    else:
+        loads_path = Path(loads_src)
+        if not loads_path.is_file():
+            raise ContractError(f"external dispatch: loads file {loads_path} is not a file")
+        dispatch_frame = _read_frame(dispatch_path)
+        loads_frame = _read_frame(loads_path)
+
+    dispatch = validate_dispatch(
+        _map_columns(dispatch_frame, dispatch_path.name, EXTERNAL_ALIASES, DISPATCH_COLUMNS)
+    )
+    loads = validate_loads(
+        _map_columns(loads_frame, loads_path.name, LOADS_ALIASES, LOADS_COLUMNS)
+    )
     _check_units(dispatch, registry)
 
+    # The two tables must describe the SAME hours. Demand for an hour the
+    # dispatch does not cover, or a dispatched hour with no demand, is a
+    # half-specified snapshot either way — and the load flow would quietly
+    # balance it on the slack.
+    d_hours, l_hours = _hours_of(dispatch), _hours_of(loads)
+    if d_hours != l_hours:
+        only_dispatch = sorted(set(d_hours) - set(l_hours))
+        only_loads = sorted(set(l_hours) - set(d_hours))
+        raise ContractError(
+            "external dispatch and loads cover different hours: "
+            f"dispatched with no demand {only_dispatch}, "
+            f"demand with no dispatch {only_loads}"
+        )
+
     source = {
-        "external": str(path),
-        "external_sha256": _sha256(path),
-        "hours": int(pd.Series(dispatch["hour"]).nunique()),
+        "external": str(dispatch_path),
+        "external_sha256": _sha256(dispatch_path),
+        "loads": str(loads_path),
+        "loads_sha256": _sha256(loads_path),
+        "hours": len(d_hours),
         "units": int(pd.Series(dispatch["unit_id"]).nunique()),
     }
-    return dispatch, source
+    return dispatch, loads, source
