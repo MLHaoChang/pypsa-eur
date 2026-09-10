@@ -3190,6 +3190,74 @@ def export_chat_summary(
     )
 
 
+# ── Asset health / outage-rate provenance (2) ───────────────────────────────
+#
+# `resolve_outage_params` already resolves a rate as `asset`,
+# `carrier_default` or `missing`. Two of those explain themselves — the
+# carrier library ships its own citation, and `missing` is the absence of a
+# claim. `asset` does not, and it is the one that matters: a condition-based
+# rate IS the claim behind condition-based reliability, and the model records
+# "a drone survey found conductor damage" and "someone typed it" identically.
+#
+# These two tools are the interface a perception feed lands through — an
+# inspection programme, a DGA monitor, a vegetation model — BEFORE any such
+# model exists. The ledger never sets a rate: values go on the components
+# through the ordinary edit paths (bulk_update_components), and
+# `provenance_report` reconciles the two. A ledger nothing can contradict
+# would be decoration.
+
+def get_asset_health(name: str) -> dict:
+    """
+    The provenance ledger for `name`, reconciled against the LIVE network.
+
+    The reconciliation is the point — which asset-level rates have no source,
+    which have drifted away from what was measured — but it is only meaningful
+    when `name` is the project currently loaded in the foreground. When it is
+    not, the ledger is still served and `provenance` is null with a note
+    saying why: silently reporting drift computed against a DIFFERENT
+    network's rates is worse than reporting none.
+    """
+    from routers.adequacy_worksheet import get_asset_health as _h
+    from services.adequacy.asset_health import provenance_report
+
+    ledger = _h(project=_authorized_project(name))
+    active = PyPSAService.get_loaded_project()
+    if active != name:
+        return {
+            **ledger,
+            "provenance": None,
+            "note": (
+                f"'{name}' is not the project in the foreground "
+                f"({active or 'none'}), so its ledger cannot be reconciled "
+                f"against a network. Activate it first, or read the ledger "
+                f"alone."
+            ),
+        }
+    return {
+        **ledger,
+        "provenance": provenance_report(
+            PyPSAService.get_network(), ledger["entries"]),
+    }
+
+
+def record_asset_health(name: str, entries: list) -> dict:
+    """
+    Replace the provenance ledger for `name`.
+
+    Whole-ledger replacement, like the worksheet: the payload is small, and a
+    merge would need a delete verb nobody asked for. Validation runs before
+    the write, so a rejected batch leaves the previous ledger byte-identical.
+
+    This records where numbers came from; it does NOT apply them. Setting the
+    rates is `bulk_update_components` on `outage_rate_value` / `mttr_hours`,
+    and the split is deliberate — the ledger's job is to be contradictable by
+    the network, which it cannot be if it writes the network.
+    """
+    from routers.adequacy_worksheet import AssetHealthPut, put_asset_health as _h
+    return _h(AssetHealthPut(entries=list(entries or [])),
+              project=_authorized_project(name))
+
+
 # ── Explanation / synthesis (1) ─────────────────────────────────────────────
 #
 # The first real member of the composite family the DISPATCHERS block below
@@ -3626,6 +3694,8 @@ DISPATCHERS: dict[str, Any] = {
     # starters, one abort.
     "get_adequacy_results": get_adequacy_results,
     "get_fmea_worksheet": get_fmea_worksheet,
+    "get_asset_health": get_asset_health,
+    "record_asset_health": record_asset_health,
     "get_stress_scenarios": get_stress_scenarios,
     "run_fmea_sweep": run_fmea_sweep,
     "run_frontier_study": run_frontier_study,

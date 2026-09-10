@@ -198,6 +198,60 @@ transition:
 All lineage operations are best-effort: a failure copying chat history
 NEVER aborts the underlying project save / rename / restore.
 
+## Asset health — outage-rate provenance
+
+`resolve_outage_params` resolves a per-asset failure rate three ways: `asset`
+(typed on the component), `carrier_default` (the NERC GADS-style class
+library), or `missing`. Two of the three explain themselves — the library
+ships its own citation, and `missing` is the absence of a claim. **`asset`
+does not**, and it is the tier every condition-based number lands in:
+
+> λ = 0.031 because a drone survey found conductor damage on span 14
+
+and
+
+> λ = 0.031 because someone typed it
+
+are entirely different claims that the model recorded identically.
+
+`services/adequacy/asset_health.py` stores the difference as a per-project
+`asset_health.json` sidecar, with two chat tools:
+
+| Tool | Tier | |
+|---|---|---|
+| `get_asset_health` | read | The ledger, reconciled against the live network |
+| `record_asset_health` | write | Whole-ledger replace |
+
+Each entry requires a **`method`** (`inspection` / `sensor` / `lab_test` /
+`vendor_datasheet` / `operating_history` / `fleet_statistic` /
+`expert_judgement`) and a **`measured_at`** ISO date: a condition figure with
+no method is not evidence, and one with no date is not a measurement.
+`expert_judgement` is on the list deliberately — the alternative to naming it
+is not rigour, it's people picking whichever label looks most defensible.
+
+Two design rules:
+
+- **The ledger never sets a rate.** Values go on the components through the
+  ordinary edit paths (`bulk_update_components`); this file records what was
+  applied and how it was obtained. That split is what lets the network
+  *contradict* the ledger — and a ledger nothing can contradict is decoration,
+  not provenance.
+- **`provenance_report` is the reconciliation**, and it is where the value is:
+  `unsourced` (a rate that overrides the carrier library with no recorded
+  source — the finding to lead with), `drifted` (the measurement no longer
+  matches what the engines will read), `orphaned`, `sourced`.
+
+`get_asset_health` returns `provenance: null` with a note when the named
+project is not the one in the foreground. Reconciling an on-disk ledger
+against a *different* network would answer a question nobody asked, and look
+authoritative doing it. The route itself stays pure — the server never mixes
+foreground network state with on-disk project state; the fusion happens in the
+chat tool, which knows which network it holds.
+
+This is the interface a perception feed lands through — an inspection
+programme, a DGA monitor, a vegetation-encroachment model — and it exists
+before any such model does, because until it does none of them can land.
+
 ## Uploaded-data QA
 
 `services/timeseries_qa.py` checks the time series a user uploads, and

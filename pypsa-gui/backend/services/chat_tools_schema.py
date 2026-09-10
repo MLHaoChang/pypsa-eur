@@ -135,6 +135,18 @@ INVESTMENT_CLASS_ENUM = [
     "Generator", "StorageUnit", "Store", "Link", "Line", "Transformer",
 ]
 
+# Outage-rate provenance. Mirrors services/adequacy/asset_health.py — the
+# validator there is the authority; these enums exist so the model is told the
+# vocabulary instead of guessing at it and getting a 422.
+ASSET_HEALTH_COMPONENT_ENUM = [
+    "generators", "storage_units", "stores", "links", "lines",
+]
+ASSET_HEALTH_METHOD_ENUM = [
+    "inspection", "sensor", "lab_test", "vendor_datasheet",
+    "operating_history", "fleet_statistic", "expert_judgement",
+]
+ASSET_HEALTH_CONFIDENCE_ENUM = ["low", "medium", "high"]
+
 
 def _t(name: str, description: str, properties: dict[str, Any],
        required: list[str] | None = None) -> dict[str, Any]:
@@ -691,6 +703,67 @@ TOOLS: list[dict[str, Any]] = [
         "single destructive tier (NOT execution_long_running). Card UX: red "
         "border + 1s delay + disclaimer 'may not free the PyPSA lock if "
         "solver is in native code'. Safety: destructive.",
+    ),
+
+    # ── Asset health / outage-rate provenance (2) ──────────────────────────
+
+    _t(
+        "get_asset_health",
+        "The per-asset outage-rate PROVENANCE ledger for a project, "
+        "reconciled against the live network. Returns {entries, version, "
+        "provenance: {sourced, unsourced, drifted, orphaned, counts}}. "
+        "`unsourced` is the finding to lead with: those assets carry a rate "
+        "that OVERRIDES the carrier library with no recorded source, so any "
+        "LOLE / COPT / FMEA number resting on them is an unexplained claim. "
+        "`drifted` means the recorded measurement no longer matches what the "
+        "engines will read. `provenance` is null (with a note) when this "
+        "project is not the one in the foreground — a reconciliation against "
+        "someone else's network would be worse than none. Safety: read.",
+        {"name": {"type": "string"}},
+        ["name"],
+    ),
+    _t(
+        "record_asset_health",
+        "Replace a project's outage-rate provenance ledger. Each entry: "
+        "{component (generators|storage_units|stores|links|lines), name, "
+        "method, measured_at 'YYYY-MM-DD', and at least one of "
+        "outage_rate_value (in [0,1)) / mttr_hours; optional "
+        "outage_rate_basis (FOR|EFORd), confidence (low|medium|high), "
+        "source_ref, note}. `method` and `measured_at` are REQUIRED: a "
+        "condition figure with no method is not evidence and one with no date "
+        "is not a measurement. Use `expert_judgement` honestly rather than "
+        "dressing an estimate as an inspection. WHOLE-LEDGER REPLACE — send "
+        "the full set, not a delta, or you delete the rest. This records "
+        "where numbers came from and does NOT apply them: set the values with "
+        "bulk_update_components on outage_rate_value / mttr_hours, then "
+        "record here. Safety: write.",
+        {
+            "name": {"type": "string"},
+            "entries": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "component": {"type": "string",
+                                      "enum": ASSET_HEALTH_COMPONENT_ENUM},
+                        "name": {"type": "string"},
+                        "outage_rate_value": {"type": "number"},
+                        "outage_rate_basis": {"type": "string",
+                                              "enum": ["FOR", "EFORd"]},
+                        "mttr_hours": {"type": "number"},
+                        "method": {"type": "string",
+                                   "enum": ASSET_HEALTH_METHOD_ENUM},
+                        "source_ref": {"type": "string"},
+                        "measured_at": {"type": "string"},
+                        "confidence": {"type": "string",
+                                       "enum": ASSET_HEALTH_CONFIDENCE_ENUM},
+                        "note": {"type": "string"},
+                    },
+                    "required": ["component", "name", "method", "measured_at"],
+                },
+            },
+        },
+        ["name", "entries"],
     ),
 
     # ── Explanation / synthesis (1) ────────────────────────────────────────
@@ -1699,6 +1772,9 @@ TOOL_ROUTES: dict[str, list] = {
     # execution (2)
     "abort_simulation": [("POST", "/api/simulation/abort")],
     "force_reset_simulation": [("POST", "/api/simulation/force_reset")],
+    # asset_health (2)
+    "get_asset_health": [("GET", "/api/projects/{name}/asset_health")],
+    "record_asset_health": [("PUT", "/api/projects/{name}/asset_health")],
     # synthesis (1) — composite in-process fusion, no HTTP route of its own
     "explain_investment": _DERIVED,
     # adequacy_fmea (9)
