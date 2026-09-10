@@ -441,38 +441,29 @@ def test_save_guard_is_inside_mutation_lock(tmp_projects_dir):
         projects_router._save_context(ctx, "B")
 
 
-def test_save_guard_source_placement_invariant():
-    """
-    Source-level check: the new 409 guard ('DIFFERENT project') sits BETWEEN
-    the existing `loaded = ctx.loaded_project` line and the empty-network
-    safety check `if not force and nc_path.exists() and n.buses.empty:` —
-    INSIDE the `with ctx.mutation_lock:` block. Detects future refactors
-    that move the guard outside the lock.
-    """
-    src_path = pathlib.Path(projects_router.__file__)
-    lines = src_path.read_text(encoding="utf-8").splitlines()
-
-    def line_with(text: str) -> int:
-        for i, line in enumerate(lines, start=1):
-            if text in line:
-                return i
-        raise AssertionError(f"line containing {text!r} not found")
-
-    lock_line = line_with("with ctx.mutation_lock:")
-    loaded_read_line = line_with("loaded = ctx.loaded_project")
-    # Unique marker — this exact phrase appears ONLY in the v6 F1 guard's
-    # raise body (verified via grep at test-write time). Future refactors
-    # that re-word the message must also update this anchor.
-    guard_line = line_with("already exists on disk and the in-memory")
-    empty_check_line = line_with(
-        "if not force and nc_path.exists() and n.buses.empty:"
-    )
-
-    assert lock_line < loaded_read_line < guard_line < empty_check_line, (
-        f"v6 F1 source-placement invariant violated: lock={lock_line}, "
-        f"loaded_read={loaded_read_line}, guard={guard_line}, "
-        f"empty_check={empty_check_line}"
-    )
+# `test_save_guard_source_placement_invariant` lived here. It asserted the v6 F1
+# TOCTOU invariant — the cross-project 409 sits inside `with ctx.mutation_lock:`
+# and after the `loaded = ctx.loaded_project` read — by reading
+# `routers/projects.py` as TEXT and comparing line numbers.
+#
+# It was replaced by `tests/test_save_guards_seam.py`, which asserts the same
+# invariant by OBSERVATION: a recording lock whose `__exit__` must receive the
+# HTTPException, which is direct proof the raise happened inside it.
+#
+# The replacement was not a preference. Extracting the guards into
+# `_check_save_allowed` made the old test VACUOUS rather than red, because
+# `line_with` returns the first match anywhere in the file: its "lock" and
+# "loaded read" anchors began matching the COMMENT that describes the invariant
+# ("# the `with ctx.mutation_lock:` block opened above, AFTER the / #
+# `loaded = ctx.loaded_project` read above"), which travelled with the guards.
+# It would have stayed green through a refactor that genuinely moved the guard
+# out of the lock, so long as the comment moved too.
+#
+# Both tests were checked against that regression before the swap: hoisting the
+# guard above the lock fails the new file's
+# `test_the_guard_raises_while_the_mutation_lock_is_still_held`, and failed the
+# old one too. The new one keeps failing it after the extraction; the old one
+# did not.
 
 
 # ── 7. chat_service helpers ─────────────────────────────────────────────────
