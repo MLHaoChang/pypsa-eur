@@ -1472,6 +1472,121 @@ def _refuse_save_during_study(ctx) -> None:
     if detail:
         raise HTTPException(status_code=409, detail=detail)
 
+def _check_save_allowed(
+    ctx,
+    name: str,
+    *,
+    loaded: str | None,
+    expect: str | None,
+    force: bool,
+    rebind: bool,
+    nc_path: pathlib.Path,
+    dest: pathlib.Path,
+):
+    """
+    Refuse a save that would destroy data. Returns the network to write.
+
+    Three guards, in this order, and the order is the point — `ctx.network` is
+    read BETWEEN the second and third exactly as it was inline, so no guard sees
+    a network it did not see before.
+
+    1. **identity** — `expect` asserts which project the caller believes is
+       active. A mismatch means the network was swapped out from under it and
+       saving would write the wrong one.
+    2. **cross-project claim** (v6 F1) — the network is bound to A, the caller
+       saves to B, and B already has a network on disk. Overwriting silently was
+       the footgun: no UI signal that B had just been destroyed. `rebind`
+       (Save-As) or `force` is the opt-in.
+    3. **empty network** — never overwrite a project that had buses with a blank
+       one. This is what stops autosave wiping a project after a server restart,
+       when the browser still holds `currentProject` but the backend is empty.
+
+    MUST be called INSIDE `ctx.mutation_lock`, after `loaded` has been read
+    there. Both halves are a TOCTOU requirement, not a style: reading the
+    binding outside the lock observes a torn value, and raising outside it lets
+    another tab swap the binding between the check and the write.
+
+    That invariant used to be asserted by reading this file's TEXT and comparing
+    line numbers (`test_save_guard_source_placement_invariant`), which could not
+    survive this extraction — and, because it matched the first occurrence of
+    each anchor ANYWHERE in the file, would have kept passing while comparing
+    lines in unrelated functions. It is now asserted by observation in
+    `tests/test_save_guards_seam.py`: the lock's `__exit__` must receive the
+    HTTPException, which is direct proof the raise happened inside it.
+    """
+    if expect is not None and loaded is not None and expect != loaded:
+        raise HTTPException(
+            409,
+            f"Backend network is bound to project '{loaded}', not "
+            f"'{expect}'. It was loaded/swapped out from under this client "
+            f"(another tab, an external client, or a load that bypassed "
+            f"this save's caller). Refusing to overwrite '{name}' with the "
+            f"wrong network. Reload '{expect}' to resync, then retry.",
+        )
+    # Cross-project name-claim guard (chatbot integration v6 F1).
+    # Refuses POST /projects/B while the active network is bound to a
+    # DIFFERENT project (loaded != name) and B already has a network on
+    # disk — the legacy code silently overwrote B's data with A's network
+    # and left the binding on A (Save-a-Copy / create_scenario semantics).
+    # For the chat agent (and any external client) this is the cross-project
+    # overwrite footgun: there is no UI signal that B was just nuked. The
+    # caller must explicitly opt in: ?rebind=true (Save-As — claim B as the
+    # new binding, accepts overwrite as part of the claim) or ?force=true
+    # (acknowledged overwrite). Same-project re-save (loaded == name) and
+    # first-save of an UNBOUND network (loaded is None — the existing
+    # bind/claim at the end of this lock block handles it) both fall through
+    # so autosave + first-save flows are unchanged.
+    #
+    # Gate on `nc_path.exists()` (not `dest.exists()`): `_safe_project_dir`
+    # above already `mkdir(exist_ok=True)`s the directory, so `dest.exists()`
+    # is always True at this point. `nc_path.exists()` is the standard
+    # "project has a network on disk" signal (matches the empty-network
+    # safety check below).
+    #
+    # PLACEMENT INVARIANT (v6 F1 line-anchored): this guard MUST sit INSIDE
+    # the `with ctx.mutation_lock:` block opened above, AFTER the
+    # `loaded = ctx.loaded_project` read above. Outside the lock would risk
+    # a TOCTOU race where `loaded` reads stale before another tab's load
+    # swaps the binding; reading `loaded` outside the lock would observe
+    # a torn value. Phase 0 QA Gate B asserts the literal line ordering.
+    if (
+        nc_path.exists()
+        and not force
+        and not rebind
+        and loaded is not None
+        and loaded != name
+    ):
+        raise HTTPException(
+            409,
+            f"Project '{name}' already exists on disk and the in-memory "
+            f"network is bound to a DIFFERENT project ('{loaded}'). "
+            f"Refusing to overwrite '{name}' with '{loaded}'s network. "
+            f"Use ?rebind=true (Save-As) to claim '{name}' as the new "
+            f"binding, or ?force=true to acknowledge the overwrite. "
+            f"Without one of these, you would silently destroy "
+            f"'{name}' while leaving the active project on '{loaded}'.",
+        )
+    n = ctx.network
+
+    # Safety: never silently overwrite a project that had data with an
+    # empty network. Guards autosave after a server restart, when the
+    # in-memory network is blank but currentProject is still set in the
+    # browser's localStorage. ?force=true bypasses (the "New Project"
+    # overwrite flow).
+    if not force and nc_path.exists() and n.buses.empty:
+        existing_meta = _read_meta(dest)
+        if existing_meta.get("bus_count", 0) > 0:
+            raise HTTPException(
+                409,
+                f"Refusing to overwrite project '{name}' "
+                f"({existing_meta['bus_count']} buses) with an empty network. "
+                "Load the project first or reset it explicitly.",
+            )
+    return n
+
+
+
+
 def _save_context(
     ctx,
     name: str,
@@ -1595,74 +1710,11 @@ def _save_context(
         # None` (fresh / unbound network) falls through — the claim at the end
         # of this block establishes the binding.
         loaded = ctx.loaded_project
-        if expect is not None and loaded is not None and expect != loaded:
-            raise HTTPException(
-                409,
-                f"Backend network is bound to project '{loaded}', not "
-                f"'{expect}'. It was loaded/swapped out from under this client "
-                f"(another tab, an external client, or a load that bypassed "
-                f"this save's caller). Refusing to overwrite '{name}' with the "
-                f"wrong network. Reload '{expect}' to resync, then retry.",
-            )
-        # Cross-project name-claim guard (chatbot integration v6 F1).
-        # Refuses POST /projects/B while the active network is bound to a
-        # DIFFERENT project (loaded != name) and B already has a network on
-        # disk — the legacy code silently overwrote B's data with A's network
-        # and left the binding on A (Save-a-Copy / create_scenario semantics).
-        # For the chat agent (and any external client) this is the cross-project
-        # overwrite footgun: there is no UI signal that B was just nuked. The
-        # caller must explicitly opt in: ?rebind=true (Save-As — claim B as the
-        # new binding, accepts overwrite as part of the claim) or ?force=true
-        # (acknowledged overwrite). Same-project re-save (loaded == name) and
-        # first-save of an UNBOUND network (loaded is None — the existing
-        # bind/claim at the end of this lock block handles it) both fall through
-        # so autosave + first-save flows are unchanged.
-        #
-        # Gate on `nc_path.exists()` (not `dest.exists()`): `_safe_project_dir`
-        # above already `mkdir(exist_ok=True)`s the directory, so `dest.exists()`
-        # is always True at this point. `nc_path.exists()` is the standard
-        # "project has a network on disk" signal (matches the empty-network
-        # safety check below).
-        #
-        # PLACEMENT INVARIANT (v6 F1 line-anchored): this guard MUST sit INSIDE
-        # the `with ctx.mutation_lock:` block opened above, AFTER the
-        # `loaded = ctx.loaded_project` read above. Outside the lock would risk
-        # a TOCTOU race where `loaded` reads stale before another tab's load
-        # swaps the binding; reading `loaded` outside the lock would observe
-        # a torn value. Phase 0 QA Gate B asserts the literal line ordering.
-        if (
-            nc_path.exists()
-            and not force
-            and not rebind
-            and loaded is not None
-            and loaded != name
-        ):
-            raise HTTPException(
-                409,
-                f"Project '{name}' already exists on disk and the in-memory "
-                f"network is bound to a DIFFERENT project ('{loaded}'). "
-                f"Refusing to overwrite '{name}' with '{loaded}'s network. "
-                f"Use ?rebind=true (Save-As) to claim '{name}' as the new "
-                f"binding, or ?force=true to acknowledge the overwrite. "
-                f"Without one of these, you would silently destroy "
-                f"'{name}' while leaving the active project on '{loaded}'.",
-            )
-        n = ctx.network
-
-        # Safety: never silently overwrite a project that had data with an
-        # empty network. Guards autosave after a server restart, when the
-        # in-memory network is blank but currentProject is still set in the
-        # browser's localStorage. ?force=true bypasses (the "New Project"
-        # overwrite flow).
-        if not force and nc_path.exists() and n.buses.empty:
-            existing_meta = _read_meta(dest)
-            if existing_meta.get("bus_count", 0) > 0:
-                raise HTTPException(
-                    409,
-                    f"Refusing to overwrite project '{name}' "
-                    f"({existing_meta['bus_count']} buses) with an empty network. "
-                    "Load the project first or reset it explicitly.",
-                )
+        n = _check_save_allowed(
+            ctx, name,
+            loaded=loaded, expect=expect, force=force, rebind=rebind,
+            nc_path=nc_path, dest=dest,
+        )
 
         # Ensure time series round-trip correctly — FOREGROUND only (gated on
         # persist_user_ts). For a BACKGROUND ctx these two would corrupt state:
