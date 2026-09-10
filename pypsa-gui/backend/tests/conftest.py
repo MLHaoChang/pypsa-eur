@@ -77,7 +77,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 from db.base import Base
 import main
@@ -93,7 +93,13 @@ from services.solver_service import SolverConfig
 
 def _reset_backend_state() -> None:
     """Fresh singleton network (unbound) + cleared lifecycle/result state."""
-    PyPSAService.reset_network()  # new Network, _loaded_project -> None
+    # `allow_during_study=True` is exactly the internal caller the opt-out
+    # exists for (Phase 11 review, finding 9): a test that leaves a live
+    # study thread in the process foreground would otherwise raise 409 OUT
+    # of this autouse fixture, skipping every cleanup below it — the
+    # registry clear, `_user_ts`, undo and the solve queue — so state bled
+    # into the next test and the failure surfaced far from its cause.
+    PyPSAService.reset_network(allow_during_study=True)
     PyPSAService._contexts.clear()  # B2 registry: no resident ctxs bleed across tests
     # `_user_ts` is a PROCESS-GLOBAL time-series store in routers.network (keyed
     # by (component, attr, name)), NOT a per-context field — so reset_network()
@@ -168,69 +174,103 @@ def _clean_llm_profiles():
 _SEED = {"password": "test-password-123"}
 
 
-@pytest.fixture(scope="session")
-def _auth_db():
+def make_auth_db(url: str | None = None):
     """
-    One FILE-BACKED SQLite database shared by every test in the session.
+    Build the SQLite database the harness runs against, and install its
+    sessionmaker as `db.session.SessionLocal`.
 
-    Was `:memory:` + `StaticPool`. The old justification ("`:memory:` gives
-    each *connection* its own database, so every caller must be routed
-    through ONE shared pooled connection or the seeded user is invisible to
-    it") stops applying the moment the database is a real file: every
-    connection then opens the SAME file, so there is no longer a reason to
-    funnel every thread through a single DBAPI connection object.
+    Returns `(engine, session_local, previous_session_local)` — the caller owns
+    teardown, because the two callers own it differently: the `_auth_db`
+    fixture restores and disposes at end of session, while `tests/qa_support.py`
+    (the standalone `qa_*.py` drivers) holds it for the life of the process.
 
-    That funnelling was a latent thread-safety hazard, not just an
-    optimisation. `test_hydrate_or_adopt_cold_paths.py` races real OS
-    threads — a `threading.Barrier`-synchronised `Session` per thread — and
-    multiple `Session`s issuing overlapping, uncoordinated statements through
-    ONE physical `sqlite3.Connection` produced genuine corruption:
-    `ValueError: badly formed hexadecimal UUID string` reading back a UUID
-    column, and a `User` row committed session-scopes earlier intermittently
-    reading back as absent (`404 Project not found` / `401 Authentication
-    required` from inside the race). Neither was a bug in the code under
-    test. `:memory:` + `StaticPool` is the textbook-safe pattern for a shared
-    engine used SEQUENTIALLY across threads (one request at a time, even if
-    served on different threadpool threads over the life of the process); it
-    was never safe for the genuinely CONCURRENT access this suite's cold-path
-    lock tests deliberately drive.
+    Extracted from the fixture body so the drivers get THIS database rather
+    than a second hand-rolled copy of it. A copy would drift, and the way it
+    would drift is silent: miss StaticPool below and the seeded user simply
+    isn't there for the request that needs it, which reads as an auth bug.
 
-    `poolclass=NullPool` + `connect_args={"check_same_thread": False,
-    "timeout": 30}` are not copied over by reflex — they're the SAME choice
-    `db/session.py::get_engine` already makes for file-backed sqlite in
-    production, for the same reason ("NullPool for a file-backed database:
-    one local user, one file. QueuePool's 5 + 10 connections buy nothing here
-    and widen the window in which a writer holds the file."). Matching it
-    means every checkout here is a brand-new DBAPI connection — never pooled,
-    never reused across threads, never shared by two threads at once — same
-    as what ships. `enable_sqlite_foreign_keys` (called below, unchanged)
-    now meaningfully enables WAL journalling per connection on a real file,
-    giving genuine reader/writer concurrency arbitrated by SQLite's own file
-    locking instead of by one shared Python object.
+    **Default (`url=None`) — one `:memory:` database behind a `StaticPool`.**
+    StaticPool is load-bearing there: `:memory:` gives each *connection* its own
+    database, and the app opens connections from several places (the auth
+    middleware, `get_db`, the solve dispatcher). Without a single pooled
+    connection the seeded user would be invisible to the request that needs it.
+    The suite drives the app through `TestClient`, one request at a time, so
+    nothing ever uses that one connection from two threads at once.
 
-    Lives in a session-scoped temp directory, removed on teardown alongside
-    `engine.dispose()`.
+    **A file URL — a normal connection per checkout, no StaticPool.**
+    For a caller that DOES touch the database from several threads:
+    `tests/qa_phase4_compare.py` boots a real uvicorn and fires concurrent
+    requests, so its handlers run on anyio worker threads. Handing those threads
+    one shared `sqlite3.Connection` is unsafe, and how it fails depends on the
+    interpreter — measured on SQLAlchemy 2.0.50, twelve threads mixing reads and
+    writes: Python 3.11 came through clean, Python 3.12 raised
+    `sqlite3.InterfaceError: bad parameter or other API misuse`. A file needs no
+    shared connection to be one database, which is also how the product runs on
+    SQLite (`db/session.py::get_engine`).
+
+    See `tests/test_qa_support_sandbox.py`.
+    MERGE NOTE (2026-09-10). This branch had replaced the whole thing with
+    an always-file database, for a reason that still holds and is NOT
+    subsumed by the `url=` parameter above: `test_hydrate_or_adopt_cold_paths.py`
+    (which exists only on this branch) races real OS threads through
+    `_auth_db` itself, and the default `:memory:` + StaticPool hands them one
+    shared `sqlite3.Connection`. Measured symptoms were
+    `ValueError: badly formed hexadecimal UUID string` on a UUID column and a
+    committed `User` row intermittently reading back as absent — neither a bug
+    in the code under test. `_auth_db` therefore passes a file URL below, which
+    keeps master's parameterisation AND this branch's fix instead of choosing
+    between them.
+
     """
     import shutil
-    import tempfile
-
-    from sqlalchemy.pool import NullPool
-
     from db import session as db_session_module
 
-    tmp_dir = tempfile.mkdtemp(prefix="pypsa-gui-test-authdb-")
-    db_path = pathlib.Path(tmp_dir) / "auth.db"
-
-    engine = create_engine(
-        f"sqlite+pysqlite:///{db_path}",
-        connect_args={"check_same_thread": False, "timeout": 30},
-        poolclass=NullPool,
-    )
+    if url is None:
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    else:
+        # Mirrors `db/session.py::get_engine`'s file-backed branch. NullPool so
+        # a connection is opened and closed per checkout rather than parked in a
+        # pool; `check_same_thread=False` because FastAPI serves sync handlers
+        # from a worker thread, which is safe now that no two of them share one
+        # connection.
+        engine = create_engine(
+            url,
+            connect_args={"check_same_thread": False, "timeout": 30},
+            poolclass=NullPool,
+        )
     db_session_module.enable_sqlite_foreign_keys(engine)
     Base.metadata.create_all(engine)
     testing_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     original = db_session_module.SessionLocal
     db_session_module.SessionLocal = testing_session_local
+    return engine, testing_session_local, original
+
+
+@pytest.fixture(scope="session")
+def _auth_db():
+    """
+    One FILE-BACKED SQLite database shared by every test in the session.
+
+    The file URL is the point, and it is not the default — see the MERGE NOTE
+    in `make_auth_db`. `test_hydrate_or_adopt_cold_paths.py` drives genuinely
+    concurrent OS threads through this fixture, and the `:memory:` default
+    would hand them a single shared `sqlite3.Connection` via StaticPool. A
+    file needs no shared connection to be one database, which is also how the
+    product runs on SQLite (`db/session.py::get_engine`).
+    """
+    import shutil
+
+    from db import session as db_session_module
+
+    tmp_dir = _tempfile.mkdtemp(prefix="pypsa-gui-test-authdb-")
+    db_path = pathlib.Path(tmp_dir) / "auth.db"
+    engine, testing_session_local, original = make_auth_db(
+        f"sqlite+pysqlite:///{db_path}"
+    )
     try:
         yield engine, testing_session_local
     finally:
@@ -589,49 +629,59 @@ def build_network(*, solve: bool = False, gens_weight=None, obj_weight=None) -> 
     return n
 
 
-@pytest.fixture
-def install_network():
+def install_network_into_backend(n: pypsa.Network, name: str | None = None) -> pypsa.Network:
     """
     Install a network as the live singleton, optionally binding it to a project
     name (mimics a load: sets n.name + _loaded_project). Without `name` the
     network is left UNBOUND (_loaded_project stays None) — the first-save case.
+
+    A plain function so `tests/qa_support.py` — the standalone `qa_*.py`
+    drivers — installs a network the same way the suite does. A bare
+    `PyPSAService.set_network()` is NOT the same way, and the difference is
+    silent: the process foreground it writes is adopted by a session exactly
+    once, so a driver that calls it twice keeps saving the FIRST network while
+    believing it swapped.
     """
-    def _install(n: pypsa.Network, name: str | None = None) -> pypsa.Network:
-        PyPSAService.set_network(n)
-        sim_router._state["solver_config"] = SolverConfig()
-        if name is not None:
-            n.name = name
-            PyPSAService.set_loaded_project(name)
-        # Step 0b: drop every resident SCRATCH context so the next request
-        # re-adopts what was just installed.
-        #
-        # `set_network` writes the PROCESS foreground, which a session adopts
-        # exactly once (`adopt_process_foreground`). Without this, the second
-        # `install_network` in a test would be invisible: the session already
-        # holds a scratch context and would keep serving the FIRST network
-        # while the test believed it had swapped it. Bound project contexts are
-        # deliberately left alone — those mirror real on-disk projects.
-        with PyPSAService._registry_lock:
-            for key in [k for k in PyPSAService._contexts if k.startswith("scratch:")]:
-                PyPSAService._contexts.pop(key, None)
-        # …and un-bind every live session, so the next request resolves the
-        # freshly-installed network instead of re-hydrating whatever project the
-        # session was last pointed at. `install_network` means "this is what the
-        # client is now looking at"; leaving the pointer set would silently
-        # discard the install one request later.
-        try:
-            from sqlalchemy import update
+    PyPSAService.set_network(n)
+    sim_router._state["solver_config"] = SolverConfig()
+    if name is not None:
+        n.name = name
+        PyPSAService.set_loaded_project(name)
+    # Step 0b: drop every resident SCRATCH context so the next request
+    # re-adopts what was just installed.
+    #
+    # `set_network` writes the PROCESS foreground, which a session adopts
+    # exactly once (`adopt_process_foreground`). Without this, the second
+    # `install_network` in a test would be invisible: the session already
+    # holds a scratch context and would keep serving the FIRST network
+    # while the test believed it had swapped it. Bound project contexts are
+    # deliberately left alone — those mirror real on-disk projects.
+    with PyPSAService._registry_lock:
+        for key in [k for k in PyPSAService._contexts if k.startswith("scratch:")]:
+            PyPSAService._contexts.pop(key, None)
+    # …and un-bind every live session, so the next request resolves the
+    # freshly-installed network instead of re-hydrating whatever project the
+    # session was last pointed at. `install_network` means "this is what the
+    # client is now looking at"; leaving the pointer set would silently
+    # discard the install one request later.
+    try:
+        from sqlalchemy import update
 
-            from db import session as _db
-            from db.models import Session as _SessionRow
+        from db import session as _db
+        from db.models import Session as _SessionRow
 
-            with _db.SessionLocal() as db:
-                db.execute(update(_SessionRow).values(active_project_id=None))
-                db.commit()
-        except Exception:  # noqa: BLE001 — no DB in pure-service tests
-            pass
-        return n
-    return _install
+        with _db.SessionLocal() as db:
+            db.execute(update(_SessionRow).values(active_project_id=None))
+            db.commit()
+    except Exception:  # noqa: BLE001 — no DB in pure-service tests
+        pass
+    return n
+
+
+@pytest.fixture
+def install_network():
+    """The function above, as a fixture."""
+    return install_network_into_backend
 
 
 # ── Mid-run source-change watcher (Improvement #10) ─────────────────────────

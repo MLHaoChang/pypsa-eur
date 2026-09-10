@@ -71,12 +71,19 @@ const QUIET_MUTATION_URLS = ['/simulation/preflight']
 
 // Expected conflict codes — still log, but avoid toast spam.
 //
-// `project_locked` joins `solver_in_flight` for the same reason: it is a
-// STANDING condition, not an incident. While another user holds the edit lock
-// every autosave tick, every canvas drag and every solver-config change is
-// refused, and one toast per refusal buries the workbench. The read-only
-// banner already says who holds it and is the affordance the user can act on.
-const QUIET_TOAST_CODES = new Set(['solver_in_flight', 'project_locked'])
+// `project_locked` is a STANDING condition, not an incident. While another
+// user holds the edit lock every autosave tick, every canvas drag and every
+// solver-config change is refused, and one toast per refusal buries the
+// workbench. The read-only banner already says who holds it and is the
+// affordance the user can act on.
+//
+// `study_in_flight` (whole-branch review S5) is the same shape for adequacy:
+// a save refused because a study is running is a structured 409 the caller
+// handles — the project switch toasts its own 'busy-study' sentence and
+// autosave must not toast it every interval.
+const QUIET_TOAST_CODES = new Set([
+  'solver_in_flight', 'project_locked', 'study_in_flight',
+])
 
 const AUTH_API_PREFIX = '/auth/'
 const AUTH_PAGES = new Set(['/login', '/set-password', '/reset-password'])
@@ -145,7 +152,15 @@ client.interceptors.response.use(
   (err) => {
     const data = err.response?.data
     const status = err.response?.status as number | undefined
-    const code = typeof data?.code === 'string' ? data.code : undefined
+    // A structured refusal carries its kind as `detail.error_kind` (the
+    // solver-in-flight and study-in-flight 409s); the middleware 409 carries
+    // a top-level `code`. Either names a quiet-toast code.
+    const code =
+      typeof data?.code === 'string'
+        ? data.code
+        : typeof data?.detail?.error_kind === 'string'
+          ? (data.detail.error_kind as string)
+          : undefined
     const msg = formatApiDetail(data?.detail ?? err.message)
     const method = (err.config?.method ?? '').toUpperCase()
     const url = err.config?.url ?? ''

@@ -17,6 +17,7 @@ from routers.projects import _RESULTS_STATE_KEYS
 from services.project_context import (
     LIFECYCLE_KEYS,
     RESULT_STATE_KEYS,
+    STUDY_KEYS,
     ProjectSolverState,
 )
 
@@ -36,12 +37,29 @@ def test_state_dict_keys_match_solver_state_fields():
 
 
 def test_every_field_is_classified_exactly_once():
-    # Every field is exactly one of lifecycle / config / result-state — the
-    # partition the dispatcher relies on (reset lifecycle, persist result-state).
-    classified = set(LIFECYCLE_KEYS) | {"solver_config"} | set(RESULT_STATE_KEYS)
+    # Every field is exactly one of lifecycle / config / result-state / STUDY —
+    # the partition the dispatcher relies on (reset lifecycle, persist
+    # result-state).
+    #
+    # ★ STUDY_KEYS became a fourth group in Phase 10. Before that the study
+    # records were in NO group and were not declared fields at all, which is
+    # exactly why nothing ever reset them: every reset path iterates a declared
+    # group, so a key in none of them survives forever — project A's finished
+    # MC study was served for project B, and a study of a discarded network
+    # survived "New". They are their own group rather than result-state
+    # because they must NOT be persisted: a study measures a network in
+    # memory and must not be restored from disk beside a network it may no
+    # longer describe.
+    classified = (set(LIFECYCLE_KEYS) | {"solver_config"}
+                  | set(RESULT_STATE_KEYS) | set(STUDY_KEYS))
     assert classified == _field_names()
     # Disjoint groups: counts sum to the field total (no key in two groups).
-    assert len(LIFECYCLE_KEYS) + 1 + len(RESULT_STATE_KEYS) == len(_field_names())
+    assert (len(LIFECYCLE_KEYS) + 1 + len(RESULT_STATE_KEYS)
+            + len(STUDY_KEYS)) == len(_field_names())
+    # …and the study keys are in NEITHER persistence group, which is the
+    # property that keeps a study off disk.
+    assert not (set(STUDY_KEYS) & set(RESULT_STATE_KEYS))
+    assert not (set(STUDY_KEYS) & set(LIFECYCLE_KEYS))
 
 
 def test_results_state_keys_are_single_source():

@@ -1797,7 +1797,3165 @@ def suite_S14():
            f"branch_gone={branch not in remaining}")
 
 
+
+def suite_S15():
+    """
+    Solution FMEA / adequacy journey (adequacy spec §5, phases 0-4).
+
+    Exists because the ~150 pytest adequacy tests construct `SolverConfig`
+    directly — a plain dataclass that validates nothing — and call route
+    handlers as functions. Neither reaches the API boundary, which is where
+    the unbounded-input defect lived and where a missing import once
+    survived every handler-level test. This suite drives the LIVE surface.
+
+    Its standard is exact arithmetic, not "a number came back": occurrence
+    rates, the shed-cost exclusion identity and sweep criticality are all
+    asserted against their closed forms, so a plausible-looking wrong
+    number fails here.
+    """
+    print("\nS15 - Solution FMEA / adequacy journey (area 15)")
+    name = "qa_e2e_fmea"
+
+    # Solver config is process-global state, not project state: restore
+    # whatever was there so a later suite (or the operator's own session)
+    # does not inherit this suite's reliability target and VOLL.
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    # Built from scratch over the API rather than from the 3bus template,
+    # unlike S10-S14. Two reasons, both specific to this suite: its
+    # assertions are exact arithmetic over particular assets (a generator
+    # carrying occurrence data, links to trip for class B, a load tight
+    # enough to matter), and a template that happens to ship no links would
+    # make the class-B rows silently empty — a suite that passes by having
+    # nothing to check. Building it here also makes S15 runnable in an
+    # environment where the template payloads are not installed.
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        skip("S15.1", f"create project -> {st_c} {str(body_c)[:80]}")
+        for i in range(2, 15):
+            skip(f"S15.{i}", "no scratch project")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    for carrier in ("gas", "load_shedding"):
+        built.append(http("/api/network/carriers", method="POST",
+                          body={"name": carrier})[0])
+    for bus in ("bus_a", "bus_b"):
+        built.append(http("/api/network/buses", method="POST",
+                          body={"name": bus, "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-01 23:00", "freq": "h"})[0])
+    # All firm generation at bus_a, all load at bus_b, so the links are the
+    # lifeline and class B has something that could actually bite.
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "ccgt_a", "bus": "bus_a", "carrier": "gas",
+                            "p_nom": 300.0, "marginal_cost": 60.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "peaker_b", "bus": "bus_b", "carrier": "gas",
+                            "p_nom": 0.0, "p_nom_extendable": True,
+                            "p_nom_max": 400.0, "capital_cost": 500_000.0,
+                            "marginal_cost": 150.0})[0])
+    for link, cap, forr, mttr in (("link_ab", 200.0, 0.02, 72.0),
+                                  ("link_ab2", 150.0, 0.03, 60.0)):
+        built.append(http("/api/network/links", method="POST",
+                          body={"name": link, "bus0": "bus_a", "bus1": "bus_b",
+                                "p_nom": cap, "efficiency": 1.0,
+                                "outage_rate_value": forr,
+                                "outage_rate_basis": "FOR",
+                                "mttr_hours": mttr})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "load_b", "bus": "bus_b", "p_set": 330.0})[0])
+    bad_build = [c for c in built if c not in (200, 201)]
+    st_pf, pf = http("/api/simulation/preflight", method="POST", body={})
+    errs = [i.get("code") for i in ((pf or {}).get("issues") or [])
+            if isinstance(pf, dict) and i.get("severity") == "error"]
+    record("S15.1", not bad_build and not errs,
+           f"built {name}: non-2xx={bad_build or 'none'}; "
+           f"preflight errors={errs or 'none'}")
+
+    # ── S15.2/3 — API-boundary bounds on the reliability inputs. A negative
+    # cap used to be accepted and then silently discarded downstream, which
+    # made "target of -1" indistinguishable from "no target at all".
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)[0]
+
+    nonsense = {
+        "ens_cap_permyriad=-1": {"ens_cap_permyriad": -1.0},
+        "ens_zone_cap_multiple=-3": {"ens_cap_permyriad": 20.0, "ens_zone_cap_multiple": -3.0},
+        "dsr_share_of_load=5": {"dsr_share_of_load": 5.0},
+        "dsr_price=-100": {"dsr_price_eur_per_mwh": -100.0},
+    }
+    bad = [k for k, v in nonsense.items() if put_cfg(**v) != 422]
+    record("S15.2", not bad, f"nonsense rejected 422; accepted-anyway={bad or 'none'}")
+
+    # 0 and None are the DOCUMENTED "off" — bounding must not break them.
+    meaningful = {
+        "cap=20": {"ens_cap_permyriad": 20.0},
+        "cap=0": {"ens_cap_permyriad": 0.0},
+        "cap=None": {"ens_cap_permyriad": None},
+        "share=1.0": {"dsr_share_of_load": 1.0},
+    }
+    refused = [k for k, v in meaningful.items() if put_cfg(**v) != 200]
+    record("S15.3", not refused, f"meaningful range accepted; refused={refused or 'none'}")
+
+    # ── S15.4/5 — COPT screening needs NO solve at all. Give one generator
+    # occurrence data by reading its row back and PUTting the whole row
+    # (these PUTs replace, they do not merge).
+    st_g, gens = http("/api/network/generators")
+    gen = gens[0] if isinstance(gens, list) and gens else None
+    if gen is None:
+        skip("S15.4", f"no generators on the template -> {st_g}")
+        skip("S15.5", "no generator to annotate")
+    else:
+        FOR_, MTTR = 0.06, 48.0
+        row = dict(gen)
+        row.update({"outage_rate_value": FOR_, "outage_rate_basis": "FOR",
+                    "mttr_hours": MTTR})
+        st_p, _ = http(f"/api/network/generators/{q(str(gen['name']))}",
+                       method="PUT", body=row)
+        st_copt, copt = http("/api/results/copt")
+        modes = (copt or {}).get("per_mode") or [] if isinstance(copt, dict) else []
+        record("S15.4", st_p == 200 and st_copt == 200 and len(modes) > 0,
+               f"PUT outage -> {st_p}; /results/copt -> {st_copt}; "
+               f"modes={len(modes)} (no solve required)")
+
+        # events/yr = FOR x 8760 / MTTR. Closed form, so an off-by-a-factor
+        # in the rate conversion cannot pass.
+        mine = next((m for m in modes if m.get("name") == gen["name"]), None)
+        expected = FOR_ * 8760.0 / MTTR
+        got = (mine or {}).get("occurrence_per_year")
+        near = got is not None and abs(float(got) - expected) < 1e-9
+        record("S15.5", near,
+               f"occurrence {got} == FOR*8760/MTTR = {expected:.6f}"
+               if mine else "annotated generator absent from the COPT ranking")
+
+    # ── S15.6/7/8 — set a target, solve, and read every result surface.
+    # A DELIBERATELY loose cap. Firm generation (300 MW at bus_a) is short of
+    # the 330 MW load, and the peaker is priced so that shedding beats
+    # building it, so this solve sheds ~720 MWh over the 24 h horizon. That
+    # is the point: with ENS = 0 the S15.7 cost identity reduces to 0 == 0
+    # and passes while checking nothing, which is exactly how it first
+    # passed. S15.7 now also requires ENS > 0 so it can never again be
+    # vacuous. The later sweep steps re-tighten the cap, which stays
+    # feasible because the peaker remains extendable.
+    st_cfg = put_cfg(ens_cap_permyriad=1500.0)
+    st_r, _ = http("/api/simulation/run", method="POST")
+
+    def poll():
+        for _ in range(90):                     # 180s ceiling, as S13
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(2)
+        return None
+
+    status = poll()
+    if status is None:
+        # Hazard 5: cannot distinguish stuck from slow — skip, never fail.
+        for i in (6, 7, 8):
+            skip(f"S15.{i}", "solve did not finish within the 180s ceiling")
+    else:
+        st_a, rep = http("/api/results/adequacy")
+        good = st_a == 200 and isinstance(rep, dict)
+        binding = rep.get("target", {}).get("binding") if good else None
+        record("S15.6", good and binding in ("system_cap", "zone_ceiling", "voll"),
+               f"cfg->{st_cfg} run->{st_r} cond={status.get('condition')} "
+               f"/results/adequacy -> {st_a} binding={binding}")
+
+        # The cost axis excludes shed cost BY CONSTRUCTION (typed
+        # Literal[True]), so a self-referential frontier is unconstructible.
+        # The identity that must hold: objective - reported cost == ENS x VOLL.
+        if good:
+            ens = float(rep["target"]["system"]["achieved_ens_mwh"])
+            cost = float(rep["cost"]["total_system_cost_eur"])
+            obj = float(status.get("objective") or 0.0)
+            voll = float((rep.get("inputs") or {}).get("voll_eur_per_mwh") or 3000.0)
+            gap, want = obj - cost, ens * voll
+            record("S15.7", ens > 0.0
+                   and abs(gap - want) <= max(1e-6, 1e-9 * abs(obj))
+                   and rep["cost"]["excludes_shed_cost"] is True,
+                   f"objective {obj:.4f} - cost {cost:.4f} = {gap:.6f}; "
+                   f"ENS {ens:.6f} x VOLL {voll:g} = {want:.6f}; "
+                   f"excludes_shed_cost={rep['cost']['excludes_shed_cost']}; "
+                   f"non-vacuous(ENS>0)={ens > 0.0}")
+
+            # Shed-hours is a NEW metric; it must reach the Lost Load tab,
+            # not just the adequacy report, or the two surfaces disagree.
+            st_ll, ll = http("/api/results/lost_load")
+            if st_ll == 204:
+                record("S15.8", ens == 0.0,
+                       f"/results/lost_load -> 204 with ENS={ens:g} "
+                       "(no shedding, so no capture — consistent)")
+            else:
+                sh = (ll or {}).get("shed_hours") if isinstance(ll, dict) else None
+                agree = (sh or {}).get("total") == rep["metrics"]["shed_hours"]
+                total = (sh or {}).get("total")
+                record("S15.8", st_ll == 200 and sh is not None and agree
+                       and (total or 0) > 0,
+                       f"/results/lost_load -> {st_ll} shed_hours={sh} "
+                       f"vs report {rep['metrics']['shed_hours']}; "
+                       f"non-vacuous(hours>0)={(total or 0) > 0}")
+        else:
+            skip("S15.7", "no adequacy report")
+            skip("S15.8", "no adequacy report")
+
+    # ── S15.9/10 — worksheet sidecar. Manual class-D rows and mode-keyed
+    # overlays are the ONLY persisted parts; computed rows regenerate from
+    # /results/copt, which is what makes annotations survive a re-solve.
+    row = {"mode_id": "manual:cyber:scada_loss", "component_class": "Expert",
+           "name": "SCADA loss", "failure_class": "D", "occurrence_per_year": 0.2,
+           "occurrence_basis": "expert", "severity_eur": 1_250_000.0,
+           "criticality_eur_per_year": 250_000.0, "in_metric_scope": True,
+           "mitigability": "offline dispatch fallback", "engine": "expert",
+           "fidelity": "expert_judgement"}
+    overlay_key = "generator:x:forced_outage"
+    st_w, _ = http(f"/api/projects/{q(name)}/worksheet", method="PUT",
+                   body={"manual_rows": [row],
+                         "overlays": {overlay_key: {"mitigability": "redundant start"}}})
+    st_wg, ws = http(f"/api/projects/{q(name)}/worksheet")
+    kept = (isinstance(ws, dict)
+            and len(ws.get("manual_rows") or []) == 1
+            and (ws.get("overlays") or {}).get(overlay_key, {}).get("mitigability")
+            == "redundant start")
+    record("S15.9", st_w == 200 and st_wg == 200 and kept,
+           f"worksheet PUT->{st_w} GET->{st_wg} round-tripped={kept}")
+
+    # Severity/criticality are >= 0 by contract: on an electricity-only
+    # metric a P2X outage REDUCES electrical demand, and such rows must be
+    # flagged out-of-scope, never ranked as beneficial.
+    st_neg, _ = http(f"/api/projects/{q(name)}/worksheet", method="PUT",
+                     body={"manual_rows": [dict(row, criticality_eur_per_year=-5000.0)],
+                           "overlays": {}})
+    _, ws2 = http(f"/api/projects/{q(name)}/worksheet")
+    intact = isinstance(ws2, dict) and len(ws2.get("manual_rows") or []) == 1
+    record("S15.10", st_neg == 422 and intact,
+           f"negative criticality -> {st_neg} (want 422); prior rows intact={intact}")
+
+    # ── S15.11 — stress registry: round-trip, then three validator guards,
+    # then prove a REJECTED write did not clobber the stored value.
+    good_sc = {"id": "cold_snap", "kind": "parametric", "frequency_per_year": 2.0,
+               "electrical_load_multiplier": 1.2,
+               "renewable_availability_multiplier": 0.6, "label": "Cold snap"}
+    st_ss, _ = http(f"/api/projects/{q(name)}/stress_scenarios", method="PUT",
+                    body={"scenarios": [good_sc]})
+    guards = {
+        "bad id": [{"id": "Cold Snap!", "kind": "parametric", "frequency_per_year": 2.0}],
+        "frequency 0": [{"id": "x", "kind": "parametric", "frequency_per_year": 0}],
+        "over cap": [{"id": f"s{i}", "kind": "parametric", "frequency_per_year": 1.0}
+                     for i in range(11)],
+    }
+    leaked = [k for k, v in guards.items()
+              if http(f"/api/projects/{q(name)}/stress_scenarios", method="PUT",
+                      body={"scenarios": v})[0] != 422]
+    _, ss = http(f"/api/projects/{q(name)}/stress_scenarios")
+    survived = (isinstance(ss, dict) and len(ss.get("scenarios") or []) == 1
+                and ss["scenarios"][0].get("id") == "cold_snap")
+    record("S15.11", st_ss == 200 and not leaked and survived,
+           f"stress PUT->{st_ss}; guards-that-leaked={leaked or 'none'}; "
+           f"stored value survived rejected writes={survived}")
+
+    # ── S15.12 — sweep guards. A sweep is several LP solves in a worker
+    # thread; it must refuse without a VOLL and refuse to run twice at once.
+    put_cfg(voll=0.0, ens_cap_permyriad=20.0)
+    st_novoll, _ = http("/api/results/fmea_sweep", method="POST", body={})
+    put_cfg(voll=3000.0, ens_cap_permyriad=50.0)
+    st_start, _ = http("/api/results/fmea_sweep", method="POST",
+                       body={"scenarios": [good_sc]})
+    st_dup, _ = http("/api/results/fmea_sweep", method="POST", body={})
+    record("S15.12", st_novoll == 422 and st_start == 200 and st_dup == 409,
+           f"no-VOLL->{st_novoll} (422)  start->{st_start} (200)  "
+           f"concurrent->{st_dup} (409)")
+
+    # ── S15.13/14 — sweep completion, criticality arithmetic, and the
+    # closing base re-solve that must leave foreground results in base state.
+    sweep = None
+    for _ in range(120):                        # 240s ceiling: several solves
+        st_sw, sw = http("/api/results/fmea_sweep")
+        if st_sw == 200 and isinstance(sw, dict) and sw.get("status") != "running":
+            sweep = sw
+            break
+        time.sleep(2)
+    if sweep is None:
+        skip("S15.13", "sweep did not finish within the 240s ceiling")
+        skip("S15.14", "sweep did not finish")
+    else:
+        rows = sweep.get("rows") or []
+        # The invariant BOTH classes are built to satisfy is f x S:
+        # criticality == occurrence_per_year x severity_eur. The two classes
+        # reach it by genuinely different routes, and asserting either
+        # route's formula on the other is simply wrong:
+        #
+        #   class B  criticality = q x dEUE x VoLL, where q is the
+        #            UNAVAILABILITY PROBABILITY — a link outage is a state
+        #            the system sits in a fraction q of the time. Occurrence
+        #            (8760q/MTTR) is reported separately and severity is
+        #            back-solved as criticality/occurrence.
+        #   class C  severity = dEUE x VoLL PER EVENT and criticality =
+        #            frequency_per_year x severity — a cold snap is a
+        #            discrete episode with an empirical annual frequency.
+        #
+        # Multiplying class B by its events/yr would overstate it by
+        # 8760/MTTR, which is how this check was first written and what
+        # running it caught.
+        wrong = []
+        for r in rows:
+            fm = r.get("failure_mode") or {}
+            occ, sev = fm.get("occurrence_per_year"), fm.get("severity_eur")
+            crit, d = fm.get("criticality_eur_per_year"), r.get("delta_eue_mwh")
+            if None in (occ, sev, crit):
+                continue
+            want = float(occ) * float(sev)
+            if abs(float(crit) - want) > max(1e-6, 1e-9 * abs(want)):
+                wrong.append(f"{r.get('id')}: f*S {want} != crit {crit}")
+            # Class C is additionally pinned to its closed form end to end.
+            if fm.get("failure_class") == "C" and d is not None:
+                want_c = float(d) * 3000.0 * float(occ)
+                if abs(float(crit) - want_c) > max(1e-6, 1e-9 * abs(want_c)):
+                    wrong.append(f"{r.get('id')}: dEUE*VoLL*freq {want_c} "
+                                 f"!= crit {crit}")
+        classes = sorted({(r.get("failure_mode") or {}).get("failure_class")
+                          for r in rows} - {None})
+        record("S15.13", sweep.get("status") == "done" and not sweep.get("error")
+               and rows and not wrong,
+               f"status={sweep.get('status')} rows={len(rows)} classes={classes} "
+               f"err={sweep.get('error')}; bad-arithmetic={wrong or 'none'}")
+
+        # The sweep pins capacities and mutates the live network; its closing
+        # base re-solve writes through the real state sink, so the foreground
+        # results must be readable and optimal afterwards.
+        _, st_after = http("/api/simulation/status")
+        st_a2, rep2 = http("/api/results/adequacy")
+        record("S15.14",
+               isinstance(st_after, dict) and st_after.get("condition") == "optimal"
+               and st_a2 in (200, 204),
+               f"after sweep: condition={(st_after or {}).get('condition')} "
+               f"/results/adequacy -> {st_a2}")
+
+    # ── S15.15 — a class-C scenario must measure degradation when the
+    # profiles were UPLOADED, which is how the GUI supplies them.
+    #
+    # Everything above uses a static `p_set`. That is exactly the blind spot
+    # that let a real bug through: `run_simulation` re-broadcasts every
+    # user-uploaded series from `_user_ts` onto the live `_t` tables just
+    # before building the LP, which restored the pristine profile OVER the
+    # mutation each contingency had just made. The scenario then solved an
+    # unmutated network, returned "ok", and reported a ΔEUE of 0 — a cold
+    # snap priced at exactly zero criticality. Nothing in process reproduces
+    # it, because a network built in process has an empty `_user_ts`.
+    _, snaps = http("/api/network/snapshots")
+    idx = (snaps or {}).get("snapshots") or []
+    if not idx:
+        skip("S15.15", "no snapshot index to upload a profile against")
+    else:
+        st_ts, _ = http("/api/network/timeseries/loads/p_set", method="PUT",
+                        body={"index": idx, "columns": ["load_b"],
+                              "data": [[330.0] for _ in idx]})
+        put_cfg(ens_cap_permyriad=None, ens_zone_cap_multiple=None)
+        poll()
+        http("/api/results/fmea_sweep", method="POST",
+             body={"scenarios": [{"id": "coldsnap", "kind": "parametric",
+                                  "frequency_per_year": 1.0,
+                                  "electrical_load_multiplier": 2.0}]})
+        sw2 = None
+        for _ in range(120):
+            st_s, s = http("/api/results/fmea_sweep")
+            if st_s == 200 and isinstance(s, dict) and s.get("status") != "running":
+                sw2 = s
+                break
+            time.sleep(2)
+        if sw2 is None:
+            skip("S15.15", "sweep did not finish within the ceiling")
+        else:
+            crows = [r for r in (sw2.get("rows") or [])
+                     if str(r.get("id", "")).startswith("scenario:")]
+            deltas = [r.get("delta_eue_mwh") for r in crows]
+            record("S15.15",
+                   st_ts == 200 and bool(crows)
+                   and all(d is not None and d > 0 for d in deltas),
+                   f"profile upload -> {st_ts}; class-C rows={len(crows)} "
+                   f"deltas={deltas} (a doubled load MUST raise ENS; 0 means "
+                   f"the uploaded profile was reapplied over the mutation)")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    restore()
+
+
+def suite_S16():
+    """
+    Sequential-MC adequacy study journey (adequacy spec §4/§5, Phase 6).
+
+    The ~40 MC/ELCC unit tests and the 10 endpoint tests all run in-process
+    against constructed MCInputs or a TestClient. None of them proves the
+    LIVE surface: a network built over the API, occurrence data resolved
+    through the real defaults chain, the study running in a genuine worker
+    thread in a server process, and the payload crossing real HTTP — the
+    layer where an unbounded input and a missing import have each survived
+    every handler-level test in this repo before.
+
+    Standard of proof: fixed seeds and CI-aware assertions. The
+    storage-helps check compares INTERVALS, not point estimates — the same
+    seed drives both runs (the fleet is unchanged, so the outage paths are
+    common random numbers) and the no-storage lower bound must clear the
+    with-storage upper bound; two overlapping blobs would prove nothing.
+    """
+    print("\nS16 - Sequential-MC adequacy study (area 16)")
+    name = "qa_e2e_mc"
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs"})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)[0]
+
+    def poll_mc(ceiling_s: int = 120):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http("/api/results/mc")
+            if st == 200 and isinstance(s, dict) and s.get("status") != "running":
+                return s
+            time.sleep(0.5)
+        return None
+
+    # ── S16.1 — fixture where storage is DECISIVE, and the bare study. Two
+    # 100 MW units against a flat 120 MW load: any single outage is a 20 MW
+    # deficit the 60 MW / 4 h battery bridges until it drains; MTTR 24 h makes
+    # outages persistent, so draining is the norm, not the tail — exactly the
+    # regime the COPT convolution cannot see and this engine exists for.
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in range(1, 7):
+            skip(f"S16.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST",
+                      body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "bus_a", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-07 23:00", "freq": "h"})[0])
+    for g in ("gen_1", "gen_2"):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": g, "bus": "bus_a", "carrier": "gas",
+                                "p_nom": 100.0, "marginal_cost": 50.0,
+                                "outage_rate_value": 0.10,
+                                "outage_rate_basis": "EFORd",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/storage_units", method="POST",
+                      body={"name": "bess", "bus": "bus_a", "carrier": "gas",
+                            "p_nom": 60.0, "max_hours": 4.0,
+                            "efficiency_store": 0.95,
+                            "efficiency_dispatch": 0.95})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "load_a", "bus": "bus_a",
+                            "p_set": 120.0})[0])
+    bad_build = [c for c in built if c not in (200, 201)]
+
+    # VoLL 0 on purpose: the MC study prices nothing and must run without one
+    # (spec §4) — the frontier and the sweep both 422 in this exact state.
+    st_cfg = put_cfg(voll=0.0)
+    st_post, _ = http("/api/results/mc", method="POST",
+                      body={"draws": 400, "seed": 7})
+    res1 = poll_mc()
+    m1 = ((res1 or {}).get("result") or {}).get("metrics") or {}
+    r1 = (res1 or {}).get("result") or {}
+    need = {"lole_hours", "lole_ci", "eue_mwh", "eue_ci", "n_samples",
+            "resolution_floor_h", "time_basis"}
+    missing = sorted(need - set(m1))
+    # The warning's three clauses, pinned by their load-bearing phrases.
+    warn = str(r1.get("warning") or "")
+    clauses_ok = ("ONE weather realisation" in warn
+                  and "INDEPENDENT" in warn and "EXCLUDED" in warn)
+    ci1 = m1.get("eue_ci")
+    shape_ok = (r1.get("engine") == "mc"
+                and r1.get("fidelity") == "sequential_mc"
+                and isinstance(ci1, list) and len(ci1) == 2
+                and "thread" not in (res1 or {}))
+    record("S16.1",
+           not bad_build and st_cfg == 200 and st_post == 200
+           and res1 is not None and res1.get("status") == "done"
+           and not missing and clauses_ok and shape_ok
+           and float(m1.get("eue_mwh") or 0.0) > 0.0,
+           f"build non-2xx={bad_build or 'none'}; voll=0 POST->{st_post}; "
+           f"status={(res1 or {}).get('status')}; missing-keys={missing or 'none'}; "
+           f"warning-clauses={clauses_ok}; eue={m1.get('eue_mwh')} "
+           f"ci={ci1} (persistent outages MUST shed on this fixture)")
+
+    # ── S16.2 — the synchronous rejection surface, live. Every one of these
+    # is knowable from the snapshot alone and must fail the POST, not the run.
+    rejects = {}
+    rejects["draws-over-cap"], _ = http("/api/results/mc", method="POST",
+                                        body={"draws": 5000})
+    rejects["11-elcc-assets"], _ = http(
+        "/api/results/mc", method="POST",
+        body={"draws": 8, "elcc_assets": [
+            {"kind": "generator", "name": f"gen_{i}"} for i in range(11)]})
+    rejects["unknown-asset"], _ = http(
+        "/api/results/mc", method="POST",
+        body={"draws": 8,
+              "elcc_assets": [{"kind": "generator", "name": "no_such_gen"}]})
+    rejects["unknown-kind"], _ = http(
+        "/api/results/mc", method="POST",
+        body={"draws": 8, "elcc_assets": [{"kind": "store", "name": "bess"}]})
+    # An implied MTTF below one timestep is a contradiction in the unit data
+    # (q = 0.99 with MTTR 1 h ⇒ MTTF ≈ 0.01 h): rejected at POST time, so the
+    # user is not told seven minutes later that their study "failed".
+    http("/api/network/generators", method="POST",
+         body={"name": "flaky", "bus": "bus_a", "carrier": "gas",
+               "p_nom": 10.0, "outage_rate_value": 0.99,
+               "outage_rate_basis": "EFORd", "mttr_hours": 1.0})
+    rejects["inconsistent-pair"], _ = http("/api/results/mc", method="POST",
+                                           body={"draws": 8})
+    http("/api/network/generators/flaky", method="DELETE")
+    want = {"draws-over-cap": 422, "11-elcc-assets": 422, "unknown-asset": 404,
+            "unknown-kind": 422, "inconsistent-pair": 422}
+    wrong = {k: f"{rejects[k]} (want {want[k]})"
+             for k in want if rejects[k] != want[k]}
+    record("S16.2", not wrong, f"rejection surface: wrong={wrong or 'none'}")
+
+    # ── S16.3 — the mutual-exclusion mesh against a REAL running study. An
+    # ELCC bisection at the full 2000-draw budget holds the surface busy for
+    # seconds, long enough that the immediate concurrent POSTs are
+    # deterministic, not a race won by luck.
+    st_go, _ = http("/api/results/mc", method="POST",
+                    body={"draws": 2000, "seed": 11, "cov_target": 0.0001,
+                          "elcc_assets": [
+                              {"kind": "storage_unit", "name": "bess"}]})
+    st_dup, _ = http("/api/results/mc", method="POST", body={"draws": 8})
+    st_fr, _ = http("/api/results/frontier", method="POST", body={})
+    res3 = poll_mc(ceiling_s=300)
+    record("S16.3",
+           st_go == 200 and st_dup == 409 and st_fr == 409
+           and res3 is not None and res3.get("status") == "done",
+           f"start->{st_go}; concurrent mc->{st_dup} (409) "
+           f"frontier->{st_fr} (409); final={(res3 or {}).get('status')}")
+
+    # ── S16.4 — the ELCC row from that run: nine keys, always all present,
+    # and a refusal carries its reason as data rather than a blank.
+    rows = ((res3 or {}).get("result") or {}).get("elcc") or []
+    row = rows[0] if rows else {}
+    keys_want = {"kind", "name", "nameplate_mw", "elcc_mw", "elcc_share",
+                 "status", "reason", "baseline_lole_h", "baseline_lole_ci"}
+    ok_status = row.get("status") in ("ok", "unidentifiable", "not_bracketed")
+    credit_sane = True
+    if row.get("status") == "ok":
+        credit_sane = (row.get("elcc_mw") is not None
+                       and -1e-9 <= float(row["elcc_mw"]) <= 60.0 + 1e-6)
+    reason_rule = ((row.get("reason") is None) == (row.get("status") == "ok"))
+    record("S16.4",
+           len(rows) == 1 and set(row) == keys_want and ok_status
+           and credit_sane and reason_rule,
+           f"rows={len(rows)}; keys-delta={sorted(set(row) ^ keys_want) or 'none'}; "
+           f"status={row.get('status')} elcc_mw={row.get('elcc_mw')} "
+           f"reason={str(row.get('reason'))[:60]}")
+
+    # ── S16.5 — storage helps, CI-aware and seed-paired. Same seed, same
+    # fleet ⇒ identical outage paths; dropping the battery can only raise
+    # every draw's shortfall. The intervals must SEPARATE — the no-storage
+    # lower bound above the with-storage upper bound — which a vacuous
+    # assertion on overlapping point estimates would never establish.
+    ci_with = m1.get("eue_ci")
+    st_del, _ = http("/api/network/storage_units/bess", method="DELETE")
+    http("/api/results/mc", method="POST", body={"draws": 400, "seed": 7})
+    res5 = poll_mc()
+    m5 = ((res5 or {}).get("result") or {}).get("metrics") or {}
+    ci_no = m5.get("eue_ci")
+    if not (isinstance(ci_with, list) and isinstance(ci_no, list)):
+        record("S16.5", False,
+               f"missing intervals: with={ci_with} without={ci_no}")
+    else:
+        separated = float(ci_no[0]) > float(ci_with[1])
+        record("S16.5",
+               st_del in (200, 204) and separated
+               and float(m5.get("eue_mwh") or 0.0)
+               > float(m1.get("eue_mwh") or 0.0),
+               f"EUE with bess {m1.get('eue_mwh')} CI={ci_with} vs without "
+               f"{m5.get('eue_mwh')} CI={ci_no}; intervals separated={separated}")
+
+    # ── S16.6 — the ELCC candidates surface, live, and its agreement
+    # guarantee. The battery is gone (S16.5 deleted it); add a must-take wind
+    # generator (no occurrence data — "wind" is deliberately absent from the
+    # defaults library) so all remaining kinds are represented: two
+    # occurrence-bearing generators and one vre. Then the contract's point:
+    # POST the ENTIRE candidates list back and every row must resolve — a
+    # candidate the run 404s on is the failure mode the endpoint exists to
+    # prevent. Plus the double-count guard live: a unit asked for as
+    # kind="vre" is a 422, not a credit counted twice.
+    http("/api/network/carriers", method="POST", body={"name": "wind"})
+    st_wg, _ = http("/api/network/generators", method="POST",
+                    body={"name": "wind_a", "bus": "bus_a", "carrier": "wind",
+                          "p_nom": 40.0})
+    st_cand, cand = http("/api/results/mc/elcc_candidates")
+    assets = (cand or {}).get("assets") or []
+    kinds = sorted({a.get("kind") for a in assets})
+    names = sorted(a.get("name") for a in assets)
+    shape_ok = (st_cand == 200 and (cand or {}).get("max_assets", 0) >= 1
+                and kinds == ["generator", "vre"]
+                and names == ["gen_1", "gen_2", "wind_a"]
+                and all(a.get("nameplate_mw", 0) > 0 for a in assets))
+    http("/api/results/mc", method="POST",
+         body={"draws": 150, "seed": 3,
+               "elcc_assets": [{"kind": a["kind"], "name": a["name"]}
+                               for a in assets]})
+    res6 = poll_mc(ceiling_s=300)
+    rows6 = ((res6 or {}).get("result") or {}).get("elcc") or []
+    resolved = (res6 is not None and res6.get("status") == "done"
+                and len(rows6) == len(assets)
+                and all(r.get("status") in
+                        ("ok", "unidentifiable", "not_bracketed")
+                        for r in rows6))
+    st_dc, _ = http("/api/results/mc", method="POST",
+                    body={"draws": 8,
+                          "elcc_assets": [{"kind": "vre", "name": "gen_1"}]})
+    record("S16.6",
+           st_wg == 201 and shape_ok and resolved and st_dc == 422,
+           f"candidates->{st_cand} kinds={kinds} names={names}; full-list run "
+           f"resolved={resolved} rows={[(r.get('name'), r.get('status')) for r in rows6]}; "
+           f"unit-as-vre->{st_dc} (want 422)")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    restore()
+
+
+def suite_S17():
+    """
+    The adequacy-coupled planning loop, live (Phase 7 spec §3).
+
+    The controller has 22 unit tests against fake callables and the route has
+    25 through a TestClient — but neither drives the thing this study IS: a
+    real HiGHS capacity expansion, re-solved under a retuned cap, evaluated by
+    the real sampler on whatever plan the LP actually produced, in a worker
+    thread in a server process. The mesh fixes in particular can only be
+    proven here: a foreground solve interleaving between iterates is an HTTP
+    fact, not a unit-test fact.
+
+    NON-VACUITY IS SELF-CALIBRATED. The suite first runs a plain MC study to
+    learn this fixture's LOLE, then targets a THIRD of it — so iterate 0 is
+    guaranteed to miss and the loop must genuinely move the cap. A hardcoded
+    target would risk a fixture that meets at iterate 0 and a suite that
+    passes having tested nothing.
+    """
+    print("\nS17 - The adequacy-coupled planning loop (area 17)")
+    name = "qa_e2e_loop"
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)[0]
+
+    def poll(path, ceiling_s=420):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http(path)
+            if st == 200 and isinstance(s, dict) and s.get("status") != "running":
+                return s
+            time.sleep(1.0)
+        return None
+
+    # ── the fixture: firm units that fail, a load tight enough to shed, and
+    # an EXTENDABLE peaker so a tighter cap has something to buy. Without a
+    # build option the LP could only answer a tighter cap by shedding less
+    # of a fixed plan, and the loop would have no lever to pull.
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in range(1, 6):
+            skip(f"S17.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST",
+                      body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "bus_a", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-02 23:00", "freq": "h"})[0])
+    for g in ("unit_1", "unit_2"):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": g, "bus": "bus_a", "carrier": "gas",
+                                "p_nom": 100.0, "marginal_cost": 50.0,
+                                "outage_rate_value": 0.12,
+                                "outage_rate_basis": "EFORd",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "peaker", "bus": "bus_a", "carrier": "gas",
+                            "p_nom": 0.0, "p_nom_extendable": True,
+                            "p_nom_max": 250.0, "capital_cost": 20_000.0,
+                            "marginal_cost": 180.0,
+                            "outage_rate_value": 0.05,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 12.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "load_a", "bus": "bus_a",
+                            "p_set": 150.0})[0])
+    bad_build = [c for c in built if c not in (200, 201)]
+
+    # ── S17.1 — the synchronous rejection surface. Every one of these is
+    # knowable from the config and one snapshot; a loop that discovered them
+    # mid-run would burn minutes of solves to report a typo.
+    put_cfg(voll=0.0)
+    rej = {}
+    rej["no-voll"], _ = http("/api/results/coupling_loop", method="POST",
+                             body={"target_lole_h": 1.0})
+    put_cfg(voll=3000.0)
+    rej["no-target"], _ = http("/api/results/coupling_loop", method="POST",
+                               body={})
+    rej["zero-target"], _ = http("/api/results/coupling_loop", method="POST",
+                                 body={"target_lole_h": 0.0})
+    rej["draws-over-cap"], _ = http("/api/results/coupling_loop", method="POST",
+                                    body={"target_lole_h": 1.0, "draws": 5000})
+    rej["budget-over-cap"], _ = http("/api/results/coupling_loop", method="POST",
+                                     body={"target_lole_h": 1.0,
+                                           "max_solves": 99})
+    rej["bad-restore"], _ = http("/api/results/coupling_loop", method="POST",
+                                 body={"target_lole_h": 1.0,
+                                       "restore": "whatever"})
+    # Undecidable: one shed hour in one draw already exceeds this target, so
+    # no verdict could distinguish a compliant plan from a lucky sample.
+    rej["below-floor"], _ = http("/api/results/coupling_loop", method="POST",
+                                 body={"target_lole_h": 1e-6, "draws": 100})
+    put_cfg(voll=3000.0, solve_strategy="myopic")
+    rej["myopic"], _ = http("/api/results/coupling_loop", method="POST",
+                            body={"target_lole_h": 1.0})
+    put_cfg(voll=3000.0, solve_strategy="full")
+    wrong = {k: v for k, v in rej.items() if v != 422}
+    record("S17.1", not bad_build and not wrong,
+           f"build non-2xx={bad_build or 'none'}; rejections that were not 422: "
+           f"{wrong or 'none'}")
+
+    # ── S17.2 — calibrate. Solve once loosely, measure the plan's real LOLE
+    # with the MC, and target a third of it: iterate 0 MUST miss.
+    put_cfg(voll=3000.0, ens_cap_permyriad=100.0, solve_strategy="full")
+    http("/api/simulation/run", method="POST")
+    solved = poll("/api/simulation/status", ceiling_s=240)
+    http("/api/results/mc", method="POST", body={"draws": 200, "seed": 4})
+    mc0 = poll("/api/results/mc")
+    lole0 = (((mc0 or {}).get("result") or {}).get("metrics") or {}).get("lole_hours")
+    if not lole0 or lole0 <= 0:
+        for i in (2, 3, 4, 5):
+            skip(f"S17.{i}", f"fixture sheds nothing (LOLE={lole0}) — nothing to target")
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        restore()
+        return
+    target = float(lole0) / 3.0
+    record("S17.2",
+           isinstance(solved, dict) and solved.get("condition") == "optimal"
+           and lole0 > 0,
+           f"baseline solved={( solved or {}).get('condition')}; baseline "
+           f"MC-LOLE={lole0:.4f} h -> target {target:.4f} h (a third: iterate 0 "
+           f"must miss, so the loop cannot pass by doing nothing)")
+
+    # ── S17.3 — the loop runs, and while it runs the mesh holds. The
+    # foreground-solve guard is the hole Phase 7 closed: a solve interleaving
+    # between iterates rewrites the very p_nom_opt the next evaluation reads.
+    st_go, _ = http("/api/results/coupling_loop", method="POST",
+                    body={"target_lole_h": target, "draws": 200, "seed": 4,
+                          "eps0": 100.0, "max_solves": 4, "restore": "base"})
+    time.sleep(1.0)
+    st_solve, _ = http("/api/simulation/run", method="POST")
+    st_mc, _ = http("/api/results/mc", method="POST", body={"draws": 8})
+    st_dup, _ = http("/api/results/coupling_loop", method="POST",
+                     body={"target_lole_h": target})
+    res = poll("/api/results/coupling_loop")
+    rows = (res or {}).get("iterations") or []
+    keys_ok = all({"eps_permyriad", "solve_status", "cost_eur", "ens_mwh",
+                   "cap_mwh", "binding", "plateau", "mc"} <= set(r) for r in rows)
+    shape_ok = (isinstance(res, dict)
+                and res.get("study") == "coupling_loop"
+                and "engine" not in res
+                and res.get("status") in ("met", "unreachable",
+                                          "budget_exhausted")
+                and isinstance(res.get("verdict"), str) and res["verdict"]
+                and res.get("resolution_floor_h") is not None
+                and "ONE weather realisation" in str(res.get("warning"))
+                and res.get("base_restored") is True
+                and "thread" not in res)
+    # If it met, the verdict must be VERIFIED: the final iterate's own
+    # evaluation, not an extrapolation between steps.
+    # An `unreachable` verdict must name the mechanism that ACTUALLY applies.
+    # This fixture is the never-bound case — 200 MW firm covers 150 MW load,
+    # so the LP sheds nothing at any ceiling and no cap can change the plan —
+    # and the generic three-mechanism copy would send the user hunting for
+    # storage foresight and DSR, neither of which is happening.
+    verdict_ok = True
+    if (res or {}).get("status") == "unreachable":
+        solved_rows = [r for r in rows if r.get("solve_status") in ("ok", "optimal")]
+        never_bound = solved_rows and not any(
+            r.get("binding") == "system_cap" for r in solved_rows)
+        v = str((res or {}).get("verdict", "")).lower()
+        # …and a dead end must name the way OUT, by the heading of the panel
+        # the user has to click. This fixture reaches the commonest honest
+        # answer the cap loop gives, and until Phase 9 that answer named the
+        # lever ("a planning reserve margin") without naming the study that
+        # now searches for it.
+        from routers.results import MARGIN_LOOP_PANEL_LABEL
+        verdict_ok = (("never bound" in v and "outage" in v
+                       and MARGIN_LOOP_PANEL_LABEL.lower() in v)
+                      if never_bound else bool(v))
+
+    met_ok = True
+    if (res or {}).get("status") == "met":
+        fin = (res or {}).get("final") or {}
+        fmc = fin.get("mc") or {}
+        met_ok = (res.get("eps_star") is not None
+                  and fmc.get("lole_hours") is not None
+                  and float(fmc["lole_hours"]) <= target + 1e-9)
+    record("S17.3",
+           st_go == 200 and st_solve == 409 and st_mc == 409 and st_dup == 409
+           and res is not None and shape_ok and keys_ok and met_ok
+           and verdict_ok and len(rows) >= 2,
+           f"start->{st_go}; DURING the run: solve->{st_solve} mc->{st_mc} "
+           f"loop->{st_dup} (all 409); status={(res or {}).get('status')} "
+           f"solves={(res or {}).get('solves_used')} iterates={len(rows)} "
+           f"eps_star={(res or {}).get('eps_star')} "
+           f"confident={(res or {}).get('confident')}; shape={shape_ok} "
+           f"verified={met_ok} verdict-names-the-real-mechanism={verdict_ok}")
+
+    # ── S17.4 — abort. A study whose wall-clock promise is "minutes to tens
+    # of minutes" that cannot be cancelled is user-hostile; the restore must
+    # still run so the network is not left on a swept cap.
+    # The abort is posted IMMEDIATELY, not after a fixed sleep: the record is
+    # published under the same lock hold that starts the thread, so it exists
+    # the moment the POST returns — and this loop is FAST (the informed jump
+    # reaches its verdict in two solves), so any sleep long enough to "let it
+    # get going" is also long enough to let it finish. A first attempt slept
+    # 1.5 s and aborted a study that had already terminated.
+    http("/api/results/coupling_loop", method="POST",
+         body={"target_lole_h": target / 100.0, "draws": 1500, "seed": 4,
+               "eps0": 100.0, "max_solves": 8})
+    st_ab, _ = http("/api/results/coupling_loop/abort", method="POST")
+    res_ab = poll("/api/results/coupling_loop")
+    record("S17.4",
+           st_ab == 200 and isinstance(res_ab, dict)
+           and res_ab.get("status") == "aborted"
+           and res_ab.get("base_restored") is True,
+           f"abort->{st_ab}; final status={(res_ab or {}).get('status')} "
+           f"(want aborted); base_restored={(res_ab or {}).get('base_restored')}")
+
+    # ── S17.5 — restore="final" leaves the user HOLDING the certified plan.
+    # Without it the loop certifies a cap and then re-solves it away, and the
+    # answer survives only as a number in a record.
+    st_f, _ = http("/api/results/coupling_loop", method="POST",
+                   body={"target_lole_h": target, "draws": 200, "seed": 4,
+                         "eps0": 100.0, "max_solves": 3, "restore": "final"})
+    res_f = poll("/api/results/coupling_loop")
+    _, cfg_after = http("/api/simulation/solver_config")
+    applied = (cfg_after or {}).get("ens_cap_permyriad")
+    eps_star = (res_f or {}).get("eps_star")
+    if (res_f or {}).get("status") == "met" and eps_star is not None:
+        ok = applied is not None and abs(float(applied) - float(eps_star)) < 1e-6
+        detail = (f"met at eps*={eps_star:g}; config now carries "
+                  f"ens_cap_permyriad={applied} (want eps*)")
+    else:
+        # Not met: "final" must fall back to base rather than apply a cap no
+        # verdict certified.
+        ok = applied is None or applied == 100.0
+        detail = (f"status={(res_f or {}).get('status')} (not met) -> restore "
+                  f"fell back to base; cap={applied} (want the original 100.0)")
+    record("S17.5", st_f == 200 and res_f is not None and ok, detail)
+
+    # ── S17.6 — the verdict names the number the PANEL tells you to type.
+    # The cap loop has had this defect since Phase 7 and worse than the margin
+    # loop did: the verdict printed `%g` (six significant figures) while the
+    # panel's restore explainer printed the BADGE formatter (two, below 1), so
+    # a certified 0.034728149‱ read "0.0347281" in one and "0.035" in the
+    # other. An ENS cap is a CEILING, so the rounded-up number is a strictly
+    # LOOSER standard than the plan the study certified.
+    from services.adequacy.lever_text import format_lever_value
+    notes, agreed, seen = [], True, 0
+    for payload, label in ((res_ab, "aborted run"), (res_f, "restore=final")):
+        star = (payload or {}).get("eps_star")
+        verdict = (payload or {}).get("verdict") or ""
+        if (payload or {}).get("status") != "met" or star is None:
+            notes.append(f"{label}: not met, nothing to name")
+            continue
+        seen += 1
+        want = f"ens_cap_permyriad = {format_lever_value(float(star))}"
+        hit = want in verdict
+        agreed = agreed and hit
+        notes.append(f"{label}: eps*={star!r} -> {want!r} present={hit}")
+    if seen == 0:
+        # SKIP, not PASS. This suite's fixture is the one where the cap is
+        # UNREACHABLE by construction (that is Phase 9's whole claim), so no
+        # run here certifies a cap and there is no number to check. Recording
+        # a PASS would read as live coverage this suite cannot provide; the
+        # bitten unit tests and S19.6 carry it.
+        skip("S17.6", "no run reached `met`, so no cap was certified to name: "
+             + "; ".join(notes))
+    else:
+        record("S17.6", agreed, "; ".join(notes))
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    restore()
+
+
+def suite_S18():
+    """
+    The firm-capacity reserve margin, live (Phase 8 spec §3/§4/§6).
+
+    The constraint has 55 unit tests, the preflight/report/endpoint 31 more,
+    and three self-calibrated acceptance tests prove the lever moves MC-LOLE.
+    None of them crosses HTTP. This suite drives the surfaces a user actually
+    touches: the config field at the API boundary, the preflight refusals that
+    replace an unimplementable "let the LP go infeasible", and the derating
+    table that makes the phase's proxies inspectable.
+
+    The margin is DERIVED from the fixture, never chosen — the Phase-8 review
+    killed a hardcoded margin by arithmetic (a value inside the largest-unit
+    step buys real megawatts and moves LOLE not at all). Same discipline here.
+    """
+    print("\nS18 - The firm-capacity reserve margin (area 18)")
+    name = "qa_e2e_prm"
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    def poll_solve(ceiling_s=240):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(1.0)
+        return None
+
+    # Two 100 MW firm units (EFORd 0.12 -> derate 0.88) covering a 150 MW load,
+    # plus an expensive extendable peaker (EFORd 0.05) the LP has no economic
+    # reason to build. The margin is the only thing that can put it in.
+    UNIT, LOAD, EFORD_U, EFORD_P = 100.0, 150.0, 0.12, 0.05
+    firm_fixed = 2 * UNIT * (1 - EFORD_U)                  # 176.0
+    needed = LOAD + UNIT - 2 * UNIT                        # 50.0 (one-out gap)
+    m_star = (firm_fixed + needed * (1 - EFORD_P)) / LOAD - 1.0   # ~0.49
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in range(1, 6):
+            skip(f"S18.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST",
+                      body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "bus_a", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-02 23:00", "freq": "h"})[0])
+    for g in ("unit_1", "unit_2"):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": g, "bus": "bus_a", "carrier": "gas",
+                                "p_nom": UNIT, "marginal_cost": 10.0,
+                                "outage_rate_value": EFORD_U,
+                                "outage_rate_basis": "EFORd",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "peaker", "bus": "bus_a", "carrier": "gas",
+                            "p_nom": 0.0, "p_nom_extendable": True,
+                            "p_nom_max": 500.0, "capital_cost": 5_000_000.0,
+                            "marginal_cost": 500.0,
+                            "outage_rate_value": EFORD_P,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 12.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "load_a", "bus": "bus_a",
+                            "p_set": LOAD})[0])
+    bad_build = [c for c in built if c not in (200, 201)]
+
+    # ── S18.1 — the config field is bounded AT THE BOUNDARY. The Phase-1 QA
+    # round found four reliability fields accepted then silently discarded;
+    # a margin of -1 or 600% must never reach the solver.
+    bad = []
+    for label, val in (("-1", -1.0), ("6", 6.0)):
+        if put_cfg(reserve_margin=val)[0] != 422:
+            bad.append(label)
+    refused = [label for label, val in (("0", 0.0), ("None", None),
+                                        ("0.15", 0.15))
+               if put_cfg(reserve_margin=val)[0] != 200]
+    record("S18.1", not bad_build and not bad and not refused,
+           f"build non-2xx={bad_build or 'none'}; nonsense accepted="
+           f"{bad or 'none'}; meaningful refused={refused or 'none'}")
+
+    # ── S18.2 — preflight REFUSES what the LP cannot express. Linopy raises on
+    # a constant constraint and Generator-p_nom does not exist when nothing
+    # extendable is active, so "let it go infeasible" was never implementable:
+    # an unreachable margin has to be caught before the solve, and it has to
+    # name both numbers rather than say "check your capacity bounds".
+    # 400%: unreachable (max firm = 176 + 500x0.95 = 651 MW against a 750 MW
+    # requirement) but INSIDE the schema's le=5 bound. A first draft used 900%,
+    # which the boundary correctly refused — so the config never took and the
+    # check passed against a margin that was never set. The set is asserted
+    # here precisely so this cannot go vacuous again.
+    st_set, _ = put_cfg(reserve_margin=4.0)
+    st_pf, pf = http("/api/simulation/preflight", method="POST", body={})
+    issues = (pf or {}).get("issues") or []
+    codes = {i.get("code") for i in issues if isinstance(i, dict)}
+    unreachable = [i for i in issues
+                   if isinstance(i, dict)
+                   and i.get("code") == "reserve_margin_unreachable"]
+    msg = str(unreachable[0].get("message", "")) if unreachable else ""
+    # The message must carry the arithmetic, not just a verdict.
+    has_numbers = sum(ch.isdigit() for ch in msg) >= 4
+    record("S18.2",
+           st_set == 200 and st_pf == 200 and bool(unreachable)
+           and unreachable[0].get("severity") == "error" and has_numbers,
+           f"cfg-set->{st_set}; preflight->{st_pf}; "
+           f"unreachable-error={bool(unreachable)} "
+           f"severity={(unreachable[0].get('severity') if unreachable else None)}; "
+           f"names-both-numbers={has_numbers}; codes={sorted(codes)[:6]}")
+
+    # ── S18.3 — the derived margin BINDS, and the endpoint reports it.
+    # m* is computed from the fixture (see the header): the smallest margin
+    # whose plan survives losing the largest unit.
+    put_cfg(reserve_margin=m_star)
+    http("/api/simulation/run", method="POST")
+    solved = poll_solve()
+    st_rm, rm = http("/api/results/reserve_margin")
+    rows = (rm or {}).get("by_period") or []
+    row = rows[0] if rows else {}
+    assets = {a.get("name"): a for a in ((rm or {}).get("assets") or [])}
+    peaker = assets.get("peaker") or {}
+    built_mw = peaker.get("capacity_mw")
+    shape_ok = (st_rm == 200 and rows
+                and {"peak_mw", "required_mw", "firm_mw", "met", "binding"}
+                <= set(row)
+                and (rm or {}).get("horizon_wide") is True
+                and row.get("met") is True)
+    # Every credited asset must carry its provenance — the proxies are only
+    # defensible if a user can see which number came from a class average.
+    prov_ok = all(a.get("basis") and a.get("source") for a in assets.values())
+    record("S18.3",
+           isinstance(solved, dict) and solved.get("condition") == "optimal"
+           and shape_ok and prov_ok
+           and built_mw is not None and float(built_mw) > 1.0,
+           f"m*={m_star:.4f} solved={(solved or {}).get('condition')}; "
+           f"/results/reserve_margin->{st_rm} peak={row.get('peak_mw')} "
+           f"required={row.get('required_mw')} firm={row.get('firm_mw')} "
+           f"met={row.get('met')} binding={row.get('binding')}; peaker built="
+           f"{built_mw} MW; every asset carries basis+source={prov_ok}")
+
+    # ── S18.4 — met and BINDING are different questions. At a margin the fixed
+    # fleet already satisfies, the standard is met and NOT binding; conflating
+    # them would credit the margin for capacity that was always there.
+    put_cfg(reserve_margin=0.05)         # 157.5 MW required vs 176 MW fixed
+    http("/api/simulation/run", method="POST")
+    solved2 = poll_solve()
+    _, rm2 = http("/api/results/reserve_margin")
+    row2 = ((rm2 or {}).get("by_period") or [{}])[0]
+    pk2 = {a.get("name"): a for a in ((rm2 or {}).get("assets") or [])}
+    built2 = (pk2.get("peaker") or {}).get("capacity_mw")
+    record("S18.4",
+           isinstance(solved2, dict) and solved2.get("condition") == "optimal"
+           and row2.get("met") is True and row2.get("binding") is False
+           and (built2 is None or float(built2) < 1.0),
+           f"slack margin: met={row2.get('met')} binding={row2.get('binding')} "
+           f"(want met+not-binding); peaker built={built2} (want ~0)")
+
+    # ── S18.5 — the margin does not leak into the contingency sweep. Without
+    # the strip, freeze_capacities pins the peaker and every contingency that
+    # removes derated capacity violates the standard, so the whole sweep dies
+    # infeasible and every severity reads as the standard rather than the
+    # outage.
+    put_cfg(reserve_margin=m_star, voll=3000.0)
+    st_sw, _ = http("/api/results/fmea_sweep", method="POST",
+                    body={"scenarios": [{"id": "cold", "kind": "parametric",
+                                         "frequency_per_year": 1.0,
+                                         "electrical_load_multiplier": 1.2}]})
+    sweep = None
+    for _ in range(150):
+        st_s, s = http("/api/results/fmea_sweep")
+        if st_s == 200 and isinstance(s, dict) and s.get("status") != "running":
+            sweep = s
+            break
+        time.sleep(2)
+    srows = (sweep or {}).get("rows") or []
+    record("S18.5",
+           st_sw == 200 and sweep is not None
+           and sweep.get("status") == "done" and not sweep.get("error")
+           and bool(srows),
+           f"sweep with a margin set -> start {st_sw} status="
+           f"{(sweep or {}).get('status')} rows={len(srows)} err="
+           f"{str((sweep or {}).get('error'))[:60]}")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    restore()
+
+
+def suite_S19():
+    """
+    The margin loop, live (Phase 9 spec §2/§4).
+
+    Phase 7's loop tunes an energy cap; its commonest honest verdict on a
+    firm-capacity-rich network is `unreachable` — the cap never binds, so no
+    ceiling changes the plan. Phase 8 built the reserve margin that DOES move
+    the metric there. Phase 9 lets the loop drive it, by feeding the
+    controller the margin's RECIPROCAL so that larger-is-stricter becomes the
+    smaller-is-stricter ordering `coupling.py` already assumes — without a
+    line of that file changing.
+
+    The claim this suite exists to prove on a real server is the comparative
+    one: on ONE network and ONE derived target, the cap loop reports
+    `unreachable` and the margin loop reports `met`. Everything else here is
+    the surface a user touches.
+    """
+    print("\nS19 - The margin loop (area 19)")
+    name = "qa_e2e_marginloop"
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs"})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    def poll(path, ceiling_s=420):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http(path)
+            if st == 200 and isinstance(s, dict) and s.get("status") != "running":
+                return s
+            time.sleep(1.0)
+        return None
+
+    # Two firm units covering a flat load, plus an expensive extendable the LP
+    # has no economic reason to build: the shape where an energy cap has no
+    # leverage (the LP sheds nothing at any ceiling) but firm capacity does.
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in range(1, 6):
+            skip(f"S19.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST",
+                      body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "bus_a", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-02 23:00", "freq": "h"})[0])
+    for g in ("unit_1", "unit_2"):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": g, "bus": "bus_a", "carrier": "gas",
+                                "p_nom": 100.0, "marginal_cost": 10.0,
+                                "outage_rate_value": 0.12,
+                                "outage_rate_basis": "EFORd",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "peaker", "bus": "bus_a", "carrier": "gas",
+                            "p_nom": 0.0, "p_nom_extendable": True,
+                            "p_nom_max": 400.0, "capital_cost": 5_000_000.0,
+                            "marginal_cost": 500.0,
+                            "outage_rate_value": 0.05,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 12.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "load_a", "bus": "bus_a",
+                            "p_set": 150.0})[0])
+    bad_build = [c for c in built if c not in (200, 201)]
+
+    # ── S19.1 — the refusals the cap loop has and the margin loop must NOT,
+    # and vice versa. A margin is a CONSTRAINT, not a price, so a margin loop
+    # on a VoLL-free network is well defined — copying the cap loop's VoLL 422
+    # would deny a supported study. Conversely the margin's own validator
+    # allows `myopic` (each window is one period, which is the peak the
+    # standard is defined against) while refusing `rolling`.
+    put_cfg(voll=0.0, reserve_margin=None)
+    st_novoll, _ = http("/api/results/margin_loop", method="POST",
+                        body={"target_lole_h": 1.0, "draws": 100})
+    # The margin loop STARTS on this config, so it must be finished before the
+    # cap loop is asked about the same one — otherwise the 409 mesh answers
+    # first and the VoLL check is never reached. (A first draft asserted 422
+    # and got 409: the mesh working, the test wrong.)
+    if st_novoll == 200:
+        http("/api/results/margin_loop/abort", method="POST")
+        poll("/api/results/margin_loop")
+    st_cap_novoll, _ = http("/api/results/coupling_loop", method="POST",
+                            body={"target_lole_h": 1.0, "draws": 100})
+    put_cfg(voll=3000.0, solve_strategy="myopic")
+    st_myopic, _ = http("/api/results/margin_loop", method="POST",
+                        body={"target_lole_h": 1.0, "draws": 100})
+    if st_myopic == 200:
+        http("/api/results/margin_loop/abort", method="POST")
+        poll("/api/results/margin_loop")
+    put_cfg(voll=3000.0, solve_strategy="rolling")
+    st_rolling, _ = http("/api/results/margin_loop", method="POST",
+                         body={"target_lole_h": 1.0, "draws": 100})
+    put_cfg(voll=3000.0, solve_strategy="full")
+    record("S19.1",
+           not bad_build and st_novoll == 200 and st_cap_novoll == 422
+           and st_myopic == 200 and st_rolling == 422,
+           f"build non-2xx={bad_build or 'none'}; margin-loop without VoLL->"
+           f"{st_novoll} (want 200, a margin needs no price); cap-loop same "
+           f"config->{st_cap_novoll} (want 422); myopic->{st_myopic} (want "
+           f"200); rolling->{st_rolling} (want 422)")
+
+    # ── S19.2 — calibrate on the incumbent plan, exactly as S17 does: solve,
+    # measure the plan's real LOLE, target a third of it. Derived, never
+    # chosen — a margin inside the largest-unit step moves EUE but not LOLE.
+    put_cfg(voll=3000.0, ens_cap_permyriad=100.0, reserve_margin=None,
+            solve_strategy="full")
+    http("/api/simulation/run", method="POST")
+    solved = poll("/api/simulation/status", ceiling_s=240)
+    http("/api/results/mc", method="POST", body={"draws": 300, "seed": 9})
+    mc0 = poll("/api/results/mc")
+    lole0 = (((mc0 or {}).get("result") or {}).get("metrics") or {}).get("lole_hours")
+    if not lole0 or lole0 <= 0:
+        for i in (2, 3, 4, 5):
+            skip(f"S19.{i}", f"fixture sheds nothing (LOLE={lole0})")
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        restore()
+        return
+    target = float(lole0) / 3.0
+    record("S19.2",
+           isinstance(solved, dict) and solved.get("condition") == "optimal"
+           and lole0 > 0,
+           f"baseline solved={(solved or {}).get('condition')}; MC-LOLE="
+           f"{lole0:.4f} h -> target {target:.4f} h (a third: the incumbent "
+           f"must miss, so neither loop can pass by doing nothing)")
+
+    # ── S19.3 — THE CLAIM. Same network, same derived target: the cap loop
+    # cannot get there and the margin loop can.
+    http("/api/results/coupling_loop", method="POST",
+         body={"target_lole_h": target, "draws": 300, "seed": 9,
+               "eps0": 100.0, "max_solves": 4})
+    cap = poll("/api/results/coupling_loop")
+    http("/api/results/margin_loop", method="POST",
+         body={"target_lole_h": target, "draws": 300, "seed": 9,
+               "max_solves": 5})
+    mar = poll("/api/results/margin_loop")
+    cap_status = (cap or {}).get("status")
+    mar_status = (mar or {}).get("status")
+    m_star = (mar or {}).get("lever_star")
+    fin = (mar or {}).get("final") or {}
+    fmc = fin.get("mc") or {}
+    verified = (mar_status != "met") or (
+        fmc.get("lole_hours") is not None
+        and float(fmc["lole_hours"]) <= target + 1e-9)
+    record("S19.3",
+           cap is not None and mar is not None
+           and cap_status == "unreachable" and mar_status == "met"
+           and m_star is not None and verified,
+           f"SAME network, SAME target {target:.4f} h: cap loop -> "
+           f"{cap_status} ({(cap or {}).get('solves_used')} solves); margin "
+           f"loop -> {mar_status} at m*={m_star} "
+           f"({(mar or {}).get('solves_used')} solves + "
+           f"{(mar or {}).get('probe_solves')} probe); final verified="
+           f"{verified}")
+
+    # ── S19.4 — the payload contract, and the one thing that must never leak:
+    # the controller's internal reciprocal. Every number on the wire is a
+    # margin.
+    rows = (mar or {}).get("iterations") or []
+    row = rows[0] if rows else {}
+    leaked = [k for k in row if k in ("eps_permyriad", "x", "lever_x")]
+    caps_none = all(r.get("cap_mwh") is None for r in rows)
+    shape_ok = (mar or {}).get("study") == "margin_loop" \
+        and (mar or {}).get("lever") == "reserve_margin" \
+        and "lever_value" in row and isinstance((mar or {}).get("verdict"), str)
+    # Margins are plausible: the certified one must be positive and within the
+    # schema bound the loop is required to respect.
+    sane = (m_star is None) or (0.0 < float(m_star) <= 5.0)
+    record("S19.4",
+           shape_ok and not leaked and caps_none and sane,
+           f"study={(mar or {}).get('study')} lever={(mar or {}).get('lever')}; "
+           f"x-leaks={leaked or 'none'}; every cap_mwh None={caps_none}; "
+           f"m*={m_star} within (0, 5]={sane}; ceiling="
+           f"{(mar or {}).get('margin_ceiling')}")
+
+    # ── S19.5 — restore="final" leaves the user holding the certified plan,
+    # and writes the MARGIN's field rather than the cap's.
+    _, cfg_mid = http("/api/simulation/solver_config")
+    cap_before = (cfg_mid or {}).get("ens_cap_permyriad")
+    http("/api/results/margin_loop", method="POST",
+         body={"target_lole_h": target, "draws": 300, "seed": 9,
+               "max_solves": 3, "restore": "final"})
+    fin2 = poll("/api/results/margin_loop")
+    _, cfg_after = http("/api/simulation/solver_config")
+    applied = (cfg_after or {}).get("reserve_margin")
+    cap_after = (cfg_after or {}).get("ens_cap_permyriad")
+    star2 = (fin2 or {}).get("lever_star")
+    if (fin2 or {}).get("status") == "met" and star2 is not None:
+        ok = applied is not None and abs(float(applied) - float(star2)) < 1e-6
+    else:
+        ok = applied is None or applied == 0 or applied == cfg_mid.get("reserve_margin")
+    # The user's own ENS cap must survive untouched either way.
+    untouched = (cap_after == cap_before)
+    record("S19.5", ok and untouched,
+           f"status={(fin2 or {}).get('status')} m*={star2}; config now "
+           f"reserve_margin={applied} (want m*); user's ens_cap_permyriad "
+           f"{cap_before} -> {cap_after} (must be untouched)={untouched}")
+
+    # ── S19.6 — the verdict names the number the PANEL tells you to type.
+    # Found by rendering: the verdict said "set reserve_margin = 0.6716"
+    # (`%g`) under an explainer saying "reserve_margin = 0.671600430725". A
+    # margin is a THRESHOLD on required firm capacity, so the shorter value is
+    # a strictly LOOSER standard that need not reproduce the certified plan.
+    # This is the layer that found it, so this is the layer that keeps it.
+    from services.adequacy.lever_text import format_lever_value
+    checked = [(mar, "restore=base"), (fin2, "restore=final")]
+    agreed, notes = True, []
+    for payload, label in checked:
+        star = (payload or {}).get("lever_star")
+        verdict = (payload or {}).get("verdict") or ""
+        if (payload or {}).get("status") != "met" or star is None:
+            notes.append(f"{label}: not met, nothing to name")
+            continue
+        want = f"reserve_margin = {format_lever_value(float(star))}"
+        hit = want in verdict
+        agreed = agreed and hit
+        notes.append(f"{label}: m*={star!r} -> {want!r} present={hit}"
+                     + ("" if hit else " | said=" + repr(
+                         verdict.split("reserve_margin = ")[1][:30]
+                         if "reserve_margin = " in verdict else "ABSENT")))
+    record("S19.6", agreed, "; ".join(notes))
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    restore()
+
+
 # ── main ──────────────────────────────────────────────────────────────────
+
+def suite_S20():
+    """
+    A network swap is REFUSED while a study runs (Phase 11 spec §1/§2).
+
+    A study's worker closes over the `pypsa.Network` object captured before it
+    started, so replacing the network does not STOP the study — it DETACHES
+    it. The study keeps solving the old object and keeps publishing into the
+    solver state the swap carries forward, so the NEW project's Adequacy tab
+    fills in live with the OLD project's study, and a `restore="final"` loop
+    writes its certified value into the NEW project's solver config.
+
+    Unit tests drive `reset_network` and two routes. This suite is here for
+    what only a live server shows: that the refusal reaches a real HTTP caller
+    with a real running study behind it, and that it LIFTS again afterwards —
+    a guard that never releases is not a guard, it is an outage.
+    """
+    # The engine caps a study at 2000 draws (`mc.MAX_DRAWS`) and refuses more
+    # with a 422 — which is what the first run of this suite hit. Ask for the
+    # cap: the study then runs long enough to still be alive when the swap is
+    # attempted, without being refused before it starts.
+    MAX_DRAWS_FOR_S20 = 2000
+
+    print("\nS20 - Refusing a network swap during a study (area 20)")
+    name = "qa_e2e_swapguard"
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2, 3):
+            skip(f"S20.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        restore()
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    # ── S20.1 — with NO study running, the swap route works. The baseline
+    # goes FIRST, before the fixture exists: it is itself a network reset, so
+    # running it after the build would wipe the very fixture the rest of the
+    # suite needs (which is exactly what the first version of this suite did
+    # — every later check then failed on an empty network with a 422 that had
+    # nothing to do with the guard).
+    st_reset, _ = http("/api/network/reset", method="POST")
+    record("S20.1", st_reset == 200,
+           f"POST /api/network/reset with no study -> {st_reset} (want 200)")
+
+    # A samplable fixture — the MC needs occurrence data or it refuses, and
+    # this suite needs a study that runs long enough to still be alive when
+    # the swap is attempted.
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST",
+                      body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "bus_a", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-03-31 23:00", "freq": "h"})[0])
+    for g in ("unit_1", "unit_2"):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": g, "bus": "bus_a", "carrier": "gas",
+                                "p_nom": 100.0, "marginal_cost": 10.0,
+                                "outage_rate_value": 0.12,
+                                "outage_rate_basis": "EFORd",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "load_a", "bus": "bus_a",
+                            "p_set": 150.0})[0])
+    if [c for c in built if c not in (200, 201)]:
+        for i in (1, 2, 3):
+            skip(f"S20.{i}", f"fixture build failed: {built}")
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        restore()
+        return
+
+    # ── S20.2 — start a REAL study, then try to swap. The study has to be
+    # genuinely alive: the guard tests `thread.is_alive()`, so anything less
+    # proves nothing.
+    http("/api/simulation/solver_config", method="PUT",
+         body={"solver_name": "highs", "voll": 3000.0})
+    http("/api/simulation/run", method="POST")
+    deadline = time.time() + 240
+    while time.time() < deadline:
+        _, stt = http("/api/simulation/status")
+        if (stt or {}).get("status") not in ("running", "starting"):
+            break
+        time.sleep(0.5)
+
+    st_mc, _mc_refusal = http("/api/results/mc", method="POST",
+                              body={"draws": MAX_DRAWS_FOR_S20, "seed": 11})
+    if st_mc != 200:
+        _, why = http("/api/results/mc")
+        for i in (2, 3):
+            skip(f"S20.{i}", f"could not start an MC study -> {st_mc}: "
+                             f"{str(_mc_refusal)[:200]}")
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        restore()
+        return
+
+    # While it runs, every network-replacing route must refuse — and say why.
+    #
+    # Read the study's OWN status immediately before the swap. Without this
+    # the check cannot tell a working guard from a study that simply finished
+    # first, and a 200 would be reported as a failure of the guard when it is
+    # a failure of the fixture. That is the difference between a check and a
+    # coin toss: the first run of this suite hit exactly that race on a two-
+    # day horizon, which is why the fixture now spans a quarter.
+    _, mc_at_swap = http("/api/results/mc")
+    live_at_swap = (mc_at_swap or {}).get("status") == "running"
+    st_swap, body_swap = http("/api/network/reset", method="POST")
+    detail = str((body_swap or {}).get("detail", ""))
+    named = "sequential-MC study" in detail
+    # Phase 12e gave the MC an abort route, so the refusal must OFFER one —
+    # and must no longer say it cannot be aborted. Before 12e this assertion
+    # was its mirror image ("cannot be aborted" present, "or abort it"
+    # absent), which was the honest copy while the control did not exist.
+    # The rule is unchanged: never name a control the user does not have.
+    honest = "or abort it" in detail and "cannot be aborted" not in detail
+    if not live_at_swap:
+        skip("S20.2", "the MC study finished before the swap was attempted "
+                      f"(status={(mc_at_swap or {}).get('status')}) — the "
+                      "guard was never exercised, so this proves nothing")
+    else:
+        record("S20.2", st_swap == 409 and named and honest,
+               f"MC study live at swap time={live_at_swap}; swap -> {st_swap} "
+               f"(want 409); names the study={named}; offers only a REAL "
+               f"remedy={honest}; detail={detail[:120]}")
+
+    # ── S20.3 — and it LIFTS. Wait the study out, then swap for real.
+    deadline = time.time() + 420
+    while time.time() < deadline:
+        _, mc = http("/api/results/mc")
+        if (mc or {}).get("status") != "running":
+            break
+        time.sleep(1.0)
+    st_after, _ = http("/api/network/reset", method="POST")
+    record("S20.3", st_after == 200,
+           f"after the study finished, POST /api/network/reset -> {st_after} "
+           "(want 200 — a guard that never lifts is an outage, not a guard)")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    restore()
+
+
+
+def suite_S21():
+    """
+    A unit with BOTH an availability profile and outage data — the preflight
+    disclosure (Phase 12a, re-scoped by Phase 12c-pre).
+
+    12a found that `copt.py`'s membership rule sent such a unit into the
+    sampled fleet as a flat two-state unit at its firm capacity, profile
+    discarded, and WARNED (`outage_shadows_profile`). 12c-pre models the
+    series in both engines — outages sampled on it, the COPT mixed exactly
+    per hour — so the preflight issue is now a DISCLOSURE of how the unit is
+    modelled (`profile_and_outage_modelled`), emitted for outage data the
+    user typed. Unit tests drive `_check_profiled_occurrence_units` directly;
+    this suite is here for the only thing that matters to a user: that the
+    disclosure REACHES them through a live preflight, naming the asset and
+    saying how it is modelled.
+    """
+    print("\nS21 - Profile plus outage data: the preflight disclosure (area 21)")
+    name = "qa_e2e_shadowprofile"
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2):
+            skip(f"S21.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    for c in ("wind", "gas"):
+        built.append(http("/api/network/carriers", method="POST",
+                          body={"name": c})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-01 07:00", "freq": "h"})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "gas1", "bus": "b", "carrier": "gas",
+                            "p_nom": 80.0, "marginal_cost": 10.0,
+                            "outage_rate_value": 0.10,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 24.0})[0])
+    # Two IDENTICAL farms; only one carries an outage rate.
+    for nm, extra in (("wind_no_for", {}),
+                      ("wind_with_for", {"outage_rate_value": 0.10,
+                                         "outage_rate_basis": "EFORd",
+                                         "mttr_hours": 24.0})):
+        body = {"name": nm, "bus": "b", "carrier": "wind", "p_nom": 100.0,
+                "marginal_cost": 0.0}
+        body.update(extra)
+        built.append(http("/api/network/generators", method="POST",
+                          body=body)[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 100.0})[0])
+    idx = [f"2030-01-01T{h:02d}:00:00" for h in range(8)]
+    prof = [0.05, 0.15, 0.35, 0.45] * 2
+    st_ts, _ = http("/api/network/timeseries/generators/p_max_pu",
+                    method="PUT",
+                    body={"index": idx,
+                          "columns": ["wind_no_for", "wind_with_for"],
+                          "data": [[v, v] for v in prof]})
+    built.append(st_ts)
+    if [c for c in built if c not in (200, 201)]:
+        for i in (1, 2):
+            skip(f"S21.{i}", f"fixture build failed: {built}")
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    st_p, pf = http("/api/simulation/preflight", method="POST")
+    issues = (pf or {}).get("issues") or []
+    hit = [i for i in issues if i.get("code") == "profile_and_outage_modelled"]
+    old = [i for i in issues if i.get("code") == "outage_shadows_profile"]
+    msg = " ".join(str(i.get("message", "")) for i in hit)
+
+    # ── S21.1 — it reaches a live preflight, names the asset, and is a WARNING
+    # (the only non-error severity on the wire; the user entered that data
+    # deliberately, and blocking would stop a network that solved yesterday).
+    # The 12a code is gone: with the profile modelled it would be false.
+    record("S21.1",
+           st_p == 200 and bool(hit) and not old
+           and "wind_with_for" in msg
+           and all(i.get("severity") == "warning" for i in hit),
+           f"preflight->{st_p}; profile_and_outage_modelled present={bool(hit)}; "
+           f"old outage_shadows_profile absent={not old}; "
+           f"names the asset={'wind_with_for' in msg}; "
+           f"severity={[i.get('severity') for i in hit]}")
+
+    # ── S21.2 — it says HOW the unit is modelled, and does NOT fire on the
+    # farm with no outage data (must-take, netted as before) nor on the
+    # thermal unit (whose p_max_pu is a flat 1.0 — the false-positive that
+    # would make it noise on every real project).
+    record("S21.2",
+           bool(hit) and "mixes" in msg
+           and "wind_no_for" not in msg and "gas1" not in msg,
+           f"says how it is modelled={'mixes' in msg}; "
+           f"silent on the no-outage farm={'wind_no_for' not in msg}; "
+           f"silent on the flat-profile thermal unit={'gas1' not in msg}")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
+def suite_S22():
+    """
+    A vintage-expanded plan's reserve-margin result, live (Phase 8 §4, found
+    by the Phase 12b review).
+
+    On a multi-period network with per-period capacity bounds the solve
+    expands `wind` into transient `wind@2030` / `wind@2040` rows, the wrapper
+    stashes those names, and the restore drops the rows BEFORE the payload
+    reads built capacities — so `_built()` found nothing, credited zero, and a
+    plan that built 35 MW of wind and met the margin was served as `met=False`
+    in both periods. The unit test drives `run_simulation`; this drives the
+    surface a user reads, `GET /results/reserve_margin`, after a solve
+    started over HTTP with bounds set over HTTP.
+
+    The companion defect — a failed margin run leaking its stash into the
+    next solve — has NO honest live reproduction: it needs an exception
+    between optimize and the report step, which no API input produces. It
+    is covered by its unit test only, and this docstring says so rather than
+    faking a check.
+    """
+    print("\nS22 - A vintage-expanded plan reports what it built (area 22)")
+    name = "qa_e2e_vintage"
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    def poll_solve(ceiling_s=240):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(1.0)
+        return None
+
+    # 200 MW base (EFORd 0.05 -> 190 firm) against 150 MW load at margin 0.5
+    # (225 required): 35 MW of firm capacity short. A cheap wind candidate at
+    # 1000/MW versus a peaker at 5e6/MW, so the LP closes the gap with wind.
+    #
+    # The unit test's wind is MUST-TAKE (a time-series profile, no outage
+    # data). That cannot be reproduced here: the generator API takes a static
+    # `p_max_pu`, the margin's profile test is a time-series column check, and
+    # a per-period profile cannot be set over the API on a multi-period
+    # network (a limitation this PR records). Without either, preflight
+    # correctly refuses the unit as unpriceable — the first run of this suite
+    # hit exactly that, and named it. So the candidate carries outage data
+    # instead: it is then a sampled unit at derate 0.95, and the thing under
+    # test — the vintage row's BUILT capacity reaching the payload — does not
+    # depend on which membership the unit has.
+    BASE, LOAD, EFORD, MARGIN = 200.0, 150.0, 0.05, 0.5
+    required = (1.0 + MARGIN) * LOAD                          # 225
+    wind_needed = (required - BASE * (1.0 - EFORD)) / (1.0 - EFORD)   # 35 / 0.95
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2):
+            skip(f"S22.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    for c in ("gas", "wind"):
+        built.append(http("/api/network/carriers", method="POST",
+                          body={"name": c})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "bus_a", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots/multi_period", method="POST",
+                      body={"periods": [2030, 2040],
+                            "start": "2030-01-01 00:00",
+                            "end": "2030-01-01 03:00", "freq": "h"})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "base", "bus": "bus_a", "carrier": "gas",
+                            "p_nom": BASE, "marginal_cost": 10.0,
+                            "outage_rate_value": EFORD,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 50.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "peaker", "bus": "bus_a", "carrier": "gas",
+                            "p_nom": 0.0, "p_nom_extendable": True,
+                            "p_nom_max": 500.0, "capital_cost": 5_000_000.0,
+                            "marginal_cost": 500.0,
+                            "outage_rate_value": EFORD,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 50.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "wind", "bus": "bus_a", "carrier": "wind",
+                            "p_nom": 0.0, "p_nom_extendable": True,
+                            "p_nom_max": 500.0, "capital_cost": 1000.0,
+                            "marginal_cost": 0.0, "p_max_pu": 1.0,
+                            "outage_rate_value": EFORD,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 50.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "load_a", "bus": "bus_a",
+                            "p_set": LOAD})[0])
+    st_vb, vb = http("/api/network/vintage_bounds/Generator/wind", method="PUT",
+                     body={"bounds": {"2030": {"p_nom_min": 0.0, "p_nom_max": 100.0},
+                                      "2040": {"p_nom_min": 0.0, "p_nom_max": 100.0}}})
+    built.append(st_vb)
+    bad_build = [c for c in built if c not in (200, 201)]
+    if bad_build:
+        # The S21 lesson: a fixture that did not build proves nothing.
+        for i in (1, 2):
+            skip(f"S22.{i}", f"fixture build non-2xx={bad_build}; vintage_bounds->{st_vb} {str(vb)[:80]}")
+        restore()
+        return
+
+    st_cfg, _ = put_cfg(reserve_margin=MARGIN, multi_investment_periods=True)
+    # The S21 lesson, applied one step later: a fixture that BUILT but was
+    # refused at preflight proves nothing either, and the first run of this
+    # suite did exactly that. So the refusal is named in the detail rather
+    # than left as an opaque `validation_failed`.
+    st_pf, pf = http("/api/simulation/preflight", method="POST", body={})
+    pf_errors = [f"{i.get('code')}: {str(i.get('message', ''))[:90]}"
+                 for i in ((pf or {}).get("issues") or [])
+                 if isinstance(i, dict) and i.get("severity") == "error"]
+    http("/api/simulation/run", method="POST")
+    solved = poll_solve()
+    why = (f"; preflight->{st_pf} errors={pf_errors or 'none'}"
+           if not (isinstance(solved, dict) and solved.get("condition") == "optimal")
+           else "")
+    st_rm, rm = http("/api/results/reserve_margin")
+    rows = {str(r.get("period")): r for r in ((rm or {}).get("by_period") or [])}
+    assets = {(a.get("name"), str(a.get("period"))): a
+              for a in ((rm or {}).get("assets") or [])}
+
+    # ── S22.1 — the standard the LP MET is reported as met, in both periods,
+    # at the firm capacity the plan actually has. Before the fix: firm 190,
+    # met=False, for a plan that built 35 MW of wind.
+    met_ok = (set(rows) == {"2030", "2040"}
+              and all(r.get("met") is True for r in rows.values())
+              and all(abs(float(r.get("firm_mw") or 0.0) - required) < 1e-3
+                      for r in rows.values()))
+    record("S22.1",
+           st_cfg == 200 and isinstance(solved, dict)
+           and solved.get("condition") == "optimal" and st_rm == 200 and met_ok,
+           f"cfg->{st_cfg} solved={(solved or {}).get('condition')} "
+           f"/results/reserve_margin->{st_rm}; periods="
+           f"{ {P: (r.get('met'), r.get('firm_mw')) for P, r in rows.items()} } "
+           f"(want met=True, firm={required:.0f} in both){why}")
+
+    # ── S22.2 — the VINTAGE rows carry their built sizes: wind@2030 at ~35 MW
+    # in 2030 AND in 2040 (a 2030 vintage is active later), and wind@2040 at
+    # 0.0 — built-to-zero, not null. Before the fix every vintage row read
+    # capacity=None.
+    v30_30 = (assets.get(("wind@2030", "2030")) or {}).get("capacity_mw")
+    v30_40 = (assets.get(("wind@2030", "2040")) or {}).get("capacity_mw")
+    v40_40 = (assets.get(("wind@2040", "2040")) or {}).get("capacity_mw")
+    def near(v, want):
+        return v is not None and abs(float(v) - want) < 1e-3
+    record("S22.2",
+           near(v30_30, wind_needed) and near(v30_40, wind_needed)
+           and near(v40_40, 0.0),
+           f"wind@2030: 2030={v30_30} 2040={v30_40} (want {wind_needed:.2f}); "
+           f"wind@2040: 2040={v40_40} (want 0.0, not None)")
+
+    restore()
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
+def suite_S23():
+    """
+    The net-load window on the surface a user reads (Phase 12b, spec v1.3).
+
+    The margin credits a profile-bearing unit on the hours GROSS demand
+    peaks; a system with such units runs short on the hours NET demand
+    peaks, and those are not the same hours. Fourteen unit tests drive the
+    payload directly; this drives the fixture, the profile and the solve over
+    HTTP and reads `GET /results/reserve_margin`.
+
+    Single-period on purpose: a per-period profile cannot be set over the
+    API on a multi-period network (recorded under S21/S22), and the window
+    is a per-period object anyway. Flat 150 MW load over four hours; a 200 MW
+    gas unit (EFORd 0.05 -> 190 firm); a 100 MW wind farm with NO outage
+    data whose profile is 1,0,1,0 -> gross window is all four tied hours,
+    derate 0.5, credited 50 MW. Net load is [50,150,50,150]: the net window
+    is hours 1 and 3, where the wind is absent, and its net derate is 0.0.
+    """
+    print("\nS23 - The net-load window, live (area 23)")
+    name = "qa_e2e_netwindow"
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    def poll_solve(ceiling_s=240):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(1.0)
+        return None
+
+    def solve_and_read():
+        st_pf, pf = http("/api/simulation/preflight", method="POST", body={})
+        pf_errors = [f"{i.get('code')}: {str(i.get('message', ''))[:80]}"
+                     for i in ((pf or {}).get("issues") or [])
+                     if isinstance(i, dict) and i.get("severity") == "error"]
+        http("/api/simulation/run", method="POST")
+        solved = poll_solve()
+        st_rm, rm = http("/api/results/reserve_margin")
+        ok = isinstance(solved, dict) and solved.get("condition") == "optimal" and st_rm == 200
+        why = "" if ok else f"; solved={(solved or {}).get('condition')} preflight->{st_pf} errors={pf_errors or 'none'}"
+        return ok, rm or {}, why
+
+    idx = [f"2030-01-01T{h:02d}:00:00" for h in range(4)]
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2):
+            skip(f"S23.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    for c in ("gas", "wind"):
+        built.append(http("/api/network/carriers", method="POST", body={"name": c})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00", "end": "2030-01-01 03:00",
+                            "freq": "h"})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "base", "bus": "b", "carrier": "gas",
+                            "p_nom": 200.0, "marginal_cost": 10.0,
+                            "outage_rate_value": 0.05, "outage_rate_basis": "EFORd",
+                            "mttr_hours": 50.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "wind", "bus": "b", "carrier": "wind",
+                            "p_nom": 100.0, "marginal_cost": 0.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 150.0})[0])
+    st_ts, body_ts = http("/api/network/timeseries/generators/p_max_pu", method="PUT",
+                          body={"index": idx, "columns": ["wind"],
+                                "data": [[1.0], [0.0], [1.0], [0.0]]})
+    built.append(st_ts)
+    bad_build = [c for c in built if c not in (200, 201)]
+    if bad_build:
+        for i in (1, 2):
+            skip(f"S23.{i}", f"fixture build non-2xx={bad_build}; timeseries->{st_ts} {str(body_ts)[:80]}")
+        restore()
+        return
+
+    st_cfg, _ = put_cfg(reserve_margin=0.2)
+    ok, rm, why = solve_and_read()
+    row = ((rm.get("by_period") or [{}])[0])
+    nw = row.get("net_window") or {}
+    assets = {a.get("name"): a for a in (rm.get("assets") or [])}
+    w = assets.get("wind") or {}
+    want_hours = [idx[1].replace("T", " "), idx[3].replace("T", " ")]
+
+    # ── S23.1 — the net window is the hours the wind is ABSENT, and the net
+    # derate says what its credit would have been there: nothing.
+    record("S23.1",
+           st_cfg == 200 and ok and nw.get("status") == "ok"
+           and nw.get("netted_assets") == ["wind"]
+           and nw.get("snapshots") == want_hours
+           and nw.get("netted_mw") is not None and abs(float(nw["netted_mw"]) - 50.0) < 1e-6
+           and w.get("profile_kind") == "varying" and w.get("netted") is True
+           and w.get("derate") is not None and abs(float(w["derate"]) - 0.5) < 1e-6
+           and w.get("derate_net") is not None and abs(float(w["derate_net"])) < 1e-9
+           and nw.get("firm_gross_mw") is not None and abs(float(nw["firm_gross_mw"]) - 50.0) < 1e-6
+           and nw.get("firm_net_mw") is not None and abs(float(nw["firm_net_mw"])) < 1e-9,
+           f"cfg->{st_cfg}{why}; status={nw.get('status')} netted={nw.get('netted_assets')} "
+           f"hours={nw.get('snapshots')} (want {want_hours}) netted_mw={nw.get('netted_mw')} "
+           f"(want 50); wind derate={w.get('derate')} derate_net={w.get('derate_net')} "
+           f"(want 0.5 / 0.0); firm gross->net={nw.get('firm_gross_mw')}->{nw.get('firm_net_mw')} "
+           f"(want 50->0)")
+
+    # ── S23.2 — a CONSTANT profile is not netted: the same farm with a flat
+    # 1.0 column reads `constant`, the block says nothing_netted, and the
+    # panel is not handed a zero-delta window dressed as a finding.
+    st_ts2, _ = http("/api/network/timeseries/generators/p_max_pu", method="PUT",
+                     body={"index": idx, "columns": ["wind"],
+                           "data": [[1.0], [1.0], [1.0], [1.0]]})
+    ok2, rm2, why2 = solve_and_read()
+    row2 = ((rm2.get("by_period") or [{}])[0])
+    nw2 = row2.get("net_window") or {}
+    w2 = ({a.get("name"): a for a in (rm2.get("assets") or [])}).get("wind") or {}
+    record("S23.2",
+           st_ts2 == 200 and ok2 and nw2.get("status") == "nothing_netted"
+           and nw2.get("snapshots") == [] and nw2.get("netted_mw") is None
+           and w2.get("profile_kind") == "constant" and w2.get("netted") is False
+           and w2.get("derate_net") is None,
+           f"ts->{st_ts2}{why2}; status={nw2.get('status')} hours={nw2.get('snapshots')} "
+           f"wind profile_kind={w2.get('profile_kind')} netted={w2.get('netted')} "
+           f"derate_net={w2.get('derate_net')} (want constant / False / None)")
+
+    restore()
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
+
+def suite_S24():
+    """
+    A unit with BOTH a profile and outage data — the engines, live
+    (Phase 12c-pre, plan v2.1 A11′).
+
+    12a measured the defect on this exact fixture: two identical 100 MW farms
+    on one profile, one with an outage rate; the one WITH it was modelled as
+    (1-q)*100 = 90 MW of firm capacity. 12c-pre attaches the series to the
+    unit: the sequential MC samples its outages on the series and the COPT
+    mixes it exactly per hour over its outage states. This suite asserts the
+    LIVE `/results/copt` equals the mixture computed independently here from
+    the fixture's numbers alone, that the MC names the unit, and that the
+    disclosure is on the payload.
+
+    The independent mixture: the table without the farm is gas1 alone (80 MW,
+    q = 0.10), so S(x) = 1 for x <= 0, 0.9 for 0 < x <= 80, else 0; the
+    residual nets only the must-take farm, r_h = 100 - 100*p_h; the profiled
+    farm is a_h = 100*p_h up with probability 0.9:
+
+        LOLP_h = 0.1*(1 - S(r_h)) + 0.9*(1 - S(r_h - a_h))
+
+    Bitten live (recorded in the plan): with the profile dropped the COPT
+    reverts to the flat two-state value.
+    """
+    print("\nS24 - Profile plus outage data: the engines, live (area 24)")
+    name = "qa_e2e_profiledunit"
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2):
+            skip(f"S24.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    for c in ("wind", "gas"):
+        built.append(http("/api/network/carriers", method="POST",
+                          body={"name": c})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-01 07:00", "freq": "h"})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "gas1", "bus": "b", "carrier": "gas",
+                            "p_nom": 80.0, "marginal_cost": 10.0,
+                            "outage_rate_value": 0.10,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 24.0})[0])
+    for nm, extra in (("wind_no_for", {}),
+                      ("wind_with_for", {"outage_rate_value": 0.10,
+                                         "outage_rate_basis": "EFORd",
+                                         "mttr_hours": 24.0})):
+        body = {"name": nm, "bus": "b", "carrier": "wind", "p_nom": 100.0,
+                "marginal_cost": 0.0}
+        body.update(extra)
+        built.append(http("/api/network/generators", method="POST",
+                          body=body)[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 100.0})[0])
+    idx = [f"2030-01-01T{h:02d}:00:00" for h in range(8)]
+    prof = [0.05, 0.15, 0.35, 0.45] * 2
+    st_ts, _ = http("/api/network/timeseries/generators/p_max_pu",
+                    method="PUT",
+                    body={"index": idx,
+                          "columns": ["wind_no_for", "wind_with_for"],
+                          "data": [[v, v] for v in prof]})
+    built.append(st_ts)
+    if [c for c in built if c not in (200, 201)]:
+        for i in (1, 2):
+            skip(f"S24.{i}", f"fixture build failed: {built}")
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    # The independent mixture, from the fixture's numbers alone.
+    def surv(x):
+        return 1.0 if x <= 0 else (0.9 if x <= 80.0 else 0.0)
+    q_farm = 0.10
+    expected = sum(
+        q_farm * (1.0 - surv(100.0 - 100.0 * p))
+        + (1.0 - q_farm) * (1.0 - surv(100.0 - 100.0 * p - 100.0 * p))
+        for p in prof)
+    # …and the flat two-state value 12a measured: the farm at 100 MW q=0.10
+    # in the table, profile discarded (states 0/80/100/180).
+    def surv_flat(x):
+        return sum(pr for c, pr in ((0.0, 0.01), (80.0, 0.09),
+                                    (100.0, 0.09), (180.0, 0.81)) if c >= x) \
+            if x > 0 else 1.0
+    flat = sum(1.0 - surv_flat(100.0 - 100.0 * p) for p in prof)
+
+    st_k, copt = http("/api/results/copt")
+    lole = float(((copt or {}).get("metrics") or {}).get("lole_hours", float("nan")))
+    fleet = (copt or {}).get("fleet") or {}
+    note = (copt or {}).get("fidelity_note") or ""
+
+    # ── S24.1 — the live COPT equals the independent mixture, not the flat
+    # value; the payload names the unit and carries the sentence.
+    record("S24.1",
+           st_k == 200 and abs(lole - expected) < 1e-6
+           and abs(lole - flat) > 0.1
+           and fleet.get("profile_units") == ["wind_with_for"]
+           and fleet.get("netted_beyond_cap") == []
+           and fleet.get("must_take") == 1
+           and "wind_with_for" in note and "mixes" in note,
+           f"copt->{st_k}; LOLE={lole:.6f} expected mixture={expected:.6f} "
+           f"(flat two-state would be {flat:.6f}); "
+           f"profile_units={fleet.get('profile_units')}; "
+           f"must_take={fleet.get('must_take')}; note names it={'wind_with_for' in note}")
+
+    # ── S24.2 — the MC study names the unit among those sampled on their
+    # series, and preflight carries the disclosure for the typed outage data.
+    st_m, _ = http("/api/results/mc", method="POST",
+                   body={"draws": 50, "seed": 1, "cov_target": 1.0})
+    result = None
+    if st_m == 200:
+        for _ in range(60):
+            st_g, rec = http("/api/results/mc")
+            if st_g == 200 and (rec or {}).get("status") in ("done", "failed"):
+                result = rec
+                break
+            time.sleep(0.5)
+    mc_units = (((result or {}).get("result") or {}).get("profile_units"))
+    st_p, pf = http("/api/simulation/preflight", method="POST")
+    codes = [i.get("code") for i in ((pf or {}).get("issues") or [])]
+    record("S24.2",
+           st_m == 200 and (result or {}).get("status") == "done"
+           and mc_units == ["wind_with_for"]
+           and "profile_and_outage_modelled" in codes
+           and "outage_shadows_profile" not in codes,
+           f"mc start->{st_m}; status={(result or {}).get('status')}; "
+           f"profile_units={mc_units}; preflight codes={codes}")
+
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
+def suite_S25():
+    """
+    One demand basis — the engines read the LP's scaled demand, live
+    (Phase 12c-0; the fifteenth finding).
+
+    `load_scalers` are applied to `loads_t.p_set` in place before the LP and
+    reverted after, so the LP, the ENS cap and the reserve-margin constraint
+    saw scaled demand while the COPT, the MC, ELCC and both certifying loops
+    read the raw series. This suite sets a 2035 growth factor of 1.25 over
+    HTTP, solves, and reads two engines: `GET /results/copt`, whose
+    per-period LOLE is computed here by hand from the uploaded profile on
+    BOTH bases, and `GET /results/reserve_margin`, whose 2035 peak must be
+    exactly 1.25x the 2030 peak of the same replicated profile.
+
+    The multi-period load COLUMN the scalers gate on is set through
+    `POST /loads/upload_profile`, which replicates a flat upload across the
+    periods — the 12c-0 shipped-code review found this route after the plan
+    had recorded "no honest live reproduction"; the QA plan now says so.
+
+    Bitten live (recorded in the plan): with `/copt` reading the raw frame,
+    the 2035 LOLE collapses to the 2030 value.
+    """
+    print("\nS25 - One demand basis: the engines read the LP's demand, live (area 25)")
+    name = "qa_e2e_demandbasis"
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    def poll_solve(ceiling_s=240):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(1.0)
+        return None
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2):
+            skip(f"S25.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    # Two units, both q = 0.10: 130 MW (the raw ramp never exceeds it, the
+    # scaled 2035 ramp does) and 100 MW (so the margin at m = 0.10 is met by
+    # the fixed fleet — 207 MW firm against 169 MW required — and the solve
+    # is feasible without expansion).
+    Q, UNITS = 0.10, [130.0, 100.0]
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST", body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots/multi_period", method="POST",
+                      body={"periods": [2030, 2035],
+                            "start": "2030-01-01 00:00",
+                            "end": "2030-01-01 23:00", "freq": "h"})[0])
+    for i, cap in enumerate(UNITS, 1):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": f"gas{i}", "bus": "b", "carrier": "gas",
+                                "p_nom": cap, "marginal_cost": 10.0 * i,
+                                "outage_rate_value": Q,
+                                "outage_rate_basis": "EFORd",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 100.0})[0])
+    # A 24 h ramp 100..123 MW, uploaded flat: replicated into BOTH periods.
+    ts = [f"2030-01-01T{h:02d}:00:00" for h in range(24)]
+    load = [100.0 + h for h in range(24)]
+    st_u, up = multipart_post("/api/network/loads/upload_profile", {}, "file",
+                              "l.csv", _s12_csv("l", ts, load))
+    built.append(st_u)
+    ok_up = (isinstance(up, dict) and up.get("matched") == ["l"]
+             and up.get("snapshot_count") == 48)
+    st_cfg, _ = put_cfg(multi_investment_periods=True,
+                        load_scalers={"2035": 1.25}, reserve_margin=0.10)
+    if [c for c in built if c not in (200, 201)] or not ok_up or st_cfg != 200:
+        for i in (1, 2):
+            skip(f"S25.{i}", f"fixture build failed: {built} upload={up} cfg={st_cfg}")
+        restore()
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    http("/api/simulation/run", method="POST")
+    solved = poll_solve()
+
+    # The hand values: the two-unit table enumerated (four states), LOLP_h =
+    # P[available < r_h]. Raw hour: r_h <= 123 < 130, so only the 100 MW
+    # state and the zero state fall short. Scaled 2035 hour: r_h up to
+    # 153.75, so the 130 MW state falls short too on the hours above 130.
+    states = [(0.0, Q * Q), (UNITS[1], (1 - Q) * Q), (UNITS[0], Q * (1 - Q)),
+              (sum(UNITS), (1 - Q) * (1 - Q))]
+
+    def lolp(r):
+        return sum(p for c, p in states if c < r) if r > 0 else 0.0
+
+    lole_raw = sum(lolp(v) for v in load)
+    lole_2035 = sum(lolp(1.25 * v) for v in load)
+    st_k, copt = http("/api/results/copt")
+    byp = ((copt or {}).get("metrics") or {}).get("by_period") or {}
+    l30 = float((byp.get("2030") or {}).get("lole_hours", float("nan")))
+    l35 = float((byp.get("2035") or {}).get("lole_hours", float("nan")))
+
+    # ── S25.1 — the COPT evaluates the LP's basis: 2035 on the scaled load,
+    # 2030 on the raw one, both to the hand value.
+    record("S25.1",
+           st_k == 200 and abs(l30 - lole_raw) < 1e-6 and abs(l35 - lole_2035) < 1e-6,
+           f"copt->{st_k}; LOLE 2030={l30:.4f} (hand {lole_raw:.4f}); "
+           f"2035={l35:.4f} (hand on the scaled load {lole_2035:.4f}; "
+           f"raw would be {lole_raw:.4f})")
+
+    # ── S25.2 — the margin the LP enforced is on the same basis: the 2035
+    # peak is exactly 1.25x the 2030 peak of one replicated profile; and the
+    # MC study reads it too (its 2035 LOLE exceeds 2030's).
+    st_rm, rm = http("/api/results/reserve_margin")
+    peaks = {r.get("period"): float(r.get("peak_mw") or 0.0)
+             for r in ((rm or {}).get("by_period") or [])}
+    st_m, _ = http("/api/results/mc", method="POST",
+                   body={"draws": 200, "seed": 3, "cov_target": 1.0})
+    mc = None
+    if st_m == 200:
+        for _ in range(120):
+            st_g, rec = http("/api/results/mc")
+            if st_g == 200 and (rec or {}).get("status") in ("done", "failed"):
+                mc = rec
+                break
+            time.sleep(0.5)
+    mbp = ((((mc or {}).get("result") or {}).get("metrics") or {}).get("by_period")) or {}
+    m30 = float((mbp.get("2030") or {}).get("lole_hours", float("nan")))
+    m35 = float((mbp.get("2035") or {}).get("lole_hours", float("nan")))
+    record("S25.2",
+           (solved or {}).get("status") in ("ok", "optimal", "completed")
+           and st_rm == 200 and abs(peaks.get("2030", 0.0) - 123.0) < 1e-6
+           and abs(peaks.get("2035", 0.0) - 1.25 * 123.0) < 1e-6
+           and (mc or {}).get("status") == "done" and m35 > m30,
+           f"solve={(solved or {}).get('status')} {str((solved or {}).get('last_failure') or '')[:120]}; margin peaks={peaks} "
+           f"(2035 must be 1.25 x 123 = 153.75); mc status={(mc or {}).get('status')} "
+           f"LOLE 2030={m30:.3f} 2035={m35:.3f}")
+
+    restore()
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
+def suite_S26():
+    """
+    The portfolio ELCC as a second opinion on the reserve margin, live
+    (Phase 12c, plan v3.1).
+
+    12a's two-farm fixture with a reserve margin: two 100 MW farms on one
+    profile, one must-take and one with outage data — after 12c-pre both
+    are profile-bearing members of one group. Solve with the margin over
+    HTTP, then `POST /results/mc` with `elcc_portfolio: true`: the block is
+    `ok`, its `credit_gross_mw` equals the served margin payload's own rows
+    summed over the two farms (recomputed here from `/results/reserve_margin`),
+    the period row prices, and the row is NOT in `elcc`.
+
+    Bitten live (recorded in the plan): with the population's generator
+    half dropped, the outage-bearing farm stays in the fleet and the credit
+    is the must-take farm's alone.
+    """
+    print("\nS26 - Portfolio ELCC beside the reserve margin, live (area 26)")
+    name = "qa_e2e_portfolio"
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    def poll_solve(ceiling_s=240):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(1.0)
+        return None
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2):
+            skip(f"S26.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    for c in ("wind", "gas"):
+        built.append(http("/api/network/carriers", method="POST", body={"name": c})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00",
+                            "end": "2030-01-01 07:00", "freq": "h"})[0])
+    # 90 MW of gas: with it UP the system is short only when the farms
+    # deliver under 10 MW, and never once they deliver 10 — so the group's
+    # last-in credit is its minimum hourly contribution, 0.05 x 200 = 10 MW,
+    # exactly (the predicate's step edge). With gas DOWN it is short
+    # regardless. The margin at 10 % (110 MW required) is met by
+    # 0.9 x 90 + the farms' 47.5 MW of profile credit, so no expansion.
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "gas1", "bus": "b", "carrier": "gas",
+                            "p_nom": 90.0, "marginal_cost": 10.0,
+                            "outage_rate_value": 0.10,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 24.0})[0])
+    for nm, extra in (("wind_no_for", {}),
+                      ("wind_with_for", {"outage_rate_value": 0.10,
+                                         "outage_rate_basis": "EFORd",
+                                         "mttr_hours": 24.0})):
+        body = {"name": nm, "bus": "b", "carrier": "wind", "p_nom": 100.0,
+                "marginal_cost": 0.0}
+        body.update(extra)
+        built.append(http("/api/network/generators", method="POST", body=body)[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 100.0})[0])
+    idx = [f"2030-01-01T{h:02d}:00:00" for h in range(8)]
+    prof = [0.05, 0.15, 0.35, 0.45] * 2
+    built.append(http("/api/network/timeseries/generators/p_max_pu", method="PUT",
+                      body={"index": idx, "columns": ["wind_no_for", "wind_with_for"],
+                            "data": [[v, v] for v in prof]})[0])
+    st_cfg, _ = put_cfg(reserve_margin=0.10)
+    if [c for c in built if c not in (200, 201)] or st_cfg != 200:
+        for i in (1, 2):
+            skip(f"S26.{i}", f"fixture build failed: {built} cfg={st_cfg}")
+        restore()
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    http("/api/simulation/run", method="POST")
+    solved = poll_solve()
+    st_rm, rm = http("/api/results/reserve_margin")
+    rows = [a for a in ((rm or {}).get("assets") or [])
+            if a.get("kind") == "generator" and a.get("name") in ("wind_no_for", "wind_with_for")]
+    credit_hand = sum(float(a.get("derate") or 0.0) * float(a.get("capacity_mw") or 0.0)
+                      for a in rows)
+
+    st_m, _ = http("/api/results/mc", method="POST",
+                   body={"draws": 100, "seed": 5, "cov_target": 1.0,
+                         "elcc_portfolio": True,
+                         "elcc_assets": [{"kind": "vre", "name": "wind_no_for"}]})
+    mc = None
+    if st_m == 200:
+        for _ in range(240):
+            st_g, rec = http("/api/results/mc")
+            if st_g == 200 and (rec or {}).get("status") in ("done", "failed"):
+                mc = rec
+                break
+            time.sleep(0.5)
+    res = ((mc or {}).get("result") or {})
+    block = res.get("elcc_portfolio") or {}
+    members = sorted(m.get("name") for m in ((block.get("population") or {}).get("members") or []))
+    periods = block.get("periods") or []
+    row = periods[0] if periods else {}
+
+    # ── S26.1 — the block is ok on the solved margin, its population is the
+    # two farms, and its gross credit is the margin payload's own rows.
+    record("S26.1",
+           (solved or {}).get("status") in ("ok", "optimal", "completed")
+           and st_rm == 200 and len(rows) == 2
+           and (mc or {}).get("status") == "done"
+           and block.get("status") == "ok"
+           and members == ["wind_no_for", "wind_with_for"]
+           and len(periods) == 1
+           and abs(float(row.get("credit_gross_mw") or 0.0) - credit_hand) < 1e-6,
+           f"solve={(solved or {}).get('status')}; mc={(mc or {}).get('status')}; "
+           f"block={block.get('status')} {str(block.get('reason') or '')[:80]}; "
+           f"members={members}; credit_gross={row.get('credit_gross_mw')} "
+           f"(payload rows sum {credit_hand:.4f})")
+
+    # ── S26.2 — the period row prices the group at its hand value, 10 MW
+    # (the step edge; tolerance max(0.5, 0.1 % of the 90 MW bracket) = 0.5),
+    # and the portfolio is NOT a row in `elcc`.
+    elcc_names = [r_.get("name") for r_ in (res.get("elcc") or [])]
+    record("S26.2",
+           row.get("status") == "ok"
+           and abs(float(row.get("elcc_mw") or 0.0) - 10.0) <= 0.5
+           and abs(float(row.get("nameplate_mw") or 0.0) - 90.0) < 1e-6
+           and elcc_names == ["wind_no_for"]
+           and all("period" not in r_ for r_ in (res.get("elcc") or [])),
+           f"period row status={row.get('status')} elcc_mw={row.get('elcc_mw')} "
+           f"nameplate={row.get('nameplate_mw')}; elcc list={elcc_names}")
+
+    restore()
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+def suite_S28():
+    """
+    Every study can be stopped, live (Phase 12e).
+
+    The plan's S28: start a sequential-MC study, abort it mid-run, and check
+    the three things an abort has to be true about — the record reaches
+    `aborted`, the mesh reopens (the next study POST is accepted rather than
+    409), and the status GET stays serialisable throughout, because the record
+    now carries a `threading.Event` and a GET that serialises one 500s on
+    every poll. Then `/results/copt` on the same project, which Part B made
+    cheap.
+
+    Bitten live (recorded in the plan): with the stop flag ignored in
+    `mc_adequacy`'s batch loop, the record never reaches `aborted` and the
+    subsequent POST is refused 409.
+    """
+    print("\nS28 - Every study can be stopped, live (area 28)")
+    name = "qa_e2e_abort"
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2, 3):
+            skip(f"S28.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    # A fleet big enough that a 2000-draw study is still running a second
+    # later — the abort has to arrive mid-run to test anything.
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST", body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00", "end": "2030-12-31 23:00",
+                            "freq": "h"})[0])
+    for i in range(12):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": f"g{i}", "bus": "b", "carrier": "gas",
+                                "p_nom": 60.0, "marginal_cost": 10.0 + i,
+                                "outage_rate_value": 0.12,
+                                "outage_rate_basis": "EFORd",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 560.0})[0])
+    if [c for c in built if c not in (200, 201)]:
+        for i in (1, 2, 3):
+            skip(f"S28.{i}", f"fixture build failed: {built}")
+        restore()
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    # An ELCC asset makes the run minutes long — a baseline plus ~10 bisected
+    # evaluations — so the abort lands mid-run rather than after it.
+    st_post, _ = http("/api/results/mc", method="POST",
+                      body={"draws": 2000, "cov_target": 0.0001,
+                            "elcc_assets": [{"kind": "generator", "name": "g0"}]})
+    time.sleep(2.0)
+    st_get_live, live = http("/api/results/mc")
+    st_ab, ab = http("/api/results/mc/abort", method="POST")
+
+    deadline = time.time() + 120
+    final = None
+    get_ok = st_get_live == 200
+    while time.time() < deadline:
+        st_g, g = http("/api/results/mc")
+        if st_g != 200:
+            get_ok = False
+        if isinstance(g, dict) and g.get("status") in ("aborted", "done", "failed"):
+            final = g
+            break
+        time.sleep(1.0)
+
+    # S28.1 - the abort route answers, and the record reaches `aborted`
+    record("S28.1",
+           st_post == 200 and st_ab == 200
+           and isinstance(ab, dict) and ab.get("aborting") is True
+           and isinstance(final, dict) and final.get("status") == "aborted",
+           f"post={st_post} abort={st_ab} {ab}; final status="
+           f"{(final or {}).get('status')}")
+
+    # S28.2 - the GET never 500s while the record carries a stop event, and
+    # never leaks it
+    record("S28.2",
+           get_ok and isinstance(live, dict)
+           and "stop_event" not in (final or {}) and "thread" not in (final or {}),
+           f"live GET={st_get_live}; keys leaked="
+           f"{[k for k in (final or {}) if k in ('stop_event', 'thread')]}")
+
+    # S28.3 - the mesh reopens: the next study is accepted, not 409 - and
+    # /results/copt still answers with a real payload on the same project.
+    #
+    # NO WALL-CLOCK GATE. This check used to assert `copt_s < 10.0` and call
+    # it a Part B cost check, which it was not on two counts (shipped-code
+    # review, finding 12): this fixture is 12 generators with no profiles, so
+    # it answers in ~0.09 s (the figure recorded in QA_E2E_PLAN.md) and the
+    # gate had ~110x headroom, and it has k = 0 mixed
+    # units so it never enters the binned path the cost claim is about. A
+    # timing gate on a live server cannot fail on a fast machine and cannot
+    # pass on a slow one - the same reason F2c counts operations instead of
+    # timing them - so the time is PRINTED and the assertion is on the
+    # payload: /copt must come back with real rows and real metrics, not a
+    # 204 or an empty shell.
+    t0 = time.time()
+    st_copt, copt = http("/api/results/copt")
+    copt_s = time.time() - t0
+    copt_ok = (st_copt == 200 and isinstance(copt, dict)
+               and bool(copt.get("per_mode"))
+               and isinstance(copt.get("metrics"), dict)
+               and copt["metrics"].get("eue_mwh") is not None)
+    # Another MC rather than the frontier: the frontier refuses without a
+    # VoLL, and this check is about the MESH reopening, not about that.
+    st_next, next_body = http("/api/results/mc", method="POST",
+                              body={"draws": 8, "cov_target": 1.0})
+    record("S28.3",
+           st_next in (200, 201) and copt_ok,
+           f"next study POST={st_next} {str(next_body)[:60]}; "
+           f"/copt={st_copt} rows={len((copt or {}).get('per_mode') or [])} "
+           f"in {copt_s:.2f}s (printed, not gated)")
+    http("/api/results/mc/abort", method="POST")
+
+    restore()
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
+def suite_S27():
+    """
+    The engines honour activity, live (Phase 12d).
+
+    The plan's F1 over the API: two 24 h periods (2030, 2035), a flat 80 MW
+    load, two 50 MW gas units at q = 0.10 and `new` — 40 MW at q = 0.20 with
+    `build_year = 2035`. By hand the 2030 fleet (two units) has LOLP 0.19
+    and the 2035 fleet (three) 0.046: per-period LOLE 4.56 h and 1.104 h.
+    Before 12d every engine scored `new` in 2030 too and both periods read
+    1.104 h. `GET /results/copt` lands on the closed form per period and
+    discloses `new` as inactive in 2030; `POST /results/mc` lands inside
+    its per-period intervals and carries the same disclosure.
+
+    Bitten live (recorded in the plan): with the per-block COPT replaced by
+    the single-table path, 2030 reads the 2035 value.
+    """
+    print("\nS27 - The engines honour activity, live (area 27)")
+    name = "qa_e2e_activity"
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2):
+            skip(f"S27.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    LOLE_2030, LOLE_2035 = 0.19 * 24, 0.046 * 24
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST", body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots/multi_period", method="POST",
+                      body={"periods": [2030, 2035],
+                            "start": "2030-01-01 00:00",
+                            "end": "2030-01-01 23:00", "freq": "h"})[0])
+    for nm in ("base_a", "base_b"):
+        built.append(http("/api/network/generators", method="POST",
+                          body={"name": nm, "bus": "b", "carrier": "gas",
+                                "p_nom": 50.0, "marginal_cost": 10.0,
+                                "build_year": 2000, "lifetime": 100.0,
+                                "outage_rate_value": 0.10,
+                                "outage_rate_basis": "FOR",
+                                "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "new", "bus": "b", "carrier": "gas",
+                            "p_nom": 40.0, "marginal_cost": 20.0,
+                            "build_year": 2035, "lifetime": 100.0,
+                            "outage_rate_value": 0.20,
+                            "outage_rate_basis": "FOR",
+                            "mttr_hours": 24.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 80.0})[0])
+    st_cfg, _ = put_cfg(multi_investment_periods=True)
+    if [c for c in built if c not in (200, 201)] or st_cfg != 200:
+        for i in (1, 2):
+            skip(f"S27.{i}", f"fixture build failed: {built} cfg={st_cfg}")
+        restore()
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    # ── S27.1 — the COPT per period at the closed form, and the disclosure.
+    st_k, copt = http("/api/results/copt")
+    byp = ((copt or {}).get("metrics") or {}).get("by_period") or {}
+    act = (copt or {}).get("activity") or {}
+    l30 = float((byp.get("2030") or {}).get("lole_hours") or -1.0)
+    l35 = float((byp.get("2035") or {}).get("lole_hours") or -1.0)
+    record("S27.1",
+           st_k == 200
+           and abs(l30 - LOLE_2030) < 1e-6 and abs(l35 - LOLE_2035) < 1e-6
+           and ((act.get("by_period") or {}).get("2030") or {}).get("inactive") == ["new"]
+           and ((act.get("by_period") or {}).get("2035") or {}).get("inactive") == []
+           and "build year" in str(act.get("note") or ""),
+           f"copt={st_k}; by_period 2030={l30:.4f} (hand {LOLE_2030:.4f}) "
+           f"2035={l35:.4f} (hand {LOLE_2035:.4f}); activity={act}")
+
+    # ── S27.2 — the MC inside its per-period intervals, same disclosure.
+    st_m, _ = http("/api/results/mc", method="POST",
+                   body={"draws": 400, "seed": 1, "cov_target": 1.0})
+    mc = None
+    if st_m == 200:
+        for _ in range(240):
+            st_g, rec = http("/api/results/mc")
+            if st_g == 200 and (rec or {}).get("status") in ("done", "failed"):
+                mc = rec
+                break
+            time.sleep(0.5)
+    res = ((mc or {}).get("result") or {})
+    mbp = ((res.get("metrics") or {}).get("by_period") or {})
+    mact = res.get("activity") or {}
+
+    def inside(period, hand):
+        ci = (mbp.get(period) or {}).get("lole_ci") or [None, None]
+        try:
+            return ci[0] <= hand <= ci[1]
+        except TypeError:
+            return False
+
+    record("S27.2",
+           (mc or {}).get("status") == "done"
+           and inside("2030", LOLE_2030) and inside("2035", LOLE_2035)
+           and ((mact.get("by_period") or {}).get("2030") or {}).get("inactive") == ["new"]
+           and "build year" in str(mact.get("note") or ""),
+           f"mc={(mc or {}).get('status')}; by_period={ {k: (v.get('lole_hours'), v.get('lole_ci')) for k, v in mbp.items()} }; "
+           f"activity={mact}")
+
+    restore()
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
+def suite_S29():
+    """
+    A missing LP bound is refused, live (Phase 12f).
+
+    A non-finite value in one of the five bounds whose PyPSA class default is
+    FINITE does not clamp anything — linopy MASKS that constraint row out of
+    the problem, so the asset is unconstrained there. Measured off-line:
+    `p_max_pu = [0.5, NaN, 1.0]` on a 100 MW unit against a 500 MW load
+    dispatches `[50, 500, 100]`.
+
+    `ramp_limit_*` is deliberately NOT one of the five — its class default IS
+    NaN and PyPSA masks the row on purpose — which is why S29.3 exists: the
+    check must stay silent on a network that carries one.
+
+    Bitten live (recorded in the plan): drop `_reject_nonfinite_timeseries`
+    from `set_timeseries` and S29.1 reads 200; restore the `float("nan")`
+    fallthrough in `_bulk` and S29.2 reads `null`.
+    """
+    print("\nS29 - A missing LP bound is refused, live (area 29)")
+    name = "qa_e2e_nonfinite"
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2, 3, 4, 5, 6):
+            skip(f"S29.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST",
+                      body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00", "end": "2030-01-01 02:00",
+                            "freq": "h"})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "g", "bus": "b", "carrier": "gas",
+                            "p_nom": 100.0, "marginal_cost": 10.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "slack", "bus": "b", "carrier": "gas",
+                            "p_nom": 5000.0, "marginal_cost": 999.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 500.0})[0])
+    if [c for c in built if c not in (200, 201)]:
+        for i in (1, 2, 3, 4, 5, 6):
+            skip(f"S29.{i}", f"fixture build failed: {built}")
+        restore()
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    _, snaps = http("/api/network/snapshots")
+    idx = (snaps or {}).get("snapshots") or []
+
+    # S29.1 - a null cell in a time series is refused, and the body says where
+    st_put, put_body = http(
+        "/api/network/timeseries/generators/p_max_pu", method="PUT",
+        body={"index": idx, "columns": ["g"],
+              "data": [[0.5], [None], [1.0]]})
+    detail = str((put_body or {}).get("detail") or put_body)
+    record("S29.1",
+           st_put == 422 and "p_max_pu" in detail and "'g'" in detail,
+           f"PUT null -> {st_put} (want 422); names the column={('p_max_pu' in detail)}; "
+           f"names the asset={chr(39) + 'g' + chr(39) in detail}")
+
+    # S29.2 - clearing p_max_pu writes PyPSA's default, not NaN, and the
+    # network then solves BOUNDED. Before 12f this wrote NaN and the 100 MW
+    # unit dispatched 500 MW against the 500 MW load.
+    http("/api/network/_bulk", method="PATCH",
+         body={"component_class": "Generator", "names": ["g"],
+               "updates": {"p_max_pu": 0.4}})
+    st_bulk, _ = http("/api/network/_bulk", method="PATCH",
+                      body={"component_class": "Generator", "names": ["g"],
+                            "updates": {"p_max_pu": None}})
+    _, gens = http("/api/network/generators")
+    rows = gens.get("generators", []) if isinstance(gens, dict) else (gens or [])
+    got = None
+    for r in rows:
+        if isinstance(r, dict) and r.get("name") == "g":
+            got = r.get("p_max_pu")
+    record("S29.2",
+           st_bulk in (200, 201) and got == 1.0,
+           f"clear p_max_pu -> {st_bulk}; reads back {got!r} (want 1.0, not null)")
+
+    # S29.3 - the check is SILENT on a NaN ramp limit, which is PyPSA's own
+    # "no ramp limit". This is the row that keeps the phase shippable: an
+    # earlier version errored on any non-finite bound and would have blocked
+    # every network in the repo.
+    st_ramp, _ = http("/api/network/_bulk", method="PATCH",
+                      body={"component_class": "Generator", "names": ["g"],
+                            "updates": {"ramp_limit_up": None}})
+    st_solve, solve_body = http("/api/simulation/run", method="POST",
+                                body={"solver_name": "highs"})
+    ok_started = st_solve in (200, 201, 202)
+    st_fin, fin = _wait_solve() if ok_started else (0, {})
+    cond = str((fin or {}).get("condition") or "")
+    record("S29.3",
+           st_ramp in (200, 201) and ok_started and "validation_failed" not in cond,
+           f"clear ramp_limit_up -> {st_ramp}; solve condition={cond!r} "
+           "(a NaN ramp limit must NOT be refused)")
+
+    # S29.4 - and the solved dispatch respects the asset's own ceiling
+    st_g, gres = http("/api/results/generators")
+    cols = (gres or {}).get("columns") or []
+    data = (gres or {}).get("data") or []
+    peak = 0.0
+    found = False
+    if "g" in cols:
+        j = cols.index("g")
+        vals = [abs(float(row[j])) for row in data
+                if isinstance(row, list) and len(row) > j]
+        if vals:
+            peak, found = max(vals), True
+    record("S29.4",
+           st_g == 200 and found and peak <= 100.0 + 1e-6,
+           f"generators GET={st_g}; g peak dispatch {peak:.1f} MW over "
+           f"{len(data)} snapshot(s) (nameplate 100 — before 12f the NaN hour "
+           "reached 500)")
+
+    # S29.5 - the shipped-code review's bypass: a bare `NaN` literal (which
+    # `json.dumps` emits for float("nan") and `json.loads` accepts) reached
+    # `_bulk` past the `null` branch and was WRITTEN. Refused now, and the
+    # bound is untouched.
+    st_lit, lit_body = http("/api/network/_bulk", method="PATCH",
+                            body={"component_class": "Generator", "names": ["g"],
+                                  "updates": {"p_max_pu": float("nan")}})
+    _, gens2 = http("/api/network/generators")
+    rows2 = gens2.get("generators", []) if isinstance(gens2, dict) else (gens2 or [])
+    got2 = None
+    for r in rows2:
+        if isinstance(r, dict) and r.get("name") == "g":
+            got2 = r.get("p_max_pu")
+    record("S29.5",
+           st_lit == 422 and got2 == 1.0,
+           f"_bulk NaN literal -> {st_lit} (want 422); p_max_pu reads back "
+           f"{got2!r} (want 1.0, untouched)")
+
+    # S29.6 - and the create schema refuses one too: `POST /generators` with
+    # `p_max_pu: Infinity` wrote `inf` into the static frame before the fix.
+    st_post, _ = http("/api/network/generators", method="POST",
+                      body={"name": "g_inf", "bus": "b", "carrier": "gas",
+                            "p_nom": 10.0, "p_max_pu": float("inf")})
+    _, gens3 = http("/api/network/generators")
+    rows3 = gens3.get("generators", []) if isinstance(gens3, dict) else (gens3 or [])
+    created = any(isinstance(r, dict) and r.get("name") == "g_inf" for r in rows3)
+    record("S29.6",
+           st_post == 422 and not created,
+           f"POST generator p_max_pu=Infinity -> {st_post} (want 422); "
+           f"created={created}")
+
+    restore()
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
+def suite_S30():
+    """
+    A NaN in ANY finite-default LP input is refused, live (Phase 12g).
+
+    12f refused NaN in five bounds; measuring the next backlog item widened it
+    to every numeric input whose PyPSA class default is finite — a NaN there is
+    never "unset" (PyPSA's own `n.add(attr=None)` writes the default), and it
+    drops a term or a constraint row at solve time: a 2-of-3 inflow series
+    masks that hour's energy balance (measured: dispatch from an empty store).
+
+    Bitten live (recorded in the plan): restore the five-only walk and S30.5
+    solves `optimal` with the balance masked; restore the five-only `_bulk`
+    mapping and S30.1/S30.2 read back null.
+    """
+    print("\nS30 - A NaN in any finite-default LP input is refused, live (area 30)")
+    name = "qa_e2e_nonfinite_inputs"
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in (1, 2, 3, 4, 5, 6):
+            skip(f"S30.{i}", f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    built.append(http("/api/network/carriers", method="POST", body={"name": "gas"})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00", "end": "2030-01-01 02:00",
+                            "freq": "h"})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "g", "bus": "b", "carrier": "gas",
+                            "p_nom": 200.0, "marginal_cost": 10.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 100.0})[0])
+    built.append(http("/api/network/storage_units", method="POST",
+                      body={"name": "su", "bus": "b", "carrier": "gas",
+                            "p_nom": 100.0, "max_hours": 2.0,
+                            "state_of_charge_initial": 50.0})[0])
+    if [c for c in built if c not in (200, 201)]:
+        for i in (1, 2, 3, 4, 5, 6):
+            skip(f"S30.{i}", f"fixture build failed: {built}")
+        restore()
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    def _read(comp, asset, col):
+        _, rows = http(f"/api/network/{comp}")
+        rows = rows.get(comp, []) if isinstance(rows, dict) else (rows or [])
+        for r in rows:
+            if isinstance(r, dict) and r.get("name") == asset:
+                return r.get(col)
+        return "<absent>"
+
+    # S30.1 - clearing state_of_charge_initial writes PyPSA's default 0.0
+    st1, _ = http("/api/network/_bulk", method="PATCH",
+                  body={"component_class": "StorageUnit", "names": ["su"],
+                        "updates": {"state_of_charge_initial": None}})
+    got1 = _read("storage_units", "su", "state_of_charge_initial")
+    record("S30.1", st1 in (200, 201) and got1 == 0.0,
+           f"clear state_of_charge_initial -> {st1}; reads back {got1!r} (want 0.0, not null)")
+
+    # S30.2 - clearing marginal_cost writes 0.0, not NaN (a NaN cost made the unit free)
+    st2, _ = http("/api/network/_bulk", method="PATCH",
+                  body={"component_class": "Generator", "names": ["g"],
+                        "updates": {"marginal_cost": None}})
+    got2 = _read("generators", "g", "marginal_cost")
+    record("S30.2", st2 in (200, 201) and got2 == 0.0,
+           f"clear marginal_cost -> {st2}; reads back {got2!r} (want 0.0, not null)")
+    http("/api/network/_bulk", method="PATCH",
+         body={"component_class": "Generator", "names": ["g"],
+               "updates": {"marginal_cost": 10.0}})
+
+    # S30.3 - a NaN literal in inflow is refused, value untouched
+    st3, _ = http("/api/network/_bulk", method="PATCH",
+                  body={"component_class": "StorageUnit", "names": ["su"],
+                        "updates": {"inflow": float("nan")}})
+    got3 = _read("storage_units", "su", "inflow")
+    record("S30.3", st3 == 422 and got3 == 0.0,
+           f"_bulk inflow=NaN -> {st3} (want 422); inflow reads back {got3!r} (want 0.0)")
+
+    # S30.4 - the create schema refuses Infinity in a finite-default field
+    st4, _ = http("/api/network/storage_units", method="POST",
+                  body={"name": "su_inf", "bus": "b", "carrier": "gas", "p_nom": 10.0,
+                        "max_hours": 2.0, "inflow": float("inf")})
+    created = _read("storage_units", "su_inf", "name")
+    record("S30.4", st4 == 422 and created == "<absent>",
+           f"POST storage_unit inflow=Infinity -> {st4} (want 422); created={created != '<absent>'}")
+
+    # S30.5 - a 2-of-3-row inflow series is accepted at the PUT (coverage is
+    # preflight's call), and Run then refuses it naming the unit and `inflow`.
+    # Before 12g this solved `optimal` dispatching from an empty store.
+    _, snaps = http("/api/network/snapshots")
+    idx = (snaps or {}).get("snapshots") or []
+    st5p, _ = http("/api/network/timeseries/storage_units/inflow", method="PUT",
+                   body={"index": idx[:2], "columns": ["su"], "data": [[0.0], [0.0]]})
+    # The preflight route judges the RAW network — the surface the Validate
+    # panel and both loops' guards read — so the refusal is named there (the
+    # S21 lesson), and Run must agree.
+    st_pf, pf = http("/api/simulation/preflight", method="POST", body={})
+    hits = [i for i in ((pf or {}).get("issues") or [])
+            if str(i.get("code", "")).startswith("nonfinite_storage_constant")
+            and i.get("name") == "su" and "inflow" in str(i.get("message", ""))]
+    st5, _ = http("/api/simulation/run", method="POST", body={"solver_name": "highs"})
+    ok_started = st5 in (200, 201, 202)
+    st_fin, fin = _wait_solve() if ok_started else (0, {})
+    cond5 = str((fin or {}).get("condition") or "")
+    record("S30.5",
+           st5p in (200, 201) and st_pf == 200 and len(hits) == 1
+           and ok_started and "validation_failed" in cond5,
+           f"PUT 2-of-3 inflow -> {st5p}; preflight names su+inflow: {len(hits)} issue(s) "
+           f"[{(hits[0].get('code') if hits else '-')}]; run condition={cond5!r} "
+           "(want validation_failed; before 12g: optimal, dispatch from an empty store)")
+
+    # S30.6 - a null inflow hour is refused at the PUT (pin of the 12f-review rule)
+    st6, _ = http("/api/network/timeseries/storage_units/inflow", method="PUT",
+                  body={"index": idx, "columns": ["su"], "data": [[0.0], [None], [0.0]]})
+    record("S30.6", st6 == 422, f"PUT null inflow hour -> {st6} (want 422)")
+
+    restore()
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
+def suite_S31():
+    """
+    A static capacity factor is applied, and "it already includes outages" is
+    a flag the asset carries (Phase 12h).
+
+    12c-pre left the static `p_max_pu` column unread on purpose: folding it in
+    AND applying an outage rate double-counts PyPSA-Eur's nuclear capacity-
+    factor table, which already contains forced outages. 12h gives that case a
+    name — the per-asset bool `p_max_pu_includes_outages` — so the fold can
+    ship. The rate is zeroed at `occurrence.resolve_outage_params`, the one
+    place every consumer reads `q` from, so both engines and the reserve
+    margin move together.
+
+    The §0 fixture with `gas` at 50 MW / marginal cost 20, because at 25 MW
+    the derated firm capacity is 99.75 MW against a 110 MW requirement and
+    preflight refuses `reserve_margin_unreachable`. `GET /results/reserve_margin`
+    serves only the persisted solve-time stash (204 otherwise), so the suite
+    sets `reserve_margin = 0.1` and solves before reading a derate — S23's
+    pattern. The COPT hand values are pinned by a unit test on the same
+    fixture (`tests/test_includes_outages.py::test_S31_*`), so the live rows
+    compare against numbers the suite owns.
+
+    Bitten live: drop the capacity scaling and S31.2 reads the 441.0
+    nameplate row (S31.4 reads 0.0); ignore the flag in
+    `resolve_outage_params` and S31.4 reads the unflagged 600.6 and derate
+    0.76.
+
+    The save leg is REDUNDANTLY protected and the bite says so. The plan
+    expected dropping the export helper's normaliser alone to make S31.4's
+    save a 500; measured, it does not — the solver's restore callback has
+    already put the dtype back by then, and each normaliser alone is enough.
+    Dropping BOTH reproduces the 500. Neither is therefore dead code: the
+    restore callback covers solve-then-save, and the export helper covers
+    every save, undo snapshot and io export that no solve preceded.
+    """
+    print("\nS31 - A static CF is applied, and the flag says whether it "
+          "already includes outages (area 31)")
+    name = "qa_e2e_includes_outages"
+    FLAG = "p_max_pu_includes_outages"
+    IDS = [f"S31.{i}" for i in (1, 2, 3, 4, 5)]
+
+    # The three hand values are OWNED by the unit suite, which pins them on
+    # this exact fixture — importing them is what stops the live rows and the
+    # pin from drifting apart.
+    from tests.test_includes_outages import (
+        S31_EUE_FLAG, S31_EUE_NAMEPLATE, S31_EUE_PLAIN)
+
+    _, cfg_before = http("/api/simulation/solver_config")
+
+    def restore():
+        if isinstance(cfg_before, dict):
+            http("/api/simulation/solver_config", method="PUT", body=cfg_before)
+
+    def put_cfg(**over):
+        base = dict(cfg_before) if isinstance(cfg_before, dict) else {}
+        base.update({"solver_name": "highs", "voll": 3000.0})
+        base.update(over)
+        return http("/api/simulation/solver_config", method="PUT", body=base)
+
+    def poll_solve(ceiling_s=300):
+        deadline = time.time() + ceiling_s
+        while time.time() < deadline:
+            st, s = http("/api/simulation/status")
+            if st == 200 and isinstance(s, dict) and not s.get("running"):
+                return s
+            time.sleep(1.0)
+        return None
+
+    def preflight_codes():
+        _st, pf = http("/api/simulation/preflight", method="POST", body={})
+        return [(str(i.get("code") or ""), str(i.get("message") or ""))
+                for i in ((pf or {}).get("issues") or []) if isinstance(i, dict)]
+
+    def copt_eue():
+        st, body = http("/api/results/copt")
+        if st != 200 or not isinstance(body, dict):
+            return None, st
+        return ((body.get("metrics") or {}).get("eue_mwh")), st
+
+    def gen_flag():
+        _st, rows = http("/api/network/generators")
+        rows = rows.get("generators", []) if isinstance(rows, dict) else (rows or [])
+        for r in rows:
+            if isinstance(r, dict) and r.get("name") == "nuc":
+                return r.get(FLAG, "<absent>")
+        return "<missing row>"
+
+    def margin_derate():
+        st, rm = http("/api/results/reserve_margin")
+        if st != 200 or not isinstance(rm, dict):
+            return None, st
+        for a in (rm.get("assets") or []):
+            if isinstance(a, dict) and a.get("name") == "nuc":
+                return a.get("derate"), st
+        return None, st
+
+    def near(v, want, tol=5e-3):
+        try:
+            return abs(float(v) - want) < tol
+        except (TypeError, ValueError):
+            return False
+
+    http("/api/network/reset", method="POST")
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+    st_c, body_c = http(f"/api/projects/{q(name)}", method="POST")
+    if st_c not in (200, 201):
+        for i in IDS:
+            skip(i, f"create project -> {st_c} {str(body_c)[:80]}")
+        return
+    http(f"/api/projects/{q(name)}/activate", method="POST")
+
+    built = [http("/api/network/reset", method="POST")[0]]
+    for c in ("nuclear", "gas"):
+        built.append(http("/api/network/carriers", method="POST", body={"name": c})[0])
+    built.append(http("/api/network/buses", method="POST",
+                      body={"name": "b", "v_nom": 380.0})[0])
+    built.append(http("/api/network/snapshots", method="POST",
+                      body={"start": "2030-01-01 00:00", "end": "2030-01-07 23:00",
+                            "freq": "h"})[0])
+    # NOTE the POST body carries no `p_max_pu_includes_outages`: S31.3's
+    # whole point is that `_bulk` has to CREATE the column on a frame the API
+    # never gave one.
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "nuc", "bus": "b", "carrier": "nuclear",
+                            "p_nom": 100.0, "marginal_cost": 5.0,
+                            "p_max_pu": 0.8, "outage_rate_value": 0.05,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 100.0})[0])
+    built.append(http("/api/network/generators", method="POST",
+                      body={"name": "gas", "bus": "b", "carrier": "gas",
+                            "p_nom": 50.0, "marginal_cost": 20.0,
+                            "outage_rate_value": 0.05,
+                            "outage_rate_basis": "EFORd",
+                            "mttr_hours": 100.0})[0])
+    built.append(http("/api/network/loads", method="POST",
+                      body={"name": "l", "bus": "b", "p_set": 100.0})[0])
+    bad = [c for c in built if c not in (200, 201)]
+    if bad:
+        for i in IDS:
+            skip(i, f"fixture build non-2xx={bad}")
+        restore()
+        http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+        return
+
+    # ── S31.1 — preflight names the unit the fold touches, and the code 12h
+    # retired is gone. `static_p_max_pu_not_applied` said "the engines do NOT
+    # apply it", which stopped being true the moment the fold shipped.
+    codes = preflight_codes()
+    may = [m for c, m in codes if c == "availability_may_include_outages"]
+    retired = [c for c, _m in codes if c == "static_p_max_pu_not_applied"]
+    record("S31.1",
+           len(may) == 1 and "nuc" in may[0] and FLAG in may[0] and not retired,
+           f"availability_may_include_outages x{len(may)} "
+           f"(names nuc={bool(may) and 'nuc' in may[0]}, names the flag="
+           f"{bool(may) and FLAG in may[0]}); retired code present={bool(retired)}")
+
+    # ── S31.2 — the CF is applied. Before 12h the engines read the nameplate
+    # row (`p_nom x (1 - q)`) and this was 441.0.
+    eue_plain, st_copt = copt_eue()
+    record("S31.2", st_copt == 200 and near(eue_plain, S31_EUE_PLAIN, 0.05),
+           f"/results/copt -> {st_copt}; EUE={eue_plain!r} "
+           f"(want {S31_EUE_PLAIN}; before 12h: {S31_EUE_NAMEPLATE}, the nameplate row)")
+
+    # ── S31.3 — `_bulk` sets the flag on a frame whose column the API POST
+    # never created, the disclosure swaps, and the value reads back `true`.
+    st_b, body_b = http("/api/network/_bulk", method="PATCH",
+                        body={"component_class": "Generator", "names": ["nuc"],
+                              "updates": {FLAG: True}})
+    read_back = gen_flag()
+    codes3 = preflight_codes()
+    folded3 = [m for c, m in codes3 if c == "outages_folded_into_availability"]
+    may3 = [c for c, _m in codes3 if c == "availability_may_include_outages"]
+    record("S31.3",
+           st_b in (200, 201) and read_back is True
+           and len(folded3) == 1 and "nuc" in folded3[0] and not may3,
+           f"_bulk set flag -> {st_b} {str(body_b)[:60]}; GET reads {read_back!r} "
+           f"(want True); outages_folded_into_availability x{len(folded3)}, "
+           f"availability_may_include_outages x{len(may3)} (want 1 / 0)")
+
+    # ── S31.4 — the engines credit the CF alone, the margin's derate moves
+    # with it, and the project still SAVES: the solve adds and removes its
+    # slack rows on a frame carrying the flag, which leaves an `object` column
+    # of pure bools — the one shape netCDF refuses — unless the export helper
+    # normalises it back.
+    eue_flag, st_copt4 = copt_eue()
+    st_cfg, _ = put_cfg(reserve_margin=0.1)
+    http("/api/simulation/run", method="POST")
+    solved4 = poll_solve()
+    d_flag, st_rm4 = margin_derate()
+    # `POST /api/projects/{name}` IS the save (the project was created by the
+    # same route at the top of this suite); a PUT there is 405.
+    st_save, body_save = http(f"/api/projects/{q(name)}", method="POST")
+    record("S31.4",
+           st_copt4 == 200 and near(eue_flag, S31_EUE_FLAG, 0.05)
+           and st_cfg == 200
+           and isinstance(solved4, dict) and solved4.get("condition") == "optimal"
+           and st_rm4 == 200 and near(d_flag, 0.80, 1e-6)
+           and st_save in (200, 201),
+           f"EUE={eue_flag!r} (want {S31_EUE_FLAG}); solve="
+           f"{(solved4 or {}).get('condition')!r}; margin->{st_rm4} derate={d_flag!r} "
+           f"(want 0.80); project save -> {st_save} {str(body_save)[:60]} "
+           "(a 500 here is the object-dtype column netCDF refuses)")
+
+    # ── S31.5 — clearing the flag through `_bulk` sends `null`, which is the
+    # blank cell the bulk editor produces. It must clear to the column's class
+    # default, not write None (which upcasts the column and 500s the save).
+    st_b5, body_b5 = http("/api/network/_bulk", method="PATCH",
+                          body={"component_class": "Generator", "names": ["nuc"],
+                                "updates": {FLAG: None}})
+    read_back5 = gen_flag()
+    http("/api/simulation/run", method="POST")
+    solved5 = poll_solve()
+    d_plain, st_rm5 = margin_derate()
+    record("S31.5",
+           st_b5 in (200, 201) and read_back5 is False
+           and isinstance(solved5, dict) and solved5.get("condition") == "optimal"
+           and st_rm5 == 200 and near(d_plain, 0.76, 1e-6),
+           f"_bulk clear flag -> {st_b5} {str(body_b5)[:60]}; GET reads "
+           f"{read_back5!r} (want False, not null and not a 500); re-solve="
+           f"{(solved5 or {}).get('condition')!r}; derate={d_plain!r} (want 0.76)")
+
+    restore()
+    http(f"/api/projects/{q(name)}?cascade=true", method="DELETE")
+
+
+def _wait_solve(timeout=600):
+    """Poll /api/simulation/status until it leaves `running`."""
+    import time as _t
+    t0 = _t.time()
+    st, body = http("/api/simulation/status")
+    while _t.time() - t0 < timeout:
+        if str((body or {}).get("status") or "") != "running":
+            return st, body
+        _t.sleep(2)
+        st, body = http("/api/simulation/status")
+    return st, body
+
+
 def main() -> int:
     global BACKEND
     ap = argparse.ArgumentParser()
@@ -1856,6 +5014,47 @@ def main() -> int:
         suite_S13()
     if run("S14"):
         suite_S14()
+    if run("S15"):
+        suite_S15()
+    if run("S16"):
+        suite_S16()
+    if run("S17"):
+        suite_S17()
+    if run("S18"):
+        suite_S18()
+    if run("S19"):
+        suite_S19()
+
+    if run("S20"):
+        suite_S20()
+
+    if run("S21"):
+        suite_S21()
+
+    if run("S22"):
+        suite_S22()
+
+    if run("S23"):
+        suite_S23()
+
+    if run("S24"):
+        suite_S24()
+
+    if run("S25"):
+        suite_S25()
+
+    if run("S26"):
+        suite_S26()
+    if run("S27"):
+        suite_S27()
+    if run("S28"):
+        suite_S28()
+    if run("S29"):
+        suite_S29()
+    if run("S30"):
+        suite_S30()
+    if run("S31"):
+        suite_S31()
 
     p = sum(1 for _, s, _ in RESULTS if s == "PASS")
     f = sum(1 for _, s, _ in RESULTS if s == "FAIL")

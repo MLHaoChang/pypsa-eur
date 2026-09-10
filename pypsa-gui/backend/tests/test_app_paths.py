@@ -13,34 +13,13 @@ import pytest
 import app_paths
 
 
-def _app_data_base(home: Path) -> Path:
-    """
-    Where app-data lives on THIS platform, given `home`.
+# NOTE (merge, 2026-09-10): both branches independently added an
+# `_app_data_base` helper here, for the same reason — the rename tests
+# hard-coded macOS paths and were red everywhere else. Master's version
+# (below) is kept because it also pins LOCALAPPDATA / XDG_DATA_HOME
+# itself rather than relying on the caller, and both call sites already
+# use its signature. This branch's copy was removed as unreachable.
 
-    The two rename tests below used to build a macOS
-    `Library/Application Support` tree and assert against `app_data_dir()`,
-    so on Linux and Windows they compared the macOS layout with the XDG or
-    LOCALAPPDATA one and failed — not because the migration logic was wrong,
-    but because the test was written on a Mac. They were red in CI for as
-    long as anyone has looked, and a permanently red summary line is how a
-    real failure hides.
-
-    This mirrors `app_paths.app_data_dir`'s platform branch. That the two
-    agree is pinned INDEPENDENTLY by
-    `test_app_data_dir_is_platform_correct` above, so the duplication cannot
-    quietly drift into agreeing with a broken implementation. And the
-    preference rule those tests are really about — new wins unless only
-    legacy exists — is now asserted directly against `_preferred`, with no
-    platform knowledge at all.
-
-    Callers must clear `XDG_DATA_HOME` / `LOCALAPPDATA` (see
-    `_home_relative_app_data`) or the real environment escapes `home`.
-    """
-    if sys.platform == "darwin":
-        return home / "Library" / "Application Support"
-    if sys.platform == "win32":
-        return home / "AppData" / "Local"
-    return home / ".local" / "share"
 
 
 @pytest.fixture()
@@ -113,6 +92,34 @@ def test_env_overrides_win(monkeypatch, tmp_path):
 # ── the rename to "PyPSA Studio" ────────────────────────────────────────────
 
 
+def _app_data_base(tmp_path, monkeypatch) -> Path:
+    """
+    The platform's app-data PARENT under a pinned `home`, mirroring
+    `app_paths.app_data_dir()`'s own `sys.platform` branch.
+
+    The two rename tests below are about `_preferred()` — old location wins
+    while only it exists, new location wins as soon as it appears — and that
+    logic is platform-independent. They used to hard-code macOS's
+    `Library/Application Support`, so they could only ever pass on a Mac: red
+    on Linux, and therefore red in any CI that ran this suite. Deriving the
+    base the way the code derives it keeps exactly what they assert and lets
+    them assert it everywhere, which is the same correction
+    `test_app_data_dir_is_platform_correct` already documents ("the test was
+    reading the machine, not the code").
+
+    `default_projects_root()` needs no equivalent: it is `home/Documents` on
+    every platform.
+    """
+    if sys.platform == "darwin":
+        return tmp_path / "Library" / "Application Support"
+    if sys.platform == "win32":
+        base = tmp_path / "AppData" / "Local"
+        monkeypatch.setenv("LOCALAPPDATA", str(base))
+        return base
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    return tmp_path / ".local" / "share"
+
+
 def test_a_fresh_install_uses_the_new_name(monkeypatch, tmp_path):
     """The product is PyPSA Studio; a machine with no history says so."""
     import app_paths
@@ -124,7 +131,7 @@ def test_a_fresh_install_uses_the_new_name(monkeypatch, tmp_path):
     assert app_paths.default_projects_root().parent.name == "PyPSA Studio"
 
 
-def test_an_EXISTING_install_keeps_its_data_after_the_rename(_home_relative_app_data):
+def test_an_EXISTING_install_keeps_its_data_after_the_rename(_home_relative_app_data, monkeypatch):
     """
     `APP_NAME` is not a label — it is the directory the user's projects live in.
     Renaming it outright points a working install at empty folders: the app
@@ -138,7 +145,7 @@ def test_an_EXISTING_install_keeps_its_data_after_the_rename(_home_relative_app_
 
     tmp_path = _home_relative_app_data
 
-    legacy_data = _app_data_base(tmp_path) / "PyPSA GUI"
+    legacy_data = _app_data_base(tmp_path, monkeypatch) / "PyPSA GUI"
     legacy_data.mkdir(parents=True)
     (legacy_data / "pypsa-gui.db").write_text("")
     legacy_projects = tmp_path / "Documents" / "PyPSA GUI" / "Projects"
@@ -148,7 +155,7 @@ def test_an_EXISTING_install_keeps_its_data_after_the_rename(_home_relative_app_
     assert app_paths.default_projects_root() == legacy_projects.resolve()
 
 
-def test_the_new_location_wins_once_it_exists(_home_relative_app_data):
+def test_the_new_location_wins_once_it_exists(_home_relative_app_data, monkeypatch):
     """
     Otherwise a stale empty "PyPSA GUI" folder — one `mkdir` from any earlier
     launch — would pin every future install to the old name forever.
@@ -157,8 +164,9 @@ def test_the_new_location_wins_once_it_exists(_home_relative_app_data):
 
     tmp_path = _home_relative_app_data
 
-    (_app_data_base(tmp_path) / "PyPSA GUI").mkdir(parents=True)
-    new = _app_data_base(tmp_path) / "PyPSA Studio"
+    base = _app_data_base(tmp_path, monkeypatch)
+    (base / "PyPSA GUI").mkdir(parents=True)
+    new = base / "PyPSA Studio"
     new.mkdir(parents=True)
 
     assert app_paths.app_data_dir() == new.resolve()

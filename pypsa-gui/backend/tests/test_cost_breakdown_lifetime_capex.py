@@ -145,6 +145,22 @@ def payload(install_network) -> dict:
     return out
 
 
+def _cb_module():
+    """
+    The module that actually CALLS `_upfront_cost_series`.
+
+    MERGE NOTE (2026-09-10): the decomposition moved the call out of
+    `routers.results` into `services.results.cost_breakdown`, which binds the
+    name at its own module scope. `routers.results` still re-exports it, so
+    patching there SUCCEEDS and injects no fault — the test then asserts a
+    null and gets a real number, which is how this was noticed. Patch the
+    caller, not the façade.
+    """
+    from services.results import cost_breakdown
+
+    return cost_breakdown
+
+
 def _boom_for_lines(n, comp_class: str):
     """Resolver that fails for Line only, exactly as PyPSA's ValueError did."""
     if comp_class == "Line":
@@ -158,7 +174,7 @@ def line_unresolvable(install_network, monkeypatch) -> dict:
     n = _solved_network()
     install_network(n)
     sim_router._state["solver_config"] = SolverConfig()
-    monkeypatch.setattr(R, "_upfront_cost_series", _boom_for_lines)
+    monkeypatch.setattr(_cb_module(), "_upfront_cost_series", _boom_for_lines)
     out = get_cost_breakdown()
     assert isinstance(out, dict)
     return out
@@ -353,7 +369,7 @@ def test_a_nan_upfront_cost_is_null_not_a_partial_total(install_network, monkeyp
             return series * float("nan")
         return series
 
-    monkeypatch.setattr(R, "_upfront_cost_series", _nan_for_lines)
+    monkeypatch.setattr(_cb_module(), "_upfront_cost_series", _nan_for_lines)
     out = get_cost_breakdown()
     assert isinstance(out, dict)
 
@@ -389,7 +405,7 @@ def test_a_non_finite_total_is_null_not_zero(install_network, monkeypatch):
             return series * float("inf")
         return series
 
-    monkeypatch.setattr(R, "_upfront_cost_series", _inf_for_lines)
+    monkeypatch.setattr(_cb_module(), "_upfront_cost_series", _inf_for_lines)
     out = get_cost_breakdown()
     assert isinstance(out, dict)
 
@@ -431,7 +447,7 @@ def test_the_failed_resolve_is_logged_with_a_traceback(install_network, monkeypa
     n = _solved_network()
     install_network(n)
     sim_router._state["solver_config"] = SolverConfig()
-    monkeypatch.setattr(R, "_upfront_cost_series", _boom_for_lines)
+    monkeypatch.setattr(_cb_module(), "_upfront_cost_series", _boom_for_lines)
 
     with caplog.at_level(logging.ERROR, logger="pypsa_gui.results"):
         out = get_cost_breakdown()

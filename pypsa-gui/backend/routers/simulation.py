@@ -162,6 +162,7 @@ from services.solver_service import (
     run_simulation,
     user_code_enabled,
 )
+from services import study_state as _study_state
 from services.ac_pf_service import run_ac_pf_stage
 from services.validation_service import has_errors, validate_for_run
 from starlette.responses import StreamingResponse
@@ -415,7 +416,12 @@ def preflight():
     (orphan vintages, slack-on-every-bus, …) that vanish the moment the
     worker exits.
     """
-    if _solver_in_flight():
+    def _deferred_payload() -> dict:
+        """The answer this route gives when a solver worker is alive.
+
+        Factored out because it is returned from two of the three gates
+        below: the worker check, and the non-blocking lock acquire.
+        """
         # Two distinct stuck states map to different remediation:
         #   * status == "running"  — solve genuinely in progress; wait.
         #   * status == "aborted"  — user clicked Abort but HiGHS/Gurobi is
@@ -450,9 +456,55 @@ def preflight():
             "deferred_reason": reason,
             "deferred_stuck": current_status == "aborted",
         }
-    n = PyPSAService.get_network()
-    config = _state["solver_config"]
-    issues = validate_for_run(n, config)
+
+    # Three gates, because three different things mutate the foreground
+    # network and no single check sees them all.
+    #
+    # 1. A solver worker. The pre-existing guard, kept first because it is
+    #    the one that can tell a stuck abort from a running solve.
+    if _solver_in_flight():
+        return _deferred_payload()
+    # 2. An adequacy study. The frontier, the sweep, the stress scenarios and
+    #    the loops mutate the foreground network BETWEEN their own solves,
+    #    with no lock held (`sweep.py`'s `c["mutate"](network)`), so neither
+    #    the worker check nor the lock below can see them. `/run` already
+    #    refuses on this; preflight did not, and answered from a network a
+    #    study was mid-way through rewriting (shipped-code review of 5e32f02,
+    #    finding 2: a live sweep, `_solver_in_flight()` False, and a
+    #    `reserve_margin_unreachable` invented from study-scaled demand).
+    _study = _study_state.blocking_study_detail()
+    if _study:
+        return {
+            "ok": True, "errors": 0, "warnings": 0, "issues": [],
+            "deferred": True, "deferred_reason": _study,
+            "deferred_stuck": False,
+        }
+    # 3. The mutation lock, held for the validation span and taken WITHOUT
+    #    blocking. This is what actually closes the check-then-act window:
+    #    a solve that begins after gate 1 cannot mutate until we release,
+    #    and a solve already holding the lock makes us return `deferred`
+    #    instantly rather than block the UI for its whole duration — the
+    #    reason this route never took the lock before. `lock_status` uses
+    #    the same idiom. A `/run` arriving mid-validation waits for one
+    #    validation (~80 ms measured), not the other way round.
+    #
+    #    An earlier fix (5e32f02) re-checked gate 1 AFTER validating instead.
+    #    That only narrows the window: a worker whose whole transient fits
+    #    inside the validation span starts after the guard, restores, and
+    #    exits before the re-check — measured at 24 of 27 non-deferred
+    #    answers wrong on a harness with a 40 ms transient against an 80 ms
+    #    validation. `/run` survived it only because `run_simulation`
+    #    happens to validate under the lock before mutating; the AC-PF
+    #    worker does not.
+    lock = PyPSAService.get_lock()
+    if not lock.acquire(blocking=False):
+        return _deferred_payload()
+    try:
+        n = PyPSAService.get_network()
+        config = _state["solver_config"]
+        issues = validate_for_run(n, config)
+    finally:
+        lock.release()
     return {
         "ok": not has_errors(issues),
         "errors": sum(1 for i in issues if i.severity == "error"),
@@ -536,6 +588,23 @@ def run():
     from fastapi import HTTPException
     import time as _time
 
+    # MESH HOLE, fixed in Phase 7 (coupling-loop spec §3, plan [S7]). The
+    # adequacy studies guard each other, but nothing stopped a FOREGROUND
+    # solve from landing between two of a study's own iterates. The frontier,
+    # the sweep and the coupling loop all mutate the network by re-solving it,
+    # and the loop's `evaluate` then samples whatever plan the network happens
+    # to be holding — so an interleaved /run silently re-solves under the
+    # user's config and the loop certifies a cap against a plan it never
+    # produced. Refused BEFORE the claim (cheap, before any work) AND AGAIN
+    # INSIDE it: the whole-branch review (finding S3) measured a study POST
+    # and a /run arriving together both admitted, because this check ran
+    # outside the lock the claim below holds while the study's own gates ran
+    # outside the lock its publish holds — two check-then-act windows facing
+    # each other. Both sides now re-check under their lock.
+    _blocked = _study_state.blocking_study_detail()
+    if _blocked:
+        raise HTTPException(409, _blocked)
+
     stop_event = threading.Event()
     log_queue = BufferedLogQueue()
 
@@ -606,6 +675,9 @@ def run():
     # False and would be mistaken for stale state, re-opening the race.
     # _state_lock is an RLock, so the nested _state_update is safe.
     with PyPSAService.get_solver_state_lock():
+        _blocked = _study_state.blocking_study_detail()
+        if _blocked:
+            raise HTTPException(409, _blocked)
         if _state["status"] == "running":
             # Recover from stale state: if the worker thread died without
             # resetting status (uncaught exception, segfault, process restart
@@ -629,6 +701,8 @@ def run():
             stop_event=stop_event,
             log_queue=log_queue,
             last_lost_load=None,
+            adequacy_report=None,
+            last_reserve_margin=None,
             lopf_results=None,
             ac_pf_results=None,
             ac_pf_convergence=None,
@@ -788,6 +862,19 @@ def run_ac_pf():
 
     from fastapi import HTTPException
 
+    # The SECOND foreground entrypoint, guarded for the same reason as /run
+    # (spec §3 asks for "both solve entrypoints if two exist"). Stage 2 is not
+    # an LP, but it holds the PyPSA lock for its whole run and overwrites
+    # `lines_t.p0/p1` and `buses_t.v_mag_pu` in place — so a study's next
+    # re-solve queues behind it and the foreground results a study restores to
+    # are no longer the ones it measured. Checked FIRST, before the
+    # solved/dispatch pre-conditions: "a study is running" is the actionable
+    # answer, and a 400 about stale dispatch would send the user to re-run the
+    # very solve this refuses.
+    _blocked = _study_state.blocking_study_detail()
+    if _blocked:
+        raise HTTPException(409, _blocked)
+
     n = PyPSAService.get_network()
     stop_event = threading.Event()
     log_queue = BufferedLogQueue()
@@ -835,6 +922,10 @@ def run_ac_pf():
     # observes is_alive()==True. _state_lock is an RLock → nested _state_update
     # is safe; raising inside the block releases the lock via the context manager.
     with PyPSAService.get_solver_state_lock():
+        # The study mesh, re-checked under the claim lock (see /run).
+        _blocked = _study_state.blocking_study_detail()
+        if _blocked:
+            raise HTTPException(409, _blocked)
         if _state["status"] == "running":
             existing = _state.get("thread")
             if existing is not None and existing.is_alive():

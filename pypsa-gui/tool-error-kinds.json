@@ -26,19 +26,22 @@
     "      KIND_COPY, and every `inline` kind is in neither.",
     "",
     "THE DERIVED SET IS A SUPERSET, deliberately. It is every `error_kind`",
-    "literal yielded at a `tool_error` site, plus every one raised in an",
-    "HTTPException `detail` anywhere in the backend, because tool dispatch",
-    "forwards ANY exception carrying `detail['error_kind']`",
-    "(chat_service._run_one_tool's except block). Some of those are only ever",
-    "raised from a route and never from a tool handler, so they can be",
-    "classified `inline` with that as the reason. Over-including costs a line",
-    "of JSON; under-including is the bug this file exists to prevent.",
+    "literal yielded at a `tool_error` site, plus every one appearing in ANY",
+    "dict literal anywhere in the backend, because tool dispatch forwards any",
+    "exception carrying `detail['error_kind']` (chat_service._run_one_tool's",
+    "except block) and those details are not always written inline at the",
+    "raise — `study_in_flight` is built in `project_context.study_swap_refusal`",
+    "and raised as a variable, which an HTTPException-scoped scan missed.",
+    "",
+    "Some kinds it finds are only ever raised from a route and never from a",
+    "tool handler; those are classified `inline` with that as the reason.",
+    "Over-including costs a line of JSON; under-including is the bug this file",
+    "exists to prevent.",
     "",
     "surface: 'banner' = promote to the error banner (needs KIND_COPY).",
     "         'inline' = leave as the gray tool line.",
     "Changing one is a UI decision. Write down why, as the entries do."
   ],
-
   "kinds": {
     "aborted": {
       "surface": "inline",
@@ -92,6 +95,10 @@
       "surface": "banner",
       "why": "The account stopped being active mid-turn. Nothing will work until it is fixed, and a gray tool line truncates that away — this is the correction the whole manifest generalises."
     },
+    "internal_error": {
+      "surface": "inline",
+      "why": "An unhandled server failure. It reaches the client on a turn-terminal `error` frame, which the banner renders directly from KIND_COPY — it is not yielded at any `tool_error` site."
+    },
     "invalid_base64": {
       "surface": "inline",
       "why": "Malformed payload into one tool call. The model can correct and retry."
@@ -140,6 +147,10 @@
       "surface": "banner",
       "why": "Several destructive calls arrived in one turn and none ran. The user must reissue them one at a time."
     },
+    "profile_switch_requires_new_chat": {
+      "surface": "inline",
+      "why": "The session is bound to one provider's block shapes, so a mid-session switch is refused. Emitted as an `error` frame with its own `new-chat` action; the banner already gets it without tool_error routing."
+    },
     "project_exists": {
       "surface": "banner",
       "why": "A save was refused to avoid an overwrite. The user chooses rename or force."
@@ -176,6 +187,10 @@
       "surface": "banner",
       "why": "A foreground solve is running and the operation was refused. The user waits or aborts."
     },
+    "study_in_flight": {
+      "surface": "inline",
+      "why": "An adequacy study is running and a save/queue was refused. Deliberately QUIET on the client (`QUIET_TOAST_CODES` in api/client.ts): it is a standing condition the caller handles, and one toast per autosave tick would bury the workbench."
+    },
     "time_column_parse_error": {
       "surface": "banner",
       "why": "The time column could not be parsed as datetimes; the user must fix the input."
@@ -200,6 +215,10 @@
       "surface": "inline",
       "why": "One tool exceeded its budget. The turn continues and the model can route around it."
     },
+    "turn_already_in_flight": {
+      "surface": "inline",
+      "why": "A second turn arrived while one was running. Route-level, on an `error` frame, and the composer state already says so."
+    },
     "unknown_confirmation_token": {
       "surface": "inline",
       "why": "A confirm arrived for a token this session does not know — a stale tab or a double-submit, not a user-actionable state."
@@ -211,6 +230,10 @@
     "unknown_session": {
       "surface": "inline",
       "why": "Raised by the chat route for a session id it does not hold. Route-only; a turn cannot be running under a session that does not exist."
+    },
+    "unknown_step_kind": {
+      "surface": "inline",
+      "why": "An internal script/step vocabulary mismatch — a bug in the caller, not a user-actionable state, and never yielded at a tool_error site."
     },
     "unknown_tool": {
       "surface": "inline",

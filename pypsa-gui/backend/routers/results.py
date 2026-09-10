@@ -17,26 +17,41 @@ header.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
-from fastapi import APIRouter, Query, Response
+import contextvars as _contextvars
+import threading as _threading
+
+from pydantic import BaseModel as _BaseModel
+
+# Whole-branch review, finding S6: the study request models typed their
+# floats as plain `float`, which accepts the JSON `Infinity`/`NaN` literals
+# (12f's finding, on the asset schemas). A frontier target of `Infinity`
+# passed, the study was PUBLISHED and RAN, the POST's own response then
+# failed to encode and every later GET on the record answered 500 until a
+# swap cleared it. `Finite` (12g's own type) on every study float; the 12f
+# handler renders the refusal.
+from models.schemas import Finite as _Finite
+
+from fastapi import APIRouter, HTTPException, Query, Response
 
 from services.dispatch_status import dispatch_status as _dispatch_status
-from services.economics import co2_intensity_map
 from services.pypsa_service import PyPSAService
+from services.adequacy.coupling import snapshot_hash as _snapshot_hash
+from services.results.prices import _apply_merit_order_correction  # noqa: F401
+from services.results.cost_breakdown import (  # noqa: F401
+    _class_lifetime,
+    _lifetime_total,
+    _sum_lifetime,
+)
 from services.serialization import (
-    df_to_json,
-    safe_float as _safe_float,
-    safe_values as _safe_values,
     slice_ts as _slice_ts,
     ts_payload as _ts_payload,
+    wants_slice as _wants_slice,
 )
 from services.solver_service import (
     SolverConfig,
-    _pv_factor_series,
-    _reference_build_year,
-    periodized_capital_costs,
-    with_periodized_cost_defaults,
 )
 # Imported under a private alias so `get_cost_breakdown` has a module-level
 # seam a test can fault-inject (same idiom as `periodized_capital_costs` in
@@ -54,15 +69,33 @@ from services.solver_service import upfront_cost_series as _upfront_cost_series
 # Those locals are now named `is_multi`, matching the convention used
 # everywhere else in this module, so the import is safe. The two response
 # payloads still emit the "is_multi_period" JSON key; only the variable moved.
-from services.period_utils import (
-    is_multi_period,
-    is_period_only as _is_period_only,
-    period_years_map,
-    snapshot_weights,
-    years_for_period,
-)
 
-from routers.simulation import _state, _state_snapshot
+from services import study_state as _study_state
+from services.adequacy import slack as _slack
+# The arithmetic behind the endpoints below lives in `services/results/`
+# (see the Phase 2 addendum of the decomposition spec). Each handler here
+# keeps the network lookup, the `_dispatch_ready` gate and the `_state`
+# reads, calls its `compute_*`, and maps `None` back to 204.
+from services.results.cost_breakdown import compute_cost_breakdown
+from services.results.asset_economics import compute_asset_economics
+from services.results.emissions import compute_emissions
+from services.results.lcoh import compute_lcoh
+from services.results.carrier_kpis import compute_carrier_kpis
+from services.results.prices import compute_prices
+from services.results.prices import compute_price_drivers
+from services.results.line_duals import compute_line_duals
+from services.results.curtailment import compute_curtailment
+from services.results.unit_commitment import compute_unit_commitment
+from services.results.statistics import compute_statistics
+from services.results.loads import compute_load_results
+from services.results.losses import compute_losses_summary
+from services.results.economics_by_carrier import compute_economics_by_carrier
+from services.results.objective_decomposition import compute_objective_decomposition
+from services.results.load_frames import (
+    corrected_marginal_prices as _lf_corrected_marginal_prices,
+    lp_scaled_load_frame as _lf_lp_scaled_load_frame,
+)
+from routers.simulation import _solver_in_flight, _state, _state_snapshot
 
 logger = logging.getLogger("pypsa_gui.results")
 
@@ -127,35 +160,10 @@ def _result_df(n, accessor_name: str, attr: str, source: str = "lopf"):
         return None
 
 
-# `_safe_values` / `_ts_payload` (NaN-safe time-series payload builders) now
-# live in `services/serialization.py`, imported above as aliases so the call
-# sites in this module are unchanged.
-
-
-def _wants_slice(from_: int | None, to_: int | None) -> bool:
-    """
-    True when the caller actually asked for a `from`/`to` window.
-
-    Deliberately `isinstance(x, int)`, not `x is None` / `x is not None`:
-    when a route function decorated with a `Query(None, ...)` default is
-    called directly as plain Python — bypassing FastAPI's request handling,
-    which is the only place that actually resolves the query string into an
-    int-or-None — the unset parameter's value is the `fastapi.params.Query`
-    sentinel object itself, not `None`. `x is not None` is then True for a
-    bound the caller never supplied, and `_slice_ts` chokes on a non-int
-    bound. `tests/test_compare_cross_surface.py` calls
-    `get_prices`/`get_curtailment` exactly this way; nothing calls one of
-    the `_serve_ts`-backed endpoints directly today, but the guard is kept
-    identical across every call site on purpose — a reader who "fixes" one
-    back to `is not None` because it looks simpler must not have a second,
-    correct form to copy from.
-
-    When both bounds are absent, the caller should leave `range_meta` as
-    `None` so the payload stays byte-identical to the pre-range response —
-    that is what keeps every consumer that has not been converted to ask
-    for a slice working unchanged.
-    """
-    return isinstance(from_, int) or isinstance(to_, int)
+# `_safe_values` / `_ts_payload` (NaN-safe time-series payload builders) and
+# `_wants_slice` (the Query-sentinel-aware range check, companion of
+# `slice_ts`) now live in `services/serialization.py`, imported above as
+# aliases so the call sites in this module are unchanged.
 
 
 def _serve_ts(
@@ -218,42 +226,10 @@ def _serve_ts(
 # Same decision, naming and response shape as `capital_costs_available` /
 # `_capital_derived` in `get_asset_economics` (commit d11d4ee1).
 
-def _lifetime_total(series, cost_unresolved: bool) -> float | None:
-    """
-    Sum one component class's (upfront cost x capacity) column, or None.
-
-    `cost_unresolved` is the caller's verdict on the COST side — a NaN upfront
-    cost means the figure is unknown, and `.fillna(0)` would otherwise bury it
-    inside a total that still looks like an answer. A NaN capacity is a
-    different thing (an asset with no `p_nom_opt` genuinely contributes
-    nothing) and is still filled with zero.
-    """
-    import math as _math
-
-    if cost_unresolved:
-        return None
-    value = float(series.fillna(0).sum())
-    return None if not _math.isfinite(value) else value
 
 
-def _sum_lifetime(values) -> float | None:
-    """Sum per-class lifetime CAPEX; None if ANY class is unknown."""
-    materialised = list(values)
-    if any(v is None for v in materialised):
-        return None
-    return float(sum(materialised))
 
 
-def _class_lifetime(by_class: dict[str, float | None], comp_class: str) -> float | None:
-    """
-    One class's lifetime CAPEX for the emission.
-
-    A class the walk never visited (no cost-bearing columns — `Load` and
-    friends can still appear in `n.statistics()`) keeps the historical 0.0:
-    nothing to compute is not the same as failed to compute. Only classes the
-    walk visited AND could not resolve carry `None`.
-    """
-    return by_class.get(comp_class, 0.0)
 
 
 @results_router.get("/cost_breakdown")
@@ -306,566 +282,8 @@ def get_cost_breakdown():
     # the network state has discount_rate=NaN again after solve — so the
     # annuity factor becomes NaN and statistics returns 0 / drops the row.
     # Re-apply the same fill here, just for the duration of the calculation.
-    cfg = _state["solver_config"]
-    # `*_lifetime_by_class` is built inside the same `with` block as the
-    # statistics call so the lifetime fill is still in place when we read
-    # per-asset `lifetime`. Used to back the "Total over lifetime" toggle
-    # on the CapacityExpansion tab — sum of (periodized capex × asset
-    # lifetime) per component class. We keep the annualised numbers
-    # PyPSA already returns and ADD a lifetime variant; the toggle picks
-    # one or the other in the UI.
-    #
-    # `None` in either dict means "this class's lifetime CAPEX could not be
-    # computed" — NOT zero. See `capex_lifetime_available` at the bottom of
-    # this function for the contract, and the walk below for the three ways a
-    # class can land there.
-    import math as _math
-    capex_lifetime_by_class: dict[str, float | None] = {}
-    capex_expansion_lifetime_by_class: dict[str, float | None] = {}
-    NOM_PAIRS = [
-        ("generators",    "Generator",    "p_nom"),
-        ("storage_units", "StorageUnit",  "p_nom"),
-        ("stores",        "Store",        "e_nom"),
-        ("links",         "Link",         "p_nom"),
-        ("lines",         "Line",         "s_nom"),
-        ("transformers",  "Transformer",  "s_nom"),
-    ]
-    try:
-        # `for_back_calculation=True` fills discount_rate — and deliberately
-        # NOT lifetime, which would retire assets; see the fill's docstring —
-        # for assets priced through `capital_cost` alone, so
-        # `_upfront_cost_series` below can recover their upfront cost instead
-        # of raising. Without it every Line in a PyPSA-Eur network took the
-        # unavailable path (see the `except` inside the loop). It cannot move
-        # `n.statistics()`: an asset with no `overnight_cost` keeps its raw
-        # `capital_cost` whatever the discount rate says
-        # (`pypsa.costs.periodized_cost`).
-        with with_periodized_cost_defaults(n, cfg, for_back_calculation=True):
-            stats = n.statistics()
-            exp_series = None
-            try:
-                exp_series = n.statistics.expanded_capex()
-            except Exception:  # noqa: BLE001 — older PyPSA versions
-                exp_series = None
-            # Per-asset lifetime-weighted CAPEX. Build inside the same block
-            # so that lifetime fills (from solver config) are in place.
-            reference_year = _reference_build_year(n)
-            for comp_attr, comp_class, nom in NOM_PAIRS:
-                df = getattr(n, comp_attr, None)
-                if df is None or df.empty:
-                    continue
-                # Upfront (overnight) cost per unit of capacity. PyPSA's
-                # `comp.overnight_cost` returns the user-typed
-                # `overnight_cost` directly, and back-calculates from
-                # `capital_cost / annuity / nyears` for assets that left
-                # it blank. Then we apply a per-asset PV factor so future-
-                # year investments are discounted back to year-0 (= min
-                # build_year). For single-instant runs the factor is 1.
-                try:
-                    upfront_series = _upfront_cost_series(n, comp_class)
-                except Exception:
-                    # PyPSA refuses the whole class when it cannot recover an
-                    # upfront cost for even one asset. `continue` used to be
-                    # here, which silently left the class out of the dicts and
-                    # let the emission's `.get(..., 0.0)` publish a confident
-                    # zero — for Lines that was 95.8% of the system's CAPEX
-                    # reported as 0.00, with nothing logged. Mark it unknown.
-                    logger.exception(
-                        "could not resolve the upfront (overnight) cost for "
-                        "component class %s in /results/cost_breakdown; its "
-                        "lifetime CAPEX is reported as unavailable, not zero",
-                        comp_class,
-                    )
-                    capex_lifetime_by_class[comp_class] = None
-                    capex_expansion_lifetime_by_class[comp_class] = None
-                    continue
-                pv_series = _pv_factor_series(df, cfg, reference_year)
-                upfront_pv = upfront_series * pv_series
-                nom_col = df[nom] if nom in df.columns else None
-                opt_col = df[f"{nom}_opt"] if f"{nom}_opt" in df.columns else nom_col
-                if opt_col is None:
-                    # No capacity column at all — the product is undefined, not
-                    # zero. Same reasoning as the resolve failure above.
-                    capex_lifetime_by_class[comp_class] = None
-                    capex_expansion_lifetime_by_class[comp_class] = None
-                    continue
-                # A NaN upfront cost is an unresolved cost, and `.fillna(0)`
-                # below would bury it inside an otherwise-plausible total. A
-                # NaN CAPACITY is different — an asset with no `p_nom_opt`
-                # genuinely contributes nothing — so only the cost side gates.
-                cost_unresolved = bool(upfront_pv.isna().any())
-                # Installed: PV-upfront × p_nom_opt across all assets.
-                capex_lifetime_sum = _lifetime_total(
-                    upfront_pv * opt_col, cost_unresolved)
-                # Expansion only: PV-upfront × positive delta.
-                if nom_col is not None:
-                    delta = (opt_col - nom_col).where(lambda s: s > 0, 0)
-                    exp_lifetime_sum = _lifetime_total(
-                        upfront_pv * delta, cost_unresolved)
-                else:
-                    exp_lifetime_sum = None if cost_unresolved else 0.0
-                if capex_lifetime_sum is None or exp_lifetime_sum is None:
-                    logger.warning(
-                        "lifetime CAPEX for component class %s is not a finite "
-                        "number (unresolved upfront cost or non-finite total); "
-                        "reporting it as unavailable rather than 0.00",
-                        comp_class,
-                    )
-                capex_lifetime_by_class[comp_class] = capex_lifetime_sum
-                capex_expansion_lifetime_by_class[comp_class] = exp_lifetime_sum
-    except Exception:
-        logger.exception("results endpoint failed; returning 204 (see traceback)")
-        return _not_solved()
-    if stats is None or stats.empty:
-        return _not_solved()
-
-    # Multi-period networks return `n.statistics()` with MultiIndex columns
-    # — typically `(metric, period)` tuples like `('Capital Expenditure', 2025)`.
-    # Some PyPSA versions instead put the period in the row index as the
-    # outermost level. We support both. Whichever shape we see, we iterate
-    # cells WITHOUT flattening (the old "groupby(level=metric).sum().T" path
-    # lost per-period info and didn't apply years weighting → users saw
-    # numbers that didn't add up across the Aggregated/Per-period views).
-    import pandas as _pd
-    cols_are_multi = isinstance(stats.columns, _pd.MultiIndex)
-    idx_is_multi   = isinstance(stats.index,   _pd.MultiIndex)
-
-    # Detect which level (column or row) carries the metric name vs period.
-    def _detect_metric_period_levels(midx: _pd.MultiIndex) -> tuple[int, int]:
-        """
-        Return (metric_level, period_level). The metric level holds strings
-        like 'Capital Expenditure'; the period level holds ints/years.
-        """
-        metric_l = None
-        period_l = None
-        for i in range(midx.nlevels):
-            vals = midx.get_level_values(i)
-            if len(vals) == 0: continue
-            sample = vals[0]
-            if isinstance(sample, str):
-                if metric_l is None: metric_l = i
-            else:
-                if period_l is None: period_l = i
-        if metric_l is None: metric_l = 0
-        if period_l is None: period_l = 1 if metric_l == 0 else 0
-        return metric_l, period_l
-
-    col_metric_level: int | None = None
-    col_period_level: int | None = None
-    capex_col: Any = None
-    opex_col: Any  = None
-    if cols_are_multi:
-        col_metric_level, col_period_level = _detect_metric_period_levels(stats.columns)
-    else:
-        # Flat columns — PyPSA versions slightly differ on column names.
-        capex_col = next((c for c in stats.columns if isinstance(c, str) and "capital" in c.lower()), None)
-        opex_col  = next((c for c in stats.columns if isinstance(c, str) and "operational" in c.lower()), None)
-        if not capex_col or not opex_col:
-            return _not_solved()
-
-    # `n.statistics()` for multi-period returns per-period values weighted by
-    # `snapshot_weightings.objective` but NOT by `investment_period_weightings.years`.
-    # To produce a horizon total (the user-facing "total OPEX" / "total CAPEX"
-    # they see in the Aggregated view), multiply each cell's value by that
-    # period's `years` BEFORE summing — otherwise a multi-period horizon with
-    # years=4+5 each shows numbers ~4× too small.
-    period_years = period_years_map(n)
-
-    def _years_for_period(p) -> float:
-        return years_for_period(period_years, p)
-
-    def _normalize_period_key(p) -> Any:
-        """
-        Coerce a period value to int when possible so the response dict
-        sorts numerically and matches the frontend's selectedPeriod (int).
-        """
-        try:
-            return int(p)
-        except (TypeError, ValueError):
-            return p
-
-    # `_is_period_only` (skip the bare-year period-total rows PyPSA emits) is
-    # imported from services.period_utils.
-    by_class: dict[str, dict[str, float]] = {}
-    by_carrier: list[dict[str, Any]] = []
-    # Per-period totals — keyed by the period level (year int).
-    # Each entry: {capex: number, opex: number, by_component: {Class: {capex, opex}}}
-    # Already multiplied by investment_period_weightings.years so each entry is
-    # the period's full LP-objective contribution. Per-period view consumers
-    # (the Dispatch tab when a specific period is selected) read directly from
-    # this — avoids the bug where the horizon total `cost.opex` was being
-    # shown verbatim in per-period view and double-counted across periods.
-    by_period: dict[Any, dict[str, Any]] = {}
-    by_carrier_dict: dict[tuple[str, str], dict[str, float]] = {}
-    capex_total = 0.0
-    opex_total = 0.0
-
-    def _accumulate(comp: str, carrier: str, period: Any, capex_v: float, opex_v: float) -> None:
-        """
-        Add one (component, carrier, period) row to all accumulators. period
-        may be None for single-period or when stats has no period dimension.
-        """
-        nonlocal capex_total, opex_total
-        capex_total += capex_v
-        opex_total  += opex_v
-        bucket = by_class.setdefault(comp, {"capex": 0.0, "opex": 0.0, "capex_expansion": 0.0})
-        bucket["capex"] += capex_v
-        bucket["opex"]  += opex_v
-        cb = by_carrier_dict.setdefault((comp, carrier), {"capex": 0.0, "opex": 0.0})
-        cb["capex"] += capex_v
-        cb["opex"]  += opex_v
-        if period is None:
-            return
-        pkey = _normalize_period_key(period)
-        # by_period now carries BOTH a per-component and a per-carrier
-        # breakdown for the period. Per-carrier is the cross-product of
-        # `by_period` and `by_carrier` so the frontend can show
-        # "OPEX by carrier for period 2026" without re-aggregating client-side.
-        p_entry = by_period.setdefault(
-            pkey, {"capex": 0.0, "opex": 0.0, "by_component": {}, "by_carrier": {}},
-        )
-        p_entry["capex"] += capex_v
-        p_entry["opex"]  += opex_v
-        p_bucket = p_entry["by_component"].setdefault(comp, {"capex": 0.0, "opex": 0.0})
-        p_bucket["capex"] += capex_v
-        p_bucket["opex"]  += opex_v
-        # Group by carrier alone within the period — collapses Generator/gas
-        # + Link/gas (rare but possible) into a single "gas" row. The
-        # frontend already does the same flattening on `cost.by_carrier` for
-        # the horizon-wide view.
-        c_bucket = p_entry["by_carrier"].setdefault(carrier or "", {"capex": 0.0, "opex": 0.0})
-        c_bucket["capex"] += capex_v
-        c_bucket["opex"]  += opex_v
-
-
-    for idx, row in stats.iterrows():
-        # Row identity. Index may be (period, comp, carrier), (comp, carrier),
-        # or just a string. We pick off the period only when it's the FIRST
-        # level of a MultiIndex row AND the value is a year-shaped int.
-        row_period: Any = None
-        if idx_is_multi and isinstance(idx, tuple) and len(idx) >= 1:
-            first = idx[0]
-            try:
-                _p = int(first)
-                if 1900 <= _p <= 2200:
-                    row_period = _p
-            except (TypeError, ValueError):
-                pass
-        if isinstance(idx, tuple):
-            levels = idx[1:] if row_period is not None else idx
-            comp = str(levels[0]) if len(levels) >= 1 else ""
-            carrier = str(levels[1]) if len(levels) >= 2 else ""
-        else:
-            comp, carrier = str(idx), ""
-        # Normalise carrier to lowercase for cross-endpoint matching with
-        # emissions / carrier_kpis. PyPSA's statistics index sometimes
-        # uses title-cased values from nice_name; emissions uses the raw
-        # key. Lowercasing both surfaces a single canonical id the frontend
-        # can join on across tabs.
-        carrier = carrier.lower() if carrier else ""
-        if not comp or _is_period_only(comp):
-            continue
-
-        if cols_are_multi:
-            # Iterate (metric, period) cells. row.items() yields (col_tuple, val).
-            for col, val in row.items():
-                if not isinstance(col, tuple) or len(col) < 2: continue
-                metric = col[col_metric_level]
-                period = col[col_period_level] if row_period is None else row_period
-                if not isinstance(metric, str): continue
-                ml = metric.lower()
-                if "capital" not in ml and "operational" not in ml: continue
-                v = _safe_float(val) * _years_for_period(period)
-                if "capital" in ml:
-                    _accumulate(comp, carrier, period, v, 0.0)
-                else:
-                    _accumulate(comp, carrier, period, 0.0, v)
-        else:
-            cx = _safe_float(row[capex_col])
-            ox = _safe_float(row[opex_col])
-            # Flat columns means stats has already been aggregated across
-            # periods by PyPSA. If the row index carries a period, scale by
-            # years; otherwise the row is horizon-total already.
-            years = _years_for_period(row_period) if row_period is not None else 1.0
-            cx *= years; ox *= years
-            _accumulate(comp, carrier, row_period, cx, ox)
-
-    # Materialise by_carrier as a flat list now that all rows have been folded.
-    for (comp, carrier), v in by_carrier_dict.items():
-        by_carrier.append({
-            "component": comp, "carrier": carrier,
-            "capex": v["capex"], "opex": v["opex"],
-            "total": v["capex"] + v["opex"],
-        })
-
-    # ── Expansion CAPEX (new investments only) ──────────────────────────────
-    # `n.statistics.expanded_capex()` returns a Series of capital_cost × Δp_nom
-    # (or s_nom/e_nom equivalents) summed per (component, carrier), i.e. the
-    # capex of capacity NEWLY built this run. Distinct from the "Capital
-    # Expenditure" column above, which is annualised cost of ALL installed
-    # capacity — the source of the user-confusing €3 B on networks with non-
-    # extendable lines that carry a capital_cost.
-    capex_expansion_total = 0.0
-    if exp_series is not None:
-        exp_idx_is_multi = isinstance(exp_series.index, _pd.MultiIndex)
-        for idx, val in exp_series.items():
-            # Same period-stripping + years-scaling logic as the stats loop:
-            # expanded_capex returns ANNUALISED per-period values, so multiply
-            # by investment_period_weightings.years to get a horizon total.
-            row_period: Any = None
-            if exp_idx_is_multi and isinstance(idx, tuple) and len(idx) >= 1:
-                first = idx[0]
-                try:
-                    _p = int(first)
-                    if 1900 <= _p <= 2200:
-                        row_period = _p
-                except (TypeError, ValueError):
-                    pass
-            if isinstance(idx, tuple):
-                levels = idx[1:] if row_period is not None else idx
-                comp = levels[0] if len(levels) >= 1 else str(idx)
-            else:
-                comp = str(idx)
-            comp = str(comp)
-            if _is_period_only(comp):
-                continue
-            years_mul = _years_for_period(row_period) if row_period is not None else 1.0
-            v = _safe_float(val) * years_mul
-            capex_expansion_total += v
-            bucket = by_class.setdefault(comp, {"capex": 0.0, "opex": 0.0, "capex_expansion": 0.0})
-            bucket["capex_expansion"] += v
-
-    # Fallback when `expanded_capex` is unavailable OR returns 0 despite
-    # observable expansion on the parent rows. The latter happens on
-    # vintage-expanded networks: vintage_service flips the parent's
-    # *_extendable=False during solve, so PyPSA's helper sees no expansion
-    # at the parent level, while the parent's p_nom_opt already includes
-    # all vintage builds via post-solve aggregation. Compute manually
-    # as Σ (p_nom_opt - p_nom) × capital_cost when the helper underreports.
-    if capex_expansion_total < 1.0:  # < 1 € total → almost certainly wrong
-        manual_total = 0.0
-        with with_periodized_cost_defaults(n, cfg):
-            for comp_attr, comp_class, nom in NOM_PAIRS:
-                df = getattr(n, comp_attr, None)
-                if df is None or df.empty or f"{nom}_opt" not in df.columns:
-                    continue
-                try:
-                    cc_series = n.c[comp_class].capital_cost
-                except Exception:
-                    continue
-                nom_col = df[nom].reindex(df.index).fillna(0.0)
-                opt_col = df[f"{nom}_opt"].reindex(df.index).fillna(nom_col)
-                delta = (opt_col - nom_col).clip(lower=0)
-                comp_sum = float((cc_series.reindex(df.index) * delta).fillna(0).sum())
-                if not _math.isfinite(comp_sum) or comp_sum < 0:
-                    comp_sum = 0.0
-                if comp_sum > 0:
-                    manual_total += comp_sum
-                    bucket = by_class.setdefault(comp_class, {"capex": 0.0, "opex": 0.0, "capex_expansion": 0.0})
-                    bucket["capex_expansion"] = max(bucket.get("capex_expansion", 0.0), comp_sum)
-        if manual_total > capex_expansion_total:
-            capex_expansion_total = manual_total
-
-    # Null-propagating totals. One unknown class makes the horizon figure
-    # unknown — see `_sum_lifetime`. `capex_lifetime_available` is the summary
-    # of the same fact, for a UI that would rather show one banner than work it
-    # out from the nulls.
-    capex_lifetime_total = _sum_lifetime(capex_lifetime_by_class.values())
-    capex_expansion_lifetime_total = _sum_lifetime(
-        capex_expansion_lifetime_by_class.values())
-    capex_lifetime_available = (
-        capex_lifetime_total is not None
-        and capex_expansion_lifetime_total is not None
-    )
-
-    # Curtailment penalty: Σ curtailment_t × curtailment_cost over renewables
-    # that opted in (curtailment_cost > 0). PyPSA's n.statistics() doesn't
-    # include this charge — it's a custom extra_functionality term — so we
-    # compute it here and surface it alongside OPEX. Weighting basis matches
-    # the LP objective (snapshot_weightings.objective × period years).
-    curtailment_cost_total = 0.0
-    try:
-        gens_df = getattr(n, "generators", None)
-        gens_t_p = getattr(n.generators_t, "p", None) if hasattr(n, "generators_t") else None
-        if (
-            gens_df is not None and not gens_df.empty
-            and "curtailment_cost" in gens_df.columns
-            and gens_t_p is not None and not gens_t_p.empty
-        ):
-            cc_series = gens_df["curtailment_cost"].fillna(0)
-            charged = cc_series[cc_series > 0]
-            if not charged.empty:
-                p_max_pu_t = getattr(n.generators_t, "p_max_pu", None)
-                p_max_static = gens_df["p_max_pu"] if "p_max_pu" in gens_df.columns else None
-                p_nom_opt = gens_df.get("p_nom_opt", gens_df.get("p_nom"))
-                # Snapshot weight per row × period years.
-                sw = getattr(n, "snapshot_weightings", None)
-                if sw is not None and "objective" in sw.columns:
-                    obj_w = sw["objective"].astype(float)
-                else:
-                    obj_w = None
-                period_years = period_years_map(n)  # NaN years → 1.0 (was unguarded)
-                is_mp_local = isinstance(n.snapshots, _pd.MultiIndex)
-                # Iterate per generator → cheaper than full matrix when only a
-                # handful of generators carry curtailment_cost.
-                for gname in charged.index:
-                    if gname not in gens_t_p.columns:
-                        continue
-                    p_series = gens_t_p[gname]
-                    # Profile shape: time-varying if column present in
-                    # p_max_pu_t, else scalar from static table.
-                    if p_max_pu_t is not None and gname in p_max_pu_t.columns:
-                        prof = p_max_pu_t[gname]
-                    elif p_max_static is not None:
-                        prof = _pd.Series(p_max_static.get(gname, 1.0), index=p_series.index)
-                    else:
-                        prof = _pd.Series(1.0, index=p_series.index)
-                    p_nom_val = float(p_nom_opt.get(gname, 0) or 0)
-                    avail = prof * p_nom_val
-                    # Multi-period effective capacity via vintage_results.
-                    # vintage_service aggregates vintages into the parent
-                    # post-solve, so p_nom_opt is the horizon-end total. For
-                    # earlier snapshots, the effective capacity is smaller
-                    # because some vintages weren't yet built. Walk
-                    # n.meta["vintage_results"] to rebuild the time-varying
-                    # effective capacity per snapshot. See /curtailment
-                    # endpoint for the same fix.
-                    if is_mp_local:
-                        try:
-                            vr = (n.meta or {}).get("vintage_results", {}) if hasattr(n, "meta") else {}
-                            gen_vr = vr.get("Generator", {}) if isinstance(vr, dict) else {}
-                            meta = gen_vr.get(gname)
-                            if meta:
-                                initial = float(meta.get("initial_capacity", 0.0) or 0.0)
-                                periods_meta = meta.get("periods", []) or []
-                                periods_arr = p_series.index.get_level_values(0).astype(int)
-                                eff = _pd.Series(initial, index=p_series.index, dtype=float)
-                                for entry in periods_meta:
-                                    try:
-                                        by = int(entry.get("build_year"))
-                                        pn = float(entry.get("p_nom_opt", 0.0) or 0.0)
-                                    except (TypeError, ValueError):
-                                        continue
-                                    if pn <= 0:
-                                        continue
-                                    eff.values[periods_arr >= by] += pn
-                                avail = prof * eff
-                        except Exception:
-                            pass
-                    curt = (avail - p_series).clip(lower=0)
-                    if obj_w is not None:
-                        weights = obj_w.reindex(p_series.index).fillna(1.0)
-                    else:
-                        weights = _pd.Series(1.0, index=p_series.index)
-                    if is_mp_local and period_years:
-                        try:
-                            periods_lvl = p_series.index.get_level_values(0)
-                            year_mul = _pd.Series(
-                                [period_years.get(int(p), 1.0) for p in periods_lvl],
-                                index=p_series.index,
-                            )
-                            weights = weights * year_mul
-                        except Exception:
-                            pass
-                    contrib = float((curt * weights).sum()) * float(charged.at[gname])
-                    if _math.isfinite(contrib):
-                        curtailment_cost_total += contrib
-    except Exception:
-        curtailment_cost_total = 0.0
-
-    # Storage-only CAPEX-expansion: sum of by_component['capex_expansion']
-    # for StorageUnit + Store, plus the lifetime variant. Exposed so the UI
-    # can show "how much money goes into storage vs everything else" at a
-    # glance without re-summing the per-component list client-side.
-    storage_capex_expansion = float(
-        by_class.get("StorageUnit", {}).get("capex_expansion", 0.0)
-        + by_class.get("Store", {}).get("capex_expansion", 0.0)
-    )
-    # Null when either storage class is unknown — a "storage CAPEX" that
-    # silently counts Stores and drops StorageUnits is the same partial-total
-    # defect as the horizon figure, just at a smaller scale.
-    storage_capex_expansion_lifetime = _sum_lifetime((
-        _class_lifetime(capex_expansion_lifetime_by_class, "StorageUnit"),
-        _class_lifetime(capex_expansion_lifetime_by_class, "Store"),
-    ))
-    # Sorted list of per-period entries — same fields as the top-level totals
-    # but scoped to one period. Each entry's capex/opex are already multiplied
-    # by `investment_period_weightings.years[period]` so that
-    # `sum(p.opex for p in by_period) == opex_total` and likewise for capex.
-    def _sort_key_period(k: Any) -> tuple:
-        if isinstance(k, int):
-            return (0, k)
-        try:
-            return (0, int(k))
-        except (TypeError, ValueError):
-            return (1, str(k))
-    by_period_list = []
-    for p in sorted(by_period.keys(), key=_sort_key_period):
-        entry = by_period[p]
-        by_period_list.append({
-            "period": p,
-            "capex": entry["capex"],
-            "opex": entry["opex"],
-            "total": entry["capex"] + entry["opex"],
-            "by_component": [
-                {"component": c, "capex": v["capex"], "opex": v["opex"]}
-                for c, v in sorted(entry["by_component"].items())
-            ],
-            # Per-carrier breakdown WITHIN the period — sorted by total
-            # (capex+opex) desc so the dominant carriers surface first.
-            # Frontend uses this when the user has picked a specific period
-            # for the OPEX-by-carrier view; falls back to the horizon-wide
-            # `by_carrier` otherwise.
-            "by_carrier": sorted(
-                [
-                    {"carrier": c, "capex": v["capex"], "opex": v["opex"]}
-                    for c, v in entry.get("by_carrier", {}).items()
-                ],
-                key=lambda r: -(r["capex"] + r["opex"]),
-            ),
-        })
-    return {
-        "capex": capex_total,
-        "capex_lifetime": capex_lifetime_total,
-        "capex_expansion": capex_expansion_total,
-        "capex_expansion_lifetime": capex_expansion_lifetime_total,
-        "opex": opex_total,
-        "total": capex_total + opex_total,
-        # Renewable-curtailment penalty (Σ curtailment_t × curtailment_cost).
-        # Zero unless the user set curtailment_cost > 0 on at least one
-        # renewable generator. Already weighted by snapshot × period years.
-        "curtailment_cost": curtailment_cost_total,
-        # CAPEX going into storage (StorageUnit + Store), expansion only.
-        # Useful as a quick "how much of the investment is storage?" KPI.
-        "storage_capex_expansion": storage_capex_expansion,
-        "storage_capex_expansion_lifetime": storage_capex_expansion_lifetime,
-        # False when ANY component class's upfront cost could not be resolved.
-        # Every `*_lifetime` field above and in `by_component` below is then
-        # `null` for the affected class AND for the totals that contain it.
-        # The flag is the summary, the nulls are the wire signal: consumers
-        # need both, the flag so one banner can explain a blank KPI, the nulls
-        # so a consumer that ignores the flag still cannot format a zero.
-        # Annualised CAPEX, OPEX and the grand total are unaffected — they come
-        # from `n.statistics()` and owe nothing to the upfront-cost resolve.
-        "capex_lifetime_available": capex_lifetime_available,
-        "by_component": [
-            {
-                "component": c,
-                "capex": v["capex"],
-                "capex_lifetime": _class_lifetime(capex_lifetime_by_class, c),
-                "capex_expansion": v.get("capex_expansion", 0.0),
-                "capex_expansion_lifetime": _class_lifetime(
-                    capex_expansion_lifetime_by_class, c),
-                "opex": v["opex"],
-                "total": v["capex"] + v["opex"],
-            }
-            for c, v in sorted(by_class.items())
-        ],
-        "by_carrier": sorted(by_carrier, key=lambda r: r["total"], reverse=True),
-        # Empty list on single-period networks. Frontend uses this only when
-        # `selectedPeriod != null` to render period-scoped CAPEX/OPEX.
-        "by_period": by_period_list,
-    }
+    payload = compute_cost_breakdown(n, _state['solver_config'])
+    return _not_solved() if payload is None else payload
 
 
 @results_router.get("/objective_decomposition")
@@ -888,68 +306,15 @@ def get_objective_decomposition():
 
     Intended use: one-shot diagnosis, not a routine endpoint. Safe on any state.
     """
-    import math as _math
     n = PyPSAService.get_network()
-    out: dict = {
-        "n_objective": None,
-        "n_objective_constant": None,
-        "lp_total": None,
-        "baseline_objective_constant": None,
-        "pypsa_gui_objective_scale": None,
-        "cost_breakdown_total": None,
-        "gap_eur": None,
-        "gap_pct": None,
-        # Multi-period myopic mode only: per-period (variable, constant) captured
-        # by _run_myopic_foresight. Sum gives the full horizon LP total.
-        "myopic_period_objectives": None,
-        "myopic_horizon_total": None,
-    }
-    # Per-period myopic objectives, if present.
-    me = getattr(n, "_myopic_period_objectives", None)
-    if isinstance(me, list) and me:
-        try:
-            out["myopic_period_objectives"] = [
-                {"period": int(p), "variable": float(v), "constant": float(c), "total": float(v + c)}
-                for (p, v, c) in me
-            ]
-            out["myopic_horizon_total"] = sum(v + c for (_, v, c) in me)
-        except Exception:
-            pass
-    try:
-        out["n_objective"] = float(n.objective) if getattr(n, "objective", None) is not None else None
-    except Exception:
-        pass
-    try:
-        out["n_objective_constant"] = float(getattr(n, "objective_constant", 0.0) or 0.0)
-    except Exception:
-        out["n_objective_constant"] = float(getattr(n, "_objective_constant", 0.0) or 0.0)
-    try:
-        out["baseline_objective_constant"] = float(getattr(n, "_baseline_objective_constant", 0.0) or 0.0)
-    except Exception:
-        pass
-    try:
-        out["pypsa_gui_objective_scale"] = float(getattr(n, "_pypsa_gui_objective_scale", 1.0) or 1.0)
-    except Exception:
-        pass
-    if out["n_objective"] is not None and out["n_objective_constant"] is not None:
-        out["lp_total"] = out["n_objective"] + out["n_objective_constant"]
-    # Try cost_breakdown.total — call the function directly to avoid an HTTP round-trip.
+    # `get_cost_breakdown()` keeps its own dispatch gate and 204; the wrapping
+    # try mirrors the one that used to surround this call inside the body, so a
+    # raising cost breakdown still yields a partial payload rather than a 500.
     try:
         cb = get_cost_breakdown()
-        if isinstance(cb, dict) and "total" in cb:
-            out["cost_breakdown_total"] = float(cb["total"])
-            if out["lp_total"] is not None:
-                gap = out["lp_total"] - out["cost_breakdown_total"]
-                out["gap_eur"] = gap
-                if abs(out["cost_breakdown_total"]) > 1e-9:
-                    out["gap_pct"] = gap / out["cost_breakdown_total"] * 100.0
     except Exception:
-        pass
-    # Sanity: replace NaN/Inf with None for JSON safety.
-    for k, v in list(out.items()):
-        if isinstance(v, float) and not _math.isfinite(v):
-            out[k] = None
-    return out
+        cb = None
+    return compute_objective_decomposition(n, cb)
 
 
 @results_router.get("/economics_by_carrier")
@@ -969,35 +334,20 @@ def get_economics_by_carrier():
     """
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
-        # A bare `{}` was indistinguishable from "solved, and this network
-        # genuinely rolls up to no carriers" — the wider of this endpoint's
-        # two availability holes, and the one a user hits first. Same shape as
-        # the success path so callers need one branch, not two.
+        # MERGE NOTE (2026-09-10): a bare `{}` was indistinguishable from
+        # "solved, and this network genuinely rolls up to no carriers" — the
+        # wider of this endpoint's two availability holes, and the one a user
+        # hits first. Same shape as the success path so callers need one
+        # branch, not two. The decomposition moved this gate into the router
+        # and the `{}` came back with it; ADR-0001 forbids the conflation.
         return {"available": False, "by_carrier": {}}
-    try:
-        import pandas as _pd
-
-        from routers.compare import _compute_economics_summary
-        # _compute_economics_summary needs (n, periods, is_multi, has_solve).
-        is_multi = isinstance(n.snapshots, _pd.MultiIndex)
-        try:
-            periods = sorted(int(p) for p in n.investment_periods) if is_multi else []
-        except Exception:
-            periods = []
-        result = _compute_economics_summary(n, periods, is_multi, True)
-        # Forward `available` alongside by_carrier. Dropping it here stopped
-        # the whole Compare-side availability fix at Compare: the Results tab
-        # received figures with no way to tell a real zero from one that was
-        # never resolved, which is the exact conflation ADR-0001 forbids.
-        # Still drops per_asset_lcoh (lives in /api/results/lcoh) to keep the
-        # payload small.
-        return {
-            "available": bool(result.available),
-            "by_carrier": {k: v.model_dump() for k, v in result.by_carrier.items()},
-        }
-    except Exception as exc:
-        import traceback
-        return {"error": str(exc), "trace": traceback.format_exc().splitlines()[-5:]}
+    # Foreground project: the VOLL capture lives in the live solver state, not
+    # on the network (solver_service strips the slacks). The solver config is
+    # the same one cost_breakdown / asset_economics resolve their `cfg` from.
+    return compute_economics_by_carrier(
+        n, _state.get("solver_config"), _state.get("last_lost_load"),
+        result_df=_result_df,
+    )
 
 
 @results_router.get("/statistics")
@@ -1006,24 +356,8 @@ def get_statistics():
     if not _dispatch_ready(n):
         return _not_solved()
     # Same periodized_cost trap as /cost_breakdown — see comment there.
-    cfg = _state["solver_config"]
-    try:
-        with with_periodized_cost_defaults(n, cfg):
-            stats = n.statistics()
-            # `df_to_json` runs `reset_index` internally + applies `_clean`
-            # to coerce NaN/Inf → None. The previous code called
-            # `stats.reset_index()` BEFORE handing off, producing a DOUBLE
-            # reset_index that left a stray `level_0` / `index` column on
-            # the records — AND the fallback `else` branch skipped `_clean`
-            # entirely, so a single NaN in `n.statistics()` (common for
-            # missing metrics) would crash Starlette's `JSONResponse.render`
-            # at `json.dumps(allow_nan=False)` with a 500 plain-text error.
-            # Same class of bug as `/results/storage` 500s `_safe_values`
-            # was added to fix. Single code path; pass `stats` straight in.
-            return df_to_json(stats)
-    except Exception:
-        logger.exception("results endpoint failed; returning 204 (see traceback)")
-        return _not_solved()
+    payload = compute_statistics(n, _state['solver_config'])
+    return _not_solved() if payload is None else payload
 
 
 @results_router.get("/generators")
@@ -1143,318 +477,12 @@ def get_lcoh():
     summary (all links combined). Empty list when no qualifying links
     exist or the LP hasn't been solved.
     """
-    import math
-
-    import pandas as _pd
-    from services.solver_service import with_periodized_cost_defaults
-
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-
-    links_df = n.links
-    if links_df.empty:
-        return {"rows": [], "total": None, "currency": "EUR"}
-
-    # Filter to electrolyser-like links by carrier substring. Matches the
-    # frontend's `isElectrolyzerCarrier` token set so the two views agree.
-    tokens = [
-        "electrol", "p2g", "p2h2", "power-to-h2", "power-to-gas",
-        "power2gas", "hydrogen", "h2",
-    ]
-    def _is_electrolyzer(c) -> bool:
-        s = str(c or "").strip().lower()
-        return any(t in s for t in tokens)
-
-    if "carrier" not in links_df.columns:
-        return {"rows": [], "total": None, "currency": "EUR"}
-    candidate_names = [name for name in links_df.index if _is_electrolyzer(links_df.at[name, "carrier"])]
-    if not candidate_names:
-        return {"rows": [], "total": None, "currency": "EUR"}
-
-    # Snapshot weight × period years — same weighting basis as cost_breakdown.
-    sns = n.snapshots
-    is_multi = is_multi_period(n)
-    weights = snapshot_weights(n, "objective")
-
-    # ENERGY weighting for the H₂-produced denominator follows the `generators`
-    # column (matching PyPSA n.statistics() and the Dispatch tab); the cost
-    # terms (VOM, electricity input) keep the `objective` weighting above.
-    # Identical when the two columns coincide (the common case); they diverge
-    # only under representative-week weighting. Lazy import avoids the
-    # projects<->simulation import cycle; the helper applies the same
-    # generators→objective→1.0 fallback + investment-period years scaling.
-    from routers.compare import _build_snapshot_weights as _bsw
-    energy_weights = _bsw(n, "generators")
-
     # Effective capital_cost via the same fill PyPSA uses for n.statistics().
-    cfg = _state.get("solver_config") or SolverConfig()
-    try:
-        with with_periodized_cost_defaults(n, cfg):
-            cap_costs = n.c["Link"].capital_cost
-            if not isinstance(cap_costs, _pd.Series):
-                cap_costs = _pd.Series(cap_costs, index=links_df.index)
-    except Exception:
-        cap_costs = links_df.get("capital_cost", _pd.Series(0.0, index=links_df.index))
-
-    # bus0 marginal prices for the electricity-cost term. Use the merit-order
-    # SUBSIDY-REMOVED duals (the same correction asset_economics and the Compare
-    # per-carrier economics apply via the shared helper) — NOT raw
-    # n.buses_t.marginal_price. Under a curtailment_cost subsidy the raw bus
-    # dual goes negative wherever a subsidised renewable sets the price, which
-    # makes the electrolyser's electricity input cost negative (unphysical — no
-    # money flows; it's an LP-accounting artefact) and understates LCOH.
-    # corrected_marginal_prices restores the real price at those buses/snapshots.
-    try:
-        bus_prices = corrected_marginal_prices(n)
-    except Exception:
-        try:
-            bus_prices = n.buses_t.marginal_price
-        except Exception:
-            bus_prices = None
-
-    p0 = getattr(n.links_t, "p0", None)
-    if p0 is None or p0.empty:
-        return {"rows": [], "total": None, "currency": "EUR"}
-
-    rows: list[dict] = []
-    # Fleet accumulators for the aggregated LCOH at the bottom.
-    # `fleet_capex_per_year` is the sum of annualised €/yr CAPEX across
-    # links (the value surfaced in the response for backwards display
-    # compatibility). `fleet_capex_total` is the horizon-total CAPEX used
-    # in the LCOH numerator — see total_years_factor comment below.
-    fleet_capex_per_year = 0.0
-    fleet_capex_total = 0.0
-    fleet_vom = 0.0
-    fleet_elec = 0.0
-    fleet_h2 = 0.0
-    # Fleet per-period accumulators. Only populated when the network is
-    # multi-period; lets the frontend Economics tab switch between the
-    # horizon-aggregate LCOH (when "Aggregated" is selected) and the
-    # period-scoped LCOH for any specific year.
-    fleet_by_period: dict[int, dict[str, float]] = {}
-
-    # Helpers for per-period slicing — Multi-period MultiIndex → list of
-    # period years; flat → empty (no per-period view).
-    if is_multi:
-        try:
-            unique_periods = sorted({int(p) for p in sns.get_level_values(0)})
-            period_level = sns.get_level_values(0)
-            _years_map = period_years_map(n)
-            period_year_factor = {
-                int(p): years_for_period(_years_map, p) for p in unique_periods
-            }
-        except Exception:
-            unique_periods = []
-            period_level = None
-            period_year_factor = {}
-    else:
-        unique_periods = []
-        period_level = None
-        period_year_factor = {}
-
-    # Horizon-total years multiplier. Per-row OPEX, electricity, and H₂
-    # totals are already weighted by `weights = sw * years_s` (line ~1567),
-    # so they accumulate ACROSS investment periods (e.g. multi-period run
-    # over [2030(years=5), 2040(years=10)] yields totals that span 15
-    # operational years). CAPEX is computed as `capital_cost × p_nom_opt`
-    # which is PyPSA's ANNUALISED value (€/yr). To keep the LCOH numerator
-    # consistent — apples-to-apples integration across the same horizon —
-    # scale CAPEX by the same total-years factor before mixing it with
-    # OPEX/elec. Without this, a 15-year-horizon LCOH would have ~1× CAPEX
-    # divided by ~15× H₂ and silently understate by an order of magnitude.
-    # Flat networks (no investment periods) get factor=1.0, preserving
-    # the legacy per-row formula `1-yr CAPEX + 1-yr OPEX`.
-    total_years_factor = float(sum(period_year_factor.values())) if is_multi and period_year_factor else 1.0
-
-    for name in candidate_names:
-        try:
-            p_nom_opt = float(links_df.at[name, "p_nom_opt"]) if "p_nom_opt" in links_df.columns else float(links_df.at[name, "p_nom"])
-        except (TypeError, ValueError, KeyError):
-            continue
-        if not math.isfinite(p_nom_opt) or p_nom_opt <= 0:
-            continue
-        try:
-            cc = float(cap_costs.at[name]) if name in cap_costs.index else 0.0
-        except Exception:
-            cc = 0.0
-        if not math.isfinite(cc) or cc < 0:
-            cc = 0.0
-        capex_eur_per_year = cc * p_nom_opt
-
-        try:
-            eff = float(links_df.at[name, "efficiency"])
-        except (TypeError, ValueError, KeyError):
-            eff = 1.0
-        if not math.isfinite(eff) or eff <= 0:
-            eff = 1.0
-
-        try:
-            mc = float(links_df.at[name, "marginal_cost"])
-        except (TypeError, ValueError, KeyError):
-            mc = 0.0
-
-        if name not in p0.columns:
-            continue
-        try:
-            disp = p0[name].reindex(sns).fillna(0.0).astype(float)
-        except Exception:
-            continue
-        # Only count the CONSUMING direction (positive p0). A reverse-flow
-        # snapshot represents the link running in fuel-cell mode and isn't
-        # part of H2 production cost.
-        consume = disp.clip(lower=0)
-        weighted_consume = consume * energy_weights
-        consume_mwh = float(weighted_consume.sum())
-        if consume_mwh <= 0:
-            # Link wasn't dispatched as a consumer during this run.
-            rows.append({
-                "name": name,
-                "carrier": str(links_df.at[name, "carrier"] or ""),
-                "p_nom_opt_mw": p_nom_opt,
-                "efficiency": eff,
-                "capex_eur_per_year": capex_eur_per_year,
-                "vom_cost_eur": 0.0,
-                "electricity_cost_eur": 0.0,
-                "h2_produced_mwh": 0.0,
-                "lcoh_eur_per_mwh_h2": None,
-                "lcoh_eur_per_kg_h2": None,
-            })
-            continue
-
-        # Variable OPEX (€): Σ |p0| × marginal_cost × weight. Use |p0| so
-        # reverse-flow snapshots still attract their marginal cost (PyPSA's
-        # convention).
-        vom_cost = float((disp.abs() * mc * weights).sum()) if mc > 0 else 0.0
-
-        # Electricity input cost: bus0 marginal price × consume_t × weight.
-        bus0 = links_df.at[name, "bus0"] if "bus0" in links_df.columns else None
-        elec_cost = 0.0
-        if bus_prices is not None and bus0 is not None and bus0 in bus_prices.columns:
-            try:
-                bp = bus_prices[bus0].reindex(sns).fillna(0.0).astype(float)
-                elec_cost = float((consume * bp * weights).sum())
-            except Exception:
-                elec_cost = 0.0
-
-        # H2 produced (MWh_H2): consume × efficiency × weight.
-        h2_produced_mwh = consume_mwh * eff
-
-        # Horizon-total CAPEX for the LCOH numerator — annualised €/yr × total
-        # operational years across all investment periods. Keeps the
-        # ratio's units consistent (€ / MWh_H2) regardless of horizon length.
-        capex_total_eur = capex_eur_per_year * total_years_factor
-
-        total_cost = capex_total_eur + vom_cost + elec_cost
-        lcoh_eur_per_mwh = total_cost / h2_produced_mwh if h2_produced_mwh > 0 else None
-        # Convert €/MWh_H2 → €/kg using LHV: 33.33 MWh / kg
-        # (1 kg H2 = 33.33 kWh = 0.03333 MWh, so €/MWh × 0.03333 → €/kg)
-        lcoh_eur_per_kg = lcoh_eur_per_mwh * 0.03333 if lcoh_eur_per_mwh is not None else None
-
-        # Per-period breakdown for the Economics tab's period selector. For
-        # each investment period:
-        #   - h2[P]  = Σ consume × weight over snapshots in P
-        #   - elec[P] = Σ consume × bus0_price × weight over snapshots in P
-        #   - vom[P] = Σ |p0| × mc × weight over snapshots in P
-        #   - capex[P] = annuitised cc × p_nom_opt × ipw.years[P]
-        #     (the asset's annual cost allocated to this period's year-span)
-        # All cost contributions in € for the period; LCOH[P] = sum / h2[P].
-        per_period_rows: list[dict] = []
-        if is_multi and unique_periods and period_level is not None:
-            for p in unique_periods:
-                mask = period_level == p
-                try:
-                    consume_p = consume[mask]
-                    weights_p = weights[mask]
-                    energy_weights_p = energy_weights[mask]
-                except Exception:
-                    continue
-                # H₂ (energy) on the generators basis; VOM/elec (cost) on objective.
-                weighted_consume_p = consume_p * energy_weights_p
-                h2_p_mwh = float(weighted_consume_p.sum()) * eff
-                vom_p = float((disp[mask].abs() * mc * weights_p).sum()) if mc > 0 else 0.0
-                elec_p = 0.0
-                if bus_prices is not None and bus0 is not None and bus0 in bus_prices.columns:
-                    try:
-                        bp_p = bus_prices[bus0][mask].reindex(consume_p.index).fillna(0.0).astype(float)
-                        elec_p = float((consume_p * bp_p * weights_p).sum())
-                    except Exception:
-                        elec_p = 0.0
-                capex_p = capex_eur_per_year * period_year_factor.get(int(p), 1.0)
-                tot_p = capex_p + vom_p + elec_p
-                lcoh_p = tot_p / h2_p_mwh if h2_p_mwh > 0 else None
-                lcoh_p_kg = lcoh_p * 0.03333 if lcoh_p is not None else None
-                per_period_rows.append({
-                    "period": int(p),
-                    "h2_produced_mwh": h2_p_mwh,
-                    "capex_eur": capex_p,
-                    "vom_cost_eur": vom_p,
-                    "electricity_cost_eur": elec_p,
-                    "lcoh_eur_per_mwh_h2": lcoh_p,
-                    "lcoh_eur_per_kg_h2": lcoh_p_kg,
-                })
-                # Roll into fleet per-period totals.
-                fb = fleet_by_period.setdefault(int(p), {
-                    "h2_produced_mwh": 0.0, "capex_eur": 0.0,
-                    "vom_cost_eur": 0.0, "electricity_cost_eur": 0.0,
-                })
-                fb["h2_produced_mwh"] += h2_p_mwh
-                fb["capex_eur"] += capex_p
-                fb["vom_cost_eur"] += vom_p
-                fb["electricity_cost_eur"] += elec_p
-
-        rows.append({
-            "name": name,
-            "carrier": str(links_df.at[name, "carrier"] or ""),
-            "p_nom_opt_mw": p_nom_opt,
-            "efficiency": eff,
-            "capex_eur_per_year": capex_eur_per_year,
-            "vom_cost_eur": vom_cost,
-            "electricity_cost_eur": elec_cost,
-            "h2_produced_mwh": h2_produced_mwh,
-            "lcoh_eur_per_mwh_h2": lcoh_eur_per_mwh,
-            "lcoh_eur_per_kg_h2": lcoh_eur_per_kg,
-            "by_period": per_period_rows,
-        })
-        # Two CAPEX accumulators: annualised €/yr for display, horizon-total
-        # for the LCOH numerator (apples-to-apples with OPEX/elec/H₂ totals).
-        fleet_capex_per_year += capex_eur_per_year
-        fleet_capex_total += capex_total_eur
-        fleet_vom += vom_cost
-        fleet_elec += elec_cost
-        fleet_h2 += h2_produced_mwh
-
-    rows.sort(key=lambda r: -(r["p_nom_opt_mw"] or 0))
-
-    total = None
-    if fleet_h2 > 0:
-        fleet_total_cost = fleet_capex_total + fleet_vom + fleet_elec
-        fleet_lcoh = fleet_total_cost / fleet_h2
-        # Per-period fleet LCOH — same shape as the per-row by_period array.
-        fleet_by_period_list = []
-        for p in sorted(fleet_by_period.keys()):
-            fb = fleet_by_period[p]
-            tot_p = fb["capex_eur"] + fb["vom_cost_eur"] + fb["electricity_cost_eur"]
-            lcoh_p = tot_p / fb["h2_produced_mwh"] if fb["h2_produced_mwh"] > 0 else None
-            fleet_by_period_list.append({
-                "period": p,
-                "h2_produced_mwh": fb["h2_produced_mwh"],
-                "capex_eur": fb["capex_eur"],
-                "vom_cost_eur": fb["vom_cost_eur"],
-                "electricity_cost_eur": fb["electricity_cost_eur"],
-                "lcoh_eur_per_mwh_h2": lcoh_p,
-                "lcoh_eur_per_kg_h2": lcoh_p * 0.03333 if lcoh_p is not None else None,
-            })
-        total = {
-            "h2_produced_mwh": fleet_h2,
-            "capex_eur_per_year": fleet_capex_per_year,
-            "vom_cost_eur": fleet_vom,
-            "electricity_cost_eur": fleet_elec,
-            "lcoh_eur_per_mwh_h2": fleet_lcoh,
-            "lcoh_eur_per_kg_h2": fleet_lcoh * 0.03333,
-            "by_period": fleet_by_period_list,
-        }
-    return {"rows": rows, "total": total, "currency": "EUR"}
+    payload = compute_lcoh(n, _state.get('solver_config') or SolverConfig(), result_df=_result_df)
+    return _not_solved() if payload is None else payload
 
 
 @results_router.get("/ac_pf/status")
@@ -1524,132 +552,13 @@ def get_losses_summary(source: str = "lopf"):
     under-reported by ~1/Σyears (a [2030(years=5), 2040(years=10)] horizon
     reported ~1/15 of the true loss MWh).
     """
-    import math
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    # Per-snapshot ENERGY weight = generators column × investment-period years.
-    # The shared helper applies the generators→objective→1.0 fallback AND the
-    # multi-period years scaling (the raw-column read used before omitted years).
-    # Returns a Series indexed by n.snapshots, aligned with the _t loss tables
-    # below. Lazy import avoids the projects<->simulation import cycle.
-    from routers.compare import _build_snapshot_weights as _bsw
-    weights = _bsw(n, "generators")
-
-    def _branch_loss(df_t, df_static, comp_name: str):
-        """Returns (per_branch_rows, snapshot_total_mw, total_mwh, peak_mw)."""
-        rows = []
-        total_mwh = 0.0
-        peak_mw = 0.0
-        snap_total = None
-        if df_t is None or df_t.empty:
-            return rows, snap_total, total_mwh, peak_mw
-        # Replace NaN / inf with 0 so JSON serialises cleanly. PyPSA emits NaN
-        # for snapshots when the loss var was masked (e.g. inactive lines).
-        clean = df_t.fillna(0.0)
-        # Per-line MWh = sum_t (loss_t × weight_t)
-        if weights is not None:
-            mwh = clean.multiply(weights, axis=0).sum(axis=0)
-        else:
-            mwh = clean.sum(axis=0)
-        peak = clean.abs().max(axis=0)
-        snap_total = clean.sum(axis=1)  # per-snapshot total across this comp
-        for name in clean.columns:
-            v_mwh = float(mwh.get(name, 0.0))
-            v_peak = float(peak.get(name, 0.0))
-            if not math.isfinite(v_mwh): v_mwh = 0.0
-            if not math.isfinite(v_peak): v_peak = 0.0
-            rows.append({
-                "component": comp_name,
-                "name": str(name),
-                "loss_mwh": v_mwh,
-                "peak_mw": v_peak,
-            })
-            total_mwh += v_mwh
-            if v_peak > peak_mw:
-                peak_mw = v_peak
-        return rows, snap_total, total_mwh, peak_mw
-
-    has_ac_pf_snapshot = _state.get("ac_pf_results") is not None
-    if source == "ac_pf" and has_ac_pf_snapshot:
-        # Real losses from AC PF: loss(t, branch) = p0 + p1. PyPSA's p0/p1
-        # are signed; their sum is the resistive loss (both are positive
-        # injections away from the buses). For lines that didn't converge
-        # the snapshot will contain NaN, which `_branch_loss` masks to 0.
-        line_p0  = _result_df(n, "lines_t",        "p0", "ac_pf") if not n.lines.empty        else None
-        line_p1  = _result_df(n, "lines_t",        "p1", "ac_pf") if not n.lines.empty        else None
-        trafo_p0 = _result_df(n, "transformers_t", "p0", "ac_pf") if not n.transformers.empty else None
-        trafo_p1 = _result_df(n, "transformers_t", "p1", "ac_pf") if not n.transformers.empty else None
-        line_t  = (line_p0  + line_p1)  if line_p0  is not None and line_p1  is not None else None
-        trafo_t = (trafo_p0 + trafo_p1) if trafo_p0 is not None and trafo_p1 is not None else None
-    else:
-        # source='lopf' OR source='ac_pf' before Stage 2 has ever run — read
-        # the LP loss variables. Returns empty when transmission_losses was
-        # off on the last solve.
-        line_t  = _result_df(n, "lines_t",        "loss", "lopf") if not n.lines.empty        else None
-        trafo_t = _result_df(n, "transformers_t", "loss", "lopf") if not n.transformers.empty else None
-    line_rows,  line_snap,  line_mwh,  line_peak  = _branch_loss(line_t,  n.lines,        "Line")
-    trafo_rows, trafo_snap, trafo_mwh, trafo_peak = _branch_loss(trafo_t, n.transformers, "Transformer")
-
-    # `enabled` reflects whether we actually have meaningful loss data:
-    # for source='ac_pf' it means a Stage 2 snapshot exists; for source='lopf'
-    # it means the LP solve modelled transmission_losses. Avoids the
-    # misleading "enabled:true, all zeros" surface when source=ac_pf is
-    # requested before Stage 2 has run (loss = p0 + p1 = 0 in DC OPF).
-    if source == "ac_pf":
-        enabled = has_ac_pf_snapshot and (
-            (line_t is not None and not line_t.empty) or
-            (trafo_t is not None and not trafo_t.empty)
-        )
-    else:
-        enabled = (line_t is not None and not line_t.empty) or \
-                  (trafo_t is not None and not trafo_t.empty)
-
-    total_mwh = line_mwh + trafo_mwh
-    peak_mw   = max(line_peak, trafo_peak)
-
-    # Per-branch share of total (for sorting / "where do losses come from").
-    rows = line_rows + trafo_rows
-    if total_mwh > 0:
-        for r in rows:
-            r["share_pct"] = 100.0 * r["loss_mwh"] / total_mwh
-    else:
-        for r in rows:
-            r["share_pct"] = 0.0
-    rows.sort(key=lambda r: r["loss_mwh"], reverse=True)
-
-    # Total served demand for the "% of demand" KPI. NaN-safe — on multi-period
-    # networks an unsolved snapshot fraction leaves `loads_t.p` with NaN cells;
-    # without `.fillna(0.0)` the sum produces NaN, JSONResponse.render then
-    # 500s with allow_nan=False (same trap CLAUDE.md flags for /results/storage).
-    # Belt-and-suspenders: also coerce the final scalar through
-    # `_safe_isfinite` so any residual non-finite value collapses to 0.
-    import math as _math
-    total_demand_mwh = 0.0
-    try:
-        if hasattr(n.loads_t, "p") and not n.loads_t.p.empty:
-            p = n.loads_t.p.fillna(0.0)
-            if weights is not None:
-                raw_total = float(p.multiply(weights, axis=0).sum().sum())
-            else:
-                raw_total = float(p.sum().sum())
-            total_demand_mwh = raw_total if _math.isfinite(raw_total) else 0.0
-    except Exception:
-        total_demand_mwh = 0.0
-
-    loss_pct_raw = (100.0 * total_mwh / total_demand_mwh) if total_demand_mwh > 0 else 0.0
-    loss_pct = loss_pct_raw if _math.isfinite(loss_pct_raw) else 0.0
-    total_mwh_safe = total_mwh if _math.isfinite(total_mwh) else 0.0
-    peak_mw_safe = peak_mw if _math.isfinite(peak_mw) else 0.0
-
-    return {
-        "enabled": bool(enabled),
-        "total_mwh": float(total_mwh_safe),
-        "peak_mw": float(peak_mw_safe),
-        "total_demand_mwh": float(total_demand_mwh),
-        "loss_pct_of_demand": float(loss_pct),
-        "by_branch": rows,
-    }
+    payload = compute_losses_summary(
+        n, source, _state.get("ac_pf_results") is not None, result_df=_result_df,
+    )
+    return _not_solved() if payload is None else payload
 
 
 @results_router.get("/carrier_kpis")
@@ -1674,248 +583,11 @@ def get_carrier_kpis():
         Generator/StorageUnit rows this is the LP's revenue from
         marginal-price-weighted dispatch.
     """
-    import math as _math
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-
-    import pandas as _pd
-
-    # Per-period weighting for intensive metrics summed across the horizon.
-    # n.statistics() on a multi-period network puts the period in COLUMNS
-    # (MultiIndex), not rows. Without flattening, `.items()` yields
-    # (col_key, Series) pairs that fall the isinstance(v, (int,float)) check
-    # → empty result → the entire panel silently disappears. Apply the
-    # same column-multiindex handling as get_cost_breakdown.
-    period_years_lookup = period_years_map(n)
-
-    def _years_for_period(p) -> float:
-        return years_for_period(period_years_lookup, p)
-
-    # Intensive metrics (capacity_factor, market_value) shouldn't get scaled
-    # by period years — averaging a CF across periods needs a different
-    # treatment. For now, weighted-average them by the period's contribution
-    # weight when collapsing multi-period columns.
-    #
-    # Capacity metrics are CAPACITY-STOCK, not energy-flow: PyPSA returns the
-    # same MW figure once per investment period, so multiplying by period
-    # years (extensive treatment) inflates them by N× across N periods. They
-    # need their own collapse mode: take the MAX across periods (the final,
-    # cumulative capacity that survives to the last period). Otherwise a
-    # 588 MW battery solved across 3 periods reports as 1764 MW.
-    INTENSIVE = {"capacity_factor", "market_value"}
-    CAPACITY_STOCK = {"optimal_capacity", "installed_capacity"}
-
-    def _kpi_series(name: str):
-        """
-        Run `n.statistics.<name>(groupby='carrier')` and return (comp,
-        carrier) → float. Handles both flat (Series) and multi-period
-        DataFrame outputs.
-        """
-        try:
-            fn = getattr(n.statistics, name)
-            s = fn(groupby="carrier")
-        except Exception:
-            return {}
-        if s is None:
-            return {}
-        out: dict = {}
-        try:
-            # Multi-period: returned as DataFrame with columns =
-            # (metric, period) MultiIndex OR a plain DataFrame with per-period
-            # columns. Flatten by summing across periods (with years scaling
-            # for extensive metrics) or averaging (for intensive ones).
-            if hasattr(s, "columns") and not isinstance(s, _pd.Series):
-                df_kpi = s
-                is_intensive = name in INTENSIVE
-                is_capacity_stock = name in CAPACITY_STOCK
-                for idx, row in df_kpi.iterrows():
-                    if not isinstance(idx, tuple) or len(idx) < 2:
-                        continue
-                    comp_name = str(idx[0])
-                    carrier_name = str(idx[1])
-                    total = 0.0
-                    weight_sum = 0.0
-                    max_val = float("-inf")
-                    for col_key, val in row.items():
-                        if not isinstance(val, (int, float)) or not _math.isfinite(val):
-                            continue
-                        # Column key shape: either a period integer/string
-                        # or a tuple (metric, period). Extract period.
-                        if isinstance(col_key, tuple) and len(col_key) >= 2:
-                            period = col_key[-1]
-                        else:
-                            period = col_key
-                        years_w = _years_for_period(period)
-                        v = float(val)
-                        if is_capacity_stock:
-                            # Capacity-stock: take the MAX across periods (the
-                            # cumulative final value that survives to last).
-                            if v > max_val:
-                                max_val = v
-                        elif is_intensive:
-                            # Weighted average by years
-                            total += v * years_w
-                            weight_sum += years_w
-                        else:
-                            # Extensive — multiply by years
-                            total += v * years_w
-                    if is_capacity_stock:
-                        final_v = max_val if max_val > float("-inf") else 0.0
-                    elif is_intensive and weight_sum > 0:
-                        final_v = total / weight_sum
-                    else:
-                        final_v = total
-                    if _math.isfinite(final_v):
-                        out[(comp_name, carrier_name)] = float(final_v)
-                return out
-            # Flat / Series path — the original behaviour.
-            for idx, v in s.items():
-                if not isinstance(v, (int, float)) or not _math.isfinite(v):
-                    continue
-                if isinstance(idx, tuple) and len(idx) >= 2:
-                    out[(str(idx[0]), str(idx[1]))] = float(v)
-        except Exception:
-            return out
-        return out
-
-    cf      = _kpi_series("capacity_factor")
-    curt    = _kpi_series("curtailment")
-    mv      = _kpi_series("market_value")
-    rev     = _kpi_series("revenue")
-    energy  = _kpi_series("supply")  # MWh dispatched (positive)
-    cap_opt = _kpi_series("optimal_capacity")
-    cap_ins = _kpi_series("installed_capacity")
-
-    # Union of (comp, carrier) keys we have data for, filtered to comps the
-    # user cares about for per-carrier KPI comparison.
-    KEEP_COMPONENTS = ("Generator", "StorageUnit", "Store", "Link")
-    keys = (set(cf) | set(curt) | set(mv) | set(rev)
-            | set(energy) | set(cap_opt) | set(cap_ins))
-    keys = {(c, k) for (c, k) in keys if c in KEEP_COMPONENTS}
-
-    # Components for which curtailment is a meaningful concept (= a primary
-    # energy resource exists that the LP could have dispatched but didn't).
-    # Storage and Store don't have a primary-energy resource — their "max
-    # available" = p_nom × hours is just nameplate runtime, NOT curtailable
-    # energy. PyPSA's n.statistics.curtailment() still computes the gap, but
-    # surfacing it as "92% curtailed" is nonsensical for a battery. Suppress
-    # it for those components in the UI.
-    #
-    # Additionally restrict Generator curtailment to renewable carriers —
-    # PyPSA also reports "curtailment" for thermal plant as unused headroom
-    # (p_nom − p), which the Curtailment / Dispatch tabs never show. Keeping
-    # it here made Load Flow's carrier table disagree with those tabs (e.g.
-    # gas "1 017 GWh curtailed" while Curtailment only listed PV spill).
-    CURTAILMENT_SOURCES = {"Generator", "Link"}
-    _RENEWABLE_KW = (
-        "wind", "solar", "ror", "hydro", "geothermal", "wave", "tidal",
-        "pv", "biomass", "biogas", "run-of-river",
-    )
-
-    def _is_renewable_carrier(name: str) -> bool:
-        c = (name or "").lower()
-        return any(k in c for k in _RENEWABLE_KW)
-
-    rows: list[dict] = []
-    for comp, carrier in sorted(keys):
-        # Prefer optimal_capacity (post-solve) over installed_capacity (input)
-        # so capacity-expansion runs see the expanded fleet.
-        cap_mw = cap_opt.get((comp, carrier), cap_ins.get((comp, carrier), 0.0))
-        energy_mwh = energy.get((comp, carrier), 0.0)
-        if (
-            comp in CURTAILMENT_SOURCES
-            and (comp != "Generator" or _is_renewable_carrier(carrier))
-        ):
-            curt_mwh = curt.get((comp, carrier), 0.0)
-            # Curtailment ratio: dispatched + curtailed = the max-available
-            # envelope, so % = curtailed / envelope.
-            if energy_mwh + curt_mwh > 0:
-                curt_pct = 100.0 * curt_mwh / (energy_mwh + curt_mwh)
-            else:
-                curt_pct = 0.0
-        else:
-            # StorageUnit / Store / thermal generators: no renewable spill KPI.
-            curt_mwh = 0.0
-            curt_pct = 0.0
-        rows.append({
-            "component": comp,
-            "carrier": carrier,
-            "capacity_mw": cap_mw,
-            "energy_mwh": energy_mwh,
-            "capacity_factor_pct": 100.0 * cf.get((comp, carrier), 0.0),
-            "curtailment_mwh": curt_mwh,
-            "curtailment_pct": curt_pct,
-            "market_value_eur_per_mwh": mv.get((comp, carrier), 0.0),
-            "revenue_eur": rev.get((comp, carrier), 0.0),
-        })
-
-    # Storage revenue from n.statistics is NET (discharge − charge at bus
-    # price). Economics / economics_by_carrier report GROSS discharge revenue
-    # and book charge cost separately — override so Load Flow's carrier table
-    # matches those tabs (and market_value = capture price on discharge).
-    try:
-        from services.period_utils import snapshot_weights as _sw
-        bus_prices = corrected_marginal_prices(n, from_state=True)
-        w_obj = _sw(n, "objective")
-        sns = n.snapshots
-
-        def _overlay_storage_revenue(df, t_p_df, comp_label: str) -> None:
-            if df is None or df.empty or t_p_df is None or t_p_df.empty:
-                return
-            if bus_prices is None or bus_prices.empty:
-                return
-            # Key by lower-case carrier — n.statistics() often returns the
-            # carrier nice_name ("Battery") while the component table stores
-            # the raw carrier id ("battery").
-            by_carrier_rev: dict[str, float] = {}
-            for asset_name in df.index:
-                if asset_name not in t_p_df.columns:
-                    continue
-                bus = df.at[asset_name, "bus"] if "bus" in df.columns else None
-                if bus is None or bus not in bus_prices.columns:
-                    continue
-                carrier = str(
-                    df.at[asset_name, "carrier"] if "carrier" in df.columns else "unknown"
-                ).lower()
-                series = t_p_df[asset_name].reindex(sns).fillna(0.0).astype(float)
-                discharge = series.clip(lower=0)
-                bp = bus_prices[bus].reindex(sns).fillna(0.0).astype(float)
-                rev_total = float((discharge * bp * w_obj).sum())
-                if not _math.isfinite(rev_total):
-                    continue
-                by_carrier_rev[carrier] = by_carrier_rev.get(carrier, 0.0) + rev_total
-            if not by_carrier_rev:
-                return
-            for row in rows:
-                if row["component"] != comp_label:
-                    continue
-                key = str(row["carrier"] or "").lower()
-                if key not in by_carrier_rev:
-                    continue
-                row["revenue_eur"] = by_carrier_rev[key]
-                e = row["energy_mwh"] or 0.0
-                row["market_value_eur_per_mwh"] = (
-                    row["revenue_eur"] / e if e > 1e-9 else 0.0
-                )
-
-        _overlay_storage_revenue(
-            n.storage_units,
-            getattr(n.storage_units_t, "p", None) if hasattr(n, "storage_units_t") else None,
-            "StorageUnit",
-        )
-        # Stores: positive p = discharge from store to bus.
-        _overlay_storage_revenue(
-            n.stores,
-            getattr(n.stores_t, "p", None) if hasattr(n, "stores_t") else None,
-            "Store",
-        )
-    except Exception:
-        pass
-
-    # Sort by revenue desc (biggest earners first); ties broken by energy.
-    rows.sort(key=lambda r: (-(r["revenue_eur"] or 0), -(r["energy_mwh"] or 0)))
-    return {"rows": rows}
+    payload = compute_carrier_kpis(n, result_df=_result_df)
+    return _not_solved() if payload is None else payload
 
 
 @results_router.get("/emissions")
@@ -1946,332 +618,11 @@ def get_emissions(source: str = "lopf"):
 
     Returns 204-equivalent when no dispatch is available.
     """
-    import math as _math
-
-    import pandas as _pd
-    src = source if source in ("lopf", "ac_pf") else "lopf"
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    p = _result_df(n, "generators_t", "p", src)
-    if p is None or p.empty:
-        return _not_solved()
-
-    # Snapshot weighting for ENERGY: emissions = Σ dispatch × weight × factor,
-    # so use the `generators` column — PyPSA's energy basis, matching
-    # n.statistics() and the primary-energy CO2 constraint. Falls back
-    # generators → objective → None on older netcdf (identical when the two
-    # columns coincide).
-    try:
-        weights = n.snapshot_weightings.generators
-    except Exception:
-        try:
-            weights = n.snapshot_weightings.objective
-        except Exception:
-            weights = None
-
-    # ── Per-period weighting setup ───────────────────────────────────────
-    # PyPSA multi-period scaling = snapshot_weight × investment_period_years.
-    # The previous implementation skipped years scaling, under-reporting on
-    # any horizon with non-unit period weights. Apply both consistently here.
-    is_multi = isinstance(n.snapshots, _pd.MultiIndex)
-    period_years = period_years_map(n)
-
-    def _years_for(p_val) -> float:
-        return years_for_period(period_years, p_val)
-
-    def _weight_series_for(snapshots) -> _pd.Series:
-        """Per-row effective weight = snapshot weight (generators) × period.years."""
-        w = _pd.Series(1.0, index=snapshots, dtype=float)
-        if weights is not None:
-            try:
-                w = w.multiply(weights.reindex(snapshots).fillna(1.0), axis=0)
-            except Exception:
-                pass
-        if is_multi and period_years:
-            try:
-                period_lvl = snapshots.get_level_values(0)
-                years_series = _pd.Series(
-                    [_years_for(pv) for pv in period_lvl],
-                    index=snapshots, dtype=float,
-                )
-                w = w.multiply(years_series, axis=0)
-            except Exception:
-                pass
-        return w
-
-    w_series = _weight_series_for(p.index)
-
-    # Helper: collapse a (snapshot × asset) dispatch DataFrame to per-period
-    # weighted energy. Returns a dict {period → Series[asset → MWh]} on
-    # multi-period; on flat networks returns {None → Series} (single bucket
-    # so downstream code can iterate uniformly).
-    def _energy_by_period(p_df: _pd.DataFrame) -> dict:
-        weighted = p_df.multiply(w_series.reindex(p_df.index).fillna(0.0), axis=0)
-        if not is_multi:
-            return {None: weighted.sum(axis=0)}
-        period_lvl = p_df.index.get_level_values(0)
-        out: dict = {}
-        for p_key, sub in weighted.groupby(period_lvl):
-            try:
-                p_norm = int(p_key)
-            except (TypeError, ValueError):
-                p_norm = p_key
-            out[p_norm] = sub.sum(axis=0)
-        return out
-
-    gen_energy_per_period = _energy_by_period(p)
-    # Flat-horizon convenience: also produce a horizon-total Series so the
-    # per-generator row can pin its energy_mwh column without per-period
-    # bookkeeping.
-    gen_energy_horizon = sum(gen_energy_per_period.values()) if not is_multi else (
-        p.multiply(w_series, axis=0).sum(axis=0)
-    )
-
-    # Carrier intensity lookup. PyPSA's primary-energy constraint reads
-    # carriers.co2_emissions × dispatched_energy / efficiency. Lower-case
-    # keys to match the lowercase comp.carrier values we look up with.
-    co2_by_carrier: dict[str, float] = co2_intensity_map(n)
-
-    gens = n.generators
-
-    # Per-period accumulators. Keyed by period (or None for flat).
-    period_totals: dict = {}                          # period → total tCO2
-    period_carrier_totals: dict = {}                  # period → {carrier → tCO2}
-    period_gen_rows: dict = {}                        # period → [row dicts]
-
-    def _accumulate(period_key, tCO2: float, carrier: str, row: dict) -> None:
-        period_totals[period_key] = period_totals.get(period_key, 0.0) + tCO2
-        bucket = period_carrier_totals.setdefault(period_key, {})
-        bucket[carrier] = bucket.get(carrier, 0.0) + tCO2
-        period_gen_rows.setdefault(period_key, []).append(row)
-
-    # Horizon-level mirrors so the headline `total_tCO2` / `by_carrier` /
-    # `by_generator` stay populated. These sum across the per-period entries.
-    rows_by_gen: list[dict] = []
-    total_t = 0.0
-    carrier_totals: dict[str, float] = {}
-
-    # ── Generator loop ──────────────────────────────────────────────────
-    for name in gens.index:
-        g_carrier = (str(gens.at[name, "carrier"]) if "carrier" in gens.columns else "").lower()
-        intensity = co2_by_carrier.get(g_carrier, 0.0)
-        eff = float(gens.at[name, "efficiency"]) if "efficiency" in gens.columns else 1.0
-        if not _math.isfinite(eff) or eff <= 0:
-            eff = 1.0
-        out_intensity = intensity / eff if intensity != 0 else 0.0
-        mwh_horizon = float(gen_energy_horizon.get(name, 0.0))
-        if not _math.isfinite(mwh_horizon):
-            mwh_horizon = 0.0
-        tCO2_horizon = mwh_horizon * out_intensity
-        total_t += tCO2_horizon
-        if intensity != 0:
-            carrier_totals[g_carrier] = carrier_totals.get(g_carrier, 0.0) + tCO2_horizon
-        rows_by_gen.append({
-            "name": str(name),
-            "carrier": g_carrier,
-            "energy_mwh": mwh_horizon,
-            "tCO2": tCO2_horizon,
-            "intensity_tCO2_per_MWh_out": out_intensity,
-        })
-        # Per-period split. On flat networks period_key=None; on multi-period
-        # each (period, generator) gets one row.
-        for period_key, energy_p in gen_energy_per_period.items():
-            mwh = float(energy_p.get(name, 0.0))
-            if not _math.isfinite(mwh):
-                mwh = 0.0
-            tCO2 = mwh * out_intensity
-            _accumulate(period_key, tCO2, g_carrier, {
-                "name": str(name),
-                "carrier": g_carrier,
-                "energy_mwh": mwh,
-                "tCO2": tCO2,
-                "intensity_tCO2_per_MWh_out": out_intensity,
-            })
-
-    # ── Storage emissions ────────────────────────────────────────────────
-    # StorageUnit + Store: emissions when the unit's carrier has
-    # co2_emissions > 0. Only discharge (positive p) emits.
-    for comp_attr, comp_class, t_attr in (
-        ("storage_units", "StorageUnit", "p"),
-        ("stores", "Store", "p"),
-    ):
-        comp_df = getattr(n, comp_attr, None)
-        if comp_df is None or comp_df.empty:
-            continue
-        comp_t = getattr(n, f"{comp_attr}_t", None)
-        if comp_t is None:
-            continue
-        p_t = getattr(comp_t, t_attr, None)
-        if p_t is None or p_t.empty:
-            continue
-        p_discharge = p_t.clip(lower=0)
-        energy_per_period = _energy_by_period(p_discharge)
-        energy_horizon = (
-            p_discharge.multiply(w_series.reindex(p_discharge.index).fillna(0.0), axis=0).sum(axis=0)
-        )
-        for name in comp_df.index:
-            s_carrier = (str(comp_df.at[name, "carrier"]) if "carrier" in comp_df.columns else "").lower()
-            intensity = co2_by_carrier.get(s_carrier, 0.0)
-            if intensity == 0:
-                continue
-            eff = 1.0
-            if comp_attr == "storage_units" and "efficiency_dispatch" in comp_df.columns:
-                try:
-                    eff = float(comp_df.at[name, "efficiency_dispatch"])
-                except (TypeError, ValueError):
-                    eff = 1.0
-            if not _math.isfinite(eff) or eff <= 0:
-                eff = 1.0
-            out_intensity = intensity / eff
-            mwh_horizon = float(energy_horizon.get(name, 0.0))
-            if not _math.isfinite(mwh_horizon) or mwh_horizon <= 0:
-                continue
-            tCO2_horizon = mwh_horizon * out_intensity
-            total_t += tCO2_horizon
-            carrier_totals[s_carrier] = carrier_totals.get(s_carrier, 0.0) + tCO2_horizon
-            rows_by_gen.append({
-                "name": str(name),
-                "carrier": s_carrier,
-                "energy_mwh": mwh_horizon,
-                "tCO2": tCO2_horizon,
-                "intensity_tCO2_per_MWh_out": out_intensity,
-                "component": comp_class,
-            })
-            for period_key, energy_p in energy_per_period.items():
-                mwh = float(energy_p.get(name, 0.0))
-                if not _math.isfinite(mwh) or mwh <= 0:
-                    continue
-                tCO2 = mwh * out_intensity
-                _accumulate(period_key, tCO2, s_carrier, {
-                    "name": str(name),
-                    "carrier": s_carrier,
-                    "energy_mwh": mwh,
-                    "tCO2": tCO2,
-                    "intensity_tCO2_per_MWh_out": out_intensity,
-                    "component": comp_class,
-                })
-
-    by_carrier = sorted(
-        [
-            {
-                "carrier": c,
-                "tCO2": t,
-                "share_pct": (100.0 * t / total_t) if total_t > 0 else 0.0,
-            }
-            for c, t in carrier_totals.items()
-        ],
-        key=lambda r: r["tCO2"], reverse=True,
-    )
-    rows_by_gen.sort(key=lambda r: r["tCO2"], reverse=True)
-
-    # ── Per-period breakdown (multi-period only) ─────────────────────────
-    # Build by_period[] = [{period, total_tCO2, by_carrier, by_generator}]
-    # sorted by period. Flat networks emit an empty list.
-    by_period_payload: list[dict] = []
-    if is_multi:
-        sorted_periods = sorted(
-            [p_key for p_key in period_totals.keys() if p_key is not None],
-            key=lambda x: (0, int(x)) if hasattr(x, "__int__") else (1, str(x)),
-        )
-        for p_key in sorted_periods:
-            total_p = float(period_totals.get(p_key, 0.0))
-            carrier_p = period_carrier_totals.get(p_key, {})
-            bc = sorted(
-                [
-                    {
-                        "carrier": c,
-                        "tCO2": t,
-                        "share_pct": (100.0 * t / total_p) if total_p > 0 else 0.0,
-                    }
-                    for c, t in carrier_p.items()
-                ],
-                key=lambda r: r["tCO2"], reverse=True,
-            )
-            gen_rows_p = sorted(
-                period_gen_rows.get(p_key, []),
-                key=lambda r: r["tCO2"], reverse=True,
-            )
-            by_period_payload.append({
-                "period": p_key,
-                "total_tCO2": total_p,
-                "by_carrier": bc,
-                "by_generator": gen_rows_p,
-            })
-
-    # ── CO₂ caps ─────────────────────────────────────────────────────────
-    # Detect every primary_energy + co2_emissions constraint. Some may be
-    # horizon-wide (no investment_period set), others per-period (the
-    # `investment_period` column carries an int year). Surface them in
-    # `caps[]`; keep the legacy `cap` field as the first active one for
-    # backward compatibility.
-    caps: list[dict] = []
-    cap_info: dict = {"active": False}
-    try:
-        if not n.global_constraints.empty:
-            gc = n.global_constraints
-            mask = (
-                (gc["type"].astype(str) == "primary_energy")
-                & (gc.get("carrier_attribute", "").astype(str) == "co2_emissions")
-            )
-            for cap_name in gc.index[mask]:
-                cap_value = float(gc.at[cap_name, "constant"])
-                mu = float(gc.at[cap_name, "mu"]) if "mu" in gc.columns else 0.0
-                # Which period does this cap apply to (if any)?
-                ip_raw = gc.at[cap_name, "investment_period"] if "investment_period" in gc.columns else None
-                ip_norm: Any = None
-                try:
-                    if ip_raw is not None and ip_raw == ip_raw:  # not NaN
-                        ip_int = int(ip_raw)
-                        # PyPSA stores no-period sentinel as -1 or 0 on some
-                        # versions; treat anything outside a reasonable year
-                        # range as horizon-wide.
-                        if 1900 <= ip_int <= 2200:
-                            ip_norm = ip_int
-                except (TypeError, ValueError):
-                    ip_norm = None
-                # The slack depends on which scope the cap covers:
-                #   • horizon-wide → cap − total_t
-                #   • per-period → cap − period's total
-                if ip_norm is None:
-                    used = total_t
-                else:
-                    used = float(period_totals.get(ip_norm, 0.0))
-                slack = (cap_value - used) if _math.isfinite(cap_value) else None
-                cap_entry = {
-                    "active": True,
-                    "name": str(cap_name),
-                    "investment_period": ip_norm,
-                    "scope": "period" if ip_norm is not None else "horizon",
-                    "cap_tCO2": cap_value if _math.isfinite(cap_value) else None,
-                    "used_tCO2": used,
-                    "shadow_price_eur_per_tCO2": mu if _math.isfinite(mu) else 0.0,
-                    "slack_tCO2": slack,
-                    "binding": (slack is not None and abs(slack) < max(1.0, abs(cap_value) * 1e-6)),
-                }
-                caps.append(cap_entry)
-                if not cap_info.get("active"):
-                    # Legacy `cap` field — first active cap, preserves the
-                    # shape older Emissions.tsx code reads.
-                    cap_info = {
-                        "active": True,
-                        "name": str(cap_name),
-                        "cap_tCO2": cap_value if _math.isfinite(cap_value) else None,
-                        "shadow_price_eur_per_tCO2": mu if _math.isfinite(mu) else 0.0,
-                        "slack_tCO2": slack,
-                    }
-    except Exception:
-        pass
-
-    return {
-        "total_tCO2": total_t,
-        "by_carrier": by_carrier,
-        "by_generator": rows_by_gen,
-        "cap": cap_info,
-        "caps": caps,
-        "is_multi_period": is_multi,
-        "by_period": by_period_payload,
-    }
+    payload = compute_emissions(n, source, result_df=_result_df)
+    return _not_solved() if payload is None else payload
 
 
 @results_router.get("/transformers")
@@ -2308,103 +659,11 @@ def get_unit_commitment(
     — the operational CF *given the unit was committed*, distinct from the
     grid-wide CF that includes off-hours.
     """
-    import math as _math
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    status = _result_df(n, "generators_t", "status", "lopf")
-    if status is None or status.empty:
-        return {"generators": [], "status_grid": None, "n_committable": 0,
-                "note": "No unit-commitment results. Set committable=True on at "
-                "least one generator and re-solve."}
-
-    start_up = _result_df(n, "generators_t", "start_up", "lopf")
-    shut_down = _result_df(n, "generators_t", "shut_down", "lopf")
-    p = _result_df(n, "generators_t", "p", "lopf")
-
-    # ENERGY basis (energy_mwh + weighted on-hours): use the `generators`
-    # column — PyPSA's energy weighting (matches n.statistics() and the Dispatch
-    # tab), falling back generators → objective → None on older netcdf. The UC
-    # start/shut COSTS below are count-based (not snapshot-weighted), so this
-    # only affects the energy figures. Identical when the columns coincide.
-    try:
-        weights = n.snapshot_weightings.generators
-    except Exception:
-        try:
-            weights = n.snapshot_weightings.objective
-        except Exception:
-            weights = None
-
-    # Restrict to actually-committable generators. PyPSA writes the status grid
-    # only for those — non-committable units have NaN here and we skip them.
-    gens = n.generators
-    committable_names = []
-    if not gens.empty and "committable" in gens.columns:
-        committable_names = [str(name) for name in gens.index[gens["committable"]]]
-
-    rows: list[dict] = []
-    for name in committable_names:
-        if name not in status.columns:
-            continue
-        s = status[name].fillna(0)
-        on_hours = float(s.sum())  # binary so sum = on-count
-        # Apply weights if present for the on-hours metric so representative-day
-        # workflows scale correctly.
-        if weights is not None:
-            on_hours_weighted = float((s * weights).sum())
-        else:
-            on_hours_weighted = on_hours
-        n_starts = int(start_up[name].fillna(0).sum()) if (start_up is not None and name in start_up.columns) else 0
-        n_shuts = int(shut_down[name].fillna(0).sum()) if (shut_down is not None and name in shut_down.columns) else 0
-        # Energy (MWh) only over hours when on.
-        if p is not None and name in p.columns:
-            p_on = p[name].fillna(0)
-            if weights is not None:
-                energy = float((p_on * weights).sum())
-            else:
-                energy = float(p_on.sum())
-        else:
-            energy = 0.0
-        p_nom = float(gens.at[name, "p_nom"]) if "p_nom" in gens.columns else 0.0
-        if not _math.isfinite(p_nom):
-            p_nom = 0.0
-        # CF when on: energy / (p_nom × on_hours). When the unit was always
-        # off, return 0 instead of NaN.
-        cf_when_on = (100.0 * energy / (p_nom * on_hours_weighted)) if (p_nom > 0 and on_hours_weighted > 0) else 0.0
-        su_cost = float(gens.at[name, "start_up_cost"]) if "start_up_cost" in gens.columns else 0.0
-        sd_cost = float(gens.at[name, "shut_down_cost"]) if "shut_down_cost" in gens.columns else 0.0
-        total_uc_cost = su_cost * n_starts + sd_cost * n_shuts
-        rows.append({
-            "name": name,
-            "carrier": str(gens.at[name, "carrier"]) if "carrier" in gens.columns else "",
-            "p_nom_MW": p_nom,
-            "n_starts": n_starts,
-            "n_shuts": n_shuts,
-            "hours_on": on_hours,
-            "energy_mwh": energy,
-            "capacity_factor_when_on_pct": cf_when_on,
-            "total_uc_cost_eur": total_uc_cost,
-        })
-    rows.sort(key=lambda r: -r["energy_mwh"])
-
-    # The binary status grid for the heatmap. Restrict to committable
-    # generators to keep the payload small. Replace NaN with 0 (off) so the
-    # frontend doesn't have to handle three-state cells.
-    cols = [c for c in status.columns if c in committable_names]
-    if cols:
-        grid = status[cols].fillna(0).astype(int)
-        range_meta = None
-        if _wants_slice(from_, to_):
-            grid, range_meta = _slice_ts(grid, from_, to_)
-        status_payload = _ts_payload(grid, range_meta=range_meta)
-    else:
-        status_payload = None
-
-    return {
-        "generators": rows,
-        "status_grid": status_payload,
-        "n_committable": len(committable_names),
-    }
+    payload = compute_unit_commitment(n, from_, to_, result_df=_result_df)
+    return _not_solved() if payload is None else payload
 
 
 @results_router.get("/line_duals")
@@ -2433,117 +692,11 @@ def get_line_duals():
     empty `rows` list rather than 204 so the UI can render the section
     placeholder instead of disappearing.
     """
-    import math as _math
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    mu_up = _result_df(n, "lines_t", "mu_upper", "lopf")
-    mu_lo = _result_df(n, "lines_t", "mu_lower", "lopf")
-    p0    = _result_df(n, "lines_t", "p0",       "lopf")
-    if (mu_up is None or mu_up.empty) and (mu_lo is None or mu_lo.empty):
-        return {"rows": [], "note": "No LP duals captured. Re-run the solve "
-                "(assign_all_duals is enabled by default in this build)."}
-
-    try:
-        weights = n.snapshot_weightings.objective
-    except Exception:
-        weights = None
-
-    # Per-period years scaling — mirror get_cost_breakdown so congestion rent
-    # is comparable to other € totals shown in the UI. Without this, networks
-    # with non-unit `investment_period_weightings.years` understate rent by
-    # the years factor.
-    import pandas as _pd_ld
-    is_multi_period_ld = isinstance(n.snapshots, _pd_ld.MultiIndex)
-    period_weight_series = None
-    if is_multi_period_ld:
-        try:
-            years_lookup = period_years_map(n)
-            if years_lookup:
-                period_lvl = n.snapshots.get_level_values(0)
-                period_weight_series = _pd_ld.Series(
-                    [years_for_period(years_lookup, p) for p in period_lvl],
-                    index=n.snapshots, dtype=float,
-                )
-        except Exception:
-            period_weight_series = None
-
-    # Take the absolute value once — mu_lower is reported as ≤ 0 by PyPSA's
-    # sign convention; in plain English a binding lower bound has positive
-    # rent magnitude. Pre-fill NaN with 0 so missing-dual snapshots don't
-    # propagate through the aggregations.
-    mu_up_abs = mu_up.abs().fillna(0.0) if mu_up is not None else None
-    mu_lo_abs = mu_lo.abs().fillna(0.0) if mu_lo is not None else None
-
-    line_names = list(n.lines.index)
-    rows: list[dict] = []
-    for name in line_names:
-        u = mu_up_abs[name] if (mu_up_abs is not None and name in mu_up_abs.columns) else None
-        l = mu_lo_abs[name] if (mu_lo_abs is not None and name in mu_lo_abs.columns) else None
-        # Skip lines that have no dual data at all (e.g. infeasible solves).
-        if u is None and l is None:
-            continue
-        # Use max(|mu_upper|, |mu_lower|) per snapshot — only one bound binds
-        # at a time, never both.
-        combined = u if l is None else (l if u is None else u.where(u >= l, l))
-        # Use a small tolerance for "non-zero" — LP duals can carry numerical
-        # noise from interior-point solvers at the 1e-12 level.
-        binding = combined > 1e-6
-        n_binding = int(binding.sum())
-        max_mu = float(combined.max()) if not combined.empty else 0.0
-        if n_binding > 0:
-            mean_mu = float(combined[binding].mean())
-        else:
-            mean_mu = 0.0
-        # Congestion rent: ∫ |mu| × |p0| dt. The LP dual is shadow price per
-        # unit capacity; multiplied by actual flow it approximates the
-        # annual welfare value of redispatching out of this congestion.
-        # Multi-period: also scale by investment_period_weightings.years
-        # so the total reads as horizon-cumulative (matches cost_breakdown).
-        if p0 is not None and name in p0.columns:
-            p_abs = p0[name].abs().fillna(0.0)
-            row_w = combined * p_abs
-            if weights is not None:
-                row_w = row_w * weights
-            if period_weight_series is not None:
-                row_w = row_w * period_weight_series
-            rent = float(row_w.sum())
-        else:
-            rent = 0.0
-        if not _math.isfinite(max_mu): max_mu = 0.0
-        if not _math.isfinite(mean_mu): mean_mu = 0.0
-        if not _math.isfinite(rent): rent = 0.0
-        # Look up s_nom for context — "this line binds 50 % of hours at 100 MW
-        # is more interesting than at 10 GW".
-        try:
-            s_nom = float(n.lines.at[name, "s_nom"])
-        except Exception:
-            s_nom = 0.0
-        # Detect VOLL-bound binding hours: dual ≥ 10,000 €/MWh is almost
-        # never physical congestion — it's a load-shedding signal where
-        # the LP is choosing to shed rather than relax the line. Surface
-        # this count so the UI can warn users that "congestion rent" on
-        # this line largely reflects the cost of unmet demand, not the
-        # value of transmission expansion.
-        VOLL_THRESHOLD = 10_000.0
-        voll_bound = int((combined > VOLL_THRESHOLD).sum())
-        rows.append({
-            "name": str(name),
-            "s_nom_MW": s_nom if _math.isfinite(s_nom) else 0.0,
-            "binding_hours": n_binding,
-            "voll_bound_hours": voll_bound,
-            "max_mu_eur_per_MWh": max_mu,
-            "mean_mu_when_binding_eur_per_MWh": mean_mu,
-            "congestion_rent_eur": rent,
-        })
-
-    rows.sort(key=lambda r: r["congestion_rent_eur"], reverse=True)
-    total_rent = sum(r["congestion_rent_eur"] for r in rows)
-    return {
-        "rows": rows,
-        "total_congestion_rent_eur": float(total_rent),
-        "n_snapshots": len(n.snapshots),
-    }
+    payload = compute_line_duals(n, result_df=_result_df)
+    return _not_solved() if payload is None else payload
 
 
 @results_router.get("/voltages")
@@ -2610,108 +763,11 @@ def get_prices(
     values are typically zero (PyPSA's pf() does not produce duals). The
     frontend handles this by falling back to LOPF prices when displaying AC.
     """
-    import numpy as np
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    try:
-        df = _result_df(n, "buses_t", "marginal_price", source)
-        if df is None or df.empty:
-            return _not_solved()
-        # Replace NaN with 0 explicitly — JSON encoders convert NaN to null
-        # which the frontend then has to handle. Zero is the right semantic
-        # default for non-binding constraints, and we use a separate `source`
-        # field to flag when prices are unreliable.
-        df = df.fillna(0.0)
-
-        # Diagnostic: are the duals actually informative? "All zero" usually
-        # means the LP didn't surface dual variables (solver config) OR a
-        # very cheap (or negative-cost) generator with abundant headroom
-        # serves every snapshot, making the dual mathematically 0. Provide a
-        # generator-cost-based fallback the UI can show alongside.
-        all_zero = bool(np.allclose(df.values, 0.0))
-        fallback_per_snapshot: list[float] = []
-        if all_zero:
-            try:
-                gens_p = n.generators_t.p
-                if not gens_p.empty:
-                    mc = n.generators["marginal_cost"].reindex(gens_p.columns).fillna(0.0)
-                    # Per snapshot: highest marginal_cost among generators with p > epsilon.
-                    eps = 1e-3
-                    for i in range(len(gens_p.index)):
-                        row = gens_p.iloc[i]
-                        active = row.index[row.abs() > eps]
-                        if len(active) == 0:
-                            fallback_per_snapshot.append(0.0)
-                        else:
-                            fallback_per_snapshot.append(float(mc.loc[active].max()))
-            except Exception:
-                fallback_per_snapshot = []
-
-        # Merit-order ("subsidy-removed") view. The correction itself lives in
-        # `_apply_merit_order_correction` — shared with `corrected_marginal_prices`,
-        # which `/asset_economics` and the Compare tabs use. This endpoint keeps
-        # its OWN fetch (it honours `source`, which that helper hardcodes to
-        # lopf) and applies the identical algorithm, so the Prices tab can no
-        # longer drift from every other price surface.
-        data_adjusted: list[list[float]] = []
-        negative_hours = 0
-        try:
-            data_adjusted = _safe_values(_apply_merit_order_correction(n, df))
-        except Exception:
-            data_adjusted = _safe_values(df)
-
-        # Count snapshots that the user is likely to see as "negative" so
-        # the frontend can show a hint without re-scanning the whole grid.
-        # A whole-horizon aggregate (not a per-snapshot array) — it does NOT
-        # narrow with a `from`/`to` window below; `range.complete` is what
-        # tells the frontend whether it reflects the full series or a slice.
-        try:
-            negative_hours = int((df.values < -1e-6).any(axis=1).sum())
-        except Exception:
-            negative_hours = 0
-
-        # Use _ts_payload for the index+columns+data+periods shape, then merge
-        # in the prices-specific extras. Keeps multi-period periods array
-        # consistent with every other /results/* endpoint.
-        range_meta = None
-        if _wants_slice(from_, to_):
-            df, range_meta = _slice_ts(df, from_, to_)
-            # data_adjusted / fallback_per_snapshot are per-snapshot arrays
-            # computed above against the FULL (unsliced) frame — same
-            # positionally-aligned-to-the-rows shape as `data`. Slice them to
-            # the bounds slice_ts ACTUALLY served (range_meta, not the raw
-            # from_/to_ — slice_ts clamps and may cap) or a ranged response
-            # carries N sliced `data` rows next to the full-length arrays,
-            # and a UI indexing data_adjusted[i] against data[i] silently
-            # renders another snapshot's price as if it were this one's.
-            lo, hi = range_meta["from"], range_meta["to"]
-            data_adjusted = data_adjusted[lo : hi + 1]
-            fallback_per_snapshot = fallback_per_snapshot[lo : hi + 1]
-        return _ts_payload(df, extra={
-            # Merit-order ("subsidy-removed") version. Same shape as `data`.
-            # When the LP-dual ALREADY reflects the merit order at a given
-            # cell (no marginal subsidised renewable there), the value
-            # equals the LP dual — so flipping the toggle has no effect on
-            # those hours, which is the right semantics.
-            "data_adjusted": data_adjusted,
-            "negative_hours": negative_hours,
-            # New diagnostic fields. UI can use these to render a banner like
-            # "LP duals were all zero — showing analytical prices instead".
-            "source": "fallback" if all_zero and fallback_per_snapshot else "lp",
-            "fallback_per_snapshot": fallback_per_snapshot if all_zero else [],
-            "note": (
-                "LP duals are zero — most likely either (a) solver skipped "
-                "dual extraction, or (b) demand is served by ample low-cost "
-                "capacity so an extra MW would cost 0. The fallback shows "
-                "the highest-marginal-cost dispatching generator per snapshot."
-                if all_zero and fallback_per_snapshot else
-                ""
-            ),
-        }, range_meta=range_meta)
-    except Exception:
-        logger.exception("results endpoint failed; returning 204 (see traceback)")
-        return _not_solved()
+    payload = compute_prices(n, source, from_, to_, result_df=_result_df)
+    return _not_solved() if payload is None else payload
 
 
 @results_router.get("/price_drivers")
@@ -2733,142 +789,11 @@ def get_price_drivers(threshold: float = 2000.0, limit: int = 200):
     1000-bus run there could be tens of thousands of cells above threshold
     and shipping them all would jam the frontend.
     """
-    import math
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-    try:
-        prices = n.buses_t.marginal_price
-        if prices.empty:
-            return _not_solved()
-        gens_p = n.generators_t.p if hasattr(n.generators_t, "p") else None
-        if gens_p is None or gens_p.empty:
-            return _not_solved()
-        gens = n.generators
-        # Bus → list of generator names that connect to it. Pre-built so
-        # we don't re-scan n.generators per cell.
-        gens_by_bus: dict[str, list[str]] = {}
-        for name in gens.index:
-            bus = str(gens.at[name, "bus"]) if "bus" in gens.columns else ""
-            gens_by_bus.setdefault(bus, []).append(str(name))
-        thr = float(threshold)
-        # Collect rows above threshold first, then sort + truncate.
-        rows: list[dict] = []
-        for col in prices.columns:
-            series = prices[col]
-            for t, v in series.items():
-                try:
-                    pv = float(v)
-                except (TypeError, ValueError):
-                    continue
-                if not math.isfinite(pv) or abs(pv) <= thr:
-                    continue
-                # Find marginal generator: dispatching > 1e-3 at this t,
-                # connected to this bus, with marginal_cost closest to |pv|.
-                bus = str(col)
-                candidates = gens_by_bus.get(bus, [])
-                best_name: str | None = None
-                best_diff = float("inf")
-                best_mc = 0.0
-                best_carrier = ""
-                best_dispatch = 0.0
-                voll_slack_active = False
-                voll_dispatch = 0.0
-                for g in candidates:
-                    if g not in gens_p.columns:
-                        continue
-                    try:
-                        disp = float(gens_p.at[t, g])
-                    except (KeyError, TypeError, ValueError):
-                        continue
-                    if abs(disp) <= 1e-3:
-                        continue
-                    mc = float(gens.at[g, "marginal_cost"]) if "marginal_cost" in gens.columns else 0.0
-                    carrier = str(gens.at[g, "carrier"]) if "carrier" in gens.columns else ""
-                    if g.startswith("__voll_") or carrier == "load_shedding":
-                        voll_slack_active = True
-                        voll_dispatch = disp
-                        # VOLL slack wins unconditionally for diagnosis — any
-                        # dispatch from it means the LP is shedding load.
-                        best_name = g
-                        best_mc = mc
-                        best_carrier = carrier
-                        best_dispatch = disp
-                        break
-                    diff = abs(mc - abs(pv))
-                    if diff < best_diff:
-                        best_diff = diff
-                        best_name = g
-                        best_mc = mc
-                        best_carrier = carrier
-                        best_dispatch = disp
-                # Diagnosis tag — one of:
-                #   load_shedding    — VOLL slack dispatching, OR observed
-                #                       price grossly exceeds any dispatching
-                #                       gen's MC (price ≥ 10× max(mc)).
-                #                       Catches cases where VOLL slack wasn't
-                #                       named __voll_* but was added inline.
-                #   thermal_peaker   — marginal gen's mc is within 5% of |price|
-                #                       AND > 100 €/MWh
-                #   transmission     — price >> any dispatching gen's mc but
-                #                       within a reasonable scarcity multiple;
-                #                       contingency / line bind is what's driving
-                #   unattributed     — couldn't find any dispatching gen on the bus
-                MAX_MC_MULTIPLIER = 10.0  # price ≥ N × max(MC) → load_shedding
-                if voll_slack_active:
-                    diag = "load_shedding"
-                elif best_name is None:
-                    diag = "unattributed"
-                elif best_mc > 0 and abs(pv) >= MAX_MC_MULTIPLIER * best_mc and abs(pv) >= 1000.0:
-                    # Price is orders of magnitude above the gen's MC. Even if
-                    # the slack generator wasn't found, the LP is effectively
-                    # shedding (or near-shedding) load at this bus.
-                    diag = "load_shedding"
-                elif best_mc > 100 and abs(best_mc - abs(pv)) / max(abs(pv), 1.0) < 0.05:
-                    diag = "thermal_peaker"
-                else:
-                    diag = "transmission"
-                # Multi-period: `t` is a (period, timestep) tuple — has no
-                # `.isoformat`, so the fallback `str(t)` would produce the
-                # tuple-string repr ("(2026, Timestamp('...'))") consumers
-                # can't parse. Split into period + ISO timestep instead.
-                if isinstance(t, tuple) and len(t) == 2:
-                    period_val = t[0]
-                    ts_val = t[1]
-                    try:
-                        period_out = int(period_val)
-                    except (TypeError, ValueError):
-                        period_out = str(period_val)
-                    snap_iso = ts_val.isoformat() if hasattr(ts_val, "isoformat") else str(ts_val)
-                else:
-                    period_out = None
-                    snap_iso = t.isoformat() if hasattr(t, "isoformat") else str(t)
-                row = {
-                    "snapshot": snap_iso,
-                    "bus": bus,
-                    "price": pv,
-                    "marginal_gen": best_name,
-                    "marginal_cost": best_mc,
-                    "carrier": best_carrier,
-                    "dispatch": best_dispatch,
-                    "voll_slack_active": voll_slack_active,
-                    "voll_dispatch": voll_dispatch,
-                    "diagnosis": diag,
-                }
-                if period_out is not None:
-                    row["period"] = period_out
-                rows.append(row)
-        rows.sort(key=lambda r: abs(r["price"]), reverse=True)
-        truncated = len(rows) > limit
-        return {
-            "threshold": thr,
-            "total_above_threshold": len(rows),
-            "truncated": truncated,
-            "rows": rows[:limit],
-        }
-    except Exception:
-        logger.exception("results endpoint failed; returning 204 (see traceback)")
-        return _not_solved()
+    payload = compute_price_drivers(n, threshold, limit)
+    return _not_solved() if payload is None else payload
 
 
 @results_router.get("/curtailment")
@@ -2876,127 +801,2659 @@ def get_curtailment(
     from_: int | None = Query(None, alias="from", description="Inclusive start index into the snapshot axis."),
     to_: int | None = Query(None, alias="to", description="Inclusive end index into the snapshot axis."),
 ):
-    import pandas as _pd
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
+    payload = compute_curtailment(n, from_, to_)
+    return _not_solved() if payload is None else payload
+
+
+@results_router.get("/fmea_modes")
+def get_fmea_modes():
+    """
+    Every COMPUTED failure-mode row on one list (adequacy Phase 4 Task 4):
+    class A from the COPT engine (regenerated on every call — zero solves)
+    plus the last contingency sweep's class B/C rows, criticality-sorted.
+    The worksheet merges this with the per-project sidecar's expert rows
+    client-side. 204 only when every source is empty.
+    """
+    per_mode: list = []
+    copt = get_copt()
+    if isinstance(copt, dict):
+        per_mode.extend(copt["per_mode"])
+    sweep = _state.get("fmea_sweep")
+    # Phase 12e: an ABORTED sweep measured real contingencies before it was
+    # stopped, and the worksheet is where those rows are read. Dropping them
+    # here would make the abort silently lose work the user paid solves for.
+    if sweep and sweep.get("status") in ("done", "aborted"):
+        for r in sweep.get("rows", []):
+            if r.get("failure_mode"):
+                per_mode.append({**r["failure_mode"],
+                                 "delta_eue_mwh": r.get("delta_eue_mwh")})
+    if not per_mode:
+        return Response(status_code=204)
+    # Phase 12e (shipped-code review, finding 11): `(-criticality, mode_id)`,
+    # which is what the spec claimed and the code did not do. Sorting on
+    # criticality alone left exactly-tied rows in SOURCE order — class A from
+    # the COPT engine, then the sweep's B and C — and the tie is not a corner
+    # case here: with no VoLL set every criticality is €0/yr (see below), so
+    # the whole ranking ties and the order the worksheet renders depended on
+    # which classes happened to have been computed. `reverse=True` cannot be
+    # used with a tuple key: it would reverse the mode_id order too.
+    per_mode.sort(key=lambda r: (-float(r.get("criticality_eur_per_year", 0.0)),
+                                 str(r.get("mode_id", ""))))
+    # VOLL travels with the rows so the worksheet can say WHY every
+    # criticality is zero. Criticality is ΔEUE × VoLL × occurrence, so with
+    # no VoLL set the whole ranking collapses to €0/yr — modes whose ΔEUE
+    # differs by 4× tie at zero, and the table reads "these failure modes
+    # cost nothing" when the truth is "these failure modes cannot be priced".
+    # The sweep already refuses outright (422) without a VoLL; this surface
+    # still has LOLE/EUE worth serving, so it reports the condition instead.
+    _cfg = _state.get("solver_config")
     try:
-        p = n.generators_t.p
-        if p.empty:
-            return _not_solved()
-        # Align p_nom to p.columns up front. Without this, generators in p
-        # that aren't in n.generators (rare but possible after carrier edits)
-        # would give NaN columns and crash JSON encoding.
-        cap_col = "p_nom_opt" if "p_nom_opt" in n.generators.columns else "p_nom"
-        p_nom = n.generators[cap_col].reindex(p.columns).fillna(0.0)
+        _voll = float(getattr(_cfg, "voll", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        _voll = 0.0
+    return {"per_mode": per_mode,
+            "voll_eur_per_mwh": _voll,
+            "sweep_status": (sweep or {}).get("status"),
+            # Phase 12e (shipped-code review, finding 14): the worksheet is
+            # where the sweep's rows are read, so it is where a failed closing
+            # re-solve has to be said. The record has carried these since the
+            # review's finding 1; this surface used to drop them, leaving the
+            # user reading contingency rows with no sign that the network is
+            # still on the last contingency.
+            "sweep_base_restored": (sweep or {}).get("base_restored"),
+            "sweep_base_restore_status": (sweep or {}).get("base_restore_status"),
+            "sweep_error": (sweep or {}).get("error")}
 
-        # PyPSA stores time-varying p_max_pu only for generators that actually
-        # have a profile — others fall back to the static n.generators.p_max_pu
-        # (default 1.0). Build a full-column DataFrame so the subtraction below
-        # produces a clean DataFrame with no NaN columns.
-        p_max_pu = n.generators_t.p_max_pu
-        if p_max_pu.empty:
-            # Constant p_max_pu = 1.0 for every generator → p_max ≡ p_nom.
-            p_max = (p * 0.0).add(p_nom, axis=1)
-        else:
-            p_max_pu_full = p_max_pu.reindex(columns=p.columns, fill_value=1.0)
-            p_max = p_max_pu_full.multiply(p_nom, axis=1)
 
-        # ── Time-varying effective capacity (multi-period vintages) ─────
-        # vintage_service aggregates vintage p_nom_opt into the parent
-        # post-solve (parent's column = parent + Σ vintages). But each
-        # vintage is only physically active from its build_year onwards
-        # — `p` is forced to 0 in earlier snapshots. Using the AGGREGATED
-        # p_nom_opt × p_max_pu gives a phantom p_max that exceeds what
-        # any of the contributing vintages could actually deliver in
-        # that snapshot. The endpoint then reports massive curtailment
-        # that doesn't exist (e.g. 920 GWh of fake curtailment in 2026
-        # from a 293-MW vintage built in 2028 whose capacity was rolled
-        # into Solar2's p_nom_opt).
-        #
-        # Fix: rebuild a per-(snapshot, generator) effective capacity by
-        # walking `n.meta["vintage_results"]` and summing only vintages
-        # with build_year ≤ snapshot's period. For generators without
-        # vintage_results, use the aggregated p_nom_opt (unchanged).
-        if isinstance(p.index, _pd.MultiIndex):
+# One predicate for the whole mutual-exclusion mesh (sweep / frontier / mc /
+# coupling loop), MOVED to services/study_state.py so the foreground solve
+# entrypoints in routers/simulation.py can enforce the same mesh without a
+# circular import (this module already imports `_state` from that one). The
+# alias is kept because every guard below reads better with it, and because a
+# second definition here is exactly how the two sides of a mesh drift apart.
+_study_running = _study_state.study_running
+
+
+def _study_mesh_blocker(self_key: str) -> str | None:
+    """The 409 detail that refuses a NEW `self_key` study, or None when the
+    surface is free. ONE predicate for all five studies.
+
+    Whole-branch review, findings S2/S4: each study POST carried its own six
+    `if` gates, run with NO lock, and they tested the foreground solve by its
+    status STRING. Two things were wrong with that. `/simulation/abort` flips
+    the status to `"aborted"` while the worker keeps running (the restore
+    phase, or HiGHS refusing to yield) — `_solver_in_flight()` exists for
+    exactly this and is what preflight, save and activate already use, so a
+    study could start on a network whose LP transforms were still being
+    reverted. And a gate that runs outside the lock that publishes is a
+    check-then-act window: two POSTs close together both passed and the
+    second overwrote the first's record, orphaning a worker nothing could
+    abort or see. This predicate is therefore called TWICE per POST: once
+    early (a cheap refusal before any synchronous work) and once INSIDE the
+    publish hold, in `_publish_study`, which is the claim.
+    """
+    label = _study_state.STUDY_LABELS
+    if _study_running(self_key):
+        return f"{label.get(self_key, self_key)} is already running"
+    for key in _study_state.STUDY_KEYS:
+        if key != self_key and _study_running(key):
+            return f"{label.get(key, key)} is running — wait for it to finish"
+    if _solver_in_flight():
+        if _state.get("status") == "aborted":
+            return ("a solve is still winding down after its abort — its "
+                    "worker is restoring the network; wait for it to exit")
+        return "a solve is running — wait for it to finish"
+    return None
+
+
+def _refuse_if_mesh_busy(self_key: str) -> None:
+    blocked = _study_mesh_blocker(self_key)
+    if blocked:
+        raise HTTPException(409, blocked)
+
+
+def _publish_study(key: str, record: dict, thread: "_threading.Thread") -> None:
+    """Claim the surface, publish the record and START the worker under ONE
+    `solver_state_lock` hold — the same shape as `/simulation/run`'s claim.
+
+    The mesh is re-checked inside the hold: that is what makes it a claim
+    rather than a check. `_study_running` tests `thread.is_alive()` (or
+    `ident is None` for a published-but-unstarted thread), so a competing
+    POST that takes the lock next reads this record as live. If `start()`
+    raises, the record is rolled back rather than left as a never-started
+    thread that `record_is_running` would count as running for the rest of
+    the process (review finding M1).
+    """
+    # The MUTATION lock outside the state lock (the order every solver
+    # write already uses). Fix review, F2: the save gate (`_save_context`)
+    # re-checks the study INSIDE `ctx.mutation_lock` and holds that lock for
+    # its whole export, so a study can only publish before a save has begun
+    # exporting or after it has finished — never between the save's gate
+    # and its export, which is where a sweep's first, lock-free contingency
+    # mutation was landing on disk as the user's project.
+    lock = PyPSAService.get_lock()
+    # Bounded: a foreground solve that claimed between this POST's early
+    # gate and here holds the mutation lock for its whole run, and the POST
+    # must answer 409 in seconds rather than wait it out (fix review, note).
+    if not lock.acquire(timeout=5.0):
+        raise HTTPException(409, "a solve is running — wait for it to finish")
+    try:
+        with PyPSAService.get_solver_state_lock():
+            _refuse_if_mesh_busy(key)
+            _state[key] = record
             try:
-                period_lvl = p.index.get_level_values(0).astype(int)
-                vintage_results = (n.meta or {}).get("vintage_results", {}) if hasattr(n, "meta") else {}
-                gen_vr = vintage_results.get("Generator", {}) if isinstance(vintage_results, dict) else {}
-                if gen_vr:
-                    # Build per-column time-varying effective capacity. Start
-                    # from the existing p_max (= p_nom_opt × p_max_pu) and
-                    # OVERRIDE columns that have vintage_results data.
-                    for gname in p.columns:
-                        meta = gen_vr.get(gname)
-                        if not meta:
-                            continue
-                        initial = float(meta.get("initial_capacity", 0.0) or 0.0)
-                        periods_meta = meta.get("periods", []) or []
-                        # Vector of effective_p_nom per snapshot for this gen.
-                        eff = _pd.Series(initial, index=p.index, dtype=float)
-                        for entry in periods_meta:
-                            try:
-                                by = int(entry.get("build_year"))
-                                pn = float(entry.get("p_nom_opt", 0.0) or 0.0)
-                            except (TypeError, ValueError):
-                                continue
-                            if pn <= 0:
-                                continue
-                            # Active in snapshots whose period >= build_year.
-                            mask = period_lvl >= by
-                            eff.values[mask] += pn
-                        # Re-compute p_max for this column using time-varying
-                        # effective capacity. p_max_pu_full has it as the
-                        # snapshot-indexed profile we built above.
-                        if p_max_pu.empty or gname not in p_max_pu_full.columns:
-                            p_max[gname] = eff
-                        else:
-                            p_max[gname] = p_max_pu_full[gname] * eff
-            except Exception:
-                pass  # defensive — fall back to unmasked behaviour
+                thread.start()
+            except BaseException:
+                _state[key] = None
+                raise
+    finally:
+        lock.release()
 
-        # fillna(0) is defensive — covers any residual NaN in `p` or column
-        # alignment edge cases. Required because JSON encoders reject NaN.
-        curtailment = (p_max - p).clip(lower=0).fillna(0.0)
-        # Filter to generators where (p_max - p) is genuinely "curtailment":
-        # renewables (free energy that's wasted) OR generators with explicit
-        # curtailment_cost > 0 (the LP penalty signals user intent).
-        # Without this filter, thermal "headroom" (unused dispatch capacity
-        # of a 200 MW thermal running at 50 MW) gets reported as curtailment
-        # — confusing in raw CSV exports and downstream consumers.
-        RENEW_KEYWORDS = ("wind", "solar", "pv", "ror", "geothermal",
-                          "offwind", "onwind", "hydro", "biomass",
-                          "wave", "tidal", "rooftop")
-        keep_cols: list[str] = []
-        gens_df = n.generators
-        for col in curtailment.columns:
-            if col not in gens_df.index:
-                continue
-            carrier = str(gens_df.at[col, "carrier"]).lower() if "carrier" in gens_df.columns else ""
-            is_renew = any(k in carrier for k in RENEW_KEYWORDS)
-            has_subsidy = False
-            if "curtailment_cost" in gens_df.columns:
-                cc_val = gens_df.at[col, "curtailment_cost"]
+
+@results_router.get("/fmea_sweep")
+def get_fmea_sweep():
+    """
+    Status + rows of the last class-B/C contingency sweep (adequacy plan
+    Phase 4). 204 = never run. The stored state carries a worker-thread
+    handle that must not leak into the payload.
+    """
+    st = _state.get("fmea_sweep")
+    if not st:
+        return Response(status_code=204)
+    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+
+
+class FmeaSweepRequest(_BaseModel):
+    # Class-C scenarios, passed by the client from the authorized registry
+    # GET (/api/projects/{name}/stress_scenarios) — this route operates on
+    # the FOREGROUND network and carries no project name, so the sidecar is
+    # read where authorization lives and re-validated here before running.
+    scenarios: list = []
+
+
+@results_router.post("/fmea_sweep/abort")
+def post_fmea_sweep_abort():
+    """
+    Ask a running FMEA sweep to stop (Phase 12e).
+
+    The shipped loop routes' contract verbatim: 200 sets the record's stop
+    event and the engine stops at its next boundary — so an abort costs at
+    most the work already in flight, plus the closing restore, which still
+    runs. IDEMPOTENT and 200 even when the run is already finishing or
+    finished: "stop" on something that has stopped is satisfied, and a 409
+    there would make the button flicker into an error at exactly the moment it
+    worked. 404 only when no run has ever been recorded — a client bug, not a
+    race.
+
+    Deliberately NOT folded into ``/simulation/abort``: that route's stop
+    event belongs to the foreground solver thread and nothing in it reaches a
+    study worker, so a user pressing it would be told the abort succeeded
+    while the study kept running.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("fmea_sweep")
+        if not st:
+            raise HTTPException(
+                404, "no FMEA sweep has been run in this session")
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
+
+
+@results_router.post("/fmea_sweep")
+def post_fmea_sweep(body: FmeaSweepRequest | None = None):
+    """
+    Start the contingency sweep — class B (link outages) plus any class-C
+    scenarios in the body — in a worker thread: a sweep is several LP
+    solves and must never block a request. 409 while a sweep or a
+    foreground solve is running. The closing base re-solve leaves the
+    network AND the foreground results in base state (it writes through
+    the real state sink).
+    """
+    import time
+
+    from services.adequacy.stress import (
+        StressValidationError,
+        run_class_c_sweep,
+    )
+    from services.adequacy.sweep import SweepBudgetError, run_class_b_sweep
+    from routers.simulation import _state_update
+
+    _refuse_if_mesh_busy("fmea_sweep")
+    cfg = _state.get("solver_config")
+    if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
+        raise HTTPException(422, "the sweep requires a VOLL > 0 in solver settings")
+    n = PyPSAService.get_network()
+    lock = PyPSAService.get_lock()
+
+    scenarios = list(getattr(body, "scenarios", None) or [])
+
+    stop_event = _threading.Event()
+    record: dict = {"status": "running", "rows": [], "error": None,
+                    "base_restored": None, "base_restore_status": None,
+                    "started_at": time.time(), "thread": None,
+                    "stop_event": stop_event}
+
+    def worker():
+        try:
+            # Class B first with a private final sink; the LAST sweep's
+            # closing base re-solve writes the REAL state sink, so
+            # /results/lost_load etc. reflect base afterwards.
+            rows, restore_b = run_class_b_sweep(
+                n, lock, cfg, stop_event=stop_event,
+                final_state_update=None if scenarios else _state_update,
+            )
+            restore = restore_b
+            # Phase 12e: the worker runs TWO sweeps, so the flag is checked
+            # BETWEEN them. Without this, breaking out of class B's
+            # contingency loop returns here and class C runs in full — the
+            # abort would stop one sweep, not the study. When class C is
+            # skipped, class B ran with a private final sink, so the
+            # foreground results are the pre-study ones; that is correct and
+            # is what the user is looking at.
+            if scenarios and not stop_event.is_set():
+                rows_c, restore = run_class_c_sweep(
+                    n, lock, cfg, scenarios, stop_event=stop_event,
+                    final_state_update=_state_update,
+                )
+                rows = rows + rows_c
+            record.update(
+                status="aborted" if stop_event.is_set() else "done",
+                rows=rows, finished_at=time.time(), error=None,
+                # Phase 12e (shipped-code review, finding 1): whether the
+                # closing base re-solve ran, and what the solver said. A
+                # sweep whose restore FAILED leaves the network on the last
+                # contingency while the foreground results describe another
+                # plan — the user has to be told, and before this the guard
+                # swallowed the exception and the record still read `done`.
+                base_restored=restore.get("base_restored"),
+                base_restore_status=restore.get("base_restore_status"))
+        except (SweepBudgetError, StressValidationError) as exc:
+            record.update(
+                status="failed", rows=[], error=str(exc), finished_at=time.time())
+        except Exception as exc:  # noqa: BLE001
+            record.update(
+                status="failed", rows=[], error=str(exc), finished_at=time.time())
+
+    # The loops' pattern (see post_coupling_loop): the record is CLOSED OVER
+    # so a context switch cannot redirect the worker's writes away from the
+    # dict the poller reads, the request's context is carried so the closing
+    # restore's `_state_update` lands in the right project, and the record is
+    # published and the thread started under ONE lock hold.
+    _ctx = _contextvars.copy_context()
+    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
+                          name="fmea-sweep")
+    record["thread"] = t
+    _publish_study("fmea_sweep", record, t)
+    return {"status": "running"}
+
+
+class FrontierRequest(_BaseModel):
+    # Reliability targets (‱) to sweep. Omitted → the default spread across
+    # the decade where the cost gradient is steep enough to show a knee.
+    targets_permyriad: list[_Finite] | None = None
+
+
+@results_router.get("/frontier")
+def get_frontier():
+    """
+    Status + points of the last cost-vs-availability study (spec §5.6).
+    204 when none has been run in this session.
+    """
+    st = _state.get("frontier")
+    if not st:
+        return Response(status_code=204)
+    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+
+
+@results_router.post("/frontier/abort")
+def post_frontier_abort():
+    """
+    Ask a running frontier study to stop (Phase 12e).
+
+    The shipped loop routes' contract verbatim: 200 sets the record's stop
+    event and the engine stops at its next boundary — so an abort costs at
+    most the work already in flight, plus the closing restore, which still
+    runs. IDEMPOTENT and 200 even when the run is already finishing or
+    finished: "stop" on something that has stopped is satisfied, and a 409
+    there would make the button flicker into an error at exactly the moment it
+    worked. 404 only when no run has ever been recorded — a client bug, not a
+    race.
+
+    Deliberately NOT folded into ``/simulation/abort``: that route's stop
+    event belongs to the foreground solver thread and nothing in it reaches a
+    study worker, so a user pressing it would be told the abort succeeded
+    while the study kept running.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("frontier")
+        if not st:
+            raise HTTPException(
+                404, "no frontier study has been run in this session")
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
+
+
+@results_router.post("/frontier")
+def post_frontier(body: FrontierRequest | None = None):
+    """
+    Start the ε-constraint frontier study in a worker thread: one full
+    capacity-expansion solve per target, so it must never block a request.
+    409 while a study, a sweep or a foreground solve is running.
+
+    Unlike the class-B/C sweep this does NOT freeze capacities — the study
+    asks what plan you would BUILD for each standard, so expansion has to
+    re-optimise at every point.
+    """
+    import time
+
+    from services.adequacy.frontier import (
+        DEFAULT_TARGETS_PERMYRIAD,
+        FrontierBudgetError,
+        FrontierConfigError,
+        knee_index,
+        run_frontier_sweep,
+    )
+    from routers.simulation import _state_update
+
+    _refuse_if_mesh_busy("frontier")
+    cfg = _state.get("solver_config")
+    if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
+        raise HTTPException(422, "the frontier requires a VOLL > 0 in solver settings")
+
+    targets = list(getattr(body, "targets_permyriad", None)
+                   or DEFAULT_TARGETS_PERMYRIAD)
+    # An ENS cap is a positive ceiling on unserved energy: a zero or negative
+    # target is not a point on the frontier (0 is "no shedding at all", which
+    # the LP cannot reach on any network that ever sheds, and a negative cap
+    # is infeasible by construction). Refused here, before the record is
+    # published, rather than discovered one infeasible solve later.
+    bad = [t for t in targets if not (math.isfinite(float(t)) and float(t) > 0)]
+    if bad:
+        raise HTTPException(
+            422, f"targets_permyriad must be positive finite numbers; got "
+                 f"{bad[:5]}{' …' if len(bad) > 5 else ''}")
+    n = PyPSAService.get_network()
+    lock = PyPSAService.get_lock()
+
+    stop_event = _threading.Event()
+    # IEEE 39-bus review, F3: the standing reserve margin travels with the
+    # record. The frontier deliberately does NOT strip it (unlike the
+    # contingency sweep) — a margin is a standing standard, not a swept one —
+    # and the phase-8 plan says that is right "but must be stated on the
+    # panel, or the curve reads as cost-vs-eps when it is
+    # cost-vs-eps-at-margin-m". Measured on the IEEE 39-bus network: with the
+    # margin already covering every swept target, all three points came back
+    # with identical cost and zero ENS and nothing on the panel said why.
+    record: dict = {"status": "running", "points": [], "error": None,
+                    "warning": None, "knee": None,
+                    "reserve_margin": (
+                        float(getattr(cfg, "reserve_margin", None))
+                        if getattr(cfg, "reserve_margin", None) is not None
+                        else None),
+                    "targets_permyriad": targets, "base_restored": None,
+                    "base_restore_status": None,
+                    "started_at": time.time(), "thread": None,
+                    "stop_event": stop_event}
+
+    def worker():
+        try:
+            res = run_frontier_sweep(n, lock, cfg, targets, stop_event=stop_event,
+                                     final_state_update=_state_update)
+            voll = float(getattr(cfg, "voll", 0.0) or 0.0)
+            record.update(
+                status="aborted" if res.get("aborted") else "done",
+                points=res["points"], warning=res["warning"],
+                knee=knee_index(res["points"], voll), voll_eur_per_mwh=voll,
+                # Phase 12e: the engine has always computed this and the route
+                # threw it away. It says whether the closing re-solve RAN —
+                # not that the plan is back — and a study that could not
+                # restore the user's plan must say so.
+                base_restored=res.get("base_restored"),
+                base_restore_status=res.get("base_restore_status"),
+                finished_at=time.time(), error=None)
+        except (FrontierBudgetError, FrontierConfigError) as exc:
+            record.update(status="failed", points=[], error=str(exc),
+                          finished_at=time.time())
+        except Exception as exc:                              # noqa: BLE001
+            # The engine attaches its partial record to the exception so the
+            # completed points and the restore's outcome are not lost with it.
+            partial = getattr(exc, "frontier_result", None) or {}
+            record.update(status="failed", points=partial.get("points") or [],
+                          base_restored=partial.get("base_restored"),
+                          base_restore_status=partial.get("base_restore_status"),
+                          error=str(exc), finished_at=time.time())
+
+    _ctx = _contextvars.copy_context()
+    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
+                          name="adequacy-frontier")
+    record["thread"] = t
+    _publish_study("frontier", record, t)
+    return {"status": "running", "targets_permyriad": targets}
+
+
+class McElccAsset(_BaseModel):
+    # ``kind`` is a plain str rather than a Literal: the authoritative kind
+    # list lives in services/adequacy/elcc.py, and duplicating it in a pydantic
+    # Literal here would fork it — the day a fourth kind lands, the route would
+    # reject it with a schema error that names no asset. An unknown kind still
+    # ends up a 422, raised by the resolver that owns the list.
+    kind: str
+    name: str
+
+
+class McRequest(_BaseModel):
+    # All optional: the bare POST is the useful default (a headline LOLE/EUE
+    # with no ELCC study), and every field below has an engine-side default
+    # that this route must not fork.
+    draws: int | None = None
+    seed: int | None = None
+    cov_target: _Finite | None = None
+    elcc_assets: list[McElccAsset] | None = None
+    # Phase 12c: price the whole profile-bearing fleet as one portfolio, per
+    # period, beside the reserve margin's own credit for the same group. A
+    # boolean, not a pseudo-asset: the row must never land in `elcc` (a
+    # consumer summing that list would double-count), and the population is
+    # the engines' to derive, not the caller's to name.
+    elcc_portfolio: bool | None = None
+
+
+@results_router.get("/mc")
+def get_mc():
+    """
+    Status + payload of the last sequential-MC study (spec §4).
+
+    204 = never run in this session. While the worker runs this serves
+    ``{"status": "running", "result": None, ...}`` — same shape as the
+    frontier surface, so the panel polls one contract. The stored record
+    carries the worker-thread handle, which must never reach the wire.
+    """
+    st = _state.get("mc")
+    if not st:
+        return Response(status_code=204)
+    # `stop_event` is a threading.Event: unserialisable, and the abort route's
+    # only handle on a live run. Same filter the loops' GETs use.
+    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+
+
+@results_router.post("/mc/abort")
+def post_mc_abort():
+    """
+    Ask a running sequential-MC study to stop (Phase 12e).
+
+    The shipped loop routes' contract verbatim: 200 sets the record's stop
+    event and the engine stops at its next boundary — so an abort costs at
+    most the work already in flight, plus the closing restore, which still
+    runs. IDEMPOTENT and 200 even when the run is already finishing or
+    finished: "stop" on something that has stopped is satisfied, and a 409
+    there would make the button flicker into an error at exactly the moment it
+    worked. 404 only when no run has ever been recorded — a client bug, not a
+    race.
+
+    Deliberately NOT folded into ``/simulation/abort``: that route's stop
+    event belongs to the foreground solver thread and nothing in it reaches a
+    study worker, so a user pressing it would be told the abort succeeded
+    while the study kept running.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("mc")
+        if not st:
+            raise HTTPException(
+                404, "no sequential-MC study has been run in this session")
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
+
+
+@results_router.post("/mc")
+def post_mc(body: McRequest | None = None):
+    """
+    Start a sequential-MC adequacy study — optionally with an ELCC table —
+    in a worker thread (spec §4).
+
+    ASYNCHRONOUS BY CONSTRUCTION, not as an optimisation: a ten-asset ELCC
+    run is a baseline plus ~10 bisected MC evaluations per asset, i.e. minutes
+    of arithmetic. Running it inline would hold a request open long past every
+    proxy and browser timeout, and would block the event loop for the whole
+    process while doing it.
+
+    Unlike the frontier and the class-B/C sweep this engine SOLVES NOTHING and
+    never mutates the network, so it does NOT require a VoLL (spec §4): its
+    metrics are hours and MWh, not euros. It is still in the mutual-exclusion
+    mesh — the snapshot it takes must not be a half-mutated network, and the
+    sweep/frontier re-solve the one it is reading.
+
+    Validation is deliberately SYNCHRONOUS wherever it is cheap: an empty
+    fleet, an inconsistent (q, MTTR) pair and an unknown ELCC asset are all
+    knowable from the snapshot alone, and a user who typed a wrong asset name
+    must learn that now rather than after seven minutes of spinner. The
+    in-thread KeyError/ValueError mapping stays as belt-and-braces for the
+    cases only the run can discover.
+    """
+    import time
+
+    from services.adequacy.elcc import (
+        MAX_ELCC_ASSETS,
+        elcc_for_asset,
+    )
+    # Private on purpose: it is the ONE place asset-kind resolution lives, and
+    # re-implementing the name lookup here to keep the import public would fork
+    # the very mapping (kind → removal semantics) the 404/422 split depends on.
+    from services.adequacy.elcc import _resolve as _resolve_elcc_asset
+    from services.adequacy.mc import (
+        MAX_DRAWS,
+        MC_WARNING_V1,
+        mc_adequacy,
+        snapshot_inputs,
+        transition_probs,
+    )
+
+    _refuse_if_mesh_busy("mc")
+
+    draws = getattr(body, "draws", None)
+    draws = 500 if draws is None else int(draws)
+    if draws < 1:
+        raise HTTPException(422, "draws must be a positive number of samples")
+    if draws > MAX_DRAWS:
+        # A product cap, not a numerical one: the benchmark harness runs far
+        # deeper budgets by calling the engine directly (spec §7).
+        raise HTTPException(
+            422,
+            f"draws={draws} exceeds the engine cap of {MAX_DRAWS} draws per "
+            "study — the adaptive batching stops at that budget anyway")
+    seed = getattr(body, "seed", None)
+    seed = 0 if seed is None else int(seed)
+    cov_target = getattr(body, "cov_target", None)
+    cov_target = 0.05 if cov_target is None else float(cov_target)
+
+    assets = [(a.kind, a.name) for a in (getattr(body, "elcc_assets", None) or [])]
+    want_portfolio = bool(getattr(body, "elcc_portfolio", None) or False)
+    if len(assets) > MAX_ELCC_ASSETS:
+        raise HTTPException(
+            422,
+            f"{len(assets)} ELCC assets requested; the cap is "
+            f"{MAX_ELCC_ASSETS} (each asset costs a baseline plus ~10 full "
+            "MC evaluations)")
+
+    # The ONE snapshot, taken under the mutation lock (spec §1). Everything
+    # after this line — validation and the worker alike — reads plain arrays,
+    # so the network is free the moment the lock is released.
+    from services.adequacy.activity import activity_summary as _activity_summary
+
+    n = PyPSAService.get_network()
+    population = None
+    snapshot_fp = None
+    margin_payload = None
+    with PyPSAService.get_lock():
+        vre_names = [nm for kind, nm in assets if kind == "vre"]
+        if want_portfolio:
+            # The portfolio's must-take half needs its profiles PRESERVED in
+            # the snapshot (`snapshot_inputs` keeps only the names it is
+            # asked for): every must-take whose column is informative.
+            from services.adequacy.copt import (
+                must_take_generators,
+                series_is_informative,
+            )
+            pmp = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
+            for nm in must_take_generators(n):
+                if (nm not in vre_names and pmp is not None
+                        and nm in getattr(pmp, "columns", [])
+                        and series_is_informative(pmp[nm])):
+                    vre_names.append(nm)
+        try:
+            inputs = snapshot_inputs(
+                n, vre_assets=vre_names, cfg=_state.get("solver_config"))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        # Phase 12d: computed HERE, from the network, under the lock — the
+        # worker never touches `n` (plan A9), and the must-take half of the
+        # disclosure is not in the fleet (shipped-code review, finding 1).
+        activity_block = _activity_summary(n, inputs.periods)
+        if want_portfolio:
+            # Everything the worker needs from the NETWORK and from request-
+            # scoped state is captured here (plan 12c v3.1 A9): the
+            # population with the engines' capacity rule, the fingerprint the
+            # margin payload is checked against, and that payload itself —
+            # the worker never touches `_state` or `n`.
+            import copy as _copy
+
+            from services.adequacy.portfolio import (
+                network_fingerprint,
+                portfolio_population,
+            )
+            population = portfolio_population(n, inputs)
+            snapshot_fp = network_fingerprint(n)
+            margin_payload = _copy.deepcopy(_state.get("last_reserve_margin"))
+
+    if not inputs.units:
+        raise HTTPException(
+            422,
+            "nothing to sample: no electrical generator carries resolvable "
+            "occurrence data (unavailability + MTTR), so the sampled fleet is "
+            "empty — an empty fleet would report the entire horizon as loss of "
+            "load, which is a statement about missing input data, not about "
+            "the system")
+
+    # §2.2's inconsistent-pair rejection, pulled forward: it is a property of
+    # the (q, MTTR) pair alone, so there is no reason to discover it a batch
+    # into a background run and report it as a failed study.
+    for u in inputs.units:
+        try:
+            transition_probs(u.q, u.mttr_hours, name=u.name)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    for kind, name in assets:
+        try:
+            _resolve_elcc_asset(inputs, kind, name)
+        except KeyError as exc:
+            msg = str(exc.args[0]) if exc.args else str(exc)
+            raise HTTPException(
+                404, f"unknown ELCC asset {name!r} (kind {kind!r}): {msg}"
+            ) from exc
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    # The record is closed over by the worker rather than reached through
+    # `_state` inside it: `_state` resolves the *request-scoped* project
+    # context, and a worker thread has no request context — it would resolve a
+    # different dict and write its result where no reader looks.
+    stop_event = _threading.Event()
+    record: dict = {"status": "running", "result": None, "error": None,
+                    "started_at": time.time(), "thread": None,
+                    "stop_event": stop_event}
+
+    def worker():
+        # Phase 12h: the rule that decides which profiled units had no
+        # outages sampled. Imported from the COPT so `/mc`'s lists and
+        # `split_fleet`'s buckets cannot disagree about the same fleet.
+        from services.adequacy.copt import is_flag_deterministic as _is_flag_deterministic, rate_is_zero as _rate_is_zero
+        try:
+            # The ONLY call in the codebase that may carry the flag: this
+            # is the study's own baseline, not a replay of one. Every ELCC
+            # and loop call passes `stop_event=None` (see `mc_adequacy`).
+            metrics = mc_adequacy(inputs, draws=draws, seed=seed,
+                                  cov_target=cov_target, stop_event=stop_event)
+            # Phase 12c: the headline metrics ARE the baseline every ELCC
+            # row needs, argument for argument; injected with a content key
+            # the callee recomputes (the N+1 baseline, closed with CRN kept).
+            from services.adequacy.elcc import baseline_key as _baseline_key
+            from services.adequacy.mc import MAX_DRAWS as _MAX_DRAWS
+            key = _baseline_key(inputs, draws=draws, seed=seed,
+                                cov_target=cov_target, max_draws=_MAX_DRAWS,
+                                batch=250)
+            rows = []
+            for kind, name in assets:
+                # Between assets: a stopped study keeps the rows it priced and
+                # never starts another. The bisection inside each asset is
+                # checked too, so the worst case is one probe, not one asset.
+                if stop_event.is_set():
+                    break
                 try:
-                    has_subsidy = float(cc_val) > 0
-                except (TypeError, ValueError):
-                    has_subsidy = False
-            if is_renew or has_subsidy:
-                keep_cols.append(col)
-        if keep_cols:
-            curtailment = curtailment[keep_cols]
+                    rows.append(elcc_for_asset(
+                        inputs, kind, name, seed=seed, draws=draws,
+                        cov_target=cov_target, baseline=metrics,
+                        baseline_key=key, stop_event=stop_event))
+                except KeyError as exc:
+                    # Belt-and-braces for the 404 the POST already raised
+                    # synchronously: the only way to reach this is a name that
+                    # resolved at POST and stopped resolving mid-run. Caught
+                    # HERE rather than around the whole worker so an internal
+                    # KeyError from the sampler cannot be mislabelled as a
+                    # missing asset — and so the message names WHICH asset.
+                    msg = str(exc.args[0]) if exc.args else str(exc)
+                    record.update(
+                        status="failed", result=None, finished_at=time.time(),
+                        error=f"unknown ELCC asset {name!r} "
+                              f"(kind {kind!r}): {msg}")
+                    return
+            portfolio = None
+            if want_portfolio:
+                from services.adequacy.portfolio import portfolio_block
+                portfolio = portfolio_block(
+                    inputs, population, margin_payload=margin_payload,
+                    snapshot_fingerprint=snapshot_fp, seed=seed, draws=draws,
+                    cov_target=cov_target, baseline=metrics, baseline_key=key,
+                    stop_event=stop_event)
+            record.update(
+                status="aborted" if stop_event.is_set() else "done",
+                error=None, finished_at=time.time(),
+                result={
+                    # A SIBLING payload, deliberately not folded into
+                    # AdequacyReport: the MC is an engine-local study (like the
+                    # COPT), and merging it would grow the one report shape
+                    # every other consumer parses (spec §4, recorded decision).
+                    "engine": "mc",
+                    "fidelity": "sequential_mc",
+                    "metrics": metrics,
+                    "elcc": rows,
+                    # Phase 12c: a SIBLING of `elcc`, never a row in it.
+                    "elcc_portfolio": portfolio,
+                    "warning": MC_WARNING_V1,
+                    # Phase 12c-pre: the units whose outages were sampled ON
+                    # their availability series rather than at nameplate.
+                    #
+                    # Phase 12h: a rate-zero unit carries a profile but has
+                    # NO outages sampled on it, so leaving it here would
+                    # make this list's documented meaning false. The MC
+                    # never calls `split_fleet`, so the two lists are built
+                    # here and are DISJOINT by construction.
+                    "profile_units": [
+                        str(u.name) for u in inputs.units
+                        if getattr(u, "profile", None) is not None
+                        and not _rate_is_zero(u)],
+                    # M5: EVERY unit the flag zeroed — profiled or folded —
+                    # so the disclosure is symmetric across the two shapes.
+                    "deterministic_units": [
+                        str(u.name) for u in inputs.units
+                        if _is_flag_deterministic(u)],
+                    # F8: the typed-zero half of the same disclosure — see
+                    # `/copt`. Without it a unit whose rate the user typed
+                    # as 0 is in NO list here, and this payload has no row
+                    # note to fall back on.
+                    "rate_zero_units": [
+                        str(u.name) for u in inputs.units
+                        if _rate_is_zero(u)
+                        and not _is_flag_deterministic(u)],
+                    "folded_units": [
+                        {"name": str(u.name),
+                         "folded_constant": float(u.folded_constant),
+                         "source": "static"}
+                        for u in inputs.units
+                        if getattr(u, "folded_constant", None) is not None],
+                    # Phase 12d: the activity disclosure (see /copt),
+                    # captured in the request.
+                    "activity": activity_block,
+                })
+        except Exception as exc:                              # noqa: BLE001
+            record.update(status="failed", result=None, error=str(exc),
+                          finished_at=time.time())
+
+    # The loops' pattern: the record is already closed over; Phase 12e adds
+    # the request's context (a bare Thread does not inherit the ContextVar the
+    # active project lives in) and publish-and-start under one lock hold.
+    _ctx = _contextvars.copy_context()
+    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
+                          name="adequacy-mc")
+    record["thread"] = t
+    _publish_study("mc", record, t)
+    return {"status": "running", "draws": draws, "seed": seed,
+            "cov_target": cov_target, "elcc_assets": len(assets),
+            "elcc_portfolio": want_portfolio}
+
+
+@results_router.get("/mc/elcc_candidates")
+def get_mc_elcc_candidates():
+    """
+    The assets an ELCC study may be asked for, for the panel's picker.
+
+    ``{"assets": [{kind, name, nameplate_mw}, …], "max_assets": N}``, sorted by
+    nameplate descending, ties by name. `elcc_assets` was API-only until this
+    endpoint existed: the panel could render a credit table it had no way to
+    request, and a user would have had to type asset names and kinds copied out
+    of the network editor — including the kind distinction (an occurrence-
+    bearing "generator" vs a must-take "vre") which is a property of the
+    OCCURRENCE DATA, not of anything the editor shows.
+
+    Membership AGREES BY CONSTRUCTION with what ``post_mc`` accepts — see
+    ``elcc.elcc_candidates``, which reads it off the same snapshot the run
+    resolves against. That is the whole point: a candidate this endpoint offers
+    and the run then 404s on is the failure mode it exists to prevent.
+
+    Synchronous and read-only: one snapshot, no sampling, no solve. Hence NO
+    409 guard — unlike ``post_mc`` this starts nothing and mutates nothing, and
+    refusing to list assets while some other study runs would disable the
+    picker for minutes at a time for no gain. The lock is still taken for the
+    snapshot itself (same discipline as ``post_mc``): the frames must not be
+    read half-mutated.
+
+    200 with an EMPTY list — never 204 — when nothing qualifies. "This network
+    has no asset whose capacity credit could be measured" is an answer, and the
+    panel renders an explanatory line from it; a 204 would collapse it into the
+    client's "never fetched" case and leave an empty box on screen.
+    """
+    from services.adequacy.elcc import MAX_ELCC_ASSETS, elcc_candidates
+
+    n = PyPSAService.get_network()
+    with PyPSAService.get_lock():
+        try:
+            assets = elcc_candidates(n, cfg=_state.get("solver_config"))
+        except ValueError as exc:
+            # The same walk `/copt` and `/mc` refuse through (S1's
+            # `OutageRateError`); the fix review found this route letting it
+            # out as a 500.
+            raise HTTPException(422, str(exc)) from exc
+    return {"assets": assets, "max_assets": MAX_ELCC_ASSETS}
+
+
+# ── the coupling loop (Phase 7) ───────────────────────────────────────────
+#
+# The route BINDS the pure controller in services/adequacy/coupling.py to this
+# process's network, config and solver: `solve_at` is one capped
+# capacity-expansion solve, `evaluate` is one sequential-MC run over the plan
+# that solve produced, and everything about storage, locking, aborting and
+# restoring lives here rather than in the controller (spec §§2–3).
+
+# The loop's own caveats, appended to the MC's standing warning. Not a
+# restatement of it: these three are properties of the SEARCH, and each one is
+# a way a reader could over-read the answer.
+LOOP_WARNING_V1 = (
+    "The map from the energy cap to MC-LOLE is a step function, not a curve: "
+    "a range of caps produces the identical plan and therefore the identical "
+    "LOLE, so ε* is the cheapest cap this search VERIFIED, not the largest cap "
+    "that would still pass. Every iterate is a genuine optimum of its own "
+    "constrained problem, but only iterates whose own MC evaluation met the "
+    "target are answers — the bracket is a search heuristic, and tightening ε "
+    "can raise MC-LOLE."
+)
+
+# [N5]. Stated where the number is read, because the mismatch is structural
+# and no choice of ε can remove it.
+MULTI_PERIOD_WARNING_V1 = (
+    "This network has more than one period: the energy cap is enforced per "
+    "period against each period's own demand, while the target is a horizon "
+    "SUM of LOLE — a single scalar ε cannot say 'fix period 3 only', so an "
+    "unreachable or budget-exhausted verdict is structurally likelier here. "
+    "The per-iterate by_period rows are the diagnostic."
+)
+
+# [N6]. Three mechanisms, named, because the user's NEXT ACTION differs by
+# which one is operating and a bare "unreachable" is unactionable.
+# The margin-loop panel's OWN heading, verbatim.
+#
+# ★ A verdict that diagnoses a dead end and names the way out is only useful
+# if the way out can be FOUND: "a planning reserve margin" is a lever, and the
+# user still has to know the tool will search for one. This names the control
+# they must click. `MarginLoopPanel.test.tsx` pins the panel to the same
+# string, because a verdict naming a control that does not exist under that
+# name is worse than no pointer at all.
+MARGIN_LOOP_PANEL_LABEL = "Reliability-targeted reserve margin loop"
+
+NEVER_BOUND_WITH_MARGIN_COPY_V1 = (
+    "The cap never bound. On every iterate that solved, the LP's own shed "
+    "energy stayed under the ceiling, so tightening the cap could not change "
+    "the plan — and no cap can. What DID shape this plan is the firm-capacity "
+    "standard: a reserve margin is already in force, and the loop is reporting "
+    "the cap's failure, not the margin's. The loss of load the MC still sees "
+    "comes from outages beyond what that margin buys. Raise the margin (or "
+    "lower the target) rather than capping harder; the cap has no leverage "
+    "here either way. HOW MUCH to raise it by is what the \""
+    + MARGIN_LOOP_PANEL_LABEL + "\" on this tab searches for: the same "
+    "target and the same sampler, on the lever that is actually shaping "
+    "this plan."
+)
+
+NEVER_BOUND_COPY_V1 = (
+    "The cap never bound. On every iterate that solved, the LP's own shed "
+    "energy stayed under the ceiling (the binding column reads something "
+    "other than 'system_cap' throughout), so tightening the cap could not "
+    "change the plan — and no cap can. The loss of load the MC reports here "
+    "comes from OUTAGES the LP does not model at all, not from energy the LP "
+    "chose to shed: its deterministic view already covers demand, which is "
+    "exactly why the cap has no leverage. What would move this number is firm "
+    "capacity the LP sees no deterministic reason to build — a planning "
+    "reserve margin, or the candidate unit itself. Capping harder will not. "
+    "You do not have to size that margin by hand: the \""
+    + MARGIN_LOOP_PANEL_LABEL + "\" on this tab runs this same search on "
+    "that lever and certifies what it finds against this same MC-LOLE "
+    "target."
+)
+
+UNREACHABLE_COPY_V1 = (
+    "No cap this search could reach produced a plan that met the target on "
+    "the MC's own LOLE. Three mechanisms produce this, and they call for "
+    "different responses: (a) the LP has perfect FORESIGHT over storage while "
+    "the MC dispatches greedily, so a plan that leans on storage looks "
+    "adequate to the solver and is not; (b) demand response serves the LP's "
+    "cap but is EXCLUDED as a resource in the MC, so tightening ε buys cost "
+    "without buying MC-LOLE and the plan stops changing; (c) tightening ε can "
+    "substitute storage for thermal capacity and RAISE MC-LOLE. Check the "
+    "per-iterate binding column and by_period rows before raising the target."
+)
+
+
+class CouplingLoopRequest(_BaseModel):
+    # `target_lole_h` is the only required field, and it is HORIZON-basis
+    # hours (the panel does the h/yr conversion so the wire stays unit-safe).
+    # Optional here rather than required-by-pydantic so a missing target is
+    # refused with the route's own sentence instead of a schema dump.
+    target_lole_h: _Finite | None = None
+    draws: int | None = None
+    seed: int | None = None
+    eps0: _Finite | None = None
+    max_solves: int | None = None
+    restore: str | None = None
+
+
+@results_router.get("/coupling_loop")
+def get_coupling_loop():
+    """
+    Status + payload of the last coupling-loop study (spec §3).
+
+    204 = never run in this session. While the worker runs, this serves the
+    SAME record with ``status: "running"`` and an ``iterations`` list that
+    grows between polls — that is the whole point of the surface, since a run
+    is minutes long and the panel renders each iterate as it lands.
+
+    The record carries a worker-thread handle AND the abort stop-event, and
+    neither may reach the wire: both are unserialisable, and the stop event in
+    particular is the abort route's only handle on a live run.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("coupling_loop")
+        if not st:
+            return Response(status_code=204)
+        # Shallow copy under the lock; `iterations` is REBOUND by the worker,
+        # never mutated, so the list this copy captures is frozen for ever.
+        return {k: v for k, v in st.items()
+                if k not in ("thread", "stop_event")}
+
+
+@results_router.post("/coupling_loop/abort")
+def post_coupling_loop_abort():
+    """
+    Ask a running coupling loop to stop (spec §3, plan [S8]).
+
+    200 sets the record's stop event; the controller checks it before each
+    solve, so an abort costs at most the iterate already in flight and the
+    closing restore still runs. IDEMPOTENT and 200 even when the run is
+    already finishing or finished: "stop" on something that has stopped is
+    satisfied, and a 409 there would make the button flicker into an error at
+    exactly the moment it worked. 404 only when no run has ever been recorded
+    — that is a client bug, not a race.
+
+    Deliberately NOT folded into ``/simulation/abort``: that route's stop
+    event belongs to the foreground solver thread and nothing in it reaches a
+    study worker, so a user pressing it would be told the abort succeeded
+    while the loop kept solving.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("coupling_loop")
+        if not st:
+            raise HTTPException(
+                404, "no coupling-loop study has been run in this session")
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
+
+
+@results_router.post("/coupling_loop")
+def post_coupling_loop(body: CouplingLoopRequest | None = None):
+    """
+    Start the adequacy-coupled planning loop in a worker thread (spec §3).
+
+    Solve the LP under an energy cap, run the sequential MC on the PLAN it
+    produced, retune the cap, re-solve — until the plan meets the user's
+    target on the MC's own LOLE rather than on the LP proxy's shed energy.
+    The two are not the same standard: the LP has perfect foresight over
+    storage and no outages at all, so a plan that sheds exactly its cap in the
+    LP can lose load for tens of hours in the MC.
+
+    ASYNCHRONOUS BY CONSTRUCTION: up to ``max_solves`` full capacity-expansion
+    solves plus an MC evaluation each, plus the closing restore — minutes to
+    tens of minutes.
+
+    VALIDATION IS SYNCHRONOUS WHEREVER IT IS CHEAP, and here that is the whole
+    set. Every refusal below is knowable from the config and one snapshot, and
+    the alternative is not "a slower error" but a WRONG ANSWER: under a
+    rolling or myopic strategy every capped solve fails validation, so the
+    loop would burn its budget and report ``unreachable`` — "no plan meets
+    this standard" — when the truth is "this strategy cannot enforce a cap".
+    """
+    import dataclasses
+    import hashlib
+    import queue as _queue
+    import time
+
+    from services.adequacy.coupling import MAX_LOOP_SOLVES, run_coupling_loop
+    from services.adequacy.lever_text import format_lever_value
+    from services.adequacy.mc import (
+        MAX_DRAWS,
+        MC_WARNING_V1,
+        mc_adequacy,
+        snapshot_inputs,
+    )
+    from services.adequacy.metrics import horizon_years, resolve_time_basis
+    from services.adequacy.sweep import _solve_once
+    from routers.simulation import _state_update
+
+    # ── the 409 mesh ──────────────────────────────────────────────────────
+    _refuse_if_mesh_busy("coupling_loop")
+
+    # ── the synchronous 422 set ───────────────────────────────────────────
+    target = getattr(body, "target_lole_h", None)
+    try:
+        target = float(target) if target is not None else None
+    except (TypeError, ValueError):
+        target = None
+    if target is None or not (target > 0):
+        raise HTTPException(
+            422,
+            "target_lole_h is required and must be > 0: the loop searches for "
+            "the cheapest cap whose plan meets a RELIABILITY STANDARD, and a "
+            "target of zero (or none) is not a standard — it is the demand "
+            "that no draw ever sheds an hour, which no finite plan can buy")
+
+    draws = getattr(body, "draws", None)
+    draws = 500 if draws is None else int(draws)
+    if draws < 1:
+        raise HTTPException(422, "draws must be a positive number of samples")
+    if draws > MAX_DRAWS:
+        raise HTTPException(
+            422,
+            f"draws={draws} exceeds the engine cap of {MAX_DRAWS} draws per "
+            "evaluation — and the loop pays that cost once per iterate")
+    seed = getattr(body, "seed", None)
+    seed = 0 if seed is None else int(seed)
+
+    max_solves = getattr(body, "max_solves", None)
+    max_solves = MAX_LOOP_SOLVES if max_solves is None else int(max_solves)
+    if not (1 <= max_solves <= MAX_LOOP_SOLVES):
+        raise HTTPException(
+            422,
+            f"max_solves must be between 1 and {MAX_LOOP_SOLVES} (got "
+            f"{max_solves}) — each solve is a full capacity expansion, so the "
+            "budget is the wall-clock promise this request makes")
+
+    restore = getattr(body, "restore", None) or "base"
+    if restore not in ("base", "final"):
+        raise HTTPException(
+            422,
+            f"restore must be 'base' or 'final' (got {restore!r}): 'base' "
+            "re-solves with your original config, 'final' leaves you holding "
+            "the certified plan at ε*")
+
+    cfg = _state.get("solver_config")
+    if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
+        raise HTTPException(
+            422, "the coupling loop requires a VOLL > 0 in solver settings — "
+                 "with no load-shedding slacks the cap constrains nothing and "
+                 "every iterate collapses to the same unconstrained plan")
+
+    strategy = str(getattr(cfg, "solve_strategy", "full") or "full")
+    if strategy in ("rolling", "myopic"):
+        raise HTTPException(
+            422,
+            f"the reliability target is not supported with the {strategy!r} "
+            "solve strategy: each LP window would need its own demand "
+            "denominator, so every capped solve fails validation. The loop "
+            "would spend its whole budget on failed iterates and report "
+            "'unreachable' — which is a statement about the strategy, not "
+            "about the network. Use the full strategy, or unset the target.")
+
+    # The ONE snapshot the validation reads, taken under the mutation lock.
+    # `keep_zero_capacity=True` from the very first call (spec §1.2): the
+    # sampled fleet's MEMBERSHIP must be invariant across iterates or the
+    # positional CRN substreams shift under it, and a fleet that is empty here
+    # would be empty for every evaluation too.
+    n = PyPSAService.get_network()
+    # Phase 12f: the same up-front refusal the margin loop makes, for the same
+    # reason and against the same defect. A non-finite value in one of the five
+    # finite-default LP bounds is a blocking preflight error, so EVERY iterate
+    # would come back `validation_failed`, the loop would spend its whole
+    # budget, and the verdict copy would advise "Raise max_solves, or start
+    # from a tighter eps0" — advice that can never work here.
+    #
+    # Guarded at BOTH loops deliberately: this codebase already learned that a
+    # guard repeated at seven call sites is the one the eighth route forgets.
+    from services.validation_service import _check_nonfinite_bounds as _cnb
+    for _iss in _cnb(n):
+        raise HTTPException(422, _iss.message)
+    with PyPSAService.get_lock():
+        try:
+            # Phase 12c-0: the LP's demand basis — the plan the loop
+            # certifies was built on it (the fifteenth finding).
+            inputs = snapshot_inputs(n, keep_zero_capacity=True, cfg=cfg)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        nyears = float(horizon_years(n))
+
+    if not inputs.units:
+        raise HTTPException(
+            422,
+            "nothing to sample: no electrical generator carries resolvable "
+            "occurrence data (unavailability + MTTR), so the sampled fleet is "
+            "empty — an empty fleet would report the entire horizon as loss of "
+            "load, which is a statement about missing input data, not about "
+            "the system")
+
+    # [S11] the up-front resolution floor. One shortfall hour in one draw
+    # contributes that hour's WEIGHT to the mean, so the smallest non-zero
+    # LOLE these draws can resolve is `min positive weight / draws`. A target
+    # under it is undecidable: every verdict the run could reach — met or
+    # missed — would be an artefact of the sample size, and the study would
+    # answer with a confident number that means nothing.
+    _w = inputs.weights[inputs.weights > 0]
+    floor_h = (float(_w.min()) / draws) if _w.size else None
+    if floor_h is not None and target < floor_h:
+        need = int(math.ceil(float(_w.min()) / target))
+        raise HTTPException(
+            422,
+            f"target_lole_h={target:g} h is below this study's resolution "
+            f"floor of {floor_h:g} h at {draws} draws: a single shortfall "
+            "hour in a single draw already exceeds it, so no verdict here "
+            "could distinguish a compliant plan from a lucky sample. About "
+            f"{need} draws would resolve it.")
+
+    eps0 = getattr(body, "eps0", None)
+    if eps0 is None:
+        eps0 = getattr(cfg, "ens_cap_permyriad", None)
+    try:
+        eps0 = float(eps0) if eps0 is not None else None
+    except (TypeError, ValueError):
+        eps0 = None
+    # An unset cap reaches the loop as the ≤ 0 NO-TARGET sentinel, which the
+    # controller would clamp to its hard backstop and start the search two
+    # decades tighter than any real plan needs. 100‱ is the loose end of the
+    # frontier's own default spread — the cheap side, where a solve is fast.
+    if eps0 is None or not (eps0 > 0):
+        eps0 = 100.0
+
+    lock = PyPSAService.get_lock()
+    base_cfg = cfg
+    basis = resolve_time_basis(nyears)
+
+    # ── the bindings (spec §3) ────────────────────────────────────────────
+
+    def _snapshot():
+        # `base_cfg` is captured in the request — the worker never reads
+        # `_state` — and the scalers do not change across iterates.
+        with lock:
+            return snapshot_inputs(n, keep_zero_capacity=True, cfg=base_cfg)
+
+    def _hash(mc_inputs) -> str:
+        """sha256 over exactly what the MC reads — the sorted
+        ``(name, capacity_mw)`` unit vector, the sorted
+        ``(name, p_nom_mw, e_nom_mwh)`` storage vector, and the residual bytes.
+
+        NOT the objective (plan [B3]): degenerate optima give equal cost for
+        different plans, and with DSR configured the objective moves (variable
+        cost) while the plan stands still. Equal hash ⇒ bit-identical MC under
+        the same seed and draw count, so reuse is exact where cost equality
+        was a guess.
+        """
+        # Phase 12d: one implementation for both loops, testable
+        # (`tests/test_adequacy_activity.py` E8).
+        return _snapshot_hash(mc_inputs)
+
+    _margin_bound_flag = [False]
+
+    def solve_at(eps: float) -> dict:
+        """One capped capacity-expansion solve into a PRIVATE sink, read out
+        exactly as ``run_frontier_sweep`` reads its points. Solve failures
+        come back as a status — the controller is specified never to see an
+        exception from here, and a raise would cost the whole study."""
+        sink: dict = {}
+        _solve_once(dataclasses.replace(base_cfg, ens_cap_permyriad=float(eps)),
+                    n, lock, None, sink)
+        status = sink.get("_status")
+        out = {"status": status, "condition": sink.get("_condition"),
+               "cost_eur": None, "ens_mwh": None, "cap_mwh": None,
+               "binding": None, "report": None}
+        if status not in ("ok", "optimal"):
+            return out
+        rep = sink.get("adequacy_report")
+        if not rep:
+            # A target WAS set and the solve succeeded, so the report is the
+            # contract. Its absence is a defect, and reporting it as a failed
+            # iterate keeps the loop from evaluating a plan it cannot describe.
+            out["status"] = "no_report"
+            out["condition"] = "the solve returned no adequacy report"
+            return out
+        # Did a reserve margin shape this iterate? The controller's row keeps
+        # nine fixed keys and drops the report, and `coupling.py` is
+        # deliberately not touched (it is the regression oracle for the margin
+        # loop), so the answer is captured HERE, where the report is in hand.
+        # `binding` itself can never say this: it is computed purely from the
+        # ENS caps and reads "voll" even when a margin is what bound.
+        _rm = (rep.get("reserve_margin") or {}).get("by_period") or []
+        if any(bool(p.get("binding")) for p in _rm):
+            _margin_bound_flag[0] = True
+        sysblk = rep["target"]["system"]
+        out.update(
+            report=rep,
+            cost_eur=float(rep["cost"]["total_system_cost_eur"]),
+            ens_mwh=float(sysblk["achieved_ens_mwh"]),
+            cap_mwh=float(sysblk["cap_mwh"]),
+            binding=rep["target"]["binding"],
+        )
+        return out
+
+    # The floor the payload reports, refreshed by every evaluation so the
+    # value that ships is the FINAL evaluation's own (spec v1.2 §3) rather
+    # than the up-front estimate. With `draws == max_draws` the sample count
+    # is pinned, so the two agree — which is the point: a drifting n_samples
+    # would mean the floor under the verdict was not the floor that was
+    # validated.
+    eval_state: dict = {"floor": floor_h}
+
+    def evaluate():
+        mc_inputs = _snapshot()
+        # §3's normative call. `max_draws=N` is what PINS the sample count:
+        # merely ignoring cov_target leaves the adaptive 2000-draw cap in play
+        # and n_samples drifts between iterates, which breaks the common
+        # random numbers the plateau reuse rests on.
+        # `stop_event` is NEVER passed here: this is a REPLAY of one batch
+        # sequence (see `mc_adequacy`'s note), and the loop's own abort is
+        # checked between iterates, never inside an evaluation.
+        metrics = mc_adequacy(mc_inputs, draws=draws, seed=seed,
+                              max_draws=draws, stop_event=None)
+        try:
+            eval_state["floor"] = metrics.get("resolution_floor_h")
+        except AttributeError:                                # noqa: BLE001
+            pass
+        return _hash(mc_inputs), metrics
+
+    def _plan_hash():
+        """The duck-typed probe of spec v1.2 §1. The hash comes from the
+        snapshot alone, so the controller can skip an MC on a plateau instead
+        of running one and throwing the result away."""
+        return _hash(_snapshot())
+
+    evaluate.plan_hash = _plan_hash
+
+    # ── the record (closed over, never reached through `_state`) ──────────
+    stop_event = _threading.Event()
+    record: dict = {
+        "study": "coupling_loop",
+        "status": "running",
+        "target_lole_h": target,
+        "basis": basis,
+        "horizon_years": nyears,
+        "draws": draws,
+        "seed": seed,
+        "eps0": eps0,
+        "max_solves": max_solves,
+        "restore": restore,
+        "base_restored": False,
+        "confident": False,
+        "eps_star": None,
+        "resolution_floor_h": floor_h,
+        "solves_used": 0,
+        "iterations": [],
+        "final": None,
+        "verdict": None,
+        "warning": MC_WARNING_V1 + " " + LOOP_WARNING_V1,
+        "error": None,
+        "started_at": time.time(),
+        "finished_at": None,
+        "thread": None,
+        "stop_event": stop_event,
+    }
+
+    def on_iteration(row: dict) -> None:
+        """Grow the record by REBINDING, never by appending in place.
+
+        ``get_coupling_loop`` serves a shallow copy, so an in-place append
+        hands the serializer the very list this thread is mutating: a mid-run
+        GET can then be written half-way through an append, and a client
+        polling every second can watch its own earlier history change. A fresh
+        list per iterate makes every snapshot immutable by construction — each
+        GET's list is a prefix of the next, permanently.
+        """
+        with PyPSAService.get_solver_state_lock():
+            record["iterations"] = record["iterations"] + [row]
+
+    # The solver's own word on the closing re-solve, for the payload. A cell
+    # rather than a return value because `_restore_closing` returns a bool
+    # that four call sites already read (12e shipped-code review, S1).
+    _restore_word: list = [None]
+
+    def _restore_closing(met: bool, eps_star) -> bool:
+        """The closing re-solve — the route's job, on EVERY path (spec §3,
+        §1.3's pattern). The loop mutates the network once per iterate, so
+        without this it is left on whichever ε happened to be last while the
+        foreground results still describe the pre-study solve: the study
+        silently rewrites the user's plan and says nothing.
+
+        ``"final"`` is only meaningful on a met verdict — there is no
+        certified cap otherwise — so it falls back to base rather than
+        applying a cap nothing verified.
+        """
+        from services.adequacy.sweep import restore_is_clean
+        from services.solver_service import run_simulation
+
+        use_final = (restore == "final" and met and eps_star is not None)
+        if use_final:
+            final_cfg = dataclasses.replace(
+                base_cfg, ens_cap_permyriad=float(eps_star))
+            # Persisted through the normal config path (read-modify-write
+            # under the solver-state lock, exactly as PUT /solver_config
+            # does) BEFORE the solve: the user asked to hold ε*, and a
+            # restore whose solve fails must still leave the setting they
+            # will re-run with, with `base_restored` reporting the failure.
+            with PyPSAService.get_solver_state_lock():
+                _state["solver_config"] = dataclasses.replace(
+                    _state["solver_config"],
+                    ens_cap_permyriad=float(eps_star))
         else:
-            # No curtailable generators in the network — return an empty-shaped
-            # payload (preserves index, drops all columns) rather than 204.
-            curtailment = curtailment.iloc[:, 0:0]
-        range_meta = None
-        if _wants_slice(from_, to_):
-            curtailment, range_meta = _slice_ts(curtailment, from_, to_)
-        return _ts_payload(curtailment, range_meta=range_meta)
-    except Exception:
-        logger.exception("results endpoint failed; returning 204 (see traceback)")
-        return _not_solved()
+            final_cfg = base_cfg
+        try:
+            status, condition = run_simulation(
+                final_cfg, n, lock, _threading.Event(), _queue.SimpleQueue(),
+                state_update=_state_update)
+        except Exception as exc:                              # noqa: BLE001
+            logger.exception(
+                "coupling loop: the closing re-solve FAILED — the network is "
+                "left on the last iterate's cap and the foreground results do "
+                "not describe the plan the verdict is about")
+            _restore_word[0] = f"raised: {exc}"
+            return False
+        # The CONDITION, through the shared predicate — never `status`. This
+        # read `status in ("ok", "optimal")`, and linopy's `SolverStatus.ok`
+        # also covers `time_limit`, `iteration_limit`, `terminated_by_limit`,
+        # `suboptimal` and `imprecise`: a closing re-solve that hit the MIP
+        # time limit (`mip_time_limit_s` is a shipped setting) reported `ok`,
+        # so the panel said "restored" while the foreground was a time-limited
+        # dispatch. The frontier and the contingency sweep had the same bug and
+        # it was found there first (12e shipped-code review, S1); this is the
+        # same defect in the two loops, fixed the same way and through the same
+        # one predicate rather than a fourth copy of the vocabulary.
+        word = str(condition or status)
+        _restore_word[0] = word
+        if not restore_is_clean(word):
+            logger.warning(
+                "coupling loop: the closing re-solve returned %r — it ran but "
+                "did not restore the plan the verdict is about", word)
+        return restore_is_clean(word)
+
+    def _verdict_copy(status: str, eps_star, rows=None) -> str:
+        _margin_bound = _margin_bound_flag[0]
+        if status == "unreachable":
+            # WHICH unreachable? The three-mechanism copy assumes the cap was
+            # doing something and the MC disagreed with it. The commonest case
+            # in practice (QA round S17) is that the cap never bound at all —
+            # the LP sheds nothing at any ceiling because its outage-free view
+            # already covers demand — and telling that user to check storage
+            # foresight and DSR sends them after mechanisms that are not
+            # happening. It is diagnosable from the rows, so diagnose it.
+            solved = [r for r in (rows or [])
+                      if r.get("solve_status") in ("ok", "optimal")]
+            if solved and not any(r.get("binding") == "system_cap"
+                                  for r in solved):
+                # WHICH never-bound? `report.binding` is computed purely from
+                # the ENS caps, so it reads "voll" even when a reserve margin
+                # is what actually shaped the plan. Prescribing a margin to a
+                # user who already set one reads as the tool not knowing what
+                # they configured — the diagnosis is right, only the
+                # recommendation is stale. The margin's own block says whether
+                # it was in force, so ask it.
+                if _margin_bound:
+                    return NEVER_BOUND_WITH_MARGIN_COPY_V1
+                return NEVER_BOUND_COPY_V1
+            return UNREACHABLE_COPY_V1
+        if status == "met" and eps_star is not None:
+            # `format_lever_value`, never `%g` — and never the badge's two
+            # significant figures either. The panel's own restore explainer
+            # prints this same number, and the two disagreed IN THE SAME
+            # PANEL: the verdict said 0.0347281 where the explainer said
+            # 0.035. An ENS cap is a CEILING on unserved energy, so a value
+            # rounded UP is a strictly LOOSER standard that need not
+            # reproduce the certified plan. One number, spelled once.
+            cap_text = format_lever_value(eps_star)
+            if restore == "final":
+                return (
+                    f"A plan meeting {target:g} h was verified at ε* = "
+                    f"{cap_text}‱, and that cap has been APPLIED to your "
+                    f"solver settings (ens_cap_permyriad = {cap_text}) and "
+                    "re-solved — the network you are holding is the certified "
+                    "plan.")
+            return (
+                f"A plan meeting {target:g} h was verified at ε* = "
+                f"{cap_text}‱. Your original config has been re-solved, so "
+                "the network you are holding is NOT that plan: to keep it, set "
+                f"ens_cap_permyriad = {cap_text} and re-solve.")
+        if status == "aborted":
+            return ("The study was aborted between iterates. Any iterates "
+                    "already evaluated are shown; the closing restore ran, so "
+                    "the network is back on your own config.")
+        if status == "budget_exhausted":
+            return (
+                f"The solve budget ({max_solves}) was spent without verifying "
+                "a plan that meets the target. Nothing here says the target is "
+                "unreachable — only that this search did not reach it. Raise "
+                "max_solves, or start from a tighter eps0.")
+        return ("The study did not complete. The iterates recorded below are "
+                "what it managed before it stopped.")
+
+    def worker():
+        res: dict | None = None
+        err: str | None = None
+        try:
+            try:
+                res = run_coupling_loop(
+                    solve_at, evaluate, target_lole_h=target, eps0=eps0,
+                    max_solves=max_solves, stop_event=stop_event,
+                    on_iteration=on_iteration)
+            except BaseException as exc:                      # noqa: BLE001
+                # The controller is total by construction; this is the belt
+                # for a broken binding above, and it must never leave the
+                # record stuck on "running" for the rest of the session.
+                logger.exception("coupling loop: the controller raised")
+                err = str(exc)
+        finally:
+            status = (res or {}).get("status") or "failed"
+            eps_star = (res or {}).get("eps_star")
+            try:
+                base_restored = _restore_closing(status == "met", eps_star)
+            except BaseException:                             # noqa: BLE001
+                logger.exception("coupling loop: the restore itself raised")
+                base_restored = False
+            iterations = (res or {}).get("iterations")
+            if iterations is None:
+                iterations = record["iterations"]
+            warning = MC_WARNING_V1 + " " + LOOP_WARNING_V1
+            if any(len((r.get("mc") or {}).get("by_period") or {}) > 1
+                   for r in iterations):
+                warning += " " + MULTI_PERIOD_WARNING_V1
+            # ONE atomic apply, under the same lock `on_iteration` rebinds
+            # under: a GET landing between the status flip and the verdict
+            # would otherwise serve a finished study with a running study's
+            # empty final, which is the one shape the panel cannot render.
+            with PyPSAService.get_solver_state_lock():
+                record.update(
+                    status=status,
+                    iterations=iterations,
+                    final=(res or {}).get("final"),
+                    confident=bool((res or {}).get("confident")),
+                    eps_star=eps_star,
+                    solves_used=int((res or {}).get("solves_used") or 0),
+                    resolution_floor_h=eval_state["floor"],
+                    base_restored=bool(base_restored),
+                    # The solver's word, so a restore that RAN and still did
+                    # not put the plan back can be named rather than merely
+                    # denied (12e shipped-code review, S1).
+                    base_restore_status=_restore_word[0],
+                    verdict=_verdict_copy(
+                        status, eps_star,
+                        (res or {}).get("iterations")),
+                    warning=warning,
+                    error=err,
+                    finished_at=time.time(),
+                )
+
+    # The worker carries the REQUEST's context (the /simulation/run pattern):
+    # the active project lives in a ContextVar and a bare Thread does not
+    # inherit it, so without this the closing restore's `_state_update` and
+    # the `restore="final"` config write would land in the PROCESS foreground
+    # — a different project's state from the one the caller is polling. The
+    # study record itself is CLOSED OVER rather than reached through `_state`
+    # (post_mc's pattern), so it cannot be redirected by a context switch at
+    # all; post_frontier's in-thread `_state["frontier"].update(...)` is the
+    # anti-pattern this deliberately does not copy.
+    _ctx = _contextvars.copy_context()
+    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
+                          name="adequacy-coupling-loop")
+    record["thread"] = t
+    # Publish and START under one lock hold. `_study_running` tests
+    # `thread.is_alive()`, and a registered-but-not-yet-started thread reports
+    # False — so a second POST arriving in that window would read the record as
+    # stale state, claim the surface, and put two loops on the same network.
+    _publish_study("coupling_loop", record, t)
+    return {"status": "running", "target_lole_h": target, "draws": draws,
+            "seed": seed, "eps0": eps0, "max_solves": max_solves,
+            "restore": restore, "basis": basis,
+            "resolution_floor_h": floor_h}
+
+
+# ── the margin loop (Phase 9) ─────────────────────────────────────────────
+#
+# The SAME controller as the coupling loop, on a different lever. Nothing in
+# `services/adequacy/coupling.py` is touched (margin-loop spec §0): the margin
+# reaches it through the reciprocal substitution of
+# `services/adequacy/margin_lever.py`, under which every comparison the
+# controller makes — the multiplicative shrink, the strictly-positive assert,
+# the geometric midpoint, the `miss > met` test and the `(cost, -x)` tie-break
+# — is already correct for a lever that gets stricter as it GROWS. What lives
+# here is what the controller cannot know: that this lever has no energy cap
+# (§2.2), that its `binding` comes from the margin's own block (§2.1), where
+# the search should START (§2.3), which refusals are knowable before the first
+# solve (§2.4), that an out-of-reach margin arrives as `validation_failed`
+# rather than as an infeasible LP (§2.5), and that the controller's `x` must
+# never reach the wire (§2.6).
+
+# The search's own caveats — properties of THIS lever's search, not of the MC.
+MARGIN_LOOP_WARNING_V1 = (
+    "The map from the reserve margin to MC-LOLE is a step function, not a "
+    "curve: a range of margins forces the identical build and therefore the "
+    "identical LOLE, so m* is the cheapest margin this search VERIFIED, not "
+    "the smallest margin that would still pass. Every iterate is a genuine "
+    "optimum of its own constrained problem, but only iterates whose own MC "
+    "evaluation met the target are answers — the bracket is a search "
+    "heuristic. The margin buys FIRM CAPACITY against a peak the LP already "
+    "covers deterministically, which is why it can move a number no energy "
+    "cap can; it does not buy energy, so a network short of energy rather "
+    "than of capacity will not respond to it."
+)
+
+MARGIN_MULTI_PERIOD_WARNING_V1 = (
+    "This network has more than one period: the margin is enforced per "
+    "period against each period's own peak, while the target is a horizon "
+    "SUM of LOLE — a single scalar margin cannot say 'fix period 3 only', so "
+    "an unreachable or budget-exhausted verdict is structurally likelier "
+    "here. The per-iterate by_period rows are the diagnostic. Note also that "
+    "when the ACTIVE EXTENDABLE SET is identical in every period the LP has "
+    "one horizon-wide nominal variable, so the standard degenerates to a "
+    "single one at the largest peak (the report's `horizon_wide` flag)."
+)
+
+# The probe of §2.3 runs at the user's own margin — but at exactly 0 there is
+# no standard at all (`_prm_margin` reads `<= 0` as "no margin"), the wrapper
+# installs nothing and the report carries no reserve-margin block, so there
+# would be nothing to read the incumbent's tight margin OFF. A margin this
+# small is numerically "no margin" for every purpose except that it makes the
+# standard — and therefore its report block — exist.
+PROBE_MARGIN = 1e-4
+
+
+class MarginLoopRequest(_BaseModel):
+    # No `m0`: the starting margin is not a user parameter but a MEASUREMENT
+    # (§2.3, the probing solve). A user-supplied start would be the one number
+    # in this request that can silently make the study worthless — too small
+    # and the search walks through a region where the plan does not change,
+    # too large and it overshoots the bracket entirely.
+    target_lole_h: _Finite | None = None
+    draws: int | None = None
+    seed: int | None = None
+    max_solves: int | None = None
+    restore: str | None = None
+
+
+@results_router.get("/margin_loop")
+def get_margin_loop():
+    """
+    Status + payload of the last margin-loop study (spec §2.6).
+
+    204 = never run in this session. While the worker runs, this serves the
+    SAME record with ``status: "running"`` and an ``iterations`` list that
+    grows between polls. The thread handle and the abort stop-event never
+    reach the wire: both are unserialisable, and the stop event is the abort
+    route's only handle on a live run.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("margin_loop")
+        if not st:
+            return Response(status_code=204)
+        # Shallow copy under the lock; `iterations` is REBOUND by the worker,
+        # never mutated, so the list this copy captures is frozen for ever.
+        return {k: v for k, v in st.items()
+                if k not in ("thread", "stop_event")}
+
+
+@results_router.post("/margin_loop/abort")
+def post_margin_loop_abort():
+    """
+    Ask a running margin loop to stop (the coupling loop's contract, §2).
+
+    200 sets the record's stop event; the controller checks it before each
+    solve, so an abort costs at most the iterate already in flight and the
+    closing restore still runs. IDEMPOTENT and 200 even when the run is
+    already finishing: "stop" on something that has stopped is satisfied.
+    404 only when no run has ever been recorded.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get("margin_loop")
+        if not st:
+            raise HTTPException(
+                404, "no margin-loop study has been run in this session")
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
+
+
+@results_router.post("/margin_loop")
+def post_margin_loop(body: MarginLoopRequest | None = None):
+    """
+    Drive the PLANNING RESERVE MARGIN until the plan meets the user's target
+    on the sequential MC's own LOLE (margin-loop spec §2).
+
+    The sibling of ``POST /results/coupling_loop`` and the answer to the case
+    that one cannot serve: on a network whose firm capacity already covers
+    demand deterministically, the LP sheds nothing at any energy cap, so no ε
+    changes the plan and the cap loop can only report ``unreachable``. The
+    loss of load the MC sees there comes from OUTAGES the LP does not model at
+    all, and the lever that buys firm capacity the LP sees no deterministic
+    reason to build is the margin.
+
+    ASYNCHRONOUS BY CONSTRUCTION: one probing solve plus up to ``max_solves``
+    full capacity expansions with an MC evaluation each, plus the closing
+    restore.
+
+    VALIDATION IS SYNCHRONOUS WHEREVER IT IS CHEAP, and for this lever that is
+    the whole set — ``reserve_margin_facts`` is explicitly preflight-callable
+    ("nothing in this function touches ``n.model``"), so the ceiling and the
+    unpriceable-asset refusal both cost zero solves. Two of the cap loop's
+    refusals are deliberately NOT copied: a VoLL is not required (the margin
+    is a constraint, not a price), and ``myopic`` is allowed (each myopic
+    iteration's snapshots are exactly one investment period, which is the peak
+    the standard is defined against — the margin's own validator downgrades it
+    to a warning, and refusing it here would deny a supported configuration).
+    """
+    import dataclasses
+    import hashlib
+    import queue as _queue
+    import time
+
+    from services.adequacy.coupling import MAX_LOOP_SOLVES, run_coupling_loop
+    from services.adequacy.lever_text import format_lever_value
+    from services.adequacy.margin_lever import (
+        MAX_MARGIN,
+        STEP_OVERSHOOT,
+        to_margin,
+        to_x,
+    )
+    from services.adequacy.mc import (
+        MAX_DRAWS,
+        MC_WARNING_V1,
+        mc_adequacy,
+        snapshot_inputs,
+    )
+    from services.adequacy.metrics import horizon_years, resolve_time_basis
+    from services.adequacy.sweep import _solve_once
+    from services.solver_service import _prm_margin, reserve_margin_facts
+    from services.validation_service import (
+        _check_nonfinite_bounds,
+        _check_reserve_margin,
+    )
+    from routers.simulation import _state_update
+
+    # ── the 409 mesh ──────────────────────────────────────────────────────
+    _refuse_if_mesh_busy("margin_loop")
+
+    # ── the synchronous 422 set (§2.4) ────────────────────────────────────
+    target = getattr(body, "target_lole_h", None)
+    try:
+        target = float(target) if target is not None else None
+    except (TypeError, ValueError):
+        target = None
+    if target is None or not (target > 0):
+        raise HTTPException(
+            422,
+            "target_lole_h is required and must be > 0: the loop searches for "
+            "the cheapest reserve margin whose plan meets a RELIABILITY "
+            "STANDARD, and a target of zero (or none) is not a standard — it "
+            "is the demand that no draw ever sheds an hour, which no finite "
+            "plan can buy")
+
+    draws = getattr(body, "draws", None)
+    draws = 500 if draws is None else int(draws)
+    if draws < 1:
+        raise HTTPException(422, "draws must be a positive number of samples")
+    if draws > MAX_DRAWS:
+        raise HTTPException(
+            422,
+            f"draws={draws} exceeds the engine cap of {MAX_DRAWS} draws per "
+            "evaluation — and the loop pays that cost once per iterate")
+    seed = getattr(body, "seed", None)
+    seed = 0 if seed is None else int(seed)
+
+    max_solves = getattr(body, "max_solves", None)
+    max_solves = MAX_LOOP_SOLVES if max_solves is None else int(max_solves)
+    if not (1 <= max_solves <= MAX_LOOP_SOLVES):
+        raise HTTPException(
+            422,
+            f"max_solves must be between 1 and {MAX_LOOP_SOLVES} (got "
+            f"{max_solves}) — each solve is a full capacity expansion, so the "
+            "budget is the wall-clock promise this request makes (the probing "
+            "solve of the informed step is one more, outside it)")
+
+    restore = getattr(body, "restore", None) or "base"
+    if restore not in ("base", "final"):
+        raise HTTPException(
+            422,
+            f"restore must be 'base' or 'final' (got {restore!r}): 'base' "
+            "re-solves with your original config, 'final' leaves you holding "
+            "the certified plan at m*")
+
+    cfg = _state.get("solver_config")
+    if cfg is None:
+        raise HTTPException(
+            422, "no solver configuration is set for this project — the loop "
+                 "builds every iterate from it")
+
+    # NO VoLL REQUIREMENT (§2.4). The cap loop needs one because without
+    # load-shedding slacks its lever constrains nothing; the margin is a
+    # CONSTRAINT on installed firm capacity and binds whether or not unserved
+    # energy carries a price.
+
+    strategy = str(getattr(cfg, "solve_strategy", "full") or "full")
+    if strategy == "rolling":
+        raise HTTPException(
+            422,
+            "the reserve margin is not supported with the 'rolling' solve "
+            "strategy: PyPSA solves each window independently, so the "
+            "constraint would be built against that WINDOW's peak demand "
+            "rather than the period's — a weaker standard than the one you "
+            "set, enforced under its name. Every iterate would fail the same "
+            "blocking validation and the loop would report 'unreachable', "
+            "which is a statement about the strategy, not about the network. "
+            "Use the full strategy. ('myopic' IS supported: each iteration's "
+            "snapshots are exactly one investment period, which is the peak "
+            "the standard is defined against — only its report is partial.)")
+
+    # The ONE snapshot the validation reads, taken under the mutation lock.
+    # `keep_zero_capacity=True` from the very first call (coupling spec §1.2):
+    # the sampled fleet's MEMBERSHIP must be invariant across iterates or the
+    # positional CRN substreams shift under it — and it is what keeps the
+    # UNBUILT peaker, the very asset a margin exists to force into being, in
+    # the fleet at all.
+    n = PyPSAService.get_network()
+    lock = PyPSAService.get_lock()
+    with lock:
+        try:
+            # Phase 12c-0: the LP's demand basis — the plan the loop
+            # certifies was built on it (the fifteenth finding).
+            inputs = snapshot_inputs(n, keep_zero_capacity=True, cfg=cfg)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        nyears = float(horizon_years(n))
+
+    if not inputs.units:
+        raise HTTPException(
+            422,
+            "nothing to sample: no electrical generator carries resolvable "
+            "occurrence data (unavailability + MTTR), so the sampled fleet is "
+            "empty — an empty fleet would report the entire horizon as loss of "
+            "load, which is a statement about missing input data, not about "
+            "the system")
+
+    # The up-front resolution floor. One shortfall hour in one draw
+    # contributes that hour's WEIGHT to the mean, so the smallest non-zero
+    # LOLE these draws can resolve is `min positive weight / draws`. A target
+    # under it is undecidable.
+    _w = inputs.weights[inputs.weights > 0]
+    floor_h = (float(_w.min()) / draws) if _w.size else None
+    if floor_h is not None and target < floor_h:
+        need = int(math.ceil(float(_w.min()) / target))
+        raise HTTPException(
+            422,
+            f"target_lole_h={target:g} h is below this study's resolution "
+            f"floor of {floor_h:g} h at {draws} draws: a single shortfall "
+            "hour in a single draw already exceeds it, so no verdict here "
+            "could distinguish a compliant plan from a lucky sample. About "
+            f"{need} draws would resolve it.")
+
+    base_cfg = cfg
+    basis = resolve_time_basis(nyears)
+
+    # ── the facts the standard knows before an LP exists (§2.4) ───────────
+    #
+    # `reserve_margin_facts` returns None for a config with no margin set, so
+    # the preflight reads it at a NOMINAL margin. Only `required_mw` scales
+    # with that number; the peaks, the derates, the unpriceable list and
+    # `max_achievable_mw` — everything read below — do not.
+    m_user = _prm_margin(base_cfg) or 0.0
+    probe_margin = max(m_user, PROBE_MARGIN)
+    facts_cfg = dataclasses.replace(base_cfg, reserve_margin=probe_margin)
+    with lock:
+        try:
+            facts = reserve_margin_facts(n, facts_cfg)
+        except Exception as exc:                              # noqa: BLE001
+            raise HTTPException(
+                422,
+                "the firm-capacity standard could not be measured on this "
+                f"network, so the loop has no ceiling to search under: {exc}"
+            ) from exc
+        # Unpriceable assets — refused with the VALIDATOR'S OWN SENTENCE, not
+        # a second one. The loop's own gate would pass (it needs one priceable
+        # unit, not all of them) and then EVERY iterate would fail the same
+        # blocking validation, ending `budget_exhausted` and advising "raise
+        # max_solves", which can never work here.
+        margin_issues = _check_reserve_margin(n, facts_cfg)
+        # Phase 12f: the SAME up-front refusal, for the same reason. A
+        # non-finite value in one of the five finite-default LP bounds is a
+        # blocking preflight error, so every iterate would fail validation and
+        # the loop would end `budget_exhausted` advising "raise max_solves" —
+        # `_margin_out_of_reach` only relabels `validation_failed` when the
+        # MARGIN is the cause, and it is not here. This check has to be CALLED,
+        # not merely allowed through the filter below: `_check_reserve_margin`
+        # is one sub-validator, not `validate_for_run`, so a code it never
+        # produces can never appear in `margin_issues`.
+        margin_issues = margin_issues + _check_nonfinite_bounds(n)
+    for iss in margin_issues:
+        # Phase 12g: every `nonfinite_*` code, by prefix. The first version
+        # listed the two 12f codes literally, so each category 12g adds would
+        # have slipped past this guard and the loop would have spent its
+        # budget refusing — the K6 outcome this guard exists to prevent.
+        if iss.code == "reserve_margin_unpriceable_assets" \
+                or iss.code.startswith("nonfinite_"):
+            raise HTTPException(422, iss.message)
+
+    # The ceiling: a margin is achievable iff EVERY period can reach it, so
+    # the binding period is the one that fails first and the aggregate is
+    # `min`, not `max` (plan §2.2 — `max` would let the search run past a
+    # margin one period already makes impossible). `max_achievable_mw` is
+    # `inf` on the ordinary network (PyPSA's default `p_nom_max`), where the
+    # ceiling is the schema's own bound instead.
+    m_max = math.inf
+    m_max_where: tuple[str, float, float] | None = None
+    for P, per in ((facts or {}).get("stash", {}).get("periods") or {}).items():
+        try:
+            peak = float(per.get("peak_mw") or 0.0)
+            reach = float(per.get("max_achievable_mw") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if peak <= 0:
+            continue
+        here = reach / peak - 1.0
+        if here < m_max:
+            m_max, m_max_where = here, (str(P), peak, reach)
+    if m_max <= 0:
+        where = ""
+        if m_max_where is not None and m_max_where[0] != "ALL":
+            where = f" in period {m_max_where[0]}"
+        peak_mw = m_max_where[1] if m_max_where else 0.0
+        reach_mw = m_max_where[2] if m_max_where else 0.0
+        raise HTTPException(
+            422,
+            f"no reserve margin is reachable on this network{where}: the "
+            f"whole fleet — every extendable at its p_nom_max, derated — tops "
+            f"out at {reach_mw:,.1f} MW against a {peak_mw:,.1f} MW peak, a "
+            f"margin of {m_max:.1%}, so even a margin of 0 % (firm capacity "
+            "equal to the peak) is out of reach. Every iterate would be "
+            "refused by the same blocking preflight the solver runs, and the "
+            "loop would spend its whole budget proving it. Raise a p_nom_max, "
+            "add candidate capacity, or enter outage data for assets the "
+            "standard currently cannot price.")
+    # The search's own upper bound: the fleet ceiling, or the schema's `le=5`
+    # when the fleet is unbounded.
+    m_ceiling = min(m_max, MAX_MARGIN)
+
+    # ── the bindings (§2.1) ───────────────────────────────────────────────
+
+    def _snapshot():
+        # `base_cfg` is captured in the request — the worker never reads
+        # `_state` — and the scalers do not change across iterates.
+        with lock:
+            return snapshot_inputs(n, keep_zero_capacity=True, cfg=base_cfg)
+
+    def _hash(mc_inputs) -> str:
+        """sha256 over exactly what the MC reads — the sorted
+        ``(name, capacity_mw)`` unit vector, the sorted
+        ``(name, p_nom_mw, e_nom_mwh)`` storage vector, and the residual
+        bytes. NOT the objective: degenerate optima give equal cost for
+        different plans. Equal hash ⇒ bit-identical MC under the same seed and
+        draw count, so the controller's plateau reuse is exact."""
+        # Phase 12d: one implementation for both loops, testable
+        # (`tests/test_adequacy_activity.py` E8).
+        return _snapshot_hash(mc_inputs)
+
+    def _margin_out_of_reach(m: float) -> str | None:
+        """Is THIS margin impossible from the candidate set — the same
+        constant arithmetic `_check_reserve_margin` blocks on, asked at a
+        specific margin (§2.5)?
+
+        A second implementation of the derating chain here would be a second
+        standard, so the numbers come from `reserve_margin_facts` — the very
+        function the validator and the LP wrapper share.
+        """
+        try:
+            with lock:
+                f = reserve_margin_facts(
+                    n, dataclasses.replace(base_cfg, reserve_margin=float(m)))
+        except Exception:                                     # noqa: BLE001
+            return None
+        if not f:
+            return None
+        for P, per in (f["stash"].get("periods") or {}).items():
+            try:
+                required = float(per.get("required_mw") or 0.0)
+                reach = float(per.get("max_achievable_mw") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if required <= 0 or not math.isfinite(required):
+                continue
+            if reach < required:
+                where = "" if str(P) == "ALL" else f" in period {P}"
+                return (
+                    f"infeasible: no plan built from this candidate set "
+                    f"reaches a {m:.1%} reserve margin{where} — it needs "
+                    f"{required:,.1f} MW of derated firm capacity and the "
+                    f"whole fleet tops out at {reach:,.1f} MW")
+        return None
+
+    _ceiling_missed = [False]
+    _last_at_ceiling = [False]
+    # IEEE 39-bus review, F1. The CLAMP below evaluates `m_ceiling` when the
+    # controller's step overshoots the fleet ceiling — but the controller
+    # records the coordinate it ASKED for (`coupling.py:_row`), and that
+    # coordinate is what `_translate`, `lever_star`, the verdict and the
+    # `restore="final"` config write all read. Measured on the stressed
+    # IEEE 39 network (ceiling 19.9 %): rows 15.75 % -> 363 % -> 131.5 %,
+    # verdict "verified at a reserve margin of 131.5%", `reserve_margin` left
+    # at 1.315, and the closing re-solve refused by the study's own preflight
+    # (`reserve_margin_unreachable`). The margin ACTUALLY solved is recorded
+    # here, keyed by the controller's `x`, and consulted at the two places a
+    # coordinate becomes a user-facing margin. The controller never solves one
+    # `x` twice and the pre-controller probe never becomes a row, so the map is
+    # unambiguous; an `x` not in it (a solve refused before it ran) still
+    # translates exactly as before.
+    _solved_margin: dict[float, float] = {}
+
+    def solve_at(x: float) -> dict:
+        _last_at_ceiling[0] = False
+        """One capacity-expansion solve at the margin ``x`` stands for, read
+        out exactly as ``run_frontier_sweep`` reads its points. Solve failures
+        come back as a status — the controller is specified never to see an
+        exception from here, and a raise would cost the whole study."""
+        m = to_margin(x)
+        out = {"status": None, "condition": None, "cost_eur": None,
+               "ens_mwh": None, "cap_mwh": None, "binding": None,
+               "report": None}
+
+        if m > MAX_MARGIN * (1.0 + 1e-9):
+            # The controller's blind step multiplies the margin by ~4 per
+            # iterate, so it can walk past the schema's own bound in two
+            # steps. Solving there would build a plan against a margin the
+            # config schema refuses — and `restore="final"` would then persist
+            # a value the next PUT rejects. Stopping is honest and free.
+            out.update(
+                status="error",
+                condition=(
+                    f"infeasible: a reserve margin of {m:.1%} is beyond the "
+                    f"configured maximum of {MAX_MARGIN:.0%} — the search has "
+                    "run out of lever, not out of budget"))
+            return out
+
+        # THE CLAMP, and it is the difference between a verdict and a guess.
+        # The controller's blind step multiplies the margin ~4x per iterate, so
+        # from a small start it can leap clean over `m_ceiling` — and an
+        # over-ceiling solve fails validation, gets relabelled `infeasible`
+        # below, and the nesting logic then (correctly, given what it was told)
+        # concludes every stricter margin is infeasible too. The loop reports
+        # `unreachable` having never evaluated the reachable region at all.
+        # Found live in S19.3: ceiling 271%, last evaluated margin 18%, verdict
+        # "unreachable" — with a plan that meets the target sitting between
+        # them. Clamping makes the strictest REACHABLE margin the thing that
+        # gets evaluated, so an `unreachable` verdict is one this study
+        # actually verified.
+        if m > m_ceiling:
+            if _ceiling_missed[0]:
+                # Already evaluated AT the ceiling and it missed. Nothing
+                # stricter exists to try, so this is a real refusal rather
+                # than another clamp to the same plan.
+                out.update(
+                    status="error",
+                    condition=(
+                        f"infeasible: the strictest reachable margin "
+                        f"({m_ceiling:.1%}) was evaluated and still missed the "
+                        "target — the candidate set, not the search, is the "
+                        "limit"))
+                return out
+            m = m_ceiling
+            _last_at_ceiling[0] = True
+        _solved_margin[float(x)] = float(m)
+        sink: dict = {}
+        _solve_once(dataclasses.replace(base_cfg, reserve_margin=m),
+                    n, lock, None, sink)
+        status = sink.get("_status")
+        condition = sink.get("_condition")
+        out.update(status=status, condition=condition)
+
+        if status not in ("ok", "optimal"):
+            # §2.5. An out-of-reach margin is a BLOCKING PREFLIGHT ERROR, not
+            # an infeasible LP (linopy raises TypeError on a constant
+            # constraint and `Generator-p_nom` does not exist when nothing
+            # extendable is active), so it arrives as `validation_failed` —
+            # which `_is_infeasible` matches on neither the status nor the
+            # condition. The controller would treat it as transient, keep
+            # stepping, and end `budget_exhausted` advising "raise
+            # max_solves", which can never work. Relabel it — but ONLY when
+            # the facts confirm the margin is the cause: a validation failure
+            # from anything else is not monotone in the margin and proves
+            # nothing about tighter ones.
+            if "validation_failed" in str(condition).lower():
+                why = _margin_out_of_reach(m)
+                if why is not None:
+                    out["condition"] = why
+            return out
+
+        rep = sink.get("adequacy_report")
+        if not rep:
+            # A margin WAS set and the solve succeeded, so the report is the
+            # contract. Its absence is a defect, and reporting it as a failed
+            # iterate keeps the loop from evaluating a plan it cannot describe.
+            out.update(status="no_report",
+                       condition="the solve returned no adequacy report")
+            return out
+
+        # §2.1: `binding` comes from the MARGIN's own block. `target.binding`
+        # is computed purely from the ENS caps and reads "voll" on every
+        # margin run, which would make the controller's `reusable` pre-test
+        # (`binding != "system_cap"`) permanently true and offer plateau reuse
+        # on iterates where the margin demonstrably rebuilt the plan.
+        rm_rows = ((rep.get("reserve_margin") or {}).get("by_period")) or []
+        binding = ("system_cap" if any(bool(r.get("binding")) for r in rm_rows)
+                   else "voll")
+
+        metrics_blk = rep.get("metrics") or {}
+        ens = metrics_blk.get("ens_mwh")
+        if ens is None:
+            ens = ((rep.get("target") or {}).get("system") or {}).get(
+                "achieved_ens_mwh")
+        try:
+            ens = float(ens) if ens is not None else None
+        except (TypeError, ValueError):
+            ens = None
+
+        out.update(
+            report=rep,
+            cost_eur=float(rep["cost"]["total_system_cost_eur"]),
+            ens_mwh=ens,
+            # §2.2, and it is LOAD-BEARING. The controller ends the search
+            # with `unreachable` when `cap_mwh is not None and cap_mwh <
+            # ENERGY_FLOOR_MWH`. On a margin-only report `cap_mwh` is `0.0` —
+            # the ENS cap's per-period loop never runs, so `SystemTarget.
+            # cap_mwh` is emitted as its initialised zero — so passing it
+            # through fires that test on the FIRST miss and every run ends
+            # `unreachable` after one solve, indistinguishable in the payload
+            # from the real thing. None makes the test a genuine no-op, which
+            # is the only correct reading for a lever with no energy cap.
+            cap_mwh=None,
+            binding=binding,
+        )
+        return out
+
+    eval_state: dict = {"floor": floor_h}
+
+    def evaluate():
+        """IDENTICAL to the coupling loop's (§2.1): the same snapshot with
+        `keep_zero_capacity=True`, the same pinned
+        `mc_adequacy(inputs, draws=N, seed=S, max_draws=N)` call — merely
+        ignoring `cov_target` would leave the adaptive cap in play and
+        `n_samples` would drift between iterates, breaking the common random
+        numbers the plateau reuse rests on — and the same plan hash."""
+        mc_inputs = _snapshot()
+        # `stop_event` is NEVER passed here: this is a REPLAY of one batch
+        # sequence (see `mc_adequacy`'s note), and the loop's own abort is
+        # checked between iterates, never inside an evaluation.
+        metrics = mc_adequacy(mc_inputs, draws=draws, seed=seed,
+                              max_draws=draws, stop_event=None)
+        try:
+            eval_state["floor"] = metrics.get("resolution_floor_h")
+        except AttributeError:                                # noqa: BLE001
+            pass
+        return _hash(mc_inputs), metrics
+
+    def _plan_hash():
+        return _hash(_snapshot())
+
+    evaluate.plan_hash = _plan_hash
+
+    def _position_x0() -> tuple[float, float | None]:
+        """§2.3 — the informed step, done by PRE-POSITIONING x0 rather than by
+        changing the controller.
+
+        With `cap_mwh=None` the controller's informed term is skipped and
+        `_tighten` degrades to the blind `x/4`, which in margin terms is
+        `m: 0 → 3` — a large but safe first jump that spends a solve learning
+        nothing when the incumbent plan already carries a comfortable margin.
+        So the route measures the incumbent first:
+
+            m_tight = min over P of (firm_mw_P / peak_mw_P) − 1
+            x0      = to_x(m_tight · (1 + STEP_OVERSHOOT))
+
+        `m_tight` is the smallest margin at which the incumbent plan is TIGHT
+        — at exactly that value the plan is feasible, unchanged, same hash,
+        same LOLE, and flagged `binding` while nothing moved — so the step
+        must STRICTLY exceed it, hence the overshoot. The aggregate is `min`
+        because the first period to bind is the binding one; `max` would step
+        past it and overshoot the bracket entirely.
+
+        Returns ``(x0, m_tight)``.
+        """
+        res = solve_at(to_x(probe_margin))
+        tights: list[float] = []
+        if res.get("status") in ("ok", "optimal"):
+            rows = ((res.get("report") or {}).get("reserve_margin") or {}).get(
+                "by_period") or []
+            for row in rows:
+                try:
+                    peak = float(row.get("peak_mw") or 0.0)
+                    firm = float(row.get("firm_mw") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if peak > 0 and math.isfinite(firm):
+                    tights.append(firm / peak - 1.0)
+        if not tights:
+            # No measurement (a failed probe, or a report with no usable
+            # period): fall back to the user's own margin and let the
+            # controller's blind step do the searching. A guess here would be
+            # a worse start than no start.
+            logger.info("margin loop: no tight margin measurable from the "
+                        "probing solve; starting from the configured margin")
+            m_start = min(max(probe_margin, STEP_OVERSHOOT), m_ceiling)
+            return to_x(max(m_start, PROBE_MARGIN)), None
+        m_tight = min(tights)
+        base = max(m_tight, 0.0)
+        m_start = base * (1.0 + STEP_OVERSHOOT)
+        if not m_start > base:
+            # `base == 0`: the incumbent is tight at (or below) a zero margin,
+            # where a multiplicative overshoot is still zero — and a margin of
+            # 0 installs no standard at all. The smallest step that changes
+            # anything is the overshoot itself.
+            m_start = STEP_OVERSHOOT
+        m_start = max(min(m_start, m_ceiling), PROBE_MARGIN)
+        return to_x(m_start), m_tight
+
+    def _translate(row: dict) -> dict:
+        """§2.6: the controller's `eps_permyriad` IS the substitution's `x`,
+        an internal coordinate with no meaning to a user — 0.76 is not a
+        margin, not a percentage and not a per-myriad ENS cap. Every row is
+        translated on its way into the record, so `x` never reaches the wire
+        at all.
+
+        F1 (IEEE 39-bus review): the margin SOLVED, not the one the
+        controller asked for — they differ on a clamped iterate."""
+        return {
+            "lever_value": _solved_margin.get(
+                float(row["eps_permyriad"]), to_margin(row["eps_permyriad"])),
+            "solve_status": row["solve_status"],
+            "condition": row["condition"],
+            "cost_eur": row["cost_eur"],
+            "ens_mwh": row["ens_mwh"],
+            "cap_mwh": row["cap_mwh"],
+            "binding": row["binding"],
+            "plateau": row["plateau"],
+            "mc": row["mc"],
+        }
+
+    # ── the record (closed over, never reached through `_state`) ──────────
+    stop_event = _threading.Event()
+    record: dict = {
+        "study": "margin_loop",
+        # The frontend discriminator (spec §3): the column header, the badge
+        # suffix and `restoreSentence`'s CONFIG FIELD NAME all come off these,
+        # so a margin run can never tell the user to set the cap's field.
+        "lever": "reserve_margin",
+        "lever_label": "planning reserve margin",
+        "lever_unit": "%",
+        "status": "running",
+        "target_lole_h": target,
+        "basis": basis,
+        "horizon_years": nyears,
+        "draws": draws,
+        "seed": seed,
+        "margin0": None,
+        "margin_tight": None,
+        # M7: the FLEET ceiling, null when unbounded — `m_ceiling` also
+        # carries the schema cap the search stops at, which is not a
+        # ceiling any fleet has.
+        "margin_ceiling": (None if not math.isfinite(m_max)
+                           else float(m_max)),
+        "max_solves": max_solves,
+        "restore": restore,
+        "base_restored": False,
+        "confident": False,
+        "lever_star": None,
+        "resolution_floor_h": floor_h,
+        "solves_used": 0,
+        # The probing solve of §2.3 is OUTSIDE the controller's budget, so it
+        # is reported separately rather than folded into `solves_used`: the
+        # budget is a promise about the search, and a user timing the run
+        # should be able to account for every solve it made.
+        "probe_solves": 0,
+        "iterations": [],
+        "final": None,
+        "verdict": None,
+        "warning": MC_WARNING_V1 + " " + MARGIN_LOOP_WARNING_V1,
+        "error": None,
+        "started_at": time.time(),
+        "finished_at": None,
+        "thread": None,
+        "stop_event": stop_event,
+    }
+
+    def on_iteration(row: dict) -> None:
+        """Grow the record by REBINDING, never by appending in place.
+
+        `get_margin_loop` serves a shallow copy, so an in-place append hands
+        the serializer the very list this thread is mutating: a mid-run GET
+        can then be written half-way through an append, and a client polling
+        every second can watch its own earlier history change. A fresh list
+        per iterate makes every snapshot immutable by construction.
+        """
+        # Did the iterate that just finished sit AT the ceiling and miss? If
+        # so no stricter margin exists to try, and `solve_at` refuses the next
+        # request outright rather than clamping to the same plan forever.
+        mc = row.get("mc") or {}
+        lole = mc.get("lole_hours")
+        if (_last_at_ceiling[0] and lole is not None
+                and float(lole) > target):
+            _ceiling_missed[0] = True
+        with PyPSAService.get_solver_state_lock():
+            record["iterations"] = record["iterations"] + [_translate(row)]
+
+    # The solver's own word on the closing re-solve, for the payload. A cell
+    # rather than a return value because `_restore_closing` returns a bool
+    # that four call sites already read (12e shipped-code review, S1).
+    _restore_word: list = [None]
+
+    def _restore_closing(met: bool, m_star) -> bool:
+        """The closing re-solve — the route's job, on EVERY path. The loop
+        mutates the network once per iterate, so without this it is left on
+        whichever margin happened to be last while the foreground results
+        still describe the pre-study solve.
+
+        `"final"` writes **`reserve_margin`** and nothing else: a user-set ENS
+        cap is carried through untouched (every config here is built from
+        `base_cfg`), because the study tuned one standard and the user asked
+        for both.
+        """
+        from services.adequacy.sweep import restore_is_clean
+        from services.solver_service import run_simulation
+
+        use_final = (restore == "final" and met and m_star is not None)
+        if use_final:
+            final_cfg = dataclasses.replace(
+                base_cfg, reserve_margin=float(m_star))
+            # Persisted through the normal config path (read-modify-write
+            # under the solver-state lock, exactly as PUT /solver_config does)
+            # BEFORE the solve: the user asked to hold m*, and a restore whose
+            # solve fails must still leave the setting they will re-run with,
+            # with `base_restored` reporting the failure.
+            with PyPSAService.get_solver_state_lock():
+                _state["solver_config"] = dataclasses.replace(
+                    _state["solver_config"], reserve_margin=float(m_star))
+        else:
+            final_cfg = base_cfg
+        try:
+            status, condition = run_simulation(
+                final_cfg, n, lock, _threading.Event(), _queue.SimpleQueue(),
+                state_update=_state_update)
+        except Exception as exc:                              # noqa: BLE001
+            logger.exception(
+                "margin loop: the closing re-solve FAILED — the network is "
+                "left on the last iterate's margin and the foreground results "
+                "do not describe the plan the verdict is about")
+            _restore_word[0] = f"raised: {exc}"
+            return False
+        # The CONDITION, through the shared predicate — see the coupling
+        # loop's twin for why the status is the wrong half to read.
+        word = str(condition or status)
+        _restore_word[0] = word
+        if not restore_is_clean(word):
+            logger.warning(
+                "margin loop: the closing re-solve returned %r — it ran but "
+                "did not restore the plan the verdict is about", word)
+        return restore_is_clean(word)
+
+    def _both_standards_clause() -> str:
+        try:
+            cap = float(getattr(base_cfg, "ens_cap_permyriad", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            cap = 0.0
+        if cap <= 0:
+            return ""
+        return (
+            f" Your energy cap (ens_cap_permyriad = {cap:g}‱) was left in "
+            "force for every iterate and was never rewritten, so the "
+            "certified plan meets BOTH standards.")
+
+    def _verdict_copy(status: str, m_star, rows=None) -> str:
+        if status == "met" and m_star is not None:
+            if restore == "final":
+                return (
+                    f"A plan meeting {target:g} h was verified at a reserve "
+                    f"margin of {m_star:.1%}, and that margin has been "
+                    f"APPLIED to your solver settings (reserve_margin = "
+                    f"{format_lever_value(m_star)}) and re-solved — the "
+                    "network you are holding "
+                    "is the certified plan." + _both_standards_clause())
+            return (
+                f"A plan meeting {target:g} h was verified at a reserve "
+                f"margin of {m_star:.1%}. Your original config has been "
+                "re-solved, so the network you are holding is NOT that plan: "
+                # `format_lever_value`, never `%g`: the panel's own
+                # restore explainer prints this same number two lines
+                # above, and `%g`'s six significant figures made the
+                # two disagree IN THE SAME PANEL — the verdict said
+                # 0.6716 where the explainer said 0.671600430725. A
+                # margin is a THRESHOLD on required firm capacity, so
+                # the shorter value is a strictly LOOSER standard that
+                # need not reproduce the certified plan.
+                f"to keep it, set reserve_margin = "
+                f"{format_lever_value(m_star)} and re-solve."
+                + _both_standards_clause())
+        if status == "unreachable":
+            ceiling = (f"{m_ceiling:.1%}" if math.isfinite(m_ceiling)
+                       else "unbounded")
+            reason = (
+                "the largest margin your candidate set can reach"
+                if m_max <= MAX_MARGIN else
+                "the largest margin the configuration schema allows")
+            return (
+                "No reserve margin this search could reach produced a plan "
+                f"that met {target:g} h on the MC's own LOLE. The search is "
+                f"bounded above by {ceiling} — {reason} — and beyond it no "
+                "plan exists at all: the margin is refused by the same "
+                "blocking preflight the solver runs, rather than by an "
+                "infeasible LP. Under that ceiling, three mechanisms produce "
+                "a miss and they call for different responses: (a) the added "
+                "firm capacity is DERATED by the same outage data the MC "
+                "samples, so a fleet of unreliable units buys less than its "
+                "nameplate; (b) the standard is enforced at the PEAK, while "
+                "loss of load in the MC can fall in hours the peak-"
+                "coincidence window never measured; (c) energy-limited "
+                "resources take a duration haircut, so a plan that meets the "
+                "margin on storage can still run out of energy in a long "
+                "outage. Check the per-iterate binding column and the "
+                "by_period rows, then consider raising a p_nom_max, adding "
+                "candidate capacity, or lowering the target.")
+        if status == "aborted":
+            return ("The study was aborted between iterates. Any iterates "
+                    "already evaluated are shown; the closing restore ran, so "
+                    "the network is back on your own config.")
+        if status == "budget_exhausted":
+            return (
+                f"The solve budget ({max_solves}) was spent without verifying "
+                "a plan that meets the target. Nothing here says the target "
+                "is unreachable — only that this search did not reach it. "
+                "Raise max_solves.")
+        return ("The study did not complete. The iterates recorded below are "
+                "what it managed before it stopped.")
+
+    def worker():
+        res: dict | None = None
+        err: str | None = None
+        try:
+            try:
+                x0, m_tight = _position_x0()
+                with PyPSAService.get_solver_state_lock():
+                    record["probe_solves"] = 1
+                    record["margin0"] = to_margin(x0)
+                    record["margin_tight"] = m_tight
+                res = run_coupling_loop(
+                    solve_at, evaluate, target_lole_h=target, eps0=x0,
+                    max_solves=max_solves, stop_event=stop_event,
+                    on_iteration=on_iteration)
+            except BaseException as exc:                      # noqa: BLE001
+                # The controller is total by construction; this is the belt
+                # for a broken binding above, and it must never leave the
+                # record stuck on "running" for the rest of the session.
+                logger.exception("margin loop: the controller raised")
+                err = str(exc)
+        finally:
+            status = (res or {}).get("status") or "failed"
+            x_star = (res or {}).get("eps_star")
+            m_star = None
+            if x_star is not None:
+                try:
+                    # F1: the margin that iterate actually solved (they differ
+                    # when the ceiling clamp fired), so the verdict names — and
+                    # `restore="final"` persists — a margin the preflight
+                    # accepts.
+                    m_star = _solved_margin.get(float(x_star),
+                                                to_margin(x_star))
+                except ValueError:                            # noqa: BLE001
+                    logger.exception("margin loop: unusable eps_star %r",
+                                     x_star)
+            try:
+                base_restored = _restore_closing(status == "met", m_star)
+            except BaseException:                             # noqa: BLE001
+                logger.exception("margin loop: the restore itself raised")
+                base_restored = False
+
+            src_rows = (res or {}).get("iterations")
+            if src_rows is None:
+                rows_out = record["iterations"]
+                final_out = None
+            else:
+                rows_out = [_translate(r) for r in src_rows]
+                final_src = (res or {}).get("final")
+                # Identity, not equality: two rows CAN carry the same numbers
+                # (a plateau iterate differs only in its lever value, and a
+                # broken binding could make even that equal), and picking the
+                # wrong one would report a different iterate as the answer.
+                final_out = next(
+                    (out for src, out in zip(src_rows, rows_out)
+                     if src is final_src), None)
+
+            warning = MC_WARNING_V1 + " " + MARGIN_LOOP_WARNING_V1
+            if any(len((r.get("mc") or {}).get("by_period") or {}) > 1
+                   for r in rows_out):
+                warning += " " + MARGIN_MULTI_PERIOD_WARNING_V1
+            # ONE atomic apply, under the same lock `on_iteration` rebinds
+            # under: a GET landing between the status flip and the verdict
+            # would otherwise serve a finished study with a running study's
+            # empty final, which is the one shape the panel cannot render.
+            with PyPSAService.get_solver_state_lock():
+                record.update(
+                    status=status,
+                    iterations=rows_out,
+                    final=final_out,
+                    confident=bool((res or {}).get("confident")),
+                    lever_star=m_star,
+                    solves_used=int((res or {}).get("solves_used") or 0),
+                    resolution_floor_h=eval_state["floor"],
+                    base_restored=bool(base_restored),
+                    base_restore_status=_restore_word[0],
+                    verdict=_verdict_copy(status, m_star, rows_out),
+                    warning=warning,
+                    error=err,
+                    finished_at=time.time(),
+                )
+
+    # The worker carries the REQUEST's context (the /simulation/run pattern):
+    # the active project lives in a ContextVar and a bare Thread does not
+    # inherit it, so without this the closing restore's `_state_update` and
+    # the `restore="final"` config write would land in the PROCESS foreground
+    # — a different project's state from the one the caller is polling.
+    _ctx = _contextvars.copy_context()
+    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
+                          name="adequacy-margin-loop")
+    record["thread"] = t
+    # Publish and START under one lock hold. `_study_running` tests
+    # `thread.is_alive()`, and a registered-but-not-yet-started thread reports
+    # False — so a second POST arriving in that window would read the record as
+    # stale state, claim the surface, and put two loops on the same network.
+    _publish_study("margin_loop", record, t)
+    return {"status": "running", "study": "margin_loop",
+            "lever": "reserve_margin", "target_lole_h": target,
+            "draws": draws, "seed": seed, "max_solves": max_solves,
+            "restore": restore, "basis": basis,
+            "margin_ceiling": (None if not math.isfinite(m_max)
+                               else float(m_max)),
+            "resolution_floor_h": floor_h}
+
+
+@results_router.get("/copt")
+def get_copt():
+    """
+    Screening adequacy + the class-A FMECA ranking from the COPT engine
+    (adequacy plan Phase 2), computed ON DEMAND from the current network —
+    no solve required, zero LP solves involved. fidelity =
+    "analytic_convolution": thermal-only, storage-excluded, network-free;
+    NOT comparable to a statutory standard, and its divergence from the
+    LP proxy is the diagnostic (spec §5.3).
+
+    204 = nothing to convolve: no electrical generator carries resolvable
+    occurrence data (see services/adequacy/occurrence.py).
+    """
+    from services.adequacy.activity import activity_summary as _activity_summary
+    from services.adequacy.activity import period_blocks as _period_blocks
+    from services.adequacy.copt import (
+        K_EXACT,
+        fleet_and_residual,
+        is_flag_deterministic as _is_flag_deterministic,
+        must_take_generators,
+        rate_is_zero as _rate_is_zero,
+        screening_analysis,
+    )
+
+    n = PyPSAService.get_network()
+    cfg = _state.get("solver_config")
+    # Phase 12c-0: under the mutation lock, like /mc — a solve scales the
+    # load frame IN PLACE for its duration, and a bare read mid-solve saw a
+    # half-transformed network (v3 review, finding 8); and on the LP's
+    # demand basis.
+    with PyPSAService.get_lock():
+        try:
+            units, residual, w = fleet_and_residual(n, cfg=cfg)
+        except ValueError as exc:
+            # Whole-branch review S1: an outage rate outside [0, 1) is
+            # refused by the walk, named, and answered 422 — the same
+            # answer /mc and both loops already give a ValueError here.
+            raise HTTPException(422, str(exc)) from exc
+        # …and the membership read for `must_take`, under the same hold
+        # (12c-0 shipped-code review, finding 4).
+        n_must_take = len(must_take_generators(n))
+        # Phase 12d: the activity disclosure reads the NETWORK (must-take
+        # farms and rows dropped at zero capacity are not in the fleet —
+        # shipped-code review, finding 1), so it is taken under the same
+        # hold as the fleet it describes.
+        activity = _activity_summary(n, _period_blocks(residual.index))
+    if not units:
+        return Response(status_code=204)
+    voll = float(getattr(cfg, "voll", 0.0) or 0.0)
+    # Phase 12c-pre: split, net the remainder, table, mixture, attribution —
+    # one call so this route and the engine tests see the same arithmetic.
+    analysis = screening_analysis(units, residual, weights=w, voll=voll,
+                                  delta_mw=1.0)
+    metrics = analysis["metrics"]
+    rows = analysis["rows"]
+    split = analysis["split"]
+    # The must-take count comes from the SAME walk that decided membership.
+    # The previous `electrical non-slack gens − len(units)` subtraction
+    # miscounted zero-capacity generators, which the walk skips and the
+    # subtraction did not (plan 12c-pre v2 review, finding 8).
+    from services.adequacy.metrics import horizon_years, resolve_time_basis
+    _copt_nyears = horizon_years(n)
+    _copt_basis = resolve_time_basis(_copt_nyears)
+    return {
+        "engine": "copt",
+        "fidelity": "analytic_convolution",
+        "metrics": {
+            "lole_hours": metrics["lole_hours"],
+            "eue_mwh": metrics["eue_mwh"],
+            "lolp_max": metrics["lolp_max"],
+            "by_period": metrics["by_period"],
+            # Derived, not asserted. The COPT sums over whatever horizon the
+            # model spans, weighted; calling that "hours_per_year" on a
+            # 168 h week reported 80.86 for a system whose annual LOLE is
+            # ~4216 — and understating LOLE is the direction that gets a
+            # number compared to a 3 h/yr standard it has no relation to.
+            "time_basis": _copt_basis,
+            "horizon_years": _copt_nyears,
+        },
+        "per_mode": [
+            {**r["failure_mode"],
+             "delta_eue_mwh": r["delta_eue_mwh"],
+             **({"note": r["note"]} if "note" in r else {})}
+            for r in rows
+        ],
+        "fleet": {
+            "units": len(units),
+            "must_take": n_must_take,
+            "delta_mw": 1.0,
+            # Phase 12c-pre disclosure: which units carry a profile INTO the
+            # sampled fleet, which of those were netted beyond the exact
+            # cap, and the sentence that says so. `fidelity` above stays the
+            # engine enum the comparison table keys on.
+            "profile_units": [u.name for u in split.mixed] + [u.name for u in split.netted],
+            "netted_beyond_cap": [u.name for u in split.netted],
+            "k_exact": K_EXACT,
+            # Phase 12h. Two units the lists above cannot describe:
+            #  * a unit whose STATIC p_max_pu was folded into its capacity
+            #    has no profile at all, so it is in no existing list — the
+            #    `source` field is here so a later phase can add another
+            #    fold without changing the shape;
+            #  * a unit whose outage rate is zero because its availability
+            #    is declared to include outages carries a profile but is in
+            #    neither `mixed` nor `netted` — it is netted exactly, at
+            #    full availability, and no outages are sampled for it.
+            "folded_units": [
+                {"name": u.name, "folded_constant": float(u.folded_constant),
+                 "source": "static"}
+                for u in units
+                if getattr(u, "folded_constant", None) is not None],
+            "deterministic_units": [u.name for u in units
+                                    if _is_flag_deterministic(u)],
+            # IEEE 39-bus review, F8. The OTHER way a unit reaches q = 0:
+            # the user typed the rate as 0. M4 stopped calling that "the
+            # flag", which was the defect — but on `/mc`, which has no rows
+            # to carry a note, it then left such a unit named nowhere at
+            # all. Same fleet, same q, different reason: two lists, both
+            # disjoint from `profile_units` and from each other.
+            "rate_zero_units": [u.name for u in units
+                                if _rate_is_zero(u)
+                                and not _is_flag_deterministic(u)],
+        },
+        "fidelity_note": analysis["fidelity_note"],
+        # Phase 12d: which units the engines masked in which period, by
+        # build year / lifetime (and which are below nameplate, a later
+        # vintage not yet built), with the sentence that says so.
+        "activity": activity,
+        "voll_eur_per_mwh": voll,
+    }
+
+
+@results_router.get("/adequacy")
+def get_adequacy():
+    """
+    The minimal AdequacyReport from the last target-constrained solve
+    (adequacy plan Phase 1 Task 3): which standard actually bound
+    (system cap / zone ceiling / VoLL), achieved ENS + shed-hours vs the
+    target, cost excluding shed by construction, all provenance-tagged
+    (engine="lp_proxy" — a deterministic proxy, not comparable to a
+    statutory standard, and the UI must say so at the point of display).
+
+    204 = no report: the solve ran without a target, or nothing has been
+    solved. Same convention as /results/lost_load.
+    """
+    report = _state.get("adequacy_report")
+    if not report:
+        return Response(status_code=204)
+    return report
+
+
+@results_router.get("/reserve_margin")
+def get_reserve_margin():
+    """
+    The firm-capacity (planning reserve margin) standard the last solve
+    enforced, and what met it (Phase 8 §4): one row per investment period —
+    peak, requirement, achieved firm MW, `met`, `binding` — plus the derating
+    table (name, kind, built capacity, derate, basis, source, energy_limited)
+    and the `derating_bases` roll-up.
+
+    Serves the PERSISTED solve-time stash, emitted into solver state like
+    `last_lost_load`, and NEVER a recomputation: the wrapper measured its
+    peaks with the load-scaling transforms applied, and the post-solve restore
+    has since reverted them — recomputing here would report a standard the LP
+    never enforced.
+
+    A met margin is NOT a met reliability target. It is a proxy standard
+    justified by convention and by the derating factors, not by a sampler, and
+    the panel says so at the point of display.
+
+    204 = no margin result: nothing solved yet, the last solve set no margin,
+    or it did not produce a dispatch to judge one against. Same convention as
+    /results/lost_load and /results/adequacy.
+    """
+    from services.adequacy.report import sanitize_reserve_margin_payload
+
+    payload = _state.get("last_reserve_margin")
+    if not payload:
+        return Response(status_code=204)
+    # `max_achievable_mw` is `inf` whenever an active extendable has an
+    # unbounded `p_nom_max` — the honest value, and not JSON: Starlette dumps
+    # with `allow_nan=False`, so serving it untouched raises inside the
+    # response and the panel gets a 500 instead of a report.
+    return sanitize_reserve_margin_payload(payload)
 
 
 @results_router.get("/lost_load")
@@ -3030,7 +3487,11 @@ def get_lost_load(
     # Surface VOLL directly so the frontend doesn't infer it via division
     # (which crashes on zero-MWh edge cases). Cost / MWh recovers the
     # per-MWh VOLL price the solver used.
-    voll = (total_cost / total_mwh) if total_mwh > 0 else 0.0
+    # Prefer the capture's explicit VoLL (present since the weighted-totals
+    # change); older captures lack it — fall back to the cost/energy ratio.
+    voll = float(cap.get("voll_eur_per_mwh") or 0.0) or (
+        (total_cost / total_mwh) if total_mwh > 0 else 0.0
+    )
 
     # Per-column bus carrier. solver_service adds a VOLL slack on EVERY bus
     # (not just electricity), so `lost_load_t.columns` carries bus names
@@ -3046,13 +3507,27 @@ def get_lost_load(
             except KeyError:
                 bus_carriers[str(col)] = ""
     range_meta = None
+    full_df = df   # bind BEFORE slicing — shed-hours is horizon-scope
     if _wants_slice(from_, to_):
         df, range_meta = _slice_ts(df, from_, to_)
+    # Shed-hours (spec §5.1) — electrical buses only, weighted on the same
+    # energy basis as dispatch. Computed on the FULL frame, not the sliced
+    # range: it is a horizon reliability number, not a window statistic.
+    from services.adequacy.metrics import electrical_columns, shed_hours
+    from services.period_utils import snapshot_weights
+    sh = shed_hours(
+        full_df[electrical_columns(n, list(full_df.columns))],
+        weights=snapshot_weights(n, "generators", sns=full_df.index),
+    )
     return _ts_payload(df, extra={
         "total_mwh": total_mwh,
         "total_cost_eur": total_cost,
         "voll_eur_per_mwh": voll,
         "bus_carriers": bus_carriers,
+        "shed_hours": {
+            "total": sh["total"],
+            "by_period": {str(k): v for k, v in sh["by_period"].items()},
+        },
     }, range_meta=range_meta)
 
 
@@ -3068,76 +3543,16 @@ def lp_scaled_load_frame(n, cfg=None, source: str = "lopf", from_state: bool = T
     per-period scalers from ``cfg``. Returns a DataFrame (snapshots × loads) or
     ``None``. Never mutates the source frame.
 
+    The returned frame MAY BE THE LIVE ``loads_t.p_set`` when nothing is
+    scaled (Phase 12c-0) — read-only for every consumer; never mutate it.
+
     ``from_state``: when True (default, live network) the LP-stage `_state`
     result snapshot takes priority via ``_result_df``. When False (e.g. a
     freshly-loaded Compare bundle ``temp_n``) read ``n.loads_t.p`` DIRECTLY —
     ``_result_df`` would otherwise return the LIVE network's cached
     `_state['lopf_results']` and cross-contaminate the comparison.
     """
-    import pandas as _pd
-    if from_state:
-        try:
-            df = _result_df(n, "loads_t", "p", source)
-        except Exception:
-            df = None
-    else:
-        df = getattr(getattr(n, "loads_t", None), "p", None)
-    already_scaled = df is not None and not df.empty
-    if not already_scaled:
-        df = getattr(getattr(n, "loads_t", None), "p_set", None)
-    if df is None or df.empty:
-        return None
-    load_scalers = getattr(cfg, "load_scalers", {}) if cfg is not None else {}
-    by_carrier = getattr(cfg, "load_scalers_by_carrier", {}) if cfg is not None else {}
-    multi_periods = isinstance(df.index, _pd.MultiIndex)
-    has_any_scaling = bool(load_scalers) or bool(by_carrier)
-    if not already_scaled and multi_periods and has_any_scaling:
-        from services.solver_service import _canonical_load_carrier_key
-        df = df.copy(deep=True)
-        carrier_by_col: dict = {}
-        try:
-            loads_df = n.loads
-            if "carrier" in loads_df.columns:
-                for col in df.columns:
-                    carrier_by_col[col] = (
-                        _canonical_load_carrier_key(loads_df.at[col, "carrier"])
-                        if col in loads_df.index else "electrical"
-                    )
-            else:
-                for col in df.columns:
-                    carrier_by_col[col] = "electrical"
-        except Exception:
-            carrier_by_col = {col: "electrical" for col in df.columns}
-        period_level = df.index.get_level_values(0)
-        for period in sorted(set(period_level)):
-            mask = period_level == period
-            p_str = str(period)
-            for col in df.columns:
-                carrier_key = carrier_by_col.get(col, "electrical")
-                factor = None
-                car_block = by_carrier.get(carrier_key) if isinstance(by_carrier, dict) else None
-                if isinstance(car_block, dict):
-                    raw = car_block.get(p_str)
-                    if raw is not None:
-                        try:
-                            f = float(raw)
-                            if f == f:
-                                factor = f
-                        except (TypeError, ValueError):
-                            pass
-                if factor is None and load_scalers:
-                    raw = load_scalers.get(p_str)
-                    if raw is not None:
-                        try:
-                            f = float(raw)
-                            if f == f:
-                                factor = f
-                        except (TypeError, ValueError):
-                            pass
-                if factor is None or factor == 1.0:
-                    continue
-                df.loc[mask, col] = df.loc[mask, col] * factor
-    return df
+    return _lf_lp_scaled_load_frame(n, cfg, source, from_state, result_df=_result_df)
 
 
 @results_router.get("/loads")
@@ -3171,100 +3586,10 @@ def get_load_results(
     # masquerading as a result on an unsolved or stale-dispatch network.
     if not _dispatch_ready(n):
         return _not_solved()
-    try:
-        df = lp_scaled_load_frame(n, _state.get("solver_config"), source)
-        if df is None or df.empty:
-            return _not_solved()
-        range_meta = None
-        if _wants_slice(from_, to_):
-            df, range_meta = _slice_ts(df, from_, to_)
-        return _ts_payload(df, range_meta=range_meta)
-    except Exception:
-        logger.exception("results endpoint failed; returning 204 (see traceback)")
-        return _not_solved()
+    payload = compute_load_results(n, _state.get("solver_config"), source, from_, to_, result_df=_result_df)
+    return _not_solved() if payload is None else payload
 
 
-def _apply_merit_order_correction(n, prices):
-    """
-    Remove the curtailment-subsidy distortion from ALREADY-FETCHED duals.
-
-    Split out of `corrected_marginal_prices` so `/results/prices` can apply
-    the identical correction to duals it fetched under its OWN `source`
-    parameter. The fetching half of `corrected_marginal_prices` hardcodes
-    `source="lopf"`, so `get_prices` cannot call it directly without losing
-    `source="ac_pf"` — which is why an inline copy grew there in the first
-    place. Only the fetch differs between the two callers; the algorithm is
-    the single source of truth and lives here.
-
-    Two branches, and BOTH matter. A subsidised renewable drags the bus dual
-    to its EFFECTIVE LP cost (`marginal_cost - curtailment_cost`):
-
-      1. dual == effective cost within `dual_tol` — the unambiguous
-         diagnostic that this renewable is the dual-setting unit.
-      2. dual BELOW the effective cost while the renewable is pinned AT its
-         ceiling — the LP can push the dual further down when the unit has
-         no headroom to respond, and the real price is still its
-         `marginal_cost`.
-
-    `get_prices` carried a copy implementing branch 1 only, so an at-ceiling
-    subsidised renewable reported the raw negative dual on the Prices tab
-    while `/asset_economics` and the Compare tabs reported the corrected
-    one — the latent drift flagged under "Known limitations" in
-    `docs/superpowers/findings/2026-08-03-compare-tab-correctness.md`.
-    """
-    prices = prices.fillna(0.0)
-    try:
-        gens = n.generators
-        if (not gens.empty
-                and "curtailment_cost" in gens.columns
-                and not n.generators_t.p.empty):
-            subsidised = gens.index[gens["curtailment_cost"].fillna(0) > 0]
-            if len(subsidised) > 0:
-                p_gens = n.generators_t.p
-                p_max_pu_full = n.get_switchable_as_dense("Generator", "p_max_pu")
-                p_nom_opt = (gens["p_nom_opt"]
-                             if "p_nom_opt" in gens.columns
-                             else gens["p_nom"])
-                eps = 1e-6
-                dual_tol = 1.0  # EUR/MWh — LP duals are exact to numerical eps
-                by_bus: dict[str, list[tuple[str, float, float]]] = {}
-                for g in subsidised:
-                    if g not in p_gens.columns:
-                        continue
-                    bus = str(gens.at[g, "bus"])
-                    cost = float(gens.at[g, "curtailment_cost"])
-                    real_mc = float(gens.at[g, "marginal_cost"]) if "marginal_cost" in gens.columns else 0.0
-                    by_bus.setdefault(bus, []).append((g, cost, real_mc))
-                if by_bus:
-                    prices = prices.copy()
-                    for bus, members in by_bus.items():
-                        if bus not in prices.columns:
-                            continue
-                        for i in range(len(p_gens.index)):
-                            t = p_gens.index[i]
-                            raw_dual = float(prices.at[t, bus])
-                            for g, cost, real_mc in members:
-                                pv = float(p_gens.at[t, g])
-                                if pv <= eps:
-                                    continue
-                                effective_lp_mc = real_mc - cost
-                                if abs(raw_dual - effective_lp_mc) <= dual_tol:
-                                    prices.at[t, bus] = real_mc
-                                    break
-                                if raw_dual < effective_lp_mc - dual_tol:
-                                    try:
-                                        pmp = float(p_max_pu_full.at[t, g])
-                                        nom = float(p_nom_opt.get(g, 0.0))
-                                        ceiling = pmp * nom
-                                    except Exception:
-                                        ceiling = None
-                                    if ceiling is not None and ceiling > eps and abs(pv - ceiling) <= 1e-3 * max(ceiling, 1.0):
-                                        prices.at[t, bus] = real_mc
-                                        break
-                    prices = prices.fillna(0.0)
-    except Exception:
-        pass  # defensive — keep raw LP duals if adjustment fails
-    return prices
 
 
 def corrected_marginal_prices(n, from_state: bool = True):
@@ -3356,818 +3681,8 @@ def get_asset_economics():
     capital cost (revenue, VOM, energy, capacity factor, prices, spread) keep
     their real values. See `_capital_derived` below for why.
     """
-    import math
-
-    import numpy as _np
-    import pandas as _pd
-
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
         return _not_solved()
-
-    cfg = _state["solver_config"]
-
-    # ── Pre-compute the effective annualised capital_cost for every asset.
-    # Same resolver the cost_breakdown endpoint feeds from, so Σ fixed_cost
-    # here matches `economics_by_carrier`'s Σ capex — see the docstring for
-    # what does and does not reconcile.
-    #
-    # When this raises, EVERY downstream lookup below falls through to its
-    # `.get("capital_cost", 0.0)` default, and the whole tab renders €0.00
-    # fixed cost, a net profit inflated by the missing CAPEX, and an
-    # understated LCOE — all with the same confidence as real figures. The
-    # flag and the nulls exist so that cannot happen silently again.
-    capital_costs_available = True
-    try:
-        asset_costs = periodized_capital_costs(n, cfg)
-    except Exception:
-        logger.exception(
-            "periodized_capital_costs failed in /results/asset_economics; "
-            "capital-cost-derived fields will be reported as unavailable",
-        )
-        asset_costs = {}
-        capital_costs_available = False
-
-    # ── Snapshot + period weighting helpers ──────────────────────────────
-    # Multi-period: `snapshot_weightings.objective` carries the per-row weight
-    # (representative-week scaling lives here), and `investment_period_weightings.years`
-    # carries the per-period multiplier. Flat snapshots: only the snapshot
-    # weight applies.
-    try:
-        sw_obj = n.snapshot_weightings["objective"]
-    except (KeyError, AttributeError):
-        sw_obj = None
-    # Energy basis: the `generators` column — PyPSA's n.statistics() energy
-    # weight, the same basis the Dispatch tab uses. Cost terms (revenue, VOM,
-    # charge cost) keep `objective`; ENERGY denominators (energy_mwh,
-    # discharge/charge_mwh, capacity-factor hours) use this. Falls back to the
-    # objective column when absent (older netcdf) — identical to prior behaviour.
-    try:
-        sw_gen = n.snapshot_weightings["generators"]
-    except (KeyError, AttributeError):
-        sw_gen = sw_obj
-    period_years_lookup = period_years_map(n)
-    # Horizon scaling factor for time-basis alignment between annual
-    # CAPEX and horizon-summed OPEX/dispatch. Without this, LCOS for
-    # storage and LCOE for generators are computed as (annual CAPEX +
-    # horizon OPEX + horizon charge_cost) / horizon discharge — mixing
-    # units. Documented in CLAUDE.md "LCOH/LCOE fleet aggregation mixing
-    # single-year CAPEX with horizon-total OPEX". Surfaced by user:
-    # Battery 1 LCOS = 4 €/MWh in this view vs 19.6 €/MWh in Compare
-    # View, a ~5× ratio that exactly tracks the n_periods × annual mismatch.
-    total_years_factor = (
-        float(sum(period_years_lookup.values()))
-        if period_years_lookup else 1.0
-    )
-
-    is_multi = isinstance(n.snapshots, _pd.MultiIndex)
-    if is_multi:
-        try:
-            period_lvl = n.snapshots.get_level_values(0)
-        except Exception:
-            period_lvl = None
-    else:
-        period_lvl = None
-
-    def _years_for_period(p) -> float:
-        return years_for_period(period_years_lookup, p)
-
-    def _weight_series_for(snapshots, sw) -> _pd.Series:
-        """Per-row effective weight = sw × period.years (sw column: objective=cost, generators=energy)."""
-        w = _pd.Series(1.0, index=snapshots, dtype=float)
-        if sw is not None:
-            try:
-                w = w.multiply(sw.reindex(snapshots).fillna(1.0), axis=0)
-            except Exception:
-                pass
-        if period_lvl is not None and period_years_lookup:
-            try:
-                years = _pd.Series(
-                    [_years_for_period(p) for p in period_lvl],
-                    index=snapshots, dtype=float,
-                )
-                w = w.multiply(years, axis=0)
-            except Exception:
-                pass
-        return w
-
-    # ── Per-row weights for the network's current snapshots ──────────────
-    # Two bases: w_vals (objective) for COST quantities (revenue, VOM, charge
-    # cost); w_vals_energy (generators) for ENERGY quantities (energy_mwh,
-    # discharge/charge_mwh, capacity-factor hours). Equal when the columns
-    # coincide; LCOE/LCOS = cost[objective] / energy[generators].
-    snapshots = n.snapshots
-    w_series = _weight_series_for(snapshots, sw_obj)
-    w_vals = w_series.values
-    w_series_energy = _weight_series_for(snapshots, sw_gen)
-    w_vals_energy = w_series_energy.values
-    # Period vector (same length as snapshots) for grouping later.
-    if is_multi and period_lvl is not None:
-        period_keys = [
-            (int(p) if hasattr(p, "__int__") else p) for p in period_lvl
-        ]
-    else:
-        period_keys = [None] * len(snapshots)
-
-    def _safe_finite(x: float) -> float:
-        return 0.0 if x is None or not math.isfinite(x) else float(x)
-
-    def _capital_derived(x: float | None) -> float | None:
-        """
-        Emit a capital-cost-derived field, or `null` if the resolver failed.
-
-        Use this — NOT `_safe_finite` — for anything computed from
-        `asset_costs`. `_safe_finite(0.0)` is indistinguishable on the wire
-        from a genuine zero, and the Economics tab formats it as "€0.00"
-        beside real revenue figures. `null` is the only value the frontend
-        cannot accidentally render as a number.
-        """
-        if not capital_costs_available:
-            return None
-        return None if x is None else _safe_finite(x)
-
-    def _accumulate_per_period(
-        series: _pd.Series,
-        weights: _np.ndarray,
-    ) -> tuple[float, dict]:
-        """
-        Sum (value × weight) across rows; also bucket by period.
-
-        Returns (total, by_period_dict). For flat snapshots `by_period_dict`
-        is empty (single-period collapses to the total).
-        """
-        vals = series.values
-        # Vectorised weighted total. NaN/Inf → 0 so JSON serialises.
-        finite_mask = _np.isfinite(vals) & _np.isfinite(weights)
-        weighted = _np.where(finite_mask, vals * weights, 0.0)
-        total = float(weighted.sum())
-        if not is_multi:
-            return total, {}
-        by_p: dict = {}
-        for i, p in enumerate(period_keys):
-            if p is None:
-                continue
-            by_p[p] = by_p.get(p, 0.0) + float(weighted[i])
-        return total, by_p
-
-    # ── Marginal prices per bus, merit-order corrected ───────────────────
-    # Was a third verbatim copy of the curtailment-subsidy correction. The
-    # shared helper performs the IDENTICAL fetch this block used to do by
-    # hand — `_result_df(..., "lopf")`, zero-fallback on `n.snapshots`
-    # (`snapshots` here is bound to exactly that), then `fillna(0.0)` — so
-    # the collapse is behaviour-preserving, pinned by
-    # tests/test_asset_economics_merit_order_parity.py.
-    #
-    # Why it matters that this is one function now: the copy that lived in
-    # `get_prices` implemented only the first of the two branches and had
-    # silently drifted (02b5e806). Three copies of a rule this subtle is how
-    # that happened.
-    prices = corrected_marginal_prices(n)
-
-    # ── Generator block ──────────────────────────────────────────────────
-    gen_rows: list[dict] = []
-    try:
-        gens_p = _result_df(n, "generators_t", "p", "lopf")
-    except Exception:
-        gens_p = None
-    if gens_p is not None and not gens_p.empty and not n.generators.empty:
-        gens_df = n.generators
-        # Use post-solve p_nom_opt when available (capacity expansion);
-        # else fall back to the input p_nom.
-        if "p_nom_opt" in gens_df.columns:
-            p_nom = gens_df["p_nom_opt"].fillna(gens_df.get("p_nom", 0.0))
-        else:
-            p_nom = gens_df["p_nom"]
-        mc_static = gens_df["marginal_cost"].fillna(0.0) if "marginal_cost" in gens_df.columns else _pd.Series(0.0, index=gens_df.index)
-        fom_static = gens_df["fom_cost"].fillna(0.0) if "fom_cost" in gens_df.columns else _pd.Series(0.0, index=gens_df.index)
-        # PyPSA also allows a time-varying marginal_cost — capture it when present.
-        try:
-            mc_t_df = n.get_switchable_as_dense("Generator", "marginal_cost")
-        except Exception:
-            mc_t_df = None
-
-        for g in gens_p.columns:
-            if g not in gens_df.index:
-                continue
-            bus = str(gens_df.at[g, "bus"])
-            if bus not in prices.columns:
-                continue
-            try:
-                p_series = gens_p[g].fillna(0.0)
-            except Exception:
-                continue
-            price_series = prices[bus].reindex(p_series.index).fillna(0.0)
-            if mc_t_df is not None and g in mc_t_df.columns:
-                mc_series = mc_t_df[g].reindex(p_series.index).fillna(float(mc_static.get(g, 0.0)))
-            else:
-                mc_series = _pd.Series(float(mc_static.get(g, 0.0)), index=p_series.index)
-
-            # revenue = Σ p × price × weight (€)
-            revenue_total, revenue_per_p = _accumulate_per_period(p_series * price_series, w_vals)
-            # vom = Σ p × marginal_cost × weight (€). For generators p is
-            # non-negative, but use |p| anyway so a backed-out p_min_pu<0
-            # asset (e.g. a Link-like generator) doesn't book negative VOM.
-            vom_series = p_series.abs() * mc_series
-            vom_total, vom_per_p = _accumulate_per_period(vom_series, w_vals)
-            # ENERGY (LCOE denominator) on the generators basis; revenue/VOM above on objective.
-            energy_total, energy_per_p = _accumulate_per_period(p_series, w_vals_energy)
-
-            # Fixed cost: capital_cost (annualised) × p_nom_opt, scaled to
-            # horizon by total_years_factor so the LCOE denominator (horizon-
-            # summed energy via per-period weights × ipw.years) and the
-            # numerator are on the same time basis. Without this, multi-period
-            # generators show LCOE = (annual_capex + horizon_vom) / horizon_energy,
-            # under-reporting CAPEX by `n_periods` (same bug as the storage
-            # block fixed above).
-            try:
-                cc_eff = float(asset_costs.get("generators", {}).get(g, {}).get("capital_cost", 0.0))
-            except (TypeError, ValueError):
-                cc_eff = 0.0
-            p_nom_g = float(p_nom.get(g, 0.0) or 0.0)
-            fixed_cost_annual = cc_eff * p_nom_g
-            fixed_cost = fixed_cost_annual * total_years_factor
-            fom_per_mw = float(fom_static.get(g, 0.0) or 0.0)
-            fom_cost = fom_per_mw * p_nom_g
-
-            # LCOE — divide total horizon-scaled cost by total energy
-            # dispatched. When energy is ~0 (e.g. a built-but-curtailed
-            # renewable) the ratio is undefined; report None.
-            denom = energy_total
-            if denom > 1e-6:
-                lcoe = (fixed_cost + vom_total) / denom
-                avg_price = revenue_total / denom
-            else:
-                lcoe = None
-                avg_price = None
-
-            # Capacity factor: energy / (8760 × p_nom_opt × Σ years). Useful
-            # for thermal vs renewable comparisons. Skip if p_nom_opt = 0.
-            if p_nom_g > 1e-6:
-                # Hours on the same (generators) basis as energy_total so the
-                # capacity factor = energy / (p_nom × represented_hours) is consistent.
-                total_hours_modelled = float(w_vals_energy.sum())
-                cap_factor = energy_total / (p_nom_g * total_hours_modelled) if total_hours_modelled > 0 else None
-            else:
-                cap_factor = None
-
-            # Per-period roll-up. Each period gets its own LCOE / avg-price.
-            by_period_rows: list[dict] = []
-            if is_multi and energy_per_p:
-                # Per-period fixed cost is fixed_cost × years[p] / Σ years —
-                # i.e. distribute the annualised CAPEX across periods in
-                # proportion to their years weight. This matches what PyPSA's
-                # statistics does: cost_per_period = capital_cost × p_nom × years.
-                total_years = sum(period_years_lookup.values()) or 1.0
-                for p_key in sorted(set(list(energy_per_p.keys()) + list(revenue_per_p.keys()))):
-                    y = _years_for_period(p_key)
-                    fixed_p = fixed_cost * (y / total_years) if total_years > 0 else 0.0
-                    fom_p = fom_cost * (y / total_years) if total_years > 0 else 0.0
-                    vom_p = vom_per_p.get(p_key, 0.0)
-                    rev_p = revenue_per_p.get(p_key, 0.0)
-                    e_p = energy_per_p.get(p_key, 0.0)
-                    lcoe_p = ((fixed_p + vom_p) / e_p) if e_p > 1e-6 else None
-                    avg_price_p = (rev_p / e_p) if e_p > 1e-6 else None
-                    net_p = rev_p - fixed_p - vom_p
-                    by_period_rows.append({
-                        "period": p_key,
-                        "energy_mwh": _safe_finite(e_p),
-                        "revenue_eur": _safe_finite(rev_p),
-                        "fixed_cost_eur": _capital_derived(fixed_p),
-                        "fom_cost_eur": _capital_derived(fom_p),
-                        "vom_cost_eur": _safe_finite(vom_p),
-                        "net_profit_eur": _capital_derived(net_p),
-                        "lcoe_eur_per_mwh": _capital_derived(lcoe_p),
-                        "avg_price_eur_per_mwh": _safe_finite(avg_price_p) if avg_price_p is not None else None,
-                    })
-
-            gen_rows.append({
-                "name": str(g),
-                "bus": bus,
-                "carrier": str(gens_df.at[g, "carrier"]) if "carrier" in gens_df.columns else "",
-                "p_nom_opt_mw": _safe_finite(p_nom_g),
-                "energy_mwh": _safe_finite(energy_total),
-                "capacity_factor": _safe_finite(cap_factor) if cap_factor is not None else None,
-                "revenue_eur": _safe_finite(revenue_total),
-                "vom_cost_eur": _safe_finite(vom_total),
-                "fixed_cost_eur": _capital_derived(fixed_cost),
-                "fom_cost_eur": _capital_derived(fom_cost),
-                "net_profit_eur": _capital_derived(revenue_total - fixed_cost - vom_total),
-                "lcoe_eur_per_mwh": _capital_derived(lcoe),
-                "avg_price_eur_per_mwh": _safe_finite(avg_price) if avg_price is not None else None,
-                "by_period": by_period_rows,
-            })
-
-    # ── StorageUnit block (arbitrage) ────────────────────────────────────
-    # Sign convention: positive p = discharge (acts like generation), negative
-    # p = charge (acts like load). Revenue comes from discharging into the
-    # market; cost comes from charging from it.
-    su_rows: list[dict] = []
-    try:
-        su_p = _result_df(n, "storage_units_t", "p", "lopf")
-    except Exception:
-        su_p = None
-    if su_p is not None and not su_p.empty and not n.storage_units.empty:
-        su_df = n.storage_units
-        if "p_nom_opt" in su_df.columns:
-            p_nom_su = su_df["p_nom_opt"].fillna(su_df.get("p_nom", 0.0))
-        else:
-            p_nom_su = su_df["p_nom"]
-        mc_static_su = su_df["marginal_cost"].fillna(0.0) if "marginal_cost" in su_df.columns else _pd.Series(0.0, index=su_df.index)
-        fom_static_su = su_df["fom_cost"].fillna(0.0) if "fom_cost" in su_df.columns else _pd.Series(0.0, index=su_df.index)
-        max_hours_su = su_df["max_hours"].fillna(0.0) if "max_hours" in su_df.columns else _pd.Series(0.0, index=su_df.index)
-
-        for s in su_p.columns:
-            if s not in su_df.index:
-                continue
-            bus = str(su_df.at[s, "bus"])
-            if bus not in prices.columns:
-                continue
-            try:
-                p_series = su_p[s].fillna(0.0)
-            except Exception:
-                continue
-            price_series = prices[bus].reindex(p_series.index).fillna(0.0)
-
-            discharge_series = p_series.clip(lower=0.0)
-            charge_series = (-p_series).clip(lower=0.0)
-            discharge_revenue_total, discharge_revenue_pp = _accumulate_per_period(
-                discharge_series * price_series, w_vals,
-            )
-            charge_cost_total, charge_cost_pp = _accumulate_per_period(
-                charge_series * price_series, w_vals,
-            )
-            discharge_mwh, discharge_mwh_pp = _accumulate_per_period(discharge_series, w_vals_energy)
-            charge_mwh, charge_mwh_pp = _accumulate_per_period(charge_series, w_vals_energy)
-            # PyPSA convention: marginal_cost applies to discharge dispatch.
-            # Charge has no explicit cost in standard formulation. Keep VOM
-            # restricted to discharge to match the LP objective contribution.
-            vom_total_su, vom_pp_su = _accumulate_per_period(
-                discharge_series * float(mc_static_su.get(s, 0.0)), w_vals,
-            )
-
-            try:
-                cc_eff = float(asset_costs.get("storage_units", {}).get(s, {}).get("capital_cost", 0.0))
-            except (TypeError, ValueError):
-                cc_eff = 0.0
-            p_nom_s = float(p_nom_su.get(s, 0.0) or 0.0)
-            # `cc_eff` is annual annuitised €/MW/yr. To put it on the same
-            # time basis as `vom_total_su` / `charge_cost_total` / `discharge_mwh`
-            # (which are all horizon-summed via the per-period weights below),
-            # multiply by `total_years_factor` = Σ ipw.years across periods.
-            # On flat networks total_years_factor=1 and this is a no-op.
-            # Documented bug: previous `fixed_cost = cc_eff × p_nom_s` mixed
-            # annual capex with horizon opex → LCOS was understated by ~3×
-            # for a 3-year multi-period horizon (Battery 1: reported 4 €/MWh,
-            # true 16.4 €/MWh).
-            fixed_cost_annual = cc_eff * p_nom_s
-            fixed_cost = fixed_cost_annual * total_years_factor
-            fom_per_mw = float(fom_static_su.get(s, 0.0) or 0.0)
-            fom_cost = fom_per_mw * p_nom_s
-
-            net_profit = discharge_revenue_total - charge_cost_total - vom_total_su - fixed_cost
-
-            # LCOS — total cost to deliver one MWh of discharge energy.
-            # Numerator includes the cost to charge (electricity bought
-            # at market price), the variable cost of discharging, and
-            # the horizon-scaled fixed cost. Denominator = discharge MWh
-            # (what the storage actually delivered, horizon-summed).
-            if discharge_mwh > 1e-6:
-                lcos = (fixed_cost + vom_total_su + charge_cost_total) / discharge_mwh
-            else:
-                lcos = None
-            # Spread = average discharge price − average charge price.
-            avg_discharge_price = (discharge_revenue_total / discharge_mwh) if discharge_mwh > 1e-6 else None
-            avg_charge_price = (charge_cost_total / charge_mwh) if charge_mwh > 1e-6 else None
-            spread = None
-            if avg_discharge_price is not None and avg_charge_price is not None:
-                spread = avg_discharge_price - avg_charge_price
-            # Round-trip efficiency for display — PyPSA stores eta_charge
-            # and eta_dispatch separately.
-            eta_c = float(su_df.at[s, "efficiency_store"]) if "efficiency_store" in su_df.columns else 1.0
-            eta_d = float(su_df.at[s, "efficiency_dispatch"]) if "efficiency_dispatch" in su_df.columns else 1.0
-            try:
-                rte = eta_c * eta_d
-            except Exception:
-                rte = None
-
-            by_period_rows: list[dict] = []
-            if is_multi and discharge_mwh_pp:
-                total_years = sum(period_years_lookup.values()) or 1.0
-                periods_set = sorted(set(
-                    list(discharge_mwh_pp.keys())
-                    + list(charge_mwh_pp.keys())
-                    + list(discharge_revenue_pp.keys())
-                    + list(charge_cost_pp.keys())
-                ))
-                for p_key in periods_set:
-                    y = _years_for_period(p_key)
-                    fixed_p = fixed_cost * (y / total_years) if total_years > 0 else 0.0
-                    fom_p = fom_cost * (y / total_years) if total_years > 0 else 0.0
-                    dm = discharge_mwh_pp.get(p_key, 0.0)
-                    cm = charge_mwh_pp.get(p_key, 0.0)
-                    dr = discharge_revenue_pp.get(p_key, 0.0)
-                    cc = charge_cost_pp.get(p_key, 0.0)
-                    vp = vom_pp_su.get(p_key, 0.0)
-                    np_period = dr - cc - vp - fixed_p
-                    lcos_p = ((fixed_p + vp + cc) / dm) if dm > 1e-6 else None
-                    spread_p = None
-                    ap_d = (dr / dm) if dm > 1e-6 else None
-                    ap_c = (cc / cm) if cm > 1e-6 else None
-                    if ap_d is not None and ap_c is not None:
-                        spread_p = ap_d - ap_c
-                    by_period_rows.append({
-                        "period": p_key,
-                        "discharge_mwh": _safe_finite(dm),
-                        "charge_mwh": _safe_finite(cm),
-                        "discharge_revenue_eur": _safe_finite(dr),
-                        "charge_cost_eur": _safe_finite(cc),
-                        "fixed_cost_eur": _capital_derived(fixed_p),
-                        "fom_cost_eur": _capital_derived(fom_p),
-                        "vom_cost_eur": _safe_finite(vp),
-                        "net_profit_eur": _capital_derived(np_period),
-                        "lcos_eur_per_mwh": _capital_derived(lcos_p),
-                        "spread_eur_per_mwh": _safe_finite(spread_p) if spread_p is not None else None,
-                    })
-
-            su_rows.append({
-                "name": str(s),
-                "bus": bus,
-                "carrier": str(su_df.at[s, "carrier"]) if "carrier" in su_df.columns else "",
-                "p_nom_opt_mw": _safe_finite(p_nom_s),
-                "max_hours": _safe_finite(float(max_hours_su.get(s, 0.0) or 0.0)),
-                "energy_capacity_mwh": _safe_finite(p_nom_s * float(max_hours_su.get(s, 0.0) or 0.0)),
-                "round_trip_efficiency": _safe_finite(rte) if rte is not None else None,
-                "discharge_mwh": _safe_finite(discharge_mwh),
-                "charge_mwh": _safe_finite(charge_mwh),
-                "discharge_revenue_eur": _safe_finite(discharge_revenue_total),
-                "charge_cost_eur": _safe_finite(charge_cost_total),
-                "vom_cost_eur": _safe_finite(vom_total_su),
-                "fixed_cost_eur": _capital_derived(fixed_cost),
-                "fom_cost_eur": _capital_derived(fom_cost),
-                "net_profit_eur": _capital_derived(net_profit),
-                "lcos_eur_per_mwh": _capital_derived(lcos),
-                "spread_eur_per_mwh": _safe_finite(spread) if spread is not None else None,
-                "avg_discharge_price_eur_per_mwh": _safe_finite(avg_discharge_price) if avg_discharge_price is not None else None,
-                "avg_charge_price_eur_per_mwh": _safe_finite(avg_charge_price) if avg_charge_price is not None else None,
-                "by_period": by_period_rows,
-            })
-
-    # ── Store block (energy-as-state arbitrage) ──────────────────────────
-    # Same arbitrage logic as StorageUnit, but the capacity unit is MWh
-    # (e_nom) instead of MW (p_nom). Hydrogen / heat storage commonly uses
-    # this. Sign convention identical to StorageUnit.
-    store_rows: list[dict] = []
-    try:
-        store_p = _result_df(n, "stores_t", "p", "lopf")
-    except Exception:
-        store_p = None
-    if store_p is not None and not store_p.empty and not n.stores.empty:
-        stores_df = n.stores
-        if "e_nom_opt" in stores_df.columns:
-            e_nom = stores_df["e_nom_opt"].fillna(stores_df.get("e_nom", 0.0))
-        else:
-            e_nom = stores_df["e_nom"]
-        mc_static_st = stores_df["marginal_cost"].fillna(0.0) if "marginal_cost" in stores_df.columns else _pd.Series(0.0, index=stores_df.index)
-        fom_static_st = stores_df["fom_cost"].fillna(0.0) if "fom_cost" in stores_df.columns else _pd.Series(0.0, index=stores_df.index)
-
-        for s in store_p.columns:
-            if s not in stores_df.index:
-                continue
-            bus = str(stores_df.at[s, "bus"])
-            if bus not in prices.columns:
-                continue
-            try:
-                p_series = store_p[s].fillna(0.0)
-            except Exception:
-                continue
-            price_series = prices[bus].reindex(p_series.index).fillna(0.0)
-
-            discharge_series = p_series.clip(lower=0.0)
-            charge_series = (-p_series).clip(lower=0.0)
-            discharge_revenue_total, discharge_revenue_pp = _accumulate_per_period(
-                discharge_series * price_series, w_vals,
-            )
-            charge_cost_total, charge_cost_pp = _accumulate_per_period(
-                charge_series * price_series, w_vals,
-            )
-            discharge_mwh, discharge_mwh_pp = _accumulate_per_period(discharge_series, w_vals_energy)
-            charge_mwh, charge_mwh_pp = _accumulate_per_period(charge_series, w_vals_energy)
-            vom_total_st, vom_pp_st = _accumulate_per_period(
-                discharge_series * float(mc_static_st.get(s, 0.0)), w_vals,
-            )
-
-            try:
-                cc_eff = float(asset_costs.get("stores", {}).get(s, {}).get("capital_cost", 0.0))
-            except (TypeError, ValueError):
-                cc_eff = 0.0
-            e_nom_s = float(e_nom.get(s, 0.0) or 0.0)
-            # Horizon-scale annual capex (see storage_units block above for
-            # the same fix). cc_eff is €/MWh/yr × e_nom_opt gives annual €;
-            # multiplying by total_years_factor matches the horizon-summed
-            # opex / discharge / charge_cost magnitudes used below.
-            fixed_cost_annual = cc_eff * e_nom_s
-            fixed_cost = fixed_cost_annual * total_years_factor
-            fom_per_unit = float(fom_static_st.get(s, 0.0) or 0.0)
-            fom_cost = fom_per_unit * e_nom_s
-
-            net_profit = discharge_revenue_total - charge_cost_total - vom_total_st - fixed_cost
-            if discharge_mwh > 1e-6:
-                lcos = (fixed_cost + vom_total_st + charge_cost_total) / discharge_mwh
-            else:
-                lcos = None
-            avg_discharge_price = (discharge_revenue_total / discharge_mwh) if discharge_mwh > 1e-6 else None
-            avg_charge_price = (charge_cost_total / charge_mwh) if charge_mwh > 1e-6 else None
-            spread = None
-            if avg_discharge_price is not None and avg_charge_price is not None:
-                spread = avg_discharge_price - avg_charge_price
-
-            by_period_rows: list[dict] = []
-            if is_multi and discharge_mwh_pp:
-                total_years = sum(period_years_lookup.values()) or 1.0
-                periods_set = sorted(set(
-                    list(discharge_mwh_pp.keys())
-                    + list(charge_mwh_pp.keys())
-                    + list(discharge_revenue_pp.keys())
-                    + list(charge_cost_pp.keys())
-                ))
-                for p_key in periods_set:
-                    y = _years_for_period(p_key)
-                    fixed_p = fixed_cost * (y / total_years) if total_years > 0 else 0.0
-                    fom_p = fom_cost * (y / total_years) if total_years > 0 else 0.0
-                    dm = discharge_mwh_pp.get(p_key, 0.0)
-                    cm = charge_mwh_pp.get(p_key, 0.0)
-                    dr = discharge_revenue_pp.get(p_key, 0.0)
-                    cc = charge_cost_pp.get(p_key, 0.0)
-                    vp = vom_pp_st.get(p_key, 0.0)
-                    np_period = dr - cc - vp - fixed_p
-                    lcos_p = ((fixed_p + vp + cc) / dm) if dm > 1e-6 else None
-                    spread_p = None
-                    ap_d = (dr / dm) if dm > 1e-6 else None
-                    ap_c = (cc / cm) if cm > 1e-6 else None
-                    if ap_d is not None and ap_c is not None:
-                        spread_p = ap_d - ap_c
-                    by_period_rows.append({
-                        "period": p_key,
-                        "discharge_mwh": _safe_finite(dm),
-                        "charge_mwh": _safe_finite(cm),
-                        "discharge_revenue_eur": _safe_finite(dr),
-                        "charge_cost_eur": _safe_finite(cc),
-                        "fixed_cost_eur": _capital_derived(fixed_p),
-                        "fom_cost_eur": _capital_derived(fom_p),
-                        "vom_cost_eur": _safe_finite(vp),
-                        "net_profit_eur": _capital_derived(np_period),
-                        "lcos_eur_per_mwh": _capital_derived(lcos_p),
-                        "spread_eur_per_mwh": _safe_finite(spread_p) if spread_p is not None else None,
-                    })
-
-            store_rows.append({
-                "name": str(s),
-                "bus": bus,
-                "carrier": str(stores_df.at[s, "carrier"]) if "carrier" in stores_df.columns else "",
-                "e_nom_opt_mwh": _safe_finite(e_nom_s),
-                "discharge_mwh": _safe_finite(discharge_mwh),
-                "charge_mwh": _safe_finite(charge_mwh),
-                "discharge_revenue_eur": _safe_finite(discharge_revenue_total),
-                "charge_cost_eur": _safe_finite(charge_cost_total),
-                "vom_cost_eur": _safe_finite(vom_total_st),
-                "fixed_cost_eur": _capital_derived(fixed_cost),
-                "fom_cost_eur": _capital_derived(fom_cost),
-                "net_profit_eur": _capital_derived(net_profit),
-                "lcos_eur_per_mwh": _capital_derived(lcos),
-                "spread_eur_per_mwh": _safe_finite(spread) if spread is not None else None,
-                "avg_discharge_price_eur_per_mwh": _safe_finite(avg_discharge_price) if avg_discharge_price is not None else None,
-                "avg_charge_price_eur_per_mwh": _safe_finite(avg_charge_price) if avg_charge_price is not None else None,
-                "by_period": by_period_rows,
-            })
-
-    # ── Link block (converters: electrolysers, heat pumps, P2X) ──────────
-    # Missing entirely until 2026-07-31. The user asked why their electrolyser
-    # showed no economics; the endpoint returned generators / storage_units /
-    # stores and no `links` key at all, so a Link could not appear in the
-    # Economics table however its costs were configured.
-    #
-    # A Link is two-sided in a way the other three are not: it BUYS at bus0 and
-    # SELLS at bus1. `revenue_eur` is therefore the NET of the two — value
-    # delivered at bus1 minus energy bought at bus0 — so `net_profit_eur`
-    # (revenue − fixed − vom) means the same thing it does for a generator and
-    # the columns stay comparable down the table. The gross halves ride along
-    # as their own fields so the netting is auditable rather than implied, and
-    # so the Compare view can reconstruct either convention.
-    link_rows: list[dict] = []
-    try:
-        links_p0 = _result_df(n, "links_t", "p0", "lopf")
-        links_p1 = _result_df(n, "links_t", "p1", "lopf")
-    except Exception:
-        links_p0 = links_p1 = None
-    if links_p0 is not None and not links_p0.empty and not n.links.empty:
-        links_df = n.links
-        if "p_nom_opt" in links_df.columns:
-            l_p_nom = links_df["p_nom_opt"].fillna(links_df.get("p_nom", 0.0))
-        else:
-            l_p_nom = links_df["p_nom"]
-        l_mc_static = (
-            links_df["marginal_cost"].fillna(0.0) if "marginal_cost" in links_df.columns
-            else _pd.Series(0.0, index=links_df.index)
-        )
-        l_fom_static = (
-            links_df["fom_cost"].fillna(0.0) if "fom_cost" in links_df.columns
-            else _pd.Series(0.0, index=links_df.index)
-        )
-        try:
-            l_mc_t_df = n.get_switchable_as_dense("Link", "marginal_cost")
-        except Exception:
-            l_mc_t_df = None
-
-        for ln in links_p0.columns:
-            if ln not in links_df.index:
-                continue
-            bus0 = str(links_df.at[ln, "bus0"]) if "bus0" in links_df.columns else ""
-            bus1 = str(links_df.at[ln, "bus1"]) if "bus1" in links_df.columns else ""
-            try:
-                p0_series = links_p0[ln].fillna(0.0)
-            except Exception:
-                continue
-
-            # `p1` is NEGATIVE when the Link delivers into bus1, so flip it to
-            # get a positive quantity of energy sold. Fall back to
-            # p0 × efficiency only when the dispatch table lacks p1.
-            if links_p1 is not None and ln in links_p1.columns:
-                out_series = -links_p1[ln].reindex(p0_series.index).fillna(0.0)
-            else:
-                try:
-                    eff = float(links_df.at[ln, "efficiency"])
-                except (KeyError, TypeError, ValueError):
-                    eff = 1.0
-                out_series = p0_series * eff
-            gross_revenue_series = out_series * (
-                prices[bus1].reindex(p0_series.index).fillna(0.0)
-                if bus1 in prices.columns else 0.0
-            )
-
-            # Multi-output Links (CHP: bus0 gas → bus1 electricity + bus2 heat;
-            # heat pumps with a second sink) deliver at bus2/bus3/bus4 as well.
-            # Counting only bus1 would silently drop half a CHP's product and
-            # inflate its unit cost accordingly. Each extra port is valued at
-            # ITS OWN bus price, which is unambiguous; the energy total is the
-            # combined output across ports, so for a multi-output Link the
-            # unit cost is per MWh of everything it delivers.
-            for port in ("2", "3", "4"):
-                bus_col = f"bus{port}"
-                if bus_col not in links_df.columns:
-                    continue
-                bus_n = str(links_df.at[ln, bus_col] or "").strip()
-                if not bus_n:
-                    continue
-                try:
-                    p_n_df = _result_df(n, "links_t", f"p{port}", "lopf")
-                except Exception:
-                    p_n_df = None
-                if p_n_df is None or ln not in getattr(p_n_df, "columns", []):
-                    continue
-                out_n = -p_n_df[ln].reindex(p0_series.index).fillna(0.0)
-                out_series = out_series + out_n
-                if bus_n in prices.columns:
-                    gross_revenue_series = gross_revenue_series + (
-                        out_n * prices[bus_n].reindex(p0_series.index).fillna(0.0)
-                    )
-
-            # Unlike the generator block, a missing bus price is NOT a reason
-            # to drop the row. An H₂ or heat bus often carries no meaningful
-            # dual, and skipping would reproduce the very bug this block
-            # fixes — the asset silently vanishing from the table. Treat an
-            # absent price as zero and still report capacity, energy and cost.
-            if bus0 in prices.columns:
-                price0 = prices[bus0].reindex(p0_series.index).fillna(0.0)
-            else:
-                price0 = _pd.Series(0.0, index=p0_series.index)
-            if l_mc_t_df is not None and ln in l_mc_t_df.columns:
-                l_mc_series = l_mc_t_df[ln].reindex(p0_series.index).fillna(float(l_mc_static.get(ln, 0.0)))
-            else:
-                l_mc_series = _pd.Series(float(l_mc_static.get(ln, 0.0)), index=p0_series.index)
-
-            gross_revenue_total, gross_rev_per_p = _accumulate_per_period(gross_revenue_series, w_vals)
-            input_cost_total, input_cost_per_p = _accumulate_per_period(p0_series * price0, w_vals)
-            # PyPSA charges a Link's marginal_cost against p0 (the input), not
-            # the output — matching how the LP builds the objective.
-            vom_total, vom_per_p = _accumulate_per_period(p0_series.abs() * l_mc_series, w_vals)
-            # ENERGY = what leaves bus1. Using p0 here would overstate a
-            # 70%-efficient electrolyser's product by 1/0.7 and understate its
-            # unit cost by the same factor.
-            energy_total, energy_per_p = _accumulate_per_period(out_series, w_vals_energy)
-            input_energy_total, _ = _accumulate_per_period(p0_series, w_vals_energy)
-
-            try:
-                cc_eff = float(asset_costs.get("links", {}).get(ln, {}).get("capital_cost", 0.0))
-            except (TypeError, ValueError):
-                cc_eff = 0.0
-            p_nom_l = float(l_p_nom.get(ln, 0.0) or 0.0)
-            fixed_cost = cc_eff * p_nom_l * total_years_factor
-            fom_cost = float(l_fom_static.get(ln, 0.0) or 0.0) * p_nom_l
-
-            revenue_total = gross_revenue_total - input_cost_total
-
-            # All-in levelised cost of the Link's OUTPUT: capital + VOM + the
-            # energy it had to buy. The bought energy belongs in the numerator
-            # — for a 70%-efficient electrolyser it is the dominant term, and
-            # omitting it produced €43.74/MWh against the LCOH panel's €246.02
-            # for the identical asset. Two views of one converter disagreeing
-            # by 5.6x is worse than either number alone, so this matches
-            # `/results/lcoh` exactly, term for term.
-            denom = energy_total
-            if denom > 1e-6:
-                lcoe = (fixed_cost + vom_total + input_cost_total) / denom
-                avg_price = gross_revenue_total / denom
-            else:
-                lcoe = None
-                avg_price = None
-
-            # p_nom bounds the INPUT (p0), so utilisation is measured there.
-            if p_nom_l > 1e-6:
-                total_hours_modelled = float(w_vals_energy.sum())
-                cap_factor = (
-                    input_energy_total / (p_nom_l * total_hours_modelled)
-                    if total_hours_modelled > 0 else None
-                )
-            else:
-                cap_factor = None
-
-            by_period_rows = []
-            if is_multi and energy_per_p:
-                total_years = sum(period_years_lookup.values()) or 1.0
-                keys = set(energy_per_p) | set(gross_rev_per_p) | set(input_cost_per_p)
-                for p_key in sorted(keys):
-                    y = _years_for_period(p_key)
-                    fixed_p = fixed_cost * (y / total_years) if total_years > 0 else 0.0
-                    fom_p = fom_cost * (y / total_years) if total_years > 0 else 0.0
-                    vom_p = vom_per_p.get(p_key, 0.0)
-                    gross_p = gross_rev_per_p.get(p_key, 0.0)
-                    in_p = input_cost_per_p.get(p_key, 0.0)
-                    rev_p = gross_p - in_p
-                    e_p = energy_per_p.get(p_key, 0.0)
-                    # Same all-in basis as the horizon figure above.
-                    lcoe_p = ((fixed_p + vom_p + in_p) / e_p) if e_p > 1e-6 else None
-                    by_period_rows.append({
-                        "period": p_key,
-                        "energy_mwh": _safe_finite(e_p),
-                        "revenue_eur": _safe_finite(rev_p),
-                        "gross_revenue_eur": _safe_finite(gross_p),
-                        "input_cost_eur": _safe_finite(in_p),
-                        "fixed_cost_eur": _capital_derived(fixed_p),
-                        "fom_cost_eur": _capital_derived(fom_p),
-                        "vom_cost_eur": _safe_finite(vom_p),
-                        "net_profit_eur": _capital_derived(rev_p - fixed_p - vom_p),
-                        "lcoe_eur_per_mwh": _capital_derived(lcoe_p),
-                        "avg_price_eur_per_mwh": _safe_finite((gross_p / e_p) if e_p > 1e-6 else 0.0) if e_p > 1e-6 else None,
-                    })
-
-            link_rows.append({
-                "name": str(ln),
-                "bus": bus0,
-                "bus1": bus1,
-                "carrier": str(links_df.at[ln, "carrier"]) if "carrier" in links_df.columns else "",
-                "efficiency": _safe_finite(float(links_df.at[ln, "efficiency"])) if "efficiency" in links_df.columns else None,
-                "p_nom_opt_mw": _safe_finite(p_nom_l),
-                "energy_mwh": _safe_finite(energy_total),
-                "input_energy_mwh": _safe_finite(input_energy_total),
-                "capacity_factor": _safe_finite(cap_factor) if cap_factor is not None else None,
-                "revenue_eur": _safe_finite(revenue_total),
-                "gross_revenue_eur": _safe_finite(gross_revenue_total),
-                "input_cost_eur": _safe_finite(input_cost_total),
-                "vom_cost_eur": _safe_finite(vom_total),
-                "fixed_cost_eur": _capital_derived(fixed_cost),
-                "fom_cost_eur": _capital_derived(fom_cost),
-                "net_profit_eur": _capital_derived(revenue_total - fixed_cost - vom_total),
-                "lcoe_eur_per_mwh": _capital_derived(lcoe),
-                "avg_price_eur_per_mwh": _safe_finite(avg_price) if avg_price is not None else None,
-                "by_period": by_period_rows,
-            })
-
-    # Periods list (sorted) for the frontend's period selector.
-    periods_list: list = []
-    if is_multi:
-        seen = set()
-        for p_key in period_keys:
-            if p_key is not None and p_key not in seen:
-                periods_list.append(p_key)
-                seen.add(p_key)
-        try:
-            periods_list = sorted(periods_list, key=lambda x: (0, int(x)) if hasattr(x, "__int__") else (1, str(x)))
-        except Exception:
-            pass
-
-    return {
-        "currency": "EUR",
-        "is_multi_period": is_multi,
-        # False when `periodized_capital_costs` raised. Every capital-cost-
-        # derived field in every row (and every `by_period` entry) is `null`
-        # in that case — see `_capital_derived`. The flag is the summary; the
-        # nulls are the wire signal. Consumers need both: the flag so one
-        # banner can explain forty blank cells, the nulls so a consumer that
-        # ignores the flag still cannot format a zero.
-        "capital_costs_available": capital_costs_available,
-        "periods": periods_list,
-        "generators": gen_rows,
-        "storage_units": su_rows,
-        "stores": store_rows,
-        "links": link_rows,
-    }
+    payload = compute_asset_economics(n, _state['solver_config'], result_df=_result_df)
+    return _not_solved() if payload is None else payload

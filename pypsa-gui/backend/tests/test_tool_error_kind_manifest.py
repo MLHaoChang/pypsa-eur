@@ -71,31 +71,32 @@ def _yielded_tool_error_kinds(tree: ast.AST) -> set[str]:
     return found
 
 
-def _http_exception_kinds(tree: ast.AST) -> set[str]:
+def _error_kind_dict_kinds(tree: ast.AST) -> set[str]:
     """
-    `error_kind` literals inside `HTTPException(detail={...})`, ANYWHERE.
+    Every `"error_kind": "<literal>"` in ANY dict literal, ANYWHERE.
 
-    Deliberately not scoped to `chat_tools`. Tool dispatch forwards any
-    exception carrying `detail["error_kind"]`, and tool handlers call into
-    `upload_service`, `routers/projects` and others that raise their own — so
-    scoping to the tool module would miss `descendants_exist`,
-    `upload_quota_exceeded` and the rest, which is precisely the class of miss
-    this guard exists to prevent.
+    NOT scoped to `HTTPException(detail={...})`, and that is the whole point.
+    The first cut of this matched only dicts written inline at the raise site,
+    and it MISSED `study_in_flight` — `routers/projects.py` builds that detail
+    in `project_context.study_swap_refusal()` and raises the variable. The
+    guard therefore under-approximated, which is the one direction it exists
+    to prevent; the miss was caught by checking a kind the frontend already
+    knew about against what this derived.
+
+    Matching every dict literal over-approximates instead: it picks up detail
+    dicts that never reach a tool, and those are classified `inline` with that
+    as their reason. A spare line of JSON is the right price for not missing
+    an emitter.
     """
     found: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
+        if not isinstance(node, ast.Dict):
             continue
-        name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
-        if name != "HTTPException":
-            continue
-        for keyword in node.keywords:
-            if keyword.arg != "detail" or not isinstance(keyword.value, ast.Dict):
-                continue
-            for key, value in zip(keyword.value.keys, keyword.value.values):
-                if (isinstance(key, ast.Constant) and key.value == "error_kind"
-                        and isinstance(value, ast.Constant)):
-                    found.add(value.value)
+        for key, value in zip(node.keys, node.values):
+            if (isinstance(key, ast.Constant) and key.value == "error_kind"
+                    and isinstance(value, ast.Constant)
+                    and isinstance(value.value, str)):
+                found.add(value.value)
     return found
 
 
@@ -108,7 +109,7 @@ def derive_tool_error_kinds() -> set[str]:
         except (SyntaxError, UnicodeDecodeError):  # pragma: no cover
             continue
         kinds |= _yielded_tool_error_kinds(tree)
-        kinds |= _http_exception_kinds(tree)
+        kinds |= _error_kind_dict_kinds(tree)
     return kinds
 
 
@@ -182,7 +183,10 @@ def test_the_derivation_finds_the_kinds_it_is_supposed_to_find():
     derived = derive_tool_error_kinds()
     # One from each extraction path, so a broken extractor cannot hide.
     assert "tool_not_offered" in derived        # yielded literal
-    assert "not_authorized" in derived          # HTTPException in chat_tools
-    assert "upload_quota_exceeded" in derived   # HTTPException in a SIBLING
+    assert "not_authorized" in derived          # dict literal in chat_tools
+    assert "upload_quota_exceeded" in derived   # dict literal in a SIBLING
+    # Built in a helper and raised as a variable — the miss that made
+    # the first version of this derivation under-approximate.
+    assert "study_in_flight" in derived
     assert "validation_error" in derived        # forwarder fallback
     assert len(derived) > 40, f"suspiciously few kinds derived: {len(derived)}"

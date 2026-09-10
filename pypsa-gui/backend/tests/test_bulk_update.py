@@ -98,12 +98,28 @@ def test_blanking_a_bound_writes_its_sentinel(client, net, col, expected):
     assert float(net.generators.at["gas", col]) == expected
 
 
-def test_blanking_a_plain_numeric_writes_nan(client, net):
+def test_blanking_a_finite_default_numeric_writes_that_default(client, net):
+    """
+    MERGE NOTE (2026-09-10): this asserted NaN, and master's Phase 12g changed
+    the behaviour deliberately — `_finite_input_meta` decides FIRST, and
+    `Generator.p_nom`'s PyPSA default is a finite 0.0. The rationale is
+    master's and it is the stronger one: NaN is not a "no value" sentinel to
+    PyPSA, which drops the term or the constraint that reads it rather than
+    falling back to a default, so clearing a finite-default input to NaN left
+    the network in a state the next solve would silently mis-model.
+
+    The property this test exists for — a blank goes through the numeric
+    branch and lands as a real number, not a string or an object-dtype cell —
+    is unchanged and still asserted. `test_nonfinite_inputs.py::test_J2a_*`
+    pins the same rule across the other finite-default columns.
+    """
     r = client.patch(BULK, json={
         "component_class": "Generator", "names": ["gas"], "updates": {"p_nom": None},
     })
     assert r.status_code == 200
-    assert math.isnan(float(net.generators.at["gas", "p_nom"]))
+    value = float(net.generators.at["gas", "p_nom"])
+    assert value == 0.0
+    assert not math.isnan(value)
 
 
 def test_empty_string_takes_the_same_blank_path_as_null(client, net):

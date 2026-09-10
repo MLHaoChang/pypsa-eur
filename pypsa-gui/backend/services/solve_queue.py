@@ -1072,7 +1072,28 @@ class SolveQueue:
             # 2. Claim the ctx lifecycle: status=running + a live worker handle
             #    (this thread) so a concurrent foreground /run on the SAME ctx
             #    409s, and wipe stale results so the fresh solve starts clean.
-            ctx_state_update(
+            # Fix review, F3: a live adequacy study on this ctx refuses the
+            # claim — checked and claimed under ONE hold of the state lock, so
+            # a study publishing concurrently (which holds that lock too)
+            # cannot slip between the check and the claim.
+            from services.project_context import (
+                STUDY_LABELS as _STUDY_LABELS,
+                running_study_key as _running_study_key,
+            )
+            with ctx.solver_state_lock:
+                _study = _running_study_key(ctx.solver_state)
+                if _study is not None:
+                    raise RuntimeError(
+                        f"{_STUDY_LABELS.get(_study, _study)} is running on "
+                        "this project — a queued solve would re-solve the "
+                        "network it is measuring. Wait for it to finish, or "
+                        "abort it, and queue again.")
+                # The claim, under the SAME hold. Fix review (second pass, P7):
+                # a separate `ctx_state_update(...)` call re-acquired the RLock
+                # after this block had released it, and a study POST landing
+                # in that gap was admitted and then solved over. One
+                # acquisition, check and claim.
+                ctx.solver_state.update(dict(
                 status="running", condition=None, objective=None, solve_time=None,
                 last_failure=None,
                 stop_event=stop_event, log_queue=log_queue,
@@ -1085,11 +1106,17 @@ class SolveQueue:
                 # — it is not; only `solve_queue.abort` can stop it — and it
                 # would be counted a second time by `solves_in_flight()`.
                 kind="queue",
-                last_lost_load=None, lopf_results=None, ac_pf_results=None,
+                # Merged 2026-09-10: `adequacy_report` / `last_reserve_margin`
+                # arrive with the FMEA work on master and must be cleared on a
+                # new claim like every other per-solve result, or a queued run
+                # inherits the previous project's adequacy verdict.
+                last_lost_load=None, adequacy_report=None,
+                last_reserve_margin=None,
+                lopf_results=None, ac_pf_results=None,
                 ac_pf_convergence=None, ac_pf_convergence_list=None,
                 ac_pf_slack_bus_used=None, ac_pf_stripped_voll_slacks=None,
                 ac_pf_converged_count=None, ac_pf_total_snapshots=None,
-            )
+                ))
 
             # 3. Solve (synchronous; honours stop_event). Writes LOPF dispatch
             #    onto n's _t tables and side-results into ctx.solver_state via the

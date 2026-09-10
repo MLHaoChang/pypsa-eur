@@ -52,6 +52,20 @@ CAPITAL_DERIVED_TOTAL = (
 INDEPENDENT = ("revenue_eur", "vom_cost_eur", "energy_mwh")
 
 
+def _ae_module():
+    """
+    The module that actually CALLS `periodized_capital_costs`.
+
+    MERGE NOTE (2026-09-10): the decomposition moved the call out of
+    `routers.results` into `services.results.asset_economics`, which binds the
+    name at its own module scope. Patching the router would inject no fault
+    while still reporting green — the failure mode these tests exist to catch.
+    """
+    from services.results import asset_economics
+
+    return asset_economics
+
+
 def _boom(*_args, **_kwargs):
     """Stand-in for a resolver that blows up mid-way, as the real one can."""
     raise RuntimeError("annuity lookup exploded")
@@ -137,7 +151,16 @@ def _run(n) -> dict:
 @pytest.fixture()
 def broken(monkeypatch) -> dict:
     """Response with the capital-cost resolver raising."""
-    monkeypatch.setattr(R, "periodized_capital_costs", _boom)
+    # MERGE NOTE (2026-09-10): patched at `services.results.asset_economics`,
+    # not `routers.results`. The decomposition moved the CALL into that module,
+    # which binds `periodized_capital_costs` at its own module scope — so
+    # patching the router's name would no longer reach the caller, and this
+    # fixture would inject no fault at all while still reporting green. The
+    # property under test is unchanged: the resolver raises, and the response
+    # has to say so.
+    from services.results import asset_economics as _ae
+
+    monkeypatch.setattr(_ae, "periodized_capital_costs", _boom)
     return _run(_flat_network())
 
 
@@ -251,7 +274,7 @@ def test_by_period_entries_are_nulled_too(monkeypatch):
     reads when they expand an asset, so a fix that stops at the top level
     leaves the zeros exactly where they do the most damage.
     """
-    monkeypatch.setattr(R, "periodized_capital_costs", _boom)
+    monkeypatch.setattr(_ae_module(), "periodized_capital_costs", _boom)
     payload = _run(_multi_period_network())
 
     assert payload["is_multi_period"] is True
@@ -303,7 +326,7 @@ def test_the_swallowed_exception_is_logged_with_a_traceback(monkeypatch, caplog)
     asserts the level, the logger, and the presence of exception info rather
     than just "something was logged".
     """
-    monkeypatch.setattr(R, "periodized_capital_costs", _boom)
+    monkeypatch.setattr(_ae_module(), "periodized_capital_costs", _boom)
 
     with caplog.at_level(logging.ERROR, logger="pypsa_gui.results"):
         payload = _run(_flat_network())

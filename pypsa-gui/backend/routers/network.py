@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import math
-from typing import Any, NamedTuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -14,14 +14,11 @@ from models.schemas import (
     CarrierCreate,
     GeneratorCreate,
     ImpedanceRescaleRequest,
-    InvestmentPeriods,
     LineCreate,
     LinkCreate,
     LoadCreate,
     NetworkMeta,
-    SampleWeeksConfig,
     ShuntImpedanceCreate,
-    SnapshotConfig,
     StorageUnitCreate,
     StoreCreate,
     TransformerCreate,
@@ -31,11 +28,126 @@ from db.session import get_db
 from deps import current_session
 from services import active_project, attribute_catalog, change_log_service, vintage_service
 from services.carrier_catalog import ensure_carrier
+from services.transient_rows import filter_transient_names
+# Phase 12f's write-path guards live in `services/user_timeseries.py` beside
+# the `_user_ts` machinery they protect, so `routers/network_time_axis.py`
+# can call them without importing back from this module (the decomposition's
+# one-way rule). Re-exported here because the chat tools and the
+# nonfinite-bounds tests reach them through `routers.network`.
+from services.user_timeseries import (  # noqa: F401
+    _attribute_default_is_finite,
+    _reject_nonfinite_timeseries,
+)
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
 from services.upload_guard import read_capped
+from services.http_filenames import content_disposition
+
+# ── Re-export façade: the extracted helper services ──────────────────────────
+# These names are DEFINED under `services/` now (see the decomposition spec,
+# Phase 4 addendum). They are imported back because `routers.network` is the
+# import surface fifty-plus call sites already use — `services/chat_tools.py`,
+# `routers/projects.py`, `routers/snapshots.py`, `routers/io.py`,
+# `routers/project_network.py`, `main.py`, `services/solver_service.py` and the
+# tests — and every one of them still works unchanged.
+#
+# Every cluster was a PURE move, so these are the identical objects, not
+# wrappers. That matters most for `_user_ts` / `_user_ts_lock`: they are shared
+# mutable state that importers take by value, so two objects would mean two
+# stores. The ~80 CRUD routes, their factory and `_xlsx_response` deliberately
+# stay in this module.
+from services.network_geometry import (  # noqa: F401
+    _EARTH_KM,
+    _IMPEDANCE_FIELDS,
+    _RecomputeResult,
+    _bus_coord,
+    _haversine_km,
+    _impedance_preview,
+    _line_haversine_km,
+    _recompute_lengths_for_bus,
+)
+from services.transformer_rules import (  # noqa: F401
+    _VNOM_TOL_KV,
+    _enrich_transformer_voltage,
+    _sanitise_transformer_type,
+    _validate_transformer_voltage,
+)
+from services.profile_shapes import (  # noqa: F401
+    _CONVENTIONAL_KW,
+    _DR_KW,
+    _ELEC_CARRIERS,
+    _H2_CARRIERS,
+    _H2_CARRIERS_LOAD,
+    _HEAT_CARRIERS,
+    _RENEWABLE_KW,
+    _double_peak_profile,
+    _flat_cf_profile,
+    _gen_category,
+    _h2_load_profile,
+    _heat_load_profile,
+    _link_category,
+    _load_section,
+    _profile_meta_for,
+    _shape_for_section,
+    _solar_cf_profile,
+    _template_snapshots,
+    _wind_cf_profile,
+)
+from services.snapshot_index import (  # noqa: F401
+    _build_period_multiindex,
+)
+from services.user_timeseries import (  # noqa: F401
+    _TS_COMPONENTS,
+    _annual_hourly_reference,
+    _backup_network_ts_to_user_ts,
+    _capture_snapshot_weights_per_timestep,
+    _ensure_snapshots_cover_user_ts,
+    _flatten_snapshot_state,
+    _parse_upload,
+    _reapply_snapshot_weights,
+    _reapply_user_ts_to_network,
+    _rebase_flat_user_ts,
+    _restore_user_ts,
+    _serialize_user_ts,
+    _user_ts,
+    _user_ts_delete_asset,
+    _user_ts_extent,
+    _user_ts_lock,
+    _user_ts_rename_asset,
+)
 
 router = APIRouter()
+
+# ── Phase 5 façade: the time-axis routes ─────────────────────────────────────
+# `services/chat_tools.py` imports fourteen of these handlers BY NAME and calls
+# them in-process, so this module stays their import surface. At the TOP, with
+# the other imports: a module body executes top to bottom, and a re-export at
+# the bottom is not bound yet for anything above it that references it.
+from routers.network_time_axis import (  # noqa: E402,F401
+    _ATTR_TO_CLASS,
+    # Re-exported for the same reason as every name in this block: the
+    # decomposition's contract is that the ORIGINAL module stays the import
+    # surface. `tests/test_model_horizon_endpoints.py` imports it from here.
+    _infer_snapshot_freq,
+    delete_timeseries,
+    download_snapshot_weightings_csv,
+    get_investment_periods,
+    get_snapshots,
+    get_timeseries,
+    list_timeseries,
+    sample_representative_weeks,
+    set_investment_periods,
+    set_multi_period_snapshots,
+    set_snapshots,
+    set_timeseries,
+    update_investment_period_weightings,
+    update_snapshot_weightings,
+    upload_snapshot_weightings_csv,
+    upload_timeseries,
+)
+from routers.network_time_axis import router as _time_axis_router
+
+router.include_router(_time_axis_router)
 
 # `df_to_json` (static-DataFrame → NaN-safe row dicts) now lives in
 # `services/serialization.py` — the single JSON-boundary scrub home. Imported
@@ -66,7 +178,17 @@ def _serialize_component(
         # large number of real rows.
         keep_idx = df.index.difference(pd.Index(list(transient)))
         df = df.loc[keep_idx]
-    return df_to_json(df)
+    rows = df_to_json(df)
+    # An unset outage basis is `null` on the wire whichever way the frame
+    # spells it — NaN before a save, "" after a netCDF round trip of a mixed
+    # column (whole-branch review, M13) — so a row read here can be sent
+    # back unchanged.
+    if "outage_rate_basis" in df.columns:
+        for row in rows:
+            v = row.get("outage_rate_basis")
+            if isinstance(v, str) and v.strip() in ("", "nan", "None"):
+                row["outage_rate_basis"] = None
+    return rows
 
 
 def _get_component(component_class: str, attr: str) -> list[dict]:
@@ -77,7 +199,8 @@ def _get_component(component_class: str, attr: str) -> list[dict]:
 
     Reads never acquire the PyPSA lock (per the project's read-never-locks
     policy), so during a solve the worker thread has already populated
-    `n.generators` with `__voll_<bus>` rows and `n.links` with
+    `n.generators` with `__voll_<bus>` rows (convention:
+    services/adequacy/slack.py) and `n.links` with
     `parent@<year>` vintages. Without this filter those leak into every
     /api/network/{component} response and confuse the user — they appear
     as "extra" assets that vanish once the LP completes.
@@ -117,41 +240,32 @@ def _meta_payload(n: Any, loaded_project: str | None) -> dict:
     }
 
 
-# Map PyPSA's lowercase-plural DataFrame attribute names to the singular
-# PascalCase class names used as keys in the transient-row registry.
-# Kept as a module-level constant so endpoints that only know the attr
-# form (e.g. /timeseries iterates "generators", "loads", …) can resolve
-# to the registry's class key with a single lookup.
-_ATTR_TO_CLASS: dict[str, str] = {
-    "buses":         "Bus",
-    "carriers":      "Carrier",
-    "generators":    "Generator",
-    "loads":         "Load",
-    "lines":         "Line",
-    "links":         "Link",
-    "storage_units": "StorageUnit",
-    "stores":        "Store",
-    "transformers":  "Transformer",
-}
 
 
-def _filter_transient_names(component_class: str, names: list[str]) -> list[str]:
+# Moved to `services/transient_rows.py` in Phase 5: `routers/network_time_axis.py`
+# needs it too, and a router it was split out of is not something it may import
+# back from. The alias keeps the private name working for this module's own
+# call sites.
+_filter_transient_names = filter_transient_names
+
+
+def _normalise_flag_column(n, attr: str) -> None:
+    """Phase 12h: keep `p_max_pu_includes_outages` a real `bool` column.
+
+    A first `n.add` on a frame that lacks the column creates it as `object`,
+    and an `object` column of PURE bools is the one shape netCDF refuses
+    (`unsupported dtype for netCDF4 variable: bool`) — so the next project
+    save is a 500 and the undo snapshot fails silently. Called at every
+    boundary that can add a row or replace a frame; a no-op on anything but
+    generators, and 0.17 ms on a 300-row frame.
     """
-    Drop solver-only transient names (vintage clones, VOLL slacks) from
-    a plain name list. Mirror of the row filter in `_get_component`, but
-    for endpoints that return column- or index-name LISTS directly (e.g.
-    /timeseries, /generators/profiles) instead of full DataFrames.
-
-    Short-circuits when the registry is empty so the healthy path costs
-    one dict lookup. Preserves input order, no allocation if nothing
-    needs filtering.
-    """
-    if not names or not PyPSAService.has_any_transient_rows():
-        return names
-    transient = PyPSAService.get_transient_rows(component_class)
-    if not transient:
-        return names
-    return [n for n in names if n not in transient]
+    if attr != "generators":
+        return
+    try:
+        from services.adequacy.occurrence import normalise_flag_column
+        normalise_flag_column(n)
+    except Exception:                                         # noqa: BLE001
+        pass
 
 
 def _drop_unknown_extras(component_class: str, attr: str, kwargs: dict) -> dict:
@@ -190,6 +304,7 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
         if component_class != "Carrier":
             ensure_carrier(n, kwargs.get("carrier", ""))
         n.add(component_class, name, **kwargs)
+        _normalise_flag_column(n, attr)
     change_log_service.log("add", component_class, name, f"Added {component_class.lower()} '{name}'")
     return {"name": name}
 
@@ -211,12 +326,93 @@ def _merge_partial_update(n, attr: str, name: str, submitted: dict) -> dict:
         defaults = getattr(n.components, attr).defaults
         mask = defaults["status"].str.startswith("Input", na=False)
         input_cols = list(defaults.index[mask])
+        # AND custom GUI-added columns (curtailment_cost, etc.) — any column on
+        # the DataFrame that PyPSA's defaults don't know about. They are inputs
+        # by construction (the GUI put them there), but they never appear in
+        # `defaults`, so filtering on `defaults` alone drops them from `current`
+        # and the remove+add cycle silently resets them on every partial PUT.
+        # Mirrors the same widening in services/vintage_service.py.
+        known_defaults = set(defaults.index)
+        input_cols += [c for c in df.columns if c not in known_defaults]
     except Exception:
         input_cols = list(df.columns)
     current = {c: df.at[name, c] for c in input_cols if c in df.columns}
     current = {k: v for k, v in current.items()
                if not (isinstance(v, float) and (math.isnan(v) or math.isinf(v)))}
     return {**current, **submitted}
+
+
+def _detach_component_series(n, attr: str, name: str) -> list[tuple[str, "pd.Series"]]:
+    """Every time-varying INPUT column this component owns, copied out before
+    a remove+add drops it (IEEE 39-bus review, F2).
+
+    ``_update_component`` updates by ``n.remove`` + ``n.add``, and PyPSA drops
+    the component's columns from every ``n.<attr>_t`` table when it is
+    removed — so saving a generator's row from the Properties panel, with no
+    field changed, silently deleted its availability profile. Measured on the
+    IEEE 39-bus network: the 500 MW wind farm became a firm must-take at
+    ``p_max_pu`` 1.0, the COPT LOLE fell 0.831 h -> 0.319 h, its ELCC
+    candidate nameplate went 306 MW -> 500 MW, and the next solve was refused
+    by the margin's own `reserve_margin_unpriceable_assets`. Nothing warned:
+    the Time Series view is served from the saved project and still showed the
+    profile.
+
+    INPUT attributes only, the same filter ``_backup_network_ts_to_user_ts``
+    documents: an edit invalidates the solve, so carrying a stale ``_t.p``
+    across it would leave one component holding dispatch the rest of the
+    network no longer has. If the component defaults cannot be read, every
+    column is carried — preserving is strictly safer than dropping, which is
+    the behaviour this exists to end.
+    """
+    ts_store = getattr(n, f"{attr}_t", None)
+    if ts_store is None:
+        return []
+    input_attrs: set[str] | None = None
+    try:
+        comp_defaults = getattr(n.components, attr).defaults
+        mask = comp_defaults["status"].astype(str).str.startswith("Input", na=False)
+        input_attrs = set(comp_defaults.index[mask])
+    except Exception:                                         # noqa: BLE001
+        input_attrs = None
+    saved: list[tuple[str, pd.Series]] = []
+    try:
+        ts_attrs = list(ts_store.keys()) if hasattr(ts_store, "keys") else []
+    except Exception:                                         # noqa: BLE001
+        return []
+    for ts_attr in ts_attrs:
+        if input_attrs is not None and ts_attr not in input_attrs:
+            continue
+        df = (ts_store.get(ts_attr) if hasattr(ts_store, "get")
+              else getattr(ts_store, ts_attr, None))
+        if df is None or not hasattr(df, "columns") or name not in df.columns:
+            continue
+        try:
+            saved.append((ts_attr, df[name].copy()))
+        except Exception:                                     # noqa: BLE001
+            continue
+    return saved
+
+
+def _reattach_component_series(n, attr: str, name: str,
+                               saved: list[tuple[str, "pd.Series"]]) -> None:
+    """Put back what ``_detach_component_series`` took out, under the SAME
+    name — a rename runs afterwards through ``rename_component_names``, which
+    re-keys the ``_t`` columns with everything else that refers to the
+    component (F2)."""
+    if not saved:
+        return
+    ts_store = getattr(n, f"{attr}_t", None)
+    if ts_store is None:
+        return
+    for ts_attr, series in saved:
+        df = (ts_store.get(ts_attr) if hasattr(ts_store, "get")
+              else getattr(ts_store, ts_attr, None))
+        if df is None or not hasattr(df, "columns"):
+            continue
+        try:
+            df[name] = series.reindex(df.index)
+        except Exception:                                     # noqa: BLE001
+            continue
 
 
 def _update_component(component_class: str, attr: str, name: str, kwargs: dict) -> dict:
@@ -246,6 +442,11 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         # merge the user never asked for, reported as a 200.
         if new_name != name and new_name in df.index:
             raise HTTPException(409, f"{component_class} '{new_name}' already exists")
+        # F2: PyPSA drops this component's columns from every `_t` table on
+        # remove, so carry them across the remove+add. Taken BEFORE the
+        # remove and put back straight after the add, under the old name, so
+        # the rename below re-keys them with everything else.
+        saved_series = _detach_component_series(n, attr, name)
         n.remove(component_class, name)
         # Re-add under the OLD name and rename separately. A rename by
         # remove+add does NOT re-point the components that REFER to this one:
@@ -260,6 +461,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         # already used it; this path is the one the Properties panel's edit
         # cards take, and it did not.
         n.add(component_class, name, **merged)
+        _reattach_component_series(n, attr, name, saved_series)
         # Re-key any saved per-period bounds so the modal data follows the
         # rename instead of stranding under the old key.
         if new_name != name:
@@ -270,6 +472,7 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
             # lost on the next save+reload (re-apply skips entries whose
             # column is no longer in the network DataFrame).
             _user_ts_rename_asset(attr, name, new_name)
+        _normalise_flag_column(n, attr)
     desc = (f"Renamed {component_class.lower()} '{name}' → '{new_name}'"
             if new_name != name else f"Updated {component_class.lower()} '{name}'")
     change_log_service.log("update", component_class, new_name, desc)
@@ -317,169 +520,20 @@ _COMPONENT_ATTRS: dict[str, str] = {
 # line lengths track the geometry. Manual edits via PUT /lines/{name} are
 # respected — the user can still override the auto value.
 
-_EARTH_KM = 6371.0
-
-
-def _haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlam = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
-    return 2 * _EARTH_KM * math.asin(min(1.0, math.sqrt(a)))
-
-
-def _bus_coord(n, bus_name: str) -> tuple[float, float] | None:
-    if bus_name not in n.buses.index:
-        return None
-    try:
-        x = float(n.buses.at[bus_name, "x"])
-        y = float(n.buses.at[bus_name, "y"])
-    except Exception:
-        return None
-    if not (math.isfinite(x) and math.isfinite(y)):
-        return None
-    # PyPSA's Bus.x / Bus.y default to 0.0, so the exact pair means "never
-    # set", not "the Gulf of Guinea". Without this, every line touching an
-    # unplaced bus is rewritten to the great-circle distance to Null Island
-    # and stored as fact — see tests/test_line_lengths.py and
-    # docs/superpowers/specs/2026-07-30-unplaced-buses-map-design.md.
-    #
-    # BOTH exactly zero: a bus at (0, 51.478) is Greenwich and stays valid.
-    if x == 0.0 and y == 0.0:
-        return None
-    # Mirrors the range check in frontend/src/utils/geo.ts's busLatLng. The
-    # frontend hides a bus outside these bounds and counts it as "unplaced"
-    # in UnplacedBusesPanel, but until this check _bus_coord had no range
-    # check at all — a bus at y == 91 was hidden by the map and reported as
-    # unplaced while recalculate_lengths still measured a haversine distance
-    # to it and wrote that into n.lines.length. Reachable in practice:
-    # PropertiesPanel's Longitude/Latitude fields are unbounded NumInputs and
-    # BusCreate.x / BusCreate.y (models/schemas.py) are plain unbounded
-    # floats. Do not remove the frontend's check when reading this — both
-    # layers must reject out-of-range coordinates.
-    if not (-90.0 <= y <= 90.0 and -180.0 <= x <= 180.0):
-        return None
-    return x, y
-
-
-def _line_haversine_km(n, bus0: str, bus1: str) -> float | None:
-    c0 = _bus_coord(n, bus0)
-    c1 = _bus_coord(n, bus1)
-    if c0 is None or c1 is None:
-        return None
-    return _haversine_km(c0[0], c0[1], c1[0], c1[1])
-
-
-_IMPEDANCE_FIELDS = ("r", "x", "b")
-
-
-def _impedance_preview(
-    line_name: str, old_length: float, new_length: float, old: dict[str, float]
-) -> dict | None:
-    """
-    What a per-km-preserving rescale WOULD do. Never mutates.
-
-    Returns None when there is no choice to offer — an all-zero impedance
-    scales to zero whatever the length does.
-
-    The relative change is identical for r, x and b (each is multiplied by the
-    same length ratio), so one number describes all three.
-
-    `rel_change` is a MAGNITUDE (`abs(ratio - 1.0)`), not a signed delta — a
-    shrinking line reports the same positive number as a growing one at the
-    same ratio. This is deliberate, not an oversight: downstream, previews
-    get partitioned by `rel_change <= <threshold>` to decide what to apply
-    WITHOUT asking the user. If this were signed, a line whose length HALVED
-    (ratio 0.5, signed change -0.5) would read as -0.5, which is <= any
-    positive threshold, and its impedance would be silently halved with no
-    prompt — the exact silent rewrite this feature exists to prevent. Keep
-    the `abs()`; a shrink must clear the same bar a growth does.
-    """
-    if all(float(old.get(k, 0.0) or 0.0) == 0.0 for k in _IMPEDANCE_FIELDS):
-        return None
-
-    reason: str | None = None
-    if not (old_length > 0):
-        reason = "old_length<=0"      # per-km undefined — nothing to preserve
-    elif not (new_length > 0):
-        reason = "new_length<=0"      # would zero the impedance
-
-    if reason is not None:
-        new = dict(old)
-        rel = 0.0
-    else:
-        ratio = new_length / old_length
-        new = {k: float(old.get(k, 0.0) or 0.0) * ratio for k in _IMPEDANCE_FIELDS}
-        # Magnitude, on purpose — see the docstring above. Do NOT drop the
-        # abs(): a shrinking line (ratio < 1) must report the same positive
-        # rel_change a growing line at the same ratio would, or a threshold
-        # comparison downstream lets shrinks slip through unprompted.
-        rel = abs(ratio - 1.0)
-
-    return {
-        "name": line_name,
-        "old_length": float(old_length),
-        "new_length": float(new_length),
-        "old": {k: float(old.get(k, 0.0) or 0.0) for k in _IMPEDANCE_FIELDS},
-        "new": new,
-        "rel_change": rel,
-        "skipped_reason": reason,
-    }
-
-
-class _RecomputeResult(NamedTuple):
-    """
-    `_recompute_lengths_for_bus` counts two different things and they are NOT
-    interchangeable: `updated` is how many lines actually had `length`
-    rewritten (every line that resolved a haversine distance); `previews` is
-    the (possibly shorter) list of impedance-rescale offers, which
-    `_impedance_preview` omits for an all-zero-impedance line even though its
-    length WAS rewritten. A changelog that reports `len(previews)` undercounts
-    whenever a zero-impedance line is among the ones touched.
-    """
-
-    updated: int
-    previews: list[dict]
-
-
-def _recompute_lengths_for_bus(n, bus_name: str) -> _RecomputeResult:
-    """
-    Rewrite line.length for every line touching `bus_name`, and return both
-    the rewrite count and one preview per line whose impedance a
-    per-km-preserving rescale would change.
-
-    Length is rewritten here because it follows from geometry. Impedance is a
-    modelling choice and is only PREVIEWED — see _impedance_preview and
-    POST /lines/rescale_impedances. The caller must hold PyPSAService.get_lock().
-    """
-    if n.lines.empty:
-        return _RecomputeResult(0, [])
-    mask = (n.lines["bus0"] == bus_name) | (n.lines["bus1"] == bus_name)
-    updated = 0
-    previews: list[dict] = []
-    for line_name in n.lines.index[mask]:
-        b0 = str(n.lines.at[line_name, "bus0"])
-        b1 = str(n.lines.at[line_name, "bus1"])
-        d = _line_haversine_km(n, b0, b1)
-        if d is None:
-            continue
-        old_length = float(n.lines.at[line_name, "length"])
-        old = {k: float(n.lines.at[line_name, k]) for k in _IMPEDANCE_FIELDS}
-        n.lines.at[line_name, "length"] = float(d)
-        updated += 1
-        p = _impedance_preview(str(line_name), old_length, float(d), old)
-        if p is not None:
-            previews.append(p)
-    return _RecomputeResult(updated, previews)
-
 
 def _xlsx_response(df: pd.DataFrame, fname: str) -> StreamingResponse:
     """
-    Serialise `df` to an .xlsx StreamingResponse with a quoted attachment
-    filename. Shared tail of the load/generator/link profile-template download
-    endpoints (filename is quoted per RFC 6266 — all template names are
-    space-free so this is byte-equivalent for browsers).
+    Serialise `df` to an .xlsx StreamingResponse with a safely-encoded
+    attachment filename. Shared tail of the load/generator/link profile-template
+    download endpoints.
+
+    The filename embeds a COMPONENT NAME, and component names are created
+    through `POST /api/network/loads` (and friends) with no character
+    validation at all — so a load called `ev"il` used to close the header's
+    quoted-string early, and one containing a newline made uvicorn raise
+    `RuntimeError: Invalid HTTP header value.` mid-send and the browser get an
+    empty reply. `content_disposition` is byte-identical to the old f-string
+    for every ordinary template name.
     """
     buf = io.BytesIO()
     df.to_excel(buf, engine="openpyxl")
@@ -487,90 +541,8 @@ def _xlsx_response(df: pd.DataFrame, fname: str) -> StreamingResponse:
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        headers={"Content-Disposition": content_disposition(fname)},
     )
-
-
-def _build_period_multiindex(periods, blocks) -> pd.MultiIndex:
-    """
-    Build the `(period, timestep)` snapshot MultiIndex from parallel `periods`
-    (year keys) + per-period `blocks` (each a DatetimeIndex of that period's
-    operational timesteps). To replicate ONE operational range under every
-    period, pass `[idx] * len(periods)`.
-
-    ALWAYS sets `mi.name = "snapshot"`. PyPSA's `set_snapshots(MultiIndex)` only
-    inherits the name on flat→multi transitions; on multi→multi REBUILDS the new
-    MultiIndex's name=None wins and propagates to every `_t` table — xarray then
-    emits dim `dim_0` and the next LP fails on `.sel(snapshot=sns)`. Centralising
-    the builder makes that footgun impossible to forget.
-    """
-    period_level = np.concatenate([np.full(len(blk), p) for p, blk in zip(periods, blocks)])
-    timestep_level = pd.DatetimeIndex(np.concatenate([blk.values for blk in blocks]))
-    mi = pd.MultiIndex.from_arrays(
-        [period_level, timestep_level], names=["period", "timestep"],
-    )
-    mi.name = "snapshot"
-    return mi
-
-
-def _infer_snapshot_freq(n) -> str | None:
-    """
-    The snapshot index's resolution, as a pandas offset alias ("h", "3h", "D").
-
-    The Model Horizon page used to render its own form state here, which was
-    seeded to "h" at mount and never read back from the network — so a
-    3-hourly MultiIndex and a Daily flat index both reported "Hourly (h)".
-
-    MultiIndex networks are measured over the FIRST period's slice only: the
-    flattened timestep level contains a discontinuity at each period seam
-    (period P's last hour → period P+1's first), which would read as irregular.
-
-    `pd.infer_freq` is tried first because it names calendar frequencies ("D",
-    "MS", "W") that a raw timedelta cannot. It returns None for a
-    representative-week index — contiguous 168-hour blocks separated by gaps —
-    whose resolution is nevertheless hourly, so fall back to the modal
-    successive delta. Returns None when neither resolves; the UI renders that
-    as "irregular" rather than guessing.
-    """
-    sns = n.snapshots
-    try:
-        if isinstance(sns, pd.MultiIndex):
-            level0 = sns.get_level_values(0)
-            if len(level0) == 0:
-                return None
-            first = level0[0]
-            idx = pd.DatetimeIndex(sns[level0 == first].get_level_values(1))
-        else:
-            idx = pd.DatetimeIndex(sns)
-    except (ValueError, TypeError):
-        # `pd.DatetimeIndex(...)` raises (e.g. `DateParseError`, a `ValueError`
-        # subclass) on a non-parseable object index. No current GUI path
-        # produces one, but this helper runs unconditionally at the top of
-        # `get_snapshots` — degrade to "irregular" rather than 500ing the
-        # page's primary endpoint.
-        return None
-    if len(idx) < 2:
-        return None
-    try:
-        inferred = pd.infer_freq(idx)
-    except (ValueError, TypeError):
-        inferred = None
-    if inferred:
-        return inferred
-    deltas = idx.to_series().diff().dropna()
-    if deltas.empty:
-        return None
-    modal = deltas.mode()
-    if modal.empty:
-        return None
-    hours = modal.iloc[0].total_seconds() / 3600.0
-    if hours <= 0:
-        return None
-    if hours == 1.0:
-        return "h"
-    if float(hours).is_integer():
-        return f"{int(hours)}h"
-    return None
 
 
 # ── Buses ────────────────────────────────────────────────────────────────────
@@ -963,10 +935,6 @@ _TRANSFORMER_PRESETS = [
     {"label": "33/11 kV",    "v_nom_0": 33.0,  "v_nom_1": 11.0,   "s_nom": 25.0,  "x": 0.10},
     {"label": "20/0.4 kV",   "v_nom_0": 20.0,  "v_nom_1": 0.4,    "s_nom": 1.0,   "x": 0.06},
 ]
-# Tolerance (kV) when matching declared v_nom_X against actual bus voltages.
-# Loose enough to accept 132 vs 132.0001 floats but tight enough to reject any
-# real mismatch (380 vs 220 differs by 160 kV — far past 0.5).
-_VNOM_TOL_KV = 0.5
 
 
 @router.get("/transformers/types")
@@ -975,91 +943,10 @@ def list_transformer_types():
     return _TRANSFORMER_PRESETS
 
 
-def _validate_transformer_voltage(n, bus0: str, bus1: str,
-                                  v_nom_0: float | None, v_nom_1: float | None) -> None:
-    """
-    Reject creation/edit when the declared step doesn't match the buses.
-
-    `v_nom_0 is None` OR `v_nom_1 is None` ⇒ user opted out of the check
-    (omitted the field from the payload, or picked Custom and left it
-    blank). Allows either orientation — bus0 may be the high or low side.
-    Legacy `<= 0` sentinel still honoured for old project files / external
-    callers that send 0.0.
-    """
-    if v_nom_0 is None or v_nom_1 is None or v_nom_0 <= 0.0 or v_nom_1 <= 0.0:
-        return
-    if bus0 not in n.buses.index:
-        raise HTTPException(404, f"Bus '{bus0}' not found")
-    if bus1 not in n.buses.index:
-        raise HTTPException(404, f"Bus '{bus1}' not found")
-    actual_0 = float(n.buses.at[bus0, "v_nom"]) if "v_nom" in n.buses.columns else 0.0
-    actual_1 = float(n.buses.at[bus1, "v_nom"]) if "v_nom" in n.buses.columns else 0.0
-    same_orientation = (
-        abs(actual_0 - v_nom_0) <= _VNOM_TOL_KV
-        and abs(actual_1 - v_nom_1) <= _VNOM_TOL_KV
-    )
-    swapped_orientation = (
-        abs(actual_0 - v_nom_1) <= _VNOM_TOL_KV
-        and abs(actual_1 - v_nom_0) <= _VNOM_TOL_KV
-    )
-    if not (same_orientation or swapped_orientation):
-        raise HTTPException(
-            400,
-            f"Voltage mismatch: transformer expects {v_nom_0:g}/{v_nom_1:g} kV "
-            f"but bus '{bus0}' is {actual_0:g} kV and bus '{bus1}' is {actual_1:g} kV. "
-            "Adjust the bus v_nom values or pick a transformer type that matches.",
-        )
-
-
-def _enrich_transformer_voltage(rows: list[dict], n) -> list[dict]:
-    """
-    Inject derived v_nom_0/v_nom_1 from connected buses into each row.
-
-    PyPSA stores voltages on the buses, not on the Transformer. The GUI
-    surfaces these as columns in the bottom-panel table and the right-panel
-    properties view, so we attach them here on the read path.
-    """
-    if "v_nom" not in n.buses.columns:
-        return rows
-    for r in rows:
-        bus0 = r.get("bus0")
-        bus1 = r.get("bus1")
-        r["v_nom_0"] = float(n.buses.at[bus0, "v_nom"]) if bus0 in n.buses.index else None
-        r["v_nom_1"] = float(n.buses.at[bus1, "v_nom"]) if bus1 in n.buses.index else None
-    return rows
-
-
 @router.get("/transformers")
 def get_transformers():
     rows = _get_component("Transformer", "transformers")
     return _enrich_transformer_voltage(rows, PyPSAService.get_network())
-
-
-def _sanitise_transformer_type(n, payload: dict) -> dict:
-    """
-    The GUI's transformer presets ("380/220 kV" etc.) are stored on
-    `transformer.type` for display purposes, but PyPSA treats `type` as a
-    foreign key into `n.transformer_types` and crashes at solve time with
-    "type does not exist in n.transformer_types" when it isn't registered.
-
-    Our presets ARE NOT PyPSA transformer types — they're UI helpers that
-    already filled in the explicit r/x/s_nom values. So if the user-supplied
-    `type` isn't in n.transformer_types, drop it (PyPSA will then use the
-    explicit parameters) but keep its label out of harm's way.
-    """
-    raw_type = payload.get("type", "")
-    if not raw_type:
-        return payload
-    try:
-        known = set(n.transformer_types.index)
-    except Exception:
-        known = set()
-    if raw_type in known:
-        return payload  # legitimate PyPSA type — pass through unchanged
-    # Strip the type so n.add() falls back to the explicit s_nom / x we sent.
-    cleaned = dict(payload)
-    cleaned["type"] = ""
-    return cleaned
 
 
 @router.post("/transformers", status_code=201)
@@ -1111,832 +998,26 @@ def delete_shunt(name: str):
 
 # ── Snapshots ─────────────────────────────────────────────────────────────────
 
-@router.get("/snapshots")
-def get_snapshots():
-    n = PyPSAService.get_network()
-    sns = n.snapshots
-    # Multi-period: emit ISO timestep strings + a parallel `periods` array,
-    # same convention as /results/* TS payloads. Pre-fix the fallback
-    # str(tuple) produced "(2026, Timestamp('...'))" which broke every
-    # consumer doing indexOf / string-compare on the array.
-    # Extent of uploaded time series — lets the Model Horizon page default its
-    # snapshot range to the data the user actually uploaded. `can_sample_weeks`
-    # gates the representative-week sampler (needs a full-year hourly profile).
-    ts_start, ts_end = _user_ts_extent()
-    can_sample_weeks = _annual_hourly_reference()[0] is not None
-    freq = _infer_snapshot_freq(n)
-    if isinstance(sns, pd.MultiIndex):
-        try:
-            periods = [int(p) for p in sns.get_level_values(0)]
-        except (TypeError, ValueError):
-            periods = [str(p) for p in sns.get_level_values(0)]
-        timesteps = sns.get_level_values(1)
-        snaps = [
-            ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
-            for ts in timesteps
-        ]
-        weightings = df_to_json(n.snapshot_weightings) if not n.snapshot_weightings.empty else []
-        return {
-            "count": len(sns),
-            "snapshots": snaps,
-            "periods": periods,
-            "weightings": weightings,
-            "ts_start": ts_start,
-            "ts_end": ts_end,
-            "can_sample_weeks": can_sample_weeks,
-            "freq": freq,
-        }
-    snaps = [s.isoformat() if hasattr(s, "isoformat") else str(s) for s in sns]
-    weightings = df_to_json(n.snapshot_weightings) if not n.snapshot_weightings.empty else []
-    return {
-        "count": len(sns), "snapshots": snaps, "weightings": weightings,
-        "ts_start": ts_start, "ts_end": ts_end,
-        "can_sample_weeks": can_sample_weeks,
-        "freq": freq,
-    }
 
 
-@router.get("/snapshots/weightings.csv")
-def download_snapshot_weightings_csv():
-    """
-    Stream `n.snapshot_weightings` as a CSV file.
-
-    Format — one row per snapshot, columns:
-      • ``snapshot`` — ISO timestamp for flat networks; ``period|iso`` (e.g.
-        ``2030|2024-01-01T00:00:00``) for MultiIndex networks. The pipe
-        separator avoids datetime-parsing ambiguity inside Excel.
-      • ``objective``, ``generators``, ``stores`` — float weights.
-
-    The same shape is accepted by ``POST /snapshots/weightings.csv``.
-    """
-    import csv
-    import io
-
-    import pandas as pd
-    from fastapi.responses import StreamingResponse
-
-    n = PyPSAService.get_network()
-    df = n.snapshot_weightings
-    if df.empty:
-        raise HTTPException(400, "Network has no snapshots yet.")
-    buf = io.StringIO()
-    w = csv.writer(buf, lineterminator="\r\n")
-    w.writerow(["snapshot", *df.columns])
-    is_multi = isinstance(df.index, pd.MultiIndex)
-    for idx, row in df.iterrows():
-        if is_multi:
-            period, ts = idx
-            iso = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
-            key = f"{int(period)}|{iso}"
-        else:
-            key = idx.isoformat() if hasattr(idx, "isoformat") else str(idx)
-        w.writerow([key, *[float(row[c]) for c in df.columns]])
-    buf.seek(0)
-    return StreamingResponse(
-        iter([buf.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="snapshot_weightings.csv"'},
-    )
 
 
-@router.post("/snapshots/weightings.csv")
-async def upload_snapshot_weightings_csv(file: UploadFile = File(...)):
-    """
-    Replace `n.snapshot_weightings` from an uploaded CSV.
-
-    CSV must have a ``snapshot`` column plus at least one of
-    ``objective`` / ``generators`` / ``stores``. Other columns are ignored.
-    Rows whose ``snapshot`` key doesn't match an existing snapshot are
-    skipped (not an error — partial uploads are common while debugging).
-    Returns the number of rows applied so the UI can show a count.
-    """
-    import csv
-    import io
-
-    import pandas as pd
-
-    content = await read_capped(file)
-    try:
-        text = content.decode("utf-8-sig")  # handles Excel-saved UTF-8 BOM
-    except UnicodeDecodeError:
-        text = content.decode("latin-1")
-    reader = csv.DictReader(io.StringIO(text))
-    if reader.fieldnames is None or "snapshot" not in (reader.fieldnames or []):
-        raise HTTPException(
-            400,
-            "CSV must have a `snapshot` column (and one or more of "
-            "`objective`, `generators`, `stores`).",
-        )
-
-    n = PyPSAService.get_network()
-    df = n.snapshot_weightings
-    if df.empty:
-        raise HTTPException(
-            400,
-            "Network has no snapshots. Set the snapshot index first.",
-        )
-    is_multi = isinstance(df.index, pd.MultiIndex)
-
-    # Build an index lookup so we can match either pipe-separated multi
-    # keys ("2030|2024-01-01T00:00:00") or plain ISO timestamps.
-    iso_to_idx: dict[str, object] = {}
-    for idx in df.index:
-        if is_multi:
-            period, ts = idx
-            iso = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
-            iso_to_idx[f"{int(period)}|{iso}"] = idx
-            iso_to_idx[iso] = idx  # tolerant: accept ISO-only too
-        else:
-            iso = idx.isoformat() if hasattr(idx, "isoformat") else str(idx)
-            iso_to_idx[iso] = idx
-
-    cols = [c for c in ("objective", "generators", "stores") if c in (reader.fieldnames or [])]
-    if not cols:
-        raise HTTPException(
-            400,
-            "CSV has no weight columns. Include at least one of `objective`, "
-            "`generators`, `stores`.",
-        )
-
-    # Two-pass validation + apply: parse + validate every cell BEFORE any
-    # write, so a malformed row N doesn't leave rows 1..N-1 already
-    # applied with no rollback. The previous single-pass loop raised
-    # HTTPException mid-iteration after partially mutating
-    # n.snapshot_weightings — symptom: a CSV with one bad cell would
-    # leave the file partially applied and the user with no clean way
-    # to retry without manually undoing the partial state.
-    pending: list[tuple[object, str, float]] = []
-    skipped = 0
-    # A bare ISO `snapshot` key is ambiguous on a multi-period network — see
-    # the tolerant `iso_to_idx[iso] = idx` registration above, which is
-    # last-write-wins across periods and so always resolves to the LAST
-    # period. Same hazard as `update_snapshot_weightings`'s PATCH path;
-    # tracked here too so a CSV that lost its `period|` prefix (Excel, a
-    # hand-edited file) doesn't silently write every row into the wrong
-    # period with no trace in the response or audit log.
-    ambiguous_bare_keys = 0
-    for row in reader:
-        key = (row.get("snapshot") or "").strip()
-        if not key or key not in iso_to_idx:
-            skipped += 1
-            continue
-        if is_multi and "|" not in key:
-            ambiguous_bare_keys += 1
-        idx = iso_to_idx[key]
-        for c in cols:
-            v = row.get(c, "").strip()
-            if v == "":
-                continue
-            try:
-                pending.append((idx, c, float(v)))
-            except (TypeError, ValueError):
-                raise HTTPException(
-                    400,
-                    f"Bad {c} value for {key}: {v!r} — no rows applied "
-                    "(transaction rolled back). Fix the CSV and re-upload."
-                )
-    applied = 0
-    with PyPSAService.get_lock():
-        for idx, c, val in pending:
-            df.at[idx, c] = val
-            applied += 1
-        change_log_service.log(
-            "update", "Network", "snapshot_weightings",
-            f"Uploaded snapshot_weightings.csv: {applied} cell(s) applied, "
-            f"{skipped} row(s) skipped (no match)."
-            + (f" — WARNING: {ambiguous_bare_keys} bare-ISO key(s) on a multi-period "
-               "network each resolved to the LAST period; send `period|iso` to target "
-               "a specific period." if ambiguous_bare_keys else ""),
-        )
-    return {
-        "applied": applied,
-        "skipped": skipped,
-        "columns": cols,
-        "ambiguous_bare_keys": ambiguous_bare_keys,
-    }
 
 
-@router.patch("/snapshots/weightings")
-def update_snapshot_weightings(body: dict):
-    """
-    Update per-snapshot weights in `n.snapshot_weightings`.
-
-    Body shape options (in priority order):
-
-      • `{"all": <float>}` — set every snapshot weight (objective + generators +
-        stores) to the same value. Canonical for the "representative day"
-        workflow: 24 hourly snapshots representing 1 typical day in a 30-day
-        month → set `{"all": 30}`.
-
-      • `{"updates": {iso_or_idx: {objective?, generators?, stores?}, ...}}` —
-        per-row override map. Keys may be ISO strings (e.g.
-        `"2026-05-11T00:00:00"`) or integer indices into `n.snapshots`. Any
-        column omitted is left unchanged.
-
-    Returns the post-update weighting DataFrame so callers can verify.
-    """
-    import pandas as pd
-    n = PyPSAService.get_network()
-    if n.snapshot_weightings.empty:
-        raise HTTPException(400, "Network has no snapshots. Set the snapshot index first via POST /snapshots.")
-    with PyPSAService.get_lock():
-        df = n.snapshot_weightings
-        # Two-pass validate-then-apply: resolve + parse EVERYTHING first
-        # (mutating nothing), raise on the first bad value, then write. The old
-        # code wrote `df.at[idx,col]=float(raw)` mid-loop and raised 400 on a
-        # bad cell at row N, leaving rows 0..N-1 already mutated with no
-        # rollback — the user retries and the table is half-applied. Same
-        # pattern as upload_snapshot_weightings_csv.
-        all_val = body.get("all")
-        all_float: float | None = None
-        if all_val is not None:
-            try:
-                all_float = float(all_val)
-            except (TypeError, ValueError):
-                raise HTTPException(400, f"`all` must be a number, got {all_val!r}")
-        updates = body.get("updates") or {}
-        if not isinstance(updates, dict):
-            raise HTTPException(400, "`updates` must be a dict keyed by snapshot.")
-        # Build an iso → index lookup once so per-row updates are fast.
-        # On multi-period networks, `df.index` is a MultiIndex of
-        # `(period, ts)` tuples — neither has a top-level `.isoformat`
-        # method, so the legacy `hasattr(s, 'isoformat')` branch fell
-        # through to `str(tuple)` like "(2026, Timestamp('2026-05-11 …'))",
-        # which a frontend ISO key never matches → every multi-period
-        # weight PATCH 400'd with "Unknown snapshot key". Build two index
-        # styles for multi-period: the bare-ts ISO and a `period|ts`
-        # composite key. Flat networks keep the single-ISO behaviour.
-        iso_to_idx: dict[str, object] = {}
-        is_multi = isinstance(df.index, pd.MultiIndex)
-        for s in df.index:
-            if is_multi and isinstance(s, tuple) and len(s) == 2:
-                period, ts = s
-                ts_iso = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
-                # Period-qualified key: frontend can disambiguate identical
-                # operational hours across periods (`"2026|2026-05-11T00:00:00"`).
-                iso_to_idx[f"{period}|{ts_iso}"] = s
-                # Bare ISO key — kept for the flat→multi migration case
-                # where the frontend hasn't been updated yet. Last write
-                # wins (later periods overwrite earlier in the bare-ISO
-                # map), so flat-style PATCHes target the latest period's
-                # row. Documented quirk; multi-period clients should use
-                # the period-qualified form.
-                iso_to_idx[ts_iso] = s
-            else:
-                iso_to_idx[s.isoformat() if hasattr(s, "isoformat") else str(s)] = s
-        # Pass 1 — resolve + parse every cell into `pending`, raising before
-        # any write.
-        pending: list[tuple[object, str, float]] = []
-        # A bare ISO key on a MultiIndex network is ambiguous — it is
-        # registered once per period and last-write-wins, so it silently
-        # resolves to the LAST period. The GUI now sends `period|iso`; anything
-        # still sending bare keys (older clients, chat tools) gets recorded in
-        # the audit log rather than writing to a surprising row in silence.
-        ambiguous_bare_keys = 0
-        for key, vals in updates.items():
-            if not isinstance(vals, dict):
-                continue
-            if key in iso_to_idx:
-                idx = iso_to_idx[key]
-                if is_multi and "|" not in str(key):
-                    ambiguous_bare_keys += 1
-            else:
-                try:
-                    pos = int(key)
-                    idx = df.index[pos]
-                except (TypeError, ValueError, IndexError):
-                    raise HTTPException(400, f"Unknown snapshot key {key!r}")
-            for col, raw in vals.items():
-                if col not in df.columns:
-                    continue
-                try:
-                    pending.append((idx, col, float(raw)))
-                except (TypeError, ValueError):
-                    raise HTTPException(400, f"Bad weight value for {key}/{col}: {raw!r}")
-        # Pass 2 — everything validated; apply atomically (the `all` broadcast
-        # first, then per-row overrides on top).
-        if all_float is not None:
-            for col in df.columns:
-                df[col] = all_float
-        for idx, col, val in pending:
-            df.at[idx, col] = val
-        applied = len(pending)
-        change_log_service.log(
-            "update", "Network", "snapshot_weightings",
-            f"Updated snapshot weightings: all={all_val}, per-row updates={applied}"
-            + (f" — WARNING: {ambiguous_bare_keys} bare-ISO key(s) on a multi-period "
-               "network each resolved to the LAST period; send `period|iso` to target "
-               "a specific period." if ambiguous_bare_keys else ""),
-        )
-    return {
-        "count": len(n.snapshot_weightings),
-        "weightings": df_to_json(n.snapshot_weightings),
-    }
 
 
-@router.post("/snapshots")
-def set_snapshots(config: SnapshotConfig):
-    import pandas as pd
-    n = PyPSAService.get_network()
-    # Preserve existing time series BEFORE PyPSA reindexes them to the new snapshots.
-    _backup_network_ts_to_user_ts(n)
-    with PyPSAService.get_lock():
-        sns = pd.date_range(config.start, config.end, freq=config.freq)
-        kw: dict = {}
-        if config.weightings is not None:
-            kw["default_snapshot_weightings"] = config.weightings
-        # Demote any lingering MultiIndex (multi-period toggled off without
-        # rebuilding n.snapshots, or a stale _t / weightings frame) to flat
-        # FIRST. A direct set_snapshots(flat DatetimeIndex) on MultiIndex state
-        # trips pandas' "cannot include dtype 'M' in a buffer" reindex bug.
-        # No-op when the network is already flat.
-        _flatten_snapshot_state(n)
-        n.set_snapshots(sns, **kw)
-        # Re-apply full profiles (from _user_ts) aligned to the new snapshot range.
-        _reapply_user_ts_to_network(n)
-    change_log_service.log(
-        "update", "Network", "snapshots",
-        f"Updated snapshots: {config.start} → {config.end} at {config.freq} ({len(n.snapshots)} steps)",
-    )
-    return {"count": len(n.snapshots)}
 
 
-@router.post("/snapshots/multi_period")
-def set_multi_period_snapshots(body: dict):
-    """
-    Build a 2-level MultiIndex (period, timestep) snapshot index for
-    multi-investment-period planning.
-
-    Body shapes:
-
-      • Same operational year per period (canonical):
-        `{"periods": [2025, 2036, 2046], "start": "2025-01-01T00:00",
-          "end": "2025-12-31T23:00", "freq": "h"}`
-        — same (start,end,freq) DatetimeIndex replicated under each period.
-
-      • Different operational range per period:
-        `{"periods": [2025, 2036, 2046],
-          "per_period": [{"start":..., "end":..., "freq":...}, ...]}`
-        — one (start,end,freq) per period. List length must equal periods.
-
-    Side effects:
-      • Sets `n.investment_periods = periods`.
-      • Backs up _t tables to _user_ts BEFORE reindex; re-applies after.
-      • PyPSA initialises `investment_period_weightings` rows (years=1.0,
-        objective=1.0) — the user can then tune via /investment_period_weightings.
-    """
-    import pandas as pd
-    n = PyPSAService.get_network()
-
-    periods = body.get("periods")
-    if not isinstance(periods, list) or not periods:
-        raise HTTPException(400, "`periods` must be a non-empty list of years.")
-    try:
-        periods_int = [int(p) for p in periods]
-    except (TypeError, ValueError):
-        raise HTTPException(400, "`periods` entries must be integers.")
-    if len(set(periods_int)) != len(periods_int):
-        raise HTTPException(400, "`periods` must be unique.")
-    periods_sorted = sorted(periods_int)
-
-    per_period = body.get("per_period")
-    if per_period is not None:
-        if not isinstance(per_period, list) or len(per_period) != len(periods_sorted):
-            raise HTTPException(
-                400, "`per_period` length must equal `periods` length.",
-            )
-        timestep_blocks = []
-        for i, spec in enumerate(per_period):
-            if not isinstance(spec, dict):
-                raise HTTPException(400, f"per_period[{i}] must be an object.")
-            try:
-                idx = pd.date_range(
-                    spec.get("start"), spec.get("end"),
-                    freq=spec.get("freq", "h"),
-                )
-            except Exception as exc:
-                raise HTTPException(
-                    400, f"per_period[{i}] bad date range: {exc}",
-                ) from exc
-            if len(idx) == 0:
-                raise HTTPException(400, f"per_period[{i}] produced an empty index.")
-            timestep_blocks.append(idx)
-    else:
-        start = body.get("start")
-        end = body.get("end")
-        freq = body.get("freq", "h")
-        if not start or not end:
-            raise HTTPException(400, "Provide `start`+`end` (or `per_period`).")
-        try:
-            base_idx = pd.date_range(start, end, freq=freq)
-        except Exception as exc:
-            raise HTTPException(400, f"Bad date range: {exc}") from exc
-        if len(base_idx) == 0:
-            raise HTTPException(400, "Date range produced an empty index.")
-        timestep_blocks = [base_idx for _ in periods_sorted]
-
-    mi = _build_period_multiindex(periods_sorted, timestep_blocks)
-
-    # Preserve existing time series BEFORE reindex.
-    _backup_network_ts_to_user_ts(n)
-    # Capture snapshot_weightings BEFORE set_snapshots resets them to 1.0
-    # (PyPSA fills with default_snapshot_weightings on reindex). Without
-    # this, the LP's n.nyears collapses to n_timesteps/8760 — undervaluing
-    # CAPEX 50× on representative-week setups and producing renewable
-    # over-build.
-    captured_weights = _capture_snapshot_weights_per_timestep(n)
-    with PyPSAService.get_lock():
-        # n.set_snapshots is order-sensitive vs n.investment_periods: PyPSA's
-        # multi-period machinery expects investment_periods to mirror the
-        # MultiIndex's level-0 values. Set snapshots first, then sync periods.
-        n.set_snapshots(mi)
-        n.investment_periods = periods_sorted
-        # Re-broadcast the captured weights under each new period.
-        _reapply_snapshot_weights(n, captured_weights)
-        # Re-apply user time series (handles MultiIndex via the level-1 path
-        # added in _reapply_user_ts_to_network).
-        _reapply_user_ts_to_network(n)
-
-    change_log_service.log(
-        "update", "Network", "snapshots",
-        f"Built MultiIndex snapshots: {len(periods_sorted)} periods × "
-        f"{[len(blk) for blk in timestep_blocks]} steps = {len(mi)} total",
-    )
-    return {
-        "count": len(n.snapshots),
-        "periods": periods_sorted,
-        "rows_per_period": [len(blk) for blk in timestep_blocks],
-    }
 
 
-@router.post("/snapshots/sample_weeks")
-def sample_representative_weeks(config: SampleWeeksConfig):
-    """
-    Build a representative-week snapshot index from an uploaded annual
-    hourly profile.
-
-    For each calendar month, ``n_weeks`` random ISO calendar weeks (Mon–Sun)
-    are sampled; their 168 hourly timesteps form the new snapshot index, and
-    ``snapshot_weightings`` is set so each sampled hour represents
-    ``days_in_month / (weeks_sampled_for_that_month × 7)`` hours — the
-    weighted total reconstructs the full year (Σ ≈ 8760 h).
-
-    Requires a flat hourly series in ``_user_ts`` spanning all 12 calendar
-    months of one year (validated via ``_annual_hourly_reference``). Works for
-    flat AND multi-period networks: for multi-period the sampled timestep
-    index is replicated under every investment period (same representative
-    weeks per period — the canonical multi-period workflow).
-    """
-    import calendar as _calendar
-    import datetime as _datetime
-
-    import numpy as _np
-
-    if config.n_weeks < 1 or config.n_weeks > 5:
-        raise HTTPException(400, "n_weeks must be between 1 and 5.")
-
-    idx, reason = _annual_hourly_reference()
-    if idx is None:
-        raise HTTPException(400, reason)
-
-    ref_year = int(idx.year[0])
-    idx_set = set(idx)
-
-    # ── Candidate ISO weeks per calendar month ────────────────────────────
-    # An ISO week qualifies only if its full Mon 00:00 … Sun 23:00 (168 h)
-    # span is present in the uploaded index — this naturally drops the partial
-    # weeks at the Jan / Dec year edges. Each qualifying week is assigned to
-    # the month of its Thursday (the ISO-standard rule for which month/year a
-    # week belongs to).
-    iso = idx.isocalendar()
-    unique_weeks = sorted(set(zip(
-        iso["year"].astype(int).tolist(),
-        iso["week"].astype(int).tolist(),
-    )))
-    month_candidates: dict[int, list] = {m: [] for m in range(1, 13)}
-    for iy, iw in unique_weeks:
-        try:
-            monday = pd.Timestamp(_datetime.date.fromisocalendar(iy, iw, 1))
-        except ValueError:
-            continue
-        span = pd.date_range(monday, periods=168, freq="h")
-        if not set(span).issubset(idx_set):
-            continue
-        owning_month = (monday + pd.Timedelta(days=3)).month  # Thursday's month
-        month_candidates[int(owning_month)].append((iy, iw, monday))
-
-    empty_months = [m for m, c in month_candidates.items() if not c]
-    if empty_months:
-        raise HTTPException(
-            400,
-            f"Month(s) {empty_months} have no fully-contained ISO week in the "
-            "uploaded profile — cannot sample. The profile must cover complete "
-            "Mon–Sun weeks in every month.",
-        )
-
-    # ── Sample n_weeks per month ──────────────────────────────────────────
-    rng = _np.random.default_rng(config.seed)
-    chosen: list = []                       # (month, iso_year, iso_week, monday)
-    weeks_per_month: dict[int, int] = {}
-    for month in range(1, 13):
-        cands = month_candidates[month]
-        take = min(config.n_weeks, len(cands))
-        weeks_per_month[month] = take
-        for pi in sorted(rng.choice(len(cands), size=take, replace=False)):
-            iy, iw, monday = cands[int(pi)]
-            chosen.append((month, iy, iw, monday))
-
-    # ── Assemble the sampled timestep index + per-snapshot weights ────────
-    chosen.sort(key=lambda t: t[3])         # chronological by Monday
-    sampled_blocks: list = []
-    weight_blocks: list = []
-    week_meta: list = []
-    for month, iy, iw, monday in chosen:
-        span = pd.date_range(monday, periods=168, freq="h")
-        days_in_month = _calendar.monthrange(ref_year, month)[1]
-        w = days_in_month / (weeks_per_month[month] * 7.0)
-        sampled_blocks.append(span)
-        weight_blocks.append(_np.full(168, w))
-        week_meta.append({
-            "month": month,
-            "iso_year": iy,
-            "iso_week": iw,
-            "start": span[0].isoformat(),
-            "end": span[-1].isoformat(),
-            "weight": round(w, 4),
-        })
-    sampled_idx = pd.DatetimeIndex(_np.concatenate([b.values for b in sampled_blocks]))
-    weights = _np.concatenate(weight_blocks)
-
-    # ── Apply to the network ──────────────────────────────────────────────
-    n = PyPSAService.get_network()
-    is_multi = isinstance(n.snapshots, pd.MultiIndex)
-    _backup_network_ts_to_user_ts(n)
-    # Detect whether the user had non-default snapshot_weightings configured
-    # BEFORE sampling. Representative-week sampling replaces the snapshot
-    # index entirely — the prior weights have no meaningful mapping onto
-    # the new sparse index, so they're necessarily overwritten with the
-    # sampler-derived rep-week scaling. We can't preserve them safely, but
-    # we CAN warn the user that their custom scaling is being discarded so
-    # the silent-loss footgun documented for `set_snapshots(MultiIndex)` in
-    # CLAUDE.md doesn't bite here. Compare every weight column to the PyPSA
-    # default (1.0); anything else counts as "custom".
-    _had_custom_weights = False
-    try:
-        sw_pre = n.snapshot_weightings
-        if not sw_pre.empty:
-            for _col in sw_pre.columns:
-                if not (sw_pre[_col].astype(float) == 1.0).all():
-                    _had_custom_weights = True
-                    break
-    except Exception:
-        _had_custom_weights = False
-    with PyPSAService.get_lock():
-        if is_multi:
-            periods = sorted(n.snapshots.get_level_values(0).unique().tolist())
-            if not periods:
-                raise HTTPException(
-                    400, "Multi-period network has no investment periods.",
-                )
-            mi = _build_period_multiindex(periods, [sampled_idx] * len(periods))
-            n.set_snapshots(mi)
-            n.investment_periods = periods
-            full_weights = _np.concatenate([weights for _ in periods])
-        else:
-            n.set_snapshots(sampled_idx)
-            full_weights = weights
-        # Re-apply uploaded profiles — sampled timesteps ⊂ uploaded index so
-        # the reindex is exact (no all-NaN columns to skip).
-        _reapply_user_ts_to_network(n)
-        # Each sampled hour stands for days_in_month / (weeks × 7) hours. Set
-        # all three weight columns so the LP objective, generator energy
-        # balance and storage SoC equations scale consistently.
-        for col in n.snapshot_weightings.columns:
-            n.snapshot_weightings[col] = full_weights
-
-    change_log_service.log(
-        "update", "Network", "snapshots",
-        f"Sampled {config.n_weeks} representative ISO week(s)/month → "
-        f"{len(sampled_idx)} timestep(s)"
-        + (f" × {len(periods)} period(s) = {len(n.snapshots)} snapshots"
-           if is_multi else f" = {len(n.snapshots)} snapshots")
-        + (" — NOTE: prior custom snapshot_weightings overwritten with "
-           "rep-week scaling (each sampled hour now represents N hours)"
-           if _had_custom_weights else ""),
-    )
-    return {
-        "count": len(n.snapshots),
-        "n_weeks": config.n_weeks,
-        "seed": config.seed,
-        "multi_period": is_multi,
-        "timesteps_per_period": len(sampled_idx),
-        "weeks": week_meta,
-        # True when the network carried non-default snapshot_weightings before
-        # sampling. Rep-week sampling necessarily replaces them (the prior
-        # weights have no mapping onto the new sparse index), and until now that
-        # was recorded only in the audit log — the user was never told.
-        "had_custom_weights": _had_custom_weights,
-    }
 
 
 # ── Investment Periods ────────────────────────────────────────────────────────
 
-@router.get("/investment_periods")
-def get_investment_periods():
-    n = PyPSAService.get_network()
-    if n.investment_periods.empty:
-        return {"periods": [], "weightings": []}
-    return {
-        "periods": n.investment_periods.tolist(),
-        "weightings": df_to_json(n.investment_period_weightings),
-    }
 
 
-@router.post("/investment_periods")
-def set_investment_periods(body: InvestmentPeriods):
-    """
-    Set the list of investment periods, rebuilding ``n.snapshots`` to match.
-
-    PyPSA's ``n.investment_periods = […]`` setter doesn't auto-extend the
-    snapshot MultiIndex when periods are added — it raises if the new
-    periods aren't already present as level-0 values. To make the GUI's
-    "add year" interaction work without forcing the user to manually rebuild
-    snapshots, this endpoint handles the three transitions:
-
-      1) Flat snapshots → MultiIndex: promote by replicating the existing
-         operational DatetimeIndex under each requested period.
-      2) MultiIndex → different MultiIndex (period added / removed): each
-         period that survives keeps ITS OWN operational range (needed for
-         "Different year per period" multi-year weather data — 2030→2019,
-         2040→2020, …); only a genuinely new period inherits the first
-         existing period's range as a template. User uploads survive via
-         _user_ts.
-      3) Empty `periods` on a MultiIndex: demote back to flat using the first
-         period's operational range.
-    """
-    import pandas as pd
-    n = PyPSAService.get_network()
-
-    new_periods = sorted({int(p) for p in body.periods})
-
-    with PyPSAService.get_lock():
-        is_multi = isinstance(n.snapshots, pd.MultiIndex)
-
-        if not new_periods:
-            # Demote to flat snapshots using period-0's timesteps.
-            if is_multi:
-                # Capture profiles, collapse the MultiIndex → flat (handles the
-                # pandas "cannot include dtype 'M' in a buffer" reindex bug),
-                # then re-apply profiles aligned to the flat index.
-                _backup_network_ts_to_user_ts(n)
-                _flatten_snapshot_state(n)
-                _reapply_user_ts_to_network(n)
-            else:
-                # Already flat. PyPSA accepts an empty pd.Index for this.
-                n.investment_periods = pd.Index([], dtype="int64")
-            return {"count": 0}
-
-        # Determine each period's operational block. A period that exists both
-        # before and after keeps ITS OWN timesteps — the previous code rebuilt
-        # every period from the FIRST period's range, which silently destroyed
-        # the "Different year per period" setup (2030→2019 weather, 2040→2020,
-        # …) the moment the user added or removed a year.
-        if is_multi:
-            level0 = n.snapshots.get_level_values(0)
-            existing_periods = sorted(level0.unique().tolist())
-            existing_blocks = {
-                int(p): pd.DatetimeIndex(
-                    n.snapshots[level0 == p].get_level_values(1),
-                )
-                for p in existing_periods
-            }
-            base_idx = existing_blocks[int(existing_periods[0])]
-        else:
-            existing_periods = []
-            existing_blocks = {}
-            base_idx = pd.DatetimeIndex(n.snapshots)
-
-        # Only rebuild snapshots if the period set actually changed.
-        if existing_periods != new_periods:
-            _backup_network_ts_to_user_ts(n)
-            captured_weights = _capture_snapshot_weights_per_timestep(n)
-            # Surviving periods keep their own block; a genuinely new period
-            # inherits the first existing period's range as a template (on a
-            # flat→multi promotion there is only one range, so every period
-            # legitimately gets it).
-            blocks = [existing_blocks.get(int(p), base_idx) for p in new_periods]
-            mi = _build_period_multiindex(new_periods, blocks)
-            n.set_snapshots(mi)
-            _reapply_snapshot_weights(n, captured_weights)
-            _reapply_user_ts_to_network(n)
-
-        # Set / re-set the periods list. PyPSA validates it matches level-0.
-        n.investment_periods = new_periods
-
-        if body.objective_weightings:
-            n.investment_period_weightings["objective"] = body.objective_weightings
-        if body.years_weightings:
-            n.investment_period_weightings["years"] = body.years_weightings
-
-        # Read inside the lock — the rest of this handler holds it, and a
-        # concurrent request between lock-release and this read could change
-        # the snapshot count out from under the log line.
-        snapshot_count = len(n.snapshots)
-        # "existing periods kept their own operational range" is only true on
-        # the actual multi→multi rebuild branch above. It was previously
-        # logged unconditionally, which was wrong in two other reachable
-        # cases: a flat→multi promotion (nothing was "kept" — there were no
-        # existing periods, every period got the same templated range) and
-        # the no-rebuild path (the period set didn't change, so the rebuild
-        # was skipped entirely; nothing was rebuilt, let alone "kept").
-        promoted = not is_multi
-        rebuilt = existing_periods != new_periods
-        if promoted:
-            range_note = "promoted from flat snapshots; every period shares the previous operational range"
-        elif rebuilt:
-            range_note = "existing periods kept their own operational range; new periods inherited the first period's range as a template"
-        else:
-            range_note = "period set unchanged; snapshot rebuild skipped"
-
-    change_log_service.log(
-        "update", "Network", "investment_periods",
-        f"Set investment periods: {new_periods} "
-        f"({snapshot_count} snapshots total; {range_note})",
-    )
-    return {"count": len(new_periods)}
 
 
-@router.patch("/investment_period_weightings")
-def update_investment_period_weightings(body: dict):
-    """
-    Update per-period weights in `n.investment_period_weightings`.
-
-    Body shape options (combinable in one call):
-
-      • `{"all_years": <float>}` — set every period's `years` column.
-      • `{"all_objective": <float>}` — set every period's `objective` column.
-      • `{"updates": {<period>: {"years"?, "objective"?}, ...}}` — per-period
-        overrides. Keys are integer years (matching `n.investment_periods`);
-        string keys are coerced.
-
-    `years` represents the number of calendar years a period stands in for
-    (PyPSA's discounting uses this as the integration window). `objective`
-    is the discount/weight applied to that period's operational + capital
-    contribution in the LP objective. Defaults are both 1.0 — set them
-    explicitly when running multi-period.
-    """
-    n = PyPSAService.get_network()
-    if n.investment_periods.empty:
-        raise HTTPException(
-            400,
-            "Network has no investment periods. Configure them first via "
-            "POST /network/investment_periods.",
-        )
-    df = n.investment_period_weightings
-    with PyPSAService.get_lock():
-        all_years = body.get("all_years")
-        all_obj = body.get("all_objective")
-        if all_years is not None:
-            try:
-                df["years"] = float(all_years)
-            except (TypeError, ValueError):
-                raise HTTPException(400, f"`all_years` must be a number, got {all_years!r}")
-        if all_obj is not None:
-            try:
-                df["objective"] = float(all_obj)
-            except (TypeError, ValueError):
-                raise HTTPException(400, f"`all_objective` must be a number, got {all_obj!r}")
-        updates = body.get("updates") or {}
-        if not isinstance(updates, dict):
-            raise HTTPException(400, "`updates` must be a dict keyed by period (year).")
-        applied = 0
-        for key, vals in updates.items():
-            if not isinstance(vals, dict):
-                continue
-            try:
-                period = int(key)
-            except (TypeError, ValueError):
-                raise HTTPException(400, f"Bad period key {key!r}")
-            if period not in df.index:
-                raise HTTPException(400, f"Unknown period {period}")
-            for col in ("years", "objective"):
-                if col in vals:
-                    try:
-                        df.at[period, col] = float(vals[col])
-                        applied += 1
-                    except (TypeError, ValueError):
-                        raise HTTPException(
-                            400, f"Bad {col} value for period {period}: {vals[col]!r}",
-                        )
-        change_log_service.log(
-            "update", "Network", "investment_period_weightings",
-            f"Updated period weightings: all_years={all_years}, "
-            f"all_objective={all_obj}, per-row updates={applied}",
-        )
-    return {
-        "periods": n.investment_periods.tolist(),
-        "weightings": df_to_json(n.investment_period_weightings),
-    }
 
 
 # ── Global constraints ───────────────────────────────────────────────────────
@@ -2083,66 +1164,234 @@ def reset_network(
 # changes (e.g. flipping `committable`) aren't supported here. For those, the
 # client should fall through to per-row PUT.
 
-def _coerce_bulk_value(df: pd.DataFrame, col: str, value: Any) -> Any:
+# Phase 12f: the five LP bounds whose PyPSA class default is FINITE, so that
+# clearing one has a real value to write. Mirrors
+# `services.validation_service.FINITE_DEFAULT_BOUNDS`, which is the preflight
+# that catches whatever gets past this route.
+_FINITE_DEFAULT_BOUNDS = ("p_max_pu", "p_min_pu", "s_max_pu",
+                          "e_max_pu", "e_min_pu")
+
+
+def _finite_input_meta(component_class: str, col: str):
+    """``(default, type)`` for ``col`` when it is a numeric INPUT attribute of
+    ``component_class`` whose PyPSA class default is finite — the set Phase
+    12g refuses NaN in — else ``None``. Read from PyPSA's own component
+    metadata (`services.validation_service.finite_default_inputs`), so the
+    two cannot drift; 12f's five bounds are the fallback so a PyPSA that
+    reshapes `defaults` cannot turn a clear into a NaN write, which is the
+    exact defect this exists to fix.
+    """
+    try:
+        from services.pypsa_service import PyPSAService
+        from services.validation_service import finite_default_inputs
+        n = PyPSAService.get_network()
+        meta = finite_default_inputs(n.components[component_class])
+        if col in meta:
+            dv, _varying, typ = meta[col]
+            return float(dv), typ
+        return None
+    except Exception:                                         # noqa: BLE001
+        if col not in _FINITE_DEFAULT_BOUNDS:
+            return None
+        if col == "p_min_pu":
+            return (-1.0 if component_class == "StorageUnit" else 0.0), "float"
+        return (0.0 if col == "e_min_pu" else 1.0), "float"
+
+
+def _finite_bound_default(component_class: str, col: str) -> float:
+    """12f's name, kept for its callers: the class default of one of the five
+    bounds, through the metadata."""
+    meta = _finite_input_meta(component_class, col)
+    if meta is not None:
+        return meta[0]
+    if col == "p_min_pu":
+        return -1.0 if component_class == "StorageUnit" else 0.0
+    return 0.0 if col == "e_min_pu" else 1.0
+
+
+def _bool_input_default(component_class: str, col: str) -> bool:
+    """The class default of a BOOLEAN input column, read from PyPSA's own
+    metadata — 12g's `finite_default_inputs` pattern for `type == "boolean"`.
+
+    A hand-written "bools clear to False" list is wrong twice over: `active`
+    defaults to True on EVERY class, and so does `Link.cyclic_delay`, which
+    is bulk-editable. A custom GUI column (`p_max_pu_includes_outages`) is
+    not in the table at all and falls back to False, its declared default.
+    """
+    try:
+        from services.pypsa_service import PyPSAService
+        comp = PyPSAService.get_network().components[component_class]
+        d = getattr(comp, "defaults", None)
+        if d is None:
+            d = getattr(comp, "attrs", None)
+        row = d.loc[col]
+        if str(row.get("type", "")).strip() == "boolean" \
+                and str(row.get("status", "")).strip().startswith("Input"):
+            return bool(row.get("default"))
+    except Exception:                                         # noqa: BLE001
+        pass
+    return False
+
+
+def _coerce_bulk_value(df: pd.DataFrame, col: str, value: Any,
+                       component_class: str) -> Any:
     """
     Coerce one bulk value to `col`'s existing dtype.
 
-    Extracted verbatim from bulk_update's inline loop so the row-wise form
-    (spec D9) applies byte-identical semantics. Mechanical move — the blank
-    sentinels, the boolean vocabulary and the 400 message are unchanged, and
-    tests/test_bulk_update.py pins all three.
+    MERGE NOTE (2026-09-10). This branch extracted the helper so the
+    per-row form (spec D9) could apply identical semantics; master kept the
+    logic inline and then GREW it — the Phase 12f/12g finite-default rules,
+    the `active` 422, `_bool_input_default`, the non-finite refusal. Taking
+    either side whole lost the other half: this branch's row form, or
+    master's rules.
 
-    Without this, writing a string into a numeric column upcasts the whole
-    column to `object`, which then breaks `n.export_to_netcdf()` at save time
-    with a cryptic "object array contains mixed native types" ValueError.
+    Master's loop body is kept BYTE-FOR-BYTE below, wrapped in a one-pass
+    loop so its `continue` statements still mean "this column is done".
+    Rewriting them into `return`s was tried first and silently broke the
+    numeric branch, whose later checks read back `coerced[col]`. Keeping
+    the body verbatim means there is nothing to get wrong, and master's
+    own tests (`test_nonfinite_bounds`, `test_nonfinite_inputs`,
+    `test_includes_outages`) pin every rule.
+
+    `component_class` is new to the signature and load-bearing: master's
+    rules consult per-class metadata (`_finite_input_meta`,
+    `_bool_input_default`) the old three-argument form could not see.
     """
-    col_dtype = df[col].dtype
-    if pd.api.types.is_bool_dtype(col_dtype):
-        if isinstance(value, str):
-            if value.strip().lower() in ("true", "1", "yes"):
-                value = True
-            elif value.strip().lower() in ("false", "0", "no"):
-                value = False
-        return bool(value) if value is not None else value
-    if pd.api.types.is_numeric_dtype(col_dtype):
-        if value is None or value == "":
-            # Blank-to-clear a bound should produce PyPSA's "no bound"
-            # sentinel (±inf), matching how the per-row PUT path clears the
-            # capacity/economic bounds via the schema aliases (_NoneToPosInf
-            # on *_max / lifetime, _NoneToNegInf on e_sum_min). The
-            # endswith("_max") predicate is intentionally a superset: it also
-            # covers PyPSA's inf-default voltage bounds (v_mag_pu_max,
-            # v_ang_max) — clearing those to inf is likewise their PyPSA
-            # default, so the resulting network is valid. Everything else
-            # keeps NaN ("missing"), as before.
-            if col.endswith("_max") or col == "lifetime":
-                return float("inf")
-            if col == "e_sum_min":
-                return float("-inf")
-            return float("nan")            # pandas treats this as missing
-        try:
-            return float(value)
-        except (TypeError, ValueError):
-            raise HTTPException(400,
-                f"Column '{col}' is numeric ({col_dtype}); got non-numeric "
-                f"value {value!r}.")
-    # Strings / objects pass through. We still cast to str if the user sent a
-    # number into a string column so dtype stays clean.
-    if pd.api.types.is_string_dtype(col_dtype) or pd.api.types.is_object_dtype(col_dtype):
-        return "" if value is None else str(value)
-    return value
+    coerced: dict[str, Any] = {}
+    for _ in (0,):
+        col_dtype = df[col].dtype
+        if pd.api.types.is_bool_dtype(col_dtype):
+            if isinstance(value, str):
+                if value.strip().lower() in ("true", "1", "yes"):
+                    value = True
+                elif value.strip().lower() in ("false", "0", "no"):
+                    value = False
+            if value is None:
+                # Phase 12h: the bulk editor sends `null` for a blank
+                # cell, and `df.loc[...] = None` upcasts the column to
+                # `object` — the one shape netCDF refuses — so the next
+                # project save is a 500. A null clears to the column's
+                # CLASS DEFAULT, read from PyPSA's metadata rather than
+                # assumed False.
+                #
+                # `active` is refused instead. Its default is True, so
+                # clearing it would ACTIVATE every selected asset,
+                # behind a confirm toast that reads "Set active =
+                # (unset) on 200 generator(s)?". 422 is the shape this
+                # route already uses for a value it could write but
+                # refuses on what the write would MEAN (12g's non-finite
+                # refusal); 400 is its wrong-type answer.
+                if col == "active":
+                    raise HTTPException(
+                        422,
+                        "Column 'active' cannot be cleared — send true "
+                        "or false. Its PyPSA default is true, so "
+                        "clearing it would ACTIVATE every selected "
+                        "asset rather than leave it as it is.")
+                coerced[col] = _bool_input_default(component_class, col)
+                continue
+            coerced[col] = bool(value)
+            continue
+        if pd.api.types.is_numeric_dtype(col_dtype):
+            if value is None or value == "":
+                # Blank-to-clear a bound should produce PyPSA's "no bound"
+                # sentinel (±inf), matching how the per-row PUT path clears the
+                # capacity/economic bounds via the schema aliases (_NoneToPosInf
+                # on *_max / lifetime, _NoneToNegInf on e_sum_min). The
+                # endswith("_max") predicate is intentionally a superset: it also
+                # covers PyPSA's inf-default voltage bounds (v_mag_pu_max,
+                # v_ang_max) — clearing those to inf is likewise their PyPSA
+                # default, so the resulting network is valid. Everything else
+                # keeps NaN ("missing"), as before.
+                # Phase 12g: the finite-default metadata decides FIRST. The
+                # suffix rules below target ±inf-default columns (`p_nom_max`,
+                # `lifetime`, `e_sum_min`) — but `Transformer.phase_shift_max`
+                # ends in `_max` and defaults to 0.0, and clearing it to `inf`
+                # made the next solve refuse the value `_bulk` itself wrote.
+                _meta = _finite_input_meta(component_class, col)
+                if _meta is not None:
+                    coerced[col] = _meta[0]
+                elif col.endswith("_max") or col == "lifetime":
+                    coerced[col] = float("inf")
+                elif col == "e_sum_min":
+                    coerced[col] = float("-inf")
+                elif col in _FINITE_DEFAULT_BOUNDS:
+                    # Phase 12f. NaN is not a valid "no bound" sentinel for
+                    # these five: PyPSA does not fall back to a default, it
+                    # MASKS the constraint row out of the LP, so clearing
+                    # `p_max_pu` used to leave a 100 MW unit free to dispatch
+                    # 500 MW. Their class default is finite, so "unset" has a
+                    # real value — and it is exactly what `n.add(attr=None)`
+                    # coerces to, verified for all five across Generator,
+                    # Link, StorageUnit, Store, Line and Transformer. Keyed by
+                    # (component, column) because `StorageUnit.p_min_pu` is
+                    # −1.0 where a Generator's is 0.0.
+                    #
+                    # `ramp_limit_*` deliberately still lands in the NaN branch
+                    # below: there the class default IS NaN and PyPSA masks the
+                    # row on purpose, which is the documented way to say "this
+                    # unit has no ramp limit".
+                    coerced[col] = _finite_bound_default(component_class, col)
+                else:
+                    coerced[col] = float("nan")  # pandas treats this as missing
+                continue
+            try:
+                coerced[col] = float(value)
+            except (TypeError, ValueError):
+                raise HTTPException(400,
+                    f"Column '{col}' is numeric ({col_dtype}); got non-numeric "
+                    f"value {value!r}.")
+            # Phase 12f: `json.loads` accepts the bare `NaN` and `Infinity`
+            # literals and `float()` accepts the strings "nan" and "inf", so
+            # a non-finite value can reach one of the five bounds past the
+            # `null` branch above. It masks the LP row exactly as a cleared
+            # cell did, so it is refused here — the same answer the time-
+            # series routes give — rather than accepted and refused at solve.
+            # Whole-branch review S1: the outage rate is a probability-like
+            # unavailability — finite and in [0, 1) — and the engines
+            # convolve whatever number is here, so the bulk path refuses
+            # exactly what the create/update schemas refuse.
+            if col == "outage_rate_value" and not (
+                    math.isfinite(coerced[col]) and 0.0 <= coerced[col] < 1.0):
+                raise HTTPException(
+                    422,
+                    f"Column 'outage_rate_value' must be a finite number in "
+                    f"[0, 1); got {value!r}. It is a probability-like "
+                    "unavailability, not a percentage or count. Send null "
+                    "to unset it (the per-carrier default then applies).")
+            if not math.isfinite(coerced[col]) and (
+                    col in _FINITE_DEFAULT_BOUNDS
+                    or _finite_input_meta(component_class, col) is not None):
+                # Phase 12g: every finite-default input, not only the five.
+                raise HTTPException(
+                    422,
+                    f"Column '{col}' must be a finite number; got {value!r}. "
+                    "PyPSA does not default a non-finite value here, it drops "
+                    "the term or the constraint that reads it. Send null to "
+                    "restore the default.")
+            continue
+        # Strings / objects pass through. We still cast to str if the user
+        # sent a number into a string column so dtype stays clean.
+        if pd.api.types.is_string_dtype(col_dtype) or pd.api.types.is_object_dtype(col_dtype):
+            coerced[col] = "" if value is None else str(value)
+            continue
+        coerced[col] = value
+    return coerced.get(col, value)
 
 
+# MERGE NOTE (2026-09-10): master's `bulk_update` is the base, with this
+# branch's per-row form (spec D9) grafted on. Master's is the better base:
+# it added the Phase 12h single-lock hold — load-bearing, because the flag
+# normaliser can CREATE a column that the unknown-column check and the
+# dtype dispatch then read — plus the transient-row refusal and the
+# finite-default rules. Taking this branch's version whole (the first
+# attempt) lost all of that and failed master's own tests.
 @router.patch("/_bulk")
 def bulk_update(body: dict) -> dict:
     component_class = body.get("component_class", "")
     names = body.get("names", [])
     updates = body.get("updates", {})
     rows = body.get("rows")
-
-    if component_class not in _COMPONENT_ATTRS:
-        raise HTTPException(400, f"Unknown component_class '{component_class}'. "
-            f"Expected one of: {', '.join(sorted(_COMPONENT_ATTRS))}.")
 
     # Two body forms (spec D9). The scalar form applies one value per column to
     # every named row; the row form carries a per-row patch, which is what a
@@ -2151,6 +1400,9 @@ def bulk_update(body: dict) -> dict:
     if row_form and (names or updates):
         raise HTTPException(400, "Send either names+updates or rows, not both.")
 
+    if component_class not in _COMPONENT_ATTRS:
+        raise HTTPException(400, f"Unknown component_class '{component_class}'. "
+            f"Expected one of: {', '.join(sorted(_COMPONENT_ATTRS))}.")
     if row_form:
         if not isinstance(rows, list) or len(rows) == 0:
             raise HTTPException(400, "rows must be a non-empty list")
@@ -2165,102 +1417,253 @@ def bulk_update(body: dict) -> dict:
             if not isinstance(up, dict) or len(up) == 0:
                 raise HTTPException(400, f"rows[{i}] needs a non-empty 'updates' object")
             if "name" in up:
-                raise HTTPException(400,
-                    "Bulk rename not supported. Use PUT /<component>/{name}.")
+                raise HTTPException(400, "Bulk rename not supported. Use PUT /<component>/{name}.")
             pairs.append((nm, up))
-        name_strs = [nm for nm, _ in pairs]
+        names = [nm for nm, _ in pairs]
         # A duplicate name would make the result order-dependent and the undo
         # step ambiguous. One gesture is one request; a client that targets the
         # same row twice has a bug worth surfacing.
-        if len(set(name_strs)) != len(name_strs):
-            dupes = sorted({x for x in name_strs if name_strs.count(x) > 1})
+        if len(set(names)) != len(names):
+            dupes = sorted({x for x in names if names.count(x) > 1})
             raise HTTPException(400,
                 f"Duplicate row name(s) in rows: {', '.join(dupes[:5])}.")
-        touched_cols = {c for _, up in pairs for c in up}
     else:
+        pairs = []
         if not isinstance(names, list) or len(names) == 0:
             raise HTTPException(400, "names must be a non-empty list")
         if not isinstance(updates, dict) or len(updates) == 0:
             raise HTTPException(400, "updates must be a non-empty object")
         if "name" in updates:
             raise HTTPException(400, "Bulk rename not supported. Use PUT /<component>/{name}.")
+
+    # Phase 12h: ONE lock hold spans the prologue, the unknown-column
+    # check, the dtype dispatch and the write. The flag normaliser below
+    # can CREATE a column, and both the check and the dispatch read the
+    # frame's columns and dtypes — a solve adding and removing its slack
+    # rows underneath would make the route write against a shape it never
+    # inspected. `get_lock()` is an RLock, so a caller already holding it
+    # is unaffected.
+    with PyPSAService.get_lock():
+        attr = _COMPONENT_ATTRS[component_class]
+        n = PyPSAService.get_network()
+        df = getattr(n, attr)
+
+        # Phase 12h: `p_max_pu_includes_outages` is a custom BOOL column, and
+        # this route is the one that has to set it on an import whose frame
+        # never carried it — without the create-if-absent the unknown-column
+        # check below refuses with `has no column(s)`. Normalising HERE, ahead
+        # of that check AND of the dtype dispatch that reads `df[col].dtype`,
+        # is also what makes a `_bulk` write land as a real `bool`: normalise
+        # after the dispatch and the string 'True' is stored instead, which
+        # `flag_is_set` reads as set and which exports fine — only the dtype
+        # separates the two, and only until the next solve.
+        if attr == "generators":
+            try:
+                from services.adequacy.occurrence import normalise_flag_column
+                normalise_flag_column(n)
+            except Exception:                                 # noqa: BLE001
+                pass
+
+        # Resolve names. Bulk semantics: refuse the whole batch if any target is
+        # missing — partial application would be hard to undo predictably.
         name_strs = [str(x) for x in names]
-        touched_cols = set(updates)
+        missing = [n_ for n_ in name_strs if n_ not in df.index]
+        if missing:
+            sample = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
+            raise HTTPException(404, f"{len(missing)} {component_class}(s) not found: {sample}")
 
-    attr = _COMPONENT_ATTRS[component_class]
-    n = PyPSAService.get_network()
-    df = getattr(n, attr)
+        # Reject any target that's currently a solver-internal transient row
+        # (vintage clone, VOLL slack). The /api/network/{component} filter
+        # hides these from the UI, so a frontend can't normally surface their
+        # names — but a stale localStorage payload, a replay attack, or a
+        # power-user CLI hitting the bulk endpoint directly could. Mutating
+        # LP scaffolding mid-solve corrupts the optimisation in subtle ways
+        # (e.g. flipping a vintage's p_nom_extendable defeats the whole
+        # per-period bound mechanism). Refuse with a clear 409.
+        transient_targets = [n_ for n_ in name_strs
+                             if n_ in PyPSAService.get_transient_rows(component_class)]
+        if transient_targets:
+            sample = ", ".join(transient_targets[:3]) + ("…" if len(transient_targets) > 3 else "")
+            raise HTTPException(
+                409,
+                f"Cannot bulk-edit {len(transient_targets)} {component_class}(s) "
+                f"({sample}) — these rows are LP scaffolding generated by the "
+                f"current solve (vintage clones or VOLL slacks). Wait for the "
+                f"solver to finish and try again on the parent row(s).",
+            )
 
-    # Resolve names. Bulk semantics: refuse the whole batch if any target is
-    # missing — partial application would be hard to undo predictably.
-    missing = [n_ for n_ in name_strs if n_ not in df.index]
-    if missing:
-        sample = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
-        raise HTTPException(404, f"{len(missing)} {component_class}(s) not found: {sample}")
+        # Validate every column exists. PyPSA defines its full schema lazily — the
+        # column may exist on the DataFrame even if no row has set it explicitly,
+        # so this catches typos like "p_min_pu " (trailing space).
+        touched_cols = set(updates) | {c for _, up in pairs for c in up}
+        unknown_cols = [c for c in sorted(touched_cols) if c not in df.columns]
+        if unknown_cols:
+            raise HTTPException(400,
+                f"{component_class} has no column(s): {', '.join(unknown_cols)}.")
 
-    # Reject any target that's currently a solver-internal transient row
-    # (vintage clone, VOLL slack). The /api/network/{component} filter
-    # hides these from the UI, so a frontend can't normally surface their
-    # names — but a stale localStorage payload, a replay attack, or a
-    # power-user CLI hitting the bulk endpoint directly could. Mutating
-    # LP scaffolding mid-solve corrupts the optimisation in subtle ways
-    # (e.g. flipping a vintage's p_nom_extendable defeats the whole
-    # per-period bound mechanism). Refuse with a clear 409.
-    transient_targets = [n_ for n_ in name_strs
-                         if n_ in PyPSAService.get_transient_rows(component_class)]
-    if transient_targets:
-        sample = ", ".join(transient_targets[:3]) + ("…" if len(transient_targets) > 3 else "")
-        raise HTTPException(
-            409,
-            f"Cannot bulk-edit {len(transient_targets)} {component_class}(s) "
-            f"({sample}) — these rows are LP scaffolding generated by the "
-            f"current solve (vintage clones or VOLL slacks). Wait for the "
-            f"solver to finish and try again on the parent row(s).",
-        )
-
-    # Validate every column exists. PyPSA defines its full schema lazily — the
-    # column may exist on the DataFrame even if no row has set it explicitly,
-    # so this catches typos like "p_min_pu " (trailing space).
-    unknown_cols = [c for c in sorted(touched_cols) if c not in df.columns]
-    if unknown_cols:
-        raise HTTPException(400,
-            f"{component_class} has no column(s): {', '.join(unknown_cols)}.")
-
-    # Coerce EVERYTHING before taking the lock, so a bad value in row 9 leaves
-    # rows 1-8 untouched. Same all-or-nothing contract the 404 above keeps.
-    coerced_rows: list[tuple[str, dict[str, Any]]] = []
-    coerced: dict[str, Any] = {}
-    if row_form:
-        coerced_rows = [
-            (nm, {c: _coerce_bulk_value(df, c, v) for c, v in up.items()})
+        # Coerce each value to the column's existing dtype. Without this, writing
+        # a string into a numeric column upcasts the whole column to `object`,
+        # which then breaks `n.export_to_netcdf()` at save time with a cryptic
+        # "object array contains mixed native types" ValueError. Reject up front
+        # so the failure happens at edit-time with a clear message rather than at
+        # save-time where the user has no idea which field is wrong.
+        # Row form coerces per row, through the SAME helper, so both forms
+        # apply identical rules (see `_coerce_bulk_value`).
+        coerced_rows: list[tuple[str, dict[str, Any]]] = [
+            (nm, {c: _coerce_bulk_value(df, c, v, component_class)
+                  for c, v in up.items()})
             for nm, up in pairs
         ]
-        new_carriers = [up["carrier"] for _, up in coerced_rows
-                        if isinstance(up.get("carrier"), str)]
-    else:
-        coerced = {
-            col: _coerce_bulk_value(df, col, value) for col, value in updates.items()
-        }
-        new_carriers = ([coerced["carrier"]]
-                        if isinstance(coerced.get("carrier"), str) else [])
+        coerced: dict[str, Any] = {}
+        for col, value in updates.items():
+            col_dtype = df[col].dtype
+            if pd.api.types.is_bool_dtype(col_dtype):
+                if isinstance(value, str):
+                    if value.strip().lower() in ("true", "1", "yes"):
+                        value = True
+                    elif value.strip().lower() in ("false", "0", "no"):
+                        value = False
+                if value is None:
+                    # Phase 12h: the bulk editor sends `null` for a blank
+                    # cell, and `df.loc[...] = None` upcasts the column to
+                    # `object` — the one shape netCDF refuses — so the next
+                    # project save is a 500. A null clears to the column's
+                    # CLASS DEFAULT, read from PyPSA's metadata rather than
+                    # assumed False.
+                    #
+                    # `active` is refused instead. Its default is True, so
+                    # clearing it would ACTIVATE every selected asset,
+                    # behind a confirm toast that reads "Set active =
+                    # (unset) on 200 generator(s)?". 422 is the shape this
+                    # route already uses for a value it could write but
+                    # refuses on what the write would MEAN (12g's non-finite
+                    # refusal); 400 is its wrong-type answer.
+                    if col == "active":
+                        raise HTTPException(
+                            422,
+                            "Column 'active' cannot be cleared — send true "
+                            "or false. Its PyPSA default is true, so "
+                            "clearing it would ACTIVATE every selected "
+                            "asset rather than leave it as it is.")
+                    coerced[col] = _bool_input_default(component_class, col)
+                    continue
+                coerced[col] = bool(value)
+                continue
+            if pd.api.types.is_numeric_dtype(col_dtype):
+                if value is None or value == "":
+                    # Blank-to-clear a bound should produce PyPSA's "no bound"
+                    # sentinel (±inf), matching how the per-row PUT path clears the
+                    # capacity/economic bounds via the schema aliases (_NoneToPosInf
+                    # on *_max / lifetime, _NoneToNegInf on e_sum_min). The
+                    # endswith("_max") predicate is intentionally a superset: it also
+                    # covers PyPSA's inf-default voltage bounds (v_mag_pu_max,
+                    # v_ang_max) — clearing those to inf is likewise their PyPSA
+                    # default, so the resulting network is valid. Everything else
+                    # keeps NaN ("missing"), as before.
+                    # Phase 12g: the finite-default metadata decides FIRST. The
+                    # suffix rules below target ±inf-default columns (`p_nom_max`,
+                    # `lifetime`, `e_sum_min`) — but `Transformer.phase_shift_max`
+                    # ends in `_max` and defaults to 0.0, and clearing it to `inf`
+                    # made the next solve refuse the value `_bulk` itself wrote.
+                    _meta = _finite_input_meta(component_class, col)
+                    if _meta is not None:
+                        coerced[col] = _meta[0]
+                    elif col.endswith("_max") or col == "lifetime":
+                        coerced[col] = float("inf")
+                    elif col == "e_sum_min":
+                        coerced[col] = float("-inf")
+                    elif col in _FINITE_DEFAULT_BOUNDS:
+                        # Phase 12f. NaN is not a valid "no bound" sentinel for
+                        # these five: PyPSA does not fall back to a default, it
+                        # MASKS the constraint row out of the LP, so clearing
+                        # `p_max_pu` used to leave a 100 MW unit free to dispatch
+                        # 500 MW. Their class default is finite, so "unset" has a
+                        # real value — and it is exactly what `n.add(attr=None)`
+                        # coerces to, verified for all five across Generator,
+                        # Link, StorageUnit, Store, Line and Transformer. Keyed by
+                        # (component, column) because `StorageUnit.p_min_pu` is
+                        # −1.0 where a Generator's is 0.0.
+                        #
+                        # `ramp_limit_*` deliberately still lands in the NaN branch
+                        # below: there the class default IS NaN and PyPSA masks the
+                        # row on purpose, which is the documented way to say "this
+                        # unit has no ramp limit".
+                        coerced[col] = _finite_bound_default(component_class, col)
+                    else:
+                        coerced[col] = float("nan")  # pandas treats this as missing
+                    continue
+                try:
+                    coerced[col] = float(value)
+                except (TypeError, ValueError):
+                    raise HTTPException(400,
+                        f"Column '{col}' is numeric ({col_dtype}); got non-numeric "
+                        f"value {value!r}.")
+                # Phase 12f: `json.loads` accepts the bare `NaN` and `Infinity`
+                # literals and `float()` accepts the strings "nan" and "inf", so
+                # a non-finite value can reach one of the five bounds past the
+                # `null` branch above. It masks the LP row exactly as a cleared
+                # cell did, so it is refused here — the same answer the time-
+                # series routes give — rather than accepted and refused at solve.
+                # Whole-branch review S1: the outage rate is a probability-like
+                # unavailability — finite and in [0, 1) — and the engines
+                # convolve whatever number is here, so the bulk path refuses
+                # exactly what the create/update schemas refuse.
+                if col == "outage_rate_value" and not (
+                        math.isfinite(coerced[col]) and 0.0 <= coerced[col] < 1.0):
+                    raise HTTPException(
+                        422,
+                        f"Column 'outage_rate_value' must be a finite number in "
+                        f"[0, 1); got {value!r}. It is a probability-like "
+                        "unavailability, not a percentage or count. Send null "
+                        "to unset it (the per-carrier default then applies).")
+                if not math.isfinite(coerced[col]) and (
+                        col in _FINITE_DEFAULT_BOUNDS
+                        or _finite_input_meta(component_class, col) is not None):
+                    # Phase 12g: every finite-default input, not only the five.
+                    raise HTTPException(
+                        422,
+                        f"Column '{col}' must be a finite number; got {value!r}. "
+                        "PyPSA does not default a non-finite value here, it drops "
+                        "the term or the constraint that reads it. Send null to "
+                        "restore the default.")
+                continue
+            # Strings / objects pass through. We still cast to str if the user
+            # sent a number into a string column so dtype stays clean.
+            if pd.api.types.is_string_dtype(col_dtype) or pd.api.types.is_object_dtype(col_dtype):
+                coerced[col] = "" if value is None else str(value)
+                continue
+            coerced[col] = value
 
-    with PyPSAService.get_lock():
         # If the bulk update sets `carrier`, ensure the carrier row exists with
         # catalog metadata first — same auto-add behavior as PUT.
         if component_class != "Carrier":
-            for new_carrier in new_carriers:
-                ensure_carrier(n, new_carrier)
+            _new_carriers = (
+                [up["carrier"] for _, up in coerced_rows
+                 if isinstance(up.get("carrier"), str)]
+                if row_form else
+                ([coerced["carrier"]]
+                 if isinstance(coerced.get("carrier"), str) else [])
+            )
+            for _c in _new_carriers:
+                ensure_carrier(n, _c)
         if row_form:
-            for nm, up in coerced_rows:
-                for col, value in up.items():
-                    df.loc[nm, col] = value
+            for _nm, _up in coerced_rows:
+                for col, value in _up.items():
+                    df.loc[_nm, col] = value
         else:
             for col, value in coerced.items():
+                # Phase 12g, measured and left alone: pandas 3.0.5 keeps an int64
+                # column int64 when the written value is integral (`0`, `0.0`,
+                # `2030.0` alike) and upcasts only on NaN — so `build_year`
+                # cleared to its default 0 stays `int64` with no help. A dtype
+                # restore written here on the plan review's contrary probe did
+                # not bite and was removed.
                 df.loc[name_strs, col] = value
 
     # One audit entry per bulk op (not per component). Pretty-print the values
-    # so the History tab shows what changed at a glance. The row form cannot
-    # print every value, so it prints the shape instead.
+    # so the History tab shows what changed at a glance.
+    # The row form cannot print every value, so it prints the shape instead,
+    # and reports the UNION of the columns any row touched.
     if row_form:
         description = f"Bulk: {len(touched_cols)} field(s) across {len(name_strs)} row(s)"
         fields = sorted(touched_cols)
@@ -2302,7 +1705,7 @@ def _push_undo_snapshot() -> None:
                 tmp = pathlib.Path(f.name)
             try:
                 with PyPSAService.get_netcdf_io_lock():
-                    n.export_to_netcdf(str(tmp))
+                    PyPSAService.export_network_to_netcdf(n, tmp)
                 netcdf_bytes = tmp.read_bytes()
             finally:
                 tmp.unlink(missing_ok=True)
@@ -2344,7 +1747,15 @@ def undo_last():
     import pathlib
     import tempfile
 
-    from services import dirty_state, undo_service
+    from services import undo_service
+
+    # ★ Precheck BEFORE the destructive pop (Phase 11 review, BLOCKER 1).
+    # `undo_service.pop()` removes the entry from the stack and returns it; a
+    # 409 raised after it discards that entry, so two refused Ctrl-Z presses
+    # during a study emptied a two-deep undo stack while changing nothing.
+    # /api/network/undo is in `_UNDO_EXCLUDE`, so the middleware's
+    # push-then-rollback does not cover it either.
+    PyPSAService.refuse_if_study_running("undo")
     result = undo_service.pop()
     if result is None:
         raise HTTPException(409, "Nothing to undo")
@@ -2371,7 +1782,7 @@ def undo_last():
             PyPSAService.reset_network()
             n = PyPSAService.get_network()
             with PyPSAService.get_netcdf_io_lock():
-                n.import_from_netcdf(str(tmp))
+                PyPSAService.import_network_from_netcdf(n, tmp)
             PyPSAService.set_binding(prev_binding)
             if prev_loaded:
                 try:
@@ -2388,869 +1799,12 @@ def undo_last():
     return {"undone": True, "remaining": undo_service.depth()}
 
 
-# ── User-uploaded time series store ───────────────────────────────────────────
-# Each column is stored as an independent pd.Series keyed by
-# (component, attribute, column_name).  Using a per-column key avoids every
-# pandas index-alignment pitfall: uploading a column with 2024 timestamps will
-# never corrupt another column that was uploaded with 2026 timestamps, and a
-# re-upload of any column simply overwrites its own entry.
-_user_ts: dict[tuple[str, str, str], pd.Series] = {}
-
 # Guards every read/write of _user_ts. The PyPSA-network lock protects the
 # PyPSA DataFrames; this lock protects this Python-side store independently
 # so a concurrent upload + autosave can't trip
 # `RuntimeError: dictionary changed size during iteration` inside
 # _serialize_user_ts / _restore_user_ts.
-import threading as _ts_threading
 
-_user_ts_lock = _ts_threading.RLock()
-
-
-def _user_ts_rename_asset(component_attr: str, old_name: str, new_name: str) -> int:
-    """
-    Re-key `_user_ts` entries when a component is renamed via PUT.
-
-    Without this, a `PUT /generators/Solar` with `{"name": "Solar_new"}`
-    renames in PyPSA + drops the vintage_bounds entry but leaves
-    `_user_ts[("generators", "p_max_pu", "Solar")]` orphaned. Next save
-    persists it; next load, `_reapply_user_ts_to_network` skips it
-    (because `col not in n.generators.index`) and the profile is silently
-    lost. Move every matching key to the new name so the profile follows
-    the rename.
-
-    Returns the number of entries re-keyed. No-op when no entries match.
-    """
-    if old_name == new_name:
-        return 0
-    with _user_ts_lock:
-        keys_to_move = [
-            (comp, attr, col) for (comp, attr, col) in _user_ts
-            if comp == component_attr and col == old_name
-        ]
-        for key in keys_to_move:
-            comp, attr, _ = key
-            _user_ts[(comp, attr, new_name)] = _user_ts.pop(key)
-    return len(keys_to_move)
-
-
-def _user_ts_delete_asset(component_attr: str, name: str) -> int:
-    """
-    Drop `_user_ts` entries for a deleted component so they don't
-    accumulate forever in saved projects (each save would serialise the
-    orphan; each load would silently drop it during reapply because the
-    component is gone). Also prevents a future component that happens to
-    reuse the same name from inheriting the deleted asset's profile.
-
-    Returns the number of entries dropped.
-    """
-    with _user_ts_lock:
-        keys_to_drop = [
-            (comp, attr, col) for (comp, attr, col) in _user_ts
-            if comp == component_attr and col == name
-        ]
-        for key in keys_to_drop:
-            del _user_ts[key]
-    return len(keys_to_drop)
-
-
-def _user_ts_extent() -> tuple[str | None, str | None]:
-    """
-    Start / end datetime of the *longest* flat (DatetimeIndex) series in
-    _user_ts — the main uploaded profile. Returns (None, None) when nothing
-    flat has been uploaded.
-
-    Uses the longest series rather than the union min/max across all series
-    on purpose: _user_ts also holds short series backed up from the network's
-    own _t tables (see _backup_network_ts_to_user_ts), and a stale backed-up
-    range (e.g. a template's 2024 default) would otherwise drag the reported
-    start backwards even though the user's actual upload starts elsewhere.
-    The longest series is exactly the reference _ensure_snapshots_cover_user_ts
-    keys on to realign n.snapshots, so this keeps the Model Horizon default
-    consistent with the snapshot index the upload actually produced.
-
-    Per-period (MultiIndex) series are skipped — their range is period-scoped
-    and doesn't describe a single operational window.
-    """
-    with _user_ts_lock:
-        flat = [
-            s for s in _user_ts.values()
-            if not isinstance(s.index, pd.MultiIndex) and len(s.index) > 0
-        ]
-    if not flat:
-        return None, None
-    ref = max(flat, key=lambda s: len(s.index))
-    try:
-        lo, hi = ref.index.min(), ref.index.max()
-    except Exception:  # noqa: BLE001 — defensive over arbitrary uploads
-        return None, None
-    return (
-        lo.isoformat() if hasattr(lo, "isoformat") else str(lo),
-        hi.isoformat() if hasattr(hi, "isoformat") else str(hi),
-    )
-
-
-def _annual_hourly_reference():
-    """
-    Validate that an uploaded profile is sample-able into representative
-    weeks. Returns ``(idx, None)`` when the longest flat _user_ts series is a
-    deduped DatetimeIndex spanning all 12 calendar months of ONE year at
-    hourly resolution; otherwise ``(None, reason)`` where ``reason`` explains
-    the failed precondition.
-
-    Drives both the ``can_sample_weeks`` flag on GET /network/snapshots and
-    the precondition check inside POST /network/snapshots/sample_weeks.
-    """
-    with _user_ts_lock:
-        flat = [
-            s for s in _user_ts.values()
-            if not isinstance(s.index, pd.MultiIndex) and len(s.index) > 1
-        ]
-    if not flat:
-        return None, (
-            "No uploaded time series found. Upload a full-year hourly profile "
-            "(generation or load) first."
-        )
-    ref = max(flat, key=lambda s: len(s.index))
-    idx = pd.DatetimeIndex(sorted(set(ref.index)))
-    years = sorted(idx.year.unique().tolist())
-    months = sorted(int(m) for m in idx.month.unique())
-    if len(years) != 1 or months != list(range(1, 13)):
-        return None, (
-            "Representative-week sampling needs a profile spanning all 12 "
-            f"months of a single calendar year — uploaded data covers "
-            f"year(s) {years}, month(s) {months}."
-        )
-    try:
-        med = idx.to_series().diff().median()
-    except Exception:  # noqa: BLE001 — defensive over arbitrary uploads
-        med = None
-    if med != pd.Timedelta(hours=1):
-        return None, (
-            f"Representative-week sampling needs an hourly profile "
-            f"({len(idx)} timesteps found; expected ~8760)."
-        )
-    return idx, None
-
-
-def _serialize_user_ts() -> dict:
-    """
-    Return _user_ts as a JSON-serialisable nested dict.
-
-    Format: ``{component: {attribute: {column: {index: [...], values: [...]}}}}``
-    The index entries are:
-      • DatetimeIndex series → list of ISO strings: ``["2025-01-01T00:00:00", …]``
-      • MultiIndex(period, timestep) series → list of [int, ISO] pairs:
-        ``[[2025, "2025-01-01T00:00:00"], …]``
-    Restore auto-detects the shape from the first entry.
-
-    Nested top-level structure avoids separator-collision bugs with component
-    names that contain "|" or "/".
-    """
-    result: dict = {}
-    # Hold _user_ts_lock for the iteration so concurrent uploads can't trip
-    # `dictionary changed size during iteration`. Snapshot keys first so a
-    # writer waiting on the lock isn't blocked for the JSON-serialisation
-    # cost (just the dict-snapshot cost).
-    with _user_ts_lock:
-        items = list(_user_ts.items())
-    for (comp, attr, col), series in items:
-        if isinstance(series.index, pd.MultiIndex):
-            idx = [
-                [int(period), ts.isoformat() if hasattr(ts, "isoformat") else str(ts)]
-                for period, ts in series.index
-            ]
-        else:
-            idx = [ts.isoformat() if hasattr(ts, "isoformat") else str(ts) for ts in series.index]
-        vals = [
-            None if isinstance(v, float) and not math.isfinite(v) else v
-            for v in series.tolist()
-        ]
-        result.setdefault(comp, {}).setdefault(attr, {})[col] = {"index": idx, "values": vals}
-    return result
-
-
-def _restore_user_ts(data: dict) -> None:
-    """
-    Restore _user_ts from the format produced by _serialize_user_ts.
-    Supports both the current nested format and the legacy pipe-separated format
-    for backwards compatibility with old user_ts.json files.
-    All-NaN series are silently skipped — they represent corrupt/empty data.
-    """
-    import logging as _logging
-    _log = _logging.getLogger(__name__)
-    new_store: dict[tuple[str, str, str], pd.Series] = {}
-
-    # Detect format: any top-level key containing "|" → legacy pipe format.
-    is_legacy = any("|" in k for k in data.keys())
-
-    def _build_series(raw_idx, values, name: str) -> pd.Series:
-        """Reconstruct a Series, detecting MultiIndex vs flat by index shape."""
-        if raw_idx and isinstance(raw_idx[0], (list, tuple)) and len(raw_idx[0]) == 2:
-            periods = [int(p) for p, _ in raw_idx]
-            timesteps = pd.to_datetime([ts for _, ts in raw_idx])
-            mi = pd.MultiIndex.from_arrays([periods, timesteps], names=["period", "timestep"])
-            return pd.Series(values, index=mi, dtype=float, name=name)
-        idx = pd.to_datetime(raw_idx)
-        return pd.Series(values, index=idx, dtype=float, name=name)
-
-    if is_legacy:
-        for key, payload in data.items():
-            parts = key.split("|", 2)
-            if len(parts) != 3:
-                continue
-            comp, attr, col = parts
-            try:
-                series = _build_series(payload["index"], payload["values"], col)
-                if series.isna().all():
-                    continue  # skip corrupt all-NaN series
-                new_store[(comp, attr, col)] = series
-            except Exception as exc:
-                _log.warning("_restore_user_ts (legacy): skipping '%s': %s", key, exc)
-    else:
-        for comp, attrs in data.items():
-            if not isinstance(attrs, dict):
-                continue
-            for attr, cols in attrs.items():
-                if not isinstance(cols, dict):
-                    continue
-                for col, payload in cols.items():
-                    if not isinstance(payload, dict):
-                        continue
-                    try:
-                        series = _build_series(payload["index"], payload["values"], col)
-                        if series.isna().all():
-                            continue  # skip corrupt all-NaN series
-                        new_store[(comp, attr, col)] = series
-                    except Exception as exc:
-                        _log.warning(
-                            "_restore_user_ts: skipping %s/%s/%s: %s", comp, attr, col, exc
-                        )
-
-    # Replace the store atomically under the lock — readers in
-    # _serialize_user_ts / _user_ts.items() never see a half-populated state.
-    with _user_ts_lock:
-        _user_ts.clear()
-        _user_ts.update(new_store)
-
-
-# Components whose `_t` tables we walk for time-series backup. Every non-empty
-# attribute on every component is captured — not just the historical 3 slots —
-# so that q_set, p_set, p_min_pu, state_of_charge, marginal_cost, etc. all
-# round-trip through save/load.
-# Components whose _t tables can hold USER-uploaded profiles (loads, capacity
-# factors, etc.). Used by _backup_network_ts_to_user_ts to decide what to
-# preserve across a set_snapshots(). Deliberately omits Bus and GlobalConstraint:
-# their _t frames (buses_t.marginal_price, global_constraints_t.mu, …) are
-# solver OUTPUTS, not user inputs, so they must not be ingested into _user_ts.
-# NOTE: _flatten_snapshot_state must NOT use this list — it has to walk EVERY
-# component (n.all_components) since set_snapshots reindexes all of them.
-_TS_COMPONENTS: list[str] = [
-    "generators", "loads", "storage_units", "stores",
-    "lines", "links", "transformers", "shunt_impedances",
-]
-
-
-def _backup_network_ts_to_user_ts(n=None) -> None:
-    """
-    Copy time series from the network's _t tables into _user_ts.
-
-    Walks every non-empty (component, attribute) pair. Only copies a column when:
-      - it is not already in _user_ts, OR
-      - the existing _user_ts entry is all-NaN (corrupt from a previous bad save).
-    All-NaN columns from the network are never ingested — they represent
-    reindex artifacts, not real user data.
-    Call this BEFORE n.set_snapshots() or n.export_to_netcdf() so that profiles
-    from imported networks are captured without overwriting good user uploads.
-
-    INPUT-attribute filter: PyPSA's component defaults flag each attribute as
-    Input (user-supplied profile) or Output (solver result). We only ingest
-    Inputs — capturing Outputs like ``generators_t.p`` / ``lines_t.p0`` /
-    ``storage_units_t.state_of_charge`` causes the next call to
-    ``_reapply_user_ts_to_network`` (triggered by every autosave) to write
-    captured dispatch back to the live network, overwriting fresh solve
-    results with stale snapshots and producing orphan columns after a
-    topology mutation. Falls back to capturing every attribute if defaults
-    aren't readable, preserving legacy behaviour for exotic component classes.
-    """
-    if n is None:
-        n = PyPSAService.get_network()
-    for comp in _TS_COMPONENTS:
-        ts_store = getattr(n, f"{comp}_t", None)
-        if ts_store is None:
-            continue
-        input_attrs: set[str] | None = None
-        try:
-            comp_defaults = getattr(n.components, comp).defaults
-            mask = comp_defaults["status"].astype(str).str.startswith("Input", na=False)
-            input_attrs = set(comp_defaults.index[mask])
-        except Exception:
-            input_attrs = None
-        try:
-            attrs = list(ts_store.keys()) if hasattr(ts_store, "keys") else []
-        except Exception:
-            attrs = []
-        for attr in attrs:
-            if input_attrs is not None and attr not in input_attrs:
-                continue
-            # Skip marginal_cost: the LP-build path (solver_service ~3736)
-            # writes per-snapshot CO2 surcharges into n.<component>_t.marginal_cost
-            # when co2_price_per_period is configured. Without this skip, the
-            # next autosave ingests those solver-written columns into _user_ts,
-            # they appear as "uploaded profiles" in the Time Series Manager,
-            # and DELETE /api/network/timeseries is futile — the next solve
-            # rewrites the columns and the autosave-after re-ingests them.
-            # Legitimate user uploads bypass this path (the upload endpoint
-            # writes _user_ts directly) and persist via user_ts.json on save.
-            if attr == "marginal_cost":
-                continue
-            df = ts_store.get(attr) if hasattr(ts_store, "get") else getattr(ts_store, attr, None)
-            if df is None or not hasattr(df, "empty") or df.empty:
-                continue
-            for col in df.columns:
-                series = df[col]
-                if series.isna().all():
-                    continue
-                key = (comp, attr, col)
-                # Atomic read-and-write under _user_ts_lock — this function
-                # is reachable from save_project's autosave path (projects.py
-                # ~line 677) BEFORE that path takes the PyPSA lock, so a
-                # foreground upload route in another thread can race the
-                # iteration here without the lock. Holding _user_ts_lock
-                # for the per-key get-or-insert keeps `_serialize_user_ts`'s
-                # snapshot-then-iterate path safe.
-                with _user_ts_lock:
-                    existing = _user_ts.get(key)
-                    if existing is None or existing.isna().all():
-                        _user_ts[key] = series.copy()
-
-
-def _rebase_flat_user_ts(new_idx: pd.DatetimeIndex) -> int:
-    """
-    Positionally re-base every flat _user_ts series of the SAME LENGTH as
-    `new_idx` onto `new_idx`. Returns the count re-based.
-
-    Prevents silent data loss when _user_ts holds profiles from different
-    calendar years. Scenario: a project is loaded with 2024 profiles (so
-    _user_ts carries a 2024 series for every profiled column), then the user
-    uploads a 2026 profile for ONE column. `_ensure_snapshots_cover_user_ts`
-    then realigns `n.snapshots` to 2026 — and without this, every still-2024
-    column reindexes to all-NaN inside `_reapply_user_ts_to_network` and is
-    silently skipped, leaving those loads at 0 demand and those renewables at
-    a flat `p_max_pu = 1.0`. The result is a badly corrupted solve (massive
-    curtailment + lost load) with no error surfaced.
-
-    Re-basing by POSITION keeps every same-resolution profile on one common
-    operational range — a series' value at hour i maps to hour i of the new
-    index. Series whose length differs from `new_idx` (a genuine 24 h
-    representative day, leap- vs non-leap-year data) are left untouched: a
-    positional re-base there would shift the calendar and corrupt the data.
-    """
-    n_target = len(new_idx)
-    rebased = 0
-    with _user_ts_lock:
-        for key, series in list(_user_ts.items()):
-            if isinstance(series.index, pd.MultiIndex):
-                continue
-            if len(series.index) != n_target or series.index.equals(new_idx):
-                continue
-            _user_ts[key] = pd.Series(
-                series.values, index=new_idx, name=series.name,
-            )
-            rebased += 1
-    return rebased
-
-
-def _ensure_snapshots_cover_user_ts(n=None) -> bool:
-    """
-    Align n.snapshots with the _user_ts profiles so an upload actually
-    reaches the optimiser. Returns True when snapshots were updated.
-
-    Two triggers — the longest stored series is adopted as the operational
-    range when EITHER:
-
-      • it is **longer** than the network currently models (growth — the
-        original behaviour), OR
-      • it has **zero date overlap** with the current snapshots — i.e. the
-        upload is for a completely different time window (e.g. a May profile
-        on a January network). This is the important case:
-        ``_reapply_user_ts_to_network`` skips every column whose aligned
-        series would be all-NaN, so without realigning here the upload is
-        stored in ``_user_ts`` (and shown in the GUI) but NEVER reaches
-        ``n.loads_t.p_set`` etc. — the model then optimises with no profile.
-
-    Two paths depending on the current snapshot shape:
-
-      • Flat ``DatetimeIndex`` → ``set_snapshots`` swaps to the uploaded range.
-      • ``MultiIndex(period, timestep)`` → rebuild the MultiIndex with the new
-        per-period range replicated under every existing period (canonical
-        "Same year per period"). Always MultiIndex → MultiIndex here, never
-        to flat, so the pandas ``cannot include dtype 'M' in a buffer``
-        reindex bug doesn't fire.
-
-      • Per-period uploads (series whose index is itself MultiIndex) are
-        filtered out before scanning — ``sorted(set(MultiIndex))`` yields
-        tuples and would explode ``pd.DatetimeIndex(...)``. They're already
-        period-scoped and don't drive the range decision.
-
-    Used after bundle load / per-component profile upload. Caller is
-    responsible for calling _reapply_user_ts_to_network afterwards to
-    populate the freshly sized _t tables.
-    """
-    if n is None:
-        n = PyPSAService.get_network()
-    if not _user_ts:
-        return False
-    flat_series = [s for s in _user_ts.values() if not isinstance(s.index, pd.MultiIndex)]
-    if not flat_series:
-        return False
-    longest = max(flat_series, key=lambda s: len(s.index))
-    # Dedup before comparing/applying so a series with duplicate timestamps
-    # can't accidentally shrink n.snapshots below its current length.
-    new_idx = pd.DatetimeIndex(sorted(set(longest.index)))
-
-    if isinstance(n.snapshots, pd.MultiIndex):
-        periods = sorted(n.snapshots.get_level_values(0).unique().tolist())
-        if not periods:
-            return False
-        per_period_now = len(n.snapshots) // len(periods)
-        # Per-period timestep range (deduped across periods) — used for the
-        # zero-overlap check below.
-        per_period_idx = pd.DatetimeIndex(
-            sorted(set(n.snapshots.get_level_values(1)))
-        )
-        no_overlap = len(per_period_idx.intersection(new_idx)) == 0
-        if len(new_idx) <= per_period_now and not no_overlap:
-            return False
-        # Grow / realign the per-period operational range to the uploaded
-        # series' extent, keeping the same periods. _t tables are MultiIndex →
-        # MultiIndex reindex, which PyPSA handles cleanly.
-        _backup_network_ts_to_user_ts(n)
-        # Re-base same-length _user_ts series onto the new timestep range so a
-        # mixed-year _user_ts (old project profiles + a fresh upload) doesn't
-        # leave the non-uploaded columns stranded in the old year (→ all-NaN
-        # → silently dropped by _reapply). See _rebase_flat_user_ts.
-        _rebase_flat_user_ts(new_idx)
-        mi = _build_period_multiindex(periods, [new_idx] * len(periods))
-        n.set_snapshots(mi)
-        return True
-
-    # Flat → flat.
-    cur = n.snapshots
-    grew = len(new_idx) > len(cur)
-    # Zero overlap → the upload is for a different operational window than the
-    # network's current snapshots; adopt the uploaded range so the data the
-    # user gave actually drives the optimisation (see docstring).
-    realign = len(cur.intersection(new_idx)) == 0
-    if not grew and not realign:
-        return False
-    # Preserve network-side _t tables (e.g. from a freshly imported netcdf)
-    # into _user_ts before set_snapshots reindexes them — otherwise rows that
-    # fall outside the new index would be silently dropped. Backup is a no-op
-    # for columns already present in _user_ts.
-    _backup_network_ts_to_user_ts(n)
-    # Re-base same-length _user_ts series onto new_idx so a mixed-year _user_ts
-    # (old project profiles + a fresh upload in a different year) doesn't leave
-    # the non-uploaded columns stranded in the old year — which would reindex
-    # to all-NaN and be silently dropped by _reapply. See _rebase_flat_user_ts.
-    _rebase_flat_user_ts(new_idx)
-    n.set_snapshots(new_idx)
-    return True
-
-
-def _reapply_user_ts_to_network(n=None) -> None:
-    """
-    Re-apply _user_ts profiles to the network's _t tables, aligned to the
-    current snapshot index.  Call this after n.set_snapshots() or after a
-    project load so that the network uses the correct time series for simulation.
-
-    If a stored series has zero overlap with the current snapshots (e.g. the
-    user uploaded 2024 hourly data but the network still uses 2013 daily
-    snapshots), the column is skipped rather than overwriting the network table
-    with all-NaN.  Update the network's snapshots first, then call this again.
-
-    Implementation note: aligned series are grouped by (component, attribute)
-    and written back in a single concat per group. The previous per-column
-    `existing.copy(); merged[col] = aligned; ts_store[attr] = merged` loop was
-    O(R·N²) per group (each iteration re-copied the full DataFrame), which
-    pushed bundle imports past axios' 30 s timeout for year-of-hourly-data
-    projects. The grouped path is O(R·N).
-    """
-    import logging as _logging
-    from collections import defaultdict
-
-    import numpy as _np
-    _log = _logging.getLogger(__name__)
-    if n is None:
-        n = PyPSAService.get_network()
-
-    # Three cases for aligning a stored _user_ts series with n.snapshots:
-    #   1) series.index is MultiIndex (per-period upload) AND n.snapshots is
-    #      MultiIndex → direct reindex (PyPSA matches tuples).
-    #   2) series.index is MultiIndex AND n.snapshots is flat → skip; the
-    #      stored data is scoped to specific periods that no longer exist.
-    #   3) series.index is DatetimeIndex AND n.snapshots is MultiIndex →
-    #      broadcast via level-1 lookup (canonical "same operational year").
-    #      reindex() rejects duplicate-target labels (level-1 has duplicates
-    #      across periods), so we lookup positionally via get_indexer.
-    #   4) series.index is DatetimeIndex AND n.snapshots is flat → plain
-    #      reindex (the original code path).
-    is_multi = isinstance(n.snapshots, pd.MultiIndex)
-    target_lookup = n.snapshots.get_level_values(1) if is_multi else None
-
-    # Defensive pre-pass: align any stale `_t` DataFrame whose index doesn't
-    # match the current `n.snapshots`. Without this, a frame written under
-    # a previous snapshot regime (e.g. flat DatetimeIndex from a single-period
-    # solve) silently leaks into the next solve via PyPSA's `_t` access —
-    # the LP either reindexes to all-NaN (broken) or the table grows in
-    # subsequent concats (rows from BOTH old and new indexes coexist,
-    # 35040-row mixed-index frames observed in live state).
-    #
-    # Strategy mirrors the per-column reapply logic below:
-    #   • flat → multi: broadcast each column by level-1 timestep match
-    #   • multi → flat: drop entirely (period scope no longer exists; if
-    #     the data is preserved in `_user_ts`, the main loop re-injects)
-    #   • multi → multi or flat → flat with different bounds: reindex
-    #     (fills missing snapshots with NaN; PyPSA's default-fallback
-    #     handles those at solve time)
-    for comp in ("generators", "loads", "storage_units", "stores", "links",
-                 "lines", "transformers"):
-        ts_store = getattr(n, f"{comp}_t", None)
-        if ts_store is None:
-            continue
-        for attr in list(ts_store.keys()):
-            ts_df = ts_store[attr]
-            if ts_df is None or ts_df.empty:
-                continue
-            if ts_df.index.equals(n.snapshots):
-                continue  # already aligned, no-op
-            df_is_multi = isinstance(ts_df.index, pd.MultiIndex)
-            if df_is_multi and is_multi:
-                ts_store[attr] = ts_df.reindex(n.snapshots)
-            elif df_is_multi and not is_multi:
-                ts_store[attr] = pd.DataFrame(index=n.snapshots)
-            elif is_multi:
-                # Flat existing → broadcast to MultiIndex by level-1 lookup.
-                positions = ts_df.index.get_indexer(target_lookup)
-                rebroadcast = pd.DataFrame(index=n.snapshots)
-                mask = positions >= 0
-                for c in ts_df.columns:
-                    out = _np.full(len(target_lookup), _np.nan, dtype=float)
-                    out[mask] = ts_df[c].values[positions[mask]]
-                    rebroadcast[c] = out
-                ts_store[attr] = rebroadcast
-            else:
-                ts_store[attr] = ts_df.reindex(n.snapshots)
-
-    # Input-attribute filter, mirroring the gate in
-    # _backup_network_ts_to_user_ts. Older user_ts.json files (saved before
-    # the backup-side filter landed) may carry OUTPUT keys like
-    # ("generators", "p", "Solar2"); writing those back to the network would
-    # clobber freshly-solved dispatch with the captured snapshot. Cache the
-    # per-component Input set so the .defaults lookup is paid once per call.
-    input_attrs_by_comp: dict[str, set[str] | None] = {}
-
-    def _is_input_attr(comp_name: str, attr_name: str) -> bool:
-        if comp_name not in input_attrs_by_comp:
-            try:
-                comp_defaults = getattr(n.components, comp_name).defaults
-                mask = comp_defaults["status"].astype(str).str.startswith("Input", na=False)
-                input_attrs_by_comp[comp_name] = set(comp_defaults.index[mask])
-            except Exception:
-                input_attrs_by_comp[comp_name] = None
-        cached = input_attrs_by_comp[comp_name]
-        return cached is None or attr_name in cached
-
-    grouped: dict[tuple[str, str], dict[str, pd.Series]] = defaultdict(dict)
-    for (comp, attr, col), series in _user_ts.items():
-        ts_store = getattr(n, f"{comp}_t", None)
-        if ts_store is None:
-            continue
-        if not _is_input_attr(comp, attr):
-            _log.debug("_reapply: skipping %s/%s/%s — output attribute", comp, attr, col)
-            continue
-        component_df = getattr(n, comp, None)
-        if component_df is None or col not in component_df.index:
-            _log.debug("_reapply: skipping %s/%s/%s — component not in network", comp, attr, col)
-            continue
-        series_is_multi = isinstance(series.index, pd.MultiIndex)
-        if series_is_multi and is_multi:
-            # Case 1 — both MultiIndex: direct tuple reindex.
-            aligned = series.reindex(n.snapshots)
-        elif series_is_multi and not is_multi:
-            # Case 2 — stored per-period data on flat snapshots: skip rather
-            # than guess which period to project. User must rebuild snapshots
-            # to MultiIndex (or re-upload as DatetimeIndex) to use this data.
-            _log.debug(
-                "_reapply: skipping per-period %s/%s/%s — network is flat",
-                comp, attr, col,
-            )
-            continue
-        elif is_multi:
-            # Case 3 — DatetimeIndex series + MultiIndex snapshots: broadcast.
-            positions = series.index.get_indexer(target_lookup)
-            out = _np.full(len(target_lookup), _np.nan, dtype=float)
-            mask = positions >= 0
-            out[mask] = series.values[positions[mask]]
-            aligned = pd.Series(out, index=n.snapshots)
-        else:
-            # Case 4 — plain reindex.
-            aligned = series.reindex(n.snapshots)
-        if aligned.isna().all() and not series.isna().all():
-            _log.warning(
-                "_reapply: %s/%s/%s has no overlap with current snapshots "
-                "(%s … %s) — skipping to avoid writing all-NaN. "
-                "Set network snapshots to match the uploaded profile first.",
-                comp, attr, col,
-                n.snapshots[0] if len(n.snapshots) else "?",
-                n.snapshots[-1] if len(n.snapshots) else "?",
-            )
-            continue
-        grouped[(comp, attr)][col] = aligned
-
-    for (comp, attr), col_dict in grouped.items():
-        ts_store = getattr(n, f"{comp}_t", None)
-        if ts_store is None:
-            continue
-        new_block = pd.DataFrame(col_dict, index=n.snapshots)
-        existing = getattr(ts_store, attr, None)
-        if existing is None or (hasattr(existing, "empty") and existing.empty):
-            ts_store[attr] = new_block
-        else:
-            # Drop overlapping columns from `existing` first, then concat once.
-            # Single O(R·(N+M)) pass instead of N copies of an N-column frame.
-            overlap = [c for c in col_dict.keys() if c in existing.columns]
-            base = existing.drop(columns=overlap) if overlap else existing
-            # Re-align `base` to `n.snapshots` BEFORE the concat. Without this
-            # guard, a flat-DatetimeIndex `base` from a previous single-period
-            # solve unions with the MultiIndex `new_block` — producing a
-            # mixed-index DataFrame whose flat rows don't match
-            # `n.snapshots`, so PyPSA's LP silently falls back to the scalar
-            # default for every column the base owns (e.g. `Solar2` p_max_pu).
-            # Symptom: renewable dispatch flat at p_nom while vintages still
-            # honour the profile, because vintage columns were written with
-            # the correct MultiIndex.
-            #
-            # Case-by-case re-alignment mirrors the `_user_ts` path above:
-            #   • flat base + multi snapshots → broadcast by level-1 timestep
-            #   • multi base + flat snapshots → drop (period scope no longer
-            #     exists)
-            #   • same-shape index → no-op (reindex is identity)
-            if not base.empty and not base.index.equals(n.snapshots):
-                base_is_multi = isinstance(base.index, pd.MultiIndex)
-                if base_is_multi and is_multi:
-                    base = base.reindex(n.snapshots)
-                elif base_is_multi and not is_multi:
-                    # Multi-period base, flat target — period scope is gone,
-                    # drop the entire base; user-uploaded data lives in
-                    # `_user_ts` and will be re-broadcast by the loop above.
-                    base = pd.DataFrame(index=n.snapshots)
-                elif is_multi:
-                    # Flat base, multi target — broadcast by level-1 timestep
-                    # so each period gets the same operational profile.
-                    base_target_lookup = n.snapshots.get_level_values(1)
-                    positions = base.index.get_indexer(base_target_lookup)
-                    rebroadcast = pd.DataFrame(index=n.snapshots)
-                    for c in base.columns:
-                        out = _np.full(len(base_target_lookup), _np.nan, dtype=float)
-                        mask = positions >= 0
-                        out[mask] = base[c].values[positions[mask]]
-                        rebroadcast[c] = out
-                    base = rebroadcast
-                else:
-                    base = base.reindex(n.snapshots)
-            ts_store[attr] = pd.concat([base, new_block], axis=1)
-
-
-def _capture_snapshot_weights_per_timestep(n):
-    """
-    Snapshot ``n.snapshot_weightings`` so it survives a subsequent
-    ``n.set_snapshots(mi)`` reset.
-
-    PyPSA's ``set_snapshots`` reindexes ``_snapshots_data`` with
-    ``fill_value=default_snapshot_weightings``, so custom weights (a
-    representative-week factor of 52.14, half-hour resolution 0.5, …) are
-    silently lost across a reshape and the LP's ``n.nyears`` collapses.
-
-    Returns:
-      • MultiIndex network → ``{period: frame}``, each frame indexed by that
-        period's own timesteps. Capturing only period 0 and broadcasting it was
-        correct only while a now-fixed bug forced every period onto period 0's
-        calendar; with distinct calendars survivable, a broadcast wipes every
-        period whose dates differ.
-      • Flat network → a single frame indexed by timestep.
-      • ``None`` when every weight is the PyPSA default 1.0 — nothing to
-        preserve, and skipping saves a needless write.
-    """
-    sw = n.snapshot_weightings.copy()
-    if sw.empty:
-        return None
-    if (sw == 1.0).all().all():
-        return None
-    if isinstance(sw.index, pd.MultiIndex):
-        captured: dict[int, pd.DataFrame] = {}
-        level0 = sw.index.get_level_values(0)
-        for p in level0.unique():
-            block = sw[level0 == p].copy()
-            # Drop the period level so the frame is keyed by timestep alone —
-            # the reapply path reindexes it against the NEW index's timesteps.
-            block.index = pd.DatetimeIndex(block.index.get_level_values(1))
-            block.index.name = "snapshot"
-            captured[int(p)] = block
-        return captured
-    sw.index.name = "snapshot"
-    return sw
-
-
-def _reapply_snapshot_weights(n, captured) -> None:
-    """
-    Write captured weights back onto ``n.snapshot_weightings`` after
-    ``set_snapshots`` has rebuilt the index. Must run AFTER the reshape. Holds
-    no lock — caller's responsibility.
-
-    Per period, in order:
-      1. that period survived the reshape → reindex ITS OWN captured frame
-      2. genuinely new period → reindex the FIRST captured period's frame as a
-         template, matching how ``set_investment_periods`` templates a new
-         period's operational range from the first existing one
-      3. anything still unmatched → 1.0
-
-    Accepts either capture shape: ``{period: frame}`` from a MultiIndex source
-    or a single frame from a flat one.
-    """
-    if captured is None:
-        return
-    if isinstance(captured, dict) and not captured:
-        return
-    idx = n.snapshots
-    if isinstance(idx, pd.MultiIndex):
-        if isinstance(captured, dict):
-            template = captured[sorted(captured)[0]]
-        else:
-            # Flat source promoted to MultiIndex: one frame for every period.
-            template = captured
-            captured = {}
-        chunks = []
-        for p in idx.get_level_values(0).unique():
-            mask = idx.get_level_values(0) == p
-            ts_slice = idx[mask].get_level_values(1)
-            source = captured.get(int(p), template)
-            aligned = source.reindex(ts_slice).fillna(1.0)
-            aligned.index = idx[mask]
-            chunks.append(aligned)
-        new_sw = pd.concat(chunks)
-    else:
-        # MultiIndex source demoted to flat: use the first captured period.
-        flat_source = captured[sorted(captured)[0]] if isinstance(captured, dict) else captured
-        new_sw = flat_source.reindex(idx).fillna(1.0)
-        new_sw.index = idx
-    # The setter validates df.index.equals(n.snapshots); we built new_sw against
-    # n.snapshots so it passes. Assign per column in case a future PyPSA adds a
-    # weight column we did not capture.
-    for col in new_sw.columns:
-        if col in n.snapshot_weightings.columns:
-            try:
-                n.snapshot_weightings[col] = new_sw[col].values
-            except Exception:
-                # Column-level failure must not break the whole solve; the 1.0
-                # default is an acceptable fallback for that column.
-                pass
-
-
-def _flatten_snapshot_state(n=None) -> None:
-    """
-    Collapse any MultiIndex(period, timestep) snapshot structure on the
-    network down to a flat DatetimeIndex, in place — so a subsequent
-    ``n.set_snapshots(flat)`` is a safe flat→flat operation.
-
-    A direct ``set_snapshots(flat)`` on a MultiIndexed network trips pandas'
-    "cannot include dtype 'M' in a buffer" bug (``MultiIndex._wrap_reindex_result``
-    → ``tuples_to_object_array``) for every non-empty MultiIndexed frame PyPSA
-    reindexes, and a length mismatch for the empty ones. To pre-empt both we
-    walk EXACTLY the frames ``set_snapshots`` touches — every component's
-    ``dynamic`` dict plus ``_snapshots_data`` — and demote each MultiIndexed one
-    to its first period's timesteps. (The earlier version walked a
-    hand-maintained component list that omitted Bus / GlobalConstraint, so their
-    solved ``_t`` frames survived as MultiIndex and still tripped the bug.)
-
-    No-op when everything is already flat. Rows from non-first periods are
-    discarded — the caller should ``_backup_network_ts_to_user_ts(n)`` before
-    and ``_reapply_user_ts_to_network(n)`` after so uploaded profiles survive.
-    Must be called under ``PyPSAService.get_lock()``.
-    """
-    if n is None:
-        n = PyPSAService.get_network()
-    snaps_multi = isinstance(n.snapshots, pd.MultiIndex)
-
-    if snaps_multi:
-        first_p = n.snapshots.get_level_values(0).unique()[0]
-        base_idx = pd.DatetimeIndex(
-            n.snapshots[n.snapshots.get_level_values(0) == first_p].get_level_values(1)
-        )
-    else:
-        base_idx = pd.DatetimeIndex(n.snapshots)
-    base_idx.name = "snapshot"
-
-    # Collapse one MultiIndexed frame to flat by keeping its FIRST period's rows
-    # and relabelling the index with that period's own timestep values. Safe for
-    # empty frames too — a boolean-mask slice works on a 0-column frame — and the
-    # result is always length-consistent, so set_snapshots() is then flat→flat.
-    def _demote(df):
-        lvl0 = df.index.get_level_values(0)
-        mask = lvl0 == lvl0.unique()[0]
-        out = df[mask].copy()
-        out.index = pd.DatetimeIndex(df.index[mask].get_level_values(1))
-        out.index.name = "snapshot"
-        return out
-
-    # Walk every component's dynamic dict — the exact set ``set_snapshots``
-    # iterates (``n.c[component].dynamic`` for ``component in n.all_components``)
-    # — so nothing PyPSA will later reindex is left MultiIndexed.
-    for component in n.all_components:
-        try:
-            dynamic = n.c[component].dynamic
-        except (KeyError, AttributeError, TypeError):
-            continue
-        for k in list(dynamic.keys()):
-            df = dynamic[k]
-            if df is None or not isinstance(df.index, pd.MultiIndex):
-                continue
-            dynamic[k] = _demote(df)
-
-    if isinstance(n.snapshot_weightings.index, pd.MultiIndex):
-        # Direct write to the private backing — PyPSA's public setter validates
-        # df.index == self.snapshots, which is still MultiIndex at this point.
-        n._snapshots_data = _demote(n.snapshot_weightings)
-
-    if snaps_multi:
-        n.set_snapshots(base_idx)
-
-
-def _parse_upload(content: bytes, filename: str) -> pd.DataFrame:
-    """
-    Parse an uploaded Excel or CSV file, returning a DataFrame with a
-    timezone-naive DatetimeIndex.  Raises HTTPException on failure.
-    """
-    fname = (filename or "").lower()
-    try:
-        if fname.endswith(".xlsx") or fname.endswith(".xls"):
-            df = pd.read_excel(io.BytesIO(content), index_col=0)
-        else:
-            df = pd.read_csv(io.BytesIO(content), index_col=0, parse_dates=False)
-    except Exception as exc:
-        raise HTTPException(400, f"Could not parse file: {exc}") from exc
-
-    # Normalise index to timezone-naive datetime using a consistent parser.
-    # Using format="mixed" (pandas ≥ 2) gracefully handles both
-    # "2024-01-01 00:00" and "2024-01-01T00:00:00" strings.
-    try:
-        idx = pd.to_datetime(df.index, utc=False, format="mixed", dayfirst=False)
-    except TypeError:
-        # pandas < 2 doesn't have format="mixed"; fall back to inference
-        idx = pd.to_datetime(df.index, utc=False, infer_datetime_format=True)
-    df.index = idx.tz_localize(None) if idx.tz is not None else idx
-    df = df[df.index.notna()]          # drop rows that didn't parse
-    df.index.name = "timestamp"
-    return df
 
 # ── Attribute catalog ─────────────────────────────────────────────────────────
 
@@ -3278,300 +1832,15 @@ def get_attribute_catalog(component: str) -> dict:
 
 # ── Time Series ───────────────────────────────────────────────────────────────
 
-@router.get("/timeseries")
-def list_timeseries():
-    n = PyPSAService.get_network()
-    result = []
-    # buses and transformers are here for the grid's series-shadow check (spec
-    # D14): a `varying` attribute is only dead if a series actually exists for
-    # that specific asset, and the grid renders both those tabs. The deliberate
-    # side effect is that the Time-Series tab also lists bus and transformer
-    # series that genuinely exist, which is correct, not a regression.
-    for component in ["generators", "loads", "storage_units", "stores", "lines",
-                      "links", "buses", "transformers"]:
-        ts_store = getattr(n, f"{component}_t", None)
-        if ts_store is None:
-            continue
-        comp_class = _ATTR_TO_CLASS.get(component, component)
-        for attr in ts_store:
-            df = ts_store[attr]
-            if not df.empty:
-                # Filter transient column names (vintage clones'
-                # cloned-from-parent profiles, VOLL slack columns) so the
-                # Time-Series tab list doesn't show LP scaffolding mid-solve.
-                cols = _filter_transient_names(comp_class, df.columns.tolist())
-                if not cols:
-                    continue
-                result.append({
-                    "component": component,
-                    "attribute": attr,
-                    "column_count": len(cols),
-                    "columns": cols,
-                })
-    return result
 
 
-@router.get("/timeseries/{component}/{attribute}")
-def get_timeseries(component: str, attribute: str, columns: str | None = None):
-    """
-    Return a time-series DataFrame as JSON.
-
-    Optional ``columns`` query param: comma-separated list of column names to
-    return (e.g. ``?columns=Wind+BE,Solar+BE``). Prefer user-uploaded data
-    (from _user_ts) for any requested column that was uploaded by the user.
-    """
-    n = PyPSAService.get_network()
-    ts_store = getattr(n, f"{component}_t", None)
-    if ts_store is None:
-        raise HTTPException(404, f"Component '{component}' not found")
-
-    net_df = ts_store.get(attribute)
-    wanted = [c.strip() for c in columns.split(",")] if columns else None
-
-    if wanted:
-        # For each requested column: prefer user-uploaded Series, fall back to network data
-        series_list: list[pd.Series] = []
-        for col in wanted:
-            user_series = _user_ts.get((component, attribute, col))
-            if user_series is not None:
-                series_list.append(user_series.rename(col))
-            elif net_df is not None and not net_df.empty and col in net_df.columns:
-                series_list.append(net_df[col])
-        df = pd.concat(series_list, axis=1) if series_list else pd.DataFrame()
-    else:
-        # No column filter — build from all user-uploaded columns for this
-        # (component, attribute), then fall back to network data for the rest.
-        prefix = (component, attribute)
-        user_series_list = [
-            s.rename(k[2]) for k, s in _user_ts.items() if k[:2] == prefix
-        ]
-        if user_series_list:
-            df = pd.concat(user_series_list, axis=1)
-        elif net_df is not None and not net_df.empty:
-            df = net_df
-        else:
-            df = pd.DataFrame()
-
-    if df is None or df.empty:
-        return {"index": [], "columns": [], "data": []}
-
-    # Drop transient columns (vintage clones' cloned profiles, VOLL slack
-    # columns) so the Time-Series viewer doesn't render LP scaffolding
-    # mid-solve. Apply AFTER user-supplied `wanted` resolution so an
-    # explicit ?columns=foo@2026 request gets a clean empty payload
-    # rather than a confusing partial frame.
-    comp_class = _ATTR_TO_CLASS.get(component, component)
-    keep_cols = _filter_transient_names(comp_class, list(df.columns))
-    if len(keep_cols) != len(df.columns):
-        df = df[keep_cols]
-    if df.empty or len(df.columns) == 0:
-        return {"index": [], "columns": [], "data": []}
-
-    # Vectorised conversion. The previous nested Python loop with per-cell
-    # isinstance/math.isfinite calls took 30+ s for tables in the 8760 × 100
-    # range — long enough to block the event loop and time out the periodic
-    # /network/meta poll. NumPy + DatetimeIndex.strftime do the same work in
-    # well under a second.
-    # MultiIndex on multi-period: emit ISO timesteps + parallel periods array,
-    # same convention as `_ts_payload` and `/network/snapshots`. Without this,
-    # `str(s)` on the tuple yields garbage like "(2026, Timestamp('...'))".
-    periods: list | None = None
-    if isinstance(df.index, pd.MultiIndex):
-        try:
-            periods = [int(p) for p in df.index.get_level_values(0)]
-        except (TypeError, ValueError):
-            periods = [str(p) for p in df.index.get_level_values(0)]
-        timesteps = df.index.get_level_values(1)
-        if isinstance(timesteps, pd.DatetimeIndex):
-            idx = timesteps.strftime("%Y-%m-%dT%H:%M:%S").tolist()
-        else:
-            idx = [str(s) for s in timesteps]
-    elif isinstance(df.index, pd.DatetimeIndex):
-        idx = df.index.strftime("%Y-%m-%dT%H:%M:%S").tolist()
-    else:
-        idx = [str(s) for s in df.index]
-
-    arr = df.to_numpy(dtype=float, copy=False)
-    arr_obj = arr.astype(object)
-    arr_obj[~np.isfinite(arr)] = None
-    data = arr_obj.tolist()
-
-    payload = {"index": idx, "columns": df.columns.tolist(), "data": data}
-    if periods is not None:
-        payload["periods"] = periods
-    return payload
 
 
-@router.put("/timeseries/{component}/{attribute}")
-def set_timeseries(component: str, attribute: str, body: dict):
-    import pandas as pd
-    n = PyPSAService.get_network()
-    ts_store = getattr(n, f"{component}_t", None)
-    if ts_store is None:
-        raise HTTPException(404)
-    with PyPSAService.get_lock():
-        idx = pd.DatetimeIndex(body.get("index", []))
-        cols = body.get("columns", [])
-        data = body.get("data", [])
-        df = pd.DataFrame(data, index=idx, columns=cols)
-        ts_store[attribute] = df
-        # Persist edits in _user_ts so they survive project reload.
-        # Hold _user_ts_lock for the mutation — autosave's
-        # _serialize_user_ts iterates the dict concurrently and would
-        # raise RuntimeError("dictionary changed size during iteration")
-        # without serialization. Inner lock; outer is the PyPSA lock.
-        with _user_ts_lock:
-            for col in df.columns:
-                _user_ts[(component, attribute, col)] = df[col].copy()
-    cols_preview = ", ".join(list(df.columns)[:3]) + ("…" if len(df.columns) > 3 else "")
-    change_log_service.log(
-        "timeseries", component.capitalize(), cols_preview,
-        f"Edited {component}/{attribute} time series: "
-        f"{len(df.columns)} column(s), {len(df)} rows",
-    )
-    return {"rows": len(df), "columns": len(df.columns)}
 
 
-@router.post("/timeseries/upload")
-async def upload_timeseries(
-    component: str,
-    attribute: str,
-    file: UploadFile = File(...),
-    period: int | None = None,
-):
-    """
-    Upload a CSV of time-series data for one (component, attribute) pair.
-
-    Behaviour by network snapshot type:
-
-    - Flat DatetimeIndex snapshots → period is ignored; CSV's DatetimeIndex is
-      stored as-is (single-period workflow).
-    - MultiIndex (period, timestep) snapshots, period=None → CSV stored with
-      its DatetimeIndex. At apply time, the values are broadcast under every
-      period via level-1 lookup (canonical "same operational year per period").
-    - MultiIndex snapshots, period=<int> → CSV's DatetimeIndex is promoted to
-      a MultiIndex by prepending `period`. Stored in _user_ts with that
-      MultiIndex; subsequent uploads with a different `period` for the same
-      column stitch (replace that period's rows, keep the others). Required
-      for "different weather year per period" workflows.
-    """
-    import io
-
-    import numpy as _np
-    import pandas as pd
-    content = await read_capped(file)
-    df = pd.read_csv(io.BytesIO(content), index_col=0, parse_dates=True)
-    n = PyPSAService.get_network()
-    ts_store = getattr(n, f"{component}_t", None)
-    if ts_store is None:
-        raise HTTPException(404, f"Component '{component}' not found")
-
-    is_multi = isinstance(n.snapshots, pd.MultiIndex)
-    if period is not None:
-        if not is_multi:
-            raise HTTPException(
-                400, "?period=… requires MultiIndex snapshots. "
-                "Build them first via /snapshots/multi_period.",
-            )
-        try:
-            period_int = int(period)
-        except (TypeError, ValueError):
-            raise HTTPException(400, f"period must be an integer, got {period!r}")
-        if period_int not in n.investment_periods:
-            raise HTTPException(
-                400, f"period={period_int} is not in n.investment_periods "
-                f"({list(n.investment_periods)})",
-            )
-        # Promote the CSV's DatetimeIndex to MultiIndex(period, timestep).
-        new_mi = pd.MultiIndex.from_arrays(
-            [_np.full(len(df), period_int), df.index],
-            names=["period", "timestep"],
-        )
-        df.index = new_mi
-
-    with PyPSAService.get_lock():
-        with _user_ts_lock:
-            for col in df.columns:
-                new_s = df[col]
-                if period is not None:
-                    existing = _user_ts.get((component, attribute, col))
-                    if existing is not None and isinstance(existing.index, pd.MultiIndex):
-                        # Drop existing rows for this period, then concat.
-                        keep = existing[existing.index.get_level_values(0) != int(period)]
-                        merged = pd.concat([keep, new_s]).sort_index()
-                        _user_ts[(component, attribute, col)] = merged
-                    else:
-                        # First per-period upload for this column — replaces any
-                        # earlier broadcast (DatetimeIndex) entry.
-                        _user_ts[(component, attribute, col)] = new_s.copy()
-                else:
-                    _user_ts[(component, attribute, col)] = new_s.copy()
-        # Grow n.snapshots if the upload covers more rows than the current
-        # operational range. Matches the behaviour of the component-specific
-        # upload routes (/generators/upload_profile, /loads/upload_profile)
-        # so the user doesn't have to know which endpoint the GUI chose.
-        # MultiIndex networks grow per-period; flat networks grow directly.
-        # No-op (returns False) when the upload is per-period (`period=` set)
-        # because that path stores a MultiIndex series, which the helper
-        # already filters out.
-        _ensure_snapshots_cover_user_ts(n)
-        # Apply to the live network's _t table immediately (so the next GET
-        # /timeseries reflects the upload without requiring a snapshot rebuild).
-        # _reapply handles all three cases (DatetimeIndex+flat, DatetimeIndex+
-        # MultiIndex broadcast, MultiIndex+MultiIndex direct).
-        _reapply_user_ts_to_network(n)
-
-    cols_preview = ", ".join(list(df.columns)[:3]) + ("…" if len(df.columns) > 3 else "")
-    change_log_service.log(
-        "timeseries", component.capitalize(), file.filename or cols_preview,
-        f"Uploaded {component}/{attribute} time series '{file.filename}': "
-        f"{len(df.columns)} column(s), {len(df)} rows"
-        + (f", period={period}" if period is not None else ""),
-    )
-    return {
-        "rows": len(df),
-        "columns": len(df.columns),
-        "period": period,
-        "mode": "per_period" if period is not None else ("broadcast" if is_multi else "flat"),
-    }
 
 
 # ── Load profile helpers ───────────────────────────────────────────────────────
-
-# Carrier-keyword sets used to classify loads into energy-vector sections.
-_ELEC_CARRIERS = {
-    "ac", "dc", "electricity", "elec", "low voltage", "medium voltage",
-    "high voltage", "lv", "mv", "hv", "ehv",
-}
-_H2_CARRIERS_LOAD = {"h2", "hydrogen", "h2 pipeline"}
-_HEAT_CARRIERS = {
-    "heat", "low temperature heat", "urban heat", "rural heat",
-    "space heat", "water tank", "central heat", "district heat",
-    "low-t heat", "low t heat",
-}
-
-
-def _load_section(n, load_name: str) -> str:
-    """
-    Classify a load as electricity / hydrogen / heat / other.
-
-    Looks up the load's bus, then the bus's carrier. Empty/AC default carriers
-    fall through to 'electricity' (PyPSA's default bus carrier is 'AC').
-    """
-    try:
-        bus = str(n.loads.at[load_name, "bus"]) if "bus" in n.loads.columns else ""
-        carrier = str(n.buses.at[bus, "carrier"]).lower().strip() if bus in n.buses.index else ""
-    except Exception:
-        carrier = ""
-    if not carrier:
-        return "electricity"
-    if carrier in _H2_CARRIERS_LOAD or "hydrogen" in carrier:
-        return "hydrogen"
-    if carrier in _HEAT_CARRIERS or "heat" in carrier or "water tank" in carrier:
-        return "heat"
-    if carrier in _ELEC_CARRIERS:
-        return "electricity"
-    return "other"
 
 
 @router.get("/loads/profiles")
@@ -3624,171 +1893,12 @@ def get_load_profiles():
     return result
 
 
-def _h2_load_profile(
-    snapshots: pd.DatetimeIndex,
-    p_max: float,
-    noise_seed: int,
-    weekend_factor: float = 0.60,
-    noise_pct: float = 0.02,
-) -> np.ndarray:
-    """
-    Industrial-style hydrogen demand: roughly flat during weekdays
-    (production runs), reduced on weekends. Normalised so a typical weekday
-    hour equals p_max.
-    """
-    rng = np.random.default_rng(noise_seed)
-    hours = snapshots.hour.values.astype(float)
-    dow = snapshots.dayofweek.values
-    # Slight mid-shift dip in the early morning to avoid a perfectly flat line.
-    base = 0.95 + 0.05 * np.cos((hours - 14.0) * np.pi / 12.0) * 0.3
-    wf = np.where(dow >= 5, weekend_factor, 1.0)
-    noise = rng.uniform(-noise_pct, noise_pct, size=len(snapshots))
-    values = p_max * base * wf * (1.0 + noise)
-    return np.round(np.maximum(values, 0.0), 3)
-
-
-def _heat_load_profile(
-    snapshots: pd.DatetimeIndex,
-    p_max: float,
-    noise_seed: int,
-    weekend_factor: float = 0.95,
-    noise_pct: float = 0.04,
-) -> np.ndarray:
-    """
-    Heat demand: pronounced morning + evening peaks, low overnight, weekends
-    only marginally lower. Normalised so the evening peak equals p_max.
-    Seasonal scaling (winter > summer) is left to the caller — for a 1-week
-    template the daily shape is what matters.
-    """
-    rng = np.random.default_rng(noise_seed)
-    hours = snapshots.hour.values.astype(float)
-    dow = snapshots.dayofweek.values
-
-    morning = 0.85 * np.exp(-0.5 * ((hours - 7.0) / 1.8) ** 2)
-    evening = 1.00 * np.exp(-0.5 * ((hours - 20.0) / 2.0) ** 2)
-    daytime = 0.35 * np.exp(-0.5 * ((hours - 13.0) / 4.0) ** 2)
-    raw = morning + evening + daytime + 0.10  # baseline overnight floor
-
-    norm = (1.00 * np.exp(-0.5 * ((20.0 - 20.0) / 2.0) ** 2)
-            + 0.85 * np.exp(-0.5 * ((20.0 - 7.0) / 1.8) ** 2)
-            + 0.35 * np.exp(-0.5 * ((20.0 - 13.0) / 4.0) ** 2)
-            + 0.10)
-    shape = raw / norm
-
-    wf = np.where(dow >= 5, weekend_factor, 1.0)
-    noise = rng.uniform(-noise_pct, noise_pct, size=len(snapshots))
-    values = p_max * shape * wf * (1.0 + noise)
-    return np.round(np.maximum(values, 0.0), 3)
-
-
 _LOAD_SHAPES = {
     "electricity": None,  # use _double_peak_profile (defined below)
     "hydrogen": _h2_load_profile,
     "heat": _heat_load_profile,
     "other": None,
 }
-
-
-def _double_peak_profile(
-    snapshots: pd.DatetimeIndex,
-    p_max: float,
-    noise_seed: int,
-    weekend_factor: float = 0.80,
-    noise_pct: float = 0.03,
-) -> np.ndarray:
-    """
-    Realistic hourly load profile for one week.
-
-    Shape: two Gaussian peaks (morning ~09:00, evening ~19:00) with a soft
-    overnight trough, normalised so the evening peak equals p_max.
-    Weekend days (Sat/Sun) are scaled by weekend_factor.
-    Independent ±noise_pct random variation per load (seeded for reproducibility).
-    """
-    rng = np.random.default_rng(noise_seed)
-    hours = snapshots.hour.values.astype(float)
-    dow   = snapshots.dayofweek.values          # 0=Mon … 6=Sun
-
-    morning = 0.75 * np.exp(-0.5 * ((hours - 9.0)  / 2.5) ** 2)
-    evening = 1.00 * np.exp(-0.5 * ((hours - 19.0) / 2.5) ** 2)
-    trough  = 0.20 * np.exp(-0.5 * ((hours - 3.0)  / 2.0) ** 2)
-    raw     = morning + evening + trough
-
-    # Normalise so the theoretical evening peak = 1
-    norm = (1.00 * np.exp(-0.5 * ((19.0 - 19.0) / 2.5) ** 2)
-          + 0.75 * np.exp(-0.5 * ((19.0 -  9.0) / 2.5) ** 2)
-          + 0.20 * np.exp(-0.5 * ((19.0 -  3.0) / 2.0) ** 2))
-    shape = raw / norm
-
-    wf    = np.where(dow >= 5, weekend_factor, 1.0)
-    noise = rng.uniform(-noise_pct, noise_pct, size=len(snapshots))
-    values = p_max * shape * wf * (1.0 + noise)
-    return np.round(np.maximum(values, 0.0), 3)
-
-
-def _shape_for_section(section: str):
-    """
-    Return the daily-shape function for a given section (defaulting to the
-    electrical double-peak shape when no carrier-specific shape is registered).
-    """
-    if section == "hydrogen":
-        return _h2_load_profile
-    if section == "heat":
-        return _heat_load_profile
-    return _double_peak_profile
-
-
-# ── Template horizon helper ──────────────────────────────────────────────────
-# All three template endpoints (loads / generators / links) used to hard-code a
-# 168-hour Monday-this-week sample. The user usually wants the template aligned
-# with the simulation horizon they're already configured with — otherwise upload
-# either truncates or has to be re-shaped.
-#
-# Resolution rules (first match wins):
-#   1. start + end provided   → custom pd.date_range(start, end, freq=freq)
-#   2. use_snapshots == True  → n.snapshots (the simulation horizon)
-#   3. fallback                → 168 h starting Monday-this-week, hourly
-#
-# Returns a (snapshots, source_label) tuple. The label is used to make the
-# error messages and filenames descriptive ("simulation" / "custom" / "sample").
-def _template_snapshots(
-    n,
-    start: str | None = None,
-    end: str | None = None,
-    freq: str = "h",
-    use_snapshots: bool = True,
-) -> tuple[pd.DatetimeIndex, str]:
-    if start and end:
-        try:
-            sns = pd.date_range(start, end, freq=freq)
-        except Exception as exc:
-            raise HTTPException(400, f"Invalid template range: {exc}")
-        if len(sns) == 0:
-            raise HTTPException(400, "Template range produced 0 timestamps; check start/end/freq.")
-        sns.name = "timestamp"
-        return sns, "custom"
-    if use_snapshots and len(n.snapshots) > 0:
-        # MultiIndex (period, timestep) — `pd.DatetimeIndex(multi)` raises
-        # `Cannot create a DatetimeArray from a MultiIndex`. The template
-        # represents one operational year that gets replicated per period, so
-        # extract period-0's timestep range and use that as the template
-        # horizon.
-        if isinstance(n.snapshots, pd.MultiIndex):
-            first_p = n.snapshots.get_level_values(0).unique()[0]
-            mask = n.snapshots.get_level_values(0) == first_p
-            sns = pd.DatetimeIndex(n.snapshots[mask].get_level_values(1))
-        else:
-            sns = pd.DatetimeIndex(n.snapshots)
-        sns.name = "timestamp"
-        return sns, "simulation"
-    try:
-        import datetime as _dt
-        today = _dt.date.today()
-        week_start = today - _dt.timedelta(days=today.weekday())
-        sns = pd.date_range(str(week_start), periods=168, freq="h")
-    except Exception:
-        sns = pd.date_range("2024-01-01", periods=168, freq="h")
-    sns.name = "timestamp"
-    return sns, "sample"
 
 
 @router.get("/loads/template")
@@ -3935,6 +2045,12 @@ def _apply_profile_upload(n, comp_attr: str, attribute: str, display_class: str,
             f"No column names matched any {display_class.lower()}. "
             f"{display_class}s in network: {list(valid)[:10]}",
         )
+    # Phase 12f: refuse before `_user_ts` is written — an entry that lands here
+    # survives project reload and is re-injected on every solve, so a rejected
+    # upload must leave nothing behind. Only the matched columns are checked:
+    # an unmatched one is discarded anyway and its blanks are not the user's
+    # problem.
+    _reject_nonfinite_timeseries(df[matched], display_class, attribute)
     with _user_ts_lock:
         for col in matched:
             _user_ts[(comp_attr, attribute, col)] = df[col].astype(float)
@@ -3966,94 +2082,6 @@ async def upload_load_profile(file: UploadFile = File(...)):
 
 
 # ── Generator profile helpers ──────────────────────────────────────────────────
-
-_RENEWABLE_KW    = {'wind', 'solar', 'ror', 'hydro', 'geothermal', 'wave', 'tidal', 'pv', 'biomass', 'biogas', 'run-of-river'}
-# Dispatchable conventional units PLUS sinks / dumps / spills that behave
-# like dispatchable units from a UX standpoint: the user wants to tune
-# marginal cost / availability / must-run from the Conventional tab.
-# 'dump', 'spill', 'sink', 'slack' cover heat-dump generators (carrier
-# 'heat-dump' uses 'dump'), wind-spill model patterns, and VOLL slacks.
-_CONVENTIONAL_KW = {'coal', 'lignite', 'gas', 'nuclear', 'oil', 'ccgt', 'ocgt', 'chp', 'thermal', 'diesel', 'peat', 'steam',
-                    'dump', 'spill', 'sink', 'slack'}
-_DR_KW           = {'dr', 'dsm', 'flex', 'dsr', 'interruptible', 'demand_response', 'curtail'}
-
-
-def _gen_category(carrier: str) -> str:
-    """Return 'renewable' | 'conventional' | 'dr' | 'other' based on carrier keyword match."""
-    c = (carrier or '').lower()
-    if any(k in c for k in _DR_KW):           return 'dr'
-    if any(k in c for k in _RENEWABLE_KW):    return 'renewable'
-    if any(k in c for k in _CONVENTIONAL_KW): return 'conventional'
-    return 'other'
-
-
-def _profile_meta_for(
-    name: str,
-    user_series: pd.Series | None,
-    network_df: pd.DataFrame | None,
-    user_only: bool = False,
-) -> dict:
-    """
-    Build a {has_profile, rows, mean, peak, sum, start, end} block for one generator.
-
-    Prefers the user-uploaded series; falls back to a column on a network _t
-    DataFrame if present, UNLESS ``user_only=True``. Returns
-    ``{has_profile: False}`` when neither has data (or only the network
-    has data and ``user_only`` is set).
-
-    The ``user_only`` flag is for attributes the user expects to control
-    exclusively from the Time Series Manager — `marginal_cost` is the
-    canonical case: the solver writes per-snapshot CO2 surcharges into
-    ``generators_t.marginal_cost`` when ``co2_price_per_period`` is set,
-    and a project saved mid-solve can persist those columns into netcdf.
-    Surfacing them as "uploaded profiles" misleads the user, so this flag
-    restricts has_profile detection to the explicit user upload store.
-
-    `sum` is Σ of the profile values — for a p_max_pu profile that's the
-    full-load-equivalent hours; for a load p_set profile it's energy in MWh.
-    The GUI labels it per attribute.
-
-    Handles multi-period networks: when `col.index` is a `(period, timestep)`
-    MultiIndex, the first/last positions are tuples — calling `.isoformat()`
-    on those throws `AttributeError: 'tuple' object has no attribute
-    'isoformat'`. Use the timestep level (level 1) for the date stamps so
-    the frontend gets a usable ISO string in both shapes.
-    """
-    s = user_series
-    if (
-        s is None
-        and not user_only
-        and network_df is not None
-        and not network_df.empty
-        and name in network_df.columns
-    ):
-        s = network_df[name]
-    if s is None:
-        return {'has_profile': False}
-    col = s.dropna()
-    if not len(col):
-        return {'has_profile': False}
-    if isinstance(col.index, pd.MultiIndex):
-        # Multi-period: pull the timestep-level (level 1) values.
-        ts_level = col.index.get_level_values(-1)
-        start_ts = ts_level[0]
-        end_ts = ts_level[-1]
-    else:
-        start_ts = col.index[0]
-        end_ts = col.index[-1]
-    def _iso(t) -> str:
-        if hasattr(t, "isoformat"):
-            return t.isoformat()
-        return str(t)
-    return {
-        'has_profile': True,
-        'rows': int(len(col)),
-        'start': _iso(start_ts),
-        'end':   _iso(end_ts),
-        'mean':  float(col.mean()),
-        'peak':  float(col.max()),
-        'sum':   float(col.sum()),
-    }
 
 
 @router.get("/generators/profiles")
@@ -4107,34 +2135,6 @@ def get_generator_profiles():
             'marginal_cost': mc_meta,
         }
     return result
-
-
-def _solar_cf_profile(snapshots: pd.DatetimeIndex, noise_seed: int) -> np.ndarray:
-    """Solar capacity factor (0–1): bell curve peaking at 13:00, zero at night."""
-    rng = np.random.default_rng(noise_seed)
-    hours = snapshots.hour.values.astype(float)
-    raw = np.exp(-0.5 * ((hours - 13.0) / 3.5) ** 2)
-    raw = np.where((hours < 5) | (hours > 21), 0.0, raw)
-    noise = rng.uniform(-0.04, 0.04, size=len(snapshots))
-    return np.round(np.clip(raw * (1.0 + noise), 0.0, 1.0), 3)
-
-
-def _wind_cf_profile(snapshots: pd.DatetimeIndex, noise_seed: int) -> np.ndarray:
-    """Wind capacity factor (0–1): smooth variation around 0.35 mean."""
-    rng = np.random.default_rng(noise_seed)
-    n = len(snapshots)
-    t = np.arange(n)
-    base = 0.35 + 0.12 * np.sin(t * 2 * np.pi / 24) + 0.08 * np.sin(t * 2 * np.pi / 72)
-    noise = rng.normal(0, 0.06, size=n)
-    smooth = np.convolve(noise, np.ones(6) / 6, mode='same')
-    return np.round(np.clip(base + smooth, 0.0, 1.0), 3)
-
-
-def _flat_cf_profile(snapshots: pd.DatetimeIndex, noise_seed: int, base: float = 0.85) -> np.ndarray:
-    """Flat capacity factor with minor noise (conventional / DR generators)."""
-    rng = np.random.default_rng(noise_seed)
-    noise = rng.uniform(-0.03, 0.03, size=len(snapshots))
-    return np.round(np.clip(base * (1.0 + noise), 0.0, 1.0), 3)
 
 
 @router.get("/generators/template")
@@ -4246,22 +2246,6 @@ async def upload_generator_profile(
 
 # ── Link profile helpers ───────────────────────────────────────────────────────
 
-_H2_CARRIERS = {'h2', 'hydrogen', 'h2 pipeline', 'h2pipeline', 'h2_pipeline'}
-
-
-def _link_category(n, link_name: str) -> str:
-    """Return 'electrolyzer' | 'fuel_cell' | 'other' based on bus carriers."""
-    try:
-        bus0 = str(n.links.at[link_name, 'bus0']) if 'bus0' in n.links.columns else ''
-        bus1 = str(n.links.at[link_name, 'bus1']) if 'bus1' in n.links.columns else ''
-        c0 = str(n.buses.at[bus0, 'carrier']).lower() if bus0 in n.buses.index else ''
-        c1 = str(n.buses.at[bus1, 'carrier']).lower() if bus1 in n.buses.index else ''
-        if c1 in _H2_CARRIERS:   return 'electrolyzer'
-        if c0 in _H2_CARRIERS:   return 'fuel_cell'
-    except Exception:
-        pass
-    return 'other'
-
 
 @router.get("/links/profiles")
 def get_link_profiles():
@@ -4357,74 +2341,3 @@ async def upload_link_profile(
     return _apply_profile_upload(PyPSAService.get_network(), "links", attribute, "Link", df)
 
 
-# ── User-uploaded time-series delete ─────────────────────────────────────────
-# Single endpoint that drops `(component, attribute, name)` entries from
-# `_user_ts`. `component` is the PyPSA `_t` attr name ('loads' / 'generators'
-# / 'links' / 'stores' / 'storage_units'). When `name` is omitted, EVERY
-# uploaded profile under `(component, attribute, *)` is dropped — useful for
-# a future "Clear all profiles on this tab" UX. The matching `_t` slot is
-# reset to PyPSA's default (column dropped from `_t.<attribute>`) via the
-# explicit column-drop below, so the LP falls back to whatever the static
-# attribute holds.
-@router.delete("/timeseries")
-def delete_timeseries(
-    component: str,
-    attribute: str,
-    name: str | None = None,
-):
-    """
-    Delete one (or all matching) user-uploaded time-series entries.
-
-    Query params:
-      - component: 'loads' | 'generators' | 'links' | 'stores' | 'storage_units'
-      - attribute: 'p_set' / 'p_max_pu' / 'p_min_pu' / 'marginal_cost' / ...
-      - name: optional component name. When omitted, drops every profile
-        matching (component, attribute, *).
-    """
-    if component not in {"loads", "generators", "links", "stores", "storage_units"}:
-        raise HTTPException(400, f"Unsupported component '{component}'")
-    n = PyPSAService.get_network()
-
-    with _user_ts_lock:
-        keys_to_drop = [
-            (c, a, col) for (c, a, col) in _user_ts
-            if c == component and a == attribute and (name is None or col == name)
-        ]
-        for key in keys_to_drop:
-            del _user_ts[key]
-    dropped_names = [col for (_, _, col) in keys_to_drop]
-    if not dropped_names:
-        # 404 over silent-success — the frontend uses this to surface
-        # "Profile not found" vs a successful drop. Same `_user_ts` key
-        # may have already been cleared by a concurrent autosave / reload,
-        # so this is informational, not destructive.
-        raise HTTPException(404, f"No uploaded profile found for {component}/{attribute}/{name or '*'}")
-
-    # Drop the matching columns from n.<component>_t.<attribute>. Without
-    # this the `_t` table keeps the stale column until next reset — the LP
-    # would still see the old profile and the next save would re-serialise
-    # it. `_reapply_user_ts_to_network` only writes; it doesn't drop.
-    with PyPSAService.get_lock():
-        t_obj = getattr(n, f"{component}_t", None)
-        if t_obj is not None:
-            attr_df = getattr(t_obj, attribute, None)
-            if attr_df is not None and hasattr(attr_df, "columns"):
-                cols_to_drop = [c for c in dropped_names if c in attr_df.columns]
-                if cols_to_drop:
-                    attr_df.drop(columns=cols_to_drop, inplace=True)
-        _reapply_user_ts_to_network(n)
-
-    names_preview = ", ".join(dropped_names[:3]) + ("…" if len(dropped_names) > 3 else "")
-    # Component → display class: 'loads' → 'Load', 'generators' → 'Generator',
-    # 'links' → 'Link'. Plural-strip the trailing 's' for the changelog.
-    display_class = component[:-1].capitalize() if component.endswith("s") else component.capitalize()
-    change_log_service.log(
-        "timeseries", display_class, names_preview,
-        f"Deleted {component} {attribute} profile(s): {len(dropped_names)} entry(ies)",
-    )
-    return {
-        "deleted": dropped_names,
-        "component": component,
-        "attribute": attribute,
-        "snapshot_count": len(n.snapshots),
-    }

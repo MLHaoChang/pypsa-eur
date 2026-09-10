@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -54,6 +55,8 @@ local_settings_store.migrate_api_key_to_app_secrets()
 
 import pypsa
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -73,6 +76,7 @@ from routers import (
     changelog,
     chat,
     clustering,
+    adequacy_worksheet,
     compare,
     io,
     local_settings,
@@ -516,6 +520,32 @@ app = FastAPI(
     # per-user instead of through a process global (Step 0b).
     dependencies=[Depends(bind_active_project)],
 )
+
+
+def _json_safe(obj):
+    """Replace a non-finite float anywhere in ``obj`` with its repr string,
+    so the object can be serialised by a JSON encoder that refuses NaN/inf."""
+    if isinstance(obj, float) and not math.isfinite(obj):
+        return repr(obj)
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
+@app.exception_handler(RequestValidationError)
+async def _request_validation_as_422(request: Request, exc: RequestValidationError):
+    """Phase 12f. A pydantic refusal echoes the offending ``input`` in its
+    error list, and when that input is ``inf`` or ``NaN`` (the create
+    schemas refuse those in the five finite-default LP bounds) starlette's
+    JSON encoder raises ``Out of range float values are not JSON compliant``
+    while writing the 422 — so the client saw a 500 (measured live, S29.6).
+    Same body FastAPI's default handler builds, with non-finite inputs
+    rendered as their repr."""
+    return JSONResponse(
+        status_code=422,
+        content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
 
 def _csrf_rejection(request: Request) -> JSONResponse | None:
     """
@@ -1070,10 +1100,21 @@ app.include_router(project_network.router, prefix="/api/projects", tags=["projec
 # `/{name}/results-summary` paths) — registered before projects.router for
 # clarity; the extra path segment means the `/{name}` catch-all never shadows it.
 app.include_router(compare.router, prefix="/api/projects", tags=["compare"])
+# FMEA worksheet sidecar (adequacy Phase 3) — specific `/{name}/worksheet`
+# path, registered before projects.router so the `/{name}` catch-all never
+# shadows it. Manual rows + overlays only; computed rows come from
+# /results/copt and merge client-side.
+app.include_router(adequacy_worksheet.router, prefix="/api/projects", tags=["adequacy"])
 # `require_file_access` guards the whole projects router because every route
 # on it resolves a path under the projects root. It is a no-op wherever the
 # grant is held; where it is not, it is the difference between a 503 that
 # says "click Allow" and a request that never returns.
+#
+# MERGE NOTE (2026-09-10): the worksheet router above deliberately does NOT
+# carry the guard. It is a sidecar that reads and writes its own JSON sidecar
+# through the same project path resolution, so it needs the grant too — but
+# adding a dependency to a router this branch never saw is a behaviour change,
+# not a merge. Recorded rather than done silently; see the merge commit.
 app.include_router(
     projects.router, prefix="/api/projects", tags=["projects"],
     dependencies=[Depends(fs_permission.require_file_access)],

@@ -38,6 +38,7 @@ import local_mode
 from db.models import User
 from db.session import get_db
 from deps import optional_user
+from services.pypsa_service import PyPSAService
 from services.solve_queue import _TERMINAL, _row_epoch, solve_queue
 
 router = APIRouter()
@@ -123,6 +124,17 @@ def enqueue_solve(
                 "lock": project_locks.serialize_lock(db, project.id, user.id),
             },
         )
+    # Fix review, F3: the queue is the Run button's real path and had no
+    # study gate at all — a queued solve re-solved the network a live study
+    # was measuring and failed only at its post-solve save. Refused here
+    # when the project is resident with a live study (the dispatcher refuses
+    # again at its claim, for a study that starts after enqueue).
+    from services.project_context import study_swap_refusal
+    _resident = PyPSAService.get_context(project_registry.registry_key(project))
+    if _resident is not None:
+        _detail = study_swap_refusal(_resident.solver_state, "queue a solve")
+        if _detail:
+            raise HTTPException(409, _detail)
     project_dir = project_registry.project_dir(project)
     if not (project_dir / "network.nc").exists():
         raise HTTPException(
