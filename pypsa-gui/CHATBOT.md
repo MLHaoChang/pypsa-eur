@@ -198,6 +198,46 @@ transition:
 All lineage operations are best-effort: a failure copying chat history
 NEVER aborts the underlying project save / rename / restore.
 
+## Explaining a result
+
+`explain_investment(component_class, name)` (read tier) answers "why did the
+model build — or not build — this?" in one call, and it is the tool the system
+prompt routes every sizing question to.
+
+The reason it exists is `binding_constraint`. In a capacity-expansion LP the
+answer to "why is it this big" is almost always **which constraint stopped
+it**, and no per-asset metric in the registry carries `p_nom_max` or
+`p_nom_extendable`. The tool classifies the decision as one of:
+
+| `binding_constraint` | What it means |
+|---|---|
+| `not_solved` | No fresh dispatch — there is no decision to explain |
+| `not_extendable` | The LP could not size it; the capacity is an input |
+| `at_upper_bound` | The **bound** set the size, not the economics |
+| `at_lower_bound` | A non-zero floor is holding it up; it lost at the margin |
+| `not_built` | Nothing blocked it — it was not worth building |
+| `interior` | This size **is** the economic answer |
+
+Alongside it: `asset_kpis` (the registry's cross-tab headline, read through
+`get_asset_results` so it can never disagree with the Asset Detail tab),
+`system_signals` (marginal price at the asset's buses, active CO₂ caps with
+their shadow prices, and `congestion`), and `reading_notes`.
+
+Two design rules the tests pin:
+
+- **Evidence, never a verdict.** The payload carries numbers and one
+  structural classification; the model writes the prose, and can only write it
+  from fields that are present.
+- **An empty list must say why it is empty.** `system_signals.congestion`
+  carries a `note` distinguishing "no lines here", "no duals captured on this
+  solve", "nothing binds", and "out of scope" — because all four otherwise
+  read as *uncongested*, and only one of them is.
+
+`reading_notes` also carries the zero-profit framing: an extendable asset at an
+interior optimum earns ≈ zero net profit **by construction**, since the LP
+builds until the marginal MW breaks even. Without that note a near-zero
+`net_profit_eur` reads as a defect and gets a made-up cause.
+
 ## Reliability / solution-FMEA tools
 
 The adequacy engines (`backend/services/adequacy/`) were reachable only from

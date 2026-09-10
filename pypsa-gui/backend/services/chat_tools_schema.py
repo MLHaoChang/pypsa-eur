@@ -128,6 +128,13 @@ ADEQUACY_STUDY_ENUM = [
 # case it started from, or at the final iterate that met the target.
 ADEQUACY_RESTORE_ENUM = ["base", "final"]
 
+# Classes whose nominal capacity the optimiser can size — mirrors
+# services/asset_results/compute._NOM_COL, the map explain_investment reads
+# through `nom_col_for`. Bus and Load are absent: neither is an investment.
+INVESTMENT_CLASS_ENUM = [
+    "Generator", "StorageUnit", "Store", "Link", "Line", "Transformer",
+]
+
 
 def _t(name: str, description: str, properties: dict[str, Any],
        required: list[str] | None = None) -> dict[str, Any]:
@@ -680,6 +687,36 @@ TOOLS: list[dict[str, Any]] = [
         "single destructive tier (NOT execution_long_running). Card UX: red "
         "border + 1s delay + disclaimer 'may not free the PyPSA lock if "
         "solver is in native code'. Safety: destructive.",
+    ),
+
+    # ── Explanation / synthesis (1) ────────────────────────────────────────
+
+    _t(
+        "explain_investment",
+        "Why is this asset the size it is? Fuses, in ONE call, the evidence an "
+        "explanation needs: `sizing` (existing vs optimised capacity, the "
+        "bounds, and `binding_constraint` — one of not_solved / "
+        "not_extendable / at_upper_bound / at_lower_bound / not_built / "
+        "interior — with the sentence that says what that means), "
+        "`asset_kpis` (the registry's "
+        "cross-tab headline: capacity factor, capture price, revenue, net "
+        "profit, LCOE, CO2, read from the same source as the Asset Detail "
+        "tab), `system_signals` (marginal price at the asset's buses, active "
+        "CO2 caps with their shadow prices, and `congestion` — binding lines "
+        "at those buses PLUS a `note` saying what an empty list means: "
+        "nothing binds, no duals captured, or out of scope) and "
+        "`reading_notes`. START HERE for any 'why did the model build / not "
+        "build X' question: `binding_constraint` is usually the whole answer, "
+        "and an asset at a bound was NOT sized by its economics. Evidence "
+        "only — no verdict; narrate solely from fields present in the payload, "
+        "and obey reading_notes (an interior extendable asset earns ~zero net "
+        "profit by construction). Safety: read.",
+        {
+            "component_class": {"type": "string",
+                                "enum": INVESTMENT_CLASS_ENUM},
+            "name": {"type": "string"},
+        },
+        ["component_class", "name"],
     ),
 
     # ── Adequacy / solution-FMEA (9) ───────────────────────────────────────
@@ -1658,6 +1695,8 @@ TOOL_ROUTES: dict[str, list] = {
     # execution (2)
     "abort_simulation": [("POST", "/api/simulation/abort")],
     "force_reset_simulation": [("POST", "/api/simulation/force_reset")],
+    # synthesis (1) — composite in-process fusion, no HTTP route of its own
+    "explain_investment": _DERIVED,
     # adequacy_fmea (9)
     "get_adequacy_results": [
         # 9 of 10 kinds map 1:1 to /api/results/{kind}; mc_elcc_candidates is
