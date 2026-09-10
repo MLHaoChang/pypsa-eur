@@ -109,6 +109,25 @@ ASSET_CATEGORY_ENUM = [
 ASSET_VIEW_MODE_ENUM = ["chronological", "duration", "monthly"]
 ASSET_RESOLUTION_ENUM = ["stats", "raw"]
 
+# Adequacy / solution-FMEA surface (services/adequacy/*, routed under
+# /api/results). Ten no-argument GETs behind ONE dispatcher tool, same shape
+# as RESULTS_ENUM/get_results. Mirror routers/results.py by hand if a kind is
+# added there.
+ADEQUACY_KIND_ENUM = [
+    "copt", "fmea_modes", "fmea_sweep", "frontier", "mc",
+    "mc_elcc_candidates", "coupling_loop", "margin_loop", "adequacy",
+    "reserve_margin",
+]
+# The five kinds that run in a worker thread, i.e. the ones that can be
+# aborted. Read-only surfaces (copt / fmea_modes / adequacy / reserve_margin /
+# mc_elcc_candidates) have no thread to stop and are deliberately absent.
+ADEQUACY_STUDY_ENUM = [
+    "fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
+]
+# Where a reliability loop leaves the network when it finishes: at the base
+# case it started from, or at the final iterate that met the target.
+ADEQUACY_RESTORE_ENUM = ["base", "final"]
+
 
 def _t(name: str, description: str, properties: dict[str, Any],
        required: list[str] | None = None) -> dict[str, Any]:
@@ -657,6 +676,137 @@ TOOLS: list[dict[str, Any]] = [
         "single destructive tier (NOT execution_long_running). Card UX: red "
         "border + 1s delay + disclaimer 'may not free the PyPSA lock if "
         "solver is in native code'. Safety: destructive.",
+    ),
+
+    # ── Adequacy / solution-FMEA (9) ───────────────────────────────────────
+
+    _t(
+        "get_adequacy_results",
+        "Reliability dispatcher — reads one /api/results reliability surface. "
+        "kind: 'copt' (analytic capacity-outage table + class-A FMECA "
+        "ranking, computed on demand, ZERO solves), 'fmea_modes' (every "
+        "computed failure mode, criticality-sorted), 'fmea_sweep' / "
+        "'frontier' / 'mc' / 'coupling_loop' / 'margin_loop' (status + rows / "
+        "points / iterations of the matching study — poll these while one "
+        "runs), 'mc_elcc_candidates' (assets an ELCC study may name), "
+        "'adequacy' (achieved ENS + shed-hours vs the target of the last "
+        "target-constrained solve, and which standard bound), "
+        "'reserve_margin' (per-period peak / requirement / achieved firm MW / "
+        "met / binding, plus the derating table). Returns "
+        "{status:'no_data', kind, message} when nothing has been computed — "
+        "read `message` for the missing precondition, do NOT report zero "
+        "risk. Safety: read.",
+        {"kind": {"type": "string", "enum": ADEQUACY_KIND_ENUM}},
+        ["kind"],
+    ),
+    _t(
+        "get_fmea_worksheet",
+        "Per-project FMEA sidecar: {manual_rows: [row], overlays: {mode_id: "
+        "{...}}, version}. Expert-entered rows and per-mode overrides only — "
+        "COMPUTED rows come from get_adequacy_results('fmea_modes') and the "
+        "two are merged for display. Safety: read.",
+        {"name": {"type": "string"}},
+        ["name"],
+    ),
+    _t(
+        "get_stress_scenarios",
+        "Per-project class-C stress-scenario registry: {scenarios: [scenario]}"
+        ". These are the scenarios to pass to run_fmea_sweep, which itself "
+        "carries no project name. Safety: read.",
+        {"name": {"type": "string"}},
+        ["name"],
+    ),
+    _t(
+        "run_fmea_sweep",
+        "Start the contingency sweep: class B (every single link outage) plus "
+        "any class-C `scenarios` given (get them from get_stress_scenarios). "
+        "Several LP solves, minutes; returns {status:'running'} immediately — "
+        "poll get_adequacy_results('fmea_sweep') for rows. Requires VOLL > 0 "
+        "in solver settings (422 without). 409 while another study or a "
+        "foreground solve holds the network. The closing base re-solve leaves "
+        "the network and the foreground results in base state. "
+        "Safety: execution.",
+        {"scenarios": {"type": "array", "items": {"type": "object"}}},
+    ),
+    _t(
+        "run_frontier_study",
+        "Start the cost-vs-availability (ε-constraint) study: ONE full "
+        "capacity-expansion solve per reliability target, so the plan is "
+        "re-optimised at every point — this is the curve for 'what would I "
+        "BUILD for each standard'. `targets_permyriad` are ENS caps in ‱ and "
+        "must be positive; omit for the engine's default spread. Requires "
+        "VOLL > 0 (422 without). 409 while another study or a foreground "
+        "solve is running. Returns {status:'running'} — poll "
+        "get_adequacy_results('frontier') for points and the knee. "
+        "Safety: execution.",
+        {"targets_permyriad": {"type": "array", "items": {"type": "number"}}},
+    ),
+    _t(
+        "run_mc_study",
+        "Start the sequential Monte-Carlo adequacy study — LOLE / EUE, "
+        "optionally an ELCC credit table for `elcc_assets` (names from "
+        "get_adequacy_results('mc_elcc_candidates')) and/or the whole "
+        "profile-bearing fleet as one portfolio via `elcc_portfolio`. Solves "
+        "NOTHING and never mutates the network, so it needs no VOLL, but it "
+        "is still mutually exclusive with the other studies (409). Minutes "
+        "for an ELCC run; returns {status:'running'} — poll "
+        "get_adequacy_results('mc'). Safety: execution.",
+        {
+            "draws": {"type": "integer"},
+            "seed": {"type": "integer"},
+            "cov_target": {"type": "number"},
+            "elcc_assets": {"type": "array", "items": {"type": "object"}},
+            "elcc_portfolio": {"type": "boolean"},
+        },
+    ),
+    _t(
+        "run_coupling_loop",
+        "Start the reliability-targeted planning loop on the ENERGY lever: "
+        "solve at an ENS cap, measure LOLE by Monte Carlo, adjust the cap, "
+        "repeat until the plan meets `target_lole_h`. `target_lole_h` is "
+        "HORIZON-basis hours, NOT h/yr — convert first on a multi-year "
+        "horizon and state the basis when reporting. `restore` decides where "
+        "the network is left: 'base' (default) or 'final'. Many solves, "
+        "returns {status:'running'} — poll "
+        "get_adequacy_results('coupling_loop') for iterations. 409 while "
+        "another study or a foreground solve is running. Safety: execution.",
+        {
+            "target_lole_h": {"type": "number"},
+            "draws": {"type": "integer"},
+            "seed": {"type": "integer"},
+            "eps0": {"type": "number"},
+            "max_solves": {"type": "integer"},
+            "restore": {"type": "string", "enum": ADEQUACY_RESTORE_ENUM},
+        },
+        ["target_lole_h"],
+    ),
+    _t(
+        "run_margin_loop",
+        "Start the reliability-targeted planning loop on the FIRM-CAPACITY "
+        "lever: raise the planning reserve margin until the plan meets "
+        "`target_lole_h` (horizon-basis hours, as run_coupling_loop). There "
+        "is deliberately NO starting-margin parameter — the start is measured "
+        "by a probing solve. Many solves, returns {status:'running'} — poll "
+        "get_adequacy_results('margin_loop'). 409 while another study or a "
+        "foreground solve is running. Safety: execution.",
+        {
+            "target_lole_h": {"type": "number"},
+            "draws": {"type": "integer"},
+            "seed": {"type": "integer"},
+            "max_solves": {"type": "integer"},
+            "restore": {"type": "string", "enum": ADEQUACY_RESTORE_ENUM},
+        },
+        ["target_lole_h"],
+    ),
+    _t(
+        "abort_adequacy_study",
+        "Stop a running study at its next boundary. IDEMPOTENT and 200 even "
+        "when the run has already finished; 404 only when that study never "
+        "ran in this session. The closing base restore STILL runs, so the "
+        "network is not left mid-contingency. Does NOT stop a foreground "
+        "solve — that is abort_simulation. Safety: destructive.",
+        {"study": {"type": "string", "enum": ADEQUACY_STUDY_ENUM}},
+        ["study"],
     ),
 
     # ── Solve queue (4) ────────────────────────────────────────────────────
@@ -1504,6 +1654,24 @@ TOOL_ROUTES: dict[str, list] = {
     # execution (2)
     "abort_simulation": [("POST", "/api/simulation/abort")],
     "force_reset_simulation": [("POST", "/api/simulation/force_reset")],
+    # adequacy_fmea (9)
+    "get_adequacy_results": [
+        # 9 of 10 kinds map 1:1 to /api/results/{kind}; mc_elcc_candidates is
+        # the outlier, nested under /mc (same shape as get_results'
+        # ac_pf_status).
+        ("GET", f"/api/results/{k}")
+        for k in ADEQUACY_KIND_ENUM if k != "mc_elcc_candidates"
+    ] + [("GET", "/api/results/mc/elcc_candidates")],
+    "get_fmea_worksheet": [("GET", "/api/projects/{name}/worksheet")],
+    "get_stress_scenarios": [("GET", "/api/projects/{name}/stress_scenarios")],
+    "run_fmea_sweep": [("POST", "/api/results/fmea_sweep")],
+    "run_frontier_study": [("POST", "/api/results/frontier")],
+    "run_mc_study": [("POST", "/api/results/mc")],
+    "run_coupling_loop": [("POST", "/api/results/coupling_loop")],
+    "run_margin_loop": [("POST", "/api/results/margin_loop")],
+    "abort_adequacy_study": [
+        ("POST", f"/api/results/{s}/abort") for s in ADEQUACY_STUDY_ENUM
+    ],
     # solve_queue (4)
     "solve_queue_enqueue": [("POST", "/api/simulation/queue")],
     "solve_queue_list": [("GET", "/api/simulation/queue")],

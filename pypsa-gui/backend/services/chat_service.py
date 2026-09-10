@@ -1600,6 +1600,38 @@ _NEXT_STEP_RUBRIC = (
     "is available. Only suggest steps the current configuration supports."
 )
 
+
+# Adequacy / reliability guide. The reliability tools each carry a DIFFERENT
+# fidelity, and the difference is the whole point: three of these engines are
+# proxies that the panels caveat at the point of display, and an agent that
+# narrates them as one number would report a proxy as a statutory result. The
+# rule below is the same one the routers' own docstrings state.
+_ADEQUACY_GUIDE = (
+    "Reliability and solution-FMEA. Read these with get_adequacy_results; "
+    "ALWAYS name the engine and its fidelity when you report a number. "
+    "'copt' = analytic capacity-outage convolution: thermal-only, "
+    "storage-excluded, network-free, zero solves — a SCREENING figure, never "
+    "comparable to a statutory standard. 'adequacy' = engine 'lp_proxy', a "
+    "deterministic LP proxy, likewise not a statutory result. "
+    "'reserve_margin' = a firm-capacity convention justified by its derating "
+    "factors, so a MET MARGIN IS NOT A MET RELIABILITY TARGET — say so "
+    "whenever you quote one. 'mc' = the sequential Monte-Carlo sampler, the "
+    "only engine here whose LOLE/EUE is a sampled ESTIMATE — quote its "
+    "interval (`lole_ci` / `eue_ci`) and its `converged` flag beside the "
+    "mean, and never present a non-converged run as a point value. "
+    "LOLE targets on the loops are "
+    "HORIZON-basis hours, not h/yr — convert before comparing to a statutory "
+    "h/yr standard and state which basis you used. A no_data result means the "
+    "study never ran or the solve set no target: report the missing "
+    "precondition from its `message`, never zero risk. Choosing a study: "
+    "run_fmea_sweep ranks failure modes by contingency; run_mc_study measures "
+    "LOLE/EUE and ELCC credit; run_frontier_study prices reliability (one "
+    "full expansion solve per target); run_coupling_loop (energy lever) and "
+    "run_margin_loop (firm-capacity lever) drive a plan TO a target. All five "
+    "are mutually exclusive with each other and with a foreground solve — a "
+    "409 means something is already running, so poll it rather than retrying."
+)
+
 # Untrusted-content boundary clause (#2, prompt half). Pairs with the
 # <untrusted_data> wrapping in _result_to_anthropic_content + the attachment
 # prefix so the model is told, in-band, that delimited text is data.
@@ -1711,8 +1743,9 @@ def _build_system_prompt(
     Build the system prompt for one turn. Kept small — the agent learns the
     full tool surface from `tools=`. The system prompt carries policy (safety
     rules + session identity + the audit-log action prefix) plus the domain /
-    solver-error / price-congestion / next-step / untrusted-data guides that
-    shape how the agent reads results and stays safe against injected text.
+    solver-error / price-congestion / next-step / adequacy / untrusted-data
+    guides that shape how the agent reads results and stays safe against
+    injected text.
 
     Optional `live_meta` (from `_format_live_network_meta`) is appended so the
     model knows the bound project + network size without a get_meta round-trip.
@@ -1734,6 +1767,7 @@ def _build_system_prompt(
         _SOLVER_ERROR_DECODER,
         _PRICE_CONGESTION_GUIDE,
         _NEXT_STEP_RUBRIC,
+        _ADEQUACY_GUIDE,
         _UNTRUSTED_DATA_CLAUSE,
     ]
     if live_meta:

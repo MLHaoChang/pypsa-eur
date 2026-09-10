@@ -977,6 +977,275 @@ def force_reset_simulation() -> dict:
     return _h()
 
 
+# ── Adequacy / solution-FMEA (9) ────────────────────────────────────────────
+#
+# The reliability surface (services/adequacy/*, routed under /api/results)
+# was reachable only from the worksheet UI: none of its endpoints had a chat
+# tool, so the agent could read a solved plan's COST in a dozen ways and its
+# RELIABILITY in none. These nine tools close that gap — one read dispatcher
+# over the ten no-argument GETs, the two per-project sidecars, the four study
+# starters and one abort.
+#
+# Two properties every caller here depends on:
+#
+#   * The GETs answer 204 when nothing has been computed (never run, or no
+#     solve to judge). A bare `Response` is not JSON — the chat layer's
+#     `json.dumps(..., default=str)` would stringify it to
+#     "<Response object at 0x…>" and the model would read that as data. Each
+#     one is mapped to an explicit `{"status": "no_data", …}` dict instead
+#     (`_adequacy_payload`), so "nothing has been run" is a fact the agent can
+#     act on rather than a blob it has to guess at.
+#   * The four POSTs are ASYNCHRONOUS by construction — each publishes a
+#     worker thread and returns `{"status": "running"}` immediately. The agent
+#     must poll the matching GET kind to see rows/points/iterations land. They
+#     are execution-tier for the same reason `run_simulation` is: minutes of
+#     LP solves, and (for the sweep/frontier/loops) a network the engine
+#     mutates and restores.
+
+# kind → handler symbol in routers.results. Every one takes NO arguments.
+_ADEQUACY_HANDLER_NAMES: dict[str, str] = {
+    "copt": "get_copt",
+    "fmea_modes": "get_fmea_modes",
+    "fmea_sweep": "get_fmea_sweep",
+    "frontier": "get_frontier",
+    "mc": "get_mc",
+    "mc_elcc_candidates": "get_mc_elcc_candidates",
+    "coupling_loop": "get_coupling_loop",
+    "margin_loop": "get_margin_loop",
+    "adequacy": "get_adequacy",
+    "reserve_margin": "get_reserve_margin",
+}
+
+# Why each kind can be empty. Surfaced verbatim on the no_data result so the
+# agent tells the user WHICH precondition is missing instead of "no data".
+_ADEQUACY_NO_DATA_HINTS: dict[str, str] = {
+    "copt": (
+        "the COPT engine found no dispatchable fleet to convolve — add "
+        "conventional generators, or check that outage rates are set"
+    ),
+    "fmea_modes": (
+        "no failure modes: the COPT ranking is empty and no contingency "
+        "sweep has run in this session"
+    ),
+    "fmea_sweep": "no class-B/C contingency sweep has run in this session",
+    "frontier": "no cost-vs-availability study has run in this session",
+    "mc": "no sequential Monte-Carlo study has run in this session",
+    "mc_elcc_candidates": "no assets are eligible for an ELCC study",
+    "coupling_loop": "no coupling loop has run in this session",
+    "margin_loop": "no margin loop has run in this session",
+    "adequacy": (
+        "nothing has been solved, or the last solve ran without a "
+        "reliability target"
+    ),
+    "reserve_margin": (
+        "nothing has been solved, the last solve set no reserve margin, or "
+        "it produced no dispatch to judge one against"
+    ),
+}
+
+# Path outlier, same shape as get_results' ac_pf_status (v4-MAJOR-4): nine of
+# the ten kinds map 1:1 to /api/results/{kind}; mc_elcc_candidates is nested
+# under /mc.
+_ADEQUACY_PATH_OUTLIERS: dict[str, str] = {
+    "mc_elcc_candidates": "/api/results/mc/elcc_candidates",
+}
+
+# study key → abort handler symbol in routers.results. `adequacy`,
+# `reserve_margin`, `copt`, `fmea_modes` and `mc_elcc_candidates` are absent
+# BY CONSTRUCTION: they are read-only surfaces computed on demand or stashed
+# by a solve, with no worker thread to stop.
+_ADEQUACY_ABORT_HANDLER_NAMES: dict[str, str] = {
+    "fmea_sweep": "post_fmea_sweep_abort",
+    "frontier": "post_frontier_abort",
+    "mc": "post_mc_abort",
+    "coupling_loop": "post_coupling_loop_abort",
+    "margin_loop": "post_margin_loop_abort",
+}
+
+
+def _resolve_adequacy_handler(kind: str, table: dict[str, str] | None = None):
+    """Resolve an adequacy GET/abort handler by kind, or raise 400/500."""
+    table = _ADEQUACY_HANDLER_NAMES if table is None else table
+    if kind not in table:
+        raise HTTPException(
+            400,
+            f"Unknown adequacy kind: {kind!r}. Known: "
+            f"{', '.join(sorted(table))}",
+        )
+    from routers import results as results_router
+    handler = getattr(results_router, table[kind], None)
+    if handler is None:
+        raise HTTPException(
+            500, f"Handler {table[kind]!r} missing from routers.results")
+    return handler
+
+
+def _adequacy_payload(kind: str, result: Any) -> Any:
+    """
+    Map a 204 `Response` to an explicit no_data dict; pass everything else
+    through untouched.
+
+    The check is on `status_code`, not `isinstance(result, Response)`: the
+    handlers build theirs with `fastapi.Response`, the chat layer must not
+    care which Response class that is, and every real payload here is a plain
+    dict with no `status_code` key of its own.
+    """
+    code = getattr(result, "status_code", None)
+    if code == 204:
+        return {
+            "status": "no_data",
+            "kind": kind,
+            "message": _ADEQUACY_NO_DATA_HINTS.get(
+                kind, "nothing has been computed for this kind yet"),
+        }
+    return result
+
+
+def get_adequacy_results(kind: str) -> Any:
+    """
+    Read one reliability surface. Mirrors `get_results`' dispatcher shape:
+    a lookup dict, a 400 on an unknown kind, and one path outlier.
+    """
+    handler = _resolve_adequacy_handler(kind)
+    return _adequacy_payload(kind, handler())
+
+
+def adequacy_path_for(kind: str) -> str:
+    """The route path a given adequacy kind reads (endpoint-map cross-check)."""
+    return _ADEQUACY_PATH_OUTLIERS.get(kind, f"/api/results/{kind}")
+
+
+def get_fmea_worksheet(name: str) -> dict:
+    """
+    The per-project FMEA sidecar: expert rows + per-mode overlays.
+
+    Computed rows are NOT here — they come from `get_adequacy_results`
+    ('fmea_modes') and the worksheet merges the two client-side.
+    """
+    from routers.adequacy_worksheet import get_worksheet as _h
+    return _h(project=_authorized_project(name))
+
+
+def get_stress_scenarios(name: str) -> dict:
+    """The per-project class-C stress-scenario registry."""
+    from routers.adequacy_worksheet import get_stress_scenarios as _h
+    return _h(project=_authorized_project(name))
+
+
+def run_fmea_sweep(scenarios: list | None = None) -> dict:
+    """
+    Start the class-B (single link outage) contingency sweep, plus any
+    class-C scenarios passed in.
+
+    `scenarios` are re-validated by the route. They come from
+    `get_stress_scenarios`, which is where authorization lives — this route
+    operates on the FOREGROUND network and carries no project name.
+    """
+    from routers.results import FmeaSweepRequest, post_fmea_sweep as _h
+    return _h(FmeaSweepRequest(scenarios=list(scenarios or [])))
+
+
+def run_frontier_study(targets_permyriad: list | None = None) -> dict:
+    """
+    Start the ε-constraint cost-vs-availability sweep: ONE full
+    capacity-expansion solve per target, so the plan is re-optimised at every
+    point. Omitting `targets_permyriad` uses the engine's default spread.
+    """
+    from routers.results import FrontierRequest, post_frontier as _h
+    return _h(FrontierRequest(targets_permyriad=targets_permyriad))
+
+
+def run_mc_study(
+    draws: int | None = None,
+    seed: int | None = None,
+    cov_target: float | None = None,
+    elcc_assets: list | None = None,
+    elcc_portfolio: bool | None = None,
+) -> dict:
+    """
+    Start the sequential Monte-Carlo adequacy study (LOLE / EUE, optionally
+    with an ELCC table).
+
+    Alone among the four studies this SOLVES NOTHING and never mutates the
+    network — its metrics are hours and MWh, not euros, so it needs no VOLL.
+    It is still mutually exclusive with the others: the snapshot it samples
+    must not be a half-mutated network.
+    """
+    from routers.results import McRequest, post_mc as _h
+    return _h(McRequest(
+        draws=draws,
+        seed=seed,
+        cov_target=cov_target,
+        elcc_assets=elcc_assets,
+        elcc_portfolio=elcc_portfolio,
+    ))
+
+
+def run_coupling_loop(
+    target_lole_h: float,
+    draws: int | None = None,
+    seed: int | None = None,
+    eps0: float | None = None,
+    max_solves: int | None = None,
+    restore: str | None = None,
+) -> dict:
+    """
+    Drive the ENS CAP (ε) until the sampled plan meets `target_lole_h`:
+    solve at ε, measure LOLE by Monte Carlo, adjust, repeat.
+
+    `target_lole_h` is HORIZON-basis hours, not h/yr — convert before calling
+    on a multi-year horizon, and say which basis you used when reporting.
+    """
+    from routers.results import CouplingLoopRequest, post_coupling_loop as _h
+    return _h(CouplingLoopRequest(
+        target_lole_h=target_lole_h,
+        draws=draws,
+        seed=seed,
+        eps0=eps0,
+        max_solves=max_solves,
+        restore=restore,
+    ))
+
+
+def run_margin_loop(
+    target_lole_h: float,
+    draws: int | None = None,
+    seed: int | None = None,
+    max_solves: int | None = None,
+    restore: str | None = None,
+) -> dict:
+    """
+    Drive the PLANNING RESERVE MARGIN until the sampled plan meets
+    `target_lole_h` — the firm-capacity lever, where run_coupling_loop turns
+    the energy lever.
+
+    There is deliberately no starting-margin parameter: the start is a
+    MEASUREMENT taken by a probing solve, and a user-supplied one is the
+    single number here that can silently make the study worthless.
+    """
+    from routers.results import MarginLoopRequest, post_margin_loop as _h
+    return _h(MarginLoopRequest(
+        target_lole_h=target_lole_h,
+        draws=draws,
+        seed=seed,
+        max_solves=max_solves,
+        restore=restore,
+    ))
+
+
+def abort_adequacy_study(study: str) -> dict:
+    """
+    Ask a running study to stop at its next boundary.
+
+    IDEMPOTENT, and 200 even when the run has already finished. The closing
+    base restore still runs, so an abort costs the work in flight plus that
+    restore — it does NOT leave the network mid-contingency. 404 only when
+    the named study has never run in this session.
+    """
+    handler = _resolve_adequacy_handler(study, _ADEQUACY_ABORT_HANDLER_NAMES)
+    return handler()
+
+
 # ── Solve queue (4) ─────────────────────────────────────────────────────────
 
 
@@ -2981,6 +3250,18 @@ DISPATCHERS: dict[str, Any] = {
     # execution (2)
     "abort_simulation": abort_simulation,
     "force_reset_simulation": force_reset_simulation,
+    # adequacy_fmea (9) — the reliability surface: one read dispatcher over
+    # the ten no-argument GETs, the two per-project sidecars, the four study
+    # starters, one abort.
+    "get_adequacy_results": get_adequacy_results,
+    "get_fmea_worksheet": get_fmea_worksheet,
+    "get_stress_scenarios": get_stress_scenarios,
+    "run_fmea_sweep": run_fmea_sweep,
+    "run_frontier_study": run_frontier_study,
+    "run_mc_study": run_mc_study,
+    "run_coupling_loop": run_coupling_loop,
+    "run_margin_loop": run_margin_loop,
+    "abort_adequacy_study": abort_adequacy_study,
     # solve_queue (4)
     "solve_queue_enqueue": solve_queue_enqueue,
     "solve_queue_list": solve_queue_list,
