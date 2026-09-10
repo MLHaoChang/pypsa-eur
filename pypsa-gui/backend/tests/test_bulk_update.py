@@ -98,12 +98,38 @@ def test_blanking_a_bound_writes_its_sentinel(client, net, col, expected):
     assert float(net.generators.at["gas", col]) == expected
 
 
-def test_blanking_a_plain_numeric_writes_nan(client, net):
+def test_blanking_a_finite_default_numeric_writes_that_default(client, net):
+    """Blanking `p_nom` writes 0.0 — its PyPSA CLASS DEFAULT — not NaN.
+
+    This test characterized NaN when it was written, and master's Phase 12g
+    deliberately changed that: NaN is not a valid "unset" sentinel for an
+    attribute whose PyPSA default is finite, because PyPSA does not fall back
+    to the default, it drops the term or masks the constraint that reads it.
+    `Generator.p_nom` defaults to 0.0, so 0.0 is what "unset" means here, and
+    the route now reads it from PyPSA's own metadata rather than assuming.
+
+    The NaN path still exists and is still characterized — see
+    `test_blanking_a_ramp_limit_writes_nan` below — for attributes whose class
+    default IS NaN, where masking the row is the documented way to say "no
+    limit". That is the distinction Phase 12g drew, and this pair pins it.
+    """
     r = client.patch(BULK, json={
         "component_class": "Generator", "names": ["gas"], "updates": {"p_nom": None},
     })
     assert r.status_code == 200
-    assert math.isnan(float(net.generators.at["gas", "p_nom"]))
+    assert float(net.generators.at["gas", "p_nom"]) == 0.0
+
+
+def test_blanking_a_ramp_limit_writes_nan(client, net):
+    """The other half of Phase 12g's distinction: `ramp_limit_up`'s class
+    default IS NaN, and PyPSA masking the ramp row is the documented way to
+    say "this unit has no ramp limit" — so blanking it still writes NaN."""
+    r = client.patch(BULK, json={
+        "component_class": "Generator", "names": ["gas"],
+        "updates": {"ramp_limit_up": None},
+    })
+    assert r.status_code == 200
+    assert math.isnan(float(net.generators.at["gas", "ramp_limit_up"]))
 
 
 def test_empty_string_takes_the_same_blank_path_as_null(client, net):
