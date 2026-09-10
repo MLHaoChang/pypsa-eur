@@ -1,0 +1,472 @@
+# The `qa_*.py` drivers had rotted, and were reporting green while doing it
+
+**Date:** 2026-09-05
+**Found while:** answering "does it make sense to do e2e QA of the backend decomposition?"
+**Status:** resolved on 2026-09-06 — the mechanical rot was fixed first, then the
+four auth-blocked drivers were unblocked (see the follow-up at the bottom). One
+driver remains blocked, and cannot be fixed by editing.
+
+## What these files are
+
+`pypsa-gui/backend/tests/qa_*.py` — nineteen standalone PASS/FAIL drivers, run as
+`python tests/qa_x.py`, each ending in `sys.exit(1 if FAIL else 0)`.
+
+`pytest.ini` excludes them **on purpose**:
+
+```ini
+python_files = test_*.py
+```
+
+with a comment saying they are "hand-rolled PASS/FAIL drivers, not pytest
+functions". That is a reasonable decision, and it has a consequence nobody
+tracked: **nothing runs them.** They are not in the pytest suite, and until
+2026-09-05 there was no CI for the backend at all. They were last exercised
+whenever someone last typed the command by hand.
+
+## What had rotted
+
+### 1. Handlers referenced at an address they left two moves ago
+
+Ten call sites across five drivers did `sim_router.get_cost_breakdown()`,
+`sim_router.get_emissions()`, and so on. Those serializers were carved out of
+`routers/simulation.py` into `routers/results.py` well before the 2026-09-04
+decomposition, so every one of those calls raised
+`AttributeError: module 'routers.simulation' has no attribute 'get_...'`.
+
+Eight source-text assertions had the same problem in a worse form: they
+`read_text()` a source file and search it for a snippet. When the code moves,
+the file still exists, the read succeeds, the snippet is absent, and the
+assertion reports a **false failure about the product**:
+
+> `[FAIL] line_duals multiplies congestion rent by years weights — missing year multiplier`
+
+The multiplier was there the whole time; the assertion was reading a file it
+had left. One of them — the `co2_by_carrier` lowercasing check — pointed at
+`routers/simulation.py` for code that lives in the solver's cost-decomposition
+logging and **never** lived in either router. That assertion had never once
+checked what it claimed to check.
+
+### 2. A crash counted as nothing at all
+
+Every driver wraps its scenarios like this:
+
+```python
+try:
+    test_carrier_kpis_multi_period()
+except Exception as e:
+    print(f"  A3 crashed: {type(e).__name__}: {e}")
+```
+
+The `except` prints and moves on. It does **not** touch `FAIL_COUNT`. So a
+scenario that dies before its first assertion contributes nothing to the
+summary, and the driver exits `0`.
+
+`qa_batch_a` was the clearest case. Two of its three scenarios crashed on the
+stale references above, and it printed:
+
+```
+Total: 2  Pass: 2  Fail: 0
+```
+
+and exited zero. Green, and testing almost nothing. This is the same failure
+mode `pixi.toml` already warns about for the desktop tests — "a skipped test
+reads as a green suite, which is how a hole this size stays open" — reappearing
+in a place nobody was looking.
+
+### 3. One stale expectation, hidden behind a crash
+
+`qa_asset_economics`' multi-period scenario expected `fixed_cost_eur` to be
+**1,000,000 €** — the annual figure (10 MW × 100,000 €/MW/yr) — split across
+periods as 2/7 and 5/7. The code returns **7,000,000 €**: the annual figure
+times `investment_period_weightings["years"]` (2 + 5).
+
+The code is right. `tests/golden/oracle.py::horizon_capex` — the oracle behind
+the collected, CI-green `test_golden_economics.py` — is exactly:
+
+```python
+return rate_per_mw * p_nom_opt * sum(years)
+```
+
+and `services/period_utils.py` calls omitting that multiplier "the ~5x too
+small bug class this module exists to prevent". The driver was written against
+the pre-fix semantics and never caught up, because it crashed on a stale
+reference before reaching the assertion and the crash was not counted.
+
+## What was fixed
+
+| fix | scope |
+|---|---|
+| stale `sim_router.get_*` → `routers.results` | 10 call sites, 5 files |
+| stale source-text paths → the modules that hold the code now | 8 assertions, 2 files |
+| `_crashed()` helper: a crashed scenario now counts as a failure | 19 sites, 11 files |
+| the three stale horizon-cost expectations | `qa_asset_economics` |
+
+Result, running all nineteen:
+
+| | before | after |
+|---|---|---|
+| exit 0 | 13 | **14** |
+| exit 1 | 6 | 5 |
+
+The count barely moves and badly understates the change, because several of the
+"13" were exiting zero without testing anything. The assertions actually
+executed:
+
+| driver | before | after |
+|---|---|---|
+| `qa_batch_a` | 2 assertions, 2 scenarios crashed | **8, all pass** |
+| `qa_batch_b` | 6 assertions, 3 fail | **12, all pass** |
+| `qa_batch_c` | 22 assertions, 6 fail | **23, all pass** |
+| `qa_emissions_per_period` | crashed | **10, all pass** |
+| `qa_asset_economics` | 26, silently 0 fail | **26, all pass** |
+
+Every one of these produces identical results on `master` and on the
+decomposition branch — checked by running the fixed drivers against both
+checkouts. None of this rot was caused by the refactor; the refactor is simply
+what caused anyone to run them.
+
+## What is still blocked, and why
+
+Five drivers still exit 1. Each has a single root cause, and none is a product
+defect:
+
+| driver | blocked on |
+|---|---|
+| `qa_rename_project` | calls project handlers directly; they now take a FastAPI-injected `user`/`db`, so `services/project_registry.py::_org_id_or_none` receives a `Depends` sentinel |
+| `qa_results_summary_compare` | same |
+| `qa_save_load_roundtrip` | same |
+| `qa_layout_persistence` | unauthenticated in-process client — every request returns `401 Authentication required` |
+| `qa_phase4_compare` | drives HTTP against a **live** backend on `:8000`; `Connection refused` without one |
+
+The first four all date from before the auth/tenancy migration. Making them run
+means giving a standalone script the scaffolding `tests/conftest.py` already
+provides to pytest — a seeded org, a signed-in session, a DB — which is real
+work and duplicates fixtures that exist. The fifth is not fixable by editing at
+all; it needs an operator to start a server.
+
+## What to do about it
+
+The mechanical rot is gone, so these drivers now tell the truth about what they
+run. The open question is whether they should keep existing in this form.
+
+Three options, in increasing order of effort:
+
+1. **Leave them.** They now fail honestly and loudly. Someone running one gets a
+   real answer.
+2. **Give the four auth-blocked drivers a shared login helper**, so a standalone
+   script can seed an org and sign in the way `conftest.py` does.
+3. **Convert them to pytest tests.** They would then get the fixtures for free
+   and run in the new `gui-backend-tests` CI job. This contradicts the explicit
+   decision recorded in `pytest.ini`, so it should be a deliberate reversal
+   rather than a drive-by.
+
+Whatever is chosen, the thing worth keeping is the `_crashed()` change: without
+it, any future rot in these files is silent again.
+
+
+---
+
+# Follow-up, 2026-09-06: the four auth-blocked drivers now run
+
+Option 2 above, taken — and it turned out to be more than a login helper,
+because the diagnosis in the table above was incomplete in two ways. Recording
+both, since the second is the one that would have bitten anyone who took the
+table at face value.
+
+## What the diagnosis got wrong
+
+**It said three drivers "call project handlers directly". Only one does.**
+`qa_save_load_roundtrip` calls `save_project` / `load_project` as plain
+functions. `qa_rename_project` and `qa_results_summary_compare` drive HTTP for
+their assertions and only reach for a direct `save_project()` in their SETUP
+helper — so they had BOTH failures at once, the `Depends` sentinel first and
+then a wall of 401s.
+
+**It missed that the drivers write into the developer's checkout.**
+`qa_layout_persistence` computed its project paths as
+`backend/tests/../projects/<name>` and `rmtree`'d them; `qa_rename_project` and
+`qa_results_summary_compare` used `routers.projects.PROJECTS_DIR`. Nothing
+sandboxed any of it. That is independent of auth and was the more urgent of the
+two problems.
+
+## The shape of the fix
+
+`tests/qa_support.py` — new. A driver imports it BEFORE `main`, which is what
+pins `DATABASE_URL`, `PROJECTS_ROOT` and `PYPSAGUI_APP_DATA_DIR` at throwaway
+locations, seeds an org, and hands back a signed-in `TestClient`.
+
+It gets that by importing `tests/conftest.py` rather than restating it. Two
+helpers were extracted there from fixture bodies into plain functions —
+`make_auth_db()` and `install_network_into_backend()` — with the fixtures now
+thin wrappers around them, so the drivers and the suite share ONE copy of the
+sandbox. A second copy would drift, and would drift silently: miss `StaticPool`
+and the seeded user simply is not there for the request that needs it, which
+reads as an auth bug.
+
+## Three things that only surfaced by running them
+
+**`PyPSAService.set_network()` is not how you install a network any more.** It
+writes the process foreground, which a session adopts exactly ONCE. A driver
+calling it twice keeps saving the first network while believing it swapped. The
+suite's `install_network` fixture already handled this — dropping resident
+scratch contexts and un-binding live sessions — which is why extracting it
+mattered more than the auth wiring did.
+
+**Reading `PyPSAService.get_network()` reads the wrong context.** The active
+project is per session, so a driver checking the process foreground after an
+HTTP call is looking at a different context from the one the route just mutated.
+`qa_rename_project`'s "in-memory n.name syncs" scenario looked like a broken
+product hook; it was the driver looking in the wrong place.
+`qa_support.session_context()` resolves the client's own context, the way
+`conftest`'s `session_ctx` fixture does.
+
+**Two assertions were pinning pre-tenancy semantics, not product behaviour.**
+
+* `qa_rename_project` asserted "old project dir removed / new project dir
+  exists". Directory movement on rename is LOCAL-mode only
+  (`project_registry._may_move_directory`); in web mode the directory is
+  UUID-keyed and stays put while the row's `name` changes. Rewritten to assert
+  what the mode under test actually contracts: the renamed project resolves, its
+  directory exists and still holds `network.nc`, and the old name resolves to
+  nothing.
+* `qa_rename_project` asserted `400` for a traversal-shaped rename. It is `200`
+  now, and the traversal is contained by `safe_names.safe_dir_name`. The
+  assertion was rewritten to check the property the status code was defending —
+  the directory stays inside the projects root — and the contract change is
+  written up separately in
+  `2026-09-06-rename-accepts-any-name-and-it-reaches-a-header.md`, along with
+  the thing that chase turned up: the project name reaches
+  `Content-Disposition` unescaped.
+
+`qa_rename_project`'s child-reparent scenario also had to be rebuilt: it wrote
+`parent_project` into `metadata.json`, but `_rename_project_db` reparents
+`direct_children(db, project)` — a query on `Project.parent_project_id`. The
+tree is now built through `POST /{base}/scenarios`, so the DB link exists.
+
+## Where the drivers stand
+
+| driver | before | after |
+|---|---|---|
+| `qa_rename_project` | crashed in setup, 0 assertions | **23, all pass** |
+| `qa_results_summary_compare` | crashed in setup, 0 assertions | **53, all pass** |
+| `qa_save_load_roundtrip` | 1 (the crash), 0 real | **52, all pass** |
+| `qa_layout_persistence` | 27, 26 fail | **30, all pass** |
+
+All nineteen drivers were then run: **eighteen exit 0**, with `qa_phase4_compare` the one exception — see the 2026-09-07 follow-up at the bottom, which closes it.
+
+## The one that stays blocked — *for now; see the 2026-09-07 section*
+
+`qa_phase4_compare` still exits 1, and **editing cannot change that**. It reads
+two SOLVED scenario projects by name out of a server on `127.0.0.1:8000`, and
+its central check is a concurrency smoke test whose whole point is real HTTP
+against real uvicorn — an in-process `TestClient` would not exercise the HDF5
+race it was written to catch. It also acquired a second precondition at the auth
+migration that this document did not previously record: even with a server
+running, its `urllib` requests are unauthenticated and get 401.
+
+It now says so. A `preflight()` reports the one blocking reason in a single
+line — no server, no session, or no such project — instead of twenty-two
+identical `Connection refused` entries, and `PYPSA_GUI_QA_COOKIE` lets an
+operator hand it a session cookie.
+
+> **This paragraph was wrong**, and the follow-up at the bottom of this document
+> corrects it. "Editing cannot change that" was an assumption I never tested.
+
+## Closed: CI runs them now, without reversing `pytest.ini`
+
+The last paragraph of this section used to read "nothing runs them
+automatically, which means the rot this document describes can start over the
+moment someone stops typing the command by hand." That was the real problem —
+bigger than any individual driver being broken — and it is fixed.
+
+Option 3 as originally framed (convert them to pytest tests) is still NOT taken,
+because the decision recorded in `pytest.ini` is a reasonable one: these are
+PASS/FAIL scripts, not pytest functions. What was wrong was never that decision;
+it was that the decision had no counterpart. It has one now:
+
+* `tests/run_qa_drivers.py` runs all runnable drivers as subprocesses
+  and fails if any exits non-zero. **~2 minutes** for the set.
+* `pixi run gui-qa-drivers` invokes it, from `[feature.test.tasks]` — same
+  placement, and the same reason, as `gui-tests`.
+* The `gui-backend-tests` CI job runs that task after the pytest step.
+
+Skipping is explicit and checked. `_EXCLUDED` in the runner is the only escape,
+every entry states its reason, and both the runner and a collected test fail if
+an entry names a file that no longer exists. New drivers are picked up by glob,
+so adding one requires no registration — only removing one from coverage takes a
+deliberate act.
+
+`tests/test_qa_driver_coverage.py` guards the arrangement itself, and is a
+normal collected test so CI runs it: the skip list is not stale, every exclusion
+has a real reason, `pytest.ini` still collects `test_*.py` alone, the pixi task
+is still under `[feature.test.tasks]` with the right `cwd`, and the CI job still
+calls it. All five checks were verified by mutation — and the mutation run
+earned its keep: the `pytest.ini` check was passing **vacuously**, because that
+file names `python_files = test_*.py` in a comment as well as in the setting and
+a substring search matched the comment. It reads the parsed setting now.
+
+`qa_phase4_compare` remained the one excluded driver at that point. It no
+longer is — see below.
+
+---
+
+# 2026-09-07: the last driver, and a wrong call I made about it
+
+`qa_phase4_compare` runs now. All nineteen drivers pass, and CI runs all
+nineteen.
+
+## What I got wrong
+
+The section above says, of that driver: *"editing cannot change that"*. I wrote
+it confidently and never tested it. Both halves of the reasoning were wrong:
+
+**"It needs an operator to start a server."** It does need a real server — but
+nothing stops the driver from starting one itself. `uvicorn` runs fine in a
+daemon thread inside the driver's own process, and doing it IN-PROCESS is what
+makes it work at all: the thread shares `tests/qa_support.py`'s sandbox, so it
+serves the same in-memory database and seeded org the driver signs in against.
+A subprocess would have come up with an empty database and 404'd on every
+scenario, which is probably the shape I was imagining when I called it
+impossible.
+
+I had in fact already booted a real uvicorn against this backend twice while
+investigating an unrelated finding, three days before writing that the driver
+could not have one. The evidence was sitting in my own transcript.
+
+**"It reads two SOLVED scenario projects by name."** True, and irrelevant. Every
+check in the driver is a SELF-CONSISTENCY assertion on the payload — per-carrier
+sums reconcile with totals, rates land in [0, 100], `by_unit` is sorted by
+cycles, period keys are a subset of the project's periods. Not one of them reads
+a number that depends on which network produced it. Any solved network with
+renewables and storage satisfies them. I never checked that before concluding
+the specific `4_nodes` data was required.
+
+## What it does now
+
+Default: builds a three-period network shaped so the payloads are non-trivial —
+400 MW of solar against a 100 MW evening-peaked load so the LP spills some
+(curtailment **69.9%**, 6.4 GWh), plus a cyclic battery so `by_unit` has a real
+cycle count — solves it, saves it as both scenarios, boots uvicorn on an
+ephemeral port, and runs every check over real HTTP. The concurrency smoke test
+keeps the property that made it worth having: **20 concurrent reads in 4.7s
+against a real ASGI server**, not a `TestClient`.
+
+Lost load stays `available=False`. That is the check's own documented happy path
+(the LP met all demand), not a gap.
+
+The operator path is preserved rather than replaced: set `PYPSA_GUI_QA_BASE` to
+an API root and the driver skips all seeding and tests that server instead, with
+`PYPSA_GUI_QA_COOKIE` for the session and `PYPSA_GUI_QA_SCENARIOS` to name real
+projects. Checking real scenarios on a real deployment is still worth doing;
+it is just no longer the only way to run the file.
+
+## Cost
+
+The runner goes from 18 drivers in 2m10s to **19 in 2m35s** — the new driver
+costs 13s, most of it the solve. `_EXCLUDED` in `tests/run_qa_drivers.py` is now
+empty of drivers: the only entry left is `qa_support.py`, which is a library.
+
+## An unrelated thing this turned up: the `PYPSA_GUI_` env-var prefix
+
+The first cut named the new variables `PYPSA_GUI_QA_BASE` and friends. Running
+the driver then printed, before anything else:
+
+```
+Unknown option 'gui_qa_base' from env var 'PYPSA_GUI_QA_BASE'.
+Use pypsa.options.describe() to see valid options.
+```
+
+pypsa parses **every** `PYPSA_*` environment variable as one of its own options
+and warns on anything it does not recognise. So this is not about the QA vars:
+it applies to every `PYPSA_GUI_*` variable the product defines —
+`PYPSA_GUI_ALLOW_USER_CODE`, `PYPSA_GUI_API_ORIGIN`,
+`PYPSA_GUI_CHAT_DAILY_TOKEN_CAP` and the rest each emit a line like that
+whenever they are set and pypsa is imported.
+
+The repo already has a collision-free convention in `PYPSAGUI_APP_DATA_DIR`,
+`PYPSAGUI_LOCAL_MODE`, `PYPSAGUI_PROJECTS_ROOT` — no underscore after `PYPSA`,
+so pypsa's parser ignores them. The new QA variables use that form.
+
+Renaming the EXISTING `PYPSA_GUI_*` variables was not done and should not be
+done casually: they are a deployment interface, and the cost is a log line, not
+a malfunction. Recorded so the next person choosing a variable name picks
+`PYPSAGUI_` and does not have to rediscover why.
+
+## The lesson worth keeping
+
+The two claims that made this driver unfixable were an assumption about the
+runtime and an assumption about the data, neither tested, both written into a
+findings document where they then read as established fact for two days. A
+finding that says "cannot" should carry the check that established it, or say
+plainly that it did not.
+
+
+---
+
+# Follow-up, 2026-09-08: the self-hosting driver was red in CI and green locally
+
+Making `qa_phase4_compare` self-hosting worked on the machine it was written on
+and failed on the first CI run, in the step this same work had just added:
+
+```
+[FAIL] qa_phase4_compare  (9s)
+      exit=1
+      | ValueError: badly formed hexadecimal UUID string
+```
+
+raised inside SQLAlchemy's `Uuid.result_processor` while loading an ORM row.
+
+## What it actually was
+
+The sandbox in `tests/qa_support.py` is `tests/conftest.py`'s database, and
+that is one `:memory:` SQLite behind a `StaticPool` — deliberately, because
+`:memory:` gives each *connection* its own database, so the seeded user is only
+visible to the request that needs it if every caller shares one connection.
+
+That is safe for the suite, which drives the app through `TestClient` one
+request at a time. It is not safe for a driver that boots a REAL uvicorn and
+fires 20 concurrent requests at it, because those handlers run on anyio worker
+threads — several threads on one `sqlite3.Connection`, with nothing serialising
+them.
+
+How badly that fails depends on the interpreter. Same SQLAlchemy (2.0.50),
+twelve threads doing mixed reads and writes through a StaticPool `:memory:`
+engine, reduced to a 40-line script with no product code in it:
+
+| interpreter | result |
+|---|---|
+| Python 3.11.15 | 0 errors |
+| Python 3.12.3 | 4 errors, `sqlite3.InterfaceError: bad parameter or other API misuse` |
+
+The local verification venv is 3.11; the pixi `test` environment CI runs is
+3.12. The `ValueError` was the same corruption wearing a different hat — a
+value from the wrong place reaching a UUID column's result processor.
+
+**Not a product defect.** The product never runs this way: on SQLite it uses a
+file with `NullPool` (`db/session.py::get_engine`), and otherwise Postgres.
+The shared connection is a test-harness artifact, and the driver was the first
+thing to use it concurrently.
+
+## The fix
+
+`make_auth_db()` takes an optional URL. Default unchanged — the suite keeps its
+in-memory StaticPool database. `tests/qa_support.py` passes a file in a
+temporary directory, so every thread gets its own connection, which is what the
+product does. `tests/test_qa_support_sandbox.py` pins both halves.
+
+Verified: 640 requests at 32-way concurrency against the self-hosted server,
+zero failures and zero server-side tracebacks, where the driver itself only
+does 20 at 8-way.
+
+## Two lessons, and the second is about this runner
+
+**A single-threaded harness is not a server.** The sandbox had one documented
+constraint (`StaticPool` is load-bearing) and one undocumented one (it is
+single-threaded). Adding a real server to a driver quietly violated the second.
+
+**The runner hid its own diagnosis.** `run_qa_drivers.py` tailed
+`stdout + stderr` as one blob, so what reached CI was the bottom 40 lines of
+that concatenation: a decapitated traceback with no exception line above it,
+and none of the driver's own PASS/FAIL summary — which is on stdout and was
+truncated away entirely. It tails the two streams separately now, each labelled
+and each reporting how much it elided.

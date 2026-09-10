@@ -235,6 +235,14 @@ tsam = "==2.3.9"
 # stays here.
 gui-tests = { cmd = "python -m pytest", cwd = "pypsa-gui/backend" }
 
+# The `qa_*.py` drivers, which `gui-tests` does NOT cover: `pytest.ini` sets
+# `python_files = test_*.py`, so pytest never collects them. That is a
+# deliberate decision (they are PASS/FAIL scripts, not pytest functions) whose
+# consequence was that nothing ran them at all — five of nineteen had been
+# broken for months and several of the rest exited zero while testing almost
+# nothing. Same `test` environment, same reason as above.
+gui-qa-drivers = { cmd = "python tests/run_qa_drivers.py", cwd = "pypsa-gui/backend" }
+
 integration-tests = """
     snakemake -call solve_elec_networks --configfile config/test/config.electricity.yaml &&
     snakemake -call --configfile config/test/config.overnight.yaml &&

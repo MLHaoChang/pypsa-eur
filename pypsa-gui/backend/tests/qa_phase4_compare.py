@@ -13,25 +13,257 @@ Verifies the new ResultsSummary fields against the live backend:
     in the session is still effective when Phase-4 compute paths are also
     in the mix).
 
-The test calls the live backend on 127.0.0.1:8000 — no harness setup
-needed. Run with `python -m tests.qa_phase4_compare` from
-pypsa-gui/backend.
+Two ways to run it
+------------------
+**Self-hosted (the default, no setup).** The driver boots a REAL uvicorn on an
+ephemeral port, seeds two solved multi-period scenarios, and runs every check
+against it over real HTTP. Just `python tests/qa_phase4_compare.py`.
+
+This file used to say it "cannot be made self-contained", which was wrong on
+both halves of the reasoning:
+
+* The server was never the obstacle — uvicorn runs perfectly well in a daemon
+  thread inside this process. Doing it IN-PROCESS is what makes it work at all:
+  the thread shares `tests/qa_support.py`'s sandbox, so it serves the same
+  in-memory database and seeded org the driver signs in against. A subprocess
+  would get its own empty database and see no projects.
+* The specific `4_nodes_N-0` / `4_nodes_N-1` data was never needed either.
+  Every check below is a SELF-CONSISTENCY assertion on the payload — per-carrier
+  sums reconcile with totals, rates land in [0, 100], `by_unit` is sorted, period
+  keys are a subset of the project's periods. None of them reads a number that
+  depends on which network produced it.
+
+What is genuinely load-bearing is that the concurrency smoke test runs against a
+real ASGI server rather than an in-process `TestClient`, because the HDF5 race it
+was written to catch lives in real concurrent request handling. A thread-hosted
+uvicorn keeps that property; `TestClient` would not.
+
+(The `PYPSAGUI_` prefix rather than `PYPSA_GUI_` is deliberate: pypsa parses
+every `PYPSA_*` environment variable as one of its own options and prints
+`Unknown option 'gui_qa_base' from env var ...` on import for anything it does
+not recognise. The repo already uses `PYPSAGUI_` for `PYPSAGUI_APP_DATA_DIR` and
+friends; these follow it.)
+
+**Against an operator's own server.** Set `PYPSAGUI_QA_BASE` to its API root
+(e.g. `http://127.0.0.1:8000/api`) and the driver skips all seeding and hits
+that instead — the original behaviour, for checking real scenarios. Add
+`PYPSAGUI_QA_COOKIE` (a `session=...` cookie from a signed-in browser,
+DevTools → Application → Cookies) unless the server runs in local mode, and set
+`PYPSAGUI_QA_SCENARIOS` to a comma-separated pair of SOLVED project names if
+yours are not called `4_nodes_N-0` / `4_nodes_N-1`.
+
+`preflight()` reports the single blocking reason in one line — no server, no
+session, no such project — instead of twenty identical connection errors.
+
+Run with `python tests/qa_phase4_compare.py` from pypsa-gui/backend.
 """
 from __future__ import annotations
 
 import concurrent.futures as _cf
 import json
+import os
+import pathlib
 import sys
 import time
+import urllib.error
 import urllib.request
 
-BASE = "http://127.0.0.1:8000/api"
-SCENARIOS = ["4_nodes_N-0", "4_nodes_N-1"]
+# Self-hosting imports `tests.qa_support`, so the backend directory has to be on
+# the path — this file is run as `python tests/qa_phase4_compare.py`, which puts
+# `tests/` on it, not the parent. Same header as every sibling driver; this one
+# lacked it only because it used to import nothing from the backend.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+
+# Set PYPSAGUI_QA_BASE to an API root to test an operator's own server; leave
+# it unset to have this driver boot its own. Both are rebound by `main()`.
+BASE = os.environ.get("PYPSAGUI_QA_BASE", "")
+
+# A `session=...` cookie from a signed-in browser. Unset is fine against a
+# server in local mode; against any other, every request is 401 without it.
+# In self-hosted mode this is set to the seeded session.
+COOKIE = os.environ.get("PYPSAGUI_QA_COOKIE", "")
+
+SCENARIOS = [
+    s.strip() for s in
+    os.environ.get("PYPSAGUI_QA_SCENARIOS", "4_nodes_N-0,4_nodes_N-1").split(",")
+    if s.strip()
+]
 
 
 def _get(path: str, timeout: float = 30.0) -> dict:
-    with urllib.request.urlopen(f"{BASE}{path}", timeout=timeout) as resp:
+    req = urllib.request.Request(f"{BASE}{path}")
+    if COOKIE:
+        req.add_header("Cookie", COOKIE)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read())
+
+
+# ── Self-hosting ─────────────────────────────────────────────────────────────
+
+
+def _build_scenario_network():
+    """
+    A small multi-period network that exercises all three Phase-4 payloads.
+
+    Deliberately shaped so the checks have something to check rather than
+    trivially-empty payloads:
+
+    * **Curtailment** — solar is given far more capacity than the load can
+      absorb at midday, with a `p_max_pu` profile that peaks well above demand,
+      so the LP spills some and `by_carrier_gwh` is non-zero.
+    * **Storage cycling** — a battery with `max_hours` and cyclic SoC, which
+      charges on the solar peak and discharges into the evening, so `by_unit`
+      has a unit with a non-zero cycle count.
+    * **Multi-period keys** — three investment periods, so every payload's
+      `by_period` has keys to be checked against the project's periods.
+
+    Lost load is left at `available=False`: no VOLL slack is configured, the LP
+    meets all demand, and `check_lost_load` treats that as its happy path.
+    """
+    import numpy as np
+    import pandas as pd
+    import pypsa
+
+    n = pypsa.Network()
+    base = pd.date_range("2026-01-01", periods=24, freq="h")
+    periods = [2026, 2027, 2028]
+    mi = pd.MultiIndex.from_product([periods, base], names=["period", "timestep"])
+    mi.name = "snapshot"
+    n.snapshots = mi
+    n.investment_periods = periods
+    for p in periods:
+        n.investment_period_weightings.loc[p, "years"] = 1.0
+        n.investment_period_weightings.loc[p, "objective"] = 1.0
+
+    n.add("Bus", "B1")
+    n.add("Carrier", "solar", co2_emissions=0.0)
+    n.add("Carrier", "gas", co2_emissions=0.2)
+    n.add("Carrier", "battery", co2_emissions=0.0)
+
+    # A daily solar shape, peaking at noon.
+    hours = np.arange(24)
+    shape = np.clip(np.sin((hours - 6) / 12 * np.pi), 0.0, None)
+    solar_pu = pd.Series(np.tile(shape, len(periods)), index=mi)
+
+    # 400 MW of solar against a 100 MW evening-weighted load: at midday the
+    # array can make ~400 MW and nothing can absorb it, so it is curtailed.
+    n.add("Generator", "Solar", bus="B1", carrier="solar",
+          p_nom=400.0, marginal_cost=0.0, p_max_pu=solar_pu)
+    n.add("Generator", "Gas", bus="B1", carrier="gas",
+          p_nom=200.0, marginal_cost=80.0)
+    n.add("StorageUnit", "Bat", bus="B1", carrier="battery",
+          p_nom=50.0, max_hours=4.0, marginal_cost=0.0,
+          efficiency_store=0.95, efficiency_dispatch=0.95,
+          cyclic_state_of_charge=True)
+
+    # Load: flat 60 MW with an evening peak the solar cannot serve directly,
+    # which is what gives the battery a reason to cycle.
+    load = np.full(24, 60.0)
+    load[17:22] = 120.0
+    n.add("Load", "L1", bus="B1", p_set=pd.Series(np.tile(load, len(periods)), index=mi))
+    return n
+
+
+def _solve(n) -> tuple[str, str]:
+    import queue
+    import threading
+
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig, run_simulation
+    from tests import qa_support
+
+    qa_support.install_network(n)
+    cfg = SolverConfig(multi_investment_periods=True, solve_strategy="overnight")
+    return run_simulation(
+        cfg, n, PyPSAService.get_lock(), threading.Event(), queue.SimpleQueue()
+    )
+
+
+def _free_port() -> int:
+    import socket
+
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def serve_self() -> str | None:
+    """
+    Boot a real uvicorn against the sandbox, seed both scenarios, and rebind
+    `BASE`/`COOKIE` at module scope. Returns a blocking reason, or None.
+
+    IN-PROCESS, in a daemon thread, on purpose. The server has to share
+    `qa_support`'s in-memory database and seeded org — a subprocess would come
+    up with an empty database and 404 on every scenario. It is still a real
+    ASGI server over a real socket, which is what the concurrency check needs.
+    """
+    global BASE, COOKIE
+
+    import threading
+
+    import uvicorn
+
+    from tests import qa_support  # pins the sandbox; must precede `main`
+    import main
+    from settings import get_settings
+
+    n = _build_scenario_network()
+    status, condition = _solve(n)
+    if status not in ("ok", "optimal"):
+        return f"the seeded scenario did not solve: status={status!r} condition={condition!r}"
+
+    for name in SCENARIOS:
+        qa_support.install_network(n)
+        qa_support.save_project(name)
+
+    port = _free_port()
+    config = uvicorn.Config(main.app, host="127.0.0.1", port=port, log_level="warning")
+    server = uvicorn.Server(config)
+    threading.Thread(target=server.run, daemon=True).start()
+
+    BASE = f"http://127.0.0.1:{port}/api"
+    settings = get_settings()
+    raw = qa_support.client().cookies.get(settings.session_cookie_name)
+    COOKIE = f"{settings.session_cookie_name}={raw}"
+
+    deadline = time.monotonic() + 30.0
+    while time.monotonic() < deadline:
+        if server.started:
+            return None
+        time.sleep(0.1)
+    return f"the self-hosted server did not come up on port {port} within 30s"
+
+
+def preflight() -> str | None:
+    """
+    The one-line reason this driver cannot run, or None if it can.
+
+    Without it a missing server produces twenty-two identical
+    `Connection refused` lines and a missing session produces twenty-two
+    identical 401s, neither of which names what to do about it.
+    """
+    try:
+        _get(f"/projects/{SCENARIOS[0]}/results-summary", timeout=5.0)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            return (
+                f"the backend at {BASE} requires a session and none was "
+                f"supplied — set PYPSAGUI_QA_COOKIE to a `session=...` cookie "
+                f"from a signed-in browser (DevTools -> Application -> Cookies)"
+            )
+        if exc.code == 404:
+            return (
+                f"the backend has no project named {SCENARIOS[0]!r} — this driver "
+                f"reads {SCENARIOS} and expects both SOLVED"
+            )
+        return f"the backend answered {exc.code} for {SCENARIOS[0]!r}"
+    except OSError as exc:
+        return (
+            f"no backend answering at {BASE} ({exc}) — start one with "
+            f"`pixi run gui-backend`, or unset PYPSAGUI_QA_BASE to have this "
+            f"driver host its own"
+        )
+    return None
 
 
 def _approx_eq(a: float, b: float, tol: float = 1e-3, rel: float = 1e-3) -> bool:
@@ -226,6 +458,23 @@ def run_concurrent_smoke() -> list[str]:
 
 
 def main() -> int:
+    if BASE:
+        _section(f"Using the server at {BASE}")
+    else:
+        _section("Self-hosting: solving a scenario and booting uvicorn")
+        blocked = serve_self()
+        if blocked is not None:
+            _section("Result")
+            print(f"\n[BLOCKED] {blocked}")
+            return 1
+        print(f"  serving on {BASE}")
+
+    blocked = preflight()
+    if blocked is not None:
+        _section("Result")
+        print(f"\n[BLOCKED] {blocked}")
+        return 1
+
     failures: list[str] = []
 
     _section("Per-scenario payload checks")

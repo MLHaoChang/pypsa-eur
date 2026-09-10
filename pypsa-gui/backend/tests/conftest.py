@@ -77,7 +77,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import NullPool, StaticPool
 
 from db.base import Base
 import main
@@ -151,28 +151,75 @@ def reset_backend():
 _SEED = {"password": "test-password-123"}
 
 
-@pytest.fixture(scope="session")
-def _auth_db():
+def make_auth_db(url: str | None = None):
     """
-    One in-memory SQLite database shared by every test in the session.
+    Build the SQLite database the harness runs against, and install its
+    sessionmaker as `db.session.SessionLocal`.
 
-    StaticPool is load-bearing: `:memory:` gives each *connection* its own
+    Returns `(engine, session_local, previous_session_local)` — the caller owns
+    teardown, because the two callers own it differently: the `_auth_db`
+    fixture restores and disposes at end of session, while `tests/qa_support.py`
+    (the standalone `qa_*.py` drivers) holds it for the life of the process.
+
+    Extracted from the fixture body so the drivers get THIS database rather
+    than a second hand-rolled copy of it. A copy would drift, and the way it
+    would drift is silent: miss StaticPool below and the seeded user simply
+    isn't there for the request that needs it, which reads as an auth bug.
+
+    **Default (`url=None`) — one `:memory:` database behind a `StaticPool`.**
+    StaticPool is load-bearing there: `:memory:` gives each *connection* its own
     database, and the app opens connections from several places (the auth
     middleware, `get_db`, the solve dispatcher). Without a single pooled
     connection the seeded user would be invisible to the request that needs it.
+    The suite drives the app through `TestClient`, one request at a time, so
+    nothing ever uses that one connection from two threads at once.
+
+    **A file URL — a normal connection per checkout, no StaticPool.**
+    For a caller that DOES touch the database from several threads:
+    `tests/qa_phase4_compare.py` boots a real uvicorn and fires concurrent
+    requests, so its handlers run on anyio worker threads. Handing those threads
+    one shared `sqlite3.Connection` is unsafe, and how it fails depends on the
+    interpreter — measured on SQLAlchemy 2.0.50, twelve threads mixing reads and
+    writes: Python 3.11 came through clean, Python 3.12 raised
+    `sqlite3.InterfaceError: bad parameter or other API misuse`. A file needs no
+    shared connection to be one database, which is also how the product runs on
+    SQLite (`db/session.py::get_engine`).
+
+    See `tests/test_qa_support_sandbox.py`.
     """
     from db import session as db_session_module
 
-    engine = create_engine(
-        "sqlite+pysqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    if url is None:
+        engine = create_engine(
+            "sqlite+pysqlite:///:memory:",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+    else:
+        # Mirrors `db/session.py::get_engine`'s file-backed branch. NullPool so
+        # a connection is opened and closed per checkout rather than parked in a
+        # pool; `check_same_thread=False` because FastAPI serves sync handlers
+        # from a worker thread, which is safe now that no two of them share one
+        # connection.
+        engine = create_engine(
+            url,
+            connect_args={"check_same_thread": False, "timeout": 30},
+            poolclass=NullPool,
+        )
     db_session_module.enable_sqlite_foreign_keys(engine)
     Base.metadata.create_all(engine)
     testing_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     original = db_session_module.SessionLocal
     db_session_module.SessionLocal = testing_session_local
+    return engine, testing_session_local, original
+
+
+@pytest.fixture(scope="session")
+def _auth_db():
+    """One in-memory SQLite database shared by every test in the session."""
+    from db import session as db_session_module
+
+    engine, testing_session_local, original = make_auth_db()
     try:
         yield engine, testing_session_local
     finally:
@@ -518,46 +565,56 @@ def build_network(*, solve: bool = False, gens_weight=None, obj_weight=None) -> 
     return n
 
 
-@pytest.fixture
-def install_network():
+def install_network_into_backend(n: pypsa.Network, name: str | None = None) -> pypsa.Network:
     """
     Install a network as the live singleton, optionally binding it to a project
     name (mimics a load: sets n.name + _loaded_project). Without `name` the
     network is left UNBOUND (_loaded_project stays None) — the first-save case.
+
+    A plain function so `tests/qa_support.py` — the standalone `qa_*.py`
+    drivers — installs a network the same way the suite does. A bare
+    `PyPSAService.set_network()` is NOT the same way, and the difference is
+    silent: the process foreground it writes is adopted by a session exactly
+    once, so a driver that calls it twice keeps saving the FIRST network while
+    believing it swapped.
     """
-    def _install(n: pypsa.Network, name: str | None = None) -> pypsa.Network:
-        PyPSAService.set_network(n)
-        sim_router._state["solver_config"] = SolverConfig()
-        if name is not None:
-            n.name = name
-            PyPSAService.set_loaded_project(name)
-        # Step 0b: drop every resident SCRATCH context so the next request
-        # re-adopts what was just installed.
-        #
-        # `set_network` writes the PROCESS foreground, which a session adopts
-        # exactly once (`adopt_process_foreground`). Without this, the second
-        # `install_network` in a test would be invisible: the session already
-        # holds a scratch context and would keep serving the FIRST network
-        # while the test believed it had swapped it. Bound project contexts are
-        # deliberately left alone — those mirror real on-disk projects.
-        with PyPSAService._registry_lock:
-            for key in [k for k in PyPSAService._contexts if k.startswith("scratch:")]:
-                PyPSAService._contexts.pop(key, None)
-        # …and un-bind every live session, so the next request resolves the
-        # freshly-installed network instead of re-hydrating whatever project the
-        # session was last pointed at. `install_network` means "this is what the
-        # client is now looking at"; leaving the pointer set would silently
-        # discard the install one request later.
-        try:
-            from sqlalchemy import update
+    PyPSAService.set_network(n)
+    sim_router._state["solver_config"] = SolverConfig()
+    if name is not None:
+        n.name = name
+        PyPSAService.set_loaded_project(name)
+    # Step 0b: drop every resident SCRATCH context so the next request
+    # re-adopts what was just installed.
+    #
+    # `set_network` writes the PROCESS foreground, which a session adopts
+    # exactly once (`adopt_process_foreground`). Without this, the second
+    # `install_network` in a test would be invisible: the session already
+    # holds a scratch context and would keep serving the FIRST network
+    # while the test believed it had swapped it. Bound project contexts are
+    # deliberately left alone — those mirror real on-disk projects.
+    with PyPSAService._registry_lock:
+        for key in [k for k in PyPSAService._contexts if k.startswith("scratch:")]:
+            PyPSAService._contexts.pop(key, None)
+    # …and un-bind every live session, so the next request resolves the
+    # freshly-installed network instead of re-hydrating whatever project the
+    # session was last pointed at. `install_network` means "this is what the
+    # client is now looking at"; leaving the pointer set would silently
+    # discard the install one request later.
+    try:
+        from sqlalchemy import update
 
-            from db import session as _db
-            from db.models import Session as _SessionRow
+        from db import session as _db
+        from db.models import Session as _SessionRow
 
-            with _db.SessionLocal() as db:
-                db.execute(update(_SessionRow).values(active_project_id=None))
-                db.commit()
-        except Exception:  # noqa: BLE001 — no DB in pure-service tests
-            pass
-        return n
-    return _install
+        with _db.SessionLocal() as db:
+            db.execute(update(_SessionRow).values(active_project_id=None))
+            db.commit()
+    except Exception:  # noqa: BLE001 — no DB in pure-service tests
+        pass
+    return n
+
+
+@pytest.fixture
+def install_network():
+    """The function above, as a fixture."""
+    return install_network_into_backend
