@@ -87,6 +87,28 @@ jobs:
         exit 1
 
     - name: Perform CodeQL Analysis
+      id: analyze
       uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{matrix.language}}"
+
+    # TEMPORARY DIAGNOSTIC — read-only, runs after the upload, changes nothing
+    # about what is scanned or reported. The code-scanning alert list is not
+    # reachable from the authoring environment (no API route through its
+    # proxy), so this prints every result with rule, severity and location
+    # into the job log, which IS readable. To be reverted once read.
+    - name: Print CodeQL results to the log (diagnostic)
+      if: always()
+      shell: bash
+      run: |
+        set -euo pipefail
+        for f in $(find "${{ steps.analyze.outputs.sarif-output }}" -name '*.sarif'); do
+          echo "=== CODEQL SARIF: $f ==="
+          echo "=== RULE SEVERITIES ==="
+          jq -r '.runs[].tool.driver.rules[]? | [.id, (.properties."security-severity" // "n/a"), (.properties."problem.severity" // "n/a")] | @tsv' "$f" | sort -u
+          echo "=== COUNT BY RULE ==="
+          jq -r '.runs[].results[] | .ruleId' "$f" | sort | uniq -c | sort -rn
+          echo "=== ALL RESULTS: rule<TAB>file:line<TAB>message ==="
+          jq -r '.runs[].results[] | [.ruleId, ((.locations[0].physicalLocation.artifactLocation.uri // "?") + ":" + ((.locations[0].physicalLocation.region.startLine // 0)|tostring)), (.message.text | gsub("\n";" ") | .[0:160])] | @tsv' "$f" | sort
+          echo "=== TOTAL: $(jq '[.runs[].results[]] | length' "$f") ==="
+        done
