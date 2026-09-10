@@ -27,6 +27,7 @@ enforces that.
 import pandas as pd
 
 from services import period_utils as _period_utils
+from services.adequacy.slack import DSR_SLACK_CARRIER, is_slack_carrier
 from services.solver.periodized_costs import _annuity
 
 

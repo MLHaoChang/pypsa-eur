@@ -32,7 +32,8 @@ from services.solver.diagnostics import (
     _log_sclopf_post_solve,
 )
 from services.solver.objective import _rescale_results_for_objective
-from services.solver.runtime import _check_stop
+from services.solver.runtime import _check_stop, ValidationRefused
+from services.validation_service import _check_nonfinite_bounds
 from services.solver.vintage_store import _MYOPIC_VINTAGE_SOURCE, _frozen_vintage_store
 
 

@@ -35,6 +35,7 @@ import pandas as pd
 from services import period_utils as _period_utils
 from services.adequacy.window import snapshot_label as _snapshot_label
 from services.solver.assumptions import _canonical_load_carrier_key
+from services.solver.runtime import _safe_log
 
 logger = logging.getLogger(__name__)
 
