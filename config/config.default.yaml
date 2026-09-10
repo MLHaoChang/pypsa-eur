@@ -1359,7 +1359,7 @@ data:
     source: primary
     version: latest
   synthetic_electricity_demand:
-    source: primary
+    source: archive
     version: latest
   opsd_electricity_demand:
     source: archive
