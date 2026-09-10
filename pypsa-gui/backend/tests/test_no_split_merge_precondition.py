@@ -237,6 +237,11 @@ def _drive_one_turn(tmp_projects_dir, install_network, fake_anthropic_module,
         def emit(self, record):
             records.append(self.format(record))
 
+    # Keep the write-ahead record on disk past the end of the turn; see the
+    # note beside `pending_path` below. Patched here rather than in the tests
+    # so both the proof and its discrimination half see the same drive.
+    monkeypatch.setattr(chat_service, "clear_pending_turn", lambda _ctx: None)
+
     collector = _Collector()
     logger.addHandler(collector)
     prev_level = logger.level
@@ -260,17 +265,47 @@ def _drive_one_turn(tmp_projects_dir, install_network, fake_anthropic_module,
     chat_path = tmp_projects_dir / "NoSplitProj" / "chat.jsonl"
     chat_text = chat_path.read_text(encoding="utf-8")
 
-    return log_text, chat_text
+    # THE THIRD SINK. `run_turn` opens a write-ahead record before it talks to
+    # the model and clears it in its `finally`, so on a turn that completes the
+    # file is gone by the time we get here — which is why this sink went
+    # unpinned while the other two were covered. Clearing is suppressed above
+    # so the record survives the successful drive and can be read.
+    #
+    # It matters as much as the other two: it lands beside the transcript, in
+    # the project directory, and therefore travels into snapshot and copy
+    # bundles the same way. CodeQL flags the write
+    # (py/clear-text-storage-sensitive-data, chat_service.py) and is right that
+    # it is an unsanitised-looking file write; the sanitiser is
+    # `_redact_for_persist` at the CALL SITE, which is exactly the arrangement
+    # nothing here was proving.
+    pending_path = chat_path.with_suffix(chat_path.suffix + ".pending")
+    pending_text = (
+        pending_path.read_text(encoding="utf-8") if pending_path.exists() else ""
+    )
+    assert pending_text, (
+        "the pending-turn record was not written (or was cleared anyway), so "
+        "the assertions on it below would be vacuous"
+    )
+
+    return log_text, chat_text, pending_text
 
 
 def test_non_pattern_secret_is_scrubbed_from_log_and_chat_jsonl(
     tmp_projects_dir, install_network, fake_anthropic_module, monkeypatch,
 ):
     """THE PROOF (module docstring). Both real sinks must be clean."""
-    log_text, chat_text = _drive_one_turn(
+    log_text, chat_text, pending_text = _drive_one_turn(
         tmp_projects_dir, install_network, fake_anthropic_module, monkeypatch,
     )
 
+    assert SECRET not in pending_text, (
+        "a managed key value leaked into the pending-turn record "
+        "(chat.jsonl.pending) — that file sits beside the transcript and "
+        "travels into snapshot/copy bundles with it, so it is a durable sink "
+        "exactly like chat.jsonl. The sanitiser is `_redact_for_persist` at "
+        "the `begin_pending_turn` call site in `run_turn`; if that call lost "
+        "its wrapper, this is what notices."
+    )
     assert SECRET not in log_text, (
         "a managed key value with no sk-ant-/key=/bearer shape leaked into "
         "the backend log — the value-substitution widening (Task 4) is "
@@ -303,10 +338,15 @@ def test_without_the_value_substitution_widening_the_same_secret_leaks(
         redaction, "_substitute_managed_values", lambda text, values: text
     )
 
-    log_text, chat_text = _drive_one_turn(
+    log_text, chat_text, pending_text = _drive_one_turn(
         tmp_projects_dir, install_network, fake_anthropic_module, monkeypatch,
     )
 
+    assert SECRET in pending_text, (
+        "disabling value-substitution should have let the secret through to "
+        "the pending-turn record — if it didn't, the assertion above proves "
+        "nothing"
+    )
     assert SECRET in log_text, (
         "disabling value-substitution should have let the secret through "
         "to the log — if it didn't, the log assertion above proves nothing"
