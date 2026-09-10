@@ -50,24 +50,26 @@ jobs:
     # severity, CVE and the package it is in. To be reverted once read.
     - name: Print grype results to the log (diagnostic)
       if: always()
+      continue-on-error: true
       shell: bash
       run: |
-        set -euo pipefail
+        set -uo pipefail
         f="${{ steps.scan.outputs.sarif }}"
         echo "=== GRYPE SARIF: $f ==="
-        echo "=== COUNT BY SEVERITY (rule security-severity bucket) ==="
-        jq -r '.runs[].tool.driver.rules[]? | .properties."security-severity" // "n/a"' "$f" | awk '{s=$1+0; if(s>=9)b="critical"; else if(s>=7)b="high"; else if(s>=4)b="medium"; else b="low"; print b}' | sort | uniq -c
-        echo "=== ALL FINDINGS: severity<TAB>CVE<TAB>package@version<TAB>fixed-in ==="
+        echo "=== COUNT BY SEVERITY ==="
+        jq -r '.runs[0].tool.driver.rules[]? | .properties."security-severity" // "0"' "$f" | awk '{s=$1+0; if(s>=9)b="critical"; else if(s>=7)b="high"; else if(s>=4)b="medium"; else b="low"; print b}' | sort | uniq -c
+        echo "=== ALL FINDINGS: severity | CVE | message | fixed-in ==="
         jq -r '
-          (.runs[].tool.driver.rules // []) as $rules
-          | .runs[].results[]
+          (.runs[0].tool.driver.rules // []) as $rules
+          | .runs[0].results[]
           | .ruleId as $id
-          | ($rules[] | select(.id==$id)) as $r
-          | [($r.properties."security-severity" // "n/a"), $id,
-             (.message.text | capture("(?<pkg>[^ ]+) (?<ver>[^ ]+)"; "g")? | "\(.pkg)@\(.ver)") // (.message.text|.[0:80]),
-             ($r.help.text // "" | capture("[Ff]ixed[^:]*: *(?<fix>[^\n]+)")?.fix // "-")]
-          | @tsv' "$f" | sort -rn
-        echo "=== TOTAL: $(jq '[.runs[].results[]] | length' "$f") ==="
+          | ([$rules[] | select(.id==$id)][0] // {}) as $r
+          | [ ($r.properties."security-severity" // "0"),
+              $id,
+              (.message.text // "" | gsub("\n";" ") | .[0:110]),
+              (($r.help.text // "") | split("\n") | map(select(test("ixed"))) | join(" ") | .[0:70]) ]
+          | join(" | ")' "$f" | sort -t'|' -k1 -rn
+        echo "=== TOTAL: $(jq '[.runs[0].results[]] | length' "$f") ==="
 
     # Set uri=pixi.lock for a readable location, and fingerprint each alert by
     # CVE id so code scanning matches against the master baseline by CVE, not line.
