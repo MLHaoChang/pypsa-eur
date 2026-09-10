@@ -44,7 +44,7 @@ vi.mock('../api/uploads', () => ({
 afterEach(() => cleanup())
 
 beforeEach(() => {
-  useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: null })
+  useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: null, assistantDockOpen: false })
   // `streaming` and `streamCleanup` have to be reset too: `onSend` returns
   // early while `streaming` is true, so a test that leaves it set makes every
   // later test's send a silent no-op — which reads as "the component ignored
@@ -253,16 +253,30 @@ it('renders an approve/reject control for tool_pending_confirmation and calls po
   })
 })
 
-// ── The agent navigating to Results must not kill the turn ────────────────
+// ── An unmount mid-turn must not kill the turn ────────────────────────────
 //
 // Reported: "show a summary of the key results and the key graphs" switches
 // the app to Results, and then either the conversation is gone or the chat is
-// still streaming with no tokens on screen.
+// still streaming with no tokens on screen. Both came from one fact —
+// ChatPanel's only mount used to be `activeSlidePanel === 'chat'`, so its own
+// frame handler answering a `ui_event` with setSlidePanel('results') unmounted
+// it mid-turn.
 //
-// Both come from one fact: ChatPanel's ONLY mount is `activeSlidePanel ===
-// 'chat'` (App.tsx), and the ErrorBoundary around it is keyed on that value —
-// so the moment ChatPanel's own frame handler answers a `ui_event` by calling
-// setSlidePanel('results'), React unmounts it mid-turn.
+// That specific trigger is now structurally impossible: 'chat' is not a
+// SlidePanel member and AssistantDock keeps ChatPanel mounted regardless of
+// navigation (see AssistantDock.eviction.test.tsx, which guards it).
+//
+// These tests still guard the OTHER half of the contract, which navigation
+// only happened to be the loudest trigger for: an unmount from any cause must
+// not abort a live turn, tokens arriving while unmounted must still land, a
+// remount must not clobber the in-flight turn with disk state, the terminal
+// frame must still close the connection, and an idle stream must still be
+// closed on unmount. Those paths remain reachable — an ErrorBoundary fallback
+// after a render crash, a project switch, HMR — so `scriptNavigateMidTurn`
+// still drives a real one: the ui_event frame it emits is exactly the frame
+// the reported bug arrived on, and the explicit `unmount()` below now stands
+// in for those remaining causes rather than being something navigation does
+// by itself.
 
 function scriptNavigateMidTurn() {
   const cleanup = vi.fn()
@@ -284,14 +298,17 @@ async function sendSummaryRequest() {
   await user.click(screen.getByTestId('chat-send'))
 }
 
-it('does not abort the live stream when the agent navigates to Results', async () => {
+it('does not abort the live stream when the panel unmounts mid-turn', async () => {
   const { cleanup } = scriptNavigateMidTurn()
   const { unmount } = renderPanel()
   await sendSummaryRequest()
 
-  // The agent's own directive moved the app off the chat panel.
+  // The agent's own directive opened Results. It no longer takes the
+  // assistant down with it — the dock is outside everything activeSlidePanel
+  // governs — so this is now just a check that the navigation happened.
   expect(useUIStore.getState().activeSlidePanel).toBe('results')
-  // Which is what unmounts ChatPanel.
+  // Stand-in for the unmount causes that DO remain: an ErrorBoundary
+  // fallback, a project switch, HMR. Any of them can land mid-turn.
   unmount()
 
   expect(cleanup).not.toHaveBeenCalled()
@@ -377,4 +394,43 @@ it('still closes an idle stream when the panel unmounts', async () => {
   unmount()
 
   expect(cleanup).toHaveBeenCalledTimes(1)
+})
+
+// ── AssistantDock expanding must re-run the stick-to-bottom autoscroll ─────
+//
+// While the dock is collapsed, ChatPanel sits under a `display:none`
+// ancestor (kept mounted, not unmounted — see AssistantDock.tsx), so a
+// scrollIntoView call made while collapsed lands on an element with no
+// layout box and is a silent no-op in a real browser. jsdom does no layout
+// at all — there is no way for any test to observe "the transcript ended up
+// visually at the bottom" — so this only pins the narrower, still real
+// precondition: the autoscroll effect has to re-run when the dock expands,
+// so a scrollIntoView call happens at all once there's a box to scroll.
+// The actual visual outcome (ask a question, collapse, let it stream,
+// expand, see the latest token) needs a manual check in the built app.
+it('re-fires the stick-to-bottom autoscroll when the assistant dock expands', async () => {
+  renderPanel()
+  await sendAndScript([
+    { event: 'session_init', data: { session_id: 'sess-dock-scroll' } },
+    { event: 'token', data: { delta: 'hello' } },
+    { event: 'turn_done', data: {} },
+  ])
+
+  // Restored in a finally: this spy replaces vitest.setup.ts's own
+  // `Element.prototype.scrollIntoView` no-op for the whole prototype, so
+  // leaving it installed would silently hand the stand-in to every test
+  // appended after this one in the file. Harmless today only because this is
+  // currently last.
+  const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView')
+  try {
+    scrollSpy.mockClear()
+
+    act(() => {
+      useUIStore.setState({ assistantDockOpen: true })
+    })
+
+    expect(scrollSpy).toHaveBeenCalled()
+  } finally {
+    scrollSpy.mockRestore()
+  }
 })

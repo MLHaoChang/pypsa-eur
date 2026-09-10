@@ -108,18 +108,25 @@ describe('CommandPalette on Dialog', () => {
     const input = screen.getByPlaceholderText(/Type a command/i)
     expect(document.activeElement).toBe(input)
 
-    // Two actions rows are always present regardless of query/project/asset
-    // data: "Save project" (first) and "Open project overview" (second).
-    const firstRow = screen.getByRole('button', { name: /Save project/i })
-    const secondRow = screen.getByRole('button', { name: /Open project overview/i })
-    expect(firstRow.className).toMatch(/bg-accent\/10/)
-    expect(secondRow.className).not.toMatch(/bg-accent\/10/)
+    // Rows are taken POSITIONALLY, not by command name. An earlier version
+    // named "Save project" and "Open project overview" and asserted they were
+    // adjacent — so adding any command between them failed a test that is
+    // about arrow-key navigation and has no opinion on the catalogue. Adding
+    // a command is not a regression; the test saying otherwise was.
+    const rows = () => screen.getAllByRole('button')
+      .filter(b => b.className.includes('w-full flex items-center gap-2.5'))
+    const before = rows()
+    expect(before.length).toBeGreaterThan(1)
+    expect(before[0].className).toMatch(/bg-accent\/10/)
+    expect(before[1].className).not.toMatch(/bg-accent\/10/)
 
     await user.keyboard('{ArrowDown}')
 
+    // Focus must stay in the input — the highlight is state, not DOM focus.
     expect(document.activeElement).toBe(input)
-    expect(firstRow.className).not.toMatch(/bg-accent\/10/)
-    expect(secondRow.className).toMatch(/bg-accent\/10/)
+    const after = rows()
+    expect(after[0].className).not.toMatch(/bg-accent\/10/)
+    expect(after[1].className).toMatch(/bg-accent\/10/)
   })
 
   it('has an aria-label of "Command palette" in the default mode', () => {

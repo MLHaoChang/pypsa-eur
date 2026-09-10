@@ -44,7 +44,13 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
     sns = n.snapshots
     co2_map = _co2_intensity_map(n)
     if not co2_map:
-        return EmissionsComparison()
+        # The network resolved fine; it simply has no `carriers` frame (or no
+        # `co2_emissions` column), so every carrier is zero-emitting by
+        # definition — "zero kt" is the real, structurally-guaranteed answer,
+        # not an absence — see the `available` field's docstring. Same
+        # ruling as curtailment's `gens.empty` / storage cycling's
+        # `sus.empty` above.
+        return EmissionsComparison(available=True)
 
     total_bucket = {"total": 0.0, "by_period": {}}
     by_carrier_kt: dict = {}
@@ -110,6 +116,7 @@ def _compute_emissions_summary(n, periods, is_multi, has_solve) -> EmissionsComp
         intensity_pp[p] = _intensity(mwh, total_bucket["by_period"].get(p, 0.0))
 
     return EmissionsComparison(
+        available=True,
         total_kt=_to_pv(total_bucket),
         by_carrier_kt=_to_pv_dict(by_carrier_kt),
         intensity_kg_per_mwh=CarrierPeriodValue(total=intensity_total, by_period=intensity_pp),

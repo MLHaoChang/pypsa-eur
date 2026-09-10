@@ -35,7 +35,7 @@ export function useEnqueueSolve() {
 export function useAbortJob() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (jobId: number) => solveQueueApi.abort(jobId),
+    mutationFn: (jobId: string) => solveQueueApi.abort(jobId),
     onSuccess: () => qc.invalidateQueries({ queryKey: QUEUE_KEY }),
   })
 }

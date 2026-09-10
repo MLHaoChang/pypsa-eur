@@ -26,12 +26,18 @@ import json
 import pathlib
 import re
 import shutil
+import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pypsa
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from services import change_log_service
+from sqlalchemy.orm import Session as DBSession
+from db.models import Session as SessionRow, User
+from db.session import get_db
+from deps import current_session, optional_user
+from services import active_project, change_log_service, project_registry
 from services.dispatch_status import (
     dispatch_status as _classify_dispatch,
     network_has_dispatch,
@@ -47,6 +53,7 @@ from services.atomic_io import (
 )
 from routers.projects import (
     _BUNDLE_FILES,
+    _enforce_project_lock,
     _force_rmtree,
     _read_meta,
     _restore_results_state,
@@ -55,6 +62,17 @@ from routers.projects import (
 )
 
 router = APIRouter()
+
+
+def _lock_target(project: AuthorizedProject) -> SimpleNamespace:
+    """
+    Adapt an `AuthorizedProject` (an id/name/directory view built for ACL, not
+    an ORM row) into the shape `_enforce_project_lock` needs: `.id` as the
+    `uuid.UUID` the lock table keys on (matches `Project.id`), and `.name` for
+    the error message. `AuthorizedProject.uuid` carries the same value as a
+    plain string.
+    """
+    return SimpleNamespace(id=uuid.UUID(project.uuid), name=project.name)
 
 _MAX_SNAPSHOTS_PER_PROJECT = 50
 
@@ -379,6 +397,8 @@ def _create_snapshot_internal(
 def create_snapshot(
     req: CreateSnapshotRequest,
     project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
 ):
     """
     Snapshot the current on-disk project bundle.
@@ -388,6 +408,7 @@ def create_snapshot(
     This is the same semantics as git: you snapshot what's committed.
     Callers that want to capture in-memory state should Save first.
     """
+    _enforce_project_lock(db, _lock_target(project), user)
     return _create_snapshot_internal(
         project.name, req.label, req.message or "", project_dir=project.directory
     )
@@ -405,7 +426,11 @@ def list_snapshots(
 
 @router.post("/{name}/snapshots/{snapshot_id}/restore")
 def restore_snapshot(
-    snapshot_id: str, project: AuthorizedProject = ProjectAccessDep
+    snapshot_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+    session: SessionRow | None = Depends(current_session),
 ):
     """
     Restore a snapshot: overwrite the project files + reload in-memory.
@@ -439,6 +464,8 @@ def restore_snapshot(
     snap_dir = _safe_snapshot_dir(project_dir, snapshot_id)
     if not snap_dir.exists() or not (snap_dir / "network.nc").exists():
         raise HTTPException(404, f"Snapshot '{snapshot_id}' not found (or incomplete)")
+
+    _enforce_project_lock(db, _lock_target(project), user)
 
     # Safety net: create an auto-snapshot of the current state before we
     # overwrite it. Pass `protect={snapshot_id}` so the cap-driven prune that
@@ -477,8 +504,9 @@ def restore_snapshot(
     # file safe against crashes, but a concurrent writer to the same path
     # (e.g. autosave triggering during restore) could lose updates without
     # the lock.
-    from services import undo_service
+    from services import dirty_state, undo_service
     undo_service.clear()
+    dirty_state.clear()  # memory and disk now agree
     with PyPSAService.get_lock():
         # Copy snapshot's files over the project's. Use atomic-write per file
         # so a crash mid-restore leaves either the pre-restore file or the
@@ -528,6 +556,16 @@ def restore_snapshot(
         # use, so a snapshot taken by an older GUI version restores instead of
         # 500-ing on an unknown solver_config key.
         _state["solver_config"] = _solver_config_from_dict(json.loads(cfg_path.read_text()))
+
+    # Restoring a saved snapshot rebinds this session's active context to that
+    # Project, so the pointer follows — same rule as load_project. AuthorizedProject
+    # carries the identity but not the ORM row, and set_active_project needs the row.
+    if session is not None:
+        project_row = project_registry.find_project(
+            db, project_registry.require_user(user), project.name
+        )
+        if project_row is not None:
+            active_project.set_active_project(db, session, project_row)
 
     # Hydrate simulation state from the restored project's metadata. Without
     # this, restoring a previously-solved snapshot leaves the header status
@@ -606,7 +644,10 @@ def restore_snapshot(
 
 @router.delete("/{name}/snapshots/{snapshot_id}", status_code=204)
 def delete_snapshot(
-    snapshot_id: str, project: AuthorizedProject = ProjectAccessDep
+    snapshot_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
 ):
     name = project.name
     project_dir = project.directory
@@ -615,6 +656,7 @@ def delete_snapshot(
     snap_dir = _safe_snapshot_dir(project_dir, snapshot_id)
     if not snap_dir.exists():
         raise HTTPException(404, f"Snapshot '{snapshot_id}' not found")
+    _enforce_project_lock(db, _lock_target(project), user)
     label = _read_snapshot_meta(snap_dir).get("label", snapshot_id)
     # `_force_rmtree` clears read-only attributes and retries with a backoff —
     # a plain `shutil.rmtree` raises WinError 5 on OneDrive-synced paths.

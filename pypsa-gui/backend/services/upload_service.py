@@ -43,6 +43,7 @@ import hashlib
 import logging
 import os
 import pathlib
+import re
 import shutil
 import threading
 import time
@@ -159,6 +160,82 @@ def _resolve_paths(
     from routers.projects import _safe_project_dir
     resolved = _safe_project_dir(name)
     return _ProjectPaths(project_dir=resolved, uploads_dir=resolved / "uploads")
+
+
+# `file_id` is minted by `_file_id_for` below as sha256(bytes)[:16] — exactly
+# 16 lowercase hex characters, always. Every other function here USES a
+# file_id supplied by a caller, and until this guard existed none of them
+# checked it, so `uploads_dir / file_id` accepted `..` and addressed the
+# project directory itself. `shutil.rmtree` on that destroyed the project.
+#
+# This is an ALLOWLIST of what a real file_id looks like, deliberately, not a
+# blocklist of traversal tricks. A blocklist here would be fail-OPEN for every
+# form nobody thought of; the allowlist is fail-CLOSED for everything that is
+# not literally a hash we minted. `..`, `%2e%2e` (post-decode), slashes,
+# absolute paths, uppercase and wrong lengths all fail it without being
+# enumerated.
+# `\A`/`\Z` and NOT `$`: `$` also matches immediately before a trailing
+# newline, so `"<16 hex>\n"` would pass a `$`-anchored pattern. Anchored in
+# the PATTERN rather than relying on `fullmatch` at the call site, so the
+# guard survives a later refactor to `.match()`/`.search()` — an unanchored
+# pattern under `.match()` is a PREFIX match, and `<16 hex>/../../etc`
+# begins with 16 hex characters.
+_FILE_ID_RE = re.compile(r"\A[0-9a-f]{16}\Z")
+
+
+def _safe_file_dir(
+    paths: _ProjectPaths, file_id: str, *, op: str
+) -> pathlib.Path | None:
+    """
+    The single chokepoint every `file_id` consumer must pass through.
+
+    Returns the upload's directory, or ``None`` if `file_id` is not one we
+    could have minted. Callers decide how to refuse — the read paths raise
+    404, `delete_upload` returns its `not_found` body — but NONE of them may
+    build a path from an unvalidated `file_id`.
+
+    Two independent checks, because they fail differently:
+      1. The regex, which forbids traversal by construction.
+      2. A containment check on the RESOLVED path, which the regex cannot do:
+         a symlink at `uploads/<valid-hex>` pointing outside the uploads dir
+         passes the regex and still escapes. `resolve()` follows it; a parent
+         that is not the uploads dir is refused.
+
+    Refusals are logged. A malformed file_id is never a normal client
+    mistake — the id is machine-generated at both call sites — so an attempt
+    is worth seeing in the log rather than silently absorbing.
+    """
+    if not isinstance(file_id, str) or not _FILE_ID_RE.fullmatch(file_id):
+        logger.warning("upload: refused malformed file_id %r on %s", file_id, op)
+        return None
+    file_dir = paths.uploads_dir / file_id
+    try:
+        if file_dir.resolve().parent != paths.uploads_dir.resolve():
+            logger.warning(
+                "upload: refused file_id %r on %s — resolves outside the "
+                "uploads dir (symlink?)", file_id, op,
+            )
+            return None
+    except OSError as exc:
+        logger.warning("upload: refused file_id %r on %s — %s", file_id, op, exc)
+        return None
+    return file_dir
+
+
+def _upload_not_found(name: str, file_id: str) -> HTTPException:
+    """
+    Refusals are indistinguishable from a genuine miss ON THE WIRE, on
+    purpose: a caller probing for traversal learns nothing about the
+    filesystem it could not already guess. The distinction lives in the log,
+    where a defender can see it, not in the response, where an attacker can.
+    """
+    return HTTPException(
+        status_code=404,
+        detail={
+            "error_kind": "upload_not_found",
+            "message": f"no upload {file_id!r} in project {name!r}",
+        },
+    )
 
 
 def _file_id_for(blob_bytes: bytes) -> tuple[str, str]:
@@ -384,16 +461,13 @@ def get_upload_meta(name: str, file_id: str, *, project_dir: pathlib.Path | None
     error_kind=upload_not_found on missing.
     """
     paths = _resolve_paths(name, project_dir)
+    file_dir = _safe_file_dir(paths, file_id, op="get_upload_meta")
+    if file_dir is None:
+        raise _upload_not_found(name, file_id)
     with _project_upload_lock(name):
-        meta = _read_meta(paths.uploads_dir / file_id / "meta.json")
+        meta = _read_meta(file_dir / "meta.json")
         if meta is None or not meta.blob_ready:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "error_kind": "upload_not_found",
-                    "message": f"no upload {file_id!r} in project {name!r}",
-                },
-            )
+            raise _upload_not_found(name, file_id)
         return meta
 
 
@@ -404,7 +478,10 @@ def get_upload_path(name: str, file_id: str, *, project_dir: pathlib.Path | None
     endpoint to keep the path-construction logic centralised.
     """
     paths = _resolve_paths(name, project_dir)
-    blob = paths.uploads_dir / file_id / "blob"
+    file_dir = _safe_file_dir(paths, file_id, op="get_upload_path")
+    if file_dir is None:
+        raise _upload_not_found(name, file_id)
+    blob = file_dir / "blob"
     # Validate via meta read (raises 404 on missing). Forward `project_dir` or
     # the check would resolve a DIFFERENT directory than the blob path above.
     get_upload_meta(name, file_id, project_dir=project_dir)
@@ -430,7 +507,13 @@ def delete_upload(name: str, file_id: str, *, project_dir: pathlib.Path | None =
     response with HTTP 200 (caller switches on `deleted` field).
     """
     paths = _resolve_paths(name, project_dir)
-    file_dir = paths.uploads_dir / file_id
+    file_dir = _safe_file_dir(paths, file_id, op="delete_upload")
+    if file_dir is None:
+        # `not_found` rather than a raise: it is TRUE (no such upload exists),
+        # it keeps this endpoint's documented always-200 contract, and it
+        # keeps the chat tool's return shape. What matters is that the
+        # refusal happens BEFORE rmtree, not what we call it afterwards.
+        return DeleteUploadResponse(deleted=False, file_id=file_id, reason="not_found")
     with _project_upload_lock(name):
         if not file_dir.exists():
             return DeleteUploadResponse(deleted=False, file_id=file_id, reason="not_found")

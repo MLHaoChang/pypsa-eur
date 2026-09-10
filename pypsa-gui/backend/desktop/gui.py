@@ -376,11 +376,19 @@ def _abort_everything() -> bool:
         abort()
 
     def abort_queue() -> None:
+        import uuid
+
         from services.solve_queue import solve_queue
 
+        # `list_jobs()` returns `to_public()` dicts — `id` is `str(uuid.UUID)`
+        # since Task 12 (R23), not the raw UUID `solve_queue.abort` expects.
+        # Passing the string straight through used to look correct (both were
+        # `int` pre-Task-12) but now misses every `_jobs` key: `abort()`
+        # returns `None`, nothing is signalled, and the caller never learns —
+        # a silent no-op on the desktop app's quit-time abort path.
         for job in solve_queue.list_jobs():
             if job.get("status") in ("queued", "running"):
-                solve_queue.abort(job["id"])
+                solve_queue.abort(uuid.UUID(job["id"]))
 
     def wait(timeout: float) -> bool:
         import time

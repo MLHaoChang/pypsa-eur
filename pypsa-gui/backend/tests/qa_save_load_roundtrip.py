@@ -225,7 +225,13 @@ def test_round_trip() -> None:
     # for real, which is what `Depends(...)` stands in for.
     with qa_support.db_session() as db:
         summary = projects_router.load_project(
-            PROJECT_NAME, db=db, user=qa_support.user()
+            # `session=None` for real, not by omission: the handler now takes a
+            # session and persists the active-project pointer through it, so an
+            # unpassed `Depends(current_session)` default reaches
+            # `set_active_project` as a `Depends` object and raises. A direct
+            # caller with no HTTP session IS the None case the handler guards
+            # for — and passing it is the contract this driver states above.
+            PROJECT_NAME, db=db, user=qa_support.user(), session=None,
         )
     # A dict, not the `ImportSummary` model: the route returns
     # `{**summary.model_dump(), "lock": lock_info}` so callers get the project

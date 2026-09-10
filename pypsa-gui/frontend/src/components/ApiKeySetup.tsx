@@ -30,7 +30,11 @@ import {
 } from '../api/chat'
 import { useChatStore } from '../store/chatStore'
 
-const API_KEY_SETTINGS_KEY = ['chat', 'api-key-settings']
+// Exported so ChatLaunchGreeting reads the SAME cache entry rather than a
+// parallel one: the greeting only needs to know whether a key exists, and
+// sharing the key means one fetch, and means this component's post-save
+// invalidation retracts the greeting's offer in the same tick.
+export const API_KEY_SETTINGS_KEY = ['chat', 'api-key-settings']
 
 /** The 403 an ordinary member gets — an expected state, not a failure. */
 function isForbidden(error: unknown): boolean {

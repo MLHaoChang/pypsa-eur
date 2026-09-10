@@ -287,7 +287,11 @@ def get_economics_by_carrier():
     """
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
-        return {}
+        # A bare `{}` was indistinguishable from "solved, and this network
+        # genuinely rolls up to no carriers" — the wider of this endpoint's
+        # two availability holes, and the one a user hits first. Same shape as
+        # the success path so callers need one branch, not two.
+        return {"available": False, "by_carrier": {}}
     # Foreground project: the VOLL capture lives in the live solver state, not
     # on the network (solver_service strips the slacks). The solver config is
     # the same one cost_breakdown / asset_economics resolve their `cfg` from.

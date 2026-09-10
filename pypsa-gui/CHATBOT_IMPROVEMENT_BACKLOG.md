@@ -1,5 +1,43 @@
 # pypsa-gui v6 Chatbot — Improvement Backlog
 
+> ## ⛔ CLOSED — 2026-08-10. Do not work from this document.
+>
+> **Every item below is done.** This file is preserved as history; its
+> priorities, verdicts and `file:line` citations are stale and most no longer
+> resolve. Working from it means redoing finished work.
+>
+> What actually happened, in order:
+>
+> 1. **Triage** — `pypsa-gui-chatbot-backlog-audit.md` (2026-07-29) checked all
+>    36 items across both backlog files against live source. It found ~12
+>    already done, 9 duplicate pairs across the two documents, and 2 items
+>    whose proposed remedy would not have worked.
+> 2. **Close-out** — the remaining items shipped between 2026-07-29 and
+>    2026-08-10. Each commit names the item numbers it closes in its body:
+>
+>    ```
+>    git log --grep='Improvement #' --grep='Improvements #' --grep='QA #' -i
+>    ```
+>
+>    or `git log --grep='#16'` for one item.
+>
+> Two conclusions worth carrying forward, because both contradict what this
+> file says:
+>
+> * **#10 was mis-diagnosed at source.** It asks for a per-worker
+>   `PROJECTS_DIR` fixture for parallel pytest. `pytest-xdist` is not
+>   installed and `addopts` carries no `-n`, so there are no workers, and
+>   `PROJECTS_DIR` is untouched by a suite run. The real flake is
+>   `inspect.getsource` reading from disk at import-time line numbers while a
+>   concurrent session edits. See `tests/_source_watch.py`.
+> * **#11 shipped deterministic, not LLM-backed.** A summarisation model call
+>   inside `run_turn` would sit in a loop already carrying a bounded retry, a
+>   model-fallback path, and cache breakpoints that must stay byte-stable —
+>   and would have to be computed once per turn, not per attempt.
+>
+> New chatbot work starts from `git log`, `CHATBOT.md`, and the smoke battery
+> in `backend/smoke/run_chat_smoke.py` — not from here.
+
 Synthesized and de-duplicated from 6 independent examiner passes (session lifecycle, tool/safety model, Anthropic-SDK/cost, persistence/lineage, frontend UX, test coverage). Every item below was confirmed against source — the named gap is genuinely absent or only partially present. The chatbot is a solid, well-tested feature; these are the highest-leverage additions, not happy-path bugs.
 
 **Overall: functional with notable gaps.** Strengths: 100 tools across 5 safety tiers with single-use confirmation tokens, prompt caching on system + tools, per-project chat.jsonl with locked rotation + lineage, abort-on-disconnect SSE, ~3500 LOC backend test suite. The risks concentrate in C2 multi-resident reliability, session lifecycle hygiene, Anthropic-path cost/correctness, UX visibility, and frontend/parallel-test coverage.

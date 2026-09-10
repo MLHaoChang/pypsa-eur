@@ -55,7 +55,10 @@ def _compute_storage_cycling_summary(n, periods, is_multi, has_solve) -> Storage
         return StorageCyclingComparison()
     sus = n.storage_units
     if sus.empty:
-        return StorageCyclingComparison()
+        # The network resolved fine; it simply has no StorageUnit component,
+        # so "zero cycling" is the real, structurally-guaranteed answer, not
+        # an absence — see the `available` field's docstring.
+        return StorageCyclingComparison(available=True)
     p_storage = getattr(n.storage_units_t, "p", None) if hasattr(n, "storage_units_t") else None
     if p_storage is None or p_storage.empty:
         return StorageCyclingComparison()
@@ -201,6 +204,7 @@ def _compute_storage_cycling_summary(n, periods, is_multi, has_solve) -> Storage
     by_unit.sort(key=lambda u: -(u.cycles.total or 0))
 
     return StorageCyclingComparison(
+        available=True,
         cycles_by_carrier=_to_pv_dict(cycles_by_carrier),
         by_unit=by_unit,
     )

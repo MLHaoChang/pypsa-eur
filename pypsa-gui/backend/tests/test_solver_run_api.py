@@ -137,3 +137,52 @@ def test_run_ac_pf_after_lopf_populates_ac_pf_state(client, install_network, ses
     assert (s["ac_pf_results"] is not None or s["ac_pf_convergence_list"] is not None), (
         "AC-PF auto-chain should have routed ac_pf_* into _state via the injected sink"
     )
+
+
+def test_voll_capture_scalar_is_snapshot_weighted(client, install_network, session_state):
+    """
+    The capture's `lost_load_total_mwh` must equal the snapshot-weighted sum
+    of the captured series — not the raw MW sum.
+
+    The capture comment said "Assumes hourly snapshots (MW=MWh/h)", and on a
+    representative-week network (weights 3.0 here, 52.14 in the field) that
+    assumption made `/results/lost_load` report energy LOW by the weight
+    factor while Compare's `_compute_lost_load_summary` reweighted the same
+    series correctly — MEASURED in the 2026-08-14 sweep: Compare 51.0 MWh vs
+    Results 17.0 on an identical capture. The LP itself charges shed load ×
+    weight in the objective, so the weighted number is the energy the solve
+    actually priced.
+
+    The invariant is stated against the capture's own series, so it needs no
+    hand-computed expectation and holds for any feasible shed pattern.
+    """
+    import pytest
+    from services import period_utils
+
+    n = build_network()
+    n.loads.loc["L1", "p_set"] = 1000.0
+    # Representative-period weighting — each modelled hour stands for 3.
+    n.snapshot_weightings.loc[:, :] = 3.0
+    install_network(n)
+    sim_router._state["solver_config"] = SolverConfig(voll=1000.0)
+
+    s = _run_and_join(client, session_state)
+    assert s["status"] == "completed", f"status={s['status']} condition={s['condition']}"
+    lost = s["last_lost_load"]
+    assert lost is not None and lost.get("lost_load_t") is not None
+
+    df = lost["lost_load_t"]
+    live_n = sim_router._state["network"] if "network" in sim_router._state else None
+    # Weight basis: generators (energy), the same basis Compare's
+    # `_build_snapshot_weights(n, "generators")` applies to this series.
+    w = period_utils.snapshot_weights(n, "generators").reindex(df.index).fillna(1.0)
+    expected_mwh = float(df.clip(lower=0).mul(w, axis=0).values.sum())
+
+    assert expected_mwh > 0, "fixture defeated — nothing was shed"
+    assert lost["lost_load_total_mwh"] == pytest.approx(expected_mwh, rel=1e-9), (
+        f"capture scalar {lost['lost_load_total_mwh']} is not the weighted "
+        f"energy {expected_mwh} — /results/lost_load serves this scalar "
+        f"verbatim while Compare reweights the series, so they diverge by "
+        f"the snapshot weight factor"
+    )
+    assert lost["lost_load_cost_eur"] == pytest.approx(expected_mwh * 1000.0, rel=1e-9)

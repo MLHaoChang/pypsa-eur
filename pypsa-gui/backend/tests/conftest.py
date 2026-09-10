@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import shutil
 import sys
 
 # Make `main`, `routers`, `services` importable (mirrors the qa_*.py header).
@@ -231,15 +232,48 @@ def make_auth_db(url: str | None = None):
 
 @pytest.fixture(scope="session")
 def _auth_db():
-    """One in-memory SQLite database shared by every test in the session."""
+    """One FILE-BACKED SQLite database shared by every test in the session.
+
+    A file, not `:memory:` + `StaticPool`, and the reason is thread safety
+    rather than taste. The old justification for the pool ("`:memory:` gives
+    each *connection* its own database, so every caller must be routed through
+    ONE shared pooled connection or the seeded user is invisible to it") stops
+    applying the moment the database is a real file: every connection then
+    opens the same file.
+
+    That funnelling was a latent hazard, not just an optimisation.
+    `test_hydrate_or_adopt_cold_paths.py` races real OS threads — a
+    `threading.Barrier`-synchronised `Session` per thread — and several
+    `Session`s issuing overlapping statements through ONE physical
+    `sqlite3.Connection` produced genuine corruption: `ValueError: badly formed
+    hexadecimal UUID string` reading back a UUID column, and a `User` row
+    committed session-scopes earlier intermittently reading back as absent
+    (`404 Project not found` / `401 Authentication required` from inside the
+    race). Neither was a bug in the code under test. `StaticPool` is the
+    textbook-safe pattern for a shared engine used SEQUENTIALLY across threads;
+    it was never safe for the genuinely CONCURRENT access those lock tests
+    deliberately drive.
+
+    This is the same conclusion `make_auth_db`'s file branch already reached
+    for `qa_phase4_compare.py`, applied to the suite itself — so both callers
+    now take the branch that matches how the product runs on SQLite
+    (`db/session.py::get_engine`). `enable_sqlite_foreign_keys` meanwhile
+    becomes meaningful per connection on a real file, giving reader/writer
+    concurrency arbitrated by SQLite's own file locking.
+
+    Lives in a session-scoped temp directory, removed on teardown.
+    """
     from db import session as db_session_module
 
-    engine, testing_session_local, original = make_auth_db()
+    tmp_dir = _tempfile.mkdtemp(prefix="pypsa-gui-test-authdb-")
+    db_path = pathlib.Path(tmp_dir) / "auth.db"
+    engine, testing_session_local, original = make_auth_db(f"sqlite+pysqlite:///{db_path}")
     try:
         yield engine, testing_session_local
     finally:
         db_session_module.SessionLocal = original
         engine.dispose()
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 def _seed_org_and_user(session_local, *, email: str, org_name: str):
@@ -334,15 +368,26 @@ def _reset_tenant_tables(_auth_db):
     too slow to repeat 1000×), but project rows must not survive: dozens of
     tests save a project called `A`, and a leftover row makes the second one
     409 on a name collision. Users, orgs and memberships deliberately persist.
+
+    `solve_jobs` joined this list with Task 15's boot reconciliation. The
+    `client` fixture below is FUNCTION-scoped and enters `TestClient(main.app)`
+    as a context manager, so `lifespan` — and with it
+    `solve_job_store.reconcile_on_boot()` — runs on every single test that
+    requests `client`, not once per process the way it does in production. A
+    `queued` or `running` row a PRIOR test left behind (the in-memory queue is
+    cleared by `reset_backend` below, but that never touches the table) would
+    otherwise be resurrected into the freshly-reset in-memory queue at the
+    START of an unrelated later test — observed as extra jobs a queue-listing
+    test never enqueued itself. Cheap and always safe to drop: nothing else
+    reads solve_jobs rows across a test boundary.
     """
     engine, _session_local = _auth_db
     from sqlalchemy import text
 
     yield
     with engine.begin() as conn:
-        for table in ("project_locks", "project_memberships", "projects"):
+        for table in ("project_locks", "project_memberships", "projects", "solve_jobs"):
             conn.execute(text(f"DELETE FROM {table}"))
-
 
 @pytest.fixture(autouse=True)
 def _acting_user(_auth_db, seeded_identity):
@@ -633,3 +678,41 @@ def install_network_into_backend(n: pypsa.Network, name: str | None = None) -> p
 def install_network():
     """The function above, as a fixture."""
     return install_network_into_backend
+
+
+# ── Mid-run source-change watcher (Improvement #10) ─────────────────────────
+#
+# The suite's real flake is not parallel-worker contamination — pytest-xdist
+# is not installed and there are no workers. It is a run racing an EDITOR:
+# `inspect.getsource` (nine call sites across five files) reads from disk at
+# the line numbers recorded at import, so a mid-run edit makes it return text
+# that was never in the function and the assertion fails as though the code
+# were wrong. In this repo the editor is a second agent session on the same
+# worktree, which CLAUDE.md documents as normal.
+#
+# This cannot prevent that. It stops the failure from lying about its cause.
+from tests import _source_watch as _sw  # noqa: E402
+
+_SOURCE_SNAPSHOT: dict[str, float] = {}
+_WATCH_ROOTS = [pathlib.Path(__file__).resolve().parent.parent / r
+                for r in _sw.WATCHED_ROOTS]
+
+
+def pytest_sessionstart(session):  # noqa: ARG001
+    global _SOURCE_SNAPSHOT
+    try:
+        _SOURCE_SNAPSHOT = _sw.snapshot_mtimes(_WATCH_ROOTS)
+    except Exception:  # noqa: BLE001 — never let the watcher break a run
+        _SOURCE_SNAPSHOT = {}
+
+
+def pytest_terminal_summary(terminalreporter, exitstatus, config):  # noqa: ARG001
+    if not _SOURCE_SNAPSHOT:
+        return
+    try:
+        msg = _sw.format_warning(_sw.changed_since(_SOURCE_SNAPSHOT, _WATCH_ROOTS))
+    except Exception:  # noqa: BLE001
+        return
+    if msg:
+        terminalreporter.write_sep("=", "source changed mid-run", yellow=True)
+        terminalreporter.write_line(msg)

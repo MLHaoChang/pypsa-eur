@@ -21,6 +21,7 @@ from services.period_utils import (
 )
 from services.serialization import safe_float as _safe_float
 from services.solver_service import (
+    upfront_cost_series as _upfront_cost_series,
     _pv_factor_series,
     _reference_build_year,
     with_periodized_cost_defaults,
@@ -31,6 +32,54 @@ from typing import Any
 # text inside the lifted bodies must produce byte-identical log records.
 logger = logging.getLogger("pypsa_gui.results")
 
+
+
+# ── Lifetime CAPEX: unavailable is a value, 0.00 is a claim ───────────────
+# Three helpers shared by `get_cost_breakdown`'s lifetime-CAPEX walk and its
+# emission. They exist to keep ONE rule in one place: a lifetime CAPEX that
+# could not be computed is `None` on the wire, and a `None` anywhere in a sum
+# makes the sum `None` too. The alternative — dropping the unknown term — is
+# the reported bug: a horizon total of EUR 1.37 bn published under a
+# whole-system label while the component worth EUR 8.07 bn was missing from it.
+# Same decision, naming and response shape as `capital_costs_available` /
+# `_capital_derived` in `get_asset_economics` (commit d11d4ee1).
+
+def _lifetime_total(series, cost_unresolved: bool) -> float | None:
+    """
+    Sum one component class's (upfront cost x capacity) column, or None.
+
+    `cost_unresolved` is the caller's verdict on the COST side — a NaN upfront
+    cost means the figure is unknown, and `.fillna(0)` would otherwise bury it
+    inside a total that still looks like an answer. A NaN capacity is a
+    different thing (an asset with no `p_nom_opt` genuinely contributes
+    nothing) and is still filled with zero.
+    """
+    import math as _math
+
+    if cost_unresolved:
+        return None
+    value = float(series.fillna(0).sum())
+    return None if not _math.isfinite(value) else value
+
+
+def _sum_lifetime(values) -> float | None:
+    """Sum per-class lifetime CAPEX; None if ANY class is unknown."""
+    materialised = list(values)
+    if any(v is None for v in materialised):
+        return None
+    return float(sum(materialised))
+
+
+def _class_lifetime(by_class: dict[str, float | None], comp_class: str) -> float | None:
+    """
+    One class's lifetime CAPEX for the emission.
+
+    A class the walk never visited (no cost-bearing columns — `Load` and
+    friends can still appear in `n.statistics()`) keeps the historical 0.0:
+    nothing to compute is not the same as failed to compute. Only classes the
+    walk visited AND could not resolve carry `None`.
+    """
+    return by_class.get(comp_class, 0.0)
 
 
 def compute_cost_breakdown(n, cfg):
@@ -60,7 +109,16 @@ def compute_cost_breakdown(n, cfg):
         ("transformers",  "Transformer",  "s_nom"),
     ]
     try:
-        with with_periodized_cost_defaults(n, cfg):
+        # `for_back_calculation=True` fills discount_rate — and deliberately
+        # NOT lifetime, which would retire assets; see the fill's docstring —
+        # for assets priced through `capital_cost` alone, so
+        # `_upfront_cost_series` below can recover their upfront cost instead
+        # of raising. Without it every Line in a PyPSA-Eur network took the
+        # unavailable path (see the `except` inside the loop). It cannot move
+        # `n.statistics()`: an asset with no `overnight_cost` keeps its raw
+        # `capital_cost` whatever the discount rate says
+        # (`pypsa.costs.periodized_cost`).
+        with with_periodized_cost_defaults(n, cfg, for_back_calculation=True):
             stats = n.statistics()
             exp_series = None
             try:
@@ -82,27 +140,55 @@ def compute_cost_breakdown(n, cfg):
                 # year investments are discounted back to year-0 (= min
                 # build_year). For single-instant runs the factor is 1.
                 try:
-                    upfront_series = n.c[comp_class].overnight_cost
+                    upfront_series = _upfront_cost_series(n, comp_class)
                 except Exception:
+                    # PyPSA refuses the whole class when it cannot recover an
+                    # upfront cost for even one asset. `continue` used to be
+                    # here, which silently left the class out of the dicts and
+                    # let the emission's `.get(..., 0.0)` publish a confident
+                    # zero — for Lines that was 95.8% of the system's CAPEX
+                    # reported as 0.00, with nothing logged. Mark it unknown.
+                    logger.exception(
+                        "could not resolve the upfront (overnight) cost for "
+                        "component class %s in /results/cost_breakdown; its "
+                        "lifetime CAPEX is reported as unavailable, not zero",
+                        comp_class,
+                    )
+                    capex_lifetime_by_class[comp_class] = None
+                    capex_expansion_lifetime_by_class[comp_class] = None
                     continue
                 pv_series = _pv_factor_series(df, cfg, reference_year)
                 upfront_pv = upfront_series * pv_series
                 nom_col = df[nom] if nom in df.columns else None
                 opt_col = df[f"{nom}_opt"] if f"{nom}_opt" in df.columns else nom_col
                 if opt_col is None:
+                    # No capacity column at all — the product is undefined, not
+                    # zero. Same reasoning as the resolve failure above.
+                    capex_lifetime_by_class[comp_class] = None
+                    capex_expansion_lifetime_by_class[comp_class] = None
                     continue
+                # A NaN upfront cost is an unresolved cost, and `.fillna(0)`
+                # below would bury it inside an otherwise-plausible total. A
+                # NaN CAPACITY is different — an asset with no `p_nom_opt`
+                # genuinely contributes nothing — so only the cost side gates.
+                cost_unresolved = bool(upfront_pv.isna().any())
                 # Installed: PV-upfront × p_nom_opt across all assets.
-                capex_lifetime_sum = float((upfront_pv * opt_col).fillna(0).sum())
+                capex_lifetime_sum = _lifetime_total(
+                    upfront_pv * opt_col, cost_unresolved)
                 # Expansion only: PV-upfront × positive delta.
                 if nom_col is not None:
                     delta = (opt_col - nom_col).where(lambda s: s > 0, 0)
-                    exp_lifetime_sum = float((upfront_pv * delta).fillna(0).sum())
+                    exp_lifetime_sum = _lifetime_total(
+                        upfront_pv * delta, cost_unresolved)
                 else:
-                    exp_lifetime_sum = 0.0
-                if _math.isnan(capex_lifetime_sum) or _math.isinf(capex_lifetime_sum):
-                    capex_lifetime_sum = 0.0
-                if _math.isnan(exp_lifetime_sum) or _math.isinf(exp_lifetime_sum):
-                    exp_lifetime_sum = 0.0
+                    exp_lifetime_sum = None if cost_unresolved else 0.0
+                if capex_lifetime_sum is None or exp_lifetime_sum is None:
+                    logger.warning(
+                        "lifetime CAPEX for component class %s is not a finite "
+                        "number (unresolved upfront cost or non-finite total); "
+                        "reporting it as unavailable rather than 0.00",
+                        comp_class,
+                    )
                 capex_lifetime_by_class[comp_class] = capex_lifetime_sum
                 capex_expansion_lifetime_by_class[comp_class] = exp_lifetime_sum
     except Exception:
@@ -358,8 +444,17 @@ def compute_cost_breakdown(n, cfg):
         if manual_total > capex_expansion_total:
             capex_expansion_total = manual_total
 
-    capex_lifetime_total = sum(capex_lifetime_by_class.values())
-    capex_expansion_lifetime_total = sum(capex_expansion_lifetime_by_class.values())
+    # Null-propagating totals. One unknown class makes the horizon figure
+    # unknown — see `_sum_lifetime`. `capex_lifetime_available` is the summary
+    # of the same fact, for a UI that would rather show one banner than work it
+    # out from the nulls.
+    capex_lifetime_total = _sum_lifetime(capex_lifetime_by_class.values())
+    capex_expansion_lifetime_total = _sum_lifetime(
+        capex_expansion_lifetime_by_class.values())
+    capex_lifetime_available = (
+        capex_lifetime_total is not None
+        and capex_expansion_lifetime_total is not None
+    )
 
     # Curtailment penalty: Σ curtailment_t × curtailment_cost over renewables
     # that opted in (curtailment_cost > 0). PyPSA's n.statistics() doesn't
@@ -464,10 +559,13 @@ def compute_cost_breakdown(n, cfg):
         by_class.get("StorageUnit", {}).get("capex_expansion", 0.0)
         + by_class.get("Store", {}).get("capex_expansion", 0.0)
     )
-    storage_capex_expansion_lifetime = float(
-        capex_expansion_lifetime_by_class.get("StorageUnit", 0.0)
-        + capex_expansion_lifetime_by_class.get("Store", 0.0)
-    )
+    # Null when either storage class is unknown — a "storage CAPEX" that
+    # silently counts Stores and drops StorageUnits is the same partial-total
+    # defect as the horizon figure, just at a smaller scale.
+    storage_capex_expansion_lifetime = _sum_lifetime((
+        _class_lifetime(capex_expansion_lifetime_by_class, "StorageUnit"),
+        _class_lifetime(capex_expansion_lifetime_by_class, "Store"),
+    ))
     # Sorted list of per-period entries — same fields as the top-level totals
     # but scoped to one period. Each entry's capex/opex are already multiplied
     # by `investment_period_weightings.years[period]` so that
@@ -519,13 +617,23 @@ def compute_cost_breakdown(n, cfg):
         # Useful as a quick "how much of the investment is storage?" KPI.
         "storage_capex_expansion": storage_capex_expansion,
         "storage_capex_expansion_lifetime": storage_capex_expansion_lifetime,
+        # False when ANY component class's upfront cost could not be resolved.
+        # Every `*_lifetime` field above and in `by_component` below is then
+        # `null` for the affected class AND for the totals that contain it.
+        # The flag is the summary, the nulls are the wire signal: consumers
+        # need both, the flag so one banner can explain a blank KPI, the nulls
+        # so a consumer that ignores the flag still cannot format a zero.
+        # Annualised CAPEX, OPEX and the grand total are unaffected — they come
+        # from `n.statistics()` and owe nothing to the upfront-cost resolve.
+        "capex_lifetime_available": capex_lifetime_available,
         "by_component": [
             {
                 "component": c,
                 "capex": v["capex"],
-                "capex_lifetime": capex_lifetime_by_class.get(c, 0.0),
+                "capex_lifetime": _class_lifetime(capex_lifetime_by_class, c),
                 "capex_expansion": v.get("capex_expansion", 0.0),
-                "capex_expansion_lifetime": capex_expansion_lifetime_by_class.get(c, 0.0),
+                "capex_expansion_lifetime": _class_lifetime(
+                    capex_expansion_lifetime_by_class, c),
                 "opex": v["opex"],
                 "total": v["capex"] + v["opex"],
             }

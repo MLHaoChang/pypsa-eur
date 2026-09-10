@@ -168,4 +168,4 @@ def _compute_loading_summary(n, periods, is_multi, has_solve) -> LoadingComparis
     _walk_branches(n.links,        getattr(n.links_t, "p0", None) if hasattr(n, "links_t") else None,        False, is_link=True, nom_field="p_nom")
     # Worst-first ordering across all branch types.
     out.sort(key=lambda e: e.peak_loading.total, reverse=True)
-    return LoadingComparison(lines=out)
+    return LoadingComparison(available=True, lines=out)

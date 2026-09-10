@@ -13,8 +13,12 @@ import { PageBody, PageSection, RowGrid, StatCard, Btn } from '../components/Pag
 
 // IssuesPanel — surfaces the backend's preflight validation findings as a
 // browsable list. Reuses /api/simulation/preflight, which is the same gate
-// /run uses; if this panel is empty the solver run will not fail on
-// pre-checks (it can still hit numerical/feasibility errors during solve).
+// /run uses; if this panel reports a clean check (not merely "empty" — see
+// ADR-0001) the solver run will not fail on pre-checks (it can still hit
+// numerical/feasibility errors during solve). A FAILED fetch is its own
+// state ("could not run the validation check"), never rendered as emptiness
+// — an unresolvable result must never collapse into the same picture as a
+// genuine zero.
 //
 // Why a panel and not a banner: validation findings vary in severity and
 // have detailed messages — a banner is too small. The panel lets users
@@ -35,7 +39,7 @@ export default function IssuesPanel() {
   // Refetch on mount + every 15 s. The model may change between solves
   // (user edits buses, costs, etc.), so polling keeps the panel honest
   // without the user having to remember to refresh.
-  const { data, isFetching, refetch } = useQuery({
+  const { data, isFetching, isError, error, refetch } = useQuery({
     queryKey: nk(currentProject, 'preflight'),
     queryFn: simulationApi.preflight,
     refetchOnMount: 'always',
@@ -164,7 +168,20 @@ export default function IssuesPanel() {
           }
           bodyClassName=""
         >
-          {data?.deferred ? (
+          {isError ? (
+            // ADR-0001: a failed fetch is NOT "no issues found" — that would
+            // silently present "we could not check" with the same confidence
+            // as a genuine clean result. Revalidate (in the section header)
+            // is this panel's retry affordance.
+            <div className="flex flex-col items-center justify-center px-8 py-12 gap-2 text-center">
+              <AlertCircle className="text-muted" size={28} />
+              <span className="text-sm font-medium text-text">Could not run the validation check</span>
+              <span className="text-xs text-muted max-w-sm">
+                {error instanceof Error ? error.message : 'The preflight request failed.'}
+                {' '}Press Revalidate to try again.
+              </span>
+            </div>
+          ) : data?.deferred ? (
             // Solver worker still active — backend declined to run the
             // validator on the transient LP state. Two flavours:
             //   * regular: just wait (animated spinner)

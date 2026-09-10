@@ -218,3 +218,34 @@ describe('isPartialPayload', () => {
     expect(isPartialPayload([null, undefined])).toBe(false)
   })
 })
+
+// FIX 2 (results-tabs-window final review, Important): the tripwire at
+// AggregatedOverview.tsx (the `partial` const) originally checked only
+// [gensTS, loadTS, storPowerTS]. curtailTS and lostLoad also feed `fullRange`
+// sums (curtailment energy/cost KPIs + per-period bars; lost-load KPIs +
+// per-period VOLL bars) and are exactly the two getters
+// (`getCurtailment`/`getLostLoad`) this plan widened to accept an optional
+// range — the pair most likely to be converted to a ranged call next. These
+// two tests render the full component (not just isPartialPayload in
+// isolation) so they exercise the actual array passed at the call site —
+// they'd have caught the omission directly.
+describe('AggregatedOverview partial-payload guard covers curtailTS and lostLoad', () => {
+  it('trips when curtailTS is windowed', async () => {
+    vi.mocked(resultsApi.getCurtailment).mockReset().mockResolvedValue({
+      index: [], columns: [], data: [],
+      range: { from: 0, to: 719, total: 26280, complete: false, capped: false },
+    })
+    renderOverview()
+    expect(await screen.findByText(/reports whole-horizon totals/)).toBeTruthy()
+  })
+
+  it('trips when lostLoad is windowed', async () => {
+    vi.mocked(resultsApi.getLostLoad).mockReset().mockResolvedValue({
+      index: [], columns: [], data: [],
+      total_mwh: 0, total_cost_eur: 0, voll_eur_per_mwh: 0,
+      range: { from: 0, to: 719, total: 26280, complete: false, capped: false },
+    })
+    renderOverview()
+    expect(await screen.findByText(/reports whole-horizon totals/)).toBeTruthy()
+  })
+})

@@ -13,6 +13,7 @@ import { useAuthMode } from '../auth/AuthModeProvider'
 import AssignMembersDialog from '../layout/AssignMembersDialog'
 import { useUIStore } from '../store/uiStore'
 import { switchToProject } from '../utils/projectActions'
+import { readOnlyBannerMessage } from '../utils/mutationGuard'
 import { PageBody, PageSection, Btn, Tag } from '../components/PageKit'
 import { buildScenarioForest, type ScenarioNode } from './ScenariosPanel'
 
@@ -45,6 +46,7 @@ export default function WorkspacePanel() {
   const { authEnabled } = useAuthMode()
   const currentProject = useUIStore(s => s.currentProject)
   const readOnly = useUIStore(s => s.readOnly)
+  const readOnlyReason = useUIStore(s => s.readOnlyReason)
   const lockHolderEmail = useUIStore(s => s.lockHolderEmail)
   const recents = useUIStore(s => s.recents)
   const setSlidePanel = useUIStore(s => s.setSlidePanel)
@@ -160,8 +162,16 @@ export default function WorkspacePanel() {
             )}
           </div>
 
-          {/* The lock chip, up front. Before this panel the only lock signal
-              was a banner AFTER an edit was refused. */}
+          {/* The read-only chip, up front. Before this panel the only lock
+              signal was a banner AFTER an edit was refused.
+
+              The chip speaks from `readOnlyReason`, not from the flag plus a
+              holder email. `readOnly` has two causes since the queue work, and
+              only one of them is a lock — this chip is NOT gated on
+              `authEnabled`, so reading the flag alone told a desktop
+              single-user build that "the edit lock could not be acquired"
+              while its project was merely solving, in a mode that has no lock
+              machinery at all. */}
           <div
             className={`inline-flex items-start gap-2 self-start rounded-[7px] border px-2.5 py-1.5 text-[11px] ${
               readOnly
@@ -172,9 +182,7 @@ export default function WorkspacePanel() {
             {readOnly ? <Lock className="mt-px shrink-0" size={12} /> : <LockOpen className="mt-px shrink-0" size={12} />}
             <span>
               {readOnly
-                ? lockHolderEmail
-                  ? <>Read-only — <span className="font-semibold">{lockHolderEmail}</span> is editing</>
-                  : 'Read-only — the edit lock could not be acquired'
+                ? <>Read-only — {readOnlyBannerMessage(readOnlyReason, lockHolderEmail)}</>
                 : 'You hold the edit lock'}
             </span>
           </div>

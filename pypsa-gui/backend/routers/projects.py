@@ -629,6 +629,7 @@ def _project_info_db(db, project) -> ProjectInfo:
     # down there must not override a category the user has since edited.
     info.scenario_description = project.scenario_description
     info.scenario_type = project.scenario_type
+    info.project_kind = project.project_kind
     parent_name = None
     if project.parent_project_id is not None:
         parent = db.get(_Project, project.parent_project_id)
@@ -662,16 +663,77 @@ def _raise_tenancy_http_error(exc: Exception) -> None:
 
 
 def _serialize_project_lock(db: DBSession, project_id, user: User) -> dict[str, object] | None:
+    """
+    Thin adapter over `project_locks.serialize_lock` (which owns the shape so
+    the write middleware in `main.py` can emit the same one without importing
+    a router). M1: the delegate swallows a DB error into None, so a lock check
+    that fails while BUILDING a 409 downgrades that 409's `lock` member to null
+    instead of replacing a correct refusal with a 500.
+    """
     from services import project_locks
 
-    lock = project_locks.get_lock(db, project_id)
-    if lock is None:
-        return None
-    holder = db.get(User, lock.holder_user_id)
-    return {
-        "holder_email": holder.email if holder is not None else str(lock.holder_user_id),
-        "yours": lock.holder_user_id == user.id,
-    }
+    return project_locks.serialize_lock(
+        db, project_id, user.id if user is not None else None
+    )
+
+
+def _check_project_lock(db: DBSession, project, user) -> None:
+    """
+    Check-only sibling of `_enforce_project_lock`: refuses a live FOREIGN lock
+    without acquiring one for the caller.
+
+    Use this where the write is incidental rather than an act of editing — a
+    canvas layout flush, an attachment upload. Acquire-on-write is right for
+    the edges that ARE the edit (save/rename/delete/scenario/members/snapshots,
+    D4/D8), but wrong here twice over: it lets a passive caller take an idle
+    project's lock just by touching it, and it leaves a 120 s claim behind that
+    outlives the request. Free, expired, and the caller's own lock all pass.
+    """
+    if local_mode.is_local_mode():
+        return
+    if project is None or user is None:
+        return
+    from services import project_locks
+
+    lock = project_locks.get_lock(db, project.id)
+    if lock is not None and lock.holder_user_id != user.id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "project_locked",
+                "message": f"'{project.name}' is being edited by another user.",
+                "lock": _serialize_project_lock(db, project.id, user),
+            },
+        )
+
+
+def _enforce_project_lock(db: DBSession, project, user) -> None:
+    """
+    Write-edge lock gate (design D3/D4). Called from HANDLER BODIES — never a
+    route decorator: chat's `_route` invokes handlers as plain functions, so a
+    decorator dependency would silently never run for chat-driven writes.
+
+    Auto-reacquire semantics: `acquire_lock` is idempotent for the current
+    holder and succeeds on a free slot, so a holder whose heartbeat lapsed
+    (laptop sleep) is re-armed by their next write instead of stranded. Only a
+    live lock held by a DIFFERENT user raises.
+    """
+    if local_mode.is_local_mode():
+        return
+    if project is None or user is None:
+        # First save creates the row after this point; nothing to lock yet.
+        return
+    from services import project_locks
+
+    if project_locks.acquire_lock(db, project.id, user.id) is None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "project_locked",
+                "message": f"'{project.name}' is being edited by another user.",
+                "lock": _serialize_project_lock(db, project.id, user),
+            },
+        )
 
 
 @router.get("/")
@@ -859,6 +921,7 @@ async def import_bundle(
     name: str | None = None,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
+    session: SessionRow | None = Depends(current_session),
 ):
     """
     Restore a project from a .pypsaproj.zip bundle.
@@ -974,8 +1037,9 @@ async def import_bundle(
             atomic_write_bytes(target_path, zf.read(member))
 
     nc_path = dest / "network.nc"
-    from services import undo_service
+    from services import dirty_state, undo_service
     undo_service.clear()
+    dirty_state.clear()  # memory and disk now agree
     with PyPSAService.get_lock():
         PyPSAService.reset_network()
         n = PyPSAService.get_network()
@@ -986,6 +1050,13 @@ async def import_bundle(
         project_registry.bind_context(
             PyPSAService.get_active_context(), _imported_project
         )
+
+    # Persist the pointer, mirroring activate_project. Written AFTER the swap
+    # succeeds so a failed import does not leave the session pointing at a
+    # project it never reached. Without this, `resolve_for_session` reads the
+    # stale pointer on the next request and silently reverts the switch.
+    if session is not None:
+        active_project.set_active_project(db, session, _imported_project)
 
     cfg_path = dest / "solver_config.json"
     if cfg_path.exists():
@@ -1051,6 +1122,12 @@ async def import_bundle(
             solve_time=None,
         )
 
+    # Persist the pointer, mirroring activate_project. Written AFTER the swap
+    # succeeds so a failed import does not leave the session pointing at a
+    # project it never reached. Without this, `resolve_for_session` reads the
+    # stale pointer on the next request and silently reverts the switch.
+    if session is not None:
+        active_project.set_active_project(db, session, _imported_project)
     change_log_service.log(
         "import", "Project", target_name,
         f"Imported project bundle '{file.filename}' as '{target_name}' "
@@ -1083,6 +1160,7 @@ _TEMPLATE_DEFAULT_NAMES = {
     "3bus": "3-Bus Tutorial",
     "ieee14": "IEEE 14-Bus",
     "belgium": "Belgium Grid",
+    "ieee39": "IEEE 39-Bus (New England)",
 }
 
 
@@ -1141,6 +1219,7 @@ def create_from_template(
     name: str | None = None,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
+    session: SessionRow | None = Depends(current_session),
 ):
     """
     Create a new project from a bundled starter network.
@@ -1186,8 +1265,9 @@ def create_from_template(
     atomic_copy(src_nc, dest / "network.nc")
 
     # Reset + load, mirroring import_bundle / load_project.
-    from services import undo_service
+    from services import dirty_state, undo_service
     undo_service.clear()
+    dirty_state.clear()  # memory and disk now agree
     with PyPSAService.get_lock():
         PyPSAService.reset_network()
         n = PyPSAService.get_network()
@@ -1197,6 +1277,13 @@ def create_from_template(
         project_registry.bind_context(
             PyPSAService.get_active_context(), _created_project
         )
+
+    # Persist the pointer, mirroring activate_project. Written AFTER the swap
+    # succeeds so a failed create does not leave the session pointing at a
+    # project it never reached. Without this, `resolve_for_session` reads the
+    # stale pointer on the next request and silently reverts the switch.
+    if session is not None:
+        active_project.set_active_project(db, session, _created_project)
 
     # Templates ship without user_ts / solver_config — reset both to defaults
     # so no stale state from a previously-open project leaks into the new one.
@@ -1229,6 +1316,12 @@ def create_from_template(
         "scenario_description": None,
     })
 
+    # Persist the pointer, mirroring activate_project. Written AFTER the swap
+    # succeeds so a failed create does not leave the session pointing at a
+    # project it never reached. Without this, `resolve_for_session` reads the
+    # stale pointer on the next request and silently reverts the switch.
+    if session is not None:
+        active_project.set_active_project(db, session, _created_project)
     change_log_service.log(
         "import", "Project", target_name,
         f"Created project '{target_name}' from template '{template_id}' "
@@ -1299,6 +1392,7 @@ def save_project(
     else:
         project_acl.ensure_project_access(db, user, project)
     storage_dir = project_registry.ensure_project_dir(project)
+    _enforce_project_lock(db, project, user)
     name = project.name
     # Captured BEFORE the save, which is what performs the claim. Mirrors
     # `_save_context`'s own condition (`loaded is None or rebind`) — keying on
@@ -1337,8 +1431,9 @@ def save_project(
     # the undo stack so revert can't roll back across the checkpoint. Autosave
     # passes clear_undo=false to keep the in-memory revert history intact.
     if clear_undo:
-        from services import undo_service
+        from services import dirty_state, undo_service
         undo_service.clear()
+        dirty_state.clear()  # memory and disk now agree
     return result
 
 
@@ -1934,6 +2029,51 @@ def _access_denied(path: pathlib.Path) -> HTTPException:
     return HTTPException(503, detail)
 
 
+def _queue_solve_running(registry_id: str | None) -> bool:
+    """
+    True while the solve queue is RUNNING a job for `registry_id`.
+
+    Read from the job table rather than from the context, because the table is
+    authoritative from the instant `_run_job` flips a job to `running` —
+    including the few instructions before it has resolved a context at all, or
+    marked one `kind="queue"`. That window is precisely when a racing
+    registration would strand the solve, so the earlier signal is the useful
+    one. Unkeyed (legacy / hand-made) jobs match nothing here: they never
+    register a context either, so they cannot be stranded by one.
+    """
+    if registry_id is None:
+        return False
+    from services.solve_queue import solve_queue
+
+    return any(
+        j.get("project_key") == registry_id and j.get("status") == "running"
+        for j in solve_queue.list_jobs()
+    )
+
+
+def _queue_solve_conflict(name: str) -> HTTPException:
+    """
+    The 409 a load must raise while the queue owns the project's context.
+
+    Structured detail in the same shape `activate_project` and `_save_context`
+    use, so the chat agent surfaces one typed `solver_in_flight` frame for
+    every refusal-during-a-solve and the frontend's `formatApiDetail` prints
+    the message.
+    """
+    return HTTPException(
+        status_code=409,
+        detail={
+            "error_kind": "solver_in_flight",
+            "message": (
+                f"'{name}' is being solved by the queue right now. Opening it "
+                f"would replace the context that solve is writing into, and "
+                f"its results would be lost. Wait for the job to finish, or "
+                f"abort it, then reopen the project."
+            ),
+        },
+    )
+
+
 def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
     """
     Populate a (typically OFF-TO-THE-SIDE, background) ProjectContext from the
@@ -2118,19 +2258,25 @@ def activate_project(
         raise HTTPException(status_code=409, detail=_study)
 
     evicted: list[str] = []
-    if PyPSAService.get_context(registry_id) is not None:
-        # Resident → instant pointer swap. Already in the registry, so no new
-        # registration and no eviction can fire.
-        PyPSAService.set_active(registry_id)
-    else:
-        # Cold: build, hydrate from disk, then publish + register atomically.
-        # activate_context(register=True) runs the B9 cap check and returns any
-        # projects evicted to make room — the freshly-activated project is
-        # protected (it's the new active id) so it's never its own victim.
-        ctx = PyPSAService.build_context()
-        _hydrate_context_from_disk(ctx, src, project.name)
-        project_registry.bind_context(ctx, project)
-        evicted = PyPSAService.activate_context(ctx, register=True)
+    # Hold this key's hydrate lock across the MISS so a concurrent cold path
+    # (a path-scoped read, the session resolver, the solve dispatcher) cannot
+    # build a SECOND context for the same project. A resident hit takes no
+    # lock at all, so the instant tab switch is unchanged.
+    # Lock order: hydrate -> _registry_lock -> solve_queue._lock.
+    with PyPSAService.hydrate_or_adopt(registry_id) as resident:
+        if resident is not None:
+            # Resident → instant pointer swap. Already in the registry, so no
+            # new registration and no eviction can fire.
+            PyPSAService.set_active(registry_id)
+        else:
+            # Cold: build, hydrate from disk, then publish + register atomically.
+            # activate_context(register=True) runs the B9 cap check and returns any
+            # projects evicted to make room — the freshly-activated project is
+            # protected (it's the new active id) so it's never its own victim.
+            ctx = PyPSAService.build_context()
+            _hydrate_context_from_disk(ctx, src, project.name)
+            project_registry.bind_context(ctx, project)
+            evicted = PyPSAService.activate_context(ctx, register=True)
 
     # Persist the pointer (Step 0b). Until this, "which project am I looking
     # at" lived only in process memory, so it was shared by every user on the
@@ -2210,6 +2356,7 @@ def load_project(
     name: str,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
+    session: SessionRow | None = Depends(current_session),
 ) -> ImportSummary | dict[str, object]:
     from services import project_registry
 
@@ -2218,16 +2365,48 @@ def load_project(
     src = project_registry.project_dir(project)
     lock_info = _serialize_project_lock(db, project.id, user)
     name = project.name
+    registry_id = project_registry.registry_key(project)
     nc_path = src / "network.nc"
     if not nc_path.exists():
         raise HTTPException(404, f"Project '{name}' not found")
 
+    # TWO INDEPENDENT REFUSALS guard this route, for two different kinds of
+    # work in flight. A queued solve and a live study are separate states:
+    # neither check implies the other, so both run, and both sit here before
+    # `undo_service.clear()` so a refusal costs the caller nothing.
     # ★ Precheck BEFORE any destructive work (Phase 11 review, BLOCKER 3b).
     # The guard inside `reset_network` fires too late: by then this route
     # has already called `undo_service.clear()`, so a REFUSED load destroys
     # the undo history of the project the user is still looking at. Placed
     # after the 404 so a missing project is still reported as missing.
     PyPSAService.refuse_if_study_running("load a project")
+
+    # ONE ProjectContext per project, always — and this route is the fifth path
+    # that can break it. It builds nothing (so it satisfies R2 as worded), but
+    # it ends by RE-REGISTERING the caller's own context under this project's
+    # key. Do that while the queue is solving the project and the dispatcher's
+    # context becomes an orphan that still solves and still saves at
+    # completion, while this freshly-loaded copy — read from the PRE-solve file
+    # — takes the registry slot and writes over the results on its next save.
+    # That is defect D-1's exact shape, reached through a READ method, which
+    # `main.py`'s `/api/projects/` solver gate does not cover.
+    #
+    # REFUSE rather than adopt the solving context. Adoption would keep the
+    # invariant literally true, but this path does not build a context — it
+    # RE-BINDS one, and its callers treat what comes back as theirs to
+    # re-key: the clone wizard does `load(src)` then `save(dest, rebind=true)`,
+    # which would move the live solving context's identity onto another
+    # project mid-solve and make the dispatcher's own save 409 against its
+    # `expect=`. A refusal is also the only honest answer for a route whose
+    # contract is "read this project off disk": the file is about to be
+    # rewritten by the solve.
+    #
+    # Checked HERE, before `undo_service.clear()` and the `reset_network()`
+    # below, so a refusal costs the caller nothing — no half-load, no lost
+    # undo stack. Re-checked at the registration itself (the disk read is the
+    # widest part of the window between the two).
+    if _queue_solve_running(registry_id):
+        raise _queue_solve_conflict(name)
 
     # Crash-recovery surface. `_atomic_write_with` renames `.tmp → final` as
     # the last step; a `.tmp` sibling means a prior save was killed mid-write.
@@ -2246,8 +2425,9 @@ def load_project(
 
     # Clear undo history — snapshots from a previous project are meaningless
     # after loading a different one.
-    from services import undo_service
+    from services import dirty_state, undo_service
     undo_service.clear()
+    dirty_state.clear()  # memory and disk now agree
 
     with PyPSAService.get_lock():
         PyPSAService.reset_network()
@@ -2355,9 +2535,42 @@ def load_project(
     # tab switch back to this project finds it resident and does an INSTANT
     # in-memory pointer swap instead of re-loading from disk. Opening a project
     # the old (foreground) way therefore makes it switchable instantly next time.
-    PyPSAService.register(
-        project_registry.registry_key(project), PyPSAService.get_active_context()
-    )
+    #
+    # Under the key's hydrate lock, like every other path that publishes a
+    # context for a project: on a registry MISS the lock is held here, so a
+    # cold dispatcher cannot build and register a second context for the same
+    # project underneath this insert; on a HIT it is not taken (the fast path
+    # is deliberately lock-free), but a hit means the dispatcher can only ADOPT
+    # what is already resident, never build. Lock order: hydrate ->
+    # _registry_lock (inside `register`) -> solve_queue._lock (inside
+    # `_queue_solve_running`), which is the documented order.
+    with PyPSAService.hydrate_or_adopt(registry_id) as resident:
+        ctx = PyPSAService.get_active_context()
+        # The entry check happened before the disk read; a job can have started
+        # since. Registering now would strand it, so refuse — but leave nothing
+        # behind that could reach the project's directory on its own. The
+        # context is bound to the project and NOT registered at this point,
+        # which is exactly what an eviction write-back (`_save_evicted_ctx`)
+        # persists; and merely unbinding it is worse, because `_save_context`
+        # treats an unbound context as a first-save claim under ANY name. A
+        # fresh empty context is the one state neither can misuse — and it
+        # costs nothing extra, since this request's `reset_network()` already
+        # replaced whatever the caller had open.
+        if resident is not ctx and _queue_solve_running(registry_id):
+            with PyPSAService.get_lock():
+                PyPSAService.reset_network()
+            raise _queue_solve_conflict(name)
+        PyPSAService.register(registry_id, ctx)
+    # Persist the pointer, mirroring activate_project. Written AFTER the swap
+    # succeeds so a failed load does not leave the session pointing at a project
+    # it never reached. Without this, `resolve_for_session` reads the stale
+    # pointer on the next request and silently reverts the switch.
+    #
+    # Placed after the hydrate-lock block on purpose: a queue-solve refusal
+    # raises inside it, so a refused load never reaches this line — which is
+    # precisely the "failed load must not move the pointer" property above.
+    if session is not None:
+        active_project.set_active_project(db, session, project)
     change_log_service.log(
         "load", "Project", name,
         f"Loaded project '{name}' ({len(n.buses)} buses, {len(n.generators)} generators, {len(n.snapshots)} snapshots)",
@@ -2509,7 +2722,13 @@ def update_scenario_metadata(
     if not submitted:
         # Nothing asked for is not an error, but it must not stamp
         # `updated_at` or write a metadata file either — a no-op is a no-op.
+        # It must not take the lock either, which is why the gate sits BELOW
+        # this return: `_enforce_project_lock` ACQUIRES (D4/D8), so gating an
+        # empty PATCH would hand the writer a 120 s hold for a call that
+        # changes nothing.
         return _project_info_db(db, project)
+
+    _enforce_project_lock(db, project, user)
 
     if "description" in submitted:
         raw = submitted["description"]
@@ -2582,6 +2801,7 @@ def _delete_project_db(db, user, name: str, cascade: bool) -> dict:
     project = project_registry.resolve_project(db, user, name)
     if not project_acl.can_delete_project(db, user, project):
         raise HTTPException(403, f"You do not have permission to delete '{project.name}'")
+    _enforce_project_lock(db, project, user)
 
     child_projects = project_registry.descendants(db, project)
     if child_projects and not cascade:
@@ -2680,6 +2900,7 @@ def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> Projec
     project = project_registry.resolve_project(db, user, name)
     if not project_acl.can_delete_project(db, user, project):
         raise HTTPException(403, f"You do not have permission to rename '{project.name}'")
+    _enforce_project_lock(db, project, user)
     old_name = project.name
     if new_name == old_name:
         raise HTTPException(400, "new_name must differ from the current name")
@@ -2948,6 +3169,24 @@ def put_layout(
     dest, name = _resolve_project_src(name, db, user)
     if not dest.exists():
         raise HTTPException(404, f"Project '{name}' not found")
+    # `_resolve_project_src` resolves a PATH, not a row — re-resolve the row so
+    # the lock can be checked. A row-absent project is the legacy flat-storage
+    # path (no DB registry entry, no lock table to speak of), so it's ungated.
+    #
+    # CHECK-ONLY (D8), deliberately NOT `_enforce_project_lock`: every other
+    # gated write edge is a user act, but the canvas PUTs a layout on drag-
+    # settle and on remount, so acquire-on-write here would let a passive
+    # viewer take an idle project's lock — and keep renewing it — purely by
+    # looking at it.
+    #
+    # This predicate used to be spelled out inline here, and `_check_project_lock`
+    # was later factored out of it for the uploads edges — leaving two copies of
+    # one rule. That is the drift shape that produced the solve-queue abort bug:
+    # two guards that agree until somebody edits one. One definition now.
+    from services import project_registry
+
+    lock_project = project_registry.find_project(db, user, name)
+    _check_project_lock(db, lock_project, user)
     # Compact (no indent): layout.json is a machine-written coordinate blob,
     # never hand-read — pretty-printing only inflates the on-disk size.
     serialized = json.dumps(layout, separators=(",", ":"))
@@ -3066,6 +3305,7 @@ def put_project_members(
     project = project_registry.resolve_project(db, user, name)
     if not project_acl.can_manage_membership(db, user, project):
         raise HTTPException(403, "You do not have permission to manage members on this project")
+    _enforce_project_lock(db, project, user)
 
     try:
         user_ids = [_uuid.UUID(str(uid)) for uid in body.user_ids]

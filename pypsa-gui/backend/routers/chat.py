@@ -20,6 +20,8 @@ TestClient.
 """
 from __future__ import annotations
 
+import asyncio
+import threading
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -59,6 +61,16 @@ class StreamRequest(BaseModel):
     script: list[dict[str, Any]] | None = None
     message: str | None = None
     attachment_file_ids: list[str] | None = None
+    # Deixis — what the user is LOOKING AT when they hit send, so "why is this
+    # so high?" has a referent. Identifiers only; the allowlist that enforces
+    # that lives in `chat_service._format_ui_context`, not here, so a client
+    # attaching values fails closed. Optional is load-bearing: the smoke
+    # harness and the existing test suite send neither field.
+    ui_context: dict[str, Any] | None = None
+    # 'voice' | 'text'. A field rather than an inference because speech
+    # reciprocity depends on it and reconstructing it later from timing or
+    # content is guesswork. Carried now; the spoken-reply half is not built.
+    input_mode: str | None = None
 
 
 class ConfirmRequest(BaseModel):
@@ -177,6 +189,39 @@ def delete_api_key_settings(
     return app_secrets.clear_secret("ANTHROPIC_API_KEY")
 
 
+def _recover_pending_turn(ctx: Any) -> dict[str, Any] | None:
+    """
+    Resolve the WAL record left by an interrupted turn (#20), or None.
+
+    Two cases have to be told apart, and the file alone cannot do it — a
+    pending record looks identical whether the turn died with the process or
+    is streaming right now in another tab:
+
+      * The owning session is in this process AND has a turn in flight. The
+        turn is alive. Report nothing and — critically — leave the file
+        alone: deleting it here would strip a running turn of the protection
+        it is currently relying on.
+      * Otherwise (the usual post-restart case, where SESSIONS is empty).
+        Nobody is going to finish this turn. Report it, then clear it, so one
+        interruption produces one notice rather than a permanent banner.
+
+    The turn is deliberately NOT promoted into `turns`. It was never
+    answered; writing it into the transcript would fabricate a record of a
+    conversation that did not happen. Reporting it lets the panel say "this
+    message was interrupted" and let the user decide whether to resend.
+    """
+    pending = chat_service.read_pending_turn(ctx)
+    if pending is None:
+        return None
+    owner = chat_service.get_session(str(pending.get("session_id") or ""))
+    if owner is not None:
+        with owner._lock:
+            if owner._turn_in_flight:
+                return None
+    chat_service.clear_pending_turn(ctx)
+    return pending
+
+
 @router.get("/history")
 def chat_history(limit: int = 200) -> dict[str, Any]:
     """
@@ -194,16 +239,25 @@ def chat_history(limit: int = 200) -> dict[str, Any]:
       * `turns`: list of turn records, oldest first.
       * `last_session_id`: id of the most recent turn (or None if empty).
       * `bound_project`: the project name we read from, or None when unbound.
+      * `history_gap`: how many on-disk records were unreadable (QA #10). Zero
+        on a healthy transcript. Non-zero means the list above is INCOMPLETE,
+        which the panel must say rather than render a quietly shorter
+        conversation.
+      * `pending_turn`: a turn that started and never finished — recovered
+        from the WAL (#20), reported ONCE, then cleared. None normally.
     """
     from services.pypsa_service import PyPSAService
     ctx = PyPSAService.get_active_context()
     # Shared two-source (rotation + current) read — also used by the #9 daily
     # cap and the #27 export route. read_all_turns returns ONLY parsed turns
     # (no session rebuild side-effect); the rehydration below stays local.
-    turns: list[dict[str, Any]] = chat_service.read_all_turns(ctx)
+    turns, history_gap = chat_service.read_all_turns_with_gap(ctx)
+    pending_turn = _recover_pending_turn(ctx)
     if not turns:
         return {"turns": [], "last_session_id": None,
-                "bound_project": ctx.loaded_project}
+                "bound_project": ctx.loaded_project,
+                "history_gap": history_gap,
+                "pending_turn": pending_turn}
     if limit > 0:
         turns = turns[-limit:]
 
@@ -239,6 +293,8 @@ def chat_history(limit: int = 200) -> dict[str, Any]:
         "turns": turns,
         "last_session_id": last_session_id,
         "bound_project": ctx.loaded_project,
+        "history_gap": history_gap,
+        "pending_turn": pending_turn,
     }
 
 
@@ -319,6 +375,107 @@ def chat_import(body: ImportRequest) -> dict[str, Any]:
     return {"imported": imported, "project": ctx.loaded_project}
 
 
+# How often the disconnect watcher asks whether the client is still there.
+# The poll is cheap (a non-blocking drain of the receive channel), so the
+# interval is set by how long we are willing to keep paying for a turn nobody
+# will read, not by cost. Module-level so a test can shorten it.
+DISCONNECT_POLL_SECONDS = 2.0
+
+
+class _DisconnectWatcher:
+    """
+    Abort a turn whose client has gone away (QA #14).
+
+    Until now the only early exit was an explicit POST to `/{id}/abort`,
+    which the panel sends when it closes cleanly. A tab that is killed, a
+    laptop that sleeps, a dropped connection and a quit app all send nothing,
+    and the turn ran to completion — more model tokens, and every remaining
+    tool in the agent's plan actually executed against a network nobody was
+    watching.
+
+    Lives here rather than inside `_gen()` because `_gen()` is a SYNC
+    generator handed to `StreamingResponse` and run in a worker thread: there
+    is no event loop in there to await anything on. The async handler has
+    both `request` and the running loop, so the watcher is a task on that
+    loop, and the only thing it ever touches is `session.abort_event` — the
+    same thread-safe primitive `/abort` sets. `_gen()` is unchanged.
+
+    Reliability note, because the obvious reading says this cannot work:
+    Starlette runs its own `listen_for_disconnect` alongside the response
+    body whenever the server advertises ASGI spec_version < 2.4 (uvicorn's
+    HTTP protocols say 2.3), and that listener is parked in `await receive()`
+    so it wins every delivery race against our opportunistic poll. It does
+    not matter: uvicorn's `receive()` is LEVEL-triggered — once the
+    connection is gone it returns `http.disconnect` to every later call
+    rather than once. Both observers therefore see it. A server with an
+    edge-triggered `receive()` would starve this watcher, so it is written to
+    be harmless when it never fires: the pre-existing `/abort` path and
+    `_gen()`'s own teardown remain the guaranteed stops, and this is the one
+    that makes them prompt.
+    """
+
+    def __init__(
+        self,
+        request: Request,
+        session: Any,
+        *,
+        finished: threading.Event | None = None,
+        poll_seconds: float | None = None,
+    ) -> None:
+        self._request = request
+        self._session = session
+        # Set by `_gen()`'s finally BEFORE it disarms, so a watcher that
+        # wakes in that window can tell "the client vanished mid-turn" from
+        # "the response is simply over".
+        self.finished = finished if finished is not None else threading.Event()
+        self._poll = (
+            poll_seconds if poll_seconds is not None else DISCONNECT_POLL_SECONDS
+        )
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._task: asyncio.Task[None] | None = None
+
+    async def _run(self) -> None:
+        while not self.finished.is_set():
+            await asyncio.sleep(self._poll)
+            if self.finished.is_set():
+                return
+            try:
+                gone = await self._request.is_disconnected()
+            except Exception:  # noqa: BLE001 — never break the stream over a probe
+                return
+            if not gone:
+                continue
+            # Re-check under the same condition that gated the sleep. Without
+            # it, a watcher that wakes just after the response completed sees
+            # a (correctly) disconnected client and flips an event that is
+            # SESSION-scoped — aborting whatever turn that session runs next.
+            if not self.finished.is_set():
+                self._session.abort_event.set()
+            return
+
+    def arm(self) -> None:
+        """Start watching. Must be called from the event loop's own task."""
+        self._loop = asyncio.get_running_loop()
+        self._task = self._loop.create_task(self._run())
+
+    def disarm(self) -> None:
+        """
+        Stop watching. Called from `_gen()`'s finally — i.e. from a WORKER
+        THREAD — so the cancel has to be marshalled onto the loop. Never
+        raises: it runs in a finally, where an exception would replace
+        whatever real failure is already in flight.
+        """
+        self.finished.set()
+        task, loop = self._task, self._loop
+        if task is None or loop is None:
+            return
+        try:
+            loop.call_soon_threadsafe(task.cancel)
+        except RuntimeError:
+            # Loop already closed — the task died with it.
+            pass
+
+
 @router.post("/stream")
 async def chat_stream(
     body: StreamRequest,
@@ -333,11 +490,14 @@ async def chat_stream(
     Abort handling (M8): the SSE generator (and the agent_loop_stub it
     drives) check `session.abort_event` between steps. Clients abort a
     stream by POSTing to `/api/chat/{session_id}/abort` (set by the
-    ChatPanel on close or by an explicit Cancel button). Phase 3 may also
-    poll `request.is_disconnected()` once an asyncio-native handler is
-    written; Phase 2 keeps the abort path purely synchronous so the
-    StreamingResponse generator runs in the standard threadpool without
-    needing `asyncio.run` from a worker thread.
+    ChatPanel on close or by an explicit Cancel button).
+
+    QA #14: a client that never gets to send that POST — a killed tab, a
+    sleeping laptop, a dropped connection — is covered by
+    `_DisconnectWatcher`, which polls `request.is_disconnected()` from THIS
+    handler's event loop and flips the same `abort_event`. `_gen()` stays a
+    plain sync generator running in the standard threadpool; nothing here
+    needs `asyncio.run` from a worker thread.
     """
     # Bind the acting identity for this turn's tools (Step 0a). The project
     # tools call `routers.projects` handlers in-process and must authorize
@@ -409,6 +569,13 @@ async def chat_stream(
     # Phase 4 QA fix: previously a body.message would mutate script and
     # accidentally trip the stub path, bypassing the LLM entirely.
     has_explicit_script = bool(body.script)
+
+    # QA #14 — armed HERE, on the event loop, because `_gen()` below has no
+    # loop to await `request.is_disconnected()` on. Disarmed in `_gen()`'s
+    # finally so no polling task outlives its stream.
+    watcher = _DisconnectWatcher(request, session)
+    watcher.arm()
+
     def _gen():
         try:
             if has_explicit_script:
@@ -417,6 +584,7 @@ async def chat_stream(
                 events = chat_service.run_turn(
                     session, body.message or "",
                     attachment_file_ids=body.attachment_file_ids,
+                    ui_context=body.ui_context,
                 )
             for event_name, payload in events:
                 yield chat_service.sse_frame(event_name, payload)
@@ -426,6 +594,10 @@ async def chat_stream(
                 {"error_kind": "internal_error",
                  "message": chat_service._redact_for_log(exc)},
             )
+        finally:
+            # Covers every exit: normal completion, the error frame above, and
+            # GeneratorExit when the consumer stops pulling.
+            watcher.disarm()
 
     return StreamingResponse(
         _gen(),
@@ -468,6 +640,34 @@ def chat_confirm(session_id: str, body: ConfirmRequest) -> dict[str, Any]:
         "tool_name": pc.tool_name,
         "decision": body.decision,
     }
+
+
+class RewindRequest(BaseModel):
+    """How many complete turns to drop from the session's API history."""
+
+    turns: int = 1
+
+
+@router.post("/{session_id}/rewind")
+def chat_rewind(session_id: str, body: RewindRequest) -> dict[str, Any]:
+    """
+    Drop the last N turns so a retry / edit-and-resend is a real retry.
+
+    Without this the client can only clear the screen, while the array
+    replayed to the model still holds the answer being retried — so the model
+    reads its own last answer and repeats it, and retry looks broken.
+
+    Idempotent-ish and never 404s, matching /abort: an unknown session means
+    there is nothing to rewind, which is the caller's desired end state
+    anyway. `dropped: 0` with `ok: true` is also what a caller gets while a
+    turn is in flight — see rewind_session for why refusing is the only safe
+    answer there.
+    """
+    session = chat_service.get_session(session_id)
+    if session is None:
+        return {"ok": False, "reason": "unknown_session", "dropped": 0}
+    dropped = chat_service.rewind_session(session, turns=body.turns)
+    return {"ok": True, "dropped": dropped}
 
 
 @router.post("/{session_id}/abort")

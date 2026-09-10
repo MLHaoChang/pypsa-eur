@@ -9,9 +9,12 @@ import {
 import { H2Icon } from '../components/AssetIcons'
 import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts'
 import { useUIStore } from '../store/uiStore'
+import { editScope, loadExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
+import { updateAsset } from '../utils/assetWrite'
 import { isRenewableCarrier } from '../utils/carriers'
 import { ingestRescale } from '../utils/rescaleActions'
+import type { RescalePreview } from '../utils/rescale'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
 import type { Bus, Carrier, Generator, Line, Link, LinkProfileMeta, Load, StorageUnit, Store, Transformer, LoadProfileMeta, GeneratorProfileMeta } from '../api/types'
@@ -62,6 +65,9 @@ import {
   MiniProfileChart,
   CardShell,
   EditShell,
+  ExtrasSection,
+  extrasPatch,
+  seedExtras,
 } from "./properties/cardKit"
 
 // ── Delete undo toast ──────────────────────────────────────────────────────────
@@ -99,7 +105,9 @@ function showDeleteUndoToast(label: string, qc: QueryClient) {
 }
 
 // ── Generator card ─────────────────────────────────────────────────────────────
-function GeneratorCard({ gen, onRename, mode = 'card', title }: {
+// Exported so the card can be rendered in isolation by
+// PropertiesPanel.save.test.tsx. Props and behaviour are unchanged.
+export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   gen: Generator
   onRename?: (newName: string) => void
   mode?: 'card' | 'detail'
@@ -134,17 +142,16 @@ function GeneratorCard({ gen, onRename, mode = 'card', title }: {
   })
 
   const saveMut = useMutation({
-    mutationFn: () => {
+    // The Asset-write chokepoint (utils/assetWrite.ts) owns fetch, spread,
+    // PUT and invalidation; this builder owns only the form→patch mapping.
+    // `current` arrives from the chokepoint — fresh-fetched on a cold cache
+    // (ruling 3), so the old `?? gen` stale-prop fallback is gone.
+    mutationFn: () => updateAsset<Generator>(
+      qc, useUIStore.getState().currentProject, 'generators', gen.name,
+      (current) => {
       const newName = form.name?.trim() || gen.name
       const newBus = (form.bus as string | undefined)?.trim() || gen.bus
-      // Read latest cached generator (race-safe vs stale closure) and
-      // spread it so fields the form doesn't surface are preserved
-      // through the backend's remove+add cycle. Mirrors the pattern
-      // applied to Load/Link/Transformer cards in patch B1.
-      const cachedGens = qc.getQueryData<Generator[]>(nk(useUIStore.getState().currentProject, 'generators')) ?? []
-      const current = cachedGens.find(g => g.name === gen.name) ?? gen
       const payload: Partial<Generator> = {
-        ...current,
         name: newName, bus: newBus,
         carrier: form.carrier || current.carrier,
         // AC control mode (PQ/PV/Slack). Drives Stage 2 AC PF; falls back to
@@ -201,10 +208,14 @@ function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       payload.discount_rate = drPct === null ? null : drPct / 100
       // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
       Object.assign(payload, outagePayload(form))
-      return networkApi.updateGenerator(gen.name, payload)
-    },
+      // Extras last: the chokepoint's ...current spread and the explicit
+      // payload.X = no(...) lines above would otherwise overwrite a value
+      // the user just typed.
+      Object.assign(payload, extrasPatch(form, loadExtras(editScope('Generator'))))
+      return payload
+    }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'generators') })
+      // Invalidation is the chokepoint's job now.
       setOpen(false)
       toast.success('Generator saved')
       const newName = form.name?.trim() || gen.name
@@ -229,12 +240,12 @@ function GeneratorCard({ gen, onRename, mode = 'card', title }: {
     // Pre-fill lifetime from solver-config global when blank/inf — matches
     // user expectation that "all assets default to the global lifetime".
     base.lifetime = defaultLifetime(gen.lifetime, globalLt)
-    setForm({
+    setForm(seedExtras(gen, {
       ...base,
       discount_rate_pct: discountRatePct(gen.discount_rate),
       // Control mode: blank if unset (treat as default 'PQ' on save).
       control: gen.control || 'PQ',
-    })
+    }, loadExtras(editScope('Generator'))))
     setOpen(true)
   }
 
@@ -444,6 +455,12 @@ function GeneratorCard({ gen, onRename, mode = 'card', title }: {
                 tip="Minimum total energy produced over the snapshot horizon. PyPSA: e_sum_min ≤ Σ_t (p_t × weight_t). Blank = no lower bound." />
       <NumInput label="E sum max" k="e_sum_max" fs={form} set={setForm} unit="MWh"
                 tip="Maximum total energy produced over the snapshot horizon. PyPSA: Σ_t (p_t × weight_t) ≤ e_sum_max. Blank = no upper bound." />
+      <ExtrasSection
+        componentClass="Generator"
+        fs={form}
+        set={setForm}
+        curated={Object.keys(form)}
+      />
     </EditShell>
   )
 }
@@ -472,13 +489,14 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   })
 
   const saveMut = useMutation({
-    mutationFn: () => {
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
+    // this builder owns only the form→patch mapping.
+    mutationFn: () => updateAsset<StorageUnit>(
+      qc, useUIStore.getState().currentProject, 'storage_units', su.name,
+      (current) => {
       const newName = form.name?.trim() || su.name
       const newBus = (form.bus as string | undefined)?.trim() || su.bus
-      const cachedSUs = qc.getQueryData<StorageUnit[]>(nk(useUIStore.getState().currentProject, 'storage_units')) ?? []
-      const current = cachedSUs.find(s => s.name === su.name) ?? su
       const payload: Partial<StorageUnit> = {
-        ...current,
         name: newName, bus: newBus,
         carrier: form.carrier || current.carrier,
         p_nom: nf(form, 'p_nom', current.p_nom),
@@ -512,10 +530,12 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       payload.discount_rate = drPct === null ? null : drPct / 100
       // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
       Object.assign(payload, outagePayload(form))
-      return networkApi.updateStorageUnit(su.name, payload)
-    },
+      // Extras last: the ...current spread and the explicit payload.X = no(...)
+      // lines above would otherwise overwrite a value the user just typed.
+      Object.assign(payload, extrasPatch(form, loadExtras(editScope('StorageUnit'))))
+      return payload
+    }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'storage_units') })
       setOpen(false)
       toast.success('Storage unit saved')
       const newName = form.name?.trim() || su.name
@@ -532,10 +552,10 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       'inflow',
       'marginal_cost', 'capital_cost', 'fom_cost', 'overnight_cost', 'build_year'])
     base.lifetime = defaultLifetime(su.lifetime, globalLt)
-    setForm({
+    setForm(seedExtras(su, {
       ...base,
       discount_rate_pct: discountRatePct(su.discount_rate),
-    })
+    }, loadExtras(editScope('StorageUnit'))))
     setOpen(true)
   }
 
@@ -662,6 +682,12 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
       <SectionHdr title="Lifecycle" />
       <BuildYearSelect fs={form} set={setForm} tip={docTip('storage_unit.build_year')} />
       <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip="Asset lifetime in years. Defaults to the global default_lifetime from Solver Settings." />
+      <ExtrasSection
+        componentClass="StorageUnit"
+        fs={form}
+        set={setForm}
+        curated={Object.keys(form)}
+      />
     </EditShell>
   )
 }
@@ -690,13 +716,13 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
   })
 
   const saveMut = useMutation({
-    mutationFn: () => {
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate.
+    mutationFn: () => updateAsset<Store>(
+      qc, useUIStore.getState().currentProject, 'stores', store.name,
+      (current) => {
       const newName = form.name?.trim() || store.name
       const newBus = (form.bus as string | undefined)?.trim() || store.bus
-      const cachedStores = qc.getQueryData<Store[]>(nk(useUIStore.getState().currentProject, 'stores')) ?? []
-      const current = cachedStores.find(s => s.name === store.name) ?? store
       const payload: Partial<Store> = {
-        ...current,
         name: newName, bus: newBus,
         carrier: form.carrier || current.carrier,
         e_nom: nf(form, 'e_nom', current.e_nom),
@@ -725,10 +751,12 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
       payload.lifetime = no(form, 'lifetime')
       // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
       Object.assign(payload, outagePayload(form))
-      return networkApi.updateStore(store.name, payload)
-    },
+      // Extras last: the ...current spread and the explicit payload.X = no(...)
+      // lines above would otherwise overwrite a value the user just typed.
+      Object.assign(payload, extrasPatch(form, loadExtras(editScope('Store'))))
+      return payload
+    }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'stores') })
       setOpen(false)
       toast.success('Store saved')
       const newName = form.name?.trim() || store.name
@@ -742,7 +770,7 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
       'e_min_pu', 'e_max_pu', 'e_initial', 'e_cyclic', 'capital_cost', 'marginal_cost', 'fom_cost',
       'overnight_cost', 'standing_loss', 'build_year'])
     base.lifetime = defaultLifetime(store.lifetime, globalLt)
-    setForm({ ...base, discount_rate_pct: discountRatePct(store.discount_rate) })
+    setForm(seedExtras(store, { ...base, discount_rate_pct: discountRatePct(store.discount_rate) }, loadExtras(editScope('Store'))))
     setOpen(true)
   }
 
@@ -852,6 +880,12 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
       <SectionHdr title="Lifecycle (multi-period)" />
       <BuildYearSelect fs={form} set={setForm} tip={docTip('store.build_year')} />
       <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip="Asset lifetime in years. Defaults to the global default_lifetime from Solver Settings." />
+      <ExtrasSection
+        componentClass="Store"
+        fs={form}
+        set={setForm}
+        curated={Object.keys(form)}
+      />
     </EditShell>
   )
 }
@@ -896,26 +930,19 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
       // open before this field existed). The selector renders the current
       // bus pre-selected so a user who doesn't touch it keeps the same bus.
       const newBus = (form.bus as string | undefined)?.trim() || load.bus
-      // PUT payload MUST spread the full cached load before overriding —
-      // backend's `_update_component` does remove + add, so any field NOT
-      // in the payload resets to Pydantic schema defaults. Without the
-      // spread, fields the form doesn't expose (e.g. `active`, `type`,
-      // future schema additions) silently revert to defaults on every
-      // Apply. Read from React Query cache to pick up edits made in
-      // other tabs / panels while this form was open.
-      const cachedLoads = qc.getQueryData<Load[]>(nk(useUIStore.getState().currentProject, 'loads')) ?? []
-      const current = cachedLoads.find(l => l.name === load.name) ?? load
-      return networkApi.updateLoad(load.name, {
-        ...current,
-        name: newName, bus: newBus,
-        carrier: form.carrier || current.carrier,
-        p_set: nf(form, 'p_set', current.p_set),
-        q_set: nf(form, 'q_set', current.q_set ?? 0),
-        sign: nf(form, 'sign', current.sign ?? -1),
-      } as Partial<Load>)
+      // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate;
+      // this builder is only the form→patch mapping.
+      return updateAsset<Load>(
+        qc, useUIStore.getState().currentProject, 'loads', load.name,
+        (current) => ({
+          name: newName, bus: newBus,
+          carrier: form.carrier || current.carrier,
+          p_set: nf(form, 'p_set', current.p_set),
+          q_set: nf(form, 'q_set', current.q_set ?? 0),
+          sign: nf(form, 'sign', current.sign ?? -1),
+        }))
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'loads') })
       setOpen(false)
       toast.success('Load saved')
       const newName = form.name?.trim() || load.name
@@ -925,7 +952,7 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
   })
 
   const startEdit = () => {
-    setForm(toFS(load, ['name', 'bus', 'carrier', 'p_set', 'q_set', 'sign']))
+    setForm(seedExtras(load, toFS(load, ['name', 'bus', 'carrier', 'p_set', 'q_set', 'sign']), loadExtras(editScope('Load'))))
     setOpen(true)
   }
 
@@ -1011,6 +1038,12 @@ function LoadCard({ load, onRename, mode = 'card', title }: {
             : 'No profile — static p_set used'}
         </span>
       </div>
+      <ExtrasSection
+        componentClass="Load"
+        fs={form}
+        set={setForm}
+        curated={Object.keys(form)}
+      />
     </EditShell>
   )
 }
@@ -1089,20 +1122,15 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
   })
 
   const saveMut = useMutation({
-    mutationFn: () => {
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate —
+    // the spread is what keeps un-surfaced Link fields (`efficiency2`,
+    // `bus2..bus4`, `committable`, `terrain_factor`, …) alive through the
+    // backend's remove+add cycle. This builder is only the form→patch map.
+    mutationFn: () => updateAsset<Link>(
+      qc, useUIStore.getState().currentProject, 'links', link.name,
+      (current) => {
       const newName = form.name?.trim() || link.name
-      // Spread the cached link before overriding — backend's
-      // `_update_component` does remove + add, so any field NOT in the
-      // payload resets to Pydantic schema defaults. The form only
-      // surfaces a curated subset (efficiency, p_nom, costs, …);
-      // without the spread, Link-specific fields like `efficiency2`,
-      // `efficiency3`, `bus2`, `bus3`, `bus4`, `committable`,
-      // `terrain_factor`, `marginal_cost_storage`, `ramp_limit_*` all
-      // silently reset every time the user clicks Apply.
-      const cachedLinks = qc.getQueryData<Link[]>(nk(useUIStore.getState().currentProject, 'links')) ?? []
-      const current = cachedLinks.find(l => l.name === link.name) ?? link
       const payload: Partial<Link> = {
-        ...current,
         name: newName,
         bus0: form.bus0 || current.bus0,
         bus1: form.bus1 || current.bus1,
@@ -1128,10 +1156,12 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       payload.discount_rate = drPct === null ? null : drPct / 100
       // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
       Object.assign(payload, outagePayload(form))
-      return networkApi.updateLink(link.name, payload)
-    },
+      // Extras last: the ...current spread and the explicit payload.X = no(...)
+      // lines above would otherwise overwrite a value the user just typed.
+      Object.assign(payload, extrasPatch(form, loadExtras(editScope('Link'))))
+      return payload
+    }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'links') })
       setOpen(false)
       toast.success('Link saved')
       const newName = form.name?.trim() || link.name
@@ -1145,10 +1175,10 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       'p_min_pu', 'p_max_pu', 'efficiency', 'marginal_cost', 'capital_cost', 'fom_cost',
       'overnight_cost', 'build_year', 'lifetime'])
     base.lifetime = defaultLifetime(link.lifetime, globalLt)
-    setForm({
+    setForm(seedExtras(link, {
       ...base,
       discount_rate_pct: discountRatePct(link.discount_rate),
-    })
+    }, loadExtras(editScope('Link'))))
     setOpen(true)
   }
 
@@ -1327,6 +1357,12 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       <SectionHdr title="Lifecycle" />
       <BuildYearSelect fs={form} set={setForm} tip={docTip('link.build_year')} />
       <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip={docTip('link.lifetime')} />
+      <ExtrasSection
+        componentClass="Link"
+        fs={form}
+        set={setForm}
+        curated={Object.keys(form)}
+      />
     </EditShell>
   )
 }
@@ -1572,34 +1608,38 @@ function BusPanel({ name }: { name: string }) {
 
   const startEdit = () => {
     if (!bus) return
-    setForm(toFS(bus, ['name', 'v_nom', 'carrier', 'control', 'country', 'sub_network', 'x', 'y']))
+    setForm(seedExtras(bus, toFS(bus, ['name', 'v_nom', 'carrier', 'control', 'country', 'sub_network', 'x', 'y']), loadExtras(editScope('Bus'))))
     setEditing(true)
   }
 
   const updateMut = useMutation({
-    mutationFn: () => {
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate.
+    // The PUT's response passes through it — the rescale preview below
+    // depends on that (Finding 1, 2026-07-31 review).
+    mutationFn: async () => {
       if (!bus) throw new Error('Bus not found')
       const newName = form.name?.trim() || bus.name
-      const cachedBuses = qc.getQueryData<Bus[]>(nk(useUIStore.getState().currentProject, 'buses')) ?? []
-      const current = cachedBuses.find(b => b.name === bus.name) ?? bus
-      return networkApi.updateBus(bus.name, {
-        ...current,
-        name: newName,
-        v_nom: nf(form, 'v_nom', current.v_nom),
-        carrier: form.carrier || current.carrier,
-        control: form.control || current.control,
-        country: form.country ?? current.country,
-        // sub_network drives the "region" cluster mode: buses sharing the same
-        // user-set label collapse to one node. Empty string means "auto-determine"
-        // and falls through to PyPSA's `determine_network_topology` in the
-        // /api/network/cluster handler.
-        sub_network: form.sub_network ?? current.sub_network,
-        x: nf(form, 'x', current.x),
-        y: nf(form, 'y', current.y),
-      })
+      const resp = await updateAsset<Bus>(
+        qc, useUIStore.getState().currentProject, 'buses', bus.name,
+        (current) => ({
+          name: newName,
+          v_nom: nf(form, 'v_nom', current.v_nom),
+          carrier: form.carrier || current.carrier,
+          control: form.control || current.control,
+          country: form.country ?? current.country,
+          // sub_network drives the "region" cluster mode: buses sharing the same
+          // user-set label collapse to one node. Empty string means "auto-determine"
+          // and falls through to PyPSA's `determine_network_topology` in the
+          // /api/network/cluster handler.
+          sub_network: form.sub_network ?? current.sub_network,
+          x: nf(form, 'x', current.x),
+          y: nf(form, 'y', current.y),
+        }))
+      // updateBus's typed response — the chokepoint is row-agnostic, so the
+      // shape is reasserted where it is consumed.
+      return resp as { name: string; rescale: RescalePreview[] }
     },
     onSuccess: (data) => {
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
       const newName = form.name?.trim() || name
       if (newName !== name) setSelectedComponent({ type: 'Bus', name: newName })
       setEditing(false)
@@ -1671,6 +1711,12 @@ function BusPanel({ name }: { name: string }) {
           <CoordPairInput fs={form} set={setForm} tip={docTip('bus.coordinates')} />
           <NumInput label="Longitude (x)" k="x" fs={form} set={setForm} tip={docTip('bus.x')} />
           <NumInput label="Latitude (y)" k="y" fs={form} set={setForm} tip={docTip('bus.y')} />
+          <ExtrasSection
+            componentClass="Bus"
+            fs={form}
+            set={setForm}
+            curated={Object.keys(form)}
+          />
         </EditShell>
       )}
 
@@ -1752,21 +1798,19 @@ function LinePanel({ name }: { name: string }) {
   }
 
   const updateMut = useMutation({
-    mutationFn: () => {
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate —
+    // the spread keeps un-surfaced fields (`terrain_factor`, `num_parallel`,
+    // `v_ang_min/max`, `committable`, …) alive through remove+add.
+    mutationFn: () => updateAsset<Line>(
+      qc, useUIStore.getState().currentProject, 'lines', name,
+      (current) => {
       if (!line) throw new Error('Line not found')
       const newName = form.name?.trim() || name
       const isExt = form.s_nom_extendable === 'true'
-      // Read latest cached line (race-safe vs stale closure) and spread it
-      // so fields the form doesn't surface (`terrain_factor`, `num_parallel`,
-      // `v_ang_min/max`, `committable`, …) survive the backend's remove+add
-      // cycle. Mirror of the E6 pattern applied to Gen/Storage/Store/Bus.
-      const cachedLines = qc.getQueryData<Line[]>(nk(useUIStore.getState().currentProject, 'lines')) ?? []
-      const current = cachedLines.find(l => l.name === name) ?? line
       // r/x/b are entered per-km in the UI; PyPSA stores absolute Ohm / Siemens.
       // Multiply by length on save. Per-km value of 0 (or empty) ⇒ absolute 0.
       const lengthOut = numField('length', current.length)
       const payload: Partial<Line> = {
-        ...current,
         name: newName, bus0: current.bus0, bus1: current.bus1, carrier: current.carrier || 'AC',
         s_nom: numField('s_nom', current.s_nom), length: lengthOut,
         r: numField('r_per_km', 0) * lengthOut,
@@ -1819,10 +1863,12 @@ function LinePanel({ name }: { name: string }) {
       }
       // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
       Object.assign(payload, outagePayload(form))
-      return networkApi.updateLine(name, payload)
-    },
+      // Extras last: the ...current spread and the explicit payload.X = no(...)
+      // lines above would otherwise overwrite a value the user just typed.
+      Object.assign(payload, extrasPatch(form, loadExtras(editScope('Line'))))
+      return payload
+    }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
       setEditing(false)
       toast.success('Line updated')
       const newName = form.name?.trim() || name
@@ -2011,6 +2057,12 @@ function LinePanel({ name }: { name: string }) {
               Cancel
             </button>
           </div>
+          <ExtrasSection
+            componentClass="Line"
+            fs={form}
+            set={setForm}
+            curated={Object.keys(form)}
+          />
         </Section>
       ) : (
         <>
@@ -2080,23 +2132,19 @@ function TransformerPanel({ name }: { name: string }) {
   }
 
   const updateMut = useMutation({
-    mutationFn: () => {
+    // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate —
+    // the spread keeps un-surfaced Transformer fields (`tap_position`,
+    // `tap_side`, `num_parallel`, `model`, `g`, `b`, `active`, `s_max_pu`)
+    // alive through the backend's remove+add cycle.
+    mutationFn: () => updateAsset<Transformer>(
+      qc, useUIStore.getState().currentProject, 'transformers', name,
+      (current) => {
       if (!tr) throw new Error('Transformer not found')
       const newName = form.name?.trim() || name
       const isExt = form.s_nom_extendable === 'true'
-      // Spread the cached transformer before overriding — backend's
-      // `_update_component` does remove + add, so any field NOT in the
-      // payload resets to Pydantic schema defaults. The form only
-      // surfaces a curated subset (r, x, s_nom, costs, …); without
-      // the spread, Transformer-specific fields like `tap_position`,
-      // `tap_side`, `num_parallel`, `model`, `g`, `b`, `active`,
-      // `s_max_pu` silently revert to defaults on every Apply.
-      const cachedTrs = qc.getQueryData<Transformer[]>(nk(useUIStore.getState().currentProject, 'transformers')) ?? []
-      const current = cachedTrs.find(t => t.name === name) ?? tr
       // Forward v_nom_0 / v_nom_1 so the backend re-validates against the
       // connected buses on every save (catches voltage edits made elsewhere).
       const payload: Partial<Transformer> = {
-        ...current,
         name: newName, bus0: current.bus0, bus1: current.bus1, type: current.type ?? '',
         s_nom: numField('s_nom', current.s_nom),
         r: numField('r', current.r),
@@ -2139,10 +2187,12 @@ function TransformerPanel({ name }: { name: string }) {
       } else {
         payload.lifetime = null
       }
-      return networkApi.updateTransformer(name, payload)
-    },
+      // Extras last: the ...current spread and the explicit payload.X = no(...)
+      // lines above would otherwise overwrite a value the user just typed.
+      Object.assign(payload, extrasPatch(form, loadExtras(editScope('Transformer'))))
+      return payload
+    }),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'transformers') })
       setEditing(false)
       toast.success('Transformer updated')
       const newName = form.name?.trim() || name
@@ -2266,6 +2316,12 @@ function TransformerPanel({ name }: { name: string }) {
               Cancel
             </button>
           </div>
+          <ExtrasSection
+            componentClass="Transformer"
+            fs={form}
+            set={setForm}
+            curated={Object.keys(form)}
+          />
         </Section>
       ) : (
         <>

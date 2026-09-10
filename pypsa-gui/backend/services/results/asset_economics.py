@@ -12,13 +12,22 @@ the router already used, so they are intentionally absent from this header.
 """
 from __future__ import annotations
 
+import logging
+
 from services.period_utils import (
     period_years_map,
     years_for_period,
 )
+from services.results.load_frames import corrected_marginal_prices
 from services.solver_service import periodized_capital_costs
 
 
+
+
+# The SAME logger the router used, not a child of it: the lifted bodies must
+# produce byte-identical log records — `tests/test_asset_economics_capital_costs.py`
+# asserts on the channel name.
+logger = logging.getLogger("pypsa_gui.results")
 
 def compute_asset_economics(n, cfg, *, result_df):
     """
@@ -35,13 +44,16 @@ def compute_asset_economics(n, cfg, *, result_df):
 
 
 
+    capital_costs_available = True
     try:
-        # ── Pre-compute the effective annualised capital_cost for every asset.
-        # Mirrors the same context the cost_breakdown endpoint uses — so the
-        # numbers reconcile (cost_breakdown.capex = Σ fixed_cost across assets).
         asset_costs = periodized_capital_costs(n, cfg)
     except Exception:
+        logger.exception(
+            "periodized_capital_costs failed in /results/asset_economics; "
+            "capital-cost-derived fields will be reported as unavailable",
+        )
         asset_costs = {}
+        capital_costs_available = False
 
     # ── Snapshot + period weighting helpers ──────────────────────────────
     # Multi-period: `snapshot_weightings.objective` carries the per-row weight
@@ -127,6 +139,19 @@ def compute_asset_economics(n, cfg, *, result_df):
     def _safe_finite(x: float) -> float:
         return 0.0 if x is None or not math.isfinite(x) else float(x)
 
+    def _capital_derived(x: float | None) -> float | None:
+        """
+        Emit a capital-cost-derived field, or `null` if the resolver failed.
+
+        Use this — NOT `_safe_finite` — for anything computed from
+        `asset_costs`. `_safe_finite(0.0)` is indistinguishable on the wire
+        from a genuine zero, and the Economics tab formats it as "€0.00"
+        beside real revenue figures. `null` is the only value the frontend
+        cannot accidentally render as a number.
+        """
+        if not capital_costs_available:
+            return None
+        return None if x is None else _safe_finite(x)
     def _accumulate_per_period(
         series: _pd.Series,
         weights: _np.ndarray,
@@ -151,115 +176,19 @@ def compute_asset_economics(n, cfg, *, result_df):
             by_p[p] = by_p.get(p, 0.0) + float(weighted[i])
         return total, by_p
 
-    # ── Marginal prices per bus (one bus per row in n.buses) ─────────────
-    try:
-        prices = result_df(n, "buses_t", "marginal_price", "lopf")
-    except Exception:
-        prices = None
-    if prices is None or prices.empty:
-        prices = _pd.DataFrame(0.0, index=snapshots, columns=n.buses.index)
-    # Replace NaN with 0 so missing duals don't poison weighted sums.
-    prices = prices.fillna(0.0)
-
-    # ── Merit-order ("subsidy-removed") price adjustment ─────────────────
-    # The curtailment_cost extra-functionality term in solver_service adds
-    # `-cost × p` to the LP objective for any renewable with
-    # curtailment_cost > 0. That distorts the LP dual at the renewable's
-    # bus: when the renewable is the marginal unit (dispatching strictly
-    # between 0 and p_max_pu × p_nom_opt), the dual equals its effective
-    # LP MC, i.e. (marginal_cost − curtailment_cost). With marginal_cost=0
-    # and a typical curtailment_cost of 100–5000 €/MWh, the dual is large
-    # and negative — and any asset trading against that bus sees a
-    # "negative charge cost" or "negative revenue" that's not physical
-    # (no money flows; the negative number is purely the LP's internal
-    # accounting).
+    # ── Marginal prices per bus, merit-order corrected ───────────────────
+    # Was a third verbatim copy of the curtailment-subsidy correction. The
+    # shared helper performs the IDENTICAL fetch this block used to do by
+    # hand — `result_df(..., "lopf")`, zero-fallback on `n.snapshots`
+    # (`snapshots` here is bound to exactly that), then `fillna(0.0)` — so
+    # the collapse is behaviour-preserving, pinned by
+    # tests/test_asset_economics_merit_order_parity.py.
     #
-    # The fix here is TARGETED — fire ONLY when the LP dual actually
-    # equals the renewable's effective LP MC (within a small tolerance),
-    # which is the diagnostic signal that the renewable IS the unit
-    # setting the dual. A naive "renewable strictly between 0 and
-    # ceiling → adjust" rule over-corrects on real networks where
-    # other binding constraints (line limits, ramping, storage SoC)
-    # determine the dual while the subsidised renewable just happens
-    # to be operating in the middle of its range — that produces prices
-    # 30×–50× too high (observed in QA: avg charge price jumping from
-    # +50 €/MWh to +1700 €/MWh).
-    try:
-        gens = n.generators
-        if (not gens.empty
-                and "curtailment_cost" in gens.columns
-                and not n.generators_t.p.empty):
-            subsidised = gens.index[gens["curtailment_cost"].fillna(0) > 0]
-            if len(subsidised) > 0:
-                p_gens = n.generators_t.p
-                p_max_pu_full = n.get_switchable_as_dense("Generator", "p_max_pu")
-                p_nom_opt = (gens["p_nom_opt"]
-                             if "p_nom_opt" in gens.columns
-                             else gens["p_nom"])
-                eps = 1e-6
-                dual_tol = 1.0  # €/MWh — LP duals are exact to numerical eps
-                by_bus: dict[str, list[tuple[str, float, float]]] = {}
-                for g in subsidised:
-                    if g not in p_gens.columns:
-                        continue
-                    bus = str(gens.at[g, "bus"])
-                    cost = float(gens.at[g, "curtailment_cost"])
-                    real_mc = float(gens.at[g, "marginal_cost"]) if "marginal_cost" in gens.columns else 0.0
-                    by_bus.setdefault(bus, []).append((g, cost, real_mc))
-                if by_bus:
-                    prices = prices.copy()
-                    for bus, members in by_bus.items():
-                        if bus not in prices.columns:
-                            continue
-                        for i in range(len(p_gens.index)):
-                            t = p_gens.index[i]
-                            raw_dual = float(prices.at[t, bus])
-                            # Walk subsidised renewables at this bus. Adjust
-                            # only if one is dispatching (pv > 0) AND the
-                            # observed LP dual matches its effective LP MC
-                            # within tolerance — the unambiguous diagnostic
-                            # that THIS renewable is setting the dual via
-                            # the subsidy term. The renewable can be either
-                            # mid-range OR at its ceiling; the dual-match
-                            # check captures both LP-degenerate situations.
-                            for g, cost, real_mc in members:
-                                pv = float(p_gens.at[t, g])
-                                if pv <= eps:
-                                    continue
-                                effective_lp_mc = real_mc - cost
-                                # Two diagnostics trigger the adjustment:
-                                #  (a) dual exactly at the subsidised LP MC
-                                #      → renewable IS the marginal unit.
-                                #  (b) dual BELOW the subsidised LP MC AND
-                                #      the renewable is dispatching at its
-                                #      ceiling (p == p_max_pu × p_nom_opt).
-                                #      Here PyPSA stacks the upper-bound
-                                #      shadow on top of the subsidy, dragging
-                                #      the dual further negative. Without
-                                #      this branch, hours where Solar is
-                                #      saturated (the common case at noon)
-                                #      keep an artificially negative dual
-                                #      that flows through to storage's
-                                #      "charge_cost" as a phantom subsidy.
-                                if abs(raw_dual - effective_lp_mc) <= dual_tol:
-                                    prices.at[t, bus] = real_mc
-                                    break
-                                if raw_dual < effective_lp_mc - dual_tol:
-                                    # Ceiling check: only adjust when this
-                                    # renewable is actually at its upper
-                                    # bound (within numerical tolerance).
-                                    try:
-                                        pmp = float(p_max_pu_full.at[t, g])
-                                        nom = float(p_nom_opt.get(g, 0.0))
-                                        ceiling = pmp * nom
-                                    except Exception:
-                                        ceiling = None
-                                    if ceiling is not None and ceiling > eps and abs(pv - ceiling) <= 1e-3 * max(ceiling, 1.0):
-                                        prices.at[t, bus] = real_mc
-                                        break
-                    prices = prices.fillna(0.0)
-    except Exception:
-        pass  # defensive — keep raw LP duals if adjustment fails
+    # Why it matters that this is one function now: the copy that lived in
+    # `get_prices` implemented only the first of the two branches and had
+    # silently drifted (02b5e806). Three copies of a rule this subtle is how
+    # that happened.
+    prices = corrected_marginal_prices(n, result_df=result_df)
 
     # ── Generator block ──────────────────────────────────────────────────
     gen_rows: list[dict] = []
@@ -369,11 +298,11 @@ def compute_asset_economics(n, cfg, *, result_df):
                         "period": p_key,
                         "energy_mwh": _safe_finite(e_p),
                         "revenue_eur": _safe_finite(rev_p),
-                        "fixed_cost_eur": _safe_finite(fixed_p),
-                        "fom_cost_eur": _safe_finite(fom_p),
+                        "fixed_cost_eur": _capital_derived(fixed_p),
+                        "fom_cost_eur": _capital_derived(fom_p),
                         "vom_cost_eur": _safe_finite(vom_p),
-                        "net_profit_eur": _safe_finite(net_p),
-                        "lcoe_eur_per_mwh": _safe_finite(lcoe_p) if lcoe_p is not None else None,
+                        "net_profit_eur": _capital_derived(net_p),
+                        "lcoe_eur_per_mwh": _capital_derived(lcoe_p),
                         "avg_price_eur_per_mwh": _safe_finite(avg_price_p) if avg_price_p is not None else None,
                     })
 
@@ -386,10 +315,10 @@ def compute_asset_economics(n, cfg, *, result_df):
                 "capacity_factor": _safe_finite(cap_factor) if cap_factor is not None else None,
                 "revenue_eur": _safe_finite(revenue_total),
                 "vom_cost_eur": _safe_finite(vom_total),
-                "fixed_cost_eur": _safe_finite(fixed_cost),
-                "fom_cost_eur": _safe_finite(fom_cost),
-                "net_profit_eur": _safe_finite(revenue_total - fixed_cost - vom_total),
-                "lcoe_eur_per_mwh": _safe_finite(lcoe) if lcoe is not None else None,
+                "fixed_cost_eur": _capital_derived(fixed_cost),
+                "fom_cost_eur": _capital_derived(fom_cost),
+                "net_profit_eur": _capital_derived(revenue_total - fixed_cost - vom_total),
+                "lcoe_eur_per_mwh": _capital_derived(lcoe) if lcoe is not None else None,
                 "avg_price_eur_per_mwh": _safe_finite(avg_price) if avg_price is not None else None,
                 "by_period": by_period_rows,
             })
@@ -518,11 +447,11 @@ def compute_asset_economics(n, cfg, *, result_df):
                         "charge_mwh": _safe_finite(cm),
                         "discharge_revenue_eur": _safe_finite(dr),
                         "charge_cost_eur": _safe_finite(cc),
-                        "fixed_cost_eur": _safe_finite(fixed_p),
-                        "fom_cost_eur": _safe_finite(fom_p),
+                        "fixed_cost_eur": _capital_derived(fixed_p),
+                        "fom_cost_eur": _capital_derived(fom_p),
                         "vom_cost_eur": _safe_finite(vp),
-                        "net_profit_eur": _safe_finite(np_period),
-                        "lcos_eur_per_mwh": _safe_finite(lcos_p) if lcos_p is not None else None,
+                        "net_profit_eur": _capital_derived(np_period),
+                        "lcos_eur_per_mwh": _capital_derived(lcos_p) if lcos_p is not None else None,
                         "spread_eur_per_mwh": _safe_finite(spread_p) if spread_p is not None else None,
                     })
 
@@ -539,10 +468,10 @@ def compute_asset_economics(n, cfg, *, result_df):
                 "discharge_revenue_eur": _safe_finite(discharge_revenue_total),
                 "charge_cost_eur": _safe_finite(charge_cost_total),
                 "vom_cost_eur": _safe_finite(vom_total_su),
-                "fixed_cost_eur": _safe_finite(fixed_cost),
-                "fom_cost_eur": _safe_finite(fom_cost),
-                "net_profit_eur": _safe_finite(net_profit),
-                "lcos_eur_per_mwh": _safe_finite(lcos) if lcos is not None else None,
+                "fixed_cost_eur": _capital_derived(fixed_cost),
+                "fom_cost_eur": _capital_derived(fom_cost),
+                "net_profit_eur": _capital_derived(net_profit),
+                "lcos_eur_per_mwh": _capital_derived(lcos) if lcos is not None else None,
                 "spread_eur_per_mwh": _safe_finite(spread) if spread is not None else None,
                 "avg_discharge_price_eur_per_mwh": _safe_finite(avg_discharge_price) if avg_discharge_price is not None else None,
                 "avg_charge_price_eur_per_mwh": _safe_finite(avg_charge_price) if avg_charge_price is not None else None,
@@ -649,11 +578,11 @@ def compute_asset_economics(n, cfg, *, result_df):
                         "charge_mwh": _safe_finite(cm),
                         "discharge_revenue_eur": _safe_finite(dr),
                         "charge_cost_eur": _safe_finite(cc),
-                        "fixed_cost_eur": _safe_finite(fixed_p),
-                        "fom_cost_eur": _safe_finite(fom_p),
+                        "fixed_cost_eur": _capital_derived(fixed_p),
+                        "fom_cost_eur": _capital_derived(fom_p),
                         "vom_cost_eur": _safe_finite(vp),
-                        "net_profit_eur": _safe_finite(np_period),
-                        "lcos_eur_per_mwh": _safe_finite(lcos_p) if lcos_p is not None else None,
+                        "net_profit_eur": _capital_derived(np_period),
+                        "lcos_eur_per_mwh": _capital_derived(lcos_p) if lcos_p is not None else None,
                         "spread_eur_per_mwh": _safe_finite(spread_p) if spread_p is not None else None,
                     })
 
@@ -667,10 +596,10 @@ def compute_asset_economics(n, cfg, *, result_df):
                 "discharge_revenue_eur": _safe_finite(discharge_revenue_total),
                 "charge_cost_eur": _safe_finite(charge_cost_total),
                 "vom_cost_eur": _safe_finite(vom_total_st),
-                "fixed_cost_eur": _safe_finite(fixed_cost),
-                "fom_cost_eur": _safe_finite(fom_cost),
-                "net_profit_eur": _safe_finite(net_profit),
-                "lcos_eur_per_mwh": _safe_finite(lcos) if lcos is not None else None,
+                "fixed_cost_eur": _capital_derived(fixed_cost),
+                "fom_cost_eur": _capital_derived(fom_cost),
+                "net_profit_eur": _capital_derived(net_profit),
+                "lcos_eur_per_mwh": _capital_derived(lcos) if lcos is not None else None,
                 "spread_eur_per_mwh": _safe_finite(spread) if spread is not None else None,
                 "avg_discharge_price_eur_per_mwh": _safe_finite(avg_discharge_price) if avg_discharge_price is not None else None,
                 "avg_charge_price_eur_per_mwh": _safe_finite(avg_charge_price) if avg_charge_price is not None else None,
@@ -849,11 +778,11 @@ def compute_asset_economics(n, cfg, *, result_df):
                         "revenue_eur": _safe_finite(rev_p),
                         "gross_revenue_eur": _safe_finite(gross_p),
                         "input_cost_eur": _safe_finite(in_p),
-                        "fixed_cost_eur": _safe_finite(fixed_p),
-                        "fom_cost_eur": _safe_finite(fom_p),
+                        "fixed_cost_eur": _capital_derived(fixed_p),
+                        "fom_cost_eur": _capital_derived(fom_p),
                         "vom_cost_eur": _safe_finite(vom_p),
-                        "net_profit_eur": _safe_finite(rev_p - fixed_p - vom_p),
-                        "lcoe_eur_per_mwh": _safe_finite(lcoe_p) if lcoe_p is not None else None,
+                        "net_profit_eur": _capital_derived(rev_p - fixed_p - vom_p),
+                        "lcoe_eur_per_mwh": _capital_derived(lcoe_p),
                         "avg_price_eur_per_mwh": _safe_finite((gross_p / e_p) if e_p > 1e-6 else 0.0) if e_p > 1e-6 else None,
                     })
 
@@ -871,10 +800,10 @@ def compute_asset_economics(n, cfg, *, result_df):
                 "gross_revenue_eur": _safe_finite(gross_revenue_total),
                 "input_cost_eur": _safe_finite(input_cost_total),
                 "vom_cost_eur": _safe_finite(vom_total),
-                "fixed_cost_eur": _safe_finite(fixed_cost),
-                "fom_cost_eur": _safe_finite(fom_cost),
-                "net_profit_eur": _safe_finite(revenue_total - fixed_cost - vom_total),
-                "lcoe_eur_per_mwh": _safe_finite(lcoe) if lcoe is not None else None,
+                "fixed_cost_eur": _capital_derived(fixed_cost),
+                "fom_cost_eur": _capital_derived(fom_cost),
+                "net_profit_eur": _capital_derived(revenue_total - fixed_cost - vom_total),
+                "lcoe_eur_per_mwh": _capital_derived(lcoe) if lcoe is not None else None,
                 "avg_price_eur_per_mwh": _safe_finite(avg_price) if avg_price is not None else None,
                 "by_period": by_period_rows,
             })
@@ -895,6 +824,13 @@ def compute_asset_economics(n, cfg, *, result_df):
     return {
         "currency": "EUR",
         "is_multi_period": is_multi,
+        # False when `periodized_capital_costs` raised. Every capital-cost-
+        # derived field in every row (and every `by_period` entry) is `null`
+        # in that case — see `_capital_derived`. The flag is the summary; the
+        # nulls are the wire signal. Consumers need both: the flag so one
+        # banner can explain forty blank cells, the nulls so a consumer that
+        # ignores the flag still cannot format a zero.
+        "capital_costs_available": capital_costs_available,
         "periods": periods_list,
         "generators": gen_rows,
         "storage_units": su_rows,

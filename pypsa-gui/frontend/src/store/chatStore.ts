@@ -4,9 +4,8 @@
  * Per-project conversation UI state (M6 location: src/store/, NOT src/stores/
  * which doesn't exist). Tracks the active session id, the visible message
  * list, the live pending-confirmation card (only one at a time), the per-
- * session usage accumulator (M10 — eur is DERIVED client-side at render
- * time from token counts × PRICING constants, never persisted), and an
- * abort_event proxy.
+ * session usage accumulator (M10 — raw token counts only; there is no cost
+ * figure, derived or otherwise), and an abort_event proxy.
  *
  * Project-switch reset: `resetForProjectSwitch()` clears every UI-side
  * field; the backend ProjectContext carries `chat_state` per project so
@@ -57,23 +56,11 @@ export interface ChatErrorState {
   message: string
 }
 
-// Anthropic publishes per-million-token prices. M10 — these are constants
-// the panel multiplies against `usage` to render an eur estimate; the
-// backend NEVER persists eur in chat.jsonl. Update these when prices change.
-export const PRICING_VERSION = '2025-11'
-export const PRICING_USD_PER_MTOK: Record<ChatModel, { input: number; output: number }> = {
-  'claude-sonnet-4-6': { input: 3.0,  output: 15.0 },
-  'claude-opus-4-8':   { input: 15.0, output: 75.0 },
-}
-// Rough USD→EUR ratio for the cost meter. Production replacement: a live
-// FX endpoint, or a config-loaded rate. Hardcoded here for Phase 3 polish.
-export const USD_PER_EUR = 1.08
-
-export function deriveCostEur(model: ChatModel, usage: ChatUsageAcc): number {
-  const p = PRICING_USD_PER_MTOK[model] ?? PRICING_USD_PER_MTOK['claude-sonnet-4-6']
-  const usd = (usage.input_tokens * p.input + usage.output_tokens * p.output) / 1_000_000
-  return usd / USD_PER_EUR
-}
+// The EUR cost estimate lived here and was deleted deliberately: it derived
+// from a hardcoded price table and a hardcoded USD_PER_EUR, both of which go
+// stale silently and cannot be caught by a test. The meter now shows token
+// counts, which are exact. Do not reintroduce a price table without a live
+// rate source.
 
 interface ChatState {
   // Identity
@@ -87,7 +74,7 @@ interface ChatState {
   pending: PendingConfirmationCard | null
   // Live tool-progress (the latest tool_progress payload per tool_use_id).
   toolProgress: Record<string, { kind: string; line: string }[]>
-  // Usage + cost meter
+  // Usage (token count) meter
   usage: ChatUsageAcc
   // Stream state
   streaming: boolean
@@ -143,9 +130,16 @@ interface ChatState {
    *
    * The connection belongs to the TURN, not to whichever component happened
    * to open it. ChatPanel used to be the only thing that closed it, from its
-   * unmount handler — and ChatPanel unmounts itself whenever the agent sends
-   * a `ui_event` that navigates to another panel, which killed the turn
-   * mid-answer. Terminal frames call this instead.
+   * unmount handler — and back when ChatPanel was the `'chat'` SlidePanel it
+   * unmounted itself whenever the agent sent a `ui_event` navigating to
+   * another panel, which killed the turn mid-answer.
+   *
+   * That trigger is gone: ChatPanel now lives in AssistantDock and navigation
+   * does not unmount it. The ownership rule stands regardless, because the
+   * remaining unmount paths (ErrorBoundary fallback after a render crash,
+   * project switch, HMR) can still land mid-turn, and none of them should
+   * decide a turn is over. Terminal frames call this instead; ChatPanel's
+   * unmount handler closes only an idle stream.
    */
   closeStream: () => void
   // Upload slice actions
@@ -217,7 +211,7 @@ function newMessageId() {
 
 export const useChatStore = create<ChatState>((set, get) => ({
   sessionId: null,
-  model: 'claude-sonnet-4-6',
+  model: 'claude-sonnet-5',
   messages: [],
   pending: null,
   toolProgress: {},

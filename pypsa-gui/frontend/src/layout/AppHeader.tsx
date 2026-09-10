@@ -10,7 +10,7 @@ import { useSolveQueue, useEnqueueSolve, useAbortJob, activeJobForProject } from
 import { nk } from '../utils/queryKeys'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useUIStore } from '../store/uiStore'
-import { evaluateMutation } from '../utils/mutationGuard'
+import { evaluateMutation, readOnlyMessage, READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
 import { useAuthMode } from '../auth/AuthModeProvider'
 import UserMenu from './UserMenu'
 import type { Bus, FailureInfo, Generator, Line, Link, Load, StorageUnit } from '../api/types'
@@ -110,6 +110,7 @@ export default function AppHeader() {
     renameProject: renameProjectInStore,
     setPaletteMode,
     readOnly,
+    readOnlyReason,
   } = useUIStore()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
@@ -149,8 +150,9 @@ export default function AppHeader() {
     if (!trimmed || trimmed === projectName) return
     if (currentProject && currentProject === projectName) {
       // Read-only guard — renaming the active project is a mutation. Refuse
-      // (and keep the old name) while another user holds the edit lock.
-      const verdict = evaluateMutation(readOnly)
+      // (and keep the old name) while another user holds the edit lock, or
+      // while a queue job is solving this project.
+      const verdict = evaluateMutation(readOnly, readOnlyReason)
       if (!verdict.allowed) {
         toast.error(verdict.blockedMessage!)
         setNameInput(projectName)
@@ -181,7 +183,7 @@ export default function AppHeader() {
       // Draft / unsaved — legacy behaviour.
       setProjectName(trimmed)
     }
-  }, [nameInput, projectName, currentProject, readOnly, setProjectName, renameProjectInStore, queryClient])
+  }, [nameInput, projectName, currentProject, readOnly, readOnlyReason, setProjectName, renameProjectInStore, queryClient])
 
   const startEditName = useCallback(() => {
     // Don't open the inline editor for a locked (read-only) project — renaming
@@ -291,7 +293,16 @@ export default function AppHeader() {
       // (e.g. user tabbed away but the dropdown is still on screen because
       // the debounced search hasn't cleared yet, or the focus was stolen
       // by a click on another element that doesn't process Escape).
-      if (e.key === 'Escape') closeSearch()
+      //
+      // Guarded against editable elements, the same test App.tsx:485 uses.
+      // This listener is CAPTURE-phase, so it runs before any descendant and
+      // stopPropagation() downstream cannot pre-empt it — the guard has to be
+      // here or an Escape meant to discard a grid cell edit also closes the
+      // header search (spec D5).
+      if (e.key !== 'Escape') return
+      const t = e.target as HTMLElement | null
+      if (t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA' || t?.isContentEditable) return
+      closeSearch()
     }
     document.addEventListener('mousedown', onDown, true)
     document.addEventListener('keydown', onKey, true)
@@ -459,9 +470,12 @@ export default function AppHeader() {
 
   const handleQuickSave = useCallback(() => {
     // Read-only guard — the keyboard shortcut (Ctrl+S) bypasses the disabled
-    // button, so block here too when another user holds the edit lock.
-    if (readOnly) {
-      toast.error('Read-only — another user is editing this project.')
+    // button, so block here too while another user holds the edit lock, or a
+    // queue job is solving this project. Routed through evaluateMutation (not
+    // a hand-rolled check) so the message names the real reason.
+    const verdict = evaluateMutation(readOnly, readOnlyReason)
+    if (!verdict.allowed) {
+      toast.error(verdict.blockedMessage!)
       return
     }
     // No active project yet ⇒ prompt for a name and save under that. Avoids
@@ -482,7 +496,7 @@ export default function AppHeader() {
       }
     }
     saveMut.mutate(name)
-  }, [currentProject, projectName, saveMut, readOnly])
+  }, [currentProject, projectName, saveMut, readOnly, readOnlyReason])
 
   // Global Ctrl+S / Cmd+S shortcut for save
   useEffect(() => {
@@ -551,7 +565,7 @@ export default function AppHeader() {
   // log_queue, so a 1.5s poll can land in that microsecond gap). On an early
   // stream error we reset the attach guard so the next poll re-attaches —
   // bounded so a genuinely dead stream still surfaces as 'failed'.
-  const attachRetryRef = useRef<{ id: number; tries: number }>({ id: -1, tries: 0 })
+  const attachRetryRef = useRef<{ id: string | null; tries: number }>({ id: null, tries: 0 })
   // Latch covering the idle-click enqueue path (pre-save await + enqueue), so a
   // fast double-click can't stack two jobs before enqueue.isPending flips.
   const enqueuingRef = useRef(false)
@@ -568,13 +582,13 @@ export default function AppHeader() {
   const myJob = currentProject ? activeJobForProject(solveQueue, currentProject) : undefined
   // Tracks the job id we've already opened the SSE for, so the auto-attach
   // effect opens the stream EXACTLY once per run (not on every 1.5s poll).
-  const attachedJobRef = useRef<number | null>(null)
+  const attachedJobRef = useRef<string | null>(null)
 
   // The single SSE-open closure, shared by the auto-attach effect (and kept
   // identical to the historical direct-/run done/err logic). `runLabel` is
   // read via the ref-captured closure value at attach time. On `done` we also
   // invalidate ['solveQueue'] so the queue UI reflects the finished job.
-  const openLogStream = useCallback((label: string, jobId?: number) => {
+  const openLogStream = useCallback((label: string, jobId?: string) => {
     esCleanupRef.current?.()
     esCleanupRef.current = createLogStream(
       (line) => {
@@ -684,6 +698,19 @@ export default function AppHeader() {
   const jobRunning = myJob?.status === 'running'
   const jobQueued = myJob?.status === 'queued'
   const busy = jobRunning || jobQueued || isRunning
+
+  // R11 — the project on screen is READ-ONLY while its queue job solves it.
+  // The backend already refuses the writes (main.py's solver-in-flight gate
+  // covers /api/network/* and /api/io/* on the caller's context, which IS the
+  // solving context once activate resolves to it); this makes the UI say so
+  // instead of letting the user fill in a form whose save will 409.
+  const setSolvingReadOnly = useUIStore(s => s.setSolvingReadOnly)
+  useEffect(() => {
+    setSolvingReadOnly(jobRunning)
+    // Clear on unmount so a header that unmounts mid-solve cannot strand the
+    // whole workbench read-only.
+    return () => setSolvingReadOnly(false)
+  }, [jobRunning, setSolvingReadOnly])
 
   const handleRunButton = async () => {
     // 1. RUNNING (queue job or legacy /run) → abort.
@@ -797,7 +824,7 @@ export default function AppHeader() {
             onClick={startEditName}
             onFocus={startEditName}
             title={readOnly && currentProject && currentProject === projectName
-              ? 'Read-only — another user is editing this project'
+              ? (readOnlyMessage(readOnlyReason) ?? READ_ONLY_MUTATION_MESSAGE)
               : 'Click to rename project'}
             className="text-[11px] font-semibold text-text truncate max-w-[180px] hover:text-accent transition-colors cursor-text"
           >
@@ -879,7 +906,7 @@ export default function AppHeader() {
       <button
         onClick={handleUndo}
         disabled={undoDepth === 0 || undoMut.isPending || busy || readOnly}
-        title={readOnly ? 'Read-only — another user is editing this project' : undoDepth > 0 ? `Undo last action (Ctrl+Z) · ${undoDepth} step${undoDepth !== 1 ? 's' : ''} available` : 'Nothing to undo'}
+        title={readOnly ? (readOnlyMessage(readOnlyReason) ?? READ_ONLY_MUTATION_MESSAGE) : undoDepth > 0 ? `Undo last action (Ctrl+Z) · ${undoDepth} step${undoDepth !== 1 ? 's' : ''} available` : 'Nothing to undo'}
         className="flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium border border-border text-text hover:bg-border/30 transition-colors disabled:opacity-35 disabled:cursor-not-allowed"
       >
         {undoMut.isPending
@@ -900,7 +927,7 @@ export default function AppHeader() {
         onClick={handleQuickSave}
         disabled={saveMut.isPending || busy || readOnly}
         title={readOnly
-          ? 'Read-only — another user is editing this project'
+          ? (readOnlyMessage(readOnlyReason) ?? READ_ONLY_MUTATION_MESSAGE)
           : currentProject
           ? `Save '${currentProject}' (Ctrl+S) — overwrites the saved project & clears revert history`
           : 'Save (Ctrl+S) — you will be prompted to name the project'}

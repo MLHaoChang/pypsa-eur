@@ -214,7 +214,7 @@ fi
 
 # ───────────────────────────────────────────────────────────────────────────
 hdr "T8: session_init carries tool_count + model"
-BODY='{"session_id":"t8","model":"claude-sonnet-4-6","script":[{"type":"turn_done","turn_id":"t8_turn"}]}'
+BODY='{"session_id":"t8","model":"claude-sonnet-5","script":[{"type":"turn_done","turn_id":"t8_turn"}]}'
 RAW=$(curl -s -N -X POST "$BACKEND/api/chat/stream" \
   -H "Content-Type: application/json" -d "$BODY" \
   --max-time 5)

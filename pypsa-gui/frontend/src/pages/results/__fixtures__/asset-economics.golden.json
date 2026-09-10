@@ -1,6 +1,7 @@
 {
   "currency": "EUR",
   "is_multi_period": true,
+  "capital_costs_available": true,
   "periods": [
     2030,
     2035

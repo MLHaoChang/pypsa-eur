@@ -1185,11 +1185,14 @@ def test_a_running_queue_job_is_seen_deterministically():
     This builds the job table directly and drives the same `list_jobs()` the
     detector reads, covering BOTH live statuses with no dispatcher and no race.
     """
+    import uuid
+
     from services.solve_queue import SolveJob, solve_queue
 
     solve_queue.reset_for_tests()
     try:
-        for jid, status in ((901, "queued"), (902, "running")):
+        for status in ("queued", "running"):
+            jid = uuid.uuid4()
             with solve_queue._lock:
                 solve_queue._jobs[jid] = SolveJob(
                     id=jid, project_id=f"project-{status}", enqueued_at=0.0,
@@ -1209,11 +1212,14 @@ def test_a_finished_queue_job_is_not_reported_as_in_flight():
     Otherwise every completed solve since boot prompts a confirm dialog, and a
     dialog that always appears is a dialog nobody reads.
     """
+    import uuid
+
     from services.solve_queue import SolveJob, solve_queue
 
     solve_queue.reset_for_tests()
     try:
-        for jid, status in ((911, "completed"), (912, "failed"), (913, "aborted")):
+        for status in ("completed", "failed", "aborted"):
+            jid = uuid.uuid4()
             with solve_queue._lock:
                 solve_queue._jobs[jid] = SolveJob(id=jid, project_id="done", enqueued_at=0.0)
                 solve_queue._jobs[jid].status = status

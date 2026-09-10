@@ -29,7 +29,7 @@
   [
    "session_init",
    {
-    "model": "claude-sonnet-4-6",
+    "model": "claude-sonnet-5",
     "session6": "<session6>",
     "session_id": "<session_id>",
     "tool_count": "<tool_count>"
@@ -57,7 +57,7 @@
   [
    "session_init",
    {
-    "model": "claude-sonnet-4-6",
+    "model": "claude-sonnet-5",
     "session6": "<session6>",
     "session_id": "<session_id>",
     "tool_count": "<tool_count>"
@@ -90,24 +90,30 @@
   [
    "tool_result",
    {
-    "result": [
-     {
-      "carrier": "AC",
-      "control": "PQ",
-      "generator": "",
-      "location": "",
-      "name": "B1",
-      "sub_network": "",
-      "type": "",
-      "unit": "",
-      "v_mag_pu_max": null,
-      "v_mag_pu_min": 0.0,
-      "v_mag_pu_set": 1.0,
-      "v_nom": 1.0,
-      "x": 0.0,
-      "y": 0.0
-     }
-    ],
+    "result": {
+     "has_more": false,
+     "items": [
+      {
+       "carrier": "AC",
+       "control": "PQ",
+       "generator": "",
+       "location": "",
+       "name": "B1",
+       "sub_network": "",
+       "type": "",
+       "unit": "",
+       "v_mag_pu_max": null,
+       "v_mag_pu_min": 0.0,
+       "v_mag_pu_set": 1.0,
+       "v_nom": 1.0,
+       "x": 0.0,
+       "y": 0.0
+      }
+     ],
+     "offset": 0,
+     "returned": 1,
+     "total_count": 1
+    },
     "tool_name": "list_components",
     "tool_use_id": "tu-1"
    }

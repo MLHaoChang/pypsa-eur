@@ -66,6 +66,122 @@ export interface TSPayload {
   range?: { from: number; to: number; total: number; complete: boolean; capped: boolean }
 }
 
+// True when any payload's `range` reports the server ACTUALLY TRUNCATED the
+// response — i.e. `capped: true`. `capped` alone is the signal.
+//
+// `complete` is NOT a truncation signal — do not add it back in. Re-review
+// finding (results-tabs-window final review, second wave): `services/
+// serialization.py::slice_ts` computes `complete = (lo == 0 and hi == total -
+// 1)`, which is `false` for EVERY window that isn't the whole horizon —
+// including the plan's own default views (`filterContext.tsx`'s first-period
+// multi-period default, and its rows-0-719 flat->8760 default). Those are
+// ordinary, correctly-served requests: the user (or the default window) asked
+// for less than the whole horizon and got exactly that. The original
+// predicate here (`capped || complete === false`) treated "this is a window"
+// as "this was truncated" and fired the banner below on every multi-period
+// and every large flat network, permanently — the exact false-positive
+// pattern this whole plan exists to avoid, and worse than silent: wrong copy
+// on screen, and a warning users learn to ignore within a day, which erases
+// its value for the case (`capped: true`) it exists to catch.
+//
+// This is the counterpart to `AggregatedOverview.isPartialPayload`, not a
+// duplicate of it:
+//   • `isPartialPayload` (AggregatedOverview.tsx) guards a tab that must
+//     NEVER receive a ranged payload at all — ANY `range` key there is
+//     already a bug, because that tab reports whole-horizon totals. It
+//     correctly uses `!complete` for that purpose: on that tab, ANY window
+//     (not just a capped one) is the bug.
+//   • `isTruncatedPayload` is for the six WINDOWING tabs (Dispatch,
+//     Curtailment, LostLoadTab, LoadFlow, Prices, StorageCycling), which
+//     legitimately request ranged payloads. A `range` key — and `complete:
+//     false` alongside it — is expected and fine there. Only `capped: true`
+//     means the server gave back FEWER rows than the window itself asked
+//     for, which is the one case worth surfacing.
+// Kept in this one shared spot (not inlined per-tab) so the six call sites
+// can't drift, and so it's unit-testable on its own — see shared.test.ts.
+export function isTruncatedPayload(
+  payloads: Array<TSPayload | null | undefined>,
+): boolean {
+  return payloads.some(p => p?.range?.capped === true)
+}
+
+// ── "Unavailable", never a number ────────────────────────────────────────
+// The word a results tab prints when the backend says a cost figure could not
+// be computed (`capital_costs_available: false` on /asset_economics,
+// `capex_lifetime_available: false` on /cost_breakdown — both accompanied by
+// `null` on every affected field). Two renderings are forbidden wherever this
+// is used, and both were shipped before:
+//
+//   • `€0.00` — indistinguishable from a genuinely free asset, and styled
+//     identically to the real figures beside it.
+//   • `—` — the results tables' existing "not applicable" marker (a generator
+//     has no charge cost; a battery has no capacity factor). Reusing it would
+//     fold "could not be computed" into "does not apply".
+//
+// So the value gets its own word. It lives here rather than in one tab
+// because a second tab now needs it, and two tabs each spelling their own
+// version of "unavailable" is exactly the drift this module exists to stop.
+export const COST_UNAVAILABLE = 'unavailable'
+
+// The inline cell rendering of the above. The word was already centralised;
+// its PRESENTATION was not — CompareView carried 19 verbatim copies of this
+// exact span, so the tooltip copy could drift on an edit to any one of them
+// and nothing would catch it. Same argument that put COST_UNAVAILABLE here,
+// one layer out.
+//
+// Deliberately NOT covering two other shapes, which are different renderings
+// rather than copies of this one:
+//   * the whole-tab fallback `<p className="text-[11px] text-muted py-2">`,
+//     a block-level message where a cell would be wrong;
+//   * bare `COST_UNAVAILABLE` interpolated into a text run
+//     ("max unavailable · min unavailable"), where a nested span would add
+//     markup to a sentence.
+export function UnavailableCell() {
+  return (
+    <span className="text-muted" title="This scenario's figures could not be resolved">
+      {COST_UNAVAILABLE}
+    </span>
+  )
+}
+
+// The BLOCK-level rendering of the same word, for the whole-tab fallback the
+// comment above names as out of scope for the cell. That exclusion was about
+// SHAPE — a `<p>` where a cell would be wrong — not about exemption from the
+// drift argument, and CompareView proved the point by carrying six verbatim
+// copies of this element.
+//
+// The classes travel with the component for the same reason the word does:
+// `text-[11px] text-muted py-2` repeated at six call sites is six chances for
+// one of them to be edited alone.
+export function UnavailableBlock() {
+  return <p className="text-[11px] text-muted py-2">{COST_UNAVAILABLE}</p>
+}
+
+// Drop-in warning banner for the six windowing tabs — renders nothing unless
+// `isTruncatedPayload(payloads)` is true (i.e. some payload was `capped`).
+// Centralised alongside the predicate so the banner copy (and its tone)
+// can't drift per tab either. Wording mirrors AggregatedOverview's
+// partial-payload message: plain-language statement of what happened,
+// phrased as a fact about the data rather than an alarm — and specifically
+// describes the SERVER returning fewer rows than the WINDOW requested, not
+// "you are viewing a window" (viewing a window is normal and must not be
+// described as a problem; being served less than the window asked for is).
+export function WindowCapBanner(
+  { payloads }: { payloads: Array<TSPayload | null | undefined> },
+) {
+  if (!isTruncatedPayload(payloads)) return null
+  return (
+    <div className="rounded border border-warn/40 bg-warn/5 px-3 py-2 text-[11px] text-warn">
+      <span className="font-semibold">Results are truncated.</span>{' '}
+      The selected window was too large for the server to return in full, so
+      it sent back fewer snapshots than the window covers — the totals and
+      charts on this tab reflect only part of it. Narrow the Horizon filter
+      further, or reduce the number of assets in scope, to see the full
+      window.
+    </div>
+  )
+}
+
 // True when the payload is multi-period (server emitted a parallel periods
 // array). Single-period payloads omit the field; treat them as one big period.
 export function isMultiPeriod(ts: TSPayload | null | undefined): boolean {
@@ -190,25 +306,118 @@ export function useWeightCtx(refTs: TSPayload | null): {
   return { weightCtx, refIndex, refPeriods }
 }
 
+// Period equality for the weight-row lookup below. Loose (string-coerced)
+// comparison because one side comes from a TSPayload's `periods` array
+// (usually numbers) and the other from a weightings row (sometimes read
+// back off JSON as the same numeric type, but not guaranteed) — matches the
+// template-literal key StorageCycling.tsx builds (`${period}|${timestep}`),
+// which coerces both sides to string implicitly.
+function _samePeriod(
+  a: number | string | null | undefined,
+  b: number | string | null | undefined,
+): boolean {
+  if (a == null || b == null) return a == null && b == null
+  return String(a) === String(b)
+}
+
+// ── Weight-row index (the fallback lookup, made O(1)) ───────────────────────
+// The fallback below used to be a linear `sw.find(...)`. That is O(n) per row
+// and the positional fast path MISSES on essentially every row of a windowed
+// multi-period payload (`sw[0]` is period 1's row; `iso`/`period` belong to
+// period 3), so the whole scan ran once per payload row — O(n²) overall.
+// Measured on the real shape (8,760-row window against a 26,280-row weightings
+// array, 12 columns): 5,853 ms for a SINGLE `weightedSum` call, versus 6 ms
+// for the whole 26,280-row horizon. The app froze 17–33 s per period switch.
+//
+// The index is built once per `sw` ARRAY and memoised in a module-level
+// WeakMap, so the cost is amortised across every call site sharing the same
+// `snapshotWeights` reference (which they all do — `useWeightCtx` hands out
+// `snap.weightings` unchanged) and the entry is collected with the array.
+//
+// Key namespaces are disjoint so the two match kinds cannot alias each other:
+//   snapshot row              ->  "s" NUL <snapshot>
+//   timestep row (+ period)   ->  "t" NUL <period>    NUL <timestep>
+//   timestep row (no period)  ->  "t" NUL <NO_PERIOD> NUL <timestep>
+// The U+0000 separator cannot occur in an ISO stamp or a period label, so
+// the two namespaces can never alias. This preserves rule 3 of the semantics
+// below: a `timestep` row that carries a period is NOT reachable by a bare
+// iso, matching `_samePeriod`'s refusal to pair a null period with a non-null
+// one. NO_PERIOD is a control character rather than "" so a (pathological)
+// row whose period really IS the empty string still keys apart from a row
+// with no period at all — `_samePeriod` treats those two as different.
+const NO_PERIOD = '\u0001'
+const _weightIndexCache = new WeakMap<SnapshotWeightRow[], Map<string, SnapshotWeightRow>>()
+
+function _snapKey(iso: string): string { return `s\u0000${iso}` }
+function _stepKey(period: number | string | null | undefined, iso: string): string {
+  return `t\u0000${period == null ? NO_PERIOD : String(period)}\u0000${iso}`
+}
+
+function _weightIndex(sw: SnapshotWeightRow[]): Map<string, SnapshotWeightRow> {
+  const cached = _weightIndexCache.get(sw)
+  if (cached) return cached
+  const map = new Map<string, SnapshotWeightRow>()
+  // Forward walk with FIRST-WINS so duplicate keys resolve exactly the way the
+  // `.find()` this replaced did (it returned the first matching row).
+  for (const row of sw) {
+    // Indexed under BOTH kinds when a row carries both fields — the old `||`
+    // predicate matched on either, so restricting to one would lose matches.
+    if (row.snapshot != null) {
+      const k = _snapKey(row.snapshot)
+      if (!map.has(k)) map.set(k, row)
+    }
+    if (row.timestep != null) {
+      const k = _stepKey(row.period, row.timestep)
+      if (!map.has(k)) map.set(k, row)
+    }
+    // Rows with neither field are unreachable by key; they stay on the
+    // positional-only path, same as before.
+  }
+  _weightIndexCache.set(sw, map)
+  return map
+}
+
 // Single-row weighting lookup. Multi-period emits `timestep` instead of
 // `snapshot` so we match on both. Falls back to positional alignment when
 // the row's key field can't be matched — both `n.snapshots` and
 // `n.snapshot_weightings` come from the same MultiIndex so positional
 // alignment is exact when lengths agree (the common case).
+//
+// `period` MUST be threaded through and checked alongside `timestep` on
+// multi-period payloads: PyPSA replicates one operational year across every
+// investment period, so `timestep` (`.isoformat()`) alone is AMBIGUOUS — the
+// same ISO string appears once per period. Without the period check, a
+// WINDOWED payload starting at period 2 has `i=0` (the window-relative row
+// index) collide positionally against `sw[0]`, which is period 1's weight
+// row — same iso, wrong period, wrong weight, and the keyed fallback below
+// is never even reached because the positional branch matched first.
+// `StorageCycling.tsx`'s `wAt` keys on the same `period|timestep` pair —
+// match its approach so the two stop disagreeing.
+//
+// Semantics preserved from the `.find()` version:
+//   1. The positional fast path runs FIRST and still wins when it matches.
+//   2. First-wins on duplicate keys (see `_weightIndex`).
+//   3. Precedence is `snapshot` then `(period|timestep)` — the `||` order of
+//      the old predicate.
+//   4. Rows with neither key field keep the positional-only path.
 function _snapshotWeightRow(
   sw: SnapshotWeightRow[],
   i: number,
   iso: string,
+  period: number | string | null | undefined,
 ): SnapshotWeightRow | undefined {
   const r = sw[i]
   if (r && ((r.snapshot && r.snapshot === iso)
-          || (r.timestep && r.timestep === iso)
+          || (r.timestep && r.timestep === iso && _samePeriod(r.period, period))
           || (!r.snapshot && !r.timestep))) {
-    // Positional match: name field absent or already matches.
+    // Positional match: name field absent, or present and matching BOTH the
+    // timestep AND (when this is a multi-period row) its period.
     return r
   }
-  // Fallback name search (slower, used when lengths differ or order changed).
-  return sw.find(o => o.snapshot === iso || o.timestep === iso)
+  // Keyed fallback (was a linear scan) — same (timestep, period) pairing and
+  // the same snapshot-before-timestep precedence as the positional branch.
+  const idx = _weightIndex(sw)
+  return idx.get(_snapKey(iso)) ?? idx.get(_stepKey(period, iso))
 }
 
 // True if any non-trivial weight (≠ 1.0) is present. UX uses this to decide
@@ -234,7 +443,16 @@ export function hasScaling(w: WeightCtx | undefined): boolean {
 //   • 'generators' — for energy (MWh) totals. PyPSA scales energy balance by
 //     this weight when summing dispatch.
 //   • 'objective'  — for cost (€) totals. Matches n.statistics()'s €/yr scaling.
-function effectiveWeightAt(
+//
+// EXPORTED so there is exactly ONE weight-resolution path in the Results tabs.
+// `Dispatch.tsx`'s per-port link-flow loop used to index `ctx.snapshotWeights`
+// by the payload row instead, with no snapshot/period check at all — which is
+// wrong on every windowed payload (the weights array is full-horizon; the row
+// index is window-relative) and is exactly the drift this export prevents.
+// Callers pass the payload's own `index`/row; the period is read off
+// `ctx.snapshotPeriods[i]`, so the ctx handed in must have `snapshotPeriods`
+// parallel to the payload being summed.
+export function effectiveWeightAt(
   ctx: WeightCtx | undefined,
   index: string[],
   i: number,
@@ -242,16 +460,20 @@ function effectiveWeightAt(
   iso: string,
 ): number {
   if (!ctx) return 1
+  // Computed BEFORE the snapshot-weight lookup (not after, as before) so it
+  // can be threaded into `_snapshotWeightRow` — see that function's doc
+  // comment for why the period is required to disambiguate `timestep` on
+  // multi-period payloads.
+  const periodVal = ctx.snapshotPeriods?.[i]
   const sw = ctx.snapshotWeights
   let w = 1
   if (sw && sw.length > 0) {
-    const row = _snapshotWeightRow(sw, i, iso)
+    const row = _snapshotWeightRow(sw, i, iso, periodVal)
     if (row) {
       const v = row[column]
       if (typeof v === 'number' && Number.isFinite(v)) w *= v
     }
   }
-  const periodVal = ctx.snapshotPeriods?.[i]
   if (periodVal != null && ctx.periodWeights) {
     const pr = ctx.periodWeights.find(r => r.period === periodVal)
     if (pr) {
@@ -267,6 +489,29 @@ function effectiveWeightAt(
   // looked up via positional row — keep the param for future flexibility.
   void index
   return w
+}
+
+// Snapshot weight ONLY — no `periodWeights.years` multiplier. Narrowly
+// scoped for `Dispatch.tsx`'s `FullLoadHoursSection`, which deliberately
+// excludes `years` (full-load hours are per-solved-year hours, not an
+// annualised/lifetime-equivalent figure — see that call site's comment).
+// `effectiveWeightAt` cannot be reused there because it always folds in
+// `years`. This still shares the ONE keyed lookup (`_snapshotWeightRow`)
+// so there is exactly one weight-resolution path, not two that can drift.
+export function snapshotWeightAt(
+  ctx: WeightCtx | undefined,
+  i: number,
+  iso: string,
+  period: number | string | null | undefined,
+  column: 'generators' | 'objective' | 'stores' = 'generators',
+): number {
+  if (!ctx) return 1
+  const sw = ctx.snapshotWeights
+  if (!sw || sw.length === 0) return 1
+  const row = _snapshotWeightRow(sw, i, iso, period)
+  if (!row) return 1
+  const v = row[column]
+  return (typeof v === 'number' && Number.isFinite(v)) ? v : 1
 }
 
 /** Sum extensive series with per-snapshot + per-period weights applied.

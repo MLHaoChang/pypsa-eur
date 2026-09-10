@@ -41,12 +41,26 @@ function Harness() {
   const [activeSlidePanel, setActiveSlidePanel] = useState<string | null>('results')
 
   // Mirrors App.tsx's global keydown effect's Escape handling, verbatim,
-  // post-Task-7 (no showShortcuts branch — that's the point).
+  // post-Task-7 (no showShortcuts branch — that's the point) and including
+  // the editable-target guard added with the assistant dock. Keep this copy
+  // in step with App.tsx: the mirror is what lets this file catch an Escape
+  // branch that is removed or made over-broad, and a mirror that has drifted
+  // silently stops doing that.
+  //
+  // The guard does not change this test's outcome — Dialog returns focus to
+  // document.body on close, which is not editable — but a harness that
+  // claimed to be verbatim while missing it would be a comment asserting a
+  // fact the code no longer has.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (compareRailOpen) { setCompareRailOpen(false); return }
-        if (activeSlidePanel) setActiveSlidePanel(null)
+        const t = e.target as HTMLElement | null
+        const isEditableTarget =
+          t?.tagName === 'INPUT' || t?.tagName === 'TEXTAREA' || !!t?.isContentEditable
+        if (!isEditableTarget) {
+          if (compareRailOpen) { setCompareRailOpen(false); return }
+          if (activeSlidePanel) setActiveSlidePanel(null)
+        }
       }
     }
     window.addEventListener('keydown', onKey)

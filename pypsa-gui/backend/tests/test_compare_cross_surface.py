@@ -44,14 +44,26 @@ def test_capacity_capex_agrees_with_periodized_capital_costs(golden):
     pcc = periodized_capital_costs(golden, _state.get("solver_config"))
     horizon_years = float(sum(gf.GOLDEN_YEARS))
     expected = 0.0
-    # Links are EXTENDABLE-ONLY here, mirroring `_walk(..., extendable_only=True)`
-    # in `_compute_total_annuitised_capex`. A passive branch the LP cannot
-    # resize contributes nothing to the objective and is deliberately excluded
-    # from this tab; an extendable link is sized by the LP and is not.
+    # EVERY cost-bearing class, passive branches included, and every link
+    # rather than only the extendable ones.
+    #
+    # Both of those used to be otherwise, and this list had drifted from the
+    # code twice over. The link entry still said `extendable_only=True` long
+    # after `_compute_total_annuitised_capex` stopped restricting the link
+    # walk; it kept passing only because every link in the golden fixture
+    # happens to be extendable, so the two policies coincide here and the
+    # stale expectation was never exercised.
+    #
+    # Lines and transformers are new, per the 2026-08-13 ruling that a passive
+    # branch's capital cost is part of what the system costs. Omitting them
+    # here was worth 7500 MEUR on this very fixture — see
+    # tests/test_capex_line_inclusion_parity.py for the measurement.
     for attr, nom, ext_only in (("generators", "p_nom", False),
                                 ("storage_units", "p_nom", False),
                                 ("stores", "e_nom", False),
-                                ("links", "p_nom", True)):
+                                ("links", "p_nom", False),
+                                ("lines", "s_nom", False),
+                                ("transformers", "s_nom", False)):
         df = getattr(golden, attr)
         for name in df.index:
             if ext_only and not bool(df.at[name, f"{nom}_extendable"]):
@@ -317,3 +329,214 @@ def test_capacity_and_economics_agree_on_total_capex(golden):
     econ_total = sum(e.capex_meur.total for e in s["economics"].by_carrier.values())
     assert cap_total == pytest.approx(econ_total, rel=1e-6), (
         f"Capacity tab {cap_total} M€ vs Economics tab {econ_total} M€")
+
+
+# ── Dispatch tab OPEX vs. Results cost_breakdown ────────────────────────────
+def test_dispatch_opex_agrees_with_cost_breakdown(golden):
+    """
+    The Dispatch tab's headline OPEX must equal Results' cost_breakdown OPEX
+    and the sum of Economics' gen_cost split — all three are the LP's
+    variable cost, Σ marginal_cost × dispatch × weight.
+
+    MEASURED before the fix, golden fixture: Dispatch said 2.494286 MEUR
+    while Economics and Results both said 2.597143. The 0.102857 gap is the
+    electrolyzer Link's VOM (|p0| 10 285.714 MWh × 10 €/MWh) — the dispatch
+    summary's opex loop covered generators ONLY, so any Link or StorageUnit
+    marginal cost was silently absent from one of the three surfaces.
+
+    Same defect shape as the 7500 MEUR capex gap fixed at 75786a49: a
+    component class present in one walk and missing from another, invisible
+    because no cross-surface test compared the two totals.
+    """
+    import routers.simulation as sim_router
+    from routers.results import get_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    sim_router._state["solver_config"] = SolverConfig()
+
+    s = cs.summarise(golden)
+    dispatch_opex = s["dispatch"].opex_meur.total
+    econ_gen_cost = sum(e.gen_cost_meur.total for e in s["economics"].by_carrier.values())
+
+    payload = get_cost_breakdown()
+    results_opex = float(payload["opex"]) / 1e6
+
+    assert econ_gen_cost == pytest.approx(results_opex, rel=1e-6), (
+        f"Economics gen_cost {econ_gen_cost} vs Results {results_opex} — "
+        f"these two already agreed before this test existed; a failure here "
+        f"is a NEW regression, not the known dispatch gap"
+    )
+    assert dispatch_opex == pytest.approx(results_opex, rel=1e-6), (
+        f"Dispatch tab says {dispatch_opex} MEUR, Results cost_breakdown "
+        f"says {results_opex} — the same LP cannot have two variable costs"
+    )
+
+
+def test_dispatch_opex_counts_storage_discharge_vom_like_economics():
+    """
+    The golden fixture's storage unit carries marginal_cost=0, so the
+    dispatch-vs-cost_breakdown test above exercises the LINK half of the
+    OPEX fix and not the storage half — the same no-fixture-reaches-the-
+    branch trap that let both capex parity suites pass while the views
+    disagreed by 7500 MEUR. This network gives BOTH a link and a storage
+    unit a non-zero marginal_cost, then requires the Dispatch headline to
+    equal Economics' gen_cost sum.
+
+    Convention pinned: storage VOM applies to the clipped DISCHARGE half
+    only (the charge side is a bus-price transfer, not an LP cost), links
+    on raw signed p0 — both mirroring `_walk_dispatch_side`.
+    """
+    import pandas as pd
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=6, freq="h"))
+    n.add("Bus", "elec", carrier="AC")
+    n.add("Bus", "h2", carrier="h2")
+    n.add("Carrier", "AC")
+    n.add("Carrier", "gas")
+    n.add("Carrier", "battery")
+    n.add("Carrier", "h2")
+    n.add(
+        "Generator", "gas",
+        bus="elec", carrier="gas",
+        p_nom=200.0, marginal_cost=50.0,
+    )
+    # The peak exceeds the gas plant's 200 MW, so the battery MUST charge in
+    # the low hours and discharge into the peak — its VOM term is genuinely
+    # non-zero. (A peak within gas capacity defeats the fixture: the LP just
+    # runs gas and the battery sits idle, which the guard below catches.)
+    n.add("Load", "L", bus="elec", p_set=[60.0, 60.0, 60.0, 60.0, 250.0, 250.0])
+    n.add(
+        "StorageUnit", "bess",
+        bus="elec", carrier="battery",
+        p_nom=80.0, max_hours=4.0, marginal_cost=7.0,
+        efficiency_store=1.0, efficiency_dispatch=1.0,
+    )
+    n.add(
+        "Link", "electrolyzer",
+        bus0="elec", bus1="h2", carrier="h2",
+        p_nom=30.0, efficiency=0.7, marginal_cost=12.0,
+    )
+    n.add("Load", "HL", bus="h2", p_set=10.0)
+    n.optimize(solver_name="highs")
+
+    s = cs.summarise(n)
+    dispatch_opex = s["dispatch"].opex_meur.total
+    econ_gen_cost = sum(e.gen_cost_meur.total for e in s["economics"].by_carrier.values())
+
+    # Guard against the vacuous case: if neither the battery nor the
+    # electrolyzer actually ran, this network proves nothing.
+    assert float(n.storage_units_t.p["bess"].clip(lower=0).sum()) > 1e-6, (
+        "fixture defeated — the battery never discharged"
+    )
+    assert float(n.links_t.p0["electrolyzer"].abs().sum()) > 1e-6, (
+        "fixture defeated — the electrolyzer never ran"
+    )
+
+    assert dispatch_opex == pytest.approx(econ_gen_cost, rel=1e-6), (
+        f"Dispatch {dispatch_opex} MEUR vs Economics gen_cost {econ_gen_cost} "
+        f"— storage discharge VOM or link VOM is missing from one walk"
+    )
+
+
+# ── Economics tab revenue vs. /results/asset_economics ──────────────────────
+def test_economics_revenue_agrees_with_asset_economics(golden):
+    """
+    Per-carrier revenue on the Economics tab must equal the same carrier's
+    revenue summed over /results/asset_economics rows.
+
+    MEASURED in the 2026-08-14 sweep before the fix: carrier h2 (the
+    electrolyzer Link) showed economics=0.0 against asset_econ=0.2136903 —
+    `_walk_dispatch_side`'s revenue block read `row.get("bus")`, links carry
+    `bus0`/`bus1` and no `bus` column, so every pure-link carrier's revenue
+    was a fabricated 0.00 while the Results side computed the real figure.
+    A zero that means "unimplemented branch" rendering identically to a
+    measured zero is ADR-0001's exact prohibition, wearing the Economics
+    table's Revenue column.
+
+    Class mapping mirrors what each surface actually reports: generators and
+    links carry `revenue_eur` (net of input cost for links, matching this
+    codebase's LCOH accounting), storage_units carry `discharge_revenue_eur`
+    (the gross discharge side — Compare books the charge side separately in
+    `storage_charge_cost_eur`). Stores are deliberately absent: neither
+    surface computes store revenue today.
+    """
+    import routers.results as R
+    import routers.simulation as sim_router
+    from services.solver_service import SolverConfig
+
+    sim_router._state["solver_config"] = SolverConfig()
+
+    econ = {
+        k: e.revenue_meur.total
+        for k, e in cs.summarise(golden)["economics"].by_carrier.items()
+    }
+
+    ae = R.get_asset_economics()
+    per_car: dict[str, float] = {}
+    for cls, key in (
+        ("generators", "revenue_eur"),
+        ("links", "revenue_eur"),
+        ("storage_units", "discharge_revenue_eur"),
+    ):
+        for row in ae.get(cls) or []:
+            val = row.get(key)
+            if val is None:
+                continue
+            car = str(row.get("carrier", "")).lower()
+            per_car[car] = per_car.get(car, 0.0) + float(val) / 1e6
+
+    # Guards: the fixture must exercise the branch that diverged — a carrier
+    # whose ONLY revenue-bearing asset is a Link.
+    assert "h2" in per_car and per_car["h2"] > 0, (
+        "fixture defeated — asset_economics no longer reports link revenue "
+        "for h2, so this test cannot see the divergent branch"
+    )
+    compared = 0
+    for car, av in per_car.items():
+        if car not in econ:
+            continue
+        assert econ[car] == pytest.approx(av, rel=1e-6), (
+            f"carrier {car!r}: Economics tab says {econ[car]} MEUR, "
+            f"asset_economics sums to {av} — the same assets cannot earn "
+            f"two different revenues depending on which tab is open"
+        )
+        compared += 1
+    assert compared >= 3, f"only {compared} carriers compared — key drift?"
+
+
+# ── Storage cycles: the two Compare-internal implementations ────────────────
+@pytest.mark.parametrize("solve_fixture", [
+    cln.solve_storage_cycling_flat_network,
+    cln.solve_storage_cycling_multi_network,
+])
+def test_dispatch_cycles_agree_with_the_cycling_block(solve_fixture):
+    """
+    Compare computes equivalent cycles TWICE: `_compute_dispatch_summary`'s
+    `storage_cycles_by_carrier` and `_compute_storage_cycling_summary`'s
+    `cycles_by_carrier`. Both render in the same view. They have already
+    diverged once — the dispatch walk summed throughput across the horizon
+    against a single period's energy cap, reporting n_periods× the per-year
+    rate until it was aligned to mean-per-year (see the comment block in the
+    dispatch walk) — and nothing but this test holds them together now.
+
+    The 2026-08-14 sweep measured them agreeing (2.0 == 2.0 on both
+    fixtures); this pins that agreement rather than fixing anything.
+    """
+    n = solve_fixture()
+    s = cs.summarise(n)
+    d = s["dispatch"].storage_cycles_by_carrier
+    c = s["storage_cycling"].cycles_by_carrier
+
+    shared = set(d) & set(c)
+    assert shared, (
+        f"no carrier computed by both implementations — dispatch={sorted(d)} "
+        f"cycling={sorted(c)}; the fixture no longer exercises the overlap"
+    )
+    for car in shared:
+        assert d[car].total == pytest.approx(c[car].total, rel=1e-9), (
+            f"carrier {car!r}: dispatch walk says {d[car].total} cycles, "
+            f"cycling block says {c[car].total} — the same fleet cannot "
+            f"cycle at two different rates in one view"
+        )

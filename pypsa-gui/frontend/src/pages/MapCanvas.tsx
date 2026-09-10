@@ -11,6 +11,8 @@ import { Ruler, Flame, Wind, BatteryCharging, Zap, ExternalLink } from 'lucide-r
 import ReactDOMServer from 'react-dom/server'
 import { useUIStore, type CanvasView } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { updateAsset } from '../utils/assetWrite'
+import type { RescalePreview } from '../utils/rescale'
 import { networkApi } from '../api/network'
 import { appLog } from '../store/simulationStore'
 import type { Bus, Generator, Line as LineT, Link as LinkT, Load, StorageUnit, Store, Transformer } from '../api/types'
@@ -21,14 +23,33 @@ import { ingestRescale } from '../utils/rescaleActions'
 import { useRescaleStore } from '../store/rescaleStore'
 import UnplacedBusesPanel from '../components/UnplacedBusesPanel'
 
+/**
+ * HTML-attribute escaping for the divIcon's `html` string. The marker markup
+ * is built as a string, so a bus called `A"B` would close the attribute early
+ * and the drop hit-test would recover the wrong name. Escaping & first is
+ * required — doing it later would double-escape the entities the other
+ * replacements introduce.
+ */
+function escapeAttr(s: string): string {
+  return s
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
 // Draggable bus marker. Mimics the previous CircleMarker visually (12 px,
 // 2 px coloured border, white fill) but uses a Marker + divIcon so leaflet
 // gives us the `draggable` capability and a `dragend` event. The cursor
 // changes to "grab" so users discover that the dot is draggable.
-function busDivIcon(color: string): L.DivIcon {
+//
+// `data-bus-name` is the drop hit-test's only handle on which bus was hit —
+// the same attribute TopologyCanvas's BusNode publishes, so hooks/
+// useAssetDrag.ts needs exactly one branch for both canvases (spec D25).
+export function busDivIcon(color: string, name: string): L.DivIcon {
   return L.divIcon({
     className: 'pypsa-bus-marker',
-    html: `<div style="width:12px;height:12px;border:2px solid ${color};background:#fff;border-radius:50%;box-sizing:border-box;cursor:grab;"></div>`,
+    html: `<div data-bus-name="${escapeAttr(name)}" style="width:12px;height:12px;border:2px solid ${color};background:#fff;border-radius:50%;box-sizing:border-box;cursor:grab;"></div>`,
     iconSize: [12, 12],
     iconAnchor: [6, 6],
   })
@@ -719,33 +740,22 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // its own per-bus position cache in localStorage and is unaffected by
   // changes here for any bus the user has already laid out there.
   const updateBusPosMut = useMutation({
-    mutationFn: ({ name, lat, lng }: { name: string; lat: number; lng: number }) => {
-      const cached = (qc.getQueryData<Bus[]>(nk(useUIStore.getState().currentProject, 'buses')) ?? []).find(b => b.name === name)
-      if (!cached) {
-        // Refuse the partial PUT — without the cached row's full fields,
-        // the backend's _update_component (remove + add) would reset
-        // every omitted attribute (v_nom, carrier, control, sub_network,
-        // country, …) to its Pydantic default. The buses query hydrates
-        // on mount and a drag normally can't fire before then, but a
-        // slow first network round-trip would expose the trap. Reject
-        // explicitly rather than silently corrupt the bus.
-        throw new Error(
-          `Bus '${name}' not yet loaded from backend — wait for the buses query to settle and try the drag again.`
-        )
-      }
-      const payload: Partial<Bus> = { ...cached, x: lng, y: lat }
-      return networkApi.updateBus(name, payload)
+    // The Asset-write chokepoint (utils/assetWrite.ts) owns fetch, spread,
+    // PUT and invalidation. The old throw-on-cache-miss ("wait for the
+    // buses query to settle") is gone: the chokepoint FETCHES on a miss
+    // (ruling 3), so a drag racing the first buses round-trip now succeeds
+    // instead of asking the user to retry — while the bare-fields PUT the
+    // throw guarded against stays unrepresentable.
+    mutationFn: async ({ name, lat, lng }: { name: string; lat: number; lng: number }) => {
+      const resp = await updateAsset<Bus>(
+        qc, useUIStore.getState().currentProject, 'buses', name, { x: lng, y: lat })
+      return resp as { name: string; rescale: RescalePreview[] }
     },
     onSuccess: (data, vars) => {
       // The backend's update_bus already recomputed the lengths of THIS bus's
       // connected lines (_recompute_lengths_for_bus, scoped to the moved bus)
-      // and logged a changelog entry. We previously also called the global
-      // recalculateLineLengths() here, which rewrote EVERY line in the network
-      // (O(all lines) per drag) and produced a SECOND changelog entry per drag.
-      // Drop that redundant whole-fleet pass — just refresh the two affected
-      // caches so the connected lines re-render with their new lengths.
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
-      qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'lines') })
+      // and logged a changelog entry; the chokepoint's blanket invalidation
+      // covers the buses AND lines refetch that used to be done here.
       appLog('INFO', `Bus '${vars.name}' moved · connected line lengths recalculated.`)
       ingestRescale(qc, data.rescale)
     },
@@ -1084,7 +1094,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
               key={bus.name}
               position={c}
               draggable
-              icon={busDivIcon(colour)}
+              icon={busDivIcon(colour, bus.name)}
               eventHandlers={{
                 click: () => setSelectedComponent({ type: 'Bus', name: bus.name }),
                 contextmenu: (e) => {

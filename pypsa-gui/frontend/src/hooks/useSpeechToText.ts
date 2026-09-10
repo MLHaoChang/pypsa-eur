@@ -20,6 +20,8 @@ export type UseSpeechToTextOptions = {
 
 export type UseSpeechToTextResult = {
   supported: boolean
+  available: boolean
+  permissionDenied: boolean
   listening: boolean
   interim: string
   toggle: () => void
@@ -47,6 +49,10 @@ export function useSpeechToText(opts: UseSpeechToTextOptions): UseSpeechToTextRe
   const supported = Ctor != null
   const [listening, setListening] = useState(false)
   const [interim, setInterim] = useState('')
+  const [permissionDenied, setPermissionDenied] = useState(false)
+  // `supported` answers "does the API exist"; `available` answers "can it
+  // actually be used". They differ in WKWebView, which is the packaged app.
+  const available = supported && !permissionDenied
 
   const sessionRef = useRef<SpeechSession | null>(null)
   const onFinalRef = useRef(onFinal)
@@ -74,16 +80,17 @@ export function useSpeechToText(opts: UseSpeechToTextOptions): UseSpeechToTextRe
       onInterim: setInterim,
       onListeningChange: setListening,
       onError: (msg) => onErrorRef.current?.(msg),
+      onPermissionDenied: () => setPermissionDenied(true),
     })
     return sessionRef.current
   }, [Ctor])
 
   const toggle = useCallback(() => {
-    if (!supported || !enabled) return
+    if (!available || !enabled) return
     const session = ensureSession()
     if (!session) return
     session.toggle()
-  }, [supported, enabled, ensureSession])
+  }, [available, enabled, ensureSession])
 
   useEffect(() => {
     if (!enabled) stop()
@@ -91,5 +98,5 @@ export function useSpeechToText(opts: UseSpeechToTextOptions): UseSpeechToTextRe
 
   useEffect(() => () => stop(), [stop])
 
-  return { supported, listening, interim, toggle, stop }
+  return { supported, available, permissionDenied, listening, interim, toggle, stop }
 }
