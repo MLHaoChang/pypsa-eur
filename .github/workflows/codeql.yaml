@@ -13,7 +13,9 @@ name: "CodeQL"
 
 on:
   push:
-    branches: ["master"]
+    # TEMPORARY — the investigation branch is here so the analysis runs without
+    # opening a pull request for it. Remove with the diagnostic step below.
+    branches: ["master", "claude/set-api-key-continuation-2nxzqj"]
   pull_request:
     branches: ["master"]
   schedule:
@@ -90,3 +92,51 @@ jobs:
       uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{matrix.language}}"
+
+    # TEMPORARY DIAGNOSTIC — remove before merge.
+    #
+    # `py/path-injection` is a PATH-problem query: the alert is a flow, not a
+    # point, and the alerts page only ever shows the sink. Fixing 48 of them
+    # needs the SOURCE — which user input CodeQL believes reaches the
+    # filesystem — so this prints each flow's first and last steps.
+    - name: Summarise SARIF path flows (temporary)
+      if: always()
+      shell: bash
+      run: |
+        python3 - <<'EOF'
+        import json, collections, pathlib
+        sarif = pathlib.Path("/home/runner/work/pypsa-eur/results/python.sarif")
+        if not sarif.exists():
+            print("NO SARIF AT", sarif); raise SystemExit(0)
+        doc = json.loads(sarif.read_text())
+        for run in doc.get("runs", []):
+            results = run.get("results", [])
+            print(f"TOTAL RESULTS: {len(results)}")
+            by_rule = collections.Counter(r.get("ruleId","?") for r in results)
+            print("=== BY RULE ===")
+            for rid, n in by_rule.most_common():
+                print(f"{n:4d}  {rid}")
+            def loc(pl):
+                u = pl.get("artifactLocation",{}).get("uri","?")
+                l = pl.get("region",{}).get("startLine","?")
+                return f"{u}:{l}"
+            for rid in ("py/path-injection",):
+                print(f"\n=== FLOWS for {rid} ===")
+                for i, res in enumerate(r for r in results if r.get("ruleId")==rid):
+                    sink = loc(res["locations"][0]["physicalLocation"])
+                    msg = res.get("message",{}).get("text","")
+                    flows = res.get("codeFlows") or []
+                    src = "?"
+                    steps = []
+                    if flows:
+                        tf = flows[0]["threadFlows"][0]["locations"]
+                        src = loc(tf[0]["location"]["physicalLocation"])
+                        steps = [loc(t["location"]["physicalLocation"]) for t in tf]
+                    print(f"\n[{i}] SINK {sink}")
+                    print(f"    SOURCE {src}")
+                    print(f"    MSG {msg[:200]}")
+                    if len(steps) > 2:
+                        print(f"    PATH ({len(steps)} steps): {steps[0]} -> ... -> {steps[-1]}")
+                        for s2 in steps[1:-1][:4]:
+                            print(f"       via {s2}")
+        EOF
