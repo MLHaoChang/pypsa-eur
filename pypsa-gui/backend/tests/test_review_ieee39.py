@@ -118,32 +118,54 @@ def test_a_one_field_edit_keeps_the_profile_too(client, install_network):
     assert _ts_column(client, "generators", "p_max_pu", "farm") == before
 
 
-def test_renaming_a_non_bus_component_is_a_500_on_pypsa_1_3(client, install_network):
-    """★ F9 (pre-existing on master, found while testing F2). The update
-    route re-points a renamed component's dependents through PyPSA's
-    `rename_component_names` — correct for a Bus, and a hard raise for
-    everything else on pypsa 1.3.0: that function derives the cross-reference
-    column from the RENAMED class (`generator`, `load`, `line`) and then
-    indexes EVERY component's static frame with it, so the first frame
-    without such a column raises `KeyError`. Renaming a generator from the
-    Properties panel is therefore a 500 today, before any of this branch's
-    code runs.
+def test_a_rename_carries_the_profile_to_the_new_name(client, install_network):
+    """★ F9, and the assertion F2 was written for. The update route re-points
+    a renamed component's dependents through PyPSA's
+    `rename_component_names` — which derives the cross-reference column from
+    the RENAMED class and indexes every component's frame with it, so it
+    holds for a Bus (`bus`, `bus0`, `bus1`) and raises `KeyError` for
+    everything else. Renaming a generator from the Properties panel was a
+    500, on the pinned PyPSA 1.1.2 and on 1.3.0 alike, before any of this
+    work's code ran.
 
-    Pinned as a KNOWN defect, not as desired behaviour: when it is fixed
-    (in PyPSA, or by re-pointing dependents here) this test fails and says
-    so, and the profile-preserving assertion below is what should replace
-    it — the series are put back under the OLD name precisely so a working
-    rename re-keys them.
+    The route now takes PyPSA's function only where its own precondition
+    holds and otherwise completes the rename the way PyPSA does before that
+    walk. So F2's series survive the remove+add AND follow the rename, which
+    is why they are put back under the OLD name.
 
-    Verified on bare PyPSA 1.3.0: Generator, Load and Line renames all raise;
-    a Bus rename succeeds (its column, `bus`, exists on the frames that carry
-    it).
+    Bite (verified): call `n.rename_component_names` directly again — the
+    request raises `KeyError: generator`.
     """
     install_network(_profiled())
+    before = _ts_column(client, "generators", "p_max_pu", "farm")
     rows = {r["name"]: r for r in client.get("/api/network/generators").json()}
-    with pytest.raises(KeyError, match="generator"):
-        client.put("/api/network/generators/farm",
+    r = client.put("/api/network/generators/farm",
                    json=dict(rows["farm"], name="farm_2"))
+    assert r.status_code == 200, r.text
+
+    names = [g["name"] for g in client.get("/api/network/generators").json()]
+    assert "farm_2" in names and "farm" not in names
+    assert _ts_column(client, "generators", "p_max_pu", "farm") is None
+    assert _ts_column(client, "generators", "p_max_pu", "farm_2") == before
+    # …and the engines see the renamed unit with its profile, not a firm one.
+    fleet = client.get("/api/results/copt").json()["fleet"]
+    assert fleet["must_take"] == 1
+
+
+def test_a_bus_rename_still_repoints_everything_attached(client, install_network):
+    """★ F9's other half: where PyPSA's walk works it is still what runs, so
+    a Bus rename keeps re-pointing the generators, loads and lines that name
+    it. Bite (verified): take the local-rename branch for every class — the
+    generator is orphaned on the old bus name."""
+    install_network(_profiled())
+    rows = {r["name"]: r for r in client.get("/api/network/buses").json()}
+    r = client.put("/api/network/buses/b", json=dict(rows["b"], name="b_2"))
+    assert r.status_code == 200, r.text
+
+    gens = {g["name"]: g for g in client.get("/api/network/generators").json()}
+    loads = {l["name"]: l for l in client.get("/api/network/loads").json()}
+    assert gens["farm"]["bus"] == "b_2" and gens["firm"]["bus"] == "b_2"
+    assert loads["l"]["bus"] == "b_2"
 
 
 # ── F6 / F7 ───────────────────────────────────────────────────────────────
@@ -296,3 +318,30 @@ def test_the_frontier_record_states_the_margin_it_swept_under(
             break
         time.sleep(0.05)
     assert "reserve_margin" in body and body["reserve_margin"] is None, body
+
+
+# ── N-h ───────────────────────────────────────────────────────────────────
+
+def test_a_unit_folded_to_zero_is_not_offered_as_an_ELCC_candidate(
+        client, install_network):
+    """★ N-h. `elcc_candidates` excluded a zero-capacity unit only when it
+    carried a PROFILE, so a unit folded to 0 MW by a static `p_max_pu` of 0 —
+    the ordinary "this unit is off for this study" idiom — was offered in the
+    picker at 0 MW. Its credit is 0 by construction, so the study it invites
+    is a run for nothing.
+
+    Bite (verified): restore the `and getattr(u, "profile", None) is not None`
+    clause — `off` is back in the list at 0 MW.
+    """
+    n = _profiled(periods=4)
+    n.generators_t.p_max_pu.drop(columns=["farm"], inplace=True)
+    n.add("Generator", "off", bus="b", carrier="gas", p_nom=100.0,
+          marginal_cost=9.0, p_max_pu=0.0, outage_rate_value=0.05,
+          outage_rate_basis="EFORd", mttr_hours=24.0)
+    install_network(n)
+
+    assets = client.get("/api/results/mc/elcc_candidates").json()["assets"]
+    names = [a["name"] for a in assets]
+    assert "off" not in names, assets
+    assert "firm" in names                    # the priceable ones stay
+    assert all(a["nameplate_mw"] > 0.0 for a in assets), assets

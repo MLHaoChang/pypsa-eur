@@ -279,3 +279,55 @@ The 43 are the environmental set characterised in
 pandas-3 unpickler); none is introduced or masked by this branch. The passing
 count rose from 3285 to 3309 with the 24 tests the minors and this review's
 fixes added.
+
+## 11. The journey re-run on the PyPSA this project PINS
+
+Every live pass in §2 ran on the container's PyPSA 1.3.0. The project pins
+**1.1.2**, and that gap is not hypothetical: it hid six broken tests and one
+real schema gap (a link's secondary efficiencies accepting a non-finite value)
+until CI ran the pinned version for the first time. So the journey was run
+again against 1.1.2 — the C1 option in
+`2026-09-10-next-steps-options.md`.
+
+**Environment.** `pixi` is not available here, so the reproduction is a venv
+carrying `pypsa==1.1.2` with `pandas<3` over the container's stack. The pandas
+bound matters and is the fix for an earlier dead end: a first venv took 1.1.2
+with the container's pandas 3, where linopy rejects Arrow-backed string arrays
+and every solve dies. That environment was sound for metadata and schema paths
+and useless for solves; this one runs both. Both IEEE 39 networks were rebuilt
+under it rather than reused, so nothing crossed the version line.
+
+**Result: no defect, and the two versions agree on every number.**
+
+| | pinned 1.1.2 | 1.3.0 (§2) |
+|---|---|---|
+| steps, both runs | 46/46, **every one 200** | 46/46 |
+| base: objective | 14.26 M€ | 14.26 M€ |
+| base: COPT | LOLE 0.8312 h / EUE 292.5 MWh | identical |
+| base: sequential MC (n = 2 000) | LOLE 0.4775 h / EUE 151.5 MWh | identical |
+| base: ELCC G39 / G30 / G38 | 784.2 / 962.8 / 723.9 MW | identical |
+| stressed: firm vs required | 8 850 / 8 850 MW, binding | identical |
+| stressed: COPT, MC | 1.2636 h / 602.5 MWh, 0.8840 h / 437.3 MWh | identical |
+| stressed: loop verdicts | coupling `unreachable` (2 solves), margin `unreachable`, ceiling 19.877 % | identical |
+
+The three differences from §2's recorded runs are all this work's own fixes
+showing up live, not version effects:
+
+* the frontier record now carries `reserve_margin: 0.15` where §2 recorded
+  `None` (F3);
+* `rate_zero_units` is a list where §2 had no such key (F8);
+* the stressed margin loop's second iterate reads **19.88 %** — the ceiling it
+  actually solved — where §2 recorded **363 %**, the margin it merely asked
+  for (F1).
+
+That last row is the defect F1 fixed, seen from the other side. The third
+iterate still reports 1752 %, and correctly: it is `solve_status: "error"`
+with the condition *"a reserve margin of 1752.0% is beyond the configured
+maximum of 500% — the search has run out of lever"*, so it never reached a
+solve and has no solved margin to report. `lever_star` is null and the verdict
+names the 19.9 % ceiling. That is the documented fallback in F1's fix, working.
+
+**What this closes.** The feature's arithmetic, its disclosures and all six
+studies behave identically on the version the project ships. What it does not
+close: the self-hosted `Run validation` job, which has still never completed,
+and the QA drivers, which cover no adequacy route (options C2 and C3).
