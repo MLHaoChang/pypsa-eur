@@ -34,7 +34,8 @@ def _blank_basis_is_none(v):
     # helpers coerce NaN to "" on import), so a row read from GET and echoed
     # into PUT carried "" where it had carried null — and was refused
     # (whole-branch review, M13). Blank means unset.
-    if isinstance(v, str) and v.strip() in ("", "nan", "None"):
+    from services.adequacy.occurrence import BLANK_SPELLINGS
+    if isinstance(v, str) and v.strip() in BLANK_SPELLINGS:
         return None
     return v
 

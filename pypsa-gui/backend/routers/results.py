@@ -3314,15 +3314,20 @@ def get_copt():
             "profile_units": [u.name for u in split.mixed] + [u.name for u in split.netted],
             "netted_beyond_cap": [u.name for u in split.netted],
             "k_exact": K_EXACT,
-            # Phase 12h. Two units the lists above cannot describe:
+            # Phase 12h, as M5 and F8 left it. Three kinds of unit the
+            # profile lists above cannot describe:
             #  * a unit whose STATIC p_max_pu was folded into its capacity
-            #    has no profile at all, so it is in no existing list — the
+            #    has no profile at all, so it is in no profile list — the
             #    `source` field is here so a later phase can add another
             #    fold without changing the shape;
-            #  * a unit whose outage rate is zero because its availability
-            #    is declared to include outages carries a profile but is in
-            #    neither `mixed` nor `netted` — it is netted exactly, at
-            #    full availability, and no outages are sampled for it.
+            #  * a unit the 12h FLAG zeroed — profiled OR folded (M5: the
+            #    disclosure is symmetric across the two shapes, where it
+            #    once named the column unit twice and the static one never);
+            #  * a unit whose rate the user TYPED as 0 (F8), which is the
+            #    same q by a different route and belongs in its own list
+            #    rather than under the flag's name.
+            # A unit in either of the last two is netted exactly, at full
+            # availability, and no outages are sampled for it.
             "folded_units": [
                 {"name": u.name, "folded_constant": float(u.folded_constant),
                  "source": "static"}

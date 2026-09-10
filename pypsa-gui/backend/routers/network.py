@@ -28,6 +28,7 @@ from db.session import get_db
 from deps import current_session
 from services import active_project, change_log_service, vintage_service
 from services.carrier_catalog import ensure_carrier
+from services.adequacy.occurrence import BLANK_SPELLINGS as _BLANK_SPELLINGS
 from services.transient_rows import filter_transient_names
 # Phase 12f's write-path guards live in `services/user_timeseries.py` beside
 # the `_user_ts` machinery they protect, so `routers/network_time_axis.py`
@@ -182,7 +183,7 @@ def _serialize_component(
     if "outage_rate_basis" in df.columns:
         for row in rows:
             v = row.get("outage_rate_basis")
-            if isinstance(v, str) and v.strip() in ("", "nan", "None"):
+            if isinstance(v, str) and v.strip() in _BLANK_SPELLINGS:
                 row["outage_rate_basis"] = None
     return rows
 

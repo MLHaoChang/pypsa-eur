@@ -318,3 +318,30 @@ def test_the_frontier_record_states_the_margin_it_swept_under(
             break
         time.sleep(0.05)
     assert "reserve_margin" in body and body["reserve_margin"] is None, body
+
+
+# ── N-h ───────────────────────────────────────────────────────────────────
+
+def test_a_unit_folded_to_zero_is_not_offered_as_an_ELCC_candidate(
+        client, install_network):
+    """★ N-h. `elcc_candidates` excluded a zero-capacity unit only when it
+    carried a PROFILE, so a unit folded to 0 MW by a static `p_max_pu` of 0 —
+    the ordinary "this unit is off for this study" idiom — was offered in the
+    picker at 0 MW. Its credit is 0 by construction, so the study it invites
+    is a run for nothing.
+
+    Bite (verified): restore the `and getattr(u, "profile", None) is not None`
+    clause — `off` is back in the list at 0 MW.
+    """
+    n = _profiled(periods=4)
+    n.generators_t.p_max_pu.drop(columns=["farm"], inplace=True)
+    n.add("Generator", "off", bus="b", carrier="gas", p_nom=100.0,
+          marginal_cost=9.0, p_max_pu=0.0, outage_rate_value=0.05,
+          outage_rate_basis="EFORd", mttr_hours=24.0)
+    install_network(n)
+
+    assets = client.get("/api/results/mc/elcc_candidates").json()["assets"]
+    names = [a["name"] for a in assets]
+    assert "off" not in names, assets
+    assert "firm" in names                    # the priceable ones stay
+    assert all(a["nameplate_mw"] > 0.0 for a in assets), assets
