@@ -45,32 +45,6 @@ jobs:
         add-cpes-if-none: true
         output-format: sarif
 
-    # TEMPORARY DIAGNOSTIC — read-only. The code-scanning alert list is not
-    # reachable from the authoring environment, so print every finding with
-    # severity, CVE and the package it is in. To be reverted once read.
-    - name: Print grype results to the log (diagnostic)
-      if: always()
-      continue-on-error: true
-      shell: bash
-      run: |
-        set -uo pipefail
-        f="${{ steps.scan.outputs.sarif }}"
-        echo "=== GRYPE SARIF: $f ==="
-        echo "=== COUNT BY SEVERITY ==="
-        jq -r '.runs[0].tool.driver.rules[]? | .properties."security-severity" // "0"' "$f" | awk '{s=$1+0; if(s>=9)b="critical"; else if(s>=7)b="high"; else if(s>=4)b="medium"; else b="low"; print b}' | sort | uniq -c
-        echo "=== ALL FINDINGS: severity | CVE | message | fixed-in ==="
-        jq -r '
-          (.runs[0].tool.driver.rules // []) as $rules
-          | .runs[0].results[]
-          | .ruleId as $id
-          | ([$rules[] | select(.id==$id)][0] // {}) as $r
-          | [ ($r.properties."security-severity" // "0"),
-              $id,
-              (.message.text // "" | gsub("\n";" ") | .[0:110]),
-              (($r.help.text // "") | split("\n") | map(select(test("ixed"))) | join(" ") | .[0:70]) ]
-          | join(" | ")' "$f" | sort -t'|' -k1 -rn
-        echo "=== TOTAL: $(jq '[.runs[0].results[]] | length' "$f") ==="
-
     # Set uri=pixi.lock for a readable location, and fingerprint each alert by
     # CVE id so code scanning matches against the master baseline by CVE, not line.
     - name: Normalize SARIF (pixi.lock location + CVE fingerprint)
