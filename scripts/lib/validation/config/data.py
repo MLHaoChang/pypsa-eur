@@ -254,7 +254,14 @@ class DataConfig(BaseModel):
         description="Swiss energy balances data source configuration.",
     )
     synthetic_electricity_demand: _DataSourceConfig = Field(
-        default_factory=lambda: _DataSourceConfig(source="primary"),
+        # `archive` rather than `primary`: the primary is zenodo.org, whose
+        # record-metadata API returned HTTP 504 for over eight hours on
+        # 2026-09-09/10 and took every Integration job in the repo down with
+        # it. `data/versions.csv` carries an archive row at the SAME version
+        # (v2) on data.pypsa.org, so this is the same file from the copy the
+        # project already publishes — the two demand datasets either side of
+        # it read from the archive for availability too.
+        default_factory=lambda: _DataSourceConfig(source="archive"),
         description="Synthetic electricity demand data source configuration.",
     )
     opsd_electricity_demand: _DataSourceConfig = Field(
