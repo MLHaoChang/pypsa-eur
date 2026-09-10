@@ -136,6 +136,50 @@ def _safe_snapshot_dir(project_dir: pathlib.Path, snapshot_id: str) -> pathlib.P
     return dest
 
 
+def _existing_snapshot_dir(
+    project_dir: pathlib.Path, snapshot_id: str, not_found: str,
+) -> pathlib.Path:
+    """
+    The directory of an EXISTING snapshot, found by matching the real directory
+    entries rather than by joining the caller's string onto a path.
+
+    WHY NOT `_safe_snapshot_dir`. That function is correct — regex allowlist,
+    `resolve()`, `is_relative_to` containment — but the path it returns is still
+    BUILT from the caller's string, and CodeQL's `py/path-injection` does not
+    model `Path.is_relative_to` as a barrier. The flows it reported ran straight
+    through the guard: `snapshots.py:118 -> :130 -> :136`, sink somewhere
+    downstream. A reader auditing those alerts has to re-derive the containment
+    argument every time, and a future edit that weakens the check would not be
+    caught by anything.
+
+    Here the tainted value is used ONLY in an equality comparison. The path
+    handed back comes out of `iterdir()`, so it is a directory that demonstrably
+    already exists under `snapshots/` — the property the containment check was
+    arguing for, established by construction instead of by proof. Same shape as
+    `gridspine_service._authorized_dispatch_dir` (859a7265), which resolves a
+    caller's directory string back to a project row and returns the path derived
+    from that row.
+
+    The regex still runs first: it rejects an obviously malformed id with 400
+    rather than 404, so a client sending nonsense gets told so instead of being
+    told the snapshot does not exist.
+
+    `not_found` is the caller's message because the two callers word it
+    differently — `restore` says "(or incomplete)" since it also requires
+    `network.nc` — and those strings are what clients see.
+    """
+    if not isinstance(snapshot_id, str) or not _SNAPSHOT_ID_RE.match(snapshot_id):
+        raise HTTPException(400, f"Invalid snapshot id: {snapshot_id!r}")
+    try:
+        entries = list(_snapshots_dir(project_dir).iterdir())
+    except (FileNotFoundError, NotADirectoryError):
+        entries = []
+    for child in entries:
+        if child.name == snapshot_id and child.is_dir():
+            return child
+    raise HTTPException(404, not_found)
+
+
 def _slugify_label(label: str) -> str:
     """
     Convert a free-form label to a filename-safe slug.
@@ -461,8 +505,11 @@ def restore_snapshot(
     if not (project_dir / "network.nc").exists():
         raise HTTPException(404, f"Project '{name}' not found")
 
-    snap_dir = _safe_snapshot_dir(project_dir, snapshot_id)
-    if not snap_dir.exists() or not (snap_dir / "network.nc").exists():
+    snap_dir = _existing_snapshot_dir(
+        project_dir, snapshot_id,
+        f"Snapshot '{snapshot_id}' not found (or incomplete)",
+    )
+    if not (snap_dir / "network.nc").exists():
         raise HTTPException(404, f"Snapshot '{snapshot_id}' not found (or incomplete)")
 
     _enforce_project_lock(db, _lock_target(project), user)
@@ -653,9 +700,9 @@ def delete_snapshot(
     project_dir = project.directory
     if not (project_dir / "network.nc").exists():
         raise HTTPException(404, f"Project '{name}' not found")
-    snap_dir = _safe_snapshot_dir(project_dir, snapshot_id)
-    if not snap_dir.exists():
-        raise HTTPException(404, f"Snapshot '{snapshot_id}' not found")
+    snap_dir = _existing_snapshot_dir(
+        project_dir, snapshot_id, f"Snapshot '{snapshot_id}' not found",
+    )
     _enforce_project_lock(db, _lock_target(project), user)
     label = _read_snapshot_meta(snap_dir).get("label", snapshot_id)
     # `_force_rmtree` clears read-only attributes and retries with a backoff —
