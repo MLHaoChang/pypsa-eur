@@ -52,9 +52,16 @@ _NoneToNegInf = Annotated[float, BeforeValidator(
 # pass-through). The frontend's `{...cached}` PUT spread carries `null` for
 # every secondary efficiency the user hasn't set — without coercion, the
 # float validator rejects null and 422s the whole Apply.
+# `Field(allow_inf_nan=False)` as well as the coercion: PyPSA's metadata lists
+# `efficiency2`/`efficiency3` as finite-default INPUTS on the version this
+# project pins (1.1.2 — the base Link table carries them, where on 1.3.0 they
+# appear only once a multi-port link exists), so a NaN there is refused exactly
+# like the primary `efficiency`. Caught by CI's J4a coverage check, which
+# compares the annotations against the INSTALLED metadata and so only fires on
+# the version that has the attribute.
 _NoneToOne = Annotated[float, BeforeValidator(
     lambda v: 1.0 if v is None else v
-)]
+), Field(allow_inf_nan=False)]
 
 
 class BusCreate(BaseModel):

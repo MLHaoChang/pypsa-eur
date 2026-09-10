@@ -15,6 +15,7 @@ and demonstrated RED before this file was allowed to go green.
 """
 from __future__ import annotations
 
+import math
 import numpy as np
 import pandas as pd
 import pypsa
@@ -60,6 +61,26 @@ _ASSET = {"Generator": "g", "Link": "lk", "Line": "ln", "Transformer": "tr",
           "StorageUnit": "su", "Store": "st", "Load": "l", "GlobalConstraint": "co2"}
 
 
+def _has_finite_default_input(comp: str, attr: str, n=None) -> bool:
+    """Whether the INSTALLED PyPSA lists ``attr`` as a finite-default input of
+    ``comp``.
+
+    The metadata is version-dependent and this project pins 1.1.2 while a
+    development container may carry a newer one: ``Link.delay`` and
+    ``Transformer.phase_shift_max`` exist on 1.3.0 and not on 1.1.2, so a case
+    naming them is a case about an attribute that is simply not there. These
+    tests are about the RULE — the status, numeric-type and finite-default
+    clauses — so a case whose attribute the installed table lacks is skipped
+    rather than asserted, and the rule is checked on whatever the table does
+    carry. Found by CI, which runs the pinned 1.1.2; six tests here had only
+    ever run against 1.3.0.
+    """
+    import pypsa as _pypsa
+    if n is None:
+        n = _pypsa.Network()
+    return attr in V.finite_default_inputs(n.components[comp])
+
+
 # ── J1: the preflight, per category, through validate_for_run ─────────────
 
 @pytest.mark.parametrize("comp,attr,code", [
@@ -76,6 +97,8 @@ def test_J1a_a_static_nan_is_refused_with_its_category(comp, attr, code):
     (not the helper — this program's recurring error). Bite (verified):
     return `nonfinite_input` for every attribute."""
     n = _all_components_network()
+    if not _has_finite_default_input(comp, attr, n):
+        pytest.skip(f"{comp}.{attr} is not a finite-default input on this PyPSA")
     assert _errors(n) == [], [i.code for i in _errors(n)]
     getattr(n, _LIST[comp]).at[_ASSET[comp], attr] = np.nan
     errs = _errors(n)
@@ -92,11 +115,14 @@ def test_J1a2_the_sentences_the_review_corrected():
     n = _all_components_network()
     n.storage_units.at["su", "standing_loss"] = np.nan
     n.generators.at["g", "up_time_before"] = np.nan
-    n.links.at["lk", "delay"] = np.nan
+    has_delay = _has_finite_default_input("Link", "delay", n)
+    if has_delay:
+        n.links.at["lk", "delay"] = np.nan
     msgs = {(i.component_class, i.name): i.message for i in _errors(n)}
     assert "carry-over" in msgs[("StorageUnit", "su")]
     assert "adds a start-up ramp" in msgs[("Generator", "g")]
-    assert "receiving end" in msgs[("Link", "lk")]
+    if has_delay:
+        assert "receiving end" in msgs[("Link", "lk")]
 
 
 def test_J1b_a_partial_inflow_series_is_a_coverage_error():
@@ -171,11 +197,24 @@ def test_J1e_the_golden_network_is_silent_and_the_set_is_the_metadata_s():
     from tests.golden import fixture as gf
     n = gf.build_golden_network()
     assert V._check_nonfinite_inputs(n) == []
+    # The three clauses, asserted on whatever the INSTALLED table carries
+    # rather than on one version's counts (which were 24/24/14/18/20/15/3/1 on
+    # PyPSA 1.3.0 and are 21/20/14/16/20/15/3/1 on the 1.1.2 this project
+    # pins). Dropping any clause from `finite_default_inputs` still fails
+    # here — an Output attribute, a non-numeric one or a NaN-default one would
+    # appear in the derived set and be caught per entry — and the set going
+    # empty, the other way a clause can "pass", is caught too.
     counts = {c: len(V.finite_default_inputs(n.components[c]))
               for c in V.NONFINITE_INPUT_COMPONENTS}
-    assert counts == {"Generator": 24, "Link": 24, "Line": 14, "Transformer": 18,
-                      "StorageUnit": 20, "Store": 15, "Load": 3,
-                      "GlobalConstraint": 1}, counts
+    assert all(v > 0 for v in counts.values()), counts
+    for c in V.NONFINITE_INPUT_COMPONENTS:
+        defaults = n.components[c].defaults
+        for attr, (dv, _varying, typ) in V.finite_default_inputs(
+                n.components[c]).items():
+            row = defaults.loc[attr]
+            assert str(row["status"]).strip().startswith("Input"), (c, attr)
+            assert typ in V._NUMERIC_TYPES, (c, attr, typ)
+            assert math.isfinite(float(dv)), (c, attr, dv)
     assert "ramp_limit_up" not in V.finite_default_inputs(n.components["Generator"])
     assert "p_set" not in V.finite_default_inputs(n.components["Generator"])
 
@@ -205,7 +244,16 @@ def test_J1f_a_multi_port_attribute_is_judged_only_where_the_port_exists():
     assert "efficiency2" in V.finite_default_inputs(n.components["Link"])
     n.links.at["lk", "efficiency2"] = np.nan          # two-port: no bus2
     assert [i for i in _errors(n) if i.name == "lk"] == []
-    n.links.at["lk3", "delay2"] = np.nan              # three-port: bus2 set
+    # The generic walk's own multi-port attribute — `efficiency2` is owned by
+    # `link_efficiency_invalid` (J1f2), so this needs a different one, and
+    # which ones exist is version-dependent (`delay2` is on 1.3.0 and not on
+    # the pinned 1.1.2). Take it from the installed table.
+    owned = {"efficiency2", "efficiency3"}
+    generic = sorted(a for a in V.finite_default_inputs(n.components["Link"])
+                     if a[-1:] in ("2", "3") and a not in owned)
+    if not generic:
+        pytest.skip("this PyPSA has no generic multi-port Link input to judge")
+    n.links.at["lk3", generic[0]] = np.nan            # three-port: bus2 set
     errs = [i for i in _errors(n) if i.name == "lk3"]
     assert [i.code for i in errs] == ["nonfinite_input"], errs
 
@@ -278,6 +326,8 @@ def test_J2a_bulk_clears_a_finite_default_input_to_its_default(comp, cls, name, 
     Bite (verified): restore the five-only mapping — `state_of_charge_initial`
     reads NaN, `phase_shift_max` reads inf."""
     n = _all_components_network()
+    if not _has_finite_default_input(cls, col, n):
+        pytest.skip(f"{cls}.{col} is not a finite-default input on this PyPSA")
     getattr(n, comp).at[name, col] = 0.37
     PyPSAService.set_network(n)
     N.bulk_update({"component_class": cls, "names": [name], "updates": {col: None}})
@@ -374,13 +424,24 @@ def _finite_schema_fields():
 
 
 def test_J4a_the_finite_annotation_covers_exactly_the_metadata_s_float_fields():
-    """★ J4a. 59 float fields (58 plus `GlobalConstraint.constant`), derived
-    from PyPSA's table, not listed by hand; the 9 int fields refuse non-finite
-    as `int` and stay int. Bite (verified): drop the annotation from
-    `inflow`."""
+    """★ J4a. The float fields are DERIVED from PyPSA's table, not listed by
+    hand, and every one of them carries the annotation; the int fields refuse
+    non-finite as `int` and stay int. Bite (verified): drop the annotation
+    from `inflow` — it lands in `expected` and not in `annotated`.
+
+    The exact size is neither pinned nor pinnable: it follows the installed
+    PyPSA (59 float fields on 1.3.0, 58 on the 1.1.2 this project pins) AND
+    the test order within this file, because a multi-port link extends the
+    Link metadata process-wide and J1f adds one. What is asserted instead is
+    that the derivation did not collapse and that the two boundary members
+    the categories turn on are in it.
+    """
     expected, annotated, ints = _finite_schema_fields()
     assert expected == annotated, sorted(expected ^ annotated)
-    assert len(expected) == 59 and len(ints) == 9, (len(expected), len(ints))
+    assert ("StorageUnitCreate", "inflow") in expected
+    assert ("GlobalConstraintCreate", "constant") in expected
+    assert ("GeneratorCreate", "build_year") in ints
+    assert len(expected) >= 50 and len(ints) >= 8, (len(expected), len(ints))
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), "Infinity"])
