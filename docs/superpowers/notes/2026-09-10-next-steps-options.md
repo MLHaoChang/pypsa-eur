@@ -73,6 +73,18 @@ Both are recorded deferrals from the design, not oversights.
 | **E1** | **Rebase the other open pull requests.** #8, #9 and #3 all sit on the master from before this merge. #8 touches no file the earlier decomposition moved, so it should integrate cleanly; #9 and #3 I have not checked. | None of them is my work. |
 | **E2** | **Answer the release-notes question.** The PR template asks for an entry in `doc/release_notes.md`; that file tracks the modelling workflow, and this is entirely inside the bundled GUI. The box was left unticked deliberately. | One line, once someone decides whether GUI features belong there. |
 
+## What has been done since this was written
+
+The recommendation below was taken, and one option beyond it.
+
+| # | What happened |
+|---|---|
+| **A1** | PR #12 opened for the two follow-up commits, CI green, squash-merged. The branch was restarted from the new master. |
+| **C1** | The IEEE 39-bus journey re-run against the pinned PyPSA 1.1.2 in a clean environment: 46 steps across both networks, every figure identical to the 1.3.0 runs. The only differences were three findings becoming *visible* on the older metadata, which is what the exercise was for. Recorded in `2026-09-09-ieee39-e2e-review.md` §11. |
+| **C3** | `pypsa-gui/backend/tests/qa_adequacy_journey.py` — a QA driver covering the adequacy journey, discovered automatically by `tests/run_qa_drivers.py` and therefore run by the `gui-qa-drivers` CI step. 91 checks over preflight, the margin- and cap-constrained solve, `/results/reserve_margin`, `/results/adequacy`, `/results/copt`, `/results/mc` with ELCC, the stress registry, the class-B/C sweep, `/results/fmea_modes`, the worksheet sidecar, the bundle, and the margin loop with its 409 mesh. Passes on both PyPSA 1.3.0 and the pinned 1.1.2. |
+
+Everything else in the tables above stands as written.
+
 ## If you want one recommendation
 
 **A1, then C1.** Put the two follow-up commits through CI, because the rename
