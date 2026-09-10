@@ -15,8 +15,9 @@ These tests pin the three fixes:
     other orgs' jobs would leave a caller at "position 4" with one job visible
     and no way to reconcile the number. Every job is returned with `id`,
     `status`, `position` and timings intact; `project_id`, `project_key` and
-    `error` are nulled for jobs the caller cannot access, and `current` is the
-    running job's id only when the caller may see it.
+    `error` are nulled for jobs the caller cannot access, and `running` is the
+    list of ids of jobs currently running, filtered to the ones the caller may
+    see.
   * **abort answers 404, never 403, when unauthorized** — byte-identical to the
     genuine not-found body, because a 403 confirms the job exists and reopens
     enumeration through a side channel.
@@ -316,19 +317,19 @@ def test_list_error_field_is_redacted_for_another_orgs_failed_job(
     assert _by_id(payload, theirs["id"])["error"] is None, "failure detail leaked"
 
 
-def test_current_is_null_when_the_running_job_belongs_to_another_org(
+def test_running_omits_a_job_belonging_to_another_org(
     client, other_org_client, install_network, tmp_projects_dir
 ):
     theirs = _enqueue(other_org_client, install_network, "Bravo")
     _force_status(theirs["id"], "running")
 
     mine_view = client.get("/api/simulation/queue").json()
-    assert mine_view["current"] is None, "running job id leaked across orgs"
+    assert theirs["id"] not in mine_view["running"], "running job id leaked across orgs"
     assert _by_id(mine_view, theirs["id"])["status"] == "running"
 
     # The owner still sees the true running id — redaction must not blind them.
     theirs_view = other_org_client.get("/api/simulation/queue").json()
-    assert theirs_view["current"] == theirs["id"]
+    assert theirs_view["running"] == [theirs["id"]]
     assert _by_id(theirs_view, theirs["id"])["project_id"] == "Bravo"
 
 
@@ -753,13 +754,35 @@ def test_a_deleted_projects_job_is_redacted_but_still_abortable(
     """
     The one place `_may_see` and `_may_abort` deliberately disagree.
 
-    `_delete_project_db` drops the row and the directory without touching the
-    queue, so a queued or running solve outlives its project. There is no ACL
-    left to consult, so the IDENTITY fails closed — but refusing the abort too
-    would strand the job and block the shared solver with no way to free it.
+    A job whose project row is GONE has no ACL left to consult, so the
+    IDENTITY fails closed — but refusing the abort too would strand the job
+    and block the shared solver with no way to free it.
+
+    The DELETE route now refuses while the queue holds an active job for the
+    project (`test_solve_queue_persisted_listing.py::
+    test_deleting_a_project_with_an_active_queue_job_is_refused`), so the
+    orphan state this test pins can no longer be produced through it — it
+    arises from what that guard cannot close (an enqueue landing after the
+    guard's `list_jobs()` snapshot, a row from another replica). Constructed
+    directly here: the project row is dropped underneath the queued job, the
+    same end state the race produces.
     """
+    from sqlalchemy import delete as _sql_delete, select as _sql_select
+
+    from db.models import Project, ProjectMembership
+    from db.session import SessionLocal
+
     job = _enqueue(client, install_network, "Doomed")
-    assert client.delete("/api/projects/Doomed").status_code == 200
+    with SessionLocal() as db:
+        doomed = db.scalar(_sql_select(Project).where(Project.name == "Doomed"))
+        assert doomed is not None
+        db.execute(
+            _sql_delete(ProjectMembership).where(
+                ProjectMembership.project_id == doomed.id
+            )
+        )
+        db.delete(doomed)
+        db.commit()
 
     payload = client.get("/api/simulation/queue").json()
     assert _by_id(payload, job["id"])["project_id"] is None
@@ -781,3 +804,47 @@ def test_unkeyed_job_is_redacted_under_auth(client, install_network, tmp_project
 
     denied = client.post(f"/api/simulation/queue/{orphan.id}/abort")
     assert denied.status_code == 404, denied.text
+
+
+def test_another_orgs_history_cannot_evict_the_callers_own(
+    client, other_org_client, install_network, tmp_projects_dir, monkeypatch,
+):
+    """
+    The persisted-history cap was applied globally BEFORE the visibility
+    filter: `_merged_jobs` asked for the newest N terminal rows across every
+    org and only then ran `_may_see`. An org that runs N solves therefore
+    pushed another org's entire history out of the listing — the victim's own
+    completed jobs vanished, displaced by rows that render fully redacted for
+    them anyway. The fix unions a second own-org capped read into the merge
+    (foreign rows stay visible-redacted — that behaviour is pinned by
+    `test_solve_queue_persisted_listing.py` — but they can no longer displace
+    the caller's own history).
+    """
+    import routers.solve_queue as RQ
+    from services import solve_job_store
+
+    monkeypatch.setattr(RQ, "_PERSISTED_HISTORY_LIMIT", 3)
+
+    mine = _enqueue(client, install_network, "MyOldFinished")
+    _force_status(mine["id"], "completed")
+    solve_job_store.record_status(solve_queue._jobs[_jid(mine["id"])])
+
+    # The other org fills the (patched) cap with NEWER terminal jobs.
+    for i in range(3):
+        j = _enqueue(other_org_client, install_network, f"TheirNewer{i}")
+        _force_status(j["id"], "completed")
+        solve_job_store.record_status(solve_queue._jobs[_jid(j["id"])])
+
+    # Restart: every job becomes persisted-only, so the listing's history
+    # comes entirely from the capped table read.
+    solve_queue.reset_for_tests()
+    try:
+        payload = client.get("/api/simulation/queue").json()
+        ids = [j["id"] for j in payload["jobs"]]
+        assert mine["id"] in ids, (
+            "the caller's own completed job was evicted from the listing by "
+            "another org's newer rows — the history cap ran before the "
+            "visibility filter"
+        )
+    finally:
+        solve_queue.reset_for_tests()

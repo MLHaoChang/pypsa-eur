@@ -223,15 +223,18 @@ def test_round_trip() -> None:
     # the `ImportSummary` object, which the HTTP route would have serialised to
     # a dict. Direct is fine as long as the dependencies it declares are passed
     # for real, which is what `Depends(...)` stands in for.
+    #
+    # ALL of them, including `session`. The route moves the per-session
+    # active-project pointer on a successful load, and it guards that with
+    # `if session is not None` — which the `Depends` sentinel passes, because
+    # it is an object, not None. Omitting it therefore does not skip the write;
+    # it reaches `set_session_active_project` and dies there on
+    # `.active_project_id`. Two frames from the omission, and nothing in the
+    # signature says the argument was required.
     with qa_support.db_session() as db:
         summary = projects_router.load_project(
-            # `session=None` for real, not by omission: the handler now takes a
-            # session and persists the active-project pointer through it, so an
-            # unpassed `Depends(current_session)` default reaches
-            # `set_active_project` as a `Depends` object and raises. A direct
-            # caller with no HTTP session IS the None case the handler guards
-            # for — and passing it is the contract this driver states above.
-            PROJECT_NAME, db=db, user=qa_support.user(), session=None,
+            PROJECT_NAME, db=db, user=qa_support.user(),
+            session=qa_support.session_row(db),
         )
     # A dict, not the `ImportSummary` model: the route returns
     # `{**summary.model_dump(), "lock": lock_info}` so callers get the project

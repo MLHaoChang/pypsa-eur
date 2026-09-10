@@ -132,6 +132,7 @@ class _RecomputeResult(NamedTuple):
     length WAS rewritten. A changelog that reports `len(previews)` undercounts
     whenever a zero-impedance line is among the ones touched.
     """
+
     updated: int
     previews: list[dict]
 

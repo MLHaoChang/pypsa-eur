@@ -30,6 +30,19 @@ vi.mock('../api/chat', async (importOriginal) => {
     }),
     putApiKeySettings: vi.fn(),
     deleteApiKeySettings: vi.fn(),
+    // Task 15: ApiKeySetup (rendered inline for `missing_api_key`) now reads
+    // this to decide inline-form vs. deep-link. `importOriginal` would
+    // otherwise leave it real, hitting a live network call from inside this
+    // suite. A builtin-Anthropic active profile keeps every test below on
+    // the pinned inline-form path.
+    getChatHealth: vi.fn().mockResolvedValue({
+      ok: true,
+      anthropic_api_key_present: false,
+      default_model: 'claude-sonnet-5',
+      confirmation_ttl_seconds: 300,
+      active_profile: { id: 'anthropic-sonnet', label: 'Claude Sonnet', wire: 'anthropic' },
+      chat_ready: false,
+    }),
   }
 })
 

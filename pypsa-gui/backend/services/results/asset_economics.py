@@ -36,6 +36,53 @@ def compute_asset_economics(n, cfg, *, result_df):
     Lifted from `routers.results.get_asset_economics`, which keeps the network
     lookup, the `_dispatch_ready` gate and the `_state` reads. Returns the
     payload dict, or `None` where the handler returns 204.
+
+    For each asset, computes:
+      • revenue       = Σ_t p_t × price_t × weight_t      (€)
+      • vom_cost      = Σ_t |p_t| × marginal_cost × weight_t  (€)
+      • fixed_cost    = capital_cost × p_nom_opt          (€/yr; already
+                        annualised by PyPSA's annuity machinery)
+      • fom_cost      = fom_cost × p_nom_opt              (informational
+                        breakdown of fixed_cost when the user typed FOM)
+      • net_profit    = revenue − (fixed_cost + vom_cost)
+      • LCOE / LCOS   = (fixed_cost + vom_cost [+ charge_cost]) / energy
+
+    Storage adds:
+      • discharge_mwh / charge_mwh — positive and negative halves of p_t
+      • discharge_revenue / charge_cost — same split but multiplied by price
+      • spread_eur_per_mwh = (discharge_revenue / discharge_mwh) −
+                             (charge_cost / charge_mwh)
+
+    Weightings: snapshot_weightings.objective × investment_period_weightings.years —
+    same convention used everywhere else (cost_breakdown, carrier_kpis).
+
+    Multi-period response also emits `by_period[period] = {...}` per asset so
+    the frontend can show both the horizon-wide total AND a per-period view
+    without re-running the same arithmetic on the client.
+
+    What these numbers reconcile with (measured on a live network, not
+    inferred from the code):
+
+      • Σ `fixed_cost_eur` == Σ `economics_by_carrier.capex_meur` × 1e6
+        EXACTLY — both 352,864,456.77, Δ = 0.00. That is the Dispatch tab's
+        "CAPEX (annuitised)" KPI, and it is the reconciliation to quote.
+      • Σ `vom_cost_eur` == `cost_breakdown.opex` EXACTLY — both
+        691,055,137.75, Δ = 0.00.
+      • It does NOT reconcile with `cost_breakdown.capex`. That figure was
+        8,420,504,580.76 against Σ `fixed_cost_eur` of 352,864,456.77 — a
+        23.9× difference — because `cost_breakdown` includes Line capex
+        (8,067,640,123.99) and transformers, while this endpoint covers only
+        Generator / StorageUnit / Store / Link. An earlier version of this
+        docstring claimed `cost_breakdown.capex = Σ fixed_cost`; it was
+        false, and comparing against it will look like a bug that isn't one.
+
+    `capital_costs_available` (top level) is False when the capital-cost
+    resolver raised. In that case every capital-cost-derived field —
+    `fixed_cost_eur`, `fom_cost_eur`, `net_profit_eur`, `lcoe_eur_per_mwh`,
+    `lcos_eur_per_mwh` — is emitted as `null` rather than 0.0, at the top
+    level AND inside every `by_period` entry. Fields that owe nothing to
+    capital cost (revenue, VOM, energy, capacity factor, prices, spread) keep
+    their real values. See `_capital_derived` below for why.
     """
     import math
 
@@ -44,6 +91,16 @@ def compute_asset_economics(n, cfg, *, result_df):
 
 
 
+    # ── Pre-compute the effective annualised capital_cost for every asset.
+    # Same resolver the cost_breakdown endpoint feeds from, so Σ fixed_cost
+    # here matches `economics_by_carrier`'s Σ capex — see the docstring for
+    # what does and does not reconcile.
+    #
+    # When this raises, EVERY downstream lookup below falls through to its
+    # `.get("capital_cost", 0.0)` default, and the whole tab renders €0.00
+    # fixed cost, a net profit inflated by the missing CAPEX, and an
+    # understated LCOE — all with the same confidence as real figures. The
+    # flag and the nulls exist so that cannot happen silently again.
     capital_costs_available = True
     try:
         asset_costs = periodized_capital_costs(n, cfg)
@@ -188,6 +245,10 @@ def compute_asset_economics(n, cfg, *, result_df):
     # `get_prices` implemented only the first of the two branches and had
     # silently drifted (02b5e806). Three copies of a rule this subtle is how
     # that happened.
+    # `result_df` is injected, not fetched: the decomposition made the
+    # frame lookup the caller's to supply, and master's shared helper takes
+    # it keyword-only. Omitting it made this return an empty frame, which
+    # silently zeroed every asset's revenue rather than failing.
     prices = corrected_marginal_prices(n, result_df=result_df)
 
     # ── Generator block ──────────────────────────────────────────────────

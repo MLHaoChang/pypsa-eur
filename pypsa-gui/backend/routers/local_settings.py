@@ -6,6 +6,22 @@ already carries the reasoning: the gate is not "admin only", it is "this
 deployment has exactly one tenant, and they own the disk". On a web deployment
 the server's API key is not something an authenticated user may replace, and
 the server's app-data path is not theirs to learn — so these routes 404 there.
+
+SCOPE, since this is no longer the only key surface (LLM provider config,
+2026-08-14). The key this pane edits is specifically the BUILT-IN ANTHROPIC
+PROFILE's slot — `ANTHROPIC_API_KEY` in `user.env`, via
+`services.app_secrets`. It is one control among several, not "the" API key:
+a profile for OpenAI, Moonshot, DashScope or a custom OpenAI-compatible
+endpoint keeps its key in its own derived slot, and those are edited from the
+assistant's model-settings section (`PUT /api/chat/settings/llm/profiles/
+{id}/key`, super-admin gated) — NOT here. The `probe_api_key` below is
+likewise Anthropic-specific by construction: it calls Anthropic's models
+endpoint, so it can only ever speak to the built-in profile's provider.
+
+Kept deliberately rather than generalised: this pane is the desktop app's
+first-run path, where the built-in Anthropic profile IS the configuration,
+and a user who never adds a second provider should not have to meet the
+profile concept at all.
 """
 from __future__ import annotations
 
@@ -20,6 +36,8 @@ from pydantic import BaseModel
 import app_paths
 import local_mode
 import local_settings
+import os
+
 from services import app_secrets
 
 logger = logging.getLogger(__name__)
@@ -39,9 +57,16 @@ class ApiKeyBody(BaseModel):
 
 def _state() -> dict:
     key = local_settings.stored_api_key()
+    # A8 — this pane writes the SAME `ANTHROPIC_API_KEY` slot the profiles
+    # pane does (`stored_api_key` is `app_secrets.get_stored`), so a key
+    # short enough to defeat redaction is just as unredactable when saved
+    # here. Read through `app_secrets.status` rather than recomputed, so the
+    # two surfaces cannot disagree; null when nothing is set (ADR-0001).
+    status = app_secrets.status("ANTHROPIC_API_KEY")
     return {
         "key_set": key is not None,
         "key_hint": local_settings.api_key_hint(key),
+        "key_redactable": status["redactable"],
         "log_path": str(app_paths.app_data_dir() / LOG_FILENAME),
     }
 
@@ -135,17 +160,36 @@ def reveal_log() -> dict:
     Show the log file in the platform file manager.
 
     This is the only `subprocess` invocation in the application. It is
-    acceptable for one specific reason: NOTHING from the request reaches the
-    command. This route takes no parameters and the path is computed here from
-    `app_paths`. There is no argument to inject into because there is no
-    argument — and `test_reveal_runs_a_fixed_command_with_no_request_input`
-    exists to keep it that way.
+    acceptable for two reasons.
+
+    NOTHING FROM THE REQUEST REACHES THE COMMAND. This route takes no
+    parameters and the path is computed here from `app_paths`. There is no
+    argument to inject into because there is no argument — and
+    `test_reveal_runs_a_fixed_command_with_no_request_input` exists to keep it
+    that way.
+
+    AND NO CREDENTIAL REACHES THE CHILD (C-18). `app_secrets.bootstrap_
+    environment` pushes every managed name from `user.env` into `os.environ`,
+    and inheriting that whole environment would hand all four provider keys
+    plus every `PYPSA_GUI_LLM_KEY__*` slot to `xdg-open`/`open`/`explorer` —
+    a long-lived desktop file manager, not a short-lived helper. On master
+    this argument was weak enough to skip: there was one key in the
+    environment. This branch put one there per profile. The filter uses
+    `is_managed_key`, the same membership rule that decides what may be
+    written to `user.env`, so a new slot shape cannot silently start leaking.
     """
     path = app_paths.app_data_dir() / LOG_FILENAME
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch(exist_ok=True)
-        subprocess.run(_reveal_argv(path), shell=False, check=False, timeout=10)
+        child_env = {
+            name: value for name, value in os.environ.items()
+            if not app_secrets.is_managed_key(name)
+        }
+        subprocess.run(
+            _reveal_argv(path), shell=False, check=False, timeout=10,
+            env=child_env,
+        )
     except Exception as exc:  # noqa: BLE001 — reported, never fatal
         logger.warning("local settings: reveal-log failed: %s", exc)
         return {"revealed": False, "detail": str(exc), "log_path": str(path)}

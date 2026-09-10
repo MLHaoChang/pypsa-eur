@@ -24,6 +24,11 @@ const base: SolveJob = {
   enqueued_at: 0,
   started_at: 0,
   finished_at: 1,
+  // A per-row capability the LLM provider branch added: the server says
+  // whether THIS caller may dismiss THIS job, rather than the client deriving
+  // it from the status. `true` here because these cases are about the row's
+  // LABEL, not its controls — the dismiss path has its own tests.
+  can_dismiss: true,
 }
 
 let jobs: SolveJob[] = []
@@ -32,11 +37,21 @@ vi.mock('../auth/AuthProvider', () => ({ useAuth: () => ({ user: null }) }))
 vi.mock('../store/uiStore', () => ({
   useUIStore: () => ({ currentProject: null, openTabs: [], markProjectSaved: vi.fn() }),
 }))
+// Every hook the panel calls has to be here, not just the ones these cases
+// exercise: a missing export is a hard render error, not a silent undefined.
+// The last five arrived with the LLM provider branch (queue pause/resume,
+// cancel-queued, requeue and the per-row dismiss); these cases are about the
+// row's LABEL, so they are inert stubs of the same mutation shape.
 vi.mock('../hooks/useSolveQueue', () => ({
   useSolveQueue: () => ({ data: { jobs, current: null }, isLoading: false, isError: false }),
   useEnqueueSolve: () => ({ mutate: vi.fn(), isPending: false }),
   useAbortJob: () => ({ mutate: vi.fn(), isPending: false }),
   useClearFinished: () => ({ mutate: vi.fn(), isPending: false }),
+  usePauseQueue: () => ({ mutate: vi.fn(), isPending: false }),
+  useResumeQueue: () => ({ mutate: vi.fn(), isPending: false }),
+  useCancelQueued: () => ({ mutate: vi.fn(), isPending: false }),
+  useRequeueJob: () => ({ mutate: vi.fn(), isPending: false }),
+  useDismissJob: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
 afterEach(() => cleanup())

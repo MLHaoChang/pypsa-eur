@@ -18,9 +18,13 @@ export function statusMap(jobs: SolveJob[]): Map<string, string> {
  * Project names whose job just TRANSITIONED into a terminal status.
  *
  * "Transitioned" is what makes this safe to run on every 1.5 s poll: a job
- * already terminal on the previous tick reports nothing, and a job seen for the
- * first time reports nothing (otherwise the first poll after a page load would
- * invalidate every project with a finished job in the process-global listing).
+ * already terminal on the previous tick reports nothing. A job NOT in `prev`
+ * at all DOES report (2026-08-14 review): polling stops while the queue is
+ * idle, so a solve queued from another tab or the chat agent can appear for
+ * the first time already `completed` — skipping it left the user reading
+ * pre-solve results for a re-solved project. The don't-invalidate-all-history
+ * property of the FIRST poll lives in the hook, which seeds its baseline
+ * before ever diffing.
  *
  * Deliberately no per-status branch. All four terminal statuses invalidate,
  * `interrupted` included — `isTerminal` is the single definition of the set.
@@ -34,7 +38,7 @@ export function terminalTransitions(
   const names: string[] = []
   for (const job of jobs) {
     const before = prev.get(String(job.id))
-    if (before === undefined || before === job.status) continue
+    if (before === job.status) continue
     if (!isTerminal(job)) continue
     if (!job.project_id) continue
     names.push(job.project_id)
@@ -56,16 +60,27 @@ export function useJobTerminalInvalidation(): void {
   const qc = useQueryClient()
   const { data } = useSolveQueue()
   const jobs = data?.jobs
-  const prevRef = useRef<Map<string, string>>(new Map())
+  // `null` = no baseline yet. The FIRST data seeds it and diffs nothing —
+  // that is what keeps a page load from invalidating every project with a
+  // finished job in the process-global listing. Every LATER poll diffs, and
+  // `terminalTransitions` now counts a newly-appearing terminal id as a
+  // transition (see its doc comment).
+  const prevRef = useRef<Map<string, string> | null>(null)
 
   useEffect(() => {
-    const list = jobs ?? []
-    const finished = terminalTransitions(prevRef.current, list)
-    prevRef.current = statusMap(list)
-    for (const name of finished) {
+    if (jobs === undefined) return
+    const prev = prevRef.current
+    prevRef.current = statusMap(jobs)
+    if (prev === null) return
+    for (const name of terminalTransitions(prev, jobs)) {
       qc.invalidateQueries({ queryKey: nk(name, 'results') })
       qc.invalidateQueries({ queryKey: nk(name, 'simulationStatus') })
       qc.invalidateQueries({ queryKey: nk(name, 'meta') })
+      // The queue row's results preview caches under
+      // `['resultsBundle', name, source]` with a 30 s staleTime — without
+      // this key, expanding a re-solved row served the PREVIOUS solve's
+      // numbers with no spinner (2026-08-14 review).
+      qc.invalidateQueries({ queryKey: nk(name, 'resultsBundle') })
     }
   }, [jobs, qc])
 }

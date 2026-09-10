@@ -12,14 +12,31 @@ export const QUEUE_KEY = ['solveQueue'] as const
  * Shared key — the panel and the per-tab badges both read it; React Query
  * dedupes to one request, and the panel's mount is what drives the interval.
  */
+/** How often to re-probe a queue whose last fetch FAILED. Slow — this is a
+ * "is the backend back yet" probe, not the active-solve poll. */
+export const QUEUE_ERROR_RETRY_MS = 15_000
+
+/**
+ * Exported for tests. The error branch is load-bearing: returning `false`
+ * whenever there was no data — including the ERROR state — combined with
+ * `retry: 1` and the app-wide `refetchOnWindowFocus: false` left the queue
+ * permanently dead after a backend blip during the first fetch (no interval,
+ * no focus refetch, no retry affordance) until the panel was remounted. Same
+ * failure class as the App.tsx SSE-probe bug documented in CLAUDE.md.
+ */
+export function queueRefetchInterval(
+  query: { state: { status: string; data?: QueueList } },
+): number | false {
+  if (query.state.status === 'error') return QUEUE_ERROR_RETRY_MS
+  const jobs = query.state.data?.jobs ?? []
+  return jobs.some(isActive) ? 1500 : false
+}
+
 export function useSolveQueue() {
   return useQuery({
     queryKey: QUEUE_KEY,
     queryFn: solveQueueApi.list,
-    refetchInterval: (query) => {
-      const jobs = query.state.data?.jobs ?? []
-      return jobs.some(isActive) ? 1500 : false
-    },
+    refetchInterval: queueRefetchInterval,
     staleTime: 1000,
   })
 }
@@ -44,6 +61,65 @@ export function useClearFinished() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: () => solveQueueApi.clearFinished(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: QUEUE_KEY }),
+  })
+}
+
+/**
+ * The five increment-3 routes.
+ *
+ * Every one invalidates QUEUE_KEY on success, and each for a reason worth
+ * stating rather than by reflex:
+ *
+ *  - pause/resume change `paused`, which nothing else in the payload reveals.
+ *  - cancelQueued flips N rows to `aborted`.
+ *  - requeue ADDS a row, and re-arms polling: `queueRefetchInterval` returns
+ *    false for an all-terminal queue, so without the invalidation a requeue
+ *    from an idle queue would sit unpolled and the new job would appear to do
+ *    nothing until something else refetched.
+ *  - dismiss REMOVES the row from this caller's listing — the listing filters
+ *    dismissed ids server-side, so the row cannot disappear without a refetch.
+ *
+ * None of them take an optimistic update: the queue is process-global and
+ * shared across users, so the server's next answer is authoritative in a way
+ * a local guess is not.
+ */
+export function usePauseQueue() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => solveQueueApi.pause(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: QUEUE_KEY }),
+  })
+}
+
+export function useResumeQueue() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => solveQueueApi.resume(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: QUEUE_KEY }),
+  })
+}
+
+export function useCancelQueued() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => solveQueueApi.cancelQueued(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: QUEUE_KEY }),
+  })
+}
+
+export function useRequeueJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (jobId: string) => solveQueueApi.requeue(jobId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: QUEUE_KEY }),
+  })
+}
+
+export function useDismissJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (jobId: string) => solveQueueApi.dismiss(jobId),
     onSuccess: () => qc.invalidateQueries({ queryKey: QUEUE_KEY }),
   })
 }

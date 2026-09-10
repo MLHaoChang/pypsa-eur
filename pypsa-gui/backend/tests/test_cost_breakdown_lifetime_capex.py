@@ -149,6 +149,22 @@ def payload(install_network) -> dict:
     return out
 
 
+def _cb_module():
+    """
+    The module that actually CALLS `_upfront_cost_series`.
+
+    MERGE NOTE (2026-09-10): the decomposition moved the call out of
+    `routers.results` into `services.results.cost_breakdown`, which binds the
+    name at its own module scope. `routers.results` still re-exports it, so
+    patching there SUCCEEDS and injects no fault — the test then asserts a
+    null and gets a real number, which is how this was noticed. Patch the
+    caller, not the façade.
+    """
+    from services.results import cost_breakdown
+
+    return cost_breakdown
+
+
 def _boom_for_lines(n, comp_class: str):
     """Resolver that fails for Line only, exactly as PyPSA's ValueError did."""
     if comp_class == "Line":

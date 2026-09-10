@@ -66,6 +66,7 @@ from typing import Any
 from collections.abc import Callable, Generator, Iterable
 
 from fastapi import HTTPException
+from services.llm_config import DEFAULT_MODEL, OPUS_MODEL
 from services.project_context import ProjectContext
 
 logger = logging.getLogger("pypsa_gui.chat")
@@ -112,18 +113,14 @@ PROJECT_REBINDING_TOOLS = frozenset([
     "restore_project_snapshot",
 ])
 
-# Default + selectable models (Phase 3 wires the Anthropic SDK using these).
-# Keep these in sync with the frontend `ChatModel` union (api/chat.ts). The
-# model string is not enforced
-# server-side (it flows straight to the SDK), so a newer model the UI offers
-# works even if this list lags — but keep it accurate as documentation.
-# No "latest" comment here on purpose. The previous pair carried
-# `# latest Sonnet` / `# latest Opus`, which read as verified and was wrong
-# for a full generation — a comment that asserts currency is how this went
-# unnoticed. The model list is checked by tests/test_chat_models.py instead.
-DEFAULT_MODEL: str = "claude-sonnet-5"
-OPUS_MODEL: str = "claude-opus-5"
-ALLOWED_MODELS: frozenset[str] = frozenset([DEFAULT_MODEL, OPUS_MODEL])
+# Default + selectable models: `DEFAULT_MODEL` / `OPUS_MODEL` are imported
+# above from `services.llm_config` (Task 5 moved the constants there — the
+# profile store owns what "the default model" means, not the chat harness)
+# and re-exported by that import so `chat_service.DEFAULT_MODEL` /
+# `.OPUS_MODEL` keep working for every caller and test that already pins
+# those names. `ALLOWED_MODELS` is gone — `llm_config.resolve_legacy_model`
+# replaces it with a mapping that also covers the free-text passthrough case
+# (an unrecognized model string is not refused; see `test_chat_models.py`).
 
 # Hard per-session token caps. The client shows the running token counts
 # (M10), but the server enforces a token-count ceiling so a misbehaving
@@ -342,7 +339,7 @@ from services.redaction import (  # moved 2026-08-13 (provider seam, Task 1)
 )
 
 
-def _redact_for_persist(value: Any) -> Any:
+def _redact_for_persist(value: Any, _values: frozenset[str] | None = None) -> Any:
     """
     Strip plausible secrets from a value before it is written to chat.jsonl.
 
@@ -355,16 +352,36 @@ def _redact_for_persist(value: Any) -> Any:
 
     Deliberately scoped to the high-value, low-false-positive patterns:
     sk-ant-* keys, password=/token=/api_key=/secret= values, and bearer
-    tokens. Bare email addresses are NOT redacted — that pattern over-redacts
+    tokens, plus (Task 4) every managed secret value currently in effect.
+    Bare email addresses are NOT redacted — that pattern over-redacts
     legitimate component / project names and model summaries (see the reviewer
     note) for little secret-leak benefit, so it is intentionally omitted.
+
+    PERFORMANCE: this recurses over every block of every turn. `_values` is
+    the `app_secrets.live_secret_values()` snapshot, taken ONCE by the
+    top-level caller (here, when `_values` is None) and threaded down through
+    every recursive call — never re-read from disk per string.
     """
+    if _values is None:
+        from services.app_secrets import live_secret_values  # noqa: PLC0415
+
+        _values = live_secret_values()
     if isinstance(value, str):
-        return _redact_secrets_in_str(value)
+        return _redact_secrets_in_str(value, _values)
     if isinstance(value, dict):
-        return {k: _redact_for_persist(v) for k, v in value.items()}
+        # C-16 — KEYS are scrubbed too. Recursing only into values let the
+        # live provider key land verbatim in `chat.jsonl` when it appeared in
+        # a key position, because the gap swallowed the managed-value
+        # SUBSTITUTION and not merely the shape regexes. Reachable through
+        # `POST /api/chat/import` and through model-authored `tool_use.input`
+        # keys, and it propagates onward into snapshot/copy bundles.
+        return {
+            (_redact_secrets_in_str(k, _values) if isinstance(k, str) else k):
+                _redact_for_persist(v, _values)
+            for k, v in value.items()
+        }
     if isinstance(value, (list, tuple)):
-        return [_redact_for_persist(v) for v in value]
+        return [_redact_for_persist(v, _values) for v in value]
     return value
 
 
@@ -428,6 +445,18 @@ class ChatSession:
     # resolved via get_or_create_session). Drives idle eviction.
     last_activity: float = field(default_factory=time.monotonic)
     model: str = DEFAULT_MODEL
+    # Task 7 — the LLM profile this session is bound to. `None` until the
+    # router's first `/stream` call resolves + binds one (or a caller that
+    # constructs a `ChatSession` directly and never sets it — `run_turn`
+    # falls back to `llm_config.resolve_legacy_model(session.model)` in that
+    # case, so a bare `ChatSession(model=...)` keeps resolving the profile
+    # its `model` string always implied). `bound_wire` is the bound
+    # profile's `wire` ("anthropic" | "openai") — kept alongside `profile_id`
+    # rather than re-resolved on every check because it is what the
+    # cross-wire guard in `routers/chat.py` compares against, and a profile
+    # can be edited/deleted out from under a live session id.
+    profile_id: str | None = None
+    bound_wire: str | None = None
     _lock: threading.Lock = field(default_factory=threading.Lock)
     pending_confirmations: dict[str, PendingConfirmation] = field(default_factory=dict)
     confirmation_decisions: dict[str, str] = field(default_factory=dict)
@@ -441,6 +470,18 @@ class ChatSession:
     # cleared in run_turn's try/finally so a concurrent second run_turn on the
     # same session_id (two tabs) is rejected with turn_already_in_flight.
     _turn_in_flight: bool = field(default=False)
+    # W-3 (ADR-0001) — whether the provider has EVER reported usage for this
+    # session. `stream_options.include_usage` is a request, not a guarantee:
+    # an OpenAI-compatible endpoint that omits the usage chunk leaves
+    # `usage_acc` at its zero initialisation, and shipping that renders as
+    # "0 in / 0 out · 0 cached" — indistinguishable from a legitimately
+    # unused session, which is precisely the "unresolvable rendered as a
+    # real value" shape ADR-0001 forbids. This wire is new on this branch,
+    # so the state is new too.
+    usage_reported: bool = False
+    # W-3 — turns started on this session, the fallback bound for an endpoint
+    # that never reports usage. See the ceiling in `_run_turn_body`.
+    turns_started: int = 0
     usage_acc: dict[str, int] = field(
         default_factory=lambda: {
             "input_tokens": 0,
@@ -648,6 +689,11 @@ class ChatSession:
             for k, v in deltas.items():
                 if k in self.usage_acc:
                     self.usage_acc[k] += int(v)
+                    # W-3 — a real report arrived, so the totals below now
+                    # mean something. Set on any recognised key, including an
+                    # honest zero: "the endpoint told us zero" is a different
+                    # fact from "the endpoint never told us".
+                    self.usage_reported = True
 
     def push_result_ref(self, ref: dict[str, Any]) -> None:
         with self._lock:
@@ -691,15 +737,24 @@ def _evict_idle_sessions_locked(now: float) -> None:
             _SESSIONS.pop(s.session_id, None)
 
 
-def get_or_create_session(
+def get_or_create_session_reporting(
     session_id: str | None = None,
     *,
     model: str = DEFAULT_MODEL,
-) -> ChatSession:
+) -> tuple[ChatSession, bool]:
     """
-    Resolve a session by id, creating a fresh one if unknown. Use the same
-    `session_id` across `/stream` and `/confirm` calls so the LLM/UI/server
-    agree on which conversation a token belongs to.
+    Resolve-or-create a session, reporting whether THIS call minted it.
+
+    `created` is True only when this call registered a brand-new session --
+    the only safe basis for a caller (`GET /history`'s rehydration) to adopt
+    a profile onto it. Existence-check and creation happen under a SINGLE
+    `_SESSIONS_LOCK` acquisition (fix round 2): the round-1 fix read
+    "already registered?" via a standalone `get_session` call and then
+    creating/fetching via a SEPARATE `get_or_create_session` call -- two
+    critical sections with a gap between them where a concurrent `/stream`
+    could register-and-bind the session. Whoever observes it as freshly
+    created here did so atomically with the registration itself, so there's
+    no stale read to race.
 
     Touches `last_activity` (create or reuse) and opportunistically sweeps idle
     sessions so the in-memory registry can't grow unbounded.
@@ -710,13 +765,31 @@ def get_or_create_session(
         if session_id and session_id in _SESSIONS:
             sess = _SESSIONS[session_id]
             sess.last_activity = now
-            return sess
+            return sess, False
         sess = ChatSession(model=model)
         if session_id:
             sess.session_id = session_id
         sess.last_activity = now
         _SESSIONS[sess.session_id] = sess
-        return sess
+        return sess, True
+
+
+def get_or_create_session(
+    session_id: str | None = None,
+    *,
+    model: str = DEFAULT_MODEL,
+) -> ChatSession:
+    """
+    Resolve a session by id, creating a fresh one if unknown. Use the same
+    `session_id` across `/stream` and `/confirm` calls so the LLM/UI/server
+    agree on which conversation a token belongs to.
+
+    Thin wrapper over `get_or_create_session_reporting` -- kept because its
+    signature/return type is pinned by callers and tests that don't care
+    which branch fired.
+    """
+    sess, _created = get_or_create_session_reporting(session_id, model=model)
+    return sess
 
 
 def drop_session(session_id: str) -> None:
@@ -1318,11 +1391,19 @@ def agent_loop_stub(
 
     # session_init: tools + replay (Phase 4 polish) + model identity
     from services.chat_tools_schema import TOOLS  # local: avoid cycle at module load
+    # Task 7 — the stub is driven by `routers/chat.py`'s script path, which
+    # binds `session.profile_id`/`bound_wire` the SAME way the real run_turn
+    # path does, before branching on `has_explicit_script`. Reported here too
+    # so a script-driven SSE test can assert the binding without needing a
+    # live/fake provider at all.
+    stub_profile = _resolve_turn_profile(session)
     yield "session_init", {
         "session_id": session.session_id,
         "session6": session.session6(),
         "model": session.model,
         "tool_count": len(TOOLS),
+        "profile_id": stub_profile.id,
+        "profile_label": stub_profile.label,
     }
 
     for step in script:
@@ -1383,6 +1464,9 @@ def agent_loop_stub(
         if kind == "turn_done":
             with session._lock:
                 usage_snapshot = dict(session.usage_acc)
+                # W-3 — ships alongside the totals so the client can
+                # tell "nothing used" from "never reported".
+                usage_snapshot["reported"] = session.usage_reported
             yield "turn_done", {
                 "turn_id": step.get("turn_id"),
                 "usage": usage_snapshot,
@@ -1505,8 +1589,24 @@ def _safety_tier_for(tool_name: str) -> str:
     """
     Resolve a tool's safety tier (read / write / destructive / execution /
     execution_long_running) by grepping the documented `Safety: <tier>`
-    marker in its description. Defaults to "read" so an unknown / undocumented
-    tool fails closed (no confirmation card).
+    marker in its description.
+
+    THIS DEFAULT IS FAIL-**OPEN**, and the docstring used to claim the
+    opposite ("fails closed"). An unknown or unmarked tool resolves to
+    "read", and "read" is precisely the tier that gets NO confirmation card
+    — so a destructive tool whose author forgot the marker would execute
+    unconfirmed. The old wording named the behaviour ("no confirmation
+    card") while mislabelling its direction, which is how it survived
+    review.
+
+    The default is left as-is deliberately: making it confirmable would
+    start gating tools that are legitimately unmarked-as-read, changing
+    behaviour for the whole registry to defend against a case that does not
+    currently exist. What keeps it safe instead is
+    `test_every_tool_safety_marker_resolves_to_known_tier`
+    (tests/test_chat_tools_dispatch.py), which asserts every TOOLS entry
+    carries a marker resolving to its own literal tier — so a missing marker
+    is a CI failure rather than a silent runtime fail-open.
     """
     # Lazy import — keeps services.chat_service import-light when only the
     # Phase 0/2 helpers are needed.
@@ -1547,7 +1647,212 @@ from services.llm_anthropic import (  # moved 2026-08-13 (provider seam)
 # module reference at call time — it's invoked via the
 # `chat_service._build_anthropic_client` alias above, which is the actual
 # patch surface tests pin, not `llm_anthropic.build_client`.
-from services import llm_anthropic, llm_provider
+from services import llm_anthropic, llm_openai_compat, llm_provider
+
+
+def llm_config_module():
+    """The `llm_config` module, imported lazily like every other use here."""
+    from services import llm_config  # noqa: PLC0415
+    return llm_config
+
+
+def _resolve_turn_profile(session: ChatSession) -> Any:
+    """
+    The `LLMProfile` this turn should use for provider construction, the
+    per-turn token cap, and the A8 fallback (Task 7).
+
+    `session.profile_id` wins when the router has bound one. Otherwise falls
+    back to `llm_config.resolve_legacy_model(session.model)` — the SAME
+    translation `resolve_legacy_model` documents for a pre-profile session,
+    so a `ChatSession` built directly (every existing e2e test does this —
+    `ChatSession()` / `ChatSession(model=OPUS_MODEL)` — with no profile_id)
+    keeps resolving exactly the profile its `model` string always implied:
+    `DEFAULT_MODEL` -> the built-in sonnet profile, `OPUS_MODEL` -> the
+    built-in opus profile (fallback_model=DEFAULT_MODEL — this is what keeps
+    the pre-Task-7 A8 test, which sets `model=OPUS_MODEL` and never touches
+    `profile_id`, passing unmodified). Deliberately NOT
+    `llm_config.resolve_profile(None)` (-> the ACTIVE profile) — that would
+    let a user's active-profile choice silently override what an unbound
+    session's own `model` field says, which is a behaviour change zero-config
+    must not have.
+    """
+    from services import llm_config
+    if session.profile_id is not None:
+        return llm_config.resolve_profile(session.profile_id)
+    return llm_config.resolve_legacy_model(session.model)
+
+
+# Block types that only make sense on the wire that produced them: Anthropic
+# extended-thinking's signed `thinking`/`redacted_thinking` blocks, and
+# Anthropic's own `image`/`document` content-block shapes. None of the four
+# has an openai-wire equivalent the translation layer can replay.
+_NON_PORTABLE_BLOCK_TYPES: frozenset[str] = frozenset(
+    ["thinking", "redacted_thinking", "image", "document"]
+)
+
+
+def _filter_non_portable_blocks(content: Any, wire: str) -> Any:
+    """
+    Drop content blocks `wire` cannot replay (Task 7 history rehydration).
+
+    A chat.jsonl transcript can carry turns recorded under a DIFFERENT
+    profile than the one GET /history resolves the minted session to (the
+    user switched wires by starting a new chat — Task 7's cross-wire guard
+    is what makes that the only way). Replaying an anthropic-shaped thinking
+    block into an openai-wire session's history is not merely wasted
+    context; the openai-compat translation has no shape for it at all.
+
+    Only `wire == "openai"` filters anything, and only when `content` is a
+    list of blocks — a plain string (an ordinary text-only turn, the common
+    case) or an anthropic-wire replay passes through unchanged, same object.
+    """
+    if wire != "openai" or not isinstance(content, list):
+        return content
+    return [
+        b for b in content
+        if not (isinstance(b, dict) and b.get("type") in _NON_PORTABLE_BLOCK_TYPES)
+    ]
+
+
+def _anthropic_client_for_profile(profile: Any | None) -> tuple[Any, str | None]:
+    """
+    `(anthropic SDK client, error_kind|None)` for an anthropic-wire profile.
+
+    Extracted from `_provider_for_profile` (C-3) so the vision sub-call in
+    `chat_tools.reconstruct_network_from_image` resolves its credentials the
+    SAME way a turn does, instead of always reaching for the ambient
+    `ANTHROPIC_API_KEY`. One source of truth, so the two cannot drift.
+
+    `profile is None` means "no profile bound" — a direct call outside a turn —
+    and takes the plain `_build_anthropic_client()` path, i.e. exactly the
+    pre-profile behaviour.
+
+      * the built-in `ANTHROPIC_API_KEY` slot -> the EXISTING
+        `_build_anthropic_client()` call, reached through the module attribute
+        so a test that monkeypatches `chat_service._build_anthropic_client`
+        still sees its double. Byte-identical zero-config behaviour, including
+        `missing_api_key` and `sdk_not_installed`.
+      * any OTHER key slot -> `anthropic.Anthropic(api_key=<slot value>)`.
+        The ONE sanctioned explicit `api_key=` kwarg in this codebase:
+        `llm_anthropic.build_client` never passes the key explicitly (so a
+        literal value cannot land in a repr or a log) because the SDK reads the
+        one blessed env var itself; a custom slot has no SDK-known name, so
+        passing it explicitly is the only way to honour it.
+      * `auth == "bearer"` with an empty/unset slot -> `(None, "missing_api_key")`.
+    """
+    if profile is None or profile.key_env == "ANTHROPIC_API_KEY":
+        return _build_anthropic_client()
+    key_value = os.environ.get(profile.key_env) if profile.key_env else None
+    if profile.auth == "bearer" and not key_value:
+        return None, "missing_api_key"
+    try:
+        import anthropic  # noqa: PLC0415
+    except ImportError:
+        return None, "sdk_not_installed"
+    try:
+        # Sanctioned explicit api_key= kwarg — see docstring above.
+        built = anthropic.Anthropic(api_key=key_value)
+    except Exception as exc:  # noqa: BLE001 — surface as typed error kind
+        logger.warning(
+            "chat: anthropic client init failed for profile %r: %s",
+            profile.id, _redact_for_log(exc),
+        )
+        return None, "unauthorized"
+    return built, None
+
+
+def _provider_for_profile(
+    profile: Any, client: Any | None = None
+) -> tuple[Any, str | None]:
+    """
+    `(provider, error_kind|None)` for an `LLMProfile` (Task 6).
+
+    Generalizes the inline construction `_run_turn_body` used to do
+    (`llm_anthropic.AnthropicProvider(client)`) across both wires, keyed off
+    the profile rather than a hardcoded Anthropic assumption. Kept in
+    `chat_service` — not `llm_anthropic` — so the existing `client=`/
+    `provider=` injection seams the whole chat test suite pins stay exactly
+    where they are.
+
+    Wiring:
+      * anthropic wire + the built-in `ANTHROPIC_API_KEY` slot → the
+        EXISTING `_build_anthropic_client()` path, reached through the
+        module attribute (so a test that monkeypatches
+        `chat_service._build_anthropic_client` sees its double here too) —
+        byte-identical zero-config behaviour, including `missing_api_key`
+        and `sdk_not_installed`.
+      * anthropic wire + any OTHER key slot (a custom profile whose preset
+        is not the built-in Anthropic one) → `anthropic.Anthropic(api_key=
+        <slot value>)`. This is the ONE sanctioned explicit `api_key=` kwarg
+        use in this codebase — `llm_anthropic.build_client` never passes the
+        key explicitly (so a literal value can't land in a repr/log) because
+        the SDK can read the one blessed `ANTHROPIC_API_KEY` env var on its
+        own; a custom slot has no such SDK-known name, so passing it
+        explicitly is the only way to honour it.
+      * openai wire → `OpenAICompatProvider(<resolved base_url>, api_key=
+        <slot value or None>)`. `llm_config` documents `base_url=None` on a
+        profile as "use the preset's own endpoint" and "always fine, always
+        the normal case" for a catalogued preset — so a `None` base_url is
+        RESOLVED here (via `llm_config.load_presets()`), never passed
+        through as-is (`OpenAICompatProvider` would crash on
+        `None.rstrip("/")`, fix round 1). A `"custom"` preset, or any preset
+        id not in the catalogue, has no endpoint to resolve `None` against —
+        that is a genuinely unusable profile, so it returns `(None,
+        "invalid_request")` rather than crashing or guessing.
+      * `auth == "bearer"` with an empty/unset key slot → `(None,
+        "missing_api_key")`, on either wire.
+
+    `client`, when given, is an already-built Anthropic SDK client (or test
+    double) — the production/test injection seam — and wins over building
+    one, on the anthropic wire only.
+    """
+    if profile.wire == "anthropic":
+        if client is not None:
+            return llm_anthropic.AnthropicProvider(client), None
+        built, err = _anthropic_client_for_profile(profile)
+        if built is None:
+            return None, err
+        return llm_anthropic.AnthropicProvider(built), None
+
+    if profile.wire == "openai":
+        base_url = profile.base_url
+        if base_url is None:
+            # Resolution, not a guard (fix round 1, finding 1): None means
+            # "use the preset's declared endpoint" for a catalogued preset,
+            # never "pass None through and let the provider crash".
+            base_url = None
+            if profile.preset != "custom":
+                from services import llm_config
+                entry = next(
+                    (e for e in llm_config.load_presets()
+                     if isinstance(e, dict) and e.get("id") == profile.preset),
+                    None,
+                )
+                if entry is not None:
+                    base_url = entry.get("base_url")
+            if not base_url:
+                # "custom" (no catalogue entry to resolve against) or an
+                # unrecognised/incomplete preset — genuinely unusable, not
+                # something to guess at.
+                return None, "invalid_request"
+        key_value = (
+            os.environ.get(profile.key_env) if profile.key_env else None
+        )
+        if profile.auth == "bearer" and not key_value:
+            return None, "missing_api_key"
+        return (
+            llm_openai_compat.OpenAICompatProvider(
+                base_url, api_key=key_value,
+                # C-2 — server-derived from the preset, like `key_env`.
+                # Exactly one completion-length parameter goes on the wire;
+                # the provider retries once under the other spelling if this
+                # endpoint refuses it by name.
+                token_param=profile.token_param,
+            ),
+            None,
+        )
+
+    return None, "internal_error"
 
 
 #: The one gridspine tool a session may use whatever project it is bound to:
@@ -1598,13 +1903,38 @@ def _tools_payload(turn_ctx=None) -> list[dict[str, Any]]:
     return tools
 
 
+def _tools_payload_for_profile(profile: Any) -> list[dict[str, Any]]:
+    """
+    The `tools` field of the neutral `LLMRequest`, honouring the profile's
+    `tools` capability (Task 8).
+
+    `profile.tools is False` -> `[]`, matching what the request actually
+    carries — NOT `_tools_payload()` filtered after the fact, which would
+    leave `session_init.tool_count` reporting a catalogue size nothing was
+    sent. Single source of truth for both the `session_init` frame and the
+    `LLMRequest.tools` field below, so they can never disagree.
+    """
+    return _tools_payload() if profile.tools else []
+
+
 # Domain-intelligence guide (#1). PyPSA result definitions + plausible ranges
 # so the agent interprets numbers correctly rather than recomputing from raw
 # tables. Tool names are spelled verbatim (get_results <metric>) because the
 # agent must be able to chain them. Module-level so the system prompt stays
 # byte-stable across the per-turn cache_control:ephemeral block (retries rebuild
 # system_blocks from the same string).
-_DOMAIN_GUIDE = (
+#
+# Task 8 — split into FACTS (definitions/ranges/modes, tool-independent) +
+# CHAINING (the multi-period/upload sentences that name specific tools and
+# only make sense when tools are actually offered). `_DOMAIN_GUIDE` stays the
+# exact concatenation so the DEFAULT (tools-enabled) prompt is byte-identical
+# to pre-split — see test_default_prompt_bytes_unchanged, which pins this
+# against a hash captured at HEAD before the split. (`_PRICE_CONGESTION_GUIDE`
+# and `_ASSISTANT_STANCE` follow this same FACTS+CHAINING=original doctrine.
+# `_SOLVER_ERROR_DECODER` and `_NEXT_STEP_RUBRIC` do NOT — see their own
+# comments below for why a straight concatenation split isn't possible for
+# those two without changing the default prompt.)
+_DOMAIN_GUIDE_FACTS = (
     "Domain knowledge — interpret results, do not recompute from raw tables. "
     "capacity factor = time-average of p / (p_nom * p_max_pu); curtailment = "
     "available VRE energy minus dispatched VRE energy. LCOE / LCOH = annualised "
@@ -1618,7 +1948,10 @@ _DOMAIN_GUIDE = (
     "capacity factor ~0.2–0.45, solar PV ~0.1–0.25, LCOE ~€30–150/MWh, CO2 "
     "price ~€0–300/t. Foresight modes: overnight = one target year solved in "
     "perfect hindsight; myopic = rolling year-by-year with no lookahead; "
-    "perfect = all years co-optimised with full foresight. Multi-period quirk: "
+    "perfect = all years co-optimised with full foresight. "
+)
+_DOMAIN_GUIDE_CHAINING = (
+    "Multi-period quirk: "
     "n.statistics() puts (metric, period) in the COLUMNS, not the rows, and the "
     "horizon total needs investment_period_weightings applied — so to read "
     "per-period results use the by_period field from get_results, never re-sum "
@@ -1633,9 +1966,34 @@ _DOMAIN_GUIDE = (
     "generators p_max_pu). Only use upload_* when the user supplied a real "
     "file or a short series."
 )
+_DOMAIN_GUIDE = _DOMAIN_GUIDE_FACTS + _DOMAIN_GUIDE_CHAINING
 
 # Solver-error decoder (#3). Symptom→cause table seeded from CLAUDE.md so the
 # agent diagnoses failed runs instead of echoing a cryptic linopy string.
+#
+# Fix round 2 (coordinator correction on top of Task 8 review finding 3):
+# `_SOLVER_ERROR_DECODER` is now the EXACT pre-Task-8 literal — byte-
+# identical to HEAD 32a0949a, full stop, verified directly (not built from
+# concatenating the two halves below). `_X = _X_FACTS + _X_CHAINING` was
+# dropped as a hard requirement for this constant: the ORIGINAL wording
+# puts the "call get_simulation_log_history" imperative BEFORE the
+# symptom→cause table, and a prefix/suffix concatenation cannot pull a
+# tool-naming clause out of the middle of a string without reordering it —
+# reordering changes the DEFAULT prompt every user gets, for a purely
+# structural reason, with no behavioural evidence that's harmless (fix
+# round 1 did this and got reverted for exactly that reason: see the
+# round-1/round-2 history in task-8-report.md).
+#
+# `_SOLVER_ERROR_DECODER_FACTS` / `_CHAINING` below are SEPARATE constants,
+# used ONLY by the tools-off (`include_tools=False`) assembly path — they
+# do NOT need to concatenate back to `_SOLVER_ERROR_DECODER` and are free to
+# reorder content for a genuinely coherent split (real domain content in
+# FACTS, the tool imperative in CHAINING). The risk this decouples is DRIFT
+# — someone edits `_SOLVER_ERROR_DECODER` and the halves silently go stale
+# — guarded by test_solver_and_rubric_halves_cover_the_same_words in
+# test_chat_profile_binding.py, which asserts the word MULTISET of
+# FACTS+CHAINING equals the word multiset of the original (order-independent
+# by design, so it doesn't re-impose the constraint just removed).
 _SOLVER_ERROR_DECODER = (
     "Solver-error decoding. On ANY failed or aborted run, call "
     "get_simulation_log_history BEFORE answering and quote the failing "
@@ -1650,22 +2008,53 @@ _SOLVER_ERROR_DECODER = (
     "terms and suggest the corrective lever (loosen the bound, rebuild "
     "snapshots, re-solve)."
 )
+_SOLVER_ERROR_DECODER_FACTS = (
+    "Solver-error decoding. Common causes: 'infeasible' = over-constrained "
+    "bounds or a CO2 cap too tight / capacities too small to meet load; "
+    "'dim_0' in a linopy/xarray error = a time-series (_t) frame lost its "
+    "index name 'snapshot'; \"cannot include dtype 'M' in a buffer\" = a "
+    "multi-period → flat demotion tripping a pandas MultiIndex reindex bug; "
+    "an assign_duals KeyError on a DatetimeIndex = a stale MultiIndex left "
+    "on a dual _t frame after a period change; a 500 with a short "
+    "plain-text body from /results/* = NaN or Inf leaked into JSON "
+    "rendering. Explain the likely cause in plain terms and suggest the "
+    "corrective lever (loosen the bound, rebuild snapshots, re-solve). "
+)
+_SOLVER_ERROR_DECODER_CHAINING = (
+    "On ANY failed or aborted run, call get_simulation_log_history BEFORE "
+    "answering and quote the failing TRACEBACK frame."
+)
 
 # Price-driver / congestion narration (#4). LMP / marginal-unit / line-dual
 # vocabulary + the chain that explains WHY prices are high.
-_PRICE_CONGESTION_GUIDE = (
+#
+# Task 8 split — see _DOMAIN_GUIDE comment above.
+_PRICE_CONGESTION_GUIDE_FACTS = (
     "Price + congestion narration. LMP = locational marginal price at a bus = "
     "dual of that bus's nodal power balance. The marginal unit is the generator "
     "whose marginal cost sets the price at that bus and hour. A line dual / "
     "congestion rent is the shadow price of a line's flow limit — nonzero means "
     "the line is binding (congested); the congestion spread is the price "
-    "difference across that congested line. To explain why prices are high, "
+    "difference across that congested line. "
+)
+_PRICE_CONGESTION_GUIDE_CHAINING = (
+    "To explain why prices are high, "
     "CHAIN get_results prices + get_results price_drivers + get_results "
     "line_duals and narrate the marginal unit and any binding lines."
 )
+_PRICE_CONGESTION_GUIDE = _PRICE_CONGESTION_GUIDE_FACTS + _PRICE_CONGESTION_GUIDE_CHAINING
 
 # Suggest-next-step rubric (#5). Compact decision rules keyed off the network's
 # configuration, so a recommendation is grounded rather than generic.
+#
+# Fix round 2 — same correction as _SOLVER_ERROR_DECODER above:
+# `_NEXT_STEP_RUBRIC` is the EXACT pre-Task-8 literal, byte-identical to
+# HEAD 32a0949a. `_NEXT_STEP_RUBRIC_FACTS` / `_CHAINING` below are separate,
+# tools-off-only constants, not required to concatenate back to it — see the
+# full rationale on `_SOLVER_ERROR_DECODER`'s comment. Drift between this
+# constant and its halves is guarded by
+# test_solver_and_rubric_halves_cover_the_same_words (word-multiset
+# equality, order-independent).
 _NEXT_STEP_RUBRIC = (
     "Suggesting next steps. Before recommending anything, read get_meta and "
     "get_solver_config to ground the advice in the actual setup. Rubric: if "
@@ -1675,6 +2064,19 @@ _NEXT_STEP_RUBRIC = (
     "present, suggest adding a CO2 cap to study decarbonisation; if the model "
     "is electricity-only, mention that sector coupling (heat / H2 / transport) "
     "is available. Only suggest steps the current configuration supports."
+)
+_NEXT_STEP_RUBRIC_FACTS = (
+    "Suggesting next steps. Rubric: if foresight is overnight but the user "
+    "wants a multi-year pathway, explain the myopic vs perfect tradeoff; if "
+    "the bus_count is high and solves are slow, suggest clustering to fewer "
+    "nodes; if no CO2 GlobalConstraint is present, suggest adding a CO2 cap "
+    "to study decarbonisation; if the model is electricity-only, mention "
+    "that sector coupling (heat / H2 / transport) is available. Only "
+    "suggest steps the current configuration supports. "
+)
+_NEXT_STEP_RUBRIC_CHAINING = (
+    "Before recommending anything, read get_meta and get_solver_config to "
+    "ground the advice in the actual setup."
 )
 
 # Untrusted-content boundary clause (#2, prompt half). Pairs with the
@@ -1699,18 +2101,34 @@ _UNTRUSTED_DATA_CLAUSE = (
 # It belongs in the SYSTEM prompt precisely because it is stable policy —
 # identical on every turn, so it rides the `cache_control: ephemeral` block
 # for free. The per-turn context does NOT (see _format_ui_context).
-_ASSISTANT_STANCE = (
+#
+# Fix round 1 (Task 8 review, finding 2): this constant was NOT split when
+# Task 8 landed, on the claim (in _build_system_prompt's docstring) that it
+# "carries no tool-chaining instructions". That claim was false — it names
+# four UI tools verbatim (ui_open_panel, ui_select_component,
+# ui_open_asset_detail, ui_set_snapshot). With `tools: false` the rendered
+# prompt still instructed the model to call tools it did not have. Split
+# like the other four guides; the tool-naming half (plus the trailing
+# "context vs tool" sentence, which is meaningless with zero tools offered)
+# is a clean SUFFIX of the original text, so this split needs no reordering
+# and stays byte-identical to the pre-Task-8 HEAD text — see
+# test_default_prompt_bytes_unchanged.
+_ASSISTANT_STANCE_FACTS = (
     "Stance. You can see the same screen the user can. When a turn carries a "
     "context block, resolve deictic references — 'this', 'that', 'here', 'the "
     "other one' — against it instead of guessing or asking which one they "
     "mean, and name the component you took them to mean so a wrong guess is "
-    "visible. After answering, OPEN the view that supports what you just said "
+    "visible. "
+)
+_ASSISTANT_STANCE_CHAINING = (
+    "After answering, OPEN the view that supports what you just said "
     "(ui_open_panel, ui_select_component, ui_open_asset_detail, "
     "ui_set_snapshot) rather than describing where to click — you stay on "
     "screen when you navigate, so moving their view costs them nothing. Where "
     "the context and a tool disagree, the tool is right: the context says what "
     "the user is LOOKING AT, tools say what is TRUE."
 )
+_ASSISTANT_STANCE = _ASSISTANT_STANCE_FACTS + _ASSISTANT_STANCE_CHAINING
 
 # Deixis, data half.
 #
@@ -2062,9 +2480,57 @@ def _format_live_network_meta(ctx: Any) -> str | None:
         return None
 
 
+# Base identity preamble, split (Task 8) so `include_tools=False` can drop
+# the confirmation-card contract paragraph — it describes the destructive-
+# action confirmation-card mechanism, which is meaningless when no tools
+# (hence no destructive tool calls) are on offer. `_CONFIRMATION_CARD_CONTRACT`
+# is a template (not a plain constant) because it embeds the per-session audit
+# prefix (`session.session6()`); `.format(session6=...)` fills it in.
+# Concatenating identity + contract.format(...) + style reproduces the
+# original single-string preamble byte-for-byte (exercised end-to-end by
+# every existing test_chat_e2e.py prompt pin, which calls _build_system_prompt
+# with the include_tools=True default); the include_tools=False trim itself
+# is exercised by test_toolless_profile_sends_no_tools_and_trimmed_prompt in
+# test_chat_profile_binding.py.
+# Task 11 — split like the Task 8 constants, for the same reason one level
+# down. `_BASE_IDENTITY` names no specific tool, so it never violated the
+# "tools-off prompt names NO tool" rule — but it still told a tools-LESS model
+# to "use the provided tools", i.e. instructed it to do the one thing it
+# cannot. Task 8's review flagged it and deferred it here.
+#
+# The FACTS half must stand alone as a coherent identity, and the two halves
+# must reassemble byte-identically, because `_BASE_IDENTITY` is the opening of
+# every default prompt and the assembled default is pinned by hash.
+_BASE_IDENTITY_FACTS = (
+    "You are the pypsa-gui assistant, an in-app copilot embedded next to "
+    "an open energy-system optimisation model. "
+)
+_BASE_IDENTITY_CHAINING = (
+    "Use the provided tools to "
+    "answer questions and make changes; do NOT hallucinate component "
+    "names or routes. "
+)
+_BASE_IDENTITY = _BASE_IDENTITY_FACTS + _BASE_IDENTITY_CHAINING
+_CONFIRMATION_CARD_CONTRACT_TEMPLATE = (
+    "Always confirm destructive / execution actions "
+    "through the confirmation card mechanism (the runtime issues a token "
+    "for you — you do NOT need to ask the user verbally). Never request "
+    "more than one destructive action in a single turn — the runtime "
+    "rejects parallel destructives. When you write to the network, every "
+    "audit entry will carry the prefix "
+    "'agent:<verb>:{session6}' automatically. "
+)
+_STYLE_GUIDANCE = (
+    "Be terse, "
+    "cite component names verbatim, prefer plain prose over markdown "
+    "headers, and end with a one-sentence summary of what changed."
+)
+
+
 def _build_system_prompt(
     session: ChatSession,
     live_meta: str | None = None,
+    include_tools: bool = True,
 ) -> str:
     """
     Build the system prompt for one turn. Kept small — the agent learns the
@@ -2075,30 +2541,144 @@ def _build_system_prompt(
 
     Optional `live_meta` (from `_format_live_network_meta`) is appended so the
     model knows the bound project + network size without a get_meta round-trip.
+
+    `include_tools` (Task 8, default True — every existing caller gets the
+    unchanged prompt): when False (a `profile.tools is False` turn, where the
+    request carries `tools=[]`), assembles only the FACTS half of each of the
+    five guide constants below and drops the confirmation-card contract
+    paragraph — all describe / invoke tools that are not being offered this
+    turn. `_UNTRUSTED_DATA_CLAUSE` is NOT trimmed: it is a safety boundary
+    clause with no tool names in it, and stays out of the split entirely.
+    `_ASSISTANT_STANCE` WAS originally left out of the split too, on the
+    (false — fix round 1, Task 8 review finding 2) claim that it carries no
+    tool-chaining instructions; it names four UI tools verbatim and is now
+    split like the other four (`_DOMAIN_GUIDE` / `_SOLVER_ERROR_DECODER` /
+    `_PRICE_CONGESTION_GUIDE` / `_NEXT_STEP_RUBRIC`).
     """
+    base = _BASE_IDENTITY if include_tools else _BASE_IDENTITY_FACTS
+    if include_tools:
+        base += _CONFIRMATION_CARD_CONTRACT_TEMPLATE.format(
+            session6=session.session6(),
+        )
+    base += _STYLE_GUIDANCE
     parts = [
-        "You are the pypsa-gui assistant, an in-app copilot embedded next to "
-        "an open energy-system optimisation model. Use the provided tools to "
-        "answer questions and make changes; do NOT hallucinate component "
-        "names or routes. Always confirm destructive / execution actions "
-        "through the confirmation card mechanism (the runtime issues a token "
-        "for you — you do NOT need to ask the user verbally). Never request "
-        "more than one destructive action in a single turn — the runtime "
-        "rejects parallel destructives. When you write to the network, every "
-        "audit entry will carry the prefix "
-        f"'agent:<verb>:{session.session6()}' automatically. Be terse, "
-        "cite component names verbatim, prefer plain prose over markdown "
-        "headers, and end with a one-sentence summary of what changed.",
-        _ASSISTANT_STANCE,
-        _DOMAIN_GUIDE,
-        _SOLVER_ERROR_DECODER,
-        _PRICE_CONGESTION_GUIDE,
-        _NEXT_STEP_RUBRIC,
+        base,
+        _ASSISTANT_STANCE if include_tools else _ASSISTANT_STANCE_FACTS,
+        # Task 10 — profile awareness. TOOLS-ON ONLY, and that is the whole
+        # placement rule: it names `set_active_profile`, and Task 8's
+        # invariant is that the tools-off prompt names NO tool. A tools-less
+        # model cannot switch anything, so telling it how would be an
+        # instruction to do the impossible.
+        #
+        # Built per turn rather than stored as a constant because it reads
+        # the live profile store — but byte-stable WITHIN a turn, which is
+        # what the prompt's cache_control:ephemeral breakpoint requires.
+        # LABELS only: never an id, never a base_url. Redaction is
+        # secrets-only and would scrub neither.
+        *( [_profile_awareness_block()] if include_tools else [] ),
+        _DOMAIN_GUIDE if include_tools else _DOMAIN_GUIDE_FACTS,
+        _SOLVER_ERROR_DECODER if include_tools else _SOLVER_ERROR_DECODER_FACTS,
+        _PRICE_CONGESTION_GUIDE if include_tools else _PRICE_CONGESTION_GUIDE_FACTS,
+        _NEXT_STEP_RUBRIC if include_tools else _NEXT_STEP_RUBRIC_FACTS,
         _UNTRUSTED_DATA_CLAUSE,
     ]
     if live_meta:
         parts.append(live_meta)
-    return "\n\n".join(parts)
+    # Drop empties before joining. `_profile_awareness_block()` returns "" when
+    # the profile store is unreadable or its active id does not resolve, and an
+    # unfiltered "" becomes a doubled blank line in the assembled prompt for
+    # every user whenever the store hiccups — a silent, store-state-dependent
+    # change to the prompt everyone gets. Filtering keeps the prompt identical
+    # to the no-block case instead.
+    return "\n\n".join(p for p in parts if p)
+
+
+def _profile_awareness_block() -> str:
+    """
+    Tell the model which LLM profile it is running as, and how to change it.
+
+    Answers "which model am I talking to?" truthfully instead of letting the
+    model guess from its own weights — it has no other way to know, and a
+    confident wrong answer there is worse than none.
+
+    Never raises: a broken profile store must not cost a turn. `load_profiles`
+    already falls back to the built-ins on a corrupt file, but a defensive
+    catch here keeps a future store change from turning into an outage in the
+    prompt builder.
+
+    LABELS ONLY — no profile ids, no base_urls, no identifiers. The label is
+    admin-typed and already displayed in the UI; the rest would leak
+    configuration into the model's context and, from there, into transcripts.
+
+    STATED TRUST ASSUMPTION, because "labels only" is not leak-proof on its
+    own: a label is free text with no content validation, so a super-admin
+    who types an email or an internal hostname into one has put it here. This
+    block widens that label's audience — before Task 10 it was shown only to
+    admins in Settings; now it also reaches every chatting user's model
+    context and the provider's servers. That is accepted deliberately (the
+    label is the only human-meaningful way to say WHICH model is active, and
+    a synthetic name would make the answer useless), not overlooked. If label
+    content ever needs constraining, constrain it at the PUT route where it
+    is authored, not here where it is read.
+    """
+    # Staged, not one blanket try. The catch below is required — "a broken
+    # profile store must not cost a turn" — but wrapping the WHOLE builder in
+    # it meant any failure anywhere discarded everything, for every user, and
+    # returned a value indistinguishable from "no profiles configured". That
+    # shape is what made S-L3 invisible: one hand-edited label emptied the
+    # block instance-wide behind a `logger.warning` nobody reads.
+    #
+    # So: resolving the active profile is all-or-nothing (without it there is
+    # genuinely nothing to say), and everything after it degrades instead.
+    try:
+        from services import llm_config
+        profiles, active_id = llm_config.load_profiles()
+        by_id = {p.id: p for p in profiles}
+        active = by_id.get(active_id)
+    except Exception:  # noqa: BLE001 — prompt meta must never abort a turn
+        logger.warning("chat: profile awareness block unavailable", exc_info=True)
+        return ""
+    if active is None:
+        # Not reachable today — `load_profiles` synthesizes the built-ins on
+        # every read and only accepts a stored active id that is among the
+        # ids it actually loaded, so the lookup always hits. Kept because
+        # this function's contract is "never raises", and a KeyError here
+        # would be a turn-level failure rather than a missing sentence.
+        return ""
+
+    block = f"Active model profile: {active.label}."
+
+    # The active profile's name is already in hand by this point. A failure
+    # building the LIST of other profiles must not take it back out — that
+    # name is the question this block exists to answer.
+    #
+    # The sort AND the join are inside ONE guard on purpose: they are the
+    # single fallible act of "describe the other profiles". Guarding only the
+    # sort (my first attempt) left a hole the old blanket catch had covered —
+    # a homogeneous list of non-string labels sorts fine and then raises
+    # TypeError in `join`, so the turn would die where it used to lose a
+    # sentence. Narrowing a safety net is only safe where nothing still falls
+    # through it.
+    try:
+        others = sorted(p.label for p in profiles if p.id != active_id)
+        listed = " Also configured: " + ", ".join(others) + "." if others else ""
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "chat: could not list the other profiles; naming the active one only",
+            exc_info=True,
+        )
+        listed = ""
+    block += listed
+
+    # A constant. No amount of broken store makes it untrue, so nothing in
+    # the store's state may delete it.
+    block += (
+        " To switch, call set_active_profile with the chosen profile's id"
+        " — it takes effect in a new chat, not this one. To add a profile"
+        " or set an API key, direct the user to Settings; you cannot do"
+        " either yourself."
+    )
+    return block
 
 
 # Thinking blocks the API will reject on replay. `thinking` requires both
@@ -2175,9 +2755,18 @@ def _sanitise_history_message(msg: dict[str, Any]) -> dict[str, Any] | None:
 class _StreamOutcome:
     """What `_stream_assistant_message` returns through `yield from`."""
 
+    # WIRE-NEUTRAL, deliberately. Master's version of this carried
+    # `final_message` — the raw Anthropic SDK message object — and the caller
+    # read `.usage` / `.content` off it. An OpenAI-compatible endpoint has no
+    # such object, so the blocks and usage are taken from the provider's
+    # normalised `message_done` event instead and travel as plain data.
     final_blocks: list[dict[str, Any]] = field(default_factory=list)
     final_usage: dict[str, int] = field(default_factory=dict)
     stop_turn: bool = False
+    # Threaded through rather than owned here: see the note in
+    # `_stream_assistant_message`. One downgrade per TURN, and this helper is
+    # called once per assistant STEP.
+    model_fallback_used: bool = False
 
 
 def _stream_assistant_message(
@@ -2185,78 +2774,91 @@ def _stream_assistant_message(
     provider: Any,
     *,
     request: Any,
+    profile: Any,
+    model_fallback_used: bool,
 ) -> Generator[tuple[str, dict[str, Any]], None, "_StreamOutcome"]:
     """
-    Drain ONE assistant message off the provider stream, retrying transients.
+    Drain ONE assistant message off the provider stream, retrying transient
+    failures.
 
     Yields the stream's frames (`token`, `thinking`, `tool_preparing`, and the
     terminal `error` / `session_done`); the caller forwards them with
-    `yield from`. Returns the blocks and usage the turn loop needs, or
-    `stop_turn=True` when the turn is over — a generator cannot end its
-    caller's turn.
+    `yield from`. Returns the final blocks and usage, or `stop_turn=True` when
+    the turn is over — a generator cannot end its caller's turn.
 
     **Retry is only safe before anything has been emitted.** Once a `token` or
-    `thinking` frame has reached the client, retrying replays the answer from the
-    start and the panel shows it twice. `emitted_this_attempt` is what prevents
-    that, and it is per ATTEMPT — hoisting it, or resetting it in the wrong
-    place, produces duplicated output under transient load while every frame
-    stays individually well-formed. `tests/test_chat_stream_attempt_seam.py`
+    `thinking` frame has reached the client, retrying replays the answer from
+    the start and the panel shows it twice. `emitted_this_attempt` is what
+    prevents that, and it is per ATTEMPT. `tests/test_chat_stream_attempt_seam.py`
     asserts on the COUNT of emitted text for that reason.
 
-    A persistent `rate_limited` on Opus buys exactly ONE attempt on Sonnet,
-    granted by widening `max_attempts` rather than resetting `attempt`, and it
-    mutates `session.model`, so the session stays downgraded after the turn.
-    `request.model` is re-read from `session.model` at the top of every attempt,
-    which is what makes that downgrade reach the wire.
+    Precisely: the tripwire is `and not emitted_this_attempt` in `retriable`
+    below, NOT the per-attempt reset. Master's prose said hoisting the reset
+    produces the duplicate; running that mutation shows it does not, because
+    the flag is only read inside the attempt that can set it and such an
+    attempt always leaves the loop. Dropping the `retriable` term is what
+    duplicates the answer. Keep both, and know which one is load-bearing.
 
-    Master's version of this seam accumulated a `pending_blocks` list, and
-    `docs/superpowers/findings/2026-09-09-chat-stream-loop-two-vestigial-guards.md`
-    records that nothing read it. It is gone here rather than preserved: this
-    branch's `message_done` event carries the blocks the next turn replays, so
-    keeping a second, unread accumulation is exactly the comment-asserting-an-
-    untrue-fact that let the original thinking-block bug hide.
+    TAKES A `provider`, NOT AN SDK `client`. The extraction on master streamed
+    through `client.messages.stream(...)` and returned the SDK's own message
+    object. That shape is Anthropic-only; this line reaches OpenAI-compatible
+    endpoints too, so the loop drives `provider.stream(request)` over a
+    normalised event vocabulary and reads the blocks and usage off
+    `message_done`. `_provider_for_profile` still accepts an injected `client`,
+    so the `client=` seam the chat suite pins is unchanged one level up.
 
-    Phase D of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`,
-    re-expressed over the `llm_provider` seam this branch introduced.
+    `model_fallback_used` IS A PARAMETER, AND THAT IS LOAD-BEARING. It bounds
+    the A8 downgrade at one per TURN, while this function runs once per
+    assistant STEP — so owning it here would silently re-arm the fallback on
+    every step of an agentic turn. `docs/superpowers/findings/2026-09-09-chat-stream-loop-two-vestigial-guards.md`
+    records it as redundant with the `session.model == OPUS_MODEL` test beside
+    it, and for the hardcoded Opus/Sonnet pair that was true: the moment the
+    fallback fired, `session.model` stopped being Opus and the guard could not
+    fire twice anyway. That reasoning does NOT survive this line's change from
+    that pair to `profile.fallback_model`, whose target is not guaranteed to
+    differ from what a later re-check compares against. The flag is the only
+    real bound here now; do not fold it back in on the strength of that
+    finding.
     """
     # Inner retry loop. A transient provider failure (rate-limit / upstream
     # overload) BEFORE any token is emitted on this attempt is retried with
-    # capped exponential backoff. Once a token has been yielded to the
-    # client, retry is UNSAFE (it would duplicate already-streamed output),
-    # so we surface the error instead. The loop always either breaks (the
-    # stream completed) or returns (terminal/exhausted error).
-    final_blocks: list[dict[str, Any]] = []
-    final_usage: dict[str, int] = {}
-    # A8 — at most one Opus→Sonnet downgrade after rate_limited retries
-    # are exhausted (public cost/availability escape hatch).
-    model_fallback_used = False
+    # capped exponential backoff. Once a token has been yielded to the client,
+    # retry is UNSAFE (it would duplicate already-streamed output), so we
+    # surface the error instead. The loop always either breaks (the stream
+    # completed) or returns (terminal/exhausted error).
     attempt = 0
-    # +1 slot reserved so a late Opus→Sonnet fallback can still run once
-    # after the normal retry budget is spent.
+    # +1 slot reserved so a late fallback can still run once after the normal
+    # retry budget is spent.
     max_attempts = MAX_STREAM_RETRIES + 1
     while attempt < max_attempts:
         emitted_this_attempt = False
-        final_blocks = []
-        final_usage = {}
-        # Drain the streamed events purely for their SSE side-effects
-        # (token / thinking / tool_preparing frames). The blocks that get
-        # replayed to the provider next turn are read from the
-        # `message_done` event below, NOT accumulated here.
+        final_blocks: list[dict[str, Any]] = []
+        final_usage: dict[str, int] = {}
+        # Drain the streamed events purely for their SSE side-effects (token /
+        # thinking / tool_preparing frames). The blocks that get replayed to
+        # the provider next turn are read from the `message_done` event below,
+        # NOT accumulated here — master's `pending_blocks` list did accumulate
+        # them and was never read by anything, while a comment claimed it was
+        # the replay source (its own docstring says so). A comment asserting a
+        # fact the code does not have is what let the original thinking-block
+        # bug hide, so the list is gone rather than preserved.
         try:
             request.model = session.model  # A8 fallback re-read per attempt
             for ev in provider.stream(request):
                 if session.abort_event.is_set():
                     yield "session_done", {"reason": "aborted"}
-                    return _StreamOutcome(stop_turn=True)
+                    return _StreamOutcome(
+                        stop_turn=True, model_fallback_used=model_fallback_used,
+                    )
                 if ev.type == "text_delta":
                     emitted_this_attempt = True
                     yield "token", {"delta": ev.text}
                 elif ev.type == "thinking_delta":
                     emitted_this_attempt = True
                     yield "thinking", {"delta": ev.text}
-                # Tool-arg streaming is silent on `token` — without a
-                # signal the UI looks frozen after "I'll create them…".
-                # Emit as soon as the model opens a tool_use block.
+                # Tool-arg streaming is silent on `token` — without a signal
+                # the UI looks frozen after "I'll create them…". Emit as soon
+                # as the model opens a tool_use block.
                 elif ev.type == "tool_use_start":
                     emitted_this_attempt = True
                     yield "tool_preparing", {
@@ -2266,23 +2868,22 @@ def _stream_assistant_message(
                 elif ev.type == "message_done":
                     final_blocks = ev.blocks
                     final_usage = ev.usage
-                # "ping": abort-check only, no frame — every other
-                # upstream event surfaces here so the per-event abort
-                # check above keeps its latency.
+                # "ping": abort-check only, no frame — every other upstream
+                # event surfaces here so the per-event abort check above keeps
+                # its latency.
             break  # stream completed — leave the retry loop
         except Exception as exc:  # noqa: BLE001 — provider contract violation
-            # Typed ProviderError is the documented contract; anything
-            # else is a provider bug (an unmapped exception escaping
-            # `stream`). Pre-branch this whole path was one bare
-            # `except Exception`, which is why every stream failure —
-            # typed or not — got mapped, metriced, terminal-logged, and
-            # turned into an `error` + `session_done` frame pair. The
-            # branch narrowed the clause to `llm_provider.ProviderError`
-            # only, so an unmapped exception (e.g. ValueError from a
-            # buggy provider) would skip metrics/logging entirely and
-            # escape `run_turn` — the router's bare catch-all still turns
-            # it into a frame, but the contract above breaks silently.
-            # Map first, then share the exact same retry/A8/terminal
+            # Typed ProviderError is the documented contract; anything else is
+            # a provider bug (an unmapped exception escaping `stream`).
+            # Pre-branch this whole path was one bare `except Exception`, which
+            # is why every stream failure — typed or not — got mapped,
+            # metriced, terminal-logged, and turned into an `error` +
+            # `session_done` frame pair. Narrowing the clause to
+            # `llm_provider.ProviderError` only would let an unmapped exception
+            # (e.g. ValueError from a buggy provider) skip metrics/logging
+            # entirely and escape `run_turn` — the router's bare catch-all
+            # still turns it into a frame, but the contract above breaks
+            # silently. Map first, then share the exact same retry/A8/terminal
             # handling for both cases — no duplicated control flow.
             if isinstance(exc, llm_provider.ProviderError):
                 error_kind, msg = exc.kind, exc.message
@@ -2300,13 +2901,13 @@ def _stream_assistant_message(
                     MAX_STREAM_RETRY_DELAY,
                     BASE_STREAM_RETRY_DELAY * (2 ** attempt),
                 )
-                # `msg` used to be computed and thrown away, which is why
-                # the thinking-block 400 could not be diagnosed from the
-                # log file at all and had to be reproduced against a live
-                # app. It arrives already through _redact_for_log (API key
-                # only); the second pass adds the stronger persist-side
-                # patterns (password=/token=/bearer) because this line
-                # writes arbitrary upstream exception text to disk.
+                # `msg` used to be computed and thrown away, which is why the
+                # thinking-block 400 could not be diagnosed from the log file
+                # at all and had to be reproduced against a live app. It
+                # arrives already through _redact_for_log (API key only); the
+                # second pass adds the stronger persist-side patterns
+                # (password=/token=/bearer) because this line writes arbitrary
+                # upstream exception text to disk.
                 logger.warning(
                     "chat: transient SDK error %r — retry %d/%d in %.1fs: %s",
                     error_kind, attempt + 1, MAX_STREAM_RETRIES, delay,
@@ -2315,42 +2916,54 @@ def _stream_assistant_message(
                 time.sleep(delay)
                 attempt += 1
                 continue
-            # A8 — persistent rate_limited on Opus → one Sonnet attempt.
+            # A8 — persistent rate_limited on a profile that DECLARES a
+            # fallback → one attempt on that fallback model (Task 7:
+            # generalised from the old hardcoded `session.model == OPUS_MODEL`
+            # guard to `profile.fallback_model`, which is None for a profile
+            # that doesn't opt in — the built-in sonnet profile among them,
+            # preserving the old "sonnet never falls back" behaviour exactly).
+            fallback_model = profile.fallback_model
             if (
                 error_kind == "rate_limited"
                 and not emitted_this_attempt
-                and session.model == OPUS_MODEL
+                and fallback_model is not None
                 and not model_fallback_used
                 and not session.abort_event.is_set()
             ):
                 model_fallback_used = True
                 from_model = session.model
-                session.model = DEFAULT_MODEL
+                session.model = fallback_model
                 logger.warning(
                     "chat: rate_limited on %s after retries — falling back to %s",
-                    from_model, DEFAULT_MODEL,
+                    from_model, fallback_model,
                 )
                 yield "model_fallback", {
                     "from_model": from_model,
-                    "to_model": DEFAULT_MODEL,
+                    "to_model": fallback_model,
                     "reason": "rate_limited",
+                    "profile_id": profile.id,
                 }
-                # Grant exactly one extra attempt on the cheaper model.
+                # Grant exactly one extra attempt on the fallback model.
                 max_attempts = attempt + 2
                 attempt += 1
                 continue
             _metric_error(error_kind)
-            # Terminal failures used to yield the frame and log NOTHING,
-            # so a non-retryable turn left no trace on disk. Same
-            # double-scrub as the retry warning above.
+            # Terminal failures used to yield the frame and log NOTHING, so a
+            # non-retryable turn left no trace on disk. Same double-scrub as
+            # the retry warning above.
             logger.error(
                 "chat: turn failed (terminal) %r after %d attempt(s): %s",
                 error_kind, attempt + 1, _redact_secrets_in_str(msg),
             )
             yield "error", {"error_kind": error_kind, "message": msg}
             yield "session_done", {"reason": error_kind}
-            return _StreamOutcome(stop_turn=True)
-    return _StreamOutcome(final_blocks=final_blocks, final_usage=final_usage)
+            return _StreamOutcome(
+                stop_turn=True, model_fallback_used=model_fallback_used,
+            )
+    return _StreamOutcome(
+        final_blocks=final_blocks, final_usage=final_usage,
+        model_fallback_used=model_fallback_used,
+    )
 
 
 @dataclass
@@ -2377,6 +2990,7 @@ def _dispatch_tool_uses(
     project_switched: Callable[[], bool],
     tool_results_for_next_turn: list[dict[str, Any]],
     char_budget: dict[str, int],
+    offered_tool_names: set[str | None],
 ) -> Generator[tuple[str, dict[str, Any]], None, "_ToolDispatchOutcome"]:
     """
     Dispatch one assistant step's tool calls, sequentially.
@@ -2403,6 +3017,12 @@ def _dispatch_tool_uses(
 
     `char_budget` is one dict for the whole step, not one per tool, or the
     per-turn result cap multiplies by the number of tools.
+
+    `offered_tool_names` is the C-1 allowlist — the names this turn actually
+    SENT. It is a parameter rather than something recomputed here because only
+    the caller knows what went out on the wire: a profile with the `tools`
+    capability off sends `[]`, and every `tool_use` coming back off such a turn
+    must be refused.
 
     Phase C of `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md`.
     The parallel-destructive `offenders` check above the call stays in
@@ -2446,6 +3066,30 @@ def _dispatch_tool_uses(
                     "content": "project_switched_mid_turn",
                 })
             break
+        # C-1 — CAPABILITY ENFORCEMENT AT THE DISPATCH SEAM.
+        #
+        # `profile.tools` was previously read only on OUTBOUND paths (request
+        # build, prompt trim, cache annotation); nothing checked the INBOUND
+        # `tool_use` blocks. An endpoint that returns tool_use despite being
+        # sent `tools=[]` had them executed — most of the catalogue carries no
+        # confirmation card, and a third of it mutates the user's projects.
+        # Since this branch's whole point is letting an operator aim the
+        # assistant at an arbitrary endpoint, that endpoint is
+        # attacker-controlled input, and `_validate_base_url` accepts plain
+        # `http`, so a MITM reaches it too.
+        #
+        # F1 — a refusal COUNTS against the turn budget.
+        #
+        # The first cut of this guard `continue`d before the increment below,
+        # reasoning that an unoffered tool should not consume the budget. That
+        # was exactly backwards: this runs inside the agentic `while True:`, so
+        # an endpoint answering every request with an unoffered `tool_use`
+        # drove the loop forever — re-sending the whole growing conversation,
+        # and the Authorization header with it, on every iteration. It also
+        # REMOVED a bound that existed before this guard was added, where an
+        # unknown name fell through to the counter and hit
+        # MAX_TOOL_CALLS_PER_TURN. The cap is the only per-turn bound there is;
+        # nothing may skip it.
         tool_call_count += 1
         if tool_call_count > MAX_TOOL_CALLS_PER_TURN:
             yield "tool_error", {
@@ -2464,6 +3108,26 @@ def _dispatch_tool_uses(
             return _ToolDispatchOutcome(
                 tool_call_count=tool_call_count, stop_turn=True,
             )
+        # Refused before the confirmation card and the dispatcher lookup: a
+        # card is how the USER authorises a tool the model asked for, and this
+        # tool was never on offer to ask for.
+        if tu.get("name") not in offered_tool_names:
+            yield "tool_error", {
+                "tool_use_id": tu.get("id"),
+                "tool_name": tu.get("name"),
+                "error_kind": "tool_not_offered",
+                "message": (
+                    "the endpoint requested a tool that was not offered "
+                    "for this turn; refusing to run it."
+                ),
+            }
+            tool_results_for_next_turn.append({
+                "type": "tool_result",
+                "tool_use_id": tu.get("id"),
+                "is_error": True,
+                "content": "tool_not_offered",
+            })
+            continue
         yield from _dispatch_real_tool_call(
             session, tu, tool_results_for_next_turn, turn_ctx=turn_ctx,
             result_char_budget=char_budget,
@@ -2686,6 +3350,8 @@ def run_turn(
     message_history: list[dict[str, Any]] | None = None,
     attachment_file_ids: list[str] | None = None,
     ui_context: dict[str, Any] | None = None,
+    wire_conflict: bool = False,
+    unknown_profile_id: str | None = None,
 ) -> Generator[tuple[str, dict[str, Any]], None, None]:
     """
     Provider-driven turn driver (Phase 3 replacement for the Phase 2 stub):
@@ -2733,7 +3399,51 @@ def run_turn(
     the body's yielded frame ORDER (asserted byte-exact by several e2e/sse
     tests) is unchanged on EVERY exit, including the budget-refused and
     client-disconnect (GeneratorExit) paths.
+
+    `wire_conflict` (Task 7) — `routers/chat.py` sets this when the caller
+    named a profile on a different wire than the one this session is already
+    bound to. A conversation's history (thinking blocks, tool-call shape) is
+    not portable across wires mid-session, so this is NOT a turn at all: the
+    ONLY two frames emitted are a typed `error` + `session_done`, emitted
+    BEFORE anything else in this function runs (no in-flight guard, no
+    metrics, no WAL entry — there is no turn here to guard or record) and the
+    session's `messages` / `profile_id` / `bound_wire` / `model` are left
+    completely untouched. The router never raises an HTTPException for this
+    — `frontend/src/api/chat.ts` discards a non-2xx SSE body, so the typed
+    frame is the only way the guidance copy reaches the panel.
     """
+    # C-4 — the caller named a profile that is not configured. Like
+    # `wire_conflict` this is NOT a turn: two frames, nothing touched. It is
+    # refused rather than silently served by the ACTIVE profile, because a
+    # silent substitution sends the user's prompt to a different provider,
+    # wire and model while every frame reports success — the exact
+    # "unresolvable renders as success" shape ADR-0001 exists to forbid.
+    if unknown_profile_id is not None:
+        yield "error", {
+            "error_kind": "unknown_profile_id",
+            "message": (
+                "the model profile this chat asked for is no longer "
+                "configured, so the message was not sent — it would "
+                "otherwise have gone to a different provider. Pick a "
+                "profile from the model menu and try again."
+            ),
+        }
+        yield "session_done", {"reason": "unknown_profile_id"}
+        return
+
+    if wire_conflict:
+        yield "error", {
+            "error_kind": "profile_switch_requires_new_chat",
+            "message": (
+                "this chat session is already bound to a different LLM "
+                "provider wire; switching providers mid-conversation isn't "
+                "supported because prior turns may not replay on the new "
+                "wire. Start a new chat to use a different provider."
+            ),
+        }
+        yield "session_done", {"reason": "profile_switch_requires_new_chat"}
+        return
+
     # Clear any aborted state from a previous turn so /abort is one-shot
     # rather than session-wide. Without this, every subsequent turn on the
     # same session_id exits immediately with session_done reason='aborted'
@@ -2796,11 +3506,71 @@ def run_turn(
         _metric_record_duration(time.monotonic() - _t_start)
         with session._lock:
             session._turn_in_flight = False
+        # C-3 — the turn's profile must not outlive the turn. A tool invoked
+        # OUTSIDE a turn (a direct call, a test) has no profile to honour and
+        # must take the pre-profile path; leaving a stale value bound would
+        # make that depend on whatever ran in this context before it. Pure
+        # side-effect, so the yielded frame ORDER several tests pin
+        # byte-exactly is unchanged on every exit.
+        from services import chat_tools as _chat_tools  # noqa: PLC0415
+        _chat_tools.set_turn_profile(None)
         # Every exit reached from inside this process is an end the user can
         # observe, so none of them should leave a "this turn was interrupted"
         # record behind. Only a crash skips this line — which is the point.
         if _wal_ctx is not None:
             clear_pending_turn(_wal_ctx)
+
+
+def _outbound_vision_block_kinds(
+    messages: list[dict[str, Any]],
+) -> tuple[bool, bool, bool]:
+    """
+    Scan the OUTBOUND `messages` array (Task 8) for `image` / `document`
+    content blocks, anywhere in it — not just the newest message.
+
+    This is the vision-capability enforcement point, and it deliberately
+    reads `messages` rather than `attachment_file_ids`: an image/document
+    attached on an EARLIER turn is replayed into `messages` via session
+    history on every later turn (that is how multi-turn multimodal
+    conversations work at all), so a check keyed on this turn's own
+    `attachment_file_ids` alone would miss every replay — a `vision: false`
+    profile could keep sending an image it can't process turn after turn.
+
+    Returns `(has_image, has_document, has_unsupported_image_source)`.
+    `has_unsupported_image_source` (fix round 1, Task 8 review finding 1) is
+    True when an `image` block's `source` is not `{"type": "base64", ...}`
+    — the only shape `upload_service.build_multimodal_content_blocks` ever
+    produces, and the only shape `llm_openai_compat._to_openai_messages`
+    knows how to translate into the openai wire's `image_url` part. A
+    url/other source must never reach that translator and get silently
+    dropped there — the caller uses this flag to refuse the turn up front on
+    the openai wire instead. (The anthropic wire forwards content blocks
+    through unchanged, and Anthropic's own API accepts a url image source
+    natively, so this is not refused there.)
+
+    A message whose `content` is a bare string (the no-attachment shape) or
+    anything else non-list contributes nothing to any of the three.
+    """
+    has_image = False
+    has_document = False
+    has_unsupported_image_source = False
+    for msg in messages:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            if block_type == "image":
+                has_image = True
+                source = block.get("source")
+                if not (isinstance(source, dict)
+                        and source.get("type") == "base64"):
+                    has_unsupported_image_source = True
+            elif block_type == "document":
+                has_document = True
+    return has_image, has_document, has_unsupported_image_source
 
 
 def _run_turn_body(
@@ -2847,35 +3617,116 @@ def _run_turn_body(
     def _project_switched() -> bool:
         return PyPSAService.get_active_context().loaded_project != turn_project_holder[0]
 
+    # W-3 — the fallback ceiling, for an endpoint that never reports usage.
+    #
+    # The token ceiling below counts numbers `usage_reported` now formally
+    # admits may never have been measured: `stream_options.include_usage` is
+    # a REQUEST, not a guarantee, so on such an endpoint `usage_acc` is
+    # structurally pinned at 0 and neither this gate nor the daily one can
+    # ever fire. Measured: 12 turns, nothing refused. The module header says
+    # "the server enforces a token-count ceiling so a misbehaving model +
+    # tool-use loop cannot burn unbounded budget" — this restores that
+    # intent where token counting is impossible, by counting the one thing
+    # that is always countable.
+    #
+    # Applies ONLY while nothing has been reported. The moment an endpoint
+    # reports anything, the token ceiling is the more precise bound and this
+    # one steps aside — asserted by its own sibling test.
+    # Kept in the CALLER rather than folded into `_turn_budget_block`:
+    # the increment below has to land between this gate and the two caps
+    # that helper checks. Folding the gate in and moving the increment
+    # after the helper would stop counting a turn that the output or
+    # daily cap refuses — a silent behaviour change, and a merge is the
+    # worst place to make one. The helper stays the pure predicate its
+    # own seam test exercises.
+    if not session.usage_reported and session.turns_started >= MAX_TURNS_PER_SESSION:
+        yield "session_done", {
+            "reason": "budget_exhausted",
+            "kind": "turns",
+            "limit": MAX_TURNS_PER_SESSION,
+        }
+        return
+    with session._lock:
+        session.turns_started += 1
+
     budget_block = _turn_budget_block(session, turn_ctx)
     if budget_block is not None:
         yield budget_block
         return
 
+    # Task 7 — the profile this turn resolves to, regardless of whether a
+    # `provider=`/`client=` seam is injected: it also drives the per-profile
+    # token cap and the A8 fallback further down, both of which apply on
+    # every path (a FakeProvider-injected test still wants its scripted A8
+    # scenario to fire off `profile.fallback_model`).
+    # F4 — the session's profile may have been deleted since it bound. C-4
+    # taught the ROUTER to refuse an unknown `body.profile_id`, but this
+    # resolves `session.profile_id`, and after C-8/C-9 a bound session
+    # normally sends no `profile_id` at all — so this is the common path.
+    # Unguarded it raised out of the generator and was rendered as
+    # `internal_error` with the profile id echoed back.
+    try:
+        profile = _resolve_turn_profile(session)
+    except llm_config_module().ProfileNotConfiguredError:
+        yield "error", {
+            "error_kind": "unknown_profile_id",
+            "message": (
+                "the model profile this chat was using is no longer "
+                "configured, so the message was not sent. Pick a profile "
+                "from the model menu and try again."
+            ),
+        }
+        yield "session_done", {"reason": "unknown_profile_id"}
+        return
+    # C-3 — publish the turn's profile to the tool layer. A tool that makes
+    # its own model sub-call (`reconstruct_network_from_image`) must bill the
+    # model the user selected and must not silently reach a provider they did
+    # not choose. Set here, once the profile is resolved and before any tool
+    # can be dispatched; the executor submit site already copies the context.
+    from services import chat_tools as _chat_tools  # noqa: PLC0415
+    _chat_tools.set_turn_profile(profile)
+
     if provider is None:
-        if client is None:
-            client, err = _build_anthropic_client()
-            if client is None:
-                _metric_error(err or "internal_error")
-                yield "error", {
-                    "error_kind": err or "internal_error",
-                    "message": (
-                        "Anthropic client unavailable — chat is disabled until "
-                        "ANTHROPIC_API_KEY is set and the SDK is installed."
-                    ),
-                }
-                yield "session_done", {"reason": "no_client"}
-                return
-        # Module attribute (not the imported name) so a test that
-        # monkeypatches `llm_anthropic.AnthropicProvider` sees its double
-        # here too.
-        provider = llm_anthropic.AnthropicProvider(client)
+        # `_provider_for_profile` reproduces the exact priority this branch
+        # always had: an injected `client` wins (wrapped, anthropic wire
+        # only) over building one, and building one for the profile's
+        # built-in ANTHROPIC_API_KEY slot routes through the SAME
+        # `_build_anthropic_client()` call — reached through the module
+        # attribute, so a test that monkeypatches
+        # `chat_service._build_anthropic_client` still sees its double —
+        # that the zero-config path always used, so the missing_api_key /
+        # sdk_not_installed error frames stay byte-identical.
+        provider, err = _provider_for_profile(profile, client=client)
+        if provider is None:
+            _metric_error(err or "internal_error")
+            if profile.wire == "anthropic":
+                # Byte-identical to the pre-Task-7 zero-config message —
+                # this is the ONLY branch invariant 1 requires word-for-word
+                # (missing_api_key / sdk_not_installed with no llm-profiles
+                # file and only ANTHROPIC_API_KEY set).
+                message = (
+                    "Anthropic client unavailable — chat is disabled until "
+                    "ANTHROPIC_API_KEY is set and the SDK is installed."
+                )
+            else:
+                message = (
+                    f"LLM provider unavailable for profile {profile.label!r} "
+                    f"({err or 'internal_error'}) — check its endpoint and "
+                    "API key in Settings."
+                )
+            yield "error", {"error_kind": err or "internal_error", "message": message}
+            yield "session_done", {"reason": "no_client"}
+            return
 
     yield "session_init", {
         "session_id": session.session_id,
         "session6": session.session6(),
         "model": session.model,
-        "tool_count": len(_tools_payload()),
+        # Task 8 — the count actually sent this turn (0 for a `tools: false`
+        # profile), not the catalogue size. See _tools_payload_for_profile.
+        "tool_count": len(_tools_payload_for_profile(profile)),
+        "profile_id": profile.id,
+        "profile_label": profile.label,
     }
 
     # Seed conversation history. Caller-supplied message_history wins for
@@ -2930,17 +3781,132 @@ def _run_turn_body(
     history_cache_anchor: int | None = len(messages) - 1 if messages else None
 
     messages.append({"role": "user", "content": user_content})
+
+    # Task 8 — vision capability enforcement, on the OUTBOUND MESSAGE ARRAY,
+    # not on `attachment_file_ids`. Checked HERE, before this turn's message
+    # is persisted into `session.messages` and before any provider call:
+    #   * `attachment_file_ids` only names THIS turn's own attachments — an
+    #     image/document attached on an earlier turn is replayed into
+    #     `messages` via session history on every later turn, so a check
+    #     keyed on `attachment_file_ids` alone misses every replay. Scanning
+    #     `messages` (built from history + this turn, just above) catches
+    #     both a fresh attachment and a replayed one.
+    #   * Checked before `session.append_history_message` so a FRESH
+    #     attachment that gets rejected here is never persisted — the turn
+    #     never happened, so there is nothing to replay next time. A
+    #     violation already sitting in history from an earlier (differently
+    #     configured) session is still caught on replay, every turn, until
+    #     the user drops the attachment or switches to a vision-capable
+    #     profile — there is no way to "fix" already-persisted history from
+    #     here.
+    (has_vision_image, has_vision_document,
+     has_unsupported_image_source) = _outbound_vision_block_kinds(messages)
+    if (has_vision_image or has_vision_document) and not profile.vision:
+        # Fixed message: capability name + profile LABEL only — never an
+        # id/base_url (SECURITY, b94eb245 on master: redaction is
+        # secrets-only and deliberately passes bare emails/ids through, so
+        # this frame must not carry one to begin with).
+        yield "error", {
+            "error_kind": "capability_unsupported",
+            "message": (
+                f"the {profile.label!r} profile does not support image or "
+                "document attachments (vision is disabled for this "
+                "profile) — remove the attachment or switch to a "
+                "vision-capable profile."
+            ),
+        }
+        yield "session_done", {"reason": "capability_unsupported"}
+        return
+    if has_vision_document and profile.wire != "anthropic":
+        # PDF (`document`) blocks are Anthropic-native: even with
+        # `vision: true`, a non-anthropic wire can't process them.
+        yield "error", {
+            "error_kind": "capability_unsupported",
+            "message": (
+                f"the {profile.label!r} profile cannot process PDF "
+                "attachments — PDF document support requires an "
+                "Anthropic-wire profile. Remove the attachment or switch "
+                "to an Anthropic profile."
+            ),
+        }
+        yield "session_done", {"reason": "capability_unsupported"}
+        return
+    if (has_vision_image and has_unsupported_image_source
+            and profile.wire != "anthropic"):
+        # Fix round 1 (Task 8 review, finding 1) — an image whose `source`
+        # isn't `{"type": "base64", ...}` is not something
+        # llm_openai_compat._to_openai_messages can translate into an
+        # `image_url` part. Refuse it HERE, before any provider call,
+        # rather than let it reach the adapter and get silently skipped —
+        # the original bug this review found was exactly that: a base64
+        # image slipped past unmodified, but a non-base64 source is the
+        # same failure mode in a different shape and must not repeat it.
+        #
+        # `wire != "anthropic"` is a DELIBERATE, STATED assumption, not an
+        # oversight: the anthropic wire (llm_anthropic.py) forwards content
+        # blocks to the SDK unchanged — no translation layer — and
+        # Anthropic's own API accepts a url image source natively, so
+        # nothing is refused there. If a THIRD wire is ever added, do not
+        # inherit this check by default: confirm whether its adapter can
+        # also carry a non-base64 image source before assuming this
+        # `!= "anthropic"` condition still means "needs refusing".
+        yield "error", {
+            "error_kind": "capability_unsupported",
+            "message": (
+                f"the {profile.label!r} profile cannot process this image "
+                "attachment — its source format is not supported for this "
+                "provider; remove the attachment or switch to a profile "
+                "that supports it."
+            ),
+        }
+        yield "session_done", {"reason": "capability_unsupported"}
+        return
+
     with session._lock:
         session.append_history_message({"role": "user", "content": user_content})
 
     tool_call_count = 0
-    tools = _tools_payload(turn_ctx)
+    # Task 8 — `[]` when the profile's `tools` capability is off; see
+    # _tools_payload_for_profile.
+    tools = _tools_payload_for_profile(profile)
+    # C-1 — the ALLOWLIST the dispatch loop below enforces.
+    #
+    # Derived from `tools` (what this turn actually SENT), never from the
+    # catalogue and never from `profile.tools` alone: the guard has to answer
+    # "was this tool offered", and only the sent payload knows that. A
+    # `tools: false` profile sends `[]`, so the set is empty and every
+    # `tool_use` coming back is refused.
+    offered_tool_names = {
+        t.get("name") for t in tools if isinstance(t, dict)
+    }
     # A4 — orient the model on the P0-pinned turn context (not a later
     # active switch). Failure → omit; never abort the turn for meta.
+    # Task 8 — `include_tools=profile.tools` trims the tool-chaining half of
+    # each guide (and the confirmation-card contract paragraph) out of the
+    # prompt when no tools are being offered this turn.
     system_prompt = _build_system_prompt(
         session,
         live_meta=_format_live_network_meta(turn_ctx),
+        include_tools=profile.tools,
     )
+
+    # A8 — at most one fallback-model downgrade after rate_limited retries
+    # are exhausted, PER TURN (public cost/availability escape hatch).
+    # Hoisted above the outer `while True:` loop (Task 7 review finding):
+    # this used to be re-initialised to False at the top of EVERY outer-loop
+    # pass (each agentic tool-use round), so the "once per turn" bound relied
+    # entirely on `session.model == OPUS_MODEL` going false the moment the
+    # fallback fired — true for the OLD hardcoded Opus/Sonnet pair, but not
+    # guaranteed once the guard below reads `profile.fallback_model` instead
+    # (a custom profile's fallback target isn't guaranteed to differ from
+    # what a later re-check would compare against). Turn-scoped here means
+    # the bound is real, not coincidental.
+    model_fallback_used = False
+
+    # Per-profile token cap (Task 7) — resolved once for the whole turn;
+    # `profile.max_output_tokens is None` means "no override", the same
+    # meaning `llm_config` documents for that field.
+    max_output_tokens = profile.max_output_tokens or MAX_OUTPUT_TOKENS_PER_TURN
 
     while True:
         if session.abort_event.is_set():
@@ -2970,21 +3936,30 @@ def _run_turn_body(
         # re-read `session.model` (A8 fallback can change it mid-turn).
         request = llm_provider.LLMRequest(
             model=session.model,
-            max_tokens=MAX_OUTPUT_TOKENS_PER_TURN,
+            max_tokens=max_output_tokens,
             system_blocks=system_blocks,
             tools=tools,
-            tools_stable=True,
+            # Task 8 — no tools sent means nothing to mark stable/cached; the
+            # cache-breakpoint site (llm_anthropic.AnthropicProvider.stream)
+            # already guards this with `if tools and request.tools_stable:`
+            # so `tools=[]` never touches `tools[-1]`, cache-marker or not.
+            tools_stable=profile.tools,
             messages=messages,
             history_stable_anchor=history_cache_anchor,
         )
 
-        # Phase D's seam, over this branch's provider: one assistant
-        # message drained with its own retry / A8-fallback budget. It
-        # cannot end THIS turn (a generator cannot return for its
-        # caller), so `stop_turn` is how it says the turn is over.
+        # Master's extraction returned the SDK message object; this returns
+        # normalised blocks + usage, because this line also streams from
+        # OpenAI-compatible endpoints. `model_fallback_used` goes in and comes
+        # back out: the A8 downgrade is bounded per TURN, and this helper runs
+        # once per assistant STEP — see its docstring.
         stream_outcome = yield from _stream_assistant_message(
-            session, provider, request=request,
+            session, provider,
+            request=request,
+            profile=profile,
+            model_fallback_used=model_fallback_used,
         )
+        model_fallback_used = stream_outcome.model_fallback_used
         if stream_outcome.stop_turn:
             return
         final_blocks = stream_outcome.final_blocks
@@ -3028,6 +4003,9 @@ def _run_turn_body(
             # No further tools requested — turn is complete.
             with session._lock:
                 usage_snapshot = dict(session.usage_acc)
+                # W-3 — ships alongside the totals so the client can
+                # tell "nothing used" from "never reported".
+                usage_snapshot["reported"] = session.usage_reported
             # Persist the completed turn to chat.jsonl for replay across
             # backend restarts and other browser tabs. Best-effort: a
             # persistence failure must not abort the turn (the user already
@@ -3050,6 +4028,14 @@ def _run_turn_body(
                     "ts": time.time(),
                     "session_id": session.session_id,
                     "model": session.model,
+                    # Task 7 — durable profile identity. `profile` was
+                    # resolved once at the top of this turn via
+                    # `_resolve_turn_profile`, so it already IS
+                    # "session.profile_id or the resolved builtin id" (that
+                    # exact fallback lives inside `_resolve_turn_profile`,
+                    # not here) — GET /history's rehydration reads this
+                    # field back through `llm_config.resolve_profile`.
+                    "profile_id": profile.id,
                     "user": _redact_for_persist(message),
                     "assistant": _redact_for_persist(assistant_blocks),
                     "usage": usage_snapshot,
@@ -3085,6 +4071,14 @@ def _run_turn_body(
         ]
         offenders = find_parallel_destructive(all_tool_uses)
         if offenders:
+            # W-2 — count the refused batch, for the same reason the
+            # `tool_not_offered` refusal counts (F1): this `continue`s the
+            # agentic loop, so an endpoint that answers every request with two
+            # destructive calls otherwise drives it forever, re-POSTing the
+            # whole growing conversation and the auth header each pass.
+            # Nothing here executes — the guard works — but "refused" must
+            # still cost budget or the cap is not a bound at all.
+            tool_call_count += len(all_tool_uses)
             tool_results = []
             for call in all_tool_uses:
                 yield "tool_error", {
@@ -3106,6 +4100,16 @@ def _run_turn_body(
             messages.append({"role": "user", "content": tool_results})
             with session._lock:
                 session.append_history_message({"role": "user", "content": tool_results})
+            if tool_call_count > MAX_TOOL_CALLS_PER_TURN:
+                yield "error", {
+                    "error_kind": "tool_call_cap_exceeded",
+                    "message": (
+                        f"more than {MAX_TOOL_CALLS_PER_TURN} tool calls in "
+                        "one turn; refusing further dispatch this turn."
+                    ),
+                }
+                yield "session_done", {"reason": "tool_call_cap_exceeded"}
+                return
             continue
 
         tool_results_for_next_turn: list[dict[str, Any]] = []
@@ -3119,6 +4123,7 @@ def _run_turn_body(
             project_switched=_project_switched,
             tool_results_for_next_turn=tool_results_for_next_turn,
             char_budget=tool_result_char_budget,
+            offered_tool_names=offered_tool_names,
         )
         tool_call_count = dispatch.tool_call_count
         if dispatch.stop_turn:
@@ -3441,7 +4446,7 @@ def _dispatch_real_tool_call(
             "type": "tool_result",
             "tool_use_id": tool_use_id,
             "is_error": True,
-            "content": str(detail or exc)[:1000],
+            "content": _redact_secrets_in_str(str(detail or exc)[:1000]),
         })
         return
 

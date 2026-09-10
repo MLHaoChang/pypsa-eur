@@ -754,8 +754,10 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "solve_queue_list",
-        "{jobs: [...], current: job_id|None} — FIFO queue snapshot. "
-        "Safety: read.",
+        "{jobs: [...], running: [job_id], paused: bool} — FIFO queue snapshot. "
+        "`running` lists EVERY job solving right now (the pool size is "
+        "PYPSA_GUI_MAX_CONCURRENT_SOLVES, default 1), and omits jobs the caller "
+        "may not see. Job ids are UUIDs. Safety: read.",
     ),
     _t(
         "solve_queue_abort",
@@ -1366,6 +1368,22 @@ TOOLS: list[dict[str, Any]] = [
         [],
     ),
 
+    # ── LLM provider switching (1) — Task 10 ────────────────────────────────
+    _t(
+        "set_active_profile",
+        "Switch which configured LLM profile the assistant uses. "
+        "`profile_id` must be one ALREADY CONFIGURED in Settings — this tool "
+        "never creates or edits a profile and never accepts an API key, so "
+        "no key material passes through the chat channel. The change takes "
+        "effect when the user starts a NEW chat: the current conversation "
+        "stays on the profile it was bound to, because a mid-session switch "
+        "would replay history to a model that may not accept its blocks. "
+        "Returns `{ok, active_profile_id, note}`; an unconfigured id is a "
+        "structured error, not a switch. Safety: destructive.",
+        {"profile_id": {"type": "string"}},
+        ["profile_id"],
+    ),
+
     # ── Asset results (3) — Task 14 ─────────────────────────────────────────
     _t(
         "get_asset_results",
@@ -1845,6 +1863,11 @@ TOOL_ROUTES: dict[str, list] = {
     "get_asset_results": _SERVICE_CALL,
     "ui_open_asset_detail": _UI_EVENT,
     "export_asset_results": _SERVICE_CALL,
+    # Task 10 — writes <app-data>/llm-profiles.json via services.llm_config,
+    # not an HTTP route. The settings pane's own PUT /chat/settings/llm/active
+    # is a DIFFERENT surface with a super-admin gate; this tool reaches the
+    # store directly, which is why it is confirmation-gated instead.
+    "set_active_profile": _SERVICE_CALL,
     # gridspine (10) — service calls, like dispatch_status: the tools call
     # services/gridspine_service.py directly, not /api/gridspine, so the
     # route table records the pattern rather than a URL.

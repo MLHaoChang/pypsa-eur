@@ -39,6 +39,12 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.pypsa_service import PyPSAService
 from services.adequacy.coupling import snapshot_hash as _snapshot_hash
+from services.results.prices import _apply_merit_order_correction  # noqa: F401
+from services.results.cost_breakdown import (  # noqa: F401
+    _class_lifetime,
+    _lifetime_total,
+    _sum_lifetime,
+)
 from services.serialization import (
     slice_ts as _slice_ts,
     ts_payload as _ts_payload,
@@ -287,10 +293,12 @@ def get_economics_by_carrier():
     """
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
-        # A bare `{}` was indistinguishable from "solved, and this network
-        # genuinely rolls up to no carriers" — the wider of this endpoint's
-        # two availability holes, and the one a user hits first. Same shape as
-        # the success path so callers need one branch, not two.
+        # MERGE NOTE (2026-09-10): a bare `{}` was indistinguishable from
+        # "solved, and this network genuinely rolls up to no carriers" — the
+        # wider of this endpoint's two availability holes, and the one a user
+        # hits first. Same shape as the success path so callers need one
+        # branch, not two. The decomposition moved this gate into the router
+        # and the `{}` came back with it; ADR-0001 forbids the conflation.
         return {"available": False, "by_carrier": {}}
     # Foreground project: the VOLL capture lives in the live solver state, not
     # on the network (solver_service strips the slacks). The solver config is

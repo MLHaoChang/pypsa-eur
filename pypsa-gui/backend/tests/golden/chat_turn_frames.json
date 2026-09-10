@@ -30,6 +30,8 @@
    "session_init",
    {
     "model": "claude-sonnet-5",
+    "profile_id": "anthropic-sonnet",
+    "profile_label": "Claude Sonnet",
     "session6": "<session6>",
     "session_id": "<session_id>",
     "tool_count": "<tool_count>"
@@ -48,7 +50,8 @@
      "cache_create_tokens": 0,
      "cache_read_tokens": 0,
      "input_tokens": 11,
-     "output_tokens": 7
+     "output_tokens": 7,
+     "reported": true
     }
    }
   ]
@@ -58,6 +61,8 @@
    "session_init",
    {
     "model": "claude-sonnet-5",
+    "profile_id": "anthropic-sonnet",
+    "profile_label": "Claude Sonnet",
     "session6": "<session6>",
     "session_id": "<session_id>",
     "tool_count": "<tool_count>"
@@ -131,7 +136,8 @@
      "cache_create_tokens": 0,
      "cache_read_tokens": 0,
      "input_tokens": 58,
-     "output_tokens": 15
+     "output_tokens": 15,
+     "reported": true
     }
    }
   ]

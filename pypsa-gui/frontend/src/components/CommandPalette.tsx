@@ -17,6 +17,7 @@ import { appLog } from '../store/simulationStore'
 import { invalidateNetworkQueries, saveProjectQuietly, formatRelativeTime, switchToProject } from '../utils/projectActions'
 import { nk } from '../utils/queryKeys'
 import { useLocalSettingsAvailable } from '../hooks/useLocalSettings'
+import { useLLMSettingsAvailable } from '../hooks/useLLMSettings'
 import type { Bus, Generator, Load, Line, Link, StorageUnit, Store, Transformer } from '../api/types'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -283,9 +284,11 @@ function useCommands(mode: PaletteMode): Command[] {
   const density              = useUIStore(s => s.density)
   const toggleTheme          = useUIStore(s => s.toggleTheme)
   const toggleDensity        = useUIStore(s => s.toggleDensity)
-  // Same gate the Sidebar row uses — shares the ['localSettings'] query, so
-  // this costs no extra request.
-  const settingsAvailable    = useLocalSettingsAvailable()
+  // Same gate the Sidebar row uses (Task 15: EITHER surface reachable) —
+  // shares each hook's own cached query, so this costs no extra request.
+  const localSettingsAvailable = useLocalSettingsAvailable()
+  const llmSettingsAvailable   = useLLMSettingsAvailable()
+  const settingsAvailable    = localSettingsAvailable || llmSettingsAvailable
 
   // Project list — shared cache with App.tsx + Sidebar.
   const { data: projects = [] } = useQuery({

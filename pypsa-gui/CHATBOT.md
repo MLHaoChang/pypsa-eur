@@ -1,13 +1,21 @@
 # pypsa-gui Chatbot Assistant
 
-The chatbot panel embeds an in-app copilot powered by the Anthropic Messages
-API. It can answer questions about the open network, drive every backend
-tool the GUI itself exposes, and gate destructive / execution actions
-behind explicit user confirmation.
+The chatbot panel embeds an in-app copilot. It can answer questions about the
+open network, drive every backend tool the GUI itself exposes, and gate
+destructive / execution actions behind explicit user confirmation.
+
+It runs on **Anthropic by default, and on other providers by configuration** —
+OpenAI, Moonshot (Kimi), Qwen (DashScope), or any OpenAI-compatible endpoint
+including local ones (Ollama, LM Studio, self-hosted vLLM). Which provider is
+used is a *profile*; see [Provider profiles](#provider-profiles) below. The
+zero-config path is unchanged: an install that only ever sets
+`ANTHROPIC_API_KEY` never has to meet the profile concept at all.
 
 ## Setup
 
-The assistant is **off** until two prerequisites are met:
+The default (Anthropic) path is **off** until two prerequisites are met.
+A non-Anthropic profile has its own prerequisites — see
+[Provider profiles](#provider-profiles).
 
 1. The `anthropic` Python package is installed (pulled in by
    [backend/requirements.txt](backend/requirements.txt) — runs
@@ -29,6 +37,67 @@ If either prerequisite is missing the panel surfaces
 `error_kind='missing_api_key'` or `error_kind='sdk_not_installed'` explaining
 the gap. Setting the key requires no restart of the frontend.
 
+## Provider profiles
+
+A **profile** is the unit you switch between: which provider, which model,
+which credential, and what that model can do. Profiles are **instance-wide**
+and only a super-admin edits them — on a server one API key is shared by every
+organisation, and the desktop app's single seeded user is a super-admin, so
+this never gets in the way there.
+
+Two profiles exist with no configuration at all — `anthropic-sonnet` (active)
+and `anthropic-opus` — both using the `ANTHROPIC_API_KEY` slot described
+above. Nothing is written to disk until you add a profile, and an install that
+never adds one behaves exactly as it did before profiles existed.
+
+**Adding one.** Settings → the assistant's model section → pick a preset
+(Anthropic, OpenAI, Moonshot, DashScope, Ollama, LM Studio) or *Custom
+OpenAI-compatible*, then supply the model id and — for the cloud presets — a
+key. Presets prefill the endpoint; the model id is always free text, so a
+model newer than this build still works. **Test connection** makes one
+1-token call and tells you which of *unreachable / unauthorized /
+model not found / invalid request* you have, rather than failing silently.
+
+**Where keys live.** Each profile derives its own slot in `<app-data>/user.env`
+— a known name for a preset (`OPENAI_API_KEY`, `MOONSHOT_API_KEY`,
+`DASHSCOPE_API_KEY`), or `PYPSA_GUI_LLM_KEY__<PROFILE_ID>` for a custom one.
+The slot name is derived server-side and is **not** accepted from the client:
+otherwise a profile could point its endpoint at an attacker's host while
+naming the shared Anthropic slot as its credential. Ollama and LM Studio are
+keyless. The shell-beats-file precedence above applies to every slot, so
+`export OPENAI_API_KEY=…` behaves the way you would expect.
+
+**Switching.** The chat panel's dropdown lists configured profiles. Switching
+between two profiles on the same wire applies immediately; switching to a
+different wire starts a new chat, because a conversation's stored history is
+in one provider's block format and replaying it to another is at best a 400.
+You can also ask the assistant to switch — it will show a confirmation card,
+and (like the Settings route) it refuses unless you are a super-admin.
+
+**Capabilities are declared, not assumed.** A profile says whether its model
+can call tools and accept images. A tools-less profile is sent no tools and
+gets a prompt with the tool-chaining guidance removed, and the panel says it
+can answer but not act — rather than letting the model narrate actions it
+cannot take. PDFs need the Anthropic wire; images work on either.
+
+> **Verification status.** Per
+> [ADR-0002](docs/adr/0002-chat-changes-need-a-live-api-probe.md) no test in
+> `backend/tests/` constructs a real client, so a green suite does not verify
+> a provider actually works. The live probes exist
+> (`test_live_probe_anthropic_wire`, `test_live_probe_openai_wire_through_a_saved_profile`)
+> but **skip unless explicitly enabled**, and a skip is not coverage. To run
+> them: `PYPSA_GUI_TEST_LIVE_ANTHROPIC=1` with `ANTHROPIC_API_KEY` set, and
+> `PYPSA_GUI_TEST_LIVE_OPENAI_PROFILE=<profile id>` for a saved
+> OpenAI-compatible profile. `backend/smoke/run_chat_smoke.py --profile <id>`
+> drives a fuller end-to-end pass against a running backend.
+>
+> Both probes have been run and passed — openai against a local Ollama on
+> 2026-09-04, anthropic against the vendor on 2026-09-09. Runbooks:
+> `docs/superpowers/runbooks/local-openai-wire-probe.md` and
+> `anthropic-wire-probe.md` (repo root `docs/`, not this directory). That is a
+> result for those commits, not standing coverage: they still skip by default,
+> so the ADR's per-change rule is unchanged.
+
 ### Supplying the key in the packaged app
 
 The distributed `.app` / `.exe` deliberately ships **no** `backend/.env` — that
@@ -38,7 +107,11 @@ session cookies, and bundling it would publish both
 packaged app has to be told the key from inside itself:
 
 1. Open the chat panel and send anything. The assistant answers with an
-   **API key missing** banner.
+   **API key missing** banner. This inline paste-and-save flow is specific to
+   the *built-in* Anthropic profile (the zero-config default); if the active
+   profile is anything else, the banner instead names that profile and
+   deep-links to Settings → the assistant's model section, because a custom
+   profile's key has nothing to do with this route.
 2. The banner carries the key field. Paste an Anthropic key and press **Save**.
 3. The assistant is usable immediately — no restart. The key is written to
    `user.env` in the app-data directory (`~/Library/Application Support/PyPSA
@@ -54,10 +127,16 @@ gets in the way there.
 `user.env` is plaintext, like the `.env` it replaces. It is not the OS
 keychain: that would mean bundling `keyring` plus a platform backend for each
 of macOS and Windows, and it defends against a threat — another process reading
-your files as you — that `backend/.env` already accepts. Only
-`ANTHROPIC_API_KEY` is ever read from or written to it; anything else in the
-file is ignored, so it cannot be used to set `SECRET_KEY` or repoint the
-database.
+your files as you — that `backend/.env` already accepts. Only a **managed
+key** may be read from or written to it — the fixed built-in provider slots
+(`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MOONSHOT_API_KEY`,
+`DASHSCOPE_API_KEY`) plus one `PYPSA_GUI_LLM_KEY__<PROFILE_ID>` slot per saved
+custom profile (see "Where keys live" under
+[Provider profiles](#provider-profiles) above) — so it can never be used to
+set `SECRET_KEY` or repoint the database. Every managed
+value currently in effect, wherever it appears in backend logs or a persisted
+chat transcript, is scrubbed before it is written — not just the ones shaped
+like a known key format.
 
 The `/api/chat/health` endpoint reports `anthropic_api_key_present` without
 ever echoing the key value, so you can probe the backend's view safely.
@@ -276,10 +355,22 @@ NEVER aborts the underlying project save / rename / restore.
 
 ## Security notes
 
-- The API key never reaches the frontend. `/api/chat/health` reports
-  only a boolean presence flag.
-- `_redact_for_log` strips both the literal `ANTHROPIC_API_KEY` value AND
-  any substring matching `sk-ant-*` before logging.
+- No managed key ever reaches the frontend. `/api/chat/health` and the
+  profile list report only presence/hint, never a value.
+- `services/redaction.py` scrubs secrets in two passes, in this order: first
+  by VALUE — every managed key currently in effect (every built-in slot and
+  every `PYPSA_GUI_LLM_KEY__<PROFILE_ID>` slot, via
+  `app_secrets.live_secret_values()`), substituted wherever it appears,
+  regardless of shape — then by PATTERN (`sk-ant-*`, `key=value`,
+  `bearer …`) for anything the value pass didn't already catch. The value
+  pass is what makes a custom provider's key safe to log or persist even
+  though its value doesn't look like an Anthropic key: pattern-only
+  redaction would miss it entirely. Applied before both the backend log
+  (`redact_for_log`) and the durable transcript (`redact_for_persist`,
+  `chat.jsonl`) — see `backend/tests/test_no_split_merge_precondition.py`,
+  which drives a real turn end-to-end to prove neither sink leaks a
+  non-pattern-shaped managed value, and that the value-substitution pass is
+  the reason: disable it alone and the same drive leaks.
 - `chat.jsonl` is gitignored via the existing `backend/projects/` rule.
 - Confirmation tokens are server-stamped, single-use, TTL'd, and never
   surface in URLs.

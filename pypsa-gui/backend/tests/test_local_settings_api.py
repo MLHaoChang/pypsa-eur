@@ -494,3 +494,73 @@ def test_reveal_argv_per_platform(monkeypatch, tmp_path, platform, expected_head
     argv = routes._reveal_argv(tmp_path / "pypsa-gui.log")
 
     assert argv[: len(expected_head)] == expected_head
+
+
+def test_reveal_does_not_hand_provider_keys_to_the_spawned_process(
+    local_client, monkeypatch,
+):
+    """
+    C-18 — the spec's subprocess-env hardening was never implemented, and this
+    branch is what made it matter.
+
+    `bootstrap_environment` pushes every managed name from `user.env` into
+    `os.environ`. On master that was one variable; now it is all four provider
+    keys plus every `PYPSA_GUI_LLM_KEY__*` slot. `subprocess.run` with no
+    `env=` hands the entire environment to `xdg-open`/`open`/`explorer`, which
+    is a long-lived desktop file manager, not a short-lived helper.
+
+    Nothing from the request reaches the command — that part of the route's
+    docstring is true and separately tested. Its silence about the ENVIRONMENT
+    is the gap.
+    """
+    from services import app_secrets
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-should-not-travel")
+    monkeypatch.setenv("PYPSA_GUI_LLM_KEY__SLOT", "sk-slot-should-not-travel")
+    monkeypatch.setenv("PATH", os.environ.get("PATH", ""))
+
+    seen: dict = {}
+
+    def _capture(argv, **kw):
+        seen["env"] = kw.get("env")
+        return None
+
+    monkeypatch.setattr("routers.local_settings.subprocess.run", _capture)
+    resp = local_client.post("/api/local-settings/reveal-log")
+    assert resp.status_code == 200
+
+    child_env = seen["env"]
+    assert child_env is not None, (
+        "subprocess.run was called with no env=, so the child inherits every "
+        "provider key and per-profile slot in the process"
+    )
+    leaked = [k for k in child_env if app_secrets.is_managed_key(k)]
+    assert leaked == [], f"managed credentials handed to the child: {leaked}"
+    # DISCRIMINATION — the child must still be able to run.
+    assert "PATH" in child_env
+
+
+# ── A8 — the same disclosure, on the pane that shares the same store ──────
+#
+# `local_settings.stored_api_key()` IS `app_secrets.get_stored`, so a short
+# key saved here is unredactable in exactly the way one saved on the
+# profiles pane is. Disclosing on one surface and not the other would be
+# worse than either: an operator who checked the screen that stays silent
+# would reasonably conclude there was nothing to know.
+
+
+def test_the_state_reports_whether_the_key_can_be_redacted(local_client, no_probe):
+    local_client.put(
+        "/api/local-settings/anthropic-key", json={"api_key": "sk-x9k2"},
+    )
+    assert local_client.get("/api/local-settings").json()["key_redactable"] is False
+
+    local_client.put(
+        "/api/local-settings/anthropic-key", json={"api_key": "sk-ant-abc123def456"},
+    )
+    assert local_client.get("/api/local-settings").json()["key_redactable"] is True
+
+
+def test_an_unset_key_claims_neither_here_either(local_client):
+    """ADR-0001: absent is not 'will leak'."""
+    assert local_client.get("/api/local-settings").json()["key_redactable"] is None

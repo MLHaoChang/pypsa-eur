@@ -10,9 +10,15 @@ math / pandas are imported locally inside functions where the router did the
 same; module-level imports below are only what the bodies reference at module
 scope.
 """
+
 from __future__ import annotations
 
 import logging
+
+# The transplanted `_periodized_lookup` logs here (merge, 2026-09-10): its
+# failure is silent and total — every asset's CAPEX reads 0.00 — so it has to
+# be diagnosable from pypsa-gui.log.
+logger = logging.getLogger("pypsa_gui.compare")
 
 import pandas as pd
 from models.schemas import (

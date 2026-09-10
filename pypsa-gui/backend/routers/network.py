@@ -127,6 +127,10 @@ router = APIRouter()
 # the bottom is not bound yet for anything above it that references it.
 from routers.network_time_axis import (  # noqa: E402,F401
     _ATTR_TO_CLASS,
+    # Re-exported for the same reason as every name in this block: the
+    # decomposition's contract is that the ORIGINAL module stays the import
+    # surface. `tests/test_model_horizon_endpoints.py` imports it from here.
+    _infer_snapshot_freq,
     delete_timeseries,
     download_snapshot_weightings_csv,
     get_investment_periods,
@@ -1173,26 +1177,6 @@ def update_meta(meta: NetworkMeta):
     return {"name": n.name}
 
 
-@router.get("/catalog/{component}")
-def get_attribute_catalog(component: str) -> dict:
-    """
-    PyPSA's own attribute metadata for one component class (spec D3, D24).
-
-    Class-level and immutable at runtime, which is why the client caches it
-    under the unscoped key ['catalog', component] with staleTime: Infinity.
-    All catalog logic lives in services/attribute_catalog.py; this stays thin
-    per .cursor/rules/pypsa-gui-backend.mdc:10-12.
-    """
-    n = PyPSAService.get_network()
-    try:
-        attributes = attribute_catalog.catalog_for(n, component)
-    except KeyError:
-        raise HTTPException(
-            400,
-            f"Unknown component '{component}'. Expected one of: "
-            f"{', '.join(attribute_catalog.known_components())}.",
-        )
-    return {"component": component, "attributes": attributes}
 
 
 @router.post("/reset")
@@ -1301,6 +1285,159 @@ def _bool_input_default(component_class: str, col: str) -> bool:
     return False
 
 
+def _coerce_bulk_value(df: pd.DataFrame, col: str, value: Any,
+                       component_class: str) -> Any:
+    """
+    Coerce one bulk value to `col`'s existing dtype.
+
+    MERGE NOTE (2026-09-10). This branch extracted the helper so the
+    per-row form (spec D9) could apply identical semantics; master kept the
+    logic inline and then GREW it — the Phase 12f/12g finite-default rules,
+    the `active` 422, `_bool_input_default`, the non-finite refusal. Taking
+    either side whole lost the other half: this branch's row form, or
+    master's rules.
+
+    Master's loop body is kept BYTE-FOR-BYTE below, wrapped in a one-pass
+    loop so its `continue` statements still mean "this column is done".
+    Rewriting them into `return`s was tried first and silently broke the
+    numeric branch, whose later checks read back `coerced[col]`. Keeping
+    the body verbatim means there is nothing to get wrong, and master's
+    own tests (`test_nonfinite_bounds`, `test_nonfinite_inputs`,
+    `test_includes_outages`) pin every rule.
+
+    `component_class` is new to the signature and load-bearing: master's
+    rules consult per-class metadata (`_finite_input_meta`,
+    `_bool_input_default`) the old three-argument form could not see.
+    """
+    coerced: dict[str, Any] = {}
+    for _ in (0,):
+        col_dtype = df[col].dtype
+        if pd.api.types.is_bool_dtype(col_dtype):
+            if isinstance(value, str):
+                if value.strip().lower() in ("true", "1", "yes"):
+                    value = True
+                elif value.strip().lower() in ("false", "0", "no"):
+                    value = False
+            if value is None:
+                # Phase 12h: the bulk editor sends `null` for a blank
+                # cell, and `df.loc[...] = None` upcasts the column to
+                # `object` — the one shape netCDF refuses — so the next
+                # project save is a 500. A null clears to the column's
+                # CLASS DEFAULT, read from PyPSA's metadata rather than
+                # assumed False.
+                #
+                # `active` is refused instead. Its default is True, so
+                # clearing it would ACTIVATE every selected asset,
+                # behind a confirm toast that reads "Set active =
+                # (unset) on 200 generator(s)?". 422 is the shape this
+                # route already uses for a value it could write but
+                # refuses on what the write would MEAN (12g's non-finite
+                # refusal); 400 is its wrong-type answer.
+                if col == "active":
+                    raise HTTPException(
+                        422,
+                        "Column 'active' cannot be cleared — send true "
+                        "or false. Its PyPSA default is true, so "
+                        "clearing it would ACTIVATE every selected "
+                        "asset rather than leave it as it is.")
+                coerced[col] = _bool_input_default(component_class, col)
+                continue
+            coerced[col] = bool(value)
+            continue
+        if pd.api.types.is_numeric_dtype(col_dtype):
+            if value is None or value == "":
+                # Blank-to-clear a bound should produce PyPSA's "no bound"
+                # sentinel (±inf), matching how the per-row PUT path clears the
+                # capacity/economic bounds via the schema aliases (_NoneToPosInf
+                # on *_max / lifetime, _NoneToNegInf on e_sum_min). The
+                # endswith("_max") predicate is intentionally a superset: it also
+                # covers PyPSA's inf-default voltage bounds (v_mag_pu_max,
+                # v_ang_max) — clearing those to inf is likewise their PyPSA
+                # default, so the resulting network is valid. Everything else
+                # keeps NaN ("missing"), as before.
+                # Phase 12g: the finite-default metadata decides FIRST. The
+                # suffix rules below target ±inf-default columns (`p_nom_max`,
+                # `lifetime`, `e_sum_min`) — but `Transformer.phase_shift_max`
+                # ends in `_max` and defaults to 0.0, and clearing it to `inf`
+                # made the next solve refuse the value `_bulk` itself wrote.
+                _meta = _finite_input_meta(component_class, col)
+                if _meta is not None:
+                    coerced[col] = _meta[0]
+                elif col.endswith("_max") or col == "lifetime":
+                    coerced[col] = float("inf")
+                elif col == "e_sum_min":
+                    coerced[col] = float("-inf")
+                elif col in _FINITE_DEFAULT_BOUNDS:
+                    # Phase 12f. NaN is not a valid "no bound" sentinel for
+                    # these five: PyPSA does not fall back to a default, it
+                    # MASKS the constraint row out of the LP, so clearing
+                    # `p_max_pu` used to leave a 100 MW unit free to dispatch
+                    # 500 MW. Their class default is finite, so "unset" has a
+                    # real value — and it is exactly what `n.add(attr=None)`
+                    # coerces to, verified for all five across Generator,
+                    # Link, StorageUnit, Store, Line and Transformer. Keyed by
+                    # (component, column) because `StorageUnit.p_min_pu` is
+                    # −1.0 where a Generator's is 0.0.
+                    #
+                    # `ramp_limit_*` deliberately still lands in the NaN branch
+                    # below: there the class default IS NaN and PyPSA masks the
+                    # row on purpose, which is the documented way to say "this
+                    # unit has no ramp limit".
+                    coerced[col] = _finite_bound_default(component_class, col)
+                else:
+                    coerced[col] = float("nan")  # pandas treats this as missing
+                continue
+            try:
+                coerced[col] = float(value)
+            except (TypeError, ValueError):
+                raise HTTPException(400,
+                    f"Column '{col}' is numeric ({col_dtype}); got non-numeric "
+                    f"value {value!r}.")
+            # Phase 12f: `json.loads` accepts the bare `NaN` and `Infinity`
+            # literals and `float()` accepts the strings "nan" and "inf", so
+            # a non-finite value can reach one of the five bounds past the
+            # `null` branch above. It masks the LP row exactly as a cleared
+            # cell did, so it is refused here — the same answer the time-
+            # series routes give — rather than accepted and refused at solve.
+            # Whole-branch review S1: the outage rate is a probability-like
+            # unavailability — finite and in [0, 1) — and the engines
+            # convolve whatever number is here, so the bulk path refuses
+            # exactly what the create/update schemas refuse.
+            if col == "outage_rate_value" and not (
+                    math.isfinite(coerced[col]) and 0.0 <= coerced[col] < 1.0):
+                raise HTTPException(
+                    422,
+                    f"Column 'outage_rate_value' must be a finite number in "
+                    f"[0, 1); got {value!r}. It is a probability-like "
+                    "unavailability, not a percentage or count. Send null "
+                    "to unset it (the per-carrier default then applies).")
+            if not math.isfinite(coerced[col]) and (
+                    col in _FINITE_DEFAULT_BOUNDS
+                    or _finite_input_meta(component_class, col) is not None):
+                # Phase 12g: every finite-default input, not only the five.
+                raise HTTPException(
+                    422,
+                    f"Column '{col}' must be a finite number; got {value!r}. "
+                    "PyPSA does not default a non-finite value here, it drops "
+                    "the term or the constraint that reads it. Send null to "
+                    "restore the default.")
+            continue
+        # Strings / objects pass through. We still cast to str if the user
+        # sent a number into a string column so dtype stays clean.
+        if pd.api.types.is_string_dtype(col_dtype) or pd.api.types.is_object_dtype(col_dtype):
+            coerced[col] = "" if value is None else str(value)
+            continue
+        coerced[col] = value
+    return coerced.get(col, value)
+
+
+# MERGE NOTE (2026-09-10): master's `bulk_update` is the base, with this
+# branch's per-row form (spec D9) grafted on. Master's is the better base:
+# it added the Phase 12h single-lock hold — load-bearing, because the flag
+# normaliser can CREATE a column that the unknown-column check and the
+# dtype dispatch then read — plus the transient-row refusal and the
+# finite-default rules. Taking this branch's version whole (the first
+# attempt) lost all of that and failed master's own tests.
 @router.patch("/_bulk")
 def bulk_update(body: dict) -> dict:
     """Bulk edit. Two request shapes, one implementation.
@@ -1704,6 +1841,30 @@ def undo_last():
 # so a concurrent upload + autosave can't trip
 # `RuntimeError: dictionary changed size during iteration` inside
 # _serialize_user_ts / _restore_user_ts.
+
+
+# ── Attribute catalog ─────────────────────────────────────────────────────────
+
+@router.get("/catalog/{component}")
+def get_attribute_catalog(component: str) -> dict:
+    """
+    PyPSA's own attribute metadata for one component class (spec D3, D24).
+
+    Class-level and immutable at runtime, which is why the client caches it
+    under the unscoped key ['catalog', component] with staleTime: Infinity.
+    All catalog logic lives in services/attribute_catalog.py; this stays thin
+    per .cursor/rules/pypsa-gui-backend.mdc:10-12.
+    """
+    n = PyPSAService.get_network()
+    try:
+        attributes = attribute_catalog.catalog_for(n, component)
+    except KeyError:
+        raise HTTPException(
+            400,
+            f"Unknown component '{component}'. Expected one of: "
+            f"{', '.join(attribute_catalog.known_components())}.",
+        )
+    return {"component": component, "attributes": attributes}
 
 
 # ── Time Series ───────────────────────────────────────────────────────────────

@@ -1,8 +1,14 @@
 /**
- * The pane's one job: `state == null` hides everything (this build isn't the
- * desktop app), a real state object renders it, and the loading branch is
- * checked BEFORE the null branch so a slow response never flashes the
- * "hidden" state before content appears.
+ * The pane hosts TWO independently-gated surfaces now (Task 15):
+ * local-settings (`state == null` hides the desktop-only key/diagnostics
+ * body — this build isn't the desktop app) and AssistantModelSettings
+ * (hides itself when `/chat/settings/llm` is unreachable — a 403 for an
+ * ordinary member, or a 404). Either can be present without the other: a web
+ * deployment 404s local-settings but a super-admin there still gets the
+ * assistant-model section: see `hooks/useLLMSettings.ts`.
+ *
+ * The loading branch is checked BEFORE the null branch so a slow response
+ * never flashes the "hidden" state before content appears.
  *
  * Guards only THIS component in isolation — it renders `<LocalSettings />`
  * directly and never exercises `useCommands`/`CommandPalette`, so it says
@@ -15,6 +21,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LocalSettings from './LocalSettings'
 import { fetchLocalSettings, type LocalSettingsState } from '../api/localSettings'
+import { fetchLLMSettingsOrNull, type LLMSettingsPayload } from '../api/llmSettings'
 
 // Partial mock: keep the real keyFieldPlaceholder/probeMessage/etc (the pane
 // imports and calls them), stub only the network call the hook wraps.
@@ -23,27 +30,97 @@ vi.mock('../api/localSettings', async (orig) => ({
   fetchLocalSettings: vi.fn(),
 }))
 
-const STATE: LocalSettingsState = { key_set: true, key_hint: '7f3a', log_path: '/tmp/app.log' }
+// Same partial-mock shape, for the AssistantModelSettings section this pane
+// now hosts. Defaults (below) resolve null so every pre-existing test in
+// this file keeps its old scope — only the web-deployment test opts into a
+// reachable payload.
+vi.mock('../api/llmSettings', async (orig) => ({
+  ...(await orig<typeof import('../api/llmSettings')>()),
+  fetchLLMSettingsOrNull: vi.fn(),
+}))
+
+const STATE: LocalSettingsState = { key_set: true, key_hint: '7f3a', key_redactable: true, log_path: '/tmp/app.log' }
+
+const LLM_PAYLOAD: LLMSettingsPayload = {
+  active_profile_id: 'anthropic-sonnet',
+  profiles: [{
+    id: 'anthropic-sonnet', label: 'Claude Sonnet', preset: 'anthropic-sonnet',
+    wire: 'anthropic', base_url: null, model: 'claude-sonnet-5',
+    tools: true, vision: true, auth: 'bearer', fallback_model: null, max_output_tokens: null,
+    key_env: 'ANTHROPIC_API_KEY',
+    key_required: true, key_present: false, key_hint: null, key_redactable: null,
+  }],
+  presets: [],
+}
 
 const renderPane = () => {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  // `retryDelay: 0` alongside `retry: false`: react-query resolves the two
+  // independently per query, and `useLLMSettings` sets `retry: 2` (which
+  // correctly wins over this `retry: false` default) but never sets its own
+  // `retryDelay`, so it still falls through to whatever this default is.
+  // Without it, the outage test below waits out ~3s of real exponential
+  // backoff for no reason — only the retry COUNT is worth proving.
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } })
   return render(<QueryClientProvider client={qc}><LocalSettings /></QueryClientProvider>)
 }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(null)
 })
 
 describe('desktop-vs-web visibility', () => {
-  it('renders nothing once resolved to null (web deployment: routes 404)', async () => {
+  it('renders nothing at all once BOTH surfaces resolve to unreachable', async () => {
     // Catches: the `if (state == null) return null` guard being removed,
-    // inverted, or bypassed — this file's own render path only, per the
-    // header above. It does not exercise ⌘K's act-settings entry; see
-    // components/CommandPalette.test.tsx for that door.
+    // inverted, or bypassed for the local-settings body — this file's own
+    // render path only, per the header above. It does not exercise ⌘K's
+    // act-settings entry; see components/CommandPalette.test.tsx for that
+    // door.
     vi.mocked(fetchLocalSettings).mockResolvedValue(null)
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(null)
     const { container } = renderPane()
     await waitFor(() => expect(container.firstChild).toBeNull())
     expect(screen.queryByText('Anthropic API key')).toBeNull()
+  })
+
+  it('on web (local-settings 404s) still renders the assistant section when llm-settings is reachable', async () => {
+    // The THIRD sanctioned edit to this pinned test (Task 15): local-settings
+    // 404ing no longer means "this pane renders nothing" — the two surfaces
+    // are gated independently. A super-admin on a web deployment gets the
+    // assistant-model section with none of the desktop-only key/diagnostics
+    // body.
+    vi.mocked(fetchLocalSettings).mockResolvedValue(null)
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(LLM_PAYLOAD)
+    renderPane()
+
+    expect(await screen.findByText('Claude Sonnet')).toBeTruthy()
+    expect(screen.queryByText('Anthropic API key')).toBeNull()
+    expect(screen.queryByText('Diagnostics')).toBeNull()
+  })
+
+  // Fix round 1 — the pane's own outer "nothing to show" guard had the same
+  // bug AssistantModelSettings did: it only checked `llmSettings.data ==
+  // null`, which is true on BOTH "not for you" (403/404) and a genuine
+  // llm-settings outage (500/network failure) — so with local-settings also
+  // unreachable, an outage made the ENTIRE pane vanish, burying
+  // AssistantModelSettings' own new visible error state before it could
+  // ever render.
+  it('still renders something (the assistant section\'s outage state), not nothing, when llm-settings errors and local-settings is also unreachable', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue(null)
+    vi.mocked(fetchLLMSettingsOrNull).mockRejectedValue(
+      Object.assign(new Error('Internal Server Error'), {
+        isAxiosError: true, response: { status: 500 },
+      }),
+    )
+    const { container } = renderPane()
+
+    // See renderPane's `retryDelay: 0` note above — this settles in ms, not
+    // the ~3s real backoff `retry: 2` would otherwise cost.
+    const errorBox = await screen.findByTestId('assistant-model-settings-error')
+    expect(errorBox).toBeTruthy()
+    expect(container.firstChild).not.toBeNull()
+    // Proves `retry: 2` itself is untouched: 1 initial attempt + 2 retries.
+    expect(fetchLLMSettingsOrNull).toHaveBeenCalledTimes(3)
   })
 
   it('renders the pane once resolved to a real state object (desktop app)', async () => {
@@ -53,6 +130,11 @@ describe('desktop-vs-web visibility', () => {
     vi.mocked(fetchLocalSettings).mockResolvedValue(STATE)
     renderPane()
     expect(await screen.findByText('Anthropic API key')).toBeTruthy()
+    // Fix round 1, item (2): pin the third leg of the gating matrix
+    // explicitly. This test's own default (beforeEach) already has
+    // llm-settings unreachable — this assertion was previously incidental,
+    // never checked.
+    expect(screen.queryByTestId('assistant-model-settings')).toBeNull()
   })
 
   it('shows the loading state before a pending fetch resolves — no empty-state flash', async () => {
@@ -71,5 +153,46 @@ describe('desktop-vs-web visibility', () => {
     expect(container.firstChild).not.toBeNull()
     resolve(null)
     await waitFor(() => expect(screen.queryByText('Loading…')).toBeNull())
+  })
+})
+
+// A8 — the same disclosure as the profiles pane, on the surface that writes
+// the same ANTHROPIC_API_KEY slot. Silent here would be worse than silent
+// everywhere: an operator who checked this screen would reasonably conclude
+// there was nothing to know.
+describe('A8 — unredactable key disclosure', () => {
+  it('warns when the stored key is too short to be redacted from logs', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue({
+      key_set: true, key_hint: null, key_redactable: false, log_path: '/tmp/pypsa-gui.log',
+    })
+    renderPane()
+    const warning = await screen.findByTestId('local-settings-key-unredactable')
+    expect(warning.textContent ?? '').toMatch(/log/i)
+  })
+
+  it('says nothing for a key redaction can blot out', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue({
+      key_set: true, key_hint: '…wxyz', key_redactable: true, log_path: '/tmp/pypsa-gui.log',
+    })
+    renderPane()
+    // Anchor on rendered CONTENT, not on the fetch having been called: the
+    // call happens on mount, before the data resolves and the pane
+    // re-renders, so asserting absence there passes against an empty pane
+    // and proves nothing. `findByText` waits for the loaded state.
+    await screen.findByText('Anthropic API key')
+    expect(screen.queryByTestId('local-settings-key-unredactable')).toBeNull()
+  })
+
+  it('says nothing when no key is set, rather than claiming it is safe', async () => {
+    vi.mocked(fetchLocalSettings).mockResolvedValue({
+      key_set: false, key_hint: null, key_redactable: null, log_path: '/tmp/pypsa-gui.log',
+    })
+    renderPane()
+    // Anchor on rendered CONTENT, not on the fetch having been called: the
+    // call happens on mount, before the data resolves and the pane
+    // re-renders, so asserting absence there passes against an empty pane
+    // and proves nothing. `findByText` waits for the loaded state.
+    await screen.findByText('Anthropic API key')
+    expect(screen.queryByTestId('local-settings-key-unredactable')).toBeNull()
   })
 })

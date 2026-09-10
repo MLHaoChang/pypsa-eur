@@ -12,6 +12,10 @@ the router already used, so they are intentionally absent from this header.
 """
 from __future__ import annotations
 
+from services.solver_service import (
+    upfront_cost_series as _upfront_cost_series,
+)
+
 import logging
 
 from services.period_utils import (
@@ -34,6 +38,10 @@ logger = logging.getLogger("pypsa_gui.results")
 
 
 
+# Moved here in the 2026-09-10 merge: `compute_cost_breakdown` is the only
+# caller, and a service reaching back into a router for them is the wrong
+# import direction. `routers/results.py` imports them back, so anything
+# that referenced them there still resolves.
 # ── Lifetime CAPEX: unavailable is a value, 0.00 is a claim ───────────────
 # Three helpers shared by `get_cost_breakdown`'s lifetime-CAPEX walk and its
 # emission. They exist to keep ONE rule in one place: a lifetime CAPEX that
@@ -89,6 +97,37 @@ def compute_cost_breakdown(n, cfg):
     Lifted from `routers.results.get_cost_breakdown`, which keeps the network
     lookup, the `_dispatch_ready` gate and the `_state` reads. Returns the
     payload dict, or `None` where the handler returns 204.
+
+    PyPSA's `n.statistics()` returns a DataFrame indexed by (component, carrier)
+    with columns including 'Capital Expenditure' and 'Operational Expenditure'.
+    We pivot that into:
+      - per-component-class totals,
+      - per-carrier breakdown,
+      - and a grand total.
+
+    The grand total here is the right thing to call "Total system cost"; the
+    LOPF objective value alone is inferior because it can include additional
+    penalty terms or omit certain costs depending on solver config.
+
+    Two CAPEX bases, and they are not interchangeable:
+
+      • `capex` / `capex_expansion` — ANNUALISED, straight from
+        `n.statistics()`. Always a number.
+      • `capex_lifetime` / `capex_expansion_lifetime` /
+        `storage_capex_expansion_lifetime` — the present value of the UPFRONT
+        (overnight) investment, `number | null`. `null` means PyPSA could not
+        resolve an upfront cost for at least one component class, and the
+        top-level `capex_lifetime_available` flag says so in one place. Nulls
+        propagate into every total that contains an unknown class: a horizon
+        figure that silently omits a component is the defect this contract
+        exists to prevent, not a smaller version of the right answer.
+
+    Most networks never see a null, because the upfront cost is DERIVED where
+    it can be: PyPSA back-calculates `capital_cost / (annuity x nyears)` for
+    assets priced without an `overnight_cost`, and the
+    `for_back_calculation=True` fill below supplies the `discount_rate` that
+    back-calculation needs from the solver config. A real number beats a null;
+    the null is for when there is genuinely nothing to compute from.
     """
     # `*_lifetime_by_class` is built inside the same `with` block as the
     # statistics call so the lifetime fill is still in place when we read
@@ -97,9 +136,14 @@ def compute_cost_breakdown(n, cfg):
     # lifetime) per component class. We keep the annualised numbers
     # PyPSA already returns and ADD a lifetime variant; the toggle picks
     # one or the other in the UI.
+    #
+    # `None` in either dict means "this class's lifetime CAPEX could not be
+    # computed" — NOT zero. See `capex_lifetime_available` at the bottom of
+    # this function for the contract, and the walk below for the three ways a
+    # class can land there.
     import math as _math
-    capex_lifetime_by_class: dict[str, float] = {}
-    capex_expansion_lifetime_by_class: dict[str, float] = {}
+    capex_lifetime_by_class: dict[str, float | None] = {}
+    capex_expansion_lifetime_by_class: dict[str, float | None] = {}
     NOM_PAIRS = [
         ("generators",    "Generator",    "p_nom"),
         ("storage_units", "StorageUnit",  "p_nom"),

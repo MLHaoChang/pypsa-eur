@@ -1,0 +1,527 @@
+// Task 15 — the super-admin surface for LLM connection profiles: pick the
+// active one, manage per-profile keys, test a connection, add from a preset
+// or a custom endpoint, delete. Security-load-bearing: the API returns only
+// `key_present`/`key_hint`, NEVER a key value, so a stored key must never
+// appear in this component's inputs — that is asserted explicitly below,
+// not just assumed from the API shape.
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { render, screen, cleanup, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+import {
+  deleteLLMProfile,
+  deleteLLMProfileKey,
+  fetchLLMSettingsOrNull,
+  postLLMActive,
+  postLLMTest,
+  putLLMProfile,
+  putLLMProfileKey,
+  type LLMSettingsPayload,
+} from '../api/llmSettings'
+import { useUIStore } from '../store/uiStore'
+import AssistantModelSettings from './AssistantModelSettings'
+
+vi.mock('../api/llmSettings', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../api/llmSettings')>()
+  return {
+    ...actual,
+    fetchLLMSettingsOrNull: vi.fn(),
+    postLLMActive: vi.fn(),
+    putLLMProfileKey: vi.fn(),
+    deleteLLMProfileKey: vi.fn(),
+    postLLMTest: vi.fn(),
+    deleteLLMProfile: vi.fn(),
+    putLLMProfile: vi.fn(),
+  }
+})
+
+vi.mock('react-hot-toast', () => ({
+  default: { success: vi.fn(), error: vi.fn() },
+}))
+
+const CONFIRM_TOAST = vi.fn()
+vi.mock('../utils/toasts', () => ({ confirmToast: (...a: unknown[]) => CONFIRM_TOAST(...a) }))
+
+function payload(over: Partial<LLMSettingsPayload> = {}): LLMSettingsPayload {
+  return {
+    active_profile_id: 'anthropic-sonnet',
+    profiles: [
+      {
+        id: 'anthropic-sonnet', label: 'Claude Sonnet', preset: 'anthropic-sonnet',
+        wire: 'anthropic', base_url: null, model: 'claude-sonnet-5',
+        tools: true, vision: true, auth: 'bearer', fallback_model: null, max_output_tokens: null,
+        key_env: 'ANTHROPIC_API_KEY',
+        key_required: true, key_present: true, key_hint: '…wxyz',
+        key_redactable: true,
+      },
+      {
+        id: 'ollama-local', label: 'Local Ollama', preset: 'custom',
+        wire: 'openai', base_url: 'http://localhost:11434/v1', model: 'qwen3:8b',
+        tools: false, vision: false, auth: 'none', fallback_model: null, max_output_tokens: null,
+        key_env: null,
+        key_required: false, key_present: false, key_hint: null,
+        key_redactable: null,
+      },
+    ],
+    presets: [
+      {
+        id: 'openai', label: 'OpenAI', wire: 'openai', base_url: 'https://api.openai.com/v1',
+        auth: 'bearer', key_env: 'OPENAI_API_KEY', tools: true, vision: true,
+        suggested_models: ['gpt-5.6-sol'], help: 'Get a key at platform.openai.com.',
+      },
+    ],
+    ...over,
+  }
+}
+
+function renderSection() {
+  // `retryDelay: 0` alongside `retry: false`: react-query resolves the two
+  // independently per query, and `useLLMSettings` sets `retry: 2` (which
+  // correctly wins over this `retry: false` default — real query, real
+  // retries) but never sets its own `retryDelay`, so `useLLMSettings` still
+  // falls through to whatever this default is. Without it, the outage test
+  // below waits out ~3s of real exponential backoff for no reason: the
+  // *retry count* (3 calls: 1 + 2 retries) is the thing worth proving, not
+  // the wall-clock delay between them.
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false, retryDelay: 0 } } })
+  return render(
+    <QueryClientProvider client={qc}>
+      <AssistantModelSettings />
+    </QueryClientProvider>,
+  )
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  useUIStore.setState({ settingsSectionRequest: null })
+  Element.prototype.scrollIntoView = vi.fn()
+})
+afterEach(() => cleanup())
+
+describe('AssistantModelSettings', () => {
+  it('hides itself (renders nothing) when llm-settings answers "not for you" (403/404 → null)', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(null)
+    const { container } = renderSection()
+    await waitFor(() => expect(container.firstChild).toBeNull())
+  })
+
+  // Fix round 1 — ADR-0001 in a new place: an OUTAGE must not render
+  // identically to "not for you". Before this fix, `useLLMSettings`'s
+  // `data` was `undefined` on ANY settled failure (a real 500, a network
+  // drop, not just the 403/404 fetchLLMSettingsOrNull maps to null), and
+  // `data == null` is true for `undefined` too — so a genuine outage
+  // silently rendered nothing, indistinguishable from an ordinary member
+  // being told this isn't for them. `fetchLLMSettingsOrNull` itself was
+  // already correct (it only maps 403/404 to null and rethrows everything
+  // else); the loss was one layer up, in how the component read the query.
+  it('renders a distinct, visible outage state — not hidden, not the "not for you" null — on a real failure', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockRejectedValue(
+      Object.assign(new Error('Internal Server Error'), {
+        isAxiosError: true, response: { status: 500 },
+      }),
+    )
+    const { container } = renderSection()
+
+    // useLLMSettings sets `retry: 2` explicitly, which wins over this
+    // QueryClient's `retry: false` default — the query genuinely retries
+    // twice. `renderSection`'s `retryDelay: 0` (see above) settles that in
+    // milliseconds rather than ~3s of real exponential backoff, so this
+    // needs no timeout override — the retry COUNT is what's worth proving
+    // (asserted below), not the wall-clock delay between attempts.
+    const errorBox = await screen.findByTestId('assistant-model-settings-error')
+    expect(errorBox.textContent).toMatch(/could not load/i)
+    // Distinguishable from BOTH other states: not the null/hidden render...
+    expect(container.firstChild).not.toBeNull()
+    expect(screen.queryByTestId('assistant-model-settings')).toBeNull()
+    // ...and not silently reusing the ready state's "no profiles" shape —
+    // there is no profile list rendered here at all, error copy only.
+    expect(screen.queryByTestId(/^assistant-model-row-/)).toBeNull()
+    // A retry affordance, not a dead end.
+    expect(screen.getByTestId('assistant-model-settings-retry')).toBeTruthy()
+    // Proves `retry: 2` itself is untouched by the `retryDelay: 0` override
+    // above: 1 initial attempt + 2 retries.
+    expect(fetchLLMSettingsOrNull).toHaveBeenCalledTimes(3)
+  })
+
+  it('renders every profile from the payload', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
+    renderSection()
+    expect(await screen.findByText('Claude Sonnet')).toBeTruthy()
+    expect(screen.getByText('Local Ollama')).toBeTruthy()
+  })
+
+  it('posts the clicked profile as active, and does not re-post the one already active', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
+    vi.mocked(postLLMActive).mockResolvedValue({ active_profile_id: 'ollama-local' })
+    renderSection()
+    const user = userEvent.setup()
+
+    const activeRadio = await screen.findByTestId('assistant-model-radio-anthropic-sonnet')
+    await user.click(activeRadio)
+    expect(postLLMActive).not.toHaveBeenCalled()
+
+    await user.click(screen.getByTestId('assistant-model-radio-ollama-local'))
+    expect(postLLMActive).toHaveBeenCalledWith('ollama-local')
+  })
+
+  it('never displays a stored key value — the input starts and stays empty', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
+    renderSection()
+    const input = (await screen.findByTestId(
+      'assistant-model-key-input-anthropic-sonnet',
+    )) as HTMLInputElement
+    expect(input.value).toBe('')
+    expect(input.type).toBe('password')
+    // The hint renders as its own text, never inside the input.
+    expect(screen.getByText(/ending …wxyz/)).toBeTruthy()
+  })
+
+  it('shows "No key needed" for an auth: none profile and renders no key input', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
+    renderSection()
+    await screen.findByText('Local Ollama')
+    expect(screen.queryByTestId('assistant-model-key-input-ollama-local')).toBeNull()
+    expect(screen.getByText(/no key needed/i)).toBeTruthy()
+  })
+
+  it('saves a typed key via putLLMProfileKey and clears the draft afterwards', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
+    vi.mocked(putLLMProfileKey).mockResolvedValue({ key_required: true, key_present: true, key_hint: '…nEwK', key_redactable: true })
+    renderSection()
+    const user = userEvent.setup()
+
+    const input = (await screen.findByTestId(
+      'assistant-model-key-input-anthropic-sonnet',
+    )) as HTMLInputElement
+    await user.type(input, 'sk-ant-fresh-value')
+    await user.click(screen.getByTestId('assistant-model-key-save-anthropic-sonnet'))
+
+    await waitFor(() =>
+      expect(putLLMProfileKey).toHaveBeenCalledWith('anthropic-sonnet', 'sk-ant-fresh-value'),
+    )
+    await waitFor(() => expect(input.value).toBe(''))
+  })
+
+  it('clears a key through confirmToast, matching the LocalSettings clear-key pattern', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
+    vi.mocked(deleteLLMProfileKey).mockResolvedValue({ key_required: true, key_present: false, key_hint: null, key_redactable: null })
+    renderSection()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByTestId('assistant-model-key-clear-anthropic-sonnet'))
+    expect(CONFIRM_TOAST).toHaveBeenCalled()
+    expect(deleteLLMProfileKey).not.toHaveBeenCalled()
+
+    // Simulate the user confirming inside the toast.
+    await CONFIRM_TOAST.mock.calls[0][1]()
+    expect(deleteLLMProfileKey).toHaveBeenCalledWith('anthropic-sonnet')
+  })
+
+  // Review finding (2026-09-09 security pass) — the confirmation stated a
+  // blast radius that is false for a SHARED key. `DELETE .../key` clears the
+  // environment variable, and for a cataloged provider preset that variable
+  // is the provider-wide key: removing it for a side profile silently takes
+  // both built-ins with it. The copy said "This model will stop working",
+  // naming one model for an instance-wide effect — in the one dialog whose
+  // whole job is telling an operator what they are about to break.
+  it('names every model that loses the key, when the key is shared', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload({
+      profiles: [
+        ...payload().profiles,
+        {
+          id: 'side-car', label: 'Side Car', preset: 'anthropic',
+          wire: 'anthropic', base_url: null, model: 'claude-sonnet-5',
+          tools: true, vision: true, auth: 'bearer',
+          fallback_model: null, max_output_tokens: null,
+          key_env: 'ANTHROPIC_API_KEY',
+          key_required: true, key_present: true, key_hint: '…wxyz',
+          key_redactable: true,
+        },
+      ],
+    }))
+    renderSection()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByTestId('assistant-model-key-clear-side-car'))
+    const message = String(CONFIRM_TOAST.mock.calls[0][0])
+    expect(message).toMatch(/shared/i)
+    expect(message).toContain('"Claude Sonnet"')
+    expect(message).not.toMatch(/This model will stop working/)
+  })
+
+  it('still says "this model" when the key is the profile\'s own private slot', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload({
+      profiles: [{
+        id: 'own-slot', label: 'Own Slot', preset: 'custom',
+        wire: 'openai', base_url: 'http://localhost:11434/v1', model: 'm',
+        tools: false, vision: false, auth: 'bearer',
+        fallback_model: null, max_output_tokens: null,
+        key_env: 'PYPSA_GUI_LLM_KEY__OWN_SLOT',
+        key_required: true, key_present: true, key_hint: '…wxyz',
+        key_redactable: true,
+      }],
+    }))
+    renderSection()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByTestId('assistant-model-key-clear-own-slot'))
+    const message = String(CONFIRM_TOAST.mock.calls[0][0])
+    expect(message).toMatch(/This model will stop working/)
+    expect(message).not.toMatch(/shared/i)
+  })
+
+  // A keyless profile shares `key_env === null` with every other keyless
+  // profile. Grouping on the raw value would report them as sharing a
+  // credential none of them has.
+  it('does not treat two keyless profiles as sharing a key', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload({
+      profiles: [
+        {
+          id: 'k1', label: 'Keyless One', preset: 'ollama', wire: 'openai',
+          base_url: 'http://localhost:11434/v1', model: 'm',
+          tools: false, vision: false, auth: 'none',
+          fallback_model: null, max_output_tokens: null,
+          key_env: null, key_required: false, key_present: false,
+          key_hint: null, key_redactable: null,
+        },
+        {
+          id: 'k2', label: 'Keyless Two', preset: 'ollama', wire: 'openai',
+          base_url: 'http://localhost:11434/v1', model: 'm',
+          tools: false, vision: false, auth: 'none',
+          fallback_model: null, max_output_tokens: null,
+          key_env: null, key_required: false, key_present: false,
+          key_hint: null, key_redactable: null,
+        },
+      ],
+    }))
+    renderSection()
+    await screen.findByText('Keyless One')
+    // Neither renders a clear-key control at all, which is the real
+    // guarantee — but assert the grouping directly too, so a future change
+    // that adds the control cannot quietly claim a shared key.
+    expect(screen.queryByTestId('assistant-model-key-clear-k1')).toBeNull()
+  })
+
+  it.each([
+    ['ok', { verdict: 'ok', latency_ms: 42, models: null }, /connected/i],
+    ['unauthorized', { verdict: 'unauthorized', latency_ms: null, models: null }, /rejected the key/i],
+    ['model_not_found', { verdict: 'model_not_found', latency_ms: null, models: null }, /doesn.t recognize this model/i],
+    ['invalid_request', { verdict: 'invalid_request', latency_ms: null, models: null }, /malformed/i],
+  ] as const)('renders fix-oriented copy for the %s verdict', async (_name, result, matcher) => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
+    vi.mocked(postLLMTest).mockResolvedValue(result)
+    renderSection()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByTestId('assistant-model-test-anthropic-sonnet'))
+    const verdictText = await screen.findByTestId('assistant-model-test-result-anthropic-sonnet')
+    expect(verdictText.textContent).toMatch(matcher)
+  })
+
+  it('names the localhost endpoint as possibly-not-running on an unreachable verdict', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
+    vi.mocked(postLLMTest).mockResolvedValue({ verdict: 'unreachable', latency_ms: null, models: null })
+    renderSection()
+    const user = userEvent.setup()
+
+    // ollama-local's base_url is http://localhost:11434/v1.
+    await user.click(await screen.findByTestId('assistant-model-test-ollama-local'))
+    const verdictText = await screen.findByTestId('assistant-model-test-result-ollama-local')
+    expect(verdictText.textContent).toMatch(/may not be running/i)
+    // The full base_url must never render in this copy (host:port at most,
+    // never a path/query — the security constraint on this surface).
+    expect(verdictText.textContent).not.toContain('11434')
+  })
+
+  it('says "check that it is online" — not "may not be running" — for a non-localhost unreachable endpoint', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
+    vi.mocked(postLLMTest).mockResolvedValue({ verdict: 'unreachable', latency_ms: null, models: null })
+    renderSection()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByTestId('assistant-model-test-anthropic-sonnet'))
+    const verdictText = await screen.findByTestId('assistant-model-test-result-anthropic-sonnet')
+    expect(verdictText.textContent).not.toMatch(/may not be running/i)
+    expect(verdictText.textContent).toMatch(/online|reachable/i)
+  })
+
+  it('deletes a profile only after the ConfirmDialog is confirmed', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
+    vi.mocked(deleteLLMProfile).mockResolvedValue({ ok: true, active_profile_id: 'anthropic-sonnet' })
+    renderSection()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByTestId('assistant-model-delete-ollama-local'))
+    expect(deleteLLMProfile).not.toHaveBeenCalled()
+
+    const dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: /delete/i }))
+    await waitFor(() => expect(deleteLLMProfile).toHaveBeenCalledWith('ollama-local'))
+  })
+
+  it('adds a custom profile from the form with an id derived from the label', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
+    vi.mocked(putLLMProfile).mockResolvedValue({
+      id: 'my-endpoint', label: 'My Endpoint', preset: 'custom', wire: 'openai',
+      base_url: 'http://localhost:8000/v1', model: 'llama3', tools: false, vision: false,
+      auth: 'none', fallback_model: null, max_output_tokens: null,
+      key_env: null,
+      key_required: false, key_present: false, key_hint: null,
+      key_redactable: null,
+    })
+    renderSection()
+    const user = userEvent.setup()
+
+    await user.click(await screen.findByTestId('assistant-model-add-open'))
+    await user.type(screen.getByTestId('assistant-model-add-label'), 'My Endpoint')
+    await user.type(screen.getByTestId('assistant-model-add-base-url'), 'http://localhost:8000/v1')
+    await user.type(screen.getByTestId('assistant-model-add-model'), 'llama3')
+    await user.click(screen.getByTestId('assistant-model-add-submit'))
+
+    await waitFor(() => expect(putLLMProfile).toHaveBeenCalled())
+    const [id, body] = vi.mocked(putLLMProfile).mock.calls[0]
+    expect(id).toBe('my-endpoint')
+    expect(body.label).toBe('My Endpoint')
+    expect(body.model).toBe('llama3')
+    expect(body).not.toHaveProperty('key_env')
+  })
+
+  it('scrolls into view and clears the section request when it matches assistant-model', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
+    useUIStore.setState({ settingsSectionRequest: 'assistant-model' })
+    renderSection()
+
+    await screen.findByText('Claude Sonnet')
+    await waitFor(() => expect(Element.prototype.scrollIntoView).toHaveBeenCalled())
+    await waitFor(() => expect(useUIStore.getState().settingsSectionRequest).toBeNull())
+  })
+
+  it('does not scroll when the pending request is for a different section', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload())
+    useUIStore.setState({ settingsSectionRequest: 'some-other-section' })
+    renderSection()
+
+    await screen.findByText('Claude Sonnet')
+    expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled()
+    expect(useUIStore.getState().settingsSectionRequest).toBe('some-other-section')
+  })
+})
+
+// C-7 / W-4 — `keyStatusText` never read `key_present`, so it stated a
+// credential source from `auth`/`key_hint`/`id` alone. Two wrong answers:
+//
+//  (a) a built-in profile with nothing configured ANYWHERE still claimed
+//      "Uses ANTHROPIC_API_KEY from the environment" — the one screen built
+//      to tell an admin why chat is broken asserting a source that does not
+//      exist;
+//  (b) `key_present: true, key_hint: null` fell through to "No key set". That
+//      is reachable: `app_secrets.status()` emits `hint=None` for a value
+//      under 4 characters while `configured` stays true. The row then reads
+//      "No key set" NEXT TO a Clear button, since that button does gate on
+//      `key_present`.
+//
+// The existing fixtures only ever paired present+hint and absent+no-hint, so
+// neither mismatch was representable.
+describe('C-7 / W-4 — key status follows key_present', () => {
+  it('a built-in with no key anywhere does not claim an environment key', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue({
+      active_profile_id: 'anthropic-sonnet',
+      profiles: [{
+        id: 'anthropic-sonnet', label: 'Claude Sonnet', preset: 'anthropic',
+        wire: 'anthropic', base_url: null, model: 'claude-sonnet-5',
+        tools: true, vision: true, auth: 'bearer',
+        fallback_model: null, max_output_tokens: null,
+        key_env: 'ANTHROPIC_API_KEY',
+        key_required: true, key_present: false, key_hint: null,
+        key_redactable: null,
+      }],
+      presets: [],
+    })
+    renderSection()
+    expect(await screen.findByText('Claude Sonnet')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('from the environment')
+    expect(document.body.textContent).toContain('No key set')
+  })
+
+  it('a key too short to hint still reads as set, not as missing', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue({
+      active_profile_id: 'custom-one',
+      profiles: [{
+        id: 'custom-one', label: 'My Endpoint', preset: 'custom',
+        wire: 'openai', base_url: 'https://example.invalid/v1', model: 'm',
+        tools: true, vision: false, auth: 'bearer',
+        fallback_model: null, max_output_tokens: null,
+        key_env: 'PYPSA_GUI_LLM_KEY__CUSTOM_ONE',
+        key_required: true, key_present: true, key_hint: null,
+        key_redactable: true,
+      }],
+      presets: [],
+    })
+    renderSection()
+    expect(await screen.findByText('My Endpoint')).toBeTruthy()
+    expect(document.body.textContent).not.toContain('No key set')
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────
+// A8 — a key too short for the redaction floor travels verbatim into logs
+// and chat.jsonl. The backend now reports `key_redactable`; this pane is
+// where the super-admin who saved it is looking, so it is where the fact
+// has to appear. A flag nothing renders is not a disclosure.
+// ─────────────────────────────────────────────────────────────────────────
+
+describe('A8 — unredactable key disclosure', () => {
+  it('warns when a stored key is too short to be redacted from logs', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload({
+      profiles: [{
+        id: 'short-key', label: 'Short Key', preset: 'custom',
+        wire: 'openai', base_url: 'http://localhost:11434/v1', model: 'm',
+        tools: false, vision: false, auth: 'bearer',
+        fallback_model: null, max_output_tokens: null,
+        key_env: 'PYPSA_GUI_LLM_KEY__SHORT_KEY',
+        key_required: true, key_present: true, key_hint: null,
+        key_redactable: false,
+      }],
+    }))
+    renderSection()
+    const warning = await screen.findByTestId('assistant-model-key-unredactable-short-key')
+    expect(warning.textContent ?? '').toMatch(/log/i)
+  })
+
+  it('says nothing for a key that redaction can blot out', async () => {
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload({
+      profiles: [{
+        id: 'long-key', label: 'Long Key', preset: 'custom',
+        wire: 'openai', base_url: 'http://localhost:11434/v1', model: 'm',
+        tools: false, vision: false, auth: 'bearer',
+        fallback_model: null, max_output_tokens: null,
+        key_env: 'PYPSA_GUI_LLM_KEY__LONG_KEY',
+        key_required: true, key_present: true, key_hint: '…wxyz',
+        key_redactable: true,
+      }],
+    }))
+    renderSection()
+    await screen.findByText('Long Key')
+    expect(screen.queryByTestId('assistant-model-key-unredactable-long-key')).toBeNull()
+  })
+
+  it('says nothing when no key is set, rather than claiming it is safe', async () => {
+    // ADR-0001 at the render layer: `key_redactable: null` is "no value to
+    // describe", and must not render like either answer.
+    vi.mocked(fetchLLMSettingsOrNull).mockResolvedValue(payload({
+      profiles: [{
+        id: 'no-key', label: 'No Key', preset: 'custom',
+        wire: 'openai', base_url: 'http://localhost:11434/v1', model: 'm',
+        tools: false, vision: false, auth: 'bearer',
+        fallback_model: null, max_output_tokens: null,
+        key_env: 'PYPSA_GUI_LLM_KEY__NO_KEY',
+        key_required: true, key_present: false, key_hint: null,
+        key_redactable: null,
+      }],
+    }))
+    renderSection()
+    await screen.findByText('No Key')
+    expect(screen.queryByTestId('assistant-model-key-unredactable-no-key')).toBeNull()
+  })
+})

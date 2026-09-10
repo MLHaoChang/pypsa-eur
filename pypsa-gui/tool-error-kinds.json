@@ -1,0 +1,271 @@
+{
+  "$comment": [
+    "SHARED BACKEND<->FRONTEND CONTRACT. Every error_kind that can reach the",
+    "frontend on a `tool_error` SSE frame, and what the UI must do with it.",
+    "",
+    "WHY THIS FILE EXISTS. ChatPanel's subset test proves every kind in",
+    "TOOL_ERROR_BANNER_KINDS has KIND_COPY — a kind that routes losing its",
+    "copy. It cannot see the other direction: a kind that SHOULD route and",
+    "does not. That is the direction that actually bit us, twice, and both",
+    "times the symptom was identical and silent — the banner's copy existed",
+    "and was simply unreachable, so the user got a truncated gray tool line.",
+    "`inactive_acting_user` was corrected that way, and so were",
+    "`not_authorized` and `unknown_profile_id`.",
+    "",
+    "Neither side can close it alone: the backend knows what it can emit and",
+    "nothing about copy; the frontend knows its copy and cannot enumerate the",
+    "backend. So the set lives here, and both sides assert against it.",
+    "",
+    "HOW IT IS ENFORCED.",
+    "  backend/tests/test_tool_error_kind_manifest.py",
+    "      derives the set from the source and fails if it differs from the",
+    "      keys below. A NEW error_kind therefore fails the build until",
+    "      somebody classifies it here.",
+    "  frontend/src/components/ChatPanel.manifest.test.tsx",
+    "      asserts every `banner` kind is in TOOL_ERROR_BANNER_KINDS AND in",
+    "      KIND_COPY, and every `inline` kind is in neither.",
+    "",
+    "THE DERIVED SET IS A SUPERSET, deliberately. It is every `error_kind`",
+    "literal yielded at a `tool_error` site, plus every one appearing in ANY",
+    "dict literal anywhere in the backend, because tool dispatch forwards any",
+    "exception carrying `detail['error_kind']` (chat_service._run_one_tool's",
+    "except block) and those details are not always written inline at the",
+    "raise — `study_in_flight` is built in `project_context.study_swap_refusal`",
+    "and raised as a variable, which an HTTPException-scoped scan missed.",
+    "",
+    "Some kinds it finds are only ever raised from a route and never from a",
+    "tool handler; those are classified `inline` with that as the reason.",
+    "Over-including costs a line of JSON; under-including is the bug this file",
+    "exists to prevent.",
+    "",
+    "surface: 'banner' = promote to the error banner (needs KIND_COPY).",
+    "         'inline' = leave as the gray tool line.",
+    "Changing one is a UI decision. Write down why, as the entries do."
+  ],
+  "kinds": {
+    "aborted": {
+      "surface": "inline",
+      "why": "The user pressed stop. Announcing their own action in a banner is noise."
+    },
+    "capability_unsupported": {
+      "surface": "banner",
+      "why": "The profile cannot do what the turn needs (vision, tools). A configuration problem only the user can fix, and the turn is over. It already had KIND_COPY and did not route — the same unreachable-copy shape as inactive_acting_user."
+    },
+    "confirmation_denied": {
+      "surface": "inline",
+      "why": "The user denied the card. Their own decision, already visible on the card."
+    },
+    "confirmation_expired": {
+      "surface": "banner",
+      "why": "The card timed out; the action did not happen and the user must redo it."
+    },
+    "descendants_exist": {
+      "surface": "banner",
+      "why": "A destructive project operation was refused. The user chooses cascade or rename."
+    },
+    "empty_file": {
+      "surface": "banner",
+      "why": "Upload rejected. The user must supply a different file."
+    },
+    "excel_parse_failed": {
+      "surface": "inline",
+      "why": "One read failed on one workbook. The turn continues and the model reports it in prose."
+    },
+    "file_integrity_error": {
+      "surface": "inline",
+      "why": "Raised by upload_service on a stored-file checksum mismatch, reached through the upload ROUTE rather than a tool handler. Kept here because the forwarder would carry it if a tool ever did."
+    },
+    "file_too_large": {
+      "surface": "banner",
+      "why": "Upload rejected against the 25 MB cap. The user must act."
+    },
+    "format_not_supported": {
+      "surface": "inline",
+      "why": "One tool could not read one format. Per-call, and the model can try another route."
+    },
+    "image_analysis_timeout": {
+      "surface": "banner",
+      "why": "The vision call timed out at 30 s. Nothing came back and the user should retry."
+    },
+    "image_too_large": {
+      "surface": "banner",
+      "why": "Attachment rejected against the 10 MB multimodal cap."
+    },
+    "inactive_acting_user": {
+      "surface": "banner",
+      "why": "The account stopped being active mid-turn. Nothing will work until it is fixed, and a gray tool line truncates that away — this is the correction the whole manifest generalises."
+    },
+    "internal_error": {
+      "surface": "inline",
+      "why": "An unhandled server failure. It reaches the client on a turn-terminal `error` frame, which the banner renders directly from KIND_COPY — it is not yielded at any `tool_error` site."
+    },
+    "invalid_base64": {
+      "surface": "inline",
+      "why": "Malformed payload into one tool call. The model can correct and retry."
+    },
+    "invalid_decision": {
+      "surface": "inline",
+      "why": "A confirm request carried something other than approve/deny — a client bug, not a user-actionable state."
+    },
+    "invalid_filename": {
+      "surface": "banner",
+      "why": "Upload rejected on the filename. The user must rename."
+    },
+    "invalid_png": {
+      "surface": "inline",
+      "why": "One image failed to decode in one tool call."
+    },
+    "invalid_tool_args": {
+      "surface": "inline",
+      "why": "The model sent arguments that do not match the schema. It sees the error and retries within the turn; a banner would fire on a self-correcting step."
+    },
+    "invalid_transcript": {
+      "surface": "inline",
+      "why": "Raised by POST /chat/import validating a pasted transcript. Route-only — no tool imports transcripts."
+    },
+    "load_not_found": {
+      "surface": "banner",
+      "why": "The named load is not in the network. The user gave a name that does not exist."
+    },
+    "mime_not_allowlisted_for_multimodal": {
+      "surface": "banner",
+      "why": "The file type cannot be attached; the user is told to use the read tool instead."
+    },
+    "no_acting_user": {
+      "surface": "banner",
+      "why": "No authenticated identity is bound to the turn, so every project-scoped tool 401s. Same family as inactive_acting_user and equally terminal — it was the one member of that family still unrouted."
+    },
+    "no_active_project": {
+      "surface": "inline",
+      "why": "Most tools need a project; the model recovers by asking which one, in prose, inside the same turn. Promoting it would banner a question the assistant is already asking."
+    },
+    "not_authorized": {
+      "surface": "banner",
+      "why": "The account may not take this action (e.g. switching the instance-wide profile). Terminal for the request and needs an administrator."
+    },
+    "parallel_destructive_not_allowed": {
+      "surface": "banner",
+      "why": "Several destructive calls arrived in one turn and none ran. The user must reissue them one at a time."
+    },
+    "profile_switch_requires_new_chat": {
+      "surface": "inline",
+      "why": "The session is bound to one provider's block shapes, so a mid-session switch is refused. Emitted as an `error` frame with its own `new-chat` action; the banner already gets it without tool_error routing."
+    },
+    "project_exists": {
+      "surface": "banner",
+      "why": "A save was refused to avoid an overwrite. The user chooses rename or force."
+    },
+    "project_lock_not_held": {
+      "surface": "inline",
+      "why": "Raised by routers/projects.py when a mutation arrives without the lock — a client-sequencing bug rather than a user-actionable state."
+    },
+    "project_lock_unavailable": {
+      "surface": "inline",
+      "why": "Someone else holds the lock. Transient and usually resolves; the model reports it and can retry."
+    },
+    "project_locked": {
+      "surface": "inline",
+      "why": "Raised by the projects and solve-queue routes. Route-only today; kept classified so it cannot arrive unnoticed if a tool starts reaching it."
+    },
+    "project_switched_mid_turn": {
+      "surface": "inline",
+      "why": "DELIBERATE, and do not 'fix' it: the same guard also yields this as an `error` frame (chat_service, right after the per-tool refusals), and THAT is what reaches the banner. Promoting the tool_error copy too would show the banner twice for one event."
+    },
+    "rate_limited_local": {
+      "surface": "inline",
+      "why": "The local per-session turn limiter, raised by the chat route before a turn starts — so it never arrives on a tool_error frame in practice."
+    },
+    "snapshot_count_mismatch": {
+      "surface": "banner",
+      "why": "Supplied rows do not match the network's snapshots. The data must be corrected."
+    },
+    "snapshot_range_mismatch": {
+      "surface": "banner",
+      "why": "Supplied time range does not match the network's snapshots."
+    },
+    "solver_in_flight": {
+      "surface": "banner",
+      "why": "A foreground solve is running and the operation was refused. The user waits or aborts."
+    },
+    "study_in_flight": {
+      "surface": "inline",
+      "why": "An adequacy study is running and a save/queue was refused. Deliberately QUIET on the client (`QUIET_TOAST_CODES` in api/client.ts): it is a standing condition the caller handles, and one toast per autosave tick would bury the workbench."
+    },
+    "time_column_parse_error": {
+      "surface": "banner",
+      "why": "The time column could not be parsed as datetimes; the user must fix the input."
+    },
+    "too_many_multimodal_blocks": {
+      "surface": "banner",
+      "why": "More than 20 attachments. The user must send fewer."
+    },
+    "tool_call_cap_exceeded": {
+      "surface": "banner",
+      "why": "The turn hit MAX_TOOL_CALLS_PER_TURN and stopped. Terminal, and the only per-turn bound there is."
+    },
+    "tool_error": {
+      "surface": "inline",
+      "why": "The forwarder's own fallback when a tool raises something with no structured error_kind. Generic by construction — there is no copy to write, which is exactly why the specific kinds beside it exist."
+    },
+    "tool_not_offered": {
+      "surface": "banner",
+      "why": "The endpoint asked for a tool that was never offered this turn. On a branch whose point is aiming the assistant at arbitrary endpoints, the user should see it."
+    },
+    "tool_timeout": {
+      "surface": "inline",
+      "why": "One tool exceeded its budget. The turn continues and the model can route around it."
+    },
+    "turn_already_in_flight": {
+      "surface": "inline",
+      "why": "A second turn arrived while one was running. Route-level, on an `error` frame, and the composer state already says so."
+    },
+    "unknown_confirmation_token": {
+      "surface": "inline",
+      "why": "A confirm arrived for a token this session does not know — a stale tab or a double-submit, not a user-actionable state."
+    },
+    "unknown_profile_id": {
+      "surface": "banner",
+      "why": "The selected profile no longer exists — fires for every open chat the moment a super-admin deletes one, and C-4 made it reachable."
+    },
+    "unknown_session": {
+      "surface": "inline",
+      "why": "Raised by the chat route for a session id it does not hold. Route-only; a turn cannot be running under a session that does not exist."
+    },
+    "unknown_step_kind": {
+      "surface": "inline",
+      "why": "An internal script/step vocabulary mismatch — a bug in the caller, not a user-actionable state, and never yielded at a tool_error site."
+    },
+    "unknown_tool": {
+      "surface": "inline",
+      "why": "The model named a tool that does not exist. It sees the error and corrects within the turn, like invalid_tool_args."
+    },
+    "unsupported_mime": {
+      "surface": "banner",
+      "why": "Upload rejected on type. The user must supply something else."
+    },
+    "upload_not_found": {
+      "surface": "banner",
+      "why": "A referenced upload is gone. The user must re-attach."
+    },
+    "upload_quota_exceeded": {
+      "surface": "banner",
+      "why": "The per-project upload quota is full. The user must delete something."
+    },
+    "validation_error": {
+      "surface": "inline",
+      "why": "The forwarder's Pydantic fallback. Its message is the useful part; the kind itself says only 'the arguments were wrong', which the model retries."
+    },
+    "value_column_parse_error": {
+      "surface": "banner",
+      "why": "The value column holds non-numeric data; the user must fix the input."
+    },
+    "vision_call_failed": {
+      "surface": "banner",
+      "why": "The vision sub-call failed outright. Nothing came back."
+    },
+    "vision_invalid_json": {
+      "surface": "banner",
+      "why": "The vision response did not parse. Nothing usable came back."
+    }
+  }
+}
