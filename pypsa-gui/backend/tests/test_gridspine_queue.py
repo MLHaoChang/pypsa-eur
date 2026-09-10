@@ -81,7 +81,12 @@ def test_a_restored_job_keeps_the_kind_it_was_enqueued_with():
         "storage_dir": None, "solver_config": None, "enqueued_at": None,
         "kind": sq.KIND_GRIDSPINE,
     }
-    job = sq.solve_queue.restore(row)
+    # `restore` returns `(job, created)` on this line, not a bare job: the LLM
+    # provider branch gave it a per-project dedupe, and `created` is how
+    # `solve_job_store`'s boot reconciliation counts what it actually resumed.
+    # The property under test is unchanged — the kind survives the restart.
+    job, created = sq.solve_queue.restore(row)
+    assert created is True
     assert job.kind == sq.KIND_GRIDSPINE
 
 
@@ -91,7 +96,8 @@ def test_a_row_without_a_kind_restores_as_a_solve(study):
         "id": uuid.uuid4(), "project_id": "Legacy", "project_key": None,
         "storage_dir": None, "solver_config": None, "enqueued_at": None,
     }
-    assert sq.solve_queue.restore(row).kind == sq.KIND_SOLVE
+    job, _created = sq.solve_queue.restore(row)
+    assert job.kind == sq.KIND_SOLVE
 
 
 # --------------------------------------------------------------------------

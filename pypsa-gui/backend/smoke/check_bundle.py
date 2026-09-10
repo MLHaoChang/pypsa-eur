@@ -55,6 +55,20 @@ FORBIDDEN_FILES = {
     # exact basename on purpose, and a generic `.tmp` rule would be a much
     # broader (and untested) change for one file.
     "local-settings.json.tmp",
+    # `.env`-shaped but not caught by `FORBIDDEN_PREFIXES` below: some
+    # deployments (and at least one developer script) write the runtime
+    # override file as `user.env` rather than `.env`, and it carries the same
+    # live `ANTHROPIC_API_KEY` / `SECRET_KEY` pair. A build run from a
+    # directory holding that file would otherwise sail through the prefix
+    # check on a technicality.
+    "user.env",
+    # `llm_config.save_profiles` writes this into app-data (Task 2, plan
+    # 2026-08-14). It never holds a raw key — `key_env` is derived, never
+    # stored — but it can hold a per-profile `base_url` a user considers
+    # private, and a `custom` profile's presence there is exactly the kind of
+    # thing a build run from a live app-data directory would otherwise ship
+    # by accident, same class of mistake as `local-settings.json` above.
+    "llm-profiles.json",
 }
 
 # Anything starting `.env`, not an enumeration of the two that exist today.

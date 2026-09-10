@@ -169,10 +169,17 @@ def solves_in_flight() -> list[InFlightSolve]:
     `"queue"` so this walk and the job table never double-report the same
     solve.
 
-    The job table stays the source for path (b) regardless: it is the only
-    one that also sees a job that is still `queued` (not yet dispatched to a
-    context at all), so a context-only view would still be incomplete even
-    though every RUNNING queue solve now has a resident context.
+    The job table stays the source for path (b) regardless: `_context_solves()`
+    deliberately skips `kind == "queue"` contexts (see its comment), so without
+    the table a running queue solve would not be reported at all.
+
+    Only a RUNNING queue job counts. A `queued` job has no live thread, its row
+    is durable, and boot reconciliation re-enqueues it (R25/R28) — nothing about
+    it is in flight, and `desktop/gui.py:_abort_everything` deliberately leaves
+    it alone. Counting it made the quit's wait() unsatisfiable: the wait polls
+    this function until it drains, no signal ever terminates a queued job, so
+    every quit with a backlog burned the full ABORT_TIMEOUT and reported
+    `abort_timed_out` on a shutdown that lost nothing.
     """
     found: list[InFlightSolve] = []
 
@@ -193,9 +200,13 @@ def solves_in_flight() -> list[InFlightSolve]:
         from services.solve_queue import solve_queue
 
         for job in solve_queue.list_jobs():
-            if job.get("status") in ("queued", "running"):
+            if job.get("status") == "running":
+                # `to_public` emits `project_id` (the display NAME) and
+                # `project_key` — it has NEVER emitted `project_name`, which is
+                # what this line used to read, so every queue solve was labelled
+                # `job <id>` in the confirmation the user is asked to act on.
                 found.append(InFlightSolve(
-                    "queue", job.get("project_name") or f"job {job.get('id')}", True,
+                    "queue", job.get("project_id") or f"job {job.get('id')}", True,
                 ))
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("could not inspect the solve queue: %s", exc)

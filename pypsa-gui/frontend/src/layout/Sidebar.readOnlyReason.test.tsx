@@ -20,7 +20,7 @@ import { WRITABLE } from '../utils/lockState'
 import { READ_ONLY_MUTATION_MESSAGE, SOLVING_MUTATION_MESSAGE } from '../utils/mutationGuard'
 
 vi.mock('../hooks/useSolveQueue', () => ({
-  useSolveQueue: () => ({ data: { jobs: [], current: null } }),
+  useSolveQueue: () => ({ data: { jobs: [], running: [], paused: false } }),
 }))
 // The Settings row's availability check hits /api/local-settings with
 // retry:2 hardcoded on the query itself (overrides the QueryClient's

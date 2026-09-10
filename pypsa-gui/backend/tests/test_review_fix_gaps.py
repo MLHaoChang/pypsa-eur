@@ -279,7 +279,15 @@ class _LockProxy:
         self.go = threading.Event()
 
     def __enter__(self):
-        if threading.current_thread().name == "solve-queue-dispatcher":
+        # MERGE NOTE (2026-09-10): prefix, not equality. Master runs ONE
+        # dispatcher named exactly "solve-queue-dispatcher"; this branch runs
+        # `PYPSA_GUI_MAX_CONCURRENT_SOLVES` of them, named
+        # "solve-queue-dispatcher-0", "-1", … . The invariant under test — the
+        # check and the claim happen under ONE lock hold — is unchanged and
+        # still held by both designs; only the thread name moved, and an
+        # equality match silently stopped arming the gap at all, which reads
+        # as "dispatcher never reached the gap" rather than as a real race.
+        if threading.current_thread().name.startswith("solve-queue-dispatcher"):
             self.n += 1
             if self.n == self.hold_before:
                 self.in_gap.set()

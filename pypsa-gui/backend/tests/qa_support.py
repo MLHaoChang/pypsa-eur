@@ -43,17 +43,27 @@ What a driver gets
 ``anon_client()``     an unauthenticated one, for the 401 contrast.
 ``db_session()``      a context manager yielding a real ``Session``.
 ``user()``            the seeded ``User`` row, for direct handler calls.
+``session_row(db)``   the client's live ``Session`` row, ditto.
 ``install_network(n)``  make ``n`` what the client's next request sees.
 ``save_project(...)`` save the live singleton through the real route.
 ``project_dir(name)`` the org-scoped directory a project's files live in.
 ``delete_project(...)`` remove row + directory, so a re-run does not 409.
 ``reset_backend()``   the same singleton reset the pytest suite does per test.
 
-Calling a handler directly is still fine — pass the real objects::
+Calling a handler directly is still fine, but pass EVERY dependency it
+declares — not just the ones you happen to know about::
 
-    projects_router.load_project(name, db=db, user=qa_support.user())
+    with qa_support.db_session() as db:
+        projects_router.load_project(
+            name, db=db, user=qa_support.user(),
+            session=qa_support.session_row(db),
+        )
 
-which is what the ``Depends`` defaults stand in for.
+which is what the ``Depends`` defaults stand in for. Miss one and the handler
+gets the ``Depends`` object itself, which is not ``None`` — so a
+``session is not None`` guard sails straight past it and the attribute error
+lands somewhere else entirely. That is exactly how the ``session`` parameter
+went unnoticed here: this example used to omit it.
 """
 from __future__ import annotations
 
@@ -174,6 +184,33 @@ def org_id():
     return _org_id
 
 
+def session_row(db):
+    """
+    The signed-in client's live ``Session`` row, bound to ``db``.
+
+    What ``Depends(current_session)`` supplies. Routes that move the per-session
+    active-project pointer take it, and a driver calling such a route directly
+    must hand over a real row: the ``Depends`` sentinel is not ``None``, so the
+    ``if session is not None`` guards those routes use let it through and the
+    failure surfaces as ``'Depends' object has no attribute 'active_project_id'``
+    from two frames deeper.
+
+    Takes ``db`` rather than opening its own so the row is attached to the SAME
+    session the caller passes to the handler — a row loaded on another
+    ``Session`` would be detached by the time the handler wrote to it.
+    """
+    from services.auth_service import resolve_session_row
+    from settings import get_settings
+
+    raw = client().cookies.get(get_settings().session_cookie_name)
+    if not raw:
+        raise RuntimeError("the client has no session cookie")
+    row = resolve_session_row(db, raw)
+    if row is None:
+        raise RuntimeError("the client's session is not live")
+    return row
+
+
 def session_context():
     """
     The ``ProjectContext`` the signed-in client's own requests resolve to.
@@ -186,17 +223,9 @@ def session_context():
     this is that fixture, as a function.
     """
     from services import active_project
-    from services.auth_service import resolve_session_row
-    from settings import get_settings
 
-    raw = client().cookies.get(get_settings().session_cookie_name)
-    if not raw:
-        raise RuntimeError("the client has no session cookie")
     with _session_local() as db:
-        row = resolve_session_row(db, raw)
-        if row is None:
-            raise RuntimeError("the client's session is not live")
-        ctx, _slot = active_project.resolve_for_session(db, row)
+        ctx, _slot = active_project.resolve_for_session(db, session_row(db))
         return ctx
 
 

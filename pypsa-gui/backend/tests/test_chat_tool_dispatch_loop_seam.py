@@ -45,10 +45,21 @@ def _tu(tid, name="list_components", args=None):
 
 
 def _drive(session, tool_uses, *, tool_call_count=0, holder=None, results=None,
-           turn_ctx=None, switched=lambda: False):
-    """Run the seam to completion, returning (frames, outcome)."""
+           turn_ctx=None, switched=lambda: False, offered=None):
+    """
+    Run the seam to completion, returning (frames, outcome).
+
+    `offered` is the C-1 allowlist the seam refuses unoffered `tool_use` blocks
+    against. It defaults to "everything this call passes in", because every
+    case in this file is about dispatch MECHANICS — the call count, the holder,
+    the char budget — and would otherwise be testing the capability guard by
+    accident. The guard has its own cases in `test_chat_profile_binding.py`;
+    pass `offered=` explicitly to exercise it here.
+    """
     holder = holder if holder is not None else ["P"]
     results = results if results is not None else []
+    if offered is None:
+        offered = {tu.get("name") for tu in tool_uses}
     frames = []
     gen = _seam()(
         session, tool_uses,
@@ -58,6 +69,7 @@ def _drive(session, tool_uses, *, tool_call_count=0, holder=None, results=None,
         project_switched=switched,
         tool_results_for_next_turn=results,
         char_budget={"used": 0},
+        offered_tool_names=offered,
     )
     try:
         while True:

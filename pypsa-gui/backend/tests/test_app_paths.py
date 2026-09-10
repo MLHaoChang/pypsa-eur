@@ -8,7 +8,30 @@ app bundle.
 import sys
 from pathlib import Path
 
+import pytest
+
 import app_paths
+
+
+# NOTE (merge, 2026-09-10): both branches independently added an
+# `_app_data_base` helper here, for the same reason — the rename tests
+# hard-coded macOS paths and were red everywhere else. Master's version
+# (below) is kept because it also pins LOCALAPPDATA / XDG_DATA_HOME
+# itself rather than relying on the caller, and both call sites already
+# use its signature. This branch's copy was removed as unreachable.
+
+
+
+@pytest.fixture()
+def _home_relative_app_data(monkeypatch, tmp_path):
+    """Pin `home` to a tmpdir and force the home-relative branch everywhere."""
+    monkeypatch.delenv("PYPSAGUI_APP_DATA_DIR", raising=False)
+    monkeypatch.delenv("PYPSAGUI_PROJECTS_ROOT", raising=False)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    monkeypatch.delenv("LOCALAPPDATA", raising=False)
+    monkeypatch.setattr(app_paths.Path, "home", staticmethod(lambda: tmp_path))
+    return tmp_path
+
 
 
 def test_app_data_dir_is_absolute_and_outside_the_source_tree():
@@ -108,7 +131,7 @@ def test_a_fresh_install_uses_the_new_name(monkeypatch, tmp_path):
     assert app_paths.default_projects_root().parent.name == "PyPSA Studio"
 
 
-def test_an_EXISTING_install_keeps_its_data_after_the_rename(monkeypatch, tmp_path):
+def test_an_EXISTING_install_keeps_its_data_after_the_rename(_home_relative_app_data, monkeypatch):
     """
     `APP_NAME` is not a label — it is the directory the user's projects live in.
     Renaming it outright points a working install at empty folders: the app
@@ -120,8 +143,7 @@ def test_an_EXISTING_install_keeps_its_data_after_the_rename(monkeypatch, tmp_pa
     """
     import app_paths
 
-    monkeypatch.delenv("PYPSAGUI_APP_DATA_DIR", raising=False)
-    monkeypatch.setattr(app_paths.Path, "home", staticmethod(lambda: tmp_path))
+    tmp_path = _home_relative_app_data
 
     legacy_data = _app_data_base(tmp_path, monkeypatch) / "PyPSA GUI"
     legacy_data.mkdir(parents=True)
@@ -133,15 +155,14 @@ def test_an_EXISTING_install_keeps_its_data_after_the_rename(monkeypatch, tmp_pa
     assert app_paths.default_projects_root() == legacy_projects.resolve()
 
 
-def test_the_new_location_wins_once_it_exists(monkeypatch, tmp_path):
+def test_the_new_location_wins_once_it_exists(_home_relative_app_data, monkeypatch):
     """
     Otherwise a stale empty "PyPSA GUI" folder — one `mkdir` from any earlier
     launch — would pin every future install to the old name forever.
     """
     import app_paths
 
-    monkeypatch.delenv("PYPSAGUI_APP_DATA_DIR", raising=False)
-    monkeypatch.setattr(app_paths.Path, "home", staticmethod(lambda: tmp_path))
+    tmp_path = _home_relative_app_data
 
     base = _app_data_base(tmp_path, monkeypatch)
     (base / "PyPSA GUI").mkdir(parents=True)
@@ -159,3 +180,34 @@ def test_the_env_override_still_beats_both(monkeypatch, tmp_path):
     (tmp_path / "Library" / "Application Support" / "PyPSA GUI").mkdir(parents=True)
 
     assert app_paths.app_data_dir() == (tmp_path / "chosen").resolve()
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# `_preferred` is the whole rename rule, and it has no platform in it. The
+# two tests above reach it through `app_data_dir`, which is worth keeping —
+# that is how production calls it — but a bug in the rule itself should not
+# need a platform-shaped fixture to show up.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_preferred_takes_the_new_name_when_both_exist(tmp_path):
+    """A stale empty legacy folder must not pin the install to the old name."""
+    (tmp_path / app_paths.LEGACY_APP_NAME).mkdir()
+    (tmp_path / app_paths.APP_NAME).mkdir()
+    assert app_paths._preferred(tmp_path) == (tmp_path / app_paths.APP_NAME).resolve()
+
+
+def test_preferred_falls_back_to_the_legacy_name_when_only_it_exists(tmp_path):
+    """
+    `APP_NAME` is not a label — it is the directory the user's data is in.
+    Taking the new name here points a working install at empty folders: the
+    app opens, lists nothing, and the projects are still on disk under the
+    old name with nothing saying so.
+    """
+    (tmp_path / app_paths.LEGACY_APP_NAME).mkdir()
+    assert app_paths._preferred(tmp_path) == (tmp_path / app_paths.LEGACY_APP_NAME).resolve()
+
+
+def test_preferred_takes_the_new_name_on_a_fresh_machine(tmp_path):
+    """Neither exists: a first run must not be born under the legacy name."""
+    assert app_paths._preferred(tmp_path) == (tmp_path / app_paths.APP_NAME).resolve()

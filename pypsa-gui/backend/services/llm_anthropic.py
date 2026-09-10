@@ -296,3 +296,67 @@ class AnthropicProvider:
                     for b in (getattr(final, "content", []) or [])],
             usage=usage_out,
         )
+
+    def probe(self, model: str) -> tuple[str, float | None]:
+        """
+        `(verdict, latency_ms)` for the Task 9 connection test — a real
+        `max_tokens=1` NON-streaming `messages.create`, mirroring
+        `OpenAICompatProvider.probe`'s fixed, non-leaking vocabulary
+        (`ok|unreachable|unauthorized|model_not_found|invalid_request`) and
+        the same rule: only the exception CLASS NAME is ever logged, never
+        `str(exc)` — the same invariant `routers/local_settings.py`'s own
+        `probe_api_key` documents for the identical reason (an SDK message
+        can echo request details that must not reach a log or a response).
+
+        UNTESTED by this task's suite (`test_llm_settings_api.py` drives the
+        openai-compat path exclusively via `httpx.MockTransport`): there is
+        no anthropic-wire equivalent double here, so this method is
+        implemented for completeness/symmetry but only exercised in
+        production. See ADR-0002 / Task 11 for the live-probe follow-up.
+        """
+        import time
+        try:
+            import anthropic  # noqa: PLC0415
+        except ImportError:
+            return "invalid_request", None
+        start = time.monotonic()
+        try:
+            self._client.messages.create(
+                model=model, max_tokens=1,
+                messages=[{"role": "user", "content": "ping"}],
+            )
+        except anthropic.AuthenticationError:
+            return "unauthorized", None
+        except anthropic.NotFoundError:
+            return "model_not_found", None
+        except (anthropic.APIConnectionError, anthropic.APITimeoutError) as exc:
+            logger.warning(
+                "chat: connection test could not reach Anthropic (%s)",
+                type(exc).__name__,
+            )
+            return "unreachable", None
+        except anthropic.AnthropicError as exc:
+            logger.warning(
+                "chat: connection test rejected by Anthropic (%s)",
+                type(exc).__name__,
+            )
+            return "invalid_request", None
+        except Exception as exc:  # noqa: BLE001 — never let this escape as a 500
+            logger.warning(
+                "chat: connection test failed unexpectedly (%s)",
+                type(exc).__name__,
+            )
+            return "invalid_request", None
+        elapsed_ms = (time.monotonic() - start) * 1000.0
+        return "ok", elapsed_ms
+
+    def probe_models(self) -> list[str] | None:
+        """Best-effort model listing, or `None` on ANY failure. Never raises."""
+        try:
+            page = self._client.models.list(limit=20)
+            ids = sorted({
+                m.id for m in getattr(page, "data", []) if getattr(m, "id", None)
+            })
+            return ids or None
+        except Exception:  # noqa: BLE001 — cosmetic, must never raise
+            return None

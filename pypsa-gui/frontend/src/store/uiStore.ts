@@ -337,6 +337,11 @@ interface UIStore {
   bottomTabRequest: string | null
   // Chat / agent navigation: Results sub-tab id (capex, dispatch, …).
   resultsTabRequest: string | null
+  // Deep-link into a Settings section (e.g. 'assistant-model'). The
+  // settings SlidePanel subtree remounts on every panel switch, so this
+  // anchor has to live outside it — a set(SlidePanel) parameter cannot
+  // survive that remount. Consumed then cleared by the section itself.
+  settingsSectionRequest: string | null
   // Deep-link into the Asset Detail tab (Task 13). Consumed then cleared by
   // AssetDetail.tsx's effect. Set only via `requestAssetDetail`.
   assetDetailRequest: AssetDetailRequest | null
@@ -419,6 +424,8 @@ interface UIStore {
   clearBottomTabRequest: () => void
   requestResultsTab: (tab: string) => void
   clearResultsTabRequest: () => void
+  requestSettingsSection: (section: string) => void
+  clearSettingsSectionRequest: () => void
   // ONE path for all four entry points (Properties, bottom table, map,
   // chatbot). Each of them only has to call this — the panel, the tab and
   // the selection all move together, so none of them can drift out of step.
@@ -479,6 +486,7 @@ export const useUIStore = create<UIStore>((set) => ({
   compareRailWidth: storedCompareRailWidth(),
   bottomTabRequest: null,
   resultsTabRequest: null,
+  settingsSectionRequest: null,
   assetDetailRequest: null,
   compareNavRequest: null,
   ioModalRequest: null,
@@ -617,6 +625,8 @@ export const useUIStore = create<UIStore>((set) => ({
   clearBottomTabRequest: () => set({ bottomTabRequest: null }),
   requestResultsTab: (tab) => set({ resultsTabRequest: tab }),
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
+  requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
+  clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
   requestAssetDetail: (req) => set({
     assetDetailRequest: req,
     selectedComponent: { type: req.componentClass, name: req.name },

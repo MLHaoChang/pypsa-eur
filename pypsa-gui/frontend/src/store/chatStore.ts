@@ -13,8 +13,6 @@
  */
 import { create } from 'zustand'
 
-import type { ChatModel } from '../api/chat'
-
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system'
 
 export interface ChatMessage {
@@ -30,6 +28,11 @@ export interface ChatMessage {
   // Phase D — file_ids that were attached to this user turn (for replay).
   // Read-only chip strip renders below the message bubble.
   attachment_file_ids?: string[]
+  // Task 13 — accumulated `thinking` SSE deltas for this assistant turn.
+  // Rendered as a collapsible block above the answer; absent (not empty
+  // string) on every turn the model didn't emit extended thinking for, so
+  // the UI can gate the `<details>` on presence rather than length.
+  thinking?: string
   ts: number
 }
 
@@ -48,6 +51,17 @@ export interface ChatUsageAcc {
   output_tokens: number
   cache_read_tokens: number
   cache_create_tokens: number
+  /**
+   * W-3 (ADR-0001) — whether the provider ever REPORTED usage this session.
+   *
+   * `stream_options.include_usage` is a request, not a guarantee: an
+   * OpenAI-compatible endpoint may simply omit the usage chunk. Without this
+   * flag the zero-initialised totals render as "0 in / 0 out · 0 cached",
+   * which is indistinguishable from a session that genuinely used nothing —
+   * an unresolvable value rendered as a real one. `false` must render as
+   * unavailable, never as zeros.
+   */
+  reported: boolean
 }
 
 export interface ChatErrorState {
@@ -65,7 +79,33 @@ export interface ChatErrorState {
 interface ChatState {
   // Identity
   sessionId: string | null
-  model: ChatModel
+  // Task 13 — which configured profile the NEXT stream request should bind
+  // to. `null` means "the server's active profile" and is the default: the
+  // dropdown always shows a real profile (falling back to
+  // `active_profile_id` from the profiles fetch for display), but the STORE
+  // stays null until the user actually picks one, so a request never
+  // re-asserts a stale choice over an admin's `set_active_profile` or an A8
+  // fallback. See `ChatStreamRequest.profile_id` in `api/chat.ts`.
+  profileId: string | null
+  // Task 13 — one-shot flag set by `startNewChat`. The chat.jsonl hydration
+  // effect in ChatPanel consumes (reads + clears) it via
+  // `consumeSuppressHydrationOnce` before deciding whether to replay
+  // history — without this, clearing `sessionId` and `messages` for a fresh
+  // chat is immediately undone by the effect re-hydrating the OLD
+  // `last_session_id` the next time it runs.
+  suppressHydrationOnce: boolean
+  // Fix round 1 (Task 13 review) — monotonic counter bumped by every
+  // `startNewChat()` call, UNCONDITIONALLY. The hydration effect used to key
+  // its rerun on `sessionId`, but `startNewChat` can fire while `sessionId`
+  // is ALREADY `null` (a fresh project with no chat.jsonl yet, or a
+  // cross-wire pick before the user's first message) — a null→null
+  // "change" that React's dependency comparison never sees, so the effect
+  // never reran to consume `suppressHydrationOnce`. The flag then survived
+  // to the NEXT real hydration trigger (a genuine project switch) and
+  // silently swallowed that project's real history. A counter that always
+  // changes on every call — regardless of what else did or didn't change —
+  // is what a one-shot flag actually needs to be one-shot-safe.
+  newChatSeq: number
   // Conversation
   messages: ChatMessage[]
   // The single pending confirmation card. The runtime allows ONE pending
@@ -105,7 +145,7 @@ interface ChatState {
 
   // Actions
   setSessionId: (id: string | null) => void
-  setModel: (m: ChatModel) => void
+  setProfileId: (id: string | null) => void
   appendMessage: (msg: Omit<ChatMessage, 'id' | 'ts'>) => void
   /**
    * Append a streaming token delta. If the last message in the list is an
@@ -114,6 +154,13 @@ interface ChatState {
    * producing one-row-per-token spam in the message list.
    */
   appendTokenDelta: (delta: string) => void
+  /**
+   * Same accumulation shape as `appendTokenDelta`, but writes the trailing
+   * assistant bubble's `thinking` field instead of `content` — `thinking`
+   * SSE frames stream separately from `token` frames and render in their own
+   * collapsible block.
+   */
+  appendThinkingDelta: (delta: string) => void
   /**
    * Replace the entire message list (used by the mount-time chat.jsonl
    * replay so a reload doesn't lose the conversation).
@@ -164,6 +211,21 @@ interface ChatState {
 
   // Lifecycle: clear UI-side conversation state on a project switch.
   resetForProjectSwitch: () => void
+  /**
+   * Task 13 — begin a fresh conversation WITHOUT a project switch (the
+   * cross-wire profile-switch confirm, and any future explicit "New chat"
+   * affordance). Nulls `sessionId` and clears the visible conversation, same
+   * as `resetForProjectSwitch`'s conversation half, but additionally arms
+   * `suppressHydrationOnce` — a project switch WANTS the new project's
+   * chat.jsonl replayed on the next hydration pass; this does not.
+   */
+  startNewChat: () => void
+  /**
+   * Read-and-clear `suppressHydrationOnce` in one step so the hydration
+   * effect can act on the value it saw without a second render racing a
+   * fresh `startNewChat()` in between the read and the clear.
+   */
+  consumeSuppressHydrationOnce: () => boolean
 }
 
 // Phase D polish #2 — multi-file upload progress batch shapes.
@@ -211,7 +273,9 @@ function newMessageId() {
 
 export const useChatStore = create<ChatState>((set, get) => ({
   sessionId: null,
-  model: 'claude-sonnet-5',
+  profileId: null,
+  suppressHydrationOnce: false,
+  newChatSeq: 0,
   messages: [],
   pending: null,
   toolProgress: {},
@@ -220,6 +284,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     output_tokens: 0,
     cache_read_tokens: 0,
     cache_create_tokens: 0,
+      reported: false,
   },
   streaming: false,
   error: null,
@@ -230,7 +295,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   uploadBatches: {},
 
   setSessionId: (id) => set({ sessionId: id }),
-  setModel: (m) => set({ model: m }),
+  setProfileId: (id) => set({ profileId: id }),
   appendMessage: (msg) => set((s) => ({
     messages: [...s.messages, { ...msg, id: newMessageId(), ts: Date.now() }],
   })),
@@ -248,6 +313,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
       messages: [...s.messages, {
         id: newMessageId(), ts: Date.now(),
         role: 'assistant', content: delta,
+      }],
+    }
+  }),
+  appendThinkingDelta: (delta) => set((s) => {
+    if (!delta) return s
+    const last = s.messages[s.messages.length - 1]
+    if (last && last.role === 'assistant') {
+      const updated: ChatMessage = { ...last, thinking: (last.thinking ?? '') + delta }
+      return { messages: [...s.messages.slice(0, -1), updated] }
+    }
+    // `thinking` frames precede `token` frames within a turn, so the first
+    // one usually creates the assistant bubble rather than joining it.
+    return {
+      messages: [...s.messages, {
+        id: newMessageId(), ts: Date.now(),
+        role: 'assistant', content: '', thinking: delta,
       }],
     }
   }),
@@ -270,6 +351,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
       output_tokens: s.usage.output_tokens + (delta.output_tokens ?? 0),
       cache_read_tokens: s.usage.cache_read_tokens + (delta.cache_read_tokens ?? 0),
       cache_create_tokens: s.usage.cache_create_tokens + (delta.cache_create_tokens ?? 0),
+      // Sticky: one real report in a session makes the totals meaningful,
+      // and a later turn on an endpoint that reports nothing must not erase
+      // what earlier turns legitimately measured.
+      reported: s.usage.reported || (delta.reported ?? false),
     },
   })),
   setStreaming: (v) => set({ streaming: v }),
@@ -358,7 +443,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       toolProgress: {},
       usage: {
         input_tokens: 0, output_tokens: 0,
-        cache_read_tokens: 0, cache_create_tokens: 0,
+        cache_read_tokens: 0, cache_create_tokens: 0, reported: false,
       },
       streaming: false,
       error: null,
@@ -368,5 +453,31 @@ export const useChatStore = create<ChatState>((set, get) => ({
       unseenExportCount: 0,
       uploadBatches: {},
     })
+  },
+
+  startNewChat: () => {
+    // Unlike `resetForProjectSwitch`, this does NOT touch `streamCleanup` /
+    // `streaming` — the dropdown that triggers the cross-wire confirm is
+    // disabled while streaming, so there is no live turn to interrupt here.
+    set((s) => ({
+      sessionId: null,
+      messages: [],
+      pending: null,
+      toolProgress: {},
+      error: null,
+      usage: {
+        input_tokens: 0, output_tokens: 0,
+        cache_read_tokens: 0, cache_create_tokens: 0, reported: false,
+      },
+      suppressHydrationOnce: true,
+      // Always increments — see the field comment. This is the value the
+      // hydration effect's dependency array watches, NOT `sessionId`.
+      newChatSeq: s.newChatSeq + 1,
+    }))
+  },
+  consumeSuppressHydrationOnce: () => {
+    const v = get().suppressHydrationOnce
+    if (v) set({ suppressHydrationOnce: false })
+    return v
   },
 }))

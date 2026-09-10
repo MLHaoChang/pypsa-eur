@@ -35,6 +35,7 @@ import {
   type ChatFrame,
   type InterruptedTurn,
 } from '../api/chat'
+import { useChatProfiles, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
 import { nk } from '../utils/queryKeys'
 import { invalidateAssetQueries, isMutatingTier } from '../utils/assetWrite'
 import {
@@ -240,9 +241,28 @@ function applyUiNavigate(d: {
 interface SessionInitFrame {
   session_id: string
   model?: string
+  // Task 13 — which profile actually resolved this turn. Display-only: the
+  // store's `profileId` selector is never PINNED from this frame — it stays
+  // `null` ("follow the server's active profile") unless the user picks one
+  // explicitly, or a request sent while `profileId === null` would start
+  // reasserting whatever the server last resolved instead of tracking future
+  // admin changes / A8 fallbacks.
+  profile_id?: string
+  profile_label?: string
 }
 
 interface TokenFrame {
+  delta: string
+}
+
+interface ModelFallbackFrame {
+  from_model: string
+  to_model: string
+  reason: string
+  profile_id?: string
+}
+
+interface ThinkingFrame {
   delta: string
 }
 
@@ -297,16 +317,35 @@ interface TurnDoneFrame {
     input_tokens?: number
     output_tokens?: number
     cache_read_tokens?: number
+    reported?: boolean
     cache_create_tokens?: number
   }
 }
 
 function UsageMeter() {
   const usage = useChatStore((s) => s.usage)
+  // W-3 (ADR-0001) — an endpoint that never reported usage is UNKNOWN, not
+  // zero. `stream_options.include_usage` is a request, not a guarantee, and
+  // an OpenAI-compatible server may simply omit the chunk; rendering the
+  // zero-initialised totals would state a measurement nobody made, and would
+  // read identically to a session that genuinely used nothing.
+  if (!usage.reported) {
+    return (
+      <span
+        className="font-mono text-[10px] text-muted truncate min-w-0"
+        data-testid="chat-usage-meter"
+        data-usage-available="false"
+        title="This model endpoint did not report token usage for this session."
+      >
+        tokens n/a
+      </span>
+    )
+  }
   return (
     <span
       className="font-mono text-[10px] text-muted truncate min-w-0"
       data-testid="chat-usage-meter"
+      data-usage-available="true"
       title="Tokens this session: input / output / read from cache"
     >
       {usage.input_tokens.toLocaleString()} in / {usage.output_tokens.toLocaleString()} out
@@ -486,12 +525,217 @@ function ConfirmationCard() {
 const RETRYABLE_ERROR_KINDS = new Set([
   'rate_limited', 'upstream_error', 'internal_error', 'tool_call_cap_exceeded',
 ])
+// Exported for the completeness test only (N-6): a kind listed here without
+// KIND_COPY renders a retry button under a raw snake_case title.
+export const RETRYABLE_ERROR_KINDS_FOR_TEST = RETRYABLE_ERROR_KINDS
 
-function ErrorBanner({ onRetry }: { onRetry: () => void }) {
+/**
+ * Task 14 — single source of truth for the error banner's copy.
+ *
+ * Used to be three hand-maintained structures that had to agree by hand: a
+ * ~28-line `error_kind === 'x' && 'Title'` chain, a NEGATED array of the same
+ * ~28 strings gating the raw-kind fall-through, and a third allowlist (below,
+ * `TOOL_ERROR_BANNER_KINDS`) deciding which `tool_error` frames get promoted
+ * to this banner at all. Adding a kind to the title chain and forgetting the
+ * negated list silently printed the title AND the raw kind; the reverse
+ * printed nothing. The fall-through below is now DERIVED from this map's
+ * keys (`!(kind in KIND_COPY) && kind`), so the two can no longer disagree —
+ * see the completeness test in ChatPanel.profile.test.tsx.
+ *
+ * Every title for a kind that predates this map is copied byte-for-byte from
+ * the old per-kind JSX condition it replaces — this migration does not
+ * restyle existing copy.
+ *
+ * SECURITY: no title/body added here may name an identifier (email, user id,
+ * org id, project uuid) or a full base_url. The dynamic `error.message` row
+ * (rendered unconditionally, unchanged) is the server's own text, already
+ * constrained to host:port at most — this map's static copy must not widen
+ * that.
+ */
+export const KIND_COPY: Record<
+  string,
+  { title: string; body?: string; action?: 'open-settings' | 'new-chat' }
+> = {
+  project_exists: { title: 'Project name already exists' },
+  descendants_exist: { title: 'Project has descendants' },
+  confirmation_expired: { title: 'Confirmation expired' },
+  rate_limited: { title: 'Rate limited' },
+  unauthorized: { title: 'API key rejected' },
+  // Fix round 1 (Task 14) — body left unset here on purpose: it's computed
+  // in ErrorBanner from the active profile's LABEL (client-side, from
+  // useChatProfiles()), not a static string — see `body` in ErrorBanner.
+  missing_api_key: { title: 'API key missing' },
+  // P-2 — the acting account stopped being active mid-turn.
+  inactive_acting_user: { title: 'Account is no longer active' },
+  // Its twin, found by the tool-error manifest (2026-09-10). Both are raised
+  // by the SAME helper — `_acting()` in chat_tools.py, seven lines apart — so
+  // the reachability argument written out below for `inactive_acting_user`
+  // covers this one word for word. The Task 14 correction routed one and left
+  // the other, which is the asymmetry a subset test structurally cannot see.
+  no_acting_user: { title: 'Not signed in' },
+  // W-1 — kinds the server can genuinely emit that had no entry, so the
+  // banner printed the raw snake_case kind as its title with no action.
+  // `unknown_profile_id` matters most: C-4 made it a REACHABLE path (before
+  // that fix the server never refused an unconfigured id at all), and it
+  // fires for every open chat the moment a super-admin deletes a profile.
+  // No action: the deep-link target renders `null` for an ordinary member (a
+  // 403 maps to null in `fetchLLMSettingsOrNull`), so the button opened an
+  // empty panel — and both server emitters already say "Pick a profile from
+  // the model menu", which is the member-visible chat-header dropdown.
+  unknown_profile_id: { title: 'That model profile no longer exists' },
+  not_authorized: { title: 'Not allowed for your account' },
+  tool_not_offered: { title: 'The model asked for a tool it was not offered' },
+  invalid_request: { title: 'The model endpoint rejected the request' },
+  upstream_error: { title: 'The model endpoint returned an error' },
+  // Was reachable from three emitters AND already listed in
+  // RETRYABLE_ERROR_KINDS above — the file knew the kind in one constant and
+  // not the other, so the retry button appeared under a raw snake_case title.
+  internal_error: { title: 'Something went wrong on the server' },
+  turn_already_in_flight: { title: 'A turn is already running' },
+  project_switched_mid_turn: { title: 'The active project changed mid-turn' },
+  unknown_session: { title: 'That chat session is no longer known' },
+  sdk_not_installed: { title: 'Provider SDK is not installed' },
+  solver_in_flight: { title: 'Solver in flight' },
+  parallel_destructive_not_allowed: { title: 'Multiple destructive actions in one turn' },
+  tool_call_cap_exceeded: { title: 'Tool call limit reached this turn' },
+  // Phase D — chatbot upload error_kinds
+  file_too_large: { title: 'File exceeds the 25 MB cap' },
+  empty_file: { title: 'Uploaded file is empty' },
+  invalid_filename: { title: 'Filename contains invalid characters' },
+  unsupported_mime: { title: 'File type not supported' },
+  mime_type_mismatch: { title: 'File type mismatch — declared vs. actual content' },
+  upload_quota_exceeded: { title: 'Per-project upload quota reached' },
+  upload_not_found: { title: 'Referenced upload no longer exists' },
+  image_too_large: { title: 'Image exceeds the 10 MB multimodal cap' },
+  too_many_multimodal_blocks: { title: 'Too many attachments (max 20)' },
+  mime_not_allowlisted_for_multimodal: {
+    title: 'File type cannot be attached — use the read tool instead',
+  },
+  load_not_found: { title: 'Load name not in network' },
+  snapshot_count_mismatch: { title: 'Row count does not match network snapshots' },
+  snapshot_range_mismatch: { title: 'Time range does not match network snapshots' },
+  time_column_parse_error: { title: 'Time column could not be parsed as datetimes' },
+  value_column_parse_error: { title: 'Value column has non-numeric data' },
+  image_analysis_timeout: { title: 'Vision call timed out (30 s)' },
+  vision_invalid_json: { title: 'Vision response was not valid JSON' },
+  vision_call_failed: { title: 'Vision call failed' },
+
+  // Task 14 — new kinds, fix-oriented copy.
+  unreachable: {
+    title: 'Could not reach the model endpoint.',
+    body: 'If this is a local endpoint, it likely needs to be started. Check the model settings.',
+    action: 'open-settings',
+  },
+  capability_unsupported: {
+    // llm_provider seam + chat_service's capability checks already send a
+    // message naming the capability and the profile LABEL (never an
+    // id/base_url — see chat_service.py's `capability_unsupported` frames).
+    // That renders in the unconditional `error.message` row below, so this
+    // entry stays generic and adds no body of its own — inventing a second
+    // description would just repeat the server's, or drift from it.
+    title: "This model doesn't support that.",
+    action: 'open-settings',
+  },
+  profile_switch_requires_new_chat: {
+    title: 'This model needs a fresh chat.',
+    action: 'new-chat',
+  },
+}
+
+/**
+ * The subset of KIND_COPY kinds that can arrive on a `tool_error` SSE frame
+ * and should be promoted to this banner instead of staying a gray tool-line
+ * in the message list.
+ *
+ * Fix round 1 (Task 14) — CORRECTION, recorded rather than quietly edited:
+ * this comment previously claimed `inactive_acting_user` surfaces ONLY on
+ * the top-level chat-stream `error` frame and can never arrive as a
+ * `tool_error`, and excluded it here on that basis. That claim was
+ * investigated and written down as verified, and it was backwards.
+ * Re-traced properly this round: `inactive_acting_user` is raised in
+ * exactly one place, `_acting()` in `chat_tools.py:1464`. `_acting()` has
+ * six call sites, ALL inside tool handlers reached through `_route` /
+ * `_authorized_project`. `_dispatch_real_tool_call`
+ * (`chat_service.py`, ~line 3824) wraps every handler call in
+ * `except Exception`, reads `error_kind` off `exc.detail`, and YIELDS a
+ * `tool_error` frame — it does not re-raise, so nothing raised inside a
+ * tool handler reaches the top-level `error`-frame catch-all.
+ * `inactive_acting_user` can therefore ONLY arrive as a `tool_error`, the
+ * opposite of the old claim. Excluding it meant an account deactivated
+ * mid-turn showed a generic, truncated gray tool line instead of the
+ * "Account is no longer active" banner `KIND_COPY` already had copy for.
+ * Included below now, with a routing test
+ * (`ChatPanel.profile.test.tsx`) asserting a `tool_error` frame of this
+ * kind renders the banner and its title.
+ *
+ * Every string here is still checked against KIND_COPY by a test so a typo
+ * or a stale rename fails loudly instead of silently falling through to
+ * the raw kind.
+ */
+export const TOOL_ERROR_BANNER_KINDS = new Set([
+  'project_exists', 'descendants_exist',
+  'confirmation_expired', 'rate_limited',
+  'unauthorized', 'missing_api_key',
+  'inactive_acting_user',
+  'solver_in_flight', 'parallel_destructive_not_allowed',
+  'tool_call_cap_exceeded',
+  // `set_active_profile` raises these as HTTPExceptions, which the dispatcher
+  // converts to `tool_error` frames — so copy alone was unreachable and the
+  // user got the truncated gray tool line. Same shape as the
+  // `inactive_acting_user` correction above; this is its sibling.
+  'not_authorized', 'unknown_profile_id',
+  // Emitted by the capability guard when an endpoint asks for a tool that was
+  // never offered for this turn.
+  'tool_not_offered',
+  // Found by `pypsa-gui/tool-error-kinds.json` and its two guards
+  // (2026-09-10), which are the first thing able to see this direction at all.
+  //
+  // `no_acting_user` is `inactive_acting_user`'s twin: the SAME `_acting()`
+  // helper raises both, seven lines apart in chat_tools.py, so every word of
+  // the reachability argument above applies unchanged. The Task 14 correction
+  // routed one and left the other.
+  //
+  // `capability_unsupported` already HAD copy right here in KIND_COPY and
+  // simply never routed, so a turn refused for lacking vision or tools showed
+  // a truncated gray tool line instead of the "This model doesn't support
+  // that." banner with its open-settings action — the same unreachable-copy
+  // shape, for the third time.
+  'no_acting_user', 'capability_unsupported',
+  // Phase D — upload-tool errors. Same routing as the chat-stream 'error'
+  // frame, so a single user mental model handles every failure surface.
+  'file_too_large', 'empty_file', 'invalid_filename',
+  'unsupported_mime', 'mime_type_mismatch', 'upload_quota_exceeded',
+  'upload_not_found', 'image_too_large', 'too_many_multimodal_blocks',
+  'mime_not_allowlisted_for_multimodal', 'load_not_found',
+  'snapshot_count_mismatch', 'snapshot_range_mismatch',
+  'time_column_parse_error', 'value_column_parse_error',
+  'image_analysis_timeout', 'vision_invalid_json', 'vision_call_failed',
+])
+
+function ErrorBanner({
+  onRetry,
+  activeProfileLabel,
+  sessionProfile,
+}: {
+  onRetry: () => void
+  // Fix round 1 (Task 14) — the brief's `missing_api_key` broadening: body
+  // names the ACTIVE profile so a user on a non-Anthropic profile isn't told
+  // to paste an Anthropic key. LABEL only, sourced from the same
+  // `selectedProfileMeta` the parent already derives from `useChatProfiles()`
+  // — never an id or base_url, and no second query added here.
+  activeProfileLabel: string | null
+  // C-12 — the same profile the body names, passed on to `ApiKeySetup` so the
+  // banner's TEXT and its FORM answer one question rather than two. It used to
+  // branch on the instance-wide active profile from `/chat/health`, which a
+  // member's session may legitimately differ from — so the body could name a
+  // local endpoint while the form below it offered to set ANTHROPIC_API_KEY.
+  sessionProfile: { id: string; label: string } | null
+}) {
   const error = useChatStore((s) => s.error)
   const setError = useChatStore((s) => s.setError)
   const streaming = useChatStore((s) => s.streaming)
   const hasQuestion = useChatStore((s) => s.messages.some((m) => m.role === 'user'))
+  const startNewChat = useChatStore((s) => s.startNewChat)
   if (!error) return null
 
   // v6-F2 — cold-path activate is NOT an error from the user's POV; the
@@ -505,6 +749,21 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
   // v4-MAJOR-1 / v6-F1 project_exists — rendered as a typed banner with a
   // hint that the user should retry with force or a new name. v4-MINOR-1
   // descendants_exist — same shape but with the descendant list.
+  const copy = KIND_COPY[error.error_kind] as
+    | { title: string; body?: string; action?: 'open-settings' | 'new-chat' }
+    | undefined
+
+  // `missing_api_key`'s body can't live as a static KIND_COPY string — it
+  // names WHICH profile is missing a key, known only client-side from the
+  // profiles query, not from the server's error message. Falls back to no
+  // body (old behaviour) when the active profile isn't resolved yet, rather
+  // than fabricating a label.
+  const body =
+    copy?.body ??
+    (error.error_kind === 'missing_api_key' && activeProfileLabel
+      ? `Currently using the "${activeProfileLabel}" profile.`
+      : undefined)
+
   return (
     <div
       // A turn that failed is an interruption, not a status update — the
@@ -518,51 +777,13 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
       data-error-kind={error.error_kind}
     >
       <div className="font-medium text-rose-400 mb-1">
-        {error.error_kind === 'project_exists' && 'Project name already exists'}
-        {error.error_kind === 'descendants_exist' && 'Project has descendants'}
-        {error.error_kind === 'confirmation_expired' && 'Confirmation expired'}
-        {error.error_kind === 'rate_limited' && 'Rate limited'}
-        {error.error_kind === 'unauthorized' && 'API key rejected'}
-        {error.error_kind === 'missing_api_key' && 'API key missing'}
-        {/* P-2 — the acting account stopped being active mid-turn. */}
-        {error.error_kind === 'inactive_acting_user' && 'Account is no longer active'}
-        {error.error_kind === 'solver_in_flight' && 'Solver in flight'}
-        {error.error_kind === 'parallel_destructive_not_allowed' && 'Multiple destructive actions in one turn'}
-        {error.error_kind === 'tool_call_cap_exceeded' && 'Tool call limit reached this turn'}
-        {/* Phase D — chatbot upload error_kinds */}
-        {error.error_kind === 'file_too_large' && 'File exceeds the 25 MB cap'}
-        {error.error_kind === 'empty_file' && 'Uploaded file is empty'}
-        {error.error_kind === 'invalid_filename' && 'Filename contains invalid characters'}
-        {error.error_kind === 'unsupported_mime' && 'File type not supported'}
-        {error.error_kind === 'mime_type_mismatch' && 'File type mismatch — declared vs. actual content'}
-        {error.error_kind === 'upload_quota_exceeded' && 'Per-project upload quota reached'}
-        {error.error_kind === 'upload_not_found' && 'Referenced upload no longer exists'}
-        {error.error_kind === 'image_too_large' && 'Image exceeds the 10 MB multimodal cap'}
-        {error.error_kind === 'too_many_multimodal_blocks' && 'Too many attachments (max 20)'}
-        {error.error_kind === 'mime_not_allowlisted_for_multimodal' && 'File type cannot be attached — use the read tool instead'}
-        {error.error_kind === 'load_not_found' && 'Load name not in network'}
-        {error.error_kind === 'snapshot_count_mismatch' && 'Row count does not match network snapshots'}
-        {error.error_kind === 'snapshot_range_mismatch' && 'Time range does not match network snapshots'}
-        {error.error_kind === 'time_column_parse_error' && 'Time column could not be parsed as datetimes'}
-        {error.error_kind === 'value_column_parse_error' && 'Value column has non-numeric data'}
-        {error.error_kind === 'image_analysis_timeout' && 'Vision call timed out (30 s)'}
-        {error.error_kind === 'vision_invalid_json' && 'Vision response was not valid JSON'}
-        {error.error_kind === 'vision_call_failed' && 'Vision call failed'}
-        {!['project_exists', 'descendants_exist', 'confirmation_expired',
-            'rate_limited', 'unauthorized', 'missing_api_key',
-            'inactive_acting_user',
-            'solver_in_flight', 'parallel_destructive_not_allowed',
-            'file_too_large', 'empty_file', 'invalid_filename',
-            'unsupported_mime', 'mime_type_mismatch', 'upload_quota_exceeded',
-            'upload_not_found', 'image_too_large', 'too_many_multimodal_blocks',
-            'mime_not_allowlisted_for_multimodal', 'load_not_found',
-            'snapshot_count_mismatch', 'snapshot_range_mismatch',
-            'time_column_parse_error', 'value_column_parse_error',
-            'image_analysis_timeout', 'vision_invalid_json', 'vision_call_failed',
-            'tool_call_cap_exceeded'].includes(error.error_kind)
-          && error.error_kind}
+        {error.error_kind in KIND_COPY && KIND_COPY[error.error_kind].title}
+        {!(error.error_kind in KIND_COPY) && error.error_kind}
       </div>
       <div className="text-muted whitespace-pre-wrap">{error.message}</div>
+      {body && (
+        <div className="text-muted text-[11px] whitespace-pre-wrap mt-1">{body}</div>
+      )}
       {/*
         U-1 — "API key missing" used to be a dead end. In the packaged app it
         was THE state: the bundle ships no `backend/.env` on purpose, so this
@@ -571,7 +792,7 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
         than on a settings page, because this is where the user is when they
         find out.
       */}
-      {error.error_kind === 'missing_api_key' && <ApiKeySetup />}
+      {error.error_kind === 'missing_api_key' && <ApiKeySetup sessionProfile={sessionProfile} />}
       <div className="flex items-center gap-3 mt-2">
         {/* The failure modes above are the ONLY place a user could previously
             end up with their question on screen, an error on screen, and
@@ -584,6 +805,30 @@ function ErrorBanner({ onRetry }: { onRetry: () => void }) {
             data-testid="chat-error-retry"
           >
             Try again
+          </button>
+        )}
+        {copy?.action === 'open-settings' && (
+          <button
+            className="text-[10px] underline text-rose-300 hover:text-rose-200"
+            onClick={() => {
+              // Deep-link straight to the model/profile settings section
+              // (Task 15's `requestSettingsSection`/AssistantModelSettings),
+              // not just the settings panel in general.
+              useUIStore.getState().requestSettingsSection('assistant-model')
+              useUIStore.getState().setSlidePanel('settings')
+            }}
+            data-testid="chat-error-open-settings"
+          >
+            Open settings
+          </button>
+        )}
+        {copy?.action === 'new-chat' && (
+          <button
+            className="text-[10px] underline text-rose-300 hover:text-rose-200"
+            onClick={() => startNewChat()}
+            data-testid="chat-error-start-new-chat"
+          >
+            Start new chat
           </button>
         )}
         <button
@@ -930,11 +1175,16 @@ export default function ChatPanel() {
   const toolTierRef = useRef(new Map<string, string>())
   const sessionId = useChatStore((s) => s.sessionId)
   const setSessionId = useChatStore((s) => s.setSessionId)
-  const model = useChatStore((s) => s.model)
-  const setModel = useChatStore((s) => s.setModel)
+  const profileId = useChatStore((s) => s.profileId)
+  const setProfileId = useChatStore((s) => s.setProfileId)
+  const startNewChat = useChatStore((s) => s.startNewChat)
+  // Fix round 1 — the hydration effect's dependency; see that effect's
+  // comment for why this exists instead of keying on `sessionId`.
+  const newChatSeq = useChatStore((s) => s.newChatSeq)
   const messages = useChatStore((s) => s.messages)
   const appendMessage = useChatStore((s) => s.appendMessage)
   const appendTokenDelta = useChatStore((s) => s.appendTokenDelta)
+  const appendThinkingDelta = useChatStore((s) => s.appendThinkingDelta)
   const setMessages = useChatStore((s) => s.setMessages)
   const setPending = useChatStore((s) => s.setPending)
   const appendToolProgress = useChatStore((s) => s.appendToolProgress)
@@ -966,9 +1216,31 @@ export default function ChatPanel() {
   useEffect(() => {
     if (prevProjectRef.current !== undefined && prevProjectRef.current !== currentProject) {
       resetChatForProjectSwitch()
+      // N-1 — the recovery banners describe ONE hydration of ONE project, as
+      // their declaration comment says. They were only ever reassigned inside
+      // a SUCCESSFUL history fetch, so a switch whose fetch fails or is
+      // skipped left the previous project's values on screen: project A's
+      // quoted user text rendered under project B, and B was falsely accused
+      // of a damaged chat.jsonl. Clearing belongs on the switch itself, not
+      // on the success path that may never run.
+      setHistoryGap(0)
+      setInterruptedTurn(null)
     }
     prevProjectRef.current = currentProject
   }, [currentProject, resetChatForProjectSwitch])
+
+  // N-1 — same for "start a new chat": the banners are about the transcript
+  // being replaced, so they must not outlive it. `newChatSeq` is the counter
+  // `startNewChat()` bumps unconditionally, for the reason recorded on the
+  // hydration effect below.
+  const prevNewChatSeqRef = useRef<number>(newChatSeq)
+  useEffect(() => {
+    if (prevNewChatSeqRef.current !== newChatSeq) {
+      prevNewChatSeqRef.current = newChatSeq
+      setHistoryGap(0)
+      setInterruptedTurn(null)
+    }
+  }, [newChatSeq])
 
   // Hydrate from chat.jsonl whenever a project becomes active. The backend
   // also rehydrates `session.messages` so subsequent turns can thread prior
@@ -987,7 +1259,42 @@ export default function ChatPanel() {
   // changes when the session_id becomes available for prompt caching), and
   // this branch is a bug fix. Revisit if boot latency is ever measured to care.
   useEffect(() => {
+    // C-5 — the consume runs BEFORE the `!currentProject` guard, not after.
+    //
+    // `startNewChat()` is reachable with no project open: the 🆕 button is
+    // disabled only on `streaming`, and AssistantDock mounts this panel for
+    // the app's lifetime, so it is clickable on the projects home page (as is
+    // the cross-wire `confirmProfileSwitch` path). With the guard first, the
+    // flag stayed armed, and the NEXT project to open consumed it and skipped
+    // its own hydration — losing that project's transcript AND its
+    // `last_session_id`, so server-side thread continuity and prompt-cache
+    // warmth went with it.
+    //
+    // Same defect `newChatSeq` was introduced to fix, reached through a
+    // different early return. A one-shot flag has to be consumed on every
+    // path that can observe it, or it is not one-shot.
+    const suppressed = useChatStore.getState().consumeSuppressHydrationOnce()
     if (!currentProject) return
+    // Task 13 — `startNewChat()` (the cross-wire profile-switch confirm, and
+    // the header's "New chat" button) clears `messages` and arms
+    // `suppressHydrationOnce`, consumed here unconditionally before the
+    // messages-length guard: without this, the freshly-cleared store (0
+    // messages, exactly the condition the guard below lets through) would
+    // re-hydrate the OLD `last_session_id` the next time this effect runs,
+    // undoing "start a new chat" immediately.
+    //
+    // Fix round 1 — this effect's dependency array watches `newChatSeq`, NOT
+    // `sessionId`. It used to watch `sessionId`, which broke when
+    // `startNewChat()` fired while `sessionId` was ALREADY null (a fresh
+    // project with no chat.jsonl yet, or a cross-wire pick before the user's
+    // first message): a null→null "change" that React's dependency
+    // comparison never sees, so the effect never reran to consume the flag.
+    // The flag then survived to the NEXT real trigger — a genuine project
+    // switch — and silently suppressed THAT project's real history load.
+    // `newChatSeq` is a counter `startNewChat()` bumps unconditionally on
+    // every call, so it always changes and the effect always gets a chance
+    // to consume the flag before anything else can observe it.
+    if (suppressed) return
     // Only seed an EMPTY conversation. Replaying chat.jsonl over a store that
     // already holds a conversation erases the turn the user just watched
     // arrive, because a turn is only persisted once it completes. The store is
@@ -997,7 +1304,8 @@ export default function ChatPanel() {
     //
     // The guard is still live even though the panel no longer remounts on
     // navigation (it is mounted for the app's lifetime inside AssistantDock).
-    // This effect re-runs whenever `currentProject` changes AND on every
+    // This effect re-runs whenever `currentProject` OR `newChatSeq` changes
+    // (the latter added for the `startNewChat` guard above) AND on every
     // mount, and the mounts that remain all reach it with a populated store:
     // the dock's ErrorBoundary swapping back to its children after a Retry,
     // HMR in dev, and a project switch whose reset has not landed yet. Do not
@@ -1056,7 +1364,7 @@ export default function ChatPanel() {
       setInterruptedTurn(h.pending_turn ?? null)
     }).catch(() => { /* missing chat.jsonl is fine — first time on this project */ })
     return () => { cancelled = true }
-  }, [currentProject, setMessages, setSessionId])
+  }, [currentProject, newChatSeq, setMessages, setSessionId])
 
   // Phase D — upload slice + send-attach wiring.
   const uploads = useChatStore((s) => s.uploads)
@@ -1525,6 +1833,13 @@ export default function ChatPanel() {
       case 'session_init': {
         const d = _frame_data<SessionInitFrame>(frame)
         setSessionId(d.session_id)
+        // The dropdown's fallback display (`profileId ?? active_profile_id`)
+        // is only as fresh as its last fetch — refetch on every new session
+        // so an admin's `set_active_profile` elsewhere, or a prior turn's A8
+        // fallback, shows up without the user having to reopen the panel.
+        // Deliberately NOT `setProfileId(d.profile_id)`: the store's selector
+        // stays `null` (follow-the-server) unless the user picks one.
+        qc.invalidateQueries({ queryKey: CHAT_PROFILES_QUERY_KEY })
         break
       }
       case 'token': {
@@ -1533,6 +1848,23 @@ export default function ChatPanel() {
         // one bubble per delta — keeps the message list readable when
         // Sonnet streams 2k tokens of output.
         appendTokenDelta(d.delta)
+        break
+      }
+      case 'thinking': {
+        const d = _frame_data<ThinkingFrame>(frame)
+        appendThinkingDelta(d.delta)
+        break
+      }
+      case 'model_fallback': {
+        // A8 — the active profile hit a persistent rate limit and the
+        // backend retried once on its declared fallback model. Previously
+        // silently DROPPED by this switch's missing `default` — the turn
+        // would just finish on a different model with no visible reason.
+        const d = _frame_data<ModelFallbackFrame>(frame)
+        appendMessage({
+          role: 'system',
+          content: `${d.from_model} → ${d.to_model} (${d.reason.replace(/_/g, ' ')})`,
+        })
         break
       }
       case 'tool_preparing': {
@@ -1616,23 +1948,7 @@ export default function ChatPanel() {
         // v4-MAJOR-1 / v4-MINOR-1 / v6-F1 + Phase D upload errors — route
         // structured error_kinds into the ErrorBanner so the user sees a
         // typed banner instead of a gray tool-line buried in the message list.
-        if ([
-          'project_exists', 'descendants_exist',
-          'confirmation_expired', 'rate_limited',
-          'unauthorized', 'missing_api_key',
-          'solver_in_flight', 'parallel_destructive_not_allowed',
-          'tool_call_cap_exceeded',
-          // Phase D — upload-tool errors. Same routing as the chat-stream
-          // 'error' frame, so a single user mental model handles every
-          // failure surface.
-          'file_too_large', 'empty_file', 'invalid_filename',
-          'unsupported_mime', 'mime_type_mismatch', 'upload_quota_exceeded',
-          'upload_not_found', 'image_too_large', 'too_many_multimodal_blocks',
-          'mime_not_allowlisted_for_multimodal', 'load_not_found',
-          'snapshot_count_mismatch', 'snapshot_range_mismatch',
-          'time_column_parse_error', 'value_column_parse_error',
-          'image_analysis_timeout', 'vision_invalid_json', 'vision_call_failed',
-        ].includes(d.error_kind)) {
+        if (TOOL_ERROR_BANNER_KINDS.has(d.error_kind)) {
           setError({ error_kind: d.error_kind, message: d.message })
         }
         {
@@ -1726,6 +2042,10 @@ export default function ChatPanel() {
             output_tokens: d.usage.output_tokens ?? 0,
             cache_read_tokens: d.usage.cache_read_tokens ?? 0,
             cache_create_tokens: d.usage.cache_create_tokens ?? 0,
+            // W-3 — the server says whether these numbers are a measurement
+            // or an initialisation. An older backend omits the field; treat
+            // that as reported, which is the pre-W-3 rendering.
+            reported: d.usage.reported ?? true,
           })
         }
         closeStream()
@@ -1742,8 +2062,8 @@ export default function ChatPanel() {
         break
       }
     }
-  }, [qc, setSessionId, appendMessage, appendTokenDelta, setPending, appendToolProgress,
-      accrueUsage, setStreaming, setError, closeStream])
+  }, [qc, setSessionId, appendMessage, appendTokenDelta, appendThinkingDelta, setPending,
+      appendToolProgress, accrueUsage, setStreaming, setError, closeStream])
 
   // Phase D polish #3 — auto-uncheck-after-send opt-in setting.
   // Stored in localStorage; OFF by default (matches sticky-chip intent).
@@ -1782,7 +2102,13 @@ export default function ChatPanel() {
       {
         session_id: sessionId ?? undefined,
         message: text,
-        model,
+        // Task 13 — `profile_id` is included ONLY when the user actually
+        // picked one. `profileId === null` means "the server's active
+        // profile", and OMITTING the field (never sending `model` either) is
+        // how that stays true turn after turn — sending a selector every
+        // time would re-assert a stale choice over an admin's
+        // `set_active_profile` or an A8 rate-limit fallback.
+        ...(profileId !== null ? { profile_id: profileId } : {}),
         attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
         // Built HERE, at send, not captured at mount or on a store
         // subscription: the user opens Results, selects a generator, and only
@@ -1805,7 +2131,7 @@ export default function ChatPanel() {
     if (autoUncheckAfterSend && attachIds.length > 0) {
       setAttachedFileIds([])
     }
-  }, [appendMessage, sessionId, model, handleFrame, setStreaming, setError,
+  }, [appendMessage, sessionId, profileId, handleFrame, setStreaming, setError,
       setStreamCleanup, autoUncheckAfterSend, setAttachedFileIds])
 
   const onSend = useCallback(() => {
@@ -2023,13 +2349,79 @@ export default function ChatPanel() {
 
   const onClearHistory = useCallback(() => {
     // Clear UI state in-place (does NOT trigger the project-switch reset
-    // path). To wipe the on-disk chat.jsonl too, the user invokes the
-    // clear_chat_history tool through the agent.
+    // path, and does NOT null sessionId or call startNewChat — the server
+    // session and its profile binding are unaffected). To wipe the on-disk
+    // chat.jsonl too, the user invokes the clear_chat_history tool through
+    // the agent.
     if (!confirm('Clear the conversation view? (On-disk chat.jsonl is untouched — ask the agent to clear_chat_history to wipe disk.)')) return
     useChatStore.setState({
       messages: [], pending: null, toolProgress: {}, error: null,
     })
   }, [])
+
+  // Fix round 1 (product gap) — `startNewChat()` was reachable ONLY from the
+  // cross-wire profile-switch confirm. A deployment where every configured
+  // profile shares one wire had NO path at all to a fresh session short of
+  // switching projects. This is the deliberate affordance for it — same
+  // action the cross-wire confirm's "Switch" button takes, just without a
+  // profile change attached.
+  const onNewChat = useCallback(() => {
+    startNewChat()
+  }, [startNewChat])
+
+  // ── Task 13 — profile dropdown + cross-wire switch confirm ───────────────
+  //
+  // `getChatProfiles()` is member-level (every authenticated user may read
+  // which profiles exist), so the query itself needs no gating — but per
+  // ADR-0001 (unresolvable data ships as a distinct state, never silently
+  // reinterpreted as "empty") a REFUSED fetch must render differently from a
+  // resolved-but-empty list. Three states before "ready", all disabled:
+  // loading (`!profilesQuery.data`), refused (`profilesQuery.isError`), and
+  // empty (`data.profiles.length === 0`).
+  const profilesQuery = useChatProfiles()
+  const chatProfiles = profilesQuery.data?.profiles ?? []
+  const activeProfileId = profilesQuery.data?.active_profile_id ?? null
+  // `profileId` (the store's explicit pick) wins; `null` falls back to
+  // whatever the server currently has active. Both are real profile ids from
+  // the SAME fetch, so this never lands on an id absent from `chatProfiles`
+  // except in the brief window before the fetch resolves — handled by the
+  // disabled placeholder below rather than by this fallback.
+  const selectedProfileId = profileId ?? activeProfileId
+  const selectedProfileMeta = chatProfiles.find((p) => p.id === selectedProfileId) ?? null
+
+  const [pendingProfilePick, setPendingProfilePick] = useState<{ id: string; label: string } | null>(null)
+
+  const onPickProfile = useCallback((id: string) => {
+    const target = chatProfiles.find((p) => p.id === id)
+    if (!target) return
+    // Cross-wire (anthropic ⇄ openai) profiles do not share a session the
+    // way two profiles on the same wire can — the confirm exists because
+    // picking one silently mid-conversation would otherwise look like the
+    // same assistant continuing when the backend has actually started over.
+    //
+    // Fix round 1 — FAIL SAFE when the current selection's wire is UNKNOWN
+    // (`selectedProfileMeta === null`, e.g. an admin deleted the profile
+    // `profileId` still points at). The old guard required a known
+    // same-wire baseline to trigger the confirm, so an unknown baseline
+    // short-circuited straight to `setProfileId` — a silent wire change
+    // wearing the same-wire path. Treat "cannot prove it's same-wire" as
+    // cross-wire: one extra confirm click costs less than a session
+    // continuing under a provider it never agreed to switch to.
+    if (!selectedProfileMeta || selectedProfileMeta.wire !== target.wire) {
+      setPendingProfilePick({ id: target.id, label: target.label })
+      return
+    }
+    setProfileId(id)
+  }, [chatProfiles, selectedProfileMeta, setProfileId])
+
+  const confirmProfileSwitch = useCallback(() => {
+    if (!pendingProfilePick) return
+    setProfileId(pendingProfilePick.id)
+    startNewChat()
+    setPendingProfilePick(null)
+  }, [pendingProfilePick, setProfileId, startNewChat])
+
+  const cancelProfileSwitch = useCallback(() => setPendingProfilePick(null), [])
 
   return (
     <div
@@ -2060,15 +2452,58 @@ export default function ChatPanel() {
         data-testid="chat-file-input"
       />
       <div className="flex items-center gap-2 px-3 h-8 border-b border-border bg-bg-2 shrink-0">
-        <select
-          value={model}
-          onChange={(e) => setModel(e.target.value as typeof model)}
-          className="bg-bg border border-border rounded px-1 py-0.5 text-[10px]"
-          data-testid="chat-model-select"
-        >
-          <option value="claude-sonnet-5">Sonnet 5</option>
-          <option value="claude-opus-5">Opus 5</option>
-        </select>
+        {profilesQuery.isError ? (
+          // ADR-0001 — a REFUSED fetch, never rendered as "no models
+          // configured": that text means the server was reachable and said
+          // "zero profiles exist", a materially different fact from
+          // "couldn't find out".
+          <select
+            disabled
+            data-profiles-state="error"
+            className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-danger"
+            title="Could not load models — check your connection and try again"
+            data-testid="chat-model-select"
+          >
+            <option>Could not load models</option>
+          </select>
+        ) : !profilesQuery.data ? (
+          <select
+            disabled
+            data-profiles-state="loading"
+            className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-muted"
+            data-testid="chat-model-select"
+          >
+            <option>Loading models…</option>
+          </select>
+        ) : chatProfiles.length === 0 ? (
+          <select
+            disabled
+            data-profiles-state="empty"
+            className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-muted"
+            title="No profiles are configured — ask an administrator to add one in Settings"
+            data-testid="chat-model-select"
+          >
+            <option>No models configured</option>
+          </select>
+        ) : (
+          <select
+            value={selectedProfileId ?? ''}
+            onChange={(e) => onPickProfile(e.target.value)}
+            disabled={streaming}
+            data-profiles-state="ready"
+            // The dock is 380px and a native <select> sizes its closed box to
+            // its widest option — a long profile label would otherwise widen
+            // the whole header row. `truncate` + `title` keep the full label
+            // reachable on hover without that.
+            className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px]"
+            title={selectedProfileMeta?.label ?? ''}
+            data-testid="chat-model-select"
+          >
+            {chatProfiles.map((p) => (
+              <option key={p.id} value={p.id}>{p.label}</option>
+            ))}
+          </select>
+        )}
         <UsageMeter />
         {/* Global mute for spoken answers. Beside the gear rather than inside
             it: the spec pairs reciprocity with "a global mute", and a mute
@@ -2137,8 +2572,24 @@ export default function ChatPanel() {
             New exports ({unseenExportCount})
           </button>
         )}
+        {/* Fix round 1 — the only other path to `startNewChat()` was the
+            cross-wire confirm's "Switch" button, which a same-wire-only
+            deployment never surfaces. `title`/`aria-label` carry the meaning
+            so a compact icon button fits the 380px dock header alongside the
+            dropdown, UsageMeter, gear, and exports badge without widening
+            the row. */}
         <button
-          className="ml-auto px-2 py-0.5 text-[10px] rounded bg-bg-2 hover:bg-bg-3 border border-border"
+          className="ml-auto px-1.5 py-0.5 text-[10px] rounded bg-bg-2 hover:bg-bg-3 border border-border"
+          onClick={onNewChat}
+          disabled={streaming}
+          data-testid="chat-new-chat"
+          title="Start a new chat (new session; the on-screen conversation and current profile binding reset)"
+          aria-label="Start a new chat"
+        >
+          🆕
+        </button>
+        <button
+          className="px-2 py-0.5 text-[10px] rounded bg-bg-2 hover:bg-bg-3 border border-border"
           onClick={onClearHistory}
           disabled={streaming || messages.length === 0}
           data-testid="chat-clear-history"
@@ -2156,7 +2607,40 @@ export default function ChatPanel() {
           </button>
         )}
       </div>
-      <ErrorBanner onRetry={onRetryLastTurn} />
+      {/* Task 13 — cross-wire profile switch confirm. Inline rather than a
+          modal: it interrupts nothing (the dropdown pick already committed
+          nothing) and the whole decision fits in one sentence. */}
+      {pendingProfilePick && (
+        <div
+          className="flex items-center gap-2 px-3 py-1 text-[11px] bg-accent/10 border-b border-accent/30 text-text shrink-0"
+          data-testid="chat-profile-switch-confirm"
+        >
+          <span>Switching to {pendingProfilePick.label} starts a new chat</span>
+          <button
+            className="px-2 py-0.5 rounded bg-accent text-bg hover:opacity-90"
+            onClick={confirmProfileSwitch}
+            data-testid="chat-profile-switch-confirm-btn"
+          >
+            Switch
+          </button>
+          <button
+            className="px-2 py-0.5 rounded bg-bg border border-border hover:bg-bg-3"
+            onClick={cancelProfileSwitch}
+            data-testid="chat-profile-switch-cancel-btn"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+      <ErrorBanner
+        onRetry={onRetryLastTurn}
+        activeProfileLabel={selectedProfileMeta?.label ?? null}
+        sessionProfile={
+          selectedProfileMeta
+            ? { id: selectedProfileMeta.id, label: selectedProfileMeta.label }
+            : null
+        }
+      />
       {historyGap > 0 && (
         <div
           role="status"
@@ -2248,11 +2732,25 @@ export default function ChatPanel() {
               'px-3 py-1.5 text-[13px] leading-relaxed tracking-[-0.005em] ' +
               (m.role === 'user' ? 'text-text bg-bg-2/40 border-b border-border/40' :
                m.role === 'tool' ? 'text-muted font-mono text-[11px] tracking-normal leading-snug' :
+               // Task 13 — model_fallback lines. Distinct from a plain
+               // assistant bubble (italic, muted, no markdown) without going
+               // as far as the tool row's monospace treatment.
+               m.role === 'system' ? 'text-muted italic text-[11px] tracking-normal leading-snug' :
                'text-text')
             }
             data-role={m.role}
             data-testid="chat-message"
           >
+            {/* Task 13 — accumulated `thinking` SSE deltas. Minimal collapsed-
+                by-default block, above the answer since thinking precedes the
+                model's text in the turn. Gated on presence, not truthiness of
+                content, so a turn with no thinking block renders nothing. */}
+            {m.role === 'assistant' && m.thinking && (
+              <details className="mb-1 text-muted text-[11px]" data-testid="chat-thinking-block">
+                <summary className="cursor-pointer select-none">Thinking</summary>
+                <div className="whitespace-pre-wrap pt-1">{m.thinking}</div>
+              </details>
+            )}
             {/* Assistant replies are GitHub-flavored markdown (tables, bold,
                 headers, lists) — render them. User/tool messages are plain
                 text; keep their newlines with pre-wrap so multi-line input and

@@ -194,6 +194,11 @@ class SmokeContext:
     session: requests.Session
     verbose: bool
     model: str | None
+    # Task 11 — the profile is the modern selector; `model` is the legacy one.
+    # Both are sent when set: the backend prefers `profile_id` and falls back
+    # to translating `model` through `llm_config.resolve_legacy_model`, so an
+    # old invocation of this script keeps working unchanged.
+    profile_id: str | None = None
 
 
 def _print_frame_compact(frame: SSEFrame, verbose: bool) -> None:
@@ -222,6 +227,11 @@ def _run_one_prompt(prompt: SmokePrompt, ctx: SmokeContext) -> PromptResult:
         "session_id": session_id,
         "message": prompt.message,
     }
+    # `profile_id` wins server-side when both are present; `model` is kept so
+    # an existing `--model claude-opus-5` invocation still selects the built-in
+    # opus profile via `resolve_legacy_model` rather than erroring.
+    if ctx.profile_id:
+        body["profile_id"] = ctx.profile_id
     if ctx.model:
         body["model"] = ctx.model
 
@@ -649,7 +659,16 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true",
                         help="Print every SSE frame.")
     parser.add_argument("--model", default=DEFAULT_MODEL,
-                        help="Override the chat model (default: backend default).")
+                        help="Override the chat model (default: backend default). "
+                             "Legacy selector — the backend translates an "
+                             "unrecognised value to the ACTIVE profile with a "
+                             "warning rather than refusing it.")
+    parser.add_argument("--profile", default=None, dest="profile_id",
+                        help="Run the smoke against a configured LLM profile "
+                             "id (e.g. anthropic-opus, or a custom "
+                             "openai-wire profile). Takes precedence over "
+                             "--model. This is how you smoke a NON-Anthropic "
+                             "provider end-to-end.")
     args = parser.parse_args()
 
     session = requests.Session()
@@ -680,6 +699,7 @@ def main() -> int:
         session=session,
         verbose=args.verbose,
         model=args.model,
+        profile_id=args.profile_id,
     )
 
     prompts = build_prompts(smoke_project)

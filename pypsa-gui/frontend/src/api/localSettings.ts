@@ -5,6 +5,17 @@
  * `reject_unless_local_mode`). `fetchLocalSettings` maps that 404 to `null`
  * rather than an error, which is how the pane and its nav entry know to hide
  * themselves — the same shape `listUnclaimed` uses at projects.ts:111.
+ *
+ * NOTE (Task 15, LLM provider config): the key this module writes IS
+ * `ANTHROPIC_API_KEY` — the same secret slot `api/chat.ts`'s
+ * `/chat/settings/api-key` writes (ApiKeySetup.tsx) and the same one the two
+ * built-in Claude profiles' `key_env` resolves to (`services/llm_config.py`,
+ * backend). It is not "the chat key" any more, now that a deployment can
+ * have several LLM profiles on other providers — `keyFieldPlaceholder`'s
+ * `'sk-ant-…'` below stays correct precisely because it is scoped to that one
+ * slot, not to "the" assistant key; the pane's own copy (pages/LocalSettings.
+ * tsx) says so explicitly rather than implying this is the only key that
+ * matters.
  */
 import axios from 'axios'
 import { client } from './client'
@@ -20,6 +31,16 @@ export interface LocalSettingsState {
   key_set: boolean
   /** Last four characters, or null — including when the key is too short to hint safely. */
   key_hint: string | null
+  /**
+   * A8 — whether redaction can blot this key out of logs and chat
+   * transcripts. `false` means it CANNOT: the value is below the server's
+   * substitution floor and appears in them verbatim. `null` when no key is
+   * set — which per ADR-0001 is NOT `false`.
+   *
+   * This pane writes the same `ANTHROPIC_API_KEY` slot the assistant-model
+   * pane does, so both disclose it or neither is trustworthy.
+   */
+  key_redactable: boolean | null
   log_path: string
 }
 

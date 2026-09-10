@@ -1,0 +1,865 @@
+"""
+LLM profile store (spec 2026-08-13, plan 2026-08-14, Task 1).
+
+Imports only stdlib and `app_paths`, deliberately — same rule
+`local_settings.py` documents at its own top: `main.py` and the
+provider seam must be able to read profile config before the router graph
+exists, so this module may not import `chat_service`, any `llm_*` provider
+module, or anything else that could pull the app graph in behind it.
+
+WHAT THIS OWNS. The list of LLM connection profiles (built-in Anthropic
+presets plus anything the user has added), which one is active, and the
+validation that keeps a saved profile safe to actually connect with. It does
+NOT own talking to a provider — that is `services/llm_provider.py` and its
+`llm_anthropic` / `llm_openai_compat` implementations, already merged and
+untouched by this module.
+
+TWO BUILT-INS, ALWAYS PRESENT. `anthropic-sonnet` and `anthropic-opus` exist
+whether or not `llm-profiles.json` exists, because the app must have a working
+default even on a machine that has never touched Settings. They are
+synthesized in code, not read from the file, so a corrupt or hand-edited file
+can never remove them or repoint their ids at something else — a file entry
+that reuses a built-in id is rejected by `save_profiles` and simply skipped
+(with a warning) if it is somehow already on disk when `load_profiles` reads
+it back.
+
+`key_env` IS DERIVED, NEVER STORED. It names the environment variable a
+profile's key lives in (e.g. `ANTHROPIC_API_KEY`, or a per-profile
+`PYPSA_GUI_LLM_KEY__<SLUG>` for a custom endpoint) so nothing above this layer
+ever handles or persists a client-supplied key or env-var name — the value in
+`os.environ` stays the only place a secret lives, matching `app_secrets`'s own
+rule.
+
+NO CACHING. `load_profiles` re-reads the file on every call. A cached result
+would make per-test app-data redirection (`PYPSAGUI_APP_DATA_DIR`) unreliable
+across tests that share a process, and in production the file only changes
+through `save_profiles` in this same process anyway, so re-reading costs
+nothing that matters.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+
+import app_paths
+
+logger = logging.getLogger(__name__)
+
+# Moved here from `chat_service` (Task 5 re-imports these rather than
+# defining them) so the profile store — not the chat harness — is the single
+# owner of what "the default model" means.
+DEFAULT_MODEL: str = "claude-sonnet-5"
+OPUS_MODEL: str = "claude-opus-5"
+
+BUILTIN_SONNET_ID = "anthropic-sonnet"
+BUILTIN_OPUS_ID = "anthropic-opus"
+_BUILTIN_IDS: frozenset[str] = frozenset([BUILTIN_SONNET_ID, BUILTIN_OPUS_ID])
+
+_FILENAME = "llm-profiles.json"
+_FILE_VERSION = 1
+
+# `\A`/`\Z`, never `^`/`$`: Python's `$` also matches immediately BEFORE a
+# trailing newline, so `^[a-z0-9-]{1,48}$` accepted an id of `"custom\n"`.
+# That id then derives `key_env == "PYPSA_GUI_LLM_KEY__CUSTOM\n"`, which
+# `app_secrets.is_managed_key` correctly refuses — and `_profile_out`'s
+# `app_secrets.status()` call raised straight out of the route, 500-ing the
+# super-admin's whole LLM settings pane.
+#
+# Reachable two ways, the second worse: a hand-edited `llm-profiles.json`
+# entry (which `load_profiles` promises to SKIP, not to propagate), and
+# `PUT /settings/llm/profiles/custom%0A` — `profile_id` is a percent-decoded
+# path parameter copied straight into `LLMProfile.id`, so that entry was
+# validated, PERSISTED, and every later `GET /settings/llm` 500ed too.
+#
+# Same defect, same fix, as `app_secrets._LLM_KEY_SLOT_RE`, which is anchored
+# this way for exactly this reason.
+_SLUG_RE = re.compile(r"\A[a-z0-9-]{1,48}\Z")
+_WIRE_VALUES = frozenset(["anthropic", "openai"])
+_AUTH_VALUES = frozenset(["bearer", "none"])
+_CREDENTIAL_QUERY_KEYS = frozenset(["key", "token", "api_key"])
+
+
+class ProfileValidationError(ValueError):
+    """A profile (or the set being saved) fails validation."""
+
+
+class ProfileNotConfiguredError(ProfileValidationError):
+    """An explicitly-named profile id does not exist in the current store."""
+
+
+@dataclass(frozen=True)
+class LLMProfile:
+    id: str  # slug [a-z0-9-]{1,48}
+    label: str
+    preset: str  # catalogue id (see `load_presets`) or "custom"
+    wire: str  # "anthropic" | "openai"
+    base_url: str | None  # None = wire's default endpoint
+    model: str  # free text, non-empty
+    tools: bool  # capabilities flattened onto the profile — a frozen
+    vision: bool  # dataclass can't hold a nested mutable "capabilities" object
+    auth: str  # "bearer" | "none"
+    fallback_model: str | None
+    max_output_tokens: int | None
+
+    @property
+    def key_env(self) -> str | None:
+        """
+        The environment variable this profile's API key lives in, or None
+        when `auth` is `"none"` (a local endpoint that takes no key).
+
+        Derived, not stored: nothing serializes this, and nothing reads it
+        back out of the file — it is recomputed from `preset`/`id` every
+        time, which is also why a profile can never be pointed at an
+        arbitrary env var by editing JSON on disk.
+        """
+        if self.auth == "none":
+            return None
+        return derive_key_env(self.id, self.preset)
+
+    @property
+    def token_param(self) -> str:
+        """
+        The completion-length parameter name this profile's endpoint wants.
+
+        Derived from `preset` exactly like `key_env` — nothing serializes it
+        and nothing reads it back off disk, so it can never be pointed
+        somewhere by editing JSON. See `derive_token_param`.
+        """
+        return derive_token_param(self.preset)
+
+
+# The two spellings of the completion-length parameter on the OpenAI wire.
+# `max_tokens` is the original and is what Ollama, LM Studio, vLLM and
+# llama.cpp accept; current OpenAI models replaced it with
+# `max_completion_tokens` and reject the PRESENCE of the old name with a 400
+# `unsupported_parameter`. Exactly one is ever sent — see
+# `llm_openai_compat.OpenAICompatProvider`.
+TOKEN_PARAM_LEGACY = "max_tokens"
+TOKEN_PARAM_COMPLETION = "max_completion_tokens"
+_TOKEN_PARAMS: frozenset[str] = frozenset(
+    [TOKEN_PARAM_LEGACY, TOKEN_PARAM_COMPLETION]
+)
+
+
+def derive_token_param(preset: str) -> str:
+    """
+    Which completion-length parameter an endpoint on this preset wants.
+
+    DERIVED FROM THE PRESET, never stored on a profile and never client-set —
+    the same rule `key_env` follows, for a weaker but similar reason: it is
+    part of how we speak to a vendor, not a user preference, and a profile
+    that could carry its own value would just be a way to make requests fail.
+
+    Anything not in the catalogue — `"custom"`, or a preset id from a newer
+    build — falls back to `max_tokens`, the broadly-compatible spelling. A
+    custom profile aimed at OpenAI therefore guesses wrong, which is why
+    `OpenAICompatProvider` retries once with the other spelling when the
+    endpoint refuses one by name.
+    """
+    entry = _preset_catalogue().get(preset)
+    declared = entry.get("token_param") if entry is not None else None
+    if declared in _TOKEN_PARAMS:
+        return declared
+    return TOKEN_PARAM_LEGACY
+
+
+def _preset_catalogue() -> dict[str, dict]:
+    return {entry["id"]: entry for entry in load_presets() if isinstance(entry, dict) and "id" in entry}
+
+
+def derive_key_env(profile_id: str, preset: str) -> str | None:
+    """
+    The env var a profile's key comes from.
+
+    A cataloged preset (from `presets.json`, Task 2) declares its own
+    `key_env` (or None, for a preset whose auth is "none") — that declaration
+    wins. `"custom"` (or any preset id not in the catalogue, e.g. because
+    `presets.json` has not shipped yet) falls back to a per-profile name
+    derived from its slug, so two custom profiles never collide on one
+    variable.
+
+    The two built-in ids read the catalogue's `anthropic` entry FIRST — not
+    their own hardcode — so there is exactly one place `ANTHROPIC_API_KEY` is
+    written down once `presets.json` exists (Task 1's review flagged the
+    original version of this function for declaring it twice). The literal
+    `"ANTHROPIC_API_KEY"` here is kept ONLY as the no-catalogue fallback: a
+    dev checkout that predates Task 2, or a build that somehow omits
+    `presets.json`, where `load_presets()` returns `[]` and the builtins must
+    still resolve correctly.
+    """
+    if profile_id in _BUILTIN_IDS:
+        anthropic_entry = _preset_catalogue().get("anthropic")
+        if anthropic_entry is not None:
+            return anthropic_entry.get("key_env")
+        return "ANTHROPIC_API_KEY"
+    if preset != "custom":
+        entry = _preset_catalogue().get(preset)
+        if entry is not None:
+            return entry.get("key_env")
+    return namespaced_key_env(profile_id)
+
+
+def namespaced_key_env(profile_id: str) -> str:
+    """
+    The PRIVATE key slot `profile_id` owns — whether or not it uses it today.
+
+    `derive_key_env` answers "where does this profile read its key from RIGHT
+    NOW", which is None at `auth="none"` and a SHARED provider variable on a
+    cataloged preset. That is the wrong question for cleanup (C-13): a
+    profile created with `auth="bearer"`, given a key, then edited to
+    `auth="none"` or onto `preset="openai"` leaves this slot behind with no
+    route that can reach it — `DELETE .../key` 409s on `auth=none` and aims
+    at the shared key otherwise, and the profile-delete guard read a
+    `key_env` that had already become None.
+
+    This name is a pure function of the id, so the slot can only ever belong
+    to that one profile. That is what makes it always safe to clear on that
+    profile's behalf, and never safe to leave behind once the profile stops
+    using it: recreating a profile under the same id would otherwise re-arm a
+    credential the operator believes they deleted.
+    """
+    return "PYPSA_GUI_LLM_KEY__" + profile_id.upper().replace("-", "_")
+
+
+def profiles_path() -> Path:
+    return app_paths.app_data_dir() / _FILENAME
+
+
+def _builtin_profiles() -> list[LLMProfile]:
+    return [
+        LLMProfile(
+            id=BUILTIN_SONNET_ID,
+            label="Claude Sonnet",
+            preset="anthropic-sonnet",
+            wire="anthropic",
+            base_url=None,
+            model=DEFAULT_MODEL,
+            tools=True,
+            vision=True,
+            auth="bearer",
+            fallback_model=None,
+            max_output_tokens=None,
+        ),
+        LLMProfile(
+            id=BUILTIN_OPUS_ID,
+            label="Claude Opus",
+            preset="anthropic-opus",
+            wire="anthropic",
+            base_url=None,
+            model=OPUS_MODEL,
+            tools=True,
+            vision=True,
+            auth="bearer",
+            fallback_model=DEFAULT_MODEL,
+            max_output_tokens=None,
+        ),
+    ]
+
+
+def _validate_field_types(profile: LLMProfile) -> None:
+    """
+    S-L3/C-22 — the fields JSON could put ANY type into.
+
+    W-5 type-checked `base_url` and its comment claimed "every other field is
+    already contained by `_strict_bool` or an enum check, and base_url was
+    the only escape". That was wrong: `tools`/`vision` are contained by
+    `_strict_bool` and `wire`/`auth` by their enum membership tests, but
+    `label`, `model`, `preset`, `fallback_model` and `max_output_tokens`
+    were read out of the file verbatim and became live profiles.
+
+    `label` is the one that bites hardest, because a wrong type there does
+    not break the profile carrying it — it breaks a SHARED consumer.
+    `chat_service._profile_awareness_block` sorts every label, so one
+    non-string raises inside a blanket `except Exception` and the block
+    comes back empty for EVERY user and every profile: the active model's
+    name and the switching instructions vanish instance-wide from one
+    hand-edited entry.
+
+    Checked here rather than in `_profile_from_dict` so the SAVE path is
+    covered by the same rule — `save_profiles` calls this too, and
+    `ProfileIn`'s docstring states validation is deliberately not duplicated
+    at the route. A check that only fired on load would let the same value
+    in through PUT and back out to every reader.
+
+    Rejected, never coerced: this build cannot know what a `label` of `123`
+    was meant to say. Since C-14 a rejected entry is preserved on disk for
+    the operator to repair rather than deleted, which is what makes refusing
+    it the safe answer rather than a data-loss one.
+    """
+    def _require(name: str, value: object, types: tuple, described: str,
+                 *, optional: bool = False) -> None:
+        if optional and value is None:
+            return
+        # `bool` is a subclass of `int`, so `True` satisfies an isinstance
+        # check for a token count. It is not a count.
+        if isinstance(value, bool) and bool not in types:
+            raise ProfileValidationError(
+                f"profile {profile.id!r}: {name} must be {described}, got bool"
+            )
+        if not isinstance(value, types):
+            raise ProfileValidationError(
+                f"profile {profile.id!r}: {name} must be {described}, got "
+                f"{type(value).__name__}"
+            )
+
+    _require("id", profile.id, (str,), "a string")
+    _require("label", profile.label, (str,), "a string")
+    _require("preset", profile.preset, (str,), "a string")
+    _require("model", profile.model, (str,), "a string")
+    _require("fallback_model", profile.fallback_model, (str,),
+             "a string or null", optional=True)
+    _require("max_output_tokens", profile.max_output_tokens, (int,),
+             "an integer or null", optional=True)
+    # The RANGE, not just the type. S-L3/C-22 contained what JSON could put
+    # in these fields and stopped there, which left the one field whose
+    # nonsense values are silently harmful.
+    #
+    # `chat_service` reads it as `profile.max_output_tokens or
+    # MAX_OUTPUT_TOKENS_PER_TURN`, so the two ends fail in opposite and
+    # equally quiet ways. A NEGATIVE value is truthy: it reaches the wire as
+    # `max_tokens=-1` and every turn on that profile dies as an opaque
+    # upstream `invalid_request`, with Settings showing a budget that looks
+    # deliberate. ZERO is falsy: it is swallowed by the `or` and silently
+    # means "the default", so Settings displays a limit that is not the one
+    # in effect. Neither was reachable only by hand-editing the file —
+    # `PUT /settings/llm/profiles/{id}` accepted both.
+    #
+    # Refused on BOTH paths, same rule as the type checks above: a check that
+    # only fired on save would let a downgrade or a hand edit put the value
+    # back. A stored 0 or negative therefore becomes a skipped entry with a
+    # warning rather than a silent surprise, and C-14 keeps its bytes on disk
+    # for the operator to repair.
+    if profile.max_output_tokens is not None and profile.max_output_tokens < 1:
+        raise ProfileValidationError(
+            f"profile {profile.id!r}: max_output_tokens must be at least 1 "
+            f"(or null for the default), got {profile.max_output_tokens}"
+        )
+
+
+def _validate_profile(profile: LLMProfile) -> None:
+    _validate_field_types(profile)
+    if not _SLUG_RE.match(profile.id):
+        raise ProfileValidationError(
+            f"profile id {profile.id!r} must match [a-z0-9-]{{1,48}}"
+        )
+    if profile.wire not in _WIRE_VALUES:
+        raise ProfileValidationError(
+            f"profile {profile.id!r}: wire must be one of {sorted(_WIRE_VALUES)}, got {profile.wire!r}"
+        )
+    if not profile.model:
+        raise ProfileValidationError(f"profile {profile.id!r}: model must not be empty")
+    if profile.auth not in _AUTH_VALUES:
+        raise ProfileValidationError(
+            f"profile {profile.id!r}: auth must be one of {sorted(_AUTH_VALUES)}, got {profile.auth!r}"
+        )
+    if profile.base_url is not None:
+        _validate_base_url(profile.id, profile.base_url)
+    _validate_preset_wire_lock(profile)
+    _validate_preset_base_url_lock(profile)
+
+
+def _validate_preset_wire_lock(profile: LLMProfile) -> None:
+    """
+    S-M2: a profile may not contradict its preset's declared `wire`.
+
+    `preset="openai", wire="anthropic"` resolved `key_env=OPENAI_API_KEY`
+    (from the preset) and then took the ANTHROPIC branch of
+    `_provider_for_profile`, which builds `anthropic.Anthropic(api_key=...)`
+    and does not read `base_url` at all — so a live OpenAI key went to
+    `api.anthropic.com` on every turn, and Settings displayed a `base_url`
+    that was never contacted, leaving the operator no way to notice.
+
+    `preset="custom"` (and any uncatalogued preset id) declares no wire and
+    keeps its free choice: it owns a private `PYPSA_GUI_LLM_KEY__<SLUG>` slot,
+    so neither wire can leak a shared credential.
+    """
+    if profile.preset == "custom":
+        return
+    entry = _preset_catalogue().get(profile.preset)
+    if entry is None:
+        return
+    declared = entry.get("wire")
+    if declared is not None and profile.wire != declared:
+        raise ProfileValidationError(
+            f"profile {profile.id!r}: wire must be {declared!r} for preset "
+            f"{profile.preset!r}, got {profile.wire!r} — a preset's key is "
+            f"resolved from the preset, so a mismatched wire would send that "
+            f"credential to the wrong provider"
+        )
+
+
+def _validate_preset_base_url_lock(profile: LLMProfile) -> None:
+    """
+    BINDING SECURITY CONSTRAINT (Task 1 review): a profile catalogued under a
+    bearer-auth preset must not carry a `base_url` that diverges from that
+    preset's declared `base_url`.
+
+    Without this, "catalogued preset + attacker-chosen base_url" would
+    exfiltrate a SHARED provider key: `key_env` for a non-custom preset
+    resolves to a well-known env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+    `MOONSHOT_API_KEY`, `DASHSCOPE_API_KEY` today), and `llm_provider` sends
+    whatever is in that variable to `profile.base_url` — so a profile that
+    kept `preset="openai"` (to inherit the OpenAI key) but pointed
+    `base_url` at an attacker's host would hand that host a live
+    `OPENAI_API_KEY`. `base_url=None` — "use the preset's own endpoint" — is
+    always fine, and always the normal case: nothing sets base_url for a
+    cataloged bearer preset. `preset="custom"` is exempt because it owns its
+    own namespaced key slot (`PYPSA_GUI_LLM_KEY__<SLUG>`, never a shared
+    provider key), so pointing it anywhere is not a shared-key leak — that is
+    the entire reason a custom profile exists.
+    """
+    if profile.preset == "custom" or profile.base_url is None:
+        return
+    entry = _preset_catalogue().get(profile.preset)
+    if entry is None:
+        return
+    # S-M1 — gate on the SAME thing `derive_key_env` decides from.
+    #
+    # This used to skip on `entry["auth"] != "bearer"`, which is a different
+    # question from the one that matters: `derive_key_env` hands the profile
+    # `entry["key_env"]`, so what makes a repoint dangerous is whether this
+    # preset supplies a SHARED credential at all — not what its `auth` field
+    # is called. The two predicates agreed only by accident of the shipped
+    # catalogue (no entry has `auth != "bearer"` with a non-null `key_env`),
+    # leaving the lock fail-open for the next preset added. A keyless preset
+    # (`key_env: null` — Ollama, LM Studio) stays free to be repointed, which
+    # is the whole point of a local-endpoint preset.
+    if entry.get("key_env") is None:
+        return
+    preset_base_url = entry.get("base_url")
+    if profile.base_url != preset_base_url:
+        raise ProfileValidationError(
+            f"profile {profile.id!r}: base_url must match preset "
+            f"{profile.preset!r}'s base_url ({preset_base_url!r}) or be "
+            f"omitted — a bearer-auth preset's key is a shared provider "
+            f"credential and must not be sent to a different host"
+        )
+
+
+def _validate_base_url(profile_id: str, base_url: str) -> None:
+    # W-5 — `urlsplit`/`parse_qs` raise a BARE `ValueError` on a malformed
+    # URL (`http://[::1` -> "Invalid IPv6 URL"). `load_profiles`' per-entry
+    # guard catches `ProfileValidationError`, which IS a `ValueError`
+    # subclass — so a bare one slipped past it and out of a function whose
+    # docstring promises it NEVER raises. One hand-edited entry then took
+    # down every turn, `GET /settings/llm`, `GET /chat/profiles` and
+    # `/history`, with no in-app way to delete the entry, because every route
+    # that could calls `load_profiles` first.
+    if not isinstance(base_url, str):
+        # An unquoted JSON scalar (`"base_url": 8080`) reaches `urlsplit` as an
+        # int/bool/float and raises AttributeError, not ValueError — so the
+        # W-5 translation below never saw it and `load_profiles` still raised.
+        # Type-check first, because `urlsplit` is reached before any other
+        # guard here. (This comment used to claim base_url was the ONLY
+        # uncontained field. It was not — `label`, `model`, `preset`,
+        # `fallback_model` and `max_output_tokens` were uncontained too, and
+        # believing this line is why S-L3/C-22 survived. They are now checked
+        # in `_validate_field_types`.)
+        raise ProfileValidationError(
+            f"profile {profile_id!r}: base_url must be a string or null, got "
+            f"{type(base_url).__name__}"
+        )
+    try:
+        parts = urlsplit(base_url)
+        query = parse_qs(parts.query)
+    except (ValueError, TypeError, AttributeError) as exc:
+        # Belt and braces: the parser's exception TYPE is not part of its
+        # contract, so translate anything it throws rather than enumerating
+        # what it happens to throw today.
+        raise ProfileValidationError(
+            f"profile {profile_id!r}: base_url is not a parsable URL"
+        ) from exc
+    if parts.scheme not in ("http", "https"):
+        raise ProfileValidationError(
+            f"profile {profile_id!r}: base_url scheme must be http or https, got {parts.scheme!r}"
+        )
+    if "@" in parts.netloc:
+        # Userinfo (`user:pass@host`) would smuggle a credential into a URL
+        # that gets logged, displayed in Settings, and written to disk in
+        # plaintext — the same class of leak `app_secrets` exists to avoid.
+        raise ProfileValidationError(
+            f"profile {profile_id!r}: base_url must not contain userinfo (user:pass@host)"
+        )
+    leaked = _CREDENTIAL_QUERY_KEYS & {key.lower() for key in query}
+    if leaked:
+        raise ProfileValidationError(
+            f"profile {profile_id!r}: base_url query must not contain credential-shaped "
+            f"parameters ({', '.join(sorted(leaked))})"
+        )
+
+
+def _strict_bool(data: dict, key: str) -> bool:
+    # `bool(data.get(key, False))` would coerce any truthy JSON value —
+    # including the string "false" — to True. A capability field must be a
+    # real JSON boolean; anything else makes the whole entry invalid so it
+    # gets skipped (and logged) by `load_profiles`, same as a missing
+    # required field.
+    value = data.get(key, False)
+    if not isinstance(value, bool):
+        raise TypeError(f"{key!r} must be a boolean, got {value!r}")
+    return value
+
+
+def _profile_from_dict(data: dict) -> LLMProfile:
+    # Only the declared fields are ever read out of a JSON entry — an unknown
+    # key is ignored rather than rejected, so a future field can be added
+    # without corrupting a file written by an older build.
+    return LLMProfile(
+        id=data["id"],
+        label=data["label"],
+        preset=data["preset"],
+        wire=data["wire"],
+        base_url=data.get("base_url"),
+        model=data["model"],
+        tools=_strict_bool(data, "tools"),
+        vision=_strict_bool(data, "vision"),
+        auth=data["auth"],
+        fallback_model=data.get("fallback_model"),
+        max_output_tokens=data.get("max_output_tokens"),
+    )
+
+
+def _profile_to_dict(profile: LLMProfile) -> dict:
+    return {
+        "id": profile.id,
+        "label": profile.label,
+        "preset": profile.preset,
+        "wire": profile.wire,
+        "base_url": profile.base_url,
+        "model": profile.model,
+        "tools": profile.tools,
+        "vision": profile.vision,
+        "auth": profile.auth,
+        "fallback_model": profile.fallback_model,
+        "max_output_tokens": profile.max_output_tokens,
+    }
+
+
+def _read_file() -> dict | None:
+    """
+    The raw parsed file, or None on any absence/corruption. NEVER raises.
+
+    Follows `local_settings.read_settings`'s never-raise discipline exactly:
+    a missing file is normal (first run); an unreadable, non-UTF-8,
+    non-JSON, or non-object file is a degraded state to warn about and
+    ignore, never a reason `load_profiles` should crash the app that calls it
+    at startup.
+    """
+    path = profiles_path()
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None
+    except OSError:
+        logger.warning("llm profiles: %s could not be read; ignoring it", path)
+        return None
+    except UnicodeDecodeError:
+        # UnicodeDecodeError is a ValueError subclass but NOT an OSError
+        # subclass, so it needs its own branch or it would raise straight
+        # out of a function documented as "NEVER raises" — the same trap
+        # `local_settings.read_settings` calls out for the same reason.
+        logger.warning("llm profiles: %s is not valid UTF-8; ignoring it", path)
+        return None
+
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        logger.warning("llm profiles: %s is not valid JSON; ignoring it", path)
+        return None
+    if not isinstance(data, dict):
+        logger.warning("llm profiles: %s is not a JSON object; ignoring it", path)
+        return None
+    return data
+
+
+def load_profiles() -> tuple[list[LLMProfile], str]:
+    """
+    `(profiles, active_id)`. NEVER raises.
+
+    Built-ins are always first (`BUILTIN_SONNET_ID`, `BUILTIN_OPUS_ID`) and
+    always present, synthesized in code rather than read from disk. File
+    entries are appended after them; an entry cannot reuse a built-in id
+    (rejected, logged, skipped), and any entry that is malformed or fails
+    validation is logged and skipped rather than aborting the whole load —
+    one bad profile must not take every other profile down with it.
+    """
+    builtins = _builtin_profiles()
+    active_id = BUILTIN_SONNET_ID
+
+    data = _read_file()
+    if data is None:
+        return builtins, active_id
+
+    raw_profiles = data.get("profiles")
+    if not isinstance(raw_profiles, list):
+        logger.warning("llm profiles: %s has no profiles list; ignoring it", profiles_path())
+        return builtins, active_id
+
+    profiles = list(builtins)
+    seen_ids = set(_BUILTIN_IDS)
+    for entry in raw_profiles:
+        if not isinstance(entry, dict):
+            logger.warning("llm profiles: skipping a non-object profile entry")
+            continue
+        try:
+            profile = _profile_from_dict(entry)
+            if profile.id in _BUILTIN_IDS:
+                raise ProfileValidationError(
+                    f"profile id {profile.id!r} is reserved for a built-in profile"
+                )
+            if profile.id in seen_ids:
+                raise ProfileValidationError(f"duplicate profile id {profile.id!r}")
+            _validate_profile(profile)
+        except (KeyError, TypeError, ValueError) as exc:  # W-5: ValueError covers
+            # ProfileValidationError AND any bare one a parser leaks.
+            logger.warning("llm profiles: skipping an invalid profile entry: %s", exc)
+            continue
+        profiles.append(profile)
+        seen_ids.add(profile.id)
+
+    stored_active = data.get("active_profile_id")
+    if isinstance(stored_active, str) and stored_active in seen_ids:
+        active_id = stored_active
+
+    return profiles, active_id
+
+
+def _entries_a_load_would_skip(written_ids: set[str]) -> list:
+    """
+    Raw file entries `load_profiles` refuses, that this write is not replacing.
+
+    C-14 — `load_profiles` skips an entry it cannot validate (right: one bad
+    profile must not take the others down) and `save_profiles` rewrites the
+    whole file from the list it is handed (right: it is the authority on what
+    a profile IS). Each half is correct; together they silently deleted every
+    entry this build could not parse.
+
+    Worse than it first looked: `set_active` does the same load→filter→save,
+    so merely SWITCHING the active profile destroyed them — and
+    `set_active_profile` is a chat tool, so the assistant could do it on the
+    user's behalf. The realistic trigger is a downgrade or one hand-edited
+    entry, and the only trace was a `logger.warning` nobody reads.
+
+    Entries are carried through VERBATIM, never re-serialised: this build does
+    not understand them, so it is in no position to normalise them. An entry
+    whose id the caller IS writing is dropped, so repairing a broken profile
+    replaces it rather than duplicating the id.
+    """
+    data = _read_file()
+    if data is None:
+        return []
+    raw = data.get("profiles")
+    if not isinstance(raw, list):
+        return []
+
+    preserved: list = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            # Not a profile at all. Kept anyway: a write must not destroy
+            # bytes it cannot interpret.
+            preserved.append(entry)
+            continue
+        entry_id = entry.get("id")
+        # `in` on a set raises TypeError for a list or dict id, which a
+        # hand-edited file can hold. `load_profiles` tolerates such an entry,
+        # so the write side must too: a store this build cannot READ must not
+        # become one it cannot WRITE. Only a string can match a profile id.
+        if isinstance(entry_id, str) and entry_id in written_ids:
+            continue
+        try:
+            candidate = _profile_from_dict(entry)
+            if candidate.id in _BUILTIN_IDS:
+                raise ProfileValidationError("reserved id")
+            _validate_profile(candidate)
+        except (KeyError, TypeError, ValueError):
+            preserved.append(entry)
+    return preserved
+
+
+def save_profiles(profiles: list[LLMProfile], active_id: str) -> None:
+    """
+    Validate every profile, then write `llm-profiles.json` at 0600.
+
+    Validates-then-writes: if ANY profile fails validation, or reuses a
+    built-in id, or `active_id` names nothing in `profiles` or the built-ins,
+    nothing is written — a bad save must not clobber a working file with a
+    half-valid one.
+
+    File profiles only: the two built-ins are never written (they are
+    synthesized by `load_profiles` on every read), so this function raises if
+    `profiles` contains a built-in id — accepting it silently would make it
+    look like a built-in came from the file, which is exactly the ambiguity
+    Task 1 promises callers cannot happen.
+    """
+    seen_ids: set[str] = set()
+    for profile in profiles:
+        if profile.id in _BUILTIN_IDS:
+            raise ProfileValidationError(
+                f"profile id {profile.id!r} is reserved for a built-in profile and cannot be saved"
+            )
+        if profile.id in seen_ids:
+            raise ProfileValidationError(f"duplicate profile id {profile.id!r}")
+        _validate_profile(profile)
+        seen_ids.add(profile.id)
+
+    if active_id not in seen_ids and active_id not in _BUILTIN_IDS:
+        raise ProfileValidationError(f"active_profile_id {active_id!r} is not a known profile")
+
+    # C-14 — re-emit the entries this build cannot load, so a write does not
+    # silently delete them. Appended after the known-good ones; `load_profiles`
+    # will skip them again on the next read, exactly as before.
+    payload = {
+        "version": _FILE_VERSION,
+        "active_profile_id": active_id,
+        "profiles": (
+            [_profile_to_dict(p) for p in profiles]
+            + _entries_a_load_would_skip({p.id for p in profiles})
+        ),
+    }
+
+    path = profiles_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    # Mode applied at open time, not write-then-chmod, matching
+    # `app_secrets._write_managed`: the alternative leaves a window where the
+    # file (which may hold a base_url a user considers private, even though
+    # never a raw key) is briefly world-readable under the process umask.
+    # Temp file + `os.replace`, the sibling of the same fix in
+    # `app_secrets._write_managed`. This used to open the LIVE file `O_TRUNC`
+    # and write in place, so a failure between open and flush (ENOSPC,
+    # SIGTERM, power loss) left `llm-profiles.json` truncated — taking every
+    # profile with it, which is the same data loss C-14 describes arriving by
+    # a different route. A fresh temp at 0600 also removes the window
+    # where an overwrite of a pre-existing file sat under the process umask;
+    # `O_CREAT` applies its mode only on creation, so the old write-then-chmod
+    # left the contents briefly readable.
+    #
+    # The temp name is UNIQUE per write, not a fixed `.tmp`. A fixed name
+    # opened `O_EXCL` turns the one crash this routine exists to survive into
+    # a permanent brick: the temp a SIGKILL leaves behind makes every later
+    # save raise `FileExistsError`, with no route to recovery from inside the
+    # app. `mkstemp` keeps the `O_EXCL` and the 0600 and drops the collision.
+    #
+    # NOT `services.atomic_io`: that helper deliberately has no `fsync` and no
+    # mode control, and its FIXED `.tmp` sibling is a documented contract there
+    # (a leftover one is the crash signal `storage_reconcile` reports). Neither
+    # fits a 0600 credential file, and its scan covers the projects root, not
+    # app-data — so nothing reaps what is written here either way.
+    fd, tmp_name = tempfile.mkstemp(
+        dir=path.parent, prefix=path.name + ".", suffix=".tmp"
+    )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink()
+        except OSError:  # pragma: no cover
+            pass
+        raise
+
+
+def resolve_profile(profile_id: str | None) -> LLMProfile:
+    """
+    The profile named by `profile_id`, or the active profile when
+    `profile_id` is None.
+
+    C-4 — an EXPLICIT id that names nothing raises `ProfileNotConfiguredError`
+    rather than falling through to the active profile. The old fall-through
+    was documented as intended, but it made an unresolvable selection render
+    as SUCCESS: a user picks `local-ollama` believing their data stays on
+    localhost, the id no longer exists, and the prompt goes to whatever
+    profile is active — a different provider, wire and model — with every
+    frame reporting a normal turn. That is the ADR-0001 shape, and
+    `frontend/src/api/chat.ts` already stated the refusing contract as fact.
+
+    `None` still means "the active profile", which is what the zero-config
+    path and `resolve_active()` rely on.
+
+    Legacy model strings (pre-profile chat sessions that stored a bare model
+    name rather than a profile id) are NOT handled here — that translation is
+    Task 7's, in the chat harness that still has the legacy value to look at,
+    and it keeps its documented free-text passthrough.
+    """
+    profiles, active_id = load_profiles()
+    by_id = {p.id: p for p in profiles}
+    if profile_id is not None:
+        if profile_id not in by_id:
+            raise ProfileNotConfiguredError(
+                f"no configured profile {profile_id!r}"
+            )
+        return by_id[profile_id]
+    return by_id[active_id]
+
+
+def resolve_active() -> LLMProfile:
+    return resolve_profile(None)
+
+
+def resolve_legacy_model(model: str | None) -> LLMProfile:
+    """
+    Map a pre-profile chat session's bare model string to a profile
+    (Task 5/7's translation `resolve_profile` deliberately does not do).
+
+    `DEFAULT_MODEL` / `OPUS_MODEL` resolve to the matching built-in profile
+    so an old session that stored one of those literals keeps behaving the
+    same way it always did. `None` (no stored model) resolves to whatever is
+    active now. Anything else — an unrecognized string — ALSO resolves to
+    the active profile rather than raising: free-text `model` values are a
+    documented passthrough contract (see `test_chat_models.py`), not
+    something this layer refuses, so an unrecognized value is logged once
+    and treated the same as "no model was stored".
+    """
+    if model == DEFAULT_MODEL:
+        return resolve_profile(BUILTIN_SONNET_ID)
+    if model == OPUS_MODEL:
+        return resolve_profile(BUILTIN_OPUS_ID)
+    if model is not None:
+        logger.warning(
+            "llm profiles: unrecognized legacy model %r; falling back to the "
+            "active profile", model,
+        )
+    return resolve_active()
+
+
+def set_active(profile_id: str) -> None:
+    """Persist `profile_id` as active. Raises `ProfileValidationError` if unknown."""
+    profiles, current_active = load_profiles()
+    by_id = {p.id: p for p in profiles}
+    if profile_id not in by_id:
+        raise ProfileValidationError(f"unknown profile id {profile_id!r}")
+    file_profiles = [p for p in profiles if p.id not in _BUILTIN_IDS]
+    save_profiles(file_profiles, profile_id)
+
+
+def load_presets() -> list[dict]:
+    """
+    The bundled preset catalogue, or `[]`.
+
+    `presets.json` ships in Task 2 — on a checkout that predates it (or any
+    build that omits it) this returns `[]` rather than raising, and
+    `derive_key_env` falls back to the per-profile custom-key-env scheme.
+    """
+    path = Path(__file__).resolve().parent.parent / "presets.json"
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        logger.warning("llm presets: %s is not valid JSON; ignoring it", path)
+        return []
+    if not isinstance(data, list):
+        logger.warning("llm presets: %s is not a JSON array; ignoring it", path)
+        return []
+    return [entry for entry in data if isinstance(entry, dict)]

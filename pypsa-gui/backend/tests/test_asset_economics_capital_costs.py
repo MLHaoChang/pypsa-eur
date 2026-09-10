@@ -57,6 +57,20 @@ CAPITAL_DERIVED_TOTAL = (
 INDEPENDENT = ("revenue_eur", "vom_cost_eur", "energy_mwh")
 
 
+def _ae_module():
+    """
+    The module that actually CALLS `periodized_capital_costs`.
+
+    MERGE NOTE (2026-09-10): the decomposition moved the call out of
+    `routers.results` into `services.results.asset_economics`, which binds the
+    name at its own module scope. Patching the router would inject no fault
+    while still reporting green — the failure mode these tests exist to catch.
+    """
+    from services.results import asset_economics
+
+    return asset_economics
+
+
 def _boom(*_args, **_kwargs):
     """Stand-in for a resolver that blows up mid-way, as the real one can."""
     raise RuntimeError("annuity lookup exploded")

@@ -2,27 +2,17 @@
 Phase D tripwire — `_stream_assistant_message` lifted out of `_run_turn_body`.
 
 The retry loop, and the highest-risk cut in the plan. It drains one assistant
-message off the provider stream, and on failure decides between three very
-different things: retry, downgrade the model once, or surface the error and end
-the turn.
+message off the stream, and on failure decides between three very different
+things: retry, downgrade the model once, or surface the error and end the turn.
 
-Ported to the provider seam
----------------------------
-Master wrote this file against the Anthropic SDK directly — a `client` with
-`client.messages.stream(...)` returning a context manager plus
-`get_final_message()`, and `_map_sdk_exception` monkeypatched to script the
-error kinds. This branch put `services/llm_provider` under that: the seam now
-takes a provider and an `LLMRequest`, drains `LLMEvent`s, and reads its error
-kinds off `ProviderError` rather than from a mapping function. So the HARNESS
-below is rewritten and every property master pinned is kept, one for one — the
-test names and the reasoning are unchanged, because the risks are unchanged.
-
-Two assertions get stronger on the way across, both about state the neutral
-vocabulary made visible: the completed-stream test now checks the blocks AND
-the usage that come off `message_done` (master could only check the identity of
-an opaque final message), and the A8 test also checks `request.model`, because
-under this seam the downgrade only reaches the wire if the request is re-read
-per attempt.
+DRIVEN THROUGH A PROVIDER, NOT AN SDK CLIENT. The extraction on master streamed
+via `client.messages.stream(...)` and returned the SDK's own message object; the
+harness here scripted that shape. This line also reaches OpenAI-compatible
+endpoints, so the seam takes an `LLMProvider` and a prepared `LLMRequest`, and
+returns normalised blocks + usage. Every property below is the one master's
+version asserted — only the double changed, from a fake SDK client to a fake
+provider, and failures are raised as the `ProviderError` the provider contract
+documents instead of monkeypatching `_map_sdk_exception`.
 
 The property that makes this dangerous to move
 ----------------------------------------------
@@ -35,16 +25,16 @@ a user under transient load — and every existing test still passes, because th
 frames are individually well-formed. So the guard here asserts on the COUNT of
 emitted text, not just its presence.
 
-One correction to that reasoning, from actually running the mutation. Master's
-prose says hoisting `emitted_this_attempt` out of the attempt loop produces the
-duplicate output. It does not: the flag is only ever READ inside the same
-attempt that can set it, and any attempt that sets it then leaves the loop
-(terminal error, completed stream, or abort), so hoisting it is inert here —
-the mutation survives all nine tests below. The term that actually carries the
-guarantee is `and not emitted_this_attempt` in the `retriable` condition, and
-dropping THAT turns `test_a_retriable_error_AFTER_emission_does_not_retry` red
-with `attempts == 2`. The per-attempt reset stays, because it is what keeps the
-inert version inert; the tripwire is on the condition.
+ONE CORRECTION TO THAT REASONING, from actually running the mutation (master,
+same file). Hoisting `emitted_this_attempt` out of the attempt loop does NOT
+produce the duplicate: the flag is only ever read inside the same attempt that
+can set it, and any attempt that sets it then leaves the loop (terminal error,
+completed stream, or abort), so the hoist is inert and survives every case
+below. The term that actually carries the guarantee is
+`and not emitted_this_attempt` in the `retriable` condition; dropping THAT
+turns `test_a_retriable_error_AFTER_emission_does_not_retry` red with
+`attempts == 2`. The per-attempt reset stays, because it is what keeps the
+inert version inert — but the tripwire is on the condition, not the reset.
 
 Three exits, all of which must survive
 --------------------------------------
@@ -55,10 +45,13 @@ Three exits, all of which must survive
 A generator cannot end its caller's turn, so the last two come back as
 `stop_turn` on the returned outcome.
 
-`model_fallback` is the odd one: a persistent `rate_limited` on Opus buys
-exactly ONE extra attempt on Sonnet, granted by widening `max_attempts` rather
-than by resetting `attempt`. It mutates `session.model`, which outlives the turn
-— the session stays downgraded — so this is not a detail the seam may drop.
+`model_fallback` is the odd one: a persistent `rate_limited` on a profile that
+DECLARES a fallback buys exactly ONE extra attempt on that model, granted by
+widening `max_attempts` rather than by resetting `attempt`. It mutates
+`session.model`, which outlives the turn — the session stays downgraded — so
+this is not a detail the seam may drop. And the once-only flag is per TURN while
+this seam runs once per assistant STEP, so it travels in and back out; the last
+case here is what pins that.
 """
 from __future__ import annotations
 
@@ -69,31 +62,32 @@ import pytest
 from services import chat_service, llm_provider
 
 
-def _ev(etype: str, **kw) -> llm_provider.LLMEvent:
+def _ev(etype, **kw):
     return llm_provider.LLMEvent(type=etype, **kw)
 
 
-def _done(blocks=(), usage=None) -> llm_provider.LLMEvent:
-    """The `message_done` event — the ONLY source of blocks and usage."""
-    return llm_provider.LLMEvent(
-        type="message_done", blocks=list(blocks), usage=dict(usage or {}),
-    )
+class _Profile:
+    """The two fields the seam reads off the turn's profile."""
+
+    def __init__(self, fallback_model=None, pid="p1"):
+        self.fallback_model = fallback_model
+        self.id = pid
 
 
 class _Provider:
     """
     Scripted per-attempt behaviour: each entry is either an exception to raise
-    or an iterable of events to stream. A generator entry lets an attempt fail
-    PART WAY through its stream, which is what the emitted-then-failed case
-    needs.
+    or a list of events to stream.
     """
 
-    name = "scripted"
+    name = "fake"
 
     def __init__(self, script):
         self._script = list(script)
         self.attempts = 0
-        self.models_seen: list[str] = []
+        # What each attempt actually asked the provider for. The fallback only
+        # reaches the wire if `request.model` is re-read per attempt.
+        self.models_seen = []
 
     def stream(self, request):
         self.attempts += 1
@@ -112,30 +106,42 @@ def _seam():
     return fn
 
 
-def _request(session, messages=None) -> llm_provider.LLMRequest:
+def _request():
     return llm_provider.LLMRequest(
-        model=session.model,
-        max_tokens=chat_service.MAX_OUTPUT_TOKENS_PER_TURN,
+        model="m", max_tokens=16,
         system_blocks=[{"type": "text", "text": "sys", "stable": True}],
-        tools=[],
-        tools_stable=True,
-        messages=messages if messages is not None else [
-            {"role": "user", "content": "hi"},
-        ],
+        tools=[], tools_stable=True,
+        messages=[{"role": "user", "content": "hi"}],
         history_stable_anchor=None,
     )
 
 
-def _drive(provider, session=None, messages=None, request=None):
+def _drive(provider, session=None, profile=None, model_fallback_used=False):
+    """
+    Run the seam to completion, returning (frames, outcome).
+
+    `request.model` is deliberately NOT set from the session here: the seam
+    re-reads `session.model` into the request on every attempt, which is the
+    mechanism the A8 fallback depends on, and `_Provider.models_seen` is what
+    checks it actually happened.
+    """
     session = session or chat_service.ChatSession()
-    request = request if request is not None else _request(session, messages)
     frames = []
-    gen = _seam()(session, provider, request=request)
+    gen = _seam()(
+        session, provider,
+        request=_request(),
+        profile=profile or _Profile(),
+        model_fallback_used=model_fallback_used,
+    )
     try:
         while True:
             frames.append(next(gen))
     except StopIteration as stop:
         return frames, stop.value
+
+
+def _rate_limited():
+    return llm_provider.ProviderError("rate_limited", "429")
 
 
 @pytest.fixture(autouse=True)
@@ -148,16 +154,14 @@ def test_the_seam_is_a_generator_returning_an_outcome():
     assert inspect.isgeneratorfunction(_seam())
 
 
-def test_a_completed_stream_returns_the_final_message():
+def test_a_completed_stream_returns_the_blocks_and_usage():
     blocks = [{"type": "text", "text": "hi"}]
-    usage = {"input_tokens": 11, "output_tokens": 7}
+    usage = {"input_tokens": 3, "output_tokens": 4}
     frames, out = _drive(_Provider([[
-        _ev("text_delta", text="hi"), _done(blocks, usage),
+        _ev("text_delta", text="hi"),
+        _ev("message_done", blocks=blocks, usage=usage),
     ]]))
     assert out.stop_turn is False
-    # Stronger than master's identity check: the blocks the next turn replays
-    # and the usage the session accrues both come off `message_done`, and a
-    # seam that dropped either would still return an outcome.
     assert out.final_blocks == blocks
     assert out.final_usage == usage
     assert [n for n, _ in frames] == ["token"]
@@ -168,26 +172,15 @@ def test_a_retriable_error_before_any_emission_retries_silently():
     Nothing has reached the client, so a second attempt is safe and the user
     sees one clean answer — no error frame for the swallowed failure.
     """
-    boom = llm_provider.ProviderError("upstream_error", "transient")
-    provider = _Provider([boom, [_ev("text_delta", text="second try"), _done()]])
+    provider = _Provider([
+        llm_provider.ProviderError("upstream_error", "transient"),
+        [_ev("text_delta", text="second try"), _ev("message_done")],
+    ])
     frames, out = _drive(provider)
     assert provider.attempts == 2
     assert out.stop_turn is False
     names = [n for n, _ in frames]
     assert names == ["token"], f"a retried attempt leaked frames: {names}"
-
-
-def test_an_unmapped_exception_is_handled_like_a_mapped_one():
-    """
-    The provider contract says `stream` raises `ProviderError`. A provider bug
-    that lets something else escape must NOT skip metrics and logging — this
-    branch narrowed the clause once and that is exactly what happened.
-    """
-    provider = _Provider([RuntimeError("a provider bug")])
-    frames, out = _drive(provider)
-    assert out.stop_turn is True
-    assert [n for n, _ in frames] == ["error", "session_done"]
-    assert frames[0][1]["error_kind"] == "internal_error"
 
 
 def test_a_retriable_error_AFTER_emission_does_not_retry():
@@ -196,11 +189,16 @@ def test_a_retriable_error_AFTER_emission_does_not_retry():
     replay the answer. The seam must surface the error instead — and the text
     must appear EXACTLY ONCE.
     """
-    def _fails_mid_stream():
+    def _dies_mid_stream():
         yield _ev("text_delta", text="half an ans")
         raise llm_provider.ProviderError("upstream_error", "died mid-stream")
 
-    provider = _Provider([_fails_mid_stream()])
+    class _P(_Provider):
+        def stream(self, request):
+            self.attempts += 1
+            return _dies_mid_stream()
+
+    provider = _P([])
     frames, out = _drive(provider)
     assert provider.attempts == 1, (
         "it retried after emitting — the client would show the answer twice"
@@ -209,6 +207,20 @@ def test_a_retriable_error_AFTER_emission_does_not_retry():
     names = [n for n, _ in frames]
     assert names == ["token", "error", "session_done"], names
     assert sum(1 for n, _ in frames if n == "token") == 1
+
+
+def test_an_unmapped_exception_is_still_metriced_and_surfaced():
+    """
+    The provider contract says `stream` raises `ProviderError`. A provider bug
+    that lets something else out must NOT skip the terminal path — narrowing
+    the except clause to `ProviderError` would let it escape `run_turn`
+    entirely, and only the router's bare catch-all would notice.
+    """
+    provider = _Provider([ValueError("a provider bug")])
+    frames, out = _drive(provider)
+    assert out.stop_turn is True
+    assert [n for n, _ in frames] == ["error", "session_done"]
+    assert frames[0][1]["error_kind"] == "internal_error"
 
 
 def test_the_retry_budget_is_finite_and_ends_in_an_error():
@@ -222,46 +234,90 @@ def test_the_retry_budget_is_finite_and_ends_in_an_error():
     assert [n for n, _ in frames] == ["error", "session_done"]
 
 
-def test_persistent_rate_limiting_on_opus_buys_one_sonnet_attempt():
+def test_persistent_rate_limiting_buys_one_fallback_attempt():
     session = chat_service.ChatSession()
-    session.model = chat_service.OPUS_MODEL
-    request = _request(session)
-    blocks = [{"type": "text", "text": "cheaper"}]
+    session.model = "big-model"
+    profile = _Profile(fallback_model="small-model")
     # Exhaust the retries, then the fallback attempt succeeds.
-    script = [llm_provider.ProviderError("rate_limited", "429")] * (
-        chat_service.MAX_STREAM_RETRIES + 1
-    )
-    script.append([_ev("text_delta", text="cheaper"), _done(blocks)])
+    script = [_rate_limited()] * (chat_service.MAX_STREAM_RETRIES + 1)
+    script.append([_ev("text_delta", text="cheaper"), _ev("message_done")])
     provider = _Provider(script)
-    frames, out = _drive(provider, session=session, request=request)
+    frames, out = _drive(provider, session=session, profile=profile)
 
-    assert session.model == chat_service.DEFAULT_MODEL, (
+    assert session.model == "small-model", (
         "the session was not downgraded; the fallback outlives the turn"
     )
     fb = [p for n, p in frames if n == "model_fallback"]
     assert fb and fb[0] == {
-        "from_model": chat_service.OPUS_MODEL,
-        "to_model": chat_service.DEFAULT_MODEL,
+        "from_model": "big-model",
+        "to_model": "small-model",
         "reason": "rate_limited",
+        "profile_id": "p1",
     }
-    assert out.stop_turn is False and out.final_blocks == blocks
+    assert out.stop_turn is False
     # Downgrading `session.model` is only half the job under this seam: the
-    # request carries the model to the provider, so it has to be re-read per
-    # attempt or the "fallback" would keep asking for Opus.
-    assert provider.models_seen[-1] == chat_service.DEFAULT_MODEL
-    assert provider.models_seen[0] == chat_service.OPUS_MODEL
+    # REQUEST carries the model to the provider, so it has to be re-read per
+    # attempt or the "fallback" would keep asking for the original model.
+    assert provider.models_seen[0] == "big-model"
+    assert provider.models_seen[-1] == "small-model"
 
 
-def test_the_fallback_is_granted_at_most_once():
+def test_a_profile_that_declares_no_fallback_never_downgrades():
     """
-    `model_fallback_used` is per turn. Without it a rate-limited session would
-    loop downgrading forever.
+    `fallback_model=None` is how a profile opts out — the built-in sonnet
+    profile among them, which preserves the pre-Task-7 "sonnet never falls
+    back" behaviour exactly.
     """
     session = chat_service.ChatSession()
-    session.model = chat_service.OPUS_MODEL
-    provider = _Provider([llm_provider.ProviderError("rate_limited", "429")] * 20)
-    frames, out = _drive(provider, session=session)
+    session.model = "only-model"
+    provider = _Provider([_rate_limited()] * 20)
+    frames, out = _drive(provider, session=session, profile=_Profile(None))
+    assert not [n for n, _ in frames if n == "model_fallback"]
+    assert session.model == "only-model"
+    assert out.stop_turn is True
+
+
+def test_the_fallback_is_granted_at_most_once_within_one_step():
+    session = chat_service.ChatSession()
+    session.model = "big-model"
+    provider = _Provider([_rate_limited()] * 20)
+    frames, out = _drive(provider, session=session,
+                         profile=_Profile(fallback_model="small-model"))
     assert sum(1 for n, _ in frames if n == "model_fallback") == 1
+    assert out.stop_turn is True
+
+
+def test_the_once_only_flag_travels_in_and_back_out_across_steps():
+    """
+    THE PER-TURN BOUND. This seam runs once per assistant STEP, but the
+    downgrade is bounded per TURN — so the flag is a parameter and comes back
+    on the outcome. Owning it inside would re-arm the fallback on every step of
+    an agentic turn, and each step would look individually correct.
+
+    `docs/superpowers/findings/2026-09-09-chat-stream-loop-two-vestigial-guards.md`
+    records the flag as redundant with the `session.model == OPUS_MODEL` test
+    that used to sit beside it. That was true only for the hardcoded pair: once
+    the fallback fired, `session.model` stopped being Opus. Reading
+    `profile.fallback_model` instead removes that coincidence, so the flag is
+    the only real bound — this is the case that fails if it is folded back in.
+    """
+    session = chat_service.ChatSession()
+    session.model = "big-model"
+    profile = _Profile(fallback_model="small-model")
+
+    _frames, first = _drive(_Provider([_rate_limited()] * 20),
+                            session=session, profile=profile)
+    assert first.model_fallback_used is True, (
+        "the outcome does not carry the flag back, so the caller cannot bound "
+        "the downgrade across the turn"
+    )
+
+    frames, out = _drive(_Provider([_rate_limited()] * 20), session=session,
+                         profile=profile,
+                         model_fallback_used=first.model_fallback_used)
+    assert not [n for n, _ in frames if n == "model_fallback"], (
+        "a second assistant step downgraded again — the bound is per turn"
+    )
     assert out.stop_turn is True
 
 
@@ -273,8 +329,12 @@ def test_an_abort_mid_stream_ends_the_turn_immediately():
         session.abort_event.set()
         yield _ev("text_delta", text="b")
 
-    provider = _Provider([_aborts_after_first()])
-    frames, out = _drive(provider, session=session)
+    class _P(_Provider):
+        def stream(self, request):
+            self.attempts += 1
+            return _aborts_after_first()
+
+    frames, out = _drive(_P([]), session=session)
     assert out.stop_turn is True
     names = [n for n, _ in frames]
     assert names[-1] == "session_done"

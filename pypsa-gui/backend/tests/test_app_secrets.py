@@ -102,6 +102,10 @@ def test_status_is_empty_before_anything_is_set():
         "hint": None,
         "overridden_by_environment": False,
         "storage_path": str(app_paths.user_env_file()),
+        # A8. Null, not False: nothing is configured, so there is no value to
+        # say anything about — and False here would render an absent key
+        # exactly like one that leaks (ADR-0001).
+        "redactable": None,
     }
 
 
@@ -261,3 +265,184 @@ def test_hand_written_quotes_are_stripped():
     app_secrets.bootstrap_environment()
 
     assert os.environ[KEY] == SAMPLE
+
+
+def test_is_managed_key_rule():
+    from services import app_secrets as s
+    assert s.is_managed_key("OPENAI_API_KEY")
+    assert s.is_managed_key("PYPSA_GUI_LLM_KEY__OLLAMA_LOCAL")
+    assert not s.is_managed_key("SECRET_KEY")
+    assert not s.is_managed_key("PYPSAGUI_APP_DATA_DIR")
+    assert not s.is_managed_key("DATABASE_URL")
+    assert not s.is_managed_key("PYPSA_GUI_LLM_KEY__bad-lower")
+    assert not s.is_managed_key("PYPSA_GUI_LLM_KEY__")
+    assert not s.is_managed_key("PYPSA_GUI_LLM_KEY__ABC\n")
+    assert not s.is_managed_key("PYPSA_GUI_LLM_KEY__ABC\r")
+    assert not s.is_managed_key("PYPSA_GUI_LLM_KEY__A\nBC")
+
+
+def test_saving_key_a_does_not_erase_key_b(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    from services import app_secrets as s
+    s.set_secret("PYPSA_GUI_LLM_KEY__A1", "value-aaaa-1234")
+    s.set_secret("OPENAI_API_KEY", "value-bbbb-5678")
+    assert s.get_stored("PYPSA_GUI_LLM_KEY__A1") == "value-aaaa-1234"
+    assert s.get_stored("OPENAI_API_KEY") == "value-bbbb-5678"
+
+
+def test_live_secret_values_covers_shell_only_keys(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYPSAGUI_APP_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "shell-only-value-99")
+    from services import app_secrets as s
+    s.set_secret("PYPSA_GUI_LLM_KEY__F1", "file-value-1234")
+    vals = s.live_secret_values()
+    assert "shell-only-value-99" in vals      # env-only, never in user.env
+    assert "file-value-1234" in vals
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# The WRITE and BOOTSTRAP paths, which no review had examined until round 4.
+# `user.env` is the only copy of the operator's keys, and this branch turned
+# it from "one Anthropic key" into "one slot per provider profile".
+# ═════════════════════════════════════════════════════════════════════════
+
+
+def test_a_failed_write_does_not_destroy_the_existing_keys(monkeypatch):
+    """
+    A3 — `_write_managed` opened the live file `O_TRUNC` with no temp-file +
+    replace, so ENOSPC, SIGTERM or a power loss between open and flush left
+    `user.env` EMPTY. Every stored credential, gone, with no backup anywhere.
+    """
+    from services import app_secrets
+
+    app_secrets.set_secret("ANTHROPIC_API_KEY", "realkey12345")
+    app_secrets.set_secret("PYPSA_GUI_LLM_KEY__A", "slotkey12345")
+    before = app_secrets._read_managed()
+    assert len(before) == 2
+
+    real_fdopen = os.fdopen
+    armed = {"on": True}
+
+    def _explode(fd, *a, **kw):
+        handle = real_fdopen(fd, *a, **kw)
+        if not armed["on"]:
+            return handle
+        original_write = handle.write
+
+        def _boom(_data):
+            original_write("")          # keep the fd consistent
+            raise OSError(28, "No space left on device")
+
+        handle.write = _boom
+        return handle
+
+    # NOT `monkeypatch.undo()` afterwards: that would also revert the autouse
+    # fixture's PYPSAGUI_APP_DATA_DIR redirect, and the assertion below would
+    # then read a different (empty) location and "pass" for the wrong reason.
+    monkeypatch.setattr(os, "fdopen", _explode)
+    with pytest.raises(OSError):
+        app_secrets.set_secret("ANTHROPIC_API_KEY", "newvalue12345")
+    armed["on"] = False
+
+    after = app_secrets._read_managed()
+    assert after == before, (
+        f"a failed write destroyed the stored credentials: {before} -> {after}"
+    )
+
+
+def test_concurrent_saves_do_not_lose_keys():
+    """
+    A2 — read-modify-write with no lock, and `_write_managed` rewrites the
+    whole file. Four threads saving four different slots lost keys on every
+    trial. Reachable: `put_llm_profile_key` and `put_anthropic_key` are plain
+    `def`, so FastAPI dispatches them on the AnyIO threadpool — two saves from
+    the Settings UI really are concurrent.
+    """
+    import threading
+
+    from services import app_secrets
+
+    names = [f"PYPSA_GUI_LLM_KEY__C{i}" for i in range(4)]
+    barrier = threading.Barrier(len(names))
+
+    def _save(name):
+        barrier.wait()
+        app_secrets.set_secret(name, f"value-for-{name}-0123456789")
+
+    threads = [threading.Thread(target=_save, args=(n,)) for n in names]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    stored = app_secrets._read_managed()
+    missing = [n for n in names if n not in stored]
+    assert not missing, f"concurrent saves lost {missing}; kept {sorted(stored)}"
+
+
+def test_bootstrap_is_idempotent_so_clearing_a_key_really_clears_it(monkeypatch):
+    """
+    A1 — `bootstrap_environment` re-snapshotted `_SHELL_NAMES` from the live
+    `os.environ`, which by then already contained everything the FIRST call
+    injected from `user.env`. Every stored key then looked shell-supplied, so:
+
+      * `clear_secret` removed it from the file but LEFT IT IN `os.environ` —
+        a user revoking a leaked key kept using it until restart;
+      * `set_secret` silently no-opped in-process, defeating the whole reason
+        this module applies keys immediately;
+      * Settings reported a shell override that did not exist.
+
+    Latent in production (`main.py` bootstraps once), but four test fixtures
+    reset `_SHELL_NAMES` by hand — callers were already tripping over it.
+    """
+    from services import app_secrets
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    app_secrets._SHELL_NAMES = frozenset()
+    app_secrets.set_secret("ANTHROPIC_API_KEY", "fromfile12345")
+
+    app_secrets.bootstrap_environment()
+    app_secrets.bootstrap_environment()   # a second call must change nothing
+
+    assert app_secrets.status("ANTHROPIC_API_KEY")["source"] == "settings", (
+        "a stored key was misreported as shell-supplied after a re-bootstrap"
+    )
+    app_secrets.clear_secret("ANTHROPIC_API_KEY")
+    assert os.environ.get("ANTHROPIC_API_KEY") is None, (
+        "clear_secret left the revoked key live in os.environ"
+    )
+
+
+def test_a_short_key_is_not_returned_in_full_as_its_own_hint():
+    """
+    A9 — `hint` is `live[-4:]` guarded by `len(live) >= 4`, so a 4-character
+    key was returned IN FULL as the "non-reversible" hint, and that hint
+    reaches an HTTP response.
+    """
+    from services import app_secrets
+
+    app_secrets.set_secret("PYPSA_GUI_LLM_KEY__SHORT", "abcd")
+    hint = app_secrets.status("PYPSA_GUI_LLM_KEY__SHORT")["hint"]
+    assert hint != "…abcd", "the whole key was returned as its own hint"
+    assert hint is None or "abcd" not in hint
+
+
+def test_a_leftover_temp_file_from_a_killed_write_does_not_brick_saving():
+    """
+    Sibling of the same hazard in `llm_config.save_profiles`.
+
+    `_write_managed` creates its temp with `O_EXCL`. A SIGKILL or power loss
+    between that open and the `os.replace` leaves the temp on disk — which is
+    exactly the crash the atomic write exists to survive. If the next write
+    then refuses because the temp is in the way, one crash permanently bricks
+    every key save, and `user.env` is the only copy of the operator's keys.
+    """
+    app_secrets.set_secret(KEY, "sk-ant-first-value-here")
+    path = app_paths.user_env_file()
+    for stale in (path.name + ".tmp", path.name + ".ab12cd.tmp"):
+        path.with_name(stale).write_text("partial", encoding="utf-8")
+
+    app_secrets.set_secret(KEY, "sk-ant-second-value-here")
+    assert os.environ[KEY] == "sk-ant-second-value-here"
+    assert "sk-ant-second-value-here" in path.read_text(encoding="utf-8")
+    assert path.with_name(path.name + ".tmp").read_text() == "partial"

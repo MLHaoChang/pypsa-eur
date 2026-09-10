@@ -62,6 +62,18 @@ class LLMEvent:
     # "cache_read_tokens", "cache_create_tokens"} — absent keys read as 0.
     usage: dict[str, int] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        # M5 — a typo'd/unrecognised event type used to fall through the
+        # harness's if/elif chain silently, indistinguishable from a "ping".
+        # Every provider maps into this closed vocabulary; a value outside
+        # it is a bug in the provider, not a shape the harness should ever
+        # have to defend against downstream.
+        if self.type not in EVENT_TYPES:
+            raise ValueError(
+                f"unknown LLMEvent type {self.type!r}; must be one of "
+                f"{sorted(EVENT_TYPES)}"
+            )
+
 
 class ProviderError(Exception):
     """A provider-side failure, already mapped to a neutral kind."""

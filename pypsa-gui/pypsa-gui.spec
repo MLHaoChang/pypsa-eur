@@ -68,6 +68,13 @@ datas = [
     # `script_location` at `<backend>/alembic`, so both must ship.
     (str(BACKEND / "alembic"), "alembic"),
     (str(BACKEND / "alembic.ini"), "."),
+    # `services/llm_config.load_presets` resolves this as
+    # `Path(__file__).resolve().parent.parent / "presets.json"` from
+    # `services/llm_config.py`, i.e. beside the backend package — the same
+    # place `alembic.ini` lands (`.`, not `"backend"`: `pathex=[str(BACKEND)]`
+    # below puts `services/llm_config.py` at _MEIPASS-root/`services/`, so its
+    # `parent.parent` is _MEIPASS root itself).
+    (str(BACKEND / "presets.json"), "."),
     # The SPA the backend serves in local mode. `settings.frontend_dist`
     # resolves `<backend>/../frontend/dist`, which under _MEIPASS means this
     # exact layout.
