@@ -336,3 +336,77 @@ def test_one_workbook_with_both_sheets_is_accepted(tmp_path):
     dispatch, loads, source = tables_from_external(path, None, _registry())
     assert len(dispatch) == 4 and len(loads) == 4
     assert source["loads"] == str(path)
+
+
+# ──────────── the driver seam the backend is allowed to reach ───────────────
+#
+# pypsa-gui imports only `gridspine.drivers` and `gridspine.schema`, so the
+# backend cannot call the producer directly. The driver mirrors
+# `dispatch_from_network`: it stages ingest and dispatch, writes the two
+# artifacts, and returns the provenance record the manifest carries.
+
+def test_the_config_carries_both_files_and_refuses_a_loads_path_alone(tmp_path):
+    from gridspine.drivers.study import StudyConfig
+
+    d, ld = _write_csv(tmp_path, _rows()), _loads(tmp_path)
+    cfg = StudyConfig(outdir=tmp_path / "run", from_external=d,
+                      from_external_loads=ld, hours=2, k=1)
+    assert (cfg.from_external, cfg.from_external_loads) == (d, ld)
+
+    # A loads path with no dispatch is not a source — it is a caller mistake
+    # that would otherwise sit in the config doing nothing.
+    with pytest.raises(ContractError) as exc:
+        StudyConfig(outdir=tmp_path / "run", from_external_loads=ld, hours=2, k=1)
+    assert "from_external" in str(exc.value)
+
+
+def test_both_external_paths_round_trip_through_the_config(tmp_path):
+    from gridspine.drivers.study import StudyConfig
+
+    d, ld = _write_csv(tmp_path, _rows()), _loads(tmp_path)
+    cfg = StudyConfig(outdir=tmp_path / "run", from_external=d,
+                      from_external_loads=ld, hours=2, k=1)
+    back = StudyConfig.from_json(cfg.to_json())
+    assert (back.from_external, back.from_external_loads) == (d, ld)
+
+
+def test_the_driver_writes_both_artifacts_and_the_provenance(tmp_path, monkeypatch):
+    """The artifacts are the stage boundary: `dispatch.csv` and `loads.csv` are
+    what every later stage reads, whichever producer wrote them."""
+    import gridspine.drivers.year_study as ys
+
+    registry = _registry(units=("G1", "G2"))
+    monkeypatch.setattr(ys, "load_case39_res", lambda: object())
+    monkeypatch.setattr(ys, "registry_from_net", lambda _net: registry)
+
+    outdir = tmp_path / "run"
+    net, reg, dispatch, loads, source = ys.dispatch_from_external(
+        _write_csv(tmp_path, _rows()), _loads(tmp_path), outdir,
+    )
+    assert (outdir / "dispatch.csv").is_file()
+    assert (outdir / "loads.csv").is_file()
+    assert source["hours"] == 2 and source["units"] == 2
+    assert len(source["external_sha256"]) == 64 and len(source["loads_sha256"]) == 64
+    assert len(dispatch) == 4 and len(loads) == 4
+
+
+def test_a_refused_external_file_writes_the_stage_error_artifact(tmp_path, monkeypatch):
+    """A bad client file is a DISPATCH-stage failure, recorded the way every
+    other stage failure is, so the UI and the copilot render it identically —
+    and nothing half-written is left behind."""
+    import gridspine.drivers.year_study as ys
+
+    monkeypatch.setattr(ys, "load_case39_res", lambda: object())
+    monkeypatch.setattr(ys, "registry_from_net", lambda _net: _registry(("G1", "G2")))
+
+    outdir = tmp_path / "run"
+    with pytest.raises(ContractError):
+        ys.dispatch_from_external(
+            _write_csv(tmp_path, _rows(units=("G1", "G2", "G99"))),
+            _loads(tmp_path), outdir,
+        )
+    import json
+    err = json.loads((outdir / "error_dispatch.json").read_text())
+    assert err["stage"] == "dispatch"
+    assert "G99" in err["cause"]
+    assert not (outdir / "dispatch.csv").exists()

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from gridspine.drivers.progress import Progress
 from gridspine.drivers.year_study import (
+    dispatch_from_external,
     dispatch_from_network,
     dispatch_year,
     resume_from_dispatch,
@@ -47,6 +48,11 @@ class StudyConfig:
     #: detailed grid's, read by `producers.external` (increment 7, A1);
     #: exclusive with the other two sources, and `hours` then describes it
     from_external: Path = None
+    #: the demand table that goes WITH `from_external`, or None when
+    #: `from_external` is one Excel workbook carrying both sheets. Not a source
+    #: on its own — demand without generation is not a dispatch — so setting it
+    #: alone is refused rather than left sitting in the config doing nothing.
+    from_external_loads: Path = None
     #: per-study template edits applied on top of the shipped library
     #: (`templates.unit_params.load_unit_templates(overlay=...)`); the library
     #: itself is never written, so two studies can disagree about a machine and
@@ -55,7 +61,8 @@ class StudyConfig:
 
     def __post_init__(self):
         object.__setattr__(self, "outdir", Path(self.outdir))
-        for name in ("from_dispatch", "from_network", "from_external", "templates_overlay"):
+        for name in ("from_dispatch", "from_network", "from_external",
+                     "from_external_loads", "templates_overlay"):
             value = getattr(self, name)
             if value is not None:
                 object.__setattr__(self, name, Path(value))
@@ -69,6 +76,11 @@ class StudyConfig:
         if len(sources) > 1:
             raise ContractError(
                 f"{', '.join(sources)} are exclusive: a study has one dispatch source"
+            )
+        if self.from_external_loads is not None and self.from_external is None:
+            raise ContractError(
+                "from_external_loads needs from_external: a demand table is not a "
+                "dispatch source on its own"
             )
         for name in ("hours", "k"):
             value = getattr(self, name)
@@ -95,6 +107,9 @@ class StudyConfig:
         d["from_dispatch"] = None if self.from_dispatch is None else str(self.from_dispatch)
         d["from_network"] = None if self.from_network is None else str(self.from_network)
         d["from_external"] = None if self.from_external is None else str(self.from_external)
+        d["from_external_loads"] = (
+            None if self.from_external_loads is None else str(self.from_external_loads)
+        )
         d["templates_overlay"] = None if self.templates_overlay is None else str(self.templates_overlay)
         d["n2_prune_threshold_pct"] = float(self.n2_prune_threshold_pct)
         return d
@@ -118,9 +133,10 @@ def run_study(config: StudyConfig, progress=None, stop_event=None):
     caller sees where it stopped and a run past the dispatch stage can be
     finished later with `from_dispatch`.
 
-    Three dispatch sources, in precedence order: `from_dispatch` (another
-    study's tables), `from_network` (a solved PyPSA network — D3), else the
-    rolling unit commitment on case39.
+    Four dispatch sources, in precedence order: `from_dispatch` (another
+    study's tables), `from_network` (a solved PyPSA network — D3),
+    `from_external` (the client's own tables — increment 7), else the rolling
+    unit commitment on case39.
     """
     if not isinstance(config, StudyConfig):
         raise ContractError(f"run_study takes a StudyConfig, got {type(config).__name__}")
@@ -136,6 +152,14 @@ def run_study(config: StudyConfig, progress=None, stop_event=None):
     if config.from_network is not None:
         net, registry, dispatch, loads, source = dispatch_from_network(
             config.from_network, config.outdir, progress=bus,
+        )
+        return study_dispatch(
+            config.outdir, net, registry, dispatch, loads, dispatch_source=source, **common,
+        )
+    if config.from_external is not None:
+        net, registry, dispatch, loads, source = dispatch_from_external(
+            config.from_external, config.from_external_loads, config.outdir,
+            progress=bus,
         )
         return study_dispatch(
             config.outdir, net, registry, dispatch, loads, dispatch_source=source, **common,

@@ -363,6 +363,47 @@ def dispatch_from_network(src, outdir, *, progress=NULL_PROGRESS):
         raise
 
 
+def dispatch_from_external(dispatch_src, loads_src, outdir, *, progress=NULL_PROGRESS):
+    """Increment 7, A1: stages ingest and dispatch from the CLIENT's own tables.
+
+    Mirrors `dispatch_from_network`, and for the same reason: the backend reaches
+    only `gridspine.drivers`, so the producer needs a driver in front of it. The
+    two-directional unit check and both column contracts are enforced in the
+    producer (`producers.external.tables_from_external`); a failure lands in the
+    `dispatch` stage's error artifact with the cause, and NOTHING is written —
+    the artifacts are the stage boundary, so a half-written pair would read
+    downstream as a valid dispatch.
+
+    `loads_src` is None when `dispatch_src` is one Excel workbook carrying both
+    sheets. Returns (net, registry, dispatch, loads, dispatch_source); the
+    provenance record names both files and both digests, so a bundle built from
+    this is traceable to exactly the tables the client handed over.
+    """
+    from gridspine.producers.external import tables_from_external
+
+    dispatch_path = Path(dispatch_src)
+    outdir = Path(outdir)
+    outdir.mkdir(parents=True, exist_ok=True)
+    stage = "ingest"
+    try:
+        net = load_case39_res()
+        registry = registry_from_net(net)
+        progress.tick("ingest", 1, 1)
+
+        stage = "dispatch"
+        dispatch, loads, dispatch_source = tables_from_external(
+            dispatch_path, loads_src, registry,
+        )
+        # Demand first, as in `dispatch_year`: the loads artifact is an input.
+        loads.to_csv(outdir / "loads.csv", index=False)
+        dispatch.to_csv(outdir / "dispatch.csv", index=False)
+        progress.tick("dispatch", 1, 1)
+        return net, registry, dispatch, loads, dispatch_source
+    except Exception as exc:
+        StageError(stage=stage, element_ids=[], cause=repr(exc)).write(outdir)
+        raise
+
+
 def run_year_study(
     outdir,
     hours: int = 8760,
