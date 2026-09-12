@@ -51,6 +51,7 @@ try:
     from gridspine.drivers.readback import readback_status as _readback_status
     from gridspine.drivers.readback import result_figure as _result_figure
     from gridspine.drivers.status import ledger_entries as _ledger_entries
+    from gridspine.drivers.year_study import check_external as _check_external
     from gridspine.drivers.status import ranked_snapshots as _ranked_snapshots
     from gridspine.drivers.status import stage_status as _stage_status
     from gridspine.drivers.study import StudyConfig, run_study
@@ -276,6 +277,11 @@ def get_config(project, db=None) -> dict:
     require_planning(project)
     data = read_config(project).to_json()
     data["from_project"] = _project_for_network(db, project, data.get("from_network"))
+    # The engineer recognises the file they uploaded, not where the server put
+    # it — the same reason `from_project` carries a name rather than a path.
+    for field in ("from_external", "from_external_loads"):
+        raw = data.get(field)
+        data[f"{field}_name"] = None if raw is None else Path(raw).name
     return data
 
 
@@ -460,7 +466,9 @@ def set_dispatch_source(db, project, source, user=None) -> dict:
     run directory of a project the caller may read.
     """
     require_planning(project)
-    base = {**read_config(project).to_json(), "from_dispatch": None, "from_network": None}
+    base = {**read_config(project).to_json(), "from_dispatch": None,
+            "from_network": None, "from_external": None,
+            "from_external_loads": None}
     if source == "generate" or source is None:
         updated = StudyConfig.from_json(base)
     elif isinstance(source, dict) and "from_dispatch" in source:
@@ -692,6 +700,84 @@ def upload_readback(project, hour: int, bus_csv: bytes, bus_name=None,
         return _ingest_readback(run_dir(project), hour, bus_path, branch_path)
     except ContractError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+_EXTERNAL_SUFFIXES = (".csv", ".txt", ".xlsx", ".xlsm", ".xls")
+
+
+def external_dir(project) -> Path:
+    """`<project dir>/gridspine/uploads/external`, created: where the client's
+    own dispatch and demand tables land. Not keyed by hour the way the read-back
+    uploads are — these describe the whole study, not one snapshot."""
+    path = gridspine_dir(project) / "uploads" / "external"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _safe_table_name(name, fallback: str) -> str:
+    """`_safe_filename`, but for the tabular suffixes this source reads.
+
+    The suffix has to survive: `producers.external` dispatches the READER on it,
+    so an `.xlsx` stored as `.csv` would be parsed as text and refused for a
+    reason that has nothing to do with the client's file.
+    """
+    base = Path(str(name or "")).name
+    cleaned = _SAFE_NAME.sub("_", base).strip("._")
+    if cleaned and cleaned.lower().endswith(_EXTERNAL_SUFFIXES):
+        return cleaned
+    return fallback
+
+
+def upload_external_dispatch(project, dispatch_bytes: bytes, dispatch_name=None,
+                             loads_bytes: bytes = None, loads_name=None) -> dict:
+    """Increment 7: the client's OWN dispatch becomes this study's source.
+
+    An upload rather than a path the caller names, deliberately. `from_dispatch`
+    is a path and had to be retro-fitted with `_authorized_dispatch_dir` after
+    CodeQL found it; `from_project` was built as a project name to avoid the
+    same hole. Here the bytes arrive, the server chooses where they land, and
+    the config records the SERVER's path — so there is no hole to close.
+
+    Validated as it arrives, the way `upload_readback` is: the producer's
+    refusals (a unit the grid does not have, a grid unit the file never mentions,
+    an ambiguous column, demand that does not match the dispatch's hours) come
+    back as 422 with the producer's own message, and the config is left alone.
+    A file that cannot be studied must not become the study's source, or the run
+    would queue and then fail at its dispatch stage for a reason the caller was
+    already told here.
+
+    `loads_bytes` may be omitted only when the dispatch upload is one Excel
+    workbook carrying both sheets; the producer decides, and says so when it is
+    not.
+    """
+    require_planning(project)
+    target = external_dir(project)
+
+    dispatch_path = target / _safe_table_name(dispatch_name, "dispatch.csv")
+    dispatch_path.write_bytes(dispatch_bytes)
+    loads_path = None
+    if loads_bytes is not None:
+        loads_path = target / _safe_table_name(loads_name, "loads.csv")
+        if loads_path == dispatch_path:
+            # One name for both tables would overwrite the dispatch with the
+            # demand and then validate the demand against itself.
+            loads_path = target / "loads.csv"
+        loads_path.write_bytes(loads_bytes)
+
+    try:
+        summary = _check_external(dispatch_path, loads_path)
+    except ContractError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    base = {
+        **read_config(project).to_json(),
+        "from_dispatch": None,
+        "from_network": None,
+        "from_external": str(dispatch_path),
+        "from_external_loads": None if loads_path is None else str(loads_path),
+    }
+    _write_config(project, StudyConfig.from_json(base))
+    return summary
 
 
 def get_readback(project) -> dict:

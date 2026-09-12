@@ -222,3 +222,37 @@ def test_a_read_back_upload_reaches_the_service_with_both_files_and_their_names(
                        files={"bus": ("b.csv", b"bus_name,vm_pu,va_degree\n", "text/csv")})
     assert resp.status_code == 200, resp.text
     assert seen["branches"] is None and seen["branch_name"] is None
+
+
+def test_an_external_dispatch_upload_reaches_the_service_with_both_files(client, study, monkeypatch):
+    """Increment 7: two tables, or one workbook. The router's only jobs are the
+    size cap and passing the client's filenames through — the suffix matters,
+    because the producer picks its reader from it."""
+    seen = {}
+
+    def fake(project, dispatch_bytes, dispatch_name=None, loads_bytes=None, loads_name=None):
+        seen.update(dispatch=dispatch_bytes, dispatch_name=dispatch_name,
+                    loads=loads_bytes, loads_name=loads_name)
+        return {"hours": 2, "units": 2}
+
+    monkeypatch.setattr(gs, "upload_external_dispatch", fake)
+    resp = client.post(
+        "/api/gridspine/Router Study/dispatch-source/external",
+        files={"dispatch": ("market_dispatch.csv", b"unit_id,hour,p_mw,q_mvar,status\n", "text/csv"),
+               "loads": ("market_loads.csv", b"bus,hour,p_mw,q_mvar\n", "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"hours": 2, "units": 2}
+    assert seen["dispatch_name"] == "market_dispatch.csv"
+    assert seen["loads_name"] == "market_loads.csv"
+    assert seen["dispatch"].startswith(b"unit_id") and seen["loads"].startswith(b"bus,")
+
+    # One workbook carrying both sheets: the loads part is genuinely absent, not
+    # an empty file the producer would then refuse for the wrong reason.
+    resp = client.post(
+        "/api/gridspine/Router Study/dispatch-source/external",
+        files={"dispatch": ("both.xlsx", b"PK\x03\x04", "application/vnd.ms-excel")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert seen["loads"] is None and seen["loads_name"] is None
+    assert seen["dispatch_name"] == "both.xlsx"

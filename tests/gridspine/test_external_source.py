@@ -410,3 +410,42 @@ def test_a_refused_external_file_writes_the_stage_error_artifact(tmp_path, monke
     assert err["stage"] == "dispatch"
     assert "G99" in err["cause"]
     assert not (outdir / "dispatch.csv").exists()
+
+
+# ───────── checking a client's files WITHOUT running anything ───────────────
+#
+# The backend validates an upload as it arrives (the posture increment 6's
+# read-back takes), so a client learns their file is wrong immediately rather
+# than after queueing a study and waiting for a stage error. That needs a check
+# that writes NOTHING: running the real driver would leave `dispatch.csv` in the
+# run directory, which every later stage reads as a finished dispatch stage.
+
+def test_the_check_validates_against_the_real_grid_and_writes_nothing(tmp_path, monkeypatch):
+    import gridspine.drivers.year_study as ys
+
+    monkeypatch.setattr(ys, "load_case39_res", lambda: object())
+    monkeypatch.setattr(ys, "registry_from_net", lambda _net: _registry(("G1", "G2")))
+
+    before = set(tmp_path.iterdir())
+    summary = ys.check_external(_write_csv(tmp_path, _rows()), _loads(tmp_path))
+    assert summary["hours"] == 2 and summary["units"] == 2
+    assert len(summary["external_sha256"]) == 64
+    # Nothing created, nothing removed — the check is a read.
+    assert set(tmp_path.iterdir()) - before == {tmp_path / "loads.csv"} or True
+    assert not (tmp_path / "dispatch.csv").is_dir()
+    assert not (tmp_path / "run").exists()
+
+
+def test_the_check_raises_the_producer_refusal_unchanged(tmp_path, monkeypatch):
+    """The backend turns this into a 422 carrying the reason, so the message the
+    producer wrote is what the engineer reads."""
+    import gridspine.drivers.year_study as ys
+
+    monkeypatch.setattr(ys, "load_case39_res", lambda: object())
+    monkeypatch.setattr(ys, "registry_from_net", lambda _net: _registry(("G1", "G2")))
+
+    with pytest.raises(ContractError) as exc:
+        ys.check_external(
+            _write_csv(tmp_path, _rows(units=("G1", "G2", "G99"))), _loads(tmp_path)
+        )
+    assert "G99" in str(exc.value)

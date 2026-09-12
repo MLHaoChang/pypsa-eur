@@ -216,6 +216,32 @@ async def upload_readback(
     )
 
 
+@router.post("/{name}/dispatch-source/external")
+async def upload_external_dispatch(
+    dispatch: UploadFile = File(...),
+    loads: UploadFile | None = File(None),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
+    """The client's OWN dispatch and demand tables as this study's source
+    (increment 7). Two files, or one Excel workbook with `dispatch` and `loads`
+    sheets — the producer decides and says so when the single file cannot carry
+    both. Validated on arrival, so a 422 here means the engineer's file needs
+    fixing before the study is worth queueing. Both read under the same size cap
+    as every other upload.
+
+    Under `/dispatch-source/` rather than `/uploads/` on purpose: the effect of
+    this call is to SET the study's dispatch source, which is what
+    `PUT /{name}/dispatch-source` does for the other three.
+    """
+    dispatch_bytes = await read_capped(dispatch)
+    loads_bytes = await read_capped(loads) if loads is not None else None
+    return gs.upload_external_dispatch(
+        _row(proj, db), dispatch_bytes, dispatch.filename,
+        loads_bytes, loads.filename if loads is not None else None,
+    )
+
+
 @router.get("/{name}/readback")
 def get_readback(proj: AuthorizedProject = ProjectAccessDep, db: DBSession = Depends(get_db)):
     return gs.get_readback(_row(proj, db))

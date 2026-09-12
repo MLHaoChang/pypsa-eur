@@ -363,6 +363,25 @@ def dispatch_from_network(src, outdir, *, progress=NULL_PROGRESS):
         raise
 
 
+def check_external(dispatch_src, loads_src):
+    """Validate a client's tables against the real grid and return the summary.
+
+    Writes NOTHING. The backend calls this as an upload arrives so a bad file is
+    refused there — the posture `upload_readback` takes — rather than queueing a
+    study that fails at its dispatch stage minutes later. Running
+    `dispatch_from_external` for this instead would leave `dispatch.csv` in the
+    run directory, and every later stage reads that as a finished dispatch.
+
+    Raises the producer's `ContractError` unchanged, so the message the engineer
+    reads is the one the producer wrote.
+    """
+    from gridspine.producers.external import tables_from_external
+
+    registry = registry_from_net(load_case39_res())
+    _dispatch, _loads, source = tables_from_external(dispatch_src, loads_src, registry)
+    return source
+
+
 def dispatch_from_external(dispatch_src, loads_src, outdir, *, progress=NULL_PROGRESS):
     """Increment 7, A1: stages ingest and dispatch from the CLIENT's own tables.
 
