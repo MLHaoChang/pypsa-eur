@@ -3283,6 +3283,43 @@ def diagnose_network(include_buses: bool = False) -> dict:
     }
 
 
+def build_study_report(project: str | None = None) -> dict:
+    """
+    Assemble the client-facing reliability write-up from everything this
+    session established — and everything it did not.
+
+    `project` names the asset-health ledger to fold in. Omitted, or naming a
+    project that is not in the foreground, means the provenance gap is simply
+    not reported rather than reported against somebody else's network — the
+    same guard `get_asset_health` applies, for the same reason.
+    """
+    from services.adequacy import campaign as _campaign
+    from services.adequacy.asset_health import provenance_report
+    from services.adequacy.study_report import build_study_report as _build
+
+    n = PyPSAService.get_network()
+
+    health = None
+    if project and PyPSAService.get_loaded_project() == project:
+        ledger = get_asset_health(project)
+        health = ledger.get("provenance")
+    elif project is None and PyPSAService.get_loaded_project():
+        # No project named, but one IS bound: use it. A report that silently
+        # skipped the provenance gap because the caller omitted an argument
+        # would be missing the finding that undermines every number in it.
+        active = PyPSAService.get_loaded_project()
+        try:
+            ledger = get_asset_health(active)
+            health = provenance_report(n, ledger.get("entries", []))
+        except Exception:  # noqa: BLE001 — no ledger is not a report failure
+            health = None
+
+    status = _campaign.status()
+    return _build(n, get_adequacy_results,
+                  campaign=status if status.get("active") else None,
+                  health=health)
+
+
 # ── Asset health / outage-rate provenance (2) ───────────────────────────────
 #
 # `resolve_outage_params` already resolves a rate as `asset`,
@@ -3801,6 +3838,8 @@ DISPATCHERS: dict[str, Any] = {
     "start_campaign": start_campaign,
     "campaign_status": campaign_status,
     "end_campaign": end_campaign,
+    # study report (1) — the write-up, and what it does not establish
+    "build_study_report": build_study_report,
     # solve_queue (4)
     "solve_queue_enqueue": solve_queue_enqueue,
     "solve_queue_list": solve_queue_list,

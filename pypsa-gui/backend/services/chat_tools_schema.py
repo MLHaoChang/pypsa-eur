@@ -933,6 +933,26 @@ TOOLS: list[dict[str, Any]] = [
         ["target_lole_h"],
     ),
     _t(
+        "build_study_report",
+        "Assemble the client-facing reliability write-up from everything this "
+        "session established — and everything it did not. Returns "
+        "{objective, campaign, sections, required_disclosures, "
+        "not_established, evidence_gaps, counts, writing_note}. Each section "
+        "carries its own engine + fidelity, READ from the payload where the "
+        "engine states them, so a screening convolution and a sampler never "
+        "become two numbers in one table with no label between them. "
+        "`required_disclosures` are sentences your prose MUST contain; "
+        "`not_established` is what the study did not answer (say it — a "
+        "report that omits what it did not measure reads as though it "
+        "measured it); `evidence_gaps` are findings that undermine the whole "
+        "document (a frozen demand profile, an island nothing can serve, a "
+        "failure rate with no recorded source) and belong BEFORE the numbers. "
+        "Narrate only from fields present in the payload. `project` names the "
+        "asset-health ledger to fold in; it defaults to the project in the "
+        "foreground. Safety: read.",
+        {"project": {"type": "string"}},
+    ),
+    _t(
         "start_campaign",
         "Open a reliability CAMPAIGN: one solve budget across a whole chain of "
         "studies. Every engine already caps itself (frontier 12 targets, "
@@ -1846,6 +1866,8 @@ TOOL_ROUTES: dict[str, list] = {
     "run_mc_study": [("POST", "/api/results/mc")],
     "run_coupling_loop": [("POST", "/api/results/coupling_loop")],
     "run_margin_loop": [("POST", "/api/results/margin_loop")],
+    # study report (1) — composite in-process fusion
+    "build_study_report": _DERIVED,
     # campaign (3) — process-global study budget, no HTTP route of its own
     "start_campaign": _SERVICE_CALL,
     "campaign_status": _SERVICE_CALL,

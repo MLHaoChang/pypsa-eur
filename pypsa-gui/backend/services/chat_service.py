@@ -1649,7 +1649,12 @@ _ADEQUACY_GUIDE = (
     "more. Read campaign_status before choosing the next study — its `entries` "
     "are the ONLY record of what you already ran, because each surface holds "
     "just its latest result and a second frontier overwrites the first. Close "
-    "with end_campaign when the objective is answered."
+    "with end_campaign when the objective is answered. WRITING IT UP: a "
+    "request for a report, a summary of findings or a client write-up goes "
+    "through build_study_report. Carry every line of its "
+    "required_disclosures, put its evidence_gaps BEFORE the numbers they "
+    "undermine, and state its not_established explicitly — a study that omits "
+    "what it did not measure reads as though it measured it."
 )
 
 # Untrusted-content boundary clause (#2, prompt half). Pairs with the

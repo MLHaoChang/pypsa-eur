@@ -198,6 +198,47 @@ transition:
 All lineage operations are best-effort: a failure copying chat history
 NEVER aborts the underlying project save / rename / restore.
 
+## The study write-up
+
+`build_study_report` (read tier) assembles the client-facing reliability
+write-up from everything the session established — **and everything it did
+not**. The system prompt routes any request for a report or a summary of
+findings through it.
+
+`AdequacyReport` deliberately keeps the COPT screening and the sequential MC
+as *siblings* rather than folding them in: each answers a question the report
+doesn't ask, and folding them would grow the one shape every consumer parses
+(spec §4, recorded decision). That's right for the wire and wrong for a client
+deliverable, where the whole point is to put the screening, the proxy, the
+sampler and the firm-capacity convention side by side. So this fuses — and the
+fusion's entire job is to stop the fusion laundering anything:
+
+- **Every section carries its own `engine` and `fidelity`**, read from the
+  payload where the engine states them, with `stated_by_engine` marking the
+  cases where the label is ours. A screening convolution and a sequential
+  sampler must never become two numbers in one table with nothing between
+  them.
+- **`required_disclosures`** are the sentences the prose must contain, derived
+  from what's actually present: a met reserve margin is not a met reliability
+  target; a COPT figure is not comparable to a statutory standard; an
+  unconverged MC mean is an interval, never a point value. Absent sections
+  produce no disclosures — a caveat about a number nobody computed is noise.
+- **`not_established`** is the negative space, stated. A report that silently
+  omits "no Monte Carlo was run" reads as though LOLE was measured. The
+  omission is the finding.
+- **`evidence_gaps`** are what undermines the whole document rather than one
+  section — a frozen demand profile, an island nothing can serve, a failure
+  rate with no recorded source — drawn from the uploaded-data QA, the topology
+  analyser and the provenance ledger. They belong *before* the numbers they
+  undermine.
+
+It writes no prose. The caller narrates, and can only narrate what is in the
+payload.
+
+On an unsolved network exactly one section comes back established — the COPT
+screening, which is computed on demand and needs no solve. Everything else is
+honestly absent, which is the report doing its job rather than a gap in it.
+
 ## Campaign mode — one budget across a chain of studies
 
 Every adequacy engine caps itself: `MAX_FRONTIER_POINTS = 12`,
