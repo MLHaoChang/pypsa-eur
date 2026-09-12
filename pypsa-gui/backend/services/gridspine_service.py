@@ -30,6 +30,8 @@ bundle or moved by a rename keeps working.
 import json
 import os
 import re
+import shutil
+import tempfile
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -242,6 +244,19 @@ def create_study(db, user, name: str, config: dict = None, kind: str = PLANNING_
             detail="from_dispatch is not set at creation; pick the source with "
                    "set_dispatch_source({'from_dispatch': dir}) afterwards",
         )
+    for field in ("from_external", "from_external_loads"):
+        if data.get(field) is not None:
+            # An external source is an UPLOAD, not a path: the bytes arrive and
+            # the server chooses where they land. Accepting a spelling of it here
+            # would store a caller-named path unchecked — the hole
+            # `_authorized_dispatch_dir` was written to close for `from_dispatch`,
+            # reopened on a field added after that guard.
+            raise HTTPException(
+                status_code=422,
+                detail=f"{field} is not set directly; upload the client's tables to "
+                       "POST /api/gridspine/{name}/dispatch-source/external, which "
+                       "validates them and records the server's own path",
+            )
     data["outdir"] = "."          # replaced by the project's own directory below
     try:
         StudyConfig.from_json(data)
@@ -362,6 +377,24 @@ def _finished_dispatch_dir(db, user, project, raw) -> Path:
     return src
 
 
+def _refuse_while_active(project, what: str) -> None:
+    """409 while a job for this project is queued or running.
+
+    One copy, because the reason is one reason: the queue snapshotted the
+    DIRECTORY, not the config, so anything that changes what the next stage
+    reads would change it under a job already in flight. `update_config` had
+    this check inline; the two dispatch-source routes — which change the most
+    consequential field of all — did not, and the GUI's disabled picker
+    (`GridspinePanel.tsx`) was the only thing standing in for it. The copilot
+    reaches the same service functions with no picker in the way.
+    """
+    if _active_job_for(project) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Project '{project.name}' has a queued or running study; abort it before {what}.",
+        )
+
+
 def update_config(project, patch: dict, *, db=None, user=None) -> dict:
     """Change some of the study config after creation. Validated as a whole
     through StudyConfig (422 on a bad value, nothing written), refused while a
@@ -382,11 +415,7 @@ def update_config(project, patch: dict, *, db=None, user=None) -> dict:
             status_code=422,
             detail=f"config field(s) not editable: {unknown}; editable: {sorted(EDITABLE_CONFIG_FIELDS)}",
         )
-    if _active_job_for(project) is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Project '{project.name}' has a queued or running study; abort it before changing the config.",
-        )
+    _refuse_while_active(project, "changing the config")
     current = read_config(project).to_json()
     merged = {**current, **patch}
     if patch.get("from_dispatch"):
@@ -466,6 +495,7 @@ def set_dispatch_source(db, project, source, user=None) -> dict:
     run directory of a project the caller may read.
     """
     require_planning(project)
+    _refuse_while_active(project, "changing the dispatch source")
     base = {**read_config(project).to_json(), "from_dispatch": None,
             "from_network": None, "from_external": None,
             "from_external_loads": None}
@@ -668,13 +698,43 @@ def uploads_dir(project, hour: int) -> Path:
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
+#: Longest stored basename. Linux's limit is 255 BYTES per component and a
+#: client's name is not the server's problem to preserve in full: without a clip
+#: a 5000-character name reached `write_bytes` and came back as an uncaught
+#: OSError — a 500 with a traceback where the action layer owes a 4xx.
+_MAX_NAME = 120
+
+
+def _clip_name(name: str) -> str:
+    """`name` shortened to `_MAX_NAME`, keeping the suffix — the reader is
+    chosen by it, so the suffix is the one part that must not be truncated."""
+    if len(name) <= _MAX_NAME:
+        return name
+    suffix = Path(name).suffix
+    return name[: len(name) - len(suffix)][: _MAX_NAME - len(suffix)] + suffix
+
+
+def _distinct_name(name: str, taken) -> str:
+    """`name`, or `name` with a counter before its suffix, until it is not one of
+    `taken`. Two uploads in one request that sanitise to the same basename would
+    otherwise be one file: the second overwrites the first and is then validated
+    against itself."""
+    if name not in taken:
+        return name
+    suffix = Path(name).suffix
+    stem = name[: len(name) - len(suffix)]
+    n = 1
+    while f"{stem}_{n}{suffix}" in taken:
+        n += 1
+    return _clip_name(f"{stem}_{n}{suffix}")
+
 
 def _safe_filename(name, fallback: str) -> str:
     """The client's basename with anything path-like removed; the fallback when
     nothing usable is left. The summary records it as the upload's name."""
     base = Path(str(name or "")).name
     cleaned = _SAFE_NAME.sub("_", base).strip("._")
-    return cleaned if cleaned and cleaned.lower().endswith(".csv") else fallback
+    return _clip_name(cleaned) if cleaned and cleaned.lower().endswith(".csv") else fallback
 
 
 def upload_readback(project, hour: int, bus_csv: bytes, bus_name=None,
@@ -692,9 +752,9 @@ def upload_readback(project, hour: int, bus_csv: bytes, bus_name=None,
     bus_path.write_bytes(bus_csv)
     branch_path = None
     if branch_csv is not None:
-        branch_path = target / _safe_filename(branch_name, "pf_branches.csv")
-        if branch_path == bus_path:
-            branch_path = target / "pf_branches.csv"
+        branch_path = target / _distinct_name(
+            _safe_filename(branch_name, "pf_branches.csv"), {bus_path.name}
+        )
         branch_path.write_bytes(branch_csv)
     try:
         return _ingest_readback(run_dir(project), hour, bus_path, branch_path)
@@ -724,7 +784,7 @@ def _safe_table_name(name, fallback: str) -> str:
     base = Path(str(name or "")).name
     cleaned = _SAFE_NAME.sub("_", base).strip("._")
     if cleaned and cleaned.lower().endswith(_EXTERNAL_SUFFIXES):
-        return cleaned
+        return _clip_name(cleaned)
     return fallback
 
 
@@ -749,32 +809,54 @@ def upload_external_dispatch(project, dispatch_bytes: bytes, dispatch_name=None,
     `loads_bytes` may be omitted only when the dispatch upload is one Excel
     workbook carrying both sheets; the producer decides, and says so when it is
     not.
+
+    The bytes are validated in a STAGING directory and moved into place only
+    once accepted. Writing them to their final path first — as this did — meant
+    a second upload reusing the first one's filename replaced the file the
+    config already pointed at and then 422'd, leaving the study queueable on
+    bytes the server had just refused; and every refused upload stayed on disk
+    under a name of the caller's choosing, with no quota.
     """
     require_planning(project)
+    _refuse_while_active(project, "changing the dispatch source")
     target = external_dir(project)
-
-    dispatch_path = target / _safe_table_name(dispatch_name, "dispatch.csv")
-    dispatch_path.write_bytes(dispatch_bytes)
-    loads_path = None
-    if loads_bytes is not None:
-        loads_path = target / _safe_table_name(loads_name, "loads.csv")
-        if loads_path == dispatch_path:
-            # One name for both tables would overwrite the dispatch with the
-            # demand and then validate the demand against itself.
-            loads_path = target / "loads.csv"
-        loads_path.write_bytes(loads_bytes)
-
+    staging = Path(tempfile.mkdtemp(dir=target, prefix=".staging-"))
     try:
-        summary = _check_external(dispatch_path, loads_path)
-    except ContractError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        dispatch_path = staging / _safe_table_name(dispatch_name, "dispatch.csv")
+        dispatch_path.write_bytes(dispatch_bytes)
+        loads_path = None
+        if loads_bytes is not None:
+            loads_path = staging / _distinct_name(
+                _safe_table_name(loads_name, "loads.csv"), {dispatch_path.name}
+            )
+            loads_path.write_bytes(loads_bytes)
 
+        try:
+            summary = _check_external(dispatch_path, loads_path)
+        except ContractError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        # Accepted: promote both parts. `os.replace` is atomic within the
+        # filesystem, so a reader never sees a half-written table.
+        dispatch_final = target / dispatch_path.name
+        os.replace(dispatch_path, dispatch_final)
+        loads_final = None
+        if loads_path is not None:
+            loads_final = target / loads_path.name
+            os.replace(loads_path, loads_final)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+
+    # The summary is the provenance record, and it has to name where the files
+    # now ARE. The digests are the staged bytes' and the moved bytes' alike.
+    summary["external"] = str(dispatch_final)
+    summary["loads"] = str(dispatch_final if loads_final is None else loads_final)
     base = {
         **read_config(project).to_json(),
         "from_dispatch": None,
         "from_network": None,
-        "from_external": str(dispatch_path),
-        "from_external_loads": None if loads_path is None else str(loads_path),
+        "from_external": str(dispatch_final),
+        "from_external_loads": None if loads_final is None else str(loads_final),
     }
     _write_config(project, StudyConfig.from_json(base))
     return summary

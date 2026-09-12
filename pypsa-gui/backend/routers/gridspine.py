@@ -37,6 +37,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
+from starlette.concurrency import run_in_threadpool
 
 from db.models import Project, User
 from db.session import get_db
@@ -210,7 +211,10 @@ async def upload_readback(
     under the same size cap as every other upload."""
     bus_bytes = await read_capped(bus)
     branch_bytes = await read_capped(branches) if branches is not None else None
-    return gs.upload_readback(
+    # Off the event loop: the comparison parses the engineer's CSVs and reads the
+    # bundle, and none of that is async. See the note on the external upload.
+    return await run_in_threadpool(
+        gs.upload_readback,
         _row(proj, db), hour, bus_bytes, bus.filename,
         branch_bytes, branches.filename if branches is not None else None,
     )
@@ -236,7 +240,12 @@ async def upload_external_dispatch(
     """
     dispatch_bytes = await read_capped(dispatch)
     loads_bytes = await read_capped(loads) if loads is not None else None
-    return gs.upload_external_dispatch(
+    # Off the event loop. The service call loads case39 and hands the client's
+    # bytes to pandas/openpyxl, all of it synchronous and all of it sized by the
+    # CLIENT: a crafted workbook that costs minutes to parse would otherwise
+    # block every other request this process is serving for that whole time.
+    return await run_in_threadpool(
+        gs.upload_external_dispatch,
         _row(proj, db), dispatch_bytes, dispatch.filename,
         loads_bytes, loads.filename if loads is not None else None,
     )

@@ -19,6 +19,7 @@ config write, the refusal mapping — not the producer, which has its own 32
 tests in `tests/gridspine/test_external_source.py`.
 """
 import uuid
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -138,13 +139,91 @@ def test_an_unnamed_upload_gets_a_usable_fallback(study):
 
 def test_an_excel_upload_keeps_its_suffix(study):
     """The producer dispatches on the suffix, so a stored `.xlsx` that became
-    `.csv` would be read with the wrong reader."""
-    with pytest.raises(HTTPException):
+    `.csv` would be read with the wrong reader. The refusal message is the
+    evidence: it names the file the reader was actually pointed at."""
+    with pytest.raises(HTTPException) as exc:
         # Not a real workbook, so the producer refuses it — but the point is the
-        # stored NAME, which the refusal message carries.
+        # name the reader saw, which the refusal message carries.
         gs.upload_external_dispatch(study, b"PK\x03\x04 not really", "book.xlsx")
+    assert "book.xlsx" in str(exc.value.detail)
+
+
+def test_a_refused_upload_leaves_nothing_behind(study):
+    """Validation happens on a staged copy, so a 422 costs the server no disk.
+
+    Storing first and validating second meant an unlimited number of refused
+    512 MB pairs could be parked under distinct sanitised names by a caller who
+    never once got a 2xx.
+    """
+    with pytest.raises(HTTPException):
+        gs.upload_external_dispatch(
+            study, DISPATCH_UNKNOWN_UNIT, "dispatch.csv", LOADS_CSV, "loads.csv",
+        )
     kept = gs.gridspine_dir(study) / "uploads" / "external"
-    assert (kept / "book.xlsx").is_file()
+    assert [p.name for p in kept.rglob("*") if p.is_file()] == []
+
+
+def test_a_refused_upload_does_not_overwrite_the_accepted_one(study):
+    """The defect this closes: the bytes were written to their final path BEFORE
+    validation, so a second upload reusing the first one's filename replaced the
+    file the config already pointed at — and then 422'd. The study was left
+    queueable on bytes the server had just refused, which is precisely what
+    `test_a_refused_file_does_not_become_the_study_source` exists to prevent."""
+    gs.upload_external_dispatch(study, DISPATCH_CSV, "dispatch.csv", LOADS_CSV, "loads.csv")
+    source = Path(gs.read_config(study).to_json()["from_external"])
+    assert source.read_bytes() == DISPATCH_CSV
+
+    with pytest.raises(HTTPException):
+        gs.upload_external_dispatch(
+            study, DISPATCH_UNKNOWN_UNIT, "dispatch.csv", LOADS_CSV, "loads.csv",
+        )
+    # Same path, still the accepted bytes, still the study's source.
+    assert Path(gs.read_config(study).to_json()["from_external"]) == source
+    assert source.read_bytes() == DISPATCH_CSV
+
+
+def test_a_dispatch_named_loads_csv_is_not_overwritten_by_the_demand(study):
+    """The collision guard's own case, which it did not cover: its fallback was
+    the fixed name `loads.csv`, so when the DISPATCH had sanitised to that name
+    the reassignment landed on the same file again, the demand bytes replaced the
+    dispatch, and the demand table was validated against itself."""
+    summary = gs.upload_external_dispatch(
+        study, DISPATCH_CSV, "loads.csv", LOADS_CSV, "loads.csv",
+    )
+    assert summary["hours"] == 2 and summary["units"] == 2
+    cfg = gs.read_config(study).to_json()
+    dispatch, loads = Path(cfg["from_external"]), Path(cfg["from_external_loads"])
+    assert dispatch != loads
+    assert dispatch.read_bytes() == DISPATCH_CSV
+    assert loads.read_bytes() == LOADS_CSV
+
+
+def test_a_name_too_long_for_the_filesystem_is_not_a_500(study):
+    """`_safe_table_name` never truncated, so a 5000-character name reached
+    `write_bytes` and came back as an uncaught OSError — a 500 with a traceback
+    where the action layer owes a 4xx or a usable file."""
+    summary = gs.upload_external_dispatch(
+        study, DISPATCH_CSV, "d" * 5000 + ".csv", LOADS_CSV, "l" * 5000 + ".csv",
+    )
+    assert summary["hours"] == 2
+    for field in ("from_external", "from_external_loads"):
+        stored = Path(gs.read_config(study).to_json()[field])
+        assert len(stored.name) <= 128 and stored.is_file()
+        assert stored.suffix == ".csv"
+
+
+def test_the_source_cannot_be_swapped_while_a_study_is_queued(study, monkeypatch):
+    """`update_config` refuses an edit while a job is queued or running because
+    the queue snapshotted the DIRECTORY, not the config — and the dispatch source
+    is the most consequential config field there is. Both source routes carried
+    the same hazard and neither checked: the GUI disables the picker, so the path
+    that reaches this is the copilot's `gridspine_set_dispatch_source`, or any
+    direct call."""
+    monkeypatch.setattr(gs, "_active_job_for", lambda _project: {"status": "queued"})
+    with pytest.raises(HTTPException) as exc:
+        gs.upload_external_dispatch(study, DISPATCH_CSV, "d.csv", LOADS_CSV, "l.csv")
+    assert exc.value.status_code == 409
+    assert gs.read_config(study).to_json()["from_external"] is None
 
 
 def test_a_refused_file_is_a_422_carrying_the_producers_reason(study):
@@ -238,3 +317,14 @@ def test_a_demand_bus_the_grid_does_not_have_is_refused_at_upload(study):
     assert exc.value.status_code == 422
     assert "L_TYPO" in str(exc.value.detail)
     assert gs.read_config(study).to_json()["from_external"] is None
+
+
+def test_the_other_source_route_is_locked_while_a_study_is_queued(study, user_and_db, monkeypatch):
+    """The same lock on `set_dispatch_source`: three of the four sources go
+    through it, so fixing only the upload would leave the hole open for the
+    other three."""
+    db, user = user_and_db
+    monkeypatch.setattr(gs, "_active_job_for", lambda _project: {"status": "running"})
+    with pytest.raises(HTTPException) as exc:
+        gs.set_dispatch_source(db, study, "generate", user=user)
+    assert exc.value.status_code == 409
