@@ -116,6 +116,110 @@ exactly `test_a_demand_bus_given_for_only_some_hours_is_refused` red; checking
 demand against `registry["bus"]` instead turns 12 red, including every happy path
 and the discrimination test.
 
+## The end-to-end review, 2026-09-12: what three independent passes found
+
+Three reviewers were run over the increment with no access to each other's
+conclusions: one on the data contract (producer, driver, schema), one on the
+upload path as a security surface, one on the picker plus the pandas-3 guard.
+Each was asked for findings with a concrete failure scenario and for a list of
+what it checked and found sound. Everything below was re-verified here before
+being acted on — two of the pointers were reported as more severe than they
+turned out to be, and one turned out to be more severe.
+
+### Fixed, with a test and a mutation each
+
+| what | where it bit | commit |
+|---|---|---|
+| demand buses unchecked in both directions | `check_external` passed a bus the grid lacks; refused three stages later, after the ranking had already used a wrong `load_mw` | `185f482e` |
+| `create_study` accepted `from_external` paths | the `from_dispatch` path-injection class, reopened on a field added after the guard; the refusal message leaks the target file's columns through the job queue | `d058de45` |
+| bytes stored before validation | a refused re-upload overwrote the accepted source the config points at | `d058de45` |
+| the collision guard's own case | a dispatch named `loads.csv` was overwritten by the demand and validated against itself; `upload_readback` had it too | `d058de45` |
+| no filename length cap | a 5000-character name was a 500 with a traceback | `d058de45` |
+| uploads parsed on the event loop | a crafted workbook (14 s measured at 4.5 MB; the cap permitted ~115x) stalls every other request | `d058de45` |
+| no queued-job lock on either source route | a queued study's source could be swapped after it was queued; the GUI's disabled picker was standing in for a backend check that did not exist | `d058de45` |
+| a timestamp `hour` | became epoch nanoseconds — `bundle_h1704067200000000000/` — while the same column in a CSV was refused | `0b32be97` |
+| `hour = 1e19` | wrapped to INT64_MIN with no warning | `0b32be97` |
+| a literally duplicated header | pandas renames it to `p_mw.1`, so the ambiguity guard missed the one case a hand-edited export actually contains | `0b32be97` |
+| `to_loads_table`'s missing direction | the nodal path kept the late refusal the external producer had just closed | `0b32be97` |
+| a stale `error_<stage>.json` | made the NEXT, successful run report `failed` over a complete manifest | `0b32be97` |
+| two hour counts in one manifest | `"hours": 2` beside `"config": {"hours": 8760}` | `0b32be97` |
+| picker state outliving its inputs | after a mode round trip both file inputs read "No file chosen" while Apply re-uploaded them | `6a09727f` |
+| a demand file sent with a workbook | the server took its two-file path and read sheet 0 — possibly the loads sheet — as the dispatch | `6a09727f` |
+| a refusal outliving its source | a red paragraph about a spreadsheet under a successfully applied network | `6a09727f` |
+| no client-side suffix check | the server renamed an unrecognised suffix and the producer refused a filename the engineer never used | `6a09727f` |
+| **the snapshot did not have to close** | the one finding bigger than the increment: see below | `34cfc5fd` |
+| RES `q_mvar` dropped by the load flow | validated, written to `dispatch.csv`, then lost — `net.sgen` is PQ, so Q is an INPUT there | `34cfc5fd` |
+| a mixed artifact pair | a failure between the two writes left this run's demand beside the previous run's dispatch, and `resumable` said True | (this commit) |
+| a table capped at a network's budget | two 512 MB parts buffer ~2 GB before a byte is validated | (this commit) |
+
+### The finding that was larger than the increment
+
+Requiring a loads table (the amendment above) stops gridspine from INVENTING
+demand. It does not stop a client's two tables from disagreeing with each other —
+and nothing checked. Measured on the real 39-bus grid: a dispatch at 90% of its
+own demand was accepted, converged with **+625 MW arriving through the external
+grid's slack**, and produced flows at 150% loading — while `import_mw`, the
+ranking criterion whose whole purpose is "greatest reliance on the external
+grid", read **0.0**, because it sums what the client wrote on the ext_grid row
+rather than what the slack did. Every N-1 severity, fault level and `.raw` in
+that study describes a grid state the client's tables do not.
+
+This is the same argument the increment's own amendment makes for requiring
+demand, applied one step further, and it was missed for the same reason: the
+plan reasoned about where demand COMES from and not about whether the two
+tables agree.
+
+The fix refuses a gap larger than losses could explain — 5% of the hour's
+demand, with a 1 MW floor, stated in the module as a LEDGER ASSUMPTION
+(transmission losses run 1-3%) rather than a tuning knob. It does not forbid
+imports: the producer already requires a row for every registry unit, the
+external grid's included, so a client who means to import declares it there and
+the snapshot closes. The refusal names the hour, both totals, the signed MW, the
+percentage, and how to declare the exchange. The worst gap is carried into the
+provenance record as `max_imbalance_mw`, so a study that closed to within 4% is
+traceably different from one that closed exactly.
+
+The stub fixtures had to be rebalanced to land it: they were 200 MW of
+generation against 160 MW of demand. A 25% imbalance was the happy path of every
+test in the file, which is its own small lesson about fixtures that are written
+to exercise a code path rather than to describe a grid.
+
+### Reported and deliberately NOT changed
+
+- **`defusedxml` is not installed**, so openpyxl's XML-bomb guard is off
+  (`openpyxl.xml.DEFUSEDXML is False`). Adding it is one line in `pixi.toml`,
+  but it re-solves the lockfile for four platforms and collides with the pandas
+  bound on `fix/pandas-upper-bound`; with nothing retained on refusal and the
+  parse now off the event loop, the remaining exposure is one request's CPU and
+  memory, which the 64 MB cap bounds. Worth doing when the two branches have
+  landed: `pixi add defusedxml`.
+- **`get_config` still returns the raw server paths** of the uploaded tables
+  beside their basenames. The frontend reads `from_external` as the
+  "is a source set" signal, so removing it is a UI change rather than a
+  redaction; and with `create_study` closed there is no route that turns
+  knowledge of the path into access. Accepted, named here.
+- **The per-part cap is per part**, not per request: two parts at 64 MB each can
+  still buffer 128 MB (256 MB at the `b"".join`). A per-request budget belongs in
+  `upload_guard` where every import endpoint would get it, not bolted onto this
+  one route.
+
+### What the reviews found SOUND, which is also evidence
+
+Worth recording, because it is the half that says where the increment was
+already right: `_safe_table_name` against 25 path-injection spellings (dots-only,
+suffix-only, NUL, RTL override, homoglyphs, Windows separators, `~`) — nothing
+escaped `external_dir`; the project-kind gate running before any directory is
+created; the ACL identical to its eleven sibling routes and applied before any
+write; `update_config` unable to set either external field; source exclusivity
+enforced n-way rather than pairwise; `is_file()` being what stops `pd.read_csv`
+from fetching an `http://` config value; every malformed-input class probed
+(thousands separators, decimal commas, Excel dates in `p_mw`, timedeltas, BOM,
+semicolon delimiters, mixed dtypes, non-tabular bytes) arriving as a
+`ContractError` and never a traceback, so the backend's single
+`except ContractError` holds; `check_external` writing nothing; and the
+`_demand_buses` indirection agreeing exactly with the key `_apply_loads` matches
+on.
+
 ## Out of scope, named
 
 The connection-study driver (`drivers/connection.py`); the grid-strength expansion beyond the SCR that `static/strength.py` already computes; the compliance rule engine; the PowerFactory API exporter; PowSyBl ingest; the clustered producer. Each is either behind one of the spec's own revisit triggers or behind a resource this environment lacks, and every one of them is a larger piece of work than A.

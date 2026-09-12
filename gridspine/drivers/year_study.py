@@ -26,6 +26,7 @@ import argparse
 import dataclasses
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import time
@@ -347,9 +348,7 @@ def dispatch_from_network(src, outdir, *, progress=NULL_PROGRESS):
         stage = "dispatch"
         n = load_solved_network(src)
         dispatch, loads, commitment = tables_from_network(n, net, registry)
-        # Demand first, as in `dispatch_year`: the loads artifact is an input.
-        loads.to_csv(outdir / "loads.csv", index=False)
-        dispatch.to_csv(outdir / "dispatch.csv", index=False)
+        _write_stage_tables(outdir, loads, dispatch)
         dispatch_source = {
             "network": str(src),
             "network_sha256": _sha256(src),
@@ -361,6 +360,32 @@ def dispatch_from_network(src, outdir, *, progress=NULL_PROGRESS):
     except Exception as exc:
         StageError(stage=stage, element_ids=[], cause=repr(exc)).write(outdir)
         raise
+
+
+def _write_stage_tables(outdir: Path, loads, dispatch) -> None:
+    """Write `loads.csv` and `dispatch.csv`, or neither.
+
+    The artifacts ARE the stage boundary, and they were written one after the
+    other: a failure between the two (ENOSPC, a full quota) left this run's
+    demand beside the PREVIOUS run's dispatch — a mixed pair that
+    `drivers.status` reports as `resumable` and every later stage reads as one
+    set of snapshots. Both go to temporary names in the same directory first and
+    are then moved into place with `os.replace`, which is atomic within a
+    filesystem.
+
+    Demand first, as `dispatch_year` has it: the loads artifact is an input.
+    """
+    staged_loads = outdir / ".loads.csv.part"
+    staged_dispatch = outdir / ".dispatch.csv.part"
+    try:
+        loads.to_csv(staged_loads, index=False)
+        dispatch.to_csv(staged_dispatch, index=False)
+        os.replace(staged_loads, outdir / "loads.csv")
+        os.replace(staged_dispatch, outdir / "dispatch.csv")
+    finally:
+        for path in (staged_loads, staged_dispatch):
+            if path.exists():
+                path.unlink()
 
 
 def _demand_buses(net) -> set[str]:
@@ -431,9 +456,7 @@ def dispatch_from_external(dispatch_src, loads_src, outdir, *, progress=NULL_PRO
             dispatch_path, loads_src, registry,
             load_buses=_demand_buses(net),
         )
-        # Demand first, as in `dispatch_year`: the loads artifact is an input.
-        loads.to_csv(outdir / "loads.csv", index=False)
-        dispatch.to_csv(outdir / "dispatch.csv", index=False)
+        _write_stage_tables(outdir, loads, dispatch)
         progress.tick("dispatch", 1, 1)
         return net, registry, dispatch, loads, dispatch_source
     except Exception as exc:

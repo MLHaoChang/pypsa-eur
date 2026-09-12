@@ -693,3 +693,44 @@ def test_the_check_refuses_a_demand_bus_the_grid_does_not_have(tmp_path, monkeyp
     with pytest.raises(ContractError) as exc:
         ys.check_external(_write_csv(tmp_path, _rows()), _loads(tmp_path, rows))
     assert "L_TYPO" in str(exc.value)
+
+
+def test_a_failure_between_the_two_artifacts_leaves_neither(tmp_path, monkeypatch):
+    """The artifacts are the stage boundary, and they were written one at a time.
+    A failure between them (ENOSPC, a quota) left THIS run's demand beside the
+    PREVIOUS run's dispatch in a reused run directory — a mixed pair that
+    `drivers.status` reports as `resumable` and every later stage reads as one
+    set of snapshots. Fault-injected rather than argued: the dispatch write
+    fails, and the old demand file has to still be the old demand file.
+    """
+    import pandas as _pd
+
+    import gridspine.drivers.year_study as ys
+
+    # The fixtures are written BEFORE the fault is installed — they go through
+    # the same `to_csv`.
+    dispatch_src, loads_src = _write_csv(tmp_path, _rows()), _loads(tmp_path)
+
+    outdir = tmp_path / "reused"
+    outdir.mkdir()
+    (outdir / "loads.csv").write_text("bus,hour,p_mw,q_mvar\nPREVIOUS,0,1.0,0.0\n")
+    (outdir / "dispatch.csv").write_text("unit_id,hour,p_mw,q_mvar,status\nPREVIOUS,0,1.0,0.0,1\n")
+
+    monkeypatch.setattr(ys, "load_case39_res", _net)
+    monkeypatch.setattr(ys, "registry_from_net", lambda _net: _registry(("G1", "G2")))
+
+    real_to_csv = _pd.DataFrame.to_csv
+
+    def fails_on_the_dispatch(self, path_or_buf=None, *args, **kwargs):
+        if path_or_buf is not None and "dispatch" in str(path_or_buf):
+            raise OSError(28, "No space left on device")
+        return real_to_csv(self, path_or_buf, *args, **kwargs)
+
+    monkeypatch.setattr(_pd.DataFrame, "to_csv", fails_on_the_dispatch)
+    with pytest.raises(OSError):
+        ys.dispatch_from_external(dispatch_src, loads_src, outdir)
+
+    assert "PREVIOUS" in (outdir / "loads.csv").read_text()
+    assert "PREVIOUS" in (outdir / "dispatch.csv").read_text()
+    assert [p.name for p in outdir.glob("*.part")] == []
+    assert [p.name for p in outdir.glob(".*.part")] == []

@@ -315,3 +315,23 @@ def test_an_external_dispatch_upload_reaches_the_service_with_both_files(client,
     assert resp.status_code == 200, resp.text
     assert seen["loads"] is None and seen["loads_name"] is None
     assert seen["dispatch_name"] == "both.xlsx"
+
+
+def test_a_table_over_the_cap_is_refused_before_it_is_parsed(client, study, monkeypatch):
+    """Both parts are capped, and at a TABLE's budget rather than the 512 MB a
+    clustered `network.nc` needs: two parts at the process-wide cap buffer ~2 GB
+    between them before a byte is validated, and nothing limits how many such
+    requests arrive at once. The cap is lowered here rather than a 64 MB body
+    being generated, which is the same code path at a size a test can afford."""
+    import routers.gridspine as router
+
+    monkeypatch.setattr(router, "TABLE_MAX_BYTES", 1024)
+    called = []
+    monkeypatch.setattr(gs, "upload_external_dispatch", lambda *a, **k: called.append(1))
+    resp = client.post(
+        "/api/gridspine/Router Study/dispatch-source/external",
+        files={"dispatch": ("big.csv", b"x" * 4096, "text/csv"),
+               "loads": ("l.csv", b"bus,hour,p_mw,q_mvar\n", "text/csv")},
+    )
+    assert resp.status_code == 413, resp.text
+    assert called == []

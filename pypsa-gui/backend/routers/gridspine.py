@@ -47,6 +47,14 @@ from services import gridspine_service as gs
 from services import project_registry
 from services.upload_guard import read_capped
 
+#: Per-part cap for the two client TABLES, well below the process-wide 512 MB
+#: that exists for a clustered `network.nc`. A year of hourly dispatch for 50
+#: units is ~440k rows, around 20 MB of CSV, and an Excel workbook of the same
+#: is smaller still — so 64 MB is generous for every legitimate file while taking
+#: the worst case from two 512 MB buffers (~2 GB in flight once `b"".join`
+#: doubles them) down to something a handful of parallel uploads cannot OOM.
+TABLE_MAX_BYTES = 64 * 1024 * 1024
+
 router = APIRouter()
 
 
@@ -238,8 +246,8 @@ async def upload_external_dispatch(
     this call is to SET the study's dispatch source, which is what
     `PUT /{name}/dispatch-source` does for the other three.
     """
-    dispatch_bytes = await read_capped(dispatch)
-    loads_bytes = await read_capped(loads) if loads is not None else None
+    dispatch_bytes = await read_capped(dispatch, TABLE_MAX_BYTES)
+    loads_bytes = await read_capped(loads, TABLE_MAX_BYTES) if loads is not None else None
     # Off the event loop. The service call loads case39 and hands the client's
     # bytes to pandas/openpyxl, all of it synchronous and all of it sized by the
     # CLIENT: a crafted workbook that costs minutes to parse would otherwise
