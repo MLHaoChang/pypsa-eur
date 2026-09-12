@@ -42,6 +42,13 @@ CORPUS = [
     "tabs\tand\nnewlines", "semi;colon", "quote'd", 'double"q',
     "%2f", "../..", "..", ".", "null\x00byte",
     "MiXeD CaSe 123", "0123456789", "_", "-", "___",
+    # LEADING whitespace on a label long enough to hit the 32-char cap. The
+    # corpus had the trailing case and not this one, and they are not
+    # symmetric: without the pre-`.strip()` the leading run becomes a single
+    # `-`, which eats a slot before the cap and is then stripped off, so the
+    # slug is 31 characters instead of 32. A mutation deleting that `.strip()`
+    # survived the whole corpus.
+    "   " + "x" * 40, "\t\n " + "w" * 40, "  " + "v" * 31,
 ]
 
 

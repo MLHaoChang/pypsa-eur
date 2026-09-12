@@ -280,14 +280,37 @@ def _list_snapshot_dirs(project_dir: pathlib.Path) -> list[pathlib.Path]:
 
     Lexicographic descending order on the ISO-prefixed id IS newest-first since
     the prefix is sortable.
+
+    Entries that resolve outside `snapshots/` are dropped, for the reason
+    `_existing_snapshot_dir` states: `iterdir()` yields a symlink as an ordinary
+    child and `is_dir()` follows it. Fixing the lookup helper alone was not
+    enough — this function feeds `list_snapshots` AND `_prune_oldest`, which
+    runs on every create once the cap is hit, and `_force_rmtree` on a link
+    does not refuse: it chmods the TARGET to 0o200 and returns normally, so the
+    prune reported a success, counted a directory it had not removed, and left
+    the poisoned entry to be re-selected on the next create. Filtering here
+    makes the property hold for every consumer instead of one of three.
     """
     snaps = _snapshots_dir(project_dir)
     if not snaps.exists():
         return []
-    return sorted(
-        (d for d in snaps.iterdir() if d.is_dir()),
-        key=lambda d: d.name, reverse=True,
-    )
+    root = snaps.resolve()
+    kept = []
+    for d in snaps.iterdir():
+        if not d.is_dir():
+            continue
+        try:
+            resolved = d.resolve()
+            if not resolved.is_relative_to(root):
+                logger.warning(
+                    "snapshots: ignoring %r — resolves outside the snapshots "
+                    "dir (symlink?)", d.name,
+                )
+                continue
+        except (OSError, ValueError):
+            continue
+        kept.append(resolved)
+    return sorted(kept, key=lambda d: d.name, reverse=True)
 
 
 def _to_info(snap_dir: pathlib.Path) -> SnapshotInfo:

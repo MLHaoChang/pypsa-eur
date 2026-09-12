@@ -277,12 +277,27 @@ def test_a_super_admin_claiming_into_an_unknown_org_is_refused(
     `org_id` is resolved to the Organization ROW, so an id that names nothing
     is a 404 before any work happens.
 
-    It used to be returned as given. Nothing checked the org existed, and the
-    value goes on to become a path segment — `storage_paths.taken_names` builds
-    `projects_root/<org_id>/` — so a typo'd uuid quietly created a directory
-    belonging to no organization. The UUID type makes it harmless as a
-    traversal (CodeQL flags the flow, `py/path-injection`, and cannot see
-    that); this is about the claim landing somewhere real.
+    CORRECTION — what this change actually did. An earlier version of this
+    docstring (and the commit message with it) said the claim "used to proceed"
+    and that `storage_paths.taken_names` would "quietly create a directory
+    belonging to no organization". Both halves are false, and an independent
+    review measured it: `legacy_migrate._validate_claim_request` ALREADY did
+    `db.get(Organization, org_id)` and raised `ValidationError("Organization
+    not found")` — a 400 — and `taken_names` only does `root.is_dir()` then
+    `iterdir()`, never `mkdir`, and runs after that validation anyway.
+
+    So the only behavioural effect is 400 → 404, and the reason to keep the
+    change is the CodeQL flow, not a hole: `_resolve_claim_org_id` used to hand
+    back the caller's uuid unchecked, which is tainted into a path segment
+    (`py/path-injection`), and resolving it to the row removes the taint edge.
+    Note the inconsistency this leaves: `tenancy_service.create_user` still
+    answers 400 for the identical condition. No frontend caller branches on the
+    code — `api/admin.ts` and `LegacyMigratePage.tsx` render `detail` — so this
+    is a wart, not a break.
+
+    The second assertion below is kept but proves nothing on its own: it passes
+    identically against the old code, because nothing ever created that
+    directory.
     """
     legacy_root = get_settings().legacy_root
     (legacy_root / "Orphan").mkdir(parents=True)

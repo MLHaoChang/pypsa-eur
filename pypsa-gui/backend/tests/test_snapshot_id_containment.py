@@ -103,6 +103,59 @@ def test_a_hostile_id_never_yields_a_path(tmp_path, hostile):
     assert exc.value.status_code in (400, 404)
 
 
+@pytest.mark.parametrize("malformed", [
+    "../..", "/etc/passwd", "a/b", "..\\..\\windows",
+    "a" * 129, "has space", "",
+])
+def test_the_regex_guard_specifically_still_answers_400(tmp_path, malformed):
+    """
+    Pins the REGEX, which the case above does not: that one accepts 400 or 404,
+    so a mutation deleting `_SNAPSHOT_ID_RE` entirely survived it — every id
+    then fell through to the `iterdir()` miss and 404'd, which the assertion
+    allowed. A malformed id is a client error and must say so.
+    """
+    project_dir = tmp_path / "Proj"
+    (project_dir / "snapshots").mkdir(parents=True)
+
+    with pytest.raises(HTTPException) as exc:
+        snap._existing_snapshot_dir(project_dir, malformed, "nope")
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.parametrize("dotted", [".", "..", "...."])
+def test_dot_ids_pass_the_regex_and_are_an_ordinary_miss(tmp_path, dotted):
+    """
+    `_SNAPSHOT_ID_RE` is `[A-Za-z0-9_\-.T]{1,128}`, so `.` and `..` match it.
+    The helper this replaced had a SECOND guard — `startswith(".")` → 400 —
+    and the rewrite dropped it. That is safe here and only here: the id is
+    never joined onto a path, so `..` is just a name that no entry has. Pinned
+    so the next person can see the difference was noticed rather than missed,
+    and so re-introducing a path join fails a test instead of shipping.
+    """
+    project_dir = tmp_path / "Proj"
+    (project_dir / "snapshots" / "2026-01-01T00-00-00-real").mkdir(parents=True)
+
+    with pytest.raises(HTTPException) as exc:
+        snap._existing_snapshot_dir(project_dir, dotted, "nope")
+    assert exc.value.status_code == 404
+
+
+def test_a_plain_file_named_like_a_snapshot_is_not_a_snapshot(tmp_path):
+    """
+    Pins the `is_dir()` guard, which was also unpinned. Without it the helper
+    hands back a FILE, and `delete`'s `_force_rmtree` raises NotADirectoryError
+    — a 500 where the honest answer is 404.
+    """
+    project_dir = tmp_path / "Proj"
+    snaps = project_dir / "snapshots"
+    snaps.mkdir(parents=True)
+    (snaps / "2026-01-01T00-00-00-file").write_text("not a directory")
+
+    with pytest.raises(HTTPException) as exc:
+        snap._existing_snapshot_dir(project_dir, "2026-01-01T00-00-00-file", "nope")
+    assert exc.value.status_code == 404
+
+
 def test_what_it_returns_is_always_a_real_child_of_snapshots(tmp_path):
     """The result came out of `iterdir()`, so it is a directory that already
     existed under `snapshots/` — and, per the cases below, one that is still
@@ -241,3 +294,45 @@ def test_a_project_reached_through_a_symlinked_root_still_works(tmp_path):
 
     got = snap._existing_snapshot_dir(linked, "2026-01-01T00-00-00-real", "nope")
     assert got.name == "2026-01-01T00-00-00-real"
+
+
+# ── the listing helper is the other consumer, and it had the same hole ──────
+#
+# Fixing `_existing_snapshot_dir` alone was not enough. `_list_snapshot_dirs`
+# feeds `list_snapshots` AND `_prune_oldest`, which runs on every create once
+# the cap is hit — and `_force_rmtree` on a link does not refuse.
+
+def test_the_listing_drops_an_entry_that_escapes_the_tree(tmp_path):
+    project_dir = tmp_path / "Proj"
+    snaps = project_dir / "snapshots"
+    (snaps / "2026-01-02T00-00-00-real").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (snaps / "1990-01-01T00-00-00-escape").symlink_to(
+        outside, target_is_directory=True,
+    )
+
+    listed = [d.name for d in snap._list_snapshot_dirs(project_dir)]
+    assert listed == ["2026-01-02T00-00-00-real"]
+
+
+def test_the_prune_candidate_list_cannot_contain_an_escaping_entry(tmp_path):
+    """
+    Stated as the property `_prune_oldest` depends on rather than by driving
+    the prune: the oldest-first tail of this list is what gets deleted, and the
+    escaping entry sorts OLDEST (its id starts with 1990), so it would be the
+    first thing chosen.
+    """
+    project_dir = tmp_path / "Proj"
+    snaps = project_dir / "snapshots"
+    for name in ("2026-01-01T00-00-00-a", "2026-01-02T00-00-00-b"):
+        (snaps / name).mkdir(parents=True)
+    victim = tmp_path / "victim"
+    victim.mkdir()
+    (snaps / "1990-01-01T00-00-00-oldest").symlink_to(
+        victim, target_is_directory=True,
+    )
+
+    dirs = snap._list_snapshot_dirs(project_dir)
+    assert all(d.resolve().is_relative_to(snaps.resolve()) for d in dirs)
+    assert victim not in [d.resolve() for d in dirs]
