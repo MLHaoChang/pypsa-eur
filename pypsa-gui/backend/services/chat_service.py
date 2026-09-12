@@ -4485,7 +4485,7 @@ def _dispatch_real_tool_call(
             "type": "tool_result",
             "tool_use_id": tool_use_id,
             "is_error": True,
-            "content": _redact_secrets_in_str(str(detail or exc)[:1000]),
+            "content": _error_result_content(detail, exc, error_kind),
         })
         return
 
@@ -4686,6 +4686,67 @@ def _apply_turn_tool_result_budget(
         })
     budget["used"] = budget.get("used", 0) + length
     return content
+
+
+# Bound on the free-text half of an is_error result. Load-bearing rather than
+# cosmetic: this string is replayed on EVERY later turn of the session, so an
+# unbounded error body is charged for repeatedly.
+_ERROR_DETAIL_CAP: int = 1000
+
+
+def _error_result_content(detail: Any, exc: BaseException, error_kind: str) -> str:
+    """
+    The MODEL-FACING content of an `is_error` tool_result: a typed kind we
+    author, then the free-text detail, fenced.
+
+    Distinct from the `tool_error` SSE frame, which goes to the user's own
+    browser and may legitimately name a lock holder — that is the product's
+    intent and the frontend reads `detail.lock` for its banner. THIS string goes
+    to the third-party LLM provider and into `session.messages`, so it is
+    replayed on every later turn.
+
+    Two properties, both of which the previous `str(detail or exc)` broke:
+
+    1. **No other user's identity.** A lock refusal's `detail` carries
+       `{"lock": {"holder_email": ...}}` (`services/project_locks.py`), and
+       flattening the dict sent that address to the provider on every turn
+       (`findings/2026-08-27-lock-holder-email-reaches-the-model.md`). So a dict
+       detail contributes ONLY its human-readable `message`; every other key
+       exists for the frontend and the model has no use for it. A dict with no
+       `message` contributes nothing but the kind — safe by default, rather than
+       dumping unknown keys and hoping none of them identifies somebody.
+       Note `_redact_secrets_in_str` does NOT cover this: it targets API keys,
+       bearer tokens and `key=value` pairs, and has no notion of an address.
+
+    2. **The free text is fenced.** `_result_to_anthropic_content` leaves the
+       is_error path unwrapped on the grounds that it carries "short typed
+       error_kinds the model must act on, not untrusted free text". True of the
+       three sites that pass a constant; false here, where an exception message
+       interpolates component names. The kind stays OUTSIDE the fence because we
+       author it and the model must act on it; the detail goes INSIDE.
+
+    Residual, stated rather than hidden: a bare (non-dict) exception whose own
+    message embeds an address would still pass it through. No code path
+    currently does that — `project_locks` puts the address in the dict, never in
+    the message — so the structural fix covers the real path, and a general
+    address scrub here would mangle more than it protects.
+    """
+    free_text: str | None = None
+    if isinstance(detail, dict):
+        message = detail.get("message")
+        free_text = str(message) if message is not None else None
+    elif detail is not None:
+        free_text = str(detail)
+    else:
+        free_text = str(exc)
+
+    if not free_text:
+        # Nothing safe to say beyond the kind. The model can still act on it.
+        return error_kind
+
+    free_text = _redact_secrets_in_str(free_text[:_ERROR_DETAIL_CAP])
+    free_text = _neutralise_untrusted_delimiters(free_text)
+    return f"{error_kind}\n{_UNTRUSTED_OPEN}\n{free_text}\n{_UNTRUSTED_CLOSE}"
 
 
 def _result_to_anthropic_content(result: Any) -> Any:
