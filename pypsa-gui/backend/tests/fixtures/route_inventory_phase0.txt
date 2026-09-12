@@ -135,6 +135,8 @@ POST    /api/projects/{base}/scenarios                           -> create_scena
 DELETE  /api/projects/{name}                                     -> delete_project_api_projects__name__delete
 GET     /api/projects/{name}                                     -> load_project_api_projects__name__get
 POST    /api/projects/{name}                                     -> save_project_api_projects__name__post
+GET     /api/projects/{name}/asset_health                        -> get_asset_health_api_projects__name__asset_health_get
+PUT     /api/projects/{name}/asset_health                        -> put_asset_health_api_projects__name__asset_health_put
 GET     /api/projects/{name}/bundle                              -> download_bundle_api_projects__name__bundle_get
 GET     /api/projects/{name}/compare-state                       -> get_compare_state_api_projects__name__compare_state_get
 GET     /api/projects/{name}/layout                              -> get_layout_api_projects__name__layout_get

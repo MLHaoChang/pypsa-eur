@@ -372,6 +372,17 @@ _NOM_COL: dict[str, str] = {
 }
 
 
+def nom_col_for(component_class: str) -> str | None:
+    """
+    The nominal-capacity column for a SIZEABLE class, or None.
+
+    Public because the sizing question — "how big did the LP make this, and
+    what stopped it there" — is asked outside the metric registry too, and a
+    second hand-written copy of this map is exactly how `e_nom` gets forgotten.
+    """
+    return _NOM_COL.get(component_class)
+
+
 def _nom_col(ctx: Ctx) -> str:
     return _NOM_COL.get(ctx.component_class, "p_nom")
 
