@@ -12,7 +12,31 @@ concurrency:
 jobs:
   run-validation:
     name: Run validation
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # TWO conditions, and the second is this fork's.
+    #
+    # The first is upstream's: skip PRs opened from a fork of this repository,
+    # because they cannot be trusted with the secrets below.
+    #
+    # The second exists because `runs-on: self-hosted` needs a self-hosted
+    # runner registered against THIS repository, and there is not one. Without
+    # it the job does not fail — it sits `queued` forever, on every pull
+    # request, so no PR here has ever shown a complete check set. It has never
+    # blocked a merge (it is not a required check), which is exactly why it
+    # went unexamined for so long: a permanently yellow check is easy to learn
+    # to ignore, and then a genuinely stuck check looks normal too.
+    #
+    # A repository VARIABLE rather than a hardcoded repo name: registering a
+    # runner later is then a settings change, not a code change, and this file
+    # does not have to name somebody else's repository to describe its own
+    # capability. Set `PYPSA_VALIDATOR_SELF_HOSTED` to `true` under
+    # Settings -> Secrets and variables -> Actions -> Variables once a runner
+    # exists, and this job starts running again with no diff.
+    #
+    # `create-report` below needs this job, and a skipped dependency skips its
+    # dependents, so both disappear from the check set together.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository
+      && vars.PYPSA_VALIDATOR_SELF_HOSTED == 'true'
     runs-on: self-hosted
     outputs:
       validation_failed: ${{ steps.check_validation.outputs.failed }}
