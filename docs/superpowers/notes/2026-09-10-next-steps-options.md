@@ -82,8 +82,11 @@ The recommendation below was taken, and one option beyond it.
 | **A1** | PR #12 opened for the two follow-up commits, CI green, squash-merged. The branch was restarted from the new master. |
 | **C1** | The IEEE 39-bus journey re-run against the pinned PyPSA 1.1.2 in a clean environment: 46 steps across both networks, every figure identical to the 1.3.0 runs. The only differences were three findings becoming *visible* on the older metadata, which is what the exercise was for. Recorded in `2026-09-09-ieee39-e2e-review.md` §11. |
 | **C3** | `pypsa-gui/backend/tests/qa_adequacy_journey.py` — a QA driver covering the adequacy journey, discovered automatically by `tests/run_qa_drivers.py` and therefore run by the `gui-qa-drivers` CI step. 91 checks over preflight, the margin- and cap-constrained solve, `/results/reserve_margin`, `/results/adequacy`, `/results/copt`, `/results/mc` with ELCC, the stress registry, the class-B/C sweep, `/results/fmea_modes`, the worksheet sidecar, the bundle, and the margin loop with its 409 mesh. Passes on both PyPSA 1.3.0 and the pinned 1.1.2. |
+| **B1** | Closed. The clamped planning-loop iterate is no longer re-solved: the controller takes an optional `solve_at.solved_value(x)` — the same duck-typed shape as its existing plan-hash probe — and the margin route offers it, so a refinement midpoint that stands for an already-solved margin stops the search before the solve instead of after it. The verdict, the certified margin and the restored config are unchanged; the run is one solve plus one MC shorter (3 -> 2 on the QA journey). |
+| **C3+** | A second QA driver, `pypsa-gui/backend/tests/qa_adequacy_studies.py`, covering what the journey driver does not reach: the ε-cap coupling loop (the margin loop's sibling on the same controller), the frontier sweep and its monotonicity, and every study's empty-state and abort contract — 204 before a run, 404 to an abort of a study that never started, an abort mid-flight that keeps the points it had and still runs the closing restore, and the same abort answering 200 twice more. 72 checks, ~24 s, discovered by the same runner. |
 
-Everything else in the tables above stands as written.
+Everything else in the tables above stands as written; of Group B, B1 is
+now closed and B2 is still open.
 
 ## If you want one recommendation
 

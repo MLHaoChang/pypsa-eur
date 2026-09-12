@@ -2827,6 +2827,41 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         )
         return out
 
+    def _solved_margin_at(x: float) -> float | None:
+        """What ``solve_at`` would ACTUALLY solve at ``x``, without solving —
+        the controller's optional ``solved_value`` probe (B1 / IEEE 39-bus
+        review, F5).
+
+        The clamp above maps every coordinate whose margin exceeds the fleet
+        ceiling onto that one ceiling, so the refinement bisection can ask for
+        a NEW coordinate that stands for a standard already solved: a full
+        capacity expansion plus its MC, spent rebuilding the met endpoint's
+        own plan and stopped only by the plan-hash check afterwards. Two
+        ceiling iterates with identical cost and identical MC LOLE are what
+        that looks like in the record (measured on the stressed IEEE 39-bus
+        network).
+
+        It MIRRORS `solve_at`'s decision tree rather than approximating it,
+        and returns None wherever that function answers without solving —
+        None is "nothing would be solved here", which the controller reads as
+        "cannot tell" and pays the solve for. Both branches are cheap and
+        pure: `to_margin` is arithmetic and the ceiling was computed before
+        the study started.
+        """
+        try:
+            m = float(to_margin(x))
+        except ValueError:
+            return None
+        if m > MAX_MARGIN * (1.0 + 1e-9):
+            return None                       # refused: out of lever
+        if m > m_ceiling:
+            if _ceiling_missed[0]:
+                return None                   # refused: the ceiling missed
+            return float(m_ceiling)
+        return m
+
+    solve_at.solved_value = _solved_margin_at
+
     eval_state: dict = {"floor": floor_h}
 
     def evaluate():
