@@ -261,6 +261,17 @@ What remains open from this review is F5 (a clamped met run spends one
 redundant solve, bounded by the controller's own plan-hash check) and F9
 above.
 
+**Update — F5 is closed.** The clamp lives in the route's `solve_at`, so the
+controller could not know that two coordinates stand for one margin; it now
+asks, through an optional `solve_at.solved_value(x)` offered exactly like the
+existing `evaluate.plan_hash` probe. When the refinement midpoint would solve
+what the met endpoint already solved, the loop stops before the solve rather
+than after it. Nothing user-facing moves: both coordinates already reported
+the same margin through `_solved_margin` (F1's fix), so the verdict, the
+`lever_star` and the restored config are unchanged — the run is one full
+capacity expansion plus one MC shorter. Measured on the shipped QA journey
+(`qa_adequacy_journey.py`): `solves_used` 3 -> 2, same `lever_star`.
+
 ## 10. Full-suite parity on the merge candidate
 
 The branch's parity claim was last proven at `177c9a4`. Three commits touched

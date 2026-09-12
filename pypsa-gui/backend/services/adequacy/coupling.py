@@ -15,7 +15,10 @@ callables it is handed:
 * ``solve_at(eps) -> SolveResult`` — one capacity-expansion solve at that cap,
   read out exactly as ``run_frontier_sweep`` reads its points
   (``status``/``condition``/``cost_eur``/``ens_mwh``/``cap_mwh``/``binding``/
-  ``report``). Solve failures arrive as a status, never as an exception.
+  ``report``). Solve failures arrive as a status, never as an exception. It may
+  carry an OPTIONAL ``solved_value(eps)`` attribute saying what it would
+  actually solve at a coordinate — see ``_would_re_solve``; a caller whose
+  lever clamps offers it and saves the solve that a clamped midpoint wastes.
 * ``evaluate() -> (plan_hash, metrics)`` — one sequential-MC evaluation of the
   network as the last solve left it, plus a hash of exactly what that MC read.
 
@@ -47,10 +50,12 @@ not monotone in ε and proves nothing; conflating the two turns "the solver ran
 out of time" into "no plan meets this standard", which are the same words for
 opposite user actions.
 
-TERMINATION IS TOTAL, and by construction rather than by argument: **every
-iteration of both loops performs exactly one ``solve_at`` call, and neither
-loop body is entered unless ``solves_used < budget``**, so the whole run makes
-at most ``budget ≤ MAX_LOOP_SOLVES`` solves and then stops. Nothing else is
+TERMINATION IS TOTAL, and by construction rather than by argument: **no
+iteration of either loop performs more than one ``solve_at`` call — the one
+body that performs none leaves the loop on the spot (the clamped-midpoint stop
+in the refinement bracket) — and neither loop body is entered unless
+``solves_used < budget``**, so the whole run makes at most
+``budget ≤ MAX_LOOP_SOLVES`` solves and then stops. Nothing else is
 load-bearing — but two further monotonicities keep the run from wasting that
 budget: the tightening step is strictly decreasing (``eps_next ≤ eps/4``) until
 it reaches ``EPS_FLOOR_PERMYRIAD``, at which point a miss is final; and the
@@ -243,6 +248,44 @@ def run_coupling_loop(solve_at, evaluate, *, target_lole_h: float, eps0: float,
     if not callable(probe):
         probe = None
 
+    # The SECOND optional, duck-typed extra, offered exactly like the plan
+    # hash above (adjudication 1) and for the same reason: a fact the caller
+    # knows for free and the controller cannot ask for through the binding
+    # signature. `solve_at.solved_value(e)` answers "what would you actually
+    # solve at this coordinate?" — which is `e` itself for a lever the caller
+    # passes through, and something else for one that CLAMPS. Absent, every
+    # test below is False and the loop behaves exactly as it did.
+    _solved_value = getattr(solve_at, "solved_value", None)
+    if not callable(_solved_value):
+        _solved_value = None
+
+    def _would_re_solve(a: float, b: float) -> bool:
+        """Whether solving at ``a`` would rebuild what ``b`` already solved.
+
+        Conservative in the only direction that matters: an unknown value, a
+        raising probe or no probe at all answers False, and the loop then
+        pays the solve and stops on the plan hash as before — one wasted
+        iterate, never a wrong answer. A false POSITIVE would end refinement
+        early, which costs optimality, so the comparison is exact to within
+        float noise rather than approximate.
+        """
+        if _solved_value is None:
+            return False
+        try:
+            va = _solved_value(a)
+            vb = _solved_value(b)
+        except Exception:                                     # noqa: BLE001
+            logger.exception(
+                "coupling loop: solved_value raised; falling back to solving")
+            return False
+        if va is None or vb is None:
+            return False
+        try:
+            return math.isclose(float(va), float(vb), rel_tol=1e-12,
+                                abs_tol=0.0)
+        except (TypeError, ValueError):
+            return False
+
     def _emit(row: dict) -> None:
         iterations.append(row)
         if on_iteration is None:
@@ -427,6 +470,22 @@ def run_coupling_loop(solve_at, evaluate, *, target_lole_h: float, eps0: float,
         if not (met_eps < mid < miss_eps):
             # The bracket has collapsed to float resolution; another solve
             # would re-solve an endpoint.
+            break
+        if _would_re_solve(mid, met_eps):
+            # A CLAMPED lever (the margin loop's fleet ceiling) maps a whole
+            # range of coordinates onto one value, so the midpoint would hand
+            # the solver the met endpoint's own standard: same LP, same plan,
+            # same MC. The hash check below already stops there — but only
+            # after paying the solve, which is the whole cost this test
+            # removes (IEEE 39-bus review, F5).
+            #
+            # And unlike the plateau case, there is nothing to win by paying
+            # it: a plateau midpoint is a genuinely LOOSER standard that
+            # happens to buy the same plan, and taking it as `final` reports
+            # more headroom for the same cost. Here both coordinates solve
+            # the SAME value, so the looser-looking one is an artefact of the
+            # coordinate, not headroom — reporting it would name a standard
+            # the study never solved.
             break
         row, kind, plan_hash = _iterate(mid)
         if kind == "error":

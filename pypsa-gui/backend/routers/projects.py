@@ -1484,6 +1484,99 @@ def _refuse_save_during_study(ctx) -> None:
     if detail:
         raise HTTPException(status_code=409, detail=detail)
 
+
+def _carry_sidecars_on_move(
+    ctx,
+    *,
+    loaded: str | None,
+    name: str,
+    rebind: bool,
+    dest: pathlib.Path,
+    db=None,
+    user=None,
+) -> None:
+    """
+    Carry a project's sidecars when a save's TARGET differs from its binding.
+
+    Two sidecars, travelling differently:
+
+    * `chat.jsonl` — MOVED on `rebind=True` (Save-As claims the new name, so the
+      conversation goes with it), COPIED otherwise (Save-a-Copy /
+      create_scenario must leave the original's thread intact).
+    * `uploads/` — ALWAYS copied. Reference material a user may want in both
+      projects, not a per-conversation thread.
+
+    `loaded` is the PRE-rebind name and must be passed explicitly:
+    `ctx.loaded_project` has already been re-bound to `name` by the time this
+    runs, so a lineage helper left to infer its own source resolves src == dst
+    and silently no-ops. That bug happened once already (the "Phase 4
+    walkthrough bug").
+
+    Both halves are BEST-EFFORT and independent. The network is on disk before
+    this runs, so raising here would report failure for a save that succeeded —
+    and a lineage failure must not stop the uploads copy. They differ in one
+    respect on purpose: the copy failure is logged, because a silently empty
+    `uploads/` gives a user nothing to go on.
+
+    In auth mode the SOURCE directory resolves through the registry, not the
+    flat projects dir: storage is org-scoped, so the flat path is wrong or
+    absent and copying from it carries nothing.
+
+    Extracted from `_save_context`; see `tests/test_save_sidecar_carry_seam.py`.
+    """
+    # Chatbot integration v6 Phase 4 — chat.jsonl lineage (F12).
+    # `loaded` captured at line 940 BEFORE the rebind at line 1043 reflects
+    # the SOURCE project; `name` is the TARGET. The rebind flag distinguishes:
+    #   * rebind=True  + source != target → Save-As: MOVE chat.jsonl
+    #   * rebind=False + source != target → Save-a-Copy / create_scenario: COPY
+    #   * source == target OR source is None → no lineage transition needed
+    # Best-effort: chat-history lineage must not fail the project save itself,
+    # so `handle_save_lineage` swallows OSErrors internally.
+    if loaded is not None and loaded != name:
+        try:
+            from services import chat_service
+            mode = (
+                chat_service.SAVE_LINEAGE_REBIND_MOVE
+                if rebind
+                else chat_service.SAVE_LINEAGE_COPY
+            )
+            # Pass `loaded` (the PRE-rebind project name) explicitly. By the
+            # time this hook fires, `ctx.loaded_project` has already been
+            # re-bound to `name` at line 1043 above — without the explicit
+            # source, the lineage helper would resolve src == dst and the
+            # move/copy would be a no-op (Phase 4 walkthrough bug).
+            chat_service.handle_save_lineage(
+                ctx, target_name=name, mode=mode, source_name=loaded,
+            )
+        except Exception:  # noqa: BLE001 — never abort save on lineage failure
+            pass
+
+        # Chatbot uploads (Phase A) — uploads/ travels alongside the project
+        # bundle on cross-project save transitions. Unlike chat.jsonl this is
+        # ALWAYS a COPY (uploads are reference materials the user may want
+        # available in both projects, not a per-conversation thread). Same
+        # best-effort guard — a copy failure must not abort the user's save.
+        try:
+            # Destination is the already-resolved `dest` (the org-scoped
+            # storage dir in auth mode, or the flat PROJECTS_DIR/name in legacy
+            # mode). The SOURCE (`loaded`) must be resolved the same way — in
+            # auth mode via the DB registry so we copy from the source
+            # project's org-scoped storage_path rather than a flat
+            # `_safe_project_dir(loaded)` that would point at the wrong (or a
+            # nonexistent) directory.
+            src_dir = _safe_project_dir(loaded)
+            if db is not None and user is not None:
+                from services import project_registry
+
+                src_project = project_registry.find_project(db, user, loaded)
+                if src_project is not None:
+                    src_dir = project_registry.project_dir(src_project)
+            _copy_bundle_dirs(src_dir, dest)
+        except Exception:  # noqa: BLE001 — best-effort, never abort save
+            logger.exception("save: _copy_bundle_dirs(%s → %s) failed", loaded, name)
+
+
+
 def _check_save_allowed(
     ctx,
     name: str,
@@ -1940,56 +2033,11 @@ def _save_context(
     # active-scoped (`undo_service.clear()` targets the active ctx), so a
     # background save must NOT run it (it would wipe the FOREGROUND's undo).
 
-    # Chatbot integration v6 Phase 4 — chat.jsonl lineage (F12).
-    # `loaded` captured at line 940 BEFORE the rebind at line 1043 reflects
-    # the SOURCE project; `name` is the TARGET. The rebind flag distinguishes:
-    #   * rebind=True  + source != target → Save-As: MOVE chat.jsonl
-    #   * rebind=False + source != target → Save-a-Copy / create_scenario: COPY
-    #   * source == target OR source is None → no lineage transition needed
-    # Best-effort: chat-history lineage must not fail the project save itself,
-    # so `handle_save_lineage` swallows OSErrors internally.
-    if loaded is not None and loaded != name:
-        try:
-            from services import chat_service
-            mode = (
-                chat_service.SAVE_LINEAGE_REBIND_MOVE
-                if rebind
-                else chat_service.SAVE_LINEAGE_COPY
-            )
-            # Pass `loaded` (the PRE-rebind project name) explicitly. By the
-            # time this hook fires, `ctx.loaded_project` has already been
-            # re-bound to `name` at line 1043 above — without the explicit
-            # source, the lineage helper would resolve src == dst and the
-            # move/copy would be a no-op (Phase 4 walkthrough bug).
-            chat_service.handle_save_lineage(
-                ctx, target_name=name, mode=mode, source_name=loaded,
-            )
-        except Exception:  # noqa: BLE001 — never abort save on lineage failure
-            pass
+    _carry_sidecars_on_move(
+        ctx, loaded=loaded, name=name, rebind=rebind,
+        dest=dest, db=db, user=user,
+    )
 
-        # Chatbot uploads (Phase A) — uploads/ travels alongside the project
-        # bundle on cross-project save transitions. Unlike chat.jsonl this is
-        # ALWAYS a COPY (uploads are reference materials the user may want
-        # available in both projects, not a per-conversation thread). Same
-        # best-effort guard — a copy failure must not abort the user's save.
-        try:
-            # Destination is the already-resolved `dest` (the org-scoped
-            # storage dir in auth mode, or the flat PROJECTS_DIR/name in legacy
-            # mode). The SOURCE (`loaded`) must be resolved the same way — in
-            # auth mode via the DB registry so we copy from the source
-            # project's org-scoped storage_path rather than a flat
-            # `_safe_project_dir(loaded)` that would point at the wrong (or a
-            # nonexistent) directory.
-            src_dir = _safe_project_dir(loaded)
-            if db is not None and user is not None:
-                from services import project_registry
-
-                src_project = project_registry.find_project(db, user, loaded)
-                if src_project is not None:
-                    src_dir = project_registry.project_dir(src_project)
-            _copy_bundle_dirs(src_dir, dest)
-        except Exception:  # noqa: BLE001 — best-effort, never abort save
-            logger.exception("save: _copy_bundle_dirs(%s → %s) failed", loaded, name)
 
     return {
         "saved": name,
