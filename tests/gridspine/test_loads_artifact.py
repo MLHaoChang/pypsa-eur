@@ -200,6 +200,29 @@ def test_apply_snapshot_moves_the_load_to_the_hour(case39_loads):
     assert abs(float(net.load["p_mw"].sum()) - native_total) > 0.05 * native_total
 
 
+def test_a_network_that_drops_one_of_the_grids_load_buses_is_refused_by_the_producer():
+    """The direction `to_loads_table` did not check, and the one the external
+    producer's `_check_load_buses` closed for a client's file.
+
+    A saved project whose network has lost a load — deleted in the GUI, or never
+    carried — produces a demand table covering 20 of case39's 21 load buses.
+    Nothing refused it HERE, so `snapshot_metrics` computed `load_mw` short by
+    that whole bus, and `metrics.csv`, `dc_sensitivities.npz`, `n1_severity_dc`
+    and `selected.csv` were all written from it before `apply_snapshot` raised
+    about a bus the table does not cover — recorded under stage `loadflow`,
+    though the cause was the dispatch producer. Both directions belong where the
+    table is BUILT.
+    """
+    net = load_case39()
+    n = to_pypsa(net)
+    victim = str(n.loads.index[0])
+    n.remove("Load", victim)
+    with pytest.raises(ContractError) as exc:
+        to_loads_table(n, net)
+    message = str(exc.value)
+    assert str(net.bus.loc[net.load["bus"], "name"].iloc[0]) in message or "load" in message.lower()
+
+
 def test_apply_snapshot_rejects_a_bus_the_loads_table_does_not_cover():
     """Fail closed: an unset net.load keeps its native value, which IS the
     increment-1 defect. Silently leaving one behind must not be possible."""
@@ -221,6 +244,35 @@ def test_apply_snapshot_rejects_an_hour_with_no_load_rows(case39_loads):
     with pytest.raises(ContractError, match="hour"):
         apply_snapshot(net, _flat_dispatch(net, reg, [999]), loads,
                        hour=999, registry=reg)
+
+
+def test_apply_snapshot_puts_the_tables_reactive_power_on_the_res_units():
+    """`net.sgen` is a PQ element, so its `q_mvar` is a load-flow INPUT — unlike
+    `net.gen`, where Q is a result and the dispatch's column is rightly ignored.
+
+    `_apply_res` set p_mw and in_service only, so a client's stated reactive
+    exchange on a RES unit was validated, written into `dispatch.csv`, and then
+    dropped: the bus voltages, the branch Q flows, the N-1 severities and the
+    `.raw` all described a different reactive state than the artifact the client
+    was handed. It had never mattered because `tables_from_network` hardcodes
+    `q_mvar = 0.0`; the external producer is the first that can carry a value.
+    """
+    net = load_case39_res()
+    reg = registry_from_net(net)
+    n = to_pypsa(net, res_cf={name: np.full(24, 0.5) for name in net.sgen["name"]})
+    loads = to_loads_table(n, net)
+    table = _flat_dispatch(net, reg, [TEST_HOUR])
+
+    res_units = [u for u, r in reg.iterrows() if r["kind"] == "res"]
+    mask = table["hour"] == TEST_HOUR
+    table.loc[mask & table["unit_id"].isin(res_units), "q_mvar"] = -60.0
+    table = validate_dispatch(table)
+
+    apply_snapshot(net, table, loads, hour=TEST_HOUR, registry=reg)
+
+    idx = {net.sgen.at[i, "name"]: i for i in net.sgen.index}
+    for unit in res_units:
+        assert float(net.sgen.at[idx[unit], "q_mvar"]) == pytest.approx(-60.0)
 
 
 def test_apply_snapshot_sets_res_sgen_and_takes_curtailed_units_out_of_service():
