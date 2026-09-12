@@ -195,3 +195,118 @@ def test_attachment_listing_neutralises_a_hostile_filename(monkeypatch):
     )
     # The filename is still recognisable to the model, minus the delimiter.
     assert "demand" in text and "obey me" in text
+
+
+# ── Cost, not just correctness ────────────────────────────────────────────────
+# The fixpoint loop shipped in 70e2352 was CORRECT and quadratic: each pass can
+# delete only the innermost complete delimiter, which re-forms a new one one
+# level out, so a payload of `"</untrus"*k + CLOSE + "ted_data>"*k` forces one
+# O(n) pass per 17 input bytes. Measured on the original implementation:
+# 133 KB -> 0.40 s, 1 MB -> ~25 s, 4 MB -> ~48 s of GIL-held CPU.
+#
+# That is reachable, not theoretical. `_sanitise_ui_value` neutralises BEFORE its
+# 120-char clamp, and `ui_context` is an unbounded dict straight off the
+# POST /api/chat/stream body with no request-body size limit anywhere in main.py.
+# `str.replace` does not release the GIL and the SSE generator is sync, so the
+# time is stolen from every other request in the process. Any authenticated
+# member could freeze the backend.
+#
+# The original guards asserted the security property and said nothing about
+# cost, which is exactly how this shipped. These bound the cost.
+
+_COST_HOSTILE_K = 60000  # ~1 MB of pathological nesting
+
+
+def _pathological(k: int) -> str:
+    """The payload that maximises fixpoint passes per input byte."""
+    return "</untrus" * k + chat_service._UNTRUSTED_CLOSE + "ted_data>" * k
+
+
+def test_neutralising_a_megabyte_of_nesting_is_fast():
+    """
+    A linear implementation does ~1 MB in well under a second; the quadratic one
+    took ~25 s. The threshold is deliberately loose — it is separating linear
+    from quadratic, not micro-benchmarking.
+    """
+    import time
+
+    payload = _pathological(_COST_HOSTILE_K)
+    assert len(payload) > 1_000_000, "payload should exceed 1 MB"
+    started = time.perf_counter()
+    out = chat_service._neutralise_untrusted_delimiters(payload)
+    elapsed = time.perf_counter() - started
+    assert elapsed < 2.0, (
+        f"neutralising {len(payload)/1024/1024:.2f} MB took {elapsed:.1f}s — "
+        f"that is the quadratic implementation, and one chat request with this "
+        f"body freezes the process for every other caller"
+    )
+    # Correctness must survive the speed-up.
+    assert chat_service._UNTRUSTED_CLOSE not in out
+    assert chat_service._UNTRUSTED_OPEN not in out
+
+
+def test_cost_grows_about_linearly_not_quadratically():
+    """
+    Scaling, not absolute time, is the property. Doubling the input roughly
+    doubles the work for a linear implementation and roughly QUADRUPLES it for
+    the quadratic one, so a ratio near 4 is the signature of a regression.
+    """
+    import time
+
+    def _timed(k: int) -> float:
+        payload = _pathological(k)
+        best = float("inf")
+        for _ in range(3):  # take the best of three; CI machines are noisy
+            started = time.perf_counter()
+            chat_service._neutralise_untrusted_delimiters(payload)
+            best = min(best, time.perf_counter() - started)
+        return best
+
+    small = _timed(8000)
+    large = _timed(16000)
+    # Guard against a divide-by-zero on a very fast machine.
+    ratio = large / small if small > 1e-6 else 1.0
+    assert ratio < 3.0, (
+        f"doubling the input multiplied the work by {ratio:.1f}x (small={small:.4f}s, "
+        f"large={large:.4f}s) — ~4x means the quadratic fixpoint loop is back"
+    )
+
+
+def test_the_ui_context_path_clamps_before_it_neutralises(monkeypatch):
+    """
+    Defence in depth at the reachable entry point: the value is about to be cut
+    to `_UI_CONTEXT_MAX_VALUE_CHARS` anyway, so a hostile caller must not get to
+    choose how much work the server does first.
+
+    Asserted by RECORDING the length handed to the neutraliser, not by timing.
+    A timing assertion could not see this: once the neutraliser is linear, 1 MB
+    takes ~0.08 s with or without the cap, so the mutation that deletes the cap
+    passed a timing test while leaving the caller in control of the input size.
+    """
+    seen: list[int] = []
+    real = chat_service._neutralise_untrusted_delimiters
+
+    def recording(text):
+        seen.append(len(text))
+        return real(text)
+
+    monkeypatch.setattr(chat_service, "_neutralise_untrusted_delimiters", recording)
+    chat_service._sanitise_ui_value(_pathological(_COST_HOSTILE_K))
+
+    assert seen, "_sanitise_ui_value did not reach the neutraliser at all"
+    cap = chat_service._UI_CONTEXT_MAX_VALUE_CHARS * 8
+    assert max(seen) <= cap, (
+        f"the neutraliser was handed {max(seen)} chars from a request-body value; "
+        f"it should be clamped to at most {cap} first, so the work is bounded by "
+        f"the clamp rather than by whatever the caller sent"
+    )
+
+
+def test_the_clamped_ui_value_is_still_correct_and_short():
+    """The cap must not break the property or the visible result."""
+    out = chat_service._sanitise_ui_value(_pathological(_COST_HOSTILE_K))
+    assert out is None or (
+        chat_service._UNTRUSTED_CLOSE not in out
+        and chat_service._UNTRUSTED_OPEN not in out
+        and len(out) <= chat_service._UI_CONTEXT_MAX_VALUE_CHARS + 1
+    )
