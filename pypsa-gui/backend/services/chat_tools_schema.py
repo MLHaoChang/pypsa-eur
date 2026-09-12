@@ -933,6 +933,43 @@ TOOLS: list[dict[str, Any]] = [
         ["target_lole_h"],
     ),
     _t(
+        "start_campaign",
+        "Open a reliability CAMPAIGN: one solve budget across a whole chain of "
+        "studies. Every engine already caps itself (frontier 12 targets, "
+        "class-B sweep 20 contingencies, each loop 8 solves) — nothing caps "
+        "chaining them, and a frontier plus two loops plus a sweep is ~50 full "
+        "capacity-expansion solves on a shared solver. Start one before "
+        "driving a multi-study question ('hit LOLE <= 3 h/yr at least cost'), "
+        "state the objective in the user's terms, and the run_* study tools "
+        "then charge against it and refuse what would overrun. "
+        "`budget_solves` defaults to 30 — a frontier plus a loop, or a full "
+        "sweep. run_mc_study is charged ZERO because it solves nothing. "
+        "Safety: write.",
+        {
+            "objective": {"type": "string"},
+            "budget_solves": {"type": "integer"},
+        },
+        ["objective"],
+    ),
+    _empty(
+        "campaign_status",
+        "The running campaign: {active, objective, budget_solves, "
+        "spent_solves, remaining_solves, started_at, entries: [{study, "
+        "solves_charged, at}]}, or {active: false}. Read it before choosing "
+        "the next study — `entries` is the only record of what this campaign "
+        "already ran, because each study surface holds ONLY its latest result "
+        "and a second frontier overwrites the first. Safety: read.",
+    ),
+    _t(
+        "end_campaign",
+        "Close the campaign and return its final record (the log survives in "
+        "the return value, not on the server). Do this when the objective is "
+        "answered or the user redirects — a second start_campaign is refused "
+        "while one is open, because it would silently discard this one's log. "
+        "Safety: write.",
+        {"note": {"type": "string"}},
+    ),
+    _t(
         "abort_adequacy_study",
         "Stop a running study at its next boundary. IDEMPOTENT and 200 even "
         "when the run has already finished; 404 only when that study never "
@@ -1809,6 +1846,10 @@ TOOL_ROUTES: dict[str, list] = {
     "run_mc_study": [("POST", "/api/results/mc")],
     "run_coupling_loop": [("POST", "/api/results/coupling_loop")],
     "run_margin_loop": [("POST", "/api/results/margin_loop")],
+    # campaign (3) — process-global study budget, no HTTP route of its own
+    "start_campaign": _SERVICE_CALL,
+    "campaign_status": _SERVICE_CALL,
+    "end_campaign": _SERVICE_CALL,
     "abort_adequacy_study": [
         ("POST", f"/api/results/{s}/abort") for s in ADEQUACY_STUDY_ENUM
     ],

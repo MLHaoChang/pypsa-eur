@@ -1169,6 +1169,54 @@ def get_stress_scenarios(name: str) -> dict:
     return _h(project=_authorized_project(name))
 
 
+def _campaign_gated(study: str, start, **estimate_kwargs):
+    """
+    Run a study under the active campaign's budget, if there is one.
+
+    Check, start, THEN record — never charge-then-refund. A study that fails
+    to start (409 while the mesh is busy, 422 for a missing VOLL) must not
+    burn budget, and a refund path would be a second place for the total to go
+    wrong. Nothing can slip between the check and the record: the study mesh
+    allows at most one study in flight.
+
+    With no campaign running both calls are no-ops, so a single study asked
+    for directly behaves exactly as it did before this existed.
+    """
+    from services.adequacy import campaign
+
+    solves = campaign.estimate_solves(PyPSAService.get_network(), study,
+                                      **estimate_kwargs)
+    campaign.check(study, solves)
+    result = start()
+    charged = campaign.record(study, solves)
+    if charged is None:
+        return result
+    return {**result, "campaign": {
+        "objective": charged["objective"],
+        "solves_charged": solves,
+        "spent_solves": charged["spent_solves"],
+        "remaining_solves": charged["remaining_solves"],
+    }}
+
+
+def start_campaign(objective: str, budget_solves: int | None = None) -> dict:
+    """Open a reliability campaign with one budget across every study."""
+    from services.adequacy import campaign
+    return campaign.start(objective, budget_solves)
+
+
+def campaign_status() -> dict:
+    """The running campaign's objective, budget, spend and study log."""
+    from services.adequacy import campaign
+    return campaign.status()
+
+
+def end_campaign(note: str | None = None) -> dict:
+    """Close the campaign and return its final record."""
+    from services.adequacy import campaign
+    return campaign.end(note)
+
+
 def run_fmea_sweep(scenarios: list | None = None) -> dict:
     """
     Start the class-B (single link outage) contingency sweep, plus any
@@ -1179,7 +1227,10 @@ def run_fmea_sweep(scenarios: list | None = None) -> dict:
     operates on the FOREGROUND network and carries no project name.
     """
     from routers.results import FmeaSweepRequest, post_fmea_sweep as _h
-    return _h(FmeaSweepRequest(scenarios=list(scenarios or [])))
+    rows = list(scenarios or [])
+    return _campaign_gated(
+        "fmea_sweep", lambda: _h(FmeaSweepRequest(scenarios=rows)),
+        scenarios=rows)
 
 
 def run_frontier_study(targets_permyriad: list | None = None) -> dict:
@@ -1189,7 +1240,10 @@ def run_frontier_study(targets_permyriad: list | None = None) -> dict:
     point. Omitting `targets_permyriad` uses the engine's default spread.
     """
     from routers.results import FrontierRequest, post_frontier as _h
-    return _h(FrontierRequest(targets_permyriad=targets_permyriad))
+    return _campaign_gated(
+        "frontier",
+        lambda: _h(FrontierRequest(targets_permyriad=targets_permyriad)),
+        targets_permyriad=targets_permyriad)
 
 
 def run_mc_study(
@@ -1209,13 +1263,13 @@ def run_mc_study(
     must not be a half-mutated network.
     """
     from routers.results import McRequest, post_mc as _h
-    return _h(McRequest(
+    return _campaign_gated("mc", lambda: _h(McRequest(
         draws=draws,
         seed=seed,
         cov_target=cov_target,
         elcc_assets=elcc_assets,
         elcc_portfolio=elcc_portfolio,
-    ))
+    )))
 
 
 def run_coupling_loop(
@@ -1234,14 +1288,17 @@ def run_coupling_loop(
     on a multi-year horizon, and say which basis you used when reporting.
     """
     from routers.results import CouplingLoopRequest, post_coupling_loop as _h
-    return _h(CouplingLoopRequest(
-        target_lole_h=target_lole_h,
-        draws=draws,
-        seed=seed,
-        eps0=eps0,
-        max_solves=max_solves,
-        restore=restore,
-    ))
+    return _campaign_gated(
+        "coupling_loop",
+        lambda: _h(CouplingLoopRequest(
+            target_lole_h=target_lole_h,
+            draws=draws,
+            seed=seed,
+            eps0=eps0,
+            max_solves=max_solves,
+            restore=restore,
+        )),
+        max_solves=max_solves)
 
 
 def run_margin_loop(
@@ -1261,13 +1318,16 @@ def run_margin_loop(
     single number here that can silently make the study worthless.
     """
     from routers.results import MarginLoopRequest, post_margin_loop as _h
-    return _h(MarginLoopRequest(
-        target_lole_h=target_lole_h,
-        draws=draws,
-        seed=seed,
-        max_solves=max_solves,
-        restore=restore,
-    ))
+    return _campaign_gated(
+        "margin_loop",
+        lambda: _h(MarginLoopRequest(
+            target_lole_h=target_lole_h,
+            draws=draws,
+            seed=seed,
+            max_solves=max_solves,
+            restore=restore,
+        )),
+        max_solves=max_solves)
 
 
 def abort_adequacy_study(study: str) -> dict:
@@ -3737,6 +3797,10 @@ DISPATCHERS: dict[str, Any] = {
     "run_coupling_loop": run_coupling_loop,
     "run_margin_loop": run_margin_loop,
     "abort_adequacy_study": abort_adequacy_study,
+    # campaign (3) — one budget across a chain of studies
+    "start_campaign": start_campaign,
+    "campaign_status": campaign_status,
+    "end_campaign": end_campaign,
     # solve_queue (4)
     "solve_queue_enqueue": solve_queue_enqueue,
     "solve_queue_list": solve_queue_list,

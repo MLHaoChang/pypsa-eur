@@ -198,6 +198,54 @@ transition:
 All lineage operations are best-effort: a failure copying chat history
 NEVER aborts the underlying project save / rename / restore.
 
+## Campaign mode — one budget across a chain of studies
+
+Every adequacy engine caps itself: `MAX_FRONTIER_POINTS = 12`,
+`MAX_CONTINGENCIES = 20`, `MAX_LOOP_SOLVES = 8`, `MAX_DRAWS = 2000`. **Nothing
+capped chaining them.** An agent asked to "hit LOLE ≤ 3 h/yr at least cost"
+can legitimately reach for a frontier, then a margin loop, then a coupling
+loop, then a sweep — every call inside its own limit, ~50 full
+capacity-expansion solves in total, unattended, on a shared solver.
+
+`services/adequacy/campaign.py` is that missing accounting, with three tools:
+
+| Tool | Tier | |
+|---|---|---|
+| `start_campaign` | write | Opens one, with an objective and a solve budget (default **30**) |
+| `campaign_status` | read | Objective, budget, spend, and the log of studies run |
+| `end_campaign` | write | Closes it and returns the final record |
+
+While a campaign is open, the five `run_*` study tools charge against it and
+refuse what would overrun. With no campaign open they behave exactly as
+before — a single study asked for directly is not a campaign, and gating it
+would be a behaviour change nobody asked for. **The panels are untouched**:
+this gates the agent, not a human clicking one button at a time.
+
+Four decisions worth knowing:
+
+- **It is not prompt discipline.** A model cannot be asked to keep a running
+  total of solves across a conversation and be relied on to stop. The gate is
+  in the dispatcher, where the only way past it is not to call the tool.
+- **Check, start, then record — never charge-then-refund.** A study that fails
+  to start (409 while the mesh is busy, 422 for a missing VOLL) must not burn
+  budget, and a refund path is a second place for the total to go wrong. The
+  study mesh already allows at most one study in flight, so nothing slips
+  between the check and the record.
+- **Monte Carlo is charged zero, because it solves nothing.** Its cost is
+  arithmetic over one snapshot. Charging it would price the one study that can
+  be run freely as if it were the most expensive — and it stays runnable
+  inside an exhausted campaign.
+- **Estimates are read from the engines, not restated.** `MAX_LOOP_SOLVES`,
+  `DEFAULT_TARGETS_PERMYRIAD` and `class_b_contingencies` are imported at
+  estimate time; a second copy of any of them in the budget module is how the
+  budget starts lying. The margin loop is charged `max_solves + 1` — its
+  starting point is a *measurement* taken by a probing solve that runs before
+  the budget.
+
+`campaign_status().entries` is also the only record of what a campaign already
+ran: each study surface holds just its latest result, so a second frontier
+overwrites the first.
+
 ## Diagnosing an infeasible model
 
 `diagnose_network` (read tier) is the shape check `validate_network` does not

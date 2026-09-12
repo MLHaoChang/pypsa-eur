@@ -110,6 +110,11 @@ def _reset_backend_state() -> None:
     # network feasible. Mirror the route handler's clear.
     with net_router._user_ts_lock:
         net_router._user_ts.clear()
+    # The campaign budget is process-global, like the study surfaces it gates,
+    # and is NOT one of _RESULTS_STATE_KEYS — so nothing below would clear it
+    # and a campaign opened by one test would still be spending in the next.
+    from services.adequacy import campaign as _campaign
+    _campaign.reset()
     sim_router._state["solver_config"] = SolverConfig()
     sim_router._state_update(**{k: None for k in _RESULTS_STATE_KEYS})
     sim_router._state_update(status="idle", condition=None, objective=None, solve_time=None)

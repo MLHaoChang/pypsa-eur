@@ -1640,7 +1640,16 @@ _ADEQUACY_GUIDE = (
     "full expansion solve per target); run_coupling_loop (energy lever) and "
     "run_margin_loop (firm-capacity lever) drive a plan TO a target. All five "
     "are mutually exclusive with each other and with a foreground solve — a "
-    "409 means something is already running, so poll it rather than retrying."
+    "409 means something is already running, so poll it rather than retrying. "
+    "CAMPAIGNS: a question that needs more than one study ('hit LOLE <= 3 h/yr "
+    "at least cost') starts with start_campaign, stating the objective in the "
+    "user's own words. Each engine caps itself but nothing caps chaining them, "
+    "and the budget is enforced in the tools, not by your counting: a refusal "
+    "means report what the campaign has established and ask before spending "
+    "more. Read campaign_status before choosing the next study — its `entries` "
+    "are the ONLY record of what you already ran, because each surface holds "
+    "just its latest result and a second frontier overwrites the first. Close "
+    "with end_campaign when the objective is answered."
 )
 
 # Untrusted-content boundary clause (#2, prompt half). Pairs with the
