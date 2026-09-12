@@ -119,6 +119,15 @@ def _rm_onexc(func, path, _exc):  # noqa: ANN001 — shutil callback signature
     is genuinely locked, so re-raise and let `_force_rmtree`'s retry loop back
     off and try the whole tree again.
     """
+    if os.path.islink(path):
+        # NEVER chmod through a link. `shutil.rmtree` refuses a symlink root
+        # by routing `Cannot call rmtree on a symbolic link` here with
+        # `func=os.path.islink` — and `os.path.islink(path)` does not raise, so
+        # the old body SWALLOWED that refusal after chmod-ing the link's TARGET
+        # to 0o200. Measured: `_force_rmtree` on `snapshots/<id> -> /some/dir`
+        # returned normally, left the target in place unreadable and
+        # untraversable, and the delete route answered 204. Re-raise instead.
+        raise OSError(f"refusing to remove a symbolic link: {path}")
     try:
         os.chmod(path, stat.S_IWRITE)
     except OSError:
@@ -143,8 +152,12 @@ def _force_rmtree(target: pathlib.Path) -> None:
       * transient locks (OneDrive sync handle, AV scan, an open file) — the
         whole call is retried a few times with a short backoff.
 
-    Raises the final ``OSError`` if the tree genuinely can't be removed.
+    Raises the final ``OSError`` if the tree genuinely can't be removed — and
+    refuses a symlink outright rather than retrying it four times, since no
+    amount of backoff turns a link into a tree.
     """
+    if target.is_symlink():
+        raise OSError(f"refusing to remove a symbolic link: {target}")
     last: OSError | None = None
     for attempt in range(4):
         try:
