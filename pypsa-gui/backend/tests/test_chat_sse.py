@@ -27,6 +27,14 @@ import pytest
 
 from services import chat_service
 
+# NOTE — sessions built directly in this file pass `owner_user_id`. /confirm,
+# /rewind and /abort authorize against the session owner and are FAIL-CLOSED, so
+# an owner-less session is refused. Production records the owner at creation
+# (both /stream and /history do), which means a session without one is a state no
+# real client can reach: these calls now model reality rather than working around
+# the guard. Omitting it here made five tests fail and one HANG — the waiting turn
+# blocked on a confirmation that could never arrive.
+
 
 def _parse_sse(raw: bytes) -> list[tuple[str, dict]]:
     """Parse an SSE byte stream into [(event_name, payload_dict), ...]."""
@@ -279,7 +287,7 @@ def test_confirmation_expires_after_ttl(client, monkeypatch):
     )
 
 
-def test_late_confirm_after_ttl_returns_409(client, monkeypatch):
+def test_late_confirm_after_ttl_returns_409(client, seeded_identity, monkeypatch):
     """
     POST /confirm AFTER the TTL fires returns 404 (the token was pruned
     server-side when wait_for_decision recognised expiry). 409 with
@@ -290,7 +298,7 @@ def test_late_confirm_after_ttl_returns_409(client, monkeypatch):
 
     # Pre-issue a token directly on a session WITHOUT routing through SSE so
     # we control the timing precisely.
-    sess = chat_service.get_or_create_session("sess-late")
+    sess = chat_service.get_or_create_session("sess-late", owner_user_id=str(seeded_identity["user_id"]))
     pc = sess.issue_confirmation(
         tool_name="delete_project", args={"name": "P"},
         safety_tier="destructive", ttl_seconds=0.05,
@@ -317,9 +325,9 @@ def test_late_confirm_after_ttl_returns_409(client, monkeypatch):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_replay_after_consume_returns_404(client):
+def test_replay_after_consume_returns_404(client, seeded_identity):
     """Second /confirm against an already-consumed token returns 404."""
-    sess = chat_service.get_or_create_session("sess-replay")
+    sess = chat_service.get_or_create_session("sess-replay", owner_user_id=str(seeded_identity["user_id"]))
     pc = sess.issue_confirmation(
         tool_name="delete_project", args={"name": "P"},
         safety_tier="destructive",
@@ -394,9 +402,9 @@ def test_parallel_destructive_batch_rejects_both(client):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_abort_endpoint_sets_abort_event(client):
+def test_abort_endpoint_sets_abort_event(client, seeded_identity):
     """Synthetic abort_event check — POST /abort sets the flag."""
-    sess = chat_service.get_or_create_session("sess-abort")
+    sess = chat_service.get_or_create_session("sess-abort", owner_user_id=str(seeded_identity["user_id"]))
     assert not sess.abort_event.is_set()
     r = client.post("/api/chat/sess-abort/abort")
     assert r.status_code == 200
@@ -409,12 +417,12 @@ def test_abort_endpoint_sets_abort_event(client):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_concurrent_confirm_one_succeeds_one_404(client):
+def test_concurrent_confirm_one_succeeds_one_404(client, seeded_identity):
     """
     Two concurrent /confirm POSTs against the SAME token. _lock serialises:
     one succeeds (200), the other observes a missing token (404).
     """
-    sess = chat_service.get_or_create_session("sess-race")
+    sess = chat_service.get_or_create_session("sess-race", owner_user_id=str(seeded_identity["user_id"]))
     pc = sess.issue_confirmation(
         tool_name="delete_project", args={"name": "X"},
         safety_tier="destructive",
@@ -472,9 +480,9 @@ def test_confirm_unknown_session_returns_404(client):
     assert r.json()["detail"]["error_kind"] == "unknown_session"
 
 
-def test_invalid_decision_returns_400_and_preserves_token(client):
+def test_invalid_decision_returns_400_and_preserves_token(client, seeded_identity):
     """An unknown decision string returns 400 + leaves the token usable."""
-    sess = chat_service.get_or_create_session("sess-invalid")
+    sess = chat_service.get_or_create_session("sess-invalid", owner_user_id=str(seeded_identity["user_id"]))
     pc = sess.issue_confirmation(
         tool_name="delete_project", args={"name": "Q"},
         safety_tier="destructive",

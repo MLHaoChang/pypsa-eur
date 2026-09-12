@@ -3879,7 +3879,18 @@ DISPATCHERS: dict[str, Any] = {
 # module-level functions stay unwrapped, so in-process callers that deliberately
 # bypass the chat surface (tests, smoke harnesses) are unaffected.
 
-_LOCK_GATE_PREFIXES = ("/api/network/", "/api/io/", "/api/simulation/")
+# Kept in step with `main._FOREIGN_LOCK_GATE_PREFIXES` DELIBERATELY, not
+# incidentally: this is the chat surface's copy of the same decision, and the two
+# drifted the moment the HTTP gate gained "/api/results/" (2026-09-12) while this
+# one did not. That drift was latent -- `TOOL_ROUTES` maps no tool to the five
+# adequacy-study POSTs today -- and would have become a real hole the day an
+# adequacy-study tool was added, which is exactly the "nothing to remember"
+# guarantee `_lock_gated_tool_names` claims below. Caught by an independent QA
+# review; `tests/test_chat_tools_lock_gate_parity.py` now fails if they diverge
+# again, so this comment is not the only thing holding them together.
+_LOCK_GATE_PREFIXES = (
+    "/api/network/", "/api/io/", "/api/simulation/", "/api/results/",
+)
 # Explicit allowlist, not a prefix — mirrors `main.py`'s
 # `_FOREIGN_LOCK_GATE_EXEMPT_EXACT` / `_FOREIGN_LOCK_GATE_EXEMPT_PATTERNS`.
 # A queue route is exempt only when it acts on a JOB or names its project in
