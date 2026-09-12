@@ -246,6 +246,35 @@ def test_apply_snapshot_rejects_an_hour_with_no_load_rows(case39_loads):
                        hour=999, registry=reg)
 
 
+def test_apply_snapshot_puts_the_tables_reactive_power_on_the_res_units():
+    """`net.sgen` is a PQ element, so its `q_mvar` is a load-flow INPUT — unlike
+    `net.gen`, where Q is a result and the dispatch's column is rightly ignored.
+
+    `_apply_res` set p_mw and in_service only, so a client's stated reactive
+    exchange on a RES unit was validated, written into `dispatch.csv`, and then
+    dropped: the bus voltages, the branch Q flows, the N-1 severities and the
+    `.raw` all described a different reactive state than the artifact the client
+    was handed. It had never mattered because `tables_from_network` hardcodes
+    `q_mvar = 0.0`; the external producer is the first that can carry a value.
+    """
+    net = load_case39_res()
+    reg = registry_from_net(net)
+    n = to_pypsa(net, res_cf={name: np.full(24, 0.5) for name in net.sgen["name"]})
+    loads = to_loads_table(n, net)
+    table = _flat_dispatch(net, reg, [TEST_HOUR])
+
+    res_units = [u for u, r in reg.iterrows() if r["kind"] == "res"]
+    mask = table["hour"] == TEST_HOUR
+    table.loc[mask & table["unit_id"].isin(res_units), "q_mvar"] = -60.0
+    table = validate_dispatch(table)
+
+    apply_snapshot(net, table, loads, hour=TEST_HOUR, registry=reg)
+
+    idx = {net.sgen.at[i, "name"]: i for i in net.sgen.index}
+    for unit in res_units:
+        assert float(net.sgen.at[idx[unit], "q_mvar"]) == pytest.approx(-60.0)
+
+
 def test_apply_snapshot_sets_res_sgen_and_takes_curtailed_units_out_of_service():
     net = load_case39_res()
     reg = registry_from_net(net)

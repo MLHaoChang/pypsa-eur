@@ -76,8 +76,15 @@ def _rows(units=("G1", "G2"), hours=(0, 1)):
 
 
 def _load_rows(buses=DEMAND_BUSES, hours=(0, 1)):
+    """Demand that MATCHES `_rows`' generation hour by hour.
+
+    It did not, before the balance check existed: 200 MW of generation against
+    160 MW of demand, a 25% gap the load flow would have pushed onto the
+    external grid's slack. A fixture that cannot balance cannot be the happy
+    path for a producer whose job includes noticing that.
+    """
     return pd.DataFrame([
-        {"bus": b, "hour": h, "p_mw": 80.0 + h, "q_mvar": 5.0}
+        {"bus": b, "hour": h, "p_mw": 100.0 + h, "q_mvar": 5.0}
         for b in buses for h in hours
     ])
 
@@ -402,6 +409,89 @@ def test_a_literally_duplicated_header_is_refused_rather_than_silently_dropped(t
         tables_from_external(raw, _loads(tmp_path), _registry(), load_buses=DEMAND_BUSES)
     message = str(exc.value)
     assert "more than one column" in message and "p_mw" in message
+
+
+# ───────────── generation against demand: the snapshot must close ──────────
+#
+# This is the check the module docstring's own argument implies and the producer
+# did not make. Requiring a loads table stops gridspine from INVENTING demand;
+# it does not stop a client's two tables from disagreeing. When they do, the
+# load flow still converges — the external grid's slack absorbs the difference
+# silently — and then every flow, every N-1 severity, every fault level and the
+# `.raw` in the handoff bundle describe a grid state the client's tables do not.
+#
+# Measured on the real 39-bus grid: generation at 90% of demand converges with
+# +717 MW coming through the slack and 149.7% branch loading, while `import_mw`
+# — the ranking criterion whose entire purpose is "greatest reliance on the
+# external grid" — reads 0.0, because it sums what the client WROTE on the
+# ext_grid row. A 10% gap is what a kW-for-MW slip, a 15-minute energy column or
+# one omitted machine produces.
+#
+# Refusing is not the same as forbidding imports. The producer already requires
+# a row for every registry unit, the external grid's included, so a client who
+# means to import declares it there and the snapshot closes. The refusal says so.
+
+def _balanced(gen_mw=100.0, units=("G1", "G2"), buses=DEMAND_BUSES, hours=(0, 1)):
+    """(dispatch, loads) whose hourly totals agree exactly."""
+    dispatch = pd.DataFrame([
+        {"unit_id": u, "hour": h, "p_mw": gen_mw, "q_mvar": 10.0, "status": 1}
+        for u in units for h in hours
+    ])
+    share = gen_mw * len(units) / len(buses)
+    loads = pd.DataFrame([
+        {"bus": b, "hour": h, "p_mw": share, "q_mvar": 5.0}
+        for b in buses for h in hours
+    ])
+    return dispatch, loads
+
+
+def test_a_dispatch_that_does_not_cover_its_demand_is_refused(tmp_path):
+    """The dangerous direction, because it converges: the slack quietly imports
+    the shortfall and the study describes a state nobody modelled."""
+    dispatch, loads = _balanced()
+    loads["p_mw"] = loads["p_mw"] * 1.2          # 20% more demand than generation
+    with pytest.raises(ContractError) as exc:
+        tables_from_external(_write_csv(tmp_path, dispatch), _loads(tmp_path, loads),
+                             _registry(), load_buses=DEMAND_BUSES)
+    message = str(exc.value)
+    assert "hour 0" in message
+    assert "slack" in message.lower() or "external grid" in message.lower()
+
+
+def test_a_dispatch_that_overshoots_its_demand_is_refused_too(tmp_path):
+    """The export direction is the same defect with the sign flipped — and it is
+    the one the old fixtures were in, 200 MW against 160."""
+    dispatch, loads = _balanced()
+    loads["p_mw"] = loads["p_mw"] * 0.8
+    with pytest.raises(ContractError):
+        tables_from_external(_write_csv(tmp_path, dispatch), _loads(tmp_path, loads),
+                             _registry(), load_buses=DEMAND_BUSES)
+
+
+def test_a_gap_the_size_of_losses_is_accepted(tmp_path):
+    """Generation legitimately exceeds demand by the network's losses — 1-3% on a
+    transmission grid — so the band has to admit that or every real dispatch
+    would be refused. The tolerance is a ledgered assumption, not a tuning knob."""
+    dispatch, loads = _balanced()
+    loads["p_mw"] = loads["p_mw"] * 0.975        # 2.5% of demand carried as losses
+    d, _l, source = tables_from_external(
+        _write_csv(tmp_path, dispatch), _loads(tmp_path, loads),
+        _registry(), load_buses=DEMAND_BUSES,
+    )
+    assert len(d) == 4
+    assert source["max_imbalance_mw"] > 0.0
+
+
+def test_the_provenance_records_the_worst_imbalance(tmp_path):
+    """A number in the manifest rather than a clean bill of health: a study whose
+    tables closed to within 4% is traceably different from one that closed
+    exactly, and the handoff bundle should be able to say which it was."""
+    dispatch, loads = _balanced()
+    _d, _l, source = tables_from_external(
+        _write_csv(tmp_path, dispatch), _loads(tmp_path, loads),
+        _registry(), load_buses=DEMAND_BUSES,
+    )
+    assert source["max_imbalance_mw"] == 0.0
 
 
 # ────────── the demand buses, checked the way the units are ────────────────

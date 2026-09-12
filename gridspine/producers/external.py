@@ -52,6 +52,23 @@ and `loads` sheets, because a client exporting one file is the common case and
 making them split it invites exactly the hand-edit this module's aliases exist
 to avoid.
 
+The snapshot has to close
+-------------------------
+Requiring demand stops gridspine from INVENTING it; it does not stop a client's
+two tables from disagreeing with each other. When they do, the load flow still
+converges — the external grid's slack absorbs the difference in silence — and
+then the flows, the N-1 severities, the fault levels and the `.raw` in the
+handoff bundle all describe a grid state the client's tables do not. Measured on
+the 39-bus grid: generation at 90% of demand converges with +717 MW through the
+slack and 149.7% branch loading, while `import_mw` — the ranking criterion whose
+whole purpose is "greatest reliance on the external grid" — reads 0.0, because it
+sums what the client wrote on the ext_grid row rather than what the slack did.
+
+So the hourly totals must agree to within what losses could explain. This does
+not forbid imports: the producer already requires a row for every registry unit,
+the external grid's included, so a client who means to import declares it there
+and the snapshot closes. The refusal says exactly that.
+
 Coercion is the enemy
 ---------------------
 `validate_dispatch` guards the values AS SUPPLIED, before `astype`, precisely
@@ -126,6 +143,17 @@ LOADS_ALIASES = {
 #: Sheet names looked for when one workbook carries both tables.
 DISPATCH_SHEET = "dispatch"
 LOADS_SHEET = "loads"
+
+#: How far an hour's generation may sit from its demand before the snapshot is
+#: refused, as a fraction of that hour's demand. LEDGER ASSUMPTION: what a load
+#: flow legitimately absorbs here is transmission losses, 1-3% on a network like
+#: case39, so 5% is generous for the physics and far below what a unit slip (kW
+#: read as MW), a missing machine or a 15-minute energy column produces. Raising
+#: or lowering it is a modelling decision, not a tuning knob.
+_BALANCE_TOL_FRACTION = 0.05
+#: ...and a floor in MW, so an hour with almost no demand is not refused over
+#: rounding in the client's export.
+_BALANCE_FLOOR_MW = 1.0
 
 _CSV_SUFFIXES = {".csv", ".txt"}
 _EXCEL_SUFFIXES = {".xlsx", ".xlsm", ".xls"}
@@ -276,6 +304,38 @@ def _check_load_buses(loads: pd.DataFrame, load_buses) -> None:
     _check_every_hour(loads, "bus", "loads")
 
 
+def _check_balance(dispatch: pd.DataFrame, loads: pd.DataFrame) -> float:
+    """Generation against demand, hour by hour. Returns the worst gap in MW.
+
+    The gap is what the external grid's slack would carry, and a slack that
+    carries 10% of demand is not a modelling choice the client made — it is the
+    difference between two tables, absorbed where nobody looks. See the module
+    docstring for why this is a refusal rather than a note, and why it does not
+    forbid a declared import.
+    """
+    gen = dispatch.groupby("hour")["p_mw"].sum()
+    demand = loads.groupby("hour")["p_mw"].sum()
+    gap = (gen - demand).reindex(demand.index).fillna(-demand)
+    limit = (demand * _BALANCE_TOL_FRACTION).clip(lower=_BALANCE_FLOOR_MW)
+    over = gap.abs() > limit
+    if over.any():
+        hour = int(gap.abs().idxmax())
+        g, d, diff = float(gen.get(hour, 0.0)), float(demand[hour]), float(gap[hour])
+        pct = 100.0 * abs(diff) / d if d else float("inf")
+        raise ContractError(
+            f"external dispatch and loads do not balance at hour {hour}: "
+            f"{g:.1f} MW generated against {d:.1f} MW of demand, a gap of "
+            f"{diff:+.1f} MW ({pct:.1f}% of demand; {int(over.sum())} hour(s) "
+            f"outside the {_BALANCE_TOL_FRACTION:.0%} band). The load flow would "
+            "close it on the external grid's slack, and every flow and N-1 "
+            "severity after that would describe a grid state your tables do not. "
+            "If the exchange is intended, declare it as p_mw on the external "
+            "grid's own unit row — the dispatch must cover it, as it covers every "
+            "other unit in the registry."
+        )
+    return float(gap.abs().max())
+
+
 def _sha256(path: Path) -> str:
     import hashlib
 
@@ -359,6 +419,8 @@ def tables_from_external(dispatch_src, loads_src, registry: pd.DataFrame, *,
             f"demand with no dispatch {only_loads}"
         )
 
+    worst_gap = _check_balance(dispatch, loads)
+
     source = {
         "external": str(dispatch_path),
         "external_sha256": _sha256(dispatch_path),
@@ -366,5 +428,9 @@ def tables_from_external(dispatch_src, loads_src, registry: pd.DataFrame, *,
         "loads_sha256": _sha256(loads_path),
         "hours": len(d_hours),
         "units": int(pd.Series(dispatch["unit_id"]).nunique()),
+        # A number, not a clean bill of health: a study whose tables closed to
+        # within 4% is traceably different from one that closed exactly, and the
+        # bundle's manifest should be able to say which it was.
+        "max_imbalance_mw": round(worst_gap, 6),
     }
     return dispatch, loads, source

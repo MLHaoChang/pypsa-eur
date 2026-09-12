@@ -38,9 +38,13 @@ DISPATCH_CSV = (
 #: way `tests/gridspine/test_external_source.py` keeps them, because the loads
 #: table is checked against the grid's load buses and not against the
 #: registry's.
+#: Demand that MATCHES the dispatch hour by hour: 200 MW against 200 MW at hour
+#: 0, 202 against 202 at hour 1. The producer refuses a pair whose totals
+#: disagree by more than losses could explain, because the load flow would
+#: otherwise close the gap on the external grid's slack in silence.
 LOADS_CSV = (
     b"bus,hour,p_mw,q_mvar\n"
-    b"L0,0,80.0,5.0\nL0,1,81.0,5.0\nL1,0,80.0,5.0\nL1,1,81.0,5.0\n"
+    b"L0,0,100.0,5.0\nL0,1,101.0,5.0\nL1,0,100.0,5.0\nL1,1,101.0,5.0\n"
 )
 DISPATCH_UNKNOWN_UNIT = DISPATCH_CSV + b"G99,0,50.0,5.0,1\nG99,1,50.0,5.0,1\n"
 LOADS_UNKNOWN_BUS = LOADS_CSV + b"L_TYPO,0,5.0,1.0\nL_TYPO,1,5.0,1.0\n"
