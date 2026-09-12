@@ -60,7 +60,16 @@ python pypsa-gui/backend/tools/merge_audit.py --theirs origin/master \
 ```
 
 Both were dropped by a merge in practice — an `error_kind` the frontend routes
-on, and an SSE frame name. Neither has a test that enumerates the set.
+on, and an SSE frame name.
+
+Correction: `error_kind` DOES have a test that enumerates the set, and has since
+2026-09-10. `tests/test_tool_error_kind_manifest.py` AST-walks every non-test
+backend source for `yield "tool_error"` and `"error_kind": "..."` literals and
+asserts the derived set equals `pypsa-gui/tool-error-kinds.json` in BOTH
+directions, so a dropped kind fails it. Use `--inventory` for the SSE frame
+names, which have no such test; do not use it as the reason you believe
+`error_kind` is covered, and do not read the earlier claim as a reason to add a
+manifest test that already exists.
 
 ## What it cannot do, measured
 
@@ -69,9 +78,11 @@ on, and an SSE frame name. Neither has a test that enumerates the set.
 class reported 4 findings, of which **2 were false positives**:
 
 * `routers/results.py::get_cost_breakdown` and `::get_asset_economics`
-  reverted to the base copy *in that file* because the decomposition moved the
-  body into `services/results/cost_breakdown.py` — and **renamed it** to
-  `compute_cost_breakdown`. The relocation allowance matches by NAME, so a
+  reverted to the base copy *in that file* because the decomposition moved each
+  body into its own service module — `services/results/cost_breakdown.py` and
+  `services/results/asset_economics.py` respectively — and **renamed** them to
+  `compute_cost_breakdown` and `compute_asset_economics`. The relocation
+  allowance matches by NAME, so a
   rename-on-move defeats it. This is the repository's own dominant refactoring
   pattern, so expect it.
 
@@ -81,7 +92,16 @@ reported 0 in that class. Duplicate definitions reported 0 on all three merges
 — correctly, because they had been fixed before commit.
 
 So: **a handful of places to look on a large merge, roughly half of them real.**
-That is worth thirty seconds. It is not a gate, and it must not become one.
+It is not a gate, and it must not become one.
+
+**Re-measured after the QA fixes** (qualified names, decorators inside the
+compared source, master's side audited too). `1c7b86d8` now reports **17**:
+the same 4 plus 3 master-side losses in `test_chat_stream_attempt_seam.py` and
+9 vocabulary entries, which are the same seam file plus test functions dropped
+on one side — all genuine places to look on a 23-file conflict. The clean merge
+`2b1c95a1` still reports **0**, so the widening did not simply raise the noise
+floor. Budget **~3 minutes**, not thirty seconds: 490 files × several refs is a
+few thousand `git show` calls even with the ref cache.
 
 Three limitations to keep in mind:
 
@@ -103,11 +123,36 @@ matter, and the same reasoning as `test_no_split_merge_precondition.py`: a
 check that cannot fail makes the audit a formality, and a formality trains the
 next person to skip it.
 
-It has already earned its keep. Widening the name-extraction to count imports
-(needed so a function turned into a re-export is not reported missing) silently
-broke the duplicate check — from 0 findings to 14, all noise, because importing
-a name twice is ordinary. The self-test and a re-measurement on real merges
-caught it; reading the code did not.
+### What the self-test is worth, measured
+
+An independent review built a sabotage matrix: 16 mutations of the tool, each
+verified to change its behaviour on realistic input, each run past
+`--self-test`. **The original fixture caught 6 of 16.** It was three flat
+top-level functions in one file — no class, no method, no decorator, no async,
+no import, no second directory — so every subtlety the code documents was
+untested, and the tool shipped with `_defs` keyed by BARE name (250 of this
+repo's 7,415 definitions invisible) and decorators excluded from the compared
+source (a dropped `@requires_capability` compares equal).
+
+The fixture is now that awkward tree, and the same matrix **catches 14 of 15**.
+The one survivor is a provably equivalent mutation — narrowing
+`check_lost_edits`'s file union to `base` alone changes nothing, because a file
+present only in `ours` has no base definitions to compare — and it is commented
+as such in the source so nobody writes an unkillable case for it.
+
+Build the matrix before trusting a self-test. "Each check returns something" is
+not a test of the check; it is a test that the function was called.
+
+### What caught the one regression this tool has had, precisely. Widening the
+name-extraction to count imports (needed so a function turned into a re-export
+is not reported missing) silently broke the duplicate check — from 0 findings
+to 14, all noise, because importing a name twice is ordinary. **The
+RE-MEASUREMENT on real merges caught it. The self-test did not, and an earlier
+version of this line claimed it did.** The self-test fixture at the time was
+three flat top-level functions with no import statement anywhere in it, so it
+could not have exercised the path. Re-measuring on a real merge is the check
+that has actually earned its keep; treat the self-test as proof that each check
+is wired up, not as proof that it is right.
 
 ## The order to work in
 
