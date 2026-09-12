@@ -33,11 +33,16 @@ DISPATCH_CSV = (
     b"G1,0,100.0,10.0,1\nG1,1,101.0,10.0,1\n"
     b"G2,0,100.0,10.0,1\nG2,1,101.0,10.0,1\n"
 )
+#: Demand sits on L0/L1, the GENERATORS on B0/B1 — disjoint on purpose, the
+#: way `tests/gridspine/test_external_source.py` keeps them, because the loads
+#: table is checked against the grid's load buses and not against the
+#: registry's.
 LOADS_CSV = (
     b"bus,hour,p_mw,q_mvar\n"
-    b"B0,0,80.0,5.0\nB0,1,81.0,5.0\nB1,0,80.0,5.0\nB1,1,81.0,5.0\n"
+    b"L0,0,80.0,5.0\nL0,1,81.0,5.0\nL1,0,80.0,5.0\nL1,1,81.0,5.0\n"
 )
 DISPATCH_UNKNOWN_UNIT = DISPATCH_CSV + b"G99,0,50.0,5.0,1\nG99,1,50.0,5.0,1\n"
+LOADS_UNKNOWN_BUS = LOADS_CSV + b"L_TYPO,0,5.0,1.0\nL_TYPO,1,5.0,1.0\n"
 
 
 @pytest.fixture
@@ -58,7 +63,15 @@ def study(user_and_db):
 
 @pytest.fixture(autouse=True)
 def stub_grid(monkeypatch):
-    """case39's registry, without loading case39."""
+    """case39's registry and demand buses, without loading case39.
+
+    The net is a stand-in rather than `object()` because the driver reads the
+    grid's LOAD buses off it (`_demand_buses`) to hand to the producer — two
+    buses carrying load, named through `net.bus["name"]` exactly as the real
+    thing does.
+    """
+    from types import SimpleNamespace
+
     import pandas as pd
 
     import gridspine.drivers.year_study as ys
@@ -66,7 +79,11 @@ def stub_grid(monkeypatch):
     registry = pd.DataFrame(
         {"bus": ["B0", "B1"]}, index=pd.Index(["G1", "G2"], name="unit_id")
     )
-    monkeypatch.setattr(ys, "load_case39_res", lambda: object())
+    net = SimpleNamespace(
+        bus=pd.DataFrame({"name": ["L0", "L1"]}),
+        load=pd.DataFrame({"bus": [0, 1]}),
+    )
+    monkeypatch.setattr(ys, "load_case39_res", lambda: net)
     monkeypatch.setattr(ys, "registry_from_net", lambda _net: registry)
 
 
@@ -205,4 +222,19 @@ def test_the_external_source_cannot_be_patched_through_update_config(study, user
     with pytest.raises(HTTPException) as exc:
         gs.update_config(study, {"from_external": "/etc/passwd"}, db=db, user=user)
     assert exc.value.status_code == 422
+    assert gs.read_config(study).to_json()["from_external"] is None
+
+
+def test_a_demand_bus_the_grid_does_not_have_is_refused_at_upload(study):
+    """The reason this is a 422 here and not a stage error later: the client is
+    standing at the upload. A bus name the grid lacks passes every column and
+    dtype check, so without the producer's demand-bus check the study would
+    queue, rank the year on an inflated total demand, and die at its ranking
+    stage with a message about the DC artifact."""
+    with pytest.raises(HTTPException) as exc:
+        gs.upload_external_dispatch(
+            study, DISPATCH_CSV, "dispatch.csv", LOADS_UNKNOWN_BUS, "loads.csv",
+        )
+    assert exc.value.status_code == 422
+    assert "L_TYPO" in str(exc.value.detail)
     assert gs.read_config(study).to_json()["from_external"] is None

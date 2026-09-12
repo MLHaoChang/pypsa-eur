@@ -363,6 +363,20 @@ def dispatch_from_network(src, outdir, *, progress=NULL_PROGRESS):
         raise
 
 
+def _demand_buses(net) -> set[str]:
+    """The grid's load-carrying bus names — what a client's loads table must
+    name, and the set `producers.external` checks it against in both
+    directions.
+
+    Not the registry's `bus` column: that is where the MACHINES sit, and on a
+    real grid neither set contains the other. `net.load["bus"]` holds bus
+    INDICES, so the canonical names come back through `net.bus["name"]` — the
+    same indirection `to_loads_table` uses (`pypsa_nodal.py:205`), and the key
+    `loadflow._apply_loads` matches on.
+    """
+    return set(net.bus.loc[net.load["bus"], "name"].astype(str))
+
+
 def check_external(dispatch_src, loads_src):
     """Validate a client's tables against the real grid and return the summary.
 
@@ -377,8 +391,11 @@ def check_external(dispatch_src, loads_src):
     """
     from gridspine.producers.external import tables_from_external
 
-    registry = registry_from_net(load_case39_res())
-    _dispatch, _loads, source = tables_from_external(dispatch_src, loads_src, registry)
+    net = load_case39_res()
+    _dispatch, _loads, source = tables_from_external(
+        dispatch_src, loads_src, registry_from_net(net),
+        load_buses=_demand_buses(net),
+    )
     return source
 
 
@@ -412,6 +429,7 @@ def dispatch_from_external(dispatch_src, loads_src, outdir, *, progress=NULL_PRO
         stage = "dispatch"
         dispatch, loads, dispatch_source = tables_from_external(
             dispatch_path, loads_src, registry,
+            load_buses=_demand_buses(net),
         )
         # Demand first, as in `dispatch_year`: the loads artifact is an input.
         loads.to_csv(outdir / "loads.csv", index=False)

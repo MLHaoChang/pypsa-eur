@@ -75,7 +75,46 @@ to two file inputs.
 - [x] A2 backend (`8475c372` driver seam, `8864dab1` service/router): the fourth source in `gridspine_service` through the ACL path, upload storage with a sanitised basename, the driver's refusals as 422; router and chat argument rows. Mutation: an unsanitised upload name must turn the escape test red (increment 6 found this one needs a path-shaped name ending in `.csv` to bite).
 - [x] A3 frontend: the fourth picker option and its file input, thin, last. Mutation: a picker that ignores the new source must turn exactly one test red.
 - [x] Vertical slice: a 39-bus study from a hand-written external CSV, ranked, bundled. 6 tests in `tests/gridspine/test_external_slice.py`, against the REAL grid rather than the stubbed registry the other tests use. Screening is on, which the plan did not anticipate mattering: `year_study.py:583` writes the full `bundle_h<hour>/` only in the second pass that screening gates, so a slice with screening off (as the increment-5 `from_project` slice has) proves the stages run and NOT that the deliverable appears. Verified output for the selected hour: a 14.9 kB PSS/E v33 `.raw`, a `.dyr` carrying GENSAL/GENROU records, `contingencies.csv`, `fault_levels.csv`, `ledger.json`/`.md` and the load-flow tables. Mutation: dropping the demand path where `run_study` calls the driver errors all six. The fixture's unit ids and load buses are derived from `registry_from_net` and the net's own load table rather than typed in, so it cannot drift out of agreement with the grid it is checked against — which is the thing the producer tests.
+- [x] Demand buses checked against the grid in both directions, with per-(bus, hour) completeness (the amendment below). 5 gridspine tests, 1 backend test, 2 mutations.
 - [x] Gates before each path-limited commit: `gridspine-tests`, `gui-tests`, `npx tsc -b`, `npx vitest run`.
+
+## Amended 2026-09-12, after the increment landed: the demand buses were not checked
+
+A1's two-directional unit check was taken straight from `tables_from_network` and
+is right. The DEMAND table got no equivalent, and nothing above noticed — the
+plan says "the unit set is checked against the detailed grid's registry in both
+directions" and the registry is units, so the gap was written into the plan and
+then faithfully implemented.
+
+What it cost. A loads table naming a bus the grid does not have, or omitting one
+it does, passed the producer and therefore passed `check_external` — the function
+whose entire reason for existing is that a client learns at the UPLOAD that their
+file is wrong. The run still failed closed, but late and in the wrong voice:
+`ranking.metrics.snapshot_metrics` sums `p_mw` over every row it is handed, so
+`load_mw` was already wrong by that bus's MW before `severity.hourly_dc_flows`
+(unknown buses) or `loadflow._apply_loads` (both directions) refused the table at
+the ranking stage, with a message about the DC artifact.
+
+The fix: `load_buses` is a required keyword argument of `tables_from_external` —
+required, with no default, because a caller that forgot it would reopen exactly
+this hole in silence — and `_check_load_buses` applies the same two directions
+plus per-(bus, hour) completeness, the completeness half factored out of the unit
+check into `_check_every_hour` since the hazard is one hazard. The driver derives
+the set with `_demand_buses(net)` from `net.bus["name"]` indexed by
+`net.load["bus"]`, the same indirection `to_loads_table` uses. NOT from the
+registry's `bus` column: that is where the machines sit, and on a real grid
+neither set contains the other — the test fixtures keep the two deliberately
+disjoint (demand on L0/L1, generators on B0/B1) so an implementation reaching for
+the registry turns every happy path red rather than passing by coincidence.
+
+Evidence: 5 new tests (4 in `tests/gridspine/test_external_source.py` — both
+directions, per-(bus, hour) completeness, and the registry-discrimination one —
+plus `check_external` refusing at the seam) and 1 in
+`pypsa-gui/backend/tests/test_gridspine_external.py` (a 422 naming the bus, with
+the config left unset). Two mutations: dropping the loads completeness call turns
+exactly `test_a_demand_bus_given_for_only_some_hours_is_refused` red; checking
+demand against `registry["bus"]` instead turns 12 red, including every happy path
+and the discrimination test.
 
 ## Out of scope, named
 

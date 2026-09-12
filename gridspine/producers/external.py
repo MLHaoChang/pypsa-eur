@@ -17,14 +17,26 @@ No pypsa import, deliberately: the engine cage confines `pypsa` to
 `producers/pypsa_nodal.py`, and an external dispatch has nothing to do with it.
 pandas only.
 
-The two directions of the unit check
-------------------------------------
+The two directions, twice: units and demand buses
+------------------------------------------------
 Mirrors `tables_from_network`'s check (`pypsa_nodal.py:461`) because the hazard
 is identical. A file naming a unit the grid lacks is obvious. A file that merely
 OMITS a grid unit is the dangerous direction: it parses, validates, ranks, and
 ranks a grid that is not the one being studied, with the omitted machine absent
 from every snapshot. Completeness is checked per (unit, hour) for the same
 reason — a single missing hour leaves one snapshot quietly wrong.
+
+The demand table gets exactly the same treatment against the grid's LOAD buses,
+which is why `load_buses` is a required argument rather than something inferred
+from the registry: the registry maps units to the buses the MACHINES sit on, and
+on a real grid that set is neither a subset nor a superset of the buses carrying
+load. Without the check, a mistyped or omitted bus name is not caught here but
+three stages later — `ranking.metrics.snapshot_metrics` sums `p_mw` over every
+row it is given, so the ranking's `load_mw` is already wrong by that bus's MW
+when `severity.hourly_dc_flows` (unknown buses) or `loadflow._apply_loads` (both
+directions) finally refuses the table. The run fails closed either way; what the
+check buys is that it fails at the UPLOAD, with the producer's own message,
+which is the whole reason `drivers.year_study.check_external` exists.
 
 Demand is required, not assumed
 -------------------------------
@@ -192,6 +204,24 @@ def _map_columns(frame: pd.DataFrame, filename: str, aliases: dict,
     return pd.DataFrame({target: frame[cols[0]] for target, cols in mapped.items()})
 
 
+def _check_every_hour(frame: pd.DataFrame, key: str, what: str) -> None:
+    """Every key in `frame` given for every hour `frame` covers.
+
+    Shared by the unit and the demand check because the hazard is one hazard:
+    the hours-agreement check below compares SETS of hours, so a key missing
+    from one hour passes it as long as some other key covers that hour — and
+    then exactly one snapshot is quietly short.
+    """
+    hours = sorted(pd.Series(frame["hour"]).unique().tolist())
+    per_key = frame.groupby(frame[key].astype(str))["hour"].nunique()
+    short = sorted(per_key[per_key != len(hours)].index.tolist())
+    if short:
+        raise ContractError(
+            f"external {what} covers {len(hours)} hour(s) but these are not "
+            f"given for every hour: {short}"
+        )
+
+
 def _check_units(dispatch: pd.DataFrame, registry: pd.DataFrame) -> None:
     """The unit set, both directions, then per-(unit, hour) completeness."""
     supplied = set(dispatch["unit_id"].astype(str))
@@ -203,15 +233,26 @@ def _check_units(dispatch: pd.DataFrame, registry: pd.DataFrame) -> None:
             "external dispatch does not map to the detailed grid's units: "
             f"missing {missing}, unknown {unknown}"
         )
+    _check_every_hour(dispatch, "unit_id", "dispatch")
 
-    hours = sorted(pd.Series(dispatch["hour"]).unique().tolist())
-    per_unit = dispatch.groupby(dispatch["unit_id"].astype(str))["hour"].nunique()
-    short = sorted(per_unit[per_unit != len(hours)].index.tolist())
-    if short:
+
+def _check_load_buses(loads: pd.DataFrame, load_buses) -> None:
+    """The demand buses, both directions, then per-(bus, hour) completeness.
+
+    `load_buses` is the grid's own set of load-carrying bus names — NOT the
+    registry's `bus` column, which is where the machines sit. See the module
+    docstring for what passing an unchecked name costs downstream.
+    """
+    supplied = set(loads["bus"].astype(str))
+    expected = {str(b) for b in load_buses}
+    missing = sorted(expected - supplied)
+    unknown = sorted(supplied - expected)
+    if missing or unknown:
         raise ContractError(
-            f"external dispatch covers {len(hours)} hour(s) but these units are "
-            f"not given for every hour: {short}"
+            "external loads do not map to the detailed grid's demand buses: "
+            f"missing {missing}, unknown {unknown}"
         )
+    _check_every_hour(loads, "bus", "loads")
 
 
 def _sha256(path: Path) -> str:
@@ -228,7 +269,8 @@ def _hours_of(frame: pd.DataFrame) -> list[int]:
     return sorted(int(h) for h in pd.Series(frame["hour"]).unique())
 
 
-def tables_from_external(dispatch_src, loads_src, registry: pd.DataFrame):
+def tables_from_external(dispatch_src, loads_src, registry: pd.DataFrame, *,
+                         load_buses):
     """`(dispatch, loads, dispatch_source)` from a client's own tables.
 
     `dispatch_src` is a CSV/Excel dispatch; `loads_src` is the matching demand,
@@ -236,6 +278,11 @@ def tables_from_external(dispatch_src, loads_src, registry: pd.DataFrame):
     `dispatch` and a `loads` sheet. Demand is not optional — see the module
     docstring on why synthesising it would produce a grid state that never
     existed.
+
+    `load_buses` is the detailed grid's load-carrying bus names, which the
+    demand table is checked against in both directions. It is required and has
+    no default on purpose: a caller that forgot it would get exactly the hole
+    this argument exists to close, and silently.
 
     `dispatch` and `loads` are exactly what `validate_dispatch` and
     `validate_loads` return, so they are interchangeable with every other
@@ -275,6 +322,7 @@ def tables_from_external(dispatch_src, loads_src, registry: pd.DataFrame):
         _map_columns(loads_frame, loads_path.name, LOADS_ALIASES, LOADS_COLUMNS)
     )
     _check_units(dispatch, registry)
+    _check_load_buses(loads, load_buses)
 
     # The two tables must describe the SAME hours. Demand for an hour the
     # dispatch does not cover, or a dispatched hour with no demand, is a
