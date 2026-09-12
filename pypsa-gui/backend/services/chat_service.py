@@ -2065,7 +2065,15 @@ _SOLVER_ERROR_DECODER_FACTS = (
 )
 _SOLVER_ERROR_DECODER_CHAINING = (
     "On ANY failed or aborted run, call get_simulation_log_history BEFORE "
-    "answering and quote the failing TRACEBACK frame."
+    "answering and quote the failing TRACEBACK frame. "
+    # Added with `diagnose_network`'s routing sentence above, in the CHAINING
+    # half because it names a tool: the FACTS half is what a tools-less model
+    # is given, and telling it to call something it does not have is the one
+    # thing this split exists to prevent.
+    "On 'infeasible' ALSO call diagnose_network before theorising: the "
+    "commonest cause is structural — an island holding demand with no plant "
+    "in it — and the linopy message names neither the island nor the demand, "
+    "so a bounds explanation offered without that check is a guess."
 )
 
 # Price-driver / congestion narration (#4). LMP / marginal-unit / line-dual

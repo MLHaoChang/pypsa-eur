@@ -245,3 +245,54 @@ def test_the_infeasibility_decoder_routes_here():
     prompt = chat_service._build_system_prompt(chat_service.ChatSession())
     assert "diagnose_network before" in prompt
     assert "island holding demand" in prompt
+
+
+# ── carried over from the implementation this module replaced ──────────────
+#
+# `tests/test_chat_tools_diagnose.py` pinned an earlier, inline
+# `diagnose_network` that master grew independently of this branch. The two
+# arrived at the same tool name with incompatible payloads, and the merge kept
+# THIS one — it is the analysis `validation_service` also runs, and a second
+# differently-worded copy is how two sources of truth start disagreeing (the
+# retired implementation's own docstring said so). Everything that file
+# covered is covered here except these two cases, which are carried over
+# verbatim in intent.
+
+
+def test_transformers_join_islands(install_network):
+    """A transformer is a connection. The retired implementation walked
+    `n.transformers`; `_BRANCHES` does too, and nothing else asserted it."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.add("Bus", "HV", v_nom=380)
+    n.add("Bus", "LV", v_nom=110)
+    n.add("Transformer", "T", bus0="HV", bus1="LV", s_nom=100, x=0.1)
+    n.add("Generator", "G", bus="HV", p_nom=10)
+    install_network(n, name="Trafo")
+
+    assert T.diagnose_network()["n_islands"] == 1
+
+
+def test_a_big_fragmented_network_stays_inside_the_result_budget(install_network):
+    """
+    A diagnosis the agent cannot read is not a diagnosis. 400 isolated buses
+    serialise past `_truncate_result`'s budget and come back as a preview
+    string, so the island list is capped and the cap is DECLARED rather than
+    silently applied — while `counts` still reports the true totals.
+    """
+    import json
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    for i in range(400):
+        n.add("Bus", f"B{i:03d}")
+    install_network(n, name="Shrapnel")
+
+    out = T.diagnose_network()
+
+    assert out["counts"]["islands"] == 400
+    assert out["n_islands"] == 400
+    assert len(out["islands"]) == T._MAX_ISLANDS_REPORTED
+    assert out["islands_truncated"] is True
+    assert out["isolated_buses_truncated"] is True
+    assert len(json.dumps(out, default=str)) < 4000

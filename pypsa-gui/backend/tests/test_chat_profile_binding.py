@@ -894,11 +894,25 @@ def test_default_prompt_bytes_unchanged():
     import hashlib
 
     expected_sha256 = {
+        # RE-PINNED, deliberately, by the integration merge of PR #21
+        # (adequacy engines / explain_investment). Two of these six constants
+        # gained a sentence there — a FEATURE change, which this test was
+        # never meant to forbid: its rule is that the default prompt must not
+        # change as a SIDE EFFECT of a refactor. The other four hashes are
+        # still the pre-Task-8 ones, and re-pinning is a deliberate,
+        # reviewable edit rather than something a refactor can do quietly.
+        #
+        # `_DOMAIN_GUIDE` gained the "SIZING questions go to
+        # explain_investment FIRST" paragraph, in `_DOMAIN_GUIDE_CHAINING`.
         "_DOMAIN_GUIDE": (
-            "3e6f420d74fea27240186cc520718dd401fd7b18a6e0fef1262630f053256f8f"
+            "44a0509625246993f9fd5a82a185ed37ff8fae62b6de440467097c24fe72d4de"
         ),
+        # `_SOLVER_ERROR_DECODER` gained the "on 'infeasible' ALSO call
+        # diagnose_network" routing sentence — the same sentence is in
+        # `_SOLVER_ERROR_DECODER_CHAINING`, which is what
+        # test_solver_and_rubric_halves_cover_the_same_words checks.
         "_SOLVER_ERROR_DECODER": (
-            "bd4de84083da126945d36c23a0e10bb0823d157ce8befb9aecf7c1b899c029db"
+            "0f5c45d3d2d6cc80f3582e8bdf62982b94c68281e0f188c6b9439b515acdd895"
         ),
         "_PRICE_CONGESTION_GUIDE": (
             "a65668e11eee7e3f30007ffc91cc7f3197e2a6938c7e8ea6e1fd647b5aa25129"
