@@ -3223,6 +3223,21 @@ def _dispatch_tool_uses(
                 ),
             }
             yield "session_done", {"reason": "tool_call_cap_exceeded"}
+            # PAIRING. Anthropic requires one `tool_result` per `tool_use` id in
+            # the next user message, and the assistant message carrying these
+            # blocks is already persisted — so returning here without results
+            # left orphans and the session's NEXT turn was rejected outright,
+            # recoverable only by starting a new chat. This path used to skip
+            # both the capped tool AND every tool after it; the docstring above
+            # promised "one tool_result per tool_use_id WITHOUT exception", and
+            # this was the exception.
+            for pending in tool_uses[idx:]:
+                tool_results_for_next_turn.append({
+                    "type": "tool_result",
+                    "tool_use_id": pending.get("id"),
+                    "is_error": True,
+                    "content": "tool_call_cap_exceeded",
+                })
             # Ends the whole turn, not just this loop — reported to the
             # caller rather than returned from it, because a generator's
             # `return` cannot end its caller's.
@@ -4255,6 +4270,20 @@ def _run_turn_body(
         )
         tool_call_count = dispatch.tool_call_count
         if dispatch.stop_turn:
+            # Record whatever was collected BEFORE bailing out. Returning first
+            # dropped the results of tools that had already run successfully in
+            # this step, orphaning their `tool_use` blocks (already persisted)
+            # and making the session's next turn a provider-side 400. Guarded on
+            # non-empty so a stop with nothing dispatched does not append an
+            # empty user message, which is itself invalid.
+            if tool_results_for_next_turn:
+                messages.append(
+                    {"role": "user", "content": tool_results_for_next_turn}
+                )
+                with session._lock:
+                    session.append_history_message(
+                        {"role": "user", "content": tool_results_for_next_turn}
+                    )
             return
         switched_mid_turn = dispatch.switched_mid_turn
         messages.append({"role": "user", "content": tool_results_for_next_turn})
