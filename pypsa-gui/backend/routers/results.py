@@ -2989,6 +2989,16 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         # ceiling any fleet has.
         "margin_ceiling": (None if not math.isfinite(m_max)
                            else float(m_max)),
+        # …and the bound the SEARCH actually stops at, always finite
+        # (whole-branch review, B2). The two are different numbers whenever
+        # the fleet is unbounded or reaches past the schema's own cap, and
+        # the panel showed only the first: "ceiling unbounded" beside an
+        # `unreachable` verdict whose own sentence says "the search is
+        # bounded above by 500%". Both true, one about the fleet and one
+        # about the search, and read together in one panel they contradict.
+        # The verdict copy below reads this same value, so the two cannot
+        # drift.
+        "search_ceiling": float(m_ceiling),
         "max_solves": max_solves,
         "restore": restore,
         "base_restored": False,

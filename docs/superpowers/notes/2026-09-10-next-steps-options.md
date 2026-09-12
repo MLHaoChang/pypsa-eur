@@ -84,9 +84,10 @@ The recommendation below was taken, and one option beyond it.
 | **C3** | `pypsa-gui/backend/tests/qa_adequacy_journey.py` — a QA driver covering the adequacy journey, discovered automatically by `tests/run_qa_drivers.py` and therefore run by the `gui-qa-drivers` CI step. 91 checks over preflight, the margin- and cap-constrained solve, `/results/reserve_margin`, `/results/adequacy`, `/results/copt`, `/results/mc` with ELCC, the stress registry, the class-B/C sweep, `/results/fmea_modes`, the worksheet sidecar, the bundle, and the margin loop with its 409 mesh. Passes on both PyPSA 1.3.0 and the pinned 1.1.2. |
 | **B1** | Closed. The clamped planning-loop iterate is no longer re-solved: the controller takes an optional `solve_at.solved_value(x)` — the same duck-typed shape as its existing plan-hash probe — and the margin route offers it, so a refinement midpoint that stands for an already-solved margin stops the search before the solve instead of after it. The verdict, the certified margin and the restored config are unchanged; the run is one solve plus one MC shorter (3 -> 2 on the QA journey). |
 | **C3+** | A second QA driver, `pypsa-gui/backend/tests/qa_adequacy_studies.py`, covering what the journey driver does not reach: the ε-cap coupling loop (the margin loop's sibling on the same controller), the frontier sweep and its monotonicity, and every study's empty-state and abort contract — 204 before a run, 404 to an abort of a study that never started, an abort mid-flight that keeps the points it had and still runs the closing restore, and the same abort answering 200 twice more. 72 checks, ~24 s, discovered by the same runner. |
+| **B2** | Closed — two fixed, one declined in place, one unrecoverable. See the section below, which is where the four are written down: the options table said "recorded in the review note with reasons", and they were not. |
 
-Everything else in the tables above stands as written; of Group B, B1 is
-now closed and B2 is still open.
+Everything else in the tables above stands as written; Group B is now
+closed.
 
 ## If you want one recommendation
 
@@ -94,3 +95,17 @@ now closed and B2 is still open.
 fix touches the path every component edit takes. Then close the version gap,
 because it is the only place left where something could be wrong and nothing
 we run would show it.
+
+## B2, item by item
+
+The table above described these four in a single clause each and said the
+reasons were in the review note. They were not — they lived in a scratchpad
+that is gone. Re-derived from the code, decided, and written down here so the
+decision survives this session.
+
+| # | What | Decision |
+|---|---|---|
+| **1. The `_avail` fallback** (`services/adequacy/mc.py`, `block_store_arrays`) | A store whose outage rate is not a finite number in `[0, 1)` is credited at full availability. Unreachable from `snapshot_inputs`, which sets `q = 0.0` for a store with no resolvable rate and refuses the study outright (`OutageRateError`) for one whose rate is out of range. | **Declined, and the argument written at the site.** The function is module-level and hand-built `StorageSpec`s reach it from the tests and from any future caller; there "no usable rate" must mean "no derate" rather than a NaN silently eating the fleet's capacity — a wrong number with no error. What was missing was not the guard but the reachability argument, which a reader had to re-derive. |
+| **2. The chip and the verdict on one ceiling** (`MarginLoopPanel.tsx`, `routers/results.py`) | The chip showed `margin_ceiling` — what the FLEET can reach, null when every extendable is unbounded — and read "ceiling unbounded" beside an `unreachable` verdict whose own sentence says "the search is bounded above by 500% — the largest margin the configuration schema allows". Both true, about different numbers, contradictory as a pair. | **Fixed.** The record carries `search_ceiling` (always finite, `min(fleet, schema cap)`) beside `margin_ceiling`, and the verdict copy reads the same value, so the two cannot drift. The chip shows one number when they agree and both when they do not, and "unbounded" never appears without the bound the search actually stopped at. Four tests, two of them biteable on the branch that renders the second number. |
+| **3. The mixture state a silent unit costs** (`services/adequacy/copt.py`, `mixture_hourly`) | A profiled unit whose availability is zero in every hour was enumerated over both of its outage states, doubling the `2^k` evaluations for a unit that cannot supply a megawatt in either. Not hypothetical: an all-NaN `p_max_pu` column is read as "unavailable every hour" (M3) and arrives as a profile of zeros, so the data defect phase 12f exists for is the one that paid for it. | **Fixed.** Such a unit is enumerated over one state. Exact, not an approximation: its two states differ by `s_i · a_{i,h} = 0`, so the pair contributes `(1−q)·X + q·X = X` to every term. The test pins both halves — bit-identical to the mixture that never had the unit, and `2^(k−1)` states rather than `2^k` — because the equality alone would pass with the filter removed. The enumeration it replaces is mathematically equal but not bitwise (a ~1e-15 reordering), which is why the assertion is exact equality against the reference rather than a tolerance. |
+| **4. "An import placement"** | One line in the IEEE 39 review's nit list, with no file, no symbol and no reason. | **Unrecoverable, and recorded as such.** The detail was in the scratchpad. Guessing at which import was meant would be inventing a finding; anything real here will be found again by the next reader of that file. |

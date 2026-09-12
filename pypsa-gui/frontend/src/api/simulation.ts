@@ -542,6 +542,12 @@ export interface MarginLoopPayload {
   margin_tight: number | null
   /** The largest margin the fleet can reach; null = unbounded. */
   margin_ceiling: number | null
+  // The bound the SEARCH stops at, always a number: `min(fleet ceiling,
+  // the schema's own cap)`. Distinct from `margin_ceiling`, which is the
+  // FLEET's reach and is null when every extendable is unbounded — the
+  // panel used to show only that one and read "ceiling unbounded" beside
+  // a verdict saying the search is bounded above by 500%.
+  search_ceiling?: number | null
   max_solves: number
   restore: 'base' | 'final'
   base_restored: boolean
