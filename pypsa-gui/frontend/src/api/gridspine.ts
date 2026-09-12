@@ -30,11 +30,24 @@ export interface StudyConfig {
   // D3). The backend stores the path and, when it can, names the project.
   from_network?: string | null
   from_project?: string | null
+  // The client's own tables as the source (increment 7). The backend stores
+  // the paths it chose and reports the filenames the engineer uploaded — what
+  // they recognise is their file, not where the server put it.
+  from_external?: string | null
+  from_external_loads?: string | null
+  from_external_name?: string | null
+  from_external_loads_name?: string | null
   outdir?: string
   templates_overlay?: string | null
 }
 
-/** Where the next run's dispatch comes from — one of three, never two. */
+/** Where the next run's dispatch comes from — one of three, never two.
+ *
+ *  The client's own tables are a FOURTH source but deliberately not a member
+ *  here: setting them means uploading files (`uploadExternalDispatch`), not
+ *  naming a path in a JSON body. That asymmetry is the security posture — the
+ *  caller never names a path — so the type keeps it visible rather than
+ *  papering over it with a `from_external` variant that could not be sent. */
 export type DispatchSource =
   | { kind: 'generate' }
   | { kind: 'from_dispatch'; dir: string }
@@ -84,6 +97,16 @@ export interface ReadbackSummary {
   tolerances: { bus: Record<string, number>; branches: Record<string, number> }
   sources: { bus_csv: { filename: string; sha256: string; bytes: number } | null; branch_csv: { filename: string; sha256: string; bytes: number } | null }
   at: string
+}
+
+/** What the backend answers after validating a client's tables. */
+export interface ExternalDispatchSummary {
+  external: string
+  external_sha256: string
+  loads: string
+  loads_sha256: string
+  hours: number
+  units: number
 }
 
 export type FigureName = 'vm' | 'va' | 'branch_p' | 'branch_q'
@@ -191,6 +214,19 @@ export const gridspineApi = {
     fd.append('bus', bus)
     if (branches) fd.append('branches', branches)
     return client.post<ReadbackSummary>(`/gridspine/${encodeURIComponent(project)}/readback/${hour}`, fd, quiet).then(r => r.data)
+  },
+
+  /** The client's own dispatch and demand tables become this study's source.
+   *  `loads` is omitted only for one Excel workbook carrying both sheets; it
+   *  must then be ABSENT from the form rather than an empty part, or the
+   *  backend hands the producer a file to refuse instead of None. */
+  uploadExternalDispatch: (project: string, dispatch: File, loads?: File | null) => {
+    const fd = new FormData()
+    fd.append('dispatch', dispatch)
+    if (loads) fd.append('loads', loads)
+    return client.post<ExternalDispatchSummary>(
+      `/gridspine/${encodeURIComponent(project)}/dispatch-source/external`, fd, quiet,
+    ).then(r => r.data)
   },
 
   readback: (project: string) =>
