@@ -510,6 +510,12 @@ class ChatSession:
     """
 
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    # WHO this conversation belongs to, as a string user id. `None` means "no
+    # owner recorded", which the /confirm, /rewind and /abort routes treat as
+    # REFUSE rather than allow — see `session_owner_allows`. Recorded once at
+    # creation and never reassigned: letting a later caller claim an existing
+    # session would be the hole this closes.
+    owner_user_id: str | None = None
     created_at: float = field(default_factory=time.monotonic)
     # Monotonic stamp of the last time this session was touched (created or
     # resolved via get_or_create_session). Drives idle eviction.
@@ -785,6 +791,32 @@ def get_session(session_id: str) -> ChatSession | None:
         return _SESSIONS.get(session_id)
 
 
+def session_owner_allows(sess: "ChatSession", user_id: str | None) -> bool:
+    """
+    May `user_id` act on `sess`?
+
+    FAIL-CLOSED, deliberately. An owner-less session is refused rather than
+    shared: if a future creation path forgets to record the owner, the symptom is
+    "I cannot abort my own turn" — loud and fixed in minutes — instead of silently
+    reopening the hole this closes. `tests/test_chat_session_ownership.py` asserts
+    the normal path DOES record an owner, so that is a caught bug rather than a
+    discovered outage.
+
+    Before this existed, `/confirm`, `/rewind` and `/abort` authenticated (the
+    global /api middleware) and authorized nothing: `_SESSIONS` is a process
+    global and any signed-in caller who knew a session id could truncate a
+    stranger's conversation, kill their in-flight turn, or supply the approval
+    for their destructive tool. Verified cross-ORG before the fix.
+    """
+    if user_id is None:
+        # Local mode issues no cookie and has exactly one identity; nothing to
+        # distinguish, and refusing would break the desktop build.
+        import local_mode
+
+        return local_mode.is_local_mode()
+    return sess.owner_user_id == str(user_id)
+
+
 def _evict_idle_sessions_locked(now: float) -> None:
     """
     Drop idle-past-TTL sessions, then enforce the LRU resident cap.
@@ -811,6 +843,7 @@ def get_or_create_session_reporting(
     session_id: str | None = None,
     *,
     model: str = DEFAULT_MODEL,
+    owner_user_id: str | None = None,
 ) -> tuple[ChatSession, bool]:
     """
     Resolve-or-create a session, reporting whether THIS call minted it.
@@ -837,6 +870,11 @@ def get_or_create_session_reporting(
             sess.last_activity = now
             return sess, False
         sess = ChatSession(model=model)
+        # Set on CREATE only. An existing session's owner is never reassigned:
+        # `get_or_create` is reached by /stream and /history, and letting the
+        # second caller overwrite the owner would let anyone adopt a live
+        # session just by naming its id.
+        sess.owner_user_id = owner_user_id
         if session_id:
             sess.session_id = session_id
         sess.last_activity = now
@@ -848,6 +886,7 @@ def get_or_create_session(
     session_id: str | None = None,
     *,
     model: str = DEFAULT_MODEL,
+    owner_user_id: str | None = None,
 ) -> ChatSession:
     """
     Resolve a session by id, creating a fresh one if unknown. Use the same
@@ -858,7 +897,9 @@ def get_or_create_session(
     signature/return type is pinned by callers and tests that don't care
     which branch fired.
     """
-    sess, _created = get_or_create_session_reporting(session_id, model=model)
+    sess, _created = get_or_create_session_reporting(
+        session_id, model=model, owner_user_id=owner_user_id,
+    )
     return sess
 
 
