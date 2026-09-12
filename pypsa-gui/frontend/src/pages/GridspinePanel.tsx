@@ -250,6 +250,15 @@ type PickerMode = SourceKind | 'from_external'
 // Apply button can say which before the request rather than after a 422.
 const WORKBOOK = /\.(xlsx|xlsm|xls)$/i
 
+// The suffixes the SERVER reads (`gridspine_service._EXTERNAL_SUFFIXES`, and
+// `producers.external`'s two sets). `accept` on a file input is advisory —
+// drag-and-drop and "All files" in the OS dialog both go round it — and the
+// server RENAMES an unrecognised suffix to `dispatch.csv`, after which the
+// producer reads the bytes as text and refuses them under a filename the
+// engineer never used. Cheaper to say so here, before the upload.
+const READABLE = /\.(csv|txt|xlsx|xlsm|xls)$/i
+const READABLE_LIST = '.csv, .txt, .xlsx, .xlsm or .xls'
+
 const INPUT = 'px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
 
 function currentSourceKind(config: StudyConfig): PickerMode {
@@ -272,6 +281,23 @@ function describeSource(config: StudyConfig): string {
   return 'generated here (IEEE 39-bus, rolling unit commitment)'
 }
 
+/** What the demand input is actually for, given what is attached.
+ *
+ *  A workbook MAY carry its own `loads` sheet, so the file is optional — but an
+ *  attached demand file is still SENT, and the server then takes its two-file
+ *  path and reads sheet 0 of the workbook as the dispatch. Saying "optional"
+ *  while sending it is how an engineer ends up reading a refusal about columns a
+ *  sheet they never meant to use does not have.
+ */
+function demandLabel(dispatch: File | null, loads: File | null): string {
+  if (dispatch && WORKBOOK.test(dispatch.name)) {
+    return loads
+      ? 'Demand table — this file will be used, not the workbook\u2019s "loads" sheet (clear it to use the sheet)'
+      : 'Demand table — optional: this workbook may hold a "loads" sheet'
+  }
+  return 'Demand table — bus, hour, P, Q (required: a snapshot is generation AND demand)'
+}
+
 function DispatchSourcePicker({ name, config, locked }: { name: string; config: StudyConfig; locked: boolean }) {
   const qc = useQueryClient()
   const [kind, setKind] = useState<PickerMode | null>(null)
@@ -280,7 +306,31 @@ function DispatchSourcePicker({ name, config, locked }: { name: string; config: 
   const [dispatchFile, setDispatchFile] = useState<File | null>(null)
   const [refusal, setRefusal] = useState<string | null>(null)
   const [loadsFile, setLoadsFile] = useState<File | null>(null)
+  // Bumping this remounts both file inputs, which is the only way to clear what
+  // an uncontrolled file input DISPLAYS. Without it the inputs and the state
+  // disagreed: after a mode round trip both read "No file chosen" while the
+  // files were still attached, and Apply re-uploaded the invisible pair.
+  const [filesKey, setFilesKey] = useState(0)
   const mode: PickerMode = kind ?? currentSourceKind(config)
+
+  function forgetFiles() {
+    setDispatchFile(null)
+    setLoadsFile(null)
+    setRefusal(null)
+    setFilesKey(k => k + 1)
+  }
+
+  /** A picked file, or a refusal instead of it. */
+  function pick(file: File | null, keep: (f: File | null) => void) {
+    setRefusal(null)
+    if (file && !READABLE.test(file.name)) {
+      keep(null)
+      setRefusal(`gridspine reads ${READABLE_LIST}; ${file.name} is none of those. `
+                 + 'Export the table as CSV or as an Excel workbook and try again.')
+      return
+    }
+    keep(file)
+  }
 
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => projectsApi.list(), enabled: mode === 'from_project' })
   const candidates = (projects.data ?? []).filter(p => p.project_kind !== 'planning_dynamics' && p.name !== name)
@@ -299,6 +349,8 @@ function DispatchSourcePicker({ name, config, locked }: { name: string; config: 
     onSuccess: (cfg) => {
       qc.setQueryData(CONFIG_KEY(name), cfg)
       setKind(null)
+      // A refusal describes a file, and the source is no longer that file.
+      forgetFiles()
       toast.success(`Dispatch source: ${describeSource(cfg)}`)
     },
     onError: (e) => toast.error(errorText(e)),
@@ -307,7 +359,7 @@ function DispatchSourcePicker({ name, config, locked }: { name: string; config: 
   const upload = useMutation({
     mutationFn: () => gridspineApi.uploadExternalDispatch(name, dispatchFile!, loadsFile),
     onSuccess: async (summary) => {
-      setRefusal(null)
+      forgetFiles()
       setKind(null)
       await qc.invalidateQueries({ queryKey: CONFIG_KEY(name) })
       toast.success(`Dispatch source: your own tables — ${summary.units} units over ${summary.hours} h`)
@@ -330,7 +382,7 @@ function DispatchSourcePicker({ name, config, locked }: { name: string; config: 
             value={mode}
             disabled={locked}
             aria-label="Dispatch source"
-            onChange={e => setKind(e.target.value as SourceKind)}
+            onChange={e => { setKind(e.target.value as PickerMode); forgetFiles() }}
           >
             <option value="generate">Generate here (unit commitment)</option>
             <option value="from_project">A solved project's network</option>
@@ -372,25 +424,38 @@ function DispatchSourcePicker({ name, config, locked }: { name: string; config: 
           <>
             <Field label="Dispatch table — unit id, hour, P, Q, status (CSV or Excel)">
               <input
+                key={`dispatch-${filesKey}`}
                 type="file"
                 className={`${INPUT} w-[300px]`}
                 accept=".csv,.txt,.xlsx,.xlsm,.xls"
                 disabled={locked}
                 aria-label="Dispatch table"
-                onChange={e => { setDispatchFile(e.target.files?.[0] ?? null); setRefusal(null) }}
+                onChange={e => pick(e.target.files?.[0] ?? null, setDispatchFile)}
               />
             </Field>
-            <Field label={dispatchFile && WORKBOOK.test(dispatchFile.name)
-              ? 'Demand table — optional: this workbook may hold a "loads" sheet'
-              : 'Demand table — bus, hour, P, Q (required: a snapshot is generation AND demand)'}>
-              <input
-                type="file"
-                className={`${INPUT} w-[300px]`}
-                accept=".csv,.txt,.xlsx,.xlsm,.xls"
-                disabled={locked}
-                aria-label="Demand table"
-                onChange={e => { setLoadsFile(e.target.files?.[0] ?? null); setRefusal(null) }}
-              />
+            <Field label={demandLabel(dispatchFile, loadsFile)}>
+              <div className="flex items-center gap-1">
+                <input
+                  key={`loads-${filesKey}`}
+                  type="file"
+                  className={`${INPUT} w-[300px]`}
+                  accept=".csv,.txt,.xlsx,.xlsm,.xls"
+                  disabled={locked}
+                  aria-label="Demand table"
+                  onChange={e => pick(e.target.files?.[0] ?? null, setLoadsFile)}
+                />
+                {loadsFile && (
+                  <button
+                    type="button"
+                    className="text-[11px] text-muted hover:text-danger px-1"
+                    aria-label="Clear the demand table"
+                    disabled={locked}
+                    onClick={() => { setLoadsFile(null); setRefusal(null); setFilesKey(k => k + 1) }}
+                  >
+                    clear
+                  </button>
+                )}
+              </div>
             </Field>
           </>
         )}

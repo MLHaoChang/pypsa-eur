@@ -7,7 +7,7 @@
 // no open project, and a capacity-expansion project's 409 — render as guidance
 // rather than as an error toast per poll.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, cleanup, waitFor, within } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Ledger, RankedSnapshot, StageStatus, StudyConfig } from '../api/gridspine'
@@ -266,7 +266,20 @@ describe('GridspinePanel', () => {
   })
 
   it('lets one workbook stand for both tables, and sends no demand file for it', async () => {
-    api.uploadExternalDispatch.mockResolvedValue({ hours: 24, units: 10 })
+    // A whole summary, not {hours, units}: the mock is untyped, so a partial one
+    // let the success path render undefined fields with tsc none the wiser.
+    api.uploadExternalDispatch.mockResolvedValue({
+      external: '/p/Study A/gridspine/uploads/external/both.xlsx',
+      external_sha256: 'c'.repeat(64),
+      loads: '/p/Study A/gridspine/uploads/external/both.xlsx',
+      loads_sha256: 'c'.repeat(64),
+      hours: 24, units: 10,
+    })
+    api.config.mockResolvedValueOnce(config).mockResolvedValue({
+      ...config,
+      from_external: '/p/Study A/gridspine/uploads/external/both.xlsx',
+      from_external_name: 'both.xlsx',
+    })
     renderPanel()
     await screen.findByTestId('dispatch-source-current')
     await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
@@ -276,6 +289,88 @@ describe('GridspinePanel', () => {
     await waitFor(() => expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(false))
     await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
     await waitFor(() => expect(api.uploadExternalDispatch).toHaveBeenCalledWith('Study A', book, null))
+    // What the engineer sees is the point: the source line now names their file.
+    await waitFor(() => expect(screen.getByTestId('dispatch-source-current').textContent)
+      .toContain('both.xlsx'))
+  })
+
+  it('forgets the files when the source mode changes, so Apply cannot send what the inputs no longer show', async () => {
+    // The file inputs are unmounted when the mode changes and remount EMPTY,
+    // while the React state survived: both inputs read "No file chosen", Apply
+    // was live, and one click re-uploaded the invisible pair.
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+    await userEvent.upload(screen.getByLabelText(/dispatch table/i),
+                           new File(['x'], 'march_dispatch.csv', { type: 'text/csv' }))
+    await userEvent.upload(screen.getByLabelText(/demand table/i),
+                           new File(['x'], 'march_loads.csv', { type: 'text/csv' }))
+    expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(false)
+
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'generate')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+
+    expect((screen.getByLabelText(/dispatch table/i) as HTMLInputElement).files).toHaveLength(0)
+    expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    expect(api.uploadExternalDispatch).not.toHaveBeenCalled()
+  })
+
+  it('lets the demand file be taken back off, so a workbook is not sent with a stale CSV', async () => {
+    // With a demand file attached, a workbook dispatch goes down the TWO-FILE
+    // path on the server and its sheet 0 is read as the dispatch — which may be
+    // the loads sheet, producing a refusal about columns the workbook has. The
+    // label said "optional", which reads as "ignored", and there was no way to
+    // un-choose it.
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+    await userEvent.upload(screen.getByLabelText(/dispatch table/i),
+                           new File(['x'], 'd.csv', { type: 'text/csv' }))
+    await userEvent.upload(screen.getByLabelText(/demand table/i),
+                           new File(['x'], 'l.csv', { type: 'text/csv' }))
+    await userEvent.click(screen.getByRole('button', { name: /clear the demand table/i }))
+    expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('clears a refusal once a different source has been applied', async () => {
+    api.uploadExternalDispatch.mockRejectedValue({
+      response: { status: 422, data: { detail: "external loads do not map to the detailed grid's demand buses: missing ['BUS_39'], unknown []" } },
+    })
+    api.setDispatchSource.mockResolvedValue({ ...config, from_dispatch: null, from_network: null })
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+    await userEvent.upload(screen.getByLabelText(/dispatch table/i), new File(['x'], 'd.xlsx'))
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    await screen.findByTestId('external-refusal')
+
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'generate')
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(api.setDispatchSource).toHaveBeenCalled())
+    expect(screen.queryByTestId('external-refusal')).toBeNull()
+  })
+
+  it('refuses a file type the server does not read, before uploading it', async () => {
+    // `accept` is advisory — drag-and-drop and "All files" in the OS dialog both
+    // ignore it. The server then RENAMES an unrecognised suffix to `dispatch.csv`
+    // and the producer reads it as text, so the engineer gets a refusal naming a
+    // filename they never used.
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+    // `fireEvent`, not `userEvent.upload`: user-event honours the `accept`
+    // attribute and drops the file without firing a change, which is precisely
+    // the browser behaviour this guard exists for the cases that DON'T — a drop,
+    // or "All files" in the OS dialog. The component must refuse it itself.
+    const input = screen.getByLabelText(/dispatch table/i) as HTMLInputElement
+    fireEvent.change(input, {
+      target: { files: [new File(['x'], 'dispatch.ods', { type: 'application/vnd.oasis.opendocument.spreadsheet' })] },
+    })
+    const shown = await screen.findByTestId('external-refusal')
+    expect(shown.textContent).toContain('.ods')
+    expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(api.uploadExternalDispatch).not.toHaveBeenCalled()
   })
 
   it('surfaces the producer\u2019s refusal inline, because that message is the actionable part', async () => {
