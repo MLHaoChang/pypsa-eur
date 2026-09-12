@@ -20,9 +20,11 @@ computed on `1bce9da` before any engine edit.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import math
 import pathlib
 import time
+import types
 
 import numpy as np
 import pandas as pd
@@ -272,6 +274,68 @@ def test_A13_the_256_state_mixture_on_a_300_unit_table_is_under_a_second():
     dt = time.perf_counter() - t0
     assert lolp.shape == (H,) and eue.shape == (H,)
     assert dt < 1.0, f"{dt:.2f}s"
+
+
+def test_a_unit_available_nowhere_costs_no_mixture_state():
+    """★ B2 (whole-branch review, the mixture nit). A profiled unit whose
+    availability is zero in EVERY hour was enumerated over both of its outage
+    states, doubling the `2^k` evaluations for a unit that cannot supply a
+    megawatt in either of them.
+
+    It is not a hypothetical shape: an all-NaN `p_max_pu` column is read as
+    "unavailable every hour" (M3) and arrives here as a profile of zeros, so
+    the data defect phase 12f exists for is exactly the one that paid for a
+    doubled mixture.
+
+    Both halves are pinned, because only together do they say the change was
+    free: the numbers are BIT-IDENTICAL to the same mixture without the unit,
+    and the state count is `2^(k-1)`, not `2^k`.
+
+    BROKEN VARIANT (bite): drop the `silent` filter in `mixture_hourly` — the
+    evaluation count doubles back to 8 and the equality assertions still pass,
+    which is why the count is asserted at all.
+    """
+    H = 24
+    hrs = np.arange(H)
+    table = [C.CoptUnit("t1", 120.0, 0.08, "FOR", 40.0, "x"),
+             C.CoptUnit("t2", 90.0, 0.05, "FOR", 40.0, "x")]
+    dist = C.build_copt(table, 1.0)
+    real = [C.CoptUnit(f"p{i}", 60.0, 0.06, "FOR", 30.0, "x",
+                       profile=np.clip(0.5 + 0.4 * np.cos(2 * np.pi * hrs / H + i),
+                                       0, 1))
+            for i in range(2)]
+    # The all-NaN column's image: zero availability, a real outage rate.
+    silent = C.CoptUnit("all_nan_column", 200.0, 0.10, "FOR", 30.0, "x",
+                        profile=np.zeros(H))
+    residual = np.full(H, 200.0)
+
+    base_l, base_e = C.mixture_hourly(dist, residual, real)
+    with_l, with_e = C.mixture_hourly(dist, residual, real + [silent])
+    # EXACT equality, not a tolerance: the silent unit's two states differ by
+    # nothing, so the fixed code computes literally the sum on the left. The
+    # enumeration it replaces is mathematically equal but not bitwise — it
+    # sums the same terms in a different order, which is where the ~1e-15 a
+    # tolerance would hide comes from.
+    assert np.array_equal(with_l, base_l), np.abs(with_l - base_l).max()
+    assert np.array_equal(with_e, base_e), np.abs(with_e - base_e).max()
+
+    calls = []
+    real_product = itertools.product
+
+    def _counting(*args, **kw):
+        out = list(real_product(*args, **kw))
+        calls.append(len(out))
+        return out
+
+    monkey = C.itertools
+    try:
+        C.itertools = types.SimpleNamespace(product=_counting)
+        C.mixture_hourly(dist, residual, real + [silent])
+    finally:
+        C.itertools = monkey
+    assert calls == [2 ** len(real)], (
+        f"{calls} states enumerated for {len(real)} real units plus one that "
+        "is available nowhere")
 
 
 # ── A3′ / A7: the COPT mixes exactly; continuity at the constant boundary ─

@@ -346,6 +346,34 @@ def test_margin_ceiling_is_null_for_an_unbounded_fleet(client, install_network,
     _start(client, max_solves=3)
     body = _poll(client)
     assert body["margin_ceiling"] is None, body.get("margin_ceiling")
+    # B2: …and the bound the SEARCH stopped at is on the record beside it.
+    # Without this the panel says "ceiling unbounded" while the verdict says
+    # the search is bounded above by the schema's cap — two true statements
+    # about different numbers, contradictory as a pair.
+    from services.adequacy.margin_lever import MAX_MARGIN
+    assert body["search_ceiling"] == pytest.approx(MAX_MARGIN), body
+
+
+def test_the_search_ceiling_is_the_fleets_when_the_fleet_is_what_stops_it(
+        client, install_network, session_state, monkeypatch):
+    """★ B2, the other regime: a FINITE fleet ceiling under the schema cap is
+    where the search stops, so both numbers are that one and the panel shows
+    it once.
+
+    Bite: publish `MAX_MARGIN` as `search_ceiling` — the chip grows a second
+    number that says 500% on a fleet that tops out at 134%.
+    """
+    from tests.test_adequacy_margin_loop import (
+        _Stubs, _install_stubs, _network, _poll, _setup, _start,
+    )
+    stubs = _Stubs(firm_base=130.0, lole_fn=lambda m: 9.0)
+    _install_stubs(monkeypatch, stubs)
+    _setup(client, install_network, network=_network(), reserve_margin=0.10)
+    _start(client, max_solves=3)
+    body = _poll(client)
+    ceiling = body["margin_ceiling"]
+    assert ceiling is not None and ceiling < 5.0, body.get("margin_ceiling")
+    assert body["search_ceiling"] == pytest.approx(ceiling), body
 
 
 # ── M6 ────────────────────────────────────────────────────────────────────

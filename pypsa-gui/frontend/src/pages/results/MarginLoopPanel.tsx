@@ -97,6 +97,36 @@ export function leverPct(v: number, unit: string): string {
   return `${compact(v * 100)}${unit}`
 }
 
+/**
+ * The ceiling chip's text (whole-branch review, B2).
+ *
+ * TWO numbers, and the panel used to show one. `margin_ceiling` is what the
+ * FLEET can reach and is null when every extendable is unbounded;
+ * `search_ceiling` is where the search actually stops, `min(fleet, the
+ * schema's cap)`, and is always a number. On an unbounded fleet the chip read
+ * "ceiling unbounded" while the `unreachable` verdict two lines below said
+ * "the search is bounded above by 500% — the largest margin the configuration
+ * schema allows". Both true, about different numbers, and contradictory as a
+ * pair.
+ *
+ * So: one number when they agree, both when they do not, and the fleet's
+ * "unbounded" never appears without the bound the search stopped at.
+ */
+export function ceilingLabel(fleet: number | null,
+                             search: number | null,
+                             unit: string): string {
+  if (search == null) {
+    // An older payload, before the field existed: the previous text, which
+    // is right as far as it goes.
+    return `ceiling ${fleet != null ? leverPct(fleet, unit) : 'unbounded'}`
+  }
+  if (fleet != null && Math.abs(fleet - search) < 1e-12) {
+    return `ceiling ${leverPct(fleet, unit)}`
+  }
+  const left = fleet != null ? leverPct(fleet, unit) : 'unbounded'
+  return `fleet ${left} · search stops at ${leverPct(search, unit)}`
+}
+
 /** Status chip colouring — the cap loop's ladder, same verdict vocabulary. */
 const STATUS_CLASS: Record<string, string> = {
   running: 'bg-panel border border-border text-muted',
@@ -353,11 +383,10 @@ export function MarginLoopPanel() {
                 <span
                   className="px-2 py-0.5 rounded bg-panel border border-border text-[10px] font-mono"
                   data-testid="margin-loop-ceiling"
-                  title="The largest margin this candidate set can reach; above it no plan exists at all and the margin is refused by the same preflight the solver runs."
+                  title="The largest margin this candidate set can reach — above it no plan exists at all, and the margin is refused by the same preflight the solver runs. The search stops at the smaller of that and the configuration schema's own cap, which is the second number when the two differ."
                 >
-                  ceiling {payload.margin_ceiling != null
-                    ? leverPct(payload.margin_ceiling, leverUnit)
-                    : 'unbounded'}
+                  {ceilingLabel(payload.margin_ceiling,
+                                payload.search_ceiling ?? null, leverUnit)}
                 </span>
                 {payload.confident && (
                   <span
