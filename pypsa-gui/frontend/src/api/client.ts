@@ -4,6 +4,7 @@ import { appLog } from '../store/simulationStore'
 import { getAuthEnabled, setAuthEnabled } from '../auth/config'
 import { shouldRearmAuth, shouldRedirectWhenAuthDisabled } from '../auth/localMode'
 import { CSRF_HEADER, needsCsrfHeader, readCsrfToken } from './csrf'
+import { lockRefusalCode } from '../utils/lockState'
 
 declare module 'axios' {
   interface AxiosRequestConfig {
@@ -20,7 +21,7 @@ export const client = axios.create({
 
 // URLs that the UI polls in the background — failures during a backend reload
 // window must NOT pop a toast or tear down the React Query cache.
-const QUIET_POLL_URLS = ['/network/undo/info', '/changelog']
+const QUIET_POLL_URLS = ['/network/undo/info', '/changelog', '/gridspine/']
 
 function isQuietPoll(url: string | undefined, method: string): boolean {
   if (method !== 'GET') return false
@@ -68,12 +69,18 @@ export function formatApiDetail(detail: unknown, fallback = 'Unknown error'): st
 // open and produces nothing the user can act on — exclude it.
 const QUIET_MUTATION_URLS = ['/simulation/preflight']
 
-// Expected conflict codes — still log, but avoid toast spam during a solve.
-// `study_in_flight` joins it (whole-branch review S5 fix, reviewed): a save
-// refused because an adequacy study is running is a structured 409 the
-// caller handles — the project switch toasts its own 'busy-study' sentence
-// and autosave must not toast it every interval.
-const QUIET_TOAST_CODES = new Set(['solver_in_flight', 'study_in_flight'])
+// Expected conflict codes — still log, but avoid toast spam. All three are
+// STANDING conditions rather than incidents, which is the whole test for
+// belonging here: while one holds, every autosave tick, canvas drag and
+// solver-config change is refused, and one toast per refusal buries the
+// workbench.
+//
+// `project_locked` — another user holds the edit lock. The read-only banner
+// already names the holder and is the affordance the user can act on.
+// `study_in_flight` — a save refused because an adequacy study is running is a
+// structured 409 the caller handles; the project switch toasts its own
+// 'busy-study' sentence, and autosave must not repeat it every interval.
+const QUIET_TOAST_CODES = new Set(['solver_in_flight', 'project_locked', 'study_in_flight'])
 
 const AUTH_API_PREFIX = '/auth/'
 const AUTH_PAGES = new Set(['/login', '/set-password', '/reset-password'])
@@ -193,8 +200,13 @@ client.interceptors.response.use(
     // brief uvicorn --reload window. They'll succeed on the next interval; no
     // need to log an error or pop a toast.
     if (!isQuietPoll(url, method) && !err.config?.skipErrorToast) {
-      appLog('ERROR', `${method} ${url} — ${msg}${code ? ` [${code}]` : ''}`)
-      if (!code || !QUIET_TOAST_CODES.has(code)) {
+      // `code` covers the emitters that set a top-level one (the solver gate,
+      // the write middleware). `lockRefusalCode` covers the two that carry the
+      // kind inside `detail` instead — the route-edge and enqueue lock
+      // refusals — which the top-level read alone cannot see.
+      const quietKey = code ?? lockRefusalCode(data)
+      appLog('ERROR', `${method} ${url} — ${msg}${quietKey ? ` [${quietKey}]` : ''}`)
+      if (!quietKey || !QUIET_TOAST_CODES.has(quietKey)) {
         toast.error(msg)
       }
     }

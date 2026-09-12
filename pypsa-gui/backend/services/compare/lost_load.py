@@ -37,9 +37,16 @@ def compute_lost_load_summary(
     The totals are SNAPSHOT-WEIGHTED (services/adequacy/metrics.py);
     ``voll_eur_per_mwh`` is explicit — captures from older builds lack it,
     and consumers keep the cost/energy-ratio fallback for those.
-    Returns ``available=False`` when the pickle is absent, the capture key
-    is missing, or the DataFrame is empty — all three are "no shedding"
-    states from the user's perspective. Multi-period split uses the snapshot
+
+    Returns ``available=False`` when the caller passes no capture (the pickle
+    was absent or unreadable — see ``routers.compare._read_lost_load_capture``),
+    the capture key is missing, the DataFrame is empty, the reindex/weighting
+    step raises, or the reindexed total is non-finite (NaN/inf). NONE of these
+    is "no shedding": they mean the capture was never usefully read, so the
+    project's actual shedding is unknown. ``captured`` is what tells that apart
+    from the one genuine zero (a FINITE total at or below the 1e-9 threshold):
+    ``captured=False`` on every unread/unusable-capture return, ``captured=True``
+    on that zero and on the success path. Multi-period split uses the snapshot
     weight matrix the rest of the comparison view shares.
     """
     from models.schemas import LostLoadBus, LostLoadByCarrier, LostLoadComparison
@@ -79,10 +86,23 @@ def compute_lost_load_summary(
         return LostLoadComparison()
 
     total_e = float(weighted.values.sum())
-    if not _math.isfinite(total_e) or total_e <= 1e-9:
-        # The capture exists but produced zero after reindex — treat as
-        # "no shedding" rather than "available but zero."
-        return LostLoadComparison(available=False, voll_eur_per_mwh=voll)
+    if not _math.isfinite(total_e):
+        # NaN/inf after reindex/weighting (e.g. an inf in the capture, or a
+        # NaN snapshot weight surviving the `.astype(float)` in
+        # `_build_snapshot_weights`) is NOT a measured zero — the capture
+        # was read but produced garbage, so this is exactly as "unread" as
+        # the reindex/mul exception branch above. Falls through to the
+        # all-default `captured=False` return, distinct from the genuine
+        # zero below.
+        return LostLoadComparison()
+    if total_e <= 1e-9:
+        # The capture exists, is finite, and produced zero after reindex —
+        # a genuine measured zero, not "unavailable." `available` stays
+        # False (the frontend's total_mwh.total > 0 invariant for
+        # available=True would otherwise break), but `captured=True` says
+        # the capture WAS read and this zero is real — see ADR-0001 /
+        # LostLoadComparison.
+        return LostLoadComparison(available=False, captured=True, voll_eur_per_mwh=voll)
 
     total_e_bucket = {"total": total_e, "by_period": {}}
     total_c_bucket = {"total": total_e * voll / 1e6, "by_period": {}}
@@ -185,6 +205,7 @@ def compute_lost_load_summary(
     )
     return LostLoadComparison(
         available=True,
+        captured=True,
         voll_eur_per_mwh=voll,
         total_mwh=_to_pv(total_e_bucket),
         total_cost_meur=_to_pv(total_c_bucket),

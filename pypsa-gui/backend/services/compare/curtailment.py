@@ -60,10 +60,16 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
 
     curt_by_carrier: dict = {}
     avail_by_carrier: dict = {}
+    # Distinguishes "nothing to curtail" from "nothing could be computed".
+    # Both leave curt_by_carrier empty; only the first is a measured zero.
+    failed = 0
 
     gens = n.generators
     if gens.empty:
-        return CurtailmentComparison()
+        # The network resolved fine; it simply has no Generator component at
+        # all, so "zero curtailment" is the real, structurally-guaranteed
+        # answer, not an absence — see the `available` field's docstring.
+        return CurtailmentComparison(available=True)
     p_t = getattr(n.generators_t, "p", None) if hasattr(n, "generators_t") else None
     p_max_pu_t = getattr(n.generators_t, "p_max_pu", None) if hasattr(n, "generators_t") else None
     if p_t is None or p_t.empty or p_max_pu_t is None or p_max_pu_t.empty:
@@ -130,12 +136,17 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
         if g not in p_max_pu_t.columns:
             continue
         eff_cap = _effective_capacity_series(g)
-        if not _math.isfinite(float(eff_cap.max())) or float(eff_cap.max()) <= 1e-9:
+        eff_max = float(eff_cap.max())
+        if not _math.isfinite(eff_max):
+            failed += 1          # a computed capacity that is NaN/inf is a failure
             continue
+        if eff_max <= 1e-9:
+            continue             # genuinely no capacity — a legitimate skip
         try:
             disp = p_t[g].reindex(sns).fillna(0.0).astype(float)
             pmu = p_max_pu_t[g].reindex(sns).fillna(0.0).astype(float)
         except Exception:
+            failed += 1
             continue
         available = pmu * eff_cap  # Hadamard product per snapshot
         # Clip negatives — solver tolerance can leave |p| > p_max_pu ×
@@ -147,9 +158,10 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
         total_c = float(weighted_curt.sum())
         total_a = float(weighted_avail.sum())
         if not _math.isfinite(total_c) or not _math.isfinite(total_a):
+            failed += 1
             continue
         if total_a <= 1e-9:
-            continue
+            continue             # no available energy — a legitimate skip
         carrier = (str(gens.at[g, "carrier"]) if "carrier" in gens.columns else "unknown").lower()
         cb = curt_by_carrier.setdefault(carrier, {"total": 0.0, "by_period": {}})
         cb["total"] += total_c / 1000.0  # GWh
@@ -161,7 +173,21 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
             ab["by_period"][p] = ab["by_period"].get(p, 0.0) + v / 1000.0
 
     if not curt_by_carrier:
-        return CurtailmentComparison()
+        # Solved fine, and `p_max_pu_t` is non-empty — the "no generator has
+        # a time-varying p_max_pu at all" case already exited above at the
+        # `p_max_pu_t.empty` check. This branch instead fires when every
+        # generator that reached the loop was skipped by one of six
+        # `continue`s. Three are legitimate "nothing to curtail" outcomes:
+        # not in `gens.index`, no `p_max_pu` column of its own (thermal), or
+        # negligible available energy (<=1e-9). The other three are
+        # failures — the computation never produced a usable number for that
+        # generator, which is not the same as it producing zero: a
+        # non-finite effective capacity, the bare `except Exception` around
+        # the reindex, and a non-finite weighted total. `failed` counts only
+        # those three, so `available` follows whether any of them fired —
+        # the same conflation Task 7 fixed for lost load (whole-branch
+        # review, Minor 2).
+        return CurtailmentComparison(available=(failed == 0))
 
     # System totals.
     total_bucket = {"total": 0.0, "by_period": {}}
@@ -193,7 +219,15 @@ def _compute_curtailment_summary(n, periods, is_multi, has_solve) -> Curtailment
         ap = total_avail["by_period"].get(p, 0.0)
         sys_rate_pp[p] = 100.0 * v / ap if ap > 1e-9 else 0.0
 
+    # At least one generator produced a real figure, so `available` is True —
+    # but `failed > 0` means the others did NOT, and their contribution is
+    # missing from every number below. Task 8 fixed the all-failed case (the
+    # empty return above); this is the partial case it recorded and deferred,
+    # which is the more dangerous of the two because the response looks
+    # complete. See ADR-0001.
     return CurtailmentComparison(
+        available=True,
+        partial=(failed > 0),
         total_gwh=_to_pv(total_bucket),
         by_carrier_gwh=_to_pv_dict(curt_by_carrier),
         rate_pct_by_carrier=_to_pv_dict(rate_by_carrier),

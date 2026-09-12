@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render, screen, cleanup, fireEvent, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi, simulationApi } from '../../api/simulation'
@@ -51,6 +51,10 @@ beforeEach(() => {
     capex: 0, capex_lifetime: 0, capex_expansion: 0, capex_expansion_lifetime: 0,
     opex: 0, total: 0, curtailment_cost: 0,
     storage_capex_expansion: 0, storage_capex_expansion_lifetime: 0,
+    // The backend emits this on every response. `true` is the ordinary case:
+    // every component class's upfront cost resolved and the `*_lifetime`
+    // figures above are real numbers rather than nulls.
+    capex_lifetime_available: true,
     by_component: [], by_carrier: [], by_period: [],
   })
   // Real shape is `{ by_carrier?: Record<...> }` (api/simulation.ts:337-350);
@@ -129,4 +133,206 @@ it('renders a distinctive optimal line sizing value sourced from the mocked netw
   // "424.2", so the single Lines row is the only match.
   const match = await screen.findByText((text) => text.includes('424.2'))
   expect(match).toBeTruthy()
+})
+
+// ── Upfront (PV) CAPEX unavailable ────────────────────────────────────────
+// `cost_breakdown`'s `*_lifetime` fields are `number | null`. `null` means the
+// backend could not resolve an upfront (overnight) cost for some component
+// class — on the user's live network that was Line, 95.8% of system CAPEX,
+// and this tab rendered `cost.capex_lifetime ?? 0` as a confident "€0.00".
+// The tab must now say "unavailable" instead, and must NOT reuse the "—" it
+// already prints for figures that genuinely do not apply (curtailment cost,
+// storage charge cost).
+
+/** The KPI card carrying `label` — `KPI` renders label and value as sibling
+ *  divs, so the label's PARENT is the card root. */
+function kpiCard(label: string): HTMLElement {
+  const el = screen.getAllByText(label).find(e => e.tagName === 'DIV')
+  if (!el?.parentElement) throw new Error(`no KPI card labelled "${label}"`)
+  return el.parentElement
+}
+
+/** Switch the cost strip to the PV / lifetime basis. */
+async function switchToLifetimeMode() {
+  fireEvent.click(await screen.findByText('Total investment (PV)'))
+}
+
+/** Backend response with every lifetime figure unresolvable. */
+function unavailablePayload() {
+  return {
+    capex: 8_067_640_124, capex_lifetime: null,
+    capex_expansion: 1_000, capex_expansion_lifetime: null,
+    opex: 500_000, total: 8_068_140_124, curtailment_cost: 0,
+    storage_capex_expansion: 0, storage_capex_expansion_lifetime: null,
+    capex_lifetime_available: false,
+    by_component: [], by_carrier: [], by_period: [],
+  }
+}
+
+it('shows the unavailable marker — not €0 — in the PV CAPEX KPIs', async () => {
+  // Fails if: the KPIs go back to `cost.capex_lifetime ?? 0` /
+  // `storage_capex_expansion_lifetime ?? 0`, which render "€0.00".
+  // Verified by restoring the `?? 0` on `displayCapex`: this assertion is what
+  // catches it.
+  vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue(unavailablePayload())
+  renderPage()
+  await switchToLifetimeMode()
+
+  expect(within(kpiCard('CAPEX (installed, PV)')).getByText('unavailable')).toBeTruthy()
+  expect(within(kpiCard('Total new investment (PV)')).getByText('unavailable')).toBeTruthy()
+  expect(within(kpiCard('Storage CAPEX (new, PV)')).getByText('unavailable')).toBeTruthy()
+  // …and the em-dash keeps its own, different meaning on the same strip.
+  expect(within(kpiCard('Curtailment cost')).getByText('—')).toBeTruthy()
+})
+
+it('refuses to print a total system cost built on an unknown CAPEX', async () => {
+  // Fails if: `displayCapex + displayOpex` is computed with a null CAPEX,
+  // which is NaN in JS and renders as "€NaN" — or worse, if the null is
+  // coalesced to 0 and the OPEX alone is published under a "Total system
+  // cost" label. Verified by reverting the KPI to
+  // `fmtCurrency(displayCapex + displayOpex)`.
+  vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue(unavailablePayload())
+  renderPage()
+  await switchToLifetimeMode()
+
+  const card = kpiCard('Total system cost')
+  expect(within(card).getByText('unavailable')).toBeTruthy()
+  expect(within(card).queryByText(/NaN/)).toBeNull()
+  expect(within(card).queryByText('€500.00 k')).toBeNull()   // the bare OPEX
+})
+
+it('explains the blank PV figures once, at the top of the tab', async () => {
+  // Fails if: the banner is deleted, leaving the reader to infer from four
+  // identical "unavailable" cells what happened. Verified by deleting it.
+  vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue(unavailablePayload())
+  renderPage()
+  await switchToLifetimeMode()
+
+  expect(await screen.findByText(/upfront \(PV\) investment costs are unavailable/i))
+    .toBeTruthy()
+})
+
+it('keeps the annualised figures, which do not depend on the failed resolve', async () => {
+  // Fails if: the fix blanks the whole tab (an early return), or lets the
+  // lifetime null leak into annualised mode. Annualised CAPEX comes from
+  // n.statistics() and is unaffected by the upfront-cost resolve — hiding it
+  // would throw away a working half of the tab, and the banner would be noise
+  // in a mode where nothing on screen is affected.
+  vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue(unavailablePayload())
+  renderPage()
+
+  // Default mode is Annualised — no banner, and real numbers.
+  await screen.findByText('CAPEX (installed)')
+  expect(within(kpiCard('CAPEX (installed)')).getByText('€8.07 B')).toBeTruthy()
+  expect(within(kpiCard('CAPEX (installed)')).queryByText('unavailable')).toBeNull()
+  expect(screen.queryByText(/upfront \(PV\) investment costs are unavailable/i)).toBeNull()
+})
+
+it('renders real PV figures untouched when every class resolved', async () => {
+  // Fails if: the unavailable path fires unconditionally, or keys off the
+  // presence of the flag rather than its value. Without this, a fix that
+  // reports EVERY run as unavailable passes every other test above.
+  vi.mocked(resultsApi.getCostBreakdown).mockResolvedValue({
+    ...unavailablePayload(),
+    capex_lifetime: 36_000_000_000,
+    capex_expansion_lifetime: 4_000,
+    storage_capex_expansion_lifetime: 0,
+    capex_lifetime_available: true,
+  })
+  renderPage()
+  await switchToLifetimeMode()
+
+  expect(within(kpiCard('CAPEX (installed, PV)')).getByText('€36.00 B')).toBeTruthy()
+  expect(screen.queryByText('unavailable')).toBeNull()
+  expect(screen.queryByText(/upfront \(PV\) investment costs are unavailable/i)).toBeNull()
+})
+
+// ── Per-asset overnight-cost unavailable (Investments-by-asset table) ─────
+// A SEPARATE consumer from the KPI strip above: `assetCosts` (GET
+// /api/simulation/asset_costs, `AssetCostMap`) feeds `costPerUnit`
+// (CapacityExpansion.tsx), which builds the per-asset "CAPEX" column on the
+// Lines/Generators/etc tables below the KPIs. The trap this guards: falling
+// through to `raw` (the row's own `capital_cost` field) whenever the backend
+// per-asset value looks unusable — `raw` is exactly 0 (or whatever the
+// network's raw column holds) for an asset priced through `overnight_cost`
+// alone, so an unresolved upfront cost used to render a confident currency
+// figure instead of a missing-data marker, silently reintroducing the exact
+// "€0" bug the backend fix exists to close.
+
+it('shows the unavailable marker — not a raw fallback number — for an asset whose upfront cost failed to resolve', async () => {
+  // Fails if: `costPerUnit`'s lifetime branch drops the
+  // `overnight_cost_available === false` check and falls through to
+  // `v != null && Number.isFinite(v) && v > 0 ? v : raw` unconditionally —
+  // `m.overnight_cost_pv` is `null` here, so that expression evaluates to
+  // `raw` (777), and the CAPEX cell would print a real currency figure
+  // (777 x 324.24 delta ≈ "€251.9 k") instead of "unavailable".
+  const unresolvedLine: Line & { s_nom_opt: number } = {
+    name: 'Line 1', bus0: 'Bus 0', bus1: 'Bus 1', length: 10, r: 0, x: 0, b: 0,
+    s_nom: 100, s_nom_extendable: true, s_nom_min: 0, s_nom_max: null,
+    // A distinctive nonzero `raw` so a reverted `costPerUnit` prints a
+    // distinctive, greppable wrong number rather than a `€0.00` that could
+    // be confused with the top KPI strip's own (legitimate) zero.
+    capital_cost: 777, fom_cost: 0, overnight_cost: null, discount_rate: null,
+    carrier: '', build_year: 2026, lifetime: null,
+    s_nom_opt: 424.24,
+  }
+  vi.mocked(networkApi.getLines).mockReset().mockResolvedValue([unresolvedLine])
+  vi.mocked(simulationApi.getAssetCosts).mockReset().mockResolvedValue({
+    lines: {
+      'Line 1': {
+        // Annualised resolves fine — independent of the upfront resolve.
+        capital_cost: 50_000,
+        overnight_cost: null,
+        overnight_cost_pv: null,
+        overnight_cost_available: false,
+        lifetime: 40,
+      },
+    },
+  })
+
+  renderPage()
+  await switchToLifetimeMode()
+
+  const row = (await screen.findByText('Line 1')).closest('tr')
+  if (!row) throw new Error('Lines table row not found')
+  // The CAPEX column is the last cell — read it directly rather than
+  // substring-searching the whole row, which also contains an (unrelated)
+  // "324.2 MVA" Built/Total cell that could otherwise collide with a numeric
+  // substring check.
+  const capexCell = row.querySelectorAll('td')[row.querySelectorAll('td').length - 1]
+  expect(capexCell.textContent).toBe('unavailable')
+})
+
+it('still derives a real per-asset PV figure when the upfront cost resolved', async () => {
+  // Fails if: the unavailable path fires unconditionally regardless of
+  // `overnight_cost_available`, which would make the derivable-case test
+  // above pass for the wrong reason (every asset "unavailable").
+  const resolvedLine: Line & { s_nom_opt: number } = {
+    name: 'Line 1', bus0: 'Bus 0', bus1: 'Bus 1', length: 10, r: 0, x: 0, b: 0,
+    s_nom: 100, s_nom_extendable: true, s_nom_min: 0, s_nom_max: null,
+    capital_cost: 0, fom_cost: 0, overnight_cost: null, discount_rate: null,
+    carrier: '', build_year: 2026, lifetime: null,
+    s_nom_opt: 424.24,
+  }
+  vi.mocked(networkApi.getLines).mockReset().mockResolvedValue([resolvedLine])
+  vi.mocked(simulationApi.getAssetCosts).mockReset().mockResolvedValue({
+    lines: {
+      'Line 1': {
+        capital_cost: 50_000,
+        overnight_cost: 1_000,
+        overnight_cost_pv: 1_000,
+        overnight_cost_available: true,
+        lifetime: 40,
+      },
+    },
+  })
+
+  renderPage()
+  await switchToLifetimeMode()
+
+  const row = (await screen.findByText('Line 1')).closest('tr')
+  if (!row) throw new Error('Lines table row not found')
+  // capex = overnight_cost_pv (1_000) x delta (324.24) = 324_240 -> "€324.2 k"
+  const capexCell = row.querySelectorAll('td')[row.querySelectorAll('td').length - 1]
+  expect(capexCell.textContent).toBe('€324.2 k')
 })

@@ -50,7 +50,7 @@ interface AggregatedOverviewProps {
  * windowed payload and every KPI silently becomes a window total under a
  * horizon label.
  *
- * Unreachable today: this tab's getters are called with one argument, so the
+ * Unreachable today: this tab's getters are called with zero arguments, so the
  * backend emits no `range` key at all. It exists for the day someone converts
  * them, which is the most likely way this design gets broken later.
  */
@@ -468,7 +468,19 @@ export default function AggregatedOverview({ weightCtx }: AggregatedOverviewProp
   // Must come AFTER the loading/empty-state guard above so a tab that is
   // still loading is never mistaken for one that received a partial
   // payload — see isPartialPayload's doc comment for why this matters.
-  const partial = isPartialPayload([gensTS as TSPayload | null, loadTS as TSPayload | null, storPowerTS as TSPayload | null])
+  //
+  // curtailTS / lostLoad are listed alongside gensTS/loadTS/storPowerTS
+  // deliberately, not as an afterthought: they feed `fullRange` sums too
+  // (curtailTS at the curtailment-energy/-cost KPIs and per-period bars;
+  // lostLoad at the lost-load KPIs and per-period VOLL bars), and they are
+  // exactly the two getters (`getCurtailment` / `getLostLoad`) this plan
+  // widened to accept an optional range — the most likely pair to be
+  // converted to a ranged call next. Omitting them would let a future
+  // "just these two" conversion pass this guard silently.
+  const partial = isPartialPayload([
+    gensTS as TSPayload | null, loadTS as TSPayload | null, storPowerTS as TSPayload | null,
+    curtailTS as TSPayload | null, lostLoad as TSPayload | null,
+  ])
   if (partial) {
     return (
       <div className="p-4 text-sm text-warn">

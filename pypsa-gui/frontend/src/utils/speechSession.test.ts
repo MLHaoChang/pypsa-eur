@@ -35,12 +35,14 @@ function handlers(): SpeechSessionHandlers & {
   onInterim: ReturnType<typeof vi.fn<(text: string) => void>>
   onListeningChange: ReturnType<typeof vi.fn<(listening: boolean) => void>>
   onError: ReturnType<typeof vi.fn<(message: string) => void>>
+  onPermissionDenied: ReturnType<typeof vi.fn<() => void>>
 } {
   return {
     onFinal: vi.fn<(text: string) => void>(),
     onInterim: vi.fn<(text: string) => void>(),
     onListeningChange: vi.fn<(listening: boolean) => void>(),
     onError: vi.fn<(message: string) => void>(),
+    onPermissionDenied: vi.fn<() => void>(),
   }
 }
 
@@ -113,14 +115,27 @@ describe('SpeechSession', () => {
     expect(h.onListeningChange).toHaveBeenLastCalledWith(false)
   })
 
-  it('maps permission errors and clears listening', () => {
+  it('maps permission errors, clears listening, and flags onPermissionDenied', () => {
     const { MockRecognition, instances } = mockCtor()
     const h = handlers()
     const session = new SpeechSession(MockRecognition as unknown as new () => SpeechRecognition, h)
     session.start()
     instances[0].onerror?.({ error: 'not-allowed' } as SpeechRecognitionErrorEvent)
-    expect(h.onError).toHaveBeenCalledWith(expect.stringMatching(/permission/i))
+    expect(h.onError).toHaveBeenCalledWith(expect.stringMatching(/denied/i))
     expect(h.onListeningChange).toHaveBeenCalledWith(false)
+    expect(h.onPermissionDenied).toHaveBeenCalledOnce()
+  })
+
+  it('does not flag onPermissionDenied for a non-denial error', () => {
+    // Negative control: a call site that invoked onPermissionDenied
+    // unconditionally on every error would pass the test above on its own.
+    const { MockRecognition, instances } = mockCtor()
+    const h = handlers()
+    const session = new SpeechSession(MockRecognition as unknown as new () => SpeechRecognition, h)
+    session.start()
+    instances[0].onerror?.({ error: 'no-speech' } as SpeechRecognitionErrorEvent)
+    expect(h.onError).toHaveBeenCalled()
+    expect(h.onPermissionDenied).not.toHaveBeenCalled()
   })
 
   it('restarts on end while still wanting to listen', () => {

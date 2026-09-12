@@ -34,9 +34,10 @@ EXIT CODES
 
 COST
 ----
-   ~$0.05-0.30 per full run (5-8 prompts at Sonnet pricing). Cheap enough
-   to run before each phase-end /qa-phase, or once per day during heavy
-   chatbot iteration. Each prompt is ~30-90s wall-clock.
+   No verified per-model pricing is published in this app, so no dollar
+   estimate is given here. Cheap enough to run before each phase-end
+   /qa-phase, or once per day during heavy chatbot iteration. Each prompt is
+   ~30-90s wall-clock.
 """
 from __future__ import annotations
 
@@ -65,7 +66,7 @@ except ImportError:
 
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 DEFAULT_MODEL = None  # Use whatever /api/chat/health reports as default.
-# Per-turn wall-clock cap. Sonnet 4.6 with 1-2 tool calls is typically 15-30s;
+# Per-turn wall-clock cap. Sonnet 5 with 1-2 tool calls is typically 15-30s;
 # a multi-step "create scenario + N components" turn can be 90-150s. Set to
 # 240s so a complex prompt (6+ tool calls) finishes without flapping.
 TURN_TIMEOUT_SECONDS = 240
@@ -169,6 +170,12 @@ class SmokePrompt:
     # project's name + base_url + a session.requests.Session for cheap reads.
     # Should return None on PASS, or a failure string on FAIL.
     post_assertion: Any = None  # Callable[[ctx], str | None] - kept loose to avoid forward-ref noise
+    # Tool names this prompt MUST have called. A tool the model never
+    # reaches is the failure mode a description bug produces: the turn
+    # succeeds, the answer looks plausible, and the new tool is dead code.
+    # Asserted against the tool_request frames, so it measures what the
+    # model chose — not what we hoped it would choose.
+    expected_tools: set[str] = field(default_factory=set)
     # Optional shared session id — when two SmokePrompts set the SAME
     # session_id, _run_one_prompt reuses it instead of minting a fresh
     # smoke-{uuid} for each, giving them one continuous chat.session_id
@@ -187,6 +194,11 @@ class SmokeContext:
     session: requests.Session
     verbose: bool
     model: str | None
+    # Task 11 — the profile is the modern selector; `model` is the legacy one.
+    # Both are sent when set: the backend prefers `profile_id` and falls back
+    # to translating `model` through `llm_config.resolve_legacy_model`, so an
+    # old invocation of this script keeps working unchanged.
+    profile_id: str | None = None
 
 
 def _print_frame_compact(frame: SSEFrame, verbose: bool) -> None:
@@ -215,6 +227,11 @@ def _run_one_prompt(prompt: SmokePrompt, ctx: SmokeContext) -> PromptResult:
         "session_id": session_id,
         "message": prompt.message,
     }
+    # `profile_id` wins server-side when both are present; `model` is kept so
+    # an existing `--model claude-opus-5` invocation still selects the built-in
+    # opus profile via `resolve_legacy_model` rather than erroring.
+    if ctx.profile_id:
+        body["profile_id"] = ctx.profile_id
     if ctx.model:
         body["model"] = ctx.model
 
@@ -315,6 +332,18 @@ def _run_one_prompt(prompt: SmokePrompt, ctx: SmokeContext) -> PromptResult:
         kinds = [e.get("error_kind") or e.get("message", "?") for e in unexpected]
         result.extra_failure = f"unexpected tool_error(s): {kinds}"
         return result
+
+    # Did the model actually reach for the tools this prompt exists to
+    # exercise? Checked before the on-disk assertion because "the network
+    # ended up right" can be true while the intended tool was never used.
+    if prompt.expected_tools:
+        never_called = sorted(prompt.expected_tools - set(result.tool_calls))
+        if never_called:
+            result.extra_failure = (
+                f"expected tool(s) never called: {never_called} "
+                f"(model used: {sorted(set(result.tool_calls)) or 'none'})"
+            )
+            return result
 
     # Post-run on-disk assertion (optional).
     if prompt.post_assertion is not None:
@@ -550,6 +579,69 @@ def build_prompts(smoke_project: str) -> list[SmokePrompt]:
             session_id=p8_session_id,
             post_assertion=assert_component_field("loads", "SmokeLoad", "p_set", 84.0),
         ),
+        # ── Tools added 2026-08-10 (#15, #16, #17) ─────────────────────────
+        #
+        # These exist because a tool's DESCRIPTION is its whole interface to
+        # the model, and that is the one thing a unit test cannot check. The
+        # pitfalls log records two bugs found only here: read_excel_sheet
+        # returning "(first sheet)" which the model echoed straight back, and
+        # a schema `required` array that disagreed with the Python signature.
+        # Both passed every unit test in the repo.
+        SmokePrompt(
+            name="P9_diagnose_network",
+            # Deliberately phrased as the question a stuck user asks, not as
+            # "call diagnose_network" — the point is whether the description
+            # makes the model REACH for it unprompted. Bus0/1/2 have no
+            # branches, so a correct answer reports several islands.
+            message=(
+                "My network won't solve and I can't see why. Is it actually "
+                "one connected electrical system?"
+            ),
+            expected_tools={"diagnose_network"},
+        ),
+        SmokePrompt(
+            name="P10_batch_create",
+            # "in a single call" is the load-bearing phrase: without it the
+            # model may loop create_component 12 times, which still succeeds
+            # and would hide the fact that the batch tool is unreachable.
+            message=(
+                "Add 12 buses named Batch00 through Batch11, each with "
+                "v_nom=220. Create them in a SINGLE tool call, not one at a "
+                "time."
+            ),
+            expected_tools={"batch_create_components"},
+            post_assertion=assert_bus_count_at_least(15),
+        ),
+        SmokePrompt(
+            name="P11_paginated_list",
+            # The return shape changed under the model: a bare list became
+            # {items, total_count, offset, returned, has_more}, so this
+            # checks the model can still read a bus list out of it.
+            #
+            # The first version of this prompt asked "how many buses are in
+            # the network in total?" and failed — the model answered with
+            # get_meta, which returns bus_count directly. That was the RIGHT
+            # call and a wrong assertion: a counting question is not an
+            # enumeration question, and asserting a tool the task does not
+            # need tests our preference, not the model's judgement. Ask for
+            # something only enumeration can answer.
+            message=(
+                "List the names of every bus currently in the network, and "
+                "tell me which of them have v_nom of 220."
+            ),
+            expected_tools={"list_components"},
+        ),
+        SmokePrompt(
+            name="P12_batch_delete",
+            # Destructive tier, so this also exercises the confirmation
+            # round-trip and the #19 pre-dispatch validator on a batch whose
+            # names all exist.
+            message=(
+                "Delete all 12 of the Batch00-Batch11 buses in a single call."
+            ),
+            expected_tools={"batch_delete_components"},
+            post_assertion=assert_component_absent("buses", "Batch07"),
+        ),
     ]
 
 
@@ -567,7 +659,16 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true",
                         help="Print every SSE frame.")
     parser.add_argument("--model", default=DEFAULT_MODEL,
-                        help="Override the chat model (default: backend default).")
+                        help="Override the chat model (default: backend default). "
+                             "Legacy selector — the backend translates an "
+                             "unrecognised value to the ACTIVE profile with a "
+                             "warning rather than refusing it.")
+    parser.add_argument("--profile", default=None, dest="profile_id",
+                        help="Run the smoke against a configured LLM profile "
+                             "id (e.g. anthropic-opus, or a custom "
+                             "openai-wire profile). Takes precedence over "
+                             "--model. This is how you smoke a NON-Anthropic "
+                             "provider end-to-end.")
     args = parser.parse_args()
 
     session = requests.Session()
@@ -598,6 +699,7 @@ def main() -> int:
         session=session,
         verbose=args.verbose,
         model=args.model,
+        profile_id=args.profile_id,
     )
 
     prompts = build_prompts(smoke_project)

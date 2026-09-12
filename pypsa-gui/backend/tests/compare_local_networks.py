@@ -146,7 +146,15 @@ def write_lost_load_capture(
     from services.project_context import RESULT_STATE_KEYS
 
     df = pd.DataFrame(per_bus_mwh, index=n.snapshots)
-    total_mwh = float(df.to_numpy().sum())
+    # SNAPSHOT-WEIGHTED, generators basis — mirrors the solver's capture
+    # since the 2026-08-14 fix (the raw MW sum understated energy by the
+    # weight factor on representative-period networks; on the unit-weight
+    # networks every existing caller builds, weighted == raw). Keeping this
+    # helper byte-faithful to solver_service._capture_and_remove_slacks is
+    # its entire job — see the format contract in the docstring above.
+    from services import period_utils
+    w = period_utils.snapshot_weights(n, "generators").reindex(df.index).fillna(1.0)
+    total_mwh = float(df.clip(lower=0).mul(w, axis=0).to_numpy().sum())
     total_cost = total_mwh * voll
 
     data: dict = {k: None for k in RESULT_STATE_KEYS}

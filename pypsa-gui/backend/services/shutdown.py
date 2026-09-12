@@ -132,6 +132,26 @@ def _context_solves() -> list[tuple[Any, Any, str | None]]:
         except Exception:  # pragma: no cover - defensive
             logger.exception("could not read solver state for a context")
             continue
+        if kind == "queue":
+            # A queue job's context is REGISTERED now (one ProjectContext per
+            # project, always), so this walk and the job table in
+            # `solves_in_flight` would each report the same solve. The job
+            # table stays the single source for the queue path because it is
+            # the only one that also sees a job that is still `queued`.
+            #
+            # Skipping here is also what keeps a background queue solve out of
+            # the `"active"` bucket below, whose label ("an open project") and
+            # remedy are written for a foreground `/run`. A queue solve is
+            # reported from the job table instead, under the `"queue"` kind,
+            # and `desktop/gui.py:_abort_everything` stops it with
+            # `solve_queue.abort`. NOTE it is no longer true that
+            # `/api/simulation/abort` cannot reach a queue job: now that the
+            # session resolves to the queue-owned context, `_state["stop_event"]`
+            # IS that job's stop event, so the endpoint does stop it. The
+            # double-counting above is the reason for this `continue`; the
+            # bucket is only about which name and channel the quit dialog
+            # reports.
+            continue
         if thread is not None and thread.is_alive():
             found.append((ctx, thread, kind))
     return found
@@ -142,15 +162,24 @@ def solves_in_flight() -> list[InFlightSolve]:
     Every running solve, across all three paths.
 
     Path (b) consults the QUEUE'S OWN JOB TABLE, not the context registry.
-    `solve_queue._run_job` reuses the RESIDENT context when the project already
-    has one — so that a foreground edit is included in the solve — and only
-    otherwise calls `PyPSAService.build_context()`, which is documented as "off
-    to the side, not activated" and is never registered.
+    Every queue job's context IS registered now — `solve_queue._run_job` and
+    `PyPSAService.build_context()` both go through the shared
+    `hydrate_or_adopt` lock, one `ProjectContext` per project, always — and
+    `_context_solves()` deliberately SKIPS any context whose `kind` is
+    `"queue"` so this walk and the job table never double-report the same
+    solve.
 
-    So the registry finds SOME queue solves and not others, which is worse than
-    finding none: it looks like it works. The job table is the only complete
-    source. (Constraint #6 originally stated the unqualified "neither", which
-    is half wrong; corrected in the plan.)
+    The job table stays the source for path (b) regardless: `_context_solves()`
+    deliberately skips `kind == "queue"` contexts (see its comment), so without
+    the table a running queue solve would not be reported at all.
+
+    Only a RUNNING queue job counts. A `queued` job has no live thread, its row
+    is durable, and boot reconciliation re-enqueues it (R25/R28) — nothing about
+    it is in flight, and `desktop/gui.py:_abort_everything` deliberately leaves
+    it alone. Counting it made the quit's wait() unsatisfiable: the wait polls
+    this function until it drains, no signal ever terminates a queued job, so
+    every quit with a backlog burned the full ABORT_TIMEOUT and reported
+    `abort_timed_out` on a shutdown that lost nothing.
     """
     found: list[InFlightSolve] = []
 
@@ -171,9 +200,13 @@ def solves_in_flight() -> list[InFlightSolve]:
         from services.solve_queue import solve_queue
 
         for job in solve_queue.list_jobs():
-            if job.get("status") in ("queued", "running"):
+            if job.get("status") == "running":
+                # `to_public` emits `project_id` (the display NAME) and
+                # `project_key` — it has NEVER emitted `project_name`, which is
+                # what this line used to read, so every queue solve was labelled
+                # `job <id>` in the confirmation the user is asked to act on.
                 found.append(InFlightSolve(
-                    "queue", job.get("project_name") or f"job {job.get('id')}", True,
+                    "queue", job.get("project_id") or f"job {job.get('id')}", True,
                 ))
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("could not inspect the solve queue: %s", exc)

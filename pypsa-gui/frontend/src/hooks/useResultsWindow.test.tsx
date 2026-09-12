@@ -67,7 +67,10 @@ describe('useResultsWindow', () => {
     expect(result.current.winValid).toBe(false)
     await waitFor(() => expect(result.current.winValid).toBe(true))
     expect(result.current.win).toEqual({ from: 0, to: 2 })
-    // Exactly one fetch — no phantom "snapshot 0" round-trip before the real one.
+    // The snapshots query itself fires exactly once — no phantom "snapshot 0"
+    // round-trip before the real one resolves. This does NOT cover the seven
+    // downstream Dispatch-style queries keyed on `win.from`/`win.to`; those
+    // are asserted per-tab (e.g. Dispatch.test.tsx), not here.
     expect(getSnapshots).toHaveBeenCalledTimes(1)
   })
 
@@ -85,5 +88,54 @@ describe('useResultsWindow', () => {
     // resolveRange's "period not present" branch: {from: index.length, to: -1}.
     await waitFor(() => expect(result.current.win).toEqual({ from: 2, to: -1 }))
     expect(result.current.winValid).toBe(false)
+  })
+
+  // FIX 1 (results-tabs-window final review, Critical): the six windowing
+  // tabs pass `fetchRange` — not `win` — to their `resultsApi.get*` calls.
+  // `win` still drives the query key so caching-by-window-position keeps
+  // working; `fetchRange` is what actually goes out on the wire, and it must
+  // be `undefined` whenever `win` covers the whole horizon, so the request
+  // has no `from`/`to` and can never hit the backend's MAX_RESPONSE_VALUES
+  // cap (`_wants_slice` in routers/results.py only slices — and therefore
+  // only caps — when bounds are present). These two tests are the
+  // discrimination proof: reverting `fetchRange` to always return `win`
+  // (i.e. dropping the `isWhole` branch) makes the first test fail, because
+  // `fetchRange` would then be `{from: 0, to: 2}` instead of `undefined`.
+  it('fetchRange is undefined when the filter covers the whole horizon', async () => {
+    const snapshots = [
+      '2026-01-01T00:00:00', '2026-01-01T01:00:00', '2026-01-01T02:00:00',
+    ]
+    getSnapshots.mockResolvedValue({ count: 3, snapshots, weightings: [] })
+    const client = makeClient()
+    const { result } = renderHook(() => useResultsWindow('proj'), {
+      wrapper: wrapperWithFilter(client),
+    })
+    await waitFor(() => expect(result.current.winValid).toBe(true))
+    // Observed: win = {from: 0, to: 2} (the full 3-snapshot horizon) —
+    // total - 1 === 2, so isWhole is true and fetchRange drops to undefined.
+    expect(result.current.win).toEqual({ from: 0, to: 2 })
+    expect(result.current.fetchRange).toBeUndefined()
+  })
+
+  it('fetchRange equals win when the filter narrows the window', async () => {
+    const snapshots = [
+      '2026-01-01T00:00:00', '2026-01-01T01:00:00', '2026-01-01T02:00:00',
+    ]
+    getSnapshots.mockResolvedValue({ count: 3, snapshots, weightings: [] })
+    const client = makeClient()
+    // Narrow to the first two snapshots only — win no longer covers the
+    // whole horizon (total - 1 === 2, win.to === 1).
+    const filter: ResultsFilter = {
+      fromIso: snapshots[0], toIso: snapshots[1], selectedPeriod: null,
+    }
+    const { result } = renderHook(() => useResultsWindow('proj'), {
+      wrapper: wrapperWithFilter(client, filter),
+    })
+    await waitFor(() => expect(result.current.winValid).toBe(true))
+    // Observed: win = {from: 0, to: 1} — narrower than the full {0, 2}
+    // horizon, so fetchRange must equal win (the ranged path is correct
+    // here; the server SHOULD be asked to slice).
+    expect(result.current.win).toEqual({ from: 0, to: 1 })
+    expect(result.current.fetchRange).toEqual(result.current.win)
   })
 })

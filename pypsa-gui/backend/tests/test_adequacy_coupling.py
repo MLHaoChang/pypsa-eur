@@ -428,6 +428,120 @@ def test_refinement_stops_when_the_midpoint_reproduces_the_met_plan():
     assert res["eps_star"] == pytest.approx(50.0)
 
 
+class _Clamping:
+    """``fake.solve_at`` behind a lever that CLAMPS.
+
+    Every coordinate stricter than ``at`` is SOLVED AT ``at`` — the shape the
+    margin loop's fleet ceiling has, where a whole range of margins maps onto
+    the strictest reachable one. ``probe`` decides whether the caller also
+    offers the optional ``solved_value`` attribute, which is the whole
+    difference this pair of tests measures.
+    """
+
+    def __init__(self, fake, *, at: float, probe: bool = True):
+        self.fake = fake
+        self.at = float(at)
+        self.asked: list[float] = []
+        if probe:
+            self.solved_value = self._solved_value
+
+    def _solved_value(self, e: float) -> float:
+        return max(float(e), self.at)
+
+    def __call__(self, e: float) -> dict:
+        self.asked.append(float(e))
+        return self.fake.solve_at(self._solved_value(e))
+
+
+def _clamped_fake() -> "Fake":
+    """The plateau test's own bracket — a miss at 100 and a met at 25, whose
+    midpoint reproduces the met plan — so the clamped tests below differ from
+    it in the LEVER and in nothing else."""
+    step = {"hash": "B", "lole": 2.0, "cost_eur": 1500.0,
+            "binding": "system_cap"}
+    return Fake(
+        [{"hash": "A", "lole": 5.0, "cost_eur": 1000.0, "binding": "system_cap"},
+         dict(step)],
+        tail=dict(step))
+
+
+def test_a_clamped_midpoint_is_not_solved_at_all():
+    """★ B1 (IEEE 39-bus review, F5). A lever that CLAMPS turns the
+    bisection's fresh midpoint into the met endpoint's own standard:
+    identical LP, identical plan, identical MC. The hash check in the
+    refinement loop already stops the search there — but only after paying
+    the solve, which on a real network is a full capacity expansion plus a
+    sampling run.
+
+    ``solve_at.solved_value`` is how a caller says so for free, and the loop
+    then stops without asking. The bracket here is the plateau test's, so the
+    only difference between the two is the lever.
+
+    BROKEN VARIANT (bite): drop the ``_would_re_solve`` test in the refinement
+    loop — the midpoint is solved, the plan comes back identical, and the hash
+    check breaks one solve later. That is the sibling test below, which pins
+    the same three solves as the behaviour when no probe is offered.
+    """
+    fake = _clamped_fake()
+    solve_at = _Clamping(fake, at=60.0)
+
+    res = run_coupling_loop(solve_at, fake.evaluate, target_lole_h=3.0,
+                            eps0=100.0, max_solves=8)
+
+    # The midpoint 50 of the bracket (25, 100) was never asked for.
+    assert solve_at.asked == [100.0, 25.0]
+    assert fake.eps_calls == [100.0, 60.0]          # …and 25 SOLVED at 60
+    assert res["solves_used"] == 2
+    assert res["status"] == "met"
+    assert res["final"]["eps_permyriad"] == pytest.approx(25.0)
+
+
+def test_without_the_probe_the_clamped_midpoint_still_costs_a_solve():
+    """★ The control for the test above, and the reason the probe is OPTIONAL
+    rather than required: a caller that does not offer one is unchanged, down
+    to the answer it gets. The loop solves the midpoint, sees the met
+    endpoint's own hash and stops — one solve later, same verdict.
+
+    The coordinate the extra solve buys is an ARTEFACT, which is why skipping
+    it above loses nothing: both 25 and 50 are solved AT 60, so the "looser"
+    midpoint is not a looser standard (contrast the plateau case, where it
+    genuinely is and taking it is the point).
+    """
+    fake = _clamped_fake()
+    solve_at = _Clamping(fake, at=60.0, probe=False)
+    assert not hasattr(solve_at, "solved_value")
+
+    res = run_coupling_loop(solve_at, fake.evaluate, target_lole_h=3.0,
+                            eps0=100.0, max_solves=8)
+
+    assert solve_at.asked == [100.0, 25.0, pytest.approx(50.0)]
+    assert fake.eps_calls == [100.0, 60.0, 60.0]    # the same margin, twice
+    assert res["solves_used"] == 3
+    assert res["status"] == "met"
+
+
+def test_a_probe_that_raises_falls_back_to_solving():
+    """★ The controller's standing rule: nothing a caller hands it may escape
+    or change the answer. A broken ``solved_value`` costs the solve the probe
+    would have saved and nothing else — the run still ends `met`, on the same
+    iterates the no-probe control produces.
+    """
+    fake = _clamped_fake()
+    solve_at = _Clamping(fake, at=60.0, probe=False)
+
+    def _boom(_e):
+        raise RuntimeError("the probe is broken")
+
+    solve_at.solved_value = _boom
+
+    res = run_coupling_loop(solve_at, fake.evaluate, target_lole_h=3.0,
+                            eps0=100.0, max_solves=8)
+
+    assert solve_at.asked == [100.0, 25.0, pytest.approx(50.0)]
+    assert res["solves_used"] == 3
+    assert res["status"] == "met"
+
+
 # ── ★ the stopping band ───────────────────────────────────────────────────
 
 def test_met_is_the_mean_and_the_interval_only_reports_confidence():

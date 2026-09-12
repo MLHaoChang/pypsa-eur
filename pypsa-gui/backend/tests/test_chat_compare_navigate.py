@@ -81,6 +81,77 @@ def test_compare_scenarios_headlines_and_delta(monkeypatch):
     assert out["focus_section"]["a"]["capacity_mw_by_carrier"]["gas"]["total"] == 100.0
 
 
+def test_compare_scenarios_headlines_null_when_one_side_unavailable(monkeypatch):
+    """
+    Important finding: `_scenario_headlines` must not ship a fabricated zero
+    for a block that never resolved. A with `has_solve=False` (capacity and
+    dispatch both unresolved) is paired with B, resolved on the SAME call —
+    so this can't pass against code that always returns `None` (B must show
+    real numbers) or against code that always returns `0.0` (A must show
+    `None` and its delta must be suppressed) — see the "every branch needs
+    its pair" rule.
+    """
+    def fake_summary(name: str):
+        if name == "A":
+            return {
+                "project": "A",
+                "has_solve": False,
+                "is_multi_period": False,
+                "periods": [],
+                "capacity": {
+                    "available": False,
+                    "capacity_mw_by_carrier": {},
+                    "capex_meur_by_carrier": {},
+                    "new_capex_meur_by_carrier": {},
+                },
+                "dispatch": {
+                    "available": False,
+                    "dispatch_gwh_by_carrier": {},
+                    "opex_meur": None,
+                    "total_load_gwh": None,
+                },
+            }
+        return {
+            "project": "B",
+            "has_solve": True,
+            "is_multi_period": False,
+            "periods": [],
+            "capacity": {
+                "available": True,
+                "capacity_mw_by_carrier": {"gas": {"total": 120.0, "by_period": {}}},
+                "capex_meur_by_carrier": {"gas": {"total": 12.0, "by_period": {}}},
+                "new_capex_meur_by_carrier": {},
+            },
+            "dispatch": {
+                "available": True,
+                "dispatch_gwh_by_carrier": {"gas": {"total": 55.0, "by_period": {}}},
+                "opex_meur": {"total": 6.0, "by_period": {}},
+                "total_load_gwh": {"total": 60.0, "by_period": {}},
+            },
+        }
+
+    monkeypatch.setattr(chat_tools, "get_project_results_summary", fake_summary)
+    out = chat_tools.compare_scenarios("A", "B", focus="capacity")
+
+    # A (unavailable) must ship None, not a fabricated zero.
+    assert out["a"]["capacity_mw_total"] is None
+    assert out["a"]["capex_meur_total"] is None
+    assert out["a"]["new_capex_meur_total"] is None
+    assert out["a"]["dispatch_gwh_total"] is None
+    # A delta against an unresolved figure is meaningless.
+    assert out["delta_b_minus_a"]["capacity_mw_total"] is None
+    assert out["delta_b_minus_a"]["capex_meur_total"] is None
+    assert out["delta_b_minus_a"]["new_capex_meur_total"] is None
+    assert out["delta_b_minus_a"]["dispatch_gwh_total"] is None
+
+    # B, its pair — still resolved, still ships real numbers (including a
+    # genuine 0.0 for new_capex_meur_total, which is measured, not missing).
+    assert out["b"]["capacity_mw_total"] == 120.0
+    assert out["b"]["capex_meur_total"] == 12.0
+    assert out["b"]["new_capex_meur_total"] == 0.0
+    assert out["b"]["dispatch_gwh_total"] == 55.0
+
+
 def test_compare_scenarios_in_dispatchers():
     assert "compare_scenarios" in chat_tools.DISPATCHERS
     assert chat_tools.DISPATCHERS["compare_scenarios"] is chat_tools.compare_scenarios

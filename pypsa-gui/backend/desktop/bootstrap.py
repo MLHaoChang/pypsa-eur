@@ -94,6 +94,13 @@ def install_file_logging():
         root.addHandler(handler)
         if root.level > logging.INFO or root.level == logging.NOTSET:
             root.setLevel(logging.INFO)
+        # Belt: httpx logs full request URLs at INFO, and str(URL) preserves
+        # userinfo (user:pass@host); base_url validation already rejects a
+        # userinfo-bearing base_url, so this only ever guards a value that
+        # should already be unreachable. Cap both loggers rather than rely on
+        # that alone.
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
         _file_handler = handler
         return path
     except Exception:

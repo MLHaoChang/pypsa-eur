@@ -18,14 +18,44 @@
  */
 import { client } from './client'
 import { rawFetchHeaders } from './csrf'
+import type { UiContext } from '../utils/uiContext'
 
-// Latest Sonnet + Opus. Keep in sync with the backend DEFAULT_MODEL/OPUS_MODEL
-// (chat_service.py) and PRICING_USD_PER_MTOK (chatStore.ts).
-export type ChatModel = 'claude-sonnet-4-6' | 'claude-opus-4-8'
+/**
+ * A model id. Deliberately a bare `string`, no longer a closed union.
+ *
+ * It used to be `'claude-sonnet-5' | 'claude-opus-5'`, kept "in sync with
+ * chat_service.DEFAULT_MODEL / OPUS_MODEL". That stopped being possible once
+ * a user can configure OpenAI, Moonshot, Qwen, Ollama or any
+ * OpenAI-compatible endpoint: the set is open, lives in the user's profile
+ * store, and a model newer than this build must still work.
+ *
+ * The VALIDATOR moved rather than disappeared — `services/llm_config.py`
+ * resolves a profile server-side, so a request can only ever name a
+ * CONFIGURED profile. Widening this type does not widen what the backend
+ * accepts.
+ */
+export type ChatModel = string
 
 export interface ChatStreamRequest {
   session_id?: string
   message?: string
+  /**
+   * Which configured profile to bind this session to. Preferred over
+   * `model`; the server resolves it and refuses an unconfigured id — as a
+   * typed `unknown_profile_id` error frame on a 200 SSE stream, not a 4xx,
+   * since a non-2xx SSE body is discarded here. No turn is run and the
+   * session keeps whatever profile it was already bound to.
+   * OMIT IT to mean "the server's active profile" — sending one
+   * unconditionally would re-assert a stale choice every turn and undo both
+   * an admin's `set_active_profile` and any A8 fallback.
+   */
+  profile_id?: string
+  /**
+   * Legacy selector, kept so an older client keeps working. The server maps
+   * the two built-in model strings onto their profiles and translates
+   * anything unrecognised to the ACTIVE profile with a warning — it does not
+   * refuse, because free-text passthrough is a documented contract.
+   */
   model?: ChatModel
   // The Phase 2 stub `script` is ALSO accepted by the backend; production
   // callers omit it (the real run_turn drives via Anthropic SDK). Tests can
@@ -36,6 +66,16 @@ export interface ChatStreamRequest {
   // Word / CSV files are NOT valid here — agents go through the
   // read_excel_sheet tool instead.
   attachment_file_ids?: string[]
+  // Deixis — what the user is LOOKING AT when they hit send, so "why is this
+  // so high?" has a referent. Built by `utils/uiContext.ts`, which is also
+  // where the identifiers-only rule is written down; the server enforces the
+  // same allowlist, so attaching values here fails closed.
+  ui_context?: UiContext
+  // 'voice' when the turn was dictated. A field rather than something the
+  // server infers, because reconstructing it later from timing or content is
+  // guesswork — and speech reciprocity (a spoken turn gets a spoken answer)
+  // depends on getting it right.
+  input_mode?: 'voice' | 'text'
 }
 
 export interface ChatFrame {
@@ -132,11 +172,44 @@ export async function postChatAbort(sessionId: string): Promise<{ ok: boolean }>
   return r.data
 }
 
+/**
+ * Drop the last `turns` turns from the session's API history.
+ *
+ * What makes retry / edit-and-resend real rather than cosmetic: the array
+ * replayed to the model lives on the server, so clearing the browser alone
+ * leaves the answer being retried in context — and the model reads its own
+ * last answer and repeats it.
+ *
+ * `dropped: 0` with `ok: true` is a legitimate outcome (unknown session, or a
+ * turn in flight, which the server refuses to rewind under).
+ */
+export async function postChatRewind(
+  sessionId: string, turns = 1,
+): Promise<{ ok: boolean; dropped: number }> {
+  const r = await client.post(`/chat/${sessionId}/rewind`, { turns })
+  return r.data
+}
+
 export interface ChatHealth {
   ok: boolean
+  /**
+   * Literally "the ANTHROPIC_API_KEY slot is set" — unchanged semantics, not
+   * "the active profile has a key". Kept as an alias so existing consumers
+   * (and the backend's own smoke scripts) keep working; use `chat_ready` for
+   * the question "can the assistant answer right now".
+   */
   anthropic_api_key_present: boolean
   default_model: ChatModel
   confirmation_ttl_seconds: number
+  /**
+   * The active profile, minimally. This endpoint is UNAUTHENTICATED-adjacent
+   * (it sits behind the global auth middleware but is the panel's cheap
+   * probe), so it exposes nothing enumerable: no profiles list, no base_url,
+   * no key hints. Use `GET /chat/profiles` for the list.
+   */
+  active_profile?: { id: string; label: string; wire: 'anthropic' | 'openai' }
+  /** Active profile resolves AND its auth requirement is satisfied. */
+  chat_ready?: boolean
 }
 
 export async function getChatHealth(): Promise<ChatHealth> {
@@ -183,7 +256,13 @@ export async function deleteApiKeySettings(): Promise<ApiKeySettings> {
 export interface ChatTurn {
   ts: number
   session_id: string
+  /** Resolved model id. Kept alongside `profile_id`, never replaced by it —
+   *  four consumers (import validation, history rehydration, an e2e pin, and
+   *  this type) key on it, and old records on disk carry only this. */
   model: ChatModel
+  /** Which profile produced the turn. Absent on records written before
+   *  profiles existed; the reader falls back to resolving `model`. */
+  profile_id?: string
   user: string
   assistant: Array<Record<string, unknown>>
   usage: {
@@ -197,10 +276,30 @@ export interface ChatTurn {
   attachment_file_ids?: string[]
 }
 
+// A turn that started and never finished, recovered from the server's
+// pending-turn WAL. Carries the user's message only — there is no assistant
+// half, which is precisely what makes it worth reporting.
+export interface InterruptedTurn {
+  ts: number
+  session_id: string
+  model: ChatModel
+  user: string
+  // NO `profile_id` here, deliberately, and not an oversight: the pending-turn
+  // WAL record (`chat_service.begin_pending_turn`) writes only ts/session_id/
+  // model/user. It exists to say "your message was interrupted" and let the
+  // user resend — it is never promoted into the transcript, so it needs no
+  // provenance. `ChatTurn` (a real, answered turn) does carry `profile_id`.
+}
+
 export interface ChatHistory {
   turns: ChatTurn[]
   last_session_id: string | null
   bound_project: string | null
+  // How many on-disk records were unreadable. Non-zero means `turns` is
+  // INCOMPLETE — say so rather than rendering a quietly shorter conversation.
+  history_gap: number
+  // Reported once, then cleared server-side; null on a clean reload.
+  pending_turn: InterruptedTurn | null
 }
 
 export async function getChatHistory(limit = 200): Promise<ChatHistory> {

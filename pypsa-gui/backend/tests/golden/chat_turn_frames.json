@@ -29,7 +29,9 @@
   [
    "session_init",
    {
-    "model": "claude-sonnet-4-6",
+    "model": "claude-sonnet-5",
+    "profile_id": "anthropic-sonnet",
+    "profile_label": "Claude Sonnet",
     "session6": "<session6>",
     "session_id": "<session_id>",
     "tool_count": "<tool_count>"
@@ -48,7 +50,8 @@
      "cache_create_tokens": 0,
      "cache_read_tokens": 0,
      "input_tokens": 11,
-     "output_tokens": 7
+     "output_tokens": 7,
+     "reported": true
     }
    }
   ]
@@ -57,7 +60,9 @@
   [
    "session_init",
    {
-    "model": "claude-sonnet-4-6",
+    "model": "claude-sonnet-5",
+    "profile_id": "anthropic-sonnet",
+    "profile_label": "Claude Sonnet",
     "session6": "<session6>",
     "session_id": "<session_id>",
     "tool_count": "<tool_count>"
@@ -90,24 +95,30 @@
   [
    "tool_result",
    {
-    "result": [
-     {
-      "carrier": "AC",
-      "control": "PQ",
-      "generator": "",
-      "location": "",
-      "name": "B1",
-      "sub_network": "",
-      "type": "",
-      "unit": "",
-      "v_mag_pu_max": null,
-      "v_mag_pu_min": 0.0,
-      "v_mag_pu_set": 1.0,
-      "v_nom": 1.0,
-      "x": 0.0,
-      "y": 0.0
-     }
-    ],
+    "result": {
+     "has_more": false,
+     "items": [
+      {
+       "carrier": "AC",
+       "control": "PQ",
+       "generator": "",
+       "location": "",
+       "name": "B1",
+       "sub_network": "",
+       "type": "",
+       "unit": "",
+       "v_mag_pu_max": null,
+       "v_mag_pu_min": 0.0,
+       "v_mag_pu_set": 1.0,
+       "v_nom": 1.0,
+       "x": 0.0,
+       "y": 0.0
+      }
+     ],
+     "offset": 0,
+     "returned": 1,
+     "total_count": 1
+    },
     "tool_name": "list_components",
     "tool_use_id": "tu-1"
    }
@@ -125,7 +136,8 @@
      "cache_create_tokens": 0,
      "cache_read_tokens": 0,
      "input_tokens": 58,
-     "output_tokens": 15
+     "output_tokens": 15,
+     "reported": true
     }
    }
   ]

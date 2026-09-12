@@ -13,7 +13,6 @@ import pandas as pd
 import pypsa
 import pytest
 
-from services import chat_tools as T
 from services import topology_analyzer as A
 from services.solver_service import SolverConfig
 from services.validation_service import has_errors, validate_for_run
@@ -208,35 +207,31 @@ def test_a_healthy_connected_network_is_silent():
     assert A.topology_issues(n) == []
 
 
-# ── The chat tool ──────────────────────────────────────────────────────────
+# ── The tool that reads it ─────────────────────────────────────────────────
+#
+# The chat-facing `diagnose_network` is master's (backlog 15, shipped on the
+# base branch with its own contract and tests in test_chat_tools_diagnose.py).
+# This module is NOT that tool: it backs the preflight warnings and the study
+# report's evidence gaps, which the tool does not do. Both walk the bus graph,
+# and unifying them is a follow-up on the shipped tool rather than something
+# to smuggle into a merge — recorded here so the duplication is deliberate and
+# visible rather than discovered later.
 
 
-def test_tool_is_registered_and_read_tier():
-    from services import chat_service
-    from services import chat_tools_schema as S
-
-    assert callable(T.DISPATCHERS["diagnose_network"])
-    assert any(t["name"] == "diagnose_network" for t in S.TOOLS)
-    assert chat_service._safety_tier_for("diagnose_network") == "read"
-
-
-def test_bus_membership_is_omitted_by_default(install_network):
+def test_the_shipped_tool_and_this_module_agree_on_island_count(install_network):
     """
-    On a large network the membership lists are the whole payload and would be
-    cut by the result cap, taking the verdicts with them.
+    The one property the two implementations MUST share. They differ on peak
+    load (this one sums per snapshot, the tool sums each load's own maximum)
+    and on the shortfall claim, but if they ever disagreed about how many
+    islands there are, one of them would be telling the user a different
+    network.
     """
-    install_network(_two_islands(supply_on_b=False))
-    out = T.diagnose_network()
-    assert all("buses" not in island for island in out["islands"])
-    assert "include_buses" in out["note"]
-    assert out["islands"][0]["verdict"]
+    from services import chat_tools
 
-
-def test_bus_membership_is_returned_on_request(install_network):
-    install_network(_two_islands(supply_on_b=False))
-    out = T.diagnose_network(include_buses=True)
-    assert all(island["buses"] for island in out["islands"])
-    assert "note" not in out
+    n = _two_islands(supply_on_b=False)
+    install_network(n)
+    assert chat_tools.diagnose_network()["island_count"] == \
+        A.analyse_topology(n)["n_islands"]
 
 
 def test_the_infeasibility_decoder_routes_here():

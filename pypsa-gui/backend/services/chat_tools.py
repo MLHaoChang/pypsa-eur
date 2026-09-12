@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import contextlib
 import inspect
+import json
 import logging
 import math
 import uuid
@@ -49,6 +50,7 @@ from typing import Any
 from fastapi import HTTPException, params as fastapi_params
 
 from services.pypsa_service import PyPSAService
+from services.redaction import redact_secrets_in_str as _redact_secrets_in_str
 
 logger = logging.getLogger("pypsa_gui.chat_tools")
 
@@ -178,8 +180,81 @@ def _sync(value):
 # ── Read tools (22) ─────────────────────────────────────────────────────────
 
 
-def list_components(component_class: str) -> list[dict]:
-    """List all components of one class (transient-filtered)."""
+# Pagination bounds for the list-shaped read tools (#16).
+#
+# Rows are the wrong unit on their own. `_truncate_result` serialises any
+# dict result and replaces it with a `preview` string past ~4000 chars, so a
+# 200-row page is fine for Carriers and 45 KB for Buses — and a page that
+# gets previewed is exactly the opaque blob this item exists to remove.
+# MAX_PAGE_CHARS is therefore the real bound and the row counts are
+# secondary caps; the packing loop below stops at whichever binds first.
+DEFAULT_PAGE_SIZE = 200
+MAX_PAGE_SIZE = 1000
+# Under _truncate_result's 4000, leaving headroom for the envelope's own
+# keys and for JSON escaping of names we did not write.
+MAX_PAGE_CHARS = 3000
+
+
+def _paginate(rows: list[dict], offset: int, limit: int | None) -> dict:
+    """
+    Wrap `rows` in the page envelope shared by the list-shaped read tools.
+
+    The envelope is returned ALWAYS, not only when a page was requested.
+    A bare list cannot answer "did I see everything?" — 200 rows and
+    200-of-5000 look identical at the call site — and a shape that changes
+    depending on the arguments is harder for a model to reason about than
+    one that does not. `total_count` is the field that makes every response
+    self-describing.
+
+    Being a dict also matters mechanically: `_truncate_result` replaces any
+    list over 200 entries with a `sample`, which is the very truncation this
+    exists to replace.
+    """
+    if offset < 0:
+        raise HTTPException(400, f"offset must be >= 0, got {offset}")
+    if limit is not None and limit < 1:
+        raise HTTPException(400, f"limit must be >= 1, got {limit}")
+
+    requested = DEFAULT_PAGE_SIZE if limit is None else limit
+    effective = min(requested, MAX_PAGE_SIZE)
+    candidate = rows[offset:offset + effective]
+
+    # Pack by serialised size. Row width varies by an order of magnitude
+    # across component classes, so no fixed row count is right for all of
+    # them — and overshooting means the whole page comes back as a preview
+    # string, which is worse than a short page.
+    page: list[dict] = []
+    used = 0
+    for row in candidate:
+        cost = len(json.dumps(row, default=str)) + 2  # +2 for ", "
+        # Always take the first row even if it alone busts the budget:
+        # returning an empty page would leave `offset` unable to advance and
+        # the agent looping forever on a row it can never get past.
+        if page and used + cost > MAX_PAGE_CHARS:
+            break
+        page.append(row)
+        used += cost
+
+    out = {
+        "items": page,
+        "total_count": len(rows),
+        "offset": offset,
+        "returned": len(page),
+        "has_more": offset + len(page) < len(rows),
+    }
+    # Say so whenever the ask was reduced, by either bound. A model that
+    # asked for 10 000 and got 13 with no note would read `has_more` as the
+    # network being smaller than it is, or stop early believing it had
+    # reached the end of what it requested.
+    if len(page) < min(requested, len(candidate)):
+        out["limit_clamped_to"] = len(page)
+    return out
+
+
+def list_components(
+    component_class: str, *, offset: int = 0, limit: int | None = None,
+) -> dict:
+    """List one class of component, one page at a time (transient-filtered)."""
     from routers.network import _get_component
     if component_class == "GlobalConstraint":
         attr = "global_constraints"
@@ -187,7 +262,134 @@ def list_components(component_class: str) -> list[dict]:
         raise HTTPException(400, f"Unknown component_class: {component_class!r}")
     else:
         attr = _GENERIC_CRUD_ATTRS[component_class]
-    return _get_component(component_class, attr)
+    return _paginate(_get_component(component_class, attr), offset, limit)
+
+
+# How many islands `diagnose_network` describes in full, and how many buses
+# it names per island. A 400-bus shrapnel network would otherwise serialise
+# past _truncate_result's budget and come back as a preview string — a
+# diagnosis the agent cannot read is not a diagnosis.
+_MAX_ISLANDS_REPORTED = 12
+_MAX_BUSES_PER_ISLAND = 8
+
+
+def diagnose_network() -> dict:
+    """
+    Electrical connectivity of the active network (#15).
+
+    Answers the question nothing else in the tool surface does: is this one
+    electrical system or several, and is anything stranded? `validate_for_run`
+    covers dangling bus references, bounds, costs and solver assumptions, but
+    never looks at the graph — and an infeasible solve is most often a load
+    sitting in an island with nothing able to serve it.
+
+    Dangling bus refs are deliberately NOT re-checked here: the preflight
+    already reports them, and a second differently-worded copy is how two
+    sources of truth start disagreeing.
+    """
+    n = PyPSAService.get_network()
+    buses = list(n.buses.index)
+    if not buses:
+        return {
+            "bus_count": 0, "island_count": 0, "islands": [],
+            "isolated_buses": [], "islands_without_generation": [],
+            "islands_truncated": False, "verdict": "empty",
+        }
+
+    # Union-find over the bus graph. Every branch class joins, including a
+    # multi-port Link's bus2/bus3/… — those extra ports are exactly how
+    # sector coupling reaches heat and hydrogen buses, so walking only
+    # bus0/bus1 would report a coupled network as a pile of fragments.
+    parent = {b: b for b in buses}
+
+    def find(x: str) -> str:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: str, b: str) -> None:
+        if a in parent and b in parent:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+    for attr in ("lines", "links", "transformers"):
+        df = getattr(n, attr, None)
+        if df is None or df.empty:
+            continue
+        ports = [c for c in df.columns if c.startswith("bus")]
+        for row in df[ports].itertuples(index=False):
+            attached = [str(v) for v in row if isinstance(v, str) and v]
+            for other in attached[1:]:
+                union(attached[0], other)
+
+    groups: dict[str, list[str]] = {}
+    for b in buses:
+        groups.setdefault(find(b), []).append(b)
+
+    # Which buses can serve load, and how much load sits where.
+    supply: set[str] = set()
+    for attr in ("generators", "storage_units", "stores"):
+        df = getattr(n, attr, None)
+        if df is not None and not df.empty and "bus" in df.columns:
+            supply.update(str(b) for b in df["bus"])
+
+    load_by_bus: dict[str, float] = {}
+    loads = getattr(n, "loads", None)
+    if loads is not None and not loads.empty and "bus" in loads.columns:
+        p_set_t = getattr(n.loads_t, "p_set", None)
+        for name, bus in loads["bus"].items():
+            peak = 0.0
+            if p_set_t is not None and name in getattr(p_set_t, "columns", []):
+                series = p_set_t[name]
+                peak = float(series.max()) if len(series) else 0.0
+            else:
+                peak = float(loads.at[name, "p_set"]) if "p_set" in loads.columns else 0.0
+            load_by_bus[str(bus)] = load_by_bus.get(str(bus), 0.0) + peak
+
+    islands = []
+    for members in groups.values():
+        members = sorted(members)
+        peak = sum(load_by_bus.get(b, 0.0) for b in members)
+        islands.append({
+            "size": len(members),
+            "buses": members[:_MAX_BUSES_PER_ISLAND],
+            "has_generation": any(b in supply for b in members),
+            "has_load": peak > 0,
+            "peak_load_mw": round(peak, 6),
+        })
+    # Biggest first: on a fragmented network the large islands are the ones
+    # the user recognises, and the truncation below keeps the head.
+    islands.sort(key=lambda i: (-i["size"], i["buses"][0] if i["buses"] else ""))
+
+    # A generation-only island is odd but solvable. Only a marooned LOAD is
+    # a defect — flagging the rest would train the agent to ignore the field.
+    stranded = [i for i in islands if i["has_load"] and not i["has_generation"]]
+
+    branch_free = {
+        b for b in buses
+        if len(groups[find(b)]) == 1
+    }
+    isolated = sorted(branch_free)
+
+    if stranded:
+        verdict = "infeasible_topology"
+    elif len(groups) > 1:
+        verdict = "fragmented"
+    else:
+        verdict = "connected"
+
+    return {
+        "bus_count": len(buses),
+        "island_count": len(groups),
+        "islands": islands[:_MAX_ISLANDS_REPORTED],
+        "islands_truncated": len(islands) > _MAX_ISLANDS_REPORTED,
+        "isolated_buses": isolated[:_MAX_ISLANDS_REPORTED],
+        "isolated_buses_truncated": len(isolated) > _MAX_ISLANDS_REPORTED,
+        "islands_without_generation": stranded[:_MAX_ISLANDS_REPORTED],
+        "verdict": verdict,
+    }
 
 
 def get_component(component_class: str, name: str) -> dict:
@@ -311,13 +513,17 @@ def get_timeseries(component: str, name: str, attribute: str, period: int | None
     return _h(component=component, attribute=attribute, columns=name)
 
 
-def list_all_timeseries() -> list[dict]:
+def list_all_timeseries(*, offset: int = 0, limit: int | None = None) -> dict:
     # NOTE: the route handler is `list_timeseries` (GET /api/network/timeseries),
     # not `list_all_timeseries`. It walks every `<component>_t` accessor and
     # reports non-empty frames + columns directly off the network, so time series
     # baked into an imported .nc are surfaced (not just user uploads).
+    #
+    # Paginated for the same reason as list_components (#16): a sector-coupled
+    # network has thousands of profiles, and the blind 200-row cut gave the
+    # agent no way to reach the rest.
     from routers.network import list_timeseries as _h
-    return _h()
+    return _paginate(list(_h()), offset, limit)
 
 
 def get_aggregate_load(section: str | None = None, names: str | None = None) -> dict:
@@ -586,10 +792,17 @@ def update_component(
     )
 
 
-def delete_component(component_class: str, name: str) -> None:
-    """Generic delete via the dedicated route handler (so the same lock + audit run)."""
+def _delete_component_handlers() -> dict[str, Any]:
+    """
+    The classes `delete_component` accepts, and the route handler for each.
+
+    Extracted from the function body so `_COMPONENT_CLASS_TO_ATTR` (used by
+    the #19 pre-dispatch validator) can be checked against it — a class added
+    here and missed there would make that component undeletable via chat, the
+    validator refusing it before the handler ever saw it.
+    """
     from routers import network as net
-    handlers = {
+    return {
         "Bus": net.delete_bus,
         "Carrier": net.delete_carrier,
         "Line": net.delete_line,
@@ -602,6 +815,11 @@ def delete_component(component_class: str, name: str) -> None:
         "ShuntImpedance": net.delete_shunt,
         "GlobalConstraint": net.delete_global_constraint,
     }
+
+
+def delete_component(component_class: str, name: str) -> None:
+    """Generic delete via the dedicated route handler (so the same lock + audit run)."""
+    handlers = _delete_component_handlers()
     h = handlers.get(component_class)
     if h is None:
         raise HTTPException(400, f"Unknown component_class: {component_class!r}")
@@ -615,6 +833,154 @@ def cascade_delete_bus(name: str) -> None:
 
 
 # ── Bulk (1) ────────────────────────────────────────────────────────────────
+
+
+# One tool call must not be able to wedge the event loop or bury the undo
+# stack. Unlike a read, where a short page is fine, a partial write is the
+# failure mode — so an oversized batch is refused rather than trimmed.
+MAX_BATCH_SIZE = 200
+
+
+def _check_batch_size(items: list, what: str) -> None:
+    if not isinstance(items, list) or not items:
+        raise HTTPException(400, f"{what} must be a non-empty list")
+    if len(items) > MAX_BATCH_SIZE:
+        raise HTTPException(
+            400,
+            f"{len(items)} {what} exceeds the {MAX_BATCH_SIZE}-item batch "
+            f"limit; split the work across several calls",
+        )
+
+
+def batch_create_components(component_class: str, components: list[dict]) -> dict:
+    """
+    Create many components of one class in a single call (#17).
+
+    Building a 30-bus network was 30 turns — 30 model round-trips, 30 audit
+    entries, and 30 chances for the turn's 25-tool-call cap to cut the job
+    in half, which is a task the agent cannot finish rather than one it
+    finishes slowly.
+
+    Validate-then-apply, refusing the whole batch on any bad entry, per the
+    same rule as /_bulk: a half-created network is not a state the agent can
+    reason about, and undo unwinds one entry at a time.
+
+    Each entry still goes through `create_component`, so every per-class
+    handler runs unchanged — carrier auto-create, line haversine length
+    fill, transformer voltage validation. A batch path that wrote rows
+    directly would silently skip all of it.
+    """
+    _check_batch_size(components, "components")
+    schema_name = _COMPONENT_CREATE_SCHEMAS.get(component_class)
+    if schema_name is None:
+        raise HTTPException(400, f"Unknown component_class: {component_class!r}")
+
+    # ── Pass 1: validate everything, write nothing. ──
+    Schema = _get_schema(schema_name)
+    existing = set(_component_index(component_class))
+    seen: set[str] = set()
+    for i, entry in enumerate(components):
+        if not isinstance(entry, dict):
+            raise HTTPException(400, f"entry {i} is not an object")
+        name = entry.get("name")
+        if not name or not isinstance(name, str):
+            raise HTTPException(400, f"entry {i} has no 'name'")
+        if name in existing:
+            raise HTTPException(
+                409, f"entry {i}: {component_class} {name!r} already exists",
+            )
+        # Caught here rather than by the second create failing — otherwise
+        # entry 1 lands and entry 2 raises, which is the partial state this
+        # design exists to avoid.
+        if name in seen:
+            raise HTTPException(400, f"entry {i}: {name!r} appears twice in the batch")
+        seen.add(name)
+        attrs = {k: v for k, v in entry.items() if k != "name"}
+        try:
+            Schema(name=name, **attrs)
+        except Exception as exc:  # noqa: BLE001 — pydantic + coercion errors
+            raise HTTPException(
+                400, f"entry {i} ({name!r}) is invalid: {exc}",
+            ) from exc
+
+    # ── Pass 2: apply. ──
+    created: list[str] = []
+    for entry in components:
+        name = entry["name"]
+        try:
+            create_component(component_class, name,
+                             {k: v for k, v in entry.items() if k != "name"})
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            # Validation passed and this still failed, so the batch IS
+            # partial. Say exactly what landed — claiming atomicity we did
+            # not deliver would send the agent looking for the wrong bug.
+            raise HTTPException(
+                500,
+                f"batch partially applied: created {created} before "
+                f"{name!r} failed: {exc}",
+            ) from exc
+        created.append(name)
+    return {"created": created, "count": len(created)}
+
+
+def batch_delete_components(component_class: str, names: list[str]) -> dict:
+    """
+    Delete many components of one class in a single call (#17).
+
+    Same validate-then-apply contract as `batch_create_components`. Each
+    delete routes through `delete_component`, so the per-class handlers
+    keep running — and with them the `_user_ts` profile cleanup and the
+    vintage-bounds cascade that a direct row drop would orphan.
+    """
+    _check_batch_size(names, "names")
+    handlers = _delete_component_handlers()
+    if component_class not in handlers:
+        raise HTTPException(400, f"Unknown component_class: {component_class!r}")
+
+    name_strs = [str(x) for x in names]
+    index = set(_component_index(component_class))
+    missing = [x for x in name_strs if x not in index]
+    if missing:
+        sample = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
+        raise HTTPException(
+            404, f"{len(missing)} {component_class}(s) not found: {sample}",
+        )
+    transient = [x for x in name_strs
+                 if x in PyPSAService.get_transient_rows(component_class)]
+    if transient:
+        sample = ", ".join(transient[:3]) + ("…" if len(transient) > 3 else "")
+        raise HTTPException(
+            409,
+            f"Cannot delete {len(transient)} {component_class}(s) ({sample}) — "
+            f"these rows are LP scaffolding from the current solve.",
+        )
+
+    deleted: list[str] = []
+    for name in name_strs:
+        try:
+            delete_component(component_class, name)
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                500,
+                f"batch partially applied: deleted {deleted} before "
+                f"{name!r} failed: {exc}",
+            ) from exc
+        deleted.append(name)
+    return {"deleted": deleted, "count": len(deleted)}
+
+
+def _component_index(component_class: str) -> list[str]:
+    """Current row names for one class, straight off the network."""
+    attr = ("global_constraints" if component_class == "GlobalConstraint"
+            else _GENERIC_CRUD_ATTRS.get(component_class))
+    if attr is None:
+        return []
+    df = getattr(PyPSAService.get_network(), attr, None)
+    return [] if df is None else [str(x) for x in df.index]
 
 
 def bulk_update_components(component_class: str, names: list[str], updates: dict) -> dict:
@@ -932,8 +1298,8 @@ def upload_generator_profile(csv_content_b64: str,
     data = base64.b64decode(csv_content_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
     if "attribute" in _h.__code__.co_varnames:
-        return _sync(_h(upload, attribute=attribute))
-    return _sync(_h(upload))
+        return _sync(_h(attribute=attribute, file=upload))
+    return _sync(_h(file=upload))
 
 
 def upload_link_profile(csv_content_b64: str,
@@ -947,8 +1313,8 @@ def upload_link_profile(csv_content_b64: str,
     data = base64.b64decode(csv_content_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
     if "attribute" in _h.__code__.co_varnames:
-        return _sync(_h(upload, attribute=attribute))
-    return _sync(_h(upload))
+        return _sync(_h(attribute=attribute, file=upload))
+    return _sync(_h(file=upload))
 
 
 # ── Solver config (1) ───────────────────────────────────────────────────────
@@ -1361,12 +1727,12 @@ def solve_queue_list() -> dict:
 
 
 def solve_queue_abort(job_id: str) -> dict:
-    # The queue's jobs dict is int-keyed (services/solve_queue.py); a string
-    # job_id silently misses every key and the handler 404s while the model
-    # thinks the abort worked. Coerce to int. A non-numeric id raises a clear
-    # ValueError that the dispatcher surfaces as a tool_error.
+    # Job ids are UUIDs (0005_solve_jobs). The old `int(job_id)` coercion
+    # existed because the jobs dict was int-keyed and a string silently missed
+    # every key — it now has to go, or every abort raises ValueError before it
+    # reaches the handler.
     from routers.solve_queue import abort_job as _h
-    return _route(_h, int(job_id))
+    return _route(_h, job_id)
 
 
 def solve_queue_clear_finished() -> dict:
@@ -1421,6 +1787,135 @@ def acting_user_id() -> str | None:
 def set_acting_session(session_id) -> None:
     """Bind the session whose active-project pointer this turn's tools may move."""
     _ACTING_SESSION_ID.set(str(session_id) if session_id is not None else None)
+
+
+# C-3 — the LLMProfile this turn is running on, for tools that make their own
+# model sub-call. `reconstruct_network_from_image` is the only one today, and
+# it was entirely profile-blind: it built an Anthropic client and hardcoded
+# DEFAULT_MODEL no matter which provider the user had selected.
+#
+# Carried as a contextvar for the same reason the acting user is: tools run on
+# `chat_service._TOOL_EXECUTOR`, and the submit site already does
+# `contextvars.copy_context()`. `None` is a legal answer and means "not inside
+# a turn" (a direct call, or a test invoking the tool on its own), where there
+# is no profile to honour and the pre-profile behaviour is correct.
+_TURN_PROFILE: ContextVar[Any] = ContextVar("chat_turn_profile", default=None)
+
+
+def set_turn_profile(profile: Any) -> None:
+    """Bind the LLMProfile whose model a tool's own sub-call must use."""
+    _TURN_PROFILE.set(profile)
+
+
+def turn_profile() -> Any:
+    """The bound `LLMProfile`, or None outside a turn."""
+    return _TURN_PROFILE.get()
+# ── gridspine: planning → dynamics studies (8) ─────────────────────────────
+#
+# These call services/gridspine_service.py DIRECTLY — the same functions the
+# /api/gridspine router wraps — so the copilot and the UI share one
+# implementation (spec, "Copilot parity"). `_service_call_` in TOOL_ROUTES.
+# The project is resolved through `project_registry.resolve_project` under the
+# acting identity, exactly as `require_project_access` does for the router:
+# 404 for "no such project" and "not yours" alike.
+#
+# `gridspine_edit_template_param` hard-codes edited_by="chat": the ledger
+# provenance the spec asks for, and the one thing the router's `user` default
+# and this wrapper must never share.
+
+
+def _gridspine_project(db, user, project_id: str):
+    from services import project_registry
+    return project_registry.resolve_project(db, user, project_id)
+
+
+def gridspine_create_study(name: str, config: dict | None = None) -> dict:
+    from services.gridspine_service import create_study as _h
+    with _acting() as (db, user):
+        return _h(db, user, name, config=config)
+
+
+def gridspine_set_dispatch_source(
+    project_id: str, from_dispatch: str | None = None, from_project: str | None = None,
+) -> dict:
+    from services.gridspine_service import set_dispatch_source as _h
+    with _acting() as (db, user):
+        if from_project is not None:
+            source = {"from_project": from_project}
+        elif from_dispatch is not None:
+            source = {"from_dispatch": from_dispatch}
+        else:
+            source = "generate"
+        return _h(db, _gridspine_project(db, user, project_id), source, user=user)
+
+
+def gridspine_get_config(project_id: str) -> dict:
+    from services.gridspine_service import get_config as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), db=db)
+
+
+def gridspine_update_config(project_id: str, **patch) -> dict:
+    from services.gridspine_service import update_config as _h
+    with _acting() as (db, user):
+        return _h(
+            _gridspine_project(db, user, project_id),
+            {k: v for k, v in patch.items() if v is not None},
+            db=db, user=user,
+        )
+
+
+def gridspine_run_pipeline(project_id: str) -> dict:
+    from services.gridspine_service import run_pipeline as _h
+    with _acting() as (db, user):
+        return _h(db, _gridspine_project(db, user, project_id), user=user)
+
+
+def gridspine_get_stage_status(project_id: str) -> dict:
+    from services.gridspine_service import get_stage_status as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def gridspine_list_ranked_snapshots(project_id: str) -> list:
+    from services.gridspine_service import list_ranked_snapshots as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def gridspine_get_assumption_ledger(project_id: str) -> dict:
+    from services.gridspine_service import get_assumption_ledger as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def gridspine_edit_template_param(project_id: str, unit_id: str, param: str,
+                                  value: float, source: str) -> dict:
+    from services.gridspine_service import edit_template_param as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), unit_id, param, value, source, "chat")
+
+
+def gridspine_get_readback(project_id: str) -> dict:
+    from services.gridspine_service import get_readback as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id))
+
+
+def gridspine_fetch_result_figure(project_id: str, hour: int, name: str) -> dict:
+    from services.gridspine_service import fetch_result_figure as _h
+    with _acting() as (db, user):
+        # `hour` goes through UNCOALESCED: the service owns the 422 for an
+        # unparseable one, and `int()` here would raise before it could answer.
+        return _h(_gridspine_project(db, user, project_id), name, hour)
+
+
+def gridspine_export_handoff_bundle(project_id: str, hour: int) -> dict:
+    from services.gridspine_service import export_handoff_bundle as _h
+    with _acting() as (db, user):
+        # Pass-through, as above: the service answers 422 on a bad hour.
+        path = _h(_gridspine_project(db, user, project_id), hour)
+        return {"path": str(path), "filename": path.name, "bytes": path.stat().st_size}
 
 
 @contextlib.contextmanager
@@ -1740,7 +2235,15 @@ def import_project_bundle(bundle_bytes_b64: str, filename: str = "bundle.zip") -
     data = base64.b64decode(bundle_bytes_b64)
     upload = UploadFile(filename=filename, file=io.BytesIO(data))
     with _acting() as (db, user):
-        return _sync(_h(upload, db=db, user=user))
+        # `import_bundle` now also declares `session: SessionRow | None =
+        # Depends(current_session)` (it moves the session's active-project
+        # pointer after a successful import). This call bypasses `_route`
+        # because `import_bundle` is async and `_route` calls its handler
+        # synchronously — so `session` must be injected by hand here the same
+        # way `_route` does it, or it arrives as the raw `Depends` sentinel and
+        # `set_active_project` blows up on it (see `_route`'s docstring on this
+        # exact failure mode).
+        return _sync(_h(upload, db=db, user=user, session=_acting_session(db)))
 
 
 def create_project_from_template(template_id: str, new_name: str) -> dict:
@@ -1819,6 +2322,22 @@ def _sum_cpv_map(mapping: Any) -> float:
     return total
 
 
+def _sum_cpv_map_if_available(mapping: Any, has_solve: bool) -> float | None:
+    """`_sum_cpv_map`, gated on the block having resolved.
+
+    `capacity.available` and `dispatch.available` are both exactly
+    `has_solve` (routers/compare.py's `_compute_capacity_summary` /
+    `_compute_dispatch_summary` early-return their all-default block
+    whenever `not has_solve` and set `available=True` on every success
+    path) — so `has_solve` is the correcting signal for these by-carrier
+    sums, matching `_cpv_total`'s existing None-on-unresolved behaviour
+    instead of defaulting to a confident 0.0 (ADR-0001).
+    """
+    if not has_solve:
+        return None
+    return _sum_cpv_map(mapping)
+
+
 def _scenario_headlines(summary: dict) -> dict:
     cap = summary.get("capacity") or {}
     disp = summary.get("dispatch") or {}
@@ -1826,14 +2345,15 @@ def _scenario_headlines(summary: dict) -> dict:
         cap = _model_to_dict(cap) or {}
     if not isinstance(disp, dict):
         disp = _model_to_dict(disp) or {}
+    has_solve = bool(summary.get("has_solve"))
     return {
-        "has_solve": bool(summary.get("has_solve")),
+        "has_solve": has_solve,
         "is_multi_period": bool(summary.get("is_multi_period")),
         "periods": list(summary.get("periods") or []),
-        "capacity_mw_total": _sum_cpv_map(cap.get("capacity_mw_by_carrier")),
-        "capex_meur_total": _sum_cpv_map(cap.get("capex_meur_by_carrier")),
-        "new_capex_meur_total": _sum_cpv_map(cap.get("new_capex_meur_by_carrier")),
-        "dispatch_gwh_total": _sum_cpv_map(disp.get("dispatch_gwh_by_carrier")),
+        "capacity_mw_total": _sum_cpv_map_if_available(cap.get("capacity_mw_by_carrier"), has_solve),
+        "capex_meur_total": _sum_cpv_map_if_available(cap.get("capex_meur_by_carrier"), has_solve),
+        "new_capex_meur_total": _sum_cpv_map_if_available(cap.get("new_capex_meur_by_carrier"), has_solve),
+        "dispatch_gwh_total": _sum_cpv_map_if_available(disp.get("dispatch_gwh_by_carrier"), has_solve),
         "opex_meur": _cpv_total(disp.get("opex_meur")),
         "total_load_gwh": _cpv_total(disp.get("total_load_gwh")),
     }
@@ -1936,14 +2456,21 @@ def compare_scenarios(
 
 def create_project_snapshot(name: str, label: str, message: str | None = None) -> dict:
     # Handler is create_snapshot(req: CreateSnapshotRequest, project:
-    # AuthorizedProject = ProjectAccessDep) and reads req.label / req.message —
-    # pass the model, not a dict (a direct call doesn't get FastAPI's body
-    # parsing, so a dict would AttributeError on req.label). The `project`
-    # default is an unresolved `Depends`, so it has to be supplied too; these
-    # four take a resolved AuthorizedProject rather than db=/user=, so
-    # `_authorized_project` is the right helper and `_route` is NOT.
-    from routers.snapshots import create_snapshot, CreateSnapshotRequest
-    return create_snapshot(
+    # AuthorizedProject = ProjectAccessDep, db, user) and reads req.label /
+    # req.message — pass the model, not a dict (a direct call doesn't get
+    # FastAPI's body parsing, so a dict would AttributeError on req.label).
+    #
+    # `_route`, NOT a positional call. The handler grew `db`/`user` Depends
+    # when `_enforce_project_lock` landed in its body; called positionally,
+    # both arrived as raw `Depends` sentinels and `user.id` raised
+    # AttributeError inside the lock check in auth mode — so the gate this
+    # tool is supposed to pass through could never fire. `project` is still
+    # resolved here (it is an `AuthorizedProject`, which `_route` cannot
+    # supply) and handed over as a positional; `_route` injects the rest.
+    # Same treatment `restore_project_snapshot` already had.
+    from routers.snapshots import create_snapshot as _h, CreateSnapshotRequest
+    return _route(
+        _h,
         CreateSnapshotRequest(label=label, message=message or ""),
         _authorized_project(name),
     )
@@ -1955,13 +2482,24 @@ def list_project_snapshots(name: str) -> list[dict]:
 
 
 def restore_project_snapshot(name: str, snapshot_id: str) -> dict:
+    # `restore_snapshot` now also declares `db`/`user`/`session` (it moves the
+    # session's active-project pointer after a successful restore, same as
+    # load_project). Unlike `import_bundle`, this handler is plain `def` — not
+    # async — so `_route` (chat_tools.py:1494) can call it directly and inject
+    # all three the way it already does for `activate_project`/`load_project`,
+    # instead of hand-injecting them here. Calling it positionally with just
+    # `snapshot_id` and `project` — as this used to — would otherwise hand
+    # `db`, `user` and `session` their raw `Depends` sentinels and crash (see
+    # `_route`'s docstring on this exact failure mode).
     from routers.snapshots import restore_snapshot as _h
-    return _h(snapshot_id, _authorized_project(name))
+    return _route(_h, snapshot_id, _authorized_project(name))
 
 
 def delete_project_snapshot(name: str, snapshot_id: str) -> None:
+    # `_route` for the same reason as `create_project_snapshot` above:
+    # `delete_snapshot` declares `db`/`user` and calls `_enforce_project_lock`.
     from routers.snapshots import delete_snapshot as _h
-    _h(snapshot_id, _authorized_project(name))
+    _route(_h, snapshot_id, _authorized_project(name))
 
 
 # ── Import / Export (8) ─────────────────────────────────────────────────────
@@ -2690,15 +3228,61 @@ def reconstruct_network_from_image(
             },
         )
 
+    # C-3 — honour the profile this turn is actually running on.
+    #
+    # This tool speaks the Anthropic SDK's `messages.stream` directly, so it
+    # cannot run on the openai wire without being ported to the provider seam.
+    # Until that port it REFUSES rather than silently substituting Anthropic:
+    # a silent substitution ships the user's image to a provider they did not
+    # choose and bills a model they did not select, while the deployment may
+    # deliberately have no Anthropic key at all. Same `capability_unsupported`
+    # shape `run_turn` uses for vision, and — same rule — the message names the
+    # profile LABEL only, never an id or base_url, because redaction is
+    # secrets-only and would scrub neither.
+    #
+    # `None` means "not inside a turn" (a direct call, or a test driving the
+    # tool on its own): there is no profile to honour, so the pre-profile
+    # behaviour stands unchanged.
+    profile = turn_profile()
+    if profile is not None:
+        if profile.wire != "anthropic":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_kind": "capability_unsupported",
+                    "message": (
+                        f"the {profile.label!r} profile cannot read a network "
+                        "diagram — this tool needs an Anthropic-wire profile. "
+                        "Switch to one, or add the components by hand."
+                    ),
+                },
+            )
+        if not profile.vision:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_kind": "capability_unsupported",
+                    "message": (
+                        f"the {profile.label!r} profile does not support image "
+                        "input (vision is disabled for this profile), so it "
+                        "cannot read a network diagram — switch to a "
+                        "vision-capable profile."
+                    ),
+                },
+            )
+
     if client is None:
         from services import chat_service
-        client, err = chat_service._build_anthropic_client()
+        client, err = chat_service._anthropic_client_for_profile(profile)
         if client is None:
             raise HTTPException(
                 status_code=503,
                 detail={
                     "error_kind": err or "internal_error",
-                    "message": "vision sub-call requires ANTHROPIC_API_KEY",
+                    "message": (
+                        "vision sub-call could not build a client for the "
+                        "profile this chat is running on"
+                    ),
                 },
             )
 
@@ -2721,8 +3305,14 @@ def reconstruct_network_from_image(
     user_content.append({"type": "text", "text": VISION_INSTRUCTION})
 
     async def _ask_vision() -> dict:
+        from services.chat_service import DEFAULT_MODEL  # noqa: PLC0415
+
+        # C-3 — the turn profile's own model, so the sub-call bills what the
+        # user selected. DEFAULT_MODEL only when there is no bound profile.
+        vision_model = profile.model if profile is not None else DEFAULT_MODEL
+
         with client.messages.stream(
-            model="claude-sonnet-4-6",
+            model=vision_model,
             max_tokens=2048,
             system="You return ONLY raw JSON when asked.",
             messages=[{"role": "user", "content": user_content}],
@@ -2750,7 +3340,9 @@ def reconstruct_network_from_image(
             status_code=502,
             detail={
                 "error_kind": "vision_call_failed",
-                "message": f"vision sub-call raised {type(exc).__name__}: {exc}",
+                "message": _redact_secrets_in_str(
+                    f"vision sub-call raised {type(exc).__name__}: {exc}"
+                ),
             },
         ) from exc
 
@@ -3057,6 +3649,92 @@ def export_asset_results(
     return meta
 
 
+# ── LLM provider switching (1) — Task 10 ────────────────────────────────────
+
+
+def set_active_profile(profile_id: str) -> dict:
+    """
+    Switch the assistant to an ALREADY-CONFIGURED LLM profile.
+
+    SCOPE BOUNDARY, deliberate and load-bearing. This tool only selects among
+    profiles a super-admin has already created in Settings. It never creates
+    a profile, never edits one, and never accepts an API key — so no key
+    material ever transits the chat channel, where it would land in the
+    model's context, in `session.messages`, and (via the assistant's own
+    reply) potentially in `chat.jsonl`. Creation and key entry stay on the
+    super-admin-gated HTTP surface.
+
+    WHY THE CHANGE IS DEFERRED TO A NEW CHAT. A session is bound to the
+    profile it resolved at creation (`ChatSession.profile_id` / `bound_wire`),
+    because its message history is stored in one provider's block shapes;
+    replaying thinking or image blocks to a different wire is a 400 at best
+    and a silent capability loss at worst. So this writes the ACTIVE profile
+    for the next session and says so, rather than mutating the running one.
+
+    Returns ``{ok, active_profile_id, note}``. An unconfigured id raises a
+    structured `HTTPException` (`error_kind='unknown_profile_id'`) which the
+    harness surfaces as a `tool_error` frame — never an escaping exception.
+
+    The message names LABELS only, never an identifier or a base_url:
+    redaction is secrets-only by design and would not scrub either.
+    """
+    from services import llm_config
+
+    # AUTHORIZATION — super-admin only, matching the HTTP surface.
+    #
+    # `POST /chat/settings/llm/active` is `_require_super_admin`-gated because
+    # the active profile is INSTANCE-WIDE: it decides which provider every
+    # organization's chat runs on, and whose API key pays for it. This tool
+    # reaches the same store, so without this check an ordinary member could
+    # flip it by asking the model and approving their own confirmation card.
+    #
+    # Confirmation-gating is NOT a substitute. It exists to stop the MODEL
+    # taking a destructive action the user did not intend; it says nothing
+    # about whether that user is entitled to the action, and the confirm
+    # endpoint itself only validates a session-scoped token. Caught in review
+    # after the first cut of this tool shipped with no role check at all.
+    #
+    # Local mode is unaffected: its single seeded identity is a super-admin.
+    with _acting() as (_db, user):
+        if not user.is_super_admin:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "error_kind": "not_authorized",
+                    "message": (
+                        "Switching the model profile changes it for everyone "
+                        "on this instance, so only a super-admin can do it. "
+                        "Ask an administrator to change it in Settings."
+                    ),
+                },
+            )
+
+    profiles, _active = llm_config.load_profiles()
+    known = {p.id: p for p in profiles}
+    if profile_id not in known:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error_kind": "unknown_profile_id",
+                "message": (
+                    f"no configured profile {profile_id!r}. Configured: "
+                    + ", ".join(sorted(p.label for p in profiles))
+                    + ". Add one in Settings first — this tool only switches "
+                    "between profiles that already exist."
+                ),
+            },
+        )
+    llm_config.set_active(profile_id)
+    return {
+        "ok": True,
+        "active_profile_id": profile_id,
+        "note": (
+            f"{known[profile_id].label} is now the active profile. This chat "
+            "stays on the model it started with — start a new chat to use it."
+        ),
+    }
+
+
 # ── Chatbot uploads — produce (4) ───────────────────────────────────────────
 #
 # Agent-driven file exports. Each writes the bytes into the active project's
@@ -3248,39 +3926,6 @@ def export_chat_summary(
     return _save_agent_export(
         payload, target, "text/markdown" if fmt == "md" else "text/plain",
     )
-
-
-def diagnose_network(include_buses: bool = False) -> dict:
-    """
-    Graph-level diagnosis: islands, what each can serve, and buses connected
-    to nothing.
-
-    Backlog item 15. `validate_network` checks VALUES — bounds, finiteness,
-    references — and a network can pass every one of them while being two
-    disconnected halves, one holding the demand and the other holding the
-    plant meant to serve it. The LP answers that with `infeasible` and a
-    linopy traceback naming neither the island nor the demand.
-
-    `include_buses` is off by default: on a 1000-bus network the membership
-    lists are the entire payload and would be cut by the result cap, taking
-    the verdicts with them. Ask for them once the island is identified.
-    """
-    from services.topology_analyzer import analyse_topology
-
-    report = analyse_topology(PyPSAService.get_network())
-    if include_buses:
-        return report
-    return {
-        **report,
-        "islands": [
-            {k: v for k, v in island.items() if k != "buses"}
-            for island in report["islands"]
-        ],
-        "note": (
-            "bus membership omitted — call again with include_buses=true for "
-            "the island you care about"
-        ),
-    }
 
 
 def build_study_report(project: str | None = None) -> dict:
@@ -3716,6 +4361,113 @@ def explain_investment(component_class: str, name: str) -> dict:
         "reading_notes": _reading_notes(sizing, co2, buses),
     }
 
+# ── Pre-dispatch validation (Improvement #19) ───────────────────────────────
+#
+# A validator answers one question about a destructive call BEFORE the user is
+# asked to authorise it: can this possibly work? It returns an error message
+# to refuse with, or None to proceed. `chat_service` consults this map right
+# before `issue_confirmation`.
+#
+# The problem it solves is not a wasted round-trip. `cascade_delete_bus`
+# carries a TYPED confirmation — the user retypes the bus name before Approve
+# unlocks — so a call that was never going to succeed made someone type a
+# name to authorise nothing. Do that a few times and confirming reads as
+# harmless, which is the one habit a destructive prompt must not build.
+#
+# SCOPE, and why it stops where it does: every validator here checks the
+# ACTIVE in-memory network, which the caller has already proved access to by
+# having it open. Project- and snapshot-level tools (delete_project,
+# restore_project_snapshot, …) are deliberately absent. Their existence check
+# is inseparable from tenancy resolution, and CLAUDE.md's 403→404 rule exists
+# because a check that runs before the caller has proved read access IS an
+# existence oracle. A second, sloppier copy of that logic in a validator is
+# precisely the wrong thing to add; those tools keep answering through the
+# route handler that already gets it right.
+#
+# A validator must be cheap and side-effect-free — it runs on the SSE thread
+# before any lock is taken.
+
+
+# Mirrors `delete_component`'s own handler table, which is the authority on
+# what that tool accepts.
+_COMPONENT_CLASS_TO_ATTR: dict[str, str] = {
+    "Bus": "buses",
+    "Carrier": "carriers",
+    "Line": "lines",
+    "Link": "links",
+    "Transformer": "transformers",
+    "Generator": "generators",
+    "StorageUnit": "storage_units",
+    "Store": "stores",
+    "Load": "loads",
+    "ShuntImpedance": "shunt_impedances",
+    "GlobalConstraint": "global_constraints",
+}
+
+
+def _validate_delete_component(args: dict[str, Any]) -> str | None:
+    from services.pypsa_service import PyPSAService
+    component_class = args.get("component_class")
+    name = args.get("name")
+    attr = _COMPONENT_CLASS_TO_ATTR.get(str(component_class))
+    if attr is None:
+        return (
+            f"unknown component_class {component_class!r}; expected one of: "
+            + ", ".join(sorted(_COMPONENT_CLASS_TO_ATTR))
+        )
+    df = getattr(PyPSAService.get_network(), attr, None)
+    if df is None or name not in df.index:
+        return (
+            f"no {component_class} named {name!r} in the network — nothing to "
+            f"delete. List the existing ones before retrying."
+        )
+    return None
+
+
+def _validate_cascade_delete_bus(args: dict[str, Any]) -> str | None:
+    from services.pypsa_service import PyPSAService
+    name = args.get("name")
+    if name not in PyPSAService.get_network().buses.index:
+        return (
+            f"no Bus named {name!r} in the network — nothing to delete. "
+            f"List the buses before retrying."
+        )
+    return None
+
+
+def _validate_batch_delete_components(args: dict[str, Any]) -> str | None:
+    component_class = args.get("component_class")
+    names = args.get("names")
+    if not isinstance(names, list) or not names:
+        return "names must be a non-empty list"
+    attr = _COMPONENT_CLASS_TO_ATTR.get(str(component_class))
+    if attr is None:
+        return (
+            f"unknown component_class {component_class!r}; expected one of: "
+            + ", ".join(sorted(_COMPONENT_CLASS_TO_ATTR))
+        )
+    from services.pypsa_service import PyPSAService
+    df = getattr(PyPSAService.get_network(), attr, None)
+    index = set() if df is None else {str(x) for x in df.index}
+    missing = [str(x) for x in names if str(x) not in index]
+    if missing:
+        sample = ", ".join(missing[:5]) + ("…" if len(missing) > 5 else "")
+        return (
+            f"{len(missing)} of {len(names)} {component_class}(s) are not in "
+            f"the network: {sample}. The whole batch would be refused — list "
+            f"the existing ones and retry with names that exist."
+        )
+    return None
+
+
+PRE_DISPATCH_VALIDATORS: dict[str, Any] = {
+    "delete_component": _validate_delete_component,
+    "cascade_delete_bus": _validate_cascade_delete_bus,
+    # The widest blast radius in the set: do not make someone approve
+    # deleting thirty components when one name is wrong and the call 404s
+    # either way.
+    "batch_delete_components": _validate_batch_delete_components,
+}
 
 # ── Registry entry-point ────────────────────────────────────────────────────
 
@@ -3725,6 +4477,7 @@ def explain_investment(component_class: str, name: str) -> dict:
 DISPATCHERS: dict[str, Any] = {
     # read (22)
     "list_components": list_components,
+    "diagnose_network": diagnose_network,
     "get_component": get_component,
     "get_meta": get_meta,
     "list_snapshots": list_snapshots,
@@ -3780,6 +4533,8 @@ DISPATCHERS: dict[str, Any] = {
     "cascade_delete_bus": cascade_delete_bus,
     # write_bulk (1)
     "bulk_update_components": bulk_update_components,
+    "batch_create_components": batch_create_components,
+    "batch_delete_components": batch_delete_components,
     # write_carriers (1)
     "create_carrier": create_carrier,
     # write_meta (1)
@@ -3813,7 +4568,6 @@ DISPATCHERS: dict[str, Any] = {
     "validate_network": validate_network,
     "check_solver_availability": check_solver_availability,
     "dispatch_status": dispatch_status,
-    "diagnose_network": diagnose_network,
     # execution_long_running (2)
     "run_simulation": run_simulation,
     "run_ac_pf_stage": run_ac_pf_stage,
@@ -3845,6 +4599,19 @@ DISPATCHERS: dict[str, Any] = {
     "solve_queue_list": solve_queue_list,
     "solve_queue_abort": solve_queue_abort,
     "solve_queue_clear_finished": solve_queue_clear_finished,
+    # gridspine (12)
+    "gridspine_create_study": gridspine_create_study,
+    "gridspine_set_dispatch_source": gridspine_set_dispatch_source,
+    "gridspine_get_config": gridspine_get_config,
+    "gridspine_update_config": gridspine_update_config,
+    "gridspine_run_pipeline": gridspine_run_pipeline,
+    "gridspine_get_stage_status": gridspine_get_stage_status,
+    "gridspine_list_ranked_snapshots": gridspine_list_ranked_snapshots,
+    "gridspine_get_assumption_ledger": gridspine_get_assumption_ledger,
+    "gridspine_edit_template_param": gridspine_edit_template_param,
+    "gridspine_export_handoff_bundle": gridspine_export_handoff_bundle,
+    "gridspine_get_readback": gridspine_get_readback,
+    "gridspine_fetch_result_figure": gridspine_fetch_result_figure,
     # project_mgmt (21)
     "list_projects": list_projects,
     "load_project": load_project,
@@ -3913,4 +4680,203 @@ DISPATCHERS: dict[str, Any] = {
     "get_asset_results": get_asset_results,
     "ui_open_asset_detail": ui_open_asset_detail,
     "export_asset_results": export_asset_results,
+    # llm provider switching (1) — Task 10
+    "set_active_profile": set_active_profile,
 }
+
+
+# ── Foreign-lock gate at the dispatch seam (fix-wave F1) ────────────────────
+#
+# The write middleware in `main.py` refuses a non-holder's write to
+# `/api/network/*`, `/api/io/*` and `/api/simulation/*` while another user
+# holds the ACTIVE project's edit lock. Chat never goes through it: every tool
+# above calls its route handler as a plain Python function, inside the SSE
+# generator, long after any middleware ran. So the same component edit that a
+# non-holder cannot make from the canvas was making it through the chat panel
+# and landing in the holder's shared resident network, where the holder's next
+# autosave persisted it.
+#
+# The gate is applied by WRAPPING the entries in `DISPATCHERS` rather than
+# each tool body: `DISPATCHERS` is the single seam `chat_service` dispatches
+# through, and a per-body check would have to be remembered ~40 times. The
+# module-level functions stay unwrapped, so in-process callers that deliberately
+# bypass the chat surface (tests, smoke harnesses) are unaffected.
+
+_LOCK_GATE_PREFIXES = ("/api/network/", "/api/io/", "/api/simulation/")
+# Explicit allowlist, not a prefix — mirrors `main.py`'s
+# `_FOREIGN_LOCK_GATE_EXEMPT_EXACT` / `_FOREIGN_LOCK_GATE_EXEMPT_PATTERNS`.
+# A queue route is exempt only when it acts on a JOB or names its project in
+# the body; a hypothetical future sibling under `/api/simulation/queue/`
+# that acts on the active project must stay gated by default, so this is
+# spelled out per-route rather than `path.startswith("/api/simulation/queue")`.
+#
+#   * `/api/simulation/queue`                      (`solve_queue_enqueue`)
+#     — names its project in the body, runs its own holder check.
+#   * `/api/simulation/queue/clear_finished`       (`solve_queue_clear_finished`)
+#     — cross-org by construction, super-admin-gated; never touches the
+#       active project.
+#   * `/api/simulation/queue/{job_id}/abort`       (`solve_queue_abort`)
+#     — job-scoped; carries its own authorization keyed on the job. This is
+#       `TOOL_ROUTES`'s literal template string (never a real job id at this
+#       seam), so an exact match on the template is correct and does not need
+#       the regex `main.py` uses against real request paths.
+_LOCK_GATE_EXEMPT_PATHS = frozenset({
+    "/api/simulation/queue",
+    "/api/simulation/queue/clear_finished",
+    "/api/simulation/queue/{job_id}/abort",
+})
+_LOCK_GATE_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
+# Tools with no HTTP route (`_service_call_` in TOOL_ROUTES) that nonetheless
+# mutate the resident network. The route-derived rule below cannot see them,
+# and they are exactly as capable of overwriting a lock holder's work as the
+# routed ones — `batch_delete_components` more so than most.
+_LOCK_GATE_SERVICE_CALL_MUTATORS = frozenset({
+    "batch_create_components",
+    "batch_delete_components",
+    "generate_exemplary_timeseries",
+    "apply_demand_from_excel",
+    "reconstruct_network_from_image",
+})
+
+
+def _lock_gated_tool_names() -> frozenset[str]:
+    """
+    The tools the seam gates: middleware parity, derived — not a hand list.
+
+    A tool is gated when its safety tier is not "read" AND it either maps to a
+    write route under a gated prefix (`chat_tools_schema.TOOL_ROUTES` is the
+    tool→route map the endpoint-map test already keeps honest) or is one of the
+    routeless network mutators above.
+
+    Deriving it has a second payoff: a tool added later against a new
+    `/api/network/*` route is gated the day it lands, with nothing to remember.
+
+    Everything else is deliberately NOT gated:
+      * `/api/projects/*` write tools (save / rename / delete / layout /
+        snapshots) already call `_enforce_project_lock` in the handler body,
+        and its 409 is the richer one — it names the TARGET project, which for
+        a tool like `save_project('Other')` is not the active one this seam
+        would have tested.
+      * `solve_queue_enqueue` names its project in the body and runs its own
+        check, exactly as `/api/simulation/queue` is exempt in the middleware.
+      * `load_project` / `activate_project` are how a user gets AWAY from a
+        locked project; gating them would trap them there. The middleware
+        likewise gates neither (one is a GET, the other is an exempt suffix).
+      * Upload / export / chat-history tools write artifacts, not network
+        state, on surfaces the middleware does not gate either.
+    """
+    from services.chat_tools_schema import TOOL_ROUTES, safety_tier_for
+
+    gated: set[str] = set()
+    for name in DISPATCHERS:
+        if safety_tier_for(name) == "read":
+            continue
+        if name in _LOCK_GATE_SERVICE_CALL_MUTATORS:
+            gated.add(name)
+            continue
+        for route in TOOL_ROUTES.get(name, ()):
+            if not isinstance(route, tuple):
+                continue  # a `_service_call_` / `_ui_event_` sentinel
+            method, path = route
+            if (
+                method.upper() in _LOCK_GATE_WRITE_METHODS
+                and any(path.startswith(p) for p in _LOCK_GATE_PREFIXES)
+                and path not in _LOCK_GATE_EXEMPT_PATHS
+            ):
+                gated.add(name)
+                break
+    return frozenset(gated)
+
+
+def _check_foreign_lock(tool_name: str) -> None:
+    """
+    Raise 409 `project_locked` when another user holds the active project's
+    edit lock. Same predicate as the middleware gate in `main.py`.
+
+    CHECK ONLY — never an acquire. A free or expired lock, the acting user's
+    own lock, local mode, an unbound scratch context and a tool call with no
+    acting identity all pass through untouched.
+    """
+    import local_mode
+
+    if local_mode.is_local_mode():
+        return  # D7 — one identity, no lock semantics
+    user_id = _ACTING_USER_ID.get()
+    if user_id is None:
+        return  # nothing to compare a holder against; `_acting()` owns the 401
+    try:
+        acting_uuid = uuid.UUID(str(user_id))
+    except (TypeError, ValueError):
+        return
+    try:
+        binding_uuid = PyPSAService.get_active_context().project_uuid
+    except Exception:  # noqa: BLE001
+        return  # unbound scratch context — nothing to guard
+    if not binding_uuid:
+        return
+    try:
+        lock_project_id = uuid.UUID(str(binding_uuid))
+    except (TypeError, ValueError):
+        return
+
+    from db.session import SessionLocal
+    from services import project_locks
+
+    try:
+        with SessionLocal() as gate_db:
+            lock = project_locks.get_lock(gate_db, lock_project_id)
+            if lock is None or lock.holder_user_id == acting_uuid:
+                return
+            detail = {
+                "error_kind": "project_locked",
+                "message": (
+                    "This project is being edited by another user, so "
+                    f"{tool_name!r} was not run. Their edit lock must expire "
+                    "or be released first."
+                ),
+                "lock": project_locks.serialize_lock(
+                    gate_db, lock_project_id, acting_uuid
+                ),
+            }
+    except Exception:  # noqa: BLE001
+        # FAIL CLOSED, matching the middleware gate (F4): `get_lock` prunes an
+        # expired row (DELETE + commit), so a race can raise here, and a DB
+        # error means the lock is UNKNOWN rather than absent. Dispatching
+        # anyway would wave through precisely the write the gate exists to
+        # stop, at the moment the check broke.
+        logger.exception(
+            "chat dispatch seam: lock check failed for %r; refusing the tool",
+            tool_name,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error_kind": "project_lock_unavailable",
+                "message": (
+                    "Could not verify this project's edit lock, so "
+                    f"{tool_name!r} was not run. Retry in a moment."
+                ),
+            },
+        ) from None
+    raise HTTPException(status_code=409, detail=detail)
+
+
+def _lock_gated(tool_name: str, handler):
+    """Wrap one dispatcher with the foreign-lock check."""
+    import functools
+
+    @functools.wraps(handler)
+    def _wrapped(*args, **kwargs):
+        _check_foreign_lock(tool_name)
+        return handler(*args, **kwargs)
+
+    return _wrapped
+
+
+# Applied in place so anything already holding a reference to DISPATCHERS
+# (chat_service imports the dict itself) sees the gated callables.
+DISPATCHERS.update({
+    name: _lock_gated(name, DISPATCHERS[name])
+    for name in _lock_gated_tool_names()
+})

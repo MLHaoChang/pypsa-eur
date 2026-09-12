@@ -67,12 +67,26 @@ export interface CostBreakdown {
   // The "_lifetime" fields back the "Total over lifetime" toggle on the
   // CapacityExpansion tab. OPEX stays per-year — multiplying it by lifetime
   // would mix construction cost with operating cost and break LCOE intuition.
+  //
+  // EVERY `*_lifetime` field is `number | null`. `null` means the backend
+  // could not resolve an upfront (overnight) cost for at least one component
+  // class — it is NOT a zero, and `?? 0` on any of them is precisely the bug
+  // this nullability exists to prevent. Nulls propagate: an unknown class
+  // makes the horizon total unknown too, because a total that silently omits
+  // a component (Line was 95.8% of one user's CAPEX) reads as an answer.
+  // `capex_lifetime_available` below is the matching summary flag.
+  // The ANNUALISED fields are never null — they come from `n.statistics()`
+  // and owe nothing to the upfront-cost resolve.
   capex: number
-  capex_lifetime: number
+  capex_lifetime: number | null
   capex_expansion: number
-  capex_expansion_lifetime: number
+  capex_expansion_lifetime: number | null
   opex: number
   total: number
+  // False when the backend could not resolve an upfront cost for some
+  // component class. Optional because a response cached from a backend older
+  // than this field has no opinion; read it as `!== false`, never `=== true`.
+  capex_lifetime_available?: boolean
   // Σ curtailment_t × curtailment_cost over renewables that opted in.
   // Already weighting-aware (snapshot × period years). Zero unless the
   // user set curtailment_cost > 0 on a renewable generator.
@@ -80,13 +94,13 @@ export interface CostBreakdown {
   // CAPEX-expansion bucket for StorageUnit + Store only — quick "how much
   // of the new investment goes into storage" KPI for the cost overview.
   storage_capex_expansion: number
-  storage_capex_expansion_lifetime: number
+  storage_capex_expansion_lifetime: number | null
   by_component: Array<{
     component: string
     capex: number
-    capex_lifetime: number
+    capex_lifetime: number | null
     capex_expansion: number
-    capex_expansion_lifetime: number
+    capex_expansion_lifetime: number | null
     opex: number
     total: number
   }>
@@ -110,7 +124,9 @@ export interface CostBreakdown {
 }
 
 // Per-asset CAPEX inputs.
-//   capital_cost     — annualised cost per unit (LP-objective value).
+//   capital_cost     — annualised cost per unit (LP-objective value). Always
+//                       a real, finite number — independent of whether the
+//                       upfront cost below resolves.
 //   overnight_cost   — nominal upfront lump-sum per unit (PyPSA's
 //                       `comp.overnight_cost`, either as-typed or back-
 //                       calculated). Same value for every asset
@@ -123,12 +139,23 @@ export interface CostBreakdown {
 //                       toggle uses this so future-year capex is shown
 //                       in today's money — e.g. a 2035 build at 7% looks
 //                       smaller than a 2025 build of the same nominal €/MW.
+//
+//   `overnight_cost` / `overnight_cost_pv` are `number | null`. `null` means
+//   the backend could not resolve THIS asset's upfront cost — see
+//   `overnight_cost_available`. NOT a zero, and never a stand-in for
+//   `capital_cost` (a different unit: EUR/MW/yr vs EUR/MW — substituting one
+//   for the other was the defect this nullability exists to prevent).
+//   overnight_cost_available — false exactly when the two fields above are
+//                       null for this asset. Optional because a response
+//                       cached from a backend older than this field has no
+//                       opinion; read it as `!== false`, never `=== true`.
 //   lifetime         — years, kept for tooltips / CSV.
 //   build_year       — optional; only present when the asset carries one.
 export type AssetCostMap = Record<string, Record<string, {
   capital_cost: number
-  overnight_cost: number
-  overnight_cost_pv: number
+  overnight_cost: number | null
+  overnight_cost_pv: number | null
+  overnight_cost_available?: boolean
   lifetime: number
   build_year?: number
 }>>
@@ -515,6 +542,12 @@ export interface MarginLoopPayload {
   margin_tight: number | null
   /** The largest margin the fleet can reach; null = unbounded. */
   margin_ceiling: number | null
+  // The bound the SEARCH stops at, always a number: `min(fleet ceiling,
+  // the schema's own cap)`. Distinct from `margin_ceiling`, which is the
+  // FLEET's reach and is null when every extendable is unbounded — the
+  // panel used to show only that one and read "ceiling unbounded" beside
+  // a verdict saying the search is bounded above by 500%.
+  search_ceiling?: number | null
   max_solves: number
   restore: 'base' | 'final'
   base_restored: boolean
@@ -866,6 +899,11 @@ export const resultsApi = {
   // gen_cost / storage_charge_cost / curtailment_cost / lost_load_cost,
   // capex_meur, dispatch_gwh, lcoe_eur_per_mwh).
   getEconomicsByCarrier: () => client.get<{
+    // False means the figures were never resolved (unsolved network, or the
+    // roll-up itself failed) and every number below is a default zero rather
+    // than a measurement — ADR-0001. Optional so a response from an older
+    // backend, which omitted the field entirely, is not read as `false`.
+    available?: boolean
     by_carrier?: Record<string, {
       revenue_meur: { total: number; by_period: Record<string, number> }
       opex_meur:    { total: number; by_period: Record<string, number> }
@@ -1023,6 +1061,12 @@ export const resultsApi = {
     bus_carriers?: Record<string, string>
     // Multi-period: parallel array of period years for each `index` entry.
     periods?: number[]
+    // Present on ranged requests (routers/results.py::_serve_ts /
+    // _ts_payload) — see the matching field on `TSPayload` in
+    // pages/results/shared.tsx for the full contract. Not re-exported from
+    // there (api/ doesn't depend on pages/) so the shape is inlined; keep it
+    // in sync if `TSPayload.range` ever changes.
+    range?: { from: number; to: number; total: number; complete: boolean; capped: boolean }
   }>('/results/lost_load', tsParams(undefined, range)).then(r => r.status === 204 ? null : r.data),
   // Transmission-losses summary. `enabled=false` ⇒ the solve didn't model
   // losses, in which case totals/peak are 0 (intentional: the LoadFlow tab
@@ -1065,6 +1109,14 @@ export const resultsApi = {
 }
 
 // ── Asset economics types ──────────────────────────────────────────────
+//
+// `fixed_cost_eur` / `fom_cost_eur` / `net_profit_eur` / `lcoe_eur_per_mwh` /
+// `lcos_eur_per_mwh` are `number | null` on EVERY row and every `by_period`
+// entry. `null` means the backend's capital-cost resolver raised and the
+// figure could not be computed — it is NOT a zero and must never be coalesced
+// into one (`?? 0` here is the bug this nullability exists to prevent).
+// `AssetEconomicsPayload.capital_costs_available` is the matching summary
+// flag; see its comment below.
 export interface GeneratorEconomicsRow {
   name: string
   bus: string
@@ -1074,19 +1126,19 @@ export interface GeneratorEconomicsRow {
   capacity_factor: number | null
   revenue_eur: number
   vom_cost_eur: number
-  fixed_cost_eur: number       // capital_cost × p_nom_opt (annualised)
-  fom_cost_eur: number         // user-typed fom_cost × p_nom_opt (informational)
-  net_profit_eur: number       // revenue − fixed − vom
+  fixed_cost_eur: number | null       // capital_cost × p_nom_opt (annualised)
+  fom_cost_eur: number | null         // user-typed fom_cost × p_nom_opt (informational)
+  net_profit_eur: number | null       // revenue − fixed − vom
   lcoe_eur_per_mwh: number | null
   avg_price_eur_per_mwh: number | null
   by_period: Array<{
     period: number | string
     energy_mwh: number
     revenue_eur: number
-    fixed_cost_eur: number
-    fom_cost_eur: number
+    fixed_cost_eur: number | null
+    fom_cost_eur: number | null
     vom_cost_eur: number
-    net_profit_eur: number
+    net_profit_eur: number | null
     lcoe_eur_per_mwh: number | null
     avg_price_eur_per_mwh: number | null
   }>
@@ -1104,9 +1156,9 @@ export interface StorageUnitEconomicsRow {
   discharge_revenue_eur: number
   charge_cost_eur: number
   vom_cost_eur: number
-  fixed_cost_eur: number
-  fom_cost_eur: number
-  net_profit_eur: number       // discharge_revenue − charge_cost − vom − fixed
+  fixed_cost_eur: number | null
+  fom_cost_eur: number | null
+  net_profit_eur: number | null       // discharge_revenue − charge_cost − vom − fixed
   lcos_eur_per_mwh: number | null
   spread_eur_per_mwh: number | null
   avg_discharge_price_eur_per_mwh: number | null
@@ -1117,10 +1169,10 @@ export interface StorageUnitEconomicsRow {
     charge_mwh: number
     discharge_revenue_eur: number
     charge_cost_eur: number
-    fixed_cost_eur: number
-    fom_cost_eur: number
+    fixed_cost_eur: number | null
+    fom_cost_eur: number | null
     vom_cost_eur: number
-    net_profit_eur: number
+    net_profit_eur: number | null
     lcos_eur_per_mwh: number | null
     spread_eur_per_mwh: number | null
   }>
@@ -1135,9 +1187,9 @@ export interface StoreEconomicsRow {
   discharge_revenue_eur: number
   charge_cost_eur: number
   vom_cost_eur: number
-  fixed_cost_eur: number
-  fom_cost_eur: number
-  net_profit_eur: number
+  fixed_cost_eur: number | null
+  fom_cost_eur: number | null
+  net_profit_eur: number | null
   lcos_eur_per_mwh: number | null
   spread_eur_per_mwh: number | null
   avg_discharge_price_eur_per_mwh: number | null
@@ -1163,9 +1215,9 @@ export interface LinkEconomicsRow {
   gross_revenue_eur: number
   input_cost_eur: number
   vom_cost_eur: number
-  fixed_cost_eur: number
-  fom_cost_eur: number
-  net_profit_eur: number       // revenue − fixed − vom
+  fixed_cost_eur: number | null
+  fom_cost_eur: number | null
+  net_profit_eur: number | null       // revenue − fixed − vom
   lcoe_eur_per_mwh: number | null  // ALL-IN per MWh of output; matches /results/lcoh
   avg_price_eur_per_mwh: number | null
   by_period: Array<{
@@ -1174,10 +1226,10 @@ export interface LinkEconomicsRow {
     revenue_eur: number
     gross_revenue_eur: number
     input_cost_eur: number
-    fixed_cost_eur: number
-    fom_cost_eur: number
+    fixed_cost_eur: number | null
+    fom_cost_eur: number | null
     vom_cost_eur: number
-    net_profit_eur: number
+    net_profit_eur: number | null
     lcoe_eur_per_mwh: number | null
     avg_price_eur_per_mwh: number | null
   }>
@@ -1185,6 +1237,11 @@ export interface LinkEconomicsRow {
 export interface AssetEconomicsPayload {
   currency: string
   is_multi_period: boolean
+  // False when the backend's capital-cost resolver raised. Every
+  // capital-cost-derived field in every row is then `null` rather than 0.0.
+  // Optional because a response cached from a backend older than this field
+  // has no opinion; read it as `!== false`, never as `=== true`.
+  capital_costs_available?: boolean
   periods: Array<number | string>
   generators: GeneratorEconomicsRow[]
   storage_units: StorageUnitEconomicsRow[]

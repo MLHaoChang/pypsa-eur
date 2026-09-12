@@ -209,11 +209,50 @@ def build_belgium() -> pypsa.Network | None:
     return n
 
 
+# ── Template 4: IEEE 39-Bus (New England) ───────────────────────────────────
+# The detailed grid gridspine's planning → dynamics pipeline studies, as a
+# PyPSA network built by gridspine's OWN producer — so a project made from it,
+# solved in the GUI and saved, is a valid dispatch source for a study
+# (increment 5, D3: the identity map needs case39 unit ids on case39 buses).
+# Nine committable thermal units (a 24 h MILP, seconds), one import slack, the
+# five RES sites of gridspine's ledger with their synthetic capacity factors.
+_CARRIER_BY_PREFIX = {"G_": "thermal", "SLK_": "import", "W_": "wind", "S_": "solar"}
+
+
+def build_ieee39() -> pypsa.Network | None:
+    # Guarded like `build_belgium`'s missing workflow output: gridspine is an
+    # editable install in every pixi environment (D5) but not in the frozen
+    # app's pip venv, and this script must still build the other templates
+    # there. `test_packaging_requirements.py` holds the guard.
+    try:
+        from gridspine.drivers.year_study import res_cf_for
+        from gridspine.ingest.pandapower_source import load_case39_res
+        from gridspine.producers.pypsa_nodal import to_pypsa
+    except ImportError as exc:
+        print(f"[ieee39] SKIP — gridspine is not importable here ({exc})")
+        return None
+
+    net = load_case39_res()
+    n = to_pypsa(net, snapshots=SNAPSHOTS, res_cf=res_cf_for(net, len(SNAPSHOTS)))
+    n.name = "IEEE 39-Bus (New England)"
+    # Carriers are cosmetic for the study (the identity map is by unit id) but
+    # the GUI's asset views and icons key off them.
+    n.add("Carrier", "AC")
+    for carrier in sorted(set(_CARRIER_BY_PREFIX.values())):
+        n.add("Carrier", carrier)
+    n.buses["carrier"] = "AC"
+    for unit in n.generators.index:
+        prefix = next(p for p in _CARRIER_BY_PREFIX if unit.startswith(p))
+        n.generators.at[unit, "carrier"] = _CARRIER_BY_PREFIX[prefix]
+    return n
+
+
 def main() -> None:
     builders = (
         ("3bus", build_3bus),
         ("ieee14", build_ieee14),
         ("belgium", build_belgium),
+        ("ieee39", build_ieee39),
     )
     for template_id, builder in builders:
         n = builder()

@@ -183,11 +183,15 @@ def elcc_candidates(n, cfg=None) -> list[dict]:
     # hour by hour and the dominance tripwire holds; a (1−q)-derated peak
     # would make `not_bracketed` reachable on the unit's best hour. A
     # zero-peak profile has nothing to price and is excluded, as the vre
-    # branch below excludes it.
+    # branch below excludes it — and so is a unit folded to zero capacity by
+    # a static `p_max_pu` of 0 (IEEE 39-bus review, N-h). The exclusion used
+    # to require a profile, so the folded unit was offered in the picker at
+    # 0 MW: a candidate whose credit is 0 by construction and whose study is
+    # a run for nothing.
     rows: list[dict] = []
     for u in inputs.units:
         nameplate = unit_nameplate_mw(u)
-        if nameplate <= 0.0 and getattr(u, "profile", None) is not None:
+        if nameplate <= 0.0:
             continue
         rows.append({"kind": "generator", "name": str(u.name),
                      "nameplate_mw": nameplate})

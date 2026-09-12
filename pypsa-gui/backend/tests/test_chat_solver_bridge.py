@@ -287,3 +287,87 @@ def test_classify_solver_line_kinds():
     assert classify("TRACEBACK: ...") == "TRACEBACK"
     assert classify("ERROR: ...") == "ERROR"
     assert classify("info-only message") == "INFO"
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# The root-logger -> SSE bridge, which was dead in production.
+#
+# `solver_service` attaches `_ThreadScopedQueueHandler` (a
+# `logging.handlers.QueueHandler`) to the ROOT logger for the duration of a
+# solve, constructed with a `BufferedLogQueue`. `QueueHandler.enqueue` calls
+# `put_nowait`. `BufferedLogQueue` defined `put` and not `put_nowait`, so
+# every record raised `AttributeError` inside `Handler.emit` — which the
+# logging module swallows by design. The solve log the user watches carried
+# only the explicit `log_queue.put()` calls (the `[PHASE]` markers) and NONE
+# of the `pypsa.*` / `linopy.*` / HiGHS output that the handler's own
+# docstring calls "what the user reads".
+#
+# `test_s0_6_solve_log_excludes_other_threads_but_keeps_pypsa_lines` was
+# written to prevent exactly this and passed throughout, because it builds
+# the handler over a `queue.SimpleQueue` — which HAS `put_nowait` — instead
+# of the type production passes. A substitute collaborator cannot show a
+# defect that lives in the real one's interface.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_a_queuehandler_record_actually_reaches_the_queue():
+    """
+    The join, over the two REAL types. Neither half is wrong on its own:
+    `QueueHandler` is stdlib, and `BufferedLogQueue.put` even coerces
+    `LogRecord` to text for exactly this producer. They simply never met.
+    """
+    import logging
+    import logging.handlers
+
+    q = BufferedLogQueue(maxlen=100)
+    handler = logging.handlers.QueueHandler(q)
+    logger = logging.getLogger("test.pypsa.optimization")
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+    try:
+        logger.info("HIGHS_LINE Model status: Optimal")
+    finally:
+        logger.removeHandler(handler)
+
+    assert any("HIGHS_LINE" in line for line in q.history()), (
+        "the root-logger bridge dropped the record: the solve log the user "
+        f"reads is empty of solver output. history={q.history()}"
+    )
+
+
+def test_it_really_is_a_drop_in_for_simplequeue():
+    """
+    The class docstring opens with "Drop-in for `queue.SimpleQueue` from the
+    producer side". That claim is what `solver_service` relies on, and it
+    was false — asserted here against `SimpleQueue` itself rather than a
+    hand-listed set, so a method the stdlib starts calling later is covered
+    by the same assertion instead of needing a new one.
+    """
+    import queue as _queue
+
+    expected = {
+        name for name in dir(_queue.SimpleQueue)
+        if not name.startswith("_") and callable(getattr(_queue.SimpleQueue, name))
+    }
+    missing = sorted(name for name in expected if not hasattr(BufferedLogQueue, name))
+    assert not missing, f"not a drop-in: {missing}"
+
+
+def test_put_nowait_records_history_and_fans_out_exactly_like_put():
+    """
+    DISCRIMINATION. Satisfying `QueueHandler` by delegating to the inner
+    `SimpleQueue.put_nowait` would make the AttributeError go away while
+    leaving the record out of `history()` and out of every subscriber deque
+    — the SSE replay and the chat bridge would stay just as empty, and the
+    test above would still pass if it only checked the queue.
+    """
+    q = BufferedLogQueue(maxlen=100)
+    sub_id, dq = q.subscribe()
+    try:
+        q.put_nowait("NOWAIT_LINE")
+        assert "NOWAIT_LINE" in q.history(), "put_nowait skipped the history buffer"
+        assert "NOWAIT_LINE" in list(dq), "put_nowait skipped the fanout subscribers"
+        assert q.get(timeout=1) == "NOWAIT_LINE", "put_nowait skipped the queue itself"
+    finally:
+        q.unsubscribe(sub_id)

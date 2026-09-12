@@ -166,11 +166,26 @@ def test_destructive_tool_emits_pending_confirmation(client):
 # ─────────────────────────────────────────────────────────────────────────
 
 
-def test_approve_within_ttl_executes_tool(client):
+def test_approve_within_ttl_executes_tool(client, monkeypatch):
     """
     Two-step: open SSE in a thread, /confirm approve, then SSE thread sees
     tool_running + tool_result.
     """
+    # The module's autouse `_short_confirmation_ttl` pins the TTL at 0.3s so
+    # tests that never send /confirm finish in milliseconds. This test DOES send
+    # it, and the poll that waits for the token to appear can take longer than
+    # 0.3s on a loaded runner — after which the TTL has already expired the
+    # token, `record_decision` pops nothing, and /confirm returns 404
+    # `unknown_confirmation_token`. That is what made this test flaky in CI
+    # while it passed locally in ~30ms: it failed the `GUI backend` job on
+    # master at 306cac1, and reproduces deterministically with a 0.5s stall
+    # inserted before the POST.
+    #
+    # A test named "within ttl" must not race the TTL. Overriding locally is
+    # exactly what `_short_confirmation_ttl`'s docstring asks of tests with
+    # specific TTL semantics, and the expiry path stays covered by the two
+    # tests below that set 0.1s deliberately.
+    monkeypatch.setattr(chat_service, "CONFIRMATION_TTL_SECONDS", 60.0)
     import threading
 
     streamed: list[tuple[str, dict]] = []

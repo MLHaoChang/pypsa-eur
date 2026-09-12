@@ -213,6 +213,7 @@ def _compute_prices_summary(n, periods, is_multi, has_solve) -> PricesComparison
     else:
         max_price, min_price = 0.0, 0.0
     return PricesComparison(
+        available=True,
         duration_curve=duration_curve,
         mean_price=CarrierPeriodValue(total=mean_total, by_period=mean_pp),
         median_price=CarrierPeriodValue(total=median_total, by_period=median_pp),

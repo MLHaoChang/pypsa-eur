@@ -1,4 +1,5 @@
 import {
+  isPermissionError,
   parseSpeechResults,
   speechErrorMessage,
   type SpeechRecognitionConstructor,
@@ -9,6 +10,8 @@ export type SpeechSessionHandlers = {
   onInterim: (text: string) => void
   onListeningChange: (listening: boolean) => void
   onError: (message: string) => void
+  /** Fired in addition to onError when the failure was a permission denial. */
+  onPermissionDenied?: () => void
 }
 
 /**
@@ -49,6 +52,7 @@ export class SpeechSession {
 
     recognition.onerror = (ev: SpeechRecognitionErrorEvent) => {
       if (ev.error === 'aborted') return
+      if (isPermissionError(ev.error)) this.handlers.onPermissionDenied?.()
       this.handlers.onError(speechErrorMessage(ev.error))
       this.wantListen = false
       this.handlers.onListeningChange(false)
@@ -84,6 +88,27 @@ export class SpeechSession {
     }
   }
 
+  /**
+   * ORDERING IS LOAD-BEARING — do not reorder the three steps below.
+   *
+   * `start()` installs an `onend` handler that RESTARTS recognition whenever
+   * `wantListen` is still true (that is what makes `continuous` survive the
+   * engine's own idle timeouts). `r.stop()` fires `onend`. So a stop that
+   * called `r.stop()` before clearing `wantListen` and detaching `r.onend`
+   * would hand control straight back to the restart path and the microphone
+   * would come back on, silently.
+   *
+   * The current order closes that race twice over: `wantListen = false` first,
+   * then `r.onend = null`, and only then `r.stop()`. Either alone would do it;
+   * both together mean a future edit has to break two things to reopen it.
+   *
+   * This matters more than it used to. ChatPanel is now mounted for the app's
+   * lifetime inside AssistantDock, so this method is the ONLY thing that turns
+   * the microphone off when the dock collapses — there is no unmount cleanup
+   * behind it any more. A silent restart here is a hot mic the user cannot
+   * see, because the mic button and the interim transcript are both inside the
+   * dock's hidden body. See ChatPanel.mic.test.tsx.
+   */
   stop(opts: { silent?: boolean } = {}): void {
     this.wantListen = false
     const r = this.recognition

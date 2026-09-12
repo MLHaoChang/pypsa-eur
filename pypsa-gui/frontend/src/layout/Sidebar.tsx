@@ -8,19 +8,22 @@ import {
   MousePointer, ZoomIn, ZoomOut, AlertTriangle,
   Thermometer, Zap, Camera, LayoutDashboard,
   Sun, Moon, Rows2, Rows3,
-  GitBranch as GitBranchIcon, ListChecks,
+  GitBranch as GitBranchIcon, ListChecks, FlaskConical,
   MessageSquare, LayoutGrid, Users, SlidersHorizontal,
 } from 'lucide-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useUIStore } from '../store/uiStore'
+import { useAssetDrag } from '../hooks/useAssetDrag'
 import { networkApi } from '../api/network'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { ioApi } from '../api/io'
 import { projectsApi } from '../api/projects'
 import { simulationApi } from '../api/simulation'
 import type { ImportSummary, ProjectInfo } from '../api/types'
 import { ImportZone } from '../pages/ImportExport'
 import { appLog, useSimulationStore } from '../store/simulationStore'
+import { formatApiDetail } from '../api/client'
 import toast from 'react-hot-toast'
 import {
   invalidateNetworkQueries, saveProjectQuietly,
@@ -33,6 +36,7 @@ import { H2Icon } from '../components/AssetIcons'
 import ProjectPicker from '../components/ProjectPicker'
 import { useSolveQueue } from '../hooks/useSolveQueue'
 import { useLocalSettingsAvailable } from '../hooks/useLocalSettings'
+import { useLLMSettingsAvailable } from '../hooks/useLLMSettings'
 import { isActive } from '../api/solveQueue'
 import { evaluateMutation } from '../utils/mutationGuard'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
@@ -234,74 +238,14 @@ function SubHdr({ title }: { title: string }) {
 // ── AssetPaletteInline ─────────────────────────────────────────────────────────
 function AssetPaletteInline() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
-  const { setCreationItem } = useUIStore()
-  // Drag ghost — rendered as a fixed-position chip that follows the cursor
-  // during a drag. Pointer-events:none so pointerup passes through to the
-  // actual drop target underneath.
-  const [ghost, setGhost] = useState<{ label: string; x: number; y: number } | null>(null)
+  // The pointer-drag gesture and its drop hit-test live in the hook — it is
+  // the single owner of "what is under the cursor", shared by the schematic
+  // and map canvases (spec D25). setCreationItem is still needed directly
+  // for the keyboard path below (Enter/Space), which is not a drag.
+  const { ghost, beginDrag } = useAssetDrag()
+  const setCreationItem = useUIStore(s => s.setCreationItem)
   const toggle = (id: string) =>
     setCollapsed(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-
-  // Manual pointer-event drag (NOT HTML5 drag-and-drop). The HTML5 API was
-  // unreliable in the user's environment — drops didn't land. Pointer events
-  // are bulletproof: we track mousedown→move→up ourselves, render our own
-  // ghost, and detect the drop target via document.elementFromPoint.
-  //
-  // Threshold: 3px of movement promotes "click" → "drag". Below ⇒ pointerup
-  // fires the click handler (opens slide-in panel without dropPosition). At
-  // or above ⇒ pointerup checks if the cursor is over the React Flow canvas
-  // and opens the panel WITH dropPosition.
-  function beginDrag(e: React.PointerEvent, item: { id: string; label: string }) {
-    if (e.button !== 0) return  // left button only
-    e.preventDefault()
-    const startX = e.clientX
-    const startY = e.clientY
-    let moved = false
-
-    const onMove = (ev: PointerEvent) => {
-      const dx = Math.abs(ev.clientX - startX)
-      const dy = Math.abs(ev.clientY - startY)
-      if (!moved && (dx > 3 || dy > 3)) {
-        moved = true
-        document.body.style.cursor = 'grabbing'
-      }
-      if (moved) setGhost({ label: item.label, x: ev.clientX, y: ev.clientY })
-    }
-
-    const onUp = (ev: PointerEvent) => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
-      document.body.style.cursor = ''
-      setGhost(null)
-
-      if (!moved) {
-        // Click — open the right-side slide-in panel with no drop position.
-        setCreationItem({ id: item.id, label: item.label })
-        return
-      }
-
-      // Drop detection. document.elementFromPoint walks the actual DOM hit
-      // test under the release coordinates; we check if that element (or
-      // any ancestor) is the React Flow canvas (.react-flow wrapper).
-      const target = document.elementFromPoint(ev.clientX, ev.clientY)
-      const rfEl = target?.closest('.react-flow') as HTMLElement | null
-      if (!rfEl) return  // released outside the canvas — cancel silently
-
-      // Convert screen → React Flow coords via the global instance handle
-      // TopologyCanvas pins to window in onInit. Without it, the new node
-      // would land at (0, 0) on the canvas regardless of where you dropped.
-      const rf = (window as unknown as {
-        rfInstance?: { screenToFlowPosition: (p: { x: number; y: number }) => { x: number; y: number } }
-      }).rfInstance
-      const pos = rf?.screenToFlowPosition({ x: ev.clientX, y: ev.clientY })
-      if (!pos) return
-
-      setCreationItem({ id: item.id, label: item.label, dropPosition: pos })
-    }
-
-    window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
-  }
 
   return (
     <div>
@@ -736,7 +680,7 @@ function ProjectSectionContent({
     autosaveEnabled, setAutosaveEnabled, markProjectSaved,
     lastSavedByProject, recents,
     activeSlidePanel, setSlidePanel, setProjectSwitchInProgress,
-    readOnly,
+    readOnly, readOnlyReason,
   } = useUIStore()
   const [showNameModal, setShowNameModal] = useState(false)
   // Separate flag for the "Save a Copy" flow so its modal can pre-fill a
@@ -745,6 +689,11 @@ function ProjectSectionContent({
   const [showCopyModal, setShowCopyModal] = useState(false)
   // "Open Project" picker — lists existing backend projects.
   const [showOpenModal, setShowOpenModal] = useState(false)
+  // Pending DESTRUCTIVE re-load of the already-open project. `depthKnown`
+  // rides along so the prompt can say which case the user is in — "you have
+  // unsaved edits" and "we could not find out" are different sentences and
+  // only one of them is a claim.
+  const [pendingReload, setPendingReload] = useState<{ name: string; depthKnown: boolean } | null>(null)
   // Route back to the projects home (the workspace surface that now owns
   // create / import / duplicate).
   const navigate = useNavigate()
@@ -775,12 +724,12 @@ function ProjectSectionContent({
   const networkHasBuses = (networkMeta?.bus_count ?? 0) > 0
 
   const guardProjectMutation = useCallback((opts?: { silent?: boolean }) => {
-    const verdict = evaluateMutation(readOnly)
+    const verdict = evaluateMutation(readOnly, readOnlyReason)
     if (verdict.allowed) return true
     if (opts?.silent) appLog('INFO', `Autosave skipped — ${verdict.blockedMessage}`)
     else toast.error(verdict.blockedMessage!)
     return false
-  }, [readOnly])
+  }, [readOnly, readOnlyReason])
 
   // Save current network state to backend (under `name`), then offer the
   // resulting bundle as a download via the OS save-file picker (Chromium) or
@@ -995,7 +944,7 @@ function ProjectSectionContent({
     saveAndExportBundle(name, { setAsCurrent: false, askLocation: true, skipCache: true })
   }
 
-  const handleOpenPick = async (name: string) => {
+  const handleOpenPick = async (name: string, opts?: { confirmed?: boolean }) => {
     setShowOpenModal(false)
     const tId = toast.loading(`Opening '${name}'…`)
     setProjectSwitchInProgress(true)
@@ -1006,6 +955,23 @@ function ProjectSectionContent({
       // is a DESTRUCTIVE re-load (not the instant switch) — switchToProject
       // no-ops on the same project, so it can't serve this recovery path.
       if (name === currentProject) {
+        // Gate on the dirty state, not unconditionally: the recovery case this
+        // branch exists for is the one where the backend network is EMPTY, and
+        // prompting there would be noise on the exact workflow it serves. But
+        // "clean" must mean clean — a failed probe is UNKNOWN and fails closed,
+        // because this path discards whatever it could not ask about.
+        if (!opts?.confirmed) {
+          // `unsaved`, not `depth > 0` — see ImportExport.tsx. A solved project
+          // has depth 0 and unsaved true, and re-reading from disk discards it.
+          let unsaved = false
+          let unsavedKnown = true
+          try { unsaved = (await networkApi.undoInfo()).unsaved } catch { unsavedKnown = false }
+          if (!unsavedKnown || unsaved) {
+            toast.dismiss(tId)
+            setPendingReload({ name, depthKnown: unsavedKnown })
+            return
+          }
+        }
         const stopped = await abortRunningSim()
         if (!stopped) {
           toast.error('Could not abort the running simulation. Try again in a moment.', { id: tId })
@@ -1048,8 +1014,15 @@ function ProjectSectionContent({
           break
       }
     } catch (e) {
-      appLog('ERROR', `Open '${name}' failed: ${String((e as Error)?.message ?? e)}`)
-      toast.error(`Could not open '${name}'`, { id: tId })
+      // Same seam as the clone wizard: `name === currentProject` above calls
+      // `projectsApi.load`, which is `load_project` — the route that now
+      // refuses (409, error_kind `solver_in_flight`) while a queue job owns
+      // this project's context. A bare "Could not open" here would hide
+      // exactly the reason this whole fix exists to surface.
+      const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+      const msg = formatApiDetail(detail, (e as Error)?.message ?? String(e))
+      appLog('ERROR', `Open '${name}' failed: ${msg}`)
+      toast.error(`Could not open '${name}': ${msg}`, { id: tId })
     } finally {
       setProjectSwitchInProgress(false)
     }
@@ -1110,6 +1083,24 @@ function ProjectSectionContent({
           initial={slugify(`${currentProject || pn}_copy`)}
           onSave={handleCopyConfirm}
           onClose={() => setShowCopyModal(false)}
+        />
+      )}
+      {pendingReload && (
+        <ConfirmDialog
+          open
+          danger
+          title="Re-load from disk?"
+          message={pendingReload.depthKnown
+            ? `'${pendingReload.name}' will be re-read from disk. Unsaved changes in the current network are lost.`
+            : `Could not check '${pendingReload.name}' for unsaved changes — the backend did not answer. `
+              + 'Re-reading from disk will discard anything unsaved.'}
+          confirmLabel="Re-load"
+          onConfirm={() => {
+            const target = pendingReload.name
+            setPendingReload(null)
+            void handleOpenPick(target, { confirmed: true })
+          }}
+          onCancel={() => setPendingReload(null)}
         />
       )}
       {showOpenModal && (
@@ -1268,12 +1259,17 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   // not to thrash the backend, short enough that the badge stays roughly
   // accurate after an edit. The panel itself polls more aggressively when
   // open.
-  const { data: preflight } = useQuery({
+  const { data: preflight, isError: preflightErrored } = useQuery({
     queryKey: nk(currentProject, 'preflight'),
     queryFn: simulationApi.preflight,
     refetchInterval: 30_000,
     staleTime: 15_000,
   })
+  // ADR-0001: a failed preflight fetch must never render as "no issues" — a
+  // defaulted zero here is indistinguishable from a real clean result, so it
+  // would silently convert "we could not check" into "we checked and it's
+  // fine". `preflightErrored` (covers both isError and the resulting
+  // `data === undefined`) drives an explicit unavailable badge instead.
   const issueCount = (preflight?.errors ?? 0) + (preflight?.warnings ?? 0)
   const hasErrors = (preflight?.errors ?? 0) > 0
   // Active (queued + running) solve-queue jobs, surfaced as a badge on the
@@ -1281,10 +1277,17 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
   // are active (see useSolveQueue), so this idle-mounted consumer is cheap.
   const { data: solveQueue } = useSolveQueue()
   const activeQueueCount = (solveQueue?.jobs ?? []).filter(isActive).length
-  // The Settings pane is desktop-only; its routes 404 on a web deployment.
-  // The row hides with it — a nav entry that opens an empty panel is worse
-  // than no nav entry. Shares one react-query fetch with the pane.
-  const settingsAvailable = useLocalSettingsAvailable()
+  // The Settings pane hosts two independently-gated surfaces (Task 15): the
+  // desktop-only Anthropic key + log (routes 404 on a web deployment) and
+  // AssistantModelSettings (super-admin-gated, meaningful on a server too).
+  // The row shows when EITHER is reachable — hiding on local-settings alone
+  // would take the row away from a web super-admin who can still reach the
+  // assistant-model section. A nav entry that opens a genuinely empty panel
+  // is still worse than no nav entry, which is why this stays an OR rather
+  // than always-on. Both hooks share their pane's own react-query fetch.
+  const localSettingsAvailable = useLocalSettingsAvailable()
+  const llmSettingsAvailable = useLLMSettingsAvailable()
+  const settingsAvailable = localSettingsAvailable || llmSettingsAvailable
   return (
     <div>
       <SItem icon={<Settings2 size={15} />} label="Solver Settings"
@@ -1294,7 +1297,7 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
       />
       {settingsAvailable && (
         <SItem icon={<SlidersHorizontal size={15} />} label="Settings"
-          title="Store your Anthropic API key and find the application log."
+          title="Choose the assistant model and, on desktop, store your Anthropic API key and find the application log."
           active={activeSlidePanel === 'settings'}
           onClick={() => { setSlidePanel(activeSlidePanel === 'settings' ? null : 'settings'); onCloseModal?.() }}
         />
@@ -1313,7 +1316,13 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
         icon={<AlertTriangle size={15} />}
         label="Issues"
         active={activeSlidePanel === 'issues'}
-        rightEl={issueCount > 0 ? (
+        rightEl={preflightErrored ? (
+          <span
+            className="shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded"
+            style={{ background: 'rgba(148,163,184,0.18)', color: '#94a3b8' }}
+            title="Could not check for issues — the preflight validation request failed"
+          >?</span>
+        ) : issueCount > 0 ? (
           <span
             className="shrink-0 ml-1 text-[10px] font-mono font-semibold px-1.5 py-px rounded"
             style={{
@@ -1339,13 +1348,78 @@ function SimulationSectionContent({ onCloseModal, requestBottomTab }: {
         ) : undefined}
         onClick={() => { setSlidePanel(activeSlidePanel === 'solveQueue' ? null : 'solveQueue'); onCloseModal?.() }}
       />
-      {/* Chatbot integration v6 (Phase 3) — toggle the ChatPanel slide. */}
-      <SItem icon={<MessageSquare size={15} />} label="Chat"
-        title="Conversational assistant. Ask questions about the open network, drive tools, confirm destructive actions through a card."
-        active={activeSlidePanel === 'chat'}
-        onClick={() => { setSlidePanel(activeSlidePanel === 'chat' ? null : 'chat'); onCloseModal?.() }}
+      <SItem icon={<FlaskConical size={15} />} label="Planning → dynamics"
+        title="Rank a year's extreme hours, screen N-1/N-2 and fault levels, and export PowerFactory handoff bundles (gridspine)."
+        active={activeSlidePanel === 'gridspine'}
+        onClick={() => { setSlidePanel(activeSlidePanel === 'gridspine' ? null : 'gridspine'); onCloseModal?.() }}
       />
+      {/* The Assistant row used to live here, as the last of seven. It is not
+          a simulation feature — it answers questions about the network and
+          opens panels from all three sections — and a row inside a collapsible
+          section is not the "always-visible" affordance the design spec asks
+          for. It is now `AssistantNavButton`, pinned above the sections in
+          both sidebar modes. See Sidebar.assistant.test.tsx. */}
     </div>
+  )
+}
+
+/**
+ * The Assistant's nav entry — top level in both sidebar modes, never inside a
+ * collapsible section.
+ *
+ * It toggles `assistantDockOpen` rather than `activeSlidePanel`: the assistant
+ * has its own dock precisely so it can stay on screen while it navigates you
+ * somewhere (see AssistantDock.tsx), and routing it back through the panel
+ * union would restore the self-eviction bug the dock exists to remove.
+ */
+function AssistantNavButton({ compact = false, onCloseModal }: {
+  compact?: boolean
+  onCloseModal?: () => void
+}) {
+  const assistantDockOpen = useUIStore(s => s.assistantDockOpen)
+  const toggleAssistantDock = useUIStore(s => s.toggleAssistantDock)
+  const title = 'Assistant — ask about the open network, drive any tool, and it opens the view it is talking about.'
+  const onClick = () => { toggleAssistantDock(); onCloseModal?.() }
+
+  if (compact) {
+    return (
+      <button
+        onClick={onClick}
+        title={title}
+        aria-label="Assistant"
+        aria-pressed={assistantDockOpen}
+        data-testid="sidebar-assistant"
+        className="flex flex-col items-center justify-center gap-0.5 w-full py-2 transition-colors"
+        style={{
+          color: assistantDockOpen ? 'var(--color-accent)' : 'var(--color-muted)',
+          background: assistantDockOpen ? 'rgba(47,129,247,0.14)' : undefined,
+        }}
+      >
+        <MessageSquare size={18} />
+        <span className="text-[8px] font-mono font-bold uppercase tracking-[0.06em]">Ask</span>
+      </button>
+    )
+  }
+
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      aria-pressed={assistantDockOpen}
+      data-testid="sidebar-assistant"
+      className="flex items-center gap-2 w-full px-3 py-2 text-[12px] font-semibold rounded-md transition-colors"
+      style={{
+        color: assistantDockOpen ? 'var(--color-accent)' : 'var(--color-text)',
+        background: assistantDockOpen ? 'rgba(47,129,247,0.14)' : 'rgba(47,129,247,0.07)',
+        border: `1px solid ${assistantDockOpen ? 'rgba(47,129,247,0.5)' : 'rgba(47,129,247,0.22)'}`,
+      }}
+    >
+      <MessageSquare size={15} className="shrink-0" />
+      <span className="flex-1 text-left">Assistant</span>
+      <span className="font-mono text-[9px] font-bold uppercase tracking-[0.12em] text-muted">
+        {assistantDockOpen ? 'Open' : 'Ask'}
+      </span>
+    </button>
   )
 }
 
@@ -1748,6 +1822,12 @@ export default function Sidebar() {
             </button>
           </div>
 
+          {/* Assistant first, and outside the section list — the three buttons
+              below open a flyout you then have to read; this one acts. */}
+          <div className="w-full border-b border-border shrink-0">
+            <AssistantNavButton compact onCloseModal={() => setActiveFlyout(null)} />
+          </div>
+
           {/* Section icons */}
           <div className="flex-1 flex flex-col w-full">
             <IconStripBtn icon={<FolderOpen size={18} />}  label="Project"    sectionId="project"    activeFlyout={activeFlyout} onClick={() => toggleFlyout('project')} />
@@ -1809,6 +1889,13 @@ export default function Sidebar() {
           >
             <ChevronLeft size={14} />
           </button>
+        </div>
+
+        {/* Assistant — pinned ABOVE the scroll container, not inside it, so it
+            is on screen whatever the sections are doing and wherever the body
+            is scrolled to. */}
+        <div className="shrink-0 px-2 pt-2 pb-1">
+          <AssistantNavButton />
         </div>
 
         {/* Scrollable body */}

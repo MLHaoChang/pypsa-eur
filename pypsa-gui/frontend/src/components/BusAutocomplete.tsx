@@ -3,14 +3,31 @@ import { useState, useRef, useEffect, useId } from 'react'
 interface BusAutocompleteProps {
   value: string
   onChange: (v: string) => void
+  /**
+   * Fired ONLY when a bus is actually chosen — clicked in the list, or Enter on
+   * a highlighted row. `onChange` cannot serve this purpose because it also
+   * fires on every keystroke, so a caller that treats it as "the user picked a
+   * bus" commits half-typed names. The grid does exactly that; see
+   * BottomPanel's bus branch.
+   */
+  onSelect?: (v: string) => void
+  autoFocus?: boolean
   buses: string[]
   placeholder?: string
   required?: boolean
   readOnly?: boolean
+  /**
+   * Whether a name matching no bus is acceptable. The creation form's default
+   * (true) is honest — the backend auto-creates the bus. The grid passes false,
+   * where an unknown name is a dangling reference instead (spec D4).
+   */
+  allowUnknown?: boolean
 }
 
 export default function BusAutocomplete({
-  value, onChange, buses, placeholder = 'Select bus…', required, readOnly,
+  value, onChange, onSelect, autoFocus, buses,
+  placeholder = 'Select bus…', required, readOnly,
+  allowUnknown = true,
 }: BusAutocompleteProps) {
   const [open, setOpen] = useState(false)
   const [cursor, setCursor] = useState(-1)
@@ -36,6 +53,7 @@ export default function BusAutocomplete({
 
   const select = (name: string) => {
     onChange(name)
+    onSelect?.(name)
     setOpen(false)
     setCursor(-1)
   }
@@ -43,12 +61,28 @@ export default function BusAutocomplete({
   const handleKey = (e: React.KeyboardEvent) => {
     if (readOnly) return
     if (!open) {
-      if (e.key === 'ArrowDown' || e.key === 'Enter') { setOpen(true); setCursor(0) }
+      // Enter here OPENS the list rather than confirming anything, so it must
+      // not also reach a parent that would read it as "commit this draft".
+      if (e.key === 'ArrowDown' || e.key === 'Enter') {
+        setOpen(true); setCursor(0)
+        if (e.key === 'Enter') e.stopPropagation()
+      }
+      // An arrow belongs to this widget in BOTH states. Letting it bubble with
+      // the dropdown closed would move the grid's active cell out from under an
+      // open editor (spec D4 adaptation 3, D5).
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') e.stopPropagation()
       return
     }
-    if (e.key === 'ArrowDown') { e.preventDefault(); setCursor(c => Math.min(c + 1, filtered.length - 1)) }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setCursor(c => Math.max(c - 1, -1)) }
-    else if (e.key === 'Enter') { if (cursor >= 0 && filtered[cursor]) { e.preventDefault(); select(filtered[cursor]) } }
+    if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); setCursor(c => Math.min(c + 1, filtered.length - 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); setCursor(c => Math.max(c - 1, -1)) }
+    // Enter on a highlighted row is this widget's own confirm — consume it.
+    // With nothing highlighted it is deliberately left to bubble, so a parent
+    // can commit a fully typed name.
+    else if (e.key === 'Enter') {
+      if (cursor >= 0 && filtered[cursor]) {
+        e.preventDefault(); e.stopPropagation(); select(filtered[cursor])
+      }
+    }
     else if (e.key === 'Escape') { setOpen(false); setCursor(-1) }
   }
 
@@ -61,8 +95,22 @@ export default function BusAutocomplete({
   const [dropPos, setDropPos] = useState({ top: 0, left: 0, width: 0 })
   useEffect(() => {
     if (!open || !inputRef.current) return
-    const rect = inputRef.current.getBoundingClientRect()
-    setDropPos({ top: rect.bottom + 4, left: rect.left, width: rect.width + 28 })
+    const place = () => {
+      const el = inputRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      setDropPos({ top: rect.bottom + 4, left: rect.left, width: rect.width + 28 })
+    }
+    place()
+    // Capture phase: a scroll inside the grid's table body does NOT bubble to
+    // window, and a fixed-position dropdown that does not follow its anchor
+    // drifts away from the cell it belongs to (spec D4 adaptation 2).
+    window.addEventListener('scroll', place, true)
+    window.addEventListener('resize', place)
+    return () => {
+      window.removeEventListener('scroll', place, true)
+      window.removeEventListener('resize', place)
+    }
   }, [open, value])
 
   const base = 'bg-bg border border-border px-2 py-1.5 text-xs focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
@@ -77,6 +125,7 @@ export default function BusAutocomplete({
           value={value}
           required={required}
           readOnly={readOnly}
+          autoFocus={autoFocus}
           placeholder={placeholder}
           onChange={e => { if (!readOnly) { onChange(e.target.value); setOpen(true); setCursor(-1) } }}
           onFocus={() => { if (!readOnly) setOpen(true) }}
@@ -107,7 +156,9 @@ export default function BusAutocomplete({
       </div>
       {showWarn && !readOnly && (
         <p className="text-[9px] text-warn mt-0.5 leading-tight">
-          No bus with this name — it will be created automatically
+          {allowUnknown
+            ? 'No bus with this name — it will be created automatically'
+            : `No bus named "${value}" — pick an existing bus`}
         </p>
       )}
       {open && !readOnly && filtered.length > 0 && (

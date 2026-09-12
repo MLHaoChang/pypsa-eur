@@ -4,8 +4,20 @@
 **Found while:** Phase D of
 `docs/superpowers/plans/2026-09-09-chat-turn-loop-decomposition.md` — extracting
 `_stream_assistant_message` from `services/chat_service.py::_run_turn_body`
-**Status:** open. Neither is a malfunction; both are recorded rather than fixed
-because that phase's contract is strictly behaviour-preserving.
+**Status:** revised 2026-09-10, and the revision matters more than the original.
+
+* **Item 1 (`pending_blocks`) — FIXED**, not by this work. PR #8 (gridspine)
+  re-expressed the same seam over its `llm_provider` abstraction, removed the
+  unread accumulation, and cited this file while doing it. Its own note says the
+  second, unread copy was "exactly the comment-asserting-an-untrue-fact that let
+  the original thinking-block bug hide" — so the finding earned its keep.
+* **Item 2 (`model_fallback_used`) — WITHDRAWN. The claim was wrong.** See the
+  correction below. The flag is load-bearing, and asserting otherwise in a
+  document another agent was already reading is the more serious of the two
+  errors recorded here.
+
+A third item, found while checking the second, is a real defect and is recorded
+in `2026-09-10-a-refused-stream-request-still-switches-the-session-model.md`.
 
 ## 1. `pending_blocks` is written and never read
 
@@ -129,3 +141,48 @@ observation: a recording lock whose `__exit__` must receive the HTTPException,
 which is direct proof the raise happened inside it. Both old and new catch a
 hoist of the guard above the lock BEFORE the extraction; only the new one still
 catches it after.
+
+---
+
+# Correction, 2026-09-10: item 2 was wrong
+
+The original wrote:
+
+> The flag can never be the deciding condition. The same branch sets
+> `session.model = DEFAULT_MODEL`, and **nothing anywhere returns it to
+> `OPUS_MODEL` mid-turn**, so `session.model == OPUS_MODEL` is already false on
+> any second pass.
+
+That last clause is false. `routers/chat.py:564`, inside `POST /api/chat/stream`:
+
+```python
+# Honour an explicit per-turn model switch on an EXISTING session.
+if body.model:
+    session.model = body.model
+```
+
+A second `/stream` request naming Opus sets `session.model` back to
+`OPUS_MODEL` on a session whose turn is already running — and PR #8's version of
+the retry loop re-reads `request.model` from `session.model` at the top of every
+attempt, so the running turn sees it. `model_fallback_used` is then the only
+thing preventing a second downgrade in one turn. **It is load-bearing, not
+belt-and-braces**, and removing it would reintroduce the loop it was written to
+stop.
+
+## How the error was made, since that is the reusable part
+
+The claim came from a mutation that failed to fail:
+`test_the_fallback_is_granted_at_most_once` kept passing when
+`model_fallback_used = False` was reset every attempt. Two readings were
+available — "the test is vacuous" or "one of two redundant guards was removed
+and the other carried it" — and the second was chosen. Both were wrong. The
+right reading was the one nobody checked: **the test never exercised the path
+where the flag matters**, because nothing in it puts the model back to Opus
+mid-turn. A guard whose necessity depends on a concurrent request cannot be
+probed by a single-threaded test, and "the mutation passed" said nothing about
+redundancy either way.
+
+The original note warned that the next person mutation-testing this code would
+hit the same non-result. That was right, and insufficient: it should have said
+the flag's condition is unreachable from the test suite, which is a coverage gap
+rather than dead code.

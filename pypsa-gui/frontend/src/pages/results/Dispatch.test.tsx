@@ -4,7 +4,10 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../../store/uiStore'
 import { resultsApi } from '../../api/simulation'
 import { networkApi } from '../../api/network'
-import Dispatch from './Dispatch'
+import Dispatch, { linkFlowTotals, type LinkPort } from './Dispatch'
+import {
+  buildMultiPeriodWindowFixture, COLUMNS, WINDOW, TIMESTEPS_PER_PERIOD,
+} from './__fixtures__/multiPeriodWindow'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -186,4 +189,63 @@ it('renders a distinctive thermal dispatch value sourced from the mocked results
   // not one node counted twice.
   const matches = await screen.findAllByText('424.24 MWh')
   expect(matches.length).toBe(2)
+})
+
+// ── linkFlowTotals on a windowed payload ────────────────────────────────────
+// Production change under test: the per-port link-flow loop inside
+// `CarrierKpiPanel` (now `linkFlowTotals`) read `snapshotWeights[row]`
+// positionally, with no snapshot-name or period check at all. `snapshotWeights`
+// always covers the FULL horizon (/api/network/snapshots takes no from/to)
+// while `row` is window-relative on a `?from=17520&to=26279` payload — so
+// every link flow was multiplied by the FIRST investment period's weight
+// instead of its own. Routing the loop through `effectiveWeightAt` (shared.tsx)
+// makes it resolve by (period, timestep) like `weightedSum` already did.
+//
+// Fixture is the real payload shape: 3 periods × 8,760 snapshots, 12 columns,
+// weight rows {period, timestep, objective, stores, generators}, non-uniform
+// weights that differ per period for the same timestep.
+const fx = buildMultiPeriodWindowFixture()
+
+// Every column is a link touching this carrier at two ports: bus0 (coeff -1,
+// consumption) and bus1 (coeff = efficiency, production). Deterministic
+// per-column efficiency so no port cancels another out.
+const PORTS: Map<string, LinkPort[]> = new Map(
+  COLUMNS.map((c, i) => [c, [{ coeff: -1 }, { coeff: 0.9 + i * 0.01 }]] as const),
+)
+
+it('linkFlowTotals: a windowed link payload matches the same rows of the whole horizon', () => {
+  const windowed = linkFlowTotals(
+    fx.windowed, PORTS, { from: 0, to: TIMESTEPS_PER_PERIOD - 1 }, fx.ctxWindow,
+  )
+  const wholeSlice = linkFlowTotals(fx.whole, PORTS, WINDOW, fx.ctxWhole)
+  // Non-degenerate: both directions carry real energy.
+  expect(wholeSlice.linkGen).toBeGreaterThan(0)
+  expect(wholeSlice.linkOutflow).toBeGreaterThan(0)
+  expect(windowed.linkGen).toBeCloseTo(wholeSlice.linkGen, 6)
+  expect(windowed.linkOutflow).toBeCloseTo(wholeSlice.linkOutflow, 6)
+})
+
+it('linkFlowTotals: whole-horizon totals are unchanged (positional == keyed here)', () => {
+  const all = linkFlowTotals(
+    fx.whole, PORTS, { from: 0, to: fx.whole.data.length - 1 }, fx.ctxWhole,
+  )
+  // Independent recomputation: on a WHOLE-horizon payload the row index IS the
+  // absolute snapshot index, so the positional read is correct and the keyed
+  // read must agree with it exactly.
+  let gen = 0, out = 0
+  for (let row = 0; row < fx.whole.data.length; row++) {
+    const sw = fx.wholeWeights[row]
+    const pw = fx.periodWeights.find(p => p.period === fx.whole.periods![row])
+    const w = (sw.generators ?? 1) * (pw?.years ?? 1)
+    for (let i = 0; i < COLUMNS.length; i++) {
+      const p0 = fx.whole.data[row][i]
+      for (const port of PORTS.get(COLUMNS[i])!) {
+        const contrib = port.coeff * p0
+        if (contrib > 0) gen += contrib * w
+        else if (contrib < 0) out += -contrib * w
+      }
+    }
+  }
+  expect(all.linkGen).toBeCloseTo(gen, 4)
+  expect(all.linkOutflow).toBeCloseTo(out, 4)
 })

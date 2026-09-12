@@ -88,6 +88,39 @@ def corrected_marginal_prices(n, from_state: bool = True, *, result_df=None):
         prices = getattr(getattr(n, "buses_t", None), "marginal_price", None)
     if prices is None or prices.empty:
         return _pd.DataFrame(0.0, index=n.snapshots, columns=n.buses.index)
+    return _apply_merit_order_correction(n, prices)
+
+
+def _apply_merit_order_correction(n, prices):
+    """
+    Remove the curtailment-subsidy distortion from ALREADY-FETCHED duals.
+
+    Split out of `corrected_marginal_prices` so `/results/prices` can apply
+    the identical correction to duals it fetched under its OWN `source`
+    parameter. The fetching half of `corrected_marginal_prices` hardcodes
+    `source="lopf"`, so `get_prices` cannot call it directly without losing
+    `source="ac_pf"` — which is why an inline copy grew there in the first
+    place. Only the fetch differs between the two callers; the algorithm is
+    the single source of truth and lives here.
+
+    Two branches, and BOTH matter. A subsidised renewable drags the bus dual
+    to its EFFECTIVE LP cost (`marginal_cost - curtailment_cost`):
+
+      1. dual == effective cost within `dual_tol` — the unambiguous
+         diagnostic that this renewable is the dual-setting unit.
+      2. dual BELOW the effective cost while the renewable is pinned AT its
+         ceiling — the LP can push the dual further down when the unit has
+         no headroom to respond, and the real price is still its
+         `marginal_cost`.
+
+    `get_prices` carried a copy implementing branch 1 only, so an at-ceiling
+    subsidised renewable reported the raw negative dual on the Prices tab
+    while `/asset_economics` and the Compare tabs reported the corrected
+    one — the latent drift flagged under "Known limitations" in
+    `docs/superpowers/findings/2026-08-03-compare-tab-correctness.md`.
+    """
+    import pandas as _pd
+
     prices = prices.fillna(0.0)
     try:
         gens = n.generators

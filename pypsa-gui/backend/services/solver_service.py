@@ -79,7 +79,9 @@ from services.solver.periodized_costs import (  # noqa: F401
     _pv_factor_series,
     _reference_build_year,
     fill_periodized_cost_defaults,
+    upfront_cost_series,
     periodized_capital_costs,
+    upfront_cost_series,
     with_periodized_cost_defaults,
 )
 from services.validation_service import has_errors, validate_for_run

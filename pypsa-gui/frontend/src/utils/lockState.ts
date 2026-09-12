@@ -15,6 +15,11 @@ export interface LockInfo {
   yours: boolean
 }
 
+// WHY a project can be read-only. `readOnly` alone could only ever produce one
+// message — "another user is editing this project" — which is a lie the moment
+// a queue job is what is holding it.
+export type ReadOnlyReason = 'writable' | 'locked-by-user' | 'solving'
+
 export interface LockState {
   // True when the current user may NOT mutate the active project — either
   // someone else holds the lock, or acquisition failed. Every destructive /
@@ -24,12 +29,14 @@ export interface LockState {
   // read-only viewer knows who to ask. null when no lock exists / holder
   // unknown / the lock is ours.
   holderEmail: string | null
+  // Why. Always 'writable' when `readOnly` is false.
+  reason: ReadOnlyReason
 }
 
 // Neutral "you may edit" state. The default when auth is disabled or no lock
 // machinery is in play (legacy single-user workbench) — so the legacy path is
 // never accidentally read-only.
-export const WRITABLE: LockState = { readOnly: false, holderEmail: null }
+export const WRITABLE: LockState = { readOnly: false, holderEmail: null, reason: 'writable' }
 
 // Outcome of attempting to ACQUIRE (or heartbeat) a project lock.
 //   ok:true  — the lock is ours; `lock` describes it (yours=true).
@@ -49,9 +56,79 @@ export function lockStateFromAcquire(outcome: LockAcquireOutcome): LockState {
   if (outcome.ok) {
     // We hold the lock now. Don't advertise our own email as "someone else is
     // editing" — a writable state has no foreign holder to name.
-    return { readOnly: false, holderEmail: outcome.lock?.yours ? null : holderEmail }
+    return {
+      readOnly: false,
+      holderEmail: outcome.lock?.yours ? null : holderEmail,
+      reason: 'writable',
+    }
   }
-  return { readOnly: true, holderEmail }
+  return { readOnly: true, holderEmail, reason: 'locked-by-user' }
+}
+
+/**
+ * Fold the two INDEPENDENT read-only inputs into the single flag the ~20 direct
+ * consumers read, plus the reason.
+ *
+ * They are independent because they clear independently: the edit lock is
+ * released by another user, the solve clears itself when the job ends. Storing
+ * only the fold would make releasing one clear the other. `solving` wins the
+ * message because it is the one with a definite end and a different remedy.
+ */
+export function effectiveLockState(
+  lockReadOnly: boolean,
+  solving: boolean,
+): { readOnly: boolean; reason: ReadOnlyReason } {
+  if (solving) return { readOnly: true, reason: 'solving' }
+  if (lockReadOnly) return { readOnly: true, reason: 'locked-by-user' }
+  return { readOnly: false, reason: 'writable' }
+}
+
+// ── Reading a refusal off the wire ─────────────────────────────────────────
+//
+// The backend refuses a write under a foreign lock from three places, and the
+// two readers below have to accept all of them:
+//
+//   `_enforce_project_lock`   detail: {error_kind, message, lock}
+//   the write middleware      detail: {…same…}, plus a top-level `code`
+//   the enqueue check         detail: {…same…}
+//
+// The middleware's top-level `code` predates the unification and stays for
+// compatibility, which is why `lockRefusalCode` looks in both places. Keeping
+// both readers here — rather than inline at the axios interceptor and again in
+// `projectActions` — is what stops the two from drifting the next time a
+// fourth emitter appears.
+
+export const PROJECT_LOCKED = 'project_locked'
+
+function detailOf(responseData: unknown): Record<string, unknown> | null {
+  if (!responseData || typeof responseData !== 'object') return null
+  const detail = (responseData as { detail?: unknown }).detail
+  if (!detail || typeof detail !== 'object') return null
+  return detail as Record<string, unknown>
+}
+
+/**
+ * `'project_locked'` when this response body is a foreign-lock refusal from any
+ * emitter, else null. Callers key toast suppression off it: a blocked write
+ * belongs in the read-only banner, not in a toast per retry.
+ */
+export function lockRefusalCode(responseData: unknown): string | null {
+  if (!responseData || typeof responseData !== 'object') return null
+  if ((responseData as { code?: unknown }).code === PROJECT_LOCKED) return PROJECT_LOCKED
+  return detailOf(responseData)?.error_kind === PROJECT_LOCKED ? PROJECT_LOCKED : null
+}
+
+/**
+ * The current holder carried by a refusal, or null when unknown.
+ *
+ * null is a legitimate answer, not only a parse failure: the backend serialiser
+ * degrades a DB error to `lock: null` rather than turning a correct 409 into a
+ * 500, and the banner then falls back to "another user".
+ */
+export function lockFromErrorData(responseData: unknown): LockInfo | null {
+  const detail = detailOf(responseData)
+  if (detail === null || !('lock' in detail)) return null
+  return (detail.lock as LockInfo | null) ?? null
 }
 
 // Destructive / mutating actions consult this before running. Kept as a named

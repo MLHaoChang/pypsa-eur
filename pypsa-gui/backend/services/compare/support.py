@@ -10,7 +10,15 @@ math / pandas are imported locally inside functions where the router did the
 same; module-level imports below are only what the bodies reference at module
 scope.
 """
+
 from __future__ import annotations
+
+import logging
+
+# The transplanted `_periodized_lookup` logs here (merge, 2026-09-10): its
+# failure is silent and total — every asset's CAPEX reads 0.00 — so it has to
+# be diagnosable from pypsa-gui.log.
+logger = logging.getLogger("pypsa_gui.compare")
 
 import pandas as pd
 from models.schemas import (
@@ -20,6 +28,12 @@ from services import economics
 from services import period_utils
 from services.serialization import safe_float as _safe_float
 
+
+
+#: The channel the Compare view logs to. Named explicitly rather than
+#: `__name__` so a log config keyed on it keeps working after the move out
+#: of `routers/compare.py`.
+logger = logging.getLogger("pypsa_gui.compare")
 
 def _bucket_add(d: dict, key: str, value: float, period: int | None) -> None:
     """
@@ -98,6 +112,17 @@ def _periodized_lookup(n, *, cfg=None) -> dict:
     try:
         return periodized_capital_costs(n, cfg)
     except Exception:
+        # Return contract is deliberately unchanged (``{}``): every caller
+        # already reads through ``_safe_capital_cost``, and reshaping this
+        # without auditing all of them is how the last round of bugs happened.
+        # But the degradation is silent and total — every asset's CAPEX reads
+        # 0.0 — so it must at least be diagnosable from pypsa-gui.log. Matches
+        # `services/asset_results/compute.py`, which names the consequence in
+        # the log line rather than just recording that something failed.
+        logger.exception(
+            "periodized_capital_costs failed while building the Compare view; "
+            "every asset's capital cost will read 0.00 in this comparison",
+        )
         return {}
 
 

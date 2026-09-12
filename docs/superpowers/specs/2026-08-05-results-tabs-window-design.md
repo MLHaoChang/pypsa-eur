@@ -163,7 +163,7 @@ const partial = [gensTS, loadTS, storPowerTS].some(
 
 When `partial` is true the tab renders an explicit "showing a partial payload —
 totals unavailable" state rather than a number. Today the condition is
-unreachable, since AggregatedOverview's getters are called with one argument and
+unreachable, since AggregatedOverview's getters are called with zero arguments and
 receive no `range` key at all. It exists for the day someone converts it by
 accident, which is the single most likely way this design gets broken later.
 

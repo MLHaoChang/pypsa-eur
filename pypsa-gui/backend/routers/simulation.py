@@ -87,9 +87,40 @@ class BufferedLogQueue:
                 dq.append(text)
         self._queue.put(item)
 
+    # `logging.handlers.QueueHandler.enqueue` calls `put_nowait`, NOT `put`.
+    # Without this the whole root-logger -> SSE bridge was dead: every record
+    # raised `AttributeError` inside `Handler.emit`, which the logging module
+    # swallows by design, so the solve log the user watches carried only the
+    # explicit `log_queue.put()` calls and none of the `pypsa.*` / `linopy.*`
+    # / HiGHS output that IS the log's content.
+    #
+    # It delegates to `put`, never to `self._queue.put_nowait`: routing round
+    # `put` would silence the AttributeError while still leaving the record
+    # out of `_history` (the SSE replay and `/log_history`) and out of every
+    # subscriber deque (the chat bridge) — the same emptiness, harder to see.
+    #
+    # `SimpleQueue` is unbounded, so there is no case where `put_nowait`
+    # should behave differently from `put` here.
+    def put_nowait(self, item: Any) -> None:
+        self.put(item)
+
     # The consumer side still uses get(timeout=...) — pass through.
     def get(self, *args, **kwargs):
         return self._queue.get(*args, **kwargs)
+
+    # The rest of the `SimpleQueue` surface, so the "drop-in" the docstring
+    # promises is actually true. These read the queue only and deliberately
+    # do NOT consult `_history`: history outlives a drained queue on purpose,
+    # so answering `empty()`/`qsize()` from it would tell a consumer there is
+    # something left to `get()` when there is not.
+    def get_nowait(self, *args, **kwargs):
+        return self._queue.get_nowait(*args, **kwargs)
+
+    def empty(self) -> bool:
+        return self._queue.empty()
+
+    def qsize(self) -> int:
+        return self._queue.qsize()
 
     def history(self) -> list[str]:
         with self._hist_lock:
@@ -355,6 +386,15 @@ def asset_costs():
     try:
         return periodized_capital_costs(n, cfg)
     except Exception:
+        # Return contract is deliberately unchanged (``{}``): the frontend
+        # already treats a missing asset as "no cost recorded", and changing
+        # the shape without auditing every consumer is out of scope here. What
+        # was NOT acceptable is that the failure left no trace at all — an
+        # empty map renders the whole "Investments by asset" table as EUR 0.
+        logger.exception(
+            "periodized_capital_costs failed in /simulation/asset_costs; the "
+            "per-asset investment table will show 0 for every asset",
+        )
         return {}
 
 
@@ -580,6 +620,16 @@ def run():
         status, condition = run_simulation(
             config, n, lock, stop_event, log_queue, state_update=_state_update
         )
+        # Results now live in the in-memory network and are NOT on disk: this
+        # path, unlike the queue's, does not persist. They are unsaved work,
+        # they never enter the undo stack, and every destructive-action guard
+        # asks `undo/info` whether unsaved work exists — so without this the
+        # guards let a solve be destroyed silently. Marked on any terminal
+        # outcome that wrote results; an aborted or failed solve leaves the
+        # network as it was.
+        if status in ("ok", "optimal"):
+            from services import dirty_state
+            dirty_state.mark_dirty()
         elapsed = _time.time() - t0
         # Total system cost (variable objective + objective_constant, summed
         # across per-period LPs in myopic mode) — see _compute_run_objective.

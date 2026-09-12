@@ -291,6 +291,10 @@ def mixture_hourly(dist: CapacityDistribution, residual, mixed=(),
     ``fixed_up``: positions in ``mixed`` whose state is forced UP — the
     attribution counterfactual (unit ``i`` perfectly available). With no
     ``mixed`` units this is one plain vectorised evaluation.
+
+    A unit whose availability is zero in every hour is enumerated over ONE
+    state rather than two: see the comment at ``silent`` below for why that
+    is exact.
     """
     r = np.asarray(residual, dtype=np.float64)
     H = r.shape[0]
@@ -301,7 +305,23 @@ def mixture_hourly(dist: CapacityDistribution, residual, mixed=(),
         return 1.0 - dist.survival_vec(r), dist.expected_shortfall_vec(r)
     avail = np.stack([_availability_mw(u, H) for u in mixed])   # (k, H)
     qs = np.array([float(u.q) for u in mixed], dtype=np.float64)
-    free = [i for i in range(len(mixed)) if i not in fixed_up]
+    # A unit that can supply NOTHING in any hour needs no state of its own.
+    # Its two states differ by `s_i · a_{i,h}` = 0, so the pair contributes
+    # `(1−q_i)·X + q_i·X = X` to every term — the law of total probability
+    # over a variable nothing depends on. Dropping it is therefore EXACT,
+    # not an approximation, and it halves the `2^k` evaluations per such
+    # unit.
+    #
+    # Not hypothetical: an all-NaN `p_max_pu` column is read as "unavailable
+    # every hour" (M3) and reaches here as a profile of zeros, so the cheap
+    # data defect that phase 12f exists for is exactly the case that paid
+    # for a doubled mixture. `nan`-free by construction — `_availability_mw`
+    # is built from a clamped profile — but a non-finite row is left in the
+    # enumeration rather than guessed at.
+    silent = {i for i in range(len(mixed))
+              if np.isfinite(avail[i]).all() and float(avail[i].max()) <= 0.0}
+    free = [i for i in range(len(mixed))
+            if i not in fixed_up and i not in silent]
     for bits in itertools.product((0, 1), repeat=len(free)):
         s = np.ones(len(mixed), dtype=np.float64)
         prob = 1.0

@@ -1,13 +1,19 @@
 /**
  * Phase 3 chatbot integration v6 — ChatPanel.
  *
- * UI shell for the chat assistant. Lives in the SlidePanel slot (kind='chat')
- * mounted by App.tsx. The panel owns:
+ * UI shell for the chat assistant. Mounted unconditionally inside
+ * `AssistantDock` (its own column beside the main area, hidden with CSS when
+ * collapsed) — NOT in the SlidePanel slot it used to occupy as kind='chat'.
+ * That move is the fix for "it switches to the results panel, but the chat
+ * disappears": `activeSlidePanel` holds one value, so as a slide panel the
+ * assistant was mutually exclusive with every view it exists to explain. The
+ * panel owns:
  *   * message list (assistant token deltas accumulate into one assistant
  *     bubble until a tool_request / tool_result lands)
  *   * confirmation card (renders when chatStore.pending is set; carries a
  *     live countdown and approve/deny buttons that POST /confirm)
- *   * cost meter (M10 — derives EUR client-side from session usage_acc)
+ *   * usage meter (exact token counts from session usage_acc — no currency
+ *     estimate; see the note in chatStore.ts for why that was removed)
  *   * project_exists / descendants_exist UX paths (v4-MAJOR-1 / v4-MINOR-1)
  *   * connection-lost toast (M8)
  *
@@ -27,8 +33,11 @@ import {
   postChatAbort,
   postChatConfirm,
   type ChatFrame,
+  type InterruptedTurn,
 } from '../api/chat'
+import { useChatProfiles, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
 import { nk } from '../utils/queryKeys'
+import { invalidateAssetQueries, isMutatingTier } from '../utils/assetWrite'
 import {
   deleteUpload,
   getUploadBlobUrl,
@@ -37,8 +46,12 @@ import {
   UploadError,
   type UploadMeta,
 } from '../api/uploads'
-import { deriveCostEur, useChatStore, type UploadMetaUI } from '../store/chatStore'
+import { useChatStore, type ChatMessage, type UploadMetaUI } from '../store/chatStore'
 import ApiKeySetup from './ApiKeySetup'
+import ChatLaunchGreeting from './ChatLaunchGreeting'
+import { buildUiContext } from '../utils/uiContext'
+import { postChatRewind } from '../api/chat'
+import * as speechOut from '../utils/speechOut'
 import { useUIStore } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
 import { useSpeechToText } from '../hooks/useSpeechToText'
@@ -94,7 +107,16 @@ function _frame_data<T = Record<string, unknown>>(f: ChatFrame): T {
   return f.data as T
 }
 
-/** Map chat tool panel_id → SlidePanel / special navigation targets. */
+/**
+ * Map chat tool panel_id → SlidePanel / special navigation targets.
+ *
+ * Not every value here is a `SlidePanel`. 'topology', 'map', 'properties',
+ * 'palette', 'bottom', 'import_export', 'project_picker', 'new_project' and
+ * 'chat' name surfaces that live outside `activeSlidePanel`; applyUiNavigate
+ * dispatches on each of them explicitly before falling through to the
+ * setSlidePanel branch. 'chat' in particular now resolves to the assistant
+ * dock, not to a slide panel.
+ */
 function _normalizePanelId(raw: string): string {
   const key = raw.trim()
   const aliases: Record<string, string> = {
@@ -190,11 +212,16 @@ function applyUiNavigate(d: {
   } else if (panel === 'compare') {
     ui.setSlidePanel('results')
     ui.setCompareRailOpen(true)
+  } else if (panel === 'chat') {
+    // 'chat' is no longer a SlidePanel member — it resolves to the dock. The
+    // agent can still be asked to open the assistant, and doing so no longer
+    // evicts whatever view is currently on screen.
+    ui.setAssistantDockOpen(true)
   } else if (
     panel === 'results' || panel === 'simparams' || panel === 'timeseries'
     || panel === 'capacityBounds' || panel === 'overview' || panel === 'issues'
     || panel === 'scenarios' || panel === 'snapshots' || panel === 'horizon'
-    || panel === 'solveQueue' || panel === 'chat'
+    || panel === 'solveQueue'
   ) {
     ui.setSlidePanel(panel)
   }
@@ -214,9 +241,28 @@ function applyUiNavigate(d: {
 interface SessionInitFrame {
   session_id: string
   model?: string
+  // Task 13 — which profile actually resolved this turn. Display-only: the
+  // store's `profileId` selector is never PINNED from this frame — it stays
+  // `null` ("follow the server's active profile") unless the user picks one
+  // explicitly, or a request sent while `profileId === null` would start
+  // reasserting whatever the server last resolved instead of tracking future
+  // admin changes / A8 fallbacks.
+  profile_id?: string
+  profile_label?: string
 }
 
 interface TokenFrame {
+  delta: string
+}
+
+interface ModelFallbackFrame {
+  from_model: string
+  to_model: string
+  reason: string
+  profile_id?: string
+}
+
+interface ThinkingFrame {
   delta: string
 }
 
@@ -271,20 +317,39 @@ interface TurnDoneFrame {
     input_tokens?: number
     output_tokens?: number
     cache_read_tokens?: number
+    reported?: boolean
     cache_create_tokens?: number
   }
 }
 
-function CostMeter() {
+function UsageMeter() {
   const usage = useChatStore((s) => s.usage)
-  const model = useChatStore((s) => s.model)
-  const eur = deriveCostEur(model, usage)
+  // W-3 (ADR-0001) — an endpoint that never reported usage is UNKNOWN, not
+  // zero. `stream_options.include_usage` is a request, not a guarantee, and
+  // an OpenAI-compatible server may simply omit the chunk; rendering the
+  // zero-initialised totals would state a measurement nobody made, and would
+  // read identically to a session that genuinely used nothing.
+  if (!usage.reported) {
+    return (
+      <span
+        className="font-mono text-[10px] text-muted truncate min-w-0"
+        data-testid="chat-usage-meter"
+        data-usage-available="false"
+        title="This model endpoint did not report token usage for this session."
+      >
+        tokens n/a
+      </span>
+    )
+  }
   return (
     <span
-      className="font-mono text-[10px] text-muted whitespace-nowrap"
-      data-testid="chat-cost-meter"
+      className="font-mono text-[10px] text-muted truncate min-w-0"
+      data-testid="chat-usage-meter"
+      data-usage-available="true"
+      title="Tokens this session: input / output / read from cache"
     >
-      {usage.input_tokens.toLocaleString()} in / {usage.output_tokens.toLocaleString()} out · €{eur.toFixed(4)}
+      {usage.input_tokens.toLocaleString()} in / {usage.output_tokens.toLocaleString()} out
+      {' · '}{usage.cache_read_tokens.toLocaleString()} cached
     </span>
   )
 }
@@ -292,6 +357,7 @@ function CostMeter() {
 function ConfirmationCard() {
   const pending = useChatStore((s) => s.pending)
   const setPending = useChatStore((s) => s.setPending)
+  const setError = useChatStore((s) => s.setError)
   const sessionId = useChatStore((s) => s.sessionId)
   const appendMessage = useChatStore((s) => s.appendMessage)
   const [secondsLeft, setSecondsLeft] = useState<number>(0)
@@ -317,6 +383,17 @@ function ConfirmationCard() {
       if (left <= 0 && timerRef.current != null) {
         clearInterval(timerRef.current)
         timerRef.current = null
+        // The countdown used to just stop here, leaving a dead card on
+        // screen with Approve still clickable — which 409s
+        // `confirmation_expired`. Teaching a user that confirming an expired
+        // destructive action is harmless is the one lesson this card must
+        // not give. Withdraw it and say why; the agent re-prompts with a
+        // fresh token, which is the flow the backend already implements.
+        setPending(null)
+        setError({
+          error_kind: 'confirmation_expired',
+          message: `The confirmation for ${pending.tool_name} expired before it was answered. Ask again to retry.`,
+        })
       }
     }
     tick()
@@ -370,6 +447,16 @@ function ConfirmationCard() {
 
   return (
     <div
+      // A destructive action blocking on the user is the strongest reason
+      // this panel has to interrupt a screen reader. `alertdialog` both
+      // interrupts AND says the thing is interactive — `alert` alone would
+      // announce the text and imply there is nothing to do about it.
+      // aria-modal is false because focus is deliberately NOT trapped: the
+      // card sits inline in the transcript and the user must stay free to
+      // scroll back and read what they are approving.
+      role="alertdialog"
+      aria-modal="false"
+      aria-labelledby="chat-confirmation-title"
       className="border border-amber-500/60 bg-amber-500/5 rounded p-3 mx-3 my-2"
       data-testid="chat-confirmation-card"
       data-tool-name={pending.tool_name}
@@ -378,7 +465,9 @@ function ConfirmationCard() {
       <div className="text-[11px] uppercase tracking-wider text-amber-500 mb-1">
         Confirm · {pending.safety_tier}
       </div>
-      <div className="text-sm font-medium mb-1 text-text">{pending.tool_name}</div>
+      <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
+        {pending.tool_name}
+      </div>
       <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
         {JSON.stringify(pending.args, null, 2)}
       </pre>
@@ -420,9 +509,233 @@ function ConfirmationCard() {
   )
 }
 
-function ErrorBanner() {
+/**
+ * Failures a fresh attempt could plausibly clear on its own.
+ *
+ * Mirrors `chat_service._RETRYABLE_SDK_KINDS` (rate_limited / upstream_error)
+ * rather than inventing a second list, plus the two the server does NOT retry
+ * inside a turn but a NEW turn resolves: an unexplained internal_error, and a
+ * tool-call cap that resets per turn.
+ *
+ * Everything else is excluded on purpose. A missing or rejected key, a name
+ * collision, a file over the size cap — none of those change because you
+ * asked again, and a button that cannot work is worse than no button: it
+ * teaches the user the button is a lie.
+ */
+const RETRYABLE_ERROR_KINDS = new Set([
+  'rate_limited', 'upstream_error', 'internal_error', 'tool_call_cap_exceeded',
+])
+// Exported for the completeness test only (N-6): a kind listed here without
+// KIND_COPY renders a retry button under a raw snake_case title.
+export const RETRYABLE_ERROR_KINDS_FOR_TEST = RETRYABLE_ERROR_KINDS
+
+/**
+ * Task 14 — single source of truth for the error banner's copy.
+ *
+ * Used to be three hand-maintained structures that had to agree by hand: a
+ * ~28-line `error_kind === 'x' && 'Title'` chain, a NEGATED array of the same
+ * ~28 strings gating the raw-kind fall-through, and a third allowlist (below,
+ * `TOOL_ERROR_BANNER_KINDS`) deciding which `tool_error` frames get promoted
+ * to this banner at all. Adding a kind to the title chain and forgetting the
+ * negated list silently printed the title AND the raw kind; the reverse
+ * printed nothing. The fall-through below is now DERIVED from this map's
+ * keys (`!(kind in KIND_COPY) && kind`), so the two can no longer disagree —
+ * see the completeness test in ChatPanel.profile.test.tsx.
+ *
+ * Every title for a kind that predates this map is copied byte-for-byte from
+ * the old per-kind JSX condition it replaces — this migration does not
+ * restyle existing copy.
+ *
+ * SECURITY: no title/body added here may name an identifier (email, user id,
+ * org id, project uuid) or a full base_url. The dynamic `error.message` row
+ * (rendered unconditionally, unchanged) is the server's own text, already
+ * constrained to host:port at most — this map's static copy must not widen
+ * that.
+ */
+export const KIND_COPY: Record<
+  string,
+  { title: string; body?: string; action?: 'open-settings' | 'new-chat' }
+> = {
+  project_exists: { title: 'Project name already exists' },
+  descendants_exist: { title: 'Project has descendants' },
+  confirmation_expired: { title: 'Confirmation expired' },
+  rate_limited: { title: 'Rate limited' },
+  unauthorized: { title: 'API key rejected' },
+  // Fix round 1 (Task 14) — body left unset here on purpose: it's computed
+  // in ErrorBanner from the active profile's LABEL (client-side, from
+  // useChatProfiles()), not a static string — see `body` in ErrorBanner.
+  missing_api_key: { title: 'API key missing' },
+  // P-2 — the acting account stopped being active mid-turn.
+  inactive_acting_user: { title: 'Account is no longer active' },
+  // Its twin, found by the tool-error manifest (2026-09-10). Both are raised
+  // by the SAME helper — `_acting()` in chat_tools.py, seven lines apart — so
+  // the reachability argument written out below for `inactive_acting_user`
+  // covers this one word for word. The Task 14 correction routed one and left
+  // the other, which is the asymmetry a subset test structurally cannot see.
+  no_acting_user: { title: 'Not signed in' },
+  // W-1 — kinds the server can genuinely emit that had no entry, so the
+  // banner printed the raw snake_case kind as its title with no action.
+  // `unknown_profile_id` matters most: C-4 made it a REACHABLE path (before
+  // that fix the server never refused an unconfigured id at all), and it
+  // fires for every open chat the moment a super-admin deletes a profile.
+  // No action: the deep-link target renders `null` for an ordinary member (a
+  // 403 maps to null in `fetchLLMSettingsOrNull`), so the button opened an
+  // empty panel — and both server emitters already say "Pick a profile from
+  // the model menu", which is the member-visible chat-header dropdown.
+  unknown_profile_id: { title: 'That model profile no longer exists' },
+  not_authorized: { title: 'Not allowed for your account' },
+  tool_not_offered: { title: 'The model asked for a tool it was not offered' },
+  invalid_request: { title: 'The model endpoint rejected the request' },
+  upstream_error: { title: 'The model endpoint returned an error' },
+  // Was reachable from three emitters AND already listed in
+  // RETRYABLE_ERROR_KINDS above — the file knew the kind in one constant and
+  // not the other, so the retry button appeared under a raw snake_case title.
+  internal_error: { title: 'Something went wrong on the server' },
+  turn_already_in_flight: { title: 'A turn is already running' },
+  project_switched_mid_turn: { title: 'The active project changed mid-turn' },
+  unknown_session: { title: 'That chat session is no longer known' },
+  sdk_not_installed: { title: 'Provider SDK is not installed' },
+  solver_in_flight: { title: 'Solver in flight' },
+  parallel_destructive_not_allowed: { title: 'Multiple destructive actions in one turn' },
+  tool_call_cap_exceeded: { title: 'Tool call limit reached this turn' },
+  // Phase D — chatbot upload error_kinds
+  file_too_large: { title: 'File exceeds the 25 MB cap' },
+  empty_file: { title: 'Uploaded file is empty' },
+  invalid_filename: { title: 'Filename contains invalid characters' },
+  unsupported_mime: { title: 'File type not supported' },
+  mime_type_mismatch: { title: 'File type mismatch — declared vs. actual content' },
+  upload_quota_exceeded: { title: 'Per-project upload quota reached' },
+  upload_not_found: { title: 'Referenced upload no longer exists' },
+  image_too_large: { title: 'Image exceeds the 10 MB multimodal cap' },
+  too_many_multimodal_blocks: { title: 'Too many attachments (max 20)' },
+  mime_not_allowlisted_for_multimodal: {
+    title: 'File type cannot be attached — use the read tool instead',
+  },
+  load_not_found: { title: 'Load name not in network' },
+  snapshot_count_mismatch: { title: 'Row count does not match network snapshots' },
+  snapshot_range_mismatch: { title: 'Time range does not match network snapshots' },
+  time_column_parse_error: { title: 'Time column could not be parsed as datetimes' },
+  value_column_parse_error: { title: 'Value column has non-numeric data' },
+  image_analysis_timeout: { title: 'Vision call timed out (30 s)' },
+  vision_invalid_json: { title: 'Vision response was not valid JSON' },
+  vision_call_failed: { title: 'Vision call failed' },
+
+  // Task 14 — new kinds, fix-oriented copy.
+  unreachable: {
+    title: 'Could not reach the model endpoint.',
+    body: 'If this is a local endpoint, it likely needs to be started. Check the model settings.',
+    action: 'open-settings',
+  },
+  capability_unsupported: {
+    // llm_provider seam + chat_service's capability checks already send a
+    // message naming the capability and the profile LABEL (never an
+    // id/base_url — see chat_service.py's `capability_unsupported` frames).
+    // That renders in the unconditional `error.message` row below, so this
+    // entry stays generic and adds no body of its own — inventing a second
+    // description would just repeat the server's, or drift from it.
+    title: "This model doesn't support that.",
+    action: 'open-settings',
+  },
+  profile_switch_requires_new_chat: {
+    title: 'This model needs a fresh chat.',
+    action: 'new-chat',
+  },
+}
+
+/**
+ * The subset of KIND_COPY kinds that can arrive on a `tool_error` SSE frame
+ * and should be promoted to this banner instead of staying a gray tool-line
+ * in the message list.
+ *
+ * Fix round 1 (Task 14) — CORRECTION, recorded rather than quietly edited:
+ * this comment previously claimed `inactive_acting_user` surfaces ONLY on
+ * the top-level chat-stream `error` frame and can never arrive as a
+ * `tool_error`, and excluded it here on that basis. That claim was
+ * investigated and written down as verified, and it was backwards.
+ * Re-traced properly this round: `inactive_acting_user` is raised in
+ * exactly one place, `_acting()` in `chat_tools.py:1464`. `_acting()` has
+ * six call sites, ALL inside tool handlers reached through `_route` /
+ * `_authorized_project`. `_dispatch_real_tool_call`
+ * (`chat_service.py`, ~line 3824) wraps every handler call in
+ * `except Exception`, reads `error_kind` off `exc.detail`, and YIELDS a
+ * `tool_error` frame — it does not re-raise, so nothing raised inside a
+ * tool handler reaches the top-level `error`-frame catch-all.
+ * `inactive_acting_user` can therefore ONLY arrive as a `tool_error`, the
+ * opposite of the old claim. Excluding it meant an account deactivated
+ * mid-turn showed a generic, truncated gray tool line instead of the
+ * "Account is no longer active" banner `KIND_COPY` already had copy for.
+ * Included below now, with a routing test
+ * (`ChatPanel.profile.test.tsx`) asserting a `tool_error` frame of this
+ * kind renders the banner and its title.
+ *
+ * Every string here is still checked against KIND_COPY by a test so a typo
+ * or a stale rename fails loudly instead of silently falling through to
+ * the raw kind.
+ */
+export const TOOL_ERROR_BANNER_KINDS = new Set([
+  'project_exists', 'descendants_exist',
+  'confirmation_expired', 'rate_limited',
+  'unauthorized', 'missing_api_key',
+  'inactive_acting_user',
+  'solver_in_flight', 'parallel_destructive_not_allowed',
+  'tool_call_cap_exceeded',
+  // `set_active_profile` raises these as HTTPExceptions, which the dispatcher
+  // converts to `tool_error` frames — so copy alone was unreachable and the
+  // user got the truncated gray tool line. Same shape as the
+  // `inactive_acting_user` correction above; this is its sibling.
+  'not_authorized', 'unknown_profile_id',
+  // Emitted by the capability guard when an endpoint asks for a tool that was
+  // never offered for this turn.
+  'tool_not_offered',
+  // Found by `pypsa-gui/tool-error-kinds.json` and its two guards
+  // (2026-09-10), which are the first thing able to see this direction at all.
+  //
+  // `no_acting_user` is `inactive_acting_user`'s twin: the SAME `_acting()`
+  // helper raises both, seven lines apart in chat_tools.py, so every word of
+  // the reachability argument above applies unchanged. The Task 14 correction
+  // routed one and left the other.
+  //
+  // `capability_unsupported` already HAD copy right here in KIND_COPY and
+  // simply never routed, so a turn refused for lacking vision or tools showed
+  // a truncated gray tool line instead of the "This model doesn't support
+  // that." banner with its open-settings action — the same unreachable-copy
+  // shape, for the third time.
+  'no_acting_user', 'capability_unsupported',
+  // Phase D — upload-tool errors. Same routing as the chat-stream 'error'
+  // frame, so a single user mental model handles every failure surface.
+  'file_too_large', 'empty_file', 'invalid_filename',
+  'unsupported_mime', 'mime_type_mismatch', 'upload_quota_exceeded',
+  'upload_not_found', 'image_too_large', 'too_many_multimodal_blocks',
+  'mime_not_allowlisted_for_multimodal', 'load_not_found',
+  'snapshot_count_mismatch', 'snapshot_range_mismatch',
+  'time_column_parse_error', 'value_column_parse_error',
+  'image_analysis_timeout', 'vision_invalid_json', 'vision_call_failed',
+])
+
+function ErrorBanner({
+  onRetry,
+  activeProfileLabel,
+  sessionProfile,
+}: {
+  onRetry: () => void
+  // Fix round 1 (Task 14) — the brief's `missing_api_key` broadening: body
+  // names the ACTIVE profile so a user on a non-Anthropic profile isn't told
+  // to paste an Anthropic key. LABEL only, sourced from the same
+  // `selectedProfileMeta` the parent already derives from `useChatProfiles()`
+  // — never an id or base_url, and no second query added here.
+  activeProfileLabel: string | null
+  // C-12 — the same profile the body names, passed on to `ApiKeySetup` so the
+  // banner's TEXT and its FORM answer one question rather than two. It used to
+  // branch on the instance-wide active profile from `/chat/health`, which a
+  // member's session may legitimately differ from — so the body could name a
+  // local endpoint while the form below it offered to set ANTHROPIC_API_KEY.
+  sessionProfile: { id: string; label: string } | null
+}) {
   const error = useChatStore((s) => s.error)
   const setError = useChatStore((s) => s.setError)
+  const streaming = useChatStore((s) => s.streaming)
+  const hasQuestion = useChatStore((s) => s.messages.some((m) => m.role === 'user'))
+  const startNewChat = useChatStore((s) => s.startNewChat)
   if (!error) return null
 
   // v6-F2 — cold-path activate is NOT an error from the user's POV; the
@@ -436,58 +749,41 @@ function ErrorBanner() {
   // v4-MAJOR-1 / v6-F1 project_exists — rendered as a typed banner with a
   // hint that the user should retry with force or a new name. v4-MINOR-1
   // descendants_exist — same shape but with the descendant list.
+  const copy = KIND_COPY[error.error_kind] as
+    | { title: string; body?: string; action?: 'open-settings' | 'new-chat' }
+    | undefined
+
+  // `missing_api_key`'s body can't live as a static KIND_COPY string — it
+  // names WHICH profile is missing a key, known only client-side from the
+  // profiles query, not from the server's error message. Falls back to no
+  // body (old behaviour) when the active profile isn't resolved yet, rather
+  // than fabricating a label.
+  const body =
+    copy?.body ??
+    (error.error_kind === 'missing_api_key' && activeProfileLabel
+      ? `Currently using the "${activeProfileLabel}" profile.`
+      : undefined)
+
   return (
     <div
+      // A turn that failed is an interruption, not a status update — the
+      // user is waiting on a reply that is not coming. `alert` announces it
+      // without moving focus, which is right here: there is nothing in the
+      // banner to operate except the API-key form, and that case renders its
+      // own labelled controls.
+      role="alert"
       className="border-l-2 border-rose-500 bg-rose-500/5 px-3 py-2 mx-3 my-2 text-xs"
       data-testid="chat-error-banner"
       data-error-kind={error.error_kind}
     >
       <div className="font-medium text-rose-400 mb-1">
-        {error.error_kind === 'project_exists' && 'Project name already exists'}
-        {error.error_kind === 'descendants_exist' && 'Project has descendants'}
-        {error.error_kind === 'confirmation_expired' && 'Confirmation expired'}
-        {error.error_kind === 'rate_limited' && 'Rate limited'}
-        {error.error_kind === 'unauthorized' && 'API key rejected'}
-        {error.error_kind === 'missing_api_key' && 'API key missing'}
-        {/* P-2 — the acting account stopped being active mid-turn. */}
-        {error.error_kind === 'inactive_acting_user' && 'Account is no longer active'}
-        {error.error_kind === 'solver_in_flight' && 'Solver in flight'}
-        {error.error_kind === 'parallel_destructive_not_allowed' && 'Multiple destructive actions in one turn'}
-        {error.error_kind === 'tool_call_cap_exceeded' && 'Tool call limit reached this turn'}
-        {/* Phase D — chatbot upload error_kinds */}
-        {error.error_kind === 'file_too_large' && 'File exceeds the 25 MB cap'}
-        {error.error_kind === 'empty_file' && 'Uploaded file is empty'}
-        {error.error_kind === 'invalid_filename' && 'Filename contains invalid characters'}
-        {error.error_kind === 'unsupported_mime' && 'File type not supported'}
-        {error.error_kind === 'mime_type_mismatch' && 'File type mismatch — declared vs. actual content'}
-        {error.error_kind === 'upload_quota_exceeded' && 'Per-project upload quota reached'}
-        {error.error_kind === 'upload_not_found' && 'Referenced upload no longer exists'}
-        {error.error_kind === 'image_too_large' && 'Image exceeds the 10 MB multimodal cap'}
-        {error.error_kind === 'too_many_multimodal_blocks' && 'Too many attachments (max 20)'}
-        {error.error_kind === 'mime_not_allowlisted_for_multimodal' && 'File type cannot be attached — use the read tool instead'}
-        {error.error_kind === 'load_not_found' && 'Load name not in network'}
-        {error.error_kind === 'snapshot_count_mismatch' && 'Row count does not match network snapshots'}
-        {error.error_kind === 'snapshot_range_mismatch' && 'Time range does not match network snapshots'}
-        {error.error_kind === 'time_column_parse_error' && 'Time column could not be parsed as datetimes'}
-        {error.error_kind === 'value_column_parse_error' && 'Value column has non-numeric data'}
-        {error.error_kind === 'image_analysis_timeout' && 'Vision call timed out (30 s)'}
-        {error.error_kind === 'vision_invalid_json' && 'Vision response was not valid JSON'}
-        {error.error_kind === 'vision_call_failed' && 'Vision call failed'}
-        {!['project_exists', 'descendants_exist', 'confirmation_expired',
-            'rate_limited', 'unauthorized', 'missing_api_key',
-            'inactive_acting_user',
-            'solver_in_flight', 'parallel_destructive_not_allowed',
-            'file_too_large', 'empty_file', 'invalid_filename',
-            'unsupported_mime', 'mime_type_mismatch', 'upload_quota_exceeded',
-            'upload_not_found', 'image_too_large', 'too_many_multimodal_blocks',
-            'mime_not_allowlisted_for_multimodal', 'load_not_found',
-            'snapshot_count_mismatch', 'snapshot_range_mismatch',
-            'time_column_parse_error', 'value_column_parse_error',
-            'image_analysis_timeout', 'vision_invalid_json', 'vision_call_failed',
-            'tool_call_cap_exceeded'].includes(error.error_kind)
-          && error.error_kind}
+        {error.error_kind in KIND_COPY && KIND_COPY[error.error_kind].title}
+        {!(error.error_kind in KIND_COPY) && error.error_kind}
       </div>
       <div className="text-muted whitespace-pre-wrap">{error.message}</div>
+      {body && (
+        <div className="text-muted text-[11px] whitespace-pre-wrap mt-1">{body}</div>
+      )}
       {/*
         U-1 — "API key missing" used to be a dead end. In the packaged app it
         was THE state: the bundle ships no `backend/.env` on purpose, so this
@@ -496,13 +792,52 @@ function ErrorBanner() {
         than on a settings page, because this is where the user is when they
         find out.
       */}
-      {error.error_kind === 'missing_api_key' && <ApiKeySetup />}
-      <button
-        className="mt-2 text-[10px] underline text-muted hover:text-text"
-        onClick={() => setError(null)}
-      >
-        Dismiss
-      </button>
+      {error.error_kind === 'missing_api_key' && <ApiKeySetup sessionProfile={sessionProfile} />}
+      <div className="flex items-center gap-3 mt-2">
+        {/* The failure modes above are the ONLY place a user could previously
+            end up with their question on screen, an error on screen, and
+            nothing to click. `rate_limited` is transient and self-healing —
+            the textbook one-click retry — and it was a dead end. */}
+        {RETRYABLE_ERROR_KINDS.has(error.error_kind) && hasQuestion && !streaming && (
+          <button
+            className="text-[10px] underline text-rose-300 hover:text-rose-200"
+            onClick={() => { setError(null); onRetry() }}
+            data-testid="chat-error-retry"
+          >
+            Try again
+          </button>
+        )}
+        {copy?.action === 'open-settings' && (
+          <button
+            className="text-[10px] underline text-rose-300 hover:text-rose-200"
+            onClick={() => {
+              // Deep-link straight to the model/profile settings section
+              // (Task 15's `requestSettingsSection`/AssistantModelSettings),
+              // not just the settings panel in general.
+              useUIStore.getState().requestSettingsSection('assistant-model')
+              useUIStore.getState().setSlidePanel('settings')
+            }}
+            data-testid="chat-error-open-settings"
+          >
+            Open settings
+          </button>
+        )}
+        {copy?.action === 'new-chat' && (
+          <button
+            className="text-[10px] underline text-rose-300 hover:text-rose-200"
+            onClick={() => startNewChat()}
+            data-testid="chat-error-start-new-chat"
+          >
+            Start new chat
+          </button>
+        )}
+        <button
+          className="text-[10px] underline text-muted hover:text-text"
+          onClick={() => setError(null)}
+        >
+          Dismiss
+        </button>
+      </div>
     </div>
   )
 }
@@ -667,49 +1002,67 @@ function ToolProgressDetails({ toolUseId }: { toolUseId: string }) {
 
 const EMPTY_TOOL_PROGRESS: { kind: string; line: string }[] = []
 
+// `ChatEmptyState` used to live here — the no-project primer, with the two
+// CustomEvent buttons Sidebar listens for. It is now the no-project BRANCH of
+// ChatLaunchGreeting, which carries both its copy and its testids, so the
+// event bridge (`chat:open-project-picker` / `chat:open-new-project-wizard`)
+// is unchanged and Sidebar needed no edit.
+
 /**
- * Phase D polish #1 — empty-state primer shown when no project is loaded
- * AND no messages have been streamed yet. Two buttons dispatch
- * decoupled CustomEvents that Sidebar listens for to open the appropriate
- * existing modal (NewProjectWizard / Open-project dialog). The event
- * bridge means the chat panel doesn't reach across the layout tree.
+ * The three things people need from a message and could not do: take the
+ * answer with them, ask again, or fix the question.
+ *
+ * Hidden while a turn is streaming — but only retry and edit. Both rewind the
+ * SERVER history, and `rewind_session` refuses under `_turn_in_flight`, so
+ * offering them mid-turn would clear the screen and silently leave the model's
+ * context untouched: the worst outcome, because it looks like it worked. Copy
+ * touches nothing and stays.
+ *
+ * Tool rows get nothing. Their content is a synthetic one-line summary of a
+ * call, not something anyone wants on a clipboard or re-asked on its own.
  */
-function ChatEmptyState() {
-  const openNewProject = () => {
-    window.dispatchEvent(new CustomEvent('chat:open-new-project-wizard'))
-  }
-  const openProjectPicker = () => {
-    window.dispatchEvent(new CustomEvent('chat:open-project-picker'))
-  }
+function MessageActions({ message, streaming, onCopy, onRetry, onEdit }: {
+  message: ChatMessage
+  streaming: boolean
+  onCopy: (m: ChatMessage) => void
+  onRetry: (m: ChatMessage) => void
+  onEdit: (m: ChatMessage) => void
+}) {
+  if (message.role === 'tool') return null
+  const btn = 'px-1 py-0.5 text-[10px] rounded text-muted hover:text-accent hover:bg-panel transition-colors'
   return (
-    <div
-      className="m-3 p-4 rounded-md border border-border bg-bg-2/40 text-center"
-      data-testid="chat-empty-state"
-    >
-      <div className="text-2xl mb-2">💬</div>
-      <div className="text-sm font-medium text-text mb-1">
-        No project loaded
-      </div>
-      <div className="text-[12px] text-muted leading-relaxed mb-3">
-        Ask me to open a saved project by name, or pick one below. Uploads
-        and chat history attach once a project is active.
-      </div>
-      <div className="flex items-center justify-center gap-2">
+    <div className="flex items-center gap-1 mt-1 opacity-60 hover:opacity-100 transition-opacity">
+      <button
+        className={btn}
+        onClick={() => onCopy(message)}
+        title="Copy this message"
+        aria-label="Copy this message"
+        data-testid={`chat-copy-${message.id}`}
+      >
+        Copy
+      </button>
+      {!streaming && message.role === 'assistant' && (
         <button
-          className="px-3 py-1.5 text-xs rounded bg-accent text-bg hover:opacity-90"
-          onClick={openProjectPicker}
-          data-testid="chat-empty-open-project"
+          className={btn}
+          onClick={() => onRetry(message)}
+          title="Discard this answer and ask again"
+          aria-label="Retry this answer"
+          data-testid={`chat-retry-${message.id}`}
         >
-          📁 Open project
+          Retry
         </button>
+      )}
+      {!streaming && message.role === 'user' && (
         <button
-          className="px-3 py-1.5 text-xs rounded bg-bg border border-border text-text hover:bg-bg-3/40"
-          onClick={openNewProject}
-          data-testid="chat-empty-new-project"
+          className={btn}
+          onClick={() => onEdit(message)}
+          title="Put this question back in the composer to change it"
+          aria-label="Edit this question"
+          data-testid={`chat-edit-${message.id}`}
         >
-          ➕ New project
+          Edit
         </button>
-      </div>
+      )}
     </div>
   )
 }
@@ -816,13 +1169,22 @@ function ReplayAttachmentChips({ fileIds }: { fileIds: string[] }) {
 
 export default function ChatPanel() {
   const qc = useQueryClient()
+  // tool_use_id → safety_tier, written at tool_request, consumed at
+  // tool_result / tool_error. `tool_result` frames don't carry the tier, so
+  // this map is how a completion knows whether it mutated (assetWrite fix).
+  const toolTierRef = useRef(new Map<string, string>())
   const sessionId = useChatStore((s) => s.sessionId)
   const setSessionId = useChatStore((s) => s.setSessionId)
-  const model = useChatStore((s) => s.model)
-  const setModel = useChatStore((s) => s.setModel)
+  const profileId = useChatStore((s) => s.profileId)
+  const setProfileId = useChatStore((s) => s.setProfileId)
+  const startNewChat = useChatStore((s) => s.startNewChat)
+  // Fix round 1 — the hydration effect's dependency; see that effect's
+  // comment for why this exists instead of keying on `sessionId`.
+  const newChatSeq = useChatStore((s) => s.newChatSeq)
   const messages = useChatStore((s) => s.messages)
   const appendMessage = useChatStore((s) => s.appendMessage)
   const appendTokenDelta = useChatStore((s) => s.appendTokenDelta)
+  const appendThinkingDelta = useChatStore((s) => s.appendThinkingDelta)
   const setMessages = useChatStore((s) => s.setMessages)
   const setPending = useChatStore((s) => s.setPending)
   const appendToolProgress = useChatStore((s) => s.appendToolProgress)
@@ -834,30 +1196,121 @@ export default function ChatPanel() {
   const closeStream = useChatStore((s) => s.closeStream)
 
   const currentProject = useUIStore((s) => s.currentProject)
+  // Read only for the autoscroll effect below — see the dependency-array
+  // comment there for why AssistantDock's collapsed state has to be visible
+  // here at all.
+  const assistantDockOpen = useUIStore((s) => s.assistantDockOpen)
+  const assistantSpeakEnabled = useUIStore((s) => s.assistantSpeakEnabled)
+  const toggleAssistantSpeak = useUIStore((s) => s.toggleAssistantSpeak)
   const resetChatForProjectSwitch = useChatStore((s) => s.resetForProjectSwitch)
   const prevProjectRef = useRef<string | null | undefined>(undefined)
+
+  // #20 — what the last reload recovered. Component state rather than the
+  // chat store: both are facts about one hydration, not about the
+  // conversation, and neither should survive a project switch or be
+  // rehydrated into a transcript.
+  const [historyGap, setHistoryGap] = useState<number>(0)
+  const [interruptedTurn, setInterruptedTurn] = useState<InterruptedTurn | null>(null)
 
   // Reset chat state on project switch (mirrors simulationStore pattern).
   useEffect(() => {
     if (prevProjectRef.current !== undefined && prevProjectRef.current !== currentProject) {
       resetChatForProjectSwitch()
+      // N-1 — the recovery banners describe ONE hydration of ONE project, as
+      // their declaration comment says. They were only ever reassigned inside
+      // a SUCCESSFUL history fetch, so a switch whose fetch fails or is
+      // skipped left the previous project's values on screen: project A's
+      // quoted user text rendered under project B, and B was falsely accused
+      // of a damaged chat.jsonl. Clearing belongs on the switch itself, not
+      // on the success path that may never run.
+      setHistoryGap(0)
+      setInterruptedTurn(null)
     }
     prevProjectRef.current = currentProject
   }, [currentProject, resetChatForProjectSwitch])
+
+  // N-1 — same for "start a new chat": the banners are about the transcript
+  // being replaced, so they must not outlive it. `newChatSeq` is the counter
+  // `startNewChat()` bumps unconditionally, for the reason recorded on the
+  // hydration effect below.
+  const prevNewChatSeqRef = useRef<number>(newChatSeq)
+  useEffect(() => {
+    if (prevNewChatSeqRef.current !== newChatSeq) {
+      prevNewChatSeqRef.current = newChatSeq
+      setHistoryGap(0)
+      setInterruptedTurn(null)
+    }
+  }, [newChatSeq])
 
   // Hydrate from chat.jsonl whenever a project becomes active. The backend
   // also rehydrates `session.messages` so subsequent turns can thread prior
   // context into the Anthropic SDK AND benefit from prompt caching (the
   // cache is per-session, so reusing the session_id keeps the cache warm).
+  //
+  // BEHAVIOUR CHANGE, recorded deliberately: now that AssistantDock mounts
+  // ChatPanel for the app's lifetime, this fires at boot for EVERY user with a
+  // project open — including one who never opens the assistant — where it
+  // previously waited until the 'chat' slide panel was opened. Same for the
+  // uploads hydration further down. Both are one GET each, both swallow their
+  // errors, and the transcript they replay lands in chatStore rather than on
+  // screen, so the cost is a request and some memory, not a failure mode.
+  // Deliberately NOT made lazy here: gating hydration on first-open is a
+  // design change (it needs a "has the user ever opened the dock" concept and
+  // changes when the session_id becomes available for prompt caching), and
+  // this branch is a bug fix. Revisit if boot latency is ever measured to care.
   useEffect(() => {
+    // C-5 — the consume runs BEFORE the `!currentProject` guard, not after.
+    //
+    // `startNewChat()` is reachable with no project open: the 🆕 button is
+    // disabled only on `streaming`, and AssistantDock mounts this panel for
+    // the app's lifetime, so it is clickable on the projects home page (as is
+    // the cross-wire `confirmProfileSwitch` path). With the guard first, the
+    // flag stayed armed, and the NEXT project to open consumed it and skipped
+    // its own hydration — losing that project's transcript AND its
+    // `last_session_id`, so server-side thread continuity and prompt-cache
+    // warmth went with it.
+    //
+    // Same defect `newChatSeq` was introduced to fix, reached through a
+    // different early return. A one-shot flag has to be consumed on every
+    // path that can observe it, or it is not one-shot.
+    const suppressed = useChatStore.getState().consumeSuppressHydrationOnce()
     if (!currentProject) return
-    // Only seed an EMPTY conversation. This effect re-runs on every mount, and
-    // the panel remounts whenever the agent navigates the app to another tab
-    // and the user comes back — at which point replaying chat.jsonl over the
-    // store erases the turn they just watched arrive, because a turn is only
-    // persisted once it completes. The store is authoritative while it holds a
-    // conversation; disk is the seed for a fresh one. `resetForProjectSwitch`
-    // empties it on a real project change, which is what re-arms this.
+    // Task 13 — `startNewChat()` (the cross-wire profile-switch confirm, and
+    // the header's "New chat" button) clears `messages` and arms
+    // `suppressHydrationOnce`, consumed here unconditionally before the
+    // messages-length guard: without this, the freshly-cleared store (0
+    // messages, exactly the condition the guard below lets through) would
+    // re-hydrate the OLD `last_session_id` the next time this effect runs,
+    // undoing "start a new chat" immediately.
+    //
+    // Fix round 1 — this effect's dependency array watches `newChatSeq`, NOT
+    // `sessionId`. It used to watch `sessionId`, which broke when
+    // `startNewChat()` fired while `sessionId` was ALREADY null (a fresh
+    // project with no chat.jsonl yet, or a cross-wire pick before the user's
+    // first message): a null→null "change" that React's dependency
+    // comparison never sees, so the effect never reran to consume the flag.
+    // The flag then survived to the NEXT real trigger — a genuine project
+    // switch — and silently suppressed THAT project's real history load.
+    // `newChatSeq` is a counter `startNewChat()` bumps unconditionally on
+    // every call, so it always changes and the effect always gets a chance
+    // to consume the flag before anything else can observe it.
+    if (suppressed) return
+    // Only seed an EMPTY conversation. Replaying chat.jsonl over a store that
+    // already holds a conversation erases the turn the user just watched
+    // arrive, because a turn is only persisted once it completes. The store is
+    // authoritative while it holds a conversation; disk is the seed for a
+    // fresh one. `resetForProjectSwitch` empties it on a real project change,
+    // which is what re-arms this.
+    //
+    // The guard is still live even though the panel no longer remounts on
+    // navigation (it is mounted for the app's lifetime inside AssistantDock).
+    // This effect re-runs whenever `currentProject` OR `newChatSeq` changes
+    // (the latter added for the `startNewChat` guard above) AND on every
+    // mount, and the mounts that remain all reach it with a populated store:
+    // the dock's ErrorBoundary swapping back to its children after a Retry,
+    // HMR in dev, and a project switch whose reset has not landed yet. Do not
+    // conclude the early return is dead — ChatPanel.test.tsx's "does not wipe
+    // an in-flight turn when the panel is reopened" fails without it.
     if (useChatStore.getState().messages.length > 0) return
     let cancelled = false
     getChatHistory().then((h) => {
@@ -903,9 +1356,15 @@ export default function ChatPanel() {
       if (h.last_session_id) {
         setSessionId(h.last_session_id)
       }
+      // #20 — the backend detects both of these and reports them exactly
+      // once. Dropping them here would make that whole recovery path
+      // invisible: the user would see a shorter conversation than they had,
+      // or a message of theirs simply missing, with nothing to explain it.
+      setHistoryGap(h.history_gap ?? 0)
+      setInterruptedTurn(h.pending_turn ?? null)
     }).catch(() => { /* missing chat.jsonl is fine — first time on this project */ })
     return () => { cancelled = true }
-  }, [currentProject, setMessages, setSessionId])
+  }, [currentProject, newChatSeq, setMessages, setSessionId])
 
   // Phase D — upload slice + send-attach wiring.
   const uploads = useChatStore((s) => s.uploads)
@@ -923,6 +1382,10 @@ export default function ChatPanel() {
   // strip mirrors what's on disk so a tab switch doesn't lose previously-
   // uploaded files. We don't auto-attach any of these; only freshly
   // uploaded files default to checked-ON.
+  //
+  // Also boot-time for every user now that the panel is always mounted — see
+  // the note on the chat.jsonl hydration above for why that is accepted here
+  // rather than made lazy.
   useEffect(() => {
     if (!currentProject) {
       setUploads([])
@@ -1200,7 +1663,21 @@ export default function ChatPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // Whether the pending composer text arrived by voice. `speech.listening` is
+  // not a substitute: the mic is stopped before the send fires (Enter stops
+  // dictation), so by the time we build the request it always reads false.
+  // Cleared on a manual keystroke and after every send, so "I dictated, then
+  // rewrote it by hand" counts as typed — which matches what the user did
+  // last, and is the safer default for a feature that decides whether the
+  // machine talks out loud.
+  const dictatedRef = useRef(false)
+  // Whether the turn currently in flight was dictated. Separate from
+  // `dictatedRef`, which describes the COMPOSER and is cleared by the send —
+  // by the time the answer lands, the composer has been empty for a while.
+  const voiceTurnRef = useRef(false)
+
   const onSpeechFinal = useCallback((text: string) => {
+    dictatedRef.current = true
     setInput((prev) => {
       const el = textareaRef.current
       const start = el?.selectionStart ?? prev.length
@@ -1227,6 +1704,29 @@ export default function ChatPanel() {
     speech.stop()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to project identity
   }, [currentProject])
+
+  // Stop dictation when the dock collapses.
+  //
+  // This replaces a guarantee the branch removed. While ChatPanel was the
+  // 'chat' SlidePanel, closing it unmounted the panel and useSpeechToText's
+  // `useEffect(() => () => stop(), [stop])` turned the microphone off. The
+  // panel is now deliberately never unmounted, so that cleanup no longer
+  // fires — and SpeechSession sets `continuous = true` with an `onend`
+  // auto-restart, so the session runs indefinitely once started.
+  //
+  // What made it serious rather than untidy: the mic button's active state
+  // and the interim-transcript line are both inside the dock's `hidden` body,
+  // so a user who starts dictating, collapses the dock and walks away gets no
+  // in-app signal at all that the microphone is still recording. The OS
+  // indicator is the only remaining cue, and it is weakest in the packaged
+  // WKWebView build.
+  //
+  // STOP, not disable. `enabled` stays `!streaming`, so expanding the dock
+  // again and clicking the mic works exactly as before — this ends the
+  // current session, it does not make dictation unavailable while collapsed.
+  useEffect(() => {
+    if (!assistantDockOpen) speech.stop()
+  }, [assistantDockOpen, speech.stop])
 
   useEffect(() => {
     if (!speech.listening) return
@@ -1299,6 +1799,25 @@ export default function ChatPanel() {
     if (nearBottom) setShowJumpLatest(false)
   }, [])
 
+  // `assistantDockOpen` is a dependency, not just a read, because of
+  // AssistantDock: while the dock is collapsed this panel sits under a
+  // `display:none` ancestor (kept mounted so a streaming turn survives the
+  // collapse — see AssistantDock.tsx), and an element with no layout box
+  // cannot be scrolled. `scrollIntoView` calls that land while collapsed are
+  // silent no-ops in a real browser (not just jsdom), and none of the other
+  // deps here change on an expand-only click, so without this the effect
+  // would never re-run and the transcript could sit scrolled to wherever it
+  // last had layout — "ask a question, collapse, the answer streams in,
+  // expand" would land on stale scroll position instead of the latest token.
+  //
+  // This does not override a deliberate scroll-up: `stickToBottom` already
+  // gates the branch below, and nothing here touches it. Collapsing hides
+  // the scroll container, so the user cannot fire onMessagesScroll while
+  // it's hidden — whatever `stickToBottom` was at collapse time is exactly
+  // what it still is on expand, and the existing if/else already respects
+  // it (bottom-follow if they were following, only the "jump to latest"
+  // affordance if they'd scrolled up). Expanding just gives the same
+  // decision a chance to actually run once there's a box to scroll.
   useEffect(() => {
     if (stickToBottom) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
@@ -1306,7 +1825,7 @@ export default function ChatPanel() {
     } else {
       setShowJumpLatest(true)
     }
-  }, [messages.length, pendingTokenForScroll, stickToBottom])
+  }, [messages.length, pendingTokenForScroll, stickToBottom, assistantDockOpen])
 
   // Frame handler — translates SSE frames into chatStore updates.
   const handleFrame = useCallback((frame: ChatFrame) => {
@@ -1314,6 +1833,13 @@ export default function ChatPanel() {
       case 'session_init': {
         const d = _frame_data<SessionInitFrame>(frame)
         setSessionId(d.session_id)
+        // The dropdown's fallback display (`profileId ?? active_profile_id`)
+        // is only as fresh as its last fetch — refetch on every new session
+        // so an admin's `set_active_profile` elsewhere, or a prior turn's A8
+        // fallback, shows up without the user having to reopen the panel.
+        // Deliberately NOT `setProfileId(d.profile_id)`: the store's selector
+        // stays `null` (follow-the-server) unless the user picks one.
+        qc.invalidateQueries({ queryKey: CHAT_PROFILES_QUERY_KEY })
         break
       }
       case 'token': {
@@ -1322,6 +1848,23 @@ export default function ChatPanel() {
         // one bubble per delta — keeps the message list readable when
         // Sonnet streams 2k tokens of output.
         appendTokenDelta(d.delta)
+        break
+      }
+      case 'thinking': {
+        const d = _frame_data<ThinkingFrame>(frame)
+        appendThinkingDelta(d.delta)
+        break
+      }
+      case 'model_fallback': {
+        // A8 — the active profile hit a persistent rate limit and the
+        // backend retried once on its declared fallback model. Previously
+        // silently DROPPED by this switch's missing `default` — the turn
+        // would just finish on a different model with no visible reason.
+        const d = _frame_data<ModelFallbackFrame>(frame)
+        appendMessage({
+          role: 'system',
+          content: `${d.from_model} → ${d.to_model} (${d.reason.replace(/_/g, ' ')})`,
+        })
         break
       }
       case 'tool_preparing': {
@@ -1336,7 +1879,10 @@ export default function ChatPanel() {
         break
       }
       case 'tool_request': {
-        const d = _frame_data<{ tool_name: string; tool_use_id: string }>(frame)
+        const d = _frame_data<{ tool_name: string; tool_use_id: string; safety_tier?: string }>(frame)
+        // Remember the tier for the completion frame — `tool_result` doesn't
+        // carry it. Consumed (and cleared) by tool_result / tool_error below.
+        if (d.tool_use_id) toolTierRef.current.set(d.tool_use_id, d.safety_tier ?? '')
         appendMessage({
           role: 'tool',
           content: `→ ${d.tool_name}`,
@@ -1366,6 +1912,20 @@ export default function ChatPanel() {
       }
       case 'tool_result': {
         const d = _frame_data<{ tool_name: string; tool_use_id: string }>(frame)
+        // The chat-staleness fix: a completed tool whose tier is not `read`
+        // may have changed any component, and the caches MUST follow — a
+        // stale row here is spread into the user's next manual PUT and the
+        // backend's remove+add cycle silently reverts the agent's work.
+        // Tier-keyed blanket per ruling 2 (asset-write-chokepoint plan); an
+        // unseen tool_use_id resolves to undefined and isMutatingTier fails
+        // SAFE (a spurious refetch beats a silent revert).
+        {
+          const tier = toolTierRef.current.get(d.tool_use_id)
+          toolTierRef.current.delete(d.tool_use_id)
+          if (isMutatingTier(tier)) {
+            invalidateAssetQueries(qc, useUIStore.getState().currentProject)
+          }
+        }
         appendMessage({
           role: 'tool',
           content: `✓ ${d.tool_name}`,
@@ -1375,26 +1935,20 @@ export default function ChatPanel() {
       }
       case 'tool_error': {
         const d = _frame_data<ToolErrorFrame>(frame)
+        // Same invalidation as tool_result: a FAILED mutating tool may have
+        // partially applied before raising, and serving the pre-attempt cache
+        // as truth is the same staleness this fix exists to close.
+        if (d.tool_use_id) {
+          const tier = toolTierRef.current.get(d.tool_use_id)
+          toolTierRef.current.delete(d.tool_use_id)
+          if (isMutatingTier(tier)) {
+            invalidateAssetQueries(qc, useUIStore.getState().currentProject)
+          }
+        }
         // v4-MAJOR-1 / v4-MINOR-1 / v6-F1 + Phase D upload errors — route
         // structured error_kinds into the ErrorBanner so the user sees a
         // typed banner instead of a gray tool-line buried in the message list.
-        if ([
-          'project_exists', 'descendants_exist',
-          'confirmation_expired', 'rate_limited',
-          'unauthorized', 'missing_api_key',
-          'solver_in_flight', 'parallel_destructive_not_allowed',
-          'tool_call_cap_exceeded',
-          // Phase D — upload-tool errors. Same routing as the chat-stream
-          // 'error' frame, so a single user mental model handles every
-          // failure surface.
-          'file_too_large', 'empty_file', 'invalid_filename',
-          'unsupported_mime', 'mime_type_mismatch', 'upload_quota_exceeded',
-          'upload_not_found', 'image_too_large', 'too_many_multimodal_blocks',
-          'mime_not_allowlisted_for_multimodal', 'load_not_found',
-          'snapshot_count_mismatch', 'snapshot_range_mismatch',
-          'time_column_parse_error', 'value_column_parse_error',
-          'image_analysis_timeout', 'vision_invalid_json', 'vision_call_failed',
-        ].includes(d.error_kind)) {
+        if (TOOL_ERROR_BANNER_KINDS.has(d.error_kind)) {
           setError({ error_kind: d.error_kind, message: d.message })
         }
         {
@@ -1470,14 +2024,28 @@ export default function ChatPanel() {
         break
       }
       case 'turn_done': {
+        // Modal reciprocity: a turn begun with the microphone is answered
+        // aloud. Decided by `voiceTurnRef`, captured at SEND — `dictatedRef`
+        // is cleared by the send itself, and the mute is read live so
+        // muting mid-turn takes effect on this answer rather than the next.
+        if (voiceTurnRef.current && useUIStore.getState().assistantSpeakEnabled) {
+          const last = useChatStore.getState().messages
+            .filter((m) => m.role === 'assistant').slice(-1)[0]
+          if (last) speechOut.speak(speechOut.plainTextForSpeech(last.content))
+        }
+        voiceTurnRef.current = false
         const d = _frame_data<TurnDoneFrame>(frame)
         if (d.usage) {
-          // M10: server reports token counts; client derives EUR.
+          // M10: server reports token counts; client renders them as-is.
           accrueUsage({
             input_tokens: d.usage.input_tokens ?? 0,
             output_tokens: d.usage.output_tokens ?? 0,
             cache_read_tokens: d.usage.cache_read_tokens ?? 0,
             cache_create_tokens: d.usage.cache_create_tokens ?? 0,
+            // W-3 — the server says whether these numbers are a measurement
+            // or an initialisation. An older backend omits the field; treat
+            // that as reported, which is the pre-W-3 rendering.
+            reported: d.usage.reported ?? true,
           })
         }
         closeStream()
@@ -1494,8 +2062,8 @@ export default function ChatPanel() {
         break
       }
     }
-  }, [qc, setSessionId, appendMessage, appendTokenDelta, setPending, appendToolProgress,
-      accrueUsage, setStreaming, setError, closeStream])
+  }, [qc, setSessionId, appendMessage, appendTokenDelta, appendThinkingDelta, setPending,
+      appendToolProgress, accrueUsage, setStreaming, setError, closeStream])
 
   // Phase D polish #3 — auto-uncheck-after-send opt-in setting.
   // Stored in localStorage; OFF by default (matches sticky-chip intent).
@@ -1516,19 +2084,42 @@ export default function ChatPanel() {
   const [pendingSendAttachIds, setPendingSendAttachIds] = useState<string[]>([])
 
   const dispatchSend = useCallback((text: string, attachIds: string[]) => {
+    // FIRST, before the composer reset four lines below clears `dictatedRef`.
+    // Reading it later — say, next to the createChatStream call that consumes
+    // `input_mode` — always yields false, and the bug is invisible: the
+    // request still carries the right mode, because that expression is
+    // evaluated before the reset too. Only the SPOKEN answer goes missing.
+    voiceTurnRef.current = dictatedRef.current
     appendMessage({
       role: 'user', content: text,
       attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
     })
     setInput('')
+    dictatedRef.current = false
     setStreaming(true)
     setError(null)
     const cleanup = createChatStream(
       {
         session_id: sessionId ?? undefined,
         message: text,
-        model,
+        // Task 13 — `profile_id` is included ONLY when the user actually
+        // picked one. `profileId === null` means "the server's active
+        // profile", and OMITTING the field (never sending `model` either) is
+        // how that stays true turn after turn — sending a selector every
+        // time would re-assert a stale choice over an admin's
+        // `set_active_profile` or an A8 rate-limit fallback.
+        ...(profileId !== null ? { profile_id: profileId } : {}),
         attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
+        // Built HERE, at send, not captured at mount or on a store
+        // subscription: the user opens Results, selects a generator, and only
+        // then asks. A context frozen earlier describes the screen they had
+        // before they went looking, which is worse than no context at all —
+        // it is a confident wrong referent.
+        ui_context: buildUiContext() ?? undefined,
+        // `voiceTurnRef`, not `dictatedRef`: this literal is evaluated
+        // after dispatchSend has already reset the composer, so reading
+        // the composer flag here always yields 'text'.
+        input_mode: voiceTurnRef.current ? 'voice' : 'text',
       },
       handleFrame,
       (err) => {
@@ -1540,7 +2131,7 @@ export default function ChatPanel() {
     if (autoUncheckAfterSend && attachIds.length > 0) {
       setAttachedFileIds([])
     }
-  }, [appendMessage, sessionId, model, handleFrame, setStreaming, setError,
+  }, [appendMessage, sessionId, profileId, handleFrame, setStreaming, setError,
       setStreamCleanup, autoUncheckAfterSend, setAttachedFileIds])
 
   const onSend = useCallback(() => {
@@ -1580,6 +2171,12 @@ export default function ChatPanel() {
   }, [])
 
   const onAbort = useCallback(async () => {
+    // Stopping a turn has to stop the VOICE as well. A synthesiser that keeps
+    // reading an answer the user just cancelled is the single most alarming
+    // way this feature can fail — there is no visible progress bar to explain
+    // why the machine is still talking.
+    speechOut.cancelSpeech()
+    voiceTurnRef.current = false
     if (!sessionId) return
     try {
       await postChatAbort(sessionId)
@@ -1589,12 +2186,19 @@ export default function ChatPanel() {
 
   // SSE cleanup on unmount (CLAUDE.md rule) — but NOT while a turn is running.
   //
-  // This panel is mounted only while `activeSlidePanel === 'chat'`, and it is
-  // itself what answers a `ui_event` by calling `setSlidePanel('results')`. So
-  // "the agent showed me the results" unmounted the panel mid-answer, and this
-  // handler then closed the connection: the backend went on generating into a
-  // socket nobody was reading, which is exactly the reported "still streaming,
-  // no tokens on screen".
+  // This panel is now mounted for the app's lifetime inside `AssistantDock`,
+  // which renders it unconditionally and hides it with CSS when collapsed. So
+  // the case that motivated this guard is gone: the panel answering a
+  // `ui_event` by calling `setSlidePanel('results')` no longer unmounts
+  // itself, because it does not live in the SlidePanel slot anymore, and
+  // collapsing the dock does not unmount it either.
+  //
+  // The guard stays because unmount paths that still exist are exactly the
+  // ones a mid-turn stream can hit: the dock's ErrorBoundary swapping in its
+  // fallback after a render crash, a project switch or route change that tears
+  // down the workbench tree, and HMR in dev. On any of those, closing a live
+  // connection would leave the backend generating into a socket nobody is
+  // reading — the reported "still streaming, no tokens on screen".
   //
   // Leaving it open is safe because `handleFrame` writes only to Zustand and
   // the query cache — never to this component's state — so the rest of the
@@ -1610,15 +2214,214 @@ export default function ChatPanel() {
     }
   }, [])
 
+  // ── per-message actions ───────────────────────────────────────────────
+  //
+  // Retry and edit share one move: withdraw a turn from BOTH histories, then
+  // do something with the question. `postChatRewind` is the server half and
+  // is awaited first — re-sending before it lands would race the rewind
+  // against the turn it is clearing space for, and the model would answer with
+  // the discarded exchange still in context.
+  const withdrawTurn = useCallback(async (userIdx: number) => {
+    const sid = useChatStore.getState().sessionId
+    if (sid) {
+      try {
+        await postChatRewind(sid, 1)
+      } catch {
+        // A failed rewind means the model would still see the old exchange.
+        // Say so rather than proceeding into a retry that quietly repeats
+        // itself — the silent version is what makes retry look broken.
+        toast.error('Could not rewind the conversation — try again in a moment.')
+        return false
+      }
+    }
+    useChatStore.setState((st) => ({
+      messages: st.messages.slice(0, userIdx),
+      toolProgress: {},
+      error: null,
+    }))
+    return true
+  }, [])
+
+  const onCopyMessage = useCallback((m: ChatMessage) => {
+    // The raw markdown, not the rendered text: a copied answer is usually
+    // pasted somewhere that renders markdown (a PR, a doc, an issue), where
+    // the rendered form arrives as flattened prose with the table gone.
+    navigator.clipboard?.writeText(m.content)
+      .then(() => toast.success('Copied'))
+      .catch(() => toast.error('Could not copy'))
+  }, [])
+
+  /** The user turn an assistant message is answering. */
+  const precedingUserIndex = useCallback((id: string) => {
+    const msgs = useChatStore.getState().messages
+    const at = msgs.findIndex((x) => x.id === id)
+    if (at < 0) return -1
+    for (let i = at; i >= 0; i--) if (msgs[i].role === 'user') return i
+    return -1
+  }, [])
+
+  const onRetryMessage = useCallback(async (m: ChatMessage) => {
+    const idx = precedingUserIndex(m.id)
+    if (idx < 0) return
+    const question = useChatStore.getState().messages[idx]
+    const attachIds = question.attachment_file_ids ?? []
+    // Withdraw the ANSWER, keeping the question: it is being re-asked, not
+    // retracted. dispatchSend re-appends it, so cut at the question's index.
+    if (!await withdrawTurn(idx)) return
+    dispatchSend(question.content, attachIds)
+  }, [precedingUserIndex, withdrawTurn, dispatchSend])
+
+  const onEditMessage = useCallback(async (m: ChatMessage) => {
+    const idx = useChatStore.getState().messages.findIndex((x) => x.id === m.id)
+    if (idx < 0) return
+    const text = m.content
+    // The files come back with the text. Retry always carried them; Edit did
+    // not, so rewording a question about an attached PDF silently re-sent it
+    // with no PDF — and the chips were gone from the composer too, so there
+    // was nothing on screen to notice. Always assigned, never merged: a
+    // leftover from a previous compose must not ride along with a question
+    // that never mentioned it.
+    const files = m.attachment_file_ids ?? []
+    // The whole turn goes, question included — the user is replacing it, and
+    // leaving the old phrasing above the new one would show them asking twice.
+    if (!await withdrawTurn(idx)) return
+    setInput(text)
+    useChatStore.getState().setAttachedFileIds(files)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [withdrawTurn])
+
+  /**
+   * Re-ask the last question after a turn FAILED.
+   *
+   * Retry hangs off an assistant message, and a turn that dies before its
+   * first token leaves none — so the case retry exists for was the one case
+   * it did not cover. The rewind is not optional: `run_turn` appends the user
+   * message to the server history before it calls the model, so an error does
+   * not unwind it, and re-asking without rewinding stacks the question twice.
+   */
+  const onRetryLastTurn = useCallback(async () => {
+    const msgs = useChatStore.getState().messages
+    let idx = -1
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'user') { idx = i; break }
+    }
+    if (idx < 0) return
+    const question = msgs[idx]
+    if (!await withdrawTurn(idx)) return
+    dispatchSend(question.content, question.attachment_file_ids ?? [])
+  }, [withdrawTurn, dispatchSend])
+
+  // ⌘/Ctrl-J toggles the assistant, and the OPEN path lands the caret in the
+  // composer.
+  //
+  // Bound here rather than in App.tsx's global handler because this component
+  // owns `textareaRef` — and a shortcut that opens the panel but leaves the
+  // caret elsewhere has saved nothing, which is the failure the focus effect
+  // below exists to prevent.
+  //
+  // Deliberately NOT guarded on an editable target, unlike the palette's
+  // ⌘K/⌘P: the composer IS an editable target, and "close the assistant I am
+  // typing in" is the most natural moment to press this. The modifier check
+  // still comes first, so a literal "j" never toggles a panel.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return
+      if (e.key !== 'j' && e.key !== 'J') return
+      e.preventDefault()
+      const ui = useUIStore.getState()
+      ui.setAssistantDockOpen(!ui.assistantDockOpen)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Focus follows the OPENING, never the mount. The dock defaults to open, so
+  // focusing on mount would steal the caret on every page load — out of the
+  // project search, out of a half-filled form, out of the canvas. The ref
+  // starts at the CURRENT value so the first run after mount is a no-op.
+  const prevDockOpenRef = useRef(assistantDockOpen)
+  useEffect(() => {
+    const opened = assistantDockOpen && !prevDockOpenRef.current
+    prevDockOpenRef.current = assistantDockOpen
+    if (!opened) return
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [assistantDockOpen])
+
   const onClearHistory = useCallback(() => {
     // Clear UI state in-place (does NOT trigger the project-switch reset
-    // path). To wipe the on-disk chat.jsonl too, the user invokes the
-    // clear_chat_history tool through the agent.
+    // path, and does NOT null sessionId or call startNewChat — the server
+    // session and its profile binding are unaffected). To wipe the on-disk
+    // chat.jsonl too, the user invokes the clear_chat_history tool through
+    // the agent.
     if (!confirm('Clear the conversation view? (On-disk chat.jsonl is untouched — ask the agent to clear_chat_history to wipe disk.)')) return
     useChatStore.setState({
       messages: [], pending: null, toolProgress: {}, error: null,
     })
   }, [])
+
+  // Fix round 1 (product gap) — `startNewChat()` was reachable ONLY from the
+  // cross-wire profile-switch confirm. A deployment where every configured
+  // profile shares one wire had NO path at all to a fresh session short of
+  // switching projects. This is the deliberate affordance for it — same
+  // action the cross-wire confirm's "Switch" button takes, just without a
+  // profile change attached.
+  const onNewChat = useCallback(() => {
+    startNewChat()
+  }, [startNewChat])
+
+  // ── Task 13 — profile dropdown + cross-wire switch confirm ───────────────
+  //
+  // `getChatProfiles()` is member-level (every authenticated user may read
+  // which profiles exist), so the query itself needs no gating — but per
+  // ADR-0001 (unresolvable data ships as a distinct state, never silently
+  // reinterpreted as "empty") a REFUSED fetch must render differently from a
+  // resolved-but-empty list. Three states before "ready", all disabled:
+  // loading (`!profilesQuery.data`), refused (`profilesQuery.isError`), and
+  // empty (`data.profiles.length === 0`).
+  const profilesQuery = useChatProfiles()
+  const chatProfiles = profilesQuery.data?.profiles ?? []
+  const activeProfileId = profilesQuery.data?.active_profile_id ?? null
+  // `profileId` (the store's explicit pick) wins; `null` falls back to
+  // whatever the server currently has active. Both are real profile ids from
+  // the SAME fetch, so this never lands on an id absent from `chatProfiles`
+  // except in the brief window before the fetch resolves — handled by the
+  // disabled placeholder below rather than by this fallback.
+  const selectedProfileId = profileId ?? activeProfileId
+  const selectedProfileMeta = chatProfiles.find((p) => p.id === selectedProfileId) ?? null
+
+  const [pendingProfilePick, setPendingProfilePick] = useState<{ id: string; label: string } | null>(null)
+
+  const onPickProfile = useCallback((id: string) => {
+    const target = chatProfiles.find((p) => p.id === id)
+    if (!target) return
+    // Cross-wire (anthropic ⇄ openai) profiles do not share a session the
+    // way two profiles on the same wire can — the confirm exists because
+    // picking one silently mid-conversation would otherwise look like the
+    // same assistant continuing when the backend has actually started over.
+    //
+    // Fix round 1 — FAIL SAFE when the current selection's wire is UNKNOWN
+    // (`selectedProfileMeta === null`, e.g. an admin deleted the profile
+    // `profileId` still points at). The old guard required a known
+    // same-wire baseline to trigger the confirm, so an unknown baseline
+    // short-circuited straight to `setProfileId` — a silent wire change
+    // wearing the same-wire path. Treat "cannot prove it's same-wire" as
+    // cross-wire: one extra confirm click costs less than a session
+    // continuing under a provider it never agreed to switch to.
+    if (!selectedProfileMeta || selectedProfileMeta.wire !== target.wire) {
+      setPendingProfilePick({ id: target.id, label: target.label })
+      return
+    }
+    setProfileId(id)
+  }, [chatProfiles, selectedProfileMeta, setProfileId])
+
+  const confirmProfileSwitch = useCallback(() => {
+    if (!pendingProfilePick) return
+    setProfileId(pendingProfilePick.id)
+    startNewChat()
+    setPendingProfilePick(null)
+  }, [pendingProfilePick, setProfileId, startNewChat])
+
+  const cancelProfileSwitch = useCallback(() => setPendingProfilePick(null), [])
 
   return (
     <div
@@ -1649,16 +2452,79 @@ export default function ChatPanel() {
         data-testid="chat-file-input"
       />
       <div className="flex items-center gap-2 px-3 h-8 border-b border-border bg-bg-2 shrink-0">
-        <select
-          value={model}
-          onChange={(e) => setModel(e.target.value as typeof model)}
-          className="bg-bg border border-border rounded px-1 py-0.5 text-[10px]"
-          data-testid="chat-model-select"
-        >
-          <option value="claude-sonnet-4-6">Sonnet 4.6</option>
-          <option value="claude-opus-4-8">Opus 4.8</option>
-        </select>
-        <CostMeter />
+        {profilesQuery.isError ? (
+          // ADR-0001 — a REFUSED fetch, never rendered as "no models
+          // configured": that text means the server was reachable and said
+          // "zero profiles exist", a materially different fact from
+          // "couldn't find out".
+          <select
+            disabled
+            data-profiles-state="error"
+            className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-danger"
+            title="Could not load models — check your connection and try again"
+            data-testid="chat-model-select"
+          >
+            <option>Could not load models</option>
+          </select>
+        ) : !profilesQuery.data ? (
+          <select
+            disabled
+            data-profiles-state="loading"
+            className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-muted"
+            data-testid="chat-model-select"
+          >
+            <option>Loading models…</option>
+          </select>
+        ) : chatProfiles.length === 0 ? (
+          <select
+            disabled
+            data-profiles-state="empty"
+            className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px] text-muted"
+            title="No profiles are configured — ask an administrator to add one in Settings"
+            data-testid="chat-model-select"
+          >
+            <option>No models configured</option>
+          </select>
+        ) : (
+          <select
+            value={selectedProfileId ?? ''}
+            onChange={(e) => onPickProfile(e.target.value)}
+            disabled={streaming}
+            data-profiles-state="ready"
+            // The dock is 380px and a native <select> sizes its closed box to
+            // its widest option — a long profile label would otherwise widen
+            // the whole header row. `truncate` + `title` keep the full label
+            // reachable on hover without that.
+            className="max-w-[9rem] truncate bg-bg border border-border rounded px-1 py-0.5 text-[10px]"
+            title={selectedProfileMeta?.label ?? ''}
+            data-testid="chat-model-select"
+          >
+            {chatProfiles.map((p) => (
+              <option key={p.id} value={p.id}>{p.label}</option>
+            ))}
+          </select>
+        )}
+        <UsageMeter />
+        {/* Global mute for spoken answers. Beside the gear rather than inside
+            it: the spec pairs reciprocity with "a global mute", and a mute
+            you have to open a popover to reach is not one you can hit while
+            the machine is mid-sentence. Hidden entirely where the platform has
+            no speech synthesis — a dead toggle is worse than no toggle. */}
+        {speechOut.isSpeechOutAvailable() && (
+          <button
+            className="px-1.5 py-0.5 text-[10px] rounded bg-bg-2 hover:bg-bg-3 border border-border"
+            style={{ color: assistantSpeakEnabled ? 'var(--color-accent)' : 'var(--color-muted)' }}
+            onClick={() => { if (assistantSpeakEnabled) speechOut.cancelSpeech(); toggleAssistantSpeak() }}
+            title={assistantSpeakEnabled
+              ? 'Spoken answers are on for dictated questions — click to mute'
+              : 'Spoken answers are muted — click to unmute'}
+            aria-label="Mute spoken answers"
+            aria-pressed={!assistantSpeakEnabled}
+            data-testid="chat-speak-toggle"
+          >
+            {assistantSpeakEnabled ? '🔊' : '🔇'}
+          </button>
+        )}
         {/* Phase D polish #3 — ⚙ gear popover for chat-panel preferences.
             Currently holds one toggle (auto-uncheck after send); future
             settings live here too. */}
@@ -1706,8 +2572,24 @@ export default function ChatPanel() {
             New exports ({unseenExportCount})
           </button>
         )}
+        {/* Fix round 1 — the only other path to `startNewChat()` was the
+            cross-wire confirm's "Switch" button, which a same-wire-only
+            deployment never surfaces. `title`/`aria-label` carry the meaning
+            so a compact icon button fits the 380px dock header alongside the
+            dropdown, UsageMeter, gear, and exports badge without widening
+            the row. */}
         <button
-          className="ml-auto px-2 py-0.5 text-[10px] rounded bg-bg-2 hover:bg-bg-3 border border-border"
+          className="ml-auto px-1.5 py-0.5 text-[10px] rounded bg-bg-2 hover:bg-bg-3 border border-border"
+          onClick={onNewChat}
+          disabled={streaming}
+          data-testid="chat-new-chat"
+          title="Start a new chat (new session; the on-screen conversation and current profile binding reset)"
+          aria-label="Start a new chat"
+        >
+          🆕
+        </button>
+        <button
+          className="px-2 py-0.5 text-[10px] rounded bg-bg-2 hover:bg-bg-3 border border-border"
           onClick={onClearHistory}
           disabled={streaming || messages.length === 0}
           data-testid="chat-clear-history"
@@ -1725,7 +2607,93 @@ export default function ChatPanel() {
           </button>
         )}
       </div>
-      <ErrorBanner />
+      {/* Task 13 — cross-wire profile switch confirm. Inline rather than a
+          modal: it interrupts nothing (the dropdown pick already committed
+          nothing) and the whole decision fits in one sentence. */}
+      {pendingProfilePick && (
+        <div
+          className="flex items-center gap-2 px-3 py-1 text-[11px] bg-accent/10 border-b border-accent/30 text-text shrink-0"
+          data-testid="chat-profile-switch-confirm"
+        >
+          <span>Switching to {pendingProfilePick.label} starts a new chat</span>
+          <button
+            className="px-2 py-0.5 rounded bg-accent text-bg hover:opacity-90"
+            onClick={confirmProfileSwitch}
+            data-testid="chat-profile-switch-confirm-btn"
+          >
+            Switch
+          </button>
+          <button
+            className="px-2 py-0.5 rounded bg-bg border border-border hover:bg-bg-3"
+            onClick={cancelProfileSwitch}
+            data-testid="chat-profile-switch-cancel-btn"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+      <ErrorBanner
+        onRetry={onRetryLastTurn}
+        activeProfileLabel={selectedProfileMeta?.label ?? null}
+        sessionProfile={
+          selectedProfileMeta
+            ? { id: selectedProfileMeta.id, label: selectedProfileMeta.label }
+            : null
+        }
+      />
+      {historyGap > 0 && (
+        <div
+          role="status"
+          className="border-l-2 border-amber-500 bg-amber-500/5 px-3 py-2 mx-3 my-2 text-xs"
+          data-testid="chat-history-gap"
+        >
+          <div className="font-medium text-amber-400 mb-0.5">
+            {historyGap} earlier {historyGap === 1 ? 'message' : 'messages'} could not be read
+          </div>
+          <div className="text-muted">
+            Part of this project&apos;s saved conversation is damaged and has been
+            skipped. What you see below is incomplete.
+          </div>
+        </div>
+      )}
+      {interruptedTurn && (
+        <div
+          role="status"
+          className="border-l-2 border-amber-500 bg-amber-500/5 px-3 py-2 mx-3 my-2 text-xs"
+          data-testid="chat-interrupted-turn"
+        >
+          <div className="font-medium text-amber-400 mb-0.5">
+            Your last message was interrupted
+          </div>
+          <div className="text-muted mb-2">
+            It was never answered, so it is not part of the conversation below.
+          </div>
+          {/* Shown verbatim: this is the thing the user lost, and reading it
+              is what lets them decide whether it is still worth sending. */}
+          <blockquote className="border-l border-border pl-2 text-text whitespace-pre-wrap break-words">
+            {interruptedTurn.user}
+          </blockquote>
+          <div className="flex items-center gap-2 mt-2">
+            <button
+              className="px-2 py-1 text-[11px] rounded bg-bg-2 hover:bg-bg-3 border border-border"
+              onClick={() => {
+                setInput(interruptedTurn.user)
+                setInterruptedTurn(null)
+              }}
+              data-testid="chat-interrupted-restore"
+            >
+              Put it back in the composer
+            </button>
+            <button
+              className="px-2 py-1 text-[11px] rounded text-muted hover:text-text"
+              onClick={() => setInterruptedTurn(null)}
+              data-testid="chat-interrupted-dismiss"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
       <div className="relative flex-1 min-h-0 flex flex-col">
         <div
           ref={messagesScrollRef}
@@ -1733,10 +2701,18 @@ export default function ChatPanel() {
           data-testid="chat-messages"
           onScroll={onMessagesScroll}
         >
-        {/* Phase D polish #1 — empty-state primer. Renders only when no
-            project is active AND there are no messages yet so a returning
-            user with stale chat replay isn't double-primed. */}
-        {!currentProject && messages.length === 0 && <ChatEmptyState />}
+        {/* The launch orientation (spec: "The launch orientation"). This was
+            `ChatEmptyState`, gated on `!currentProject` — so it was invisible
+            in exactly the case the spec cares most about, a project already
+            open whose name, size and solve status the assistant should be
+            able to state without being asked. The no-project variant is now
+            one branch of it rather than the whole thing.
+
+            Still gated on an empty conversation: a returning user replaying
+            stale chat history is not being oriented, and a greeting pinned
+            above a live conversation is a header repeating what they have
+            moved past. */}
+        {messages.length === 0 && <ChatLaunchGreeting />}
         {/* Discoverability chips: unbound → open/browse; bound → compare /
             navigate / summarize. Click fills the composer for edit-before-send. */}
         {messages.length === 0 && (
@@ -1756,11 +2732,25 @@ export default function ChatPanel() {
               'px-3 py-1.5 text-[13px] leading-relaxed tracking-[-0.005em] ' +
               (m.role === 'user' ? 'text-text bg-bg-2/40 border-b border-border/40' :
                m.role === 'tool' ? 'text-muted font-mono text-[11px] tracking-normal leading-snug' :
+               // Task 13 — model_fallback lines. Distinct from a plain
+               // assistant bubble (italic, muted, no markdown) without going
+               // as far as the tool row's monospace treatment.
+               m.role === 'system' ? 'text-muted italic text-[11px] tracking-normal leading-snug' :
                'text-text')
             }
             data-role={m.role}
             data-testid="chat-message"
           >
+            {/* Task 13 — accumulated `thinking` SSE deltas. Minimal collapsed-
+                by-default block, above the answer since thinking precedes the
+                model's text in the turn. Gated on presence, not truthiness of
+                content, so a turn with no thinking block renders nothing. */}
+            {m.role === 'assistant' && m.thinking && (
+              <details className="mb-1 text-muted text-[11px]" data-testid="chat-thinking-block">
+                <summary className="cursor-pointer select-none">Thinking</summary>
+                <div className="whitespace-pre-wrap pt-1">{m.thinking}</div>
+              </details>
+            )}
             {/* Assistant replies are GitHub-flavored markdown (tables, bold,
                 headers, lists) — render them. User/tool messages are plain
                 text; keep their newlines with pre-wrap so multi-line input and
@@ -1774,6 +2764,8 @@ export default function ChatPanel() {
             {m.role === 'user' && m.attachment_file_ids && m.attachment_file_ids.length > 0 && (
               <ReplayAttachmentChips fileIds={m.attachment_file_ids} />
             )}
+            <MessageActions message={m} streaming={streaming}
+              onCopy={onCopyMessage} onRetry={onRetryMessage} onEdit={onEditMessage} />
           </div>
         ))}
         <ConfirmationCard />
@@ -1877,16 +2869,18 @@ export default function ChatPanel() {
                 (speech.listening
                   ? 'bg-accent/15 border-accent text-accent'
                   : 'bg-bg-3/40 hover:bg-bg-3 border-border text-muted') +
-                (speech.supported && !streaming ? '' : ' opacity-50')
+                (speech.available && !streaming ? '' : ' opacity-50')
               }
               onClick={speech.toggle}
-              disabled={!speech.supported || streaming}
+              disabled={!speech.available || streaming}
               title={
                 !speech.supported
                   ? 'Voice input needs Chrome or Edge'
-                  : speech.listening
-                    ? 'Stop voice input (Esc)'
-                    : 'Start voice input (English)'
+                  : speech.permissionDenied
+                    ? 'Microphone access denied — allow it in System Settings → Privacy & Security → Microphone'
+                    : speech.listening
+                      ? 'Stop voice input (Esc)'
+                      : 'Start voice input (English)'
               }
               aria-label={speech.listening ? 'Stop voice input' : 'Start voice input'}
               aria-pressed={speech.listening}
@@ -1901,10 +2895,19 @@ export default function ChatPanel() {
               className="flex-1 min-h-0 bg-bg border border-border rounded px-2 py-1.5 text-[13px] leading-relaxed tracking-[-0.005em] resize-none focus:outline-none focus:border-accent/60"
               placeholder={streaming ? 'streaming…' : 'message…   (Shift+Enter for newline)'}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={(e) => { dictatedRef.current = false; setInput(e.target.value) }}
               onKeyDown={(e) => {
                 if (e.key === 'Escape' && speech.listening) {
+                  // stopPropagation as well as preventDefault. App.tsx's
+                  // window-level keydown handler also acts on Escape (close
+                  // the compare rail, then the active slide panel), and
+                  // preventDefault does NOT stop propagation — so without
+                  // this the keystroke that stops the mic also closed the
+                  // panel the agent had just opened. App.tsx now skips
+                  // Escape for editable targets too; this is the near side of
+                  // the same fix and keeps the behaviour correct on its own.
                   e.preventDefault()
+                  e.stopPropagation()
                   speech.stop()
                   return
                 }

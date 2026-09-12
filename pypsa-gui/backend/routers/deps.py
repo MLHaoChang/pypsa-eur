@@ -133,25 +133,27 @@ def resolve_project_context(
         raise HTTPException(404, f"Project '{project_id}' not found")
 
     key = project_registry.registry_key(project)
-    resident = PyPSAService.get_context(key)
-    if resident is not None:
-        # A path-scoped read counts as a touch — re-stamp recency so a warm,
-        # frequently-read project doesn't get evicted out from under the reader
-        # (B9). Stamp under the registry lock so it's atomic w.r.t. eviction's
-        # min(last_interacted_at) victim pick.
-        with PyPSAService._registry_lock:
-            resident.last_interacted_at = time.monotonic()
-        return resident
+    # Lock order: hydrate -> _registry_lock -> solve_queue._lock. Taken only on
+    # a miss; a resident hit is the same unlocked dict read it always was.
+    with PyPSAService.hydrate_or_adopt(key) as resident:
+        if resident is not None:
+            # A path-scoped read counts as a touch — re-stamp recency so a warm,
+            # frequently-read project doesn't get evicted out from under the reader
+            # (B9). Stamp under the registry lock so it's atomic w.r.t. eviction's
+            # min(last_interacted_at) victim pick.
+            with PyPSAService._registry_lock:
+                resident.last_interacted_at = time.monotonic()
+            return resident
 
-    ctx = PyPSAService.build_context()
-    _hydrate_context_from_disk(ctx, src, project.name)
-    project_registry.bind_context(ctx, project)
-    # register() stamps recency + runs the B9 cap check (evicting the LRU
-    # non-protected project, saving it first). The evicted ids aren't surfaced
-    # to this path-scoped reader — the activate endpoint is the channel that
-    # tells the frontend to drop caches; a path-scoped read is transient.
-    PyPSAService.register(key, ctx)
-    return ctx
+        ctx = PyPSAService.build_context()
+        _hydrate_context_from_disk(ctx, src, project.name)
+        project_registry.bind_context(ctx, project)
+        # register() stamps recency + runs the B9 cap check (evicting the LRU
+        # non-protected project, saving it first). The evicted ids aren't surfaced
+        # to this path-scoped reader — the activate endpoint is the channel that
+        # tells the frontend to drop caches; a path-scoped read is transient.
+        PyPSAService.register(key, ctx)
+        return ctx
 
 
 # The dependency callable used by path-scoped routes:

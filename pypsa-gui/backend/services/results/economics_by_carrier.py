@@ -42,7 +42,14 @@ def compute_economics_by_carrier(n, cfg, lost_load_cap, *, result_df):
         )
         # Return just the by_carrier dict — that's what the Results tab needs.
         # Drop per_asset_lcoh (lives in /api/results/lcoh) to keep the payload small.
+        # Forward `available` alongside by_carrier. Dropping it here stopped
+        # the whole Compare-side availability fix at Compare: the Results tab
+        # received figures with no way to tell a real zero from one that was
+        # never resolved, which is the exact conflation ADR-0001 forbids.
+        # Still drops per_asset_lcoh (lives in /api/results/lcoh) to keep the
+        # payload small.
         return {
+            "available": bool(result.available),
             "by_carrier": {k: v.model_dump() for k, v in result.by_carrier.items()},
         }
     except Exception:

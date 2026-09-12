@@ -39,6 +39,12 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.pypsa_service import PyPSAService
 from services.adequacy.coupling import snapshot_hash as _snapshot_hash
+from services.results.prices import _apply_merit_order_correction  # noqa: F401
+from services.results.cost_breakdown import (  # noqa: F401
+    _class_lifetime,
+    _lifetime_total,
+    _sum_lifetime,
+)
 from services.serialization import (
     slice_ts as _slice_ts,
     ts_payload as _ts_payload,
@@ -287,7 +293,13 @@ def get_economics_by_carrier():
     """
     n = PyPSAService.get_network()
     if not _dispatch_ready(n):
-        return {}
+        # MERGE NOTE (2026-09-10): a bare `{}` was indistinguishable from
+        # "solved, and this network genuinely rolls up to no carriers" — the
+        # wider of this endpoint's two availability holes, and the one a user
+        # hits first. Same shape as the success path so callers need one
+        # branch, not two. The decomposition moved this gate into the router
+        # and the `{}` came back with it; ADR-0001 forbids the conflation.
+        return {"available": False, "by_carrier": {}}
     # Foreground project: the VOLL capture lives in the live solver state, not
     # on the network (solver_service strips the slacks). The solver config is
     # the same one cost_breakdown / asset_economics resolve their `cfg` from.
@@ -2815,6 +2827,41 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         )
         return out
 
+    def _solved_margin_at(x: float) -> float | None:
+        """What ``solve_at`` would ACTUALLY solve at ``x``, without solving —
+        the controller's optional ``solved_value`` probe (B1 / IEEE 39-bus
+        review, F5).
+
+        The clamp above maps every coordinate whose margin exceeds the fleet
+        ceiling onto that one ceiling, so the refinement bisection can ask for
+        a NEW coordinate that stands for a standard already solved: a full
+        capacity expansion plus its MC, spent rebuilding the met endpoint's
+        own plan and stopped only by the plan-hash check afterwards. Two
+        ceiling iterates with identical cost and identical MC LOLE are what
+        that looks like in the record (measured on the stressed IEEE 39-bus
+        network).
+
+        It MIRRORS `solve_at`'s decision tree rather than approximating it,
+        and returns None wherever that function answers without solving —
+        None is "nothing would be solved here", which the controller reads as
+        "cannot tell" and pays the solve for. Both branches are cheap and
+        pure: `to_margin` is arithmetic and the ceiling was computed before
+        the study started.
+        """
+        try:
+            m = float(to_margin(x))
+        except ValueError:
+            return None
+        if m > MAX_MARGIN * (1.0 + 1e-9):
+            return None                       # refused: out of lever
+        if m > m_ceiling:
+            if _ceiling_missed[0]:
+                return None                   # refused: the ceiling missed
+            return float(m_ceiling)
+        return m
+
+    solve_at.solved_value = _solved_margin_at
+
     eval_state: dict = {"floor": floor_h}
 
     def evaluate():
@@ -2942,6 +2989,16 @@ def post_margin_loop(body: MarginLoopRequest | None = None):
         # ceiling any fleet has.
         "margin_ceiling": (None if not math.isfinite(m_max)
                            else float(m_max)),
+        # …and the bound the SEARCH actually stops at, always finite
+        # (whole-branch review, B2). The two are different numbers whenever
+        # the fleet is unbounded or reaches past the schema's own cap, and
+        # the panel showed only the first: "ceiling unbounded" beside an
+        # `unreachable` verdict whose own sentence says "the search is
+        # bounded above by 500%". Both true, one about the fleet and one
+        # about the search, and read together in one panel they contradict.
+        # The verdict copy below reads this same value, so the two cannot
+        # drift.
+        "search_ceiling": float(m_ceiling),
         "max_solves": max_solves,
         "restore": restore,
         "base_restored": False,
@@ -3314,15 +3371,20 @@ def get_copt():
             "profile_units": [u.name for u in split.mixed] + [u.name for u in split.netted],
             "netted_beyond_cap": [u.name for u in split.netted],
             "k_exact": K_EXACT,
-            # Phase 12h. Two units the lists above cannot describe:
+            # Phase 12h, as M5 and F8 left it. Three kinds of unit the
+            # profile lists above cannot describe:
             #  * a unit whose STATIC p_max_pu was folded into its capacity
-            #    has no profile at all, so it is in no existing list — the
+            #    has no profile at all, so it is in no profile list — the
             #    `source` field is here so a later phase can add another
             #    fold without changing the shape;
-            #  * a unit whose outage rate is zero because its availability
-            #    is declared to include outages carries a profile but is in
-            #    neither `mixed` nor `netted` — it is netted exactly, at
-            #    full availability, and no outages are sampled for it.
+            #  * a unit the 12h FLAG zeroed — profiled OR folded (M5: the
+            #    disclosure is symmetric across the two shapes, where it
+            #    once named the column unit twice and the static one never);
+            #  * a unit whose rate the user TYPED as 0 (F8), which is the
+            #    same q by a different route and belongs in its own list
+            #    rather than under the flag's name.
+            # A unit in either of the last two is netted exactly, at full
+            # availability, and no outages are sampled for it.
             "folded_units": [
                 {"name": u.name, "folded_constant": float(u.folded_constant),
                  "source": "static"}

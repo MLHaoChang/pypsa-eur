@@ -3,6 +3,10 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { X, AlertTriangle } from 'lucide-react'
 import { networkApi } from '../api/network'
 import { useUIStore, type CreationRequest } from '../store/uiStore'
+import { isRevealed } from '../utils/attributeCatalog'
+import { extrasPatch, useSolveMode } from './properties/cardKit'
+import { useCatalog } from '../hooks/useCatalog'
+import { creationScope, loadExtras, saveExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
 import BusAutocomplete from '../components/BusAutocomplete'
 import toast from 'react-hot-toast'
@@ -47,6 +51,13 @@ const genFields = (carrier: string): FieldSpec[] => [
   { key: 'carrier',          label: 'Carrier',        type: 'text',     defaultValue: carrier },
   { key: 'p_nom',            label: 'P nom',          type: 'number',   defaultValue: '0',    unit: 'MW',     half: true },
   { key: 'p_nom_extendable', label: 'Extendable',     type: 'checkbox', defaultValue: 'false',               half: true },
+  // Revealed by `p_nom_extendable` (D22 rule 1), so the create and edit forms
+  // agree about when a bound is shown — criterion 34. Deliberately NO
+  // defaultValue on p_nom_max: blank must reach the backend as "unset" so
+  // PyPSA's own `inf` applies. A default of '0' here would cap every
+  // extendable generator at zero.
+  { key: 'p_nom_min',        label: 'P nom min',      type: 'number',   defaultValue: '0',    unit: 'MW',     half: true },
+  { key: 'p_nom_max',        label: 'P nom max',      type: 'number',                         unit: 'MW',     half: true },
   { key: 'marginal_cost',    label: 'Marginal cost',  type: 'number',   defaultValue: '0',    unit: '$/MWh',  half: true },
   { key: 'capital_cost',     label: 'Capital cost',   type: 'number',   defaultValue: '0',    unit: '$/MW',   half: true },
 ]
@@ -66,17 +77,29 @@ const storFields = (carrier: string, hours = '4'): FieldSpec[] => [
 // load only attaches to a heat-carrier bus.
 interface BusFieldSpec extends FieldSpec { busCarrierFilter?: BusCarrier }
 
+/** Cut to `n` characters on a word boundary, with an ellipsis when cut. */
+function truncate(text: string, n: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  if (flat.length <= n) return flat
+  const cut = flat.slice(0, n)
+  const lastSpace = cut.lastIndexOf(' ')
+  return `${(lastSpace > n * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`
+}
+
 const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
   bus: [
     { key: 'name',    label: 'Name',       type: 'text',   required: true },
     { key: 'v_nom',   label: 'Voltage',    type: 'number', defaultValue: '1',  unit: 'kV',  half: true },
     { key: 'carrier', label: 'Carrier',    type: 'select', defaultValue: 'AC',              half: true, options: ['AC','DC','H2','heat','gas'] },
     { key: 'control', label: 'Control',    type: 'select', defaultValue: 'PQ',              half: true, options: ['PQ','PV','Slack'] },
-    // x/y are the bus's geographic coordinates (longitude / latitude),
-    // surfaced here so the user can edit. When the user drags an item onto
-    // the canvas, these get pre-populated with the React-Flow drop coords
-    // — the same numbers feed n.buses.x / n.buses.y AND posCache, so the
-    // new bus appears exactly where it was dropped.
+    // x/y are the bus's geographic coordinates (longitude / latitude).
+    // A canvas drop does NOT seed them: React Flow flow-space pixels are not
+    // a geographic position, and an in-range pair (e.g. 45, 30) would be
+    // accepted as one — a bus silently placed off the coast of Egypt, with
+    // the backend then measuring line lengths to it. A dropped bus keeps
+    // these '0' defaults, lands as unplaced (utils/geo.ts:44), and is picked
+    // up by UnplacedBusesPanel. The drop point still reaches the canvas via
+    // setPendingNodePosition below, which is a layout cache, not PyPSA data.
     { key: 'x',       label: 'Longitude',  type: 'number', defaultValue: '0',               half: true },
     { key: 'y',       label: 'Latitude',   type: 'number', defaultValue: '0',               half: true },
   ],
@@ -119,15 +142,6 @@ const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 's_nom',            label: 'S nom',         type: 'number',   defaultValue: '100', unit: 'MVA',  half: true },
     { key: 's_nom_extendable', label: 'S nom extendable', type: 'checkbox', defaultValue: 'false' },
   ],
-  link: [
-    { key: 'name',         label: 'Name',        type: 'text',   required: true },
-    { key: 'bus0',         label: 'From Bus',     type: 'bus',    required: false },
-    { key: 'bus1',         label: 'To Bus',       type: 'bus',    required: false },
-    { key: 'carrier',      label: 'Carrier',      type: 'text',   defaultValue: 'AC' },
-    { key: 'p_nom',        label: 'P nom',        type: 'number', defaultValue: '0',  unit: 'MW',      half: true },
-    { key: 'efficiency',   label: 'Efficiency',   type: 'number', defaultValue: '1',                   half: true },
-    { key: 'marginal_cost',label: 'Marginal cost',type: 'number', defaultValue: '0',  unit: '$/MWh' },
-  ],
   electrolyzer: [
     { key: 'name',         label: 'Name',                    type: 'text',   required: true },
     { key: 'bus0',         label: 'Electricity bus (input)', type: 'bus',    required: true,  busCarrierFilter: 'non-h2' } as BusFieldSpec,
@@ -153,7 +167,6 @@ const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
   ],
   thermal:   genFields('gas'),
   renewable: genFields('wind'),
-  generator: genFields(''),
   battery:   storFields('battery', '4'),
   psh:       storFields('hydro',   '6'),
   hydrogen:  storFields('H2',      '24'),
@@ -232,44 +245,58 @@ const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'carrier', label: 'Carrier',       type: 'text',   defaultValue: 'heat' },
     { key: 'p_set',   label: 'P set',         type: 'number', defaultValue: '0', unit: 'MW' },
   ],
-  // Generic load — kept for callers that aren't carrier-specific (legacy).
-  load: [
-    { key: 'name',    label: 'Name',          type: 'text',   required: true },
-    { key: 'bus',     label: 'Attach to Bus', type: 'bus',    required: true },
-    { key: 'carrier', label: 'Carrier',       type: 'text',   defaultValue: 'AC' },
-    { key: 'p_set',   label: 'P set',         type: 'number', defaultValue: '0',  unit: 'MW' },
-  ],
+}
+
+/**
+ * Palette id → the field a drop-on-a-bus prefills (spec D27).
+ *
+ * 17 of the 18 palette items have a terminal. `bus` is deliberately absent:
+ * it IS the terminal, so dropping a bus onto a bus behaves as a plain canvas
+ * drop. The six branch types take `bus0`; the eleven single-terminal types
+ * take `bus`.
+ *
+ * The orphan FIELD_MAP keys `link` / `generator` / `load` are not listed —
+ * they are unreachable from the live UI and are deleted in the same change as
+ * AssetPalette.tsx (spec D29).
+ */
+export const TERMINAL_FIELD: Record<string, 'bus' | 'bus0'> = {
+  line: 'bus0', transformer: 'bus0',
+  electrolyzer: 'bus0', fuel_cell: 'bus0', power_to_heat: 'bus0', chp: 'bus0',
+  thermal: 'bus', renewable: 'bus',
+  battery: 'bus', psh: 'bus', caes: 'bus', flywheel: 'bus', hydrogen: 'bus',
+  thermal_storage: 'bus',
+  load_elec: 'bus', load_h2: 'bus', load_heat: 'bus',
 }
 
 const AUTO_PREFIX: Record<string, string> = {
-  bus: 'Bus', line: 'Line', link: 'Link', transformer: 'Tx',
-  thermal: 'Gas', renewable: 'Wind', generator: 'Gen',
+  bus: 'Bus', line: 'Line', transformer: 'Tx',
+  thermal: 'Gas', renewable: 'Wind',
   battery: 'Battery', psh: 'PSH', hydrogen: 'H2', caes: 'CAES', flywheel: 'FW',
   electrolyzer: 'Electrolyzer', fuel_cell: 'FuelCell',
   power_to_heat: 'P2H', chp: 'CHP', thermal_storage: 'TES',
-  load: 'Load', load_elec: 'Load', load_h2: 'H2Load', load_heat: 'HeatLoad',
+  load_elec: 'Load', load_h2: 'H2Load', load_heat: 'HeatLoad',
 }
 
 const QUERY_KEY: Record<string, string> = {
-  bus: 'buses', line: 'lines', link: 'links', transformer: 'transformers',
-  thermal: 'generators', renewable: 'generators', generator: 'generators',
+  bus: 'buses', line: 'lines', transformer: 'transformers',
+  thermal: 'generators', renewable: 'generators',
   battery: 'storage_units', psh: 'storage_units', hydrogen: 'storage_units',
   caes: 'storage_units', flywheel: 'storage_units',
   electrolyzer: 'links', fuel_cell: 'links',
   power_to_heat: 'links', chp: 'links',
   thermal_storage: 'stores',
-  load: 'loads', load_elec: 'loads', load_h2: 'loads', load_heat: 'loads',
+  load_elec: 'loads', load_h2: 'loads', load_heat: 'loads',
 }
 
 const COMPONENT_TYPE: Record<string, string> = {
-  bus: 'Bus', line: 'Line', link: 'Link', transformer: 'Transformer',
-  thermal: 'Generator', renewable: 'Generator', generator: 'Generator',
+  bus: 'Bus', line: 'Line', transformer: 'Transformer',
+  thermal: 'Generator', renewable: 'Generator',
   battery: 'StorageUnit', psh: 'StorageUnit', hydrogen: 'StorageUnit',
   caes: 'StorageUnit', flywheel: 'StorageUnit',
   electrolyzer: 'Link', fuel_cell: 'Link',
   power_to_heat: 'Link', chp: 'Link',
   thermal_storage: 'Store',
-  load: 'Load', load_elec: 'Load', load_h2: 'Load', load_heat: 'Load',
+  load_elec: 'Load', load_h2: 'Load', load_heat: 'Load',
 }
 
 type CreateFn = (p: Record<string, unknown>) => Promise<unknown>
@@ -277,7 +304,6 @@ type CreateFn = (p: Record<string, unknown>) => Promise<unknown>
 const CREATE_FN: Record<string, CreateFn> = {
   bus:           p => networkApi.createBus(p as Partial<Bus>),
   line:          p => networkApi.createLine(p as Partial<Line>),
-  link:          p => networkApi.createLink(p as Partial<Link>),
   transformer:   p => networkApi.createTransformer(p as Partial<Transformer>),
   electrolyzer:  p => networkApi.createLink(p as Partial<Link>),
   fuel_cell:     p => networkApi.createLink(p as Partial<Link>),
@@ -285,14 +311,12 @@ const CREATE_FN: Record<string, CreateFn> = {
   chp:           p => networkApi.createLink(p as Partial<Link>),
   thermal:       p => networkApi.createGenerator(p as Partial<Generator>),
   renewable:     p => networkApi.createGenerator(p as Partial<Generator>),
-  generator:     p => networkApi.createGenerator(p as Partial<Generator>),
   battery:       p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
   psh:           p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
   hydrogen:      p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
   caes:          p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
   flywheel:      p => networkApi.createStorageUnit(p as Partial<StorageUnit>),
   thermal_storage: p => networkApi.createStore(p as Partial<Store>),
-  load:          p => networkApi.createLoad(p as Partial<Load>),
   load_elec:     p => networkApi.createLoad(p as Partial<Load>),
   load_h2:       p => networkApi.createLoad(p as Partial<Load>),
   load_heat:     p => networkApi.createLoad(p as Partial<Load>),
@@ -358,6 +382,14 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
   const { setCreationItem, setSelectedComponent, setPendingNodePosition } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
+  const solveMode = useSolveMode()
+  // Attributes the user has added to THIS palette type (spec D23). The scope
+  // key is the palette id, not the component class: two palette items can map
+  // to one class (thermal and renewable are both Generators) and the choice
+  // belongs to the item the user clicked.
+  const [extraKeys, setExtraKeys] = useState<string[]>(() => loadExtras(creationScope(item.id)))
+  const [picking, setPicking] = useState(false)
+  const { data: catalog } = useCatalog(COMPONENT_TYPE[item.id] ?? null)
 
   const fields = FIELD_MAP[item.id] ?? []
   const qKey = QUERY_KEY[item.id] ?? ''
@@ -382,13 +414,21 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
     const init: Record<string, string> = {}
     fields.forEach(f => { init[f.key] = f.defaultValue ?? '' })
     init.name = `${prefix} ${existingCount + 1}`
-    // Drop-position pre-population. Only meaningful for the Bus form — other
-    // assets attach to a bus and don't carry their own coordinate. Format
-    // with limited precision so the user sees a clean number; they can still
-    // edit before submitting.
-    if (item.dropPosition && item.id === 'bus') {
-      init.x = String(Number(item.dropPosition.x.toFixed(2)))
-      init.y = String(Number(item.dropPosition.y.toFixed(2)))
+    // Terminal prefill from a drop-on-a-bus (spec D27). Applied only when the
+    // target bus passes the field's own carrier filter — otherwise the form
+    // opens unprefilled and the existing mismatch line ("No H₂ bus in
+    // network…") does the explaining, rather than a hydrogen bus silently
+    // landing in an electricity-only terminal.
+    //
+    // A schematic drop deliberately does NOT seed init.x / init.y (spec D28):
+    // React Flow flow-space pixels are not a geographic position. See the
+    // comment on FIELD_MAP.bus's x/y fields.
+    const terminal = TERMINAL_FIELD[item.id]
+    if (item.dropBusName && terminal) {
+      const spec = fields.find(f => f.key === terminal) as BusFieldSpec | undefined
+      if (spec && filteredBusNames(spec.busCarrierFilter).includes(item.dropBusName)) {
+        init[terminal] = item.dropBusName
+      }
     }
     return init
   })
@@ -421,16 +461,46 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
     return Object.keys(errs).length === 0
   }
 
+  /**
+   * The fields D22 says to show for the form's current state — the single
+   * source for BOTH the render and the submit payload.
+   *
+   * Keeping them in step is load-bearing, not tidiness: the payload loop used
+   * to enumerate every field, so the moment a field became hideable it would
+   * post a value the user never saw. With `p_nom_max` in the list that means
+   * `p_nom_max: 0` on every non-extendable generator — a silent capacity cap
+   * of zero.
+   */
+  const visibleFields = fields.filter(f => isRevealed(f.key, {
+    mode: solveMode,
+    extendable: form.p_nom_extendable === 'true'
+      || form.e_nom_extendable === 'true'
+      || form.s_nom_extendable === 'true',
+    committable: form.committable === 'true',
+    noSlackBus: false,   // the creation form makes no network-wide claim
+  }))
+
   const createMut = useMutation({
     mutationFn: async () => {
       if (!validate()) throw new Error('validation')
       const payload: Record<string, unknown> = {}
-      fields.forEach(f => {
+      visibleFields.forEach(f => {
         const v = form[f.key] ?? ''
-        if (f.type === 'number') payload[f.key] = v !== '' ? parseFloat(v) : 0
+        if (f.type === 'number') {
+          // A blank number falls back to 0 only where the field declares a
+          // default — that is the long-standing behaviour and every existing
+          // field declares one. A field with NO default (p_nom_max) is omitted
+          // instead, so the model's own sentinel applies rather than a zero.
+          if (v !== '') payload[f.key] = parseFloat(v)
+          else if (f.defaultValue !== undefined) payload[f.key] = 0
+        }
         else if (f.type === 'checkbox') payload[f.key] = v === 'true'
         else payload[f.key] = v
       })
+      // The loop above enumerates `fields`, so an extras value would be
+      // rendered and never sent — the exact lie D20 names. extrasPatch closes
+      // it, after the loop so a curated key always wins.
+      Object.assign(payload, extrasPatch(form, extraKeys))
       const fn = CREATE_FN[item.id]
       if (!fn) throw new Error(`Unknown asset type: ${item.id}`)
       const transform = SUBMIT_TRANSFORM[item.id]
@@ -482,7 +552,10 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
       {/* Form body */}
       <div className="flex-1 overflow-y-auto px-3 py-3">
         <div className="grid grid-cols-2 gap-x-2 gap-y-2.5">
-          {fields.map(f => {
+          {/* D22 rule 1: p_nom_min / p_nom_max stay hidden until the asset is
+              extendable, so the create and edit forms stop disagreeing about
+              when they are shown (criterion 34). */}
+          {visibleFields.map(f => {
             const colSpan = f.half ? '' : 'col-span-2'
             const error = errors[f.key]
 
@@ -571,6 +644,70 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
               </div>
             )
           })}
+
+          {/* "+ Add parameter" (spec D23). Lists the component's Input
+              attributes the form does not already show; default_text stands in
+              whenever `default` is null, so an unbounded attribute reads `inf`
+              rather than blank (criterion 30). Adding one never seeds a value —
+              the field opens empty and PyPSA's default applies until the user
+              types one. */}
+          {catalog && (
+            <div className="col-span-2 mt-2 pt-2 border-t border-border">
+              {extraKeys.map(k => {
+                const attr = catalog.attributes.find(a => a.name === k)
+                return (
+                  <label key={k} className="flex items-center gap-1.5 mb-1">
+                    <span className="text-[10px] text-muted w-32 shrink-0 truncate"
+                          title={attr?.description ?? k}>
+                      {k}{attr?.unit ? ` (${attr.unit})` : ''}
+                    </span>
+                    <input
+                      value={form[k] ?? ''}
+                      onChange={e => set(k, e.target.value)}
+                      placeholder={attr?.default_text ?? ''}
+                      className="flex-1 bg-bg border border-border rounded px-1.5 py-0.5 text-xs"
+                    />
+                  </label>
+                )
+              })}
+              {picking ? (
+                <select
+                  autoFocus
+                  value=""
+                  onChange={e => {
+                    const v = e.target.value
+                    if (!v) return
+                    const next = [...extraKeys, v]
+                    setExtraKeys(next)
+                    saveExtras(creationScope(item.id), next)
+                    setPicking(false)
+                  }}
+                  onBlur={() => setPicking(false)}
+                  className="w-full bg-bg border border-accent rounded px-1.5 py-0.5 text-xs"
+                >
+                  <option value="">Choose a parameter…</option>
+                  {catalog.attributes
+                    .filter(a => a.status.startsWith('Input')
+                      && !fields.some(f => f.key === a.name)
+                      && !extraKeys.includes(a.name))
+                    .map(a => (
+                      // Criterion 30 wants type, unit, description AND default.
+                      // The description is truncated inline because a native
+                      // <option> cannot wrap, and carried whole in `title` —
+                      // a tooltip alone would not be "shown".
+                      <option key={a.name} value={a.name}
+                              title={a.description ?? undefined}>
+                        {a.name}{a.unit ? ` (${a.unit})` : ''} — {a.type}, default {a.default_text || '—'}
+                        {a.description ? ` — ${truncate(a.description, 70)}` : ''}
+                      </option>
+                    ))}
+                </select>
+              ) : (
+                <button type="button" onClick={() => setPicking(true)}
+                        className="text-[10px] text-accent hover:underline">+ Add parameter</button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

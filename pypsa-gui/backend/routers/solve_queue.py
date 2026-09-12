@@ -5,22 +5,32 @@ Thin layer over `services.solve_queue.solve_queue` — the dispatcher singleton
 owns all state and threading. Mounted under `/api/simulation/queue` in main.py.
 
 Endpoints:
-    POST   /api/simulation/queue                 enqueue a saved project
-    GET    /api/simulation/queue                  list all jobs (FIFO order)
-    POST   /api/simulation/queue/{job_id}/abort   abort running / cancel queued
-    POST   /api/simulation/queue/clear_finished   drop terminal jobs from listing
+    POST   /api/simulation/queue                        enqueue a saved project
+    GET    /api/simulation/queue                        list all jobs (FIFO order)
+    GET    /api/simulation/queue/{job_id}/log_history   a job's log lines so far
+    GET    /api/simulation/queue/{job_id}/log_stream    SSE live tail of a job's log
+    POST   /api/simulation/queue/{job_id}/abort         abort running / cancel queued
+    POST   /api/simulation/queue/{job_id}/requeue       re-enqueue a finished job
+    POST   /api/simulation/queue/{job_id}/dismiss       hide a finished job from the caller
+    POST   /api/simulation/queue/pause                  stop starting new jobs
+    POST   /api/simulation/queue/resume                 continue in FIFO order
+    POST   /api/simulation/queue/cancel_queued          bulk-cancel the caller's queued jobs
+    POST   /api/simulation/queue/clear_finished         drop terminal jobs from listing
 
-AUTHORIZATION. All four routes take `db`/`user` and authorize against the
-caller. Three of them did not until P-1, and the queue is a PROCESS-GLOBAL
-singleton shared by every org — see the per-route docstrings for what each one
-now refuses, and `_may_see` / `_may_abort` for the two different boundaries
-they use and why they differ.
+AUTHORIZATION. All eleven routes take `db`/`user` and authorize against the
+caller. Three of the original four did not until P-1, and the queue is a
+PROCESS-GLOBAL singleton shared by every org — see the per-route docstrings
+for what each one now refuses, and `_may_see` / `_may_abort` for the two
+different boundaries they use and why they differ.
 """
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DBSession
 
@@ -29,13 +39,43 @@ from db.models import User
 from db.session import get_db
 from deps import optional_user
 from services.pypsa_service import PyPSAService
-from services.solve_queue import solve_queue
+from services.solve_queue import _TERMINAL, _row_epoch, solve_queue
 
 router = APIRouter()
 
 
 class EnqueueRequest(BaseModel):
     project_id: str
+
+
+def _config_snapshot_for(project_key: str, project_dir) -> str | None:
+    """
+    The solver config this enqueue should freeze onto the job, as JSON.
+
+    Resolution mirrors what the dispatcher used to do at run time, but ONCE and
+    HERE, where the request exists: the resident context's live config when the
+    project is resident (so the user's unsaved solver edits are honoured, which
+    is what they expect from the Run button), else the `solver_config.json` the
+    project has on disk. Returns None only if neither can be read, which leaves
+    the dispatcher on its pre-snapshot fallback.
+    """
+    import json as _json
+    from dataclasses import asdict
+
+    from services.pypsa_service import PyPSAService
+
+    try:
+        resident = PyPSAService.get_context(project_key)
+        if resident is not None:
+            cfg = resident.solver_state.get("solver_config")
+            if cfg is not None:
+                return _json.dumps(asdict(cfg))
+        on_disk = project_dir / "solver_config.json"
+        if on_disk.exists():
+            return on_disk.read_text(encoding="utf-8")
+    except Exception:  # noqa: BLE001 — never fail an enqueue over bookkeeping
+        pass
+    return None
 
 
 @router.post("")
@@ -47,8 +87,9 @@ def enqueue_solve(
     """
     Queue a project to solve. The dispatcher loads the SAVED version from disk,
     so the project must already exist on disk with a network — the caller (the
-    frontend) saves the foreground project before enqueuing it. Returns the
-    created job, including its queue position.
+    frontend) saves the foreground project before enqueuing it. Returns the job,
+    including its queue position and an `already_queued` flag that is true when
+    an existing job was returned instead of a new one.
 
     AUTHORIZATION (Step 0a): the project arrives in the BODY, not the path, so
     this route is invisible to a path-parameter inventory — it was not among
@@ -63,6 +104,33 @@ def enqueue_solve(
 
     project_registry.require_user(user)
     project = project_registry.resolve_project(db, user, req.project_id)
+    # TWO INDEPENDENT PRE-CONDITIONS, both 409, checked in this order.
+    #
+    # The lock check goes first because its refusal is the more actionable one:
+    # it names the holder, so the UI's read-only banner can say who is editing
+    # rather than "another user".
+    #
+    # Lock CHECK, not an acquire (design §Open items): enqueueing on your own
+    # locked project must not steal or extend anything, and an unlocked
+    # project must stay unlocked — the dispatcher's own completion save is
+    # exempt from lock enforcement by design.
+    from services import project_locks
+
+    lock = project_locks.get_lock(db, project.id)
+    if lock is not None and lock.holder_user_id != user.id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_kind": "project_locked",
+                "message": f"'{project.name}' is being edited by another user.",
+                # I1: same wire shape as `_enforce_project_lock` and the write
+                # middleware — the frontend reads `detail.lock` to name the
+                # holder in the read-only banner, and a refusal that omits it
+                # leaves the banner saying "another user".
+                "lock": project_locks.serialize_lock(db, project.id, user.id),
+            },
+        )
+
     # Fix review, F3: the queue is the Run button's real path and had no
     # study gate at all — a queued solve re-solved the network a live study
     # was measuring and failed only at its post-solve save. Refused here
@@ -81,12 +149,42 @@ def enqueue_solve(
             f"Project '{project.name}' has no saved network on disk. Save the "
             "project before queuing it to solve.",
         )
-    job = solve_queue.enqueue(
+    # Idempotent by project: a second enqueue of a project that already has a
+    # queued or running job returns THAT job with `already_queued: true` and
+    # creates nothing. 200, not 409 — the caller's intent ("this project should
+    # be solving") is already satisfied, and an error would make every client
+    # re-implement the check it just handed to the server.
+    #
+    # The snapshot is resolved BEFORE `enqueue_unique`, here, where the request
+    # and the authorized directory both still exist — the dispatcher runs on a
+    # worker thread with neither (R24). It is passed INTO `enqueue_unique` as a
+    # constructor argument, not assigned onto `job` afterward: `enqueue_unique`
+    # publishes the job to the dispatcher's queue (`self._q.put(jid)`, which
+    # wakes a possibly-idle dispatcher thread) before returning, so an
+    # assign-after-return has a real TOCTOU window where the dispatcher reads
+    # the job's config before this route gets back to setting it — the
+    # pre-fix bug, reintroduced for one job in one race. Passing it in means
+    # the job is never visible to the dispatcher with a missing snapshot.
+    # Resolving it even when `created` turns out False is wasted work but not
+    # wrong: `enqueue_unique` discards it for an idempotent re-enqueue and the
+    # existing job keeps the config IT was created with.
+    snapshot = _config_snapshot_for(project_registry.registry_key(project), project_dir)
+    # `enqueued_by_user_id` stamps the ACTING user alongside the org-scoped
+    # directory this route already resolved. Keying per-user dismiss on project
+    # access instead would let two users sharing a project dismiss each other's
+    # rows — the exact thing per-user dismiss exists to prevent. The row INSERT
+    # itself happens INSIDE `enqueue_unique`, before the job is published to
+    # the dispatcher — inserting here, after it returned, left a window where a
+    # fast-failing job went terminal against a missing row and boot
+    # reconciliation re-ran it (see `enqueue_unique`'s docstring).
+    job, created = solve_queue.enqueue_unique(
         project.name,
         project_key=project_registry.registry_key(project),
         storage_dir=str(project_dir),
+        solver_config_json=snapshot,
+        enqueued_by_user_id=user.id,
     )
-    return solve_queue.get_job(job.id)
+    return {**(solve_queue.get_job(job.id) or job.to_public(None)), "already_queued": not created}
 
 
 # ── Authorization helpers (P-1) ─────────────────────────────────────────────
@@ -98,7 +196,19 @@ def enqueue_solve(
 #
 # Fields that name the work rather than measure it. `error` is included because
 # a failure message routinely quotes a project name, a path or a solver detail.
-_REDACTED = ("project_id", "project_key", "error")
+#
+# `objective` / `solve_time` / `condition` joined this set in Task 16a's review
+# round 1 (Important 2, human-adjudicated): before persisted rows were merged
+# into the listing, these were never redacted because the queue was
+# self-clearing — a finished job eventually left `_jobs` and took its result
+# with it. Once a terminal row can survive indefinitely (interrupted jobs are
+# permanently un-restartable back into memory; any job's history now outlives
+# a restart), leaving them un-redacted let any authenticated caller read every
+# organisation's solved system cost, forever. Redacting them still preserves
+# the queue-depth rationale below — a foreign job still shows its `status` and
+# `position`, so a caller can see someone is ahead of them, just not what that
+# job's model cost.
+_REDACTED = ("project_id", "project_key", "error", "objective", "solve_time", "condition")
 
 
 def _org_prefix(db: DBSession, user: User) -> str | None:
@@ -197,26 +307,414 @@ def _may_abort(db: DBSession, user: User, job: dict) -> bool:
     return project_acl.can_access_project(db, user, project)
 
 
+def _parse_job_id(job_id: str) -> uuid.UUID | None:
+    """
+    The path parameter as a UUID, or None if it is not one.
+
+    Declared `str` in the signature rather than `uuid.UUID` deliberately: FastAPI
+    would answer 422 for a malformed id, which is a different answer from the 404
+    an unknown id gets — and telling a caller "that is not even a valid id"
+    re-opens the oracle the byte-identical 404 exists to close.
+    """
+    try:
+        return uuid.UUID(job_id)
+    except (ValueError, AttributeError, TypeError):
+        return None
+
+
+def _visible_job_or_404(db: DBSession, user: User, job_id: str) -> dict:
+    """
+    The job, if the caller may SEE it; the genuine not-found 404 otherwise.
+
+    404, never 403, with the not-found message BYTE FOR BYTE — same reasoning as
+    `abort_job`: a 403 would confirm the id exists and hand back the enumeration
+    the redacted listing just took away.
+
+    `_may_see`, not `_may_abort`. The two deliberately disagree for a job
+    orphaned by a project delete: it stays ABORTABLE by its own org so a running
+    solve can still be stopped and the shared solver freed. That exception is
+    about stopping work, not about reading the deleted project's log, so the
+    listing predicate is the right one here.
+    """
+    from services import project_acl
+
+    not_found = HTTPException(404, f"No solve job with id {job_id}.")
+    parsed = _parse_job_id(job_id)
+    if parsed is None:
+        raise not_found
+    job = solve_queue.get_job(parsed) or _persisted_public_or_none(parsed)
+    if job is None:
+        raise not_found
+    prefix = _org_prefix(db, user)
+    allowed = project_acl.accessible_project_ids(db, user, [_project_uuid(job, prefix)])
+    if not _may_see(job, prefix, allowed):
+        raise not_found
+    return job
+
+
+def _persisted_public_or_none(parsed: uuid.UUID) -> dict | None:
+    """
+    A persisted-only job (its row survives, its `SolveJob` did not — every
+    `interrupted` job after a restart, by construction) in `to_public()`
+    shape, or None. The listing merges these rows in (Task 16a), so an id it
+    serves must ALSO resolve on the detail routes — resolving through
+    `solve_queue.get_job` alone answered the existence-oracle 404 for every
+    such job, indistinguishable from a bad id, with no way for the caller to
+    tell "no retained log" from "this job never existed".
+    """
+    from services import solve_job_store
+
+    row = solve_job_store.load_job(parsed)
+    return _persisted_job_public(row) if row is not None else None
+
+
+def _sse_line(text: object) -> str:
+    """One SSE `data:` frame. Newlines would terminate the frame early."""
+    safe = str(text).replace("\n", " ").replace("\r", "")
+    return f"data: {safe}\n\n"
+
+
+def _done_event(job_id: uuid.UUID) -> str:
+    """The `event: done` SSE frame carrying a job's current/terminal snapshot."""
+    job = solve_queue.get_job(job_id) or _persisted_public_or_none(job_id) or {}
+    payload = json.dumps({
+        "status": job.get("status"),
+        "objective": job.get("objective"),
+        "solve_time": job.get("solve_time"),
+        "condition": job.get("condition"),
+    })
+    return f"event: done\ndata: {payload}\n\n"
+
+
+@router.get("/{job_id}/log_history")
+def job_log_history(
+    job_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    The lines this job emitted — live while it runs, retained once terminal.
+
+    Readable regardless of which project the caller is viewing and regardless
+    of whether the job's context is still resident, because the queue lives on
+    the JOB. `/api/simulation/log_history` answers a different question (what
+    the caller's ACTIVE context last logged) and is unchanged.
+    """
+    from services import project_registry
+
+    project_registry.require_user(user)
+    job = _visible_job_or_404(db, user, job_id)
+    parsed = _parse_job_id(job_id)
+    q = solve_queue.get_log_queue(parsed)
+    lines = q.history() if q is not None else []
+    return {"lines": lines, "status": job["status"]}
+
+
+@router.get("/{job_id}/log_stream")
+async def job_log_stream(
+    job_id: str,
+    request: Request,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    Server-Sent Events for ONE job's log.
+
+    Reads through `BufferedLogQueue.subscribe()`, not `get()`. The legacy `get()`
+    consumer is DESTRUCTIVE — it pops — so draining the same queue here would
+    race `/api/simulation/log_stream` for the foreground's lines and each would
+    see half of them. The fanout deque is exactly the side channel that exists
+    for a second consumer, and it never observes the `None` close sentinel.
+
+    SUBSCRIBE BEFORE REPLAY. `history()` snapshots under a lock and returns a
+    copy; `subscribe()` only sees lines `put()` AFTER it runs. A line landing
+    in the gap between the two belongs to neither and is silently lost — and
+    that gap is not microseconds: every `yield` in the replay loop suspends
+    this generator while Starlette writes the frame to the socket, so with a
+    full 5000-line history and a slow consumer the gap is the wall-clock time
+    to write 5000 frames. Subscribing first trades that gap for an occasional
+    DUPLICATE at the seam (a line already in `history()` may also arrive again
+    via the live deque) — the correct direction: the legacy
+    `/api/simulation/log_stream` documents the same choice already
+    (`routers/simulation.py:912-914`, duplicate-prone rather than gap-prone).
+    That duplicate window is tiny by comparison — `subscribe()` and
+    `history()` are adjacent statements with no I/O between them, so at most
+    one line can land in it — and harmless regardless of size: every consumer
+    (`SolveQueuePanel.tsx`'s `JobLogPanel`) renders lines as plain strings
+    into a `<pre>`, not React-keyed and not de-duplicated, so a repeated line
+    is just a repeated row.
+
+    Termination is therefore the job's own status, not a sentinel: stop once
+    the job is terminal AND the deque has drained, then emit `done`. A job
+    cleared out of the queue entirely (`clear_finished` ran mid-stream) reads
+    back as `get_job() is None` — also treated as terminal, or the loop would
+    poll forever for a status that can no longer arrive.
+    """
+    from services import project_registry
+
+    project_registry.require_user(user)
+    _visible_job_or_404(db, user, job_id)
+    parsed = _parse_job_id(job_id)
+
+    async def generate():
+        q = solve_queue.get_log_queue(parsed)
+        if q is None:
+            # No queue was ever published for this job — most commonly a
+            # caller attaching in the `queued` window, before the dispatcher's
+            # claim block sets `log_queue` at the `running` flip. Emit `done`
+            # immediately: without it, a browser EventSource auto-reconnects
+            # on this frame-then-close, looping every few seconds until the
+            # job starts, and any consumer awaiting `done` waits forever.
+            yield "data: No log for this job\n\n"
+            yield _done_event(parsed)
+            return
+
+        sub_id, dq = q.subscribe()
+        try:
+            for line in q.history():
+                if await request.is_disconnected():
+                    return
+                yield _sse_line(line)
+
+            while True:
+                if await request.is_disconnected():
+                    return
+                drained = False
+                while dq:
+                    drained = True
+                    yield _sse_line(dq.popleft())
+                if drained:
+                    continue
+                snapshot = solve_queue.get_job(parsed) or {}
+                if not snapshot or snapshot.get("status") in _TERMINAL:
+                    # The producer's guarantee is "put lines, then flip status":
+                    # by the time `status` reads as terminal, every line the
+                    # solve emitted has already been queued. But there is a GIL
+                    # switch point between the `while dq` drain above and this
+                    # status read, wide enough for that final `put()` to land
+                    # in it — so drain once more before stopping, or the tail
+                    # (often the `[PHASE] Failed: ...` / `TRACEBACK: ...` lines)
+                    # is silently dropped.
+                    while dq:
+                        yield _sse_line(dq.popleft())
+                    break
+                await asyncio.sleep(0.25)
+        finally:
+            # A closed browser tab would otherwise leak the deque + dict entry.
+            q.unsubscribe(sub_id)
+
+        yield _done_event(parsed)
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+# Bounds the persisted-history slice `_merged_jobs` reads on every poll
+# (Task 16a review round 1, Important 3): unbounded, that query's cost grows
+# with every terminal job the process has EVER recorded, on a route polled
+# every 1.5s while any job is active. 200 is generous for "what a caller would
+# plausibly want to see" while keeping the worst case bounded regardless of
+# process uptime. `load_by_status` returns the NEWEST rows first when capped,
+# so the ones dropped are the oldest history, not the most relevant. Deliberately
+# NOT applied to `clear_finished` — that is a rare, deliberate, super-admin
+# wipe, not a hot poll, and capping it would leave un-wiped rows behind.
+_PERSISTED_HISTORY_LIMIT = 200
+
+
+# Transport key for the job owner between `_merged_jobs` and `list_queue`.
+#
+# The owner is NOT a response field. `enqueued_by_user_id` in the listing would
+# let any authenticated caller enumerate which colleague queued which job —
+# a disclosure about OTHER users, and more than any client needs. `list_queue`
+# reduces it to a per-caller `can_dismiss` boolean and pops this key, so it
+# never reaches a response.
+#
+# Leading underscore so it cannot collide with a real `to_public()` field, and
+# popped unconditionally (`pop(_OWNER_KEY, None)`) rather than conditionally,
+# so a future job dict that somehow lacks it still cannot carry it through.
+_OWNER_KEY = "_owner"
+
+
+def _can_dismiss(job: dict, owner, user: User) -> bool:
+    """
+    Whether `POST /{job_id}/dismiss` would ACCEPT this row from this caller.
+
+    Exactly the route's own precondition, not an approximation of it: terminal
+    (a live job must not be hideable from your own listing — that is how a
+    solve gets forgotten about) AND queued by this caller (dismissal is
+    per-user; keying it on project access would let two users sharing a project
+    hide each other's rows).
+
+    A NULL owner — a legacy row from before Task 13, or a hand-made one — is
+    false for everybody, which mirrors the route: it fails closed rather than
+    guessing, so such a row stays visible and un-dismissable by design.
+
+    Emitting the capability rather than the identity is what keeps this
+    disclosure-free: it is true only for rows the caller queued themselves, so
+    it says nothing about anyone else. A foreign org's redacted row is already
+    false for the same reason, which is why this needs no redaction branch.
+    """
+    if job.get("status") not in _TERMINAL:
+        return False
+    return owner is not None and str(owner) == str(user.id)
+
+
+def _persisted_job_public(row: dict) -> dict:
+    """
+    A `solve_jobs` row (from `solve_job_store.load_by_status`), reshaped to
+    the same shape `SolveJob.to_public()` returns, so `_merged_jobs` can hand
+    `list_queue` ONE uniform list and the existing authorization pass
+    (`_may_see` / `_redact`, keyed on `project_key`) needs no branch for
+    "was this job live or persisted".
+
+    `position` is always `None`. Every row this is ever called with is
+    TERMINAL — `_merged_jobs` only loads `_TERMINAL` statuses — and a queue
+    position is only meaningful for a job still waiting to run. Fabricating
+    one for a job that finished, possibly restarts ago, would be a made-up
+    number with no actual queue behind it.
+    """
+    started_at = row.get("started_at")
+    finished_at = row.get("finished_at")
+    return {
+        "id": str(row["id"]),
+        "project_id": row.get("project_id"),
+        "project_key": row.get("project_key"),
+        "status": row.get("status"),
+        "position": None,
+        "objective": row.get("objective"),
+        "solve_time": row.get("solve_time"),
+        "condition": row.get("condition"),
+        "error": row.get("error"),
+        "enqueued_at": _row_epoch(row.get("enqueued_at")),
+        "started_at": _row_epoch(started_at) if started_at is not None else None,
+        "finished_at": _row_epoch(finished_at) if finished_at is not None else None,
+        # PRIVATE, and `list_queue` pops it before anything is serialised —
+        # see `_OWNER_KEY`.
+        _OWNER_KEY: row.get("enqueued_by_user_id"),
+    }
+
+
+def _merged_jobs(project_key_prefix: str | None = None) -> list[dict]:
+    """
+    Every in-memory job, plus persisted TERMINAL rows for jobs that are no
+    longer resident — the gap Task 16a closes.
+
+    `project_key_prefix` (the caller's `org_uuid:` half, None in local mode)
+    adds a SECOND capped read scoped to the caller's own org, unioned with
+    the global one. Capping globally alone let one org's volume evict
+    another org's entire history: the newest-N window filled with rows the
+    victim only ever sees fully redacted, displacing their own completed
+    jobs. Scoping the ONLY read to the caller's org is not an option either —
+    `test_solve_queue_persisted_listing.py::
+    test_a_persisted_terminal_job_is_redacted_for_another_org` pins
+    (human-adjudicated, review round 1) that foreign history is REDACTED,
+    never silently absent. The union gives both properties: the caller's own
+    newest-N can never be displaced, foreign rows stay visible-redacted, and
+    the result stays bounded at 2N.
+
+    Why a job can be persisted but not resident: a restart drops EVERY entry
+    from `_jobs` (a fresh `SolveQueue()` singleton), and boot reconciliation
+    (`solve_job_store.reconcile_on_boot`) only ever re-admits `queued` rows
+    back into memory — a `running` row becomes `interrupted` and is
+    DELIBERATELY never re-enqueued (R25's crash-loop guard: auto-retrying a
+    job that crashed the process would crash-loop the boot). So the only way
+    an `interrupted` job — or any terminal job from before the last restart —
+    can ever reach a caller is by being read back from the table here, at the
+    listing's read boundary. Nothing is re-admitted to `_jobs`; a persisted
+    row that matches a live job is simply not fetched into the result at all
+    (see below), so this can never put a terminal job back in front of the
+    dispatcher.
+
+    IN-MEMORY WINS for any id present in both. `solve_queue.list_jobs()` is
+    the FIRST source and its ids are excluded from what the DB query is
+    allowed to contribute — a live job's `status` / `started_at` / `position`
+    can be ahead of what was last mirrored to its row (`record_status` runs
+    outside the dispatcher's lock and is best-effort), and a stale row must
+    never overwrite a job the dispatcher is actively running. Filtering by id
+    achieves this without ever inspecting the persisted row's own status: even
+    a persisted row that happens to read TERMINAL for a job that is actually
+    still live (a lagging mirror) is dropped, because its id is already
+    accounted for by the in-memory copy.
+
+    ORDERING: `_order` is already ascending by `enqueued_at` by construction
+    (a job is appended to `_jobs` and `_order` together, under `_lock`, at the
+    moment its `enqueued_at = time.time()` is stamped). `load_by_status` is
+    asked for the `_PERSISTED_HISTORY_LIMIT` NEWEST rows (see there), then
+    re-sorted ascending together with the live ones by that one key.
+    Combining and re-sorting gives a single globally chronological list — a
+    caller's queue view and job history read oldest-enqueued-first either way,
+    restart or not — and a STABLE sort (Python's `sorted`) means the common
+    case (no persisted-only rows to add) reproduces `list_jobs()`'s existing
+    order exactly, so this is additive over the pre-Task-16a behaviour rather
+    than a new ordering rule.
+    """
+    from services import solve_job_store
+
+    jobs = solve_queue.list_jobs()
+    # The owner rides alongside each job under `_OWNER_KEY` so `list_queue` can
+    # answer `can_dismiss` without a lookup per row. Live jobs get it from one
+    # locked read of the queue; persisted-only rows carry it on the row itself
+    # (`_persisted_job_public`), which is why `load_by_status` selects it.
+    live_owners = solve_queue.owners()
+    jobs = [{**job, _OWNER_KEY: live_owners.get(job["id"])} for job in jobs]
+    live_ids = {job["id"] for job in jobs}
+    rows = {
+        str(row["id"]): row
+        for row in solve_job_store.load_by_status(
+            _TERMINAL, limit=_PERSISTED_HISTORY_LIMIT,
+        )
+    }
+    if project_key_prefix is not None:
+        for row in solve_job_store.load_by_status(
+            _TERMINAL,
+            limit=_PERSISTED_HISTORY_LIMIT,
+            project_key_prefix=project_key_prefix,
+        ):
+            rows.setdefault(str(row["id"]), row)
+    persisted_only = [
+        _persisted_job_public(row)
+        for rid, row in rows.items()
+        if rid not in live_ids
+    ]
+    return sorted(jobs + persisted_only, key=lambda job: job["enqueued_at"])
+
+
 @router.get("")
 def list_queue(
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
     """
-    All jobs in FIFO order. `current` is the id of the running job, if any.
+    All jobs in FIFO order. `running` lists the ids solving right now.
 
     AUTHORIZATION (P-1): this REDACTS, it does not filter. `position`
     (`SolveJob.to_public`) is the 1-based place in a GLOBALLY sequential queue,
     because one solver serves every org — a caller's wait genuinely depends on
     jobs they do not own. Dropping other orgs' rows would leave them at
     "position 4" with one job visible and no way to reconcile the number, so
-    queue depth (the thing they legitimately need) becomes unreadable.
+    queue depth (the thing they legitimately need) becomes unreadable. The
+    same predicate applies uniformly to a persisted row — `_may_see` /
+    `_project_uuid` only ever look at `project_key`, which a persisted row
+    carries exactly like a live one, so a caller cannot see another
+    organisation's job merely because it was read back from `solve_jobs`
+    instead of `_jobs`.
 
     So every job comes back with `id`, `status`, `position` and its timings
-    intact, and the fields that say WHOSE work it is are nulled for jobs the
-    caller cannot access. `current` is the true running job id only when the
-    caller may see it — otherwise null, since the id alone was enough to abort
-    it before this change.
+    intact, and the fields that say WHOSE work it is (`project_id`,
+    `project_key`, `error`) OR WHAT IT PRODUCED (`objective`, `solve_time`,
+    `condition` — added in Task 16a's review, since a persisted row can now
+    outlive the queue that used to self-clear it) are nulled for jobs the
+    caller cannot access. `running` carries the ids of the jobs solving right
+    now, and only those the caller may see — the id alone was enough to abort
+    a job before P-1, so a hidden job's id must not appear here even though
+    its redacted row does.
 
     "Cannot access" is the PROJECT ACL, resolved for the whole listing in one
     batch (`accessible_project_ids`). This endpoint is polled every 1.5s while
@@ -228,24 +726,55 @@ def list_queue(
 
     project_registry.require_user(user)
     prefix = _org_prefix(db, user)
-    jobs = solve_queue.list_jobs()
+    jobs = _merged_jobs(project_key_prefix=prefix)
+    # Per-user dismissal (R32). Dropped rather than redacted: the caller asked
+    # for these to be gone from THEIR view, and they are still in every other
+    # user's listing and still in the table. Applied AFTER the merge, against
+    # `str(job["id"])`, so a job served only from the persisted-row half of
+    # `_merged_jobs` (every `interrupted` job after a restart, or any terminal
+    # job from before the last restart) is filtered too — `dismissed_ids_for`
+    # itself reads the table for exactly this reason (Ruling 2).
+    dismissed = {str(jid) for jid in solve_queue.dismissed_ids_for(user.id)}
+    jobs = [job for job in jobs if job["id"] not in dismissed]
     allowed = project_acl.accessible_project_ids(
         db, user, (_project_uuid(job, prefix) for job in jobs)
     )
     seen = [_may_see(job, prefix, allowed) for job in jobs]
-    current = next(
-        (job["id"] for job, ok in zip(jobs, seen) if ok and job["status"] == "running"),
-        None,
-    )
+    # PLURAL. `current: job_id | None` could not represent a pool, and it was
+    # never read from `_current_id` anyway — it was recomputed as the FIRST
+    # visible running job, so at a concurrency above 1 it reported one arbitrary
+    # job and hid the rest with no schema signal that it was truncating. Ids the
+    # caller may not see are omitted for the same reason `current` was nulled
+    # cross-org: the id alone was enough to abort it.
+    running = [
+        job["id"] for job, ok in zip(jobs, seen) if ok and job["status"] == "running"
+    ]
+    # `_OWNER_KEY` is popped HERE, at the one boundary where a response is
+    # built, and turned into the per-caller capability. Nothing below this line
+    # can leak an owner id: the key is gone from every dict by the time the
+    # list comprehension runs.
+    owners = {job["id"]: job.pop(_OWNER_KEY, None) for job in jobs}
     return {
-        "jobs": [job if ok else _redact(job) for job, ok in zip(jobs, seen)],
-        "current": current,
+        "jobs": [
+            {
+                **(job if ok else _redact(job)),
+                # Rides through `_redact` deliberately — that helper is
+                # `{**job, **nulls}` and this key is not in `_REDACTED`. It
+                # needs no redaction branch because a foreign org's job can
+                # never have been queued by this caller, so it is already
+                # false for every redacted row.
+                "can_dismiss": _can_dismiss(job, owners.get(job["id"]), user),
+            }
+            for job, ok in zip(jobs, seen)
+        ],
+        "running": running,
+        "paused": solve_queue.is_paused(),
     }
 
 
 @router.post("/{job_id}/abort")
 def abort_job(
-    job_id: int,
+    job_id: str,
     db: DBSession = Depends(get_db),
     user: User | None = Depends(optional_user),
 ):
@@ -253,10 +782,12 @@ def abort_job(
     Abort a running job (signals its stop_event) or cancel a queued one.
 
     AUTHORIZATION (P-1): 404, never 403, when the caller may not touch this
-    job, with the message the genuine not-found case uses BYTE FOR BYTE. Job
-    ids are small sequential integers, so a 403 would confirm that id 7 exists
-    and hand back the enumeration the redacted listing just took away — the
-    same reasoning `project_registry.find_project` documents for projects.
+    job, with the message the genuine not-found case uses BYTE FOR BYTE. A 403
+    would confirm that a job with this id exists and hand back the enumeration
+    the redacted listing just took away — the same reasoning
+    `project_registry.find_project` documents for projects. A malformed id gets
+    the SAME 404, for the same reason `_parse_job_id` declares `job_id: str`
+    rather than `uuid.UUID`.
 
     The job is fetched and authorized BEFORE `abort()`, which is destructive:
     it flips a queued job to cancelled or sets a running job's stop_event.
@@ -265,14 +796,383 @@ def abort_job(
 
     project_registry.require_user(user)
     not_found = HTTPException(404, f"No solve job with id {job_id}.")
-    job = solve_queue.get_job(job_id)
-    if job is None or not _may_abort(db, user, job):
+    parsed = _parse_job_id(job_id)
+    if parsed is None:
         raise not_found
-    res = solve_queue.abort(job_id)
+    job = solve_queue.get_job(parsed)
+    if job is None:
+        # Persisted-only: the row survived a restart, the `SolveJob` did not —
+        # terminal by construction (`queued` rows are re-admitted at boot,
+        # `running` rows become `interrupted`). Nothing to stop; answer the
+        # same authorized no-op an in-memory TERMINAL job gets from `abort()`
+        # rather than the existence-oracle 404 for an id the listing serves.
+        persisted = _persisted_public_or_none(parsed)
+        if persisted is None or not _may_abort(db, user, persisted):
+            raise not_found
+        return persisted
+    if not _may_abort(db, user, job):
+        raise not_found
+    res = solve_queue.abort(parsed)
     if res is None:
         # Cleared by a concurrent clear_finished between the two lookups.
         raise not_found
     return res
+
+
+@router.post("/{job_id}/requeue")
+def requeue_job(
+    job_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    Run a finished job again: a NEW `queued` job for the same project.
+
+    All four terminal statuses are eligible on identical terms, `interrupted`
+    included. R25 bars only AUTOMATIC re-enqueue at boot — the point of that
+    rule is that a job which crashed the process must not crash-loop the boot,
+    and a user clicking "run it again" is not that.
+
+    A `queued` or `running` job is not requeueable: 409, because the caller's
+    intent is already in flight and a second job would be the duplicate R15
+    exists to refuse.
+
+    AUTHORIZATION is `_may_see` (via `_visible_job_or_404`), not `_may_abort`.
+    Requeue CREATES work rather than stopping it, so `_may_abort`'s deliberate
+    exception — a job orphaned by a project delete stays abortable so the shared
+    solver can be freed — is exactly wrong here: there is no project left to
+    solve.
+
+    The new job inherits the ORIGINAL config snapshot rather than re-resolving
+    it. "Run that again" means that run, and silently substituting today's
+    config would make requeue the one operation whose result cannot be
+    reproduced.
+
+    SOURCING `storage_dir` / the snapshot: `_visible_job_or_404` returns a
+    `to_public()`-shaped dict, which carries neither field. When the source
+    job is still resident (`solve_queue._jobs`), read them off the live
+    `SolveJob`. When it is not — every `interrupted` job after a restart, by
+    construction (`solve_job_store.reconcile_on_boot` never re-admits a
+    `running` row to memory) — read them off the persisted row via
+    `solve_job_store.load_job`. Resolving through `solve_queue.get_job` alone
+    would make a restart-surviving job unrequeueable with no way to tell that
+    from a bad id.
+
+    THE ROW INSERT happens INSIDE `enqueue_unique`, which also takes the
+    snapshot and the acting user as constructor arguments — not an
+    assign-then-`record_enqueued` pair afterward. `enqueue_unique` publishes
+    the new job to the dispatcher's queue before returning; assigning the
+    snapshot post-return would leave a window where a fast-failing job goes
+    terminal against a job whose config was never actually set, and inserting
+    the row afterward would leave a window where it goes terminal against a
+    row that does not exist yet — the exact TOCTOU `enqueue_solve` closed for
+    the first enqueue (see there), reopened here for the second one.
+
+    THE PROJECT NAME AND DIRECTORY ARE RESOLVED FRESH (fix round 1, review
+    Important). The source job's own `project_id` / `storage_dir` are a
+    point-in-time CAPTURE from whenever it was enqueued, and in LOCAL mode
+    `project_registry.rename_project` MOVES the directory on disk: enqueue
+    "Alpha" -> finish -> rename Alpha to "Beta" (directory moves) -> requeue
+    the old job would otherwise carry a `storage_dir` that no longer exists.
+    The dispatcher then hydrates nothing, and `_save_context`'s
+    `mkdir(parents=True, exist_ok=True)` RECREATES the stale directory,
+    orphaned from any DB row — the same defect class already fixed for
+    project delete. So the project row is re-resolved from `old["project_key"]`
+    (the same `org_uuid:project_uuid` identity `_project_uuid` already knows
+    how to parse) and `project_registry.project_dir(project)` is read again,
+    HERE, not carried over from the source job. Only the config SNAPSHOT is
+    still read from the source job/row — that reuse is the deliberate R31
+    semantic ("run THAT run again"), and it is not a project-identity field.
+
+    A legacy job with no `project_key` (pre-Step-0a artefact, or hand-made in
+    a test) has no row to re-resolve against; that one case falls back to
+    whatever the job/row itself carries.
+    """
+    import pathlib
+
+    from db.models import Project
+    from services import project_locks, project_registry, solve_job_store
+
+    project_registry.require_user(user)
+    old = _visible_job_or_404(db, user, job_id)
+    if old["status"] not in _TERMINAL:
+        raise HTTPException(
+            409,
+            f"Job {job_id} is {old['status']}, not finished. Only a finished job "
+            "can be requeued; abort it first if you want to start over.",
+        )
+
+    parsed = _parse_job_id(job_id)
+    with solve_queue._lock:
+        source = solve_queue._jobs.get(parsed)
+    if source is not None:
+        stored_dir = source.storage_dir
+        snapshot = source.solver_config_json
+    else:
+        persisted = solve_job_store.load_job(parsed)
+        stored_dir = persisted.get("storage_dir") if persisted else None
+        snapshot = persisted.get("solver_config") if persisted else None
+
+    not_found = HTTPException(404, f"No solve job with id {job_id}.")
+    prefix = _org_prefix(db, user)
+    project_uuid = _project_uuid(old, prefix)
+    if project_uuid is not None:
+        project = db.get(Project, project_uuid)
+        if project is None:
+            raise not_found
+        project_name = project.name
+        # HOLDER CHECK — the precondition for this route's foreign-lock
+        # exemption (`main._FOREIGN_LOCK_GATE_EXEMPT_PATTERNS`), not an
+        # incidental extra. The middleware can only test the session's ACTIVE
+        # project, which is the wrong project for a route that names its
+        # target through the JOB, so the exemption removes that refusal — and
+        # requeue CREATES a job that solves and SAVES this project. Without
+        # the check here, exemption would mean starting a write against a
+        # project another user holds, with nothing testing that lock at any
+        # layer. `abort` and `dismiss` are exempt with no equivalent because
+        # stopping or hiding work writes nothing; `enqueue_solve` carries this
+        # same check for the same reason, and this is a port of it.
+        #
+        # A CHECK, not an acquire, and for the same reason as there: requeuing
+        # your own locked project must not steal or extend anything, and an
+        # unlocked project must stay unlocked. Placed BEFORE the `network.nc`
+        # existence test below so a held lock is reported as `project_locked`
+        # rather than masked by a missing-network 404 — the ordering
+        # `enqueue_solve` already uses.
+        lock = project_locks.get_lock(db, project.id)
+        if lock is not None and lock.holder_user_id != user.id:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_kind": "project_locked",
+                    "message": f"'{project.name}' is being edited by another user.",
+                    # I1 wire shape: the frontend reads `detail.lock` to name
+                    # the holder in its read-only banner.
+                    "lock": project_locks.serialize_lock(db, project.id, user.id),
+                },
+            )
+        storage_dir = str(project_registry.project_dir(project))
+    else:
+        # No project_key to resolve against — a legacy unkeyed job. Every job
+        # `enqueue_solve` has created since Step 0a carries one; this is only
+        # reachable for a hand-made or pre-Step-0a artefact, so fall back to
+        # whatever the job/row itself captured.
+        project_name = old["project_id"]
+        storage_dir = stored_dir
+
+    if not storage_dir or not (pathlib.Path(storage_dir) / "network.nc").exists():
+        raise HTTPException(
+            404,
+            f"Project '{project_name}' has no saved network on disk. Save the "
+            "project before queuing it to solve.",
+        )
+
+    job, created = solve_queue.enqueue_unique(
+        project_name,
+        project_key=old["project_key"],
+        storage_dir=storage_dir,
+        solver_config_json=snapshot,
+        enqueued_by_user_id=user.id,
+    )
+    return {**(solve_queue.get_job(job.id) or job.to_public(None)), "already_queued": not created}
+
+
+@router.post("/{job_id}/dismiss")
+def dismiss_job(
+    job_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    Hide a finished job from THIS caller's listing.
+
+    Filtered on `enqueued_by_user_id`: you may clear what you queued, and
+    nothing else. Keying this on project access instead would let two users
+    sharing a project dismiss each other's rows — the exact thing per-user
+    dismiss exists to fix. 403, not 404, because the caller can already SEE the
+    row (that is why they are asking to hide it), so refusing tells them nothing
+    they did not know.
+
+    All four terminal statuses are dismissible, `interrupted` included. A
+    `queued` or `running` job is not: hiding live work from your own listing is
+    how a solve gets forgotten about.
+
+    OWNERSHIP HAS A PERSISTED FALLBACK (fix round 1). A job that isn't
+    resident in `_jobs` — every `interrupted` job after a restart, and any
+    terminal job from before the last restart — is exactly the kind of row a
+    user wants to clear, and it is precisely the case `_visible_job_or_404`
+    already handles for VISIBILITY (via `_persisted_public_or_none`). Asking
+    only `solve_queue._jobs` for the owner made that whole class of job
+    permanently un-dismissable by anyone, its own enqueuer included — the
+    same gap Ruling 2 already closed for the listing filter, left open here.
+    Falling back to `solve_job_store.load_job` answers the one question that
+    remains once visibility is settled: WHO queued it.
+    """
+    from services import project_registry, solve_job_store
+
+    project_registry.require_user(user)
+    job = _visible_job_or_404(db, user, job_id)
+    if job["status"] not in _TERMINAL:
+        raise HTTPException(
+            409,
+            f"Job {job_id} is {job['status']}. Only a finished job can be "
+            "dismissed; abort it first if you want it out of the queue.",
+        )
+    parsed = _parse_job_id(job_id)
+    with solve_queue._lock:
+        source = solve_queue._jobs.get(parsed)
+        owner = None if source is None else source.enqueued_by_user_id
+    if owner is None:
+        # Not resident — fall back to the persisted row. A row with a NULL
+        # `enqueued_by_user_id` (a legacy job from before Task 13, or one
+        # built by hand) stays un-dismissable by design: there is no owner to
+        # compare against, so this fails closed rather than guessing. That is
+        # a dead end for the caller (a 403 with no way to become the owner),
+        # not a bug — the row is still visible and still counts toward queue
+        # depth, it just can never be dismissed.
+        persisted = solve_job_store.load_job(parsed)
+        owner = persisted.get("enqueued_by_user_id") if persisted else None
+    if owner is None or str(owner) != str(user.id):
+        raise HTTPException(
+            403,
+            "You can only dismiss jobs you queued. Dismissal is per user, so "
+            "hiding someone else's row would change their view too.",
+        )
+    # `solve_queue.dismiss` only has something to mutate when the job is
+    # resident; for a persisted-only job there is no in-memory `SolveJob` to
+    # flag, so the DB write below is the only effect that can persist. Both
+    # branches converge on the same `record_dismissed` call because
+    # `dismissed_ids_for` (and therefore the listing filter) reads the table,
+    # not `_jobs`, for exactly this kind of row.
+    if source is not None and not solve_queue.dismiss(parsed, user.id):
+        raise HTTPException(404, f"No solve job with id {job_id}.")
+    solve_job_store.record_dismissed(parsed, user.id)
+    return {"dismissed": True}
+
+
+def _require_instance_scope(user: User) -> None:
+    """
+    Gate for controls that act on the WHOLE dispatcher.
+
+    One dispatcher serves every org, so pausing it stops every org's jobs — an
+    operation that crosses org boundaries by construction, which is exactly the
+    reasoning `clear_finished` uses to sit on `User.is_super_admin` rather than
+    on an org-admin role. Local mode has one seeded tenant and one user, so the
+    only possible subject IS the caller and the gate would only lock them out of
+    their own machine.
+
+    RULING (controller, fix round 1): task-19's brief shipped this helper
+    alongside a test (`test_pause_and_resume_round_trip`) that called the
+    routes through the plain, non-super-admin `client` fixture and asserted
+    200 — a self-contradiction the first pass resolved by DROPPING the gate.
+    The controller ruled the brief's PROSE (this docstring's reasoning) is
+    correct and the brief's TEST was the defect: pausing halts the one
+    process-global FIFO for every org, the same cross-org blast radius that
+    puts `clear_finished` on `is_super_admin`, and the test carried no
+    reasoning of its own. The gate is restored; the tests now use
+    `super_admin_client` / local mode for the 200 cases and pin 403 for a
+    plain authenticated caller.
+    """
+    if local_mode.is_local_mode():
+        return
+    if not user.is_super_admin:
+        raise HTTPException(
+            403,
+            "Pausing the queue stops solving for every organization, so it is "
+            "restricted to super-admins.",
+        )
+
+
+@router.post("/pause")
+def pause_queue(
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    Start no more jobs. Jobs already running finish normally.
+
+    AUTHORIZATION: instance-wide, gated on `User.is_super_admin` (local mode
+    exempt) — see `_require_instance_scope`.
+    """
+    from services import project_registry
+
+    project_registry.require_user(user)
+    _require_instance_scope(user)
+    solve_queue.pause()
+    return {"paused": solve_queue.is_paused()}
+
+
+@router.post("/resume")
+def resume_queue(
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """Continue in FIFO order. Authorization: see `pause_queue`."""
+    from services import project_registry
+
+    project_registry.require_user(user)
+    _require_instance_scope(user)
+    solve_queue.resume()
+    return {"paused": solve_queue.is_paused()}
+
+
+@router.post("/cancel_queued")
+def cancel_queued(
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+):
+    """
+    Cancel every QUEUED job this caller could cancel one at a time.
+
+    AUTHORIZATION: each candidate goes through `_may_abort` — the same predicate
+    the single-job abort route applies — so the two agree for every job in the
+    queue. A caller who gets a 404 from `POST /{job_id}/abort` sees that job
+    left `queued` and otherwise untouched here, and the response counts only
+    what they actually cancelled, so the number is never a hint about somebody
+    else's work.
+
+    `running` jobs are OUT OF SCOPE. Stopping a live solve is a decision about
+    one specific piece of work in flight — it wastes minutes of solver time and
+    it is what the single-job abort is for. Sweeping it into a bulk control
+    makes "cancel the queue" occasionally mean "kill the thing that was almost
+    done".
+
+    NO global variant and NO super-admin escalation, deliberately.
+    `clear_finished` is unconditionally global and gated on `is_super_admin`,
+    and that precedent is not followed here: clearing finished rows is listing
+    hygiene, while this destroys queued work.
+
+    Does NOT call `solve_job_store.record_status` itself: `cancel_if_queued`
+    already mirrors a cancelled job's terminal status to the `solve_jobs`
+    table (see its docstring) — a second call here would just re-persist the
+    same row.
+
+    Calls `solve_queue.cancel_if_queued`, NOT `solve_queue.abort` (fix round
+    1, Critical, review). The candidate list here is a SNAPSHOT
+    (`list_jobs()`), and `_may_abort` runs a DB read per candidate with no
+    lock held — a window wide enough for the dispatcher to claim a job
+    (queued -> running) between the snapshot and the cancel. `abort()` would
+    see `running` in that window and set the job's stop_event, killing an
+    in-flight solve that R29 explicitly puts out of scope. `cancel_if_queued`
+    re-checks `status == "queued"` under its own lock at the moment it acts
+    and has no running branch at all, so a job claimed out from under this
+    sweep is left alone rather than aborted.
+    """
+    from services import project_registry
+
+    project_registry.require_user(user)
+    cancelled = 0
+    for job in solve_queue.list_jobs():
+        if job.get("status") != "queued":
+            continue
+        if not _may_abort(db, user, job):
+            continue
+        parsed = _parse_job_id(job["id"])
+        if parsed is None:
+            continue
+        if solve_queue.cancel_if_queued(parsed):
+            cancelled += 1
+    return {"cancelled": cancelled}
 
 
 @router.post("/clear_finished")

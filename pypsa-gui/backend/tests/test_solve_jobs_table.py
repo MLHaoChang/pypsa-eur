@@ -1,0 +1,369 @@
+"""
+R22 — every job is persisted, with who queued it and what it was queued with.
+
+The queue was purely in-process: `itertools.count(1)` ids, a dict, and nothing
+on disk. A restart lost every queued job silently, and a shared instance could
+not say who queued a solve. Increment 3's boot reconciliation, requeue, dismiss
+and config snapshot all read this table.
+"""
+from __future__ import annotations
+
+import json
+import time
+import uuid
+
+from sqlalchemy import select
+
+from db.models import SolveJobRow
+from services import solve_job_store
+from services.solve_queue import SolveJob
+from tests.conftest import build_network
+
+
+def _save_project(client, name: str) -> None:
+    r = client.post(f"/api/projects/{name}", params={"force": True, "rebind": True})
+    assert r.status_code == 200, r.text
+
+
+def _row(job_id):
+    # Imported HERE, not at module top: `db.session.SessionLocal` is
+    # monkeypatched onto the file-backed test database by the `_auth_db`
+    # fixture, which only runs once a test requests it — AFTER pytest has
+    # already collected (imported) this module. A top-level `from db.session
+    # import SessionLocal` would bind to the pristine, un-migrated `:memory:`
+    # sessionmaker captured at collection time and every query here would
+    # raise `no such table: solve_jobs` regardless of what `solve_job_store`
+    # correctly wrote. `solve_job_store.py` uses the same mid-function import
+    # for the same reason.
+    from db.session import SessionLocal
+
+    with SessionLocal() as db:
+        return db.scalar(select(SolveJobRow).where(SolveJobRow.id == _as_uuid(job_id)))
+
+
+def _as_uuid(job_id):
+    return job_id if isinstance(job_id, uuid.UUID) else uuid.UUID(str(job_id))
+
+
+def test_the_table_carries_a_uuid_pk_a_user_and_a_config():
+    cols = SolveJobRow.__table__.columns
+    assert cols["id"].primary_key
+    assert "enqueued_by_user_id" in cols
+    assert "solver_config" in cols
+    assert SolveJobRow.__tablename__ == "solve_jobs"
+
+
+def test_record_enqueued_writes_the_row_with_the_acting_user_and_config(seeded_identity):
+    job = SolveJob(
+        id=uuid.uuid4(), project_id="Persisted", project_key="org:proj",
+        storage_dir="/tmp/persisted", enqueued_at=time.time(),
+    )
+    # A REAL seeded user, not a fabricated `uuid.uuid4()`: `enqueued_by_user_id`
+    # is a genuine foreign key to `users.id` (ON DELETE SET NULL), and SQLite
+    # FK enforcement is on for every connection (`configure_sqlite`). An actor
+    # id with no backing row would 23503/IntegrityError the insert — which
+    # `record_enqueued` correctly treats as an operational failure and
+    # swallows, so the row would silently never be written and this assertion
+    # would fail for a reason that has nothing to do with the code under test.
+    actor = seeded_identity["user_id"]
+    solve_job_store.record_enqueued(
+        job, enqueued_by_user_id=actor, solver_config_json=json.dumps({"solver_name": "highs"}),
+    )
+    row = _row(job.id)
+    assert row is not None, "no solve_jobs row was written"
+    assert row.project_id == "Persisted"
+    assert row.project_key == "org:proj"
+    assert row.status == "queued"
+    assert row.enqueued_by_user_id == actor
+    assert json.loads(row.solver_config)["solver_name"] == "highs"
+
+
+def test_record_enqueued_refuses_a_non_uuid_id_loudly():
+    """
+    The swallow-everything version turned a type error into a silent no-write:
+    `Uuid(as_uuid=True)`'s bind processor calls `value.hex`, the AttributeError
+    was caught, and every row went unwritten behind one log line. A programming
+    error must reach the caller.
+    """
+    import pytest
+
+    bogus = SolveJob(id=7, project_id="Wrong", enqueued_at=time.time())
+    with pytest.raises(TypeError, match="UUID"):
+        solve_job_store.record_enqueued(
+            bogus, enqueued_by_user_id=None, solver_config_json=None,
+        )
+
+
+def test_record_status_mirrors_the_terminal_record():
+    job = SolveJob(id=uuid.uuid4(), project_id="Finished", enqueued_at=time.time())
+    solve_job_store.record_enqueued(job, enqueued_by_user_id=None, solver_config_json=None)
+    job.status = "completed"
+    job.objective = 1234.5
+    job.solve_time = 2.0
+    job.condition = "optimal"
+    job.finished_at = time.time()
+    solve_job_store.record_status(job)
+    row = _row(job.id)
+    assert row.status == "completed"
+    assert row.objective == 1234.5
+    assert row.condition == "optimal"
+    assert row.finished_at is not None
+
+
+def test_record_status_reports_whether_it_actually_committed():
+    """
+    Fix round 2 (final whole-branch review, Important 2): `record_status`
+    used to return `None` unconditionally — a caller had no way to tell a
+    landed mirror from a silently swallowed one. `abort()` / `cancel_if_queued()`
+    now need a real signal to log a WARNING on divergence, so the function
+    must report True only on an actual commit and False on every way the
+    write did not happen: a missing row, and the terminal-regression guard.
+    """
+    # Missing row: nothing was ever inserted for this id.
+    ghost = SolveJob(id=uuid.uuid4(), project_id="NoRow", enqueued_at=time.time())
+    ghost.status = "aborted"
+    assert solve_job_store.record_status(ghost) is False
+
+    # A genuine commit.
+    job = SolveJob(id=uuid.uuid4(), project_id="Lands", enqueued_at=time.time())
+    solve_job_store.record_enqueued(job, enqueued_by_user_id=None, solver_config_json=None)
+    job.status = "aborted"
+    job.finished_at = time.time()
+    assert solve_job_store.record_status(job) is True
+    assert _row(job.id).status == "aborted"
+
+    # The terminal-regression guard: row is already terminal, job tries to
+    # move back to a live status — the write is refused, so it must report
+    # False even though no exception was raised.
+    job.status = "running"
+    job.finished_at = None
+    assert solve_job_store.record_status(job) is False
+    assert _row(job.id).status == "aborted", "the regression guard let a stale mirror through"
+
+
+def test_load_by_status_returns_only_the_asked_for_statuses():
+    queued = SolveJob(id=uuid.uuid4(), project_id="Q", enqueued_at=time.time())
+    done = SolveJob(id=uuid.uuid4(), project_id="D", enqueued_at=time.time())
+    for j in (queued, done):
+        solve_job_store.record_enqueued(j, enqueued_by_user_id=None, solver_config_json=None)
+    done.status = "completed"
+    solve_job_store.record_status(done)
+
+    ids = {r["id"] for r in solve_job_store.load_by_status(("queued",))}
+    assert queued.id in ids
+    assert done.id not in ids
+
+
+def test_enqueuing_through_the_route_persists_the_row(
+    client, install_network, tmp_projects_dir,
+):
+    install_network(build_network(), name="Durable")
+    _save_project(client, "Durable")
+    job = client.post("/api/simulation/queue", json={"project_id": "Durable"}).json()
+    row = _row(job["id"])
+    assert row is not None, "the enqueue route did not persist the job"
+    assert row.project_id == "Durable"
+    assert row.enqueued_by_user_id is not None, "the acting user was not stamped"
+
+
+def test_record_enqueued_refuses_a_non_uuid_actor_loudly():
+    """
+    Review round 1, Important 1: `enqueued_by_user_id` binds into the SAME
+    `Uuid(as_uuid=True)` column type as `job.id`, but was left un-annotated and
+    unguarded — a `str` or `int` actor hits the identical `value.hex` ->
+    `AttributeError` -> `StatementError` -> `except SQLAlchemyError` ->
+    logged-and-swallowed path the `job.id` guard exists to close, one column
+    over. Demonstrated here the same way the reviewer demonstrated the hole:
+    a dashed-string actor id (the shape a value takes arriving off a
+    serialized payload, not a typed parameter — the exact shape Task 12's
+    review flagged) and a bare int both must raise loudly, and neither may
+    reach the table.
+    """
+    import pytest
+
+    for bad_actor in (str(uuid.uuid4()), 7):
+        job = SolveJob(id=uuid.uuid4(), project_id="BadActor", enqueued_at=time.time())
+        with pytest.raises(TypeError, match="UUID"):
+            solve_job_store.record_enqueued(
+                job, enqueued_by_user_id=bad_actor, solver_config_json=None,
+            )
+        assert _row(job.id) is None, (
+            f"a row was written for actor={bad_actor!r} despite the raised TypeError"
+        )
+
+
+def test_aborting_a_queued_job_persists_as_aborted():
+    """
+    Review round 1, Important 2: cancelling a still-QUEUED job never enters
+    `_run_job` — the dispatcher pops it, sees `cancelled`, and `continue`s
+    straight past both `record_status` call sites there. `abort()` was the
+    ONLY code path that flips a queued job to `aborted`, and it never mirrored
+    that transition to the table — so the row stayed `status="queued"`
+    forever. That matters because boot reconciliation (a later task in this
+    increment) re-enqueues everything the table still shows as `queued`:
+    without this mirror, restarting the process would resurrect a job the
+    user explicitly cancelled.
+
+    Exercises `SolveQueue.abort()` directly on a job seeded straight into
+    `_jobs`/`_order`, without ever touching the dispatcher thread or `_q` —
+    deterministic by construction, not by timing a real background solve.
+    """
+    from services.solve_queue import SolveQueue
+
+    sq = SolveQueue()
+    jid = uuid.uuid4()
+    job = SolveJob(id=jid, project_id="CancelMe", enqueued_at=time.time())
+    sq._jobs[jid] = job
+    sq._order.append(jid)
+    solve_job_store.record_enqueued(job, enqueued_by_user_id=None, solver_config_json=None)
+    assert _row(jid).status == "queued"
+
+    result = sq.abort(jid)
+
+    assert result["status"] == "aborted"
+    row = _row(jid)
+    assert row is not None
+    assert row.status == "aborted", (
+        "abort() of a queued job never reached the table — a restart would "
+        "resurrect a job the user explicitly cancelled"
+    )
+
+
+def test_abort_logs_a_warning_when_the_terminal_mirror_does_not_land(monkeypatch, caplog):
+    """
+    Final whole-branch review, fix round 2 (Important 2 — precondition for the
+    `restore()` per-project dedupe fix). `abort()` used to swallow a failed
+    `record_status` mirror with nothing but a DEBUG-invisible `except: pass`
+    equivalent — the exact silent divergence (memory says `aborted`, table
+    still says `queued`) that let `restore()` re-admit a job twice at boot.
+    `record_status` now reports whether it actually committed, and `abort()`
+    must log a WARNING naming the job id when it did not.
+    """
+    from services.solve_queue import SolveQueue
+
+    monkeypatch.setattr(solve_job_store, "record_status", lambda job: False)
+    sq = SolveQueue()
+    jid = uuid.uuid4()
+    job = SolveJob(id=jid, project_id="MirrorFails", enqueued_at=time.time())
+    sq._jobs[jid] = job
+    sq._order.append(jid)
+
+    with caplog.at_level("WARNING"):
+        result = sq.abort(jid)
+
+    assert result["status"] == "aborted", "the in-memory transition must still succeed"
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert any(str(jid) in r.getMessage() for r in warnings), (
+        f"abort() did not log a WARNING naming job {jid} when the table mirror "
+        f"failed to land; records were: {[r.getMessage() for r in caplog.records]}"
+    )
+
+
+def test_cancel_if_queued_logs_a_warning_when_the_terminal_mirror_does_not_land(
+    monkeypatch, caplog,
+):
+    """Same divergence risk as `abort()`'s WARNING, for the bulk-cancel path."""
+    from services.solve_queue import SolveQueue
+
+    monkeypatch.setattr(solve_job_store, "record_status", lambda job: False)
+    sq = SolveQueue()
+    jid = uuid.uuid4()
+    job = SolveJob(id=jid, project_id="MirrorFailsToo", enqueued_at=time.time())
+    job.status = "queued"
+    sq._jobs[jid] = job
+    sq._order.append(jid)
+
+    with caplog.at_level("WARNING"):
+        result = sq.cancel_if_queued(jid)
+
+    assert result is True, "the in-memory cancellation must still succeed"
+    warnings = [r for r in caplog.records if r.levelname == "WARNING"]
+    assert any(str(jid) in r.getMessage() for r in warnings), (
+        f"cancel_if_queued() did not log a WARNING naming job {jid} when the "
+        f"table mirror failed to land; records were: "
+        f"{[r.getMessage() for r in caplog.records]}"
+    )
+
+
+def test_the_row_exists_before_the_dispatcher_can_run_the_job(monkeypatch, seeded_identity):
+    """
+    The insert must happen-before `_q.put` publishes the job. The route used
+    to insert AFTER `enqueue_unique` returned — the mirror image of the
+    config-snapshot TOCTOU the constructor argument closed (see
+    `enqueue_unique`'s docstring): a job that fails fast can go terminal
+    before the row exists, `record_status` no-ops on the missing row twice,
+    and the route then inserts the row as `queued` — so boot reconciliation
+    re-enqueues and re-runs a job that already ran and failed.
+    """
+    import threading
+
+    from services.solve_queue import solve_queue
+
+    solve_queue.reset_for_tests()
+    seen: dict = {}
+    ran = threading.Event()
+
+    def fake_run(job) -> None:
+        # What the dispatcher sees at the exact moment it starts the job.
+        seen["row"] = _row(job.id)
+        ran.set()
+
+    monkeypatch.setattr(solve_queue, "_run_job", fake_run)
+    try:
+        job, created = solve_queue.enqueue_unique(
+            "RowBeforePublish",
+            project_key="org:row-before-publish",
+            storage_dir="/tmp/row-before-publish",
+            solver_config_json=None,
+        )
+        assert created
+        assert ran.wait(10), "the dispatcher never picked the job up"
+        assert seen["row"] is not None, (
+            "the dispatcher ran the job before its solve_jobs row existed — "
+            "every status mirror for a fast job lands on a missing row and "
+            "the job is re-run at the next boot"
+        )
+        assert seen["row"].status == "queued"
+    finally:
+        solve_queue.reset_for_tests()
+        solve_job_store.delete_jobs([job.id])
+
+
+def test_a_terminal_row_never_regresses_to_a_live_status(seeded_identity):
+    """
+    The abort-vs-finish race: `abort()` mirrors a job it read as `running`
+    OUTSIDE `_lock`, so its commit can land AFTER the worker's terminal
+    commit — leaving a completed job's row at `running`, which the next boot
+    flips to `interrupted` (losing objective/finished_at) even though the
+    solve finished. The store refuses the regression: a terminal row only
+    ever changes to another terminal status, never back to a live one.
+    """
+    # The store keeps its own copy of the terminal set (it deliberately
+    # imports nothing from the queue); this pin is what keeps them in sync.
+    from services.solve_queue import _TERMINAL as queue_terminal
+
+    assert set(solve_job_store._TERMINAL) == set(queue_terminal)
+
+    job = SolveJob(id=uuid.uuid4(), project_id="NoRegress", enqueued_at=time.time())
+    solve_job_store.record_enqueued(job, enqueued_by_user_id=None, solver_config_json=None)
+    try:
+        job.status = "completed"
+        job.objective = 42.0
+        job.finished_at = time.time()
+        solve_job_store.record_status(job)
+        assert _row(job.id).status == "completed"
+
+        # The stale mirror, committing last.
+        job.status = "running"
+        job.objective = None
+        job.finished_at = None
+        solve_job_store.record_status(job)
+
+        row = _row(job.id)
+        assert row.status == "completed", (
+            "a stale `running` mirror overwrote the terminal row — the next "
+            "boot would report a finished solve as interrupted"
+        )
+        assert row.objective == 42.0
+    finally:
+        solve_job_store.delete_jobs([job.id])

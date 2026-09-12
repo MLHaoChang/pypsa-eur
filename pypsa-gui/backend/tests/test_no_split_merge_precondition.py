@@ -1,0 +1,441 @@
+"""
+Task 16 — no-split merge precondition trip-wire (see the plan's Global
+Constraints and .superpowers/sdd/2026-08-14-llm-provider-config-and-switching/
+task-16-brief.md).
+
+WHY THIS FILE EXISTS. On `master`, `redaction.redact_secrets_in_str` is
+PATTERN-ONLY: it scrubs `sk-ant-*`, `key=value`, and `bearer <token>` shapes.
+That is safe on `master` only because `llm_openai_compat.OpenAICompatProvider`
+has no production caller there. THIS BRANCH removes both halves of that
+safety net at once:
+
+  1. it gives `OpenAICompatProvider` a real caller (`chat_service._provider_
+     for_profile`, Task 6/7), so a live turn can actually reach it, and
+  2. it adds per-profile key slots (`PYPSA_GUI_LLM_KEY__<SLOT>`, Task 3)
+     whose values are arbitrary strings that match NONE of master's three
+     patterns.
+
+Task 4's value-substitution widening (`redaction._substitute_managed_values`,
+fed by `app_secrets.live_secret_values()`) is the SOLE compensating control,
+and it exists ONLY on this branch. If this branch is ever cherry-picked or
+partially reverted such that the provider wiring lands without the
+redaction widening, a live third-party key ships into the backend log and
+`chat.jsonl` unscrubbed — with every other test in the suite still green,
+because nothing else here depends on the widening.
+
+THE PROOF. `test_non_pattern_secret_is_scrubbed_from_log_and_chat_jsonl`
+plants a managed key whose value matches none of the three master patterns,
+drives ONE real `chat_service.run_turn` call in which:
+  * a transient provider error (mapped `rate_limited`, retryable) carries
+    the literal value and is logged via the real `logger.warning` retry
+    site in `chat_service.run_turn` (services/chat_service.py, the
+    `_RETRYABLE_SDK_KINDS` branch) — this is the LOG sink;
+  * the user's own message also carries the literal value, and the turn
+    completes on the retry, so it is persisted to `chat.jsonl` via
+    `_redact_for_persist` (services/chat_service.py, the `append_turn` call
+    at the end of `_run_turn_body`) — this is the PERSIST sink.
+Both sinks are grepped for the literal value afterwards; it must be absent
+from both.
+
+THE DISCRIMINATION. A test that merely asserts absence proves nothing if the
+value was never going to be redacted-in in the first place (e.g. if
+`_values` is empty, both scrubbing functions just no-op and the assertions
+would still pass by never having anything to leak). `test_without_the_
+value_substitution_widening_the_same_secret_leaks` reruns THE EXACT SAME
+drive with `redaction._substitute_managed_values` monkeypatched to a no-op
+(simulating a partial-revert that drops Task 4's widening but keeps
+everything else) and asserts the value NOW appears in both sinks — proving
+the first test's green run is actually caused by the widening, not by
+coincidence.
+"""
+from __future__ import annotations
+
+import json
+import logging
+import sys
+import types
+
+import pytest
+
+from services import chat_service
+
+# ─────────────────────────────────────────────────────────────────────────
+# Minimal local fake SDK plumbing. Deliberately NOT imported from
+# test_chat_e2e.py's richer FakeAnthropicClient — this file only needs "fail
+# once with a message, then succeed", which is a few lines on its own and
+# keeps this trip-wire independent of that module's fixture graph.
+# ─────────────────────────────────────────────────────────────────────────
+
+
+class _FakeStreamEvent:
+    def __init__(self, etype, **fields):
+        self.type = etype
+        for k, v in fields.items():
+            setattr(self, k, v)
+
+
+class _FakeBlock:
+    def __init__(self, btype, **fields):
+        self.type = btype
+        for k, v in fields.items():
+            setattr(self, k, v)
+
+
+class _FakeFinalMessage:
+    def __init__(self, content, usage):
+        self.content = content
+        self.usage = usage
+
+
+class _FakeUsage:
+    def __init__(self, input_tokens=5, output_tokens=5,
+                 cache_read_input_tokens=0, cache_creation_input_tokens=0):
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+        self.cache_read_input_tokens = cache_read_input_tokens
+        self.cache_creation_input_tokens = cache_creation_input_tokens
+
+
+class _FakeStream:
+    """Context-manager mimicking anthropic.MessagesStream."""
+
+    def __init__(self, events, final_message):
+        self._events = events
+        self._final = final_message
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def __iter__(self):
+        return iter(self._events)
+
+    def get_final_message(self):
+        return self._final
+
+
+class _FakeMessages:
+    def __init__(self, client):
+        self._client = client
+
+    def stream(self, **kwargs):
+        return self._client._next_turn(**kwargs)
+
+
+class _RaiseOnceThenSucceedClient:
+    """First `messages.stream()` call raises `exc`; the second replays `turn`."""
+
+    def __init__(self, exc, turn):
+        self._raised = False
+        self._exc = exc
+        self._turn = turn
+        self.messages = _FakeMessages(self)
+        self.calls = []
+
+    def _next_turn(self, **kwargs):
+        self.calls.append(kwargs)
+        if not self._raised:
+            self._raised = True
+            raise self._exc
+        events, final = self._turn
+        return _FakeStream(events, final)
+
+
+def _install_fake_anthropic_module():
+    """A `sys.modules["anthropic"]` stand-in with just the exception classes
+    `llm_anthropic.map_sdk_exception` isinstance-checks against."""
+    mod = types.ModuleType("anthropic")
+
+    class RateLimitError(Exception):
+        pass
+
+    class AuthenticationError(Exception):
+        pass
+
+    class APIStatusError(Exception):
+        def __init__(self, msg, status_code=None):
+            super().__init__(msg)
+            self.status_code = status_code
+
+    mod.RateLimitError = RateLimitError
+    mod.AuthenticationError = AuthenticationError
+    mod.APIStatusError = APIStatusError
+    mod.Anthropic = object  # unused — client= is injected directly
+    return mod
+
+
+@pytest.fixture
+def fake_anthropic_module(monkeypatch):
+    mod = _install_fake_anthropic_module()
+    monkeypatch.setitem(sys.modules, "anthropic", mod)
+    return mod
+
+
+# A random 24-char alphanumeric value: no `sk-ant-` prefix, no `=`
+# character (so SECRET_KV_RE's `key=value` shape never matches), and no
+# `bearer` substring — deliberately outside every pattern in
+# services/redaction.py (SECRET_KV_RE, BEARER_RE, SK_ANT_RE). Long enough to
+# clear MIN_SUBSTITUTION_LENGTH (8).
+SECRET = "qzB7nR3tY0pLxK9mWs2VhC8u"
+
+
+def _drive_one_turn(tmp_projects_dir, install_network, fake_anthropic_module,
+                     monkeypatch):
+    """
+    Shared drive: plant the non-pattern managed key, then run ONE
+    `chat_service.run_turn` whose first attempt fails carrying the secret
+    (retried and logged) and whose user message also carries the secret
+    (persisted to chat.jsonl on the successful retry).
+
+    Returns (log_text, chat_jsonl_text).
+    """
+    import pypsa
+
+    from routers import projects as projects_router
+
+    monkeypatch.setattr(projects_router, "PROJECTS_DIR", tmp_projects_dir)
+
+    n = pypsa.Network()
+    n.add("Bus", "B1")
+    install_network(n, name="NoSplitProj")
+    (tmp_projects_dir / "NoSplitProj").mkdir(exist_ok=True)
+
+    # Retryable errors sleep BASE_STREAM_RETRY_DELAY * 2**attempt between
+    # attempts by default — zero it so this test doesn't actually wait.
+    monkeypatch.setattr(chat_service, "BASE_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRY_DELAY", 0.0)
+    monkeypatch.setattr(chat_service, "MAX_STREAM_RETRIES", 3)
+
+    # The managed, non-pattern-matching key value this precondition is about.
+    monkeypatch.setenv("PYPSA_GUI_LLM_KEY__ZZTEST", SECRET)
+
+    session = chat_service.ChatSession()
+    success = (
+        [_FakeStreamEvent("text", text="noted.")],
+        _FakeFinalMessage(content=[_FakeBlock("text", text="noted.")],
+                          usage=_FakeUsage()),
+    )
+    # A realistic transient-upstream shape: a gateway/proxy 500 whose body
+    # echoes back the credential it rejected. rate_limited is RETRYABLE
+    # (services/chat_service.py:_RETRYABLE_SDK_KINDS), so this attempt logs
+    # via the retry-warning site and a second attempt is made.
+    client = _RaiseOnceThenSucceedClient(
+        fake_anthropic_module.RateLimitError(
+            f"upstream 500 — rejected credential {SECRET}"
+        ),
+        success,
+    )
+
+    user_message = f"my other provider key is {SECRET} and it just errored"
+
+    logger = logging.getLogger("pypsa_gui.chat")
+    records: list[str] = []
+
+    class _Collector(logging.Handler):
+        def emit(self, record):
+            records.append(self.format(record))
+
+    # Keep the write-ahead record on disk past the end of the turn; see the
+    # note beside `pending_path` below. Patched here rather than in the tests
+    # so both the proof and its discrimination half see the same drive.
+    monkeypatch.setattr(chat_service, "clear_pending_turn", lambda _ctx: None)
+
+    collector = _Collector()
+    logger.addHandler(collector)
+    prev_level = logger.level
+    logger.setLevel(logging.WARNING)
+    try:
+        events = list(chat_service.run_turn(session, user_message, client=client))
+    finally:
+        logger.removeHandler(collector)
+        logger.setLevel(prev_level)
+
+    assert len(client.calls) == 2, "expected exactly one retry then success"
+    assert any(ev == "turn_done" for ev, _ in events), (
+        "the drive must complete successfully so the turn reaches append_turn"
+    )
+    assert not any(ev == "error" for ev, _ in events), (
+        "a terminal error frame would mean the retry never succeeded"
+    )
+
+    log_text = "\n".join(records)
+
+    chat_path = tmp_projects_dir / "NoSplitProj" / "chat.jsonl"
+    chat_text = chat_path.read_text(encoding="utf-8")
+
+    # THE THIRD SINK. `run_turn` opens a write-ahead record before it talks to
+    # the model and clears it in its `finally`, so on a turn that completes the
+    # file is gone by the time we get here — which is why this sink went
+    # unpinned while the other two were covered. Clearing is suppressed above
+    # so the record survives the successful drive and can be read.
+    #
+    # It matters as much as the other two: it lands beside the transcript, in
+    # the project directory, and therefore travels into snapshot and copy
+    # bundles the same way. CodeQL flags the write
+    # (py/clear-text-storage-sensitive-data, chat_service.py) and is right that
+    # it is an unsanitised-looking file write; the sanitiser is
+    # `_redact_for_persist` at the CALL SITE, which is exactly the arrangement
+    # nothing here was proving.
+    pending_path = chat_path.with_suffix(chat_path.suffix + ".pending")
+    pending_text = (
+        pending_path.read_text(encoding="utf-8") if pending_path.exists() else ""
+    )
+    assert pending_text, (
+        "the pending-turn record was not written (or was cleared anyway), so "
+        "the assertions on it below would be vacuous"
+    )
+
+    return log_text, chat_text, pending_text
+
+
+def test_non_pattern_secret_is_scrubbed_from_log_and_chat_jsonl(
+    tmp_projects_dir, install_network, fake_anthropic_module, monkeypatch,
+):
+    """THE PROOF (module docstring). Both real sinks must be clean."""
+    log_text, chat_text, pending_text = _drive_one_turn(
+        tmp_projects_dir, install_network, fake_anthropic_module, monkeypatch,
+    )
+
+    assert SECRET not in pending_text, (
+        "a managed key value leaked into the pending-turn record "
+        "(chat.jsonl.pending) — that file sits beside the transcript and "
+        "travels into snapshot/copy bundles with it, so it is a durable sink "
+        "exactly like chat.jsonl. The sanitiser is `_redact_for_persist` at "
+        "the `begin_pending_turn` call site in `run_turn`; if that call lost "
+        "its wrapper, this is what notices."
+    )
+    assert SECRET not in log_text, (
+        "a managed key value with no sk-ant-/key=/bearer shape leaked into "
+        "the backend log — the value-substitution widening (Task 4) is "
+        "not scrubbing the retry-warning log site"
+    )
+    assert SECRET not in chat_text, (
+        "a managed key value with no sk-ant-/key=/bearer shape leaked into "
+        "the durable chat.jsonl record — the value-substitution widening "
+        "(Task 4) is not scrubbing _redact_for_persist"
+    )
+
+
+def test_without_the_value_substitution_widening_the_same_secret_leaks(
+    tmp_projects_dir, install_network, fake_anthropic_module, monkeypatch,
+):
+    """
+    THE DISCRIMINATION (module docstring). Disable ONLY the value-
+    substitution pass (simulating a partial revert / cherry-pick that keeps
+    the provider wiring but drops Task 4's widening) and prove the exact
+    same drive now leaks the secret into BOTH sinks — the pattern-only
+    regexes (sk-ant-*/key=value/bearer) never match this value's shape.
+
+    This is what makes the first test meaningful: without this half, a
+    broken widening that always no-ops would still pass the first test
+    (nothing to redact != successfully redacted).
+    """
+    from services import redaction
+
+    monkeypatch.setattr(
+        redaction, "_substitute_managed_values", lambda text, values: text
+    )
+
+    log_text, chat_text, pending_text = _drive_one_turn(
+        tmp_projects_dir, install_network, fake_anthropic_module, monkeypatch,
+    )
+
+    assert SECRET in pending_text, (
+        "disabling value-substitution should have let the secret through to "
+        "the pending-turn record — if it didn't, the assertion above proves "
+        "nothing"
+    )
+    assert SECRET in log_text, (
+        "disabling value-substitution should have let the secret through "
+        "to the log — if it didn't, the log assertion above proves nothing"
+    )
+    assert SECRET in chat_text, (
+        "disabling value-substitution should have let the secret through "
+        "to chat.jsonl — if it didn't, the persist assertion above proves "
+        "nothing"
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Round-4 findings against the redaction control ITSELF — the sole
+# compensating control this file's precondition depends on. Prior reviews
+# only checked that it catches managed values; nobody read the algorithm.
+# ═════════════════════════════════════════════════════════════════════════
+
+
+def test_a_secret_in_a_dict_KEY_is_redacted_before_persist(monkeypatch):
+    """
+    C-16, worse than filed. `_redact_for_persist` recursed dict VALUES but not
+    dict KEYS, and the gap swallows the managed-value substitution too — not
+    just the shape regexes. So the actual configured provider key could land
+    verbatim in `chat.jsonl` and propagate into snapshot/copy bundles.
+
+    Reachable via `POST /api/chat/import` (member auth is enough, and the
+    route's own docstring claims the opposite), and organically through
+    model-authored `tool_use.input` keys.
+    """
+    from services import chat_service
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-LIVEKEY0000000000")
+    payload = {
+        "input": {
+            "sk-ant-LIVEKEY0000000000": "value-position-is-fine",
+            "Authorization: Bearer sk-ant-LIVEKEY0000000000": "see above",
+        },
+    }
+    out = chat_service._redact_for_persist(payload)
+    flat = json.dumps(out)
+    assert "sk-ant-LIVEKEY0000000000" not in flat, (
+        f"the live provider key survived in a dict KEY: {flat}"
+    )
+
+
+def test_a_json_quoted_credential_field_is_redacted(monkeypatch):
+    """
+    A6 — `SECRET_KV_RE` required `=`/`:` IMMEDIATELY after the keyword, so a
+    quote between them defeated it. That is exactly the shape of a provider
+    error body, and `llm_openai_compat` wraps `str(exc)` from an SDK whose
+    `APIStatusError.__str__` renders precisely that JSON.
+    """
+    from services import redaction
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    body = '{"api_key": "sk-proj-SECRET123", "token":"tokSECRET456"}'
+    out = redaction.redact_secrets_in_str(body, frozenset())
+    assert "sk-proj-SECRET123" not in out, out
+    assert "tokSECRET456" not in out, out
+
+
+def test_the_durable_path_is_never_weaker_than_the_log(monkeypatch):
+    """
+    A7 / C-15. The two redactors were asymmetric in BOTH directions:
+
+      * `redact_for_log` omitted the shape patterns entirely, so an unmanaged
+        bearer token or `api_key=` pair survived into the log; while
+      * `redact_for_log` alone replaced the ANTHROPIC_API_KEY literal
+        unconditionally, where `redact_secrets_in_str` reached it only through
+        `_substitute_managed_values` — which is gated on a length floor.
+
+    So for a short live key the DURABLE `chat.jsonl` path was weaker than the
+    log, inverting the intent: the file you keep was less scrubbed than the
+    line you print.
+    """
+    from services import redaction
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "shortk")
+    text = (
+        "boom: key shortk rejected; "
+        "password=hunter2secret; bearer glpat-UNMANAGED-abcdef123456"
+    )
+    for_log = redaction.redact_for_log(text)
+    for_persist = redaction.redact_secrets_in_str(text)
+
+    for name, out in (("redact_for_log", for_log),
+                      ("redact_secrets_in_str", for_persist)):
+        assert "shortk" not in out, f"{name} leaked the live key: {out}"
+        assert "hunter2secret" not in out, f"{name} leaked a password: {out}"
+        assert "glpat-UNMANAGED-abcdef123456" not in out, (
+            f"{name} leaked a bearer token: {out}"
+        )

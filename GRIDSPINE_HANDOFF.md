@@ -1,3 +1,14 @@
+> **SUPERSEDED — read the increment-3 handoff instead.**
+> This file was written on 2026-09-01 to finish **increment 2** and reached this
+> branch through the merge of `master`. Increments 3–6 have since landed here
+> (AC N-1 screening, the job-shaped driver, the backend action layer, the solve-queue
+> job kind, the router, the copilot tools, the study view, packaging, a project's own
+> network as the dispatch source, and PowerFactory read-back). Its code map, its API
+> and its "what to do next" are all out of date.
+>
+> Current: `docs/superpowers/handoffs/2026-09-05-gridspine-increment-3-handoff.md`
+> and the increment plans beside it under `docs/superpowers/plans/`.
+
 # gridspine — cloud continuation handoff
 
 **Written:** 2026-09-01 · **Owner:** Hao (Hitachi Energy Power Consulting)

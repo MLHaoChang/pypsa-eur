@@ -68,6 +68,13 @@ datas = [
     # `script_location` at `<backend>/alembic`, so both must ship.
     (str(BACKEND / "alembic"), "alembic"),
     (str(BACKEND / "alembic.ini"), "."),
+    # `services/llm_config.load_presets` resolves this as
+    # `Path(__file__).resolve().parent.parent / "presets.json"` from
+    # `services/llm_config.py`, i.e. beside the backend package — the same
+    # place `alembic.ini` lands (`.`, not `"backend"`: `pathex=[str(BACKEND)]`
+    # below puts `services/llm_config.py` at _MEIPASS-root/`services/`, so its
+    # `parent.parent` is _MEIPASS root itself).
+    (str(BACKEND / "presets.json"), "."),
     # The SPA the backend serves in local mode. `settings.frontend_dist`
     # resolves `<backend>/../frontend/dist`, which under _MEIPASS means this
     # exact layout.
@@ -96,6 +103,22 @@ for dist in ("pypsa", "linopy", "xarray", "fastapi", "uvicorn", "starlette",
 # xarray and pypsa both resolve backends through entry points at first use.
 datas += collect_data_files("xarray", includes=["**/*.yaml", "**/*.yml"])
 datas += collect_data_files("pypsa", includes=["**/*.csv", "**/*.yaml"])
+
+# ── the planning → dynamics pipeline (gridspine; increment 6) ───────────────
+#
+# `gridspine/` lives at the REPO ROOT, beside `pypsa-gui/`, and reaches the
+# bundle through `pathex` below rather than through the venv: pixi's editable
+# install is a setuptools import-finder hook, which PyInstaller cannot follow,
+# and a copy in site-packages would freeze stale code. Its unit-template
+# library is `__file__`-relative YAML; pandapower's IEEE 39-bus case is a
+# `__file__`-relative JSON (`pandapower/networks/_get_cases_path`). Both are
+# data, not code, so both are collected here and both packages are written
+# out as real directories below (`module_collection_mode`).
+GRIDSPINE = ROOT.parent / "gridspine"
+if not (GRIDSPINE / "templates" / "data" / "case39_units.yaml").is_file():
+    raise SystemExit(f"{GRIDSPINE} is missing or has no templates/data — build from a full checkout")
+datas += [(str(GRIDSPINE / "templates" / "data"), "gridspine/templates/data")]
+datas += collect_data_files("pandapower", includes=["**/*.json", "**/*.csv"])
 
 # ── hiddenimports: MEASURED, not guessed ────────────────────────────────────
 #
@@ -134,6 +157,18 @@ hiddenimports = [
     "sqlalchemy.dialects.sqlite",
     # the desktop shell
     "webview", "webview.platforms.cocoa",
+    # the planning → dynamics pipeline (increment 6). Measured by diffing
+    # sys.modules across a 24 h study with screening on, in the Linux sibling
+    # of this venv (`.build-venv-linux`, same requirements): gridspine imports
+    # pandapower and lightsim2grid at MODULE scope, so static analysis sees
+    # them, and the only lazily loaded third-party module not already listed
+    # above was cloudpickle (dask's). The gridspine entry modules are named
+    # because the backend imports them inside a try/except — analysable today,
+    # spelled out so a future change to that guard cannot drop the package
+    # from the bundle without a build error.
+    "cloudpickle",
+    "gridspine.drivers.study", "gridspine.drivers.status",
+    "gridspine.schema.contracts", "gridspine.templates.unit_params",
 ]
 
 # Present in the CONDA env and pulled in by xarray's entry-point scan; absent
@@ -146,11 +181,24 @@ excludes = [
     "tkinter", "PyQt5", "PyQt6", "PySide2", "PySide6",
     "IPython", "jupyter", "notebook", "nbformat",
     "pytest", "_pytest",
+    # FOUND BY THE FROZEN PROBE (increment 6), not by analysis: pandapower's
+    # `networks/*.py` do `from pandapower.__init__ import pp_dir`. In a normal
+    # interpreter that re-executes `pandapower/__init__.py` as a module named
+    # `pandapower.__init__` with the SAME `__file__`, so `pp_dir` agrees.
+    # PyInstaller freezes `pandapower.__init__` as its own package-shaped
+    # module at `pandapower/__init__/__init__.py`, whose `pp_dir` is one level
+    # too deep — and `pn.case39()` then looks for its JSON under
+    # `pandapower/__init__/networks/…`, which does not exist. Excluding the
+    # name makes the frozen importer fall through to the on-disk source that
+    # `pyz+py` writes, which is exactly the normal-interpreter behaviour.
+    "pandapower.__init__",
 ]
 
 a = Analysis(                              # noqa: F821 - injected
     [str(BACKEND / "desktop" / "gui.py")],
-    pathex=[str(BACKEND)],
+    # The repo root SECOND: the backend's own modules win any name clash, and
+    # `gridspine` is the only thing the root contributes (see the datas note).
+    pathex=[str(BACKEND), str(ROOT.parent)],
     binaries=[],
     datas=datas,
     hiddenimports=hiddenimports,
@@ -178,6 +226,11 @@ a = Analysis(                              # noqa: F821 - injected
     module_collection_mode={
         "pypsa": "pyz+py",
         "linopy": "pyz+py",
+        # Same `__file__`-relative data reads (increment 6): gridspine's
+        # `templates/unit_params.py` opens `Path(__file__).parent / "data"`,
+        # pandapower's `networks` opens `pp_dir/networks/...json`.
+        "gridspine": "pyz+py",
+        "pandapower": "pyz+py",
     },
 )
 
@@ -278,6 +331,26 @@ app = BUNDLE(                              # noqa: F821 - injected
         # cwd-relative DATABASE_URL that killed the launch.
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "14.0",   # netCDF4's arm64 wheel floor
+        # The chat panel's mic button (`useSpeechToText` / `ChatPanel.tsx`)
+        # dictates into the message box via the Web Speech API. Without this
+        # key macOS TCC kills the whole process the instant recognition
+        # starts — a hard termination, not a Python exception, and nothing
+        # reaches `pypsa-gui.log`. The string is shown verbatim in the
+        # permission dialog, so it names the feature rather than saying
+        # "this app uses speech recognition".
+        "NSSpeechRecognitionUsageDescription": (
+            "PyPSA Studio uses speech recognition to turn what you say into "
+            "text when you use the mic button to dictate a message into the "
+            "chat box."
+        ),
+        # On-device speech recognition captures audio through the microphone,
+        # so macOS gates it behind BOTH usage-description keys — shipping
+        # only NSSpeechRecognitionUsageDescription just moves the same TCC
+        # kill from the speech check to this one.
+        "NSMicrophoneUsageDescription": (
+            "PyPSA Studio uses the microphone to capture your voice when you "
+            "use the mic button to dictate a message into the chat box."
+        ),
         "CFBundleShortVersionString": "0.1.0",
         # The MACHINE-readable build number, distinct from the marketing
         # string above. D9's updater and any stapling workflow key off this
@@ -285,6 +358,17 @@ app = BUNDLE(                              # noqa: F821 - injected
         # a version that only ever existed as "0.1.0" gives an updater nothing
         # to compare.
         "CFBundleVersion": "0.1.0",
+        # macOS denies the microphone outright to a bundle that does not
+        # declare why it wants one. Measured before adding these: a WKWebView
+        # exposes `webkitSpeechRecognition`, `.start()` runs, and it fires
+        # `not-allowed` — the signature of a permission refusal rather than a
+        # missing API. The strings are shown verbatim in the OS prompt.
+        "NSMicrophoneUsageDescription":
+            "PyPSA Studio uses the microphone only while you hold the "
+            "dictate button in the assistant, to turn speech into text.",
+        "NSSpeechRecognitionUsageDescription":
+            "PyPSA Studio uses speech recognition to transcribe what you "
+            "dictate to the assistant.",
     },
 )
 

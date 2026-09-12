@@ -150,6 +150,15 @@ CARRIER_DEFAULTS: dict[str, OutageParams] = {
         "≈ utility-scale BESS availability surveys (FOR; sparse public data)"),
 }
 
+# The spellings an UNSET string attribute arrives in. A netCDF round trip
+# writes "" into a mixed column, a CSV can carry the literal "nan", and a
+# JSON `None` stringifies to "None" — all three mean "the user typed
+# nothing" and all three were spelled out separately in three modules
+# (IEEE 39-bus review, N-c). One owner, imported by the schema and the
+# editor's serialiser.
+BLANK_SPELLINGS = ("", "nan", "None")
+
+
 
 def _is_set(v: object) -> bool:
     if v is None:
@@ -157,7 +166,7 @@ def _is_set(v: object) -> bool:
     if isinstance(v, float) and not math.isfinite(v):
         return False
     if isinstance(v, str):
-        return v.strip() not in ("", "nan", "None")
+        return v.strip() not in BLANK_SPELLINGS
     return True
 
 

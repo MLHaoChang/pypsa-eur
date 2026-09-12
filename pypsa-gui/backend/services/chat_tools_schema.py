@@ -171,10 +171,27 @@ TOOLS: list[dict[str, Any]] = [
 
     _t(
         "list_components",
-        "List all components of one class as JSON rows (transient-filtered: "
-        "solver-internal vintage clones and VOLL slack generators are hidden). "
-        "Safety: read.",
-        {"component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM}},
+        "List one class of component as JSON rows, one page at a time "
+        "(transient-filtered: solver-internal vintage clones and VOLL slack "
+        "generators are hidden). Returns "
+        "{items, total_count, offset, returned, has_more}. `total_count` is "
+        "the size of the WHOLE class, not the page — compare it against "
+        "`returned` to see what you are missing, and re-call with "
+        "offset=offset+returned while has_more is true. Safety: read.",
+        {
+            "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
+            "offset": {
+                "type": "integer",
+                "description": "Row to start at. Defaults to 0.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": (
+                    "Rows to return. Defaults to 200; values above 1000 are "
+                    "clamped, and the response then carries limit_clamped_to."
+                ),
+            },
+        },
         ["component_class"],
     ),
     _t(
@@ -187,6 +204,18 @@ TOOLS: list[dict[str, Any]] = [
             "name": {"type": "string"},
         },
         ["component_class", "name"],
+    ),
+    _empty(
+        "diagnose_network",
+        "Electrical connectivity diagnosis: how many islands the network "
+        "splits into, which buses have no branch attached, and — the usual "
+        "cause of an infeasible solve — which islands hold load but nothing "
+        "able to serve it. Returns {bus_count, island_count, islands, "
+        "isolated_buses, islands_without_generation, verdict}, where verdict "
+        "is connected | fragmented | infeasible_topology | empty. Call this "
+        "FIRST when a solve is infeasible or a result looks impossible. Does "
+        "not check dangling bus references — run_preflight covers those. "
+        "Safety: read.",
     ),
     _empty(
         "get_meta",
@@ -260,10 +289,26 @@ TOOLS: list[dict[str, Any]] = [
         },
         ["component", "name", "attribute"],
     ),
-    _empty(
+    _t(
         "list_all_timeseries",
-        "Enumerate every (component, attribute, column) _user_ts entry with "
-        "metadata. Safety: read.",
+        "Enumerate every (component, attribute, column) time-series entry "
+        "with metadata, one page at a time. Returns "
+        "{items, total_count, offset, returned, has_more} — re-call with "
+        "offset=offset+returned while has_more is true. Safety: read.",
+        {
+            "offset": {
+                "type": "integer",
+                "description": "Row to start at. Defaults to 0.",
+            },
+            "limit": {
+                "type": "integer",
+                "description": (
+                    "Rows to return. Defaults to 200; values above 1000 are "
+                    "clamped, and the response then carries limit_clamped_to."
+                ),
+            },
+        },
+        [],
     ),
     _empty(
         "get_solver_config",
@@ -390,6 +435,41 @@ TOOLS: list[dict[str, Any]] = [
             "updates": {"type": "object"},
         },
         ["component_class", "names", "updates"],
+    ),
+
+    _t(
+        "batch_create_components",
+        "Create MANY components of one class in a single call. Prefer this "
+        "over repeated create_component: a turn allows only 25 tool calls, "
+        "so building a network one component at a time is a task that gets "
+        "cut off rather than one that finishes slowly. Each entry is an "
+        "object with 'name' plus that class's attributes. The WHOLE batch is "
+        "refused if any entry is invalid, duplicates another entry's name, "
+        "or collides with an existing component — nothing is created in that "
+        "case, and the error names the offending entry and its index. Max "
+        "200 per call. Safety: write.",
+        {
+            "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
+            "components": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "One object per component: {name, ...attributes}.",
+            },
+        },
+        ["component_class", "components"],
+    ),
+
+    _t(
+        "batch_delete_components",
+        "Delete MANY components of one class in a single call. The WHOLE "
+        "batch is refused if any name is absent or is solver scaffolding — "
+        "nothing is deleted in that case. Max 200 per call. "
+        "Safety: destructive.",
+        {
+            "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
+            "names": {"type": "array", "items": {"type": "string"}},
+        },
+        ["component_class", "names"],
     ),
 
     # ── Carriers (1) ───────────────────────────────────────────────────────
@@ -666,22 +746,6 @@ TOOLS: list[dict[str, Any]] = [
     _empty(
         "check_solver_availability",
         "{highs, gurobi, scip, glpk} — which solvers are installed. Safety: read.",
-    ),
-    _t(
-        "diagnose_network",
-        "Graph-level diagnosis — the shape check validate_network does not "
-        "do. Returns {islands: [{id, n_buses, peak_load_mw, nameplate_mw, "
-        "extendable, verdict, reason}], n_islands, isolated_buses, counts}. "
-        "verdict is ok / no_demand / no_supply / under_capacity. CALL THIS "
-        "FIRST on any 'why is my model infeasible' question: a network passes "
-        "every value check and is still two halves, one with the demand and "
-        "one with the plant, and the linopy traceback names neither. A "
-        "shortfall is only ever claimed when it is CERTAIN — nameplate is an "
-        "upper bound on dispatch — and never when anything in the island is "
-        "extendable. Bus membership is omitted unless include_buses=true, "
-        "because on a large network it would crowd out the verdicts. "
-        "Safety: read.",
-        {"include_buses": {"type": "boolean"}},
     ),
     _empty(
         "dispatch_status",
@@ -1005,18 +1069,26 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "solve_queue_enqueue",
         "Enqueue a project for background solving. Dispatcher auto-runs on "
-        "enqueue. Project must have a saved network.nc. Safety: execution.",
+        "enqueue. Project must have a saved network.nc. Idempotent per project: "
+        "if the project already has a queued or running job the response is 200 "
+        "with THAT job and `already_queued: true`, and no second job is created "
+        "— this is not an error, so do not retry. A new job returns "
+        "`already_queued: false`. Safety: execution.",
         {"project_id": {"type": "string"}},
         ["project_id"],
     ),
     _empty(
         "solve_queue_list",
-        "{jobs: [...], current: job_id|None} — FIFO queue snapshot. "
-        "Safety: read.",
+        "{jobs: [...], running: [job_id], paused: bool} — FIFO queue snapshot. "
+        "`running` lists EVERY job solving right now (the pool size is "
+        "PYPSA_GUI_MAX_CONCURRENT_SOLVES, default 1), and omits jobs the caller "
+        "may not see. Job ids are UUIDs. Safety: read.",
     ),
     _t(
         "solve_queue_abort",
-        "Abort a running OR cancel a queued job. Safety: destructive.",
+        "Abort a running OR cancel a queued job. `job_id` is the job's UUID, "
+        "exactly as returned by solve_queue_list / solve_queue_enqueue — not an "
+        "index and not a project name. Safety: destructive.",
         {"job_id": {"type": "string"}},
         ["job_id"],
     ),
@@ -1033,7 +1105,8 @@ TOOLS: list[dict[str, Any]] = [
         "All projects on disk as ProjectInfo entries: name, id, created_at, "
         "has_solver_config, bus_count, snapshot_count, objective, "
         "has_orphan_tmp, missing, parent_project, scenario_description, "
-        "scenario_type (per "
+        "scenario_type, project_kind (null = capacity_expansion; "
+        "'planning_dynamics' for a gridspine study) (per "
         "schemas.py:467-491). `id` is the DB-registry UUID when multi-user "
         "auth is enabled and null in single-user mode. Each entry is "
         "augmented with `resident: bool` "
@@ -1142,7 +1215,7 @@ TOOLS: list[dict[str, Any]] = [
         "list_projects filtered to entries where parent_project == name. Each "
         "entry is a ProjectInfo {name, id, created_at, has_solver_config, "
         "bus_count, snapshot_count, objective, has_orphan_tmp, missing, "
-        "parent_project, scenario_description, scenario_type} per "
+        "parent_project, scenario_description, scenario_type, project_kind} per "
         "schemas.py:467-491. "
         "Safety: read.",
         {"name": {"type": "string"}},
@@ -1620,6 +1693,22 @@ TOOLS: list[dict[str, Any]] = [
         [],
     ),
 
+    # ── LLM provider switching (1) — Task 10 ────────────────────────────────
+    _t(
+        "set_active_profile",
+        "Switch which configured LLM profile the assistant uses. "
+        "`profile_id` must be one ALREADY CONFIGURED in Settings — this tool "
+        "never creates or edits a profile and never accepts an API key, so "
+        "no key material passes through the chat channel. The change takes "
+        "effect when the user starts a NEW chat: the current conversation "
+        "stays on the profile it was bound to, because a mid-session switch "
+        "would replay history to a model that may not accept its blocks. "
+        "Returns `{ok, active_profile_id, note}`; an unconfigured id is a "
+        "structured error, not a switch. Safety: destructive.",
+        {"profile_id": {"type": "string"}},
+        ["profile_id"],
+    ),
+
     # ── Asset results (3) — Task 14 ─────────────────────────────────────────
     _t(
         "get_asset_results",
@@ -1686,6 +1775,173 @@ TOOLS: list[dict[str, Any]] = [
             "mode": {"type": "string", "enum": ASSET_VIEW_MODE_ENUM},
         },
         ["component_class", "name"],
+    ),
+
+    # ── gridspine: planning → dynamics studies (8) ─────────────────────────
+    # Wrappers over services/gridspine_service.py — the SAME functions
+    # /api/gridspine calls, so the copilot and the UI cannot drift (spec,
+    # "Copilot parity"). Every project-scoped tool takes the project by name
+    # and is only offered when the session's bound project is a
+    # planning_dynamics one (chat_service._tools_payload); create is always
+    # offered. NOT verified by a live API probe yet (ADR 0002) — see the
+    # increment-4 plan, task 6.
+    _t(
+        "gridspine_create_study",
+        "Create a NEW planning → dynamics project (kind planning_dynamics) "
+        "with a study config: hours (default 8760), k (extreme hours per "
+        "criterion, default 5), window and overlap (rolling unit-commitment "
+        "window in hours, defaults 168/24), screen (run N-1/N-2 screening, "
+        "default true). The project is created but not run. Returns {id, "
+        "name, kind, config, status}. Safety: write.",
+        {
+            "name": {"type": "string"},
+            "config": {"type": "object"},
+        },
+        ["name"],
+    ),
+    _t(
+        "gridspine_set_dispatch_source",
+        "Choose where a planning → dynamics project's dispatch comes from: "
+        "omit both arguments to generate it with the rolling unit commitment; "
+        "from_project = the name of one of the user's capacity-expansion "
+        "projects whose network is SOLVED AND SAVED (its generators must be "
+        "the IEEE 39-bus units, e.g. a project made from the 'IEEE 39-Bus' "
+        "template) to study that dispatch; from_dispatch = the directory of a "
+        "finished study (holding dispatch.csv and loads.csv) to reuse its "
+        "tables. One source at a time. Returns the updated config. "
+        "Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "from_dispatch": {"type": "string"},
+            "from_project": {"type": "string"},
+        },
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_get_config",
+        "The study config a planning → dynamics project will run with: hours, "
+        "k, window, overlap, screen, n2_prune_threshold_pct, from_dispatch, "
+        "from_network (a saved network path) and from_project (that network's "
+        "project name, when it is one of the user's). Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_update_config",
+        "Change some of a planning → dynamics project's study config after "
+        "creation — any subset of hours, k, window (hours, a whole number of "
+        "days), overlap, screen, n2_prune_threshold_pct. Validated as a whole; "
+        "refused while a study for the project is queued or running. Returns "
+        "the updated config. Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "hours": {"type": "integer"},
+            "k": {"type": "integer"},
+            "window": {"type": "integer"},
+            "overlap": {"type": "integer"},
+            "screen": {"type": "boolean"},
+            "n2_prune_threshold_pct": {"type": "number"},
+        },
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_run_pipeline",
+        "Run a planning → dynamics study through the solve queue: unit "
+        "commitment, ranking (AC N-1 severity at every hour), load flow, "
+        "N-1/N-2 screening, fault levels and handoff bundles. Returns the "
+        "queue job {id, kind, status, position}; watch or abort it with the "
+        "solve_queue_* tools. A year takes ~2 h; one job per project at a "
+        "time. Safety: execution_long_running.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_get_stage_status",
+        "Per-stage state of a planning → dynamics study, read from its "
+        "artifacts (valid after a restart): {status, resumable, error, "
+        "selected_hours, converged_hours, bundles, stages: {ingest, dispatch, "
+        "ranking, loadflow, screening, handoff: {state, done, total}}}. "
+        "Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_list_ranked_snapshots",
+        "The selected extreme hours of a finished study with why each was "
+        "chosen (reasons: min_inertia_excl_equiv_mws, max_ibr_share, "
+        "max_load_mw, max_import_mw, max_n1_severity) and every ranking metric "
+        "(load_mw, import_mw, inertia_mws, inertia_excl_equiv_mws, ibr_share, "
+        "n1_severity_dc, n1_severity_ac) plus the load-flow converged flag. "
+        "One row per hour. Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_get_assumption_ledger",
+        "The study's assumptions ledger as data: entries (what was measured, "
+        "what was assumed), provenance_counts of template values by tag "
+        "(measured/datasheet/assumed), the screening measurements, and edits "
+        "(this project's template edits with who made them: user or chat). "
+        "Answers before the first run too, from the templates it will use. "
+        "Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_edit_template_param",
+        "Change one dynamic-model parameter of one unit for THIS project only "
+        "(e.g. unit_id G_BUS_32, param h_s), recorded in the project's "
+        "template overlay with provenance edited_by=chat. source is the value's "
+        "own provenance tag: measured, datasheet or assumed. The shipped "
+        "template library is never modified. Refused if the unit or parameter "
+        "does not exist or the value breaks the model's physics checks. "
+        "Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "unit_id": {"type": "string"},
+            "param": {"type": "string"},
+            "value": {"type": "number"},
+            "source": {"type": "string", "enum": ["measured", "datasheet", "assumed"]},
+        },
+        ["project_id", "unit_id", "param", "value", "source"],
+    ),
+    _t(
+        "gridspine_export_handoff_bundle",
+        "Zip one selected hour's handoff bundle (.raw, .dyr, contingencies, "
+        "screening, fault levels, ledger) inside the project directory and "
+        "return {path, filename, bytes}. The user downloads it from the "
+        "study view; this tool prepares it. Safety: write.",
+        {
+            "project_id": {"type": "string"},
+            "hour": {"type": "integer"},
+        },
+        ["project_id", "hour"],
+    ),
+    _t(
+        "gridspine_get_readback",
+        "What the engineer has read back from PowerFactory for a planning → "
+        "dynamics project, per bundle hour: {hour: {pass, bus: {n, n_ok, "
+        "max_vm_rel_err, max_va_abs_err_deg, worst, pass}, branches: {...} or "
+        "null when no branch export was uploaded, tolerances, sources, at}}. "
+        "The gate is <1 % |Vm| and 0.5° per bus, 1 % P (floored at 1 MW) and "
+        "5 Mvar Q per branch. Empty until a CSV is uploaded in the study view. "
+        "Safety: read.",
+        {"project_id": {"type": "string"}},
+        ["project_id"],
+    ),
+    _t(
+        "gridspine_fetch_result_figure",
+        "One read-back comparison as data for a bundle hour: name is vm, va, "
+        "branch_p or branch_q; returns {available, hour, tolerance, rows: "
+        "[{element, pandapower, powerfactory, err, ok}]}, or available=false "
+        "with the reason when nothing has been uploaded for that hour. "
+        "Safety: read.",
+        {
+            "project_id": {"type": "string"},
+            "hour": {"type": "integer"},
+            "name": {"type": "string", "enum": ["vm", "va", "branch_p", "branch_q"]},
+        },
+        ["project_id", "hour", "name"],
     ),
 ]
 
@@ -1766,6 +2022,9 @@ TOOL_ROUTES: dict[str, list] = {
     # read (22)
     "list_components": _COMP_LIST_ROUTES,
     "get_component": _SERVICE_CALL,
+    # #15: derived entirely from the in-memory graph — there is no HTTP
+    # endpoint to mirror, same as dispatch_status.
+    "diagnose_network": _SERVICE_CALL,
     "get_meta": [("GET", "/api/network/meta")],
     "list_snapshots": [("GET", "/api/network/snapshots")],
     "list_carriers": [("GET", "/api/network/carriers")],
@@ -1806,6 +2065,10 @@ TOOL_ROUTES: dict[str, list] = {
     "cascade_delete_bus": [("DELETE", "/api/network/buses/{name}/cascade")],
     # write_bulk (1)
     "bulk_update_components": [("PATCH", "/api/network/_bulk")],
+    # #17: loops the per-class handlers so their dedicated logic and the
+    # _user_ts / vintage cleanup keep running; no single endpoint mirrors it.
+    "batch_create_components": _SERVICE_CALL,
+    "batch_delete_components": _SERVICE_CALL,
     # write_carriers (1)
     "create_carrier": [("POST", "/api/network/carriers")],
     # write_meta (1)
@@ -1839,7 +2102,6 @@ TOOL_ROUTES: dict[str, list] = {
     "validate_network": [("POST", "/api/simulation/preflight")],
     "check_solver_availability": [("GET", "/api/simulation/check_solvers")],
     "dispatch_status": _SERVICE_CALL,  # B3: NO HTTP endpoint exists
-    "diagnose_network": _SERVICE_CALL,  # backlog 15: no HTTP endpoint
     # execution_long_running (2)
     "run_simulation": [("POST", "/api/simulation/run")],
     "run_ac_pf_stage": [("POST", "/api/simulation/run_ac_pf")],
@@ -1955,6 +2217,26 @@ TOOL_ROUTES: dict[str, list] = {
     "get_asset_results": _SERVICE_CALL,
     "ui_open_asset_detail": _UI_EVENT,
     "export_asset_results": _SERVICE_CALL,
+    # Task 10 — writes <app-data>/llm-profiles.json via services.llm_config,
+    # not an HTTP route. The settings pane's own PUT /chat/settings/llm/active
+    # is a DIFFERENT surface with a super-admin gate; this tool reaches the
+    # store directly, which is why it is confirmation-gated instead.
+    "set_active_profile": _SERVICE_CALL,
+    # gridspine (10) — service calls, like dispatch_status: the tools call
+    # services/gridspine_service.py directly, not /api/gridspine, so the
+    # route table records the pattern rather than a URL.
+    "gridspine_create_study": _SERVICE_CALL,
+    "gridspine_set_dispatch_source": _SERVICE_CALL,
+    "gridspine_get_config": _SERVICE_CALL,
+    "gridspine_update_config": _SERVICE_CALL,
+    "gridspine_run_pipeline": _SERVICE_CALL,
+    "gridspine_get_stage_status": _SERVICE_CALL,
+    "gridspine_list_ranked_snapshots": _SERVICE_CALL,
+    "gridspine_get_assumption_ledger": _SERVICE_CALL,
+    "gridspine_edit_template_param": _SERVICE_CALL,
+    "gridspine_export_handoff_bundle": _SERVICE_CALL,
+    "gridspine_get_readback": _SERVICE_CALL,
+    "gridspine_fetch_result_figure": _SERVICE_CALL,
 }
 
 
@@ -1962,3 +2244,36 @@ TOOL_ROUTES: dict[str, list] = {
 NON_HTTP_SENTINELS = frozenset(
     ["_service_call_", "_derived_", "_ui_event_", "_chat_jsonl_"]
 )
+
+
+# ── Safety tiers ────────────────────────────────────────────────────────────
+
+
+SAFETY_TIERS = (
+    "execution_long_running",
+    "execution",
+    "destructive",
+    "write",
+    "read",
+)
+
+
+def safety_tier_for(tool_name: str) -> str:
+    """
+    Resolve a tool's safety tier from the documented `Safety: <tier>` marker in
+    its description.
+
+    The marker in the description IS the declaration — there is no separate
+    tier field to drift from it. Unknown / undocumented tools resolve to
+    "read", which is the conservative answer for the confirmation card (no
+    card) and the permissive one for the chat dispatch seam's lock gate; the
+    schema-parity tests keep the undocumented case from existing.
+    """
+    for tool in TOOLS:
+        if tool["name"] == tool_name:
+            description = tool["description"]
+            for tier in SAFETY_TIERS:
+                if f"Safety: {tier}" in description:
+                    return tier
+            return "read"
+    return "read"

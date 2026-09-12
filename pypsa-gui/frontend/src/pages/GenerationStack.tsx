@@ -5,6 +5,7 @@ import { DataGrid } from '../components/DataGrid'
 import { networkApi } from '../api/network'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { updateAsset } from '../utils/assetWrite'
 import type { Generator, StorageUnit, Store } from '../api/types'
 import toast from 'react-hot-toast'
 
@@ -56,26 +57,15 @@ function GeneratorsTab() {
     onError: () => toast.error('Failed to delete generator'),
   })
   const update = useMutation({
-    mutationFn: ({ name, field, value }: { name: string; field: string; value: unknown }) => {
-      // Spread the full cached generator so the backend's remove+add cycle
-      // (in `_update_component`) doesn't reset the other fields to schema
-      // defaults. Without this, editing `p_nom` in-grid would wipe
-      // `marginal_cost`, `efficiency`, `capital_cost`, `committable`, …
-      // back to Pydantic defaults. Same pattern as PropertiesPanel cards.
-      const cached = qc.getQueryData<Generator[]>(nk(useUIStore.getState().currentProject, 'generators')) ?? []
-      const current = cached.find(g => g.name === name)
-      if (!current) {
-        // Refuse the partial PUT on a cache miss — without the full cached row,
-        // the backend's remove+add would reset every omitted field to its
-        // schema default. The grid only renders after the query resolves, so
-        // this is near-unreachable, but match MapCanvas's throw-don't-degrade
-        // policy rather than silently corrupt the generator.
-        throw new Error(`Generator '${name}' not loaded yet — try the edit again in a moment.`)
-      }
-      const body = { ...current, [field]: value } as Partial<Generator>
-      return networkApi.updateGenerator(name, body)
-    },
-    onSuccess: () => qc.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'generators') }),
+    // The Asset-write chokepoint (utils/assetWrite.ts) owns fetch, spread,
+    // PUT and invalidation — the spread keeps every field the grid doesn't
+    // show (`marginal_cost`, `efficiency`, `capital_cost`, `committable`, …)
+    // alive through the backend's remove+add cycle. The old
+    // throw-on-cache-miss is gone: the chokepoint fetches on a miss
+    // (ruling 3), so the cold path succeeds instead of erroring.
+    mutationFn: ({ name, field, value }: { name: string; field: string; value: unknown }) =>
+      updateAsset(qc, useUIStore.getState().currentProject, 'generators', name,
+        { [field]: value }),
     onError: (e: unknown) => toast.error(e instanceof Error ? e.message : 'Failed to update generator'),
   })
 

@@ -17,6 +17,17 @@
  * the deployment this exists for — always gets the form. A member of a
  * multi-tenant instance gets told who to ask instead, which is the only useful
  * thing to tell them.
+ *
+ * TASK 15 GENERALISATION. `missing_api_key` can now fire for ANY profile, not
+ * only the two built-in Claude ones — a deployment can have several LLM
+ * profiles on other providers (see api/llmSettings.ts). The inline form below
+ * is specific to `/chat/settings/api-key`, i.e. `ANTHROPIC_API_KEY` — it makes
+ * no sense, and would actively mislead, for a missing OpenAI/local-endpoint
+ * key. `getChatHealth()`'s `active_profile` decides the branch: the built-in
+ * profile keeps this file's original, first-run-tested form verbatim; any
+ * other active profile gets told which profile is short a key and a deep-link
+ * to the AssistantModelSettings section (Task 15) instead, where that
+ * profile's OWN key field lives.
  */
 import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -25,22 +36,69 @@ import toast from 'react-hot-toast'
 import {
   deleteApiKeySettings,
   getApiKeySettings,
+  getChatHealth,
   putApiKeySettings,
   type ApiKeySettings,
+  type ChatHealth,
 } from '../api/chat'
 import { useChatStore } from '../store/chatStore'
+import { useUIStore } from '../store/uiStore'
 
-const API_KEY_SETTINGS_KEY = ['chat', 'api-key-settings']
+// Exported so ChatLaunchGreeting reads the SAME cache entry rather than a
+// parallel one: the greeting only needs to know whether a key exists, and
+// sharing the key means one fetch, and means this component's post-save
+// invalidation retracts the greeting's offer in the same tick.
+export const API_KEY_SETTINGS_KEY = ['chat', 'api-key-settings']
+
+/**
+ * The two ids `services/llm_config.py` synthesizes in code (`_BUILTIN_IDS`)
+ * and never lets a file entry override. Kept as a local literal (rather than
+ * importing AssistantModelSettings' copy) so this component's dependency
+ * surface stays "chat + ui store", matching its existing shape — the ids
+ * themselves are backend-stable, not something either file owns.
+ */
+const BUILTIN_ANTHROPIC_PROFILE_IDS = new Set(['anthropic-sonnet', 'anthropic-opus'])
 
 /** The 403 an ordinary member gets — an expected state, not a failure. */
 function isForbidden(error: unknown): boolean {
   return (error as { response?: { status?: number } })?.response?.status === 403
 }
 
-export default function ApiKeySetup() {
+/**
+ * C-12 — `sessionProfile` is the profile the FAILED TURN ran on.
+ *
+ * `missing_api_key` is raised by a turn, and a turn runs on the session's
+ * bound profile — which any member's chat may legitimately differ from the
+ * instance-wide active one a super-admin picked. This component branched on
+ * `getChatHealth().active_profile` while ChatPanel's banner body named
+ * `selectedProfileMeta.label`, so the two halves of one banner answered
+ * different questions: a user on a local endpoint, on an instance still
+ * defaulting to built-in Claude, was told their Ollama profile needed a key
+ * and then handed a form that sets ANTHROPIC_API_KEY. The Task-15 deep-link
+ * built for that case never fired.
+ *
+ * `null`/omitted keeps the old behaviour — fall back to health's active
+ * profile — for callers that have no session profile resolved yet.
+ */
+export default function ApiKeySetup({
+  sessionProfile = null,
+}: {
+  sessionProfile?: { id: string; label: string } | null
+} = {}) {
   const qc = useQueryClient()
   const setError = useChatStore((s) => s.setError)
+  const requestSettingsSection = useUIStore((s) => s.requestSettingsSection)
+  const setSlidePanel = useUIStore((s) => s.setSlidePanel)
   const [value, setValue] = useState('')
+
+  // Cheap, unauthenticated-adjacent probe (api/chat.ts's own doc comment) —
+  // this is the first real caller. Decides which branch below renders;
+  // see the TASK 15 GENERALISATION note above.
+  const health = useQuery<ChatHealth>({
+    queryKey: ['chat', 'health'],
+    queryFn: getChatHealth,
+    retry: false,
+  })
 
   const settings = useQuery<ApiKeySettings>({
     queryKey: API_KEY_SETTINGS_KEY,
@@ -80,6 +138,44 @@ export default function ApiKeySetup() {
       toast.success('API key removed.')
     },
   })
+
+  // Wait for the routing decision before rendering anything — the two
+  // branches are different enough (a form vs. a deep-link) that flashing one
+  // then swapping to the other would be worse than a brief nothing. Defaults
+  // to `true` (builtin, i.e. today's form) once `health` SETTLES without a
+  // usable `active_profile` — a real failure here must not permanently hide
+  // the one feature `missing_api_key` exists to fix.
+  // C-12 — the profile the TURN used decides the branch; health's
+  // instance-wide active profile is only the fallback when the session has
+  // none resolved. Waiting on `health` is still right in that fallback case,
+  // but a known session profile answers the question outright.
+  if (!sessionProfile && health.isLoading) return null
+  const decidingProfile = sessionProfile ?? health.data?.active_profile ?? null
+  const isBuiltinActive =
+    !decidingProfile || BUILTIN_ANTHROPIC_PROFILE_IDS.has(decidingProfile.id)
+
+  if (!isBuiltinActive) {
+    const label = decidingProfile?.label ?? 'the active model'
+    return (
+      <div className="mt-2" data-testid="chat-api-key-setup">
+        <p className="text-[11px] text-muted">
+          The &quot;{label}&quot; profile needs its own key — this form only
+          covers the built-in Claude profiles. Configure it in Settings.
+        </p>
+        <button
+          type="button"
+          className="mt-1 text-[11px] underline text-muted hover:text-text"
+          data-testid="chat-api-key-open-settings"
+          onClick={() => {
+            requestSettingsSection('assistant-model')
+            setSlidePanel('settings')
+          }}
+        >
+          Open settings
+        </button>
+      </div>
+    )
+  }
 
   if (settings.isLoading) return null
 

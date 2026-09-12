@@ -11,7 +11,7 @@ import { networkApi } from '../../api/network'
 import type { Bus, Line as LineT, Transformer } from '../../api/types'
 import { type TSPayload, fmtPower, shortStamp, downloadCSV, KPI, ChartActions, Seg,
   CHART_GRID, CHART_AXIS, CHART_LEGEND, CHART_TOOLTIP, yAxisLabel,
-  useSeasonalViewMode, SeasonalLineCardGrid,
+  useSeasonalViewMode, SeasonalLineCardGrid, WindowCapBanner,
   WEEKLY_MIN_DAYS, MONTHLY_MIN_DAYS } from './shared'
 import { useResultsFilter, resolveRange } from './filterContext'
 import { useResultsWindow } from '../../hooks/useResultsWindow'
@@ -47,20 +47,20 @@ export default function LoadFlow() {
   // Positional bounds for the active Horizon filter, resolved against the
   // SNAPSHOT INDEX (not a results payload) — same hook Dispatch uses so the
   // per-snapshot queries below can be windowed before any payload exists.
-  const { win, winValid } = useResultsWindow(currentProject)
+  const { win, winValid, fetchRange } = useResultsWindow(currentProject)
   const { data: acPfStatus } = useQuery({ queryKey: nk(currentProject, 'results', 'ac_pf', 'status'), queryFn: resultsApi.getAcPfStatus })
   const acPfAvailable = !!acPfStatus?.available
 
   const { data: linesTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'lines', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getLineResults(resultSource, win),
+    queryFn: () => resultsApi.getLineResults(resultSource, fetchRange),
     enabled: winValid,
   })
   // Transformer flows — same shape as lines (per-snapshot p0 on bus0 side).
   // Drives the new Transformers loading table + chart below.
   const { data: trafosTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'transformers', resultSource, win.from, win.to),
-    queryFn: () => resultsApi.getTransformerResults(resultSource, win),
+    queryFn: () => resultsApi.getTransformerResults(resultSource, fetchRange),
     enabled: winValid,
   })
   // Marginal prices are LP duals — they only exist on the LOPF/SCLOPF solve.
@@ -70,7 +70,7 @@ export default function LoadFlow() {
   // results elsewhere on the page.
   const { data: priceTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'prices', 'lopf', win.from, win.to),
-    queryFn: () => resultsApi.getPrices('lopf', win),
+    queryFn: () => resultsApi.getPrices('lopf', fetchRange),
     enabled: winValid,
   })
   // CO₂ emissions per-carrier + per-generator, plus shadow price of any
@@ -88,7 +88,7 @@ export default function LoadFlow() {
   // heatmap + per-generator UC stats (starts, shuts, on-hours, UC costs).
   const { data: ucResults } = useQuery({
     queryKey: nk(currentProject, 'results', 'unit_commitment', win.from, win.to),
-    queryFn: () => resultsApi.getUnitCommitment(win),
+    queryFn: () => resultsApi.getUnitCommitment(fetchRange),
     enabled: winValid,
   })
   // Transmission losses — single source of truth for both the primary
@@ -116,17 +116,17 @@ export default function LoadFlow() {
   // would return 204. Each returns a TSPayload (snapshot × asset) or null.
   const { data: voltagesTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'voltages', 'ac_pf', win.from, win.to),
-    queryFn: () => resultsApi.getVoltages('ac_pf', win),
+    queryFn: () => resultsApi.getVoltages('ac_pf', fetchRange),
     enabled: acPfAvailable && winValid,
   })
   const { data: lineReactiveTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'line_reactive', 'ac_pf', win.from, win.to),
-    queryFn: () => resultsApi.getLineReactive('ac_pf', win),
+    queryFn: () => resultsApi.getLineReactive('ac_pf', fetchRange),
     enabled: acPfAvailable && winValid,
   })
   const { data: trafoReactiveTS } = useQuery({
     queryKey: nk(currentProject, 'results', 'transformer_reactive', 'ac_pf', win.from, win.to),
-    queryFn: () => resultsApi.getTransformerReactive('ac_pf', win),
+    queryFn: () => resultsApi.getTransformerReactive('ac_pf', fetchRange),
     enabled: acPfAvailable && winValid,
   })
 
@@ -558,6 +558,16 @@ export default function LoadFlow() {
 
   return (
     <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full text-sm [&>*]:shrink-0">
+
+      {/* ── Truncated-window banner (FIX 1 secondary, results-tabs-window
+          final review) — a narrow-but-wide window can still hit the
+          server's MAX_RESPONSE_VALUES cap even after the primary fix. ── */}
+      <WindowCapBanner payloads={[
+        tsLines, tsTrafos, priceTS as TSPayload | null,
+        ucResults?.status_grid as TSPayload | null | undefined,
+        voltagesTS as TSPayload | null, lineReactiveTS as TSPayload | null,
+        trafoReactiveTS as TSPayload | null,
+      ]} />
 
       {/* ── KPI strip ─────────────────────────────────────────── */}
       <section>

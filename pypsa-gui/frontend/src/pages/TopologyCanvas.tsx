@@ -19,6 +19,8 @@ import { projectsApi } from '../api/projects'
 import { rawFetchHeaders } from '../api/csrf'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
+import { updateAsset } from '../utils/assetWrite'
+import type { RescalePreview } from '../utils/rescale'
 import { isRenewableCarrier } from '../utils/carriers'
 import {
   registerPendingEdgeDelete, cancelPendingEdgeDelete,
@@ -305,7 +307,9 @@ const CENTER_HANDLE: React.CSSProperties = {
 const BUS_NODE_H = 30
 const BUS_NODE_MIN_W = 72
 
-function BusNode({ id, data, selected }: NodeProps) {
+// Exported so a test can render one node in isolation inside a
+// <ReactFlowProvider>. nodeTypes (:1786) still references it locally.
+export function BusNode({ id, data, selected }: NodeProps) {
   const { bus } = data as unknown as { bus: Bus }
   const color = getLineColor(bus.v_nom ?? 1)
   const overlapping = useContext(OverlapContext)
@@ -326,6 +330,10 @@ function BusNode({ id, data, selected }: NodeProps) {
 
   return (
     <div
+      // The drop hit-test's only handle on which bus was hit — the same
+      // attribute MapCanvas's busDivIcon publishes, so hooks/useAssetDrag.ts
+      // needs exactly one branch for both canvases (spec D25).
+      data-bus-name={bus.name}
       className="relative flex items-center gap-1.5 transition-all"
       style={{
         minWidth: BUS_NODE_MIN_W,
@@ -1886,28 +1894,18 @@ export default function TopologyCanvas() {
   const { data: stores = [] }     = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores })
 
   const saveBusMut = useMutation({
-    mutationFn: ({ name, fields }: { name: string; fields: Partial<Bus> }) => {
-      // Spread the full cached bus so the backend's remove+add cycle
-      // (in `_update_component`) doesn't reset the bus's other fields
-      // (`v_mag_pu_min/max/set`, `country`, `unit`, `sub_network`, …) to
-      // schema defaults. The canvas BusEditor only surfaces a subset of
-      // bus fields; without the spread, editing voltage on the schematic
-      // would wipe everything else. Same pattern as PropertiesPanel.BusPanel.
-      const cachedBuses = queryClient.getQueryData<Bus[]>(nk(useUIStore.getState().currentProject, 'buses')) ?? []
-      const current = cachedBuses.find(b => b.name === name)
-      if (!current) {
-        // Refuse the partial PUT on a cache miss — degrading to `fields` alone
-        // would let the backend's remove+add reset every omitted bus field to
-        // its schema default. The BusEditor only opens on a rendered (loaded)
-        // bus, so this is near-unreachable; throw rather than corrupt, matching
-        // MapCanvas's drag handler.
-        throw new Error(`Bus '${name}' not loaded yet — try the edit again in a moment.`)
-      }
-      const body: Partial<Bus> = { ...current, ...fields }
-      return networkApi.updateBus(name, body)
+    // The Asset-write chokepoint (utils/assetWrite.ts) owns fetch, spread,
+    // PUT and invalidation — the spread keeps un-surfaced bus fields
+    // (`v_mag_pu_min/max/set`, `country`, `unit`, `sub_network`, …) alive
+    // through the backend's remove+add cycle. The old throw-on-cache-miss
+    // is gone: the chokepoint FETCHES on a miss (ruling 3), so the
+    // near-unreachable cold-cache path now succeeds instead of erroring.
+    mutationFn: async ({ name, fields }: { name: string; fields: Partial<Bus> }) => {
+      const resp = await updateAsset<Bus>(
+        queryClient, useUIStore.getState().currentProject, 'buses', name, fields)
+      return resp as { name: string; rescale: RescalePreview[] }
     },
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: nk(useUIStore.getState().currentProject, 'buses') })
       // See utils/rescaleActions.ts — update_bus previews a per-km-preserving
       // impedance rescale whenever this edit changed x/y and a connected
       // line's length moved as a result. BusEditor is one of the four write

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import threading
 import time
+import uuid
 
 import pypsa
 
@@ -33,7 +34,10 @@ def _wait_until(pred, timeout: float = 60.0, interval: float = 0.05):
     raise AssertionError(f"condition not met within {timeout}s")
 
 
-def _wait_for_terminal(job_id: int, timeout: float = 90.0) -> dict:
+def _wait_for_terminal(job_id, timeout: float = 90.0) -> dict:
+    # `job_id` is usually a JSON-echoed string (`some_job["id"]`); `_jobs` is
+    # UUID-keyed, so it must be parsed before it can find anything.
+    job_id = uuid.UUID(str(job_id))
     _wait_until(
         lambda: (solve_queue.get_job(job_id) or {}).get("status")
         in ("completed", "failed", "aborted"),
@@ -84,18 +88,41 @@ def test_enqueue_nonexistent_project_404(client, tmp_projects_dir, session_ctx):
     assert solve_queue.list_jobs() == []
 
 
-def test_fifo_two_jobs_both_complete(client, install_network, tmp_projects_dir, session_ctx):
-    install_network(build_network(), name="P1")
+def test_fifo_two_distinct_projects_start_in_enqueue_order(
+    client, install_network, tmp_projects_dir, session_ctx
+):
+    """
+    FIFO ordering across two DISTINCT projects. Task 8's idempotent enqueue
+    made "two jobs of the SAME project" impossible via this route (the
+    second POST now returns the first job with `already_queued: true`), so
+    the two-project shape is the meaningful FIFO invariant left to assert
+    here — same project-setup shape as
+    `test_two_independent_projects_each_persist_own_results` below, which
+    covers persistence; this one is specifically about ORDER.
+
+    The dispatcher is ONE thread draining ONE `queue.Queue` (`self._q`,
+    `services/solve_queue.py`) strictly FIFO, and each job runs to
+    completion before the next is popped — so enqueue order must equal
+    start order: job A (enqueued first over a synchronous `TestClient` call,
+    so strictly before B) starts no later than job B, and B's `started_at`
+    is only set after A's ENTIRE `_run_job` (hydrate + solve + save)
+    returns. This is not a race: swap `self._q` for a `queue.LifoQueue` (or
+    otherwise pop the more-recently-enqueued job first) and B starts before
+    A, flipping the inequality below — verified by temporarily doing exactly
+    that monkeypatch during development; see task-8-report.md.
+    """
+    install_network(build_network(gens_weight=1.0), name="P1")
     _save_project(client, "P1")
+    install_network(build_network(gens_weight=3.0), name="P2")
+    _save_project(client, "P2")
 
     a = client.post("/api/simulation/queue", json={"project_id": "P1"}).json()
-    b = client.post("/api/simulation/queue", json={"project_id": "P1"}).json()
+    b = client.post("/api/simulation/queue", json={"project_id": "P2"}).json()
 
     da = _wait_for_terminal(a["id"])
     db = _wait_for_terminal(b["id"])
     assert da["status"] == "completed", da
     assert db["status"] == "completed", db
-    # FIFO: the first-enqueued job started no later than the second.
     assert da["started_at"] <= db["started_at"]
 
 
@@ -123,14 +150,24 @@ def test_abort_queued_job_is_skipped(client, install_network, tmp_projects_dir, 
     monkeypatch.setattr(pr, "_hydrate_context_from_disk", blocking_hydrate)
 
     a = client.post("/api/simulation/queue", json={"project_id": "P1"}).json()
-    b = client.post("/api/simulation/queue", json={"project_id": "P1"}).json()
+    # A second HTTP enqueue of the SAME project while one is active is now
+    # refused (idempotent enqueue, R15/R16: it returns job A again with
+    # `already_queued: true` instead of creating a job B). This test's subject
+    # is abort()'s queued-vs-running handling, not dedup, so build job B
+    # directly through the raw `enqueue()` — deliberately left unguarded for
+    # exactly this: the harness constructing a queue state directly
+    # (`services/solve_queue.py::enqueue_unique` docstring). Carry job A's
+    # `project_key` over so B is abortable through the HTTP route exactly like
+    # a router-enqueued job would be — an unkeyed job fails `_may_abort` closed
+    # outside local mode.
+    b_id = solve_queue.enqueue("P1", project_key=a["project_key"]).id
 
     # Job A is now running (blocked in hydrate); job B must be queued behind it.
-    _wait_until(lambda: solve_queue.get_job(a["id"])["status"] == "running")
-    assert solve_queue.get_job(b["id"])["status"] == "queued"
+    _wait_until(lambda: solve_queue.get_job(uuid.UUID(str(a["id"])))["status"] == "running")
+    assert solve_queue.get_job(b_id)["status"] == "queued"
 
     # Cancel the queued job B.
-    r = client.post(f"/api/simulation/queue/{b['id']}/abort")
+    r = client.post(f"/api/simulation/queue/{b_id}/abort")
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "aborted"
 
@@ -138,7 +175,7 @@ def test_abort_queued_job_is_skipped(client, install_network, tmp_projects_dir, 
     gate.set()
     da = _wait_for_terminal(a["id"])
     assert da["status"] == "completed", da
-    assert solve_queue.get_job(b["id"])["status"] == "aborted"
+    assert solve_queue.get_job(b_id)["status"] == "aborted"
 
     # clear_finished drops both terminal jobs — but the ROUTE is super-admin
     # only since P-1 (the queue is process-global, so a clear crosses every
@@ -202,8 +239,11 @@ def test_abort_running_solve_is_fast_and_next_job_starts(
 
     # Wait until P_SLOW is actually running AND has progressed past hydration +
     # modelling-assumptions into the native solve (so the abort lands mid-LP).
-    _wait_until(lambda: solve_queue.get_job(a["id"])["status"] == "running", timeout=30)
-    assert solve_queue.get_job(b["id"])["status"] == "queued"
+    _wait_until(
+        lambda: solve_queue.get_job(uuid.UUID(str(a["id"])))["status"] == "running",
+        timeout=30,
+    )
+    assert solve_queue.get_job(uuid.UUID(str(b["id"])))["status"] == "queued"
     time.sleep(3.0)  # let HiGHS get into the native solve window
 
     # Abort the RUNNING job. Must end `aborted` quickly (interrupt, not wait-out).
@@ -240,7 +280,10 @@ def test_enqueue_unsafe_name_is_404(client, tmp_projects_dir, session_ctx):
 
 
 def test_abort_unknown_job_is_404(client, session_ctx):
-    r = client.post("/api/simulation/queue/99999/abort")
+    # A well-formed but never-issued id, not a malformed string — this
+    # exercises the "parsed, not in `_jobs`" branch. The malformed-id branch
+    # is covered separately by test_solve_queue_uuid_ids.py.
+    r = client.post(f"/api/simulation/queue/{uuid.uuid4()}/abort")
     assert r.status_code == 404, r.text
 
 

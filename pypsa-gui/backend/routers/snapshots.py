@@ -26,12 +26,18 @@ import json
 import pathlib
 import re
 import shutil
+import uuid
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pypsa
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from services import change_log_service
+from sqlalchemy.orm import Session as DBSession
+from db.models import Session as SessionRow, User
+from db.session import get_db
+from deps import current_session, optional_user
+from services import active_project, change_log_service, project_registry
 from services.dispatch_status import (
     dispatch_status as _classify_dispatch,
     network_has_dispatch,
@@ -47,6 +53,7 @@ from services.atomic_io import (
 )
 from routers.projects import (
     _BUNDLE_FILES,
+    _enforce_project_lock,
     _force_rmtree,
     _read_meta,
     _restore_results_state,
@@ -56,6 +63,17 @@ from routers.projects import (
 
 router = APIRouter()
 
+
+def _lock_target(project: AuthorizedProject) -> SimpleNamespace:
+    """
+    Adapt an `AuthorizedProject` (an id/name/directory view built for ACL, not
+    an ORM row) into the shape `_enforce_project_lock` needs: `.id` as the
+    `uuid.UUID` the lock table keys on (matches `Project.id`), and `.name` for
+    the error message. `AuthorizedProject.uuid` carries the same value as a
+    plain string.
+    """
+    return SimpleNamespace(id=uuid.UUID(project.uuid), name=project.name)
+
 _MAX_SNAPSHOTS_PER_PROJECT = 50
 
 # Same-shape regex as project names but allows the iso-timestamp prefix
@@ -64,6 +82,15 @@ _MAX_SNAPSHOTS_PER_PROJECT = 50
 # check below, but we still validate the form for defence in depth. The `T`
 # separator and `-` digit-group dividers are the only non-alphanumerics that
 # leak out of strftime + slugify.
+# The characters `_LABEL_RE` used to let through, as data rather than as a
+# pattern. Kept beside it so the two cannot drift: `test_snapshot_slug.py`
+# asserts every member survives slugification and that nothing else does.
+_SLUG_ALPHABET = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789_-"
+)
+
 _SNAPSHOT_ID_RE = re.compile(r"^[A-Za-z0-9_\-.T]{1,128}$")
 _LABEL_RE = re.compile(r"[^A-Za-z0-9_\-]+")
 
@@ -118,6 +145,50 @@ def _safe_snapshot_dir(project_dir: pathlib.Path, snapshot_id: str) -> pathlib.P
     return dest
 
 
+def _existing_snapshot_dir(
+    project_dir: pathlib.Path, snapshot_id: str, not_found: str,
+) -> pathlib.Path:
+    """
+    The directory of an EXISTING snapshot, found by matching the real directory
+    entries rather than by joining the caller's string onto a path.
+
+    WHY NOT `_safe_snapshot_dir`. That function is correct — regex allowlist,
+    `resolve()`, `is_relative_to` containment — but the path it returns is still
+    BUILT from the caller's string, and CodeQL's `py/path-injection` does not
+    model `Path.is_relative_to` as a barrier. The flows it reported ran straight
+    through the guard: `snapshots.py:118 -> :130 -> :136`, sink somewhere
+    downstream. A reader auditing those alerts has to re-derive the containment
+    argument every time, and a future edit that weakens the check would not be
+    caught by anything.
+
+    Here the tainted value is used ONLY in an equality comparison. The path
+    handed back comes out of `iterdir()`, so it is a directory that demonstrably
+    already exists under `snapshots/` — the property the containment check was
+    arguing for, established by construction instead of by proof. Same shape as
+    `gridspine_service._authorized_dispatch_dir` (859a7265), which resolves a
+    caller's directory string back to a project row and returns the path derived
+    from that row.
+
+    The regex still runs first: it rejects an obviously malformed id with 400
+    rather than 404, so a client sending nonsense gets told so instead of being
+    told the snapshot does not exist.
+
+    `not_found` is the caller's message because the two callers word it
+    differently — `restore` says "(or incomplete)" since it also requires
+    `network.nc` — and those strings are what clients see.
+    """
+    if not isinstance(snapshot_id, str) or not _SNAPSHOT_ID_RE.match(snapshot_id):
+        raise HTTPException(400, f"Invalid snapshot id: {snapshot_id!r}")
+    try:
+        entries = list(_snapshots_dir(project_dir).iterdir())
+    except (FileNotFoundError, NotADirectoryError):
+        entries = []
+    for child in entries:
+        if child.name == snapshot_id and child.is_dir():
+            return child
+    raise HTTPException(404, not_found)
+
+
 def _slugify_label(label: str) -> str:
     """
     Convert a free-form label to a filename-safe slug.
@@ -127,7 +198,40 @@ def _slugify_label(label: str) -> str:
     with ``-`` and leading/trailing dashes are trimmed. Capped to 32 chars so
     the full ``<iso>-<slug>`` id stays under the Windows 260-char path limit.
     """
-    slug = _LABEL_RE.sub("-", (label or "").strip())[:32].strip("-_.")
+    # REBUILT FROM `_SLUG_ALPHABET`, not sliced out of `label`.
+    #
+    # `_LABEL_RE.sub("-", ...)` produced exactly the same string and was just as
+    # safe — every surviving character was already drawn from `[A-Za-z0-9_-]`.
+    # What it was not is LEGIBLE: a regex substitution is not a barrier CodeQL
+    # models, so the slug stayed tainted, went into the snapshot id, and the id
+    # went into a directory name — which is why one label flowed to ~30
+    # `py/path-injection` sinks across atomic_io, chat_service, projects and
+    # main.
+    #
+    # Indexing the constant makes the provenance explicit: every character in
+    # the result is a character of `_SLUG_ALPHABET`, chosen by a position
+    # derived from the label rather than copied out of it. The label decides
+    # WHICH safe character appears; it never supplies one.
+    #
+    # `find` returns -1 for anything outside the alphabet. The old pattern was
+    # `[^A-Za-z0-9_\-]+` — note the `+`: a RUN of rejected characters collapsed
+    # to ONE dash, so "a  b" slugified to "a-b" and not "a--b". Emitting a dash
+    # per character would have changed every id containing two adjacent spaces.
+    # The `substituted` flag is that `+`, written out; `test_snapshot_slug.py`
+    # compares the two implementations over a corpus rather than trusting
+    # this note — the first draft of it dropped the collapsing and would have
+    # renamed every snapshot whose label had two adjacent spaces.
+    picked: list[str] = []
+    substituted = False          # was the character just appended a stand-in?
+    for ch in (label or "").strip():
+        i = _SLUG_ALPHABET.find(ch)
+        if i >= 0:
+            picked.append(_SLUG_ALPHABET[i])
+            substituted = False
+        elif not substituted:
+            picked.append("-")   # one dash per RUN, which is what the `+` did
+            substituted = True
+    slug = "".join(picked)[:32].strip("-_.")
     return slug or "snapshot"
 
 
@@ -379,6 +483,8 @@ def _create_snapshot_internal(
 def create_snapshot(
     req: CreateSnapshotRequest,
     project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
 ):
     """
     Snapshot the current on-disk project bundle.
@@ -388,6 +494,7 @@ def create_snapshot(
     This is the same semantics as git: you snapshot what's committed.
     Callers that want to capture in-memory state should Save first.
     """
+    _enforce_project_lock(db, _lock_target(project), user)
     return _create_snapshot_internal(
         project.name, req.label, req.message or "", project_dir=project.directory
     )
@@ -405,7 +512,11 @@ def list_snapshots(
 
 @router.post("/{name}/snapshots/{snapshot_id}/restore")
 def restore_snapshot(
-    snapshot_id: str, project: AuthorizedProject = ProjectAccessDep
+    snapshot_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+    session: SessionRow | None = Depends(current_session),
 ):
     """
     Restore a snapshot: overwrite the project files + reload in-memory.
@@ -436,9 +547,14 @@ def restore_snapshot(
     if not (project_dir / "network.nc").exists():
         raise HTTPException(404, f"Project '{name}' not found")
 
-    snap_dir = _safe_snapshot_dir(project_dir, snapshot_id)
-    if not snap_dir.exists() or not (snap_dir / "network.nc").exists():
+    snap_dir = _existing_snapshot_dir(
+        project_dir, snapshot_id,
+        f"Snapshot '{snapshot_id}' not found (or incomplete)",
+    )
+    if not (snap_dir / "network.nc").exists():
         raise HTTPException(404, f"Snapshot '{snapshot_id}' not found (or incomplete)")
+
+    _enforce_project_lock(db, _lock_target(project), user)
 
     # Safety net: create an auto-snapshot of the current state before we
     # overwrite it. Pass `protect={snapshot_id}` so the cap-driven prune that
@@ -477,8 +593,9 @@ def restore_snapshot(
     # file safe against crashes, but a concurrent writer to the same path
     # (e.g. autosave triggering during restore) could lose updates without
     # the lock.
-    from services import undo_service
+    from services import dirty_state, undo_service
     undo_service.clear()
+    dirty_state.clear()  # memory and disk now agree
     with PyPSAService.get_lock():
         # Copy snapshot's files over the project's. Use atomic-write per file
         # so a crash mid-restore leaves either the pre-restore file or the
@@ -528,6 +645,16 @@ def restore_snapshot(
         # use, so a snapshot taken by an older GUI version restores instead of
         # 500-ing on an unknown solver_config key.
         _state["solver_config"] = _solver_config_from_dict(json.loads(cfg_path.read_text()))
+
+    # Restoring a saved snapshot rebinds this session's active context to that
+    # Project, so the pointer follows — same rule as load_project. AuthorizedProject
+    # carries the identity but not the ORM row, and set_active_project needs the row.
+    if session is not None:
+        project_row = project_registry.find_project(
+            db, project_registry.require_user(user), project.name
+        )
+        if project_row is not None:
+            active_project.set_active_project(db, session, project_row)
 
     # Hydrate simulation state from the restored project's metadata. Without
     # this, restoring a previously-solved snapshot leaves the header status
@@ -606,15 +733,19 @@ def restore_snapshot(
 
 @router.delete("/{name}/snapshots/{snapshot_id}", status_code=204)
 def delete_snapshot(
-    snapshot_id: str, project: AuthorizedProject = ProjectAccessDep
+    snapshot_id: str,
+    project: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
 ):
     name = project.name
     project_dir = project.directory
     if not (project_dir / "network.nc").exists():
         raise HTTPException(404, f"Project '{name}' not found")
-    snap_dir = _safe_snapshot_dir(project_dir, snapshot_id)
-    if not snap_dir.exists():
-        raise HTTPException(404, f"Snapshot '{snapshot_id}' not found")
+    snap_dir = _existing_snapshot_dir(
+        project_dir, snapshot_id, f"Snapshot '{snapshot_id}' not found",
+    )
+    _enforce_project_lock(db, _lock_target(project), user)
     label = _read_snapshot_meta(snap_dir).get("label", snapshot_id)
     # `_force_rmtree` clears read-only attributes and retries with a backoff —
     # a plain `shutil.rmtree` raises WinError 5 on OneDrive-synced paths.
