@@ -140,6 +140,51 @@ def test_entry_under_never_leaves_the_dist_tree(dist, tmp_path, hostile):
     assert main._entry_under(dist, hostile) is None
 
 
+def test_entry_under_refuses_a_symlink_out_of_the_dist_tree(dist, tmp_path):
+    """
+    THE ONE THE FIRST VERSION GOT WRONG, and the reason the containment check
+    is not decorative.
+
+    `iterdir()` yields a symlink as an ordinary child, so it matches by name,
+    and `is_file()` follows it. A walk that only checks "does each segment name
+    a real entry" therefore MATCHES, opens and serves `dist/escape.css ->
+    /etc/passwd`. The code this replaced resolved the path and failed
+    `is_relative_to`, so it 404'd — meaning the rewrite was a regression, not a
+    refactor, until the resolve came back.
+
+    An independent review found it; nothing in this file did, because no case
+    here had ever created a symlink.
+    """
+    secret = tmp_path / "SECRET.txt"
+    secret.write_text("backend source", encoding="utf-8")
+    (dist / "escape.css").symlink_to(secret)
+
+    assert main._entry_under(dist, "escape.css") is None
+
+
+def test_entry_under_still_serves_a_symlink_that_stays_inside(dist):
+    """
+    The other half, so the fix is a containment check and not a symlink ban:
+    the old code resolved and required containment, so a link pointing WITHIN
+    `dist` was served. That still holds.
+    """
+    (dist / "alias.css").symlink_to(dist / "brand.css")
+
+    got = main._entry_under(dist, "alias.css")
+    assert got is not None and got.read_text() == "body{}"
+
+
+def test_the_route_refuses_an_escaping_symlink(local_spa_client, dist, tmp_path):
+    """At the route, not just the helper: a 404, not the file's contents."""
+    secret = tmp_path / "SECRET.txt"
+    secret.write_text("backend source", encoding="utf-8")
+    (dist / "leak.css").symlink_to(secret)
+
+    resp = local_spa_client.get("/leak.css")
+    assert resp.status_code == 404, resp.text
+    assert "backend source" not in resp.text
+
+
 def test_entry_under_refuses_a_directory(dist):
     """`assets` exists but is not a file; FileResponse on a directory is a 500."""
     assert main._entry_under(dist, "assets") is None
