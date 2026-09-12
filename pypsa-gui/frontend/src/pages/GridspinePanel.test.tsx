@@ -38,6 +38,7 @@ const api = vi.hoisted(() => ({
   config: vi.fn(),
   updateConfig: vi.fn(),
   uploadReadback: vi.fn(),
+  uploadExternalDispatch: vi.fn(),
   readback: vi.fn(),
   figure: vi.fn(),
 }))
@@ -226,6 +227,71 @@ describe('GridspinePanel', () => {
     await userEvent.click(apply)
     await waitFor(() => expect(api.setDispatchSource).toHaveBeenCalledWith('Study A', { kind: 'from_project', project: 'Solved 39' }))
     await waitFor(() => expect(screen.getByTestId('dispatch-source-current').textContent).toContain('the solved network of Solved 39'))
+  })
+
+  it('takes the client\u2019s own tables as a fourth source, both files, and reports what was read', async () => {
+    api.uploadExternalDispatch.mockResolvedValue({
+      external: '/p/Study A/gridspine/uploads/external/market_dispatch.csv',
+      external_sha256: 'a'.repeat(64),
+      loads: '/p/Study A/gridspine/uploads/external/market_loads.csv',
+      loads_sha256: 'b'.repeat(64),
+      hours: 24, units: 10,
+    })
+    api.config.mockResolvedValueOnce(config).mockResolvedValue({
+      ...config,
+      from_external: '/p/Study A/gridspine/uploads/external/market_dispatch.csv',
+      from_external_loads: '/p/Study A/gridspine/uploads/external/market_loads.csv',
+      from_external_name: 'market_dispatch.csv',
+      from_external_loads_name: 'market_loads.csv',
+    })
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+
+    const apply = screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement
+    expect(apply.disabled).toBe(true)                    // no file chosen yet
+
+    const dispatch = new File(['unit_id,hour,p_mw,q_mvar,status\n'], 'market_dispatch.csv', { type: 'text/csv' })
+    const loads = new File(['bus,hour,p_mw,q_mvar\n'], 'market_loads.csv', { type: 'text/csv' })
+    await userEvent.upload(screen.getByLabelText(/dispatch table/i), dispatch)
+    // A CSV dispatch cannot carry the demand, so Apply waits for the second file
+    // rather than sending one the backend would refuse.
+    expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(true)
+    await userEvent.upload(screen.getByLabelText(/demand table/i), loads)
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+
+    await waitFor(() => expect(api.uploadExternalDispatch).toHaveBeenCalledWith('Study A', dispatch, loads))
+    await waitFor(() => expect(screen.getByTestId('dispatch-source-current').textContent)
+      .toContain('market_dispatch.csv'))
+  })
+
+  it('lets one workbook stand for both tables, and sends no demand file for it', async () => {
+    api.uploadExternalDispatch.mockResolvedValue({ hours: 24, units: 10 })
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+    const book = new File(['PK'], 'both.xlsx', { type: 'application/vnd.ms-excel' })
+    await userEvent.upload(screen.getByLabelText(/dispatch table/i), book)
+    // An Excel dispatch MAY carry both sheets, so Apply is live with one file.
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Apply' }) as HTMLButtonElement).disabled).toBe(false))
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    await waitFor(() => expect(api.uploadExternalDispatch).toHaveBeenCalledWith('Study A', book, null))
+  })
+
+  it('surfaces the producer\u2019s refusal inline, because that message is the actionable part', async () => {
+    // Inline rather than only a toast: the refusal names the units or columns
+    // that disagree, and an engineer reads it against their file. A toast that
+    // vanishes after three seconds is the wrong home for a list of ids.
+    api.uploadExternalDispatch.mockRejectedValue({
+      response: { status: 422, data: { detail: "external dispatch does not map to the detailed grid's units: missing [], unknown ['G99']" } },
+    })
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+    await userEvent.upload(screen.getByLabelText(/dispatch table/i), new File(['x'], 'd.xlsx'))
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    const shown = await screen.findByTestId('external-refusal')
+    expect(shown.textContent).toContain("unknown ['G99']")
   })
 
   it('shows the current source by project name when the config already names one', async () => {

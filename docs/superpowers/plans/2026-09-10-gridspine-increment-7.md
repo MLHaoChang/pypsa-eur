@@ -1,6 +1,6 @@
 # gridspine increment 7 — the client's own dispatch as a fourth source (spec stage 1, `producers/external.py`)
 
-**Status:** PROPOSED, 2026-09-10, after increment 6 landed on `master` in PR #8 (`fb6cb753`). Not started. This document exists to get scope agreed BEFORE code, because the obvious next items are all blocked on resources this environment does not have, and the choice of what to build instead is the owner's.
+**Status:** A1, A2 and A3 LANDED on `feat/gridspine-external-producer`, 2026-09-12. Proposed 2026-09-10, after increment 6 landed on `master` in PR #8 (`fb6cb753`). Not started. This document exists to get scope agreed BEFORE code, because the obvious next items are all blocked on resources this environment does not have, and the choice of what to build instead is the owner's.
 
 ## Why this increment is a scoping decision, not a task list
 
@@ -72,8 +72,8 @@ to two file inputs.
 ## Tasks
 
 - [x] A1 gridspine (`1eedeb82`, demand required in a follow-up commit): `producers/external.py`, the two-directional registry check, the typed column contract for both tables, the required loads table and the hours-agreement check, `StudyConfig.from_external` and its three-way exclusivity. 26 tests. Three mutations, each killing exactly its intended test: dropping the omitted-unit direction (only the "never mentions" test — and note the per-hour completeness check does NOT cover it, so that direction is load-bearing, not belt-and-braces); leaving `from_external` out of the exclusivity list (only the two parametrised exclusivity cases); disabling the hours-agreement check (only the hours test). Gate: `gridspine-tests` 593 passed / 2 skipped at A1, re-run after the demand change.
-- [ ] A2 backend: the fourth source in `gridspine_service` through the ACL path, upload storage with a sanitised basename, the driver's refusals as 422; router and chat argument rows. Mutation: an unsanitised upload name must turn the escape test red (increment 6 found this one needs a path-shaped name ending in `.csv` to bite).
-- [ ] A3 frontend: the fourth picker option and its file input, thin, last. Mutation: a picker that ignores the new source must turn exactly one test red.
+- [x] A2 backend (`8475c372` driver seam, `8864dab1` service/router): the fourth source in `gridspine_service` through the ACL path, upload storage with a sanitised basename, the driver's refusals as 422; router and chat argument rows. Mutation: an unsanitised upload name must turn the escape test red (increment 6 found this one needs a path-shaped name ending in `.csv` to bite).
+- [x] A3 frontend: the fourth picker option and its file input, thin, last. Mutation: a picker that ignores the new source must turn exactly one test red.
 - [ ] Vertical slice: a 39-bus study from a hand-written external CSV, ranked, bundled.
 - [ ] Gates before each path-limited commit: `gridspine-tests`, `gui-tests`, `npx tsc -b`, `npx vitest run`.
 

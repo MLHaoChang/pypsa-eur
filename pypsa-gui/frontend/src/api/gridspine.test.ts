@@ -87,6 +87,25 @@ describe('gridspineApi', () => {
     expect(body.get('branches')).toBe(br)
   })
 
+  it('uploads a client dispatch as multipart, with the loads file optional for a workbook', async () => {
+    const dispatch = new File(['unit_id,hour,p_mw,q_mvar,status\n'], 'market_dispatch.csv', { type: 'text/csv' })
+    const loads = new File(['bus,hour,p_mw,q_mvar\n'], 'market_loads.csv', { type: 'text/csv' })
+    await gridspineApi.uploadExternalDispatch('S', dispatch, loads)
+    let [url, body] = post.mock.lastCall as [string, FormData]
+    expect(url).toBe('/gridspine/S/dispatch-source/external')
+    expect(body.get('dispatch')).toBe(dispatch)
+    expect(body.get('loads')).toBe(loads)
+
+    // One workbook carrying both sheets: `loads` must be ABSENT, not an empty
+    // part — the backend passes None through to the producer, which then looks
+    // for the two sheets instead of refusing an unreadable second file.
+    const book = new File(['PK'], 'both.xlsx')
+    await gridspineApi.uploadExternalDispatch('S', book)
+    ;[url, body] = post.mock.lastCall as [string, FormData]
+    expect(body.get('dispatch')).toBe(book)
+    expect(body.has('loads')).toBe(false)
+  })
+
   it('reads the read-back summary and one figure from their own endpoints', async () => {
     await gridspineApi.readback('S')
     expect(get).toHaveBeenLastCalledWith('/gridspine/S/readback', expect.anything())
