@@ -1237,13 +1237,23 @@ def create_from_template(
     # refusal advises then fails FOREVER, because the committed row makes
     # every attempt 409 with "already exists" instead.
     PyPSAService.refuse_if_study_running("create a project from a template")
-    if template_id not in _TEMPLATE_DEFAULT_NAMES:
+    # The KEY from the registry, not the string off the URL. `in` already
+    # decided this is one of a fixed set, so the two are equal by construction
+    # — but only one of them is a value this module owns, and it is the one
+    # that goes on to name a directory. CodeQL reported the caller's string
+    # tainted into `_PROJECT_TEMPLATES_DIR / ... / "network.nc"`; a membership
+    # test is not a barrier it models, the same way `is_relative_to` and a
+    # `re.sub` allowlist are not.
+    template_key = next(
+        (known for known in _TEMPLATE_DEFAULT_NAMES if known == template_id), None
+    )
+    if template_key is None:
         raise HTTPException(
             404,
             f"Unknown template '{template_id}'. Available: "
             f"{', '.join(sorted(_TEMPLATE_DEFAULT_NAMES))}.",
         )
-    src_nc = _PROJECT_TEMPLATES_DIR / template_id / "network.nc"
+    src_nc = _PROJECT_TEMPLATES_DIR / template_key / "network.nc"
     if not src_nc.exists():
         raise HTTPException(
             404,
@@ -1253,7 +1263,7 @@ def create_from_template(
 
     # `name` is optional — default to the template's friendly name, then
     # uniquify so clicking the same template twice doesn't clobber the first.
-    requested = (name or "").strip() or _TEMPLATE_DEFAULT_NAMES[template_id]
+    requested = (name or "").strip() or _TEMPLATE_DEFAULT_NAMES[template_key]
     from services import project_registry
 
     project_registry.require_user(user)

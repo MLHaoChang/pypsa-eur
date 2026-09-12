@@ -94,7 +94,22 @@ def _resolve_claim_org_id(
     membership = _require_admin_actor(db, actor)
     if actor.is_super_admin:
         if requested_org_id is not None:
-            return requested_org_id
+            # The ROW's id, not the caller's, and the lookup is the point twice
+            # over. It is the existence check this branch never had: a
+            # super-admin naming an org that does not exist used to have the
+            # claim proceed and `taken_names` mkdir `projects_root/<that uuid>/`
+            # — a directory belonging to nobody. And it is what stops the value
+            # reaching a path as caller input: `str(org_id)` becomes a path
+            # segment in `storage_paths.taken_names`, which CodeQL reported
+            # (`py/path-injection`) and which the UUID type makes harmless but
+            # not evidently so.
+            organization = db.get(Organization, requested_org_id)
+            if organization is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No organization with id {requested_org_id}",
+                )
+            return organization.id
         if membership is not None:
             return membership.org_id
         raise HTTPException(status_code=400, detail="org_id is required for a super-admin without an organization")
