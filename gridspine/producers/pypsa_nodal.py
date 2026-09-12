@@ -218,6 +218,20 @@ def to_loads_table(n: pypsa.Network, net) -> pd.DataFrame:
         raise ContractError(
             f"PyPSA loads sit on buses the source grid has no load for: {missing}"
         )
+    # And the other direction, which went unchecked: a network that has LOST a
+    # load (deleted in the GUI, or never carried) produces a table covering all
+    # but that bus. It parses, it validates, and `snapshot_metrics` then ranks
+    # the year on a `load_mw` short by that whole bus — until `apply_snapshot`
+    # refuses it three stages later, under the `loadflow` stage, for a defect
+    # that belongs to this producer. The external producer checks both
+    # directions of exactly this correspondence (`_check_load_buses`).
+    unmentioned = sorted(set(ratio) - set(bus_of))
+    if unmentioned:
+        raise ContractError(
+            "the source grid carries load at buses the PyPSA network has no load "
+            f"for: {unmentioned} — the demand table would be short by them at "
+            "every hour"
+        )
 
     rows = []
     for hour, snap in enumerate(n.snapshots):

@@ -61,6 +61,7 @@ every snapshot it appears in. This module therefore does no numeric cleaning of
 its own: it maps column NAMES and hands the values over untouched. Everything
 the contract rejects stays rejected.
 """
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -172,6 +173,26 @@ def _read_frame(path: Path, sheet: str | None = None) -> pd.DataFrame:
     return frame
 
 
+#: pandas de-duplicates a repeated header by appending `.1`, `.2`, ... BEFORE
+#: anything here sees the frame, so the literal duplicate — the same name twice,
+#: which is what a hand-edited export actually contains — arrived as a name that
+#: matches no alias and was dropped without a word. Undoing the rename is the
+#: only way to see it: `p_mw` twice must be as ambiguous as `p_mw` + `P [MW]`.
+_DEDUPLICATED = re.compile(r"^(?P<base>.+)\.\d+$")
+
+
+def _alias_target(column: object, aliases: dict) -> str | None:
+    """The contract column `column` names, looking through pandas' duplicate
+    suffix when the raw header matches nothing."""
+    text = str(column)
+    target = aliases.get(_normalise(text))
+    if target is None:
+        match = _DEDUPLICATED.match(text)
+        if match:
+            target = aliases.get(_normalise(match.group("base")))
+    return target
+
+
 def _map_columns(frame: pd.DataFrame, filename: str, aliases: dict,
                  contract: dict) -> pd.DataFrame:
     """Client headers -> contract columns, refusing ambiguity rather than
@@ -179,7 +200,7 @@ def _map_columns(frame: pd.DataFrame, filename: str, aliases: dict,
     be discarded silently, and the client would have no way to know which."""
     mapped: dict[str, list[object]] = {}
     for column in frame.columns:
-        target = aliases.get(_normalise(column))
+        target = _alias_target(column, aliases)
         if target is not None:
             mapped.setdefault(target, []).append(column)
 

@@ -123,6 +123,41 @@ class StudyConfig:
         return cls(**data)
 
 
+def _with_actual_hours(common: dict, dispatch) -> dict:
+    """`common` with the config's `hours` replaced by the dispatch's own count.
+
+    `hours` is an input to the rolling unit commitment and means nothing for a
+    source that brings its own hours — but it was carried into the manifest's
+    `config` untouched, so a 2-hour study from a client's file was recorded as
+    `"hours": 2` beside `"config": {"hours": 8760}`, and the config is the half
+    `get_config` hands the UI and the copilot. One manifest, one hour count.
+    """
+    return {
+        **common,
+        "config_json": {
+            **common["config_json"],
+            "hours": int(dispatch["hour"].nunique()),
+        },
+    }
+
+
+def _clear_stale_errors(outdir) -> None:
+    """Remove the PREVIOUS run's `error_<stage>.json` artifacts.
+
+    `drivers.status.stage_status` reads them as the state of the run, and nothing
+    ever removed one — while the run directory is per project and reused, so a
+    study that failed at its dispatch stage made the next, successful run of the
+    same project report `failed` over a complete manifest and real bundles. An
+    error artifact describes a run, so clearing them is the first thing a run
+    does; anything this run fails at writes its own.
+    """
+    out = Path(outdir)
+    if not out.is_dir():
+        return
+    for path in out.glob("error_*.json"):
+        path.unlink(missing_ok=True)
+
+
 def run_study(config: StudyConfig, progress=None, stop_event=None):
     """Run `config` to a `StudyResult`, reporting progress and honouring a stop.
 
@@ -140,6 +175,7 @@ def run_study(config: StudyConfig, progress=None, stop_event=None):
     """
     if not isinstance(config, StudyConfig):
         raise ContractError(f"run_study takes a StudyConfig, got {type(config).__name__}")
+    _clear_stale_errors(config.outdir)
     bus = Progress(progress, stop_event)
     common = dict(
         k=config.k, screen=config.screen,
@@ -154,7 +190,8 @@ def run_study(config: StudyConfig, progress=None, stop_event=None):
             config.from_network, config.outdir, progress=bus,
         )
         return study_dispatch(
-            config.outdir, net, registry, dispatch, loads, dispatch_source=source, **common,
+            config.outdir, net, registry, dispatch, loads, dispatch_source=source,
+            **_with_actual_hours(common, dispatch),
         )
     if config.from_external is not None:
         net, registry, dispatch, loads, source = dispatch_from_external(
@@ -162,7 +199,8 @@ def run_study(config: StudyConfig, progress=None, stop_event=None):
             progress=bus,
         )
         return study_dispatch(
-            config.outdir, net, registry, dispatch, loads, dispatch_source=source, **common,
+            config.outdir, net, registry, dispatch, loads, dispatch_source=source,
+            **_with_actual_hours(common, dispatch),
         )
     net, registry, dispatch, loads = dispatch_year(
         config.outdir, hours=config.hours, window=config.window,

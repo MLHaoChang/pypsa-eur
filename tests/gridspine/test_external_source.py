@@ -383,6 +383,27 @@ def test_one_workbook_with_both_sheets_is_accepted(tmp_path):
     assert source["loads"] == str(path)
 
 
+def test_a_literally_duplicated_header_is_refused_rather_than_silently_dropped(tmp_path):
+    """The ambiguity guard keyed on the NORMALISED header, and pandas renames a
+    repeated header before the guard ever sees it: a second `p_mw` arrives as
+    `p_mw.1`, which normalises to `pmw1` and matches no alias. So the duplicate
+    that an actual hand-edited export contains — the same name twice, not two
+    spellings of it — was the one case that slipped through, and the column was
+    discarded with no message. `p_mw` + `P [MW]` was caught all along; that is
+    the case the existing test pins.
+    """
+    raw = tmp_path / "dispatch.csv"
+    raw.write_text(
+        "unit_id,hour,p_mw,p_mw,q_mvar,status\n"
+        "G1,0,100,-999,0,1\nG1,1,100,-999,0,1\n"
+        "G2,0,100,-999,0,1\nG2,1,100,-999,0,1\n"
+    )
+    with pytest.raises(ContractError) as exc:
+        tables_from_external(raw, _loads(tmp_path), _registry(), load_buses=DEMAND_BUSES)
+    message = str(exc.value)
+    assert "more than one column" in message and "p_mw" in message
+
+
 # ────────── the demand buses, checked the way the units are ────────────────
 #
 # The unit set is checked in both directions (above). The DEMAND buses were

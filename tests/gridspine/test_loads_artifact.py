@@ -200,6 +200,29 @@ def test_apply_snapshot_moves_the_load_to_the_hour(case39_loads):
     assert abs(float(net.load["p_mw"].sum()) - native_total) > 0.05 * native_total
 
 
+def test_a_network_that_drops_one_of_the_grids_load_buses_is_refused_by_the_producer():
+    """The direction `to_loads_table` did not check, and the one the external
+    producer's `_check_load_buses` closed for a client's file.
+
+    A saved project whose network has lost a load — deleted in the GUI, or never
+    carried — produces a demand table covering 20 of case39's 21 load buses.
+    Nothing refused it HERE, so `snapshot_metrics` computed `load_mw` short by
+    that whole bus, and `metrics.csv`, `dc_sensitivities.npz`, `n1_severity_dc`
+    and `selected.csv` were all written from it before `apply_snapshot` raised
+    about a bus the table does not cover — recorded under stage `loadflow`,
+    though the cause was the dispatch producer. Both directions belong where the
+    table is BUILT.
+    """
+    net = load_case39()
+    n = to_pypsa(net)
+    victim = str(n.loads.index[0])
+    n.remove("Load", victim)
+    with pytest.raises(ContractError) as exc:
+        to_loads_table(n, net)
+    message = str(exc.value)
+    assert str(net.bus.loc[net.load["bus"], "name"].iloc[0]) in message or "load" in message.lower()
+
+
 def test_apply_snapshot_rejects_a_bus_the_loads_table_does_not_cover():
     """Fail closed: an unset net.load keeps its native value, which IS the
     increment-1 defect. Silently leaving one behind must not be possible."""

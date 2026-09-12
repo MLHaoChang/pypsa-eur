@@ -89,9 +89,13 @@ def studied(client_tables, tmp_path_factory):
     dispatch_path, loads_path, _d, _l = client_tables
     out = tmp_path_factory.mktemp("external-studied")
     ticks = []
+    # `hours` is deliberately NOT set: an external source does not generate a
+    # year, so the field describes nothing, and leaving it at its 8760 default is
+    # what a caller who uploads a file actually does. The manifest has to come
+    # out saying 2 in both places — see the test below.
     config = StudyConfig(
         outdir=out, from_external=dispatch_path, from_external_loads=loads_path,
-        k=1, screen=True, hours=HOURS,
+        k=1, screen=True,
     )
     result = run_study(
         config, progress=lambda stage, done, total: ticks.append((stage, done, total)),
@@ -166,3 +170,15 @@ def test_the_config_in_the_manifest_records_the_source_it_ran_from(studied, clie
     assert config["from_external"] == str(dispatch_path)
     assert config["from_external_loads"] == str(loads_path)
     assert config["from_network"] is None and config["from_dispatch"] is None
+
+
+def test_the_manifest_does_not_contradict_itself_about_the_hour_count(studied):
+    """`hours` is an input to the rolling unit commitment and means nothing for a
+    source that brings its own hours. It was passed through into the manifest's
+    `config` untouched, so a 2-hour study from a client file was recorded as
+    `"hours": 2` beside `"config": {"hours": 8760}` — and the config is what
+    `get_config` hands the UI and the copilot."""
+    out, _result, _ticks = studied
+    manifest = json.loads((out / "manifest.json").read_text())
+    assert manifest["hours"] == HOURS
+    assert manifest["config"]["hours"] == HOURS
