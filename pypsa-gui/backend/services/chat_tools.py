@@ -4401,7 +4401,6 @@ def explain_investment(component_class: str, name: str) -> dict:
 DISPATCHERS: dict[str, Any] = {
     # read (22)
     "list_components": list_components,
-    "diagnose_network": diagnose_network,
     "get_component": get_component,
     "get_meta": get_meta,
     "list_snapshots": list_snapshots,
