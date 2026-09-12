@@ -333,6 +333,40 @@ def get_solver_config():
     return asdict(_state["solver_config"])
 
 
+def user_code_authorized(db, actor) -> bool:
+    """
+    True iff `actor` may set `extra_functionality_code` in this deployment.
+
+    The ONE definition of that authorization, because the PUT below is not the
+    only writer of the field: `routers/projects.import_bundle` takes a bundle's
+    `solver_config.json`, and `_solver_config_from_dict` filters to the live
+    `SolverConfig` field set — of which this is one. A member refused here
+    reached the identical capability through a zip until both edges shared this
+    predicate (found by an independent QA review, 2026-09-12; see
+    tests/test_user_code_import_bypass.py). A field is only as gated as its
+    least-guarded writer.
+
+    Both conditions are required, and neither overrides the other: the operator
+    opted in via the process-wide flag, AND the caller is an org admin. Local
+    mode is exempt from the admin half — the desktop build has one seeded
+    identity and no org to be an admin of.
+    """
+    import local_mode
+
+    if local_mode.is_local_mode():
+        return True
+
+    from services.solver_service import user_code_enabled
+
+    if not user_code_enabled():
+        return False
+    if actor is None:
+        return False
+    from services.tenancy_service import is_org_admin
+
+    return is_org_admin(db, actor)
+
+
 def _gate_user_code(submitted: dict, db, actor) -> None:
     """
     Refuse a non-admin's attempt to set `extra_functionality_code`.
@@ -371,6 +405,9 @@ def _gate_user_code(submitted: dict, db, actor) -> None:
 
     from services.solver_service import user_code_enabled
 
+    # Split rather than one `user_code_authorized` call so each refusal keeps
+    # its own message: "the operator never opted in" and "you are not an admin"
+    # are different problems with different remedies.
     if not user_code_enabled():
         raise HTTPException(
             status_code=403,

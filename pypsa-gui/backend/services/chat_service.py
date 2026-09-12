@@ -4774,16 +4774,15 @@ def _result_to_anthropic_content(result: Any) -> Any:
     one (see
     `docs/superpowers/findings/2026-09-10-a-tool-result-can-close-the-untrusted-fence.md`).
 
-    This wraps ONLY the success path; the `is_error` tool_result content (built
-    in _dispatch_tool_use) stays unwrapped. That was justified as "short typed
-    error_kinds the model must act on, not untrusted free text", which is true
-    of three of the four is_error sites (`"tool_timeout"`, `"unknown_tool"`, the
-    `error_kind` string) and NOT true of the fourth, which passes up to 1000
-    chars of exception text — and an exception message routinely interpolates a
-    component name. That path is therefore untrusted free text in an unfenced
-    region. Left as-is here deliberately: fencing it changes the model-facing
-    text on every tool error and needs its own decision about separating the
-    typed kind from the free-text detail. Tracked in the finding above.
+    This wraps ONLY the success path. The `is_error` content is built by
+    `_error_result_content`, which fences its own free-text half — so the error
+    path is no longer unfenced, and this docstring no longer claims it is. It
+    said the opposite (that leaving is_error unwrapped was a deliberate choice
+    pending a decision) for one session after that decision was made and acted
+    on; an independent QA review caught the contradiction. Kept as a pointer
+    rather than deleted, because the reasoning still matters: three of the four
+    is_error sites pass a typed constant and need no fence, and the fourth
+    passes exception text, which does.
     """
     if isinstance(result, str):
         body = result
