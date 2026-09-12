@@ -35,7 +35,6 @@ asked for.
 """
 from __future__ import annotations
 
-import threading
 import time
 from dataclasses import dataclass, field
 
@@ -83,8 +82,34 @@ class _Campaign:
     entries: list[dict] = field(default_factory=list)
 
 
-_LOCK = threading.Lock()
-_ACTIVE: _Campaign | None = None
+# Review finding 5: this was a module global while every study record it gates
+# lives in the per-project context (`STUDY_KEYS` sits beside `RESULT_STATE_KEYS`
+# in services/project_context.py for exactly this reason). On a multi-user
+# server that meant two tenants sharing one budget — and a refusal that quoted
+# the OTHER tenant's objective text back, free text one user typed surfacing to
+# another, the shape of
+# docs/superpowers/findings/2026-08-27-lock-holder-email-reaches-the-model.md.
+#
+# The campaign now lives in the active context's `solver_state`, under its own
+# lock, beside the study records. `reset_network` gives each test and each
+# fresh project a clean one by construction.
+_CAMPAIGN_KEY = "adequacy_campaign"
+
+
+def _context():
+    from services.pypsa_service import PyPSAService
+    return PyPSAService.get_active_context()
+
+
+def _get(ctx) -> _Campaign | None:
+    return ctx.solver_state.get(_CAMPAIGN_KEY)
+
+
+def _put(ctx, campaign: _Campaign | None) -> None:
+    if campaign is None:
+        ctx.solver_state.pop(_CAMPAIGN_KEY, None)
+    else:
+        ctx.solver_state[_CAMPAIGN_KEY] = campaign
 
 
 def _iso(ts: float) -> str:
@@ -104,15 +129,14 @@ def _snapshot(campaign: _Campaign, *, active: bool = True) -> dict:
 
 
 def reset() -> None:
-    """Drop any active campaign. For test isolation and hard resets only."""
-    global _ACTIVE
-    with _LOCK:
-        _ACTIVE = None
+    """Drop the active context's campaign. Test isolation and hard resets."""
+    ctx = _context()
+    with ctx.solver_state_lock:
+        _put(ctx, None)
 
 
 def start(objective: str, budget_solves: int | None = None) -> dict:
     """Open a campaign. Refuses while one is already open."""
-    global _ACTIVE
     objective = (objective or "").strip()
     if not objective:
         raise CampaignError(
@@ -129,34 +153,44 @@ def start(objective: str, budget_solves: int | None = None) -> dict:
             f"{budget}). Past that a run stops being a campaign and becomes an "
             f"overnight job, which a person should start deliberately")
 
-    with _LOCK:
-        if _ACTIVE is not None:
+    ctx = _context()
+    with ctx.solver_state_lock:
+        active = _get(ctx)
+        if active is not None:
+            # The objective is NOT quoted back. It is free text someone typed,
+            # and on a shared context the someone need not be the caller —
+            # campaign_status is the authorised way to read it.
             raise CampaignError(
-                f"a campaign is already running ('{_ACTIVE.objective}', "
-                f"{_ACTIVE.spent_solves}/{_ACTIVE.budget_solves} solves "
+                f"a campaign is already running "
+                f"({active.spent_solves}/{active.budget_solves} solves "
                 f"spent). End it first — starting a second would silently "
-                f"discard the first one's log")
-        _ACTIVE = _Campaign(objective=objective, budget_solves=budget,
-                            started_at=time.time())
-        return _snapshot(_ACTIVE)
+                f"discard the first one's log; read campaign_status for what "
+                f"it is working on")
+        campaign = _Campaign(objective=objective, budget_solves=budget,
+                             started_at=time.time())
+        _put(ctx, campaign)
+        return _snapshot(campaign)
 
 
 def status() -> dict:
     """The active campaign, or `{"active": False}`."""
-    with _LOCK:
-        if _ACTIVE is None:
+    ctx = _context()
+    with ctx.solver_state_lock:
+        active = _get(ctx)
+        if active is None:
             return {"active": False, "entries": []}
-        return _snapshot(_ACTIVE)
+        return _snapshot(active)
 
 
 def end(note: str | None = None) -> dict:
     """Close the campaign and return its final record."""
-    global _ACTIVE
-    with _LOCK:
-        if _ACTIVE is None:
+    ctx = _context()
+    with ctx.solver_state_lock:
+        active = _get(ctx)
+        if active is None:
             raise CampaignError("no campaign is running")
-        final = _snapshot(_ACTIVE, active=False)
-        _ACTIVE = None
+        final = _snapshot(active, active=False)
+        _put(ctx, None)
     if note:
         final["note"] = str(note)[:MAX_OBJECTIVE_LEN]
     return final
@@ -174,35 +208,38 @@ def check(study: str, solves: int) -> None:
     if study not in CHARGEABLE:
         raise CampaignBudgetError(f"unknown study '{study}'",
                                   error_kind="unknown_study")
-    with _LOCK:
-        if _ACTIVE is None:
+    ctx = _context()
+    with ctx.solver_state_lock:
+        active = _get(ctx)
+        if active is None:
             return
-        remaining = _ACTIVE.budget_solves - _ACTIVE.spent_solves
+        remaining = active.budget_solves - active.spent_solves
         if solves > remaining:
             raise CampaignBudgetError(
                 f"'{study}' needs up to {solves} solve(s) and the campaign has "
-                f"{remaining} of {_ACTIVE.budget_solves} left "
-                f"(objective: {_ACTIVE.objective}). Report what the campaign "
-                f"has established so far and ask before spending more — or "
-                f"narrow the study (fewer frontier targets, a smaller "
-                f"max_solves) to fit")
+                f"{remaining} of {active.budget_solves} left. Report what the "
+                f"campaign has established so far and ask before spending "
+                f"more — or narrow the study (fewer frontier targets, a "
+                f"smaller max_solves) to fit")
 
 
 def record(study: str, solves: int) -> dict | None:
     """Charge a STARTED study. Returns the new status, or None if idle."""
-    with _LOCK:
-        if _ACTIVE is None:
+    ctx = _context()
+    with ctx.solver_state_lock:
+        active = _get(ctx)
+        if active is None:
             return None
-        if len(_ACTIVE.entries) >= MAX_ENTRIES:
+        if len(active.entries) >= MAX_ENTRIES:
             raise CampaignBudgetError(
                 f"campaign log is full ({MAX_ENTRIES} entries)")
-        _ACTIVE.spent_solves += int(solves)
-        _ACTIVE.entries.append({
+        active.spent_solves += int(solves)
+        active.entries.append({
             "study": study,
             "solves_charged": int(solves),
             "at": _iso(time.time()),
         })
-        return _snapshot(_ACTIVE)
+        return _snapshot(active)
 
 
 def estimate_solves(n, study: str, **kwargs) -> int:
@@ -218,10 +255,17 @@ def estimate_solves(n, study: str, **kwargs) -> int:
         # sampled off one snapshot.
         return 0
 
+    # Review finding 4: every one of these ends with a full re-solve that the
+    # route's own budget explicitly EXCLUDES — the frontier's `_restore_base`,
+    # both loops' `_restore_closing` — and `coupling.py` says so in as many
+    # words: "the wall-time budget the route promises is `max_solves + 1` (the
+    # closing restore is outside it)". The sweep's `+ 1` was always here; the
+    # others were undercharging by exactly that restore, so a campaign could
+    # overrun its budget by one solve per study.
     if study == "frontier":
         from services.adequacy.frontier import DEFAULT_TARGETS_PERMYRIAD
         targets = kwargs.get("targets_permyriad") or DEFAULT_TARGETS_PERMYRIAD
-        return len(list(targets))
+        return len(list(targets)) + 1
 
     if study == "fmea_sweep":
         from services.adequacy.sweep import class_b_contingencies
@@ -236,9 +280,11 @@ def estimate_solves(n, study: str, **kwargs) -> int:
         from services.adequacy.coupling import MAX_LOOP_SOLVES
         max_solves = kwargs.get("max_solves")
         budget = MAX_LOOP_SOLVES if max_solves is None else int(max_solves)
-        # The margin loop measures its starting point with a probing solve
-        # BEFORE the budget (spec §2.3), so it costs one more than it says.
-        return budget + (1 if study == "margin_loop" else 0)
+        # +1 for the closing restore, outside the route's budget (above), and
+        # the margin loop pays ANOTHER for the probing solve that measures its
+        # starting margin before the budget opens (spec §2.3). So the cap loop
+        # costs budget + 1 and the margin loop budget + 2.
+        return budget + (2 if study == "margin_loop" else 1)
 
     raise CampaignBudgetError(f"unknown study '{study}'",
                               error_kind="unknown_study")

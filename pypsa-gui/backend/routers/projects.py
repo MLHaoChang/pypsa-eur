@@ -87,7 +87,16 @@ PROJECTS_DIR = pathlib.Path(get_settings().flat_projects_root)
 # `SIDECAR_NAME` constants (a router-level import of the adequacy services
 # is a cycle waiting to happen); `test_bundle_sidecars` pins them equal.
 _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.json", "layout.json", "results_state.pkl",
-                 "adequacy_worksheet.json", "adequacy_stress_scenarios.json")
+                 "adequacy_worksheet.json", "adequacy_stress_scenarios.json",
+                 # Review finding S7, third recurrence: the outage-rate
+                 # provenance ledger. Dropping it on a bundle/snapshot/fork is
+                 # not cosmetic — `study_report._evidence_gaps` reads it, so a
+                 # restored project reports every asset-level rate as
+                 # `unsourced` and a clean study grows a provenance gap it does
+                 # not have. test_bundle_sidecars now enumerates every
+                 # SIDECAR_NAME under services/adequacy/ so a fourth sidecar
+                 # cannot repeat this.
+                 "asset_health.json")
 
 # Per-project subdirectories that travel alongside the bundle FILES on every
 # project-to-project transition. Chatbot uploads (Phase A) live here under

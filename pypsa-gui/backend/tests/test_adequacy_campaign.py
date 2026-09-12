@@ -58,6 +58,43 @@ def test_a_second_campaign_is_refused_while_one_is_open():
         C.start("second")
 
 
+def test_a_refusal_does_not_quote_the_running_objective_back():
+    """
+    Review finding 5. The objective is free text somebody typed, and on a
+    shared context that somebody need not be the caller — the shape of the
+    lock-holder-email finding. campaign_status is the authorised way to read
+    it.
+    """
+    C.start("decommission the Hunterston units before 2032")
+    with pytest.raises(C.CampaignError) as exc:
+        C.start("something else")
+    assert "Hunterston" not in str(exc.value)
+    assert "campaign_status" in str(exc.value)
+
+
+def test_the_budget_refusal_does_not_quote_it_either():
+    C.start("decommission the Hunterston units before 2032", 1)
+    C.record("frontier", 1)
+    with pytest.raises(C.CampaignBudgetError) as exc:
+        C.check("frontier", 5)
+    assert "Hunterston" not in str(exc.value)
+
+
+def test_the_campaign_lives_in_the_project_context_not_a_module_global():
+    """
+    Every study record this gates lives in the per-project context. A module
+    global meant two tenants sharing one budget on a multi-user server.
+    """
+    from services.pypsa_service import PyPSAService
+
+    C.start("x", 10)
+    ctx = PyPSAService.get_active_context()
+    assert C._CAMPAIGN_KEY in ctx.solver_state
+    assert not hasattr(C, "_ACTIVE"), "the module global is gone"
+    C.end()
+    assert C._CAMPAIGN_KEY not in ctx.solver_state
+
+
 @pytest.mark.parametrize("budget", [0, -1, C.MAX_BUDGET_SOLVES + 1])
 def test_an_out_of_range_budget_is_refused(budget):
     with pytest.raises(C.CampaignError, match="budget_solves"):
@@ -107,7 +144,10 @@ def test_a_study_that_would_overrun_is_refused_with_the_numbers():
         C.check("margin_loop", 9)
     message = str(exc.value)
     assert "9" in message and "2 of 10" in message
-    assert "hit LOLE <= 3 h/yr" in message, "the objective has to be named"
+    # The objective is deliberately NOT quoted — see
+    # test_the_budget_refusal_does_not_quote_it_either. The numbers are what
+    # the agent needs to decide; the objective it already knows.
+    assert "hit LOLE <= 3 h/yr" not in message
 
 
 def test_a_study_that_exactly_fits_is_allowed():
@@ -152,33 +192,43 @@ def test_monte_carlo_is_charged_nothing_because_it_solves_nothing():
     assert C.estimate_solves(_network(), "mc", draws=2000) == 0
 
 
-def test_the_frontier_costs_one_solve_per_target():
+def test_the_frontier_costs_one_solve_per_target_plus_its_restore():
+    """
+    Review finding 4: the closing `_restore_base` is a full re-solve the
+    route's own budget excludes, so the worst case is targets + 1.
+    """
     n = _network()
     assert C.estimate_solves(n, "frontier",
-                             targets_permyriad=[1.0, 2.0, 3.0]) == 3
+                             targets_permyriad=[1.0, 2.0, 3.0]) == 4
 
 
 def test_the_frontier_default_matches_the_engine_not_a_restated_constant():
     from services.adequacy.frontier import DEFAULT_TARGETS_PERMYRIAD
 
     assert C.estimate_solves(_network(), "frontier") == len(
-        DEFAULT_TARGETS_PERMYRIAD)
+        DEFAULT_TARGETS_PERMYRIAD) + 1
 
 
-def test_a_loop_costs_its_own_solve_budget():
+def test_a_loop_costs_its_own_budget_plus_the_closing_restore():
+    """
+    `coupling.py`: "the wall-time budget the route promises is
+    `max_solves + 1` (the closing restore is outside it)". Charging only
+    `max_solves` let a campaign overrun by one solve per study.
+    """
     from services.adequacy.coupling import MAX_LOOP_SOLVES
 
     n = _network()
-    assert C.estimate_solves(n, "coupling_loop") == MAX_LOOP_SOLVES
-    assert C.estimate_solves(n, "coupling_loop", max_solves=3) == 3
+    assert C.estimate_solves(n, "coupling_loop") == MAX_LOOP_SOLVES + 1
+    assert C.estimate_solves(n, "coupling_loop", max_solves=3) == 4
 
 
-def test_the_margin_loop_costs_one_more_than_it_says():
+def test_the_margin_loop_pays_for_its_probe_as_well():
     """
-    Its starting margin is a MEASUREMENT taken by a probing solve that runs
-    before the budget (spec 2.3) — so the honest charge is budget + 1.
+    It pays TWO solves outside its budget: the probing solve that measures its
+    starting margin (spec 2.3) and the closing restore every study runs.
     """
     n = _network()
+    assert C.estimate_solves(n, "margin_loop", max_solves=3) == 5
     assert (C.estimate_solves(n, "margin_loop", max_solves=3)
             == C.estimate_solves(n, "coupling_loop", max_solves=3) + 1)
 

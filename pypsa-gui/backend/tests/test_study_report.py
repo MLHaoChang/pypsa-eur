@@ -145,11 +145,97 @@ def test_a_converged_mc_still_carries_its_interval():
     assert any("interval" in d for d in report["required_disclosures"])
 
 
-def test_a_loop_forces_the_horizon_basis_sentence():
+# ── Time basis: read, never asserted (review finding 1) ────────────────────
+
+
+def test_an_annual_loop_is_not_told_its_hours_are_per_horizon():
+    """
+    The loops state a `basis`, derived at run time; on a modelled year it is
+    `hours_per_year`. Hardcoding "horizon-basis, not h/yr" made a MANDATORY
+    disclosure FALSE on exactly the annual networks a client study uses.
+    """
+    read = _read_with(margin_loop={"status": "done", "iterations": [],
+                                   "basis": "hours_per_year"})
+    disclosures = R.build_study_report(_network(), read)["required_disclosures"]
+    assert any("hours per YEAR" in d for d in disclosures)
+    assert not any("per HORIZON" in d for d in disclosures)
+
+
+def test_a_multi_year_loop_is_told_to_convert():
+    read = _read_with(coupling_loop={"status": "done", "iterations": [],
+                                     "basis": "hours_per_horizon"})
+    disclosures = R.build_study_report(_network(), read)["required_disclosures"]
+    assert any("per HORIZON" in d and "convert" in d for d in disclosures)
+
+
+def test_a_loop_with_no_stated_basis_refuses_to_pick_one():
+    """
+    Silence is not an annual basis — that is the direction that gets a number
+    compared to a standard it has no relation to.
+    """
     read = _read_with(margin_loop={"status": "done", "iterations": []})
-    report = R.build_study_report(_network(), read)
-    assert any("HORIZON-basis hours" in d
-               for d in report["required_disclosures"])
+    disclosures = R.build_study_report(_network(), read)["required_disclosures"]
+    assert any("states no `basis`" in d for d in disclosures)
+
+
+def test_the_basis_is_read_out_of_a_nested_result_block():
+    read = _read_with(coupling_loop={"status": "done",
+                                     "result": {"basis": "hours_per_year"}})
+    disclosures = R.build_study_report(_network(), read)["required_disclosures"]
+    assert any("hours per YEAR" in d for d in disclosures)
+
+
+# ── The engines' own warnings (review finding 2) ───────────────────────────
+
+
+def test_an_engine_standing_warning_becomes_a_required_disclosure():
+    """
+    MC_WARNING_V1 and each loop's warning ride on the payload precisely so a
+    consumer surfaces them. The one module whose job is forcing caveats into
+    the prose must not drop the caveats the engines insist travel.
+    """
+    read = _read_with(mc={"result": {
+        "engine": "mc", "fidelity": "sequential_mc", "metrics": {},
+        "warning": "one weather realisation; no inter-annual variability"}})
+    disclosures = R.build_study_report(_network(), read)["required_disclosures"]
+    assert any("one weather realisation" in d for d in disclosures)
+    assert any("the engine's own standing warning" in d for d in disclosures)
+
+
+def test_a_top_level_warning_is_surfaced_too():
+    read = _read_with(frontier={"status": "done", "points": [],
+                                "warning": "a margin is a standing standard"})
+    disclosures = R.build_study_report(_network(), read)["required_disclosures"]
+    assert any("a margin is a standing standard" in d for d in disclosures)
+
+
+def test_a_section_without_a_warning_adds_nothing():
+    read = _read_with(frontier={"status": "done", "points": []})
+    disclosures = R.build_study_report(_network(), read)["required_disclosures"]
+    assert not any("standing warning" in d for d in disclosures)
+
+
+# ── Mixed provenance (review note) ─────────────────────────────────────────
+
+
+def test_a_loop_section_says_its_provenance_is_mixed():
+    """
+    The verdict is MC-judged; every cost figure in the iterates is lp_proxy.
+    One tag cannot hold both in a document whose first disclosure is that they
+    are not interchangeable.
+    """
+    read = _read_with(margin_loop={"status": "done", "iterations": []})
+    section = next(s for s in R.build_study_report(_network(), read)["sections"]
+                   if s["id"] == "margin_loop")
+    assert "MIXED" in section["provenance_note"]
+    assert "lp_proxy" in section["provenance_note"]
+
+
+def test_a_single_provenance_section_carries_no_such_note():
+    read = _read_with(copt={"engine": "copt", "fidelity": "analytic_convolution"})
+    section = next(s for s in R.build_study_report(_network(), read)["sections"]
+                   if s["id"] == "copt")
+    assert "provenance_note" not in section
 
 
 def test_disclosures_are_not_claimed_for_absent_sections():

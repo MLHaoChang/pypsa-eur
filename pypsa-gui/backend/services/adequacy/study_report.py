@@ -59,12 +59,12 @@ _SECTION_CAVEATS: dict[str, str] = {
         "curve, not a plan"
     ),
     "coupling_loop": (
-        "a plan driven to the target on the ENERGY lever (ENS cap); targets "
-        "are horizon-basis hours, not h/yr"
+        "a plan driven to the target on the ENERGY lever (ENS cap); read the "
+        "record's `basis` for what its hours are measured over"
     ),
     "margin_loop": (
-        "a plan driven to the target on the FIRM-CAPACITY lever; targets are "
-        "horizon-basis hours, not h/yr"
+        "a plan driven to the target on the FIRM-CAPACITY lever; read the "
+        "record's `basis` for what its hours are measured over"
     ),
     "fmea_sweep": (
         "deterministic contingency screening — class B link outages and any "
@@ -94,6 +94,24 @@ _ASSUMED_PROVENANCE: dict[str, tuple[str, str]] = {
     "fmea_sweep": ("lp_proxy", "deterministic_scenario"),
 }
 
+# A loop carries TWO provenances and one tag cannot hold both: the verdict is
+# MC-judged, and every cost and plan figure in its iterates is `lp_proxy`. In a
+# document whose first disclosure is that those are not interchangeable, the
+# section has to say so rather than wear the sampler's label over all of it.
+# (Review note, PR #21.)
+_MIXED_PROVENANCE: dict[str, str] = {
+    "coupling_loop": (
+        "MIXED: the target verdict is MC-judged (sequential_mc), but every "
+        "cost and plan figure in the iterates is lp_proxy. Do not attribute "
+        "the costs to the sampler"
+    ),
+    "margin_loop": (
+        "MIXED: the target verdict is MC-judged (sequential_mc), but every "
+        "cost and plan figure in the iterates is lp_proxy. Do not attribute "
+        "the costs to the sampler"
+    ),
+}
+
 SECTION_ORDER = (
     "adequacy", "reserve_margin", "mc", "copt",
     "frontier", "coupling_loop", "margin_loop", "fmea_sweep",
@@ -112,8 +130,12 @@ def _provenance(section: str, payload: dict) -> dict:
     assumed = _ASSUMED_PROVENANCE.get(section)
     if (not engine or not fidelity) and assumed:
         engine, fidelity = engine or assumed[0], fidelity or assumed[1]
-    return {"engine": engine, "fidelity": fidelity,
-            "stated_by_engine": bool(payload.get("engine"))}
+    out = {"engine": engine, "fidelity": fidelity,
+           "stated_by_engine": bool(payload.get("engine"))}
+    mixed = _MIXED_PROVENANCE.get(section)
+    if mixed:
+        out["provenance_note"] = mixed
+    return out
 
 
 def _mc_disclosure(payload: dict) -> str | None:
@@ -165,6 +187,72 @@ def _sections(read) -> list[dict]:
     return out
 
 
+def _basis_disclosures(sections: list[dict]) -> list[str]:
+    """
+    What the loop hours are actually measured over — READ, never asserted.
+
+    This module's own rule is to read provenance from the payload where the
+    engine states it, and the loops state their `basis`: `resolve_time_basis`
+    returns "hours_per_year" on a modelled year and "hours_per_horizon"
+    otherwise. Hardcoding "horizon-basis, not h/yr" made a MANDATORY
+    disclosure false on exactly the annual networks a client study uses —
+    the defect the COPT's own time_basis fix closed one layer down ("Derived,
+    not asserted … understating LOLE is the direction that gets a number
+    compared to a 3 h/yr standard it has no relation to").
+    """
+    out: list[str] = []
+    for section in sections:
+        if section["id"] not in ("coupling_loop", "margin_loop"):
+            continue
+        if section["status"] != "ok":
+            continue
+        payload = section["payload"]
+        basis = payload.get("basis")
+        if basis is None and isinstance(payload.get("result"), dict):
+            basis = payload["result"].get("basis")
+        label = section["id"].replace("_", " ")
+        if basis == "hours_per_year":
+            out.append(
+                f"The {label} target is in hours per YEAR (`basis`: "
+                f"{basis}) — it is directly comparable to an h/yr standard.")
+        elif basis:
+            out.append(
+                f"The {label} target is in hours per HORIZON (`basis`: "
+                f"{basis}), NOT per year — convert before comparing it to a "
+                f"statutory h/yr standard.")
+        else:
+            out.append(
+                f"The {label} record states no `basis`, so do not compare its "
+                f"hours to an h/yr standard without establishing one.")
+    return out
+
+
+def _engine_warnings(sections: list[dict]) -> list[str]:
+    """
+    The standing warnings the engines attach to their own results.
+
+    `MC_WARNING_V1` (one weather realisation, no inter-annual variability),
+    each loop's `LOOP_WARNING_V1` / `MARGIN_LOOP_WARNING_V1` ("m* is the
+    cheapest margin this search VERIFIED, not the smallest that would pass"),
+    the frontier's own — they ride on the payloads precisely so a consumer
+    surfaces them. A module whose job is to force caveats into the prose that
+    then drops the caveats the engines insist travel with their results is
+    the one omission it cannot afford.
+    """
+    out: list[str] = []
+    for section in sections:
+        if section["status"] != "ok":
+            continue
+        payload = section["payload"]
+        warning = payload.get("warning")
+        if not warning and isinstance(payload.get("result"), dict):
+            warning = payload["result"].get("warning")
+        if warning:
+            out.append(f"{section['id']} — the engine's own standing warning, "
+                       f"which travels with this result: {warning}")
+    return out
+
+
 def _disclosures(sections: list[dict]) -> list[str]:
     """The sentences the narrative MUST contain, given what is present."""
     present = {s["id"] for s in sections if s["status"] == "ok"}
@@ -186,15 +274,13 @@ def _disclosures(sections: list[dict]) -> list[str]:
         out.append(
             "The target result is engine 'lp_proxy', a deterministic proxy "
             "rather than a probabilistic one.")
-    if {"coupling_loop", "margin_loop"} & present:
-        out.append(
-            "Loop targets are HORIZON-basis hours, not h/yr — state which "
-            "basis any quoted LOLE is on before comparing it to a standard.")
+    out += _basis_disclosures(sections)
     for section in sections:
         if section["id"] == "mc" and section["status"] == "ok":
             note = _mc_disclosure(section["payload"])
             if note:
                 out.append(note.capitalize() + ".")
+    out += _engine_warnings(sections)
     return out
 
 

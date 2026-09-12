@@ -111,9 +111,11 @@ def _reset_backend_state() -> None:
     # network feasible. Mirror the route handler's clear.
     with net_router._user_ts_lock:
         net_router._user_ts.clear()
-    # The campaign budget is process-global, like the study surfaces it gates,
-    # and is NOT one of _RESULTS_STATE_KEYS — so nothing below would clear it
-    # and a campaign opened by one test would still be spending in the next.
+    # The campaign budget lives in the context's `solver_state`, beside the
+    # study records it gates — and `reset_network` CARRIES solver_state
+    # forward (see ProjectContext), while the sweep below only clears
+    # _RESULTS_STATE_KEYS, which this key is not one of. So without this a
+    # campaign opened by one test keeps spending in the next.
     from services.adequacy import campaign as _campaign
     _campaign.reset()
     sim_router._state["solver_config"] = SolverConfig()

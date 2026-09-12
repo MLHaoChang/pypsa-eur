@@ -66,6 +66,37 @@ def test_the_tuple_names_the_services_sidecars():
     assert _stress.SIDECAR_NAME == "adequacy_stress_scenarios.json"
 
 
+def test_every_adequacy_sidecar_is_in_the_bundle():
+    """
+    Finding S7, generalised after its THIRD recurrence.
+
+    Naming the sidecars by hand is what let each new one ship outside the
+    bundle: the test passed because it only knew about the ones that already
+    worked. This walks `services/adequacy/` instead, so a module that declares
+    a SIDECAR_NAME is in the bundle or this fails — including the next one
+    nobody has written yet.
+    """
+    import importlib
+    import pkgutil
+
+    import services.adequacy as adequacy_pkg
+
+    declared = {}
+    for module in pkgutil.iter_modules(adequacy_pkg.__path__):
+        mod = importlib.import_module(f"services.adequacy.{module.name}")
+        name = getattr(mod, "SIDECAR_NAME", None)
+        if name:
+            declared[module.name] = name
+
+    assert declared, "no sidecars found — has the package moved?"
+    missing = {m: n for m, n in declared.items() if n not in _BUNDLE_FILES}
+    assert not missing, (
+        f"sidecar(s) not carried by _BUNDLE_FILES: {missing}. A bundle "
+        f"export/import, a snapshot restore and a scenario fork all drop "
+        f"them silently."
+    )
+
+
 def test_bundle_export_carries_both_and_import_restores_them(
         client, api_project, project_storage_dir):
     """★ The zip lists both sidecars; importing it under a new name gives a
