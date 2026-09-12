@@ -23,6 +23,7 @@ recent N restore points without the dir growing unbounded.
 from __future__ import annotations
 
 import json
+import logging
 import pathlib
 import re
 import shutil
@@ -60,6 +61,8 @@ from routers.projects import (
     _safe_project_dir,
     _solver_config_from_dict,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -162,12 +165,22 @@ def _existing_snapshot_dir(
     caught by anything.
 
     Here the tainted value is used ONLY in an equality comparison. The path
-    handed back comes out of `iterdir()`, so it is a directory that demonstrably
-    already exists under `snapshots/` — the property the containment check was
-    arguing for, established by construction instead of by proof. Same shape as
+    handed back comes out of `iterdir()`, so its NAME is one the directory
+    really contains rather than one the caller supplied. Same shape as
     `gridspine_service._authorized_dispatch_dir` (859a7265), which resolves a
     caller's directory string back to a project row and returns the path derived
     from that row.
+
+    `iterdir()` DOES NOT SUBSUME THE CONTAINMENT CHECK, and the first version of
+    this function wrongly said it did. `iterdir()` yields a symlink as an
+    ordinary child, `is_dir()` follows it, and the entry `snapshots/<valid-id>`
+    may therefore be a link to any directory on the box. The helper this
+    replaced resolved the path and refused it with 400; without the resolve
+    below, `restore` would copy that target's `network.nc` and `chat.jsonl` into
+    the caller's project — another tenant's, if the link points there. So the
+    resolve stays, for the reason `upload_service._safe_file_dir` states: the
+    regex forbids traversal by construction, and only the resolved path can
+    refuse a symlink.
 
     The regex still runs first: it rejects an obviously malformed id with 400
     rather than 404, so a client sending nonsense gets told so instead of being
@@ -184,8 +197,22 @@ def _existing_snapshot_dir(
     except (FileNotFoundError, NotADirectoryError):
         entries = []
     for child in entries:
-        if child.name == snapshot_id and child.is_dir():
-            return child
+        if child.name != snapshot_id or not child.is_dir():
+            continue
+        try:
+            resolved = child.resolve()
+            if not resolved.is_relative_to(_snapshots_dir(project_dir).resolve()):
+                # A symlink out of the snapshots tree. 404, not 400: the id is
+                # well-formed, and "no such snapshot" is the truth a client is
+                # entitled to — it just isn't a snapshot of this project.
+                logger.warning(
+                    "snapshots: refused id %r — resolves outside the snapshots "
+                    "dir (symlink?)", snapshot_id,
+                )
+                break
+        except (OSError, ValueError):
+            break
+        return resolved
     raise HTTPException(404, not_found)
 
 

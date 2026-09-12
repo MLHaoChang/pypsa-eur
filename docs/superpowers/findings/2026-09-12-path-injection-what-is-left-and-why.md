@@ -44,6 +44,24 @@ safe and instead *derive* it from something already safe:
 That last one is the pattern `gridspine_service._authorized_dispatch_dir`
 established in 859a7265, generalised.
 
+**Correction — `iterdir()` does not replace a containment check, and both
+`iterdir()` rewrites here shipped as if it did.** `iterdir()` establishes that
+an entry's NAME is one the directory really contains. It establishes nothing
+about where the entry leads: a symlink is an ordinary child, `is_dir()` and
+`is_file()` follow it, so `snapshots/<valid-id>` or `dist/<matched-name>` could
+point anywhere on the box. Both helpers replaced code that resolved the path and
+refused exactly that, and both lost the refusal — `main._entry_under` served
+files symlinked out of `dist` (fixed in 12e4fef7), and `_existing_snapshot_dir`
+would have let `restore` copy another project's `network.nc` and `chat.jsonl`
+into the caller's. Every test written for the rewrites passed before and after
+the regression, because they all tested `..` and none tested a symlink.
+
+Derive-don't-argue is still the right remedy for the CodeQL flow — it removes
+the taint edge, which a containment check does not. It is not a substitute for
+the containment check. Keep both: the derivation for the auditor, the resolve
+for the filesystem. `upload_service._safe_file_dir` says this in its own
+docstring and is the one place that got it right first time.
+
 ## What is left, and why
 
 ### 4 alerts — a project or study name becomes its directory name

@@ -7,13 +7,22 @@ and no request could get a `/` into the id anyway — the router splits the URL 
 `/` before the handler sees it, and `_SNAPSHOT_ID_RE` excludes the character.
 
 WHAT CHANGED. `_existing_snapshot_dir` uses the caller's string ONLY in an
-equality test against the names `iterdir()` returns, so the directory it hands
-back is one that demonstrably already exists under `snapshots/`. The old helper
-BUILT a path from the id and then argued the result was contained. Both are
-safe; only one is safe by construction. The argument had two costs: an auditor
-had to re-derive it, and CodeQL's `py/path-injection` — which does not model
-`Path.is_relative_to` as a barrier — reported the flow running straight through
-the guard (`snapshots.py:118 -> :130 -> :136`) into every downstream sink.
+equality test against the names `iterdir()` returns, so the NAME it hands back
+is one the directory really contains rather than one the caller supplied. The
+old helper BUILT a path from the id and then argued the result was contained.
+The argument had two costs: an auditor had to re-derive it, and CodeQL's
+`py/path-injection` — which does not model `Path.is_relative_to` as a barrier —
+reported the flow running straight through the guard
+(`snapshots.py:118 -> :130 -> :136`) into every downstream sink.
+
+WHAT THE FIRST VERSION OF THIS FILE GOT WRONG, and why the symlink cases at the
+bottom exist. It claimed the `iterdir()` match made the containment check
+redundant — "both are safe; only one is safe by construction". That was false.
+`iterdir()` yields a symlink as an ordinary child and `is_dir()` follows it, so
+`snapshots/<valid-id>` could be a link to any directory on the box; the helper
+this replaced resolved the path and refused exactly that with 400, and the
+rewrite shipped without it. The resolve is back. Every test above passed both
+before and after that regression, which is the point of the ones below.
 
 WHY THESE CALL THE HELPER DIRECTLY. A hostile id cannot be delivered through
 `client.<verb>(url)`: httpx resolves `..` against the URL before sending, so
@@ -95,11 +104,9 @@ def test_a_hostile_id_never_yields_a_path(tmp_path, hostile):
 
 
 def test_what_it_returns_is_always_a_real_child_of_snapshots(tmp_path):
-    """
-    The property the old containment check argued for, now established by
-    construction: the result came out of `iterdir()`, so it is a directory that
-    already existed under `snapshots/`.
-    """
+    """The result came out of `iterdir()`, so it is a directory that already
+    existed under `snapshots/` — and, per the cases below, one that is still
+    under `snapshots/` after resolution."""
     project_dir = tmp_path / "Proj"
     snaps = project_dir / "snapshots"
     (snaps / "2026-01-01T00-00-00-real").mkdir(parents=True)
@@ -107,7 +114,7 @@ def test_what_it_returns_is_always_a_real_child_of_snapshots(tmp_path):
     got = snap._existing_snapshot_dir(
         project_dir, "2026-01-01T00-00-00-real", "nope",
     )
-    assert got.parent == snaps
+    assert got.parent == snaps.resolve()
     assert got.is_dir()
     assert got.name == "2026-01-01T00-00-00-real"
 
@@ -133,3 +140,104 @@ def test_a_missing_snapshots_directory_is_a_miss_not_a_crash(tmp_path):
     with pytest.raises(HTTPException) as exc:
         snap._existing_snapshot_dir(project_dir, "2026-01-01T00-00-00-x", "nope")
     assert exc.value.status_code == 404
+
+
+# ── a symlink is a child too ────────────────────────────────────────────────
+#
+# `iterdir()` establishes that the NAME is real. It says nothing about where the
+# entry leads. These are the cases the rewrite silently stopped refusing.
+
+def test_a_symlink_out_of_the_tree_is_refused(tmp_path):
+    """
+    `snapshots/<valid-id>` -> somewhere else entirely. The name matches, the
+    regex passes, `is_dir()` follows the link and says yes. Only resolving the
+    path catches it — which is why the resolve is not redundant with the
+    `iterdir()` match.
+    """
+    project_dir = tmp_path / "Proj"
+    (project_dir / "snapshots").mkdir(parents=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    (project_dir / "snapshots" / "2026-01-01T00-00-00-evil").symlink_to(
+        outside, target_is_directory=True,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        snap._existing_snapshot_dir(
+            project_dir, "2026-01-01T00-00-00-evil", "nope",
+        )
+    # 404, not 400: the id is well formed. It just is not a snapshot of this
+    # project, and that is all the caller is entitled to hear.
+    assert exc.value.status_code == 404
+
+
+def test_the_symlink_would_otherwise_have_leaked_another_project(tmp_path):
+    """
+    States the consequence rather than the mechanism, so the case survives a
+    refactor of the helper. `restore` copies `_BUNDLE_FILES` out of whatever
+    directory it is handed — `network.nc`, and `chat.jsonl` with it. Point the
+    link at a second project and the helper is the only thing standing between
+    a caller and that project's chat history.
+    """
+    projects = tmp_path / "projects"
+    mine = projects / "Mine"
+    (mine / "snapshots").mkdir(parents=True)
+    victim = projects / "Victim"
+    victim.mkdir(parents=True)
+    (victim / "network.nc").write_bytes(b"victim network")
+    (victim / "chat.jsonl").write_text('{"user": "victim secrets"}\n')
+
+    (mine / "snapshots" / "2026-01-01T00-00-00-leak").symlink_to(
+        victim, target_is_directory=True,
+    )
+
+    with pytest.raises(HTTPException):
+        snap._existing_snapshot_dir(mine, "2026-01-01T00-00-00-leak", "nope")
+
+
+def test_a_symlink_within_the_tree_is_still_allowed(tmp_path):
+    """The check is containment, not "no symlinks". A link from one snapshot
+    name to another resolves inside `snapshots/` and stays legal — refusing it
+    would be a behaviour change the old helper never made."""
+    project_dir = tmp_path / "Proj"
+    snaps = project_dir / "snapshots"
+    real = snaps / "2026-01-01T00-00-00-real"
+    real.mkdir(parents=True)
+    (snaps / "2026-01-01T00-00-00-alias").symlink_to(real, target_is_directory=True)
+
+    got = snap._existing_snapshot_dir(
+        project_dir, "2026-01-01T00-00-00-alias", "nope",
+    )
+    assert got == real.resolve()
+
+
+def test_a_dangling_symlink_is_a_miss_not_a_crash(tmp_path):
+    """`is_dir()` is False for a broken link, so this never reaches the
+    resolve — but assert it, because a resolve that ran first would raise
+    instead of 404ing."""
+    project_dir = tmp_path / "Proj"
+    (project_dir / "snapshots").mkdir(parents=True)
+    (project_dir / "snapshots" / "2026-01-01T00-00-00-dead").symlink_to(
+        tmp_path / "never-existed", target_is_directory=True,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        snap._existing_snapshot_dir(project_dir, "2026-01-01T00-00-00-dead", "nope")
+    assert exc.value.status_code == 404
+
+
+def test_a_project_reached_through_a_symlinked_root_still_works(tmp_path):
+    """
+    The failure mode of a containment check written carelessly: resolve one
+    side and not the other, and every project under a symlinked projects root
+    — `/tmp` on macOS, a OneDrive-backed `~/Documents` — 404s for every
+    snapshot it has.
+    """
+    real_project = tmp_path / "real" / "Proj"
+    (real_project / "snapshots" / "2026-01-01T00-00-00-real").mkdir(parents=True)
+    linked = tmp_path / "linked-Proj"
+    linked.symlink_to(real_project, target_is_directory=True)
+
+    got = snap._existing_snapshot_dir(linked, "2026-01-01T00-00-00-real", "nope")
+    assert got.name == "2026-01-01T00-00-00-real"
