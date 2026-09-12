@@ -138,10 +138,23 @@ own cookie policy through configuration. The CSRF double-submit check
 
 ### 8. Two CI signals that cannot be trusted
 
-**The `Gridspine` job is path-filtered and reads green while running nothing.**
-On PR #18 it "succeeded" in 9 seconds with its steps skipped. A green check mark
-therefore does not mean those tests ran. I got this wrong myself on PR #16 and
-had to correct it, which is the point: the signal looks like coverage.
+**Three jobs are path-filtered and read green while running nothing.**
+`Gridspine` ("Skip - no gridspine changes") and BOTH `Integration` jobs
+("Skip - no source changes") report success with every meaningful step skipped —
+on `83d50f0` that was 3 of 5 checks. A green check mark does not mean those tests
+ran. I got this wrong myself on PR #16 and had to correct it, which is the point:
+the signal looks like coverage.
+
+**`GUI backend` is the only job that validates this backend, and a follow-up
+push cancels it.** The workflow uses `cancel-in-progress`, and its backend-test
+step takes ~22 minutes. On `83d50f0` it was cancelled at 16:36:38 by the next
+push, so CI reached **no verdict at all** on that commit — which is the commit
+that carried a regression (a missing `tool-error-kinds.json` entry). The local
+failing-set run caught it; CI could not have. Two consequences worth keeping:
+the local full-suite comparison is the PRIMARY gate on this repo, not a
+belt-and-braces extra; and pushing again while `GUI backend` is in flight
+destroys the only signal in flight. Note also that a `check_suite.completed`
+event is silent about this — its own text excludes cancelled suites.
 
 **`dev-env` has been red since `14eae4d`.**
 
