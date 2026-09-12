@@ -13,8 +13,7 @@ name: "CodeQL"
 
 on:
   push:
-    # TEMPORARY — see the diagnostic step below. Removed with it.
-    branches: ["master", "claude/set-api-key-continuation-2nxzqj"]
+    branches: ["master"]
   pull_request:
     branches: ["master"]
   schedule:
@@ -91,47 +90,3 @@ jobs:
       uses: github/codeql-action/analyze@v4
       with:
         category: "/language:${{matrix.language}}"
-
-    # TEMPORARY DIAGNOSTIC — remove before opening a pull request.
-    #
-    # Prints EVERY remaining alert with its flow, not just one rule. The last
-    # round of this printed `py/path-injection` only and a second round was
-    # needed for the rest; this is that second round, widened so there need
-    # not be a third.
-    - name: Summarise SARIF (temporary)
-      if: always()
-      shell: bash
-      run: |
-        python3 - <<'EOF'
-        import json, collections, pathlib
-        sarif = pathlib.Path("/home/runner/work/pypsa-eur/results/python.sarif")
-        if not sarif.exists():
-            print("NO SARIF AT", sarif); raise SystemExit(0)
-        doc = json.loads(sarif.read_text())
-        for run in doc.get("runs", []):
-            results = run.get("results", [])
-            print(f"TOTAL RESULTS: {len(results)}")
-            print("=== BY RULE ===")
-            for rid, n in collections.Counter(
-                r.get("ruleId", "?") for r in results
-            ).most_common():
-                print(f"{n:4d}  {rid}")
-            def loc(pl):
-                return "%s:%s" % (
-                    pl.get("artifactLocation", {}).get("uri", "?"),
-                    pl.get("region", {}).get("startLine", "?"),
-                )
-            print("=== EVERY ALERT ===")
-            for i, res in enumerate(results):
-                rid = res.get("ruleId", "?")
-                sink = loc(res["locations"][0]["physicalLocation"])
-                flows = res.get("codeFlows") or []
-                print(f"\n[{i}] {rid}")
-                print(f"    SINK   {sink}")
-                if flows:
-                    tf = flows[0]["threadFlows"][0]["locations"]
-                    steps = [loc(t["location"]["physicalLocation"]) for t in tf]
-                    print(f"    SOURCE {steps[0]}")
-                    for s2 in steps[1:-1][:5]:
-                        print(f"      via  {s2}")
-        EOF
