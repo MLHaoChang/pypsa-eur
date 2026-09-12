@@ -136,7 +136,7 @@ own cookie policy through configuration. The CSRF double-submit check
 
 ## Verification / CI
 
-### 8. Two CI signals that cannot be trusted
+### 8. Three CI signals that cannot be trusted
 
 **Three jobs are path-filtered and read green while running nothing.**
 `Gridspine` ("Skip - no gridspine changes") and BOTH `Integration` jobs
@@ -155,6 +155,14 @@ the local full-suite comparison is the PRIMARY gate on this repo, not a
 belt-and-braces extra; and pushing again while `GUI backend` is in flight
 destroys the only signal in flight. Note also that a `check_suite.completed`
 event is silent about this — its own text excludes cancelled suites.
+
+One thing this does NOT mean, tested rather than assumed: a docs-only push does
+not make `GUI backend` skip. `dorny/paths-filter` on a `pull_request` event
+diffs against the BASE branch, not the previous commit, so the whole PR's
+changed paths decide the filter and earlier backend commits keep it true. The
+cost of pushing mid-flight is the ~22 minutes, not a green check that ran
+nothing. (I predicted the opposite here and was wrong; the run on `b3f8829`
+disproved it.)
 
 **`dev-env` has been red since `14eae4d`.**
 
