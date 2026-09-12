@@ -92,5 +92,70 @@ def test_traversal_is_refused(local_spa_client):
     assert local_spa_client.get("/assets/../../settings.py").status_code == 404
 
 
+# ── `_entry_under`: the id is a lookup key, never a path fragment ───────────
+#
+# The case above cannot reach the handler with a traversal in it: httpx
+# resolves `..` against the URL before sending, so `/assets/../../settings.py`
+# leaves as `/settings.py`. It still asserts something worth asserting — that
+# a real backend source file is not served — but it does NOT exercise the
+# containment logic, so these go at the helper.
+#
+# `_entry_under` replaced `(dist / full_path).resolve()` plus an
+# `is_relative_to` check. Both refuse traversal; only one refuses it by
+# construction, and the difference is why CodeQL reported the request tainted
+# into `FileResponse` (`py/path-injection` does not model `is_relative_to` as
+# a barrier).
+
+def test_entry_under_finds_a_real_file(dist):
+    got = main._entry_under(dist, "brand.css")
+    assert got is not None and got.is_file()
+    assert got.read_text() == "body{}"
+
+
+def test_entry_under_walks_nested_segments(dist):
+    got = main._entry_under(dist, "assets/spa.js")
+    assert got is not None and got.name == "spa.js"
+    assert got.parent.name == "assets"
+
+
+@pytest.mark.parametrize("hostile", [
+    "../settings.py",
+    "../../settings.py",
+    "assets/../../settings.py",
+    "..",
+    ".",
+    "./brand.css",
+    "/etc/passwd",
+    "assets/../brand.css",      # would resolve INSIDE dist, and is still refused:
+                                # `..` is not an entry name, so it cannot match
+])
+def test_entry_under_never_leaves_the_dist_tree(dist, tmp_path, hostile):
+    """
+    `iterdir()` never yields an entry named `.` or `..`, so a segment naming
+    either matches nothing. Traversal is not rejected here — it is
+    unrepresentable.
+    """
+    # A real file one level up, so "refused" cannot be confused with "absent".
+    (tmp_path / "settings.py").write_text("SECRET = 1", encoding="utf-8")
+    assert main._entry_under(dist, hostile) is None
+
+
+def test_entry_under_refuses_a_directory(dist):
+    """`assets` exists but is not a file; FileResponse on a directory is a 500."""
+    assert main._entry_under(dist, "assets") is None
+
+
+def test_entry_under_refuses_an_empty_or_missing_name(dist):
+    assert main._entry_under(dist, "") is None
+    assert main._entry_under(dist, "/") is None
+    assert main._entry_under(dist, "nope.css") is None
+
+
+def test_entry_under_refuses_descending_through_a_file(dist):
+    """`brand.css/anything` — `iterdir()` on a file raises, and that is a miss
+    rather than a 500."""
+    assert main._entry_under(dist, "brand.css/nested.css") is None
+
+
 def test_head_is_supported(local_spa_client):
     assert local_spa_client.head("/projects").status_code == 200
