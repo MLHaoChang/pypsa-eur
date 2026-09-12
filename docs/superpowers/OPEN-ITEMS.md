@@ -17,37 +17,76 @@ verification record.
 
 ---
 
+## Critical
+
+### 1. The user-timeseries store is a process global shared across tenants
+
+`services/user_timeseries.py:39` — `_user_ts` is keyed `(component, attribute,
+column)` with no org, project or session. It is authoritative, not a cache: the
+timeseries GET prefers it over the network's own data, and every foreground save
+serialises it into that project's `user_ts.json` and reapplies it onto the
+network before the netCDF export.
+
+Reproduced: org A uploads a profile for `L1`; org B activates its OWN project and
+reads A's values, then saves them into B's storage. Cross-tenant read AND
+cross-tenant write. The desktop build is affected too, as a multi-project
+data-integrity bug.
+
+The code mitigated only the BACKGROUND case, on the stated basis that the store
+"belongs to the FOREGROUND ctx" — true for one desktop user, false once one
+process serves many signed-in sessions, where every session is a foreground.
+
+NOT patched: ~230 references across 13 modules; per-`ProjectContext` isolation is
+the real fix and needs its own plan. A narrow containment exists (restore-or-clear
+on activate, as `load_project` already does) but closes only the demonstrated
+path, not the class — two concurrent sessions on different projects still share
+one dict. Full analysis, reproduction and fix criteria:
+`findings/2026-09-12-user-ts-is-a-process-global-shared-across-tenants.md`.
+
+---
+
 ## High
 
-### 1. The adequacy studies re-solve the shared network with no lock check
+### 2. `worksheet` and `stress_scenarios` PUTs ignore a foreign edit lock
 
-**HIGH, and new from the 2026-09-12 authorization audit.** Ten routes:
-`POST /api/results/{frontier,mc,fmea_sweep,margin_loop,coupling_loop}` and their
-`/abort` siblings.
+`routers/adequacy_worksheet.py:43-51` and `:65-71` carry `ProjectAccessDep` (ACL)
+only — no lock check. They are mounted under `/api/projects`, which is
+deliberately absent from the middleware's prefix list because that family is
+covered by in-handler enforcement; these two handlers never got it. Verified: with
+A holding the lock, `PUT .../layout` and `POST .../uploads` are refused 409 while
+`PUT .../worksheet` and `PUT .../stress_scenarios` return 200, replacing the
+sidecar wholesale and bumping `version` so A's client treats B's content as
+authoritative. Both files are in `_BUNDLE_FILES`, so the write propagates into
+bundles and snapshots. Fix: `_check_project_lock(db, _lock_target(project), user)`
+on both, as `routers/uploads.py:182,308` does. Server only.
 
-`post_frontier` (`routers/results.py:1104`) takes `PyPSAService.get_network()` —
-the resident, SHARED network — and runs full capacity-expansion solves in a
-worker thread. `routers/results.py` has no lock or holder check of any kind
-(grep it for `get_lock(db`, `holder_user_id`, `_enforce_project_lock`,
-`project_locks`: nothing). It is not covered by the foreign-lock middleware
-either, because that is a prefix list — `/api/network/`, `/api/io/`,
-`/api/simulation/` — and `/api/results/` is not on it.
+### 3. `/api/chat/{id}/rewind` and `/abort` perform no authorization
 
-`_refuse_if_mesh_busy` / `_publish_study` serialise studies against each other
-under the PyPSA mutation lock. That is thread safety, not authorization: it
-stops two studies overlapping, not a non-holder starting one. Since the resident
-context is shared per `(org, project)`, a non-holder who activates the same
-project re-solves the holder's network, and the holder's next autosave persists
-it — `_publish_study`'s own comment records that these mutations reach disk.
+`routers/chat.py:1299-1332` declare no user dependency and consult no owner, org
+or project; `_SESSIONS` is a process-global whose `ChatSession` has no owner
+field. Verified cross-org: a different organization's user called
+`POST /api/chat/<victim>/rewind {"turns":2}` → `200 {"dropped":4}`, emptying the
+victim's session, and `/abort` → 200 with the victim's `abort_event` set. The
+session id is not secret either — `GET /api/chat/history` returns
+`last_session_id` to any co-member who activates the project. (`/confirm` is the
+same family, practically shielded by a uuid4 token: defence by accident.)
+Server only.
 
-Same class as `2026-08-27-requeue-is-a-cross-user-overwrite`, which was fixed by
-porting `enqueue_solve`'s holder check into the route. The same port is the fix,
-and the pattern is already in the codebase. Server / multi-tenant only.
-Source: finding 1 of `assessments/2026-09-12-per-route-authorization-audit.md`.
+### 4. `/api/changelog/` is unscoped for a caller with no OrgMembership
+
+`routers/changelog.py:15-17` returns `None` for a membership-less caller, and
+`change_log_service` reads `org_id=None` as "no filter" and, on DELETE, "clear
+EVERYTHING" — contradicting both its own docstring and the route's. Verified: an
+orgless user reads every tenant's entries and `DELETE /api/changelog/` → 204
+destroys org1's audit trail. Membership-less users are the normal case for the
+shipped first user: `tools/bootstrap_super_admin.py` creates it with no
+OrgMembership. The predicate should be "is a super-admin", not "has no
+membership". Server only.
+
 
 ## Medium
 
-### 2. Chat sessions have no owner, so the confirmation gate rests on id secrecy
+### 5. Chat sessions have no owner, so the confirmation gate rests on id secrecy
 
 `ChatSession` (`services/chat_service.py:474`) has no user field and
 `get_session` (`:745`) is a plain lookup in a process-global dict, so nothing
@@ -67,7 +106,7 @@ screenshot — the gate is forgeable with no code change and no review step that
 would catch it. An owner field and one comparison removes the dependency.
 Source: finding 2 of the same audit.
 
-### 3. `ProjectAccessDep` is adopted by 6 of 23 routers
+### 6. `ProjectAccessDep` is adopted by 6 of 23 routers
 
 `routers/deps.py:100` defines the right primitive — a per-route dependency that
 resolves the project named by the request and checks the caller's access. It is
@@ -83,7 +122,7 @@ has the opposite default. Worth a test that fails when a route is mounted under
 a prefix no mechanism covers — the omission is what needs to become loud.
 Source: finding 3 of the same audit.
 
-### 4. Node positions revert on the blank canvas
+### 7. Node positions revert on the blank canvas
 
 User-reported 2026-07-31; diagnosed, never fixed. Two facts still hold:
 `PUT /layout` 404s until the project directory exists on disk, and on load the
@@ -98,7 +137,7 @@ The user's exact sequence was never reproduced, so the trigger for the failing
 PUT is still unidentified — the finding lists the candidates in the order worth
 testing. Source: `findings/2026-07-31-blank-canvas-node-drags-revert.md`.
 
-### 5. Component names are not validated at the edge
+### 8. Component names are not validated at the edge
 
 Names flow from request bodies into the network, into filenames and into
 model-facing text with no character-class check. This is the shared root cause
@@ -112,7 +151,7 @@ anchored and narrow, and it is not applied to names generally. Source: gap 3 of
 
 ## Low
 
-### 6. A refused `/stream` request still switches the session model
+### 9. A refused `/stream` request still switches the session model
 
 `routers/chat.py:1166` sets `session.model` (and `profile_id`, `bound_wire`)
 before `run_turn` reaches the `_turn_in_flight` guard that refuses the request
@@ -122,7 +161,7 @@ state. Two fix options in the finding, neither applied; it is a design choice
 about where the guard belongs. Source:
 `findings/2026-09-10-a-refused-stream-request-still-switches-the-session-model.md`.
 
-### 7. Cookie policy is hardcoded to a preview vendor's hostname
+### 10. Cookie policy is hardcoded to a preview vendor's hostname
 
 `routers/auth.py::_cookie_flags` returns `SameSite=None; Secure` for any host
 matching `.cursorusercontent.com`. `SameSite=None` widens CSRF surface, and here
@@ -136,7 +175,7 @@ own cookie policy through configuration. The CSRF double-submit check
 
 ## Verification / CI
 
-### 8. Three CI signals that cannot be trusted
+### 11. Three CI signals that cannot be trusted
 
 **Three jobs are path-filtered and read green while running nothing.**
 `Gridspine` ("Skip - no gridspine changes") and BOTH `Integration` jobs
