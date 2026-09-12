@@ -3,9 +3,16 @@
 **Date:** 2026-09-10
 **Severity:** the highest-value hardening gap found in this pass. Bounded by the
 safety tiers, not by the fence.
-**Status:** open, not fixed — a one-line fix exists and is below, but it is a
-behaviour change to the model-facing prompt and belongs to whoever owns the chat
-layer.
+**Status: FIXED 2026-09-12** in PR #18 (`claude/master-refactor-tdd-zga39h`,
+commit `70e2352`) — but NOT by the one-line fix proposed below, which is itself
+bypassable. Read "What implementing it turned up" at the end of this file; that
+section supersedes this header's recommendation. One item found while fixing is
+still OPEN: the fourth `is_error` site passes up to 1000 chars of exception text
+in an *unfenced* region.
+
+**Original status at time of writing:** open, not fixed — a one-line fix exists
+and is below, but it is a behaviour change to the model-facing prompt and belongs
+to whoever owns the chat layer.
 
 ## The gap
 
