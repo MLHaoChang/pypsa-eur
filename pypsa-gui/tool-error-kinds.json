@@ -251,6 +251,14 @@
       "surface": "banner",
       "why": "The per-project upload quota is full. The user must delete something."
     },
+    "user_code_disabled": {
+      "surface": "inline",
+      "why": "Raised by routers/simulation._gate_user_code on the solver-config ROUTE, never from a tool handler, so it cannot reach a tool_error frame. Listed because the derivation matches every error_kind dict literal on purpose (it under-approximated once and missed study_in_flight). Refuses extra_functionality_code when the operator has not set PYPSA_GUI_ALLOW_USER_CODE; the settings form shows the detail where the user typed the code."
+    },
+    "user_code_forbidden": {
+      "surface": "inline",
+      "why": "Same route and same reason as user_code_disabled: a config-PUT refusal, not a tool frame. Refuses a non-admin setting extra_functionality_code, which is exec()-ed in-process. Inline so the message lands next to the field; a banner would announce another user's lack of privilege in the chat surface, which is not where the attempt happened."
+    },
     "validation_error": {
       "surface": "inline",
       "why": "The forwarder's Pydantic fallback. Its message is the useful part; the kind itself says only 'the arguments were wrong', which the model retries."
