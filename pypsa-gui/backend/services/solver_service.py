@@ -1447,11 +1447,28 @@ _USER_CODE_GATE_ENV = "PYPSA_GUI_ALLOW_USER_CODE"
 def user_code_enabled() -> bool:
     """
     True iff the operator has explicitly opted in to executing user-supplied
-    Python via the `extra_functionality_code` field. Off by default — this
-    field is `exec()`-ed in-process with full FS / network privileges, and
-    the GUI has no auth layer, so allowing it implicitly is a footgun. Set
-    `PYPSA_GUI_ALLOW_USER_CODE=1` (or `true`/`yes`) to enable for trusted
-    single-user / localhost deployments.
+    Python via the `extra_functionality_code` field. Off by default — the field
+    is `exec()`-ed in-process with full FS / network privileges. Set
+    `PYPSA_GUI_ALLOW_USER_CODE=1` (or `true`/`yes`) to enable.
+
+    THIS FLAG IS NOT THE WHOLE GATE, and the reasoning it used to carry was
+    wrong. It said "the GUI has no auth layer" and described deployments as
+    "single-user / localhost": both were true when written and neither is now.
+    `main.py` refuses any unauthenticated `/api/*` request, and the product has
+    organizations and memberships. Corrected here because a reader who believes
+    the risk was "no auth" concludes it is solved and relaxes the gate.
+
+    What the flag actually is: the DEPLOYMENT's kill switch, process-wide, which
+    cannot be granted per project or per org. Authorization is enforced
+    separately and at the edge by `routers/simulation._gate_user_code`, which
+    additionally requires an org admin (or super-admin) to SET the field — being
+    a project's lock holder is not a privilege level. Both conditions must hold;
+    admin does not override an operator who never opted in. Local mode is exempt
+    from the admin half: the desktop build has one seeded identity and no org.
+
+    The compile-time check below is defence in depth, not the primary gate: the
+    solve worker has no request context, so it can test this flag and nothing
+    about the caller.
     """
     import os
     val = os.environ.get(_USER_CODE_GATE_ENV, "").strip().lower()

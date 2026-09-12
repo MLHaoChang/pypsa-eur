@@ -92,6 +92,15 @@ finding.
 
 ### 2. The `exec()` gate's stated justification is now false
 
+**FIXED 2026-09-12.** `routers/simulation._gate_user_code` now refuses a
+non-admin's attempt to set `extra_functionality_code`, at the edge and before
+the merge that would store it, and the docstring below is corrected. Both
+conditions are required: admin does not override the operator opt-in. The
+2026-09-12 per-route authorization audit (finding 4) also REFINES the claim
+below: `/api/simulation/` is under the foreign-lock middleware, so a
+non-holder was already refused; the escalation was member-with-the-lock to
+in-process RCE, not any authenticated user. Analysis below unchanged.
+
 `services/solver_service.py:1446-1456`, `user_code_enabled()`:
 
 > Off by default — this field is `exec()`-ed in-process with full FS /

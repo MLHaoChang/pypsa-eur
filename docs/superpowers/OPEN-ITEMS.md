@@ -17,28 +17,73 @@ verification record.
 
 ---
 
+## High
+
+### 1. The adequacy studies re-solve the shared network with no lock check
+
+**HIGH, and new from the 2026-09-12 authorization audit.** Ten routes:
+`POST /api/results/{frontier,mc,fmea_sweep,margin_loop,coupling_loop}` and their
+`/abort` siblings.
+
+`post_frontier` (`routers/results.py:1104`) takes `PyPSAService.get_network()` —
+the resident, SHARED network — and runs full capacity-expansion solves in a
+worker thread. `routers/results.py` has no lock or holder check of any kind
+(grep it for `get_lock(db`, `holder_user_id`, `_enforce_project_lock`,
+`project_locks`: nothing). It is not covered by the foreign-lock middleware
+either, because that is a prefix list — `/api/network/`, `/api/io/`,
+`/api/simulation/` — and `/api/results/` is not on it.
+
+`_refuse_if_mesh_busy` / `_publish_study` serialise studies against each other
+under the PyPSA mutation lock. That is thread safety, not authorization: it
+stops two studies overlapping, not a non-holder starting one. Since the resident
+context is shared per `(org, project)`, a non-holder who activates the same
+project re-solves the holder's network, and the holder's next autosave persists
+it — `_publish_study`'s own comment records that these mutations reach disk.
+
+Same class as `2026-08-27-requeue-is-a-cross-user-overwrite`, which was fixed by
+porting `enqueue_solve`'s holder check into the route. The same port is the fix,
+and the pattern is already in the codebase. Server / multi-tenant only.
+Source: finding 1 of `assessments/2026-09-12-per-route-authorization-audit.md`.
+
 ## Medium
 
-### 1. The `exec()` gate is a process-wide flag, and `/simulation/run` has no admin gate
+### 2. Chat sessions have no owner, so the confirmation gate rests on id secrecy
 
-`services/solver_service.py:1446` justifies the gate with "the GUI has no auth
-layer" and "single-user / localhost". Both were true when written and neither is
-now: there is a global 401 gate (`main.py:658`) and the product is multi-tenant.
+`ChatSession` (`services/chat_service.py:474`) has no user field and
+`get_session` (`:745`) is a plain lookup in a process-global dict, so nothing
+compares the caller to the session. `POST /api/chat/{session_id}/confirm` can
+therefore supply the approval for **another account's** pending
+destructive-tool confirmation — and that approval is the whole protection the
+safety tiers give destructive and execution tools. `abort` and `rewind` are
+reachable the same way.
 
-The real shape: `PYPSA_GUI_ALLOW_USER_CODE` is **process-wide**, so it cannot be
-granted per project or per org; `extra_functionality_code` is an ordinary
-`SolverConfig` field set through `PUT /api/simulation/config`'s permissive
-`merged.update(submitted)` (`routers/simulation.py:349`); and
-`POST /api/simulation/run` (`routers/simulation.py:586`) has no admin gate —
-`routers/simulation.py` contains no `Depends` at all, while every privilege check
-lives in `routers/admin.py`. With the flag on, any authenticated **member** gets
-in-process arbitrary Python with full FS and network access.
+**Not currently exploitable:** `session_id` is `uuid.uuid4().hex` (122 bits),
+and greps found it neither logged nor persisted into `chat.jsonl`. It is a strong
+capability-style secret.
 
-Minimum: correct the docstring, and gate the field on org-admin rather than on a
-process-wide variable. Source: gap 2 of
-`assessments/2026-09-10-backend-hardening-assessment.md`.
+The problem is that this is load-bearing and undeclared. The day a session id
+becomes visible — a support endpoint, a debug log line, an error body, a
+screenshot — the gate is forgeable with no code change and no review step that
+would catch it. An owner field and one comparison removes the dependency.
+Source: finding 2 of the same audit.
 
-### 2. Node positions revert on the blank canvas
+### 3. `ProjectAccessDep` is adopted by 6 of 23 routers
+
+`routers/deps.py:100` defines the right primitive — a per-route dependency that
+resolves the project named by the request and checks the caller's access. It is
+used by `compare`, `adequacy_worksheet`, `uploads`, `snapshots`, `gridspine` and
+`deps`, and NOT by the five routers carrying most of the surface: `network` (81
+routes), `results` (48), `chat` (20), `simulation` (14), `io` (8) — 171 of 267.
+Those rely on the path-prefix middleware instead.
+
+This is the structural cause of item 1, and it is a shape rather than a one-off:
+a prefix list denies by omission, so a new router under a new prefix is ungated
+by default, silently, with nothing failing. A dependency declared on the route
+has the opposite default. Worth a test that fails when a route is mounted under
+a prefix no mechanism covers — the omission is what needs to become loud.
+Source: finding 3 of the same audit.
+
+### 4. Node positions revert on the blank canvas
 
 User-reported 2026-07-31; diagnosed, never fixed. Two facts still hold:
 `PUT /layout` 404s until the project directory exists on disk, and on load the
@@ -53,7 +98,7 @@ The user's exact sequence was never reproduced, so the trigger for the failing
 PUT is still unidentified — the finding lists the candidates in the order worth
 testing. Source: `findings/2026-07-31-blank-canvas-node-drags-revert.md`.
 
-### 3. Component names are not validated at the edge
+### 5. Component names are not validated at the edge
 
 Names flow from request bodies into the network, into filenames and into
 model-facing text with no character-class check. This is the shared root cause
@@ -67,7 +112,7 @@ anchored and narrow, and it is not applied to names generally. Source: gap 3 of
 
 ## Low
 
-### 4. A refused `/stream` request still switches the session model
+### 6. A refused `/stream` request still switches the session model
 
 `routers/chat.py:1166` sets `session.model` (and `profile_id`, `bound_wire`)
 before `run_turn` reaches the `_turn_in_flight` guard that refuses the request
@@ -77,7 +122,7 @@ state. Two fix options in the finding, neither applied; it is a design choice
 about where the guard belongs. Source:
 `findings/2026-09-10-a-refused-stream-request-still-switches-the-session-model.md`.
 
-### 5. Cookie policy is hardcoded to a preview vendor's hostname
+### 7. Cookie policy is hardcoded to a preview vendor's hostname
 
 `routers/auth.py::_cookie_flags` returns `SameSite=None; Secure` for any host
 matching `.cursorusercontent.com`. `SameSite=None` widens CSRF surface, and here
@@ -91,7 +136,7 @@ own cookie policy through configuration. The CSRF double-submit check
 
 ## Verification / CI
 
-### 6. Two CI signals that cannot be trusted
+### 8. Two CI signals that cannot be trusted
 
 **The `Gridspine` job is path-filtered and reads green while running nothing.**
 On PR #18 it "succeeded" in 9 seconds with its steps skipped. A green check mark

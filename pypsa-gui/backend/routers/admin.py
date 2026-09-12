@@ -14,6 +14,7 @@ from services import email_service
 from services.auth_service import issue_password_token
 from services.legacy_migrate import claim_legacy_project, list_legacy_projects
 from services.tenancy_service import (
+    is_org_admin,
     ConflictError,
     PermissionDenied,
     ValidationError,
@@ -78,9 +79,11 @@ def _raise_email_http_error(exc: email_service.EmailServiceError) -> None:
 
 def _require_admin_actor(db: DBSession, actor: User) -> OrgMembership | None:
     membership = get_user_membership(db, actor.id)
-    if actor.is_super_admin:
-        return membership
-    if membership is None or membership.role != "admin":
+    # Delegates the PREDICATE to tenancy_service so this router and the
+    # `extra_functionality_code` gate in routers/simulation.py cannot drift
+    # apart on what "admin" means; the status code and wording stay here,
+    # where they are part of this surface's contract.
+    if not is_org_admin(db, actor):
         raise HTTPException(status_code=403, detail="Only org admins or super-admins can access admin routes")
     return membership
 
