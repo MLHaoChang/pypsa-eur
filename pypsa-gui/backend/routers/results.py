@@ -17,22 +17,9 @@ header.
 from __future__ import annotations
 
 import logging
-import math
 from typing import Any
 
-import contextvars as _contextvars
 import threading as _threading
-
-from pydantic import BaseModel as _BaseModel
-
-# Whole-branch review, finding S6: the study request models typed their
-# floats as plain `float`, which accepts the JSON `Infinity`/`NaN` literals
-# (12f's finding, on the asset schemas). A frontier target of `Infinity`
-# passed, the study was PUBLISHED and RAN, the POST's own response then
-# failed to encode and every later GET on the record answered 500 until a
-# swap cleared it. `Finite` (12g's own type) on every study float; the 12f
-# handler renders the refusal.
-from models.schemas import Finite as _Finite
 
 from fastapi import APIRouter, HTTPException, Query, Response
 
@@ -51,6 +38,16 @@ from services.adequacy.margin_loop_runner import (  # noqa: F401
     MARGIN_MULTI_PERIOD_WARNING_V1,
     PROBE_MARGIN,
     MarginLoopRequest,
+)
+from services.adequacy.mc_loop_runner import (  # noqa: F401
+    McElccAsset,
+    McRequest,
+)
+from services.adequacy.frontier_loop_runner import (  # noqa: F401
+    FrontierRequest,
+)
+from services.adequacy.fmea_sweep_runner import (  # noqa: F401
+    FmeaSweepRequest,
 )
 from services.results.prices import _apply_merit_order_correction  # noqa: F401
 from services.results.cost_breakdown import (  # noqa: F401
@@ -938,14 +935,6 @@ def get_fmea_sweep():
     return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
 
 
-class FmeaSweepRequest(_BaseModel):
-    # Class-C scenarios, passed by the client from the authorized registry
-    # GET (/api/projects/{name}/stress_scenarios) — this route operates on
-    # the FOREGROUND network and carries no project name, so the sidecar is
-    # read where authorization lives and re-validated here before running.
-    scenarios: list = []
-
-
 @results_router.post("/fmea_sweep/abort")
 def post_fmea_sweep_abort():
     """
@@ -987,88 +976,15 @@ def post_fmea_sweep(body: FmeaSweepRequest | None = None):
     network AND the foreground results in base state (it writes through
     the real state sink).
     """
-    import time
-
-    from services.adequacy.stress import (
-        StressValidationError,
-        run_class_c_sweep,
-    )
-    from services.adequacy.sweep import SweepBudgetError, run_class_b_sweep
     from routers.simulation import _state_update
-
+    from services.adequacy.fmea_sweep_runner import start_fmea_sweep
     _refuse_if_mesh_busy("fmea_sweep")
-    cfg = _state.get("solver_config")
-    if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
-        raise HTTPException(422, "the sweep requires a VOLL > 0 in solver settings")
-    n = PyPSAService.get_network()
-    lock = PyPSAService.get_lock()
-
-    scenarios = list(getattr(body, "scenarios", None) or [])
-
-    stop_event = _threading.Event()
-    record: dict = {"status": "running", "rows": [], "error": None,
-                    "base_restored": None, "base_restore_status": None,
-                    "started_at": time.time(), "thread": None,
-                    "stop_event": stop_event}
-
-    def worker():
-        try:
-            # Class B first with a private final sink; the LAST sweep's
-            # closing base re-solve writes the REAL state sink, so
-            # /results/lost_load etc. reflect base afterwards.
-            rows, restore_b = run_class_b_sweep(
-                n, lock, cfg, stop_event=stop_event,
-                final_state_update=None if scenarios else _state_update,
-            )
-            restore = restore_b
-            # Phase 12e: the worker runs TWO sweeps, so the flag is checked
-            # BETWEEN them. Without this, breaking out of class B's
-            # contingency loop returns here and class C runs in full — the
-            # abort would stop one sweep, not the study. When class C is
-            # skipped, class B ran with a private final sink, so the
-            # foreground results are the pre-study ones; that is correct and
-            # is what the user is looking at.
-            if scenarios and not stop_event.is_set():
-                rows_c, restore = run_class_c_sweep(
-                    n, lock, cfg, scenarios, stop_event=stop_event,
-                    final_state_update=_state_update,
-                )
-                rows = rows + rows_c
-            record.update(
-                status="aborted" if stop_event.is_set() else "done",
-                rows=rows, finished_at=time.time(), error=None,
-                # Phase 12e (shipped-code review, finding 1): whether the
-                # closing base re-solve ran, and what the solver said. A
-                # sweep whose restore FAILED leaves the network on the last
-                # contingency while the foreground results describe another
-                # plan — the user has to be told, and before this the guard
-                # swallowed the exception and the record still read `done`.
-                base_restored=restore.get("base_restored"),
-                base_restore_status=restore.get("base_restore_status"))
-        except (SweepBudgetError, StressValidationError) as exc:
-            record.update(
-                status="failed", rows=[], error=str(exc), finished_at=time.time())
-        except Exception as exc:  # noqa: BLE001
-            record.update(
-                status="failed", rows=[], error=str(exc), finished_at=time.time())
-
-    # The loops' pattern (see post_coupling_loop): the record is CLOSED OVER
-    # so a context switch cannot redirect the worker's writes away from the
-    # dict the poller reads, the request's context is carried so the closing
-    # restore's `_state_update` lands in the right project, and the record is
-    # published and the thread started under ONE lock hold.
-    _ctx = _contextvars.copy_context()
-    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
-                          name="fmea-sweep")
-    record["thread"] = t
-    _publish_study("fmea_sweep", record, t)
-    return {"status": "running"}
-
-
-class FrontierRequest(_BaseModel):
-    # Reliability targets (‱) to sweep. Omitted → the default spread across
-    # the decade where the cost gradient is steep enough to show a knee.
-    targets_permyriad: list[_Finite] | None = None
+    return start_fmea_sweep(
+        body,
+        solver_state=_state,
+        state_update=_state_update,
+        publish_study=_publish_study,
+    )
 
 
 @results_router.get("/frontier")
@@ -1125,117 +1041,15 @@ def post_frontier(body: FrontierRequest | None = None):
     asks what plan you would BUILD for each standard, so expansion has to
     re-optimise at every point.
     """
-    import time
-
-    from services.adequacy.frontier import (
-        DEFAULT_TARGETS_PERMYRIAD,
-        FrontierBudgetError,
-        FrontierConfigError,
-        knee_index,
-        run_frontier_sweep,
-    )
     from routers.simulation import _state_update
-
+    from services.adequacy.frontier_loop_runner import start_frontier
     _refuse_if_mesh_busy("frontier")
-    cfg = _state.get("solver_config")
-    if cfg is None or float(getattr(cfg, "voll", 0.0) or 0.0) <= 0:
-        raise HTTPException(422, "the frontier requires a VOLL > 0 in solver settings")
-
-    targets = list(getattr(body, "targets_permyriad", None)
-                   or DEFAULT_TARGETS_PERMYRIAD)
-    # An ENS cap is a positive ceiling on unserved energy: a zero or negative
-    # target is not a point on the frontier (0 is "no shedding at all", which
-    # the LP cannot reach on any network that ever sheds, and a negative cap
-    # is infeasible by construction). Refused here, before the record is
-    # published, rather than discovered one infeasible solve later.
-    bad = [t for t in targets if not (math.isfinite(float(t)) and float(t) > 0)]
-    if bad:
-        raise HTTPException(
-            422, f"targets_permyriad must be positive finite numbers; got "
-                 f"{bad[:5]}{' …' if len(bad) > 5 else ''}")
-    n = PyPSAService.get_network()
-    lock = PyPSAService.get_lock()
-
-    stop_event = _threading.Event()
-    # IEEE 39-bus review, F3: the standing reserve margin travels with the
-    # record. The frontier deliberately does NOT strip it (unlike the
-    # contingency sweep) — a margin is a standing standard, not a swept one —
-    # and the phase-8 plan says that is right "but must be stated on the
-    # panel, or the curve reads as cost-vs-eps when it is
-    # cost-vs-eps-at-margin-m". Measured on the IEEE 39-bus network: with the
-    # margin already covering every swept target, all three points came back
-    # with identical cost and zero ENS and nothing on the panel said why.
-    record: dict = {"status": "running", "points": [], "error": None,
-                    "warning": None, "knee": None,
-                    "reserve_margin": (
-                        float(getattr(cfg, "reserve_margin", None))
-                        if getattr(cfg, "reserve_margin", None) is not None
-                        else None),
-                    "targets_permyriad": targets, "base_restored": None,
-                    "base_restore_status": None,
-                    "started_at": time.time(), "thread": None,
-                    "stop_event": stop_event}
-
-    def worker():
-        try:
-            res = run_frontier_sweep(n, lock, cfg, targets, stop_event=stop_event,
-                                     final_state_update=_state_update)
-            voll = float(getattr(cfg, "voll", 0.0) or 0.0)
-            record.update(
-                status="aborted" if res.get("aborted") else "done",
-                points=res["points"], warning=res["warning"],
-                knee=knee_index(res["points"], voll), voll_eur_per_mwh=voll,
-                # Phase 12e: the engine has always computed this and the route
-                # threw it away. It says whether the closing re-solve RAN —
-                # not that the plan is back — and a study that could not
-                # restore the user's plan must say so.
-                base_restored=res.get("base_restored"),
-                base_restore_status=res.get("base_restore_status"),
-                finished_at=time.time(), error=None)
-        except (FrontierBudgetError, FrontierConfigError) as exc:
-            record.update(status="failed", points=[], error=str(exc),
-                          finished_at=time.time())
-        except Exception as exc:                              # noqa: BLE001
-            # The engine attaches its partial record to the exception so the
-            # completed points and the restore's outcome are not lost with it.
-            partial = getattr(exc, "frontier_result", None) or {}
-            record.update(status="failed", points=partial.get("points") or [],
-                          base_restored=partial.get("base_restored"),
-                          base_restore_status=partial.get("base_restore_status"),
-                          error=str(exc), finished_at=time.time())
-
-    _ctx = _contextvars.copy_context()
-    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
-                          name="adequacy-frontier")
-    record["thread"] = t
-    _publish_study("frontier", record, t)
-    return {"status": "running", "targets_permyriad": targets}
-
-
-class McElccAsset(_BaseModel):
-    # ``kind`` is a plain str rather than a Literal: the authoritative kind
-    # list lives in services/adequacy/elcc.py, and duplicating it in a pydantic
-    # Literal here would fork it — the day a fourth kind lands, the route would
-    # reject it with a schema error that names no asset. An unknown kind still
-    # ends up a 422, raised by the resolver that owns the list.
-    kind: str
-    name: str
-
-
-class McRequest(_BaseModel):
-    # All optional: the bare POST is the useful default (a headline LOLE/EUE
-    # with no ELCC study), and every field below has an engine-side default
-    # that this route must not fork.
-    draws: int | None = None
-    seed: int | None = None
-    cov_target: _Finite | None = None
-    elcc_assets: list[McElccAsset] | None = None
-    # Phase 12c: price the whole profile-bearing fleet as one portfolio, per
-    # period, beside the reserve margin's own credit for the same group. A
-    # boolean, not a pseudo-asset: the row must never land in `elcc` (a
-    # consumer summing that list would double-count), and the population is
-    # the engines' to derive, not the caller's to name.
-    elcc_portfolio: bool | None = None
+    return start_frontier(
+        body,
+        solver_state=_state,
+        state_update=_state_update,
+        publish_study=_publish_study,
+    )
 
 
 @results_router.get("/mc")
@@ -1312,256 +1126,13 @@ def post_mc(body: McRequest | None = None):
     in-thread KeyError/ValueError mapping stays as belt-and-braces for the
     cases only the run can discover.
     """
-    import time
-
-    from services.adequacy.elcc import (
-        MAX_ELCC_ASSETS,
-        elcc_for_asset,
-    )
-    # Private on purpose: it is the ONE place asset-kind resolution lives, and
-    # re-implementing the name lookup here to keep the import public would fork
-    # the very mapping (kind → removal semantics) the 404/422 split depends on.
-    from services.adequacy.elcc import _resolve as _resolve_elcc_asset
-    from services.adequacy.mc import (
-        MAX_DRAWS,
-        MC_WARNING_V1,
-        mc_adequacy,
-        snapshot_inputs,
-        transition_probs,
-    )
-
+    from services.adequacy.mc_loop_runner import start_mc
     _refuse_if_mesh_busy("mc")
-
-    draws = getattr(body, "draws", None)
-    draws = 500 if draws is None else int(draws)
-    if draws < 1:
-        raise HTTPException(422, "draws must be a positive number of samples")
-    if draws > MAX_DRAWS:
-        # A product cap, not a numerical one: the benchmark harness runs far
-        # deeper budgets by calling the engine directly (spec §7).
-        raise HTTPException(
-            422,
-            f"draws={draws} exceeds the engine cap of {MAX_DRAWS} draws per "
-            "study — the adaptive batching stops at that budget anyway")
-    seed = getattr(body, "seed", None)
-    seed = 0 if seed is None else int(seed)
-    cov_target = getattr(body, "cov_target", None)
-    cov_target = 0.05 if cov_target is None else float(cov_target)
-
-    assets = [(a.kind, a.name) for a in (getattr(body, "elcc_assets", None) or [])]
-    want_portfolio = bool(getattr(body, "elcc_portfolio", None) or False)
-    if len(assets) > MAX_ELCC_ASSETS:
-        raise HTTPException(
-            422,
-            f"{len(assets)} ELCC assets requested; the cap is "
-            f"{MAX_ELCC_ASSETS} (each asset costs a baseline plus ~10 full "
-            "MC evaluations)")
-
-    # The ONE snapshot, taken under the mutation lock (spec §1). Everything
-    # after this line — validation and the worker alike — reads plain arrays,
-    # so the network is free the moment the lock is released.
-    from services.adequacy.activity import activity_summary as _activity_summary
-
-    n = PyPSAService.get_network()
-    population = None
-    snapshot_fp = None
-    margin_payload = None
-    with PyPSAService.get_lock():
-        vre_names = [nm for kind, nm in assets if kind == "vre"]
-        if want_portfolio:
-            # The portfolio's must-take half needs its profiles PRESERVED in
-            # the snapshot (`snapshot_inputs` keeps only the names it is
-            # asked for): every must-take whose column is informative.
-            from services.adequacy.copt import (
-                must_take_generators,
-                series_is_informative,
-            )
-            pmp = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
-            for nm in must_take_generators(n):
-                if (nm not in vre_names and pmp is not None
-                        and nm in getattr(pmp, "columns", [])
-                        and series_is_informative(pmp[nm])):
-                    vre_names.append(nm)
-        try:
-            inputs = snapshot_inputs(
-                n, vre_assets=vre_names, cfg=_state.get("solver_config"))
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        # Phase 12d: computed HERE, from the network, under the lock — the
-        # worker never touches `n` (plan A9), and the must-take half of the
-        # disclosure is not in the fleet (shipped-code review, finding 1).
-        activity_block = _activity_summary(n, inputs.periods)
-        if want_portfolio:
-            # Everything the worker needs from the NETWORK and from request-
-            # scoped state is captured here (plan 12c v3.1 A9): the
-            # population with the engines' capacity rule, the fingerprint the
-            # margin payload is checked against, and that payload itself —
-            # the worker never touches `_state` or `n`.
-            import copy as _copy
-
-            from services.adequacy.portfolio import (
-                network_fingerprint,
-                portfolio_population,
-            )
-            population = portfolio_population(n, inputs)
-            snapshot_fp = network_fingerprint(n)
-            margin_payload = _copy.deepcopy(_state.get("last_reserve_margin"))
-
-    if not inputs.units:
-        raise HTTPException(
-            422,
-            "nothing to sample: no electrical generator carries resolvable "
-            "occurrence data (unavailability + MTTR), so the sampled fleet is "
-            "empty — an empty fleet would report the entire horizon as loss of "
-            "load, which is a statement about missing input data, not about "
-            "the system")
-
-    # §2.2's inconsistent-pair rejection, pulled forward: it is a property of
-    # the (q, MTTR) pair alone, so there is no reason to discover it a batch
-    # into a background run and report it as a failed study.
-    for u in inputs.units:
-        try:
-            transition_probs(u.q, u.mttr_hours, name=u.name)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-
-    for kind, name in assets:
-        try:
-            _resolve_elcc_asset(inputs, kind, name)
-        except KeyError as exc:
-            msg = str(exc.args[0]) if exc.args else str(exc)
-            raise HTTPException(
-                404, f"unknown ELCC asset {name!r} (kind {kind!r}): {msg}"
-            ) from exc
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-
-    # The record is closed over by the worker rather than reached through
-    # `_state` inside it: `_state` resolves the *request-scoped* project
-    # context, and a worker thread has no request context — it would resolve a
-    # different dict and write its result where no reader looks.
-    stop_event = _threading.Event()
-    record: dict = {"status": "running", "result": None, "error": None,
-                    "started_at": time.time(), "thread": None,
-                    "stop_event": stop_event}
-
-    def worker():
-        # Phase 12h: the rule that decides which profiled units had no
-        # outages sampled. Imported from the COPT so `/mc`'s lists and
-        # `split_fleet`'s buckets cannot disagree about the same fleet.
-        from services.adequacy.copt import is_flag_deterministic as _is_flag_deterministic, rate_is_zero as _rate_is_zero
-        try:
-            # The ONLY call in the codebase that may carry the flag: this
-            # is the study's own baseline, not a replay of one. Every ELCC
-            # and loop call passes `stop_event=None` (see `mc_adequacy`).
-            metrics = mc_adequacy(inputs, draws=draws, seed=seed,
-                                  cov_target=cov_target, stop_event=stop_event)
-            # Phase 12c: the headline metrics ARE the baseline every ELCC
-            # row needs, argument for argument; injected with a content key
-            # the callee recomputes (the N+1 baseline, closed with CRN kept).
-            from services.adequacy.elcc import baseline_key as _baseline_key
-            from services.adequacy.mc import MAX_DRAWS as _MAX_DRAWS
-            key = _baseline_key(inputs, draws=draws, seed=seed,
-                                cov_target=cov_target, max_draws=_MAX_DRAWS,
-                                batch=250)
-            rows = []
-            for kind, name in assets:
-                # Between assets: a stopped study keeps the rows it priced and
-                # never starts another. The bisection inside each asset is
-                # checked too, so the worst case is one probe, not one asset.
-                if stop_event.is_set():
-                    break
-                try:
-                    rows.append(elcc_for_asset(
-                        inputs, kind, name, seed=seed, draws=draws,
-                        cov_target=cov_target, baseline=metrics,
-                        baseline_key=key, stop_event=stop_event))
-                except KeyError as exc:
-                    # Belt-and-braces for the 404 the POST already raised
-                    # synchronously: the only way to reach this is a name that
-                    # resolved at POST and stopped resolving mid-run. Caught
-                    # HERE rather than around the whole worker so an internal
-                    # KeyError from the sampler cannot be mislabelled as a
-                    # missing asset — and so the message names WHICH asset.
-                    msg = str(exc.args[0]) if exc.args else str(exc)
-                    record.update(
-                        status="failed", result=None, finished_at=time.time(),
-                        error=f"unknown ELCC asset {name!r} "
-                              f"(kind {kind!r}): {msg}")
-                    return
-            portfolio = None
-            if want_portfolio:
-                from services.adequacy.portfolio import portfolio_block
-                portfolio = portfolio_block(
-                    inputs, population, margin_payload=margin_payload,
-                    snapshot_fingerprint=snapshot_fp, seed=seed, draws=draws,
-                    cov_target=cov_target, baseline=metrics, baseline_key=key,
-                    stop_event=stop_event)
-            record.update(
-                status="aborted" if stop_event.is_set() else "done",
-                error=None, finished_at=time.time(),
-                result={
-                    # A SIBLING payload, deliberately not folded into
-                    # AdequacyReport: the MC is an engine-local study (like the
-                    # COPT), and merging it would grow the one report shape
-                    # every other consumer parses (spec §4, recorded decision).
-                    "engine": "mc",
-                    "fidelity": "sequential_mc",
-                    "metrics": metrics,
-                    "elcc": rows,
-                    # Phase 12c: a SIBLING of `elcc`, never a row in it.
-                    "elcc_portfolio": portfolio,
-                    "warning": MC_WARNING_V1,
-                    # Phase 12c-pre: the units whose outages were sampled ON
-                    # their availability series rather than at nameplate.
-                    #
-                    # Phase 12h: a rate-zero unit carries a profile but has
-                    # NO outages sampled on it, so leaving it here would
-                    # make this list's documented meaning false. The MC
-                    # never calls `split_fleet`, so the two lists are built
-                    # here and are DISJOINT by construction.
-                    "profile_units": [
-                        str(u.name) for u in inputs.units
-                        if getattr(u, "profile", None) is not None
-                        and not _rate_is_zero(u)],
-                    # M5: EVERY unit the flag zeroed — profiled or folded —
-                    # so the disclosure is symmetric across the two shapes.
-                    "deterministic_units": [
-                        str(u.name) for u in inputs.units
-                        if _is_flag_deterministic(u)],
-                    # F8: the typed-zero half of the same disclosure — see
-                    # `/copt`. Without it a unit whose rate the user typed
-                    # as 0 is in NO list here, and this payload has no row
-                    # note to fall back on.
-                    "rate_zero_units": [
-                        str(u.name) for u in inputs.units
-                        if _rate_is_zero(u)
-                        and not _is_flag_deterministic(u)],
-                    "folded_units": [
-                        {"name": str(u.name),
-                         "folded_constant": float(u.folded_constant),
-                         "source": "static"}
-                        for u in inputs.units
-                        if getattr(u, "folded_constant", None) is not None],
-                    # Phase 12d: the activity disclosure (see /copt),
-                    # captured in the request.
-                    "activity": activity_block,
-                })
-        except Exception as exc:                              # noqa: BLE001
-            record.update(status="failed", result=None, error=str(exc),
-                          finished_at=time.time())
-
-    # The loops' pattern: the record is already closed over; Phase 12e adds
-    # the request's context (a bare Thread does not inherit the ContextVar the
-    # active project lives in) and publish-and-start under one lock hold.
-    _ctx = _contextvars.copy_context()
-    t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
-                          name="adequacy-mc")
-    record["thread"] = t
-    _publish_study("mc", record, t)
-    return {"status": "running", "draws": draws, "seed": seed,
-            "cov_target": cov_target, "elcc_assets": len(assets),
-            "elcc_portfolio": want_portfolio}
+    return start_mc(
+        body,
+        solver_state=_state,
+        publish_study=_publish_study,
+    )
 
 
 @results_router.get("/mc/elcc_candidates")

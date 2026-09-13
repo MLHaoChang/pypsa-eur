@@ -44,7 +44,6 @@ import time
 
 import pytest
 
-import routers.results as RR
 import routers.simulation as RS
 from services import study_state as STUDY
 from services.project_context import record_is_running
@@ -192,9 +191,13 @@ def test_two_study_posts_racing_admit_exactly_one(client, install_network,
     install_network(build_network())
     st = session_state(client)
     _voll(st)
+    import services.adequacy.fmea_sweep_runner as FSR
     import services.adequacy.sweep as SW
     monkeypatch.setattr(SW, "run_class_b_sweep", _slow_sweep)
-    monkeypatch.setattr(RR, "_contextvars", _Barrier2(contextvars))
+    # The copy_context call lives in the runner since the MC/study router
+    # lift — patching ``routers.results._contextvars`` after that cut is a
+    # no-op (AttributeError / dead patch), same vacuous class as F1j.
+    monkeypatch.setattr(FSR, "_contextvars", _Barrier2(contextvars))
 
     out: dict[int, object] = {}
 
@@ -245,8 +248,9 @@ def test_run_and_study_racing_admit_exactly_one(client, install_network,
         return "ok", "optimal"
 
     monkeypatch.setattr(RS, "run_simulation", fake_run)
+    import services.adequacy.fmea_sweep_runner as FSR
     bar = _Barrier2(contextvars)
-    monkeypatch.setattr(RR, "_contextvars", bar)
+    monkeypatch.setattr(FSR, "_contextvars", bar)
     monkeypatch.setattr(RS, "contextvars", bar)
 
     out: dict[str, object] = {}

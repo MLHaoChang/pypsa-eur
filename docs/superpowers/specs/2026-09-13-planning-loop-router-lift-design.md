@@ -78,6 +78,10 @@ existing test for a refactor).
 
 ## Out of scope
 
-* `post_mc` / frontier / sweep — same shape, separate cuts.
 * Behaviour changes, including tempting copy edits in verdict strings.
+
+Follow-on (done on `cursor/mc-study-router-lift-ce8d`): `post_mc`,
+`post_frontier`, and `post_fmea_sweep` lifted into
+`services/adequacy/{mc_loop,frontier_loop,fmea_sweep}_runner.py` — see
+`docs/superpowers/specs/2026-09-13-mc-study-router-lift-design.md`.
 * Touching `services/adequacy/coupling.py` (the pure controller).
