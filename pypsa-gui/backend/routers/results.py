@@ -850,6 +850,29 @@ def _refuse_if_mesh_busy(self_key: str) -> None:
         raise HTTPException(409, blocked)
 
 
+
+def _abort_study(key: str, never_run_msg: str) -> dict:
+    """Shared body for the five study abort POSTs.
+
+    Under the solver-state lock: look up the record, 404 if none has ever
+    been published, otherwise set its stop event (when present) and answer
+    with the current status. Idempotent: aborting a finished study is still
+    200 with ``aborting: false``. The per-route 404 copy is the only
+    difference callers pass in — keeping those strings on the handlers so
+    the panel's error text stays a deliberate contract, not a shared
+    template that drifts.
+    """
+    with PyPSAService.get_solver_state_lock():
+        st = _state.get(key)
+        if not st:
+            raise HTTPException(404, never_run_msg)
+        ev = st.get("stop_event")
+        status = st.get("status")
+    if ev is not None:
+        ev.set()
+    return {"status": status, "aborting": status == "running"}
+
+
 def _publish_study(key: str, record: dict, thread: "_threading.Thread") -> None:
     """Claim the surface, publish the record and START the worker under ONE
     `solver_state_lock` hold — the same shape as `/simulation/run`'s claim.
@@ -920,16 +943,7 @@ def post_fmea_sweep_abort():
     study worker, so a user pressing it would be told the abort succeeded
     while the study kept running.
     """
-    with PyPSAService.get_solver_state_lock():
-        st = _state.get("fmea_sweep")
-        if not st:
-            raise HTTPException(
-                404, "no FMEA sweep has been run in this session")
-        ev = st.get("stop_event")
-        status = st.get("status")
-    if ev is not None:
-        ev.set()
-    return {"status": status, "aborting": status == "running"}
+    return _abort_study('fmea_sweep', 'no FMEA sweep has been run in this session')
 
 
 @results_router.post("/fmea_sweep")
@@ -984,16 +998,7 @@ def post_frontier_abort():
     study worker, so a user pressing it would be told the abort succeeded
     while the study kept running.
     """
-    with PyPSAService.get_solver_state_lock():
-        st = _state.get("frontier")
-        if not st:
-            raise HTTPException(
-                404, "no frontier study has been run in this session")
-        ev = st.get("stop_event")
-        status = st.get("status")
-    if ev is not None:
-        ev.set()
-    return {"status": status, "aborting": status == "running"}
+    return _abort_study('frontier', 'no frontier study has been run in this session')
 
 
 @results_router.post("/frontier")
@@ -1055,16 +1060,7 @@ def post_mc_abort():
     study worker, so a user pressing it would be told the abort succeeded
     while the study kept running.
     """
-    with PyPSAService.get_solver_state_lock():
-        st = _state.get("mc")
-        if not st:
-            raise HTTPException(
-                404, "no sequential-MC study has been run in this session")
-        ev = st.get("stop_event")
-        status = st.get("status")
-    if ev is not None:
-        ev.set()
-    return {"status": status, "aborting": status == "running"}
+    return _abort_study('mc', 'no sequential-MC study has been run in this session')
 
 
 @results_router.post("/mc")
@@ -1196,16 +1192,7 @@ def post_coupling_loop_abort():
     study worker, so a user pressing it would be told the abort succeeded
     while the loop kept solving.
     """
-    with PyPSAService.get_solver_state_lock():
-        st = _state.get("coupling_loop")
-        if not st:
-            raise HTTPException(
-                404, "no coupling-loop study has been run in this session")
-        ev = st.get("stop_event")
-        status = st.get("status")
-    if ev is not None:
-        ev.set()
-    return {"status": status, "aborting": status == "running"}
+    return _abort_study('coupling_loop', 'no coupling-loop study has been run in this session')
 
 
 @results_router.post("/coupling_loop")
@@ -1290,16 +1277,7 @@ def post_margin_loop_abort():
     already finishing: "stop" on something that has stopped is satisfied.
     404 only when no run has ever been recorded.
     """
-    with PyPSAService.get_solver_state_lock():
-        st = _state.get("margin_loop")
-        if not st:
-            raise HTTPException(
-                404, "no margin-loop study has been run in this session")
-        ev = st.get("stop_event")
-        status = st.get("status")
-    if ev is not None:
-        ev.set()
-    return {"status": status, "aborting": status == "running"}
+    return _abort_study('margin_loop', 'no margin-loop study has been run in this session')
 
 
 @results_router.post("/margin_loop")
