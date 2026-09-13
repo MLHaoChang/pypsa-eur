@@ -38,6 +38,23 @@ Two rules hold this together:
   `assumptions`/`diagnostics`/`objective` → `myopic`). If new code seems to need
   a back-import, it is in the wrong module. The same test enforces this.
 
+## Where planning-loop controllers go
+`POST /results/coupling_loop` and `POST /results/margin_loop` stay as thin
+handlers in `routers/results.py` (mesh refuse + FastAPI decorator). The
+validation, bindings, study record and worker live in:
+
+| module | owns |
+|---|---|
+| `services/adequacy/coupling_loop_runner.py` | `start_coupling_loop`, coupling-loop constants + `CouplingLoopRequest` |
+| `services/adequacy/margin_loop_runner.py` | `start_margin_loop`, margin-loop constants + `MarginLoopRequest` |
+
+Inject `solver_state=`, `state_update=`, `publish_study=` — never import
+`routers.*` from the runners. The pure controller stays in
+`services/adequacy/coupling.py`. Constants/models are re-exported from the
+router so `chat_tools` and existing tests keep importing from
+`routers.results`. Spec:
+`docs/superpowers/specs/2026-09-13-planning-loop-router-lift-design.md`.
+
 ## Where results arithmetic goes
 The `/results/*` handlers in `routers/results.py` are thin: network lookup,
 `_dispatch_ready` gate, `_state` reads, then a call into
