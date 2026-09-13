@@ -38,7 +38,6 @@ from fastapi import APIRouter, HTTPException, Query, Response
 
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.pypsa_service import PyPSAService
-from services.adequacy.coupling import snapshot_hash as _snapshot_hash
 from services.adequacy.coupling_loop_runner import (  # noqa: F401
     LOOP_WARNING_V1,
     UNREACHABLE_COPY_V1,

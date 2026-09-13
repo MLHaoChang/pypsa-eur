@@ -101,7 +101,6 @@ def start_margin_loop(
     to a warning, and refusing it here would deny a supported configuration).
     """
     import dataclasses
-    import hashlib
     import queue as _queue
     import time
 
