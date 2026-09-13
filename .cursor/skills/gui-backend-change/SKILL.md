@@ -117,6 +117,7 @@ router; two sibling routers hold deep route clusters:
 | `services/transformer_rules.py` | transformer voltage validation / enrichment / type sanitisation |
 | `services/snapshot_index.py` | `_build_period_multiindex` |
 | `services/network_bulk.py` | `PATCH /_bulk` coerce rules + `apply_bulk_update`; thin `bulk_update` stays on the router |
+| `services/network_buses.py` | bus specials (`apply_update_bus`, cascade delete, rename); inject `_update_component` — never import `routers.*` |
 | `routers/network_time_axis.py` | snapshots / investment periods / timeseries routes (Phase 5) |
 | `routers/network_profiles.py` | load / generator / link profile list + template + upload; `_xlsx_response`, `_apply_profile_upload` |
 | `services/network_undo.py` | undo capture/restore (`push_undo_snapshot`, `get_undo_info`, `apply_undo`); thin `/undo` handlers stay on the router |
@@ -131,6 +132,7 @@ pinned, not conventional. Bulk lift:
 Profiles sibling:
 `docs/superpowers/specs/2026-09-13-network-profiles-router-lift-design.md`.
 Undo lift: `docs/superpowers/specs/2026-09-13-network-undo-router-lift-design.md`.
+Bus specials: `docs/superpowers/specs/2026-09-13-network-bus-specials-lift-design.md`.
 
 Inject state into `apply_bulk_update` only via its arguments / `PyPSAService` —
 never import `routers.*` from `services/network_bulk.py`. Do not fold the
