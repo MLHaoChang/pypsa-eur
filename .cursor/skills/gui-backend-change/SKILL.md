@@ -61,6 +61,15 @@ and existing tests keep importing from `routers.results`. Specs:
 `docs/superpowers/specs/2026-09-13-planning-loop-router-lift-design.md`,
 `docs/superpowers/specs/2026-09-13-mc-study-router-lift-design.md`.
 
+## Where COPT / FMEA-modes payloads go
+`GET /results/copt` and `GET /results/fmea_modes` stay as thin handlers in
+`routers/results.py` (network + state + HTTP map). Payload assembly lives in
+`services/adequacy/copt_endpoint.py` (`build_copt_payload`,
+`build_fmea_modes_payload`). Inject `get_lock=` / `sweep_record=` — never
+import `routers.*` from the endpoint module. Pure engines stay in
+`services/adequacy/copt.py`. Spec:
+`docs/superpowers/specs/2026-09-13-copt-modes-router-lift-design.md`.
+
 ## Where results arithmetic goes
 The `/results/*` handlers in `routers/results.py` are thin: network lookup,
 `_dispatch_ready` gate, `_state` reads, then a call into
