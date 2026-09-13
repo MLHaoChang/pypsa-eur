@@ -116,13 +116,20 @@ the router, so existing imports are unchanged:
 | `services/network_geometry.py` | haversine, bus coordinates, impedance preview, length recompute |
 | `services/transformer_rules.py` | transformer voltage validation / enrichment / type sanitisation |
 | `services/snapshot_index.py` | `_build_period_multiindex` |
+| `services/network_bulk.py` | `PATCH /_bulk` coerce rules + `apply_bulk_update`; thin `bulk_update` stays on the router |
 
 **Never rebind `_user_ts` or `_user_ts_lock`.** `services/chat_tools.py` imports
 them by value inside a function and mutates in place; reassigning either would
 leave the router and every importer holding different objects, with writes
 going to different stores. `tests/test_network_facade_surface.py` fails on any
 rebinding, and also fails if a CRUD helper is moved out — this phase's scope is
-pinned, not conventional.
+pinned, not conventional. Spec for the bulk lift:
+`docs/superpowers/specs/2026-09-13-network-bulk-router-lift-design.md`.
+
+Inject state into `apply_bulk_update` only via its arguments / `PyPSAService` —
+never import `routers.*` from `services/network_bulk.py`. Do not fold the
+inlined coerce loop in `apply_bulk_update` into `_coerce_bulk_value` without a
+dedicated change (MERGE NOTE documents both shapes).
 
 ## Weighting (multi-period)
 - Use `snapshot_weights(n, column, sns=None)`, `period_years_map`, `years_for_period`.
