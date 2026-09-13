@@ -850,12 +850,22 @@ def test_F1n2_the_loops_read_the_condition_and_not_the_status():
     with a patched solver to reach one line; this cannot be routed around by a
     fixture.
 
+    The bodies live in ``services/adequacy/{coupling,margin}_loop_runner.py``
+    since the planning-loop router lift (PR #27). Scanning ``routers/results.py``
+    after that cut went *vacuous* — zero matches, green forever — the same
+    self-satisfying shape named in
+    ``docs/superpowers/findings/2026-09-09-chat-stream-loop-two-vestigial-guards.md``.
+
     Bite (verified): put `return status in ("ok", "optimal")` back in either
-    `_restore_closing`.
+    `_restore_closing`, or drop one of the four ``restore_is_clean(word)`` calls.
     """
     import pathlib
 
-    raw = pathlib.Path("routers/results.py").read_text()
+    roots = [
+        pathlib.Path("services/adequacy/coupling_loop_runner.py"),
+        pathlib.Path("services/adequacy/margin_loop_runner.py"),
+    ]
+    raw = "\n".join(p.read_text() for p in roots)
     # Comments are stripped before scanning: the fix's own comment QUOTES the
     # expression it replaced, and a check that trips on prose about a defect
     # rather than the defect is not a check.
@@ -866,7 +876,7 @@ def test_F1n2_the_loops_read_the_condition_and_not_the_status():
         " also covers time_limit, iteration_limit, terminated_by_limit,"
         " suboptimal and imprecise; read the CONDITION through"
         " services.adequacy.sweep.restore_is_clean")
-    # both loops, not just one
+    # both loops, not just one (two call sites each)
     assert raw.count("restore_is_clean(word)") >= 4, (
         "both `_restore_closing` bodies must route through the shared"
         " predicate — found fewer uses than the two loops need")
