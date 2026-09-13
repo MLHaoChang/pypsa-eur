@@ -102,14 +102,14 @@ def test_the_crud_routes_did_not_come_along():
         "_update_component",
         "_delete_component",
         "_merge_partial_update",
-        "_push_undo_snapshot",
-    ]
+            ]
     for name in stays:
         fn = getattr(NET, name, None)
         assert fn is not None, f"routers.network.{name} disappeared"
         if inspect.isfunction(fn):
             assert fn.__module__ == "routers.network", (
                 f"{name} left routers.network — this phase moves profiles only"
+            # `_push_undo_snapshot` later moved to services.network_undo
             )
 
 
@@ -125,6 +125,11 @@ def test_the_moved_routes_are_gone_from_the_router_source():
     assert not still_here, (
         f"these are still DEFINED in routers/network.py: {sorted(still_here)}"
     )
+
+
+def test_push_undo_snapshot_moved_to_network_undo_after_this_phase():
+    """Later undo lift; still reachable from the router façade."""
+    assert NET._push_undo_snapshot.__module__ == "services.network_undo"
 
 
 def test_the_profiles_router_is_included():
