@@ -109,15 +109,26 @@ _MOVED: dict[str, str] = {
 
     # ── undo capture (middleware + /undo routes) ──────────────────────────────
     "_push_undo_snapshot": "services.network_undo",
+
+    # ── generic CRUD factory ──────────────────────────────────────────────────
+    "_serialize_component": "services.network_crud",
+    "_get_component": "services.network_crud",
+    "_meta_payload": "services.network_crud",
+    "_drop_unknown_extras": "services.network_crud",
+    "_normalise_flag_column": "services.network_crud",
+    "_create_component": "services.network_crud",
+    "_merge_partial_update": "services.network_crud",
+    "_detach_component_series": "services.network_crud",
+    "_reattach_component_series": "services.network_crud",
+    "_rename_component_safely": "services.network_crud",
+    "_update_component": "services.network_crud",
+    "_delete_component": "services.network_crud",
 }
 
-# Names other modules import from `routers.network` that must stay put: the
-# CRUD factory only. `_xlsx_response` / `_apply_profile_upload` moved with
-# the profiles sibling (`test_network_profiles_surface.py`).
+# Names other modules import from `routers.network` that must remain exported.
+# The CRUD factory now lives in services.network_crud (see `_MOVED`); this list
+# is empty — kept so the parametrized stay tests still collect.
 _STAYS = [
-    "_serialize_component", "_get_component", "_meta_payload",
-    "_create_component", "_merge_partial_update",
-    "_update_component", "_delete_component",
     ]
 
 # Thin FastAPI handlers whose bodies live in services. The handler name stays
