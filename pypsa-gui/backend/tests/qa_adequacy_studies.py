@@ -9,10 +9,11 @@ screen, sample, sweep, write the worksheet, drive the margin loop. This one
 covers what that journey does not reach, and what CI otherwise sees only
 through unit tests:
 
-* **the ε-cap coupling loop** — the margin loop's sibling on the same
-  controller, driving the unserved-energy cap instead of the firm-capacity
-  standard. The two levers take different branches of the same search, and
-  only one of them was under a driver.
+* **the ε-cap coupling loop and the margin loop** — siblings on the same
+  controller, driving the unserved-energy cap and the firm-capacity
+  standard respectively. The two levers take different branches of the
+  same search; both must be under a live driver, not only empty-state
+  checks.
 * **the frontier sweep** — the cost-vs-reliability curve. Its points come out
   of five separate solves and carry an ordering the panel draws a knee on;
   nothing end-to-end checked that the curve is monotone in the direction
@@ -347,6 +348,59 @@ def section_4_coupling_loop() -> None:
               str(loop["final"]["mc"]["lole_hours"]))
 
 
+# ── §4b the margin loop ───────────────────────────────────────────────────
+
+def section_4b_margin_loop() -> None:
+    print("\n[4b] the margin loop — the cap loop's sibling lever")
+    c = qa_support.client()
+    r = c.post("/api/results/margin_loop",
+               json={"target_lole_h": 400.0, "draws": 200, "seed": 7,
+                     "max_solves": 3})
+    _step("the margin loop starts", r.status_code == 200, r.text[:200])
+    if r.status_code != 200:
+        return
+    loop = _poll("/api/results/margin_loop")
+    _step("the margin loop reaches a verdict rather than an error",
+          loop.get("status") in ("met", "unreachable", "budget_exhausted"),
+          f"status={loop.get('status')} error={str(loop.get('error'))[:200]}")
+    _step("the payload is JSON-clean", not _nonfinite(loop),
+          str(_nonfinite(loop)[:5]))
+    _step("it spent no more solves than it was budgeted",
+          0 < int(loop.get("solves_used", 0)) <= 3,
+          f"solves_used={loop.get('solves_used')}")
+    _step("the closing re-solve put the network back on base",
+          loop.get("base_restored") is True,
+          f"base_restored={loop.get('base_restored')} "
+          f"status={loop.get('base_restore_status')}")
+    rows = loop.get("iterations") or []
+    _step("every iterate is on the record", len(rows) >= 1, f"{len(rows)} rows")
+    # The search tightens by GROWING the margin, never by loosening: each
+    # iterate's lever_value is strictly above the last. A loop that walks
+    # back down is searching a bracket it already disproved.
+    margins = [float(r_["lever_value"]) for r_ in rows]
+    _step("the margin tightens strictly, iterate by iterate",
+          all(b > a for a, b in zip(margins, margins[1:])), str(margins))
+    _step("no iterate was handed a non-positive margin",
+          all(v > 0 for v in margins), str(margins))
+    evaluated = [r_ for r_ in rows if r_.get("mc")]
+    _step("an evaluated iterate carries finite LOLE and EUE",
+          all(float(r_["mc"]["lole_hours"]) >= 0
+              and float(r_["mc"]["eue_mwh"]) >= 0 for r_ in evaluated),
+          f"{len(evaluated)} evaluated of {len(rows)}")
+    _step("the loop carries the MC's standing warning and its own",
+          bool(loop.get("warning")) and len(str(loop.get("warning"))) > 200,
+          str(loop.get("warning"))[:120])
+    # `lever_star` is the ANSWER, and it exists exactly when there is one.
+    _step("lever_star is set if and only if the loop met the target",
+          (loop.get("lever_star") is not None) == (loop.get("status") == "met"),
+          f"status={loop.get('status')} lever_star={loop.get('lever_star')}")
+    if loop.get("final"):
+        _step("the answering iterate's own MC evaluation met the target",
+              float(loop["final"]["mc"]["lole_hours"]) <= 400.0 + 1e-9,
+              str(loop["final"]["mc"]["lole_hours"]))
+
+
+
 # ── §5 abort ──────────────────────────────────────────────────────────────
 
 def section_5_abort() -> None:
@@ -450,6 +504,7 @@ def main() -> int:
         section_2_refusals()
         section_3_frontier()
         section_4_coupling_loop()
+        section_4b_margin_loop()
         section_5_abort()
         section_6_the_network_comes_back()
     except Exception as exc:                                     # noqa: BLE001

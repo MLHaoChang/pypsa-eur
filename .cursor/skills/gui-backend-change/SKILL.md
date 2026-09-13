@@ -61,6 +61,8 @@ and existing tests keep importing from `routers.results`. Specs:
 `docs/superpowers/specs/2026-09-13-planning-loop-router-lift-design.md`,
 `docs/superpowers/specs/2026-09-13-mc-study-router-lift-design.md`.
 
+Study abort POSTs share `_abort_study(key, never_run_msg)` in `routers/results.py` — keep the per-route docstring and 404 copy; do not fold them into `/simulation/abort`.
+
 ## Where COPT / FMEA-modes payloads go
 `GET /results/copt` and `GET /results/fmea_modes` stay as thin handlers in
 `routers/results.py` (network + state + HTTP map). Payload assembly lives in

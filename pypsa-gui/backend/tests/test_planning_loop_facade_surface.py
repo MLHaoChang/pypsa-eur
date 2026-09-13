@@ -38,8 +38,10 @@ def test_handlers_and_models_stay_on_the_router_surface():
         "MARGIN_LOOP_PANEL_LABEL",
         "LOOP_WARNING_V1",
         "MARGIN_LOOP_WARNING_V1",
+        "MARGIN_MULTI_PERIOD_WARNING_V1",
         "UNREACHABLE_COPY_V1",
         "NEVER_BOUND_COPY_V1",
+        "NEVER_BOUND_WITH_MARGIN_COPY_V1",
         "PROBE_MARGIN",
     ):
         assert hasattr(R, name), name
