@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import io
 import math
 from typing import Any
 
-import numpy as np
 import pandas as pd
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session as DBSession
-from fastapi.responses import StreamingResponse
 from models.schemas import (
     BusCreate,
     CarrierCreate,
@@ -41,8 +38,6 @@ from services.user_timeseries import (  # noqa: F401
 )
 from services.pypsa_service import PyPSAService
 from services.serialization import df_to_json
-from services.upload_guard import read_capped
-from services.http_filenames import content_disposition
 
 # ── Re-export façade: the extracted helper services ──────────────────────────
 # These names are DEFINED under `services/` now (see the decomposition spec,
