@@ -133,6 +133,13 @@ _LIFTED_HANDLERS: dict[str, tuple] = {
     "rename_bus": ("services.network_buses", "apply_rename_bus"),
     "recalculate_line_lengths": ("services.network_lines", "apply_recalculate_line_lengths"),
     "rescale_impedances": ("services.network_lines", "apply_rescale_impedances"),
+    "create_global_constraint": ("services.network_global_constraints", "apply_create_global_constraint"),
+    "update_global_constraint": (
+        "services.network_global_constraints",
+        "apply_update_global_constraint",
+        ("_merge_partial_update",),
+    ),
+    "delete_global_constraint": ("services.network_global_constraints", "apply_delete_global_constraint"),
 }
 
 # `_filter_transient_names` was in the list above until Phase 5, and came out
