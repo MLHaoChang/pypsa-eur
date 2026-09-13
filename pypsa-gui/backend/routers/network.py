@@ -133,6 +133,11 @@ from services.network_lines import (  # noqa: F401
     apply_recalculate_line_lengths,
     apply_rescale_impedances,
 )
+from services.network_global_constraints import (  # noqa: F401
+    apply_create_global_constraint,
+    apply_delete_global_constraint,
+    apply_update_global_constraint,
+)
 
 router = APIRouter()
 
@@ -926,9 +931,6 @@ def delete_shunt(name: str):
 
 from models.schemas import GlobalConstraintCreate
 
-_GC_OPTIONAL = ("carrier_attribute", "carrier", "investment_period")
-
-
 @router.get("/global_constraints")
 def get_global_constraints():
     # Route through the generic helper so the transient-row filter runs
@@ -942,67 +944,19 @@ def get_global_constraints():
 
 @router.post("/global_constraints", status_code=201)
 def create_global_constraint(body: GlobalConstraintCreate):
-    n = PyPSAService.get_network()
-    with PyPSAService.get_lock():
-        if body.name in n.global_constraints.index:
-            raise HTTPException(409, f"GlobalConstraint '{body.name}' already exists")
-        kwargs: dict[str, Any] = {
-            "type": body.type,
-            "sense": body.sense,
-            "constant": float(body.constant),
-        }
-        for opt in _GC_OPTIONAL:
-            v = getattr(body, opt, None)
-            # Empty strings should not become column entries either — PyPSA
-            # treats "" the same as None for these optional fields.
-            if v is None or v == "":
-                continue
-            kwargs[opt] = v
-        n.add("GlobalConstraint", body.name, **kwargs)
-    change_log_service.log(
-        "add", "GlobalConstraint", body.name,
-        f"Added global constraint '{body.name}' ({body.type} {body.sense} {body.constant})",
-    )
-    return {"name": body.name}
+    return apply_create_global_constraint(body)
 
 
 @router.put("/global_constraints/{name}")
 def update_global_constraint(name: str, body: GlobalConstraintCreate):
-    n = PyPSAService.get_network()
-    with PyPSAService.get_lock():
-        if name not in n.global_constraints.index:
-            raise HTTPException(404, f"GlobalConstraint '{name}' not found")
-        # Real partial-PUT: same pattern as _update_component for the regular
-        # component CRUD. Reads the existing row, merges `exclude_unset=True`
-        # on top, so a body of `{"constant": 100}` ONLY changes constant
-        # instead of resetting `type`/`sense`/`carrier_attribute`/period to
-        # the Pydantic schema defaults (which was the B2 footgun before).
-        # NOTE: deliberately NOT routed through _update_component — that injects
-        # ensure_carrier (wrong for a GlobalConstraint). Shared MERGE only.
-        merged = _merge_partial_update(
-            n, "global_constraints", name, body.model_dump(exclude_unset=True)
-        )
-        new_name = merged.pop("name", name)
-        n.remove("GlobalConstraint", name)
-        n.add("GlobalConstraint", new_name, **merged)
-    change_log_service.log(
-        "update", "GlobalConstraint", new_name,
-        f"Updated global constraint '{name}' → '{new_name}'",
+    return apply_update_global_constraint(
+        name, body, merge_partial_update=_merge_partial_update,
     )
-    return {"name": new_name}
 
 
 @router.delete("/global_constraints/{name}", status_code=204)
 def delete_global_constraint(name: str):
-    n = PyPSAService.get_network()
-    with PyPSAService.get_lock():
-        if name not in n.global_constraints.index:
-            raise HTTPException(404, f"GlobalConstraint '{name}' not found")
-        n.remove("GlobalConstraint", name)
-    change_log_service.log(
-        "delete", "GlobalConstraint", name,
-        f"Deleted global constraint '{name}'",
-    )
+    apply_delete_global_constraint(name)
 
 
 # ── Network Meta ──────────────────────────────────────────────────────────────
