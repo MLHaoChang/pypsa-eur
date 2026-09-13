@@ -106,23 +106,27 @@ _MOVED: dict[str, str] = {
     "_finite_bound_default": "services.network_bulk",
     "_bool_input_default": "services.network_bulk",
     "_coerce_bulk_value": "services.network_bulk",
+
+    # ── undo capture (middleware + /undo routes) ──────────────────────────────
+    "_push_undo_snapshot": "services.network_undo",
 }
 
 # Names other modules import from `routers.network` that must stay put: the
-# CRUD factory and undo. `_xlsx_response` / `_apply_profile_upload` moved with
+# CRUD factory only. `_xlsx_response` / `_apply_profile_upload` moved with
 # the profiles sibling (`test_network_profiles_surface.py`).
 _STAYS = [
     "_serialize_component", "_get_component", "_meta_payload",
     "_create_component", "_merge_partial_update",
     "_update_component", "_delete_component",
-    "_push_undo_snapshot",
-]
+    ]
 
 # Thin FastAPI handlers whose bodies live in services. The handler name stays
 # on `routers.network` (chat_tools imports `bulk_update` by name); the compute
 # function is defined in the service module.
 _LIFTED_HANDLERS: dict[str, tuple[str, str]] = {
     "bulk_update": ("services.network_bulk", "apply_bulk_update"),
+    "undo_info": ("services.network_undo", "get_undo_info"),
+    "undo_last": ("services.network_undo", "apply_undo"),
 }
 
 # `_filter_transient_names` was in the list above until Phase 5, and came out

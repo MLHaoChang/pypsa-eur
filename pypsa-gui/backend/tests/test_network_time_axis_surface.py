@@ -131,7 +131,7 @@ def test_the_crud_routes_did_not_come_along():
     """
     stays = ["_serialize_component", "_get_component", "_create_component",
              "_update_component", "_delete_component", "_merge_partial_update",
-             "_push_undo_snapshot"]
+             ]
     for name in stays:
         fn = getattr(NET, name, None)
         assert fn is not None, f"routers.network.{name} disappeared"
@@ -142,6 +142,7 @@ def test_the_crud_routes_did_not_come_along():
             )
     # `_xlsx_response` later moved with the profiles sibling; still reachable.
     assert NET._xlsx_response.__module__ == "routers.network_profiles"
+    assert NET._push_undo_snapshot.__module__ == "services.network_undo"
 
 
 def test_the_moved_routes_are_gone_from_the_router_source():
