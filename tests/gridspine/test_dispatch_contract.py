@@ -2,7 +2,7 @@ import pandas as pd
 import pytest
 
 from gridspine.schema.contracts import ContractError
-from gridspine.schema.dispatch import validate_dispatch
+from gridspine.schema.dispatch import validate_dispatch, validate_loads
 
 
 def good():
@@ -84,3 +84,86 @@ def test_inf_p_rejected():
     df.loc[1, "p_mw"] = float("inf")
     with pytest.raises(ContractError, match="inf"):
         validate_dispatch(df)
+
+
+# ───────────────── hour is a snapshot index, not a timestamp ────────────────
+#
+# `pd.to_numeric` is the integrality guard's first step, and on a datetime64
+# column it succeeds: it returns epoch NANOSECONDS, every one of them integral.
+# So a client whose export calls its timestamp column `snapshot` — one of the
+# aliases `producers.external` accepts, and what a market model actually names
+# it — got a dispatch keyed by 1704067200000000000 rather than a refusal. The
+# study then completes: `metrics.csv` indexed by those numbers,
+# `lf_1704067200000000000_bus.csv`, `bundle_h1704067200000000000/`, and the
+# manifest's `selected_hours` likewise. The same column in a CSV IS refused
+# (strings become NaN), so the two file formats disagreed about one client's
+# data, which is the worst version of this.
+
+def _hours(df):
+    return validate_dispatch(df)["hour"].tolist()
+
+
+def test_a_timestamp_hour_is_refused_rather_than_read_as_epoch_nanoseconds():
+    df = good()
+    df["hour"] = pd.to_datetime(
+        ["2024-01-01 00:00", "2024-01-01 00:00", "2024-01-01 01:00", "2024-01-01 01:00"]
+    )
+    with pytest.raises(ContractError) as exc:
+        validate_dispatch(df)
+    message = str(exc.value)
+    # The range guard below would refuse these nanoseconds too, so what this
+    # pins is the MESSAGE: a client who shipped a timestamp column is told that,
+    # and told which dtype gave it away, rather than being shown a bound.
+    assert "datetime64" in message and "snapshot index" in message
+
+
+def test_a_timestamp_hour_is_refused_in_the_loads_table_too():
+    loads = pd.DataFrame({
+        "bus": ["L0", "L0"],
+        "hour": pd.to_datetime(["2024-01-01 00:00", "2024-01-01 01:00"]),
+        "p_mw": [10.0, 11.0], "q_mvar": [1.0, 1.0],
+    })
+    with pytest.raises(ContractError) as exc:
+        validate_loads(loads)
+    assert "loads table" in str(exc.value) and "datetime64" in str(exc.value)
+
+
+def test_an_hour_too_large_to_be_a_snapshot_index_is_refused_not_wrapped():
+    """`1e19 % 1 == 0`, so the integrality guard passed it, and `astype("int64")`
+    wrapped it to INT64_MIN in silence — no warning, no error, a negative hour in
+    the table. Epoch SECONDS (1704067200) lands here too, which is the same
+    client mistake one unit smaller."""
+    df = good()
+    df["hour"] = [0, 0, 1e19, 1e19]
+    with pytest.raises(ContractError) as exc:
+        validate_dispatch(df)
+    assert "hour" in str(exc.value).lower()
+    assert all(h >= 0 for h in _hours(good()))
+
+
+def test_a_negative_hour_is_refused():
+    """An hour is a position in the study. A negative one would name a
+    `bundle_h-1/` directory and index nothing."""
+    df = good()
+    df["hour"] = [0, 0, -1, -1]
+    with pytest.raises(ContractError):
+        validate_dispatch(df)
+
+
+def test_a_sparse_but_sane_hour_set_still_passes():
+    """The bound is there to catch garbage, not to police a study's shape: hours
+    need not be 0..N-1, and nothing downstream treats them positionally."""
+    df = good()
+    df["hour"] = [5, 5, 9000, 9000]
+    assert _hours(df) == [5, 5, 9000, 9000]
+
+
+def test_the_dispatch_table_comes_back_in_the_contract_order():
+    """`validate_loads` selects its columns and `validate_dispatch` did not, so
+    the stage-1 artifact's column order was whatever the client's file had.
+    No number was wrong, but `dispatch.csv` and the client-facing
+    `bundle_h*/dispatch_h*.csv` varied run to run for no reason."""
+    shuffled = good()[["hour", "status", "unit_id", "q_mvar", "p_mw"]]
+    assert list(validate_dispatch(shuffled).columns) == [
+        "unit_id", "hour", "p_mw", "q_mvar", "status",
+    ]

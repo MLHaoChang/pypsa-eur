@@ -239,26 +239,98 @@ function StudyView({ name }: { name: string }) {
 // with the reason, because the backend would refuse it with the same reason.
 type SourceKind = DispatchSource['kind']
 
+// FOUR sources in the picker, three in `DispatchSource`. The client's own
+// tables are set by UPLOADING files, not by naming a path in a JSON body —
+// which is the security posture, not an implementation detail — so the extra
+// member lives here rather than in the API's union.
+type PickerMode = SourceKind | 'from_external'
+
+// An Excel dispatch MAY carry its demand on a second sheet; a CSV cannot. So
+// the demand file is required for a CSV and optional for a workbook, and the
+// Apply button can say which before the request rather than after a 422.
+const WORKBOOK = /\.(xlsx|xlsm|xls)$/i
+
+// The suffixes the SERVER reads (`gridspine_service._EXTERNAL_SUFFIXES`, and
+// `producers.external`'s two sets). `accept` on a file input is advisory —
+// drag-and-drop and "All files" in the OS dialog both go round it — and the
+// server RENAMES an unrecognised suffix to `dispatch.csv`, after which the
+// producer reads the bytes as text and refuses them under a filename the
+// engineer never used. Cheaper to say so here, before the upload.
+const READABLE = /\.(csv|txt|xlsx|xlsm|xls)$/i
+const READABLE_LIST = '.csv, .txt, .xlsx, .xlsm or .xls'
+
 const INPUT = 'px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20'
 
-function currentSourceKind(config: StudyConfig): SourceKind {
+function currentSourceKind(config: StudyConfig): PickerMode {
+  if (config.from_external) return 'from_external'
   if (config.from_network) return 'from_project'
   if (config.from_dispatch) return 'from_dispatch'
   return 'generate'
 }
 
 function describeSource(config: StudyConfig): string {
+  if (config.from_external) {
+    // The filename, not the server path: what the engineer recognises is the
+    // file they uploaded.
+    const d = config.from_external_name ?? config.from_external
+    const l = config.from_external_loads_name ?? config.from_external_loads
+    return l ? `your own tables (${d} + ${l})` : `your own tables (${d})`
+  }
   if (config.from_network) return `the solved network of ${config.from_project ?? config.from_network}`
   if (config.from_dispatch) return `the dispatch in ${config.from_dispatch}`
   return 'generated here (IEEE 39-bus, rolling unit commitment)'
 }
 
+/** What the demand input is actually for, given what is attached.
+ *
+ *  A workbook MAY carry its own `loads` sheet, so the file is optional — but an
+ *  attached demand file is still SENT, and the server then takes its two-file
+ *  path and reads sheet 0 of the workbook as the dispatch. Saying "optional"
+ *  while sending it is how an engineer ends up reading a refusal about columns a
+ *  sheet they never meant to use does not have.
+ */
+function demandLabel(dispatch: File | null, loads: File | null): string {
+  if (dispatch && WORKBOOK.test(dispatch.name)) {
+    return loads
+      ? 'Demand table — this file will be used, not the workbook\u2019s "loads" sheet (clear it to use the sheet)'
+      : 'Demand table — optional: this workbook may hold a "loads" sheet'
+  }
+  return 'Demand table — bus, hour, P, Q (required: a snapshot is generation AND demand)'
+}
+
 function DispatchSourcePicker({ name, config, locked }: { name: string; config: StudyConfig; locked: boolean }) {
   const qc = useQueryClient()
-  const [kind, setKind] = useState<SourceKind | null>(null)
+  const [kind, setKind] = useState<PickerMode | null>(null)
   const [dir, setDir] = useState(config.from_dispatch ?? '')
   const [project, setProject] = useState(config.from_project ?? '')
-  const mode: SourceKind = kind ?? currentSourceKind(config)
+  const [dispatchFile, setDispatchFile] = useState<File | null>(null)
+  const [refusal, setRefusal] = useState<string | null>(null)
+  const [loadsFile, setLoadsFile] = useState<File | null>(null)
+  // Bumping this remounts both file inputs, which is the only way to clear what
+  // an uncontrolled file input DISPLAYS. Without it the inputs and the state
+  // disagreed: after a mode round trip both read "No file chosen" while the
+  // files were still attached, and Apply re-uploaded the invisible pair.
+  const [filesKey, setFilesKey] = useState(0)
+  const mode: PickerMode = kind ?? currentSourceKind(config)
+
+  function forgetFiles() {
+    setDispatchFile(null)
+    setLoadsFile(null)
+    setRefusal(null)
+    setFilesKey(k => k + 1)
+  }
+
+  /** A picked file, or a refusal instead of it. */
+  function pick(file: File | null, keep: (f: File | null) => void) {
+    setRefusal(null)
+    if (file && !READABLE.test(file.name)) {
+      keep(null)
+      setRefusal(`gridspine reads ${READABLE_LIST}; ${file.name} is none of those. `
+                 + 'Export the table as CSV or as an Excel workbook and try again.')
+      return
+    }
+    keep(file)
+  }
 
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => projectsApi.list(), enabled: mode === 'from_project' })
   const candidates = (projects.data ?? []).filter(p => p.project_kind !== 'planning_dynamics' && p.name !== name)
@@ -266,16 +338,36 @@ function DispatchSourcePicker({ name, config, locked }: { name: string; config: 
   const source: DispatchSource | null =
     mode === 'generate' ? { kind: 'generate' }
     : mode === 'from_dispatch' ? (dir.trim() ? { kind: 'from_dispatch', dir: dir.trim() } : null)
-    : (project ? { kind: 'from_project', project } : null)
+    : mode === 'from_project' ? (project ? { kind: 'from_project', project } : null)
+    : null
+
+  // A workbook may carry both tables; a CSV must be paired with a demand file.
+  const externalReady = !!dispatchFile && (WORKBOOK.test(dispatchFile.name) || !!loadsFile)
 
   const apply = useMutation({
     mutationFn: (s: DispatchSource) => gridspineApi.setDispatchSource(name, s),
     onSuccess: (cfg) => {
       qc.setQueryData(CONFIG_KEY(name), cfg)
       setKind(null)
+      // A refusal describes a file, and the source is no longer that file.
+      forgetFiles()
       toast.success(`Dispatch source: ${describeSource(cfg)}`)
     },
     onError: (e) => toast.error(errorText(e)),
+  })
+
+  const upload = useMutation({
+    mutationFn: () => gridspineApi.uploadExternalDispatch(name, dispatchFile!, loadsFile),
+    onSuccess: async (summary) => {
+      forgetFiles()
+      setKind(null)
+      await qc.invalidateQueries({ queryKey: CONFIG_KEY(name) })
+      toast.success(`Dispatch source: your own tables — ${summary.units} units over ${summary.hours} h`)
+    },
+    // Inline as well as a toast: the producer's refusal names the units or the
+    // columns that disagree, and the engineer reads it against their own file.
+    // A toast that vanishes is the wrong home for a list of ids.
+    onError: (e) => { setRefusal(errorText(e)); toast.error('That dispatch could not be read') },
   })
 
   return (
@@ -290,11 +382,12 @@ function DispatchSourcePicker({ name, config, locked }: { name: string; config: 
             value={mode}
             disabled={locked}
             aria-label="Dispatch source"
-            onChange={e => setKind(e.target.value as SourceKind)}
+            onChange={e => { setKind(e.target.value as PickerMode); forgetFiles() }}
           >
             <option value="generate">Generate here (unit commitment)</option>
             <option value="from_project">A solved project's network</option>
             <option value="from_dispatch">A finished study's directory</option>
+            <option value="from_external">Your own dispatch (CSV / Excel)</option>
           </select>
         </Field>
         {mode === 'from_dispatch' && (
@@ -327,8 +420,54 @@ function DispatchSourcePicker({ name, config, locked }: { name: string; config: 
             </select>
           </Field>
         )}
-        <Btn onClick={() => source && apply.mutate(source)} disabled={locked || !source || apply.isPending}>Apply</Btn>
+        {mode === 'from_external' && (
+          <>
+            <Field label="Dispatch table — unit id, hour, P, Q, status (CSV or Excel)">
+              <input
+                key={`dispatch-${filesKey}`}
+                type="file"
+                className={`${INPUT} w-[300px]`}
+                accept=".csv,.txt,.xlsx,.xlsm,.xls"
+                disabled={locked}
+                aria-label="Dispatch table"
+                onChange={e => pick(e.target.files?.[0] ?? null, setDispatchFile)}
+              />
+            </Field>
+            <Field label={demandLabel(dispatchFile, loadsFile)}>
+              <div className="flex items-center gap-1">
+                <input
+                  key={`loads-${filesKey}`}
+                  type="file"
+                  className={`${INPUT} w-[300px]`}
+                  accept=".csv,.txt,.xlsx,.xlsm,.xls"
+                  disabled={locked}
+                  aria-label="Demand table"
+                  onChange={e => pick(e.target.files?.[0] ?? null, setLoadsFile)}
+                />
+                {loadsFile && (
+                  <button
+                    type="button"
+                    className="text-[11px] text-muted hover:text-danger px-1"
+                    aria-label="Clear the demand table"
+                    disabled={locked}
+                    onClick={() => { setLoadsFile(null); setRefusal(null); setFilesKey(k => k + 1) }}
+                  >
+                    clear
+                  </button>
+                )}
+              </div>
+            </Field>
+          </>
+        )}
+        {mode === 'from_external'
+          ? <Btn onClick={() => upload.mutate()} disabled={locked || !externalReady || upload.isPending}>Apply</Btn>
+          : <Btn onClick={() => source && apply.mutate(source)} disabled={locked || !source || apply.isPending}>Apply</Btn>}
       </div>
+      {refusal && (
+        <p className="mt-2 text-[11px] text-danger whitespace-pre-wrap font-mono" data-testid="external-refusal">
+          {refusal}
+        </p>
+      )}
     </PageSection>
   )
 }

@@ -127,6 +127,16 @@ def _apply_res(net, snap, registry) -> None:
     equation, and taking it out keeps the RAW writer's STAT field agreeing with
     the snapshot being studied.
 
+    `q_mvar` is set as well as `p_mw`, because `net.sgen` is a PQ element and its
+    Q is a load-flow INPUT — unlike `net.gen` (a PV bus), where Q is a result and
+    the dispatch column is rightly ignored. Leaving it unset dropped a client's
+    stated reactive exchange after it had been validated and written into
+    `dispatch.csv`: the voltages, branch Q flows, N-1 severities and the `.raw`
+    then described a different reactive state than the artifact the client was
+    handed. It never showed because `tables_from_network` hardcodes `q_mvar = 0.0`
+    and case39_res's sgen rows are natively 0.0 too; `producers.external` is the
+    first producer that can carry a value here.
+
     INCREMENT-3 WARNING — do not reuse this mapping for the short-circuit
     stage. Curtailment is a control state, not a disconnection: a curtailed
     inverter is still energised, still synchronised, and still contributes
@@ -146,6 +156,7 @@ def _apply_res(net, snap, registry) -> None:
         row = snap.loc[unit_id]
         i = idx_of[unit_id]
         net.sgen.at[i, "p_mw"] = float(row["p_mw"])
+        net.sgen.at[i, "q_mvar"] = float(row["q_mvar"])
         net.sgen.at[i, "in_service"] = bool(int(row["status"]))
 
 
@@ -212,6 +223,17 @@ def check_net_carries_hour(net, dispatch, loads, hour, registry) -> None:
                 f"net does not carry hour {hour}: {unit_id} p_mw {have:.3f} on the net vs "
                 f"{want:.3f} in the dispatch — apply_snapshot first"
             )
+        if rec["kind"] == "res":
+            # Only for sgen: Q is an input there, so an unapplied value is a
+            # stage-order defect exactly as an unapplied P is. For `gen` the
+            # dispatch's q_mvar is deliberately not applied (PV bus), so checking
+            # it would refuse every correctly applied snapshot.
+            want_q, have_q = float(at_hour.at[unit_id, "q_mvar"]), float(table.at[idx, "q_mvar"])
+            if abs(want_q - have_q) > P_TOL_MW:
+                raise ContractError(
+                    f"net does not carry hour {hour}: {unit_id} q_mvar {have_q:.3f} on the "
+                    f"net vs {want_q:.3f} in the dispatch — apply_snapshot first"
+                )
 
 
 def _bus_numbers(net):

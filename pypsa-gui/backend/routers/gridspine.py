@@ -37,6 +37,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session as DBSession
+from starlette.concurrency import run_in_threadpool
 
 from db.models import Project, User
 from db.session import get_db
@@ -45,6 +46,14 @@ from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import gridspine_service as gs
 from services import project_registry
 from services.upload_guard import read_capped
+
+#: Per-part cap for the two client TABLES, well below the process-wide 512 MB
+#: that exists for a clustered `network.nc`. A year of hourly dispatch for 50
+#: units is ~440k rows, around 20 MB of CSV, and an Excel workbook of the same
+#: is smaller still — so 64 MB is generous for every legitimate file while taking
+#: the worst case from two 512 MB buffers (~2 GB in flight once `b"".join`
+#: doubles them) down to something a handful of parallel uploads cannot OOM.
+TABLE_MAX_BYTES = 64 * 1024 * 1024
 
 router = APIRouter()
 
@@ -210,9 +219,43 @@ async def upload_readback(
     under the same size cap as every other upload."""
     bus_bytes = await read_capped(bus)
     branch_bytes = await read_capped(branches) if branches is not None else None
-    return gs.upload_readback(
+    # Off the event loop: the comparison parses the engineer's CSVs and reads the
+    # bundle, and none of that is async. See the note on the external upload.
+    return await run_in_threadpool(
+        gs.upload_readback,
         _row(proj, db), hour, bus_bytes, bus.filename,
         branch_bytes, branches.filename if branches is not None else None,
+    )
+
+
+@router.post("/{name}/dispatch-source/external")
+async def upload_external_dispatch(
+    dispatch: UploadFile = File(...),
+    loads: UploadFile | None = File(None),
+    proj: AuthorizedProject = ProjectAccessDep,
+    db: DBSession = Depends(get_db),
+):
+    """The client's OWN dispatch and demand tables as this study's source
+    (increment 7). Two files, or one Excel workbook with `dispatch` and `loads`
+    sheets — the producer decides and says so when the single file cannot carry
+    both. Validated on arrival, so a 422 here means the engineer's file needs
+    fixing before the study is worth queueing. Both read under the same size cap
+    as every other upload.
+
+    Under `/dispatch-source/` rather than `/uploads/` on purpose: the effect of
+    this call is to SET the study's dispatch source, which is what
+    `PUT /{name}/dispatch-source` does for the other three.
+    """
+    dispatch_bytes = await read_capped(dispatch, TABLE_MAX_BYTES)
+    loads_bytes = await read_capped(loads, TABLE_MAX_BYTES) if loads is not None else None
+    # Off the event loop. The service call loads case39 and hands the client's
+    # bytes to pandas/openpyxl, all of it synchronous and all of it sized by the
+    # CLIENT: a crafted workbook that costs minutes to parse would otherwise
+    # block every other request this process is serving for that whole time.
+    return await run_in_threadpool(
+        gs.upload_external_dispatch,
+        _row(proj, db), dispatch_bytes, dispatch.filename,
+        loads_bytes, loads.filename if loads is not None else None,
     )
 
 

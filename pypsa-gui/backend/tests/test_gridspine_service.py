@@ -378,6 +378,26 @@ def test_a_study_is_not_created_with_a_raw_dispatch_path(user_and_db):
     assert "set_dispatch_source" in str(exc.value.detail)
 
 
+def test_a_study_is_not_created_with_a_raw_external_path(user_and_db):
+    """The third and fourth path fields, and the reason this test exists at all:
+    `from_external` was added to `StudyConfig` by increment 7 and NOT to this
+    guard, so a caller could hand `create_study` any path on the box and have it
+    written into the config verbatim — `_authorized_dispatch_dir` bypassed on a
+    field it was never taught about. The run would then `pd.read_csv` that file
+    and put its first line into the refusal message the queue hands back.
+
+    An external source is an UPLOAD. There is no spelling of it a caller is
+    allowed to name, which is why this refusal does not point at
+    `set_dispatch_source` the way the other two do.
+    """
+    db, user = user_and_db
+    for field in ("from_external", "from_external_loads"):
+        with pytest.raises(HTTPException) as exc:
+            gs.create_study(db, user, f"Raw {field}", config={field: "/etc/passwd"})
+        assert exc.value.status_code == 422
+        assert "upload" in str(exc.value.detail).lower()
+
+
 # --------------------------------------------------------------------------
 # run / read
 # --------------------------------------------------------------------------
