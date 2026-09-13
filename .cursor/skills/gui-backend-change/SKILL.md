@@ -70,6 +70,13 @@ import `routers.*` from the endpoint module. Pure engines stay in
 `services/adequacy/copt.py`. Spec:
 `docs/superpowers/specs/2026-09-13-copt-modes-router-lift-design.md`.
 
+## Where lost-load payload assembly goes
+`GET /results/lost_load` stays a thin handler in `routers/results.py`
+(capture lookup + HTTP map). Arithmetic lives in
+`services/results/lost_load.py::compute_lost_load`. Inject the capture
+dict — never import `routers.*`. Spec:
+`docs/superpowers/specs/2026-09-13-lost-load-router-lift-design.md`.
+
 ## Where results arithmetic goes
 The `/results/*` handlers in `routers/results.py` are thin: network lookup,
 `_dispatch_ready` gate, `_state` reads, then a call into
