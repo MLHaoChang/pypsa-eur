@@ -1,22 +1,22 @@
-# MC study router lift — design
+# MC / frontier / FMEA-sweep study router lift — design
 
 **Date:** 2026-09-13
 **Status:** approved for implementation (continues the backend god-file decomposition)
-**Scope:** lift `post_mc` out of `routers/results.py` into `services/adequacy/mc_loop_runner.py`, restoring the thin-router invariant for the remaining largest FMEA study controller. Strictly behaviour-preserving. Follow-on to PR #27.
+**Scope:** lift `post_mc`, `post_frontier`, and `post_fmea_sweep` out of `routers/results.py` into `services/adequacy/{mc_loop,frontier_loop,fmea_sweep}_runner.py`, restoring the thin-router invariant for the remaining FMEA study controllers. Strictly behaviour-preserving. Follow-on to PR #27.
 
 ## Problem
 
-After the planning-loop lift (#27), `routers/results.py` is still 2,190 lines. The largest remaining study POST is:
+After the planning-loop lift (#27), `routers/results.py` is still 2,190 lines. The largest remaining study POSTs are:
 
 | handler | LOC | shape |
 |---|---:|---|
 | `post_mc` | 274 | validation + snapshot under lock + worker + publish |
-| `post_frontier` | 95 | same shape (later cut) |
-| `post_fmea_sweep` | 85 | same shape (later cut) |
+| `post_frontier` | 95 | same shape |
+| `post_fmea_sweep` | 85 | same shape |
 
-`post_mc` already calls pure engines in `services/adequacy/mc.py` / `elcc.py`. What remains in the router is request validation, the one locked snapshot, the study record, and the worker — same seam as the coupling/margin lifts.
+`post_mc` already calls pure engines in `services/adequacy/mc.py` / `elcc.py`; frontier and sweep call `frontier.py` / `sweep.py` / `stress.py`. What remains in the router is request validation, the study record, and the worker — same seam as the coupling/margin lifts.
 
-`services/chat_tools.py` imports `McRequest` and `post_mc` from `routers.results`, so the **handler name, signature and request model stay on the router** (re-exported).
+`services/chat_tools.py` imports the request models and handlers from `routers.results`, so the **handler name, signature and request model stay on the router** (re-exported).
 
 ## Design
 
@@ -51,7 +51,11 @@ No `state_update` is needed (MC never mutates solver settings). The runner never
 * New tripwire: thin handler LOC; runner never imports routers; surface names stay on the router.
 * F1n2-style source scans that named `post_mc` in `routers/results.py` still resolve the thin handler (ALLOWED exemption stays valid).
 
-## Out of scope (this PR)
+## Included follow-on cuts
 
-* `post_frontier` / `post_fmea_sweep` — same shape, separate or follow-on commits if time allows.
+* `post_frontier` → `services/adequacy/frontier_loop_runner.py` (`start_frontier`, `FrontierRequest`); injects `state_update` (closing restore).
+* `post_fmea_sweep` → `services/adequacy/fmea_sweep_runner.py` (`start_fmea_sweep`, `FmeaSweepRequest`); injects `state_update`.
+
+## Out of scope
+
 * Behaviour changes.

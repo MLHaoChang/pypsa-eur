@@ -39,22 +39,25 @@ Two rules hold this together:
   a back-import, it is in the wrong module. The same test enforces this.
 
 ## Where planning-loop / study controllers go
-`POST /results/coupling_loop`, `POST /results/margin_loop`, and
-`POST /results/mc` stay as thin handlers in `routers/results.py` (mesh refuse
-+ FastAPI decorator). The validation, bindings, study record and worker live
-in:
+`POST /results/coupling_loop`, `POST /results/margin_loop`,
+`POST /results/mc`, `POST /results/frontier`, and `POST /results/fmea_sweep`
+stay as thin handlers in `routers/results.py` (mesh refuse + FastAPI
+decorator). The validation, bindings, study record and worker live in:
 
 | module | owns |
 |---|---|
 | `services/adequacy/coupling_loop_runner.py` | `start_coupling_loop`, coupling-loop constants + `CouplingLoopRequest` |
 | `services/adequacy/margin_loop_runner.py` | `start_margin_loop`, margin-loop constants + `MarginLoopRequest` |
 | `services/adequacy/mc_loop_runner.py` | `start_mc`, `McRequest` + `McElccAsset` |
+| `services/adequacy/frontier_loop_runner.py` | `start_frontier`, `FrontierRequest` |
+| `services/adequacy/fmea_sweep_runner.py` | `start_fmea_sweep`, `FmeaSweepRequest` |
 
-Inject `solver_state=`, `state_update=` (loops only), `publish_study=` — never
-import `routers.*` from the runners. The pure controllers stay in
-`services/adequacy/coupling.py` / `mc.py` / `elcc.py`. Constants/models are
-re-exported from the router so `chat_tools` and existing tests keep importing
-from `routers.results`. Specs:
+Inject `solver_state=`, `state_update=` (loops / frontier / sweep — anything
+that restores via `_state_update`), `publish_study=` — never import
+`routers.*` from the runners. The pure controllers stay in
+`services/adequacy/coupling.py` / `mc.py` / `elcc.py` / `frontier.py` /
+`sweep.py`. Constants/models are re-exported from the router so `chat_tools`
+and existing tests keep importing from `routers.results`. Specs:
 `docs/superpowers/specs/2026-09-13-planning-loop-router-lift-design.md`,
 `docs/superpowers/specs/2026-09-13-mc-study-router-lift-design.md`.
 
