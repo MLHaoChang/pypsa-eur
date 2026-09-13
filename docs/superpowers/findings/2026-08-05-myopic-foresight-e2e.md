@@ -1,5 +1,8 @@
 # Myopic foresight — end-to-end examination
 
+**Status: CLOSED.** Both defects fixed (see Verdict below); the optimisation itself was
+never at fault. Added 2026-09-12 by a triage pass — this file had no status line.
+
 **Date:** 2026-08-05
 **Scope:** the myopic solve strategy from solver config → LP loop → reported results.
 **Verdict:** the optimisation itself is sound. Two defects, both in what the app

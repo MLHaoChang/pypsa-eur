@@ -701,7 +701,8 @@ def _recover_pending_turn(ctx: Any) -> dict[str, Any] | None:
 
 
 @router.get("/history")
-def chat_history(limit: int = 200) -> dict[str, Any]:
+def chat_history(limit: int = 200,
+                 actor: User | None = Depends(optional_user)) -> dict[str, Any]:
     """
     Replay the active project's chat history (the on-disk `chat.jsonl` and
     its rotation backup) so a frontend reload can hydrate the message list
@@ -787,6 +788,10 @@ def chat_history(limit: int = 200) -> dict[str, Any]:
             sess, session_was_freshly_minted = (
                 chat_service.get_or_create_session_reporting(
                     last_session_id, model=resolved_profile.model,
+                    # Record the owner on creation. `session_owner_allows` is
+                    # fail-closed, so a creation path that omits this locks the
+                    # real owner out of /abort and /rewind.
+                    owner_user_id=(str(actor.id) if actor is not None else None),
                 )
             )
             # Fix round 1 — GET /history must stay read-only w.r.t. an
@@ -1077,6 +1082,12 @@ async def chat_stream(
 
     session = chat_service.get_or_create_session(
         body.session_id, model=body.model or chat_service.DEFAULT_MODEL,
+        # Same source the tool layer binds from two lines above, rather than a
+        # second resolution that could disagree with it.
+        owner_user_id=(
+            str(getattr(getattr(request.state, "auth_user", None), "id", None) or "")
+            or None
+        ),
     )
 
     # #26 — in-memory token-bucket rate limit, keyed per session_id (a session
@@ -1261,7 +1272,8 @@ async def chat_stream(
 
 
 @router.post("/{session_id}/confirm")
-def chat_confirm(session_id: str, body: ConfirmRequest) -> dict[str, Any]:
+def chat_confirm(session_id: str, body: ConfirmRequest,
+                 actor: User | None = Depends(optional_user)) -> dict[str, Any]:
     """
     Resolve a pending confirmation token. v4-MINOR-3: the lookup + pop run
     under `ChatSession._lock`, so two concurrent POSTs (two tabs, fast
@@ -1273,6 +1285,19 @@ def chat_confirm(session_id: str, body: ConfirmRequest) -> dict[str, Any]:
     alive so the caller can retry with the correct value.
     """
     session = chat_service.get_session(session_id)
+    # Authorization, not just authentication. `_SESSIONS` is a process global and
+    # this route used to consult no owner at all, so any signed-in caller who knew
+    # a session id could act on a stranger's conversation -- verified cross-ORG.
+    # The id is not secret either: GET /history hands `last_session_id` to any
+    # co-member who activates the project.
+    #
+    # A foreign session is made INDISTINGUISHABLE from an unknown one rather than
+    # answered with a 403: that keeps this route from confirming the session
+    # exists, and matches the existing never-404 contract below.
+    if session is not None and not chat_service.session_owner_allows(
+        session, getattr(actor, "id", None),
+    ):
+        session = None
     if session is None:
         raise HTTPException(
             status_code=404,
@@ -1297,7 +1322,8 @@ class RewindRequest(BaseModel):
 
 
 @router.post("/{session_id}/rewind")
-def chat_rewind(session_id: str, body: RewindRequest) -> dict[str, Any]:
+def chat_rewind(session_id: str, body: RewindRequest,
+                actor: User | None = Depends(optional_user)) -> dict[str, Any]:
     """
     Drop the last N turns so a retry / edit-and-resend is a real retry.
 
@@ -1312,6 +1338,12 @@ def chat_rewind(session_id: str, body: RewindRequest) -> dict[str, Any]:
     answer there.
     """
     session = chat_service.get_session(session_id)
+    # Same guard and same reasoning as /confirm and /abort above: a foreign
+    # session is made indistinguishable from an unknown one.
+    if session is not None and not chat_service.session_owner_allows(
+        session, getattr(actor, "id", None),
+    ):
+        session = None
     if session is None:
         return {"ok": False, "reason": "unknown_session", "dropped": 0}
     dropped = chat_service.rewind_session(session, turns=body.turns)
@@ -1319,13 +1351,27 @@ def chat_rewind(session_id: str, body: RewindRequest) -> dict[str, Any]:
 
 
 @router.post("/{session_id}/abort")
-def chat_abort(session_id: str) -> dict[str, Any]:
+def chat_abort(session_id: str,
+               actor: User | None = Depends(optional_user)) -> dict[str, Any]:
     """
     Set the session's abort_event so its SSE generator + any cooperating
     worker shut down. Idempotent: safe to call on an unknown session
     (returns ok=false rather than 404, so a quick double-click is harmless).
     """
     session = chat_service.get_session(session_id)
+    # Authorization, not just authentication. `_SESSIONS` is a process global and
+    # this route used to consult no owner at all, so any signed-in caller who knew
+    # a session id could act on a stranger's conversation -- verified cross-ORG.
+    # The id is not secret either: GET /history hands `last_session_id` to any
+    # co-member who activates the project.
+    #
+    # A foreign session is made INDISTINGUISHABLE from an unknown one rather than
+    # answered with a 403: that keeps this route from confirming the session
+    # exists, and matches the existing never-404 contract below.
+    if session is not None and not chat_service.session_owner_allows(
+        session, getattr(actor, "id", None),
+    ):
+        session = None
     if session is None:
         return {"ok": False, "reason": "unknown_session"}
     session.abort_event.set()

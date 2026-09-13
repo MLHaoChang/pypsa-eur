@@ -1,5 +1,9 @@
 # Verification of the Results-tabs window at real scale
 
+**Status: CLOSED — this is a verification record, not a defect report.** 16/16 checks
+PASS, with a mutation test proving they discriminate. Added 2026-09-12 by a triage
+pass — this file had no status line.
+
 **Date:** 2026-08-09
 **Scope:** the six windowing Results tabs shipped by
 `docs/superpowers/plans/2026-08-05-results-tabs-window.md`. That plan's own

@@ -546,7 +546,17 @@ def test_new_llm_routes_are_not_under_the_foreign_lock_gate():
             "needed here. Do not synthesize the symbol locally to make it "
             "run; that would test a stand-in, not the real gate."
         )
-    assert prefixes == ("/api/network/", "/api/io/", "/api/simulation/")
+    # Exact equality on purpose: widening this gate must be a DELIBERATE,
+    # reviewed act, not something that drifts. `/api/results/` was added
+    # 2026-09-12 because the five adequacy-study POSTs under it re-solve the
+    # SHARED resident network with no holder check of their own (see finding 1
+    # of docs/superpowers/assessments/2026-09-12-per-route-authorization-audit.md
+    # and tests/test_results_study_foreign_lock.py). Updating this expectation
+    # is the review step working as intended — do NOT relax it to a
+    # subset/"startswith" check to stop it failing on the next widening.
+    assert prefixes == (
+        "/api/network/", "/api/io/", "/api/simulation/", "/api/results/",
+    )
     exempt_fn = getattr(main, "_foreign_lock_gate_exempt", None)
     for path in _NEW_ROUTE_PATHS:
         assert not any(path.startswith(p) for p in prefixes), path
