@@ -1241,11 +1241,26 @@ def _entry_under(root: Path, relative: str) -> Path | None:
     `_DistAssets` mount above, so this path handles only the shallow root files
     (`favicon.ico`, `manifest.json`, and friends).
 
-    A symlink inside `dist` is followed, exactly as before: the old check
-    called `resolve()` on both sides, so a link pointing outside `dist` failed
-    `is_relative_to` and 404'd. Here it never matches an entry name in the
-    first place unless it IS a real child, and following a child of the build
-    output is the intended behaviour for a build output.
+    SYMLINKS NEED THE CONTAINMENT CHECK BACK, and this is the one place it is
+    load-bearing rather than decorative. An earlier version of this function
+    dropped it, reasoning that a traversing segment "never matches an entry
+    name in the first place". That is true of `..`; it is FALSE of a symlink.
+    `iterdir()` yields a symlink as an ordinary child, so it matches by name,
+    and `is_file()` follows it — so `dist/escape.css -> /etc/passwd` was
+    matched, opened and served, where the code this replaced resolved it,
+    failed `is_relative_to`, and 404'd. A regression, shipped, and caught by an
+    independent review rather than by the tests here.
+
+    So the walk establishes "every segment names a real entry", and the resolve
+    below establishes "and the thing it finally names is still inside `dist`".
+    Both are needed; neither subsumes the other. A symlink pointing WITHIN
+    `dist` still resolves and is still served, which is what the old code did
+    too.
+
+    This does not reintroduce the `py/path-injection` flow. The value being
+    checked comes from `iterdir()`, not from the request — the containment test
+    is confirming a property of a path this function built, not laundering a
+    tainted one.
     """
     current = root
     segments = [seg for seg in relative.split("/") if seg]
@@ -1264,7 +1279,13 @@ def _entry_under(root: Path, relative: str) -> Path | None:
         if match is None:
             return None
         current = match
-    return current if current.is_file() else None
+    try:
+        resolved = current.resolve()
+        if not resolved.is_relative_to(root.resolve()):
+            return None          # a symlink out of the tree
+    except (OSError, ValueError):
+        return None
+    return resolved if resolved.is_file() else None
 
 
 app.mount("/assets", _DistAssets(check_dir=False), name="assets")

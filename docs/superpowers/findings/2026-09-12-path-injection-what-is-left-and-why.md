@@ -16,25 +16,43 @@ did the work.
 | template key + static file lookup | 6 | 23 |
 | org id resolved to its row | 5 | 22 |
 
-## The single finding underneath all of it
+## The finding underneath all of it, and what it got wrong
 
-**CodeQL was not disagreeing with the guards. It could not see them.**
+**Every line reference in this section is to the BASELINE revision the scan
+ran on — `e037601c^` for `snapshots.py`, `57dc6242^` for `main.py` — not to the
+current tree.** The first version of this document wrote them in the present
+tense, and that mattered: by the time it was committed (`04819565`), the
+`serve_spa` guard it cites as evidence had already been deleted by this
+branch's own remedy 26 minutes earlier, and stayed deleted for ten hours. The
+document was offering a guard that no longer existed as proof that alerts about
+that file were false positives. State the revision, or do not cite the line.
 
-Every flow it reported ran *through* a correct check and out the other side.
-Three barriers this codebase relies on are not modelled by
-`codeql/python-queries`:
+**CodeQL was not disagreeing with the guards. It could not see them.** That
+part holds. Every flow it reported ran *through* a check that was correct at
+the baseline, and out the other side. Three barriers this codebase relied on
+are not modelled by `codeql/python-queries`:
 
 * `Path.is_relative_to` after `resolve()` — the containment check in
-  `snapshots._safe_snapshot_dir` and `main.serve_spa`;
+  `snapshots._safe_snapshot_dir` and `main.serve_spa`, both as they stood at
+  the baseline;
 * a `re.sub` character allowlist — `snapshots._slugify_label`;
 * a membership test against a known dict — `projects.create_from_template`.
 
-The flow for the snapshot guard made this unmistakable:
-`snapshots.py:118 -> :130 -> :136 -> <sink>` — 118 is the guard's own
-signature, 130 is where it builds the path, 136 is where it returns it.
+The flow for the snapshot guard made this unmistakable — at `e037601c^`,
+`snapshots.py:118 -> :130 -> :136 -> <sink>`, where 118 is the guard's own
+signature, 130 is where it builds the path, and 136 is where it returns it.
+(Those numbers are already stale in the current tree; the decomposition moved
+them. That is the point of naming the revision.)
 
-So the remedy was never to add a check. It was to stop *arguing* a value is
-safe and instead *derive* it from something already safe:
+**Where this document was wrong: "so the remedy was never to add a check".**
+It was, for two of the four changes. See the correction below — the remedy
+removes the taint edge CodeQL objects to, and that is worth doing, but it does
+not replace the check, and here it twice replaced it. Read the rest of this
+section as "how to make the alert go away", never as "why the alert was
+wrong".
+
+The remedy that makes the flow disappear is to stop *arguing* a value is safe
+and instead *derive* it from something already safe:
 
 * `iterdir()` for a directory that must already exist (snapshots, static files);
 * a module constant for a generated name (the slug alphabet);
@@ -44,6 +62,24 @@ safe and instead *derive* it from something already safe:
 That last one is the pattern `gridspine_service._authorized_dispatch_dir`
 established in 859a7265, generalised.
 
+**Correction — `iterdir()` does not replace a containment check, and both
+`iterdir()` rewrites here shipped as if it did.** `iterdir()` establishes that
+an entry's NAME is one the directory really contains. It establishes nothing
+about where the entry leads: a symlink is an ordinary child, `is_dir()` and
+`is_file()` follow it, so `snapshots/<valid-id>` or `dist/<matched-name>` could
+point anywhere on the box. Both helpers replaced code that resolved the path and
+refused exactly that, and both lost the refusal — `main._entry_under` served
+files symlinked out of `dist` (fixed in 12e4fef7), and `_existing_snapshot_dir`
+would have let `restore` copy another project's `network.nc` and `chat.jsonl`
+into the caller's. Every test written for the rewrites passed before and after
+the regression, because they all tested `..` and none tested a symlink.
+
+Derive-don't-argue is still the right remedy for the CodeQL flow — it removes
+the taint edge, which a containment check does not. It is not a substitute for
+the containment check. Keep both: the derivation for the auditor, the resolve
+for the filesystem. `upload_service._safe_file_dir` says this in its own
+docstring and is the one place that got it right first time.
+
 ## What is left, and why
 
 ### 4 alerts — a project or study name becomes its directory name
@@ -52,9 +88,19 @@ established in 859a7265, generalised.
 both reaching `storage_paths.allocate_storage_path` →
 `safe_names.safe_dir_name`.
 
+(That attribution is from the SARIF and a reader cannot re-derive it without
+re-running the scan. Note there is a THIRD route into the same sink that the
+alerts did not name: `project_registry.create_root` at `:238`, reached from
+`create_from_template`, which passes the user-supplied `name` query parameter
+straight through — `projects.py:1266–1270`. Same disposition applies for the
+same reason, but do not read "rename and create-study" as the complete set of
+callers.)
+
 **This is the product design, and it is documented where it lives.** E1 put the
 user's own name on disk so the directory is findable in Finder. `safe_dir_name`
-is a *denylist* — it strips `<>:"/\|?*` and control characters, defuses Windows
+is a *denylist* — it REPLACES `<>:"/\|?*` and control characters with `_`
+(`safe_names.py:64`; it does not strip them, which would silently join two
+separated components), defuses Windows
 reserved device names, strips leading/trailing dots and spaces, caps the
 component at 96 characters, and then **deliberately preserves everything else,
 including non-ASCII**: its docstring says folding to ASCII "would make `Étude`
