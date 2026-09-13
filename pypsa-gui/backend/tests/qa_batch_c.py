@@ -64,10 +64,11 @@ def _has_in(path_str: str, snippet: str) -> bool:
 
 def test_c1_lost_load_voll() -> None:
     print("\n[C1] lost_load emits voll_eur_per_mwh")
-    # `/results/lost_load` is served from `routers/results.py` — the read-only
-    # serializers were carved out of `routers/simulation.py`, which this
-    # assertion still named.
-    ok = _has_in("backend/routers/results.py",
+    # Payload assembly lives in `services/results/lost_load.py` since the
+    # lost-load router lift. Scanning `routers/results.py` after that cut
+    # went *vacuous* — the thin handler no longer contains the key — the
+    # same self-satisfying shape as F1j / F1n2 after earlier lifts.
+    ok = _has_in("backend/services/results/lost_load.py",
                  "voll_eur_per_mwh")
     _step("voll_eur_per_mwh in /results/lost_load payload", ok)
     ok2 = _has_in("frontend/src/api/simulation.ts", "voll_eur_per_mwh: number")
