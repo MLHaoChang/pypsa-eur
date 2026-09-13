@@ -2079,6 +2079,72 @@ _NEXT_STEP_RUBRIC_CHAINING = (
     "ground the advice in the actual setup."
 )
 
+
+# Adequacy / reliability guide. The reliability tools each carry a DIFFERENT
+# fidelity, and the difference is the whole point: three of these engines are
+# proxies that the panels caveat at the point of display, and an agent that
+# narrates them as one number would report a proxy as a statutory result. The
+# rule below is the same one the routers' own docstrings state.
+# Split FACTS / CHAINING per Task 8's doctrine, and NOT folded into the five
+# pinned constants: `test_default_prompt_bytes_unchanged` pins those against
+# their pre-split hashes precisely so the default prompt does not move as a
+# side effect, and new guidance arriving as a NEW part is the sanctioned way
+# past that (the same way `_profile_awareness_block()` joined the list).
+#
+# The FACTS half is where the fidelity truths live, and it names no tool — a
+# tools-off model cannot check anything, so it is the mode MOST likely to
+# narrate a screening proxy as a statutory result.
+_ADEQUACY_GUIDE_FACTS = (
+    "Reliability and solution-FMEA. ALWAYS name the engine and its fidelity "
+    "when you report a number. 'copt' = analytic capacity-outage convolution: "
+    "thermal-only, storage-excluded, network-free, zero solves — a SCREENING "
+    "figure, never comparable to a statutory standard. 'adequacy' = engine "
+    "'lp_proxy', a deterministic LP proxy, likewise not a statutory result. "
+    "'reserve_margin' = a firm-capacity convention justified by its derating "
+    "factors, so a MET MARGIN IS NOT A MET RELIABILITY TARGET — say so "
+    "whenever you quote one. 'mc' = the sequential Monte-Carlo sampler, the "
+    "only engine here whose LOLE/EUE is a sampled ESTIMATE — quote its "
+    "interval (`lole_ci` / `eue_ci`) and its `converged` flag beside the "
+    "mean, and never present a non-converged run as a point value. LOLE "
+    "targets on the loops are HORIZON-basis hours, not h/yr — convert before "
+    "comparing to a statutory h/yr standard and state which basis you used. "
+    "An asset sitting on a capacity bound was NOT sized by its economics, so "
+    "explaining one from capture price or profitability is confidently wrong. "
+    "The commonest cause of an infeasible model is structural — an island "
+    "holding demand with no plant in it — and the solver message names "
+    "neither the island nor the demand. A study that omits what it did not "
+    "measure reads as though it measured it. "
+)
+_ADEQUACY_GUIDE_CHAINING = (
+    "Read these with get_adequacy_results. A no_data result means the study "
+    "never ran or the solve set no target: report the missing precondition "
+    "from its `message`, never zero risk. Choosing a study: run_fmea_sweep "
+    "ranks failure modes by contingency; run_mc_study measures LOLE/EUE and "
+    "ELCC credit; run_frontier_study prices reliability (one full expansion "
+    "solve per target); run_coupling_loop (energy lever) and run_margin_loop "
+    "(firm-capacity lever) drive a plan TO a target. All five are mutually "
+    "exclusive with each other and with a foreground solve — a 409 means "
+    "something is already running, so poll it rather than retrying. SIZING "
+    "questions — 'why did it build X', 'why only N MW', 'why no storage' — go "
+    "to explain_investment FIRST: its `binding_constraint` answers most of "
+    "them outright. On 'infeasible' ALSO call diagnose_network before "
+    "theorising, so a bounds explanation is not offered as a guess. "
+    "CAMPAIGNS: a question that needs more than one study ('hit LOLE <= 3 "
+    "h/yr at least cost') starts with start_campaign, stating the objective "
+    "in the user's own words. Each engine caps itself but nothing caps "
+    "chaining them, and the budget is enforced in the tools, not by your "
+    "counting: a refusal means report what the campaign has established and "
+    "ask before spending more. Read campaign_status before choosing the next "
+    "study — its `entries` are the ONLY record of what you already ran, "
+    "because each surface holds just its latest result and a second frontier "
+    "overwrites the first. Close with end_campaign when the objective is "
+    "answered. WRITING IT UP: a request for a report, a summary of findings "
+    "or a client write-up goes through build_study_report. Carry every line "
+    "of its required_disclosures, put its evidence_gaps BEFORE the numbers "
+    "they undermine, and state its not_established explicitly."
+)
+_ADEQUACY_GUIDE = _ADEQUACY_GUIDE_FACTS + _ADEQUACY_GUIDE_CHAINING
+
 # Untrusted-content boundary clause (#2, prompt half). Pairs with the
 # <untrusted_data> wrapping in _result_to_anthropic_content + the attachment
 # prefix so the model is told, in-band, that delimited text is data.
@@ -2536,8 +2602,9 @@ def _build_system_prompt(
     Build the system prompt for one turn. Kept small — the agent learns the
     full tool surface from `tools=`. The system prompt carries policy (safety
     rules + session identity + the audit-log action prefix) plus the domain /
-    solver-error / price-congestion / next-step / untrusted-data guides that
-    shape how the agent reads results and stays safe against injected text.
+    solver-error / price-congestion / next-step / adequacy / untrusted-data
+    guides that shape how the agent reads results and stays safe against
+    injected text.
 
     Optional `live_meta` (from `_format_live_network_meta`) is appended so the
     model knows the bound project + network size without a get_meta round-trip.
@@ -2580,6 +2647,11 @@ def _build_system_prompt(
         _SOLVER_ERROR_DECODER if include_tools else _SOLVER_ERROR_DECODER_FACTS,
         _PRICE_CONGESTION_GUIDE if include_tools else _PRICE_CONGESTION_GUIDE_FACTS,
         _NEXT_STEP_RUBRIC if include_tools else _NEXT_STEP_RUBRIC_FACTS,
+        # Reliability. FACTS-only when tools are off: the half that names
+        # engines and fidelities is exactly what a tools-less model needs
+        # (it can check nothing), and the half that names tools is
+        # unusable there.
+        _ADEQUACY_GUIDE if include_tools else _ADEQUACY_GUIDE_FACTS,
         _UNTRUSTED_DATA_CLAUSE,
     ]
     if live_meta:

@@ -16,6 +16,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from routers.deps import AuthorizedProject, ProjectAccessDep
+from services.adequacy.asset_health import (
+    AssetHealthValidationError,
+    load_asset_health,
+    save_asset_health,
+)
 from services.adequacy.stress import (
     StressValidationError,
     load_scenarios,
@@ -68,4 +73,33 @@ def put_stress_scenarios(body: StressScenariosPut,
     try:
         return {"scenarios": save_scenarios(project.directory, body.scenarios)}
     except StressValidationError as exc:
+        raise HTTPException(422, str(exc))
+
+
+class AssetHealthPut(BaseModel):
+    entries: list[dict] = Field(default_factory=list)
+
+
+@router.get("/{name}/asset_health")
+def get_asset_health(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """
+    The per-asset outage-rate PROVENANCE ledger — same sidecar pattern and
+    authorization as the worksheet.
+
+    Serves the file and nothing else. Reconciling it against a live network
+    (which rates have no source, which have drifted) needs the FOREGROUND
+    network, and this route has only a project name: the two are not
+    necessarily the same thing, and a route that quietly compared them would
+    answer about a different network than the one it was asked about. The
+    fusion lives one layer up, where the caller knows which network it holds.
+    """
+    return load_asset_health(project.directory)
+
+
+@router.put("/{name}/asset_health")
+def put_asset_health(body: AssetHealthPut,
+                     project: AuthorizedProject = ProjectAccessDep) -> dict:
+    try:
+        return save_asset_health(project.directory, body.entries)
+    except AssetHealthValidationError as exc:
         raise HTTPException(422, str(exc))

@@ -109,6 +109,44 @@ ASSET_CATEGORY_ENUM = [
 ASSET_VIEW_MODE_ENUM = ["chronological", "duration", "monthly"]
 ASSET_RESOLUTION_ENUM = ["stats", "raw"]
 
+# Adequacy / solution-FMEA surface (services/adequacy/*, routed under
+# /api/results). Ten no-argument GETs behind ONE dispatcher tool, same shape
+# as RESULTS_ENUM/get_results. Mirror routers/results.py by hand if a kind is
+# added there.
+ADEQUACY_KIND_ENUM = [
+    "copt", "fmea_modes", "fmea_sweep", "frontier", "mc",
+    "mc_elcc_candidates", "coupling_loop", "margin_loop", "adequacy",
+    "reserve_margin",
+]
+# The five kinds that run in a worker thread, i.e. the ones that can be
+# aborted. Read-only surfaces (copt / fmea_modes / adequacy / reserve_margin /
+# mc_elcc_candidates) have no thread to stop and are deliberately absent.
+ADEQUACY_STUDY_ENUM = [
+    "fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
+]
+# Where a reliability loop leaves the network when it finishes: at the base
+# case it started from, or at the final iterate that met the target.
+ADEQUACY_RESTORE_ENUM = ["base", "final"]
+
+# Classes whose nominal capacity the optimiser can size — mirrors
+# services/asset_results/compute._NOM_COL, the map explain_investment reads
+# through `nom_col_for`. Bus and Load are absent: neither is an investment.
+INVESTMENT_CLASS_ENUM = [
+    "Generator", "StorageUnit", "Store", "Link", "Line", "Transformer",
+]
+
+# Outage-rate provenance. Mirrors services/adequacy/asset_health.py — the
+# validator there is the authority; these enums exist so the model is told the
+# vocabulary instead of guessing at it and getting a 422.
+ASSET_HEALTH_COMPONENT_ENUM = [
+    "generators", "storage_units", "stores", "links", "lines",
+]
+ASSET_HEALTH_METHOD_ENUM = [
+    "inspection", "sensor", "lab_test", "vendor_datasheet",
+    "operating_history", "fleet_statistic", "expert_judgement",
+]
+ASSET_HEALTH_CONFIDENCE_ENUM = ["low", "medium", "high"]
+
 
 def _t(name: str, description: str, properties: dict[str, Any],
        required: list[str] | None = None) -> dict[str, Any]:
@@ -309,6 +347,10 @@ TOOLS: list[dict[str, Any]] = [
         "forwarded where the underlying handler accepts it. "
         "Returns (dispatch kinds): {index:[iso], columns:[name], data:[[float]]}; "
         "(cost_breakdown): {total, capex, opex, by_component, by_carrier, by_period}. "
+        "Returns {status:'no_data', kind, message} when the underlying endpoint "
+        "has nothing to serve — an unsolved or stale network, or a solve that "
+        "produced none of this kind (lost_load on a run that shed nothing). "
+        "Read `message` and check dispatch_status; do NOT report it as a zero. "
         "Safety: read.",
         {
             "result_kind": {"type": "string", "enum": RESULTS_ENUM},
@@ -694,8 +736,12 @@ TOOLS: list[dict[str, Any]] = [
     _empty(
         "validate_network",
         "Run preflight validation. Returns list[Issue {severity, code, "
-        "component_class, name, message}]. Lock-free, no side effects. "
-        "Safety: read.",
+        "component_class, name, message}]. Errors mean PyPSA will fail; "
+        "warnings mean the solve will RUN and the answer is probably nonsense "
+        "— the timeseries_* codes (all_zero / frozen / negative / spike / "
+        "scale_outlier) are uploaded-data defects that no downstream result "
+        "will ever mention, so report them BEFORE narrating any number that "
+        "depends on the series. Lock-free, no side effects. Safety: read.",
     ),
     _empty(
         "check_solver_availability",
@@ -737,6 +783,285 @@ TOOLS: list[dict[str, Any]] = [
         "single destructive tier (NOT execution_long_running). Card UX: red "
         "border + 1s delay + disclaimer 'may not free the PyPSA lock if "
         "solver is in native code'. Safety: destructive.",
+    ),
+
+    # ── Asset health / outage-rate provenance (2) ──────────────────────────
+
+    _t(
+        "get_asset_health",
+        "The per-asset outage-rate PROVENANCE ledger for a project, "
+        "reconciled against the live network. Returns {entries, version, "
+        "provenance: {sourced, unsourced, drifted, orphaned, counts}}. "
+        "`unsourced` is the finding to lead with: those assets carry a rate "
+        "that OVERRIDES the carrier library with no recorded source, so any "
+        "LOLE / COPT / FMEA number resting on them is an unexplained claim. "
+        "`drifted` means the recorded measurement no longer matches what the "
+        "engines will read. `provenance` is null (with a note) when this "
+        "project is not the one in the foreground — a reconciliation against "
+        "someone else's network would be worse than none. Safety: read.",
+        {"name": {"type": "string"}},
+        ["name"],
+    ),
+    _t(
+        "record_asset_health",
+        "Replace a project's outage-rate provenance ledger. Each entry: "
+        "{component (generators|storage_units|stores|links|lines), name, "
+        "method, measured_at 'YYYY-MM-DD', and at least one of "
+        "outage_rate_value (in [0,1)) / mttr_hours; optional "
+        "outage_rate_basis (FOR|EFORd), confidence (low|medium|high), "
+        "source_ref, note}. `method` and `measured_at` are REQUIRED: a "
+        "condition figure with no method is not evidence and one with no date "
+        "is not a measurement. Use `expert_judgement` honestly rather than "
+        "dressing an estimate as an inspection. WHOLE-LEDGER REPLACE — send "
+        "the full set, not a delta, or you delete the rest. This records "
+        "where numbers came from and does NOT apply them: set the values with "
+        "bulk_update_components on outage_rate_value / mttr_hours, then "
+        "record here. Safety: write.",
+        {
+            "name": {"type": "string"},
+            "entries": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "component": {"type": "string",
+                                      "enum": ASSET_HEALTH_COMPONENT_ENUM},
+                        "name": {"type": "string"},
+                        "outage_rate_value": {"type": "number"},
+                        "outage_rate_basis": {"type": "string",
+                                              "enum": ["FOR", "EFORd"]},
+                        "mttr_hours": {"type": "number"},
+                        "method": {"type": "string",
+                                   "enum": ASSET_HEALTH_METHOD_ENUM},
+                        "source_ref": {"type": "string"},
+                        "measured_at": {"type": "string"},
+                        "confidence": {"type": "string",
+                                       "enum": ASSET_HEALTH_CONFIDENCE_ENUM},
+                        "note": {"type": "string"},
+                    },
+                    "required": ["component", "name", "method", "measured_at"],
+                },
+            },
+        },
+        ["name", "entries"],
+    ),
+
+    # ── Explanation / synthesis (1) ────────────────────────────────────────
+
+    _t(
+        "explain_investment",
+        "Why is this asset the size it is? Fuses, in ONE call, the evidence an "
+        "explanation needs: `sizing` (existing vs optimised capacity, the "
+        "bounds, and `binding_constraint` — one of not_solved / "
+        "not_extendable / at_upper_bound / at_lower_bound / not_built / "
+        "interior — with the sentence that says what that means), "
+        "`asset_kpis` (the registry's "
+        "cross-tab headline: capacity factor, capture price, revenue, net "
+        "profit, LCOE, CO2, read from the same source as the Asset Detail "
+        "tab), `system_signals` (marginal price at the asset's buses, active "
+        "CO2 caps with their shadow prices, and `congestion` — binding lines "
+        "at those buses PLUS a `note` saying what an empty list means: "
+        "nothing binds, no duals captured, or out of scope) and "
+        "`reading_notes`. START HERE for any 'why did the model build / not "
+        "build X' question: `binding_constraint` is usually the whole answer, "
+        "and an asset at a bound was NOT sized by its economics. Evidence "
+        "only — no verdict; narrate solely from fields present in the payload, "
+        "and obey reading_notes (an interior extendable asset earns ~zero net "
+        "profit by construction). Safety: read.",
+        {
+            "component_class": {"type": "string",
+                                "enum": INVESTMENT_CLASS_ENUM},
+            "name": {"type": "string"},
+        },
+        ["component_class", "name"],
+    ),
+
+    # ── Adequacy / solution-FMEA (9) ───────────────────────────────────────
+
+    _t(
+        "get_adequacy_results",
+        "Reliability dispatcher — reads one /api/results reliability surface. "
+        "kind: 'copt' (analytic capacity-outage table + class-A FMECA "
+        "ranking, computed on demand, ZERO solves), 'fmea_modes' (every "
+        "computed failure mode, criticality-sorted), 'fmea_sweep' / "
+        "'frontier' / 'mc' / 'coupling_loop' / 'margin_loop' (status + rows / "
+        "points / iterations of the matching study — poll these while one "
+        "runs), 'mc_elcc_candidates' (assets an ELCC study may name), "
+        "'adequacy' (achieved ENS + shed-hours vs the target of the last "
+        "target-constrained solve, and which standard bound), "
+        "'reserve_margin' (per-period peak / requirement / achieved firm MW / "
+        "met / binding, plus the derating table). Returns "
+        "{status:'no_data', kind, message} when nothing has been computed — "
+        "read `message` for the missing precondition, do NOT report zero "
+        "risk. Safety: read.",
+        {"kind": {"type": "string", "enum": ADEQUACY_KIND_ENUM}},
+        ["kind"],
+    ),
+    _t(
+        "get_fmea_worksheet",
+        "Per-project FMEA sidecar: {manual_rows: [row], overlays: {mode_id: "
+        "{...}}, version}. Expert-entered rows and per-mode overrides only — "
+        "COMPUTED rows come from get_adequacy_results('fmea_modes') and the "
+        "two are merged for display. Safety: read.",
+        {"name": {"type": "string"}},
+        ["name"],
+    ),
+    _t(
+        "get_stress_scenarios",
+        "Per-project class-C stress-scenario registry: {scenarios: [scenario]}"
+        ". These are the scenarios to pass to run_fmea_sweep, which itself "
+        "carries no project name. Safety: read.",
+        {"name": {"type": "string"}},
+        ["name"],
+    ),
+    _t(
+        "run_fmea_sweep",
+        "Start the contingency sweep: class B (every single link outage) plus "
+        "any class-C `scenarios` given (get them from get_stress_scenarios). "
+        "Several LP solves, minutes; returns {status:'running'} immediately — "
+        "poll get_adequacy_results('fmea_sweep') for rows. Requires VOLL > 0 "
+        "in solver settings (422 without). 409 while another study or a "
+        "foreground solve holds the network. The closing base re-solve leaves "
+        "the network and the foreground results in base state. "
+        "Safety: execution.",
+        {"scenarios": {"type": "array", "items": {"type": "object"}}},
+    ),
+    _t(
+        "run_frontier_study",
+        "Start the cost-vs-availability (ε-constraint) study: ONE full "
+        "capacity-expansion solve per reliability target, so the plan is "
+        "re-optimised at every point — this is the curve for 'what would I "
+        "BUILD for each standard'. `targets_permyriad` are ENS caps in ‱ and "
+        "must be positive; omit for the engine's default spread. Requires "
+        "VOLL > 0 (422 without). 409 while another study or a foreground "
+        "solve is running. Returns {status:'running'} — poll "
+        "get_adequacy_results('frontier') for points and the knee. "
+        "Safety: execution.",
+        {"targets_permyriad": {"type": "array", "items": {"type": "number"}}},
+    ),
+    _t(
+        "run_mc_study",
+        "Start the sequential Monte-Carlo adequacy study — LOLE / EUE, "
+        "optionally an ELCC credit table for `elcc_assets` (names from "
+        "get_adequacy_results('mc_elcc_candidates')) and/or the whole "
+        "profile-bearing fleet as one portfolio via `elcc_portfolio`. Solves "
+        "NOTHING and never mutates the network, so it needs no VOLL, but it "
+        "is still mutually exclusive with the other studies (409). Minutes "
+        "for an ELCC run; returns {status:'running'} — poll "
+        "get_adequacy_results('mc'). Safety: execution.",
+        {
+            "draws": {"type": "integer"},
+            "seed": {"type": "integer"},
+            "cov_target": {"type": "number"},
+            "elcc_assets": {"type": "array", "items": {"type": "object"}},
+            "elcc_portfolio": {"type": "boolean"},
+        },
+    ),
+    _t(
+        "run_coupling_loop",
+        "Start the reliability-targeted planning loop on the ENERGY lever: "
+        "solve at an ENS cap, measure LOLE by Monte Carlo, adjust the cap, "
+        "repeat until the plan meets `target_lole_h`. `target_lole_h` is "
+        "HORIZON-basis hours, NOT h/yr — convert first on a multi-year "
+        "horizon and state the basis when reporting. `restore` decides where "
+        "the network is left: 'base' (default) or 'final'. Many solves, "
+        "returns {status:'running'} — poll "
+        "get_adequacy_results('coupling_loop') for iterations. 409 while "
+        "another study or a foreground solve is running. Safety: execution.",
+        {
+            "target_lole_h": {"type": "number"},
+            "draws": {"type": "integer"},
+            "seed": {"type": "integer"},
+            "eps0": {"type": "number"},
+            "max_solves": {"type": "integer"},
+            "restore": {"type": "string", "enum": ADEQUACY_RESTORE_ENUM},
+        },
+        ["target_lole_h"],
+    ),
+    _t(
+        "run_margin_loop",
+        "Start the reliability-targeted planning loop on the FIRM-CAPACITY "
+        "lever: raise the planning reserve margin until the plan meets "
+        "`target_lole_h` (horizon-basis hours, as run_coupling_loop). There "
+        "is deliberately NO starting-margin parameter — the start is measured "
+        "by a probing solve. Many solves, returns {status:'running'} — poll "
+        "get_adequacy_results('margin_loop'). 409 while another study or a "
+        "foreground solve is running. Safety: execution.",
+        {
+            "target_lole_h": {"type": "number"},
+            "draws": {"type": "integer"},
+            "seed": {"type": "integer"},
+            "max_solves": {"type": "integer"},
+            "restore": {"type": "string", "enum": ADEQUACY_RESTORE_ENUM},
+        },
+        ["target_lole_h"],
+    ),
+    _t(
+        "build_study_report",
+        "Assemble the client-facing reliability write-up from everything this "
+        "session established — and everything it did not. Returns "
+        "{objective, campaign, sections, required_disclosures, "
+        "not_established, evidence_gaps, counts, writing_note}. Each section "
+        "carries its own engine + fidelity, READ from the payload where the "
+        "engine states them, so a screening convolution and a sampler never "
+        "become two numbers in one table with no label between them. "
+        "`required_disclosures` are sentences your prose MUST contain; "
+        "`not_established` is what the study did not answer (say it — a "
+        "report that omits what it did not measure reads as though it "
+        "measured it); `evidence_gaps` are findings that undermine the whole "
+        "document (a frozen demand profile, an island nothing can serve, a "
+        "failure rate with no recorded source) and belong BEFORE the numbers. "
+        "Narrate only from fields present in the payload. `project` names the "
+        "asset-health ledger to fold in; it defaults to the project in the "
+        "foreground. Safety: read.",
+        {"project": {"type": "string"}},
+    ),
+    _t(
+        "start_campaign",
+        "Open a reliability CAMPAIGN: one solve budget across a whole chain of "
+        "studies. Every engine already caps itself (frontier 12 targets, "
+        "class-B sweep 20 contingencies, each loop 8 solves) — nothing caps "
+        "chaining them, and a frontier plus two loops plus a sweep is ~50 full "
+        "capacity-expansion solves on a shared solver. Start one before "
+        "driving a multi-study question ('hit LOLE <= 3 h/yr at least cost'), "
+        "state the objective in the user's terms, and the run_* study tools "
+        "then charge against it and refuse what would overrun. "
+        "`budget_solves` defaults to 30 — a frontier plus a loop, or a full "
+        "sweep. run_mc_study is charged ZERO because it solves nothing. "
+        "Safety: write.",
+        {
+            "objective": {"type": "string"},
+            "budget_solves": {"type": "integer"},
+        },
+        ["objective"],
+    ),
+    _empty(
+        "campaign_status",
+        "The running campaign: {active, objective, budget_solves, "
+        "spent_solves, remaining_solves, started_at, entries: [{study, "
+        "solves_charged, at}]}, or {active: false}. Read it before choosing "
+        "the next study — `entries` is the only record of what this campaign "
+        "already ran, because each study surface holds ONLY its latest result "
+        "and a second frontier overwrites the first. Safety: read.",
+    ),
+    _t(
+        "end_campaign",
+        "Close the campaign and return its final record (the log survives in "
+        "the return value, not on the server). Do this when the objective is "
+        "answered or the user redirects — a second start_campaign is refused "
+        "while one is open, because it would silently discard this one's log. "
+        "Safety: write.",
+        {"note": {"type": "string"}},
+    ),
+    _t(
+        "abort_adequacy_study",
+        "Stop a running study at its next boundary. IDEMPOTENT and 200 even "
+        "when the run has already finished; 404 only when that study never "
+        "ran in this session. The closing base restore STILL runs, so the "
+        "network is not left mid-contingency. Does NOT stop a foreground "
+        "solve — that is abort_simulation. Safety: destructive.",
+        {"study": {"type": "string", "enum": ADEQUACY_STUDY_ENUM}},
+        ["study"],
     ),
 
     # ── Solve queue (4) ────────────────────────────────────────────────────
@@ -1783,6 +2108,35 @@ TOOL_ROUTES: dict[str, list] = {
     # execution (2)
     "abort_simulation": [("POST", "/api/simulation/abort")],
     "force_reset_simulation": [("POST", "/api/simulation/force_reset")],
+    # asset_health (2)
+    "get_asset_health": [("GET", "/api/projects/{name}/asset_health")],
+    "record_asset_health": [("PUT", "/api/projects/{name}/asset_health")],
+    # synthesis (1) — composite in-process fusion, no HTTP route of its own
+    "explain_investment": _DERIVED,
+    # adequacy_fmea (9)
+    "get_adequacy_results": [
+        # 9 of 10 kinds map 1:1 to /api/results/{kind}; mc_elcc_candidates is
+        # the outlier, nested under /mc (same shape as get_results'
+        # ac_pf_status).
+        ("GET", f"/api/results/{k}")
+        for k in ADEQUACY_KIND_ENUM if k != "mc_elcc_candidates"
+    ] + [("GET", "/api/results/mc/elcc_candidates")],
+    "get_fmea_worksheet": [("GET", "/api/projects/{name}/worksheet")],
+    "get_stress_scenarios": [("GET", "/api/projects/{name}/stress_scenarios")],
+    "run_fmea_sweep": [("POST", "/api/results/fmea_sweep")],
+    "run_frontier_study": [("POST", "/api/results/frontier")],
+    "run_mc_study": [("POST", "/api/results/mc")],
+    "run_coupling_loop": [("POST", "/api/results/coupling_loop")],
+    "run_margin_loop": [("POST", "/api/results/margin_loop")],
+    # study report (1) — composite in-process fusion
+    "build_study_report": _DERIVED,
+    # campaign (3) — process-global study budget, no HTTP route of its own
+    "start_campaign": _SERVICE_CALL,
+    "campaign_status": _SERVICE_CALL,
+    "end_campaign": _SERVICE_CALL,
+    "abort_adequacy_study": [
+        ("POST", f"/api/results/{s}/abort") for s in ADEQUACY_STUDY_ENUM
+    ],
     # solve_queue (4)
     "solve_queue_enqueue": [("POST", "/api/simulation/queue")],
     "solve_queue_list": [("GET", "/api/simulation/queue")],

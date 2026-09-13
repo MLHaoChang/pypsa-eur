@@ -632,6 +632,48 @@ def _resolve_results_handler(result_kind: str):
     return handler
 
 
+# A 204 answer — "nothing of this kind exists yet" — is the single most
+# common non-error outcome on the results surface, and a `Response` is not
+# JSON. `json.dumps(..., default=str)` in the chat layer turns one into
+# "<starlette.responses.Response object at 0x…>", which the model reads as
+# DATA: it cannot tell an unsolved network from a solved one, and narrates
+# whatever it can invent around a repr. This is the same defect class the
+# tools audit found in the five binary-export tools; it survived here because
+# the audit did not cover the results path.
+#
+# Every tool that can receive a 204 funnels through `_payload_or_no_data`.
+
+def _no_data(kind: str, message: str) -> dict:
+    """The model-facing shape of 'this exists, but is empty right now'."""
+    return {"status": "no_data", "kind": kind, "message": message}
+
+
+def _payload_or_no_data(kind: str, result: Any, message: str) -> Any:
+    """
+    Map a 204 `Response` to an explicit no_data dict; pass everything else
+    through untouched.
+
+    The check is on `status_code`, not `isinstance(result, Response)`: the
+    handlers build theirs with `fastapi.Response`, the chat layer must not
+    care which Response class that is, and no real payload here is an object
+    carrying a `status_code`.
+    """
+    if getattr(result, "status_code", None) == 204:
+        return _no_data(kind, message)
+    return result
+
+
+# What a 204 means on /api/results. Both halves are load-bearing: `lost_load`
+# and `adequacy` answer 204 on a perfectly good solve that simply shed nothing
+# / carried no target, so "not solved" alone would be a lie.
+_RESULTS_NO_DATA_MESSAGE = (
+    "no result of this kind: the network has not been solved, its dispatch is "
+    "stale relative to the current topology, or this solve produced none of "
+    "it. Call dispatch_status and get_simulation_status before reading further "
+    "— do NOT report this as a zero."
+)
+
+
 def get_results(result_kind: str, source: str = "lopf") -> Any:
     """
     v4-MAJOR-4 dispatcher: every results enum routes through the named
@@ -642,8 +684,10 @@ def get_results(result_kind: str, source: str = "lopf") -> Any:
     # Some handlers take `source` as a query param; pass via kwargs if the
     # function accepts it, else call bare. Inspect via __code__.co_varnames.
     if "source" in handler.__code__.co_varnames:
-        return handler(source=source)
-    return handler()
+        result = handler(source=source)
+    else:
+        result = handler()
+    return _payload_or_no_data(result_kind, result, _RESULTS_NO_DATA_MESSAGE)
 
 
 def results_path_for(result_kind: str) -> str:
@@ -1341,6 +1385,328 @@ def force_reset_simulation() -> dict:
     """v4-NIT-2: classified destructive (single tier — NOT execution_long_running)."""
     from routers.simulation import force_reset as _h
     return _h()
+
+
+# ── Adequacy / solution-FMEA (9) ────────────────────────────────────────────
+#
+# The reliability surface (services/adequacy/*, routed under /api/results)
+# was reachable only from the worksheet UI: none of its endpoints had a chat
+# tool, so the agent could read a solved plan's COST in a dozen ways and its
+# RELIABILITY in none. These nine tools close that gap — one read dispatcher
+# over the ten no-argument GETs, the two per-project sidecars, the four study
+# starters and one abort.
+#
+# Two properties every caller here depends on:
+#
+#   * The GETs answer 204 when nothing has been computed (never run, or no
+#     solve to judge), which `_adequacy_payload` maps to an explicit
+#     `{"status": "no_data", …}` dict — see `_payload_or_no_data` for why a
+#     bare `Response` must never reach the model. What is specific here is the
+#     MESSAGE: each kind names its own missing precondition, because "no
+#     frontier" and "no reserve margin" have different remedies.
+#   * The four POSTs are ASYNCHRONOUS by construction — each publishes a
+#     worker thread and returns `{"status": "running"}` immediately. The agent
+#     must poll the matching GET kind to see rows/points/iterations land. They
+#     are execution-tier for the same reason `run_simulation` is: minutes of
+#     LP solves, and (for the sweep/frontier/loops) a network the engine
+#     mutates and restores.
+
+# kind → handler symbol in routers.results. Every one takes NO arguments.
+_ADEQUACY_HANDLER_NAMES: dict[str, str] = {
+    "copt": "get_copt",
+    "fmea_modes": "get_fmea_modes",
+    "fmea_sweep": "get_fmea_sweep",
+    "frontier": "get_frontier",
+    "mc": "get_mc",
+    "mc_elcc_candidates": "get_mc_elcc_candidates",
+    "coupling_loop": "get_coupling_loop",
+    "margin_loop": "get_margin_loop",
+    "adequacy": "get_adequacy",
+    "reserve_margin": "get_reserve_margin",
+}
+
+# Why each kind can be empty. Surfaced verbatim on the no_data result so the
+# agent tells the user WHICH precondition is missing instead of "no data".
+_ADEQUACY_NO_DATA_HINTS: dict[str, str] = {
+    "copt": (
+        "the COPT engine found no dispatchable fleet to convolve — add "
+        "conventional generators, or check that outage rates are set"
+    ),
+    "fmea_modes": (
+        "no failure modes: the COPT ranking is empty and no contingency "
+        "sweep has run in this session"
+    ),
+    "fmea_sweep": "no class-B/C contingency sweep has run in this session",
+    "frontier": "no cost-vs-availability study has run in this session",
+    "mc": "no sequential Monte-Carlo study has run in this session",
+    "mc_elcc_candidates": "no assets are eligible for an ELCC study",
+    "coupling_loop": "no coupling loop has run in this session",
+    "margin_loop": "no margin loop has run in this session",
+    "adequacy": (
+        "nothing has been solved, or the last solve ran without a "
+        "reliability target"
+    ),
+    "reserve_margin": (
+        "nothing has been solved, the last solve set no reserve margin, or "
+        "it produced no dispatch to judge one against"
+    ),
+}
+
+# Path outlier, same shape as get_results' ac_pf_status (v4-MAJOR-4): nine of
+# the ten kinds map 1:1 to /api/results/{kind}; mc_elcc_candidates is nested
+# under /mc.
+_ADEQUACY_PATH_OUTLIERS: dict[str, str] = {
+    "mc_elcc_candidates": "/api/results/mc/elcc_candidates",
+}
+
+# study key → abort handler symbol in routers.results. `adequacy`,
+# `reserve_margin`, `copt`, `fmea_modes` and `mc_elcc_candidates` are absent
+# BY CONSTRUCTION: they are read-only surfaces computed on demand or stashed
+# by a solve, with no worker thread to stop.
+_ADEQUACY_ABORT_HANDLER_NAMES: dict[str, str] = {
+    "fmea_sweep": "post_fmea_sweep_abort",
+    "frontier": "post_frontier_abort",
+    "mc": "post_mc_abort",
+    "coupling_loop": "post_coupling_loop_abort",
+    "margin_loop": "post_margin_loop_abort",
+}
+
+
+def _resolve_adequacy_handler(kind: str, table: dict[str, str] | None = None):
+    """Resolve an adequacy GET/abort handler by kind, or raise 400/500."""
+    table = _ADEQUACY_HANDLER_NAMES if table is None else table
+    if kind not in table:
+        raise HTTPException(
+            400,
+            f"Unknown adequacy kind: {kind!r}. Known: "
+            f"{', '.join(sorted(table))}",
+        )
+    from routers import results as results_router
+    handler = getattr(results_router, table[kind], None)
+    if handler is None:
+        raise HTTPException(
+            500, f"Handler {table[kind]!r} missing from routers.results")
+    return handler
+
+
+def _adequacy_payload(kind: str, result: Any) -> Any:
+    """
+    `_payload_or_no_data` with the per-kind precondition as the message.
+
+    The reliability surface earns per-kind hints where /api/results makes do
+    with one sentence: "no frontier" and "no reserve margin" have different
+    remedies, and the agent is the one who has to name the missing one.
+    """
+    return _payload_or_no_data(
+        kind, result,
+        _ADEQUACY_NO_DATA_HINTS.get(
+            kind, "nothing has been computed for this kind yet"),
+    )
+
+
+def get_adequacy_results(kind: str) -> Any:
+    """
+    Read one reliability surface. Mirrors `get_results`' dispatcher shape:
+    a lookup dict, a 400 on an unknown kind, and one path outlier.
+    """
+    handler = _resolve_adequacy_handler(kind)
+    return _adequacy_payload(kind, handler())
+
+
+def adequacy_path_for(kind: str) -> str:
+    """The route path a given adequacy kind reads (endpoint-map cross-check)."""
+    return _ADEQUACY_PATH_OUTLIERS.get(kind, f"/api/results/{kind}")
+
+
+def get_fmea_worksheet(name: str) -> dict:
+    """
+    The per-project FMEA sidecar: expert rows + per-mode overlays.
+
+    Computed rows are NOT here — they come from `get_adequacy_results`
+    ('fmea_modes') and the worksheet merges the two client-side.
+    """
+    from routers.adequacy_worksheet import get_worksheet as _h
+    return _h(project=_authorized_project(name))
+
+
+def get_stress_scenarios(name: str) -> dict:
+    """The per-project class-C stress-scenario registry."""
+    from routers.adequacy_worksheet import get_stress_scenarios as _h
+    return _h(project=_authorized_project(name))
+
+
+def _campaign_gated(study: str, start, **estimate_kwargs):
+    """
+    Run a study under the active campaign's budget, if there is one.
+
+    Check, start, THEN record — never charge-then-refund. A study that fails
+    to start (409 while the mesh is busy, 422 for a missing VOLL) must not
+    burn budget, and a refund path would be a second place for the total to go
+    wrong. Nothing can slip between the check and the record: the study mesh
+    allows at most one study in flight.
+
+    With no campaign running both calls are no-ops, so a single study asked
+    for directly behaves exactly as it did before this existed.
+    """
+    from services.adequacy import campaign
+
+    solves = campaign.estimate_solves(PyPSAService.get_network(), study,
+                                      **estimate_kwargs)
+    campaign.check(study, solves)
+    result = start()
+    charged = campaign.record(study, solves)
+    if charged is None:
+        return result
+    return {**result, "campaign": {
+        "objective": charged["objective"],
+        "solves_charged": solves,
+        "spent_solves": charged["spent_solves"],
+        "remaining_solves": charged["remaining_solves"],
+    }}
+
+
+def start_campaign(objective: str, budget_solves: int | None = None) -> dict:
+    """Open a reliability campaign with one budget across every study."""
+    from services.adequacy import campaign
+    return campaign.start(objective, budget_solves)
+
+
+def campaign_status() -> dict:
+    """The running campaign's objective, budget, spend and study log."""
+    from services.adequacy import campaign
+    return campaign.status()
+
+
+def end_campaign(note: str | None = None) -> dict:
+    """Close the campaign and return its final record."""
+    from services.adequacy import campaign
+    return campaign.end(note)
+
+
+def run_fmea_sweep(scenarios: list | None = None) -> dict:
+    """
+    Start the class-B (single link outage) contingency sweep, plus any
+    class-C scenarios passed in.
+
+    `scenarios` are re-validated by the route. They come from
+    `get_stress_scenarios`, which is where authorization lives — this route
+    operates on the FOREGROUND network and carries no project name.
+    """
+    from routers.results import FmeaSweepRequest, post_fmea_sweep as _h
+    rows = list(scenarios or [])
+    return _campaign_gated(
+        "fmea_sweep", lambda: _h(FmeaSweepRequest(scenarios=rows)),
+        scenarios=rows)
+
+
+def run_frontier_study(targets_permyriad: list | None = None) -> dict:
+    """
+    Start the ε-constraint cost-vs-availability sweep: ONE full
+    capacity-expansion solve per target, so the plan is re-optimised at every
+    point. Omitting `targets_permyriad` uses the engine's default spread.
+    """
+    from routers.results import FrontierRequest, post_frontier as _h
+    return _campaign_gated(
+        "frontier",
+        lambda: _h(FrontierRequest(targets_permyriad=targets_permyriad)),
+        targets_permyriad=targets_permyriad)
+
+
+def run_mc_study(
+    draws: int | None = None,
+    seed: int | None = None,
+    cov_target: float | None = None,
+    elcc_assets: list | None = None,
+    elcc_portfolio: bool | None = None,
+) -> dict:
+    """
+    Start the sequential Monte-Carlo adequacy study (LOLE / EUE, optionally
+    with an ELCC table).
+
+    Alone among the four studies this SOLVES NOTHING and never mutates the
+    network — its metrics are hours and MWh, not euros, so it needs no VOLL.
+    It is still mutually exclusive with the others: the snapshot it samples
+    must not be a half-mutated network.
+    """
+    from routers.results import McRequest, post_mc as _h
+    return _campaign_gated("mc", lambda: _h(McRequest(
+        draws=draws,
+        seed=seed,
+        cov_target=cov_target,
+        elcc_assets=elcc_assets,
+        elcc_portfolio=elcc_portfolio,
+    )))
+
+
+def run_coupling_loop(
+    target_lole_h: float,
+    draws: int | None = None,
+    seed: int | None = None,
+    eps0: float | None = None,
+    max_solves: int | None = None,
+    restore: str | None = None,
+) -> dict:
+    """
+    Drive the ENS CAP (ε) until the sampled plan meets `target_lole_h`:
+    solve at ε, measure LOLE by Monte Carlo, adjust, repeat.
+
+    `target_lole_h` is HORIZON-basis hours, not h/yr — convert before calling
+    on a multi-year horizon, and say which basis you used when reporting.
+    """
+    from routers.results import CouplingLoopRequest, post_coupling_loop as _h
+    return _campaign_gated(
+        "coupling_loop",
+        lambda: _h(CouplingLoopRequest(
+            target_lole_h=target_lole_h,
+            draws=draws,
+            seed=seed,
+            eps0=eps0,
+            max_solves=max_solves,
+            restore=restore,
+        )),
+        max_solves=max_solves)
+
+
+def run_margin_loop(
+    target_lole_h: float,
+    draws: int | None = None,
+    seed: int | None = None,
+    max_solves: int | None = None,
+    restore: str | None = None,
+) -> dict:
+    """
+    Drive the PLANNING RESERVE MARGIN until the sampled plan meets
+    `target_lole_h` — the firm-capacity lever, where run_coupling_loop turns
+    the energy lever.
+
+    There is deliberately no starting-margin parameter: the start is a
+    MEASUREMENT taken by a probing solve, and a user-supplied one is the
+    single number here that can silently make the study worthless.
+    """
+    from routers.results import MarginLoopRequest, post_margin_loop as _h
+    return _campaign_gated(
+        "margin_loop",
+        lambda: _h(MarginLoopRequest(
+            target_lole_h=target_lole_h,
+            draws=draws,
+            seed=seed,
+            max_solves=max_solves,
+            restore=restore,
+        )),
+        max_solves=max_solves)
+
+
+def abort_adequacy_study(study: str) -> dict:
+    """
+    Ask a running study to stop at its next boundary.
+
+    IDEMPOTENT, and 200 even when the run has already finished. The closing
+    base restore still runs, so an abort costs the work in flight plus that
+    restore — it does NOT leave the network mid-contingency. 404 only when
+    the named study has never run in this session.
+    """
+    handler = _resolve_adequacy_handler(study, _ADEQUACY_ABORT_HANDLER_NAMES)
+    return handler()
 
 
 # ── Solve queue (4) ─────────────────────────────────────────────────────────
@@ -3562,6 +3928,439 @@ def export_chat_summary(
     )
 
 
+def build_study_report(project: str | None = None) -> dict:
+    """
+    Assemble the client-facing reliability write-up from everything this
+    session established — and everything it did not.
+
+    `project` names the asset-health ledger to fold in. Omitted, or naming a
+    project that is not in the foreground, means the provenance gap is simply
+    not reported rather than reported against somebody else's network — the
+    same guard `get_asset_health` applies, for the same reason.
+    """
+    from services.adequacy import campaign as _campaign
+    from services.adequacy.asset_health import provenance_report
+    from services.adequacy.study_report import build_study_report as _build
+
+    n = PyPSAService.get_network()
+
+    health = None
+    if project and PyPSAService.get_loaded_project() == project:
+        ledger = get_asset_health(project)
+        health = ledger.get("provenance")
+    elif project is None and PyPSAService.get_loaded_project():
+        # No project named, but one IS bound: use it. A report that silently
+        # skipped the provenance gap because the caller omitted an argument
+        # would be missing the finding that undermines every number in it.
+        active = PyPSAService.get_loaded_project()
+        try:
+            ledger = get_asset_health(active)
+            health = provenance_report(n, ledger.get("entries", []))
+        except Exception:  # noqa: BLE001 — no ledger is not a report failure
+            health = None
+
+    status = _campaign.status()
+    return _build(n, get_adequacy_results,
+                  campaign=status if status.get("active") else None,
+                  health=health)
+
+
+# ── Asset health / outage-rate provenance (2) ───────────────────────────────
+#
+# `resolve_outage_params` already resolves a rate as `asset`,
+# `carrier_default` or `missing`. Two of those explain themselves — the
+# carrier library ships its own citation, and `missing` is the absence of a
+# claim. `asset` does not, and it is the one that matters: a condition-based
+# rate IS the claim behind condition-based reliability, and the model records
+# "a drone survey found conductor damage" and "someone typed it" identically.
+#
+# These two tools are the interface a perception feed lands through — an
+# inspection programme, a DGA monitor, a vegetation model — BEFORE any such
+# model exists. The ledger never sets a rate: values go on the components
+# through the ordinary edit paths (bulk_update_components), and
+# `provenance_report` reconciles the two. A ledger nothing can contradict
+# would be decoration.
+
+def get_asset_health(name: str) -> dict:
+    """
+    The provenance ledger for `name`, reconciled against the LIVE network.
+
+    The reconciliation is the point — which asset-level rates have no source,
+    which have drifted away from what was measured — but it is only meaningful
+    when `name` is the project currently loaded in the foreground. When it is
+    not, the ledger is still served and `provenance` is null with a note
+    saying why: silently reporting drift computed against a DIFFERENT
+    network's rates is worse than reporting none.
+    """
+    from routers.adequacy_worksheet import get_asset_health as _h
+    from services.adequacy.asset_health import provenance_report
+
+    ledger = _h(project=_authorized_project(name))
+    active = PyPSAService.get_loaded_project()
+    if active != name:
+        return {
+            **ledger,
+            "provenance": None,
+            "note": (
+                f"'{name}' is not the project in the foreground "
+                f"({active or 'none'}), so its ledger cannot be reconciled "
+                f"against a network. Activate it first, or read the ledger "
+                f"alone."
+            ),
+        }
+    return {
+        **ledger,
+        "provenance": provenance_report(
+            PyPSAService.get_network(), ledger["entries"]),
+    }
+
+
+def record_asset_health(name: str, entries: list) -> dict:
+    """
+    Replace the provenance ledger for `name`.
+
+    Whole-ledger replacement, like the worksheet: the payload is small, and a
+    merge would need a delete verb nobody asked for. Validation runs before
+    the write, so a rejected batch leaves the previous ledger byte-identical.
+
+    This records where numbers came from; it does NOT apply them. Setting the
+    rates is `bulk_update_components` on `outage_rate_value` / `mttr_hours`,
+    and the split is deliberate — the ledger's job is to be contradictable by
+    the network, which it cannot be if it writes the network.
+    """
+    from routers.adequacy_worksheet import AssetHealthPut, put_asset_health as _h
+    return _h(AssetHealthPut(entries=list(entries or [])),
+              project=_authorized_project(name))
+
+
+# ── Explanation / synthesis (1) ─────────────────────────────────────────────
+#
+# The first real member of the composite family the DISPATCHERS block below
+# documents as removed-because-never-implemented. It fuses results IN PROCESS
+# rather than making the agent chain four reads and reconcile them from
+# 4000-char truncations.
+#
+# What it adds over `get_asset_results`, which already returns this asset's
+# cross-tab KPIs:
+#
+#   * THE BOUND. In a capacity-expansion LP, "why is it this big" is almost
+#     always answered by WHICH CONSTRAINT BOUND IT, and no per-asset metric
+#     carries p_nom_max / p_nom_extendable. An asset sitting on its ceiling
+#     was sized by that ceiling, not by its economics, and an explanation
+#     that talks about capture prices instead is confidently wrong.
+#   * THE SYSTEM SIGNALS that made it attractive HERE: the CO2 shadow price
+#     it is priced against, the marginal price at its bus, and whether the
+#     lines out of that bus are congested.
+#   * THE EQUILIBRIUM FRAMING. An extendable asset at an interior optimum
+#     earns ≈ zero net profit BY CONSTRUCTION — the LP builds until the
+#     marginal MW breaks even. Without that note the agent reads a near-zero
+#     net_profit_eur as a defect and invents a cause.
+#
+# It returns EVIDENCE and one structural classification, never a narrative
+# verdict: the model writes the prose, and can only write it from numbers
+# that are in the payload.
+
+# Which bus columns carry an asset's electrical location, per class.
+_INVESTMENT_BUS_COLS: dict[str, tuple[str, ...]] = {
+    "Generator": ("bus",),
+    "StorageUnit": ("bus",),
+    "Store": ("bus",),
+    "Link": ("bus0", "bus1"),
+    "Line": ("bus0", "bus1"),
+    "Transformer": ("bus0", "bus1"),
+}
+
+# One sentence per structural outcome — the LP fact, not advice.
+_BINDING_EXPLANATIONS: dict[str, str] = {
+    "not_solved": (
+        "the network has no fresh dispatch, so there is no sizing decision to "
+        "explain — every capacity below is an input or a stale leftover"
+    ),
+    "not_extendable": (
+        "the LP could not size this asset at all: its capacity is an INPUT, "
+        "not a result. Set p_nom_extendable (or the class's equivalent) to "
+        "let the optimisation choose it"
+    ),
+    "at_upper_bound": (
+        "the LP took every MW the upper bound allowed. The BOUND set this "
+        "size, not the economics — raise it to learn what the economics would "
+        "build"
+    ),
+    "not_built": (
+        "the LP chose to build none of it: at these costs it did not compete "
+        "at the margin against everything else on the system. Nothing blocked "
+        "it — it was simply not worth building"
+    ),
+    "at_lower_bound": (
+        "the LP built the minimum it was FORCED to and no more. The asset was "
+        "not competitive at the margin; a non-zero floor is holding it up, so "
+        "this capacity is a constraint's doing, not the economics'"
+    ),
+    "interior": (
+        "the LP stopped between the bounds, so this size IS the economic "
+        "answer: the marginal MW broke even against everything else on the "
+        "system"
+    ),
+}
+
+
+def _finite(value: Any) -> float | None:
+    """float(value) or None for anything non-finite, missing or unparseable."""
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    return out if math.isfinite(out) else None
+
+
+def _is_at(value: float | None, bound: float | None) -> bool:
+    """
+    Is an optimised capacity sitting ON a bound?
+
+    Relative, because an LP lands on a bound within solver tolerance and an
+    exact `==` reports "interior" for a plainly saturated asset — the single
+    wrong answer this whole tool exists to avoid.
+    """
+    if value is None or bound is None:
+        return False
+    return abs(value - bound) <= max(abs(bound), abs(value), 1.0) * 1e-6
+
+
+def _sizing(row: Any, nom_col: str, *, solved: bool) -> dict:
+    """Classify the sizing decision from the asset's static row."""
+    existing = _finite(row.get(nom_col))
+    optimised = _finite(row.get(f"{nom_col}_opt")) if solved else None
+    lower = _finite(row.get(f"{nom_col}_min"))
+    upper = _finite(row.get(f"{nom_col}_max"))   # None == unbounded (inf)
+    extendable = bool(row.get(f"{nom_col}_extendable", False))
+
+    if not solved:
+        binding = "not_solved"
+    elif not extendable:
+        binding = "not_extendable"
+    elif _is_at(optimised, upper):
+        binding = "at_upper_bound"
+    elif _is_at(optimised, lower):
+        # A floor of zero is not a floor. Reporting "the minimum it was forced
+        # to" for an asset nobody forced anywhere reads as if a constraint
+        # explained the zero, when the honest answer is that it lost on cost.
+        binding = "at_lower_bound" if (lower or 0.0) > 0 else "not_built"
+    else:
+        binding = "interior"
+
+    added = None if (optimised is None or existing is None) else optimised - existing
+    headroom = None if (optimised is None or upper is None) else upper - optimised
+    return {
+        "capacity_column": nom_col,
+        "extendable": extendable,
+        "existing": existing,
+        "optimised": optimised,
+        "added": added,
+        "lower_bound": lower,
+        "upper_bound": upper,          # null = unbounded (p_nom_max = inf)
+        "headroom": headroom,
+        "binding_constraint": binding,
+        "explanation": _BINDING_EXPLANATIONS[binding],
+    }
+
+
+def _bus_price_signals(n: Any, buses: list[str]) -> dict:
+    """Mean / min / max / load-weighted marginal price at each of the asset's buses."""
+    from services.asset_results import service as svc
+
+    wanted = ["bus_price_mean", "bus_price_min", "bus_price_max",
+              "bus_load_weighted_price"]
+    out: dict[str, Any] = {}
+    for bus in buses:
+        if bus not in n.buses.index:
+            continue
+        try:
+            resp = svc.build_response(
+                n, "Bus", bus, category="prices", metric_ids=wanted,
+                source="lopf", from_iso=None, to_iso=None, period=None,
+                mode="chronological",
+            )
+        except Exception:  # noqa: BLE001 — a missing signal is not a failure
+            continue
+        scalars = {k: v for k, v in resp.get("scalars", {}).items() if k in wanted}
+        if scalars:
+            out[bus] = scalars
+    return out
+
+
+def _congestion_at(n: Any, buses: list[str]) -> dict:
+    """
+    The binding LINES touching the asset's buses, WITH why the list may be
+    empty.
+
+    An empty list has four very different causes — no lines there at all, no
+    duals captured on this solve, lines that never bind, or an asset that
+    connects through links and transformers, which `compute_line_duals` does
+    not cover (it walks `n.lines`). Returning the bare list makes all four read
+    as "uncongested", the one reading that can be flatly wrong, so the reason
+    travels with the data instead of being inferred from its absence.
+    """
+    at_bus = {
+        str(name) for name, line in n.lines.iterrows()
+        if str(line.get("bus0")) in buses or str(line.get("bus1")) in buses
+    }
+    if not at_bus:
+        # Checked FIRST: on a network with no lines, compute_line_duals says
+        # "No LP duals captured — re-run the solve", which sends the agent
+        # (and the user) after a solve that would change nothing.
+        return {"lines": [], "note": (
+            "no line connects to this asset's buses, so line congestion does "
+            "not apply here — links and transformers are out of scope either "
+            "way"
+        )}
+
+    payload = get_results("line_duals")
+    if not isinstance(payload, dict):
+        return {"lines": [], "note": "line duals unavailable"}
+    if payload.get("status") == "no_data":
+        return {"lines": [], "note": payload.get("message")}
+    if payload.get("note"):
+        # compute_line_duals' own sentence — "No LP duals captured…". Empty
+        # here means UNKNOWN, not uncongested.
+        return {"lines": [], "note": str(payload["note"])}
+
+    lines = [
+        {k: r.get(k) for k in ("name", "binding_hours",
+                               "max_mu_eur_per_MWh", "congestion_rent_eur")}
+        for r in payload.get("rows", [])
+        if r.get("name") in at_bus and (r.get("binding_hours") or 0) > 0
+    ]
+    note = None if lines else (
+        "no line at this asset's buses binds in any hour — but this covers "
+        "n.lines only, so a link- or transformer-connected corridor is not "
+        "evidence either way"
+    )
+    return {"lines": lines, "note": note}
+
+
+def _co2_signals() -> list[dict]:
+    """Active CO2 caps with their shadow prices — the system-wide clean premium."""
+    payload = get_results("emissions")
+    if not isinstance(payload, dict) or payload.get("status") == "no_data":
+        return []
+    return [
+        {k: cap.get(k) for k in ("name", "scope", "investment_period",
+                                 "binding", "shadow_price_eur_per_tCO2",
+                                 "slack_tCO2")}
+        for cap in payload.get("caps", []) if cap.get("active")
+    ]
+
+
+def _reading_notes(sizing: dict, co2: list[dict], buses: list[str]) -> list[str]:
+    """The framing that keeps the narration honest. Order is deliberate."""
+    notes = [
+        "This payload is EVIDENCE, not a verdict. Narrate only numbers that "
+        "appear in it, and name the field you used.",
+    ]
+    binding = sizing["binding_constraint"]
+    if binding == "interior":
+        notes.append(
+            "Zero-profit equilibrium: an extendable asset at an interior "
+            "optimum earns approximately zero net profit BY CONSTRUCTION — "
+            "the LP builds until the marginal MW breaks even. A near-zero "
+            "net_profit_eur here is the expected result, not a fault."
+        )
+    elif binding == "at_upper_bound":
+        notes.append(
+            "The size is a bound, not an optimum: do not narrate capture "
+            "price or profitability as the reason it is this big."
+        )
+    elif binding == "not_built":
+        notes.append(
+            "Nothing was built, so revenue / capture-price KPIs below are "
+            "zero or absent BY CONSTRUCTION. The question to answer is what "
+            "it lost to: compare its capital_cost and marginal_cost against "
+            "the bus price and against what the LP built instead."
+        )
+    elif binding == "not_extendable":
+        notes.append(
+            "Every capacity number below is an input the user typed. Nothing "
+            "here explains a build decision, because none was made."
+        )
+    binding_caps = [c for c in co2 if c.get("binding")]
+    if binding_caps:
+        notes.append(
+            "A CO2 cap binds. Its shadow price is part of this asset's "
+            "competitiveness and vanishes if the cap is relaxed — say so "
+            "rather than presenting the economics as cap-independent."
+        )
+    if len(buses) > 1:
+        notes.append(
+            "This asset spans more than one bus; the price signals are "
+            "reported per bus and can disagree across a congested corridor."
+        )
+    notes.append(
+        "Read system_signals.congestion.note before concluding anything from "
+        "an empty `lines` list: it says whether nothing binds, the duals were "
+        "never captured, or the corridor is simply out of scope."
+    )
+    return notes
+
+
+def explain_investment(component_class: str, name: str) -> dict:
+    """
+    Assemble the evidence behind one sizing decision: what the LP built, WHICH
+    CONSTRAINT stopped it there, what the asset earned, and the system signals
+    it was priced against.
+    """
+    from services.asset_results.compute import attr_for, nom_col_for
+    from services.dispatch_status import dispatch_status_detail
+
+    nom_col = nom_col_for(component_class)
+    if nom_col is None:
+        raise HTTPException(
+            400,
+            f"{component_class!r} carries no capacity the optimiser sizes. "
+            f"Sizeable classes: "
+            f"{', '.join(sorted(_INVESTMENT_BUS_COLS))}",
+        )
+
+    n = PyPSAService.get_network()
+    # `attr_for`, not `_GENERIC_CRUD_ATTRS`: the same class → DataFrame map
+    # `get_asset_results` uses, so the row this reads and the KPIs it fuses
+    # below can never come from two different tables.
+    df = getattr(n, attr_for(component_class))
+    if name not in df.index:
+        raise HTTPException(404, f"No {component_class} named {name!r}")
+    row = df.loc[name].to_dict()
+
+    dispatch = dispatch_status_detail(n)
+    solved = dispatch.get("state") == "fresh"
+
+    buses = [str(row.get(col)) for col in _INVESTMENT_BUS_COLS[component_class]
+             if row.get(col) is not None]
+    sizing = _sizing(row, nom_col, solved=solved)
+    co2 = _co2_signals() if solved else []
+
+    # The per-asset KPIs, taken from the registry rather than recomputed, so
+    # this can never disagree with the Asset Detail tab the user is looking at.
+    kpis = get_asset_results(component_class, name, category="summary")
+
+    return {
+        "asset": {
+            "component_class": component_class,
+            "name": name,
+            "carrier": row.get("carrier"),
+            "buses": buses,
+        },
+        "dispatch_state": dispatch,
+        "sizing": sizing,
+        "asset_kpis": kpis.get("headline", []),
+        "unavailable_kpis": kpis.get("unavailable", []),
+        "system_signals": {
+            "bus_prices": _bus_price_signals(n, buses) if solved else {},
+            "co2_caps": co2,
+            "congestion": _congestion_at(n, buses) if solved else {
+                "lines": [], "note": "no fresh dispatch — nothing to assess"},
+        },
+        "reading_notes": _reading_notes(sizing, co2, buses),
+    }
+
 # ── Pre-dispatch validation (Improvement #19) ───────────────────────────────
 #
 # A validator answers one question about a destructive call BEFORE the user is
@@ -3670,7 +4469,6 @@ PRE_DISPATCH_VALIDATORS: dict[str, Any] = {
     "batch_delete_components": _validate_batch_delete_components,
 }
 
-
 # ── Registry entry-point ────────────────────────────────────────────────────
 
 # Single source of truth for the (tool_name → callable) mapping. The Phase 2
@@ -3723,6 +4521,11 @@ DISPATCHERS: dict[str, Any] = {
     # to chat_tools_schema.TOOLS *and* TOOL_ROUTES, and confirm the schema
     # `required` array matches the Python signature's defaults (see the
     # "Optional tool params" pitfall in CLAUDE.md).
+    #
+    # explain_investment is the first one added that way — a real fusion of
+    # the sizing bound, the registry's per-asset KPIs and the system-wide
+    # price/CO2/congestion signals.
+    "explain_investment": explain_investment,
     # write_generic_crud (4)
     "create_component": create_component,
     "update_component": update_component,
@@ -3771,6 +4574,26 @@ DISPATCHERS: dict[str, Any] = {
     # execution (2)
     "abort_simulation": abort_simulation,
     "force_reset_simulation": force_reset_simulation,
+    # adequacy_fmea (9) — the reliability surface: one read dispatcher over
+    # the ten no-argument GETs, the two per-project sidecars, the four study
+    # starters, one abort.
+    "get_adequacy_results": get_adequacy_results,
+    "get_fmea_worksheet": get_fmea_worksheet,
+    "get_asset_health": get_asset_health,
+    "record_asset_health": record_asset_health,
+    "get_stress_scenarios": get_stress_scenarios,
+    "run_fmea_sweep": run_fmea_sweep,
+    "run_frontier_study": run_frontier_study,
+    "run_mc_study": run_mc_study,
+    "run_coupling_loop": run_coupling_loop,
+    "run_margin_loop": run_margin_loop,
+    "abort_adequacy_study": abort_adequacy_study,
+    # campaign (3) — one budget across a chain of studies
+    "start_campaign": start_campaign,
+    "campaign_status": campaign_status,
+    "end_campaign": end_campaign,
+    # study report (1) — the write-up, and what it does not establish
+    "build_study_report": build_study_report,
     # solve_queue (4)
     "solve_queue_enqueue": solve_queue_enqueue,
     "solve_queue_list": solve_queue_list,
