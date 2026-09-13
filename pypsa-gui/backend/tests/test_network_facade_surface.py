@@ -131,6 +131,8 @@ _LIFTED_HANDLERS: dict[str, tuple] = {
     "update_bus": ("services.network_buses", "apply_update_bus", ("_update_component",)),
     "delete_bus_cascade": ("services.network_buses", "apply_delete_bus_cascade"),
     "rename_bus": ("services.network_buses", "apply_rename_bus"),
+    "recalculate_line_lengths": ("services.network_lines", "apply_recalculate_line_lengths"),
+    "rescale_impedances": ("services.network_lines", "apply_rescale_impedances"),
 }
 
 # `_filter_transient_names` was in the list above until Phase 5, and came out
