@@ -96,6 +96,16 @@ _MOVED: dict[str, str] = {
     "_reapply_snapshot_weights": "services.user_timeseries",
     "_flatten_snapshot_state": "services.user_timeseries",
     "_parse_upload": "services.user_timeseries",
+
+    # ── bulk edit (`PATCH /_bulk`) ───────────────────────────────────────────
+    # Body + coerce / finite-default rules. The FastAPI handler stays thin in
+    # the router; see `_LIFTED_HANDLERS` below.
+    "_COMPONENT_ATTRS": "services.network_bulk",
+    "_FINITE_DEFAULT_BOUNDS": "services.network_bulk",
+    "_finite_input_meta": "services.network_bulk",
+    "_finite_bound_default": "services.network_bulk",
+    "_bool_input_default": "services.network_bulk",
+    "_coerce_bulk_value": "services.network_bulk",
 }
 
 # Names other modules import from `routers.network` that must stay put: the
@@ -106,6 +116,13 @@ _STAYS = [
     "_update_component", "_delete_component", "_xlsx_response",
     "_push_undo_snapshot", "_apply_profile_upload",
 ]
+
+# Thin FastAPI handlers whose bodies live in services. The handler name stays
+# on `routers.network` (chat_tools imports `bulk_update` by name); the compute
+# function is defined in the service module.
+_LIFTED_HANDLERS: dict[str, tuple[str, str]] = {
+    "bulk_update": ("services.network_bulk", "apply_bulk_update"),
+}
 
 # `_filter_transient_names` was in the list above until Phase 5, and came out
 # deliberately rather than quietly. It is a pure domain helper over
@@ -218,4 +235,36 @@ def test_a_name_phase_5_moved_out_is_still_reachable_from_the_router(name, origi
     assert getattr(NET, name) is svc, (
         f"routers.network.{name} is not {origin}.{name.lstrip('_')} — the alias "
         f"must re-export the moved function, not redefine it"
+    )
+
+
+@pytest.mark.parametrize("handler,target", sorted(_LIFTED_HANDLERS.items()))
+def test_each_lifted_handler_stays_thin_and_delegates(handler, target):
+    """
+    The FastAPI route stays on `routers.network` (name + decorator are API);
+    the body is a one-line call into the service. A fat body growing back here
+    undoes the lift without failing the pure-move `_MOVED` checks.
+    """
+    module_name, fn_name = target
+    module = importlib.import_module(module_name)
+    fn = getattr(module, fn_name, None)
+    assert callable(fn), f"{module_name}.{fn_name} missing for {handler}"
+    assert fn.__module__ == module_name, (
+        f"{fn_name} is re-exported into {module_name} rather than defined there"
+    )
+    wrapper = getattr(NET, handler, None)
+    assert callable(wrapper), f"routers.network.{handler} is gone"
+    assert wrapper.__module__ == "routers.network", (
+        f"{handler} must remain the FastAPI handler on routers.network"
+    )
+    src = inspect.getsource(wrapper)
+    assert fn_name in src, (
+        f"routers.network.{handler} no longer calls {fn_name}; the body drifted "
+        f"back into the router"
+    )
+    # Executable body (skip decorator / def / docstring) must stay a single return.
+    code = wrapper.__code__
+    assert code.co_names == (fn_name,), (
+        f"routers.network.{handler} co_names={code.co_names!r}; expected only "
+        f"{fn_name!r} — the coerce / lock / write loop belongs in {module_name}"
     )
