@@ -15,13 +15,9 @@ unchanged. Never imports ``routers.*``.
 """
 from __future__ import annotations
 
-import logging as _logging
-import pathlib
-import tempfile
-
 from fastapi import HTTPException
 
-from services import change_log_service, dirty_state, undo_service
+from services import change_log_service
 from services.pypsa_service import PyPSAService
 from services.user_timeseries import (
     _backup_network_ts_to_user_ts,
