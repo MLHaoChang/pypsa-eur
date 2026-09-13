@@ -17,22 +17,9 @@ header.
 from __future__ import annotations
 
 import logging
-import math
 from typing import Any
 
-import contextvars as _contextvars
 import threading as _threading
-
-from pydantic import BaseModel as _BaseModel
-
-# Whole-branch review, finding S6: the study request models typed their
-# floats as plain `float`, which accepts the JSON `Infinity`/`NaN` literals
-# (12f's finding, on the asset schemas). A frontier target of `Infinity`
-# passed, the study was PUBLISHED and RAN, the POST's own response then
-# failed to encode and every later GET on the record answered 500 until a
-# swap cleared it. `Finite` (12g's own type) on every study float; the 12f
-# handler renders the refusal.
-from models.schemas import Finite as _Finite
 
 from fastapi import APIRouter, HTTPException, Query, Response
 

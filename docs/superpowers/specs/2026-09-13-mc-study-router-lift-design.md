@@ -34,22 +34,23 @@ Mesh refusal stays in the router. Everything from the synchronous 422 set throug
 
 ### Injected state, no router import
 
-The runner accepts:
+The runners accept:
 
 * `solver_state` — today's `_state` (solver_config, last_reserve_margin)
 * `publish_study` — today's `_publish_study`
+* `state_update` — today's `_state_update` (frontier and sweep only; closing restore). MC does not take it.
 
-No `state_update` is needed (MC never mutates solver settings). The runner never imports `routers.*`. Pure engines in `mc.py` / `elcc.py` stay untouched.
+The runners never import `routers.*`. Pure engines stay untouched.
 
 ### Constants and request models
 
-`McRequest` (and any MC-only wire constants) move with the runner and are **re-exported from `routers/results.py`**.
+`McRequest` / `FrontierRequest` / `FmeaSweepRequest` (and any study-only wire constants) move with their runners and are **re-exported from `routers/results.py`**.
 
 ### Proof
 
-* Existing `tests/test_adequacy_mc_endpoint.py` failing set unchanged.
-* New tripwire: thin handler LOC; runner never imports routers; surface names stay on the router.
-* F1n2-style source scans that named `post_mc` in `routers/results.py` still resolve the thin handler (ALLOWED exemption stays valid).
+* Existing `tests/test_adequacy_{mc_endpoint,frontier,sweep,fmea_sweep*}.py` failing sets unchanged.
+* Tripwires: thin handler LOC; runners never import routers; surface names stay on the router (`test_mc_study_facade_surface.py`, `test_study_runners_facade_surface.py`).
+* F1n2/F1j-style source scans retargeted at the runners when a results.py scan goes vacuous.
 
 ## Included follow-on cuts
 

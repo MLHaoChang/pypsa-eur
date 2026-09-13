@@ -43,5 +43,5 @@
 
 - [x] `tests/test_mc_study_facade_surface.py` + `tests/test_study_runners_facade_surface.py` — surface names, no-router layering, thin LOC for mc/frontier/sweep.
 - [x] Update `.cursor/skills/gui-backend-change/SKILL.md`.
-- [ ] Run mc / frontier / sweep endpoint suites + tripwires.
-- [ ] Commit (no push from this follow-on unless asked).
+- [x] Run mc / frontier / sweep endpoint suites + tripwires.
+- [x] Commit (no push from this follow-on unless asked).
