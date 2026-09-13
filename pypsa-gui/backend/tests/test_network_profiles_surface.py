@@ -94,7 +94,9 @@ def test_the_profiles_module_never_imports_routers_network():
     )
 
 
-def test_the_crud_routes_did_not_come_along():
+def test_the_crud_factory_still_exported_from_the_router():
+    """Factory helpers may live in services.network_crud but must remain
+    importable from routers.network (chat_tools / project_network)."""
     stays = [
         "_serialize_component",
         "_get_component",
@@ -102,15 +104,14 @@ def test_the_crud_routes_did_not_come_along():
         "_update_component",
         "_delete_component",
         "_merge_partial_update",
-            ]
+    ]
+    import services.network_crud as CRUD
     for name in stays:
         fn = getattr(NET, name, None)
         assert fn is not None, f"routers.network.{name} disappeared"
-        if inspect.isfunction(fn):
-            assert fn.__module__ == "routers.network", (
-                f"{name} left routers.network — this phase moves profiles only"
-            # `_push_undo_snapshot` later moved to services.network_undo
-            )
+        assert fn is getattr(CRUD, name), (
+            f"routers.network.{name} is not services.network_crud.{name}"
+        )
 
 
 def test_the_moved_routes_are_gone_from_the_router_source():

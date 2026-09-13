@@ -105,8 +105,8 @@ fails if a name or a positional parameter list changes, and
 Nothing under `services/compare/` imports a router.
 
 ## Where network helpers go
-`routers/network.py` keeps its ~80 CRUD routes, the generic CRUD factory and
-the undo stack. Pure helpers live in services and are re-exported from the
+`routers/network.py` keeps its ~80 thin CRUD routes and the undo stack; the
+generic CRUD factory lives in `services/network_crud.py` (re-exported). Pure helpers live in services and are re-exported from the
 router; two sibling routers hold deep route clusters:
 
 | module | owns |
@@ -120,6 +120,7 @@ router; two sibling routers hold deep route clusters:
 | `services/network_buses.py` | bus specials (`apply_update_bus`, cascade delete, rename); inject `_update_component` — never import `routers.*` |
 | `services/network_lines.py` | line specials (`apply_recalculate_line_lengths`, `apply_rescale_impedances`); geometry stays in `network_geometry` |
 | `services/network_global_constraints.py` | global-constraint create/update/delete; inject `_merge_partial_update` on update — never import `routers.*` |
+| `services/network_crud.py` | generic CRUD factory (`_create`/`_update`/`_delete`/`_merge_partial_update` + series/rename helpers); router re-exports |
 | `routers/network_time_axis.py` | snapshots / investment periods / timeseries routes (Phase 5) |
 | `routers/network_profiles.py` | load / generator / link profile list + template + upload; `_xlsx_response`, `_apply_profile_upload` |
 | `services/network_undo.py` | undo capture/restore (`push_undo_snapshot`, `get_undo_info`, `apply_undo`); thin `/undo` handlers stay on the router |
@@ -128,8 +129,7 @@ router; two sibling routers hold deep route clusters:
 them by value inside a function and mutates in place; reassigning either would
 leave the router and every importer holding different objects, with writes
 going to different stores. `tests/test_network_facade_surface.py` fails on any
-rebinding, and also fails if a CRUD helper is moved out — this phase's scope is
-pinned, not conventional. Bulk lift:
+rebinding, and fails if a moved helper stops being the identical re-export. Bulk lift:
 `docs/superpowers/specs/2026-09-13-network-bulk-router-lift-design.md`.
 Profiles sibling:
 `docs/superpowers/specs/2026-09-13-network-profiles-router-lift-design.md`.
@@ -137,6 +137,7 @@ Undo lift: `docs/superpowers/specs/2026-09-13-network-undo-router-lift-design.md
 Bus specials: `docs/superpowers/specs/2026-09-13-network-bus-specials-lift-design.md`.
 Line specials: `docs/superpowers/specs/2026-09-13-network-line-specials-lift-design.md`.
 Global constraints: `docs/superpowers/specs/2026-09-13-network-global-constraints-lift-design.md`.
+CRUD factory: `docs/superpowers/specs/2026-09-13-network-crud-factory-lift-design.md`.
 
 Inject state into `apply_bulk_update` only via its arguments / `PyPSAService` —
 never import `routers.*` from `services/network_bulk.py`. Do not fold the

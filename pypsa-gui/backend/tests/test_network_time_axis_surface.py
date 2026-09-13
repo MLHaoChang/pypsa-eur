@@ -122,24 +122,21 @@ def test_the_moved_module_never_imports_back_from_the_router():
     )
 
 
-def test_the_crud_routes_did_not_come_along():
+def test_the_crud_factory_still_exported_from_the_router():
     """
-    Scope guard. This phase moves the time axis; the ~80 CRUD routes stay put
-    deliberately, because they are two-line factory calls and splitting them
-    would add files without removing complexity. If one of these moved, the
-    phase grew without the reasoning being revisited.
+    Scope guard updated for the CRUD-factory lift: helpers may live in
+    services.network_crud, but routers.network must still re-export them.
     """
     stays = ["_serialize_component", "_get_component", "_create_component",
              "_update_component", "_delete_component", "_merge_partial_update",
              ]
+    import services.network_crud as CRUD
     for name in stays:
         fn = getattr(NET, name, None)
         assert fn is not None, f"routers.network.{name} disappeared"
-        if inspect.isfunction(fn):
-            assert fn.__module__ == "routers.network", (
-                f"{name} left routers.network — this phase was meant to move the "
-                f"time-axis routes only"
-            )
+        assert fn is getattr(CRUD, name), (
+            f"routers.network.{name} is not services.network_crud.{name}"
+        )
     # `_xlsx_response` later moved with the profiles sibling; still reachable.
     assert NET._xlsx_response.__module__ == "routers.network_profiles"
     assert NET._push_undo_snapshot.__module__ == "services.network_undo"
