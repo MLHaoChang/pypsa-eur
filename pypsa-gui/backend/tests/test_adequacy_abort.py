@@ -626,6 +626,12 @@ def test_F1j_no_replay_call_site_can_forward_the_stop_flag():
     have been changed back to forward a live flag with this test still green
     (adversarial review of the review fixes, M1).
 
+    The `/mc` worker body lives in ``services/adequacy/mc_loop_runner.py``
+    since the MC study router lift. Scanning ``routers/results.py`` for the
+    exempted call after that cut went *vacuous* — the thin ``post_mc`` still
+    existed, so ``seen_allowed`` stayed green while the live-flag call had
+    moved out of the scanned files.
+
     Bites (verified): drop `stop_event=None` from `elcc.metrics_at`, from
     either portfolio call, or from either loop's `evaluate`.
     """
@@ -633,8 +639,10 @@ def test_F1j_no_replay_call_site_can_forward_the_stop_flag():
     import pathlib
 
     # The one call that MAY carry a live flag: the `/mc` worker's own baseline,
-    # which is the study the user is aborting.
-    ALLOWED = ("post_mc",)
+    # which is the study the user is aborting. Nested as ``worker`` inside
+    # ``start_mc`` after the MC study router lift.
+    ALLOWED = ("start_mc",)
+    _ALLOWED_SRC = pathlib.Path("services/adequacy/mc_loop_runner.py")
 
     offenders: list[str] = []
 
@@ -662,17 +670,17 @@ def test_F1j_no_replay_call_site_can_forward_the_stop_flag():
 
     seen_allowed = 0
     for rel in ("services/adequacy/elcc.py", "services/adequacy/portfolio.py",
-                "routers/results.py"):
+                "routers/results.py", "services/adequacy/mc_loop_runner.py"):
         src = pathlib.Path(rel).read_text()
         scan(rel, src, ast.parse(src), ())
     # The exemption must still match something, or a rename silently turns this
     # into a test that no call site can pass.
-    for node in ast.walk(ast.parse(pathlib.Path("routers/results.py").read_text())):
+    for node in ast.walk(ast.parse(_ALLOWED_SRC.read_text())):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
                 and node.name in ALLOWED:
             seen_allowed += 1
     assert seen_allowed == len(ALLOWED), (
-        f"the exempted function(s) {ALLOWED} are not in routers/results.py any "
+        f"the exempted function(s) {ALLOWED} are not in {_ALLOWED_SRC} any "
         "more — this test is asserting nothing about them")
 
     assert not offenders, (

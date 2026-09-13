@@ -38,22 +38,25 @@ Two rules hold this together:
   `assumptions`/`diagnostics`/`objective` → `myopic`). If new code seems to need
   a back-import, it is in the wrong module. The same test enforces this.
 
-## Where planning-loop controllers go
-`POST /results/coupling_loop` and `POST /results/margin_loop` stay as thin
-handlers in `routers/results.py` (mesh refuse + FastAPI decorator). The
-validation, bindings, study record and worker live in:
+## Where planning-loop / study controllers go
+`POST /results/coupling_loop`, `POST /results/margin_loop`, and
+`POST /results/mc` stay as thin handlers in `routers/results.py` (mesh refuse
++ FastAPI decorator). The validation, bindings, study record and worker live
+in:
 
 | module | owns |
 |---|---|
 | `services/adequacy/coupling_loop_runner.py` | `start_coupling_loop`, coupling-loop constants + `CouplingLoopRequest` |
 | `services/adequacy/margin_loop_runner.py` | `start_margin_loop`, margin-loop constants + `MarginLoopRequest` |
+| `services/adequacy/mc_loop_runner.py` | `start_mc`, `McRequest` + `McElccAsset` |
 
-Inject `solver_state=`, `state_update=`, `publish_study=` — never import
-`routers.*` from the runners. The pure controller stays in
-`services/adequacy/coupling.py`. Constants/models are re-exported from the
-router so `chat_tools` and existing tests keep importing from
-`routers.results`. Spec:
-`docs/superpowers/specs/2026-09-13-planning-loop-router-lift-design.md`.
+Inject `solver_state=`, `state_update=` (loops only), `publish_study=` — never
+import `routers.*` from the runners. The pure controllers stay in
+`services/adequacy/coupling.py` / `mc.py` / `elcc.py`. Constants/models are
+re-exported from the router so `chat_tools` and existing tests keep importing
+from `routers.results`. Specs:
+`docs/superpowers/specs/2026-09-13-planning-loop-router-lift-design.md`,
+`docs/superpowers/specs/2026-09-13-mc-study-router-lift-design.md`.
 
 ## Where results arithmetic goes
 The `/results/*` handlers in `routers/results.py` are thin: network lookup,
