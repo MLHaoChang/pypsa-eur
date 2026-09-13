@@ -109,12 +109,13 @@ _MOVED: dict[str, str] = {
 }
 
 # Names other modules import from `routers.network` that must stay put: the
-# CRUD factory, the HTTP-response helpers, and every route.
+# CRUD factory and undo. `_xlsx_response` / `_apply_profile_upload` moved with
+# the profiles sibling (`test_network_profiles_surface.py`).
 _STAYS = [
     "_serialize_component", "_get_component", "_meta_payload",
     "_create_component", "_merge_partial_update",
-    "_update_component", "_delete_component", "_xlsx_response",
-    "_push_undo_snapshot", "_apply_profile_upload",
+    "_update_component", "_delete_component",
+    "_push_undo_snapshot",
 ]
 
 # Thin FastAPI handlers whose bodies live in services. The handler name stays
@@ -159,9 +160,9 @@ def test_a_moved_name_is_the_identical_object(name, origin):
 @pytest.mark.parametrize("name", _STAYS)
 def test_the_crud_and_http_helpers_stay_in_the_router(name):
     """
-    The ~80 CRUD routes and their factory are deliberately NOT extracted, and
-    `_xlsx_response` returns a `StreamingResponse` — an HTTP concern. If one of
-    these moves, this phase's scope grew without the plan being updated.
+    The ~80 CRUD routes and their factory are deliberately NOT extracted. If
+    one of these moves, this phase's scope grew without the plan being updated.
+    (Profile helpers left with `routers.network_profiles` — see that surface.)
     """
     fn = getattr(NET, name, None)
     assert fn is not None, f"routers.network.{name} disappeared"
