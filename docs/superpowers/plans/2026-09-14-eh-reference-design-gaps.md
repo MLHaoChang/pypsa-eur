@@ -167,9 +167,9 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 **Acceptance**
 - [x] Sync study materializes a report for `strong_grid` after required stages.
 - [x] Abort leaves pipeline.aborted and restores pack overlay.
-- [ ] **QA gate cleared** (re-gate after NO-GO fixes)
+- [x] **QA gate cleared** — [P1.5 re-gate](bc-d8211c3f-f8fa-51d5-8194-9ede0cd033b0): **GO** (after NO-GO fixes). HTTP still deferred.
 
-**TDD evidence:** ImportError red → `eh_study`/`eh_report` → study tests green.
+**TDD evidence:** ImportError red → `eh_study`/`eh_report` → study tests green (incl. live solves + abort/undo).
 ---
 
 ## Phase 2 — Class-B Link residuals (optional, non-blocking)
@@ -241,17 +241,20 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 - `pack_hash` / `assumptions_hash` definition documented
 
 **Steps**
-- [ ] Backend assembler from adequacy, frontier, FMEA, redundancy, DtC, gates.
-- [ ] `GET /results/eh_reference_design` (+ persist) populated by P1.5 job.
-- [ ] Frontend: one “Reference design” summary + export (JSON/CSV) — not three disconnected tabs only.
-- [ ] TEA: LCOE (optional LCOH) post-process from existing economics helpers — no second cost engine.
-- [ ] “Configurable outputs” for v1 = fixed schema + optional section inclusion / export columns (or drop the word; pin in spec).
+- [x] Backend assembler enrichment: sizing + TEA/LCOE from existing cost/energy.
+- [x] `GET /results/eh_reference_design` (+ persist key `eh_reference_design_report`).
+- [ ] Frontend: one “Reference design” summary + export — deferred (backend GET/export ready).
+- [x] TEA: LCOE post-process from cost ÷ served energy — no second cost engine.
+- [x] “Configurable outputs” for v1 = fixed schema (`EXPORT_KEYS`) + golden fixture.
 
 **Acceptance**
-- [ ] MVP-A: orchestrated `strong_grid` study → one GET returns report with cost@target + frontier or explicit `not_established`.
-- [ ] Empty `redundancy` / `dtc` / `gates` allowed with flags (does not fail MVP-A).
-- [ ] Golden-fixture snapshot tests for stable export shape.
+- [x] MVP-A: orchestrated `strong_grid` study → report with cost@target + sizing + TEA; frontier `skipped`/`not_established`.
+- [x] Empty `redundancy` / `dtc` / `gates` allowed with flags.
+- [x] Golden-fixture snapshot tests for stable export shape.
 - [ ] MVP-B DoD: weak + off-grid packs produce filled dtc/lever sections per P3a/P4a/P3c.
+- [ ] **QA gate cleared** (pending)
+
+**TDD evidence:** P5 tests red (missing helpers) → `eh_report` enrichment + study wiring → green.
 
 ---
 

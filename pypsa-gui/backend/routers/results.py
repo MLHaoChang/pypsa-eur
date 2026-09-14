@@ -1367,6 +1367,23 @@ def get_adequacy():
     return report
 
 
+@results_router.get("/eh_reference_design")
+def get_eh_reference_design():
+    """
+    Energy Hub ``ReferenceDesignReport`` from the last EH study (Phase 5).
+
+    Assembled only via ``assemble_reference_design_report``; persisted under
+    ``eh_reference_design_report`` in result state. 204 when no study has
+    been stored yet (same convention as ``/results/adequacy``).
+    """
+    from services.adequacy.eh_report import eh_reference_design_http_payload
+
+    body, status = eh_reference_design_http_payload(_state)
+    if status == 204:
+        return Response(status_code=204)
+    return body
+
+
 @results_router.get("/reserve_margin")
 def get_reserve_margin():
     """

@@ -60,8 +60,13 @@ def run_eh_study(
     stages: Iterable[str] | None = None,
     budget_solves: int = DEFAULT_EH_BUDGET_SOLVES,
     state_update=None,
+    store: dict | None = None,
 ) -> ReferenceDesignReport:
-    """Synchronous EH study driver (HTTP worker wraps this later)."""
+    """Synchronous EH study driver (HTTP worker wraps this later).
+
+    If ``store`` is provided, the finished report is persisted under
+    ``eh_reference_design_report`` for ``GET /results/eh_reference_design``.
+    """
     from services.solver_service import run_simulation
 
     requested = tuple(stages) if stages is not None else DEFAULT_STAGES
@@ -100,6 +105,7 @@ def run_eh_study(
     cost_at_target = None
     period_basis = None
     adequacy_report: dict[str, Any] | None = None
+    tea_obj = None
 
     def _mark(stage: str, status: str, *, note: str | None = None,
               solves_charged: int = 0) -> None:
@@ -180,10 +186,39 @@ def run_eh_study(
                              "excludes_shed_cost": True},
                             None,
                         )
-                        # Sizing best-effort placeholder until P5 deepens it.
+                        # P5: sizing from the solved network (installed p_nom).
+                        sizing = report_mod.sizing_summary_from_network(network)
                         section_payloads["sizing"] = (
-                            "not_established", None,
-                            "sizing summary deferred to P5 enrichment")
+                            "ok", sizing, None)
+                        # P5: TEA/LCOE from cost ÷ (demand − ENS).
+                        ens_for_tea = float(ens_mwh) if ens_mwh is not None else None
+                        served = report_mod.served_energy_mwh_from_network(
+                            network, ens_mwh=ens_for_tea)
+                        if served is None and isinstance(metrics, dict):
+                            dem = metrics.get("demand_mwh")
+                            ens = metrics.get("ens_mwh")
+                            if dem is not None and ens is not None:
+                                served = max(0.0, float(dem) - float(ens))
+                        if served is None and ens_cap is not None \
+                                and cap_mwh and float(cap_mwh) > 0 \
+                                and ens_mwh is not None:
+                            demand = float(cap_mwh) / (float(ens_cap) / 1e4)
+                            served = max(0.0, demand - float(ens_mwh))
+                        tea_block = report_mod.compute_tea(
+                            cost_eur=cost_at_target,
+                            served_energy_mwh=served)
+                        if tea_block.lcoe_eur_per_mwh is not None:
+                            section_payloads["tea"] = (
+                                "ok",
+                                tea_block.model_dump(mode="json"),
+                                None,
+                            )
+                        else:
+                            section_payloads["tea"] = (
+                                "not_established",
+                                tea_block.model_dump(mode="json"),
+                                tea_block.notes,
+                            )
         elif "ens_solve" not in requested:
             section_payloads.setdefault(
                 "target", ("not_established", None, "ens_solve not run"))
@@ -222,10 +257,16 @@ def run_eh_study(
                 "gates", ("skipped", None, "gates/SCR not in P1.5 MVP-A"))
 
         section_payloads.setdefault(
-            "tea", ("skipped", None, "TEA wrap is P5"))
+            "tea", ("skipped", None, "TEA not produced (ens_solve did not run)"))
         section_payloads.setdefault(
             "fmea_top", section_payloads.get(
                 "fmea_top", ("skipped", None, "fmea_top not requested")))
+
+        tea_obj = None
+        tea_sec = section_payloads.get("tea")
+        if tea_sec and tea_sec[0] == "ok" and isinstance(tea_sec[1], dict):
+            from models.energy_hub import TeaBlock
+            tea_obj = TeaBlock.model_validate(tea_sec[1])
 
         if "assemble" in requested and not (aborted and adequacy_report is None):
             _mark("assemble", "run")
@@ -242,7 +283,7 @@ def run_eh_study(
         records, budget_solves=budget_solves, solves_consumed=solves,
         aborted=aborted)
 
-    return report_mod.assemble_reference_design_report(
+    report = report_mod.assemble_reference_design_report(
         archetype=pack.archetype,
         pack_hash=pack_h,
         assumptions_hash=_assumptions_hash(cfg),
@@ -253,4 +294,8 @@ def run_eh_study(
         achieved_shed_hours=achieved_shed_hours,
         cost_at_target_eur=cost_at_target,
         period_basis=period_basis,
+        tea=tea_obj,
     )
+    if store is not None:
+        report_mod.store_eh_report(store, report)
+    return report
