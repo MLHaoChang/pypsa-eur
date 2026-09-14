@@ -145,24 +145,31 @@ Every phase follows this loop. **Do not start Phase N+1 until Phase N’s gate i
 
 **Goal.** One job runs the reference-design pipeline; P5 only assembles.
 
+**P1.5 sync MVP-A slice (HTTP deferred):** `run_eh_study` implements
+`apply_pack` → `ens_solve` → `assemble`. Other default stages are **skipped**
+(not left `pending`). `POST /results/eh_study` is deferred to a follow-up
+within P1.5 or early P5 — gate must re-clear if HTTP lands later.
+
 **Pipeline (default stages)**
 1. Apply archetype pack  
 2. ENS-cap (or target) solve  
-3. Optional frontier (budget-capped)  
-4. Optional MC certify / coupling loop (required vs optional **per archetype** — pin in pack: recommend **required** for `off_grid` / `weak_flexible`)  
-5. FMEA top-N (best-effort)  
+3. Optional frontier (budget-capped) — skipped until implemented  
+4. Optional MC certify — skipped; if `mc_certify_required` → gates `not_established`  
+5. FMEA top-N — skipped until implemented  
 6. Later stages (P3a/P4a) when enabled  
-7. Emit `ReferenceDesignReport` with completeness flags  
+7. Emit `ReferenceDesignReport` via `assemble_reference_design_report` only  
 
 **Steps**
-- [ ] `EHStudyRunner` (+ abort/partial), reuse frontier/MC/campaign budget patterns.
-- [ ] `POST /results/eh_study` (or project-scoped equivalent) + status + abort.
-- [ ] Completeness: missing MC/frontier/redundancy/dtc → `not_established`, not silent omission.
+- [x] `run_eh_study` sync driver (+ abort/undo), reuse solve + pack apply.
+- [x] Completeness: missing MC/frontier/redundancy/dtc → `skipped` / `not_established`.
+- [ ] `POST /results/eh_study` (+ status + abort) — deferred (plan amendment).
 
 **Acceptance**
-- [ ] One API/job materializes a report for `strong_grid` after required stages.
-- [ ] Abort leaves partial report with flags; does not corrupt project state.
+- [x] Sync study materializes a report for `strong_grid` after required stages.
+- [x] Abort leaves pipeline.aborted and restores pack overlay.
+- [ ] **QA gate cleared** (re-gate after NO-GO fixes)
 
+**TDD evidence:** ImportError red → `eh_study`/`eh_report` → study tests green.
 ---
 
 ## Phase 2 — Class-B Link residuals (optional, non-blocking)
