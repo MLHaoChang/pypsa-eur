@@ -18,7 +18,7 @@
       "DC",
       "electricity"
     ],
-    "import_p_nom_mw": 0.0,
+    "import_p_nom_mw": null,
     "import_energy_mwh_per_year": null,
     "import_firmness": "planning_limit_only"
   },

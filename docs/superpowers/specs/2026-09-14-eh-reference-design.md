@@ -117,9 +117,9 @@ If none match: `strong_grid` is a no-op; `weak_flexible` / `off_grid` **prefligh
 |---|---|---|
 | `strong_grid` | **No-op** (no Link/`p_nom` change) | n/a |
 | `weak_flexible` | Set each selected Link `p_nom` (and `p_nom_max` if present) to pack `import_p_nom_mw` (per-link equal split if one number); optional static `p_max_pu` left unchanged | restore saved `p_nom` / `p_nom_max` |
-| `off_grid` | Set selected Links `p_nom` → `0` and static `p_max_pu` → `0` (mirror Class-B restore discipline for time series if present) | restore saved values |
+| `off_grid` | Force selected Links **out of service via `p_max_pu`/`p_min_pu` → 0** (keep `p_nom` > 0 so preflight `link_p_nom_invalid` does not fire — same discipline as Class-B Link outages). Optionally also clamp `p_nom_max` if present | restore saved `p_max_pu` / `p_min_pu` / `p_nom_max` |
 
-**Energy (optional, weak_flexible only):** if pack `import_energy_mwh_per_year` is set, add a named GlobalConstraint summing absolute electrical import on selected Links ≤ that energy; remove on undo. If unset, power-only.
+**Energy (optional field on pack):** `import_energy_mwh_per_year` is **reserved**. Phase 1 apply is **power-only**; if the field is set, `apply_archetype_pack` MUST emit a warning and must NOT add a GlobalConstraint. Energy import caps land in P3c (or a later overlay phase), not P1.
 
 **Firmness:** overlays are **planning limits**, not adequacy of the external grid. Report `levers.import_firmness = "planning_limit_only"` unless Link outages are modelled in the same study.
 

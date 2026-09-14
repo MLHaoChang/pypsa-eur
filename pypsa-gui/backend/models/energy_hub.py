@@ -240,7 +240,10 @@ def default_off_grid_pack() -> ArchetypePack:
         ),
         levers=OptimizationLevers(
             sizing=True, import_cap=True, storage_duration=True),
-        import_overlay=ImportOverlaySpec(import_p_nom_mw=0.0),
+        # import_p_nom_mw unused for off_grid: islanding is p_*_pu→0
+        # (Class-B discipline), not p_nom→0. Leave None so fixtures cannot
+        # be misread as a zero-nominal mutation.
+        import_overlay=ImportOverlaySpec(import_p_nom_mw=None),
         mc_certify_required=True,
         dtc_stress_default=False,
         dsr_opt_in=False,

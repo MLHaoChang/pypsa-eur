@@ -42,6 +42,24 @@ P0 contracts
 
 ---
 
+## Phase QA gate + TDD protocol (mandatory)
+
+Every phase follows this loop. **Do not start Phase N+1 until Phase N’s gate is cleared.**
+
+1. **TDD — red:** Write failing tests that encode the phase acceptance criteria first. Demonstrate red (or skip-document if env blocks a live solve, with a unit-level red still shown).
+2. **TDD — green:** Implement the minimum code to pass. No drive-by refactors.
+3. **TDD — verify:** Re-run the phase test file(s); all must pass.
+4. **QA gate assessor (independent):** Run an adversarial gate with verdict `GO` | `GO WITH BINDING CONDITIONS` | `NO-GO` against that phase’s acceptance + modelling honesty.
+5. **Proceed rule:**
+   - `GO` → commit, then start next phase at step 1.
+   - `GO WITH BINDING CONDITIONS` → satisfy conditions (doc and/or code) in the same phase commit set, re-verify tests, then proceed.
+   - `NO-GO` → **stop**; fix blockers; re-gate; do not touch the next phase.
+6. Record the gate verdict in this plan under the phase (checkbox + one-line note).
+
+**Gate rubric (per phase):** acceptance criteria met; no rebuild of shipped work; no scope leak into later phases; TDD evidence (red→green) present; tests fail-closed without climate/EMT data.
+
+---
+
 ## Review deltas (must read before implementing)
 
 | Change | Why |
@@ -103,20 +121,24 @@ P0 contracts
 | Archetype | Pack contents |
 |---|---|
 | `strong_grid` | Loose/no import limit; economic ENS ladder; frontier primary |
-| `weak_flexible` | Tight power/energy import caps via **documented Link/GlobalConstraint overlay**; DSR **opt-in with double-count preflight** (FMEA §4.4) |
+| `weak_flexible` | Tight **power** import caps via Link `p_nom` overlay (spec §6); `import_energy_mwh_per_year` reserved (warn-only in P1); DSR **opt-in with double-count preflight** (FMEA §4.4) |
 | `off_grid` | Import capacity = 0 overlay; islanded electrical balance; storage/fuel as primary adequacy resources |
 
 **Steps**
-- [ ] Implement pack apply/undo with pinned import overlay semantics (which Links, power vs energy, restore).
-- [ ] DSR double-count preflight for `weak_flexible`.
-- [ ] Three fixture overlays; **at least one path binds ENS** (not smoke-only).
-- [ ] Document which existing endpoints the pack feeds (no duplicate engines).
+- [x] Implement pack apply/undo with pinned import overlay semantics (which Links, power vs energy, restore).
+- [x] DSR double-count preflight for `weak_flexible`.
+- [x] Three fixture overlays; **at least one path binds ENS** (not smoke-only).
+- [x] Document which existing endpoints the pack feeds (no duplicate engines).
+
+**Feeds (no new engines):** SolverConfig `ens_cap_permyriad` (+ optional DSR fields via preflight helper) → existing `run_simulation` / `/results/adequacy` / frontier / MC when later orchestrated.
 
 **Acceptance**
-- [ ] `pixi run gui-tests`: pack apply/undo + one live mini-solve per archetype.
-- [ ] `strong_grid`: ENS binds; adequacy report returns.
-- [ ] No SCR/gridspine dependency in P1.
+- [x] Pack apply/undo + live mini-solve per archetype (`test_energy_hub_archetypes.py`).
+- [x] `strong_grid`: ENS binds (`binding == system_cap`).
+- [x] No SCR/gridspine dependency in P1.
+- [x] **QA gate cleared** — [P1 assessor](bc-37a2dcd6-5f89-5073-a006-7922bf6e71f7): `GO WITH BINDING CONDITIONS`; conditions satisfied (power-only energy field, off_grid `import_p_nom_mw=None`, energy-warn + `p_nom>0` tests).
 
+**TDD evidence:** collection ImportError (red) → implement `archetypes.py` → archetype+contract tests green (incl. live solves).
 ---
 
 ## Phase 1.5 — EH study orchestrator
