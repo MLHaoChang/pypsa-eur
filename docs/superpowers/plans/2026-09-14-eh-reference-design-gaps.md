@@ -2,7 +2,9 @@
 
 > **For agentic workers:** Implement phase-by-phase. Prefer extending `pypsa-gui/backend/services/adequacy/` and existing frontier/loop runners over new parallel stacks.
 >
-> **Review revision (2026-09-14):** Updated after independent reviews — [Adequacy modelling](bc-7d546fbf-01ad-5eae-aa2e-01c8940b6283), [Product/architecture](bc-97591163-b6f7-5e4d-9cf1-0b2dd23bf334), [FMEA/gap-coverage](bc-ebad9414-b1ef-5ab4-b355-748248270b9b). See § Review deltas.
+> **Review revision (2026-09-14):** Updated after independent reviews — modelling, product/architecture, gap-coverage. See § Review deltas.
+>
+> **Final gate (2026-09-14):** Assessor verdict **`GO WITH BINDING CONDITIONS`**. Binding conditions are in the companion spec (§2 decisions 6/16–18, §4 completeness enum, §5 report ownership, §6 import overlays). Implementation starts at **P0 only**, then P1 → P1.5 → P5 (MVP-A).
 
 **Goal.** Package today’s solution-FMEA / cost–availability stack into a PGGI **Energy Hub reference design**: archetype packs, orchestrated study pipeline, redundancy and DtC as real levers, and a `ReferenceDesignReport` linking availability and cost.
 
@@ -60,28 +62,30 @@ P0 contracts
 
 **Goal.** One schema everyone implements against. No solver changes yet.
 
-**Deliverables**
-- Spec: `docs/superpowers/specs/2026-09-14-eh-reference-design.md` (keep in sync)
-- Pydantic models / JSON fixtures for:
-  - `EnergyHubArchetype`: `strong_grid` | `weak_flexible` | `off_grid`
-  - `AvailabilityTarget`: ENS ‱ and/or LOLE h/yr + **precedence rule** when both set
-  - `OptimizationLevers`: `sizing` (on), `redundancy` (off→P3), `import_cap`, `storage_duration`
-  - `ReferenceDesignReport` fields per spec §4, including `completeness` / `not_established` flags per section
-  - `EHStudyPipeline` stage list + solve budget
+**Gate prerequisites (done in spec before/with this phase)**
+- Import overlay contracts pinned (spec §6)
+- Completeness enum `ok | not_established | skipped` normative (spec §4)
+- Report ownership: P1.5 runner → P5 assembler only (spec §5 / decision 16)
+- Pipeline stages + `DEFAULT_EH_BUDGET_SOLVES = 30` / `MAX = 120` (decisions 17–18)
+- Decision table is the full set (1–18), not a stale “five/eight”
 
-**Decisions pinned in the spec (do not re-litigate)** — all eight in spec §2, plus:
-- Dynamics = gate, not co-opt lever (v1)
-- ENS vs LOLE precedence when both configured
-- Import representation + firmness by archetype
-- Storage duration = scenario enum first (continuous `max_hours` later)
-- DtC v1 = stress-first; planning gated
-- Class-B residual risk scope (Link-only vs Link+SCLOPF merged) stated on the report
-- `ReferenceDesignReport` naming lock
+**Deliverables**
+- Spec: `docs/superpowers/specs/2026-09-14-eh-reference-design.md`
+- Pydantic models in `pypsa-gui/backend/models/energy_hub.py`
+- JSON fixtures under `pypsa-gui/backend/tests/fixtures/eh_archetypes/`
+- Contract tests: `tests/test_energy_hub_contract.py`
+
+**Models**
+- `EnergyHubArchetype`, `AvailabilityTarget` (+ precedence), `OptimizationLevers`
+- `SectionStatus`, `ReferenceDesignReport` (+ completeness map, pipeline)
+- `EHStudyPipeline` stage literals + budget constants
+- `ImportOverlayContract` fields mirroring spec §6 (`import_carriers`, `import_p_nom_mw`, …)
 
 **Acceptance**
-- [ ] Spec lists all pinned decisions explicitly (not a subset of five).
-- [ ] Skeleton API types / JSON fixtures match `ReferenceDesignReport` (+ `gates`, `tea`, `dtc`, `pack_hash`, completeness flags).
-- [ ] No UI required.
+- [x] Spec lists decisions 1–18 and §6 import overlays.
+- [x] Skeleton models + fixtures round-trip; completeness enum enforced.
+- [x] Default pipeline stages and budget constants exported and tested.
+- [x] No solver / UI / orchestrator behaviour yet.
 
 ---
 

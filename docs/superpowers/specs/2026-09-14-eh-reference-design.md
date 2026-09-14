@@ -1,9 +1,11 @@
 # Design — Energy Hub Reference Design (gap closure)
 
 **Status:** design / planning companion to `docs/superpowers/plans/2026-09-14-eh-reference-design-gaps.md`.  
-**Revised:** 2026-09-14 after independent plan reviews (modelling, product/architecture, gap-coverage).
+**Revised:** 2026-09-14 after independent plan reviews + **final gate assessor** (`GO WITH BINDING CONDITIONS`).
 
 **Goal.** Package the existing solution-FMEA and cost–availability stack into configurable **Energy Hub reference designs** for three archetypes, with outputs that link availability and cost. This doc pins product decisions; it does not replace the FMEA adequacy design (`2026-08-27-solution-fmea-adequacy-design.md`).
+
+**Gate:** Binding conditions from the assessor are normative in §2 (decisions 6, 16–18), §4 (completeness enum), §5 (report ownership), and §6 (import overlays).
 
 ---
 
@@ -34,16 +36,19 @@ Electricity-only adequacy remains the default until the multi-energy phase.
 | 3 | **Cost axis** = total system cost excluding shed (`excludes_shed_cost: true`), same as frontier. State period basis on every cost field. |
 | 4 | **Archetypes** = packs (config + network overlays), not new solvers: `strong_grid`, `weak_flexible`, `off_grid`. |
 | 5 | **Redundancy** = discrete options / train counts (scenario enum first, then outer-loop selection). Not continuous FOR derating. |
-| 6 | **Import caps** = planning overlays (Link `p_nom` / GlobalConstraint / bus tags — pin per pack). **Not** certified interconnector adequacy unless outages are modelled. |
+| 6 | **Import caps** = planning overlays per **§6** (normative selection + mutation). **Not** certified interconnector adequacy unless outages are modelled. |
 | 7 | **Storage duration** = scenario enum first (hours of autonomy / `max_hours` options). Continuous expansion later. Annual ENS/LOLE alone does not claim multi-day autonomy. |
 | 8 | **DtC** = critical-load tags + islanding contingencies; **stress-on-fixed-plan first**. Planning mode blocked until slack/attribution spike. No per-load shed attribution on today’s one-slack-per-bus model. |
 | 9 | **TEA** = post-process wrap (LCOE / optional LCOH) — no second cost engine. |
 | 10 | **Dynamics** = **feasibility gate, not co-opt lever** (v1). EMT = escalation flag behind SCR only. |
 | 11 | **RAM v1** = rate library + provenance (+ optional spare-lead-time modifier). Not full CMMS; planned-outage MC deferred. |
-| 12 | **Report name** = `ReferenceDesignReport` only. Sections may be `not_established`. |
+| 12 | **Report name** = `ReferenceDesignReport` only. Sections may be `not_established` / `skipped`. |
 | 13 | **“Configurable outputs” (v1)** = fixed report schema + optional section inclusion / export columns — not arbitrary metrics. |
 | 14 | **Class-B residual risk in report:** default Link-primary; document if AC Line/Transformer SCLOPF rows are merged or omitted. |
 | 15 | **DSR in `weak_flexible`:** opt-in with double-count preflight (FMEA §4.4); never silently global. |
+| 16 | **Report ownership:** `EHStudyRunner` (P1.5) orchestrates stages and emits `ReferenceDesignReport` **only** via the P5 assembler (`assemble_reference_design_report`). No second report builder. |
+| 17 | **EH study budget default:** `DEFAULT_EH_BUDGET_SOLVES = 30` (same ceiling philosophy as `campaign.DEFAULT_BUDGET_SOLVES`); override allowed up to `MAX_EH_BUDGET_SOLVES = 120`. |
+| 18 | **Default pipeline stages (ordered):** `apply_pack` → `ens_solve` → `frontier` → `mc_certify` → `fmea_top` → `redundancy` → `levers` → `dtc_stress` → `assemble`. Stages after `ens_solve` may be skipped per pack/request; skipped → completeness `skipped`; required but missing → `not_established`. |
 
 ---
 
@@ -55,13 +60,13 @@ Electricity-only adequacy remains the default until the multi-energy phase.
 - SCR gate optional / informational.
 
 ### `weak_flexible`
-- Tight power and/or energy import limits via pack overlay; DSR opt-in with preflight.
+- Tight power and/or energy import limits via pack overlay (§6); DSR opt-in with preflight.
 - DtC **stress** enabled by default (critical loads/buses under islanding).
 - MC LOLE certify **required** for MVP-B.
 - SCR preflight warn/block per P9 product rule (not part of P1 pack apply).
 
 ### `off_grid`
-- Import capacity forced to zero for the study horizon.
+- Import capacity forced to zero for the study horizon (§6).
 - Storage and fuel/backup are primary adequacy resources; **storage-duration scenarios required** for honest co-opt.
 - MC LOLE certify **required** for MVP-B.
 - Report autonomy scenarios explicitly (do not equate annual ENS with multi-day sufficiency).
@@ -70,42 +75,57 @@ Electricity-only adequacy remains the default until the multi-energy phase.
 
 ## 4. Reference design output (normative fields)
 
-`ReferenceDesignReport` must be assemblable from existing study fragments:
+**Completeness enum (normative):** each report section carries  
+`status: "ok" | "not_established" | "skipped"`.
+
+- `ok` — section populated from a completed stage  
+- `not_established` — stage was required or expected but did not produce evidence  
+- `skipped` — stage intentionally not requested for this run  
+
+`ReferenceDesignReport` fields:
 
 - `archetype`, `pack_hash`, `assumptions_hash`
 - `target` / `achieved` (ENS ‱, shed-hours, optional MC LOLE)
 - `cost_at_target_eur` (+ `period_basis`)
-- `frontier`: list of `{target, cost, achieved}` or `not_established`
-- `sizing`: new capacity by carrier / technology
-- `redundancy`: selected option id + alternatives table or `not_established`
-- `levers`: import_cap / storage_duration scenario results or `not_established`
-- `dtc`: critical unmet metrics under islanding or `not_established`
-- `fmea_top`: top-N modes by €/yr criticality (+ residual-risk scope note)
-- `tea`: `{lcoe_eur_per_mwh?, lcoh_eur_per_kg?, notes}` post-processed
-- `gates`: `{scr?: pass/warn/fail, emt_recommended?: bool}` or `not_established`
-- `completeness`: per-section status map
-- `pipeline`: stages run, aborted, budgets consumed
+- `frontier`, `sizing`, `redundancy`, `levers`, `dtc`, `fmea_top`, `tea`, `gates` — each a payload **or** empty with section status ≠ `ok`
+- `completeness`: map of section name → status
+- `pipeline`: stages run / skipped / aborted, budgets consumed
 
 ---
 
 ## 5. Study pipeline (normative)
 
-`EHStudyRunner` owns the product loop (packs alone are not enough):
-
-1. Apply archetype pack (undo-safe)  
-2. Target solve (ENS-cap)  
-3. Frontier (optional, budget-capped)  
-4. MC certify / coupling (per-archetype required flag)  
-5. FMEA top-N (best-effort)  
-6. Redundancy / import / storage scenarios when enabled  
-7. DtC stress when enabled  
-8. Assemble `ReferenceDesignReport`
+`EHStudyRunner` owns the product loop (packs alone are not enough). Default stage order is decision 18. **Report emission:** runner calls `assemble_reference_design_report(...)` only — it must not construct a parallel JSON shape.
 
 Abort/partial behaviour matches frontier/MC patterns; partial reports must set completeness flags.
 
 ---
 
-## 6. MVP definitions
+## 6. Import overlay contracts (normative — gate binding condition)
+
+**Selecting import Links** (first match wins, documented on pack apply):
+
+1. Link attribute / custom attr `eh_role == "grid_import"`, else  
+2. Either endpoint bus has `eh_poc == true` (or bus attr `eh_poc`), else  
+3. Link `carrier` ∈ pack field `import_carriers` (default `["AC", "DC", "electricity"]` intersected with present carriers).
+
+If none match: `strong_grid` is a no-op; `weak_flexible` / `off_grid` **preflight-error** (cannot apply island/import pack without identifiable import Links).
+
+**Mutations (power)**
+
+| Archetype | Mutation | Undo |
+|---|---|---|
+| `strong_grid` | **No-op** (no Link/`p_nom` change) | n/a |
+| `weak_flexible` | Set each selected Link `p_nom` (and `p_nom_max` if present) to pack `import_p_nom_mw` (per-link equal split if one number); optional static `p_max_pu` left unchanged | restore saved `p_nom` / `p_nom_max` |
+| `off_grid` | Set selected Links `p_nom` → `0` and static `p_max_pu` → `0` (mirror Class-B restore discipline for time series if present) | restore saved values |
+
+**Energy (optional, weak_flexible only):** if pack `import_energy_mwh_per_year` is set, add a named GlobalConstraint summing absolute electrical import on selected Links ≤ that energy; remove on undo. If unset, power-only.
+
+**Firmness:** overlays are **planning limits**, not adequacy of the external grid. Report `levers.import_firmness = "planning_limit_only"` unless Link outages are modelled in the same study.
+
+---
+
+## 7. MVP definitions
 
 | Slice | Includes | Archetypes |
 |---|---|---|
@@ -116,7 +136,7 @@ P3b (auto-select redundancy) and P4b (DtC planning) complete co-opt but are post
 
 ---
 
-## 7. Non-goals (v1)
+## 8. Non-goals (v1)
 
 - Joint MILP of unit commitment + redundancy integers in one solve
 - In-tree EMT simulation / dynamics↔adequacy co-simulation
@@ -129,6 +149,6 @@ P3b (auto-select redundancy) and P4b (DtC planning) complete co-opt but are post
 
 ---
 
-## 8. Relationship to FMEA design
+## 9. Relationship to FMEA design
 
 Solution FMEA remains the **diagnostic** under a single plan. The EH reference design is the **product wrapper**: archetype → orchestrated levers → existing co-opt/diagnostic engines → `ReferenceDesignReport`. Every point on an EH frontier still gets its own FMEA ranking (same principle as solution FMEA).
