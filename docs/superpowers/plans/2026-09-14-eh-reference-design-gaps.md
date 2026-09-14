@@ -1,26 +1,58 @@
 # Energy Hub Reference Design — Gap Closure Plan
 
-> **For agentic workers:** Implement phase-by-phase. Do not start Phase *N+1* until Phase *N* acceptance criteria pass. Prefer extending `pypsa-gui/backend/services/adequacy/` and existing frontier/loop runners over new parallel stacks.
+> **For agentic workers:** Implement phase-by-phase. Prefer extending `pypsa-gui/backend/services/adequacy/` and existing frontier/loop runners over new parallel stacks.
+>
+> **Review revision (2026-09-14):** Updated after independent reviews — [Adequacy modelling](bc-7d546fbf-01ad-5eae-aa2e-01c8940b6283), [Product/architecture](bc-97591163-b6f7-5e4d-9cf1-0b2dd23bf334), [FMEA/gap-coverage](bc-ebad9414-b1ef-5ab4-b355-748248270b9b). See § Review deltas.
 
-**Goal.** Close the gaps between today’s solution-FMEA / cost–availability stack and a PGGI **Energy Hub reference design** product: archetype packs, redundancy and DtC as real levers, configurable availability↔cost outputs, then multi-energy / RAM / dynamics extensions.
+**Goal.** Package today’s solution-FMEA / cost–availability stack into a PGGI **Energy Hub reference design**: archetype packs, orchestrated study pipeline, redundancy and DtC as real levers, and a `ReferenceDesignReport` linking availability and cost.
 
-**Already shipped (do not rebuild).** ENS-capped expansion, VoLL soft dual, ε-constraint frontier, MC coupling + margin loops, COPT + sequential MC + ELCC/PRM, FMEA classes A/B/C/D (B Link incomplete; C partial), electricity-only adequacy reports, plain SCR in gridspine.
+**Already shipped (do not rebuild).**
+- ENS-capped expansion, VoLL soft dual, ε-constraint frontier, MC coupling + margin loops
+- COPT + sequential MC + ELCC/PRM
+- FMEA A/B/C/D substrate: **Class-B Link path is shipped** (`p_max_pu`/`p_min_pu`→0); Class C **parametric** shipped, `profiles` / climate packs open
+- Electricity-only adequacy reports; plain SCR in gridspine (report bands today — EH warn/block is an EH product rule, pinned in P9)
+
+**Honest co-opt scope (v1).** Sizing (ENS-cap) + discrete redundancy (P3) + import/storage scenario levers are co-optimized iteratively. **Dynamic behaviors are a feasibility gate (SCR), not a co-opt lever.** EMT is a recommendation flag only.
 
 **Tech stack.** Unchanged: FastAPI / PyPSA / linopy; React + TS; pixi `gui-tests`.
 
-**Dependency order (hard).**
+**Dependency order (revised).**
 
 ```
 P0 contracts
- └─ P1 archetype packs ──┬─ P2 Class-B Link fix (can parallel with P1)
-                         ├─ P3 redundancy lever
-                         ├─ P4 DtC contract
-                         └─ P5 EH output pack + TEA wrap
-                              ├─ P6 multi-energy ENS/FMEA
-                              ├─ P7 RAM enrichment
-                              ├─ P8 Class-C completeness
-                              └─ P9 dynamics / SCR gate / EMT hook
+ └─ P1 archetype packs (solver/network only; no SCR)
+      └─ P1.5 EHStudyRunner (orchestrator + budget + completeness)
+           ├─ P2 residual Class-B only (optional, parallel, non-blocking)
+           ├─ P3a redundancy scenarios ──┐
+           ├─ P4a DtC stress ────────────┼─→ P5 ReferenceDesignReport (+ TEA)
+           └─ P3c import/storage levers ─┘
+                ├─ P3b redundancy outer-loop select (co-opt complete)
+                ├─ P4b DtC planning (gated on slack/attribution design)
+                ├─ P6 multi-energy ENS/FMEA
+                ├─ P7 RAM v1 library (planned-outage MC deferred)
+                ├─ P8 Class-C profiles + synthetic years (real climate deferred)
+                └─ P9 SCR gate / EMT flag (weak pack warn-only may land earlier as thin preflight)
 ```
+
+**MVP split**
+- **MVP-A (strong_grid):** P0 → P1 → P1.5 → P5 with sizing + frontier + cost@target + report (redundancy/dtc/gates may be empty/`not_established`).
+- **MVP-B (three archetypes):** MVP-A + P3a + P4a + P3c + filled report fields for weak/off-grid.
+
+---
+
+## Review deltas (must read before implementing)
+
+| Change | Why |
+|---|---|
+| Demote P2 | Link Class-B already shipped; only residuals remain |
+| Add P1.5 orchestrator | P5 assembler without a pipeline is not a product |
+| Add P3c import/storage levers | Listed in P0 then orphaned; critical for off-grid/weak |
+| Split P3a/P3b, P4a/P4b | Stress/comparison ship first; planning/select need extra design |
+| Strip SCR from P1 | Belongs in P9; P1 is packs only |
+| Soften P5 empty-field contract | Report valid with `not_established` sections |
+| Narrow P7/P8 | Avoid MC planned-outage and real climate megaprojects in v1 |
+| Pin naming | `ReferenceDesignReport` only (drop `ReferenceDesignOutput`) |
+| Pin dynamics language | Gate, not lever |
 
 ---
 
@@ -29,232 +61,248 @@ P0 contracts
 **Goal.** One schema everyone implements against. No solver changes yet.
 
 **Deliverables**
-- Spec: `docs/superpowers/specs/2026-09-14-eh-reference-design.md`
-- Pydantic models (or draft JSON Schema) for:
+- Spec: `docs/superpowers/specs/2026-09-14-eh-reference-design.md` (keep in sync)
+- Pydantic models / JSON fixtures for:
   - `EnergyHubArchetype`: `strong_grid` | `weak_flexible` | `off_grid`
-  - `AvailabilityTarget`: ENS ‱ and/or LOLE h/yr
-  - `OptimizationLevers`: sizing (default on), redundancy (off→on in P3), import_cap, storage_duration
-  - `ReferenceDesignOutput`: sizing table, cost@target, frontier points, residual FMEA top-N, archetype id
+  - `AvailabilityTarget`: ENS ‱ and/or LOLE h/yr + **precedence rule** when both set
+  - `OptimizationLevers`: `sizing` (on), `redundancy` (off→P3), `import_cap`, `storage_duration`
+  - `ReferenceDesignReport` fields per spec §4, including `completeness` / `not_established` flags per section
+  - `EHStudyPipeline` stage list + solve budget
 
-**Decisions to pin in the spec (do not re-litigate later)**
-1. Certification metric: plan on ENS (LP); accept on MC LOLE when loops are run.
-2. Cost axis: total system cost excluding shed (same as frontier today).
-3. Electricity-only until Phase 6.
-4. Redundancy = discrete spare/train counts, not continuous derating.
-5. DtC = critical-load subset + islanding contingency set (Phase 4).
+**Decisions pinned in the spec (do not re-litigate)** — all eight in spec §2, plus:
+- Dynamics = gate, not co-opt lever (v1)
+- ENS vs LOLE precedence when both configured
+- Import representation + firmness by archetype
+- Storage duration = scenario enum first (continuous `max_hours` later)
+- DtC v1 = stress-first; planning gated
+- Class-B residual risk scope (Link-only vs Link+SCLOPF merged) stated on the report
+- `ReferenceDesignReport` naming lock
 
 **Acceptance**
-- [ ] Spec merged with the five decisions above explicit.
-- [ ] Empty/skeleton API types or JSON fixtures committed; no UI required.
+- [ ] Spec lists all pinned decisions explicitly (not a subset of five).
+- [ ] Skeleton API types / JSON fixtures match `ReferenceDesignReport` (+ `gates`, `tea`, `dtc`, `pack_hash`, completeness flags).
+- [ ] No UI required.
 
 ---
 
-## Phase 1 — Archetype packs on the existing pipeline
+## Phase 1 — Archetype packs (solver/network only)
 
-**Goal.** Each archetype is a **parameter + constraint pack** that drives today’s ENS-cap → frontier → MC loop without new co-opt math.
+**Goal.** Each archetype is a **parameter + network overlay pack** that configures today’s ENS-cap / frontier / MC stack. **No SCR in this phase.**
 
 **Files (expected)**
-- New: `backend/services/adequacy/archetypes.py` (pack builders)
-- New: fixtures under `backend/tests/fixtures/eh_archetypes/`
-- Wire: solver config defaults + optional `POST /results/eh_study` or project template apply
-- UI (thin): archetype picker that applies pack to Solver settings / network assumptions
+- New: `backend/services/adequacy/archetypes.py` — `apply_archetype_pack(network, cfg) -> undo`
+- New: fixtures under `backend/tests/fixtures/eh_archetypes/` (one network × three overlays, or three minis)
+- Wire: SolverConfig patch + network assumption hooks (import Links, DSR opt-in)
 
 **Pack definitions**
 
 | Archetype | Pack contents |
 |---|---|
-| `strong_grid` | Soft/no import limit; economic ENS ladder; frontier primary |
-| `weak_flexible` | Tight `p_max` / energy import caps; SCR preflight warn; flexible load/DSR defaults |
-| `off_grid` | Import capacity = 0; islanded electrical balance; storage/fuel as primary adequacy |
+| `strong_grid` | Loose/no import limit; economic ENS ladder; frontier primary |
+| `weak_flexible` | Tight power/energy import caps via **documented Link/GlobalConstraint overlay**; DSR **opt-in with double-count preflight** (FMEA §4.4) |
+| `off_grid` | Import capacity = 0 overlay; islanded electrical balance; storage/fuel as primary adequacy resources |
 
 **Steps**
-- [ ] Implement `build_archetype_pack(archetype) -> SolverConfig patch + network assumption hooks`.
-- [ ] Three minimal reference networks (or one network with three overlays) runnable in tests.
-- [ ] For each archetype: one ENS-cap solve + optional short frontier (≤3 points) + optional MC smoke.
-- [ ] Document which existing endpoints the pack calls (no duplicate engines).
+- [ ] Implement pack apply/undo with pinned import overlay semantics (which Links, power vs energy, restore).
+- [ ] DSR double-count preflight for `weak_flexible`.
+- [ ] Three fixture overlays; **at least one path binds ENS** (not smoke-only).
+- [ ] Document which existing endpoints the pack feeds (no duplicate engines).
 
 **Acceptance**
-- [ ] `pixi run gui-tests` covers pack application + one live mini-solve per archetype.
-- [ ] Manual/API path: apply pack → solve → `/results/adequacy` + `/results/frontier` return data.
+- [ ] `pixi run gui-tests`: pack apply/undo + one live mini-solve per archetype.
+- [ ] `strong_grid`: ENS binds; adequacy report returns.
+- [ ] No SCR/gridspine dependency in P1.
 
 ---
 
-## Phase 2 — Close Class-B Link outage gap
+## Phase 1.5 — EH study orchestrator
 
-**Goal.** HVDC / Link contingencies behave like Line/Transformer outages in the FMEA sweep.
+**Goal.** One job runs the reference-design pipeline; P5 only assembles.
 
-**Files**
-- `services/adequacy/sweep.py` (or contingency driver)
-- `services/solver_service.py` / SCLOPF helpers as needed
-- Tests: extend FMEA sweep tests with a Link
+**Pipeline (default stages)**
+1. Apply archetype pack  
+2. ENS-cap (or target) solve  
+3. Optional frontier (budget-capped)  
+4. Optional MC certify / coupling loop (required vs optional **per archetype** — pin in pack: recommend **required** for `off_grid` / `weak_flexible`)  
+5. FMEA top-N (best-effort)  
+6. Later stages (P3a/P4a) when enabled  
+7. Emit `ReferenceDesignReport` with completeness flags  
 
 **Steps**
-- [ ] Define Link outage as `p_nom → 0` (or remove from dispatch) without breaking multi-carrier links.
-- [ ] Include Links in class-B candidate set with clear carrier/bus filters.
-- [ ] Infeasible contingencies → distinct outcome (same rule as transit-bus shed gap).
+- [ ] `EHStudyRunner` (+ abort/partial), reuse frontier/MC/campaign budget patterns.
+- [ ] `POST /results/eh_study` (or project-scoped equivalent) + status + abort.
+- [ ] Completeness: missing MC/frontier/redundancy/dtc → `not_established`, not silent omission.
 
 **Acceptance**
-- [ ] Sweep ranks at least one Link failure mode on a fixture network.
-- [ ] No regression on Line/Transformer SCLOPF path.
+- [ ] One API/job materializes a report for `strong_grid` after required stages.
+- [ ] Abort leaves partial report with flags; does not corrupt project state.
 
 ---
 
-## Phase 3 — Redundancy as a co-optimization lever
+## Phase 2 — Class-B Link residuals (optional, non-blocking)
 
-**Goal.** Redundancy stops being mitigability text and becomes something the study can optimize.
+**Goal.** Close **remaining** Link/FMEA edge cases only. **Do not re-implement Class B.**
 
-**Approach (two sub-phases; ship 3a before 3b)**
-
-### 3a — Scenario enumeration (required)
-- [ ] Define redundancy scenarios: `base`, `n1_generation`, `n1_conversion`, `parallel_storage` (extensible list).
-- [ ] Runner: for fixed availability target, solve each scenario; table of cost vs achieved ENS/LOLE.
-- [ ] API + Adequacy tab panel: “Redundancy comparison”.
-
-### 3b — Discrete outer loop (required for “co-optimize”)
-- [ ] Decision variables: spare units / train count per asset class (integers, small domains).
-- [ ] Outer loop or ε-constraint over redundancy options: minimize cost s.t. availability target (reuse coupling-loop controller pattern).
-- [ ] Provenance: which redundancy choice was selected and why (binding LOLE or ENS).
-
-**Out of scope for Phase 3:** joint MILP with UC + redundancy integers in one shot.
+**Candidate residuals (inventory first)**
+- Multi-carrier Link filters
+- Time-varying `links_t.p_min_pu` / restore semantics
+- Document or merge Line/Transformer SCLOPF rows into FMEA top-N (or label report “Link-primary residual risk”)
 
 **Acceptance**
-- [ ] At fixed LOLE/ENS target, study returns ≥2 redundancy options with costs.
-- [ ] 3b selects a least-cost option that meets the target (tested on mini network).
+- [ ] Written inventory of residuals vs shipped tests.
+- [ ] Only ship fixes for confirmed gaps; else close phase as N/A.
+
+---
+
+## Phase 3 — Redundancy + import/storage levers
+
+### 3a — Redundancy scenario enumeration (`v1-core`)
+- [ ] Scenarios: `base`, `n1_generation`, `n1_conversion`, `parallel_storage` (extensible).
+- [ ] Runner: fixed availability target → cost vs achieved ENS/LOLE per scenario.
+- [ ] Provenance: binding metric (ENS vs LOLE); rejected options must fail the **same** certify method.
+- [ ] API + thin UI panel.
+
+### 3b — Discrete outer-loop selection (`v1-nice` / co-opt complete)
+- [ ] Small integer domains per asset class; pin max trains + **MC certify cadence** (every candidate vs finalists only).
+- [ ] Select least-cost option meeting target; reuse coupling-loop **control-flow** only (not continuous bisection math).
+- [ ] Out of scope: joint MILP with UC + redundancy.
+
+### 3c — Import cap + storage duration scenario levers (`v1-blocker` for off-grid honesty)
+- [ ] Scenario enum over `import_cap` and `storage_duration` (e.g. hours of autonomy), especially for `off_grid` / `weak_flexible`.
+- [ ] Pin: import = planning limit (not certified interconnector adequacy) unless outages modelled.
+- [ ] Note: annual ENS/LOLE ≠ multi-day autonomy sizing; report autonomy scenarios explicitly.
+
+**Acceptance**
+- [ ] 3a: ≥2 redundancy options with costs at fixed target.
+- [ ] 3c: ≥2 storage-duration (or import) options affecting cost@target on off-grid fixture.
+- [ ] 3b (when shipped): selected option meets target; losers fail same metric.
 
 ---
 
 ## Phase 4 — DtC modelling contract
 
-**Goal.** “Power and energy for DtC operation” is an executable constraint/stress pack, not a label.
+### 4a — Stress mode (required for `weak_flexible` MVP-B)
+- [ ] Sidecar `dtc_config.json`: `critical_load_ids` / bus tags, `islanding_contingencies`, targets.
+- [ ] Fixed-plan islanding re-dispatch; report unmet critical load.
+- [ ] **Do not claim per-load shed attribution** unless slack model changes (today: one slack per bus — FMEA §6.3). Prefer critical **buses** or islanded system ENS with non-critical demand shedable via explicit tier/tags.
+- [ ] Wire as default stress for `weak_flexible` pack.
 
-**Contract**
-- Inputs: `critical_load_ids` (or bus tags), `islanding_contingencies` (grid disconnect / Link outages), `dtc_lole_h` or `dtc_ens_cap`.
-- Evaluation modes:
-  1. **Stress (fixed plan):** Class-C-style re-dispatch under islanding; report unmet critical load.
-  2. **Planning:** ENS/LOLE target applied only to critical load under islanded topology (expansion may add assets).
-
-**Steps**
-- [ ] Sidecar schema `dtc_config.json` (mirror worksheet/stress sidecars).
-- [ ] Stress evaluator reusing sweep/MC substrate where possible.
-- [ ] Optional planning mode: temporary network overlay (import→0) + critical-load-only shed metric.
-- [ ] Wire into `weak_flexible` archetype pack as default DtC stress.
+### 4b — Planning mode (gated)
+- [ ] Design spike first: slack/attribution mechanism OR islanded topology + system ENS under retained critical demand.
+- [ ] Only then: expansion under DtC planning overlay.
 
 **Acceptance**
-- [ ] Fixture: with grid disconnected, critical load LOLE/ENS reported separately from non-critical.
-- [ ] Weak-flexible archetype run includes DtC stress block in study output.
+- [ ] 4a: grid disconnected → critical unmet metrics separate from non-critical; electrical-only projects unchanged when DtC off.
+- [ ] Weak-flexible orchestrated run includes DtC stress block or `not_established` with reason.
+- [ ] 4b: no implementation until spike decision recorded in spec.
 
 ---
 
-## Phase 5 — Configurable EH outputs + TEA wrap
+## Phase 5 — `ReferenceDesignReport` + TEA wrap
 
-**Goal.** One reference-design artifact that links availability and cost.
+**Goal.** One artifact linking availability and cost. Assembler only — orchestration is P1.5.
 
-**Output pack (`ReferenceDesignReport`)**
-- Archetype id + pack hash
-- Target vs achieved (ENS, shed-hours, MC LOLE if run)
-- Cost@target (ex-shed) + frontier points
-- Selected sizing summary (new capacity by carrier)
-- Selected redundancy option (from P3)
-- Top FMEA modes
-- TEA wrap: LCOE (and optional LCOH if H₂ present) derived from existing cost + energy results — **post-process only**
+**Report contents** — per spec §4, plus:
+- `completeness` map per section (`ok` | `not_established` | `skipped`)
+- Cost period-basis AC (multi-period weighting consistent with frontier)
+- `pack_hash` / `assumptions_hash` definition documented
 
 **Steps**
-- [ ] Backend assembler from existing report fragments (adequacy, frontier, FMEA, redundancy, DtC).
-- [ ] `GET /results/eh_reference_design` (+ project persist).
-- [ ] Frontend: single “Reference design” summary view / export (JSON + CSV).
-- [ ] TEA helpers: reuse economics tabs’ cost aggregates; do not build a second cost engine.
+- [ ] Backend assembler from adequacy, frontier, FMEA, redundancy, DtC, gates.
+- [ ] `GET /results/eh_reference_design` (+ persist) populated by P1.5 job.
+- [ ] Frontend: one “Reference design” summary + export (JSON/CSV) — not three disconnected tabs only.
+- [ ] TEA: LCOE (optional LCOH) post-process from existing economics helpers — no second cost engine.
+- [ ] “Configurable outputs” for v1 = fixed schema + optional section inclusion / export columns (or drop the word; pin in spec).
 
 **Acceptance**
-- [ ] One API call returns the full pack after a standard archetype study pipeline.
-- [ ] Export stable enough for golden-fixture snapshot tests.
+- [ ] MVP-A: orchestrated `strong_grid` study → one GET returns report with cost@target + frontier or explicit `not_established`.
+- [ ] Empty `redundancy` / `dtc` / `gates` allowed with flags (does not fail MVP-A).
+- [ ] Golden-fixture snapshot tests for stable export shape.
+- [ ] MVP-B DoD: weak + off-grid packs produce filled dtc/lever sections per P3a/P4a/P3c.
 
 ---
 
-## Phase 6 — Multi-energy unserved energy (only if EH needs it)
+## Phase 6 — Multi-energy unserved energy (post–MVP-B)
 
-**Goal.** Hub carriers beyond electricity can appear in targets and FMEA severity.
+**Goal.** Hub carriers beyond electricity in targets/FMEA — **after** electrical EH works.
 
-**Steps**
-- [ ] Extend demand/shed metrics to tagged critical carriers (e.g. H₂, heat) without breaking electrical ENS.
-- [ ] Per-carrier caps or a weighted multi-carrier target (pin choice in a mini-spec).
-- [ ] FMEA severity can attribute non-electrical shortfall.
+**Prerequisite.** Slack/attribution redesign (per-bus load or per-carrier shed) — not “just extend metrics.”
 
 **Acceptance**
-- [ ] Off-grid (or sector-coupled) fixture with H₂ load: unmet H₂ appears in report and ranking.
-- [ ] Electrical-only projects unchanged (default path).
+- [ ] Sector-coupled fixture: unmet H₂ (or heat) in report/ranking.
+- [ ] Electrical-only default path unchanged.
 
 ---
 
-## Phase 7 — RAM enrichment
+## Phase 7 — RAM v1 enrichment (not full RAM)
 
-**Goal.** Move from FOR/MTTR inputs toward a usable maintainability layer — still not a full CMMS.
+**Ship first**
+- [ ] Asset-class rate library + provenance (extend `CARRIER_DEFAULTS` / `asset_health`).
+- [ ] Optional spare-lead-time as **documented** severity modifier.
+- [ ] Detectability: **add schema+UI or drop** — worksheet today has mitigability only.
 
-**Steps**
-- [ ] Asset-class RAM library (defaults + provenance) extending `occurrence.CARRIER_DEFAULTS` / `asset_health`.
-- [ ] Optional planned-outage calendars excluded from FOR but applied in MC (or stress).
-- [ ] Worksheet fields: detectability / mitigability stay expert; add “spare lead time” as optional severity modifier (documented, not silent).
+**Defer**
+- Planned-outage calendars in MC (large semantics change).
 
 **Acceptance**
-- [ ] Library loads in UI; MC/COPT show which rates came from library vs override.
-- [ ] One planned-outage fixture changes LOLE vs FOR-only baseline.
+- [ ] Library loads; MC/COPT show library vs override provenance.
+- [ ] No claim of full RAM/CMMS.
 
 ---
 
-## Phase 8 — Class-C completeness
+## Phase 8 — Class-C completeness (split)
 
-**Goal.** Finish the stress/climate-year path the FMEA design already scoped.
-
-**Steps**
-- [ ] Bundle reference climate / weather years as Class-C scenarios.
-- [ ] Runner + worksheet integration; provenance in study report.
-- [ ] Budget caps consistent with frontier/MC abort patterns.
+**(a) `kind=profiles` runner + synthetic multi-year fixtures** — required for testability.  
+**(b) Real climate-year bundles** — data procurement gate; do not block (a).
 
 **Acceptance**
-- [ ] Multi-year stress run produces ranked Class-C modes with frequencies.
-- [ ] Abort + partial results behave like other adequacy studies.
+- [ ] Synthetic profiles run ranks Class-C modes with frequencies + abort/partial like other studies.
+- [ ] Real climate packs optional behind data availability.
 
 ---
 
-## Phase 9 — Dynamics gate (SCR → optional EMT hook)
+## Phase 9 — Dynamics gate (SCR → EMT flag)
 
-**Goal.** Weak-grid archetype feasibility without making EMT a co-opt objective.
+**Goal.** Weak-grid **feasibility gate**, not co-opt.
 
 **Steps**
-- [ ] Archetype preflight: run plain SCR (existing gridspine) on POC buses; band → warn/block.
-- [ ] Study report section: grid-strength gate pass/fail.
-- [ ] Hook only: if band ∈ {very_weak, …}, flag “EMT recommended” (exporter/placeholder) — no EMT solver in-tree required.
+- [ ] Pin EH product rule: warn vs block thresholds (gridspine bands are report-only today).
+- [ ] Map POC buses + installed-MVA convention for PyPSA EH networks (not assume full gridspine study).
+- [ ] Wire `gridspine.static.strength` (or documented proxy); report `gates.scr`.
+- [ ] `emt_recommended` flag only — no in-tree EMT.
+- [ ] Optional: thin warn-only preflight attachable to `weak_flexible` earlier without blocking P1.
 
 **Acceptance**
-- [ ] Weak-flexible pack fails or warns closed-loop when SCR below threshold.
-- [ ] Strong-grid pack does not require SCR pass.
+- [ ] Weak-flexible: SCR below threshold → warn or block per pin; strong_grid does not require SCR pass.
+- [ ] Full dynamics↔adequacy co-simulation remains out of scope.
 
 ---
 
-## Suggested build sequence (summary)
+## Suggested build sequence
 
-| Step | Phase | Implements gap |
+| Step | Phase | Role |
 |---|---|---|
-| 1 | P0 | Contracts for archetypes, levers, outputs |
-| 2 | P1 | EH archetypes (strong / weak / off-grid) |
-| 3 | P2 | Class-B Link outages |
-| 4 | P3 | Redundancy co-optimization |
-| 5 | P4 | DtC contract |
-| 6 | P5 | Configurable availability↔cost (+ TEA wrap) |
-| 7 | P6 | Multi-energy FMEA/ENS |
-| 8 | P7 | RAM enrichment |
-| 9 | P8 | Class-C completeness |
-| 10 | P9 | Dynamics / SCR gate / EMT hook |
+| 1 | P0 | Contracts, completeness flags, naming |
+| 2 | P1 | Archetype packs (no SCR) |
+| 3 | P1.5 | Orchestrator + budget |
+| 4 | P5 (MVP-A) | Report + TEA for strong_grid |
+| 5 | P3a ‖ P4a ‖ P3c | Redundancy compare, DtC stress, import/storage levers |
+| 6 | P5 (MVP-B) | Fill weak/off-grid sections |
+| 7 | P2 | Residuals only (anytime parallel) |
+| 8 | P3b / P4b | Co-opt select + DtC planning |
+| 9 | P6–P9 | Multi-energy, RAM v1, Class-C profiles, SCR gate |
 
-**Definition of done for the product slice (P0–P5):**  
-User picks an EH archetype → runs target study → gets a reference-design pack with cost@availability, sizing, redundancy choice, FMEA residual risk, and DtC stress where applicable — all on top of the existing FMEA/frontier/MC stack.
+**Definition of done**
+- **MVP-A:** archetype → orchestrated study → report with cost↔availability for `strong_grid`.
+- **MVP-B:** same for all three archetypes with redundancy comparison, DtC stress (weak), import/storage scenarios (off-grid/weak), completeness flags everywhere.
 
-**Explicitly deferred after P5:** full EMT co-simulation, statutory-grade PRAS/Antares exporters, full maintainability programs, joint MILP redundancy+UC.
+**Explicitly deferred:** joint MILP redundancy+UC; in-tree EMT; statutory PRAS/Antares; full RAM/CMMS; real climate procurement; DtC per-load attribution without slack redesign; treating import caps as certified interconnection adequacy.
 
 ---
 
 ## Per-phase PR discipline
 
-- One phase per PR (P2 may merge beside P1).
-- Tests first for new engines/runners; live mini-solves for anything that claims a target binds.
-- No new parallel adequacy stack; extend `services/adequacy/*` and Results tabs.
-- Update this plan’s checkboxes when a phase lands; add a short “notes” subsection if decisions change.
+- One phase per PR (P3a ‖ P4a ‖ P3c may parallel after P1.5).
+- Tests first; live mini-solves must **bind** targets where claimed.
+- No parallel adequacy stack.
+- Update checkboxes + “notes” when decisions change.
