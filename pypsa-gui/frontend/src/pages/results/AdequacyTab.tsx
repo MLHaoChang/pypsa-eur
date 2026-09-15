@@ -100,17 +100,14 @@ export default function AdequacyTab() {
       <FrontierPanel />
       <McPanel />
       <LoopPanel />
-      {/* The SAME coupled search on the other lever (Phase 9). It sits last
-          because it is read against the one above it: where the cap loop
-          reports `unreachable` — no energy cap this search could reach met the
-          target — the margin loop is the question "then how much firm capacity
-          would?", and the two verdicts are only comparable in that order. It
-          mounts unconditionally like everything else on this tab; its 204 is
-          its ordinary state before anything has been run. */}
+      {/* The SAME coupled search on the other lever (Phase 9). It sits after
+          the energy-cap loop because it is read against that verdict: where
+          the cap loop reports `unreachable`, the margin loop asks how much
+          firm capacity would meet the target. Mounts unconditionally; 204 is
+          ordinary before anything has been run. */}
       <MarginLoopPanel />
-      {/* Energy Hub packaging study (P5 leftover): mounts last — it
-          consumes the standards and studies above into one
-          ReferenceDesignReport. Same unconditional mount as the rest. */}
+      {/* Energy Hub packaging study (P5 leftover): mounts last — consumes the
+          standards and studies above into one ReferenceDesignReport. */}
       <EhReferenceDesignPanel />
     </div>
   )
