@@ -258,12 +258,14 @@ def run_eh_study(
                         pack_hash=pack_h,
                         assumptions_hash=_assumptions_hash(cfg),
                     )
-                    n_opts = len(table.get("options") or [])
+                    n_attempted = int(table.get("solves_attempted") or 0)
+                    sec_status, sec_note = red.redundancy_section_status(table)
                     _mark("redundancy", "run",
-                          solves_charged=n_opts,
-                          note=f"{n_opts} scenarios")
-                    section_payloads["redundancy"] = ("ok", table, None)
-                    solves += n_opts
+                          solves_charged=n_attempted,
+                          note=sec_note or f"{n_attempted} solves")
+                    section_payloads["redundancy"] = (
+                        sec_status, table, sec_note)
+                    solves += n_attempted
                 except Exception as exc:
                     logger.exception("redundancy compare failed")
                     _mark("redundancy", "aborted", note=str(exc))

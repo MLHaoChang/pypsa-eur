@@ -17,7 +17,7 @@ import queue
 import threading
 from typing import Any, Callable, Iterable
 
-from models.energy_hub import AvailabilityTarget
+from models.energy_hub import AvailabilityTarget, ImportOverlaySpec
 
 logger = logging.getLogger("pypsa_gui.redundancy")
 
@@ -28,14 +28,19 @@ DEFAULT_SCENARIOS: tuple[str, ...] = (
     "parallel_storage",
 )
 
-# Synthetic headroom when inventing N+1 capacity (MW). Documented as
-# placeholder — not sized from the hub.
 _PLACEHOLDER_HEADROOM_MW = 50.0
 _PLACEHOLDER_STORAGE_MW = 40.0
 
-# Preference order for picking a conversion Link (role then carrier).
-_CONVERSION_ROLES = ("eh_conversion", "conversion", "electrolyser", "fuel_cell")
-_CONVERSION_CARRIERS = ("AC", "DC", "electricity", "H2", "heat")
+# Positive conversion identity only. Never treat bare AC/electricity as
+# conversion — those match grid-import Links on weak_flexible packs.
+_CONVERSION_ROLES = (
+    "eh_conversion",
+    "conversion",
+    "electrolyser",
+    "fuel_cell",
+)
+_CONVERSION_CARRIERS = ("H2", "heat", "methanol", "ammonia")
+_IMPORT_ROLES = frozenset({"grid_import", "eh_import", "import"})
 
 
 class RedundancyScenarioError(ValueError):
@@ -45,9 +50,8 @@ class RedundancyScenarioError(ValueError):
 def _finite_base_mw(row, *, fallback: float = 0.0) -> float:
     """Finite MW base for headroom bumps — never ``inf``.
 
-    Prefer a positive ``p_nom_opt`` (post-solve size); otherwise positive
-    ``p_nom``. Skip zeros so an unsolved ``p_nom_opt=0`` does not erase
-    nameplate headroom.
+    Prefer a positive ``p_nom_opt`` (post-solve); otherwise positive ``p_nom``.
+    Skip zeros so an unsolved ``p_nom_opt=0`` does not erase nameplate.
     """
     for col in ("p_nom_opt", "p_nom"):
         if col not in row.index:
@@ -61,40 +65,96 @@ def _finite_base_mw(row, *, fallback: float = 0.0) -> float:
     return float(fallback)
 
 
+def _import_link_ids(n) -> set[str]:
+    """Links that ``select_import_links`` would claim (or role-tagged imports)."""
+    out: set[str] = set()
+    if n.links is None or n.links.empty:
+        return out
+    if "eh_role" in n.links.columns:
+        for i in n.links.index:
+            if str(n.links.at[i, "eh_role"]) in _IMPORT_ROLES:
+                out.add(str(i))
+    try:
+        from services.adequacy.archetypes import select_import_links
+        out.update(select_import_links(n, ImportOverlaySpec()))
+    except Exception:
+        logger.debug("select_import_links unavailable; role filter only", exc_info=True)
+    # eh_poc endpoints
+    if n.buses is not None and not n.buses.empty and "eh_poc" in n.buses.columns:
+        poc = {
+            str(b) for b in n.buses.index
+            if n.buses.at[b, "eh_poc"] is True
+            or str(n.buses.at[b, "eh_poc"]).lower() in ("true", "1", "yes")
+        }
+        if poc:
+            for i in n.links.index:
+                b0 = str(n.links.at[i, "bus0"]) if "bus0" in n.links.columns else ""
+                b1 = str(n.links.at[i, "bus1"]) if "bus1" in n.links.columns else ""
+                if b0 in poc or b1 in poc:
+                    out.add(str(i))
+    return out
+
+
 def _select_conversion_link(n) -> str | None:
-    """Pick a Link for n1_conversion — role/carrier before insertion order."""
+    """Pick a conversion Link by positive identity; never guess / never import.
+
+    Explicit ``eh_role`` in ``_CONVERSION_ROLES`` always wins, even if the
+    link's carrier would also match the import-carrier fallback. Import-role
+    / PoC links are never selected. Bare AC/electricity without a conversion
+    role is not conversion identity — return ``None`` and invent a spare path.
+    """
     if n.links is None or n.links.empty:
         return None
     links = n.links
+    banned = _import_link_ids(n)
+
+    # 1) Positive role match (overrides import-carrier false positives).
     if "eh_role" in links.columns:
         for role in _CONVERSION_ROLES:
             for i in links.index:
                 if str(links.at[i, "eh_role"]) == role:
+                    # Still refuse if also tagged as an import role.
+                    if str(links.at[i, "eh_role"]) in _IMPORT_ROLES:
+                        continue
                     return str(i)
+
+    # 2) Conversion carriers only, excluding anything import selection claims.
     if "carrier" in links.columns:
         carriers = {str(c) for c in _CONVERSION_CARRIERS}
         for i in links.index:
+            if str(i) in banned:
+                continue
+            if "eh_role" in links.columns and str(links.at[i, "eh_role"]) in _IMPORT_ROLES:
+                continue
             if str(links.at[i, "carrier"]) in carriers:
                 return str(i)
-    # Last resort: first finite-capacity or first extendable link.
-    for i in links.index:
-        row = links.loc[i]
-        if "p_nom_extendable" in links.columns and bool(row.get("p_nom_extendable")):
-            return str(i)
-    return str(links.index[0])
+    return None
+
+
+def _na_mutation(scenario_id: str, reason: str) -> dict[str, Any]:
+    return {
+        "scenario_id": scenario_id,
+        "applied": [],
+        "cost_basis": "synthetic_placeholder",
+        "not_applicable": True,
+        "not_applicable_reason": reason,
+    }
 
 
 def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], dict]:
     """Mutate ``n`` for a scenario; return ``(undo, mutation_record)``.
 
-    ``mutation_record`` describes what changed so options are falsifiable
-    (assessor N3). Economics are ``synthetic_placeholder`` unless noted.
+    ``mutation_record`` describes what changed so options are falsifiable.
+    Economics are ``synthetic_placeholder`` unless ``cost_basis == "none"``.
+    When a scenario cannot enlarge the feasible set, ``not_applicable`` is set
+    and ``applied`` is empty (monotone headroom; assessor D2).
     """
     if scenario_id == "base":
         return lambda: None, {
             "scenario_id": "base",
             "applied": [],
             "cost_basis": "none",
+            "not_applicable": False,
         }
 
     snap: dict[str, Any] = {
@@ -131,13 +191,26 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
         if link_name is not None:
             row = n.links.loc[link_name]
             base_mw = _finite_base_mw(row)
-            new_max = base_mw + _PLACEHOLDER_HEADROOM_MW
-            old_max = row["p_nom_max"] if "p_nom_max" in n.links.columns else None
+            target_max = base_mw + _PLACEHOLDER_HEADROOM_MW
+            old_max_f: float | None
             try:
-                old_max_f = float(old_max) if old_max is not None else None
+                old_max_f = float(row["p_nom_max"]) if "p_nom_max" in n.links.columns else None
             except (TypeError, ValueError):
                 old_max_f = None
-            # Force finite headroom even when prior p_nom_max was inf.
+            if old_max_f is not None and math.isfinite(old_max_f):
+                if old_max_f >= target_max:
+                    # Would shrink or leave unchanged — not a redundancy enlarge.
+                    def undo_na() -> None:
+                        pass
+                    return undo_na, _na_mutation(
+                        scenario_id,
+                        f"link {link_name!r} p_nom_max={old_max_f} already "
+                        f">= target {target_max}; refuse to shrink",
+                    )
+                new_max = target_max  # strictly > old_max_f
+            else:
+                # Missing / inf: force finite enlargement from nameplate.
+                new_max = target_max
             n.links.at[link_name, "p_nom_max"] = new_max
             if "p_nom_extendable" in n.links.columns:
                 n.links.at[link_name, "p_nom_extendable"] = True
@@ -154,7 +227,8 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
                 "headroom_mw": _PLACEHOLDER_HEADROOM_MW,
             })
         else:
-            # No links: invent a spare conversion path (distinct from n1_generation).
+            # No identifiable conversion Link: invent a spare path rather than
+            # mutating an import / random AC link (assessor D1).
             bus = _primary_load_bus(n)
             if "eh_n1_conv_bus" not in n.buses.index:
                 n.add("Bus", "eh_n1_conv_bus", carrier="AC")
@@ -172,6 +246,7 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
                     p_nom=0.0, p_nom_extendable=True,
                     p_nom_max=_PLACEHOLDER_HEADROOM_MW,
                     capital_cost=40.0, efficiency=0.95,
+                    carrier="H2",
                 )
                 if "eh_role" not in n.links.columns:
                     n.links["eh_role"] = ""
@@ -221,12 +296,12 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
             if n.links is not None and not n.links.empty:
                 n.links = n.links.iloc[0:0].copy()
 
-    mutation = {
+    return undo, {
         "scenario_id": scenario_id,
         "applied": applied,
         "cost_basis": "synthetic_placeholder",
+        "not_applicable": False,
     }
-    return undo, mutation
 
 
 def _primary_load_bus(n) -> str:
@@ -265,12 +340,8 @@ def compare_redundancy_scenarios(
 ) -> dict[str, Any]:
     """Solve each scenario at a fixed ENS target; return comparison table.
 
-    Certify method for P3a is **ENS** (planning metric). MC LOLE comparison
-    is out of scope here (P3b / coupling loop).
-
-    Sub-solves use a **private** sink — they never write the caller's
-    solver state (assessor N2). Pass ``pack_hash`` / ``assumptions_hash``
-    so ``GET /eh_redundancy`` can detect staleness (assessor N4).
+    Certify method for P3a is **ENS**. Sub-solves use a private sink (N2).
+    Pass ``pack_hash`` / ``assumptions_hash`` for staleness detection (N4).
     """
     from services.solver_service import SolverConfig, run_simulation
 
@@ -289,13 +360,37 @@ def compare_redundancy_scenarios(
             "redundancy compare requires ens_cap_permyriad > 0")
 
     options: list[dict[str, Any]] = []
+    solves_attempted = 0
+    aborted = False
     for sid in scenarios:
         if stop_event.is_set():
+            aborted = True
             break
         _detach_solver_model(network)
         nn = network.copy()
         undo, mutation = apply_redundancy_scenario(nn, sid)
-        # Private sink — never forward into the caller's state_update (N2).
+        if mutation.get("not_applicable"):
+            options.append({
+                "scenario_id": sid,
+                "status": "not_applicable",
+                "condition": mutation.get("not_applicable_reason"),
+                "cost_at_target_eur": None,
+                "achieved_ens_mwh": None,
+                "cap_mwh": None,
+                "binding": None,
+                "binding_metric": "ens",
+                "meets_target": None,
+                "excludes_shed_cost": True,
+                "cost_basis": mutation["cost_basis"],
+                "applied": mutation["applied"],
+                "not_applicable": True,
+            })
+            try:
+                undo()
+            except Exception:
+                logger.exception("redundancy N/A undo failed for %s", sid)
+            continue
+
         sink: dict = {}
         try:
             cfg_i = copy.copy(cfg) if cfg is not None else SolverConfig()
@@ -305,6 +400,7 @@ def compare_redundancy_scenarios(
                 pass
             if float(getattr(cfg_i, "voll", 0.0) or 0.0) <= 0:
                 cfg_i.voll = 150.0
+            solves_attempted += 1
             status, condition = run_simulation(
                 cfg_i, nn, lock, stop_event, log_queue,
                 state_update=lambda **kw: sink.update(kw),
@@ -320,7 +416,6 @@ def compare_redundancy_scenarios(
             if achieved is not None and cap is not None and float(cap) > 0:
                 meets = float(achieved) <= float(cap) * (1.0 + 1e-4)
             else:
-                # Do not invent compliance from binding alone (assessor N5).
                 meets = None
             options.append({
                 "scenario_id": sid,
@@ -337,6 +432,7 @@ def compare_redundancy_scenarios(
                 "excludes_shed_cost": True,
                 "cost_basis": mutation["cost_basis"],
                 "applied": mutation["applied"],
+                "not_applicable": False,
             })
         finally:
             try:
@@ -345,13 +441,36 @@ def compare_redundancy_scenarios(
                 logger.exception("redundancy scenario undo failed for %s", sid)
             _detach_solver_model(nn)
 
+    solved = [
+        o for o in options
+        if o.get("status") in ("ok", "optimal") and not o.get("not_applicable")
+    ]
     out = {
         "certify_method": "ens",
         "ens_cap_permyriad": float(ens_cap),
         "pack_hash": pack_hash,
         "assumptions_hash": assumptions_hash,
         "options": options,
+        "solves_attempted": solves_attempted,
+        "aborted": aborted,
+        "comparable_solved": len(solved),
     }
     if store is not None:
         store["eh_redundancy_comparison"] = out
     return out
+
+
+def redundancy_section_status(table: dict[str, Any]) -> tuple[str, str | None]:
+    """Map a comparison table to (section_status, note) — assessor D3 honesty."""
+    if table.get("aborted"):
+        return "not_established", "redundancy compare aborted mid-loop"
+    options = table.get("options") or []
+    solved = [
+        o for o in options
+        if o.get("status") in ("ok", "optimal") and not o.get("not_applicable")
+    ]
+    if len(solved) < 1:
+        return "not_established", "no redundancy option solved"
+    if len(solved) < 2:
+        return "not_established", "fewer than two comparable solved options"
+    return "ok", None
