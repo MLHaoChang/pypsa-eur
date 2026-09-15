@@ -208,14 +208,16 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 - [ ] Out of scope: joint MILP with UC + redundancy.
 
 ### 3c — Import cap + storage duration scenario levers (`v1-blocker` for off-grid honesty)
-- [ ] Scenario enum over `import_cap` and `storage_duration` (e.g. hours of autonomy), especially for `off_grid` / `weak_flexible`.
-- [ ] Pin: import = planning limit (not certified interconnector adequacy) unless outages modelled.
-- [ ] Note: annual ENS/LOLE ≠ multi-day autonomy sizing; report autonomy scenarios explicitly.
+- [x] Scenario enum over `import_cap` and `storage_duration` (e.g. hours of autonomy), especially for `off_grid` / `weak_flexible`.
+- [x] Pin: import = planning limit (not certified interconnector adequacy) unless outages modelled.
+- [x] Note: annual ENS/LOLE ≠ multi-day autonomy sizing; report autonomy scenarios explicitly.
+- [x] API: `GET /results/eh_levers` (+ persist `eh_lever_comparison`); wired into `run_eh_study` when stage `levers` / pack levers enabled.
 
 **Acceptance**
-- [ ] 3a: ≥2 redundancy options with costs at fixed target.
-- [ ] 3c: ≥2 storage-duration (or import) options affecting cost@target on off-grid fixture.
+- [x] 3a: ≥2 redundancy options with costs at fixed target (P3a; B1–B3 closed in `99ef3cc9`).
+- [x] 3c: ≥2 storage-duration (or import) options affecting cost@target on off-grid/weak fixtures (`test_energy_hub_levers.py`).
 - [ ] 3b (when shipped): selected option meets target; losers fail same metric.
+- [ ] **QA gate cleared** (assessor pending)
 
 ---
 

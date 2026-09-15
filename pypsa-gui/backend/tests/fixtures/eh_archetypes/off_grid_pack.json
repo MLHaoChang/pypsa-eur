@@ -9,7 +9,7 @@
   "levers": {
     "sizing": true,
     "redundancy": false,
-    "import_cap": true,
+    "import_cap": false,
     "storage_duration": true
   },
   "import_overlay": {

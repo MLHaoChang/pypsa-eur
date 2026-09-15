@@ -37,6 +37,11 @@ class LeverScenarioError(ValueError):
 
 
 def _import_link_ids(n) -> list[str]:
+    """Return identifiable import Links only — never guess ``index[0]``.
+
+    Assessor P3c-B2: a missing import identity must raise at apply time,
+    not mutate a conversion / random AC Link.
+    """
     if n.links is None or n.links.empty:
         return []
     try:
@@ -51,7 +56,37 @@ def _import_link_ids(n) -> list[str]:
             str(i) for i in n.links.index
             if str(n.links.at[i, "eh_role"]) in ("grid_import", "eh_import", "import")
         ]
-    return [str(n.links.index[0])] if len(n.links.index) else []
+    return []
+
+
+def _import_links_flow_blocked(n, link_ids: list[str]) -> bool:
+    """True when every applied import Link is Class-B islanded (p_*_pu ≈ 0)."""
+    if not link_ids or n.links is None or n.links.empty:
+        return False
+    for name in link_ids:
+        if name not in n.links.index:
+            continue
+        for col in ("p_max_pu", "p_min_pu"):
+            if col not in n.links.columns:
+                continue
+            try:
+                v = float(n.links.at[name, col])
+            except (TypeError, ValueError):
+                continue
+            if abs(v) > 1e-12:
+                return False
+        # Missing pu columns → assume flow allowed (nameplate path).
+        if "p_max_pu" not in n.links.columns and "p_min_pu" not in n.links.columns:
+            return False
+    # All inspected links either missing or pu-clamped to ~0.
+    present = [name for name in link_ids if name in n.links.index]
+    if not present:
+        return False
+    for name in present:
+        max_pu = float(n.links.at[name, "p_max_pu"]) if "p_max_pu" in n.links.columns else 1.0
+        if abs(max_pu) > 1e-12:
+            return False
+    return True
 
 
 def apply_lever_scenario(
@@ -187,6 +222,16 @@ def compare_lever_scenarios(
                 meets = float(achieved) <= float(cap) * (1.0 + 1e-4)
             else:
                 meets = None
+            ineffective = False
+            ineffective_reason = None
+            if kind == "import_cap":
+                applied_links = list(mutation.get("applied_links") or [])
+                if _import_links_flow_blocked(nn, applied_links):
+                    ineffective = True
+                    ineffective_reason = (
+                        "import_cap no-op under Class-B islanding "
+                        "(applied Links have p_max_pu≈0)"
+                    )
             options.append({
                 "kind": kind,
                 "value": val,
@@ -203,6 +248,9 @@ def compare_lever_scenarios(
                 "firmness": mutation["firmness"],
                 "autonomy_note": mutation.get("autonomy_note"),
                 "applied": mutation,
+                "ineffective": ineffective,
+                "ineffective_reason": ineffective_reason,
+                "effective_voll": float(cfg_i.voll),
             })
         finally:
             try:
@@ -211,7 +259,15 @@ def compare_lever_scenarios(
                 logger.exception("lever scenario undo failed for %s=%s", kind, val)
             _detach_solver_model(nn)
 
-    solved = [o for o in options if o.get("status") in ("ok", "optimal")]
+    solved = [
+        o for o in options
+        if o.get("status") in ("ok", "optimal") and not o.get("ineffective")
+    ]
+    costs = {
+        o.get("cost_at_target_eur")
+        for o in solved
+        if o.get("cost_at_target_eur") is not None
+    }
     out = {
         "kind": kind,
         "certify_method": "ens",
@@ -224,6 +280,7 @@ def compare_lever_scenarios(
         "solves_attempted": solves_attempted,
         "aborted": aborted,
         "comparable_solved": len(solved),
+        "distinct_costs": len(costs),
     }
     if store is not None:
         store["eh_lever_comparison"] = out
@@ -231,14 +288,29 @@ def compare_lever_scenarios(
 
 
 def levers_section_status(table: dict[str, Any]) -> tuple[str, str | None]:
+    """Honest gate: ≥2 effective solved options with distinct costs@target.
+
+    Assessor P3c-B1: Class-B-islanded import_cap no-ops (identical cost /
+    p_max_pu≈0) must not yield ``ok``.
+    """
     if table.get("aborted"):
         return "not_established", "lever compare aborted mid-loop"
     solved = [
         o for o in (table.get("options") or [])
-        if o.get("status") in ("ok", "optimal")
+        if o.get("status") in ("ok", "optimal") and not o.get("ineffective")
     ]
     if len(solved) < 1:
-        return "not_established", "no lever option solved"
+        return "not_established", "no effective lever option solved"
     if len(solved) < 2:
         return "not_established", "fewer than two comparable solved lever options"
+    costs = {
+        o.get("cost_at_target_eur")
+        for o in solved
+        if o.get("cost_at_target_eur") is not None
+    }
+    if len(costs) < 2:
+        return (
+            "not_established",
+            "lever options did not differentiate cost_at_target_eur",
+        )
     return "ok", None

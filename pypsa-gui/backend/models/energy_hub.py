@@ -238,8 +238,10 @@ def default_off_grid_pack() -> ArchetypePack:
             target_lole_h=3.0,
             certification_metric="mc_lole",
         ),
+        # import_cap stays False: Class-B islanding zeros p_*_pu, so a
+        # planning-limit MW lever is a no-op after apply_pack (P3c-B1).
         levers=OptimizationLevers(
-            sizing=True, import_cap=True, storage_duration=True),
+            sizing=True, import_cap=False, storage_duration=True),
         # import_p_nom_mw unused for off_grid: islanding is p_*_pu→0
         # (Class-B discipline), not p_nom→0. Leave None so fixtures cannot
         # be misread as a zero-nominal mutation.

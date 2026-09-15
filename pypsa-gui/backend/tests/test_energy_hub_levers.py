@@ -202,3 +202,52 @@ def test_run_eh_study_levers_stage_writes_store():
     assert report.completeness["levers"] == "ok"
     assert "eh_lever_comparison" in store
     assert store["eh_lever_comparison"]["comparable_solved"] >= 2
+
+
+def test_import_cap_refuses_without_import_identity():
+    """Assessor P3c-B2: never fall back to links.index[0]."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.add("Carrier", "H2")
+    n.add("Bus", "b0", carrier="AC")
+    n.add("Bus", "b1", carrier="AC")
+    n.add("Link", "elyzer", bus0="b0", bus1="b1",
+          p_nom=10.0, efficiency=0.9, carrier="H2")
+    n.links["eh_role"] = ""
+    n.links.at["elyzer", "eh_role"] = "eh_conversion"
+    with pytest.raises(L.LeverScenarioError, match="no import"):
+        L.apply_lever_scenario(n, "import_cap", value=25.0)
+    assert float(n.links.at["elyzer", "p_nom"]) == 10.0
+
+
+def test_levers_section_status_rejects_identical_costs():
+    """Assessor P3c-B1: identical cost@target is not an established lever table."""
+    table = {
+        "aborted": False,
+        "options": [
+            {"status": "ok", "cost_at_target_eur": 100.0, "ineffective": False},
+            {"status": "ok", "cost_at_target_eur": 100.0, "ineffective": False},
+        ],
+    }
+    status, note = L.levers_section_status(table)
+    assert status == "not_established"
+    assert "differentiate" in (note or "")
+
+
+def test_levers_section_status_rejects_ineffective_islanded_import():
+    table = {
+        "aborted": False,
+        "options": [
+            {"status": "ok", "cost_at_target_eur": 10.0, "ineffective": True},
+            {"status": "ok", "cost_at_target_eur": 20.0, "ineffective": True},
+        ],
+    }
+    status, note = L.levers_section_status(table)
+    assert status == "not_established"
+
+
+def test_off_grid_pack_disables_import_cap_lever():
+    """Class-B islanding makes import_cap a no-op; pack must not enable it."""
+    pack = default_off_grid_pack()
+    assert pack.levers.storage_duration is True
+    assert pack.levers.import_cap is False
