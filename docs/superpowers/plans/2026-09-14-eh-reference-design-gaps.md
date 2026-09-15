@@ -228,7 +228,7 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 - [x] Fixed-plan islanding re-dispatch; report unmet critical load (`services/adequacy/dtc.py`).
 - [x] **Do not claim per-load shed attribution** — bus-aggregate only (`attribution=bus_aggregate_not_per_load`).
 - [x] Wire as default stress for `weak_flexible` pack (`dtc_stress_default=True`; stage in `run_eh_study`).
-- [ ] **QA gate cleared** (assessor pending)
+- [x] **QA gate cleared** — [P4a re-gate](bc-1242dced-b02a-56fd-b508-6652bf5804b0): **GO** (after binding-condition fix `cf31c7b0`).
 
 ### 4b — Planning mode (gated)
 - [ ] Design spike first: slack/attribution mechanism OR islanded topology + system ENS under retained critical demand.
@@ -238,7 +238,7 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 - [x] 4a: grid disconnected → critical unmet metrics separate from non-critical; electrical-only projects unchanged when DtC off (`test_energy_hub_dtc.py`).
 - [x] Weak-flexible orchestrated run includes DtC stress block or `not_established` with reason.
 - [ ] 4b: no implementation until spike decision recorded in spec.
-- [ ] **QA gate cleared** (assessor pending)
+- [x] **QA gate cleared** — [P4a re-gate](bc-1242dced-b02a-56fd-b508-6652bf5804b0): **GO**.
 
 ---
 
