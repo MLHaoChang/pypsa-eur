@@ -176,3 +176,25 @@ def test_claim_wipe_includes_eh_dtc_planning():
     idx = text.find('status="running"')
     chunk = text[idx:idx + 1200]
     assert "eh_dtc_planning=None" in chunk
+
+
+def test_run_dtc_planning_refuses_missing_ens_cap():
+    """Binding P4b-B1: refuse uncapped VoLL-only expansion."""
+    from services.pypsa_service import PyPSAService
+
+    n = _planning_network()
+    PyPSAService.set_network(n)
+    dtc = DtcConfig(
+        critical_bus_ids=["crit"],
+        critical_load_ids=["critical"],
+        islanding_contingencies=["import_poc"],
+    )
+    with pytest.raises(D.DtcPlanningError, match="ens_cap_permyriad"):
+        D.run_dtc_planning(
+            n, SolverConfig(voll=500.0, ens_cap_permyriad=None),
+            lock=PyPSAService.get_lock(),
+            stop_event=threading.Event(),
+            log_queue=queue.SimpleQueue(),
+            dtc=dtc,
+        )
+

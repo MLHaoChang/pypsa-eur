@@ -330,6 +330,16 @@ def run_dtc_planning(
 
     if dtc.attribution != "bus_aggregate_not_per_load":
         raise DtcPlanningError("planning refuses per-load attribution")
+    ens_cap = getattr(cfg, "ens_cap_permyriad", None) if cfg is not None else None
+    try:
+        ens_cap_f = float(ens_cap) if ens_cap is not None else None
+    except (TypeError, ValueError):
+        ens_cap_f = None
+    if ens_cap_f is None or ens_cap_f <= 0:
+        raise DtcPlanningError(
+            "dtc planning requires ens_cap_permyriad > 0 "
+            "(ENS-capped expansion; refuse uncapped VoLL-only sizing)"
+        )
     log_queue = log_queue or queue.SimpleQueue()
     contingencies: list[dict[str, Any]] = []
     solves_attempted = 0
