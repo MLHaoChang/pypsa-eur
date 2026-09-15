@@ -632,6 +632,75 @@ export interface EhStudyPayload {
   finished_at?: number | null
 }
 
+export interface EhRedundancyOption {
+  scenario_id: string
+  status: string
+  condition?: string | null
+  cost_at_target_eur?: number | null
+  achieved_ens_mwh?: number | null
+  meets_target?: boolean | null
+  not_applicable?: boolean
+  binding_metric?: string
+}
+
+export interface EhRedundancyTable {
+  certify_method?: string
+  ens_cap_permyriad?: number
+  options?: EhRedundancyOption[]
+  comparable_solved?: number
+  aborted?: boolean
+  selection?: { selected_id?: string | null } | null
+  selection_error?: string | null
+}
+
+export interface EhLeverOption {
+  kind: string
+  value: number
+  unit?: string
+  status: string
+  cost_at_target_eur?: number | null
+  achieved_ens_mwh?: number | null
+  meets_target?: boolean | null
+  ineffective?: boolean
+  ineffective_reason?: string | null
+}
+
+export interface EhLeverTable {
+  kind?: string
+  options?: EhLeverOption[]
+  comparable_solved?: number
+  skipped_kinds?: string[]
+  honesty_notes?: string[]
+  aborted?: boolean
+}
+
+export interface EhDtcContingency {
+  contingency: string
+  status: string
+  condition?: string | null
+  critical_unserved_mwh?: number | null
+  noncritical_unserved_mwh?: number | null
+  cost_at_target_eur?: number | null
+  built_p_nom_mw?: number | null
+}
+
+export interface EhDtcStressTable {
+  mode?: string
+  attribution?: string
+  contingencies?: EhDtcContingency[]
+  honesty_notes?: string[]
+  comparable_solved?: number
+  aborted?: boolean
+}
+
+export interface EhDtcPlanningTable {
+  mode?: string
+  attribution?: string
+  contingencies?: EhDtcContingency[]
+  comparable_solved?: number
+  aborted?: boolean
+}
+
 // ── The firm-capacity (planning reserve margin) standard, Phase 8 §4 ────────
 //
 // KEY NAMES ARE VERBATIM from the backend and must stay that way: they come
@@ -1081,6 +1150,14 @@ export const resultsApi = {
     .then(r => r.data as { status: string; aborting: boolean }),
   getEhReferenceDesign: () => client.get('/results/eh_reference_design')
     .then(r => (r.status === 204 ? null : r.data as EhReferenceDesignReport)),
+  getEhRedundancy: () => client.get('/results/eh_redundancy')
+    .then(r => (r.status === 204 ? null : r.data as EhRedundancyTable)),
+  getEhLevers: () => client.get('/results/eh_levers')
+    .then(r => (r.status === 204 ? null : r.data as EhLeverTable)),
+  getEhDtc: () => client.get('/results/eh_dtc')
+    .then(r => (r.status === 204 ? null : r.data as EhDtcStressTable)),
+  getEhDtcPlanning: () => client.get('/results/eh_dtc_planning')
+    .then(r => (r.status === 204 ? null : r.data as EhDtcPlanningTable)),
   // FMEA worksheet sidecar (Phase 3): manual class-D rows + mitigability
   // overlays, persisted per project. Computed rows come from getCopt and
   // merge client-side (pages/results/fmea.ts).

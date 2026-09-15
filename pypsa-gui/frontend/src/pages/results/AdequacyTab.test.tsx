@@ -33,6 +33,8 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       abortMarginLoop: vi.fn(),
       getEhStudy: vi.fn(), startEhStudy: vi.fn(), abortEhStudy: vi.fn(),
       getEhReferenceDesign: vi.fn(),
+      getEhRedundancy: vi.fn(), getEhLevers: vi.fn(),
+      getEhDtc: vi.fn(), getEhDtcPlanning: vi.fn(),
     },
   }
 })
@@ -107,6 +109,10 @@ beforeEach(() => {
   vi.mocked(resultsApi.abortEhStudy).mockReset()
     .mockResolvedValue({ status: 'done', aborting: false })
   vi.mocked(resultsApi.getEhReferenceDesign).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhRedundancy).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhLevers).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhDtc).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhDtcPlanning).mockReset().mockResolvedValue(null)
   // The firm-capacity readout serves 204 before any margin-set solve, and the
   // tab must still mount it — that is the invariant this file exists for.
   vi.mocked(resultsApi.getReserveMargin).mockReset().mockResolvedValue(null)

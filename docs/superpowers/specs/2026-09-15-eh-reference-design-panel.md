@@ -12,7 +12,6 @@ Let a user run an archetype pack study from Results → Adequacy and read the
 ## Non-goals (this slice)
 
 - Chat tools for `eh_study`
-- Deep redundancy / levers / DtC table UIs (GETs exist; follow-up)
 - New Adequacy IA or marketing layout
 - P2 / P6–P9 modelling
 
@@ -44,3 +43,14 @@ stack the user already read.
 - Run requires archetype; Abort only while running
 - Completeness statuses visible for a done report
 - AdequacyTab panel order includes `eh-reference-design-panel` last
+
+## Sibling tables + CSV (follow-up)
+
+When stages ran, panel also fetches and renders:
+
+- `GET /results/eh_redundancy` — options + selected id
+- `GET /results/eh_levers` — options + soft-skipped kinds
+- `GET /results/eh_dtc` — stress contingencies (bus-aggregate attribution)
+- `GET /results/eh_dtc_planning` — planning contingencies
+
+Each table has a CSV download via shared `downloadCSV`.

@@ -7,9 +7,19 @@ import { useUIStore } from '../../store/uiStore'
 import {
   COMPLETENESS_ORDER,
   completenessRows,
+  dtcPlanningCsvRows,
+  dtcStressCsvRows,
   EhReferenceDesignPanel,
+  leverCsvRows,
+  redundancyCsvRows,
   statusTone,
 } from './EhReferenceDesignPanel'
+import { downloadCSV } from './shared'
+
+vi.mock('./shared', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./shared')>()
+  return { ...actual, downloadCSV: vi.fn() }
+})
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -21,6 +31,10 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       startEhStudy: vi.fn(),
       abortEhStudy: vi.fn(),
       getEhReferenceDesign: vi.fn(),
+      getEhRedundancy: vi.fn(),
+      getEhLevers: vi.fn(),
+      getEhDtc: vi.fn(),
+      getEhDtcPlanning: vi.fn(),
     },
   }
 })
@@ -72,6 +86,11 @@ beforeEach(() => {
   vi.mocked(resultsApi.abortEhStudy).mockReset()
     .mockResolvedValue({ status: 'running', aborting: true })
   vi.mocked(resultsApi.getEhReferenceDesign).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhRedundancy).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhLevers).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhDtc).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhDtcPlanning).mockReset().mockResolvedValue(null)
+  vi.mocked(downloadCSV).mockReset()
 })
 
 afterEach(() => { cleanup(); vi.clearAllMocks() })
@@ -174,5 +193,119 @@ describe('EhReferenceDesignPanel', () => {
     await user.click(screen.getByTestId('eh-run'))
     const blocked = await screen.findByTestId('eh-blocked')
     expect(blocked.textContent).toMatch(/frontier/i)
+  })
+})
+
+
+describe('EH sibling table CSV helpers', () => {
+  it('maps redundancy options including selection', () => {
+    const rows = redundancyCsvRows({
+      options: [
+        { scenario_id: 'base', status: 'ok', cost_at_target_eur: 100,
+          achieved_ens_mwh: 1, meets_target: true },
+        { scenario_id: 'n1_generation', status: 'ok', cost_at_target_eur: 120,
+          achieved_ens_mwh: 0.5, meets_target: true },
+      ],
+      selection: { selected_id: 'base' },
+    })
+    expect(rows[0]).toEqual(['base', 'ok', 100, 1, 'yes', 'selected', ''])
+    expect(rows[1][5]).toBe('')
+  })
+
+  it('maps lever and DtC rows', () => {
+    expect(leverCsvRows({
+      options: [{
+        kind: 'storage_duration', value: 4, unit: 'h', status: 'ok',
+        cost_at_target_eur: 50, achieved_ens_mwh: 0, meets_target: true,
+      }],
+    })[0][0]).toBe('storage_duration')
+    expect(dtcStressCsvRows({
+      contingencies: [{
+        contingency: 'import', status: 'ok',
+        critical_unserved_mwh: 2, noncritical_unserved_mwh: 9,
+      }],
+    })[0][0]).toBe('import')
+    expect(dtcPlanningCsvRows({
+      contingencies: [{
+        contingency: 'import', status: 'optimal',
+        cost_at_target_eur: 200, built_p_nom_mw: 15,
+      }],
+    })[0][3]).toBe(15)
+  })
+})
+
+describe('EhReferenceDesignPanel — sibling tables', () => {
+  const RED = {
+    options: [
+      { scenario_id: 'base', status: 'ok', cost_at_target_eur: 1e6,
+        achieved_ens_mwh: 1, meets_target: true },
+      { scenario_id: 'parallel_storage', status: 'ok', cost_at_target_eur: 1.2e6,
+        achieved_ens_mwh: 0.5, meets_target: true },
+    ],
+    selection: { selected_id: 'base' },
+  }
+  const LEV = {
+    kind: 'storage_duration',
+    options: [
+      { kind: 'storage_duration', value: 2, unit: 'h', status: 'ok',
+        cost_at_target_eur: 900000, meets_target: true },
+      { kind: 'storage_duration', value: 8, unit: 'h', status: 'ok',
+        cost_at_target_eur: 1100000, meets_target: true },
+    ],
+    skipped_kinds: ['import_cap:no import Links'],
+  }
+  const DTC = {
+    attribution: 'bus_aggregate_not_per_load',
+    contingencies: [{
+      contingency: 'grid_import', status: 'ok',
+      critical_unserved_mwh: 3, noncritical_unserved_mwh: 12,
+    }],
+  }
+  const DTC_PLAN = {
+    mode: 'planning',
+    contingencies: [{
+      contingency: 'grid_import', status: 'optimal',
+      cost_at_target_eur: 2e6, built_p_nom_mw: 40,
+    }],
+  }
+
+  it('renders redundancy / levers / DtC tables when GETs return data', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report: REPORT,
+    } as never)
+    vi.mocked(resultsApi.getEhRedundancy).mockResolvedValue(RED as never)
+    vi.mocked(resultsApi.getEhLevers).mockResolvedValue(LEV as never)
+    vi.mocked(resultsApi.getEhDtc).mockResolvedValue(DTC as never)
+    vi.mocked(resultsApi.getEhDtcPlanning).mockResolvedValue(DTC_PLAN as never)
+    await openPanel()
+    expect(await screen.findByTestId('eh-redundancy')).toBeTruthy()
+    expect(screen.getByTestId('eh-redundancy-selected').textContent).toMatch(/base/)
+    expect(screen.getByTestId('eh-redundancy-row-base').getAttribute('data-selected'))
+      .toBe('true')
+    expect(screen.getByTestId('eh-levers')).toBeTruthy()
+    expect(screen.getByTestId('eh-levers-skipped').textContent).toMatch(/import_cap/)
+    expect(screen.getByTestId('eh-dtc-stress')).toBeTruthy()
+    expect(screen.getByTestId('eh-dtc-attribution').textContent)
+      .toMatch(/bus_aggregate/)
+    expect(screen.getByTestId('eh-dtc-planning')).toBeTruthy()
+  })
+
+  it('exports CSV for each sibling table', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report: REPORT,
+    } as never)
+    vi.mocked(resultsApi.getEhRedundancy).mockResolvedValue(RED as never)
+    vi.mocked(resultsApi.getEhLevers).mockResolvedValue(LEV as never)
+    vi.mocked(resultsApi.getEhDtc).mockResolvedValue(DTC as never)
+    vi.mocked(resultsApi.getEhDtcPlanning).mockResolvedValue(DTC_PLAN as never)
+    const user = await openPanel()
+    await user.click(await screen.findByTestId('eh-redundancy-csv'))
+    await user.click(screen.getByTestId('eh-levers-csv'))
+    await user.click(screen.getByTestId('eh-dtc-stress-csv'))
+    await user.click(screen.getByTestId('eh-dtc-planning-csv'))
+    expect(downloadCSV).toHaveBeenCalledTimes(4)
+    expect(vi.mocked(downloadCSV).mock.calls.map(c => c[0])).toEqual([
+      'eh-redundancy.csv', 'eh-levers.csv', 'eh-dtc-stress.csv', 'eh-dtc-planning.csv',
+    ])
   })
 })
