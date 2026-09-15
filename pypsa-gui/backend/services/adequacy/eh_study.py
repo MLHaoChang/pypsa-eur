@@ -65,17 +65,32 @@ def run_eh_study(
     """Synchronous EH study driver (HTTP worker wraps this later).
 
     If ``store`` is provided, the finished report is persisted under
-    ``eh_reference_design_report`` for ``GET /results/eh_reference_design``.
+    ``eh_reference_design_report`` for ``GET /results/eh_reference_design``,
+    and a redundancy stage also writes ``eh_redundancy_comparison`` for
+    ``GET /results/eh_redundancy``.
+
+    Stage list vs ``pack.levers.redundancy`` (P3a binding condition):
+    - Explicit ``stages=...`` wins: including ``\"redundancy\"`` runs the
+      compare even when ``levers.redundancy`` is False.
+    - Default pipeline (``stages is None``): ``redundancy`` is dropped unless
+      ``pack.levers.redundancy`` is True. MVP-A packs ship False and therefore
+      skip redundancy unless the caller opts in via levers or stages.
     """
     from services.solver_service import run_simulation
 
-    requested = tuple(stages) if stages is not None else DEFAULT_STAGES
+    if stages is not None:
+        requested = tuple(stages)
+    else:
+        requested = tuple(
+            s for s in DEFAULT_STAGES
+            if s != "redundancy" or pack.levers.redundancy
+        )
     budget_solves = max(1, min(int(budget_solves), MAX_EH_BUDGET_SOLVES))
     log_queue = log_queue or queue.SimpleQueue()
     state_update = state_update or (lambda **kw: None)
 
-    # Stages this driver can actually execute today (MVP-A sync slice).
-    IMPLEMENTED = frozenset({"apply_pack", "ens_solve", "assemble"})
+    # Stages this driver can actually execute today.
+    IMPLEMENTED = frozenset({"apply_pack", "ens_solve", "redundancy", "assemble"})
 
     records: list[PipelineStageRecord] = []
     for name in DEFAULT_STAGES:
@@ -225,22 +240,53 @@ def run_eh_study(
             section_payloads.setdefault(
                 "cost", ("not_established", None, "ens_solve not run"))
 
+        if not aborted and "redundancy" in requested:
+            if stop_event.is_set():
+                aborted = True
+                _mark("redundancy", "aborted")
+            else:
+                from services.adequacy import redundancy as red
+                try:
+                    table = red.compare_redundancy_scenarios(
+                        network, cfg,
+                        lock=lock,
+                        stop_event=stop_event,
+                        log_queue=log_queue,
+                        scenarios=None,
+                        availability=pack.availability,
+                        state_update=state_update,
+                        store=store,
+                    )
+                    n_opts = len(table.get("options") or [])
+                    _mark("redundancy", "run",
+                          solves_charged=n_opts,
+                          note=f"{n_opts} scenarios")
+                    section_payloads["redundancy"] = ("ok", table, None)
+                    solves += n_opts
+                except Exception as exc:
+                    logger.exception("redundancy compare failed")
+                    _mark("redundancy", "aborted", note=str(exc))
+                    section_payloads["redundancy"] = (
+                        "not_established", None, str(exc))
+
         # Optional / not-yet-implemented stages → section skipped (never pending).
         for optional, section in (
             ("frontier", "frontier"),
-            ("redundancy", "redundancy"),
             ("levers", "levers"),
             ("dtc_stress", "dtc"),
             ("fmea_top", "fmea_top"),
         ):
             if optional not in IMPLEMENTED:
                 reason = (
-                    f"{optional} not implemented in P1.5 sync driver"
+                    f"{optional} not implemented in sync driver"
                     if optional in requested
                     else f"{optional} not requested"
                 )
                 section_payloads.setdefault(
                     section, ("skipped", None, reason))
+        if "redundancy" not in requested:
+            section_payloads.setdefault(
+                "redundancy", ("skipped", None, "redundancy not requested"))
 
         if pack.mc_certify_required and "mc_certify" not in IMPLEMENTED:
             section_payloads["gates"] = (

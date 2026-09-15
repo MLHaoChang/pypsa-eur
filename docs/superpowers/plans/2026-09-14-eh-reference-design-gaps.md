@@ -190,10 +190,17 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 ## Phase 3 — Redundancy + import/storage levers
 
 ### 3a — Redundancy scenario enumeration (`v1-core`)
-- [ ] Scenarios: `base`, `n1_generation`, `n1_conversion`, `parallel_storage` (extensible).
-- [ ] Runner: fixed availability target → cost vs achieved ENS/LOLE per scenario.
-- [ ] Provenance: binding metric (ENS vs LOLE); rejected options must fail the **same** certify method.
-- [ ] API + thin UI panel.
+- [x] Scenarios: `base`, `n1_generation`, `n1_conversion`, `parallel_storage` (extensible).
+- [x] Runner: fixed availability target → cost vs achieved ENS per scenario (`compare_redundancy_scenarios`).
+- [x] Provenance: binding metric `ens` for all rows (same certify method).
+- [x] API: `GET /results/eh_redundancy` (+ persist `eh_redundancy_comparison`); UI panel deferred.
+- [x] Wired into `run_eh_study` when stage `redundancy` requested / default pipeline.
+
+**Acceptance (3a)**
+- [x] ≥2 redundancy options with costs at fixed ENS target.
+- [ ] **QA gate cleared** (binding conditions satisfied; awaiting assessor re-gate)
+
+**TDD evidence:** ImportError red → `redundancy.py` → 12 tests green (incl. live compares + store persist + levers gate + n1_conversion distinct topology).
 
 ### 3b — Discrete outer-loop selection (`v1-nice` / co-opt complete)
 - [ ] Small integer domains per asset class; pin max trains + **MC certify cadence** (every candidate vs finalists only).
@@ -252,9 +259,9 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 - [x] Empty `redundancy` / `dtc` / `gates` allowed with flags.
 - [x] Golden-fixture snapshot tests for stable export shape.
 - [ ] MVP-B DoD: weak + off-grid packs produce filled dtc/lever sections per P3a/P4a/P3c.
-- [ ] **QA gate cleared** (pending)
+- [x] **QA gate cleared** — [P5 re-gate](bc-6b83512d-30a2-531a-9fd6-b863eee782f9): **GO** (after NO-GO LCOE fix).
 
-**TDD evidence:** P5 tests red (missing helpers) → `eh_report` enrichment + study wiring → green.
+**TDD evidence:** P5 tests red → enrichment + ENS-honest LCOE → green (9 tests).
 
 ---
 

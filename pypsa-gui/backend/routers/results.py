@@ -1384,6 +1384,15 @@ def get_eh_reference_design():
     return body
 
 
+@results_router.get("/eh_redundancy")
+def get_eh_redundancy():
+    """Last redundancy scenario comparison table (Phase 3a). 204 if none."""
+    table = _state.get("eh_redundancy_comparison")
+    if not table:
+        return Response(status_code=204)
+    return table
+
+
 @results_router.get("/reserve_margin")
 def get_reserve_margin():
     """
