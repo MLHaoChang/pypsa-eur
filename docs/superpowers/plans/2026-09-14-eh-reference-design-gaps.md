@@ -239,7 +239,7 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 - [x] 4a: grid disconnected → critical unmet metrics separate from non-critical; electrical-only projects unchanged when DtC off (`test_energy_hub_dtc.py`).
 - [x] Weak-flexible orchestrated run includes DtC stress block or `not_established` with reason.
 - [x] 4b: spike decision recorded (spec §10 — islanded + retained critical); planning overlay shipped (`test_energy_hub_dtc_planning.py`).
-- [ ] **QA gate cleared** (P4b — awaiting assessor)
+- [x] **QA gate cleared** — [P4b re-gate](bc-c6486462-cde4-551a-94ce-a66848500349): **GO** (after binding-condition fix `0a10957e`; prior GO WITH BINDING CONDITIONS [bc-6a40e238-d91c-5097-a372-298c3ac45c56](bc-6a40e238-d91c-5097-a372-298c3ac45c56)).
 - [x] **QA gate cleared** — [P4a re-gate](bc-1242dced-b02a-56fd-b508-6652bf5804b0): **GO**.
 
 ---
