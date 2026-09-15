@@ -198,9 +198,9 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 
 **Acceptance (3a)**
 - [x] ≥2 redundancy options with costs at fixed ENS target.
-- [ ] **QA gate cleared** (binding conditions satisfied; awaiting assessor re-gate)
+- [ ] **QA gate cleared** (NO-GO N1–N4 addressed; awaiting re-gate)
 
-**TDD evidence:** ImportError red → `redundancy.py` → 12 tests green (incl. live compares + store persist + levers gate + n1_conversion distinct topology).
+**TDD evidence:** ImportError red → `redundancy.py` → 17 tests green (finite n1_conversion headroom, role selection, private sink, provenance hashes, claim wipe).
 
 ### 3b — Discrete outer-loop selection (`v1-nice` / co-opt complete)
 - [ ] Small integer domains per asset class; pin max trains + **MC certify cadence** (every candidate vs finalists only).

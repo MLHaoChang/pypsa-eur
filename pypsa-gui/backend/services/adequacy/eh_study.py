@@ -254,8 +254,9 @@ def run_eh_study(
                         log_queue=log_queue,
                         scenarios=None,
                         availability=pack.availability,
-                        state_update=state_update,
                         store=store,
+                        pack_hash=pack_h,
+                        assumptions_hash=_assumptions_hash(cfg),
                     )
                     n_opts = len(table.get("options") or [])
                     _mark("redundancy", "run",
