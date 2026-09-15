@@ -263,6 +263,7 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 - [x] Empty `redundancy` / `dtc` / `gates` allowed with flags.
 - [x] Golden-fixture snapshot tests for stable export shape.
 - [x] MVP-B DoD: weak + off-grid packs produce filled dtc/lever sections per P3a/P4a/P3c (`test_energy_hub_mvp_b.py`; soft-skip inapplicable lever kinds).
+- [x] **MVP-B DoD QA gate cleared** — [re-gate](bc-542e73c5-e8ce-50da-ab39-51df2aa3efee): **GO** (after binding-condition fix `57b11e05`; prior GO WITH BINDING CONDITIONS [bc-cea1d58c-c457-50e9-bab8-7414cc598c1a](bc-cea1d58c-c457-50e9-bab8-7414cc598c1a)).
 - [x] **QA gate cleared** — [P5 re-gate](bc-6b83512d-30a2-531a-9fd6-b863eee782f9): **GO** (after NO-GO LCOE fix).
 
 **TDD evidence:** P5 tests red → enrichment + ENS-honest LCOE → green (9 tests).
