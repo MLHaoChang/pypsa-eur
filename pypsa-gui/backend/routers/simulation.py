@@ -705,6 +705,7 @@ def run():
             last_reserve_margin=None,
             eh_redundancy_comparison=None,
             eh_lever_comparison=None,
+            eh_dtc_stress=None,
             eh_reference_design_report=None,
             lopf_results=None,
             ac_pf_results=None,

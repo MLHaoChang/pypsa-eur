@@ -1402,6 +1402,16 @@ def get_eh_levers():
     return table
 
 
+
+
+@results_router.get("/eh_dtc")
+def get_eh_dtc():
+    """Last DtC stress table (Phase 4a). 204 if none."""
+    table = _state.get("eh_dtc_stress")
+    if not table:
+        return Response(status_code=204)
+    return table
+
 @results_router.get("/reserve_margin")
 def get_reserve_margin():
     """

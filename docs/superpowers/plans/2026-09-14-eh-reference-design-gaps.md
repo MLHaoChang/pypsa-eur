@@ -217,26 +217,28 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 - [x] 3a: ≥2 redundancy options with costs at fixed target (P3a; B1–B3 closed in `99ef3cc9`).
 - [x] 3c: ≥2 storage-duration (or import) options affecting cost@target on off-grid/weak fixtures (`test_energy_hub_levers.py`).
 - [ ] 3b (when shipped): selected option meets target; losers fail same metric.
-- [ ] **QA gate cleared** (assessor pending)
+- [x] **QA gate cleared** — [P3c re-gate](bc-4e1a7ff3-1fb9-5f4c-80ab-1eea7a1d7919): **GO** (after binding-condition fix `7527dd05`; prior GO WITH BINDING CONDITIONS [bc-661df1e3-bf66-59d4-89b5-dc06fe6384fe](bc-661df1e3-bf66-59d4-89b5-dc06fe6384fe)).
 
 ---
 
 ## Phase 4 — DtC modelling contract
 
 ### 4a — Stress mode (required for `weak_flexible` MVP-B)
-- [ ] Sidecar `dtc_config.json`: `critical_load_ids` / bus tags, `islanding_contingencies`, targets.
-- [ ] Fixed-plan islanding re-dispatch; report unmet critical load.
-- [ ] **Do not claim per-load shed attribution** unless slack model changes (today: one slack per bus — FMEA §6.3). Prefer critical **buses** or islanded system ENS with non-critical demand shedable via explicit tier/tags.
-- [ ] Wire as default stress for `weak_flexible` pack.
+- [x] Sidecar `dtc_config.json`: `critical_load_ids` / bus tags, `islanding_contingencies`, targets (`DtcConfig`).
+- [x] Fixed-plan islanding re-dispatch; report unmet critical load (`services/adequacy/dtc.py`).
+- [x] **Do not claim per-load shed attribution** — bus-aggregate only (`attribution=bus_aggregate_not_per_load`).
+- [x] Wire as default stress for `weak_flexible` pack (`dtc_stress_default=True`; stage in `run_eh_study`).
+- [ ] **QA gate cleared** (assessor pending)
 
 ### 4b — Planning mode (gated)
 - [ ] Design spike first: slack/attribution mechanism OR islanded topology + system ENS under retained critical demand.
 - [ ] Only then: expansion under DtC planning overlay.
 
 **Acceptance**
-- [ ] 4a: grid disconnected → critical unmet metrics separate from non-critical; electrical-only projects unchanged when DtC off.
-- [ ] Weak-flexible orchestrated run includes DtC stress block or `not_established` with reason.
+- [x] 4a: grid disconnected → critical unmet metrics separate from non-critical; electrical-only projects unchanged when DtC off (`test_energy_hub_dtc.py`).
+- [x] Weak-flexible orchestrated run includes DtC stress block or `not_established` with reason.
 - [ ] 4b: no implementation until spike decision recorded in spec.
+- [ ] **QA gate cleared** (assessor pending)
 
 ---
 

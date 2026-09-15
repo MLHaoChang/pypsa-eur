@@ -95,6 +95,32 @@ class OptimizationLevers(BaseModel):
     storage_duration: bool = False
 
 
+class DtcConfig(BaseModel):
+    """DtC stress sidecar (spec decision 8; plan Phase 4a).
+
+    Attribution is bus-aggregate only — today's one-VOLL-per-bus model cannot
+    honestly claim per-load shed. Reject any other attribution mode.
+    """
+
+    critical_bus_ids: list[str] = Field(default_factory=list)
+    critical_load_ids: list[str] = Field(default_factory=list)
+    islanding_contingencies: list[str] = Field(default_factory=list)
+    attribution: Literal["bus_aggregate_not_per_load"] = "bus_aggregate_not_per_load"
+
+    @model_validator(mode="after")
+    def _refuse_per_load_attribution(self) -> "DtcConfig":
+        if self.attribution != "bus_aggregate_not_per_load":
+            raise ValueError(
+                "DtC attribution must be bus_aggregate_not_per_load "
+                "(per_load shed claims are not supported on one-slack-per-bus)"
+            )
+        if not self.critical_bus_ids and not self.critical_load_ids:
+            raise ValueError("DtC config needs critical_bus_ids and/or critical_load_ids")
+        if not self.islanding_contingencies:
+            raise ValueError("DtC config needs at least one islanding contingency")
+        return self
+
+
 class ImportOverlaySpec(BaseModel):
     """Normative import overlay knobs (spec §6) — values only; apply in P1."""
 
