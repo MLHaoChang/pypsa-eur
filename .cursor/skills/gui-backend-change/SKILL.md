@@ -40,7 +40,8 @@ Two rules hold this together:
 
 ## Where planning-loop / study controllers go
 `POST /results/coupling_loop`, `POST /results/margin_loop`,
-`POST /results/mc`, `POST /results/frontier`, and `POST /results/fmea_sweep`
+`POST /results/mc`, `POST /results/frontier`, `POST /results/fmea_sweep`,
+and `POST /results/eh_study`
 stay as thin handlers in `routers/results.py` (mesh refuse + FastAPI
 decorator). The validation, bindings, study record and worker live in:
 
@@ -51,6 +52,7 @@ decorator). The validation, bindings, study record and worker live in:
 | `services/adequacy/mc_loop_runner.py` | `start_mc`, `McRequest` + `McElccAsset` |
 | `services/adequacy/frontier_loop_runner.py` | `start_frontier`, `FrontierRequest` |
 | `services/adequacy/fmea_sweep_runner.py` | `start_fmea_sweep`, `FmeaSweepRequest` |
+| `services/adequacy/eh_study_runner.py` | `start_eh_study`, `EhStudyRequest` |
 
 Inject `solver_state=`, `state_update=` (loops / frontier / sweep — anything
 that restores via `_state_update`), `publish_study=` — never import
