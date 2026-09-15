@@ -24,5 +24,6 @@
   },
   "mc_certify_required": false,
   "dtc_stress_default": false,
-  "dsr_opt_in": false
+  "dsr_opt_in": false,
+  "dtc_planning_default": false
 }

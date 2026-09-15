@@ -124,6 +124,12 @@
         "note": null
       },
       {
+        "stage": "dtc_planning",
+        "status": "pending",
+        "solves_charged": 0,
+        "note": null
+      },
+      {
         "stage": "assemble",
         "status": "pending",
         "solves_charged": 0,

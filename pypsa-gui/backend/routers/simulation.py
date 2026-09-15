@@ -706,6 +706,7 @@ def run():
             eh_redundancy_comparison=None,
             eh_lever_comparison=None,
             eh_dtc_stress=None,
+            eh_dtc_planning=None,
             eh_reference_design_report=None,
             lopf_results=None,
             ac_pf_results=None,

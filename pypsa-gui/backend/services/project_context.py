@@ -232,6 +232,7 @@ RESULT_STATE_KEYS = (
     "eh_redundancy_comparison",
     "eh_lever_comparison",
     "eh_dtc_stress",
+    "eh_dtc_planning",
     "last_reserve_margin",
     "ac_pf_convergence", "ac_pf_convergence_list",
     "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks",
@@ -411,6 +412,7 @@ class ProjectSolverState:
     eh_redundancy_comparison: Any = None
     eh_lever_comparison: Any = None  # Phase 3c import/storage lever table
     eh_dtc_stress: Any = None  # Phase 4a DtC stress table
+    eh_dtc_planning: Any = None  # Phase 4b DtC planning table
     # The firm-capacity (reserve-margin) result of the last solve that
     # enforced one — the PERSISTED solve-time stash `/results/reserve_margin`
     # serves. Reset with the rest each solve, so a margin can never outlive

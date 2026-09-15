@@ -1593,3 +1593,12 @@ def get_asset_economics():
         return _not_solved()
     payload = compute_asset_economics(n, _state['solver_config'], result_df=_result_df)
     return _not_solved() if payload is None else payload
+
+
+@results_router.get("/eh_dtc_planning")
+def get_eh_dtc_planning():
+    """Last DtC planning table (Phase 4b). 204 if none."""
+    table = _state.get("eh_dtc_planning")
+    if table is None:
+        return Response(status_code=204)
+    return table

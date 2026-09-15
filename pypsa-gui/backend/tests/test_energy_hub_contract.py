@@ -29,6 +29,7 @@ def test_pipeline_constants_match_spec():
         "redundancy",
         "levers",
         "dtc_stress",
+        "dtc_planning",
         "assemble",
     )
 

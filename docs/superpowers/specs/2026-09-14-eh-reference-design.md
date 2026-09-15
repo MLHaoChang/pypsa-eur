@@ -38,7 +38,7 @@ Electricity-only adequacy remains the default until the multi-energy phase.
 | 5 | **Redundancy** = discrete options / train counts (scenario enum first, then outer-loop selection). Not continuous FOR derating. |
 | 6 | **Import caps** = planning overlays per **§6** (normative selection + mutation). **Not** certified interconnector adequacy unless outages are modelled. |
 | 7 | **Storage duration** = scenario enum first (hours of autonomy / `max_hours` options). Continuous expansion later. Annual ENS/LOLE alone does not claim multi-day autonomy. |
-| 8 | **DtC** = critical-load tags + islanding contingencies; **stress-on-fixed-plan first**. Planning mode blocked until slack/attribution spike. No per-load shed attribution on today’s one-slack-per-bus model. |
+| 8 | **DtC** = critical-load tags + islanding contingencies; **stress-on-fixed-plan first**, then **planning** per §10. No per-load shed attribution on today’s one-slack-per-bus model. |
 | 9 | **TEA** = post-process wrap (LCOE / optional LCOH) — no second cost engine. |
 | 10 | **Dynamics** = **feasibility gate, not co-opt lever** (v1). EMT = escalation flag behind SCR only. |
 | 11 | **RAM v1** = rate library + provenance (+ optional spare-lead-time modifier). Not full CMMS; planned-outage MC deferred. |
@@ -48,7 +48,7 @@ Electricity-only adequacy remains the default until the multi-energy phase.
 | 15 | **DSR in `weak_flexible`:** opt-in with double-count preflight (FMEA §4.4); never silently global. |
 | 16 | **Report ownership:** `EHStudyRunner` (P1.5) orchestrates stages and emits `ReferenceDesignReport` **only** via the P5 assembler (`assemble_reference_design_report`). No second report builder. |
 | 17 | **EH study budget default:** `DEFAULT_EH_BUDGET_SOLVES = 30` (same ceiling philosophy as `campaign.DEFAULT_BUDGET_SOLVES`); override allowed up to `MAX_EH_BUDGET_SOLVES = 120`. |
-| 18 | **Default pipeline stages (ordered):** `apply_pack` → `ens_solve` → `frontier` → `mc_certify` → `fmea_top` → `redundancy` → `levers` → `dtc_stress` → `assemble`. Stages after `ens_solve` may be skipped per pack/request; skipped → completeness `skipped`; required but missing → `not_established`. |
+| 18 | **Default pipeline stages (ordered):** `apply_pack` → `ens_solve` → `frontier` → `mc_certify` → `fmea_top` → `redundancy` → `levers` → `dtc_stress` → `dtc_planning` → `assemble`. Stages after `ens_solve` may be skipped per pack/request; skipped → completeness `skipped`; required but missing → `not_established`. `dtc_planning` is opt-in (pack flag / explicit stages); default packs skip it. |
 
 ---
 
@@ -152,3 +152,29 @@ P3b (auto-select redundancy) and P4b (DtC planning) complete co-opt but are post
 ## 9. Relationship to FMEA design
 
 Solution FMEA remains the **diagnostic** under a single plan. The EH reference design is the **product wrapper**: archetype → orchestrated levers → existing co-opt/diagnostic engines → `ReferenceDesignReport`. Every point on an EH frontier still gets its own FMEA ranking (same principle as solution FMEA).
+
+## 10. DtC planning spike (P4b) — decision recorded
+
+**Spike question.** Plan Phase 4b required a choice before expansion under a DtC overlay:
+
+1. **Slack/attribution redesign** — per-load or multi-slack shed so critical unmet can be attributed inside a shared bus, or  
+2. **Islanded topology + system ENS under retained critical demand** — Class-B island the PoC, keep critical-bus loads, remove non-critical-bus demand from the planning solve, expand under the existing ENS-cap LP, report **system** ENS/cost (still bus-aggregate honesty).
+
+**Decision (2026-09-15):** **(2) Islanded topology + system ENS under retained critical demand.**
+
+**Rationale.** Spec decision 8 and non-goals already refuse per-load attribution on one-slack-per-bus. P6 still owns any future multi-slack redesign. P4a already requires critical vs non-critical loads on **different buses**; zeroing non-critical-bus `p_set` for the planning solve is therefore an honest retained-critical overlay, not a fake per-load shed claim.
+
+**Normative planning overlay**
+
+| Step | Action |
+|---|---|
+| 1 | Apply each `islanding_contingencies` Link via Class-B `p_*_pu→0` (same as stress). |
+| 2 | Retain critical demand: keep loads on critical buses; set non-critical-bus load `p_set`→0 for the solve (undo restores). |
+| 3 | Run ENS-capped expansion (`run_simulation` / existing solver path) — not a second cost engine. |
+| 4 | Report system ENS, cost@target, sizing; `attribution=bus_aggregate_not_per_load`; honesty notes must include `retained_critical_demand` and `no_per_load_attribution`. |
+
+**Not claimed.** Per-load shed ranking; certified islanding resilience without the Class-B contingency set; multi-energy critical carriers (P6).
+
+---
+
+

@@ -24,6 +24,16 @@ HONESTY_NOTES: tuple[str, ...] = (
     "islanding_is_planning_contingency",
 )
 
+PLANNING_HONESTY_NOTES: tuple[str, ...] = (
+    "no_per_load_attribution",
+    "retained_critical_demand",
+    "islanding_is_planning_contingency",
+    "system_ens_not_per_load",
+)
+
+class DtcPlanningError(ValueError):
+    pass
+
 
 class DtcConfigError(ValueError):
     pass
@@ -257,6 +267,171 @@ def run_dtc_stress(
     if store is not None:
         store["eh_dtc_stress"] = out
     return out
+
+
+
+
+def apply_retained_critical_demand(
+    n, dtc: DtcConfig,
+) -> tuple[Callable[[], None], dict[str, Any]]:
+    """Zero non-critical-bus load ``p_set``; keep critical buses intact.
+
+    Spec §10: retained critical demand for P4b planning. Critical and
+    non-critical loads must sit on different buses (P4a honesty boundary).
+    """
+    if n.loads is None or n.loads.empty:
+        raise DtcPlanningError("no loads to apply retained-critical overlay")
+    crit = _critical_buses(n, dtc)
+    if not crit:
+        raise DtcPlanningError("no critical buses resolved for retained demand")
+    snap = n.loads.copy(deep=True)
+    zeroed: list[str] = []
+    for lid in list(n.loads.index):
+        bus = str(n.loads.at[lid, "bus"]) if "bus" in n.loads.columns else ""
+        if bus and bus not in crit:
+            n.loads.at[lid, "p_set"] = 0.0
+            zeroed.append(str(lid))
+    # Also clear dynamic p_set for zeroed loads when present.
+    ts_snap = None
+    if getattr(n, "loads_t", None) is not None and getattr(n.loads_t, "p_set", None) is not None:
+        ts = n.loads_t.p_set
+        cols = [c for c in zeroed if c in ts.columns]
+        if cols:
+            ts_snap = ts[cols].copy()
+            ts[cols] = 0.0
+
+    def undo() -> None:
+        n.loads = snap
+        if ts_snap is not None:
+            for c in ts_snap.columns:
+                n.loads_t.p_set[c] = ts_snap[c]
+
+    return undo, {
+        "action": "retain_critical_demand",
+        "critical_buses": sorted(crit),
+        "zeroed_load_ids": zeroed,
+    }
+
+
+def run_dtc_planning(
+    network,
+    cfg,
+    *,
+    lock,
+    stop_event: threading.Event,
+    log_queue: queue.Queue | None = None,
+    dtc: DtcConfig,
+    store: dict | None = None,
+    pack_hash: str | None = None,
+    assumptions_hash: str | None = None,
+) -> dict[str, Any]:
+    """ENS-capped expansion under islanded + retained-critical overlay (P4b)."""
+    from services.solver_service import SolverConfig, run_simulation
+
+    if dtc.attribution != "bus_aggregate_not_per_load":
+        raise DtcPlanningError("planning refuses per-load attribution")
+    log_queue = log_queue or queue.SimpleQueue()
+    contingencies: list[dict[str, Any]] = []
+    solves_attempted = 0
+    aborted = False
+    crit = sorted(_critical_buses(network, dtc))
+
+    for link_id in dtc.islanding_contingencies:
+        if stop_event.is_set():
+            aborted = True
+            break
+        _detach_solver_model(network)
+        nn = network.copy()
+        _detach_solver_model(nn)
+        try:
+            undo_island, island_mut = apply_islanding_contingency(nn, str(link_id))
+            undo_ret, ret_mut = apply_retained_critical_demand(nn, dtc)
+        except Exception as exc:
+            contingencies.append({
+                "contingency": str(link_id),
+                "status": "error",
+                "condition": str(exc),
+                "cost_at_target_eur": None,
+                "built_p_nom_mw": None,
+            })
+            continue
+        sink: dict = {}
+        try:
+            cfg_i = copy.copy(cfg) if cfg is not None else cfg
+            status, condition = run_simulation(
+                cfg_i, nn, lock, stop_event, log_queue,
+                state_update=lambda **kw: sink.update(kw),
+            )
+            solves_attempted += 1
+            cost = None
+            built = None
+            ens_mwh = None
+            ar = sink.get("adequacy_report")
+            if isinstance(ar, dict):
+                cost = (ar.get("cost") or {}).get("total_system_cost_eur")
+                system = (ar.get("target") or {}).get("system") or {}
+                ens_mwh = system.get("achieved_ens_mwh")
+            # Built capacity: extendable gens that gained p_nom_opt > p_nom.
+            try:
+                if nn.generators is not None and not nn.generators.empty:
+                    built = 0.0
+                    for g in nn.generators.index:
+                        row = nn.generators.loc[g]
+                        if "p_nom_extendable" in nn.generators.columns and not bool(row.get("p_nom_extendable", False)):
+                            continue
+                        p0 = float(row["p_nom"]) if "p_nom" in nn.generators.columns else 0.0
+                        p1 = float(row["p_nom_opt"]) if "p_nom_opt" in nn.generators.columns else p0
+                        if p1 > p0 + 1e-6:
+                            built += p1 - p0
+            except Exception:
+                built = None
+            contingencies.append({
+                "contingency": str(link_id),
+                "status": status,
+                "condition": condition,
+                "cost_at_target_eur": cost,
+                "achieved_ens_mwh": ens_mwh,
+                "built_p_nom_mw": built,
+                "applied_island": island_mut,
+                "retained_critical": ret_mut,
+                "retained_critical_buses": crit,
+            })
+        finally:
+            try:
+                undo_ret()
+            except Exception:
+                logger.exception("retained-critical undo failed")
+            try:
+                undo_island()
+            except Exception:
+                logger.exception("island undo failed")
+            _detach_solver_model(nn)
+
+    out = {
+        "mode": "planning",
+        "attribution": "bus_aggregate_not_per_load",
+        "honesty_notes": list(PLANNING_HONESTY_NOTES),
+        "pack_hash": pack_hash,
+        "assumptions_hash": assumptions_hash,
+        "contingencies": contingencies,
+        "solves_attempted": solves_attempted,
+        "aborted": aborted,
+    }
+    if store is not None:
+        store["eh_dtc_planning"] = out
+    return out
+
+
+def dtc_planning_section_status(table: dict[str, Any]) -> tuple[str, str | None]:
+    if table.get("aborted"):
+        return "not_established", "DtC planning aborted mid-loop"
+    solved = [
+        c for c in (table.get("contingencies") or [])
+        if c.get("status") in ("ok", "optimal")
+    ]
+    if len(solved) < 1:
+        return "not_established", "no DtC planning contingency solved"
+    return "ok", None
 
 
 def dtc_section_status(table: dict[str, Any]) -> tuple[str, str | None]:

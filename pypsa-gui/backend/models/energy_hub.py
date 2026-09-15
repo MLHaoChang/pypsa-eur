@@ -27,6 +27,7 @@ EH_PIPELINE_STAGES: tuple[str, ...] = (
     "redundancy",
     "levers",
     "dtc_stress",
+    "dtc_planning",
     "assemble",
 )
 
@@ -39,6 +40,7 @@ EHPipelineStage = Literal[
     "redundancy",
     "levers",
     "dtc_stress",
+    "dtc_planning",
     "assemble",
 ]
 
@@ -143,6 +145,8 @@ class ArchetypePack(BaseModel):
     # Pack policy: whether mc_certify is required for a complete MVP-B report.
     mc_certify_required: bool = False
     dtc_stress_default: bool = False
+    # Opt-in P4b planning overlay (islanded + retained critical demand).
+    dtc_planning_default: bool = False
     # DSR: weak_flexible may suggest opt-in; never silently global (decision 15).
     dsr_opt_in: bool = False
 
@@ -235,6 +239,7 @@ def default_strong_grid_pack() -> ArchetypePack:
         levers=OptimizationLevers(sizing=True),
         mc_certify_required=False,
         dtc_stress_default=False,
+        dtc_planning_default=False,
         dsr_opt_in=False,
     )
 
@@ -252,6 +257,7 @@ def default_weak_flexible_pack() -> ArchetypePack:
         import_overlay=ImportOverlaySpec(import_p_nom_mw=50.0),
         mc_certify_required=True,
         dtc_stress_default=True,
+        dtc_planning_default=False,
         dsr_opt_in=True,
     )
 
@@ -274,5 +280,6 @@ def default_off_grid_pack() -> ArchetypePack:
         import_overlay=ImportOverlaySpec(import_p_nom_mw=None),
         mc_certify_required=True,
         dtc_stress_default=False,
+        dtc_planning_default=False,
         dsr_opt_in=False,
     )

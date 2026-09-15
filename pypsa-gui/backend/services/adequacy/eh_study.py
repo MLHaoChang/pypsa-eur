@@ -89,6 +89,8 @@ def run_eh_study(
                 return bool(pack.levers.import_cap or pack.levers.storage_duration)
             if s == "dtc_stress":
                 return bool(pack.dtc_stress_default)
+            if s == "dtc_planning":
+                return bool(getattr(pack, "dtc_planning_default", False))
             return True
         requested = tuple(s for s in DEFAULT_STAGES if _keep(s))
     budget_solves = max(1, min(int(budget_solves), MAX_EH_BUDGET_SOLVES))
@@ -97,7 +99,7 @@ def run_eh_study(
 
     # Stages this driver can actually execute today.
     IMPLEMENTED = frozenset({
-        "apply_pack", "ens_solve", "redundancy", "levers", "dtc_stress", "assemble",
+        "apply_pack", "ens_solve", "redundancy", "levers", "dtc_stress", "dtc_planning", "assemble",
     })
 
     records: list[PipelineStageRecord] = []
@@ -454,15 +456,80 @@ def run_eh_study(
                 )
                 section_payloads.setdefault(
                     section, ("skipped", None, reason))
+
+        if not aborted and "dtc_planning" in requested:
+            if stop_event.is_set():
+                aborted = True
+                _mark("dtc_planning", "aborted")
+            else:
+                from services.adequacy import dtc as dtc_mod
+                from models.energy_hub import DtcConfig
+                try:
+                    cfg_dtc = dtc_config
+                    if cfg_dtc is None:
+                        from services.adequacy.archetypes import select_import_links
+                        links = select_import_links(network, pack.import_overlay)
+                        crit_buses = []
+                        if network.buses is not None and "eh_critical" in getattr(
+                                network.buses, "columns", []):
+                            crit_buses = [
+                                str(b) for b in network.buses.index
+                                if network.buses.at[b, "eh_critical"] is True
+                                or str(network.buses.at[b, "eh_critical"]).lower()
+                                in ("true", "1", "yes")
+                            ]
+                        if not links or not crit_buses:
+                            raise dtc_mod.DtcPlanningError(
+                                "dtc_planning requested but no import Links / "
+                                "critical buses resolved; pass dtc_config"
+                            )
+                        cfg_dtc = DtcConfig(
+                            critical_bus_ids=crit_buses,
+                            islanding_contingencies=list(links),
+                        )
+                    table = dtc_mod.run_dtc_planning(
+                        network, cfg,
+                        lock=lock,
+                        stop_event=stop_event,
+                        log_queue=log_queue,
+                        dtc=cfg_dtc,
+                        store=store,
+                        pack_hash=pack_h,
+                        assumptions_hash=_assumptions_hash(cfg),
+                    )
+                    n_attempted = int(table.get("solves_attempted") or 0)
+                    sec_status, sec_note = dtc_mod.dtc_planning_section_status(table)
+                    _mark("dtc_planning", "run",
+                          solves_charged=n_attempted,
+                          note=sec_note or f"{n_attempted} solves")
+                    # Merge with existing dtc stress payload when present.
+                    prev = section_payloads.get("dtc")
+                    if prev and isinstance(prev[1], dict) and prev[1].get("mode") in ("stress", "stress_fixed_plan"):
+                        merged = {
+                            "mode": "stress+planning",
+                            "stress": prev[1],
+                            "planning": table,
+                            "attribution": "bus_aggregate_not_per_load",
+                        }
+                        section_payloads["dtc"] = (sec_status, merged, sec_note)
+                    else:
+                        section_payloads["dtc"] = (sec_status, table, sec_note)
+                    solves += n_attempted
+                except Exception as exc:
+                    logger.exception("DtC planning failed")
+                    _mark("dtc_planning", "aborted", note=str(exc))
+                    section_payloads.setdefault(
+                        "dtc", ("not_established", None, str(exc)))
+
         if "redundancy" not in requested:
             section_payloads.setdefault(
                 "redundancy", ("skipped", None, "redundancy not requested"))
         if "levers" not in requested:
             section_payloads.setdefault(
                 "levers", ("skipped", None, "levers not requested"))
-        if "dtc_stress" not in requested:
+        if "dtc_stress" not in requested and "dtc_planning" not in requested:
             section_payloads.setdefault(
-                "dtc", ("skipped", None, "dtc_stress not requested"))
+                "dtc", ("skipped", None, "dtc_stress/dtc_planning not requested"))
 
         if pack.mc_certify_required and "mc_certify" not in IMPLEMENTED:
             section_payloads["gates"] = (
