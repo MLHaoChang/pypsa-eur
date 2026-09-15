@@ -63,7 +63,7 @@ def run_eh_study(
     store: dict | None = None,
     dtc_config=None,
 ) -> ReferenceDesignReport:
-    """Synchronous EH study driver (HTTP worker wraps this later).
+    """Synchronous EH study driver (HTTP worker: ``eh_study_runner``).
 
     If ``store`` is provided, the finished report is persisted under
     ``eh_reference_design_report`` for ``GET /results/eh_reference_design``,

@@ -49,6 +49,10 @@ from services.adequacy.frontier_loop_runner import (  # noqa: F401
 from services.adequacy.fmea_sweep_runner import (  # noqa: F401
     FmeaSweepRequest,
 )
+from services.adequacy.eh_study_runner import (  # noqa: F401
+    EhStudyRequest,
+
+)
 from services.results.prices import _apply_merit_order_correction  # noqa: F401
 from services.results.cost_breakdown import (  # noqa: F401
     _class_lifetime,
@@ -1365,6 +1369,58 @@ def get_adequacy():
     if not report:
         return Response(status_code=204)
     return report
+
+
+@results_router.get("/eh_study")
+def get_eh_study():
+    """
+    Status + payload of the last Energy Hub reference-design study.
+
+    204 when none has been run in this session. While the worker runs this
+    serves ``{"status": "running", ...}`` — same shape as the frontier
+    surface. The stored record carries the worker-thread handle and stop
+    event, which must never reach the wire.
+    """
+    st = _state.get("eh_study")
+    if not st:
+        return Response(status_code=204)
+    return {k: v for k, v in st.items() if k not in ("thread", "stop_event")}
+
+
+@results_router.post("/eh_study/abort")
+def post_eh_study_abort():
+    """
+    Ask a running Energy Hub study to stop.
+
+    Same contract as the other study abort POSTs: 200 sets the record's stop
+    event; idempotent when already finishing or finished; 404 only when no
+    run has ever been recorded.
+    """
+    return _abort_study(
+        "eh_study",
+        "no Energy Hub study has been run in this session",
+    )
+
+
+@results_router.post("/eh_study")
+def post_eh_study(body: EhStudyRequest | None = None):
+    """
+    Start the Energy Hub reference-design study in a worker thread.
+
+    Applies an archetype pack, runs the EH pipeline (ENS solve and any
+    enabled stages), and persists ``ReferenceDesignReport`` for
+    ``GET /results/eh_reference_design``. 409 while a study or a foreground
+    solve is running.
+    """
+    from routers.simulation import _state_update
+    from services.adequacy.eh_study_runner import start_eh_study
+    _refuse_if_mesh_busy("eh_study")
+    return start_eh_study(
+        body,
+        solver_state=_state,
+        state_update=_state_update,
+        publish_study=_publish_study,
+    )
 
 
 @results_router.get("/eh_reference_design")

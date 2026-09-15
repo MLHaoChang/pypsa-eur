@@ -2,7 +2,8 @@
 The study mutual-exclusion mesh is a CLAIM, not a check.
 
 Whole-branch review (2026-09-08), findings S2, S3, S4 and M1. Five study
-POSTs (`fmea_sweep`, `frontier`, `mc`, `coupling_loop`, `margin_loop`) and
+POSTs (`fmea_sweep`, `frontier`, `mc`, `coupling_loop`, `margin_loop`,
+`eh_study`) and
 the two foreground solve entrypoints (`/simulation/run`, `/run_ac_pf`) share
 one foreground network. Before this file:
 
@@ -55,6 +56,7 @@ STUDY_POSTS = {
     "mc": "/api/results/mc",
     "coupling_loop": "/api/results/coupling_loop",
     "margin_loop": "/api/results/margin_loop",
+    "eh_study": "/api/results/eh_study",
 }
 
 

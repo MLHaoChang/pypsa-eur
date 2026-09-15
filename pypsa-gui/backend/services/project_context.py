@@ -253,7 +253,8 @@ RESULT_STATE_KEYS = (
 # And it keeps the import graph acyclic — `study_state` imports PyPSAService,
 # so `pypsa_service` cannot import `study_state`, but it already imports this
 # module.
-STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop")
+STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
+             "eh_study")
 
 # What each study is called in a refusal. A user who is told "a study is
 # running" cannot act; one who is told WHICH can go and deal with it.
@@ -263,6 +264,7 @@ STUDY_LABELS = {
     "mc": "a sequential-MC study",
     "coupling_loop": "a coupling-loop study",
     "margin_loop": "a margin-loop study",
+    "eh_study": "an Energy Hub study",
 }
 
 # The studies a user can actually STOP.
@@ -278,7 +280,7 @@ STUDY_LABELS = {
 # Pinned by a test against the routes that actually exist, so this cannot
 # drift the day someone REMOVES an abort.
 ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
-                     "fmea_sweep")
+                     "fmea_sweep", "eh_study")
 
 
 def record_is_running(record) -> bool:
@@ -448,6 +450,7 @@ class ProjectSolverState:
     mc: Any = None
     coupling_loop: Any = None
     margin_loop: Any = None
+    eh_study: Any = None
 
     def as_dict(self) -> dict[str, Any]:
         """A plain dict with the same keys/values — the legacy `_state` shape."""

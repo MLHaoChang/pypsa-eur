@@ -23,8 +23,9 @@ _RESULTS = _BACKEND / "routers" / "results.py"
 _MC_RUNNER = _BACKEND / "services" / "adequacy" / "mc_loop_runner.py"
 _FRONTIER_RUNNER = _BACKEND / "services" / "adequacy" / "frontier_loop_runner.py"
 _FMEA_SWEEP_RUNNER = _BACKEND / "services" / "adequacy" / "fmea_sweep_runner.py"
+_EH_RUNNER = _BACKEND / "services" / "adequacy" / "eh_study_runner.py"
 
-_RUNNERS = (_MC_RUNNER, _FRONTIER_RUNNER, _FMEA_SWEEP_RUNNER)
+_RUNNERS = (_MC_RUNNER, _FRONTIER_RUNNER, _FMEA_SWEEP_RUNNER, _EH_RUNNER)
 
 # Hard ceiling: a thin handler is mesh refuse + imports + the runner call.
 # Today's measured sizes are ~19–31; leave headroom for comment edits.
@@ -37,10 +38,12 @@ def test_handlers_and_models_stay_on_the_router_surface():
         "post_mc",
         "post_frontier",
         "post_fmea_sweep",
+        "post_eh_study",
         "McRequest",
         "McElccAsset",
         "FrontierRequest",
         "FmeaSweepRequest",
+        "EhStudyRequest",
     ):
         assert hasattr(R, name), name
 
@@ -69,7 +72,7 @@ def _handler_loc(name: str) -> int:
 
 
 @pytest.mark.parametrize(
-    "name", ["post_mc", "post_frontier", "post_fmea_sweep"],
+    "name", ["post_mc", "post_frontier", "post_fmea_sweep", "post_eh_study"],
 )
 def test_post_handlers_stay_thin(name: str):
     loc = _handler_loc(name)
@@ -82,6 +85,8 @@ def test_runners_export_start_functions():
     mc = importlib.import_module("services.adequacy.mc_loop_runner")
     frontier = importlib.import_module("services.adequacy.frontier_loop_runner")
     sweep = importlib.import_module("services.adequacy.fmea_sweep_runner")
+    eh = importlib.import_module("services.adequacy.eh_study_runner")
     assert callable(mc.start_mc)
     assert callable(frontier.start_frontier)
     assert callable(sweep.start_fmea_sweep)
+    assert callable(eh.start_eh_study)
