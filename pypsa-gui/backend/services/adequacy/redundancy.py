@@ -28,6 +28,17 @@ DEFAULT_SCENARIOS: tuple[str, ...] = (
     "parallel_storage",
 )
 
+# Phase 3b — discrete outer-loop selection pins.
+# MC certify cadence: finalists only (selected + dominated feasible), not every
+# candidate in the integer domain. Coupling-loop control-flow only — no bisection.
+MC_CERTIFY_CADENCE = "finalists_only"
+MAX_TRAINS_BY_CLASS: dict[str, int] = {
+    "base": 1,
+    "n1_generation": 1,
+    "n1_conversion": 1,
+    "parallel_storage": 2,
+}
+
 _PLACEHOLDER_HEADROOM_MW = 50.0
 _PLACEHOLDER_STORAGE_MW = 40.0
 
@@ -45,6 +56,108 @@ _IMPORT_ROLES = frozenset({"grid_import", "eh_import", "import"})
 
 class RedundancyScenarioError(ValueError):
     pass
+
+
+def parse_scenario_id(scenario_id: str) -> tuple[str, int]:
+    """Split ``kind`` / ``kind@trains`` into ``(kind, trains)``."""
+    sid = str(scenario_id)
+    if "@" in sid:
+        kind, _, rest = sid.partition("@")
+        try:
+            trains = int(rest)
+        except ValueError as exc:
+            raise RedundancyScenarioError(
+                f"invalid train count in scenario id {scenario_id!r}") from exc
+        if trains < 1:
+            raise RedundancyScenarioError(
+                f"train count must be >= 1 in scenario id {scenario_id!r}")
+        return kind, trains
+    return sid, 1
+
+
+def expand_redundancy_domain(
+    base_scenarios: Iterable[str] | None = None,
+    *,
+    max_trains_by_class: dict[str, int] | None = None,
+) -> tuple[str, ...]:
+    """Expand scenario kinds into a small integer train domain (P3b).
+
+    Classes with ``max_trains == 1`` stay un-suffixed. Classes with
+    ``max_trains > 1`` emit ``kind@1`` .. ``kind@N``.
+    """
+    caps = dict(MAX_TRAINS_BY_CLASS)
+    if max_trains_by_class:
+        caps.update({str(k): int(v) for k, v in max_trains_by_class.items()})
+    seeds = (
+        tuple(base_scenarios) if base_scenarios is not None else DEFAULT_SCENARIOS
+    )
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in seeds:
+        kind, _trains_in = parse_scenario_id(raw)
+        if "@" in str(raw):
+            sid = str(raw)
+            if sid not in seen:
+                out.append(sid)
+                seen.add(sid)
+            continue
+        n_max = int(caps.get(kind, 1))
+        if n_max <= 1:
+            if kind not in seen:
+                out.append(kind)
+                seen.add(kind)
+        else:
+            for t in range(1, n_max + 1):
+                sid = f"{kind}@{t}"
+                if sid not in seen:
+                    out.append(sid)
+                    seen.add(sid)
+    return tuple(out)
+
+
+def select_redundancy_option(table: dict[str, Any]) -> dict[str, Any]:
+    """Least-cost option among those meeting the ENS target (P3b).
+
+    ``losers`` fail the same ENS metric (``meets_target`` False).
+    ``dominated`` meet the target but cost more than the selected option.
+    """
+    if table.get("aborted"):
+        raise RedundancyScenarioError(
+            "cannot select from an aborted redundancy compare")
+    options = list(table.get("options") or [])
+    feasible = [
+        o for o in options
+        if o.get("status") in ("ok", "optimal")
+        and not o.get("not_applicable")
+        and o.get("meets_target") is True
+        and o.get("cost_at_target_eur") is not None
+    ]
+    if not feasible:
+        raise RedundancyScenarioError(
+            "no feasible redundancy option meets the ENS target")
+    selected = min(feasible, key=lambda o: float(o["cost_at_target_eur"]))
+    selected_id = selected.get("scenario_id")
+    losers = [
+        o for o in options
+        if o.get("scenario_id") != selected_id
+        and o.get("status") in ("ok", "optimal")
+        and not o.get("not_applicable")
+        and o.get("meets_target") is False
+    ]
+    dominated = [
+        o for o in feasible
+        if o.get("scenario_id") != selected_id
+    ]
+    return {
+        "selected_id": selected_id,
+        "selected": selected,
+        "losers": losers,
+        "dominated": dominated,
+        "selection_rule": "least_cost_meeting_ens_target",
+        "certify_method": table.get("certify_method", "ens"),
+        "mc_certify_cadence": MC_CERTIFY_CADENCE,
+        "feasible_count": len(feasible),
+    }
 
 
 def _finite_base_mw(row, *, fallback: float = 0.0) -> float:
@@ -180,7 +293,10 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
     When a scenario cannot enlarge the feasible set, ``not_applicable`` is set
     and ``applied`` is empty (monotone headroom; assessor D2).
     """
-    if scenario_id == "base":
+    kind, trains = parse_scenario_id(scenario_id)
+
+    if kind == "base":
+
         return lambda: None, {
             "scenario_id": "base",
             "applied": [],
@@ -198,7 +314,7 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
     }
     applied: list[dict[str, Any]] = []
 
-    if scenario_id == "n1_generation":
+    if kind == "n1_generation":
         bus = _primary_load_bus(n)
         if "eh_spare_gen" not in n.generators.index:
             n.add(
@@ -217,7 +333,7 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
                 "marginal_cost": 180.0,
                 "carrier": "gas",
             })
-    elif scenario_id == "n1_conversion":
+    elif kind == "n1_conversion":
         link_name = _select_conversion_link(n)
         if link_name is not None:
             row = n.links.loc[link_name]
@@ -313,14 +429,16 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
                     "carrier": "H2",
                 },
             ])
-    elif scenario_id == "parallel_storage":
+    elif kind == "parallel_storage":
         bus = _primary_load_bus(n)
+        p_max = float(_PLACEHOLDER_STORAGE_MW) * float(trains)
+        capex = 80.0 * float(trains)
         if "eh_spare_storage" not in n.storage_units.index:
             n.add(
                 "StorageUnit", "eh_spare_storage", bus=bus, carrier="battery",
                 p_nom=0.0, p_nom_extendable=True,
-                p_nom_max=_PLACEHOLDER_STORAGE_MW,
-                max_hours=4.0, capital_cost=80.0,
+                p_nom_max=p_max,
+                max_hours=4.0, capital_cost=capex,
                 efficiency_store=0.9, efficiency_dispatch=0.9,
             )
             applied.append({
@@ -328,13 +446,14 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
                 "name": "eh_spare_storage",
                 "action": "add",
                 "bus": bus,
-                "p_nom_max": _PLACEHOLDER_STORAGE_MW,
-                "capital_cost": 80.0,
+                "p_nom_max": p_max,
+                "capital_cost": capex,
                 "max_hours": 4.0,
+                "trains": int(trains),
             })
     else:
         raise RedundancyScenarioError(
-            f"unknown redundancy scenario {scenario_id!r}")
+            f"unknown redundancy scenario {scenario_id!r} (kind={kind!r})")
 
     def undo() -> None:
         if snap["buses"] is not None:
@@ -345,7 +464,7 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
             n.storage_units = snap["storage_units"]
         if snap["links"] is not None:
             n.links = snap["links"]
-        elif scenario_id == "n1_conversion":
+        elif kind == "n1_conversion":
             if n.links is not None and not n.links.empty:
                 n.links = n.links.iloc[0:0].copy()
 
@@ -354,6 +473,8 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
         "applied": applied,
         "cost_basis": "synthetic_placeholder",
         "not_applicable": False,
+        "trains": int(trains),
+        "kind": kind,
     }
 
 
@@ -390,6 +511,7 @@ def compare_redundancy_scenarios(
     store: dict | None = None,
     pack_hash: str | None = None,
     assumptions_hash: str | None = None,
+    select: bool = True,
 ) -> dict[str, Any]:
     """Solve each scenario at a fixed ENS target; return comparison table.
 
@@ -398,7 +520,10 @@ def compare_redundancy_scenarios(
     """
     from services.solver_service import SolverConfig, run_simulation
 
-    scenarios = tuple(scenarios) if scenarios is not None else DEFAULT_SCENARIOS
+    if scenarios is not None:
+        scenarios = expand_redundancy_domain(tuple(scenarios))
+    else:
+        scenarios = expand_redundancy_domain(DEFAULT_SCENARIOS)
     if not scenarios:
         raise RedundancyScenarioError("need at least one redundancy scenario")
     log_queue = log_queue or queue.SimpleQueue()
@@ -519,6 +644,15 @@ def compare_redundancy_scenarios(
         "effective_voll": effective_voll_used,
         "voll_defaulted": voll_was_defaulted,
     }
+    if select and not aborted:
+        try:
+            out["selection"] = select_redundancy_option(out)
+        except RedundancyScenarioError as exc:
+            out["selection"] = None
+            out["selection_error"] = str(exc)
+    elif select and aborted:
+        out["selection"] = None
+        out["selection_error"] = "compare aborted before selection"
     if store is not None:
         store["eh_redundancy_comparison"] = out
     return out

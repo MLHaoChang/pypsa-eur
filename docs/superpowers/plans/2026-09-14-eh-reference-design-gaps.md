@@ -203,9 +203,9 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 **TDD evidence:** ImportError red → `redundancy.py` → 17 tests green (finite n1_conversion headroom, role selection, private sink, provenance hashes, claim wipe).
 
 ### 3b — Discrete outer-loop selection (`v1-nice` / co-opt complete)
-- [ ] Small integer domains per asset class; pin max trains + **MC certify cadence** (every candidate vs finalists only).
-- [ ] Select least-cost option meeting target; reuse coupling-loop **control-flow** only (not continuous bisection math).
-- [ ] Out of scope: joint MILP with UC + redundancy.
+- [x] Small integer domains per asset class; pin max trains + **MC certify cadence** (every candidate vs finalists only).
+- [x] Select least-cost option meeting target; reuse coupling-loop **control-flow** only (not continuous bisection math).
+- [x] Out of scope: joint MILP with UC + redundancy.
 
 ### 3c — Import cap + storage duration scenario levers (`v1-blocker` for off-grid honesty)
 - [x] Scenario enum over `import_cap` and `storage_duration` (e.g. hours of autonomy), especially for `off_grid` / `weak_flexible`.
@@ -216,7 +216,8 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 **Acceptance**
 - [x] 3a: ≥2 redundancy options with costs at fixed target (P3a; B1–B3 closed in `99ef3cc9`).
 - [x] 3c: ≥2 storage-duration (or import) options affecting cost@target on off-grid/weak fixtures (`test_energy_hub_levers.py`).
-- [ ] 3b (when shipped): selected option meets target; losers fail same metric.
+- [x] 3b: selected option meets target; losers fail same metric (`test_energy_hub_redundancy_select.py`).
+- [ ] **QA gate cleared** (P3b — awaiting assessor)
 - [x] **QA gate cleared** — [P3c re-gate](bc-4e1a7ff3-1fb9-5f4c-80ab-1eea7a1d7919): **GO** (after binding-condition fix `7527dd05`; prior GO WITH BINDING CONDITIONS [bc-661df1e3-bf66-59d4-89b5-dc06fe6384fe](bc-661df1e3-bf66-59d4-89b5-dc06fe6384fe)).
 
 ---
