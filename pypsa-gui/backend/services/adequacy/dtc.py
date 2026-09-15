@@ -44,10 +44,16 @@ def load_dtc_config(path: str | Path) -> DtcConfig:
 def apply_islanding_contingency(
     n, link_id: str,
 ) -> tuple[Callable[[], None], dict[str, Any]]:
-    """Zero import Link availability (Class-B p_*_pu); return undo + mutation."""
+    """Zero import Link availability (Class-B p_*_pu); return undo + mutation.
+
+    Undo restores both static and time-series ``p_max_pu`` / ``p_min_pu``
+    (assessor P4a-B1). Prefer calling on a copy when the caller will discard
+    the network anyway.
+    """
     if n.links is None or link_id not in n.links.index:
         raise DtcStressError(f"islanding contingency Link {link_id!r} not found")
-    snap = n.links.copy(deep=True)
+    snap_static = n.links.copy(deep=True)
+    snap_t: dict[str, Any] = {}
     if "p_max_pu" not in n.links.columns:
         n.links["p_max_pu"] = 1.0
     if "p_min_pu" not in n.links.columns:
@@ -57,15 +63,21 @@ def apply_islanding_contingency(
     for attr in ("p_max_pu", "p_min_pu"):
         ts = getattr(getattr(n, "links_t", None), attr, None)
         if ts is not None and link_id in getattr(ts, "columns", []):
+            snap_t[attr] = ts[link_id].copy()
             ts[link_id] = 0.0
 
     def undo() -> None:
-        n.links = snap
+        n.links = snap_static
+        for attr, series in snap_t.items():
+            ts = getattr(getattr(n, "links_t", None), attr, None)
+            if ts is not None and link_id in getattr(ts, "columns", []):
+                ts[link_id] = series
 
     return undo, {
         "action": "island_import",
         "link": str(link_id),
         "method": "p_max_pu_p_min_pu_zero",
+        "restored_time_series": sorted(snap_t.keys()),
     }
 
 

@@ -82,16 +82,26 @@ def test_dtc_refuses_per_load_attribution_claim():
         )
 
 
-def test_apply_islanding_zeros_import_and_undo_restores():
+def test_apply_islanding_zeros_import_and_undo_restores_static_and_ts():
+    """Assessor P4a-B1: undo must restore links_t as well as static."""
     n = _weak_network()
     if "p_max_pu" not in n.links.columns:
         n.links["p_max_pu"] = 1.0
-    before = float(n.links.at["import_poc", "p_max_pu"])
+    # Seed a time-series overlay so undo has something to restore.
+    n.links_t.p_max_pu = pd.DataFrame(
+        1.0, index=n.snapshots, columns=["import_poc"])
+    n.links_t.p_min_pu = pd.DataFrame(
+        0.0, index=n.snapshots, columns=["import_poc"])
+    before_static = float(n.links.at["import_poc", "p_max_pu"])
+    before_ts = n.links_t.p_max_pu["import_poc"].copy()
     undo, mut = D.apply_islanding_contingency(n, "import_poc")
     assert float(n.links.at["import_poc", "p_max_pu"]) == 0.0
+    assert float(n.links_t.p_max_pu["import_poc"].max()) == 0.0
     assert mut["action"] == "island_import"
+    assert "p_max_pu" in mut["restored_time_series"]
     undo()
-    assert float(n.links.at["import_poc", "p_max_pu"]) == pytest.approx(before)
+    assert float(n.links.at["import_poc", "p_max_pu"]) == pytest.approx(before_static)
+    assert (n.links_t.p_max_pu["import_poc"] == before_ts).all()
 
 
 @pytest.mark.live_solve
@@ -120,9 +130,14 @@ def test_islanding_stress_separates_critical_and_noncritical_unserved():
     rows = [r for r in table["contingencies"] if r["status"] in ("ok", "optimal")]
     assert len(rows) >= 1
     row = rows[0]
+    # Assessor P4a-B2: both sides must show unmet, and Class-B island must bind.
+    assert row["applied"]["method"] == "p_max_pu_p_min_pu_zero"
     assert row["critical_unserved_mwh"] is not None
     assert row["noncritical_unserved_mwh"] is not None
-    assert (row["critical_unserved_mwh"] + row["noncritical_unserved_mwh"]) > 0
+    assert row["critical_unserved_mwh"] > 0
+    assert row["noncritical_unserved_mwh"] > 0
+    assert "crit" in row["critical_buses"]
+    assert "flex" in row["noncritical_buses"]
 
 
 @pytest.mark.live_solve
