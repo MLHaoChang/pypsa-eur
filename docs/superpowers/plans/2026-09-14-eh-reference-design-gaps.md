@@ -262,7 +262,7 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 - [x] MVP-A: orchestrated `strong_grid` study → report with cost@target + sizing + TEA; frontier `skipped`/`not_established`.
 - [x] Empty `redundancy` / `dtc` / `gates` allowed with flags.
 - [x] Golden-fixture snapshot tests for stable export shape.
-- [ ] MVP-B DoD: weak + off-grid packs produce filled dtc/lever sections per P3a/P4a/P3c.
+- [x] MVP-B DoD: weak + off-grid packs produce filled dtc/lever sections per P3a/P4a/P3c (`test_energy_hub_mvp_b.py`; soft-skip inapplicable lever kinds).
 - [x] **QA gate cleared** — [P5 re-gate](bc-6b83512d-30a2-531a-9fd6-b863eee782f9): **GO** (after NO-GO LCOE fix).
 
 **TDD evidence:** P5 tests red → enrichment + ENS-honest LCOE → green (9 tests).

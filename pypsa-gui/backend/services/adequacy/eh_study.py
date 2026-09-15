@@ -298,26 +298,39 @@ def run_eh_study(
                     # Primary kind first; merge options if both enabled.
                     merged = None
                     attempted = 0
+                    skipped_kinds: list[str] = []
                     for kind in kinds:
-                        table = lev.compare_lever_scenarios(
-                            network, cfg,
-                            lock=lock,
-                            stop_event=stop_event,
-                            log_queue=log_queue,
-                            kind=kind,
-                            values=None,
-                            availability=pack.availability,
-                            store=store if kind == kinds[-1] else None,
-                            pack_hash=pack_h,
-                            assumptions_hash=_assumptions_hash(cfg),
-                        )
+                        try:
+                            table = lev.compare_lever_scenarios(
+                                network, cfg,
+                                lock=lock,
+                                stop_event=stop_event,
+                                log_queue=log_queue,
+                                kind=kind,
+                                values=None,
+                                availability=pack.availability,
+                                store=None,
+                                pack_hash=pack_h,
+                                assumptions_hash=_assumptions_hash(cfg),
+                            )
+                        except lev.LeverScenarioError as exc:
+                            # Pack may enable a lever the network cannot host
+                            # (e.g. storage_duration with no StorageUnits).
+                            skipped_kinds.append(f"{kind}:{exc}")
+                            logger.info(
+                                "lever kind %s not applicable: %s", kind, exc)
+                            continue
                         attempted += int(table.get("solves_attempted") or 0)
                         if merged is None:
                             merged = table
                         else:
                             merged = {
                                 **table,
-                                "kind": "+".join(kinds),
+                                "kind": "+".join(
+                                    k for k in kinds
+                                    if not any(s.startswith(k + ":")
+                                               for s in skipped_kinds)
+                                ) or table.get("kind"),
                                 "options": list(merged.get("options") or [])
                                 + list(table.get("options") or []),
                                 "solves_attempted": attempted,
@@ -326,6 +339,11 @@ def run_eh_study(
                                 + int(table.get("comparable_solved") or 0),
                             }
                     if store is not None and merged is not None:
+                        if skipped_kinds:
+                            merged = {
+                                **merged,
+                                "skipped_kinds": skipped_kinds,
+                            }
                         store["eh_lever_comparison"] = merged
                     sec_status, sec_note = lev.levers_section_status(merged or {})
                     _mark("levers", "run",
