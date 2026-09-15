@@ -217,7 +217,7 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 - [x] 3a: ≥2 redundancy options with costs at fixed target (P3a; B1–B3 closed in `99ef3cc9`).
 - [x] 3c: ≥2 storage-duration (or import) options affecting cost@target on off-grid/weak fixtures (`test_energy_hub_levers.py`).
 - [x] 3b: selected option meets target; losers fail same metric (`test_energy_hub_redundancy_select.py`).
-- [ ] **QA gate cleared** (P3b — awaiting assessor)
+- [x] **QA gate cleared** — [P3b gate](bc-8e4a860d-384c-58eb-8829-1936023baad6): **GO**.
 - [x] **QA gate cleared** — [P3c re-gate](bc-4e1a7ff3-1fb9-5f4c-80ab-1eea7a1d7919): **GO** (after binding-condition fix `7527dd05`; prior GO WITH BINDING CONDITIONS [bc-661df1e3-bf66-59d4-89b5-dc06fe6384fe](bc-661df1e3-bf66-59d4-89b5-dc06fe6384fe)).
 
 ---
