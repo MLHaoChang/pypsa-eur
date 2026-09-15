@@ -704,6 +704,7 @@ def run():
             adequacy_report=None,
             last_reserve_margin=None,
             eh_redundancy_comparison=None,
+            eh_lever_comparison=None,
             eh_reference_design_report=None,
             lopf_results=None,
             ac_pf_results=None,

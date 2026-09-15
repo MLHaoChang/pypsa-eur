@@ -230,6 +230,7 @@ RESULT_STATE_KEYS = (
     "adequacy_report",
     "eh_reference_design_report",
     "eh_redundancy_comparison",
+    "eh_lever_comparison",
     "last_reserve_margin",
     "ac_pf_convergence", "ac_pf_convergence_list",
     "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks",
@@ -406,7 +407,8 @@ class ProjectSolverState:
     last_lost_load: Any = None
     adequacy_report: Any = None   # minimal AdequacyReport dict (target solves)
     eh_reference_design_report: Any = None  # ReferenceDesignReport dict (EH study)
-    eh_redundancy_comparison: Any = None  # Phase 3a redundancy table
+    eh_redundancy_comparison: Any = None
+    eh_lever_comparison: Any = None  # Phase 3c import/storage lever table
     # The firm-capacity (reserve-margin) result of the last solve that
     # enforced one — the PERSISTED solve-time stash `/results/reserve_margin`
     # serves. Reset with the rest each solve, so a margin can never outlive

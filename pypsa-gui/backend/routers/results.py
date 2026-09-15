@@ -1393,6 +1393,15 @@ def get_eh_redundancy():
     return table
 
 
+@results_router.get("/eh_levers")
+def get_eh_levers():
+    """Last import/storage lever comparison table (Phase 3c). 204 if none."""
+    table = _state.get("eh_lever_comparison")
+    if not table:
+        return Response(status_code=204)
+    return table
+
+
 @results_router.get("/reserve_margin")
 def get_reserve_margin():
     """

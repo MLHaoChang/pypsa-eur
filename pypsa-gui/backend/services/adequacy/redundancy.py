@@ -95,28 +95,59 @@ def _import_link_ids(n) -> set[str]:
     return out
 
 
+def _poc_touching_link_ids(n) -> set[str]:
+    """Links with either endpoint tagged ``eh_poc`` (assessor B3)."""
+    out: set[str] = set()
+    if n.links is None or n.links.empty:
+        return out
+    if n.buses is None or n.buses.empty or "eh_poc" not in n.buses.columns:
+        return out
+    poc = {
+        str(b) for b in n.buses.index
+        if n.buses.at[b, "eh_poc"] is True
+        or str(n.buses.at[b, "eh_poc"]).lower() in ("true", "1", "yes")
+    }
+    if not poc:
+        return out
+    for i in n.links.index:
+        b0 = str(n.links.at[i, "bus0"]) if "bus0" in n.links.columns else ""
+        b1 = str(n.links.at[i, "bus1"]) if "bus1" in n.links.columns else ""
+        if b0 in poc or b1 in poc:
+            out.add(str(i))
+    return out
+
+
 def _select_conversion_link(n) -> str | None:
     """Pick a conversion Link by positive identity; never guess / never import.
 
     Explicit ``eh_role`` in ``_CONVERSION_ROLES`` always wins, even if the
     link's carrier would also match the import-carrier fallback. Import-role
-    / PoC links are never selected. Bare AC/electricity without a conversion
-    role is not conversion identity — return ``None`` and invent a spare path.
+    or PoC-touching links are never selected (assessor B3). Bare AC /
+    electricity without a conversion role is not conversion identity —
+    return ``None`` and invent a spare path.
+
+    Carrier-only import matches (``select_import_links`` AC/DC fallback)
+    must not veto a positive conversion role — that would ban every AC
+    ``eh_conversion`` Link used by live N-1 fixtures.
     """
     if n.links is None or n.links.empty:
         return None
     links = n.links
     banned = _import_link_ids(n)
+    poc_touch = _poc_touching_link_ids(n)
 
     # 1) Positive role match (overrides import-carrier false positives).
+    #    B3: refuse import-ROLE tags and PoC-touching endpoints only.
     if "eh_role" in links.columns:
         for role in _CONVERSION_ROLES:
             for i in links.index:
+                name = str(i)
+                if "eh_role" in links.columns and str(links.at[i, "eh_role"]) in _IMPORT_ROLES:
+                    continue
+                if name in poc_touch:
+                    continue
                 if str(links.at[i, "eh_role"]) == role:
-                    # Still refuse if also tagged as an import role.
-                    if str(links.at[i, "eh_role"]) in _IMPORT_ROLES:
-                        continue
-                    return str(i)
+                    return name
 
     # 2) Conversion carriers only, excluding anything import selection claims.
     if "carrier" in links.columns:
@@ -251,15 +282,37 @@ def apply_redundancy_scenario(n, scenario_id: str) -> tuple[Callable[[], None], 
                 if "eh_role" not in n.links.columns:
                     n.links["eh_role"] = ""
                 n.links.at["eh_spare_conversion", "eh_role"] = "eh_n1_conversion"
-            applied.append({
-                "component": "Link",
-                "name": "eh_spare_conversion",
-                "action": "add_conversion_path",
-                "bus0": bus,
-                "bus1": "eh_n1_conv_bus",
-                "p_nom_max": _PLACEHOLDER_HEADROOM_MW,
-                "capital_cost": 40.0,
-            })
+            # Disclose every invented component (assessor B1) — the feeder is
+            # firm nameplate with zero capital cost, not a mere link upgrade.
+            applied.extend([
+                {
+                    "component": "Bus",
+                    "name": "eh_n1_conv_bus",
+                    "action": "add",
+                    "carrier": "AC",
+                },
+                {
+                    "component": "Generator",
+                    "name": "eh_n1_conv_feeder",
+                    "action": "add",
+                    "bus": "eh_n1_conv_bus",
+                    "p_nom": _PLACEHOLDER_HEADROOM_MW,
+                    "capital_cost": 0.0,
+                    "marginal_cost": 180.0,
+                    "carrier": "gas",
+                    "note": "firm_nameplate_zero_capex",
+                },
+                {
+                    "component": "Link",
+                    "name": "eh_spare_conversion",
+                    "action": "add_conversion_path",
+                    "bus0": bus,
+                    "bus1": "eh_n1_conv_bus",
+                    "p_nom_max": _PLACEHOLDER_HEADROOM_MW,
+                    "capital_cost": 40.0,
+                    "carrier": "H2",
+                },
+            ])
     elif scenario_id == "parallel_storage":
         bus = _primary_load_bus(n)
         if "eh_spare_storage" not in n.storage_units.index:
@@ -362,6 +415,8 @@ def compare_redundancy_scenarios(
     options: list[dict[str, Any]] = []
     solves_attempted = 0
     aborted = False
+    effective_voll_used: float | None = None
+    voll_was_defaulted = False
     for sid in scenarios:
         if stop_event.is_set():
             aborted = True
@@ -398,8 +453,13 @@ def compare_redundancy_scenarios(
                 cfg_i.ens_cap_permyriad = float(ens_cap)
             except Exception:
                 pass
+            voll_defaulted = False
             if float(getattr(cfg_i, "voll", 0.0) or 0.0) <= 0:
                 cfg_i.voll = 150.0
+                voll_defaulted = True
+            effective_voll = float(cfg_i.voll)
+            effective_voll_used = effective_voll
+            voll_was_defaulted = voll_was_defaulted or voll_defaulted
             solves_attempted += 1
             status, condition = run_simulation(
                 cfg_i, nn, lock, stop_event, log_queue,
@@ -433,6 +493,8 @@ def compare_redundancy_scenarios(
                 "cost_basis": mutation["cost_basis"],
                 "applied": mutation["applied"],
                 "not_applicable": False,
+                "effective_voll": effective_voll,
+                "voll_defaulted": voll_defaulted,
             })
         finally:
             try:
@@ -454,6 +516,8 @@ def compare_redundancy_scenarios(
         "solves_attempted": solves_attempted,
         "aborted": aborted,
         "comparable_solved": len(solved),
+        "effective_voll": effective_voll_used,
+        "voll_defaulted": voll_was_defaulted,
     }
     if store is not None:
         store["eh_redundancy_comparison"] = out

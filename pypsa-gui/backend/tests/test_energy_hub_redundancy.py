@@ -140,7 +140,8 @@ def test_select_conversion_excludes_grid_import_and_does_not_guess_ac():
     # Applying invents a spare conversion path — does NOT touch import_poc.
     undo, mut = R.apply_redundancy_scenario(n, "n1_conversion")
     assert float(n.links.at["import_poc", "p_nom_max"]) == 50.0
-    assert mut["applied"][0]["action"] == "add_conversion_path"
+    actions = {a["action"] for a in mut["applied"]}
+    assert "add_conversion_path" in actions
     assert "eh_spare_conversion" in n.links.index
     undo()
 
@@ -214,6 +215,7 @@ def test_claim_wipe_includes_eh_keys():
     idx = text.find('status="running"')
     chunk = text[idx:idx + 900]
     assert "eh_redundancy_comparison=None" in chunk
+    assert "eh_lever_comparison=None" in chunk
     assert "eh_reference_design_report=None" in chunk
 
 
@@ -342,3 +344,58 @@ def test_run_eh_study_redundancy_honest_status_and_store():
     # With default scenarios on a solvable net, expect ok completeness.
     assert report.completeness["redundancy"] == "ok"
     assert table["comparable_solved"] >= 2
+
+
+
+def test_invented_spare_path_lists_bus_feeder_and_link():
+    """Assessor B1: applied must enumerate every invented component."""
+    n = _network()  # no conversion link
+    undo, mut = R.apply_redundancy_scenario(n, "n1_conversion")
+    names = {a["name"] for a in mut["applied"]}
+    assert names >= {"eh_n1_conv_bus", "eh_n1_conv_feeder", "eh_spare_conversion"}
+    feeder = next(a for a in mut["applied"] if a["name"] == "eh_n1_conv_feeder")
+    assert feeder["capital_cost"] == 0.0
+    assert feeder.get("note") == "firm_nameplate_zero_capex"
+    undo()
+
+
+def test_conversion_role_on_poc_bus_is_banned():
+    """Assessor B3: conversion-role link on a PoC bus must not be selected."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.add("Carrier", "AC")
+    n.add("Bus", "hub", carrier="AC")
+    n.add("Bus", "poc", carrier="AC")
+    n.buses["eh_poc"] = False
+    n.buses.at["poc", "eh_poc"] = True
+    n.add("Load", "l", bus="hub", p_set=10.0)
+    n.add("Generator", "g", bus="hub", p_nom=10.0, marginal_cost=10.0, carrier="AC")
+    n.add("Link", "elyzer", bus0="hub", bus1="poc",
+          p_nom=25.0, p_nom_extendable=True, p_nom_max=25.0,
+          efficiency=1.0, carrier="H2")
+    n.links["eh_role"] = ""
+    n.links.at["elyzer", "eh_role"] = "eh_conversion"
+    assert "elyzer" in R._import_link_ids(n)
+    assert R._select_conversion_link(n) is None
+
+
+@pytest.mark.live_solve
+def test_compare_stamps_effective_voll():
+    """Assessor B2: table discloses effective VOLL and whether it was defaulted."""
+    from services.pypsa_service import PyPSAService
+
+    n = _network()
+    PyPSAService.set_network(n)
+    # voll=0 forces default
+    table = R.compare_redundancy_scenarios(
+        n, SolverConfig(voll=0.0, ens_cap_permyriad=1000.0),
+        lock=PyPSAService.get_lock(),
+        stop_event=threading.Event(),
+        log_queue=queue.SimpleQueue(),
+        scenarios=("base",),
+        availability=AvailabilityTarget(ens_cap_permyriad=1000.0),
+    )
+    assert table["effective_voll"] == 150.0
+    assert table["voll_defaulted"] is True
+    assert table["options"][0]["effective_voll"] == 150.0
+    assert table["options"][0]["voll_defaulted"] is True

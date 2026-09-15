@@ -81,16 +81,19 @@ def run_eh_study(
     if stages is not None:
         requested = tuple(stages)
     else:
-        requested = tuple(
-            s for s in DEFAULT_STAGES
-            if s != "redundancy" or pack.levers.redundancy
-        )
+        def _keep(s: str) -> bool:
+            if s == "redundancy":
+                return bool(pack.levers.redundancy)
+            if s == "levers":
+                return bool(pack.levers.import_cap or pack.levers.storage_duration)
+            return True
+        requested = tuple(s for s in DEFAULT_STAGES if _keep(s))
     budget_solves = max(1, min(int(budget_solves), MAX_EH_BUDGET_SOLVES))
     log_queue = log_queue or queue.SimpleQueue()
     state_update = state_update or (lambda **kw: None)
 
     # Stages this driver can actually execute today.
-    IMPLEMENTED = frozenset({"apply_pack", "ens_solve", "redundancy", "assemble"})
+    IMPLEMENTED = frozenset({"apply_pack", "ens_solve", "redundancy", "levers", "assemble"})
 
     records: list[PipelineStageRecord] = []
     for name in DEFAULT_STAGES:
@@ -272,10 +275,69 @@ def run_eh_study(
                     section_payloads["redundancy"] = (
                         "not_established", None, str(exc))
 
+
+        if not aborted and "levers" in requested:
+            if stop_event.is_set():
+                aborted = True
+                _mark("levers", "aborted")
+            else:
+                from services.adequacy import levers as lev
+                try:
+                    kinds = []
+                    if pack.levers.storage_duration:
+                        kinds.append("storage_duration")
+                    if pack.levers.import_cap:
+                        kinds.append("import_cap")
+                    if not kinds:
+                        kinds = ["storage_duration"]
+                    # Primary kind first; merge options if both enabled.
+                    merged = None
+                    attempted = 0
+                    for kind in kinds:
+                        table = lev.compare_lever_scenarios(
+                            network, cfg,
+                            lock=lock,
+                            stop_event=stop_event,
+                            log_queue=log_queue,
+                            kind=kind,
+                            values=None,
+                            availability=pack.availability,
+                            store=store if kind == kinds[-1] else None,
+                            pack_hash=pack_h,
+                            assumptions_hash=_assumptions_hash(cfg),
+                        )
+                        attempted += int(table.get("solves_attempted") or 0)
+                        if merged is None:
+                            merged = table
+                        else:
+                            merged = {
+                                **table,
+                                "kind": "+".join(kinds),
+                                "options": list(merged.get("options") or [])
+                                + list(table.get("options") or []),
+                                "solves_attempted": attempted,
+                                "comparable_solved": int(
+                                    merged.get("comparable_solved") or 0)
+                                + int(table.get("comparable_solved") or 0),
+                            }
+                    if store is not None and merged is not None:
+                        store["eh_lever_comparison"] = merged
+                    sec_status, sec_note = lev.levers_section_status(merged or {})
+                    _mark("levers", "run",
+                          solves_charged=attempted,
+                          note=sec_note or f"{attempted} solves")
+                    section_payloads["levers"] = (sec_status, merged, sec_note)
+                    solves += attempted
+                except Exception as exc:
+                    logger.exception("lever compare failed")
+                    _mark("levers", "aborted", note=str(exc))
+                    section_payloads["levers"] = (
+                        "not_established", None, str(exc))
+
+
         # Optional / not-yet-implemented stages → section skipped (never pending).
         for optional, section in (
             ("frontier", "frontier"),
-            ("levers", "levers"),
             ("dtc_stress", "dtc"),
             ("fmea_top", "fmea_top"),
         ):
@@ -290,6 +352,9 @@ def run_eh_study(
         if "redundancy" not in requested:
             section_payloads.setdefault(
                 "redundancy", ("skipped", None, "redundancy not requested"))
+        if "levers" not in requested:
+            section_payloads.setdefault(
+                "levers", ("skipped", None, "levers not requested"))
 
         if pack.mc_certify_required and "mc_certify" not in IMPLEMENTED:
             section_payloads["gates"] = (
