@@ -299,6 +299,7 @@ def run_eh_study(
                     merged = None
                     attempted = 0
                     skipped_kinds: list[str] = []
+                    applicable_kinds: list[str] = []
                     for kind in kinds:
                         try:
                             table = lev.compare_lever_scenarios(
@@ -314,23 +315,27 @@ def run_eh_study(
                                 assumptions_hash=_assumptions_hash(cfg),
                             )
                         except lev.LeverScenarioError as exc:
-                            # Pack may enable a lever the network cannot host
-                            # (e.g. storage_duration with no StorageUnits).
+                            msg = str(exc)
+                            # Soft-skip only asset-absence — config/unknown-kind
+                            # errors must fail closed with the original message.
+                            asset_absent = (
+                                "no StorageUnits" in msg
+                                or "no import Links" in msg
+                            )
+                            if not asset_absent:
+                                raise
                             skipped_kinds.append(f"{kind}:{exc}")
                             logger.info(
                                 "lever kind %s not applicable: %s", kind, exc)
                             continue
+                        applicable_kinds.append(kind)
                         attempted += int(table.get("solves_attempted") or 0)
                         if merged is None:
                             merged = table
                         else:
                             merged = {
                                 **table,
-                                "kind": "+".join(
-                                    k for k in kinds
-                                    if not any(s.startswith(k + ":")
-                                               for s in skipped_kinds)
-                                ) or table.get("kind"),
+                                "kind": "+".join(applicable_kinds),
                                 "options": list(merged.get("options") or [])
                                 + list(table.get("options") or []),
                                 "solves_attempted": attempted,
@@ -338,17 +343,40 @@ def run_eh_study(
                                     merged.get("comparable_solved") or 0)
                                 + int(table.get("comparable_solved") or 0),
                             }
-                    if store is not None and merged is not None:
-                        if skipped_kinds:
-                            merged = {
-                                **merged,
-                                "skipped_kinds": skipped_kinds,
-                            }
+                    # Always surface soft-skips on the payload (even if store
+                    # is None or every kind was inapplicable).
+                    if merged is None:
+                        merged = {
+                            "kind": "+".join(kinds),
+                            "options": [],
+                            "solves_attempted": 0,
+                            "comparable_solved": 0,
+                            "aborted": False,
+                        }
+                    if skipped_kinds:
+                        merged = {**merged, "skipped_kinds": list(skipped_kinds)}
+                    if store is not None:
                         store["eh_lever_comparison"] = merged
-                    sec_status, sec_note = lev.levers_section_status(merged or {})
-                    _mark("levers", "run",
-                          solves_charged=attempted,
-                          note=sec_note or f"{attempted} solves")
+                    sec_status, sec_note = lev.levers_section_status(merged)
+                    if skipped_kinds and not applicable_kinds:
+                        skip_note = (
+                            "all lever kinds inapplicable: "
+                            + "; ".join(skipped_kinds)
+                        )
+                        sec_status = "not_established"
+                        sec_note = skip_note
+                        _mark("levers", "skipped",
+                              note=skip_note)
+                    else:
+                        note = sec_note or f"{attempted} solves"
+                        if skipped_kinds:
+                            note = (
+                                f"{note}; soft-skipped "
+                                + ", ".join(skipped_kinds)
+                            )
+                        _mark("levers", "run",
+                              solves_charged=attempted,
+                              note=note)
                     section_payloads["levers"] = (sec_status, merged, sec_note)
                     solves += attempted
                 except Exception as exc:

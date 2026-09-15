@@ -179,3 +179,120 @@ def test_mvp_b_off_grid_default_pipeline_fills_levers():
     assert "eh_lever_comparison" in store
     assert store["eh_lever_comparison"]["comparable_solved"] >= 2
     assert "eh_dtc_stress" not in store
+
+def test_soft_skip_surfaces_skipped_kinds_without_store():
+    """Binding: skipped_kinds visible on report payload even when store is None."""
+    from services.adequacy import eh_study as S
+    from services.pypsa_service import PyPSAService
+
+    n = _weak_mvp_b_network()
+    pack = default_weak_flexible_pack().model_copy(update={
+        "availability": AvailabilityTarget(ens_cap_permyriad=5000.0),
+        "mc_certify_required": False,
+        "dtc_stress_default": False,  # isolate levers
+    })
+    PyPSAService.set_network(n)
+    report = S.run_eh_study(
+        n, pack, SolverConfig(voll=500.0, ens_cap_permyriad=5000.0),
+        lock=PyPSAService.get_lock(),
+        stop_event=threading.Event(),
+        log_queue=queue.SimpleQueue(),
+        stages=("apply_pack", "ens_solve", "levers", "assemble"),
+        store=None,
+    )
+    payload = report.sections["levers"].payload
+    assert payload is not None
+    skipped = payload.get("skipped_kinds") or []
+    assert any(s.startswith("storage_duration:") for s in skipped)
+    assert payload.get("kind") == "import_cap"
+
+
+def test_soft_skip_does_not_swallow_config_errors():
+    """Binding: non-asset LeverScenarioError must fail closed, not soft-skip."""
+    from services.adequacy import eh_study as S
+    from services.pypsa_service import PyPSAService
+
+    n = _weak_mvp_b_network()
+    # Force a config-class lever failure: empty ens cap makes compare refuse.
+    pack = default_weak_flexible_pack().model_copy(update={
+        "availability": AvailabilityTarget(ens_cap_permyriad=5000.0),
+        "mc_certify_required": False,
+        "dtc_stress_default": False,
+        "levers": default_weak_flexible_pack().levers.model_copy(update={
+            "import_cap": True,
+            "storage_duration": False,
+        }),
+    })
+    PyPSAService.set_network(n)
+    # Pass cfg with ens_cap wiped after pack availability is set — compare_lever
+    # uses availability.ens_cap_permyriad; override availability to None path by
+    # monkeypatching compare to raise a non-asset LeverScenarioError.
+    from services.adequacy import levers as lev
+    real = lev.compare_lever_scenarios
+
+    def _boom(*args, **kwargs):
+        raise lev.LeverScenarioError("ens_cap_permyriad must be > 0")
+
+    lev.compare_lever_scenarios = _boom  # type: ignore[assignment]
+    try:
+        report = S.run_eh_study(
+            n, pack, SolverConfig(voll=500.0, ens_cap_permyriad=5000.0),
+            lock=PyPSAService.get_lock(),
+            stop_event=threading.Event(),
+            log_queue=queue.SimpleQueue(),
+            stages=("apply_pack", "ens_solve", "levers", "assemble"),
+            store={},
+        )
+    finally:
+        lev.compare_lever_scenarios = real  # type: ignore[assignment]
+    assert report.completeness["levers"] == "not_established"
+    note = report.sections["levers"].note or ""
+    assert "ens_cap_permyriad" in note
+    assert "soft-skipped" not in note.lower()
+
+
+def test_all_kinds_soft_skipped_marks_pipeline_skipped():
+    """Binding: total soft-skip → not_established + pipeline skipped, skip list kept."""
+    from services.adequacy import eh_study as S
+    from services.pypsa_service import PyPSAService
+
+    # Network with neither import identity nor storage.
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Carrier", "gas")
+    n.add("Bus", "b", carrier="AC")
+    n.add("Load", "l", bus="b", p_set=10.0)
+    n.add("Generator", "g", bus="b", carrier="gas",
+          p_nom=20.0, marginal_cost=10.0)
+    # Off-grid/weak packs require import Links for apply_pack — use strong +
+    # explicit levers stage with both kinds enabled.
+    pack = default_strong_grid_pack().model_copy(update={
+        "availability": AvailabilityTarget(ens_cap_permyriad=1000.0),
+        "mc_certify_required": False,
+        "levers": default_weak_flexible_pack().levers.model_copy(update={
+            "import_cap": True,
+            "storage_duration": True,
+        }),
+    })
+    PyPSAService.set_network(n)
+    store: dict = {}
+    report = S.run_eh_study(
+        n, pack, SolverConfig(voll=150.0, ens_cap_permyriad=1000.0),
+        lock=PyPSAService.get_lock(),
+        stop_event=threading.Event(),
+        log_queue=queue.SimpleQueue(),
+        stages=("apply_pack", "ens_solve", "levers", "assemble"),
+        store=store,
+    )
+    assert report.completeness["levers"] == "not_established"
+    payload = report.sections["levers"].payload
+    assert payload is not None
+    skipped = payload.get("skipped_kinds") or []
+    assert len(skipped) >= 2
+    assert "eh_lever_comparison" in store
+    assert store["eh_lever_comparison"].get("skipped_kinds")
+    # Pipeline stage must not claim an unqualified run.
+    lever_stages = [s for s in report.pipeline.stages if s.stage == "levers"]
+    assert lever_stages and lever_stages[0].status == "skipped"
+
