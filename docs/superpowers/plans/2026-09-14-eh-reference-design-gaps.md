@@ -145,10 +145,10 @@ Every phase follows this loop. **Do not start Phase N+1 until Phase N’s gate i
 
 **Goal.** One job runs the reference-design pipeline; P5 only assembles.
 
-**P1.5 sync MVP-A slice (HTTP deferred):** `run_eh_study` implements
+**P1.5 sync MVP-A slice + HTTP:** `run_eh_study` implements
 `apply_pack` → `ens_solve` → `assemble`. Other default stages are **skipped**
-(not left `pending`). `POST /results/eh_study` is deferred to a follow-up
-within P1.5 or early P5 — gate must re-clear if HTTP lands later.
+(not left `pending`). `POST /results/eh_study` (+ status + abort) landed as
+the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f3a): **GO**.
 
 **Pipeline (default stages)**
 1. Apply archetype pack  
@@ -162,12 +162,12 @@ within P1.5 or early P5 — gate must re-clear if HTTP lands later.
 **Steps**
 - [x] `run_eh_study` sync driver (+ abort/undo), reuse solve + pack apply.
 - [x] Completeness: missing MC/frontier/redundancy/dtc → `skipped` / `not_established`.
-- [ ] `POST /results/eh_study` (+ status + abort) — deferred (plan amendment).
+- [x] `POST /results/eh_study` (+ status + abort) — [HTTP re-gate GO](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f3a).
 
 **Acceptance**
 - [x] Sync study materializes a report for `strong_grid` after required stages.
 - [x] Abort leaves pipeline.aborted and restores pack overlay.
-- [x] **QA gate cleared** — [P1.5 re-gate](bc-d8211c3f-f8fa-51d5-8194-9ede0cd033b0): **GO** (after NO-GO fixes). HTTP still deferred.
+- [x] **QA gate cleared** — [P1.5 re-gate](bc-d8211c3f-f8fa-51d5-8194-9ede0cd033b0): **GO** (after NO-GO fixes). HTTP follow-up: [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f3a) **GO**.
 
 **TDD evidence:** ImportError red → `eh_study`/`eh_report` → study tests green (incl. live solves + abort/undo).
 ---
