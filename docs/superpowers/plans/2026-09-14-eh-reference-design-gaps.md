@@ -256,7 +256,7 @@ the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f
 **Steps**
 - [x] Backend assembler enrichment: sizing + TEA/LCOE from existing cost/energy.
 - [x] `GET /results/eh_reference_design` (+ persist key `eh_reference_design_report`).
-- [x] Frontend: one “Reference design” summary panel (start/poll/abort + report) — [panel](docs/superpowers/specs/2026-09-15-eh-reference-design-panel.md); sibling tables + per-table CSV included. QA: [frontend gate GO](bc-6e89ba0d-78ad-50b3-a511-1e6422ecbc52).
+- [x] Frontend: one “Reference design” summary panel (start/poll/abort + report) — [panel](docs/superpowers/specs/2026-09-15-eh-reference-design-panel.md); sibling tables + per-table CSV included. QA: [frontend gate GO](bc-6e89ba0d-78ad-50b3-a511-1e6422ecbc52). Tables+CSV: [gate GO](bc-505793f5-18cb-5cb4-9316-e9d60670273f).
 - [x] TEA: LCOE post-process from cost ÷ served energy — no second cost engine.
 - [x] “Configurable outputs” for v1 = fixed schema (`EXPORT_KEYS`) + golden fixture.
 
