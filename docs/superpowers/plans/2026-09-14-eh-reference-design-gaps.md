@@ -184,7 +184,7 @@ the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f
 **Acceptance**
 - [x] Written inventory of residuals vs shipped tests — [inventory](docs/superpowers/findings/2026-09-16-eh-p2-class-b-residuals-inventory.md).
 - [x] Only ship fixes for confirmed gaps; else close phase as N/A (SCLOPF↔FMEA merge closed N/A).
-- [ ] **QA gate cleared**
+- [x] **QA gate cleared** — [P2 gate](bc-6181d9c2-c3fa-5016-a894-707a2babb1fd): **GO**.
 
 ---
 
