@@ -321,6 +321,7 @@ the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f
 - Band edges reuse `gridspine.static.strength.SCR_BANDS` (2, 3, 5); on-edge SCR=3 belongs to pass
 - Proxy (no full 60909): `buses.eh_sk_mva` / (`buses.eh_ibr_mva` or installed IBR Generator MW-as-MVA) at `eh_poc` buses; gate uses **min** SCR
 - Archetype scope: **`weak_flexible` only**; `strong_grid` / `off_grid` → gates `skipped`
+- Partial PoC coverage is **fail-closed** (`not_established` if any `eh_poc` lacks `eh_sk_mva`/IBR)
 
 **Steps**
 - [x] Pin EH product rule: warn vs block thresholds (gridspine bands are report-only today).
@@ -332,9 +333,9 @@ the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f
 **Acceptance**
 - [x] Weak-flexible: SCR below threshold → warn (thin slice); strong_grid does not require SCR pass (`test_energy_hub_scr_gate.py`).
 - [x] Full dynamics↔adequacy co-simulation remains out of scope.
-- [ ] **QA gate cleared**
+- [x] **QA gate cleared** — [P9 assessor](bc-52970cf8-ad19-57f3-bad7-bc1c059f5552): `GO WITH BINDING CONDITIONS`; conditions satisfied (SCR↔MC orthogonality test, partial-PoC fail-closed, TDD count corrected).
 
-**TDD evidence:** ImportError/red → `scr_gate.py` + assemble `gates=` + weak_flexible wiring → 13 tests green.
+**TDD evidence:** ImportError/red → `scr_gate.py` + assemble `gates=` + weak_flexible wiring → 14 tests green (incl. orthogonality + fail-closed PoC).
 
 ---
 

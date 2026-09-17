@@ -128,6 +128,21 @@ def test_evaluate_network_not_established_without_sk():
     assert note and "eh_sk_mva" in note
 
 
+def test_evaluate_network_fail_closed_when_any_poc_incomplete():
+    """Partial PoC coverage must not soft-ok over the computable subset."""
+    from services.adequacy import scr_gate as G
+
+    n = _poc_network(sk_mva=400.0, wind_mw=100.0)  # poc SCR=4 would pass alone
+    n.add("Bus", "poc2", carrier="AC")
+    n.buses.at["poc2", "eh_poc"] = True
+    # poc2 tagged but no eh_sk_mva / IBR → incomplete
+    gate, status, payload, note = G.evaluate_network_scr_gate(n)
+    assert gate is None
+    assert status == "not_established"
+    assert payload is None
+    assert note and "ALL eh_poc" in note and "poc2" in note
+
+
 def test_assemble_accepts_gates_block():
     from services.adequacy import eh_report as R
     from models.energy_hub import EHStudyPipeline
@@ -175,6 +190,41 @@ def test_weak_flexible_study_fills_gates_warn():
     assert report.gates.scr == "warn"
     assert report.gates.emt_recommended is True
     assert report.sections["gates"].payload["min_scr"] == pytest.approx(2.5)
+
+
+def test_weak_flexible_gates_ok_does_not_imply_mc_certify():
+    """SCR gates.ok is orthogonal to required-but-missing mc_certify."""
+    from services.adequacy import eh_study as S
+    from services.pypsa_service import PyPSAService
+
+    n = _poc_network(sk_mva=250.0, wind_mw=100.0)
+    n.generators.at["local", "p_nom"] = 100.0
+    pack = default_weak_flexible_pack().model_copy(update={
+        "availability": AvailabilityTarget(
+            ens_cap_permyriad=5000.0, target_lole_h=3.0,
+            certification_metric="mc_lole"),
+        "mc_certify_required": True,
+        "dtc_stress_default": False,
+        "levers": default_weak_flexible_pack().levers.model_copy(update={
+            "import_cap": False, "storage_duration": False,
+        }),
+    })
+    assert pack.mc_certify_required is True
+    PyPSAService.set_network(n)
+    report = S.run_eh_study(
+        n, pack, SolverConfig(voll=150.0, ens_cap_permyriad=5000.0),
+        lock=PyPSAService.get_lock(),
+        stop_event=threading.Event(),
+        log_queue=queue.SimpleQueue(),
+        stages=("apply_pack", "ens_solve", "assemble"),  # mc omitted
+    )
+    assert report.completeness["gates"] == "ok"
+    assert report.gates is not None
+    assert report.gates.scr == "warn"
+    mc_rec = next(s for s in report.pipeline.stages if s.stage == "mc_certify")
+    assert mc_rec.status == "skipped"
+    assert mc_rec.note and "required" in mc_rec.note
+    assert "not implemented" in mc_rec.note or "not_established" in mc_rec.note
 
 
 def test_strong_grid_study_skips_scr_gate():

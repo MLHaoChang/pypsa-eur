@@ -19,7 +19,9 @@ No full 60909 fault study is required. The proxy is:
   installed Generator ``p_nom`` (prefer ``p_nom_opt``) for IBR carriers at
   that bus — installed MW read as MVA, matching the gridspine SCR ledger.
 
-The gate uses the **minimum** SCR across PoC buses.
+The gate uses the **minimum** SCR across PoC buses. Every tagged
+``eh_poc`` must have a computable SCR — partial coverage is fail-closed
+(``not_established``), never a soft ``ok`` over a subset.
 """
 from __future__ import annotations
 
@@ -154,13 +156,14 @@ def evaluate_network_scr_gate(
             "band": scr_band(value),
         })
 
-    if missing and not rows:
+    # Fail-closed: any incomplete PoC blocks the gate (no soft ok over a subset).
+    if missing:
         return (
             None,
             "not_established",
             None,
-            "eh_sk_mva (and IBR capacity) required on eh_poc buses for SCR gate; "
-            f"missing/invalid at: {', '.join(missing)}",
+            "eh_sk_mva (and IBR capacity) required on ALL eh_poc buses for SCR "
+            f"gate; missing/invalid at: {', '.join(missing)}",
         )
     if not rows:
         return (
@@ -180,7 +183,7 @@ def evaluate_network_scr_gate(
         "min_scr": min_scr,
         "min_bus": min_row["bus"],
         "buses": rows,
-        "incomplete_pocs": missing or None,
+        "incomplete_pocs": None,
         "warn_only": True,
     }
     note = (
