@@ -131,6 +131,7 @@ def run_eh_study(
     period_basis = None
     adequacy_report: dict[str, Any] | None = None
     tea_obj = None
+    gates_obj = None
 
     def _mark(stage: str, status: str, *, note: str | None = None,
               solves_charged: int = 0) -> None:
@@ -531,7 +532,17 @@ def run_eh_study(
             section_payloads.setdefault(
                 "dtc", ("skipped", None, "dtc_stress/dtc_planning not requested"))
 
-        if pack.mc_certify_required and "mc_certify" not in IMPLEMENTED:
+        if pack.archetype == "weak_flexible":
+            # P9 thin SCR warn-only gate (feasibility flag, not co-opt).
+            # Orthogonal to mc_certify: missing MC stays on the pipeline stage;
+            # gates.scr / emt_recommended are the dynamics product fields.
+            from services.adequacy import scr_gate as scr_gate_mod
+            gate_block, gate_status, gate_payload, gate_note = (
+                scr_gate_mod.evaluate_network_scr_gate(network))
+            section_payloads["gates"] = (gate_status, gate_payload, gate_note)
+            if gate_block is not None:
+                gates_obj = gate_block
+        elif pack.mc_certify_required and "mc_certify" not in IMPLEMENTED:
             section_payloads["gates"] = (
                 "not_established", None,
                 "mc_certify required by pack but not implemented in P1.5",
@@ -543,7 +554,11 @@ def run_eh_study(
             )
         else:
             section_payloads.setdefault(
-                "gates", ("skipped", None, "gates/SCR not in P1.5 MVP-A"))
+                "gates", (
+                    "skipped", None,
+                    "SCR gate not required for this archetype (P9 thin slice "
+                    "is weak_flexible only)",
+                ))
 
         section_payloads.setdefault(
             "tea", ("skipped", None, "TEA not produced (ens_solve did not run)"))
@@ -584,6 +599,7 @@ def run_eh_study(
         cost_at_target_eur=cost_at_target,
         period_basis=period_basis,
         tea=tea_obj,
+        gates=gates_obj,
     )
     if store is not None:
         report_mod.store_eh_report(store, report)
