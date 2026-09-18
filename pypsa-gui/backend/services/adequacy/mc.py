@@ -113,6 +113,8 @@ class StorageSpec:
     q: float = 0.0
     basis: str = ""
     source: str = "missing"
+    # P7: citation when ``source == "carrier_default"``.
+    library_citation: str = ""
 
 
 @dataclass(frozen=True)
@@ -243,11 +245,16 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
                 max_hours = 0.0
             occ = sparams.loc[s]
             q_s = 0.0
+            cite = ""
             if str(occ["source"]) != "missing":
                 if not rate_is_usable(occ["rate"]):
                     bad_rates.append(f"{s} (rate {float(occ['rate']):g})")
                     continue
                 q_s = float(occ["rate"])
+            if str(occ["source"]) == "carrier_default":
+                from services.adequacy.occurrence import library_citation as _lib_cite
+                carrier = str(row.get("carrier") or "").strip().lower()
+                cite = _lib_cite(carrier) or ""
             storage.append(StorageSpec(
                 name=str(s),
                 p_nom_mw=p_nom,
@@ -258,6 +265,7 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
                 q=q_s,
                 basis=str(occ["basis"] or ""),
                 source=str(occ["source"]),
+                library_citation=cite,
             ))
         if bad_rates:
             raise OutageRateError(
