@@ -314,9 +314,9 @@ the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f
 **Acceptance**
 - [x] Synthetic profiles run ranks Class-C modes with frequencies + abort/partial like other studies (`test_energy_hub_class_c_profiles.py`).
 - [x] Real climate packs optional behind data availability (procurement deferred; incomplete stubs allowed in registry).
-- [ ] **QA gate cleared**
+- [x] **QA gate cleared** — [P8 assessor](bc-520276e1-35ca-5e40-bdbb-fa300ef257fe): `GO WITH BINDING CONDITIONS`; conditions satisfied (membership test pin; snapshot-length row fail-closed).
 
-**TDD evidence:** `profiles_not_supported_yet` / ImportError red → profiles mutate + packs → 6 tests green (+ stress/F1m2 regression).
+**TDD evidence:** `profiles_not_supported_yet` / ImportError red → profiles mutate + packs → 8 tests green (+ stress/F1m2 regression).
 
 ---
 
