@@ -198,7 +198,7 @@ the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f
 
 **Acceptance (3a)**
 - [x] ≥2 redundancy options with costs at fixed ENS target.
-- [ ] **QA gate cleared** (NO-GO N1–N4 addressed; awaiting re-gate)
+- [x] **QA gate cleared** — Re-gate #3 [bc-55271fc9-feaa-5908-9674-1300466bfe8a](bc-55271fc9-feaa-5908-9674-1300466bfe8a): **GO WITH BINDING CONDITIONS** (B1–B3); B1–B3 closed in `99ef3cc9` (shipped with P3c); covered by P3c re-gate GO [bc-4e1a7ff3-1fb9-5f4c-80ab-1eea7a1d7919](bc-4e1a7ff3-1fb9-5f4c-80ab-1eea7a1d7919).
 
 **TDD evidence:** ImportError red → `redundancy.py` → 17 tests green (finite n1_conversion headroom, role selection, private sink, provenance hashes, claim wipe).
 
