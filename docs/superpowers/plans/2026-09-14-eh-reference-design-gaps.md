@@ -302,7 +302,7 @@ the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f
 **Acceptance**
 - [x] Library loads; MC/COPT show library vs override provenance (`rate_source` + `library_citation`; `test_energy_hub_ram_v1.py`).
 - [x] No claim of full RAM/CMMS (`ram_note` on COPT/MC payloads).
-- [ ] **QA gate cleared**
+- [x] **QA gate cleared** — [P7 assessor](bc-e90602ef-ed5b-5bea-8b44-7fa4761b4335): **GO** (provenance-only; 4/4 tests green).
 
 **TDD evidence:** KeyError red → wire `rate_source` / `units_provenance` / `library_citation` → 4 tests green.
 
