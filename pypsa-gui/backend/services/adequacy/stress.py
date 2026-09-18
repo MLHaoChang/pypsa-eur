@@ -13,9 +13,13 @@ that data cannot be procured from this environment and is a RECORDED
 procurement follow-up, not silently dropped. This module ships the
 machinery: ``kind="parametric"`` scenarios (load/availability multipliers,
 loudly labelled parametric in their occurrence basis) run today;
-``kind="profiles"`` entries are accepted by the registry for forward
-compatibility and reported as not-yet-runnable by the sweep — a real
-climate year later becomes just another scenario entry with real profiles.
+``kind="profiles"`` scenarios swap absolute load / renewable availability
+series (inline or via a synthetic ``profile_pack``). Real climate-year
+bundles remain optional behind data availability — a climate year later
+becomes just another profiles scenario entry.
+
+Incomplete profiles (no series / pack / mismatched lengths) are
+fail-closed as ``profiles_incomplete``, never solved as parametric.
 
 Registry: a per-project JSON sidecar (``adequacy_stress_scenarios.json``)
 on the worksheet-service pattern — atomic, schema-versioned, capped,
@@ -49,9 +53,91 @@ MAX_SCENARIOS = 10
 _ID_RE = re.compile(r"^[a-z0-9_\-]{1,64}$")
 VALID_KINDS = ("parametric", "profiles")
 
+# Bundled synthetic profile packs (P8a). Real climate years are NOT here —
+# they are a procurement follow-up. Paths relative to this module resolve
+# to the test fixtures tree when present; production can overlay a
+# directory later without changing the scenario schema.
+_SYNTHETIC_PACK_DIRS: tuple[pathlib.Path, ...] = (
+    pathlib.Path(__file__).resolve().parents[2]
+    / "tests" / "fixtures" / "eh_class_c",
+)
+
 
 class StressValidationError(ValueError):
     pass
+
+
+def load_synthetic_profile_pack(pack_id: str) -> dict:
+    """Load a bundled synthetic profiles scenario by id (no ``.json``)."""
+    sid = str(pack_id).strip()
+    if not sid or not _ID_RE.match(sid):
+        raise StressValidationError(
+            f"profile_pack id '{pack_id}' must match [a-z0-9_-]{{1,64}}")
+    for root in _SYNTHETIC_PACK_DIRS:
+        path = root / f"{sid}.json"
+        if not path.is_file():
+            continue
+        try:
+            raw = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise StressValidationError(
+                f"profile_pack '{sid}' unreadable: {exc}") from exc
+        if not isinstance(raw, dict):
+            raise StressValidationError(
+                f"profile_pack '{sid}' must be a JSON object")
+        out = dict(raw)
+        out["kind"] = "profiles"
+        out.setdefault("id", sid)
+        return out
+    raise StressValidationError(
+        f"unknown synthetic profile_pack '{sid}' "
+        f"(looked in {[str(p) for p in _SYNTHETIC_PACK_DIRS]})")
+
+
+def _series_map(raw) -> dict[str, list[float]] | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or not raw:
+        return None
+    out: dict[str, list[float]] = {}
+    for key, vals in raw.items():
+        if not isinstance(vals, (list, tuple)) or not vals:
+            return None
+        try:
+            series = [float(v) for v in vals]
+        except (TypeError, ValueError):
+            return None
+        if not all(math.isfinite(v) for v in series):
+            return None
+        out[str(key)] = series
+    return out or None
+
+
+def _profiles_payload(scenario: dict) -> tuple[
+        dict[str, list[float]] | None, dict[str, list[float]] | None]:
+    """Resolve inline series or ``profile_pack`` into (loads, gens) maps."""
+    sc = scenario
+    if sc.get("profile_pack"):
+        pack = load_synthetic_profile_pack(str(sc["profile_pack"]))
+        # Inline keys on the scenario override pack fields.
+        loads = _series_map(sc.get("loads_p_set")) or _series_map(
+            pack.get("loads_p_set"))
+        gens = _series_map(sc.get("generators_p_max_pu")) or _series_map(
+            pack.get("generators_p_max_pu"))
+        return loads, gens
+    return (_series_map(sc.get("loads_p_set")),
+            _series_map(sc.get("generators_p_max_pu")))
+
+
+def _profiles_ready(scenario: dict) -> bool:
+    loads, gens = _profiles_payload(scenario)
+    if loads is None and gens is None:
+        return False
+    lengths = [len(v) for v in (loads or {}).values()]
+    lengths += [len(v) for v in (gens or {}).values()]
+    if not lengths:
+        return False
+    return len(set(lengths)) == 1 and lengths[0] > 0
 
 
 def _validate(scenarios: list[dict]) -> None:
@@ -88,6 +174,28 @@ def _validate(scenarios: list[dict]) -> None:
                 raise StressValidationError(
                     f"scenario '{sid}': availability multiplier {rm:g} "
                     "outside [0, 1.5]")
+        elif sc.get("kind") == "profiles":
+            # Incomplete is allowed in the registry (forward-compat climate
+            # stub) but series that ARE present must be finite + equal length.
+            loads = _series_map(sc.get("loads_p_set"))
+            gens = _series_map(sc.get("generators_p_max_pu"))
+            if sc.get("loads_p_set") is not None and loads is None:
+                raise StressValidationError(
+                    f"scenario '{sid}': loads_p_set must be "
+                    "{{name: [finite floats, ...]}}")
+            if sc.get("generators_p_max_pu") is not None and gens is None:
+                raise StressValidationError(
+                    f"scenario '{sid}': generators_p_max_pu must be "
+                    "{{name: [finite floats, ...]}}")
+            lengths = [len(v) for v in (loads or {}).values()]
+            lengths += [len(v) for v in (gens or {}).values()]
+            if lengths and len(set(lengths)) != 1:
+                raise StressValidationError(
+                    f"scenario '{sid}': profile series length mismatch "
+                    f"(got lengths {sorted(set(lengths))})")
+            if sc.get("profile_pack"):
+                # Resolve now so a typo fails at save, not mid-sweep.
+                load_synthetic_profile_pack(str(sc["profile_pack"]))
 
 
 def load_scenarios(project_dir: pathlib.Path) -> list[dict]:
@@ -201,48 +309,196 @@ def _parametric_mutate(scenario: dict):
     return mutate
 
 
+def _profiles_mutate(scenario: dict):
+    """Swap absolute load / renewable p_max_pu series for one climate-like year.
+
+    Only electrical loads and profile-borne (must-take) generators are
+    touched — same membership rule as the parametric renewable multiplier.
+    Series length must equal ``len(n.snapshots)`` at mutate time; otherwise
+    the contingency fails closed (no partial apply).
+    """
+    loads_map, gens_map = _profiles_payload(scenario)
+
+    def mutate(n):
+        import pandas as pd
+
+        from services.adequacy.metrics import electrical_columns
+        from services.adequacy.occurrence import resolve_outage_params
+
+        h = len(n.snapshots)
+        for series_map, label in ((loads_map, "loads_p_set"),
+                                  (gens_map, "generators_p_max_pu")):
+            if series_map is None:
+                continue
+            bad = [k for k, v in series_map.items() if len(v) != h]
+            if bad:
+                raise StressValidationError(
+                    f"scenario '{scenario.get('id')}': {label} length "
+                    f"must equal snapshots ({h}); bad: {bad}")
+
+        undo_ops = []
+        elec = set(electrical_columns(n, list(n.buses.index)))
+        idx = n.snapshots
+
+        if loads_map:
+            loads = n.loads
+            if loads is not None and not loads.empty and "bus" in loads.columns:
+                for name, series in loads_map.items():
+                    if name not in loads.index:
+                        continue
+                    if str(loads.at[name, "bus"]) not in elec:
+                        continue
+                    p_set_t = getattr(getattr(n, "loads_t", None), "p_set", None)
+                    had_col = (
+                        p_set_t is not None
+                        and name in getattr(p_set_t, "columns", [])
+                    )
+                    if had_col:
+                        orig_t = p_set_t[name].copy()
+                        p_set_t[name] = pd.Series(series, index=idx)
+
+                        def _undo_lt(n=n, col=name, orig=orig_t):
+                            live = getattr(getattr(n, "loads_t", None),
+                                           "p_set", None)
+                            if live is not None and col in live.columns:
+                                live[col] = orig
+
+                        undo_ops.append(_undo_lt)
+                    else:
+                        orig_static = float(loads.at[name, "p_set"])
+                        loads.at[name, "p_set"] = float(series[0])
+                        if p_set_t is None:
+                            n.loads_t.p_set = pd.DataFrame(
+                                {name: series}, index=idx)
+                        else:
+                            n.loads_t.p_set[name] = pd.Series(
+                                series, index=idx)
+
+                        def _undo_ls(n=n, col=name, orig_s=orig_static):
+                            live = n.loads
+                            if col in live.index:
+                                live.at[col, "p_set"] = orig_s
+                            live_t = getattr(getattr(n, "loads_t", None),
+                                             "p_set", None)
+                            if live_t is not None and col in live_t.columns:
+                                live_t.drop(columns=[col], inplace=True)
+
+                        undo_ops.append(_undo_ls)
+
+        if gens_map:
+            gens = n.generators
+            if gens is not None and not gens.empty:
+                params = resolve_outage_params(n, "generators")
+                must_take = {
+                    g for g in gens.index
+                    if params.loc[g, "source"] == "missing"
+                    and str(gens.at[g, "bus"]) in elec
+                }
+                pmp_t = getattr(getattr(n, "generators_t", None), "p_max_pu", None)
+                for name, series in gens_map.items():
+                    if name not in must_take:
+                        continue
+                    had_col = (
+                        pmp_t is not None
+                        and name in getattr(pmp_t, "columns", [])
+                    )
+                    if had_col:
+                        orig_t = pmp_t[name].copy()
+                        pmp_t[name] = pd.Series(series, index=idx)
+
+                        def _undo_gt(n=n, col=name, orig=orig_t):
+                            live = getattr(getattr(n, "generators_t", None),
+                                           "p_max_pu", None)
+                            if live is not None and col in live.columns:
+                                live[col] = orig
+
+                        undo_ops.append(_undo_gt)
+                    elif "p_max_pu" in gens.columns:
+                        orig_static = float(gens.at[name, "p_max_pu"])
+                        gens.at[name, "p_max_pu"] = float(series[0])
+                        if pmp_t is None:
+                            n.generators_t.p_max_pu = pd.DataFrame(
+                                {name: series}, index=idx)
+                        else:
+                            n.generators_t.p_max_pu[name] = pd.Series(
+                                series, index=idx)
+
+                        def _undo_gs(n=n, col=name, orig_s=orig_static):
+                            live = n.generators
+                            if col in live.index:
+                                live.at[col, "p_max_pu"] = orig_s
+                            live_t = getattr(getattr(n, "generators_t", None),
+                                             "p_max_pu", None)
+                            if live_t is not None and col in live_t.columns:
+                                live_t.drop(columns=[col], inplace=True)
+
+                        undo_ops.append(_undo_gs)
+
+        def undo():
+            for op in reversed(undo_ops):
+                op()
+
+        return undo
+
+    return mutate
+
+
 def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
                       log_queue=None, final_state_update=None,
                       stop_event=None) -> tuple[list[dict], dict]:
     """
     Class-C rows via the shared driver. occurrence = the scenario's
     empirical ``frequency_per_year``; severity = ΔEUE × VoLL per event;
-    criticality = the product (f×S by construction). Parametric provenance
-    is loud: the occurrence basis is ``scenario:parametric``. ``profiles``
-    entries return a not-runnable status row instead of pretending.
+    criticality = the product (f×S by construction).
+
+    Provenance is loud:
+    * parametric → ``occurrence_basis="scenario:parametric"``
+    * profiles (complete) → ``occurrence_basis="scenario:profiles"``
+    * profiles incomplete → status ``profiles_incomplete`` (not solved)
     """
     from services.adequacy.sweep import run_contingency_sweep
 
     _validate(scenarios)
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
-    runnable = [sc for sc in scenarios if sc["kind"] == "parametric"]
     rows: list[dict] = []
+    contingencies: list[dict] = []
     for sc in scenarios:
-        if sc["kind"] != "parametric":
-            rows.append({"id": f"scenario:{sc['id']}",
-                         "status": "profiles_not_supported_yet",
-                         "delta_eue_mwh": None, "failure_mode": None,
-                         "meta": {"name": sc.get("name", sc["id"])}})
-    if not runnable:
-        # The 2-tuple on EVERY path — see the twin in `run_class_b_sweep`.
-        # This one is worse than a crash at two scenarios: `rows` is a list of
-        # status rows, so `rows_c, restore = ...` UNPACKS a two-element list
-        # and `restore` becomes a scenario row whose `.get("base_restored")`
-        # is a quiet `None`. No sweep ran, so nothing was restored.
+        sid = f"scenario:{sc['id']}"
+        meta = {"name": sc.get("name", sc["id"]),
+                "frequency_per_year": float(sc["frequency_per_year"]),
+                "kind": sc["kind"]}
+        if sc["kind"] == "parametric":
+            contingencies.append({
+                "id": sid, "mutate": _parametric_mutate(sc), "meta": meta,
+                "occurrence_basis": "scenario:parametric",
+            })
+        elif sc["kind"] == "profiles":
+            if not _profiles_ready(sc):
+                rows.append({
+                    "id": sid, "status": "profiles_incomplete",
+                    "delta_eue_mwh": None, "failure_mode": None,
+                    "meta": meta,
+                })
+                continue
+            contingencies.append({
+                "id": sid, "mutate": _profiles_mutate(sc), "meta": meta,
+                "occurrence_basis": "scenario:profiles",
+            })
+        else:
+            rows.append({
+                "id": sid, "status": "profiles_incomplete",
+                "delta_eue_mwh": None, "failure_mode": None, "meta": meta,
+            })
+
+    if not contingencies:
         return rows, {"base_restored": None, "base_restore_status": None,
                       "aborted": False}
-    contingencies = [
-        {"id": f"scenario:{sc['id']}", "mutate": _parametric_mutate(sc),
-         "meta": {"name": sc.get("name", sc["id"]),
-                  "frequency_per_year": float(sc["frequency_per_year"])}}
-        for sc in runnable
-    ]
+
     swept = run_contingency_sweep(
         network, lock, cfg, contingencies, stop_event=stop_event,
         log_queue=log_queue, final_state_update=final_state_update)
     for c in contingencies:
-        # Phase 12e: see the class-B assembler — an aborted sweep carries
-        # only what it reached, and the rest are skipped rather than raising.
+        # Phase 12e: aborted sweep carries only what it reached.
         res = swept["contingencies"].get(c["id"])
         if res is None:
             continue
@@ -265,7 +521,7 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
                 "name": meta["name"],
                 "failure_class": "C",
                 "occurrence_per_year": freq,
-                "occurrence_basis": "scenario:parametric",
+                "occurrence_basis": c["occurrence_basis"],
                 "severity_eur": severity,
                 "criticality_eur_per_year": freq * severity,
                 "in_metric_scope": True,
@@ -275,10 +531,6 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
             "meta": meta,
         })
     rows.sort(key=lambda r: (r["delta_eue_mwh"] or 0.0), reverse=True)
-    # Phase 12e (shipped-code review, finding 1): the closing restore's
-    # outcome rides out beside the rows, as class B's does — a sweep whose
-    # re-solve failed must not report `done` while the network sits on the
-    # last scenario.
     return rows, {"base_restored": swept.get("base_restored"),
                   "base_restore_status": swept.get("base_restore_status"),
                   "aborted": bool(swept.get("aborted"))}
