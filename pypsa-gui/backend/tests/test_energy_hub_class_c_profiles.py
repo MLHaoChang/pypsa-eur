@@ -100,7 +100,7 @@ def test_inline_profiles_prices_dunkelflaute():
 
 
 def test_synthetic_pack_resolves_and_ranks():
-    """Multi-year synthetic fixture: two packs rank by ΔEUE × frequency."""
+    """Multi-year synthetic fixture: two packs rank by ΔEUE (assembler sort)."""
     from services.adequacy.stress import load_synthetic_profile_pack
 
     mild = load_synthetic_profile_pack("synth_mild_snap")
@@ -123,6 +123,59 @@ def test_synthetic_pack_resolves_and_ranks():
     assert runnable[0]["id"] == "scenario:year_deep"
     assert all(r["failure_mode"]["occurrence_basis"] == "scenario:profiles"
                for r in runnable)
+
+
+def test_profiles_skip_heat_load_and_thermal_with_occurrence():
+    """Membership honesty: only electrical loads + must-take renewables."""
+    n = _network_with_wind()
+    n.add("Carrier", "heat")
+    n.add("Bus", "h", carrier="heat")
+    n.add("Load", "heat_l", bus="h", p_set=200.0)
+    # Thermal with typed FOR — occurrence-bearing, must NOT get p_max_pu swap.
+    n.generators.at["g", "outage_rate_value"] = 0.05
+    n.generators.at["g", "outage_rate_basis"] = "EFORd"
+    n.generators.at["g", "mttr_hours"] = 50.0
+    if "p_max_pu" not in n.generators.columns:
+        n.generators["p_max_pu"] = 1.0
+    n.generators.at["g", "p_max_pu"] = 1.0
+
+    scen = _profiles_scenario(
+        loads_p_set={"l": [130.0, 130.0], "heat_l": [999.0, 999.0]},
+        generators_p_max_pu={"wind1": [0.25, 0.25], "g": [0.01, 0.01]},
+    )
+    PyPSAService.set_network(n)
+    rows, _restore = ST.run_class_c_sweep(
+        n, PyPSAService.get_lock(), SolverConfig(voll=VOLL),
+        [scen], log_queue=queue.SimpleQueue())
+    assert rows[0]["status"] in ("ok", "optimal")
+    # Same ΔEUE as electrical+wind-only dunkelflaute (heat/thermal ignored).
+    assert rows[0]["delta_eue_mwh"] == pytest.approx(360.0, rel=1e-3)
+    assert float(n.loads.at["heat_l", "p_set"]) == pytest.approx(200.0)
+    assert float(n.generators.at["g", "p_max_pu"]) == pytest.approx(1.0)
+    assert float(n.generators_t.p_max_pu["wind1"].min()) == pytest.approx(1.0)
+
+
+def test_profiles_length_mismatch_is_row_fail_closed_not_sweep_abort():
+    """Bad series length must not raise out of run_class_c_sweep."""
+    n = _network_with_wind()
+    PyPSAService.set_network(n)
+    bad = _profiles_scenario(
+        id="bad_len",
+        loads_p_set={"l": [130.0]},  # length 1 vs 2 snapshots
+        generators_p_max_pu={"wind1": [0.25]},
+    )
+    good = _profiles_scenario(id="good")
+    # Registry rejects mismatched sibling lengths; here both series agree
+    # at length 1 so save would pass — horizon gate is the live check.
+    rows, restore = ST.run_class_c_sweep(
+        n, PyPSAService.get_lock(), SolverConfig(voll=VOLL),
+        [bad, good], log_queue=queue.SimpleQueue())
+    by = {r["id"]: r for r in rows}
+    assert by["scenario:bad_len"]["status"] == "profiles_incomplete"
+    assert by["scenario:good"]["status"] in ("ok", "optimal")
+    assert by["scenario:good"]["failure_mode"]["occurrence_basis"] == (
+        "scenario:profiles")
+    assert restore["aborted"] is False
 
 
 def test_profiles_abort_partial_like_parametric(monkeypatch):

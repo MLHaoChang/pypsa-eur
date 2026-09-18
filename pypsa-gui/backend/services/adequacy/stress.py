@@ -140,6 +140,17 @@ def _profiles_ready(scenario: dict) -> bool:
     return len(set(lengths)) == 1 and lengths[0] > 0
 
 
+def _profiles_match_horizon(scenario: dict, n_snapshots: int) -> bool:
+    """True when every series length equals the live network horizon."""
+    loads, gens = _profiles_payload(scenario)
+    for series_map in (loads, gens):
+        if series_map is None:
+            continue
+        if any(len(v) != n_snapshots for v in series_map.values()):
+            return False
+    return True
+
+
 def _validate(scenarios: list[dict]) -> None:
     if len(scenarios) > MAX_SCENARIOS:
         raise StressValidationError(
@@ -460,6 +471,12 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
 
     _validate(scenarios)
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
+    # Horizon for fail-closed length checks. Missing on stub networks used by
+    # unit tests that monkeypatch the sweep — those skip the length gate.
+    try:
+        n_snapshots = len(network.snapshots)
+    except Exception:                                         # noqa: BLE001
+        n_snapshots = None
     rows: list[dict] = []
     contingencies: list[dict] = []
     for sc in scenarios:
@@ -478,6 +495,17 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
                     "id": sid, "status": "profiles_incomplete",
                     "delta_eue_mwh": None, "failure_mode": None,
                     "meta": meta,
+                })
+                continue
+            # Binding condition: length ≠ snapshots is a per-scenario
+            # incomplete row — never an uncaught mutate raise that aborts
+            # the rest of the Class-C sweep.
+            if (n_snapshots is not None
+                    and not _profiles_match_horizon(sc, n_snapshots)):
+                rows.append({
+                    "id": sid, "status": "profiles_incomplete",
+                    "delta_eue_mwh": None, "failure_mode": None,
+                    "meta": {**meta, "note": "series_length_ne_snapshots"},
                 })
                 continue
             contingencies.append({
