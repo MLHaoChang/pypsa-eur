@@ -70,7 +70,8 @@ Do **not** invent SCR values when the gates section is `skipped` with no
 
 ## Acceptance (gates)
 
-- Warn + EMT recommended + min SCR render from a done report
-- Pass + EMT no render without a note when note is null
-- Skipped gates → no dynamics strip
-- `not_established` with a section note → note only (no fake SCR)
+- [x] Warn + EMT recommended + min SCR render from a done report
+- [x] Pass + EMT no render without a note when note is null
+- [x] Skipped gates → no dynamics strip
+- [x] `not_established` with a section note → note only (no fake SCR)
+- [x] **QA gate cleared** — [FE SCR gates QA](bc-889e4231-3989-5dbc-ae8a-eb935f4be7f5): **GO** (17/17 panel tests; fail-closed; EMT flag-only).
