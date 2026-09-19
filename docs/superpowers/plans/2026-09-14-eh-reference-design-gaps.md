@@ -177,13 +177,14 @@ the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f
 **Goal.** Close **remaining** Link/FMEA edge cases only. **Do not re-implement Class B.**
 
 **Candidate residuals (inventory first)**
-- Multi-carrier Link filters
-- Time-varying `links_t.p_min_pu` / restore semantics
-- Document or merge Line/Transformer SCLOPF rows into FMEA top-N (or label report “Link-primary residual risk”)
+- Multi-carrier Link filters — **fixed** (`in_metric_scope=False` for conversion/P2X)
+- Time-varying `links_t.p_min_pu` / restore semantics — **fixed** (parity with DtC)
+- Document or merge Line/Transformer SCLOPF rows into FMEA top-N — **document Link-primary; merge N/A**
 
 **Acceptance**
-- [ ] Written inventory of residuals vs shipped tests.
-- [ ] Only ship fixes for confirmed gaps; else close phase as N/A.
+- [x] Written inventory of residuals vs shipped tests — [inventory](docs/superpowers/findings/2026-09-16-eh-p2-class-b-residuals-inventory.md).
+- [x] Only ship fixes for confirmed gaps; else close phase as N/A (SCLOPF↔FMEA merge closed N/A).
+- [x] **QA gate cleared** — [P2 gate](bc-6181d9c2-c3fa-5016-a894-707a2babb1fd): **GO**.
 
 ---
 

@@ -132,6 +132,59 @@ def _electrical_eue_mwh(capture: dict | None, n) -> float:
     return float(bp[cols].to_numpy().sum()) if cols else 0.0
 
 
+# Positive conversion identity (aligned with redundancy._CONVERSION_*). Bare
+# AC/electricity is never conversion — those are transport / import Links.
+_CONVERSION_ROLES = frozenset({
+    "eh_conversion", "conversion", "electrolyser", "fuel_cell",
+})
+_CONVERSION_CARRIERS = frozenset({"H2", "heat", "methanol", "ammonia"})
+
+
+def link_in_electricity_metric_scope(n, name: str) -> bool:
+    """True iff this Link is electricity *transport* for Class-B severity.
+
+    Spec §4.3: the FMEA metric is electricity-only. Outaging a conversion /
+    P2X Link (electrical ↔ non-electrical, or a known conversion role /
+    carrier) can *reduce* electrical demand — those rows must be flagged
+    ``in_metric_scope=False`` with zeroed severity, never ranked as
+    beneficial criticality.
+    """
+    from services.solver_service import _canonical_load_carrier_key
+
+    links = getattr(n, "links", None)
+    if links is None or name not in links.index:
+        return False
+    if "eh_role" in links.columns:
+        role = str(links.at[name, "eh_role"] or "").strip().lower()
+        if role in _CONVERSION_ROLES:
+            return False
+    if "carrier" in links.columns:
+        carrier = str(links.at[name, "carrier"] or "").strip()
+        if carrier in _CONVERSION_CARRIERS:
+            return False
+
+    buses = getattr(n, "buses", None)
+    if buses is None or buses.empty or "carrier" not in buses.columns:
+        return True
+    keys: list[str] = []
+    for col in ("bus0", "bus1"):
+        if col not in links.columns:
+            continue
+        bus = links.at[name, col]
+        if bus is None or (isinstance(bus, float) and math.isnan(bus)):
+            continue
+        bus = str(bus)
+        if bus not in buses.index:
+            continue
+        keys.append(_canonical_load_carrier_key(buses.at[bus, "carrier"]))
+    if len(keys) >= 2:
+        electrical = [k == "electrical" for k in keys]
+        # Mixed electrical / non-electrical endpoints ⇒ conversion / P2X.
+        if any(electrical) and not all(electrical):
+            return False
+    return True
+
+
 def _solve_once(cfg, n, lock, log_queue, sink: dict) -> None:
     from services.solver_service import run_simulation
 
@@ -355,21 +408,25 @@ def class_b_contingencies(n) -> list[dict]:
             orig_min = float(lk.at[name, "p_min_pu"])
             lk.at[name, "p_max_pu"] = 0.0
             lk.at[name, "p_min_pu"] = 0.0
-            t = getattr(getattr(nn, "links_t", None), "p_max_pu", None)
-            had_t = t is not None and name in getattr(t, "columns", [])
-            orig_t = t[name].copy() if had_t else None
-
-            if had_t:
-                t[name] = 0.0
+            # Both time-series bounds — parity with DtC islanding / off_grid
+            # apply (P2 residual). Closing only p_max_pu leaves reverse flow
+            # on a bidirectional links_t.p_min_pu series.
+            snap_t: dict[str, object] = {}
+            for attr in ("p_max_pu", "p_min_pu"):
+                t = getattr(getattr(nn, "links_t", None), attr, None)
+                if t is not None and name in getattr(t, "columns", []):
+                    snap_t[attr] = t[name].copy()
+                    t[name] = 0.0
 
             def undo():
                 live = nn.links
                 if name in live.index:
                     live.at[name, "p_max_pu"] = orig_max
                     live.at[name, "p_min_pu"] = orig_min
-                lt = getattr(getattr(nn, "links_t", None), "p_max_pu", None)
-                if had_t and lt is not None and name in getattr(lt, "columns", []):
-                    lt[name] = orig_t
+                for attr, series in snap_t.items():
+                    lt = getattr(getattr(nn, "links_t", None), attr, None)
+                    if lt is not None and name in getattr(lt, "columns", []):
+                        lt[name] = series
 
             return undo
 
@@ -381,6 +438,7 @@ def class_b_contingencies(n) -> list[dict]:
                 "q": float(row["rate"]),
                 "basis": str(row["basis"]),
                 "mttr_hours": float(row["mttr_hours"]),
+                "in_metric_scope": link_in_electricity_metric_scope(n, name),
             },
         })
     if len(out) > MAX_CLASS_B_LINKS:
@@ -439,10 +497,21 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
             continue
         delta = float(res["delta_eue_mwh"] or 0.0)
         q = meta["q"]
-        crit = q * delta * voll
-        occ = (8760.0 * q / meta["mttr_hours"]
-               if meta["mttr_hours"] and math.isfinite(meta["mttr_hours"])
-               and meta["mttr_hours"] > 0 else 0.0)
+        in_scope = bool(meta.get("in_metric_scope", True))
+        # Spec §4.3: out-of-scope conversion / P2X rows keep a non-negative
+        # zero criticality — never a "break the electrolyser" ranking.
+        if in_scope:
+            crit = q * delta * voll
+            occ = (8760.0 * q / meta["mttr_hours"]
+                   if meta["mttr_hours"] and math.isfinite(meta["mttr_hours"])
+                   and meta["mttr_hours"] > 0 else 0.0)
+            severity = (crit / occ) if occ > 0 else 0.0
+        else:
+            crit = 0.0
+            occ = (8760.0 * q / meta["mttr_hours"]
+                   if meta["mttr_hours"] and math.isfinite(meta["mttr_hours"])
+                   and meta["mttr_hours"] > 0 else 0.0)
+            severity = 0.0
         rows.append({
             "id": c["id"],
             "status": res["status"],
@@ -454,9 +523,9 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
                 "failure_class": "B",
                 "occurrence_per_year": occ,
                 "occurrence_basis": meta["basis"],
-                "severity_eur": (crit / occ) if occ > 0 else 0.0,
+                "severity_eur": severity,
                 "criticality_eur_per_year": crit,
-                "in_metric_scope": True,
+                "in_metric_scope": in_scope,
                 "engine": "lp_proxy",
                 "fidelity": "deterministic_scenario",
             },

@@ -192,3 +192,25 @@ def test_mvp_a_strong_grid_study_binds_and_reports():
     assert report.completeness["cost"] == "ok"
     assert report.achieved_ens_permyriad is not None or report.sections[
         "target"].payload is not None
+
+
+def test_fmea_top_skip_note_is_link_primary_residual_risk():
+    """P2 / spec decision 14: EH report omits SCLOPF merge; label Link-primary."""
+    from services.pypsa_service import PyPSAService
+
+    n = _ens_bind_network()
+    pack = default_strong_grid_pack().model_copy(update={
+        "availability": AvailabilityTarget(ens_cap_permyriad=1000.0),
+    })
+    PyPSAService.set_network(n)
+    report = S.run_eh_study(
+        n, pack, SolverConfig(voll=150.0, ens_cap_permyriad=1000.0),
+        lock=PyPSAService.get_lock(),
+        stop_event=threading.Event(),
+        log_queue=queue.SimpleQueue(),
+        stages=("apply_pack", "ens_solve", "assemble"),
+    )
+    note = report.sections["fmea_top"].note or ""
+    assert "Link-primary" in note
+    assert "SCLOPF" in note
+    assert S.FMEA_TOP_LINK_PRIMARY_NOTE.split(";")[0] in note

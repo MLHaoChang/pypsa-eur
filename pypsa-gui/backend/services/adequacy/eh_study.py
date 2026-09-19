@@ -30,11 +30,20 @@ logger = logging.getLogger("pypsa_gui.eh_study")
 
 DEFAULT_STAGES = EH_PIPELINE_STAGES
 
+# Spec decision 14 / P2: FMEA top-N from the EH study is Link-primary Class-B
+# residual risk. AC Line/Transformer N-1 stays on SCLOPF and is omitted from
+# the FMEA ranking unless a future product decision merges them.
+FMEA_TOP_LINK_PRIMARY_NOTE = (
+    "Link-primary residual risk (Class-B Link sweep); "
+    "AC Line/Transformer N-1 remains on SCLOPF and is omitted from FMEA ranking"
+)
+
 # Re-export for tests / callers.
 __all__ = [
     "DEFAULT_STAGES",
     "DEFAULT_EH_BUDGET_SOLVES",
     "MAX_EH_BUDGET_SOLVES",
+    "FMEA_TOP_LINK_PRIMARY_NOTE",
     "run_eh_study",
 ]
 
@@ -114,6 +123,8 @@ def run_eh_study(
             note = f"{name} not implemented in P1.5 sync driver"
             if name == "mc_certify" and pack.mc_certify_required:
                 note = "required by pack but not implemented — not_established"
+            elif name == "fmea_top":
+                note = FMEA_TOP_LINK_PRIMARY_NOTE + f"; {note}"
             records.append(PipelineStageRecord(
                 stage=name, status="skipped", note=note))  # type: ignore[arg-type]
         else:
@@ -449,11 +460,18 @@ def run_eh_study(
             ("fmea_top", "fmea_top"),
         ):
             if optional not in IMPLEMENTED:
-                reason = (
-                    f"{optional} not implemented in sync driver"
-                    if optional in requested
-                    else f"{optional} not requested"
-                )
+                if optional == "fmea_top":
+                    reason = FMEA_TOP_LINK_PRIMARY_NOTE
+                    if optional not in requested:
+                        reason = f"{reason}; stage not requested"
+                    else:
+                        reason = f"{reason}; stage not implemented in sync driver"
+                else:
+                    reason = (
+                        f"{optional} not implemented in sync driver"
+                        if optional in requested
+                        else f"{optional} not requested"
+                    )
                 section_payloads.setdefault(
                     section, ("skipped", None, reason))
 
