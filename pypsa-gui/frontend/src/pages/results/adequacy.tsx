@@ -175,12 +175,25 @@ export interface CoptPayload {
     rate_zero_units?: string[]
     netted_beyond_cap?: string[]
     k_exact?: number
+    /** P7: per-unit outage-rate provenance (library vs asset override). */
+    units_provenance?: RateProvenanceEntry[]
   }
   /** The one sentence about profiled units; null when the fleet has none. */
   fidelity_note?: string | null
   /** Phase 12d: the activity disclosure (see `ActivitySummary`). */
   activity?: ActivitySummary
+  /** P7 honesty: rate library + provenance only — not full RAM/CMMS. */
+  ram_note?: string | null
   voll_eur_per_mwh: number
+}
+
+/** P7 rate-source ledger entry (COPT fleet / MC result). */
+export type RateSource = 'asset' | 'carrier_default' | 'missing'
+
+export interface RateProvenanceEntry {
+  name: string
+  rate_source: RateSource | string
+  library_citation?: string | null
 }
 
 /** "2 inactive in 2030, 1 partial in 2040" — the chip text for an activity
@@ -241,6 +254,58 @@ export function foldChipTitle(
     lines.push('No outages sampled — the outage rate is 0 as entered: '
       + zero.join(', '))
   }
+  return lines.join('\n')
+}
+
+/** P7: "2 library · 1 asset" (+ optional storage counts). Empty when absent. */
+export function ramChipText(p: {
+  units_provenance?: RateProvenanceEntry[] | null
+  storage_provenance?: RateProvenanceEntry[] | null
+} | null | undefined): string {
+  const units = p?.units_provenance ?? []
+  const storage = p?.storage_provenance ?? []
+  if (!units.length && !storage.length) return ''
+  const count = (list: RateProvenanceEntry[], src: string) =>
+    list.filter(e => e.rate_source === src).length
+  const parts: string[] = []
+  const lib = count(units, 'carrier_default')
+  const asset = count(units, 'asset')
+  const missing = count(units, 'missing')
+  if (lib) parts.push(`${lib} library`)
+  if (asset) parts.push(`${asset} asset`)
+  if (missing) parts.push(`${missing} missing`)
+  const sLib = count(storage, 'carrier_default')
+  const sAsset = count(storage, 'asset')
+  if (sLib || sAsset) {
+    const sParts: string[] = []
+    if (sLib) sParts.push(`${sLib} library`)
+    if (sAsset) sParts.push(`${sAsset} asset`)
+    parts.push(`storage ${sParts.join(' · ')}`)
+  }
+  return parts.join(' · ')
+}
+
+export function ramChipTitle(
+  p: {
+    units_provenance?: RateProvenanceEntry[] | null
+    storage_provenance?: RateProvenanceEntry[] | null
+  } | null | undefined,
+  ramNote?: string | null,
+): string {
+  const lines: string[] = []
+  const fmt = (e: RateProvenanceEntry) => {
+    const cite = e.library_citation ? ` (${e.library_citation})` : ''
+    return `${e.name}: ${e.rate_source}${cite}`
+  }
+  const units = p?.units_provenance ?? []
+  if (units.length) {
+    lines.push('Outage-rate provenance: ' + units.map(fmt).join('; '))
+  }
+  const storage = p?.storage_provenance ?? []
+  if (storage.length) {
+    lines.push('Storage rate provenance: ' + storage.map(fmt).join('; '))
+  }
+  if (ramNote) lines.push(ramNote)
   return lines.join('\n')
 }
 
@@ -312,6 +377,18 @@ export function CoptChips({ copt, proxyEnsMwh }: {
           title={foldChipTitle(copt.fleet)}
         >
           {foldChipText(copt.fleet)}
+        </span>
+      )}
+      {ramChipText({ units_provenance: copt.fleet.units_provenance }) && (
+        <span
+          className="px-2 py-0.5 rounded bg-panel border border-border text-[10px] text-muted"
+          data-testid="copt-ram-note"
+          title={ramChipTitle(
+            { units_provenance: copt.fleet.units_provenance },
+            copt.ram_note,
+          )}
+        >
+          {ramChipText({ units_provenance: copt.fleet.units_provenance })}
         </span>
       )}
       {copt.fidelity_note && (

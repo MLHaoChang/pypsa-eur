@@ -119,7 +119,7 @@ def test_a_study_record_does_not_survive_a_reset_to_a_new_network(
 @pytest.mark.parametrize("key", STUDY_KEYS)
 def test_every_study_key_is_cleared_not_just_the_one_that_was_noticed(
         client, install_network, key):
-    """★ A4: all five studies, parametrized over STUDY_KEYS ITSELF.
+    """★ A4: all studies, parametrized over STUDY_KEYS ITSELF.
 
     The MC is the study the defect was noticed on, and fixing only `mc` would
     leave the frontier, the FMEA sweep and BOTH planning loops leaking — the

@@ -9,7 +9,9 @@ import { formatApiDetail } from '../../api/client'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import {
-  activityChipText, basisSuffix, foldChipText, foldChipTitle, type AdequacyReportPayload, type CoptPayload,
+  activityChipText, basisSuffix, foldChipText, foldChipTitle,
+  ramChipText, ramChipTitle,
+  type AdequacyReportPayload, type CoptPayload,
 } from './adequacy'
 
 // ── The sequential Monte-Carlo adequacy study (spec §5, Phase 6) ────────────
@@ -619,6 +621,16 @@ export function McPanel() {
               title={foldChipTitle(result)}
             >
               {foldChipText(result)}
+            </span>
+          )}
+
+          {result && ramChipText(result) && (
+            <span
+              className="self-start px-2 py-0.5 rounded bg-panel border border-border text-[10px] text-muted"
+              data-testid="mc-ram-note"
+              title={ramChipTitle(result, result.ram_note)}
+            >
+              {ramChipText(result)}
             </span>
           )}
 

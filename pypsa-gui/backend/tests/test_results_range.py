@@ -347,6 +347,14 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # reads `@results_router.get` only); both carry their
         # ROUTE_SURFACES entries in test_golden_coverage.py.
         "/margin_loop",
+        # Energy Hub reference-design surfaces — structured reports /
+        # comparison tables / study lifecycle status, no snapshot series.
+        "/eh_study",
+        "/eh_reference_design",
+        "/eh_redundancy",
+        "/eh_levers",
+        "/eh_dtc",
+        "/eh_dtc_planning",
     }
 
     unclassified = declared - ranged - aggregates

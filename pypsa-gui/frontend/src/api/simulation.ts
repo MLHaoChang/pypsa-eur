@@ -279,6 +279,20 @@ export interface McResult {
    *  period, beside the reserve margin's own credit for the same group. A
    *  SIBLING of `elcc`, never a row in it; `null` when not requested. */
   elcc_portfolio?: ElccPortfolioBlock | null
+  /** P7: per-unit outage-rate provenance (library vs asset override). */
+  units_provenance?: {
+    name: string
+    rate_source: string
+    library_citation?: string | null
+  }[]
+  /** P7: storage rate provenance (missing entries omitted by the engine). */
+  storage_provenance?: {
+    name: string
+    rate_source: string
+    library_citation?: string | null
+  }[]
+  /** P7 honesty: rate library + provenance only — not full RAM/CMMS. */
+  ram_note?: string | null
 }
 
 export type ElccPortfolioStatus =
@@ -589,6 +603,133 @@ export interface MarginLoopRequestBody {
   // (`MarginLoopRequest` in routers/results.py refuses to take one): too
   // small and the search walks a region where the plan does not change, too
   // large and it overshoots the bracket entirely.
+}
+
+/** Energy Hub archetype packs the study can run (backend EnergyHubArchetype). */
+export type EhArchetype = 'strong_grid' | 'weak_flexible' | 'off_grid'
+
+export interface EhStudyRequestBody {
+  archetype: EhArchetype
+  stages?: string[]
+  budget_solves?: number
+}
+
+export type EhSectionStatus = 'ok' | 'not_established' | 'skipped'
+
+/** P9 dynamics gate product fields (warn-only thin slice; fail reserved). */
+export type EhScrVerdict = 'pass' | 'warn' | 'fail'
+
+export interface EhGatesBlock {
+  scr?: EhScrVerdict | null
+  emt_recommended?: boolean | null
+}
+
+export interface EhSectionState {
+  status: EhSectionStatus
+  payload?: Record<string, unknown> | null
+  note?: string | null
+}
+
+/** Durable product artifact from GET /results/eh_reference_design. */
+export interface EhReferenceDesignReport {
+  archetype: EhArchetype
+  pack_hash: string
+  assumptions_hash: string
+  ens_cap_permyriad?: number | null
+  achieved_ens_permyriad?: number | null
+  achieved_shed_hours?: number | null
+  mc_lole_h?: number | null
+  cost_at_target_eur?: number | null
+  period_basis?: string | null
+  excludes_shed_cost?: boolean
+  completeness?: Record<string, EhSectionStatus>
+  sections?: Record<string, EhSectionState>
+  tea?: { lcoe_eur_per_mwh?: number | null; lcoh_eur_per_kg?: number | null; notes?: string | null } | null
+  pipeline?: { aborted?: boolean; solves_consumed?: number } | null
+  /** Dynamics feasibility gate (SCR → EMT flag). Absent when section skipped. */
+  gates?: EhGatesBlock | null
+}
+
+/** Study lifecycle record from GET /results/eh_study. */
+export interface EhStudyPayload {
+  status: string
+  study?: string
+  archetype?: EhArchetype
+  stages?: string[] | null
+  budget_solves?: number
+  report?: EhReferenceDesignReport | null
+  error?: string | null
+  started_at?: number
+  finished_at?: number | null
+}
+
+export interface EhRedundancyOption {
+  scenario_id: string
+  status: string
+  condition?: string | null
+  cost_at_target_eur?: number | null
+  achieved_ens_mwh?: number | null
+  meets_target?: boolean | null
+  not_applicable?: boolean
+  binding_metric?: string
+}
+
+export interface EhRedundancyTable {
+  certify_method?: string
+  ens_cap_permyriad?: number
+  options?: EhRedundancyOption[]
+  comparable_solved?: number
+  aborted?: boolean
+  selection?: { selected_id?: string | null } | null
+  selection_error?: string | null
+}
+
+export interface EhLeverOption {
+  kind: string
+  value: number
+  unit?: string
+  status: string
+  cost_at_target_eur?: number | null
+  achieved_ens_mwh?: number | null
+  meets_target?: boolean | null
+  ineffective?: boolean
+  ineffective_reason?: string | null
+}
+
+export interface EhLeverTable {
+  kind?: string
+  options?: EhLeverOption[]
+  comparable_solved?: number
+  skipped_kinds?: string[]
+  honesty_notes?: string[]
+  aborted?: boolean
+}
+
+export interface EhDtcContingency {
+  contingency: string
+  status: string
+  condition?: string | null
+  critical_unserved_mwh?: number | null
+  noncritical_unserved_mwh?: number | null
+  cost_at_target_eur?: number | null
+  built_p_nom_mw?: number | null
+}
+
+export interface EhDtcStressTable {
+  mode?: string
+  attribution?: string
+  contingencies?: EhDtcContingency[]
+  honesty_notes?: string[]
+  comparable_solved?: number
+  aborted?: boolean
+}
+
+export interface EhDtcPlanningTable {
+  mode?: string
+  attribution?: string
+  contingencies?: EhDtcContingency[]
+  comparable_solved?: number
+  aborted?: boolean
 }
 
 // ── The firm-capacity (planning reserve margin) standard, Phase 8 §4 ────────
@@ -1029,6 +1170,25 @@ export const resultsApi = {
   // while this loop kept solving.
   abortMarginLoop: () => client.post('/results/margin_loop/abort')
     .then(r => r.data),
+  // Energy Hub reference-design study (P1.5 HTTP / P5 panel). 204 = none this
+  // session. Poll while status === 'running'; durable report also on
+  // getEhReferenceDesign.
+  getEhStudy: () => client.get('/results/eh_study')
+    .then(r => (r.status === 204 ? null : r.data as EhStudyPayload)),
+  startEhStudy: (body: EhStudyRequestBody) =>
+    client.post('/results/eh_study', body).then(r => r.data),
+  abortEhStudy: () => client.post('/results/eh_study/abort')
+    .then(r => r.data as { status: string; aborting: boolean }),
+  getEhReferenceDesign: () => client.get('/results/eh_reference_design')
+    .then(r => (r.status === 204 ? null : r.data as EhReferenceDesignReport)),
+  getEhRedundancy: () => client.get('/results/eh_redundancy')
+    .then(r => (r.status === 204 ? null : r.data as EhRedundancyTable)),
+  getEhLevers: () => client.get('/results/eh_levers')
+    .then(r => (r.status === 204 ? null : r.data as EhLeverTable)),
+  getEhDtc: () => client.get('/results/eh_dtc')
+    .then(r => (r.status === 204 ? null : r.data as EhDtcStressTable)),
+  getEhDtcPlanning: () => client.get('/results/eh_dtc_planning')
+    .then(r => (r.status === 204 ? null : r.data as EhDtcPlanningTable)),
   // FMEA worksheet sidecar (Phase 3): manual class-D rows + mitigability
   // overlays, persisted per project. Computed rows come from getCopt and
   // merge client-side (pages/results/fmea.ts).

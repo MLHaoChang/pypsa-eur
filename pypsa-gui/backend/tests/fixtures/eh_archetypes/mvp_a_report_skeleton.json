@@ -1,0 +1,145 @@
+{
+  "archetype": "strong_grid",
+  "pack_hash": "fixture-pack",
+  "assumptions_hash": "fixture-assumptions",
+  "ens_cap_permyriad": 10.0,
+  "achieved_ens_permyriad": null,
+  "achieved_shed_hours": null,
+  "mc_lole_h": null,
+  "cost_at_target_eur": null,
+  "period_basis": null,
+  "excludes_shed_cost": true,
+  "sections": {
+    "target": {
+      "status": "not_established",
+      "payload": null,
+      "note": null
+    },
+    "cost": {
+      "status": "not_established",
+      "payload": null,
+      "note": null
+    },
+    "frontier": {
+      "status": "not_established",
+      "payload": null,
+      "note": null
+    },
+    "sizing": {
+      "status": "not_established",
+      "payload": null,
+      "note": null
+    },
+    "redundancy": {
+      "status": "not_established",
+      "payload": null,
+      "note": null
+    },
+    "levers": {
+      "status": "not_established",
+      "payload": null,
+      "note": null
+    },
+    "dtc": {
+      "status": "not_established",
+      "payload": null,
+      "note": null
+    },
+    "fmea_top": {
+      "status": "not_established",
+      "payload": null,
+      "note": null
+    },
+    "tea": {
+      "status": "not_established",
+      "payload": null,
+      "note": null
+    },
+    "gates": {
+      "status": "not_established",
+      "payload": null,
+      "note": null
+    }
+  },
+  "completeness": {
+    "target": "not_established",
+    "cost": "not_established",
+    "frontier": "not_established",
+    "sizing": "not_established",
+    "redundancy": "not_established",
+    "levers": "not_established",
+    "dtc": "not_established",
+    "fmea_top": "not_established",
+    "tea": "not_established",
+    "gates": "not_established"
+  },
+  "pipeline": {
+    "stages": [
+      {
+        "stage": "apply_pack",
+        "status": "pending",
+        "solves_charged": 0,
+        "note": null
+      },
+      {
+        "stage": "ens_solve",
+        "status": "pending",
+        "solves_charged": 0,
+        "note": null
+      },
+      {
+        "stage": "frontier",
+        "status": "pending",
+        "solves_charged": 0,
+        "note": null
+      },
+      {
+        "stage": "mc_certify",
+        "status": "pending",
+        "solves_charged": 0,
+        "note": null
+      },
+      {
+        "stage": "fmea_top",
+        "status": "pending",
+        "solves_charged": 0,
+        "note": null
+      },
+      {
+        "stage": "redundancy",
+        "status": "pending",
+        "solves_charged": 0,
+        "note": null
+      },
+      {
+        "stage": "levers",
+        "status": "pending",
+        "solves_charged": 0,
+        "note": null
+      },
+      {
+        "stage": "dtc_stress",
+        "status": "pending",
+        "solves_charged": 0,
+        "note": null
+      },
+      {
+        "stage": "dtc_planning",
+        "status": "pending",
+        "solves_charged": 0,
+        "note": null
+      },
+      {
+        "stage": "assemble",
+        "status": "pending",
+        "solves_charged": 0,
+        "note": null
+      }
+    ],
+    "budget_solves": 30,
+    "solves_consumed": 0,
+    "aborted": false
+  },
+  "tea": null,
+  "gates": null
+}

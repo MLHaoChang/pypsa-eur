@@ -194,6 +194,50 @@ def test_class_b_zeroes_time_varying_availability_too():
     assert float(n.links_t.p_max_pu["tie"].min()) == pytest.approx(1.0)
 
 
+def test_class_b_zeroes_and_restores_time_varying_p_min_pu():
+    """★ P2 residual: DtC islanding already zeros links_t.p_min_pu; Class B
+    must match. A bidirectional TS min that stays non-zero after "outage"
+    keeps reverse flow — the bite that closing only p_max_pu leaves open.
+    """
+    n = _network()
+    n.links_t.p_max_pu = pd.DataFrame({"tie": [1.0, 1.0]}, index=n.snapshots)
+    n.links_t.p_min_pu = pd.DataFrame({"tie": [-0.4, -0.4]}, index=n.snapshots)
+    cons = S.class_b_contingencies(n)
+    assert len(cons) == 1
+    undo = cons[0]["mutate"](n)
+    assert float(n.links_t.p_max_pu["tie"].abs().max()) == pytest.approx(0.0)
+    assert float(n.links_t.p_min_pu["tie"].abs().max()) == pytest.approx(0.0)
+    undo()
+    assert float(n.links_t.p_max_pu["tie"].min()) == pytest.approx(1.0)
+    assert float(n.links_t.p_min_pu["tie"].max()) == pytest.approx(-0.4)
+
+
+def test_conversion_links_are_out_of_electricity_metric_scope():
+    """★ P2 residual / spec §4.3: P2X / conversion Links must not rank as
+    beneficial criticality on an electricity-only metric.
+    """
+    n = _network()
+    n.add("Carrier", "H2")
+    n.add("Bus", "h2", carrier="H2")
+    n.add("Link", "electrolyser", bus0="bus_gen", bus1="h2", p_nom=80.0,
+          carrier="H2", efficiency=0.7,
+          outage_rate_value=0.05, outage_rate_basis="FOR", mttr_hours=24.0)
+    assert S.link_in_electricity_metric_scope(n, "tie") is True
+    assert S.link_in_electricity_metric_scope(n, "electrolyser") is False
+
+    PyPSAService.set_network(n)
+    rows, _restore = S.run_class_b_sweep(
+        n, PyPSAService.get_lock(), _cfg(), log_queue=queue.SimpleQueue())
+    by_id = {r["id"]: r for r in rows if r.get("failure_mode")}
+    assert "link:tie:forced_outage" in by_id
+    assert "link:electrolyser:forced_outage" in by_id
+    assert by_id["link:tie:forced_outage"]["failure_mode"]["in_metric_scope"] is True
+    el = by_id["link:electrolyser:forced_outage"]["failure_mode"]
+    assert el["in_metric_scope"] is False
+    assert el["severity_eur"] == 0.0
+    assert el["criticality_eur_per_year"] == 0.0
+
+
 # ── the background runner + routes ────────────────────────────────────────
 
 def test_fmea_sweep_routes_lifecycle():
