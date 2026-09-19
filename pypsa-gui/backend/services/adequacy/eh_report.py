@@ -13,6 +13,7 @@ from typing import Any
 from models.energy_hub import (
     REPORT_SECTIONS,
     EHStudyPipeline,
+    GatesBlock,
     PipelineStageRecord,
     ReferenceDesignReport,
     SectionState,
@@ -126,6 +127,7 @@ def assemble_reference_design_report(
     cost_at_target_eur: float | None = None,
     period_basis: str | None = None,
     tea: TeaBlock | None = None,
+    gates: GatesBlock | None = None,
 ) -> ReferenceDesignReport:
     """Build the one product artifact from stage fragments + completeness."""
     sections: dict[str, SectionState] = {}
@@ -152,6 +154,7 @@ def assemble_reference_design_report(
         completeness=completeness,
         pipeline=pipeline,
         tea=tea,
+        gates=gates,
     )
 
 

@@ -339,16 +339,27 @@ the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f
 
 **Goal.** Weak-grid **feasibility gate**, not co-opt.
 
+**Pinned product rule (EH, not gridspine):**
+- SCR ≥ 3.0 → `gates.scr=pass`, `emt_recommended=False`
+- SCR < 3.0 → `gates.scr=warn`, `emt_recommended=True` (includes SCR < 2; **`fail` reserved** — thin slice is warn-only)
+- Band edges reuse `gridspine.static.strength.SCR_BANDS` (2, 3, 5); on-edge SCR=3 belongs to pass
+- Proxy (no full 60909): `buses.eh_sk_mva` / (`buses.eh_ibr_mva` or installed IBR Generator MW-as-MVA) at `eh_poc` buses; gate uses **min** SCR
+- Archetype scope: **`weak_flexible` only**; `strong_grid` / `off_grid` → gates `skipped`
+- Partial PoC coverage is **fail-closed** (`not_established` if any `eh_poc` lacks `eh_sk_mva`/IBR)
+
 **Steps**
-- [ ] Pin EH product rule: warn vs block thresholds (gridspine bands are report-only today).
-- [ ] Map POC buses + installed-MVA convention for PyPSA EH networks (not assume full gridspine study).
-- [ ] Wire `gridspine.static.strength` (or documented proxy); report `gates.scr`.
-- [ ] `emt_recommended` flag only — no in-tree EMT.
-- [ ] Optional: thin warn-only preflight attachable to `weak_flexible` earlier without blocking P1.
+- [x] Pin EH product rule: warn vs block thresholds (gridspine bands are report-only today).
+- [x] Map POC buses + installed-MVA convention for PyPSA EH networks (not assume full gridspine study).
+- [x] Wire `gridspine.static.strength` band edges + documented `eh_sk_mva` proxy; report `gates.scr`.
+- [x] `emt_recommended` flag only — no in-tree EMT.
+- [x] Thin warn-only preflight attachable to `weak_flexible` (`services/adequacy/scr_gate.py` + `run_eh_study`).
 
 **Acceptance**
-- [ ] Weak-flexible: SCR below threshold → warn or block per pin; strong_grid does not require SCR pass.
-- [ ] Full dynamics↔adequacy co-simulation remains out of scope.
+- [x] Weak-flexible: SCR below threshold → warn (thin slice); strong_grid does not require SCR pass (`test_energy_hub_scr_gate.py`).
+- [x] Full dynamics↔adequacy co-simulation remains out of scope.
+- [x] **QA gate cleared** — [P9 assessor](bc-52970cf8-ad19-57f3-bad7-bc1c059f5552): `GO WITH BINDING CONDITIONS`; conditions satisfied (SCR↔MC orthogonality test, partial-PoC fail-closed, TDD count corrected).
+
+**TDD evidence:** ImportError/red → `scr_gate.py` + assemble `gates=` + weak_flexible wiring → 14 tests green (incl. orthogonality + fail-closed PoC).
 
 ---
 
