@@ -59,6 +59,11 @@
       "status": "not_established",
       "payload": null,
       "note": null
+    },
+    "multi_energy": {
+      "status": "not_established",
+      "payload": null,
+      "note": null
     }
   },
   "completeness": {
@@ -71,7 +76,8 @@
     "dtc": "not_established",
     "fmea_top": "not_established",
     "tea": "not_established",
-    "gates": "not_established"
+    "gates": "not_established",
+    "multi_energy": "not_established"
   },
   "pipeline": {
     "stages": [
