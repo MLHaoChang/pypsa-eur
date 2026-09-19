@@ -320,9 +320,18 @@ the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f
 **(a) `kind=profiles` runner + synthetic multi-year fixtures** — required for testability.  
 **(b) Real climate-year bundles** — data procurement gate; do not block (a).
 
+**Shipped (a)**
+- Inline `loads_p_set` / `generators_p_max_pu` (or `profile_pack`) swaps absolute series
+- Occurrence basis `scenario:profiles`; incomplete → fail-closed `profiles_incomplete`
+- Synthetic packs: `tests/fixtures/eh_class_c/synth_*.json`
+- Abort/partial via shared contingency sweep (same as parametric)
+
 **Acceptance**
-- [ ] Synthetic profiles run ranks Class-C modes with frequencies + abort/partial like other studies.
-- [ ] Real climate packs optional behind data availability.
+- [x] Synthetic profiles run ranks Class-C modes with frequencies + abort/partial like other studies (`test_energy_hub_class_c_profiles.py`).
+- [x] Real climate packs optional behind data availability (procurement deferred; incomplete stubs allowed in registry).
+- [x] **QA gate cleared** — [P8 assessor](bc-520276e1-35ca-5e40-bdbb-fa300ef257fe): `GO WITH BINDING CONDITIONS`; conditions satisfied (membership test pin; snapshot-length row fail-closed).
+
+**TDD evidence:** `profiles_not_supported_yet` / ImportError red → profiles mutate + packs → 8 tests green (+ stress/F1m2 regression).
 
 ---
 

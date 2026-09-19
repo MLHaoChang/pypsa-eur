@@ -814,7 +814,7 @@ def test_F1m2_the_class_C_assembler_returns_the_pair_when_nothing_is_runnable():
     rows, restore = ST.run_class_c_sweep(object(), object(), _cfg(), scen)
 
     assert [r["id"] for r in rows] == ["scenario:s0", "scenario:s1"]
-    assert all(r["status"] == "profiles_not_supported_yet" for r in rows)
+    assert all(r["status"] == "profiles_incomplete" for r in rows)
     # No sweep ran, so nothing was restored — and the flags say exactly that
     # rather than claiming a re-solve that never happened.
     assert restore == {"base_restored": None, "base_restore_status": None,
