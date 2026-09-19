@@ -304,8 +304,14 @@ the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f
 - [x] Library loads; MC/COPT show library vs override provenance (`rate_source` + `library_citation`; `test_energy_hub_ram_v1.py`).
 - [x] No claim of full RAM/CMMS (`ram_note` on COPT/MC payloads).
 - [x] **QA gate cleared** — [P7 assessor](bc-e90602ef-ed5b-5bea-8b44-7fa4761b4335): **GO** (provenance-only; 4/4 tests green).
+<<<<<<< HEAD
 
 **TDD evidence:** KeyError red → wire `rate_source` / `units_provenance` / `library_citation` → 4 tests green.
+=======
+- [x] Frontend disclosure: COPT/MC chips for `rate_source` counts + `ram_note` — [P7 RAM FE QA](bc-360b2266-9712-5f68-9693-6fc675592cd5): **GO** (79 tests; fail-closed pre-P7).
+
+**TDD evidence:** KeyError red → wire `rate_source` / `units_provenance` / `library_citation` → 4 tests green. FE: `ramChipText` red → chips → adequacy+McPanel green.
+>>>>>>> origin/cursor/eh-p7-ram-fe-ef60
 
 ---
 
