@@ -64,6 +64,7 @@ def build_copt_payload(
     # miscounted zero-capacity generators, which the walk skips and the
     # subtraction did not (plan 12c-pre v2 review, finding 8).
     from services.adequacy.metrics import horizon_years, resolve_time_basis
+    from services.adequacy.occurrence import RAM_NOTE, provenance_entry
     _copt_nyears = horizon_years(n)
     _copt_basis = resolve_time_basis(_copt_nyears)
     return {
@@ -129,6 +130,15 @@ def build_copt_payload(
             "rate_zero_units": [u.name for u in units
                                 if _rate_is_zero(u)
                                 and not _is_flag_deterministic(u)],
+            # P7: library vs typed override — NOT folded_units[].source.
+            "units_provenance": [
+                provenance_entry(
+                    name=u.name,
+                    rate_source=u.source or "missing",
+                    citation=getattr(u, "library_citation", None) or None,
+                )
+                for u in units
+            ],
         },
         "fidelity_note": analysis["fidelity_note"],
         # Phase 12d: which units the engines masked in which period, by
@@ -136,6 +146,7 @@ def build_copt_payload(
         # vintage not yet built), with the sentence that says so.
         "activity": activity,
         "voll_eur_per_mwh": voll,
+        "ram_note": RAM_NOTE,
     }
 
 

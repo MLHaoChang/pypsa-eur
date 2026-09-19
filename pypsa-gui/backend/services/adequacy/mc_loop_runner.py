@@ -211,6 +211,7 @@ def start_mc(
         # outages sampled. Imported from the COPT so `/mc`'s lists and
         # `split_fleet`'s buckets cannot disagree about the same fleet.
         from services.adequacy.copt import is_flag_deterministic as _is_flag_deterministic, rate_is_zero as _rate_is_zero
+        from services.adequacy.occurrence import RAM_NOTE, provenance_entry
         try:
             # The ONLY call in the codebase that may carry the flag: this
             # is the study's own baseline, not a replay of one. Every ELCC
@@ -307,6 +308,25 @@ def start_mc(
                     # Phase 12d: the activity disclosure (see /copt),
                     # captured in the request.
                     "activity": activity_block,
+                    # P7: library vs typed override (not folded_units source).
+                    "units_provenance": [
+                        provenance_entry(
+                            name=u.name,
+                            rate_source=u.source or "missing",
+                            citation=getattr(u, "library_citation", None) or None,
+                        )
+                        for u in inputs.units
+                    ],
+                    "storage_provenance": [
+                        provenance_entry(
+                            name=s.name,
+                            rate_source=getattr(s, "source", None) or "missing",
+                            citation=getattr(s, "library_citation", None) or None,
+                        )
+                        for s in inputs.storage
+                        if (getattr(s, "source", None) or "missing") != "missing"
+                    ],
+                    "ram_note": RAM_NOTE,
                 })
         except Exception as exc:                              # noqa: BLE001
             record.update(status="failed", result=None, error=str(exc),

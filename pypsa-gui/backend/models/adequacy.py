@@ -346,6 +346,9 @@ class FailureModeResult(BaseModel):
     criticality_eur_per_year: float = Field(ge=0)
     in_metric_scope: bool = True
     mitigability: str | None = None  # expert-entered (worksheet, Phase 3)
+    # P7: rate library vs typed override. Optional so class-B/C/D rows stay valid.
+    rate_source: str | None = None
+    library_citation: str | None = None
     engine: Engine
     fidelity: Fidelity
 
