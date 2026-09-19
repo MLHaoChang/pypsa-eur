@@ -47,7 +47,7 @@ const cell = (v: unknown) =>
 /** Stable display order for completeness chips (matches REPORT_SECTIONS). */
 export const COMPLETENESS_ORDER = [
   'target', 'cost', 'frontier', 'sizing', 'redundancy', 'levers', 'dtc',
-  'fmea_top', 'tea', 'gates',
+  'fmea_top', 'tea', 'gates', 'multi_energy',
 ] as const
 
 export function completenessRows(
@@ -91,6 +91,36 @@ export function hasGatesBlock(report: EhReferenceDesignReport): boolean {
   const payload = section?.payload
   if (payload && typeof payload.min_scr === 'number') return true
   return false
+}
+
+
+/** True when multi-energy ENS is established or fail-closed with a note. */
+export function hasMultiEnergyBlock(report: EhReferenceDesignReport): boolean {
+  const section = report.sections?.multi_energy
+  if (!section) return false
+  if (section.status === 'skipped') return false
+  if (section.note) return true
+  const payload = section.payload
+  if (payload && typeof payload === 'object') {
+    const by = (payload as { ens_by_carrier_mwh?: unknown }).ens_by_carrier_mwh
+    if (by && typeof by === 'object') return true
+    const v = (payload as { violations?: unknown }).violations
+    if (Array.isArray(v) && v.length > 0) return true
+  }
+  return section.status === 'ok' || section.status === 'not_established'
+}
+
+/** Carrier → MWh pairs from the multi_energy section payload. */
+export function multiEnergyCarrierEntries(
+  report: EhReferenceDesignReport,
+): { carrier: string; mwh: number }[] {
+  const payload = report.sections?.multi_energy?.payload
+  if (!payload || typeof payload !== 'object') return []
+  const by = (payload as { ens_by_carrier_mwh?: unknown }).ens_by_carrier_mwh
+  if (!by || typeof by !== 'object') return []
+  return Object.entries(by as Record<string, unknown>)
+    .filter(([, v]) => typeof v === 'number' && Number.isFinite(v))
+    .map(([carrier, mwh]) => ({ carrier, mwh: Number(mwh) }))
 }
 
 /** CSV rows for the redundancy comparison table. */
@@ -239,6 +269,7 @@ export function EhReferenceDesignPanel() {
     () => completenessRows(report?.completeness),
     [report?.completeness],
   )
+  const meCarriers = report ? multiEnergyCarrierEntries(report) : []
 
   const selected = ARCHETYPES.find(a => a.id === archetype)!
   const selectedId = redTable?.selection?.selected_id ?? null
@@ -454,6 +485,46 @@ export function EhReferenceDesignPanel() {
                   )}
                 </div>
               )}
+
+              {hasMultiEnergyBlock(report) && (
+                <div
+                  className="flex flex-col gap-1 border-t border-border/50 pt-2"
+                  data-testid="eh-multi-energy"
+                >
+                  <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                    Multi-energy ENS
+                  </h4>
+                  {meCarriers.length > 0 && (
+                    <div
+                      className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]"
+                      data-testid="eh-multi-energy-by-carrier"
+                    >
+                      {meCarriers.map(({ carrier, mwh }) => (
+                        <span key={carrier} data-testid={`eh-multi-energy-${carrier}`}>
+                          <span className="text-muted">{carrier} </span>
+                          <span className="text-text font-mono">
+                            {mwh.toFixed(2)} MWh
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {typeof report.sections?.multi_energy?.payload?.attribution === 'string' && (
+                    <p className="text-[10px] text-muted" data-testid="eh-multi-energy-attribution">
+                      attribution: {String(report.sections.multi_energy.payload.attribution)}
+                    </p>
+                  )}
+                  {report.sections?.multi_energy?.note && (
+                    <p
+                      className="text-[10px] text-muted"
+                      data-testid="eh-multi-energy-note"
+                    >
+                      {report.sections.multi_energy.note}
+                    </p>
+                  )}
+                </div>
+              )}
+
             </div>
           )}
 

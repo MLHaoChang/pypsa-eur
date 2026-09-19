@@ -10,7 +10,9 @@ import {
   dtcPlanningCsvRows,
   dtcStressCsvRows,
   EhReferenceDesignPanel,
+  hasMultiEnergyBlock,
   leverCsvRows,
+  multiEnergyCarrierEntries,
   redundancyCsvRows,
   scrTone,
   statusTone,
@@ -59,6 +61,7 @@ const REPORT = {
     fmea_top: 'skipped' as const,
     tea: 'ok' as const,
     gates: 'not_established' as const,
+    multi_energy: 'skipped' as const,
   },
   tea: { lcoe_eur_per_mwh: 42, lcoh_eur_per_kg: null, notes: null },
 }
@@ -405,5 +408,107 @@ describe('EhReferenceDesignPanel — sibling tables', () => {
     expect(vi.mocked(downloadCSV).mock.calls.map(c => c[0])).toEqual([
       'eh-redundancy.csv', 'eh-levers.csv', 'eh-dtc-stress.csv', 'eh-dtc-planning.csv',
     ])
+  })
+})
+
+
+describe('hasMultiEnergyBlock / multiEnergyCarrierEntries', () => {
+  it('hides skipped multi_energy', () => {
+    expect(hasMultiEnergyBlock({
+      ...REPORT,
+      completeness: { ...REPORT.completeness, multi_energy: 'skipped' },
+      sections: { multi_energy: { status: 'skipped', payload: null, note: null } },
+    })).toBe(false)
+  })
+
+  it('lists carrier MWh from payload', () => {
+    const report = {
+      ...REPORT,
+      completeness: { ...REPORT.completeness, multi_energy: 'ok' as const },
+      sections: {
+        multi_energy: {
+          status: 'ok' as const,
+          payload: {
+            attribution: 'dedicated_bus_by_carrier',
+            ens_by_carrier_mwh: { hydrogen: 80, electrical: 0 },
+          },
+          note: 'unmet by carrier',
+        },
+      },
+    }
+    expect(hasMultiEnergyBlock(report)).toBe(true)
+    expect(multiEnergyCarrierEntries(report)).toEqual([
+      { carrier: 'hydrogen', mwh: 80 },
+      { carrier: 'electrical', mwh: 0 },
+    ])
+  })
+})
+
+describe('multi-energy ENS panel', () => {
+  it('renders carrier ENS when multi_energy is ok', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done',
+      report: {
+        ...REPORT,
+        completeness: { ...REPORT.completeness, multi_energy: 'ok' as const },
+        sections: {
+          multi_energy: {
+            status: 'ok' as const,
+            payload: {
+              attribution: 'dedicated_bus_by_carrier',
+              honesty: ['dedicated_bus_by_carrier'],
+              ens_by_carrier_mwh: { hydrogen: 80.5 },
+              violations: [],
+            },
+            note: 'unmet by carrier (dedicated-bus roll-up): hydrogen=80.5 MWh',
+          },
+        },
+      },
+    } as never)
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null as never)
+    await openPanel()
+    const block = await screen.findByTestId('eh-multi-energy')
+    expect(block).toBeTruthy()
+    expect(screen.getByTestId('eh-multi-energy-hydrogen').textContent).toMatch(/80\.50/)
+    expect(screen.getByTestId('eh-multi-energy-attribution').textContent)
+      .toMatch(/dedicated_bus_by_carrier/)
+    expect(screen.getByTestId('eh-multi-energy-note').textContent).toMatch(/hydrogen/)
+  })
+
+  it('does not render multi_energy when skipped', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done',
+      report: REPORT,
+    } as never)
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null as never)
+    await openPanel()
+    await screen.findByTestId('eh-report')
+    expect(screen.queryByTestId('eh-multi-energy')).toBeNull()
+  })
+
+  it('shows fail-closed note without inventing by_carrier totals', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done',
+      report: {
+        ...REPORT,
+        completeness: { ...REPORT.completeness, multi_energy: 'not_established' as const },
+        sections: {
+          multi_energy: {
+            status: 'not_established' as const,
+            payload: {
+              attribution: 'dedicated_bus_by_carrier',
+              ens_by_carrier_mwh: null,
+              violations: ['bus b: mixed load carriers'],
+            },
+            note: 'shared or mismatched bus/load carriers — multi-energy ENS not established',
+          },
+        },
+      },
+    } as never)
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null as never)
+    await openPanel()
+    expect(await screen.findByTestId('eh-multi-energy')).toBeTruthy()
+    expect(screen.queryByTestId('eh-multi-energy-by-carrier')).toBeNull()
+    expect(screen.getByTestId('eh-multi-energy-note').textContent).toMatch(/not established/i)
   })
 })
