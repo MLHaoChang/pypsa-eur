@@ -33,3 +33,9 @@ Result: **4 files, 102 passed**.
 
 - P6 multi-energy — BLOCKED (slack redesign)
 - Deferred: climate P8(b), spare-lead, planned-outage MC, chat tools
+
+## Independent e2e QA
+
+- Assessor: [bc-fd2cf311-65ca-513f-a391-9532c3fd9088](bc-fd2cf311-65ca-513f-a391-9532c3fd9088)
+- Verdict: **GO** (no binding conditions)
+- Re-run: backend **153** passed; frontend **102** passed

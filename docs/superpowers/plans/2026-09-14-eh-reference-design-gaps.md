@@ -6,7 +6,7 @@
 >
 > **Final gate (2026-09-14):** Assessor verdict **`GO WITH BINDING CONDITIONS`**. Binding conditions are in the companion spec (§2 decisions 6/16–18, §4 completeness enum, §5 report ownership, §6 import overlays). Implementation starts at **P0 only**, then P1 → P1.5 → P5 (MVP-A).
 
-> **Integration (2026-09-19).** All GO'd phase PRs merged on `cursor/eh-reference-design-complete-ef60` (P2, P3a docs, P7 BE+FE, P8a, P9, FE panel, SCR strip). **P6 remains BLOCKED** (slack redesign). Explicit deferrals unchanged (climate P8b, spare-lead, planned-outage MC, chat tools).
+> **Integration (2026-09-19).** All GO'd phase PRs merged on `cursor/eh-reference-design-complete-ef60` (P2, P3a docs, P7 BE+FE, P8a, P9, FE panel, SCR strip). **P6 remains BLOCKED** (slack redesign). Explicit deferrals unchanged (climate P8b, spare-lead, planned-outage MC, chat tools). **E2E QA cleared** — [complete-stack e2e](bc-fd2cf311-65ca-513f-a391-9532c3fd9088): **GO** (BE 153 + FE 102).
 
 **Goal.** Package today’s solution-FMEA / cost–availability stack into a PGGI **Energy Hub reference design**: archetype packs, orchestrated study pipeline, redundancy and DtC as real levers, and a `ReferenceDesignReport` linking availability and cost.
 
