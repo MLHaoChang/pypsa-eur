@@ -286,17 +286,24 @@ the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f
 
 ## Phase 7 — RAM v1 enrichment (not full RAM)
 
+**Inventory:** [`docs/superpowers/findings/2026-09-18-eh-p7-ram-v1-inventory.md`](../findings/2026-09-18-eh-p7-ram-v1-inventory.md)
+
 **Ship first**
-- [ ] Asset-class rate library + provenance (extend `CARRIER_DEFAULTS` / `asset_health`).
-- [ ] Optional spare-lead-time as **documented** severity modifier.
-- [ ] Detectability: **add schema+UI or drop** — worksheet today has mitigability only.
+- [x] Asset-class rate library + provenance (already in `CARRIER_DEFAULTS` / `asset_health`; P7 exposes on COPT/MC wire).
+- [ ] Optional spare-lead-time as **documented** severity modifier — **DEFERRED** (not required for acceptance; no silent severity scale).
+- [x] Detectability: **DROP** — worksheet remains mitigability-only (FMEA Phase 3); no IEC detectability schema/UI in v1.
 
 **Defer**
 - Planned-outage calendars in MC (large semantics change).
+- Spare-lead-time severity modifier (optional plan line).
 
 **Acceptance**
-- [ ] Library loads; MC/COPT show library vs override provenance.
-- [ ] No claim of full RAM/CMMS.
+- [x] Library loads; MC/COPT show library vs override provenance (`rate_source` + `library_citation`; `test_energy_hub_ram_v1.py`).
+- [x] No claim of full RAM/CMMS (`ram_note` on COPT/MC payloads).
+- [x] **QA gate cleared** — [P7 assessor](bc-e90602ef-ed5b-5bea-8b44-7fa4761b4335): **GO** (provenance-only; 4/4 tests green).
+- [x] Frontend disclosure: COPT/MC chips for `rate_source` counts + `ram_note` — [P7 RAM FE QA](bc-360b2266-9712-5f68-9693-6fc675592cd5): **GO** (79 tests; fail-closed pre-P7).
+
+**TDD evidence:** KeyError red → wire `rate_source` / `units_provenance` / `library_citation` → 4 tests green. FE: `ramChipText` red → chips → adequacy+McPanel green.
 
 ---
 
