@@ -9,6 +9,7 @@ import {
   type EhLeverTable,
   type EhRedundancyTable,
   type EhReferenceDesignReport,
+  type EhScrVerdict,
   type EhSectionStatus,
   type EhStudyPayload,
 } from '../../api/simulation'
@@ -71,6 +72,25 @@ export function statusTone(status: EhSectionStatus): string {
   if (status === 'ok') return 'text-accent'
   if (status === 'skipped') return 'text-muted'
   return 'text-warn'
+}
+
+/** Tone for the P9 SCR product verdict (fail reserved; thin slice uses warn). */
+export function scrTone(scr: EhScrVerdict): string {
+  if (scr === 'pass') return 'text-accent'
+  if (scr === 'fail') return 'text-danger'
+  return 'text-warn'
+}
+
+/** True when the report carries SCR/EMT values or an honest gates note. */
+export function hasGatesBlock(report: EhReferenceDesignReport): boolean {
+  const gate = report.gates
+  if (gate?.scr != null) return true
+  if (gate?.emt_recommended != null) return true
+  const section = report.sections?.gates
+  if (section?.note) return true
+  const payload = section?.payload
+  if (payload && typeof payload.min_scr === 'number') return true
+  return false
 }
 
 /** CSV rows for the redundancy comparison table. */
@@ -379,6 +399,60 @@ export function EhReferenceDesignPanel() {
                     </li>
                   ))}
                 </ul>
+              )}
+
+              {hasGatesBlock(report) && (
+                <div
+                  className="flex flex-col gap-1 border-t border-border/50 pt-2"
+                  data-testid="eh-gates"
+                >
+                  <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                    Dynamics gate
+                  </h4>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+                    {report.gates?.scr != null && (
+                      <span
+                        data-testid="eh-gates-scr"
+                        data-scr={report.gates.scr}
+                        className={scrTone(report.gates.scr)}
+                      >
+                        <span className="text-muted">SCR </span>
+                        <span className="font-mono font-medium">
+                          {report.gates.scr}
+                        </span>
+                      </span>
+                    )}
+                    {report.gates?.emt_recommended != null && (
+                      <span data-testid="eh-gates-emt">
+                        <span className="text-muted">EMT </span>
+                        <span className="text-text">
+                          {report.gates.emt_recommended
+                            ? 'recommended'
+                            : 'no'}
+                        </span>
+                      </span>
+                    )}
+                    {typeof report.sections?.gates?.payload?.min_scr === 'number' && (
+                      <span data-testid="eh-gates-min-scr">
+                        <span className="text-muted">min SCR </span>
+                        <span className="text-text font-mono">
+                          {Number(report.sections.gates.payload.min_scr).toFixed(2)}
+                          {typeof report.sections.gates.payload.pass_scr === 'number'
+                            ? ` (pass ≥ ${report.sections.gates.payload.pass_scr})`
+                            : ''}
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                  {report.sections?.gates?.note && (
+                    <p
+                      className="text-[10px] text-muted"
+                      data-testid="eh-gates-note"
+                    >
+                      {report.sections.gates.note}
+                    </p>
+                  )}
+                </div>
               )}
             </div>
           )}

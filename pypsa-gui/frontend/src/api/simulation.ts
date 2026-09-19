@@ -616,6 +616,20 @@ export interface EhStudyRequestBody {
 
 export type EhSectionStatus = 'ok' | 'not_established' | 'skipped'
 
+/** P9 dynamics gate product fields (warn-only thin slice; fail reserved). */
+export type EhScrVerdict = 'pass' | 'warn' | 'fail'
+
+export interface EhGatesBlock {
+  scr?: EhScrVerdict | null
+  emt_recommended?: boolean | null
+}
+
+export interface EhSectionState {
+  status: EhSectionStatus
+  payload?: Record<string, unknown> | null
+  note?: string | null
+}
+
 /** Durable product artifact from GET /results/eh_reference_design. */
 export interface EhReferenceDesignReport {
   archetype: EhArchetype
@@ -629,8 +643,11 @@ export interface EhReferenceDesignReport {
   period_basis?: string | null
   excludes_shed_cost?: boolean
   completeness?: Record<string, EhSectionStatus>
+  sections?: Record<string, EhSectionState>
   tea?: { lcoe_eur_per_mwh?: number | null; lcoh_eur_per_kg?: number | null; notes?: string | null } | null
   pipeline?: { aborted?: boolean; solves_consumed?: number } | null
+  /** Dynamics feasibility gate (SCR → EMT flag). Absent when section skipped. */
+  gates?: EhGatesBlock | null
 }
 
 /** Study lifecycle record from GET /results/eh_study. */

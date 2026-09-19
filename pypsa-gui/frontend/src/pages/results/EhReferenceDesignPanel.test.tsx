@@ -12,6 +12,7 @@ import {
   EhReferenceDesignPanel,
   leverCsvRows,
   redundancyCsvRows,
+  scrTone,
   statusTone,
 } from './EhReferenceDesignPanel'
 import { downloadCSV } from './shared'
@@ -193,6 +194,103 @@ describe('EhReferenceDesignPanel', () => {
     await user.click(screen.getByTestId('eh-run'))
     const blocked = await screen.findByTestId('eh-blocked')
     expect(blocked.textContent).toMatch(/frontier/i)
+  })
+})
+
+describe('SCR / EMT dynamics gate (P9)', () => {
+  it('tones pass / warn / fail differently', () => {
+    expect(scrTone('pass')).toContain('accent')
+    expect(scrTone('warn')).toContain('warn')
+    expect(scrTone('fail')).toContain('danger')
+  })
+
+  it('renders SCR warn + EMT recommended + min SCR from sections payload', async () => {
+    const report = {
+      ...REPORT,
+      archetype: 'weak_flexible' as const,
+      completeness: { ...REPORT.completeness, gates: 'ok' as const },
+      gates: { scr: 'warn' as const, emt_recommended: true },
+      sections: {
+        gates: {
+          status: 'ok' as const,
+          payload: {
+            method: 'eh_sk_mva_proxy',
+            pass_scr: 3,
+            min_scr: 2.5,
+            min_bus: 'poc',
+            warn_only: true,
+          },
+          note: 'SCR warn at poc (min SCR=2.5, threshold=3; warn-only thin slice)',
+        },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report,
+    } as never)
+    await openPanel()
+    const block = await screen.findByTestId('eh-gates')
+    expect(block).toBeTruthy()
+    expect(screen.getByTestId('eh-gates-scr').textContent).toMatch(/warn/i)
+    expect(screen.getByTestId('eh-gates-scr').getAttribute('data-scr')).toBe('warn')
+    expect(screen.getByTestId('eh-gates-emt').textContent).toMatch(/yes|recommended/i)
+    expect(screen.getByTestId('eh-gates-min-scr').textContent).toMatch(/2\.5/)
+    expect(screen.getByTestId('eh-gates-note').textContent).toMatch(/warn-only/i)
+  })
+
+  it('renders SCR pass with EMT not recommended', async () => {
+    const report = {
+      ...REPORT,
+      completeness: { ...REPORT.completeness, gates: 'ok' as const },
+      gates: { scr: 'pass' as const, emt_recommended: false },
+      sections: {
+        gates: {
+          status: 'ok' as const,
+          payload: { method: 'eh_sk_mva_proxy', min_scr: 4.2, pass_scr: 3 },
+          note: null,
+        },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report,
+    } as never)
+    await openPanel()
+    expect((await screen.findByTestId('eh-gates-scr')).getAttribute('data-scr'))
+      .toBe('pass')
+    expect(screen.getByTestId('eh-gates-emt').textContent).toMatch(/no/i)
+    expect(screen.queryByTestId('eh-gates-note')).toBeNull()
+  })
+
+  it('does not invent SCR values when gates section is skipped', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report: REPORT,
+    } as never)
+    await openPanel()
+    await screen.findByTestId('eh-report')
+    expect(screen.queryByTestId('eh-gates')).toBeNull()
+    expect(screen.queryByTestId('eh-gates-scr')).toBeNull()
+  })
+
+  it('shows section note alone when gates are not_established without values', async () => {
+    const report = {
+      ...REPORT,
+      completeness: { ...REPORT.completeness, gates: 'not_established' as const },
+      gates: null,
+      sections: {
+        gates: {
+          status: 'not_established' as const,
+          payload: null,
+          note: 'no eh_poc buses tagged for SCR gate',
+        },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report,
+    } as never)
+    await openPanel()
+    expect(await screen.findByTestId('eh-gates')).toBeTruthy()
+    expect(screen.queryByTestId('eh-gates-scr')).toBeNull()
+    expect(screen.getByTestId('eh-gates-note').textContent)
+      .toMatch(/no eh_poc/i)
   })
 })
 

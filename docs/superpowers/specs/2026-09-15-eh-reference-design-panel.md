@@ -54,3 +54,24 @@ When stages ran, panel also fetches and renders:
 - `GET /results/eh_dtc_planning` — planning contingencies
 
 Each table has a CSV download via shared `downloadCSV`.
+
+## Dynamics gate (P9 follow-up)
+
+When `ReferenceDesignReport.gates` is present (typically `weak_flexible`),
+the panel shows a **Dynamics gate** strip under completeness:
+
+- `gates.scr` — `pass` | `warn` | `fail` (thin slice is warn-only; fail reserved)
+- `gates.emt_recommended` — EMT escalation flag only (no in-tree EMT)
+- Optional `sections.gates.payload.min_scr` (+ `pass_scr` threshold)
+- Optional `sections.gates.note` (including honest `not_established` reasons)
+
+Do **not** invent SCR values when the gates section is `skipped` with no
+`gates` block and no note.
+
+## Acceptance (gates)
+
+- [x] Warn + EMT recommended + min SCR render from a done report
+- [x] Pass + EMT no render without a note when note is null
+- [x] Skipped gates → no dynamics strip
+- [x] `not_established` with a section note → note only (no fake SCR)
+- [x] **QA gate cleared** — [FE SCR gates QA](bc-889e4231-3989-5dbc-ae8a-eb935f4be7f5): **GO** (17/17 panel tests; fail-closed; EMT flag-only).
