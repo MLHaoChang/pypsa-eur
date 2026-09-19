@@ -279,6 +279,20 @@ export interface McResult {
    *  period, beside the reserve margin's own credit for the same group. A
    *  SIBLING of `elcc`, never a row in it; `null` when not requested. */
   elcc_portfolio?: ElccPortfolioBlock | null
+  /** P7: per-unit outage-rate provenance (library vs asset override). */
+  units_provenance?: {
+    name: string
+    rate_source: string
+    library_citation?: string | null
+  }[]
+  /** P7: storage rate provenance (missing entries omitted by the engine). */
+  storage_provenance?: {
+    name: string
+    rate_source: string
+    library_citation?: string | null
+  }[]
+  /** P7 honesty: rate library + provenance only — not full RAM/CMMS. */
+  ram_note?: string | null
 }
 
 export type ElccPortfolioStatus =
