@@ -28,8 +28,24 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from gridspine.static.strength import SCR_BANDS, band as scr_band
 from models.energy_hub import GatesBlock, SectionStatus
+
+# gridspine is repo-root (not in gui-requirements pip freeze). Guard like
+# ``gridspine_service`` so the frozen desktop build 503s/fail-closes instead of
+# importing a missing distribution at module load.
+try:
+    from gridspine.static.strength import SCR_BANDS, band as scr_band
+except ImportError:  # pragma: no cover - build-shape branch
+    SCR_BANDS = (2.0, 3.0, 5.0)
+
+    def scr_band(value: float) -> str:
+        if value < SCR_BANDS[0]:
+            return "weak"
+        if value < SCR_BANDS[1]:
+            return "moderate"
+        if value < SCR_BANDS[2]:
+            return "strong"
+        return "very_strong"
 
 # Moderate edge of SCR_BANDS (2, 3, 5) — pass/warn threshold.
 PASS_SCR = float(SCR_BANDS[1])  # 3.0

@@ -150,19 +150,20 @@ def _bus_unserved_mwh(
         if "objective" in n.snapshot_weightings.columns
         else n.snapshot_weightings.iloc[:, 0]
     )
+    from services.adequacy.slack import (
+        VOLL_SLACK_PREFIX,
+        involuntary_slack_mask,
+    )
+
     total = 0.0
     for bus in bus_ids:
-        cand = [f"__voll_{bus}"]
+        cand = [f"{VOLL_SLACK_PREFIX}{bus}"]
         cand = [c for c in cand if c in n.generators_t.p.columns]
         if not cand:
+            invol = involuntary_slack_mask(n.generators)
             cand = [
                 str(g) for g in n.generators.index
-                if str(n.generators.at[g, "bus"]) == bus
-                and (
-                    str(g).startswith("__voll")
-                    or str(n.generators.at[g, "carrier"]) in (
-                        "voll", "load_shedding", "load_shedding_voll")
-                )
+                if bool(invol.at[g]) and str(n.generators.at[g, "bus"]) == bus
             ]
         for g in cand:
             if g not in n.generators_t.p.columns:

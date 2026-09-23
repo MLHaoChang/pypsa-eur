@@ -6,7 +6,7 @@
 >
 > **Final gate (2026-09-14):** Assessor verdict **`GO WITH BINDING CONDITIONS`**. Binding conditions are in the companion spec (§2 decisions 6/16–18, §4 completeness enum, §5 report ownership, §6 import overlays). Implementation starts at **P0 only**, then P1 → P1.5 → P5 (MVP-A).
 
-> **Integration (2026-09-19).** All GO'd phase PRs merged on `cursor/eh-reference-design-complete-ef60` (P2, P3a docs, P7 BE+FE, P8a, P9, FE panel, SCR strip). **E2E QA cleared** — [complete-stack e2e](bc-fd2cf311-65ca-513f-a391-9532c3fd9088): **GO** (BE 153 + FE 102). Explicit deferrals unchanged (climate P8b, spare-lead, planned-outage MC, chat tools). **P6(a)** dedicated-bus multi-energy on `cursor/eh-p6-multi-energy-ef60`; P6(b) multi-slack still deferred.
+> **Integration (2026-09-23).** Complete stack (#48) + **P6(a)** on `cursor/eh-p6-multi-energy-ef60` ([#49](https://github.com/MLHaoChang/pypsa-eur/pull/49)). **E2E QA cleared** — [`2026-09-23-eh-p6a-complete-stack-e2e.md`](../findings/2026-09-23-eh-p6a-complete-stack-e2e.md): **GO** (BE 161 + FE 107). Also fixed three pre-existing GUI-backend CI hygiene failures on master (slack literal in `dtc.py`, EH GET routes in `ROUTE_SURFACES`, guarded `gridspine` in `scr_gate`). Explicit deferrals unchanged (P6b multi-slack, climate P8b, spare-lead, planned-outage MC, chat tools, Class-C authoring UI).
 
 **Goal.** Package today’s solution-FMEA / cost–availability stack into a PGGI **Energy Hub reference design**: archetype packs, orchestrated study pipeline, redundancy and DtC as real levers, and a `ReferenceDesignReport` linking availability and cost.
 

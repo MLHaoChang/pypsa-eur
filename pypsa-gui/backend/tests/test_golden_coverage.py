@@ -160,6 +160,13 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_eh_study"):                    frozenset(),
     ("routers/results.py", "post_eh_study"):                   frozenset(),
     ("routers/results.py", "post_eh_study_abort"):             frozenset(),
+    # EH reference-design fragments (report / tables). No economics SURFACES —
+    # same adequacy-style € derivation as get_adequacy / get_frontier above.
+    ("routers/results.py", "get_eh_reference_design"):         frozenset(),
+    ("routers/results.py", "get_eh_redundancy"):               frozenset(),
+    ("routers/results.py", "get_eh_levers"):                   frozenset(),
+    ("routers/results.py", "get_eh_dtc"):                      frozenset(),
+    ("routers/results.py", "get_eh_dtc_planning"):             frozenset(),
     ("routers/results.py", "get_load_results"):                frozenset(),
     ("routers/results.py", "get_asset_economics"):             frozenset({"asset_economics"}),
     # ── routers/simulation.py ───────────────────────────────────────────
