@@ -13,6 +13,7 @@ import {
   hasMultiEnergyBlock,
   leverCsvRows,
   multiEnergyCarrierEntries,
+  multiEnergyLoadEntries,
   redundancyCsvRows,
   scrTone,
   statusTone,
@@ -510,5 +511,41 @@ describe('multi-energy ENS panel', () => {
     expect(await screen.findByTestId('eh-multi-energy')).toBeTruthy()
     expect(screen.queryByTestId('eh-multi-energy-by-carrier')).toBeNull()
     expect(screen.getByTestId('eh-multi-energy-note').textContent).toMatch(/not established/i)
+  })
+})
+
+
+describe('P6b per-Load multi-energy disclosure', () => {
+  it('lists ens_by_load_mwh when attribution is per_load_slack', async () => {
+    const report = {
+      ...REPORT,
+      completeness: { ...REPORT.completeness, multi_energy: 'ok' as const },
+      sections: {
+        multi_energy: {
+          status: 'ok' as const,
+          payload: {
+            attribution: 'per_load_slack',
+            honesty: ['per_load_slack', 'shared_bus_supported'],
+            ens_by_carrier_mwh: { hydrogen: 40 },
+            ens_by_load_mwh: { l_h2: 40, industrial: 12.5 },
+            violations: [],
+          },
+          note: 'unmet by carrier (per-Load slack): hydrogen=40 MWh',
+        },
+      },
+    }
+    expect(multiEnergyLoadEntries(report)).toEqual([
+      { load: 'l_h2', mwh: 40 },
+      { load: 'industrial', mwh: 12.5 },
+    ])
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done',
+      report,
+    } as never)
+    await openPanel()
+    expect(await screen.findByTestId('eh-multi-energy-by-load')).toBeTruthy()
+    expect(screen.getByTestId('eh-multi-energy-load-l_h2').textContent).toMatch(/40/)
+    expect(screen.getByTestId('eh-multi-energy-attribution').textContent)
+      .toMatch(/per_load_slack/)
   })
 })

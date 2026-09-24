@@ -90,7 +90,7 @@ def test_capture_separates_the_tiers():
     assert float(cap["dsr_total_mwh"]) == pytest.approx(DSR_MWH, rel=1e-3)
     assert float(cap["lost_load_total_mwh"]) == pytest.approx(
         10.0 * N_SNAPSHOTS * WEIGHT, rel=1e-3)
-    assert "b" in cap["lost_load_t"].columns
+    assert "l" in cap["lost_load_t"].columns
     assert not any(str(c).startswith("__dsr") for c in cap["lost_load_t"].columns)
     assert "dsr_t" in cap and float(cap["dsr_t"].max().max()) == pytest.approx(
         LOAD_MW * DSR_SHARE, rel=1e-3)

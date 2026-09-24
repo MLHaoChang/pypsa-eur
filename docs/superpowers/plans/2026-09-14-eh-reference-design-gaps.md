@@ -6,7 +6,7 @@
 >
 > **Final gate (2026-09-14):** Assessor verdict **`GO WITH BINDING CONDITIONS`**. Binding conditions are in the companion spec (§2 decisions 6/16–18, §4 completeness enum, §5 report ownership, §6 import overlays). Implementation starts at **P0 only**, then P1 → P1.5 → P5 (MVP-A).
 
-> **Integration (2026-09-23).** Complete stack (#48) + **P6(a)** on `cursor/eh-p6-multi-energy-ef60` ([#49](https://github.com/MLHaoChang/pypsa-eur/pull/49)). **E2E QA cleared** — [`2026-09-23-eh-p6a-complete-stack-e2e.md`](../findings/2026-09-23-eh-p6a-complete-stack-e2e.md): **GO** (BE 161 + FE 107). Also fixed three pre-existing GUI-backend CI hygiene failures on master (slack literal in `dtc.py`, EH GET routes in `ROUTE_SURFACES`, guarded `gridspine` in `scr_gate`). Explicit deferrals unchanged (P6b multi-slack, climate P8b, spare-lead, planned-outage MC, chat tools, Class-C authoring UI).
+> **Integration (2026-09-24).** P6(a) merged (#49). **P6(b) implemented** on `cursor/eh-p6b-multislack-spike-ef60` (#50): per-Load VOLL slacks; shared-bus `multi_energy` via `per_load_slack`; bus roll-up retained for DtC. Spike: [`2026-09-24-eh-p6b-multislack-spike.md`](../findings/2026-09-24-eh-p6b-multislack-spike.md). Remaining deferrals: climate P8b, spare-lead, planned-outage MC, chat tools, Class-C authoring UI.
 
 **Goal.** Package today’s solution-FMEA / cost–availability stack into a PGGI **Energy Hub reference design**: archetype packs, orchestrated study pipeline, redundancy and DtC as real levers, and a `ReferenceDesignReport` linking availability and cost.
 
@@ -283,12 +283,12 @@ the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f
 
 **Spike (2026-09-19):** [`docs/superpowers/findings/2026-09-19-eh-p6-multi-energy-spike.md`](../findings/2026-09-19-eh-p6-multi-energy-spike.md) — full per-Load multi-slack redesign deferred; **P6(a)** ships dedicated-bus honesty (P4b pattern).
 
-**Status.** P6(a) shipped: `multi_energy` report section with `ens_by_carrier_mwh` when buses are carrier-dedicated; shared-bus fail-closed; electrical default unchanged. P6(b) multi-slack redesign remains open.
+**Status.** P6(a) **merged** (#49): `multi_energy` report section with `ens_by_carrier_mwh` when buses are carrier-dedicated; shared-bus fail-closed; electrical default unchanged. P6(b) spike recommends per-Load slacks (option C); implementation still gated.
 
 **Acceptance**
 - [x] Sector-coupled fixture: unmet H₂ in report (`test_energy_hub_multi_energy.py`).
 - [x] Electrical-only default path unchanged (`multi_energy=skipped`).
-- [ ] P6(b): per-Load / multi-slack attribution for shared-bus models — **DEFERRED**.
+- [x] P6(b): per-Load / multi-slack attribution for shared-bus models — **implemented** (option C; [spike](../findings/2026-09-24-eh-p6b-multislack-spike.md); `test_energy_hub_multi_energy_p6b.py`).
 
 ---
 

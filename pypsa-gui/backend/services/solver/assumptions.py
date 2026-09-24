@@ -33,8 +33,8 @@ from services.adequacy.slack import (
     DSR_SLACK_CARRIER,
     DSR_SLACK_PREFIX,
     INVOLUNTARY_SLACK_CARRIER,
-    VOLL_SLACK_PREFIX,
     strip_slack_prefix,
+    voll_slack_name,
 )
 from services.pypsa_service import PyPSAService
 from services.solver.periodized_costs import fill_periodized_cost_defaults
@@ -746,34 +746,29 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
     #    primal-infeasible window that PyPSA simply reports as zero VOLL
     #    dispatch). Sized at 10× the observed max so the slack always has
     #    headroom — bumping further would slow the solver without benefit.
-    if cfg.voll > 0 and not n.buses.empty:
+    if cfg.voll > 0 and not n.buses.empty and not n.loads.empty:
         added = []
-        # Choose a slack p_nom that comfortably exceeds the worst-case load.
-        try:
-            max_load = float(n.loads_t.p_set.max().max()) if not n.loads_t.p_set.empty else 0.0
-        except Exception:
-            max_load = 0.0
-        if max_load <= 0 and not n.loads.empty:
-            max_load = float(n.loads["p_set"].max()) if "p_set" in n.loads.columns else 0.0
-        slack_pnom = max(max_load, 1.0) * 10.0
-        # ONLY add VOLL slack at buses that actually carry a load. Transit /
-        # source buses (waste-heat collection, gas trunk, hydrogen network
-        # backbone) have no demand to "fail to meet" — adding a slack there
-        # lets the LP create energy from nothing at VOLL cost, which on a
-        # sector-coupled network the optimiser exploits: e.g. a heat-pump
-        # bus2 drawing from a low-T heat collector with insufficient waste
-        # heat is filled by the slack instead of curtailing high-T demand,
-        # producing physically impossible balances ("creating" 35 MW of
-        # waste heat at €100k/MWh to enable €3M of avoided high-T VOLL).
-        # If the user genuinely wants slack on a transit bus they can add
-        # a Generator manually.
-        load_bus_set = set(n.loads["bus"].astype(str)) if "bus" in n.loads.columns else set()
-        skipped_transit = 0
-        for bus in n.buses.index:
-            if str(bus) not in load_bus_set:
-                skipped_transit += 1
+        # P6(b): one involuntary VOLL slack per Load (not per bus), so shared-
+        # bus industrial/residential (or AC+H₂) shed is attributable. Size
+        # each slack from THAT Load's peak so a tiny Load does not inherit a
+        # system-wide 10× max headroom (and a large Load is never undersized).
+        p_set_t = getattr(getattr(n, "loads_t", None), "p_set", None)
+        skipped_orphan = 0
+        for load_id in n.loads.index:
+            bus = str(n.loads.at[load_id, "bus"]) if "bus" in n.loads.columns else ""
+            if not bus or bus not in n.buses.index:
+                skipped_orphan += 1
                 continue
-            name = f"{VOLL_SLACK_PREFIX}{bus}"
+            peak = 0.0
+            try:
+                if p_set_t is not None and load_id in getattr(p_set_t, "columns", []):
+                    peak = float(p_set_t[load_id].max())
+                elif "p_set" in n.loads.columns:
+                    peak = float(n.loads.at[load_id, "p_set"] or 0.0)
+            except (TypeError, ValueError):
+                peak = 0.0
+            slack_pnom = max(peak, 1.0) * 10.0
+            name = voll_slack_name(load_id)
             if name in n.generators.index:
                 continue  # don't double-add if a previous run leaked
             # Mark BEFORE n.add so a GET landing during the add window
@@ -796,8 +791,8 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         if added:
             phase(
                 f"Added {len(added)} VOLL slack generator(s) at {cfg.voll:.0f} EUR/MWh "
-                f"(sized to {slack_pnom:.0f} MW = 10× scaled-max load)."
-                + (f" Skipped {skipped_transit} transit bus(es) without loads." if skipped_transit else "")
+                f"(one per Load; each sized to 10× that Load's peak)."
+                + (f" Skipped {skipped_orphan} Load(s) with missing bus." if skipped_orphan else "")
             )
             # Restore = remove the slacks.
             def _capture_and_remove_slacks(names=added, voll=cfg.voll):
@@ -810,8 +805,8 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                         live = [nm for nm in names if nm in df.columns]
                         if live:
                             sub = df[live].copy()
-                            # Strip the slack prefix so the bus name stands
-                            # alone in the result payload — friendlier to plot.
+                            # Strip prefix → Load id (P6b). Legacy bus-scoped
+                            # names strip to the bus id the same way.
                             sub.columns = [strip_slack_prefix(c) for c in sub.columns]
                             # Aggregate stats for the KPI tiles. SNAPSHOT-
                             # WEIGHTED (canonical, spec §6.3): the frame stays
@@ -838,20 +833,42 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                             captured["lost_load_total_mwh"] = totals["total_mwh"]
                             captured["lost_load_cost_eur"] = totals["cost_eur"]
                             # Solve-time achieved values for the adequacy
-                            # report: per-bus-per-period weighted MWh, and
-                            # the electrical shed-hours (spec §5.1).
+                            # report: per-Load and per-bus per-period weighted
+                            # MWh, and electrical shed-hours (spec §5.1).
                             from services.adequacy.metrics import (
                                 electrical_columns,
                                 shed_hours,
                             )
-                            bus_e = sub.clip(lower=0).mul(
+                            load_e = sub.clip(lower=0).mul(
                                 w_energy.reindex(sub.index).fillna(0.0), axis=0)
                             if isinstance(sub.index, pd.MultiIndex):
-                                bp = bus_e.groupby(
+                                lp = load_e.groupby(
+                                    sub.index.get_level_values(0)).sum()
+                            else:
+                                lp = pd.DataFrame(
+                                    [load_e.sum()], index=["ALL"])
+                            captured["lost_load_load_period_mwh"] = lp
+                            # Bus roll-up for DtC / electrical consumers that
+                            # still key on buses (P4b honesty pin unchanged).
+                            bus_snap = load_e.copy()
+                            rename = {}
+                            for col in list(bus_snap.columns):
+                                if (
+                                    n.loads is not None
+                                    and not n.loads.empty
+                                    and col in n.loads.index
+                                    and "bus" in n.loads.columns
+                                ):
+                                    rename[col] = str(n.loads.at[col, "bus"])
+                            if rename:
+                                bus_snap = bus_snap.rename(columns=rename)
+                                bus_snap = bus_snap.T.groupby(level=0).sum().T
+                            if isinstance(sub.index, pd.MultiIndex):
+                                bp = bus_snap.groupby(
                                     sub.index.get_level_values(0)).sum()
                             else:
                                 bp = pd.DataFrame(
-                                    [bus_e.sum()], index=["ALL"])
+                                    [bus_snap.sum()], index=["ALL"])
                             captured["lost_load_bus_period_mwh"] = bp
                             captured["shed_hours_electrical"] = shed_hours(
                                 sub[electrical_columns(n, list(sub.columns))],
