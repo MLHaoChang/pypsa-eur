@@ -123,6 +123,19 @@ export function multiEnergyCarrierEntries(
     .map(([carrier, mwh]) => ({ carrier, mwh: Number(mwh) }))
 }
 
+/** Load → MWh pairs from per-Load slack capture (P6b). */
+export function multiEnergyLoadEntries(
+  report: EhReferenceDesignReport,
+): { load: string; mwh: number }[] {
+  const payload = report.sections?.multi_energy?.payload
+  if (!payload || typeof payload !== 'object') return []
+  const by = (payload as { ens_by_load_mwh?: unknown }).ens_by_load_mwh
+  if (!by || typeof by !== 'object') return []
+  return Object.entries(by as Record<string, unknown>)
+    .filter(([, v]) => typeof v === 'number' && Number.isFinite(v) && Number(v) > 0)
+    .map(([load, mwh]) => ({ load, mwh: Number(mwh) }))
+}
+
 /** CSV rows for the redundancy comparison table. */
 export function redundancyCsvRows(table: EhRedundancyTable): unknown[][] {
   const selected = table.selection?.selected_id ?? ''
@@ -270,6 +283,7 @@ export function EhReferenceDesignPanel() {
     [report?.completeness],
   )
   const meCarriers = report ? multiEnergyCarrierEntries(report) : []
+  const meLoads = report ? multiEnergyLoadEntries(report) : []
 
   const selected = ARCHETYPES.find(a => a.id === archetype)!
   const selectedId = redTable?.selection?.selected_id ?? null
@@ -502,6 +516,21 @@ export function EhReferenceDesignPanel() {
                       {meCarriers.map(({ carrier, mwh }) => (
                         <span key={carrier} data-testid={`eh-multi-energy-${carrier}`}>
                           <span className="text-muted">{carrier} </span>
+                          <span className="text-text font-mono">
+                            {mwh.toFixed(2)} MWh
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {meLoads.length > 0 && (
+                    <div
+                      className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]"
+                      data-testid="eh-multi-energy-by-load"
+                    >
+                      {meLoads.map(({ load, mwh }) => (
+                        <span key={load} data-testid={`eh-multi-energy-load-${load}`}>
+                          <span className="text-muted">{load} </span>
                           <span className="text-text font-mono">
                             {mwh.toFixed(2)} MWh
                           </span>

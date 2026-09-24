@@ -63,3 +63,14 @@ P4b DtC already pinned `attribution=bus_aggregate_not_per_load` for the same rea
 ## Gate
 
 Spike only — **no implementation commit** until product confirms C (vs keep fail-closed shared-bus forever). Acceptance when implementing: shared-bus industrial+residential fixture shows distinct shed; electrical default unchanged; source guard green.
+
+
+## Implementation status (2026-09-24)
+
+Product confirmed option **C**. Shipped on this branch:
+
+* `voll_slack_name(load_id)` + per-Load creation in `assumptions.py`
+* Capture: `lost_load_t` / `lost_load_load_period_mwh` by Load; `lost_load_bus_period_mwh` roll-up
+* `multi_energy` prefers `per_load_slack` when Load-period capture present
+* `electrical_columns` classifies Load or bus columns
+* Tests: `test_energy_hub_multi_energy_p6b.py`

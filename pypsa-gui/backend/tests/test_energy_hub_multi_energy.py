@@ -128,7 +128,15 @@ def test_eh_study_fills_multi_energy_when_h2_starved():
     payload = report.sections["multi_energy"].payload or {}
     by = payload.get("ens_by_carrier_mwh") or {}
     assert by.get("hydrogen", 0.0) > 0.0
-    assert "dedicated_bus_by_carrier" in (payload.get("honesty") or [])
+    # P6(b): live solves always emit per-Load capture → per_load_slack honesty.
+    honesty = payload.get("honesty") or []
+    assert (
+        "per_load_slack" in honesty
+        or "dedicated_bus_by_carrier" in honesty
+    )
+    assert payload.get("attribution") in (
+        "per_load_slack", "dedicated_bus_by_carrier",
+    )
     assert report.completeness.get("target") == "ok"
 
 

@@ -92,25 +92,46 @@ def shed_hours(
 
 def electrical_columns(n, columns) -> list[str]:
     """
-    The subset of ``columns`` (bus names) whose bus carrier classifies as
-    electrical — the electricity-only target scope of spec §4.3. Uses the
-    same canonical classifier as the load-scaling machinery
-    (``_canonical_load_carrier_key``: AC aliases and blank → "electrical"),
-    so the target and the load views can never disagree on what counts.
+    The subset of ``columns`` whose carrier classifies as electrical — the
+    electricity-only target scope of spec §4.3.
 
-    A column with NO matching bus is KEPT: the metric must not silently drop
-    shed energy it cannot classify (a renamed bus would otherwise vanish
-    from the reliability number).
+    Columns may be **Load ids** (P6(b) per-Load capture) or **bus ids**
+    (legacy / bus roll-up). Load columns use ``loads.carrier`` when set,
+    otherwise the Load's bus carrier. Bus columns use ``buses.carrier``.
+    Classifier is ``_canonical_load_carrier_key`` (AC aliases and blank →
+    "electrical"), matching the load-scaling machinery.
+
+    A column with NO matching Load or bus is KEPT: the metric must not
+    silently drop shed energy it cannot classify.
     """
     # Lazy import — solver_service is a 5,800-line module and pulls the whole
     # solver stack; metrics must stay importable in isolation.
     from services.solver_service import _canonical_load_carrier_key
 
     buses = getattr(n, "buses", None)
-    if buses is None or "carrier" not in getattr(buses, "columns", []):
-        return list(columns)
+    loads = getattr(n, "loads", None)
     out = []
     for col in columns:
+        # Prefer Load identity (P6b capture columns).
+        if loads is not None and not loads.empty and col in loads.index:
+            raw = None
+            if "carrier" in loads.columns:
+                raw = loads.at[col, "carrier"]
+            if raw is None or (isinstance(raw, float) and pd.isna(raw)) or str(raw).strip() == "":
+                bus = str(loads.at[col, "bus"]) if "bus" in loads.columns else None
+                if (
+                    bus is not None
+                    and buses is not None
+                    and bus in buses.index
+                    and "carrier" in getattr(buses, "columns", [])
+                ):
+                    raw = buses.at[bus, "carrier"]
+            if _canonical_load_carrier_key(raw) == "electrical":
+                out.append(col)
+            continue
+        if buses is None or "carrier" not in getattr(buses, "columns", []):
+            out.append(col)
+            continue
         if col not in buses.index:
             out.append(col)
             continue

@@ -46,7 +46,10 @@ INVOLUNTARY_SLACK_CARRIERS: frozenset[str] = frozenset(
 )
 SLACK_CARRIERS: frozenset[str] = INVOLUNTARY_SLACK_CARRIERS | {DSR_SLACK_CARRIER}
 
-# What current builds create slack names with (f"{PREFIX}{bus}").
+# What current builds create slack names with.
+# P6(b): involuntary VOLL slacks are per-Load (``f"{PREFIX}{load_id}"``).
+# Legacy solves used one slack per bus (``f"{PREFIX}{bus}"``); strip + masks
+# still recognise those names so old netcdfs / mid-flight captures restore.
 VOLL_SLACK_PREFIX = "__voll_"
 LEGACY_SLACK_PREFIX = "voll_slack_"
 DSR_SLACK_PREFIX = "__dsr_"
@@ -54,6 +57,11 @@ INVOLUNTARY_SLACK_PREFIXES: tuple[str, ...] = (VOLL_SLACK_PREFIX, LEGACY_SLACK_P
 SLACK_NAME_PREFIXES: tuple[str, ...] = (
     VOLL_SLACK_PREFIX, LEGACY_SLACK_PREFIX, DSR_SLACK_PREFIX,
 )
+
+
+def voll_slack_name(load_id: object) -> str:
+    """Canonical involuntary VOLL slack Generator name for one Load."""
+    return f"{VOLL_SLACK_PREFIX}{load_id}"
 
 
 def is_slack_carrier(carrier: object) -> bool:
@@ -67,8 +75,11 @@ def is_slack_name(name: object) -> bool:
 
 
 def strip_slack_prefix(name: str) -> str:
-    """``__voll_<bus>`` → ``<bus>`` (prefix removal, not substring replace),
-    so the bus name stands alone in result payloads."""
+    """``__voll_<load_id>`` → ``<load_id>`` (prefix removal, not substring).
+
+    Legacy bus-scoped names ``__voll_<bus>`` strip the same way — the remnant
+    is whatever identity the creation site encoded after the prefix.
+    """
     return name.removeprefix(VOLL_SLACK_PREFIX)
 
 
