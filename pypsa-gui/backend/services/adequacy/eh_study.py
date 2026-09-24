@@ -256,11 +256,25 @@ def run_eh_study(
                                 tea_block.model_dump(mode="json"),
                                 tea_block.notes,
                             )
+                        # P6(a): dedicated-bus multi-energy ENS disclosure.
+                        from services.adequacy import multi_energy as ME
+                        capture = sink.get("last_lost_load")
+                        if not isinstance(capture, dict):
+                            capture = {}
+                        me_status, me_payload, me_note = (
+                            ME.multi_energy_section_from_capture(
+                                network, capture))
+                        section_payloads["multi_energy"] = (
+                            me_status, me_payload, me_note)
         elif "ens_solve" not in requested:
             section_payloads.setdefault(
                 "target", ("not_established", None, "ens_solve not run"))
             section_payloads.setdefault(
                 "cost", ("not_established", None, "ens_solve not run"))
+            section_payloads.setdefault(
+                "multi_energy",
+                ("not_established", None, "ens_solve not run"),
+            )
 
         if not aborted and "redundancy" in requested:
             if stop_event.is_set():
@@ -580,6 +594,10 @@ def run_eh_study(
 
         section_payloads.setdefault(
             "tea", ("skipped", None, "TEA not produced (ens_solve did not run)"))
+        section_payloads.setdefault(
+            "multi_energy",
+            ("skipped", None, "multi_energy not produced (ens_solve did not run)"),
+        )
         section_payloads.setdefault(
             "fmea_top", section_payloads.get(
                 "fmea_top", ("skipped", None, "fmea_top not requested")))

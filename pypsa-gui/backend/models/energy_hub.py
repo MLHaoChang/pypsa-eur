@@ -59,6 +59,7 @@ REPORT_SECTIONS: tuple[str, ...] = (
     "fmea_top",
     "tea",
     "gates",
+    "multi_energy",
 )
 
 
