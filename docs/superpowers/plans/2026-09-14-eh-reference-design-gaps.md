@@ -6,7 +6,7 @@
 >
 > **Final gate (2026-09-14):** Assessor verdict **`GO WITH BINDING CONDITIONS`**. Binding conditions are in the companion spec (§2 decisions 6/16–18, §4 completeness enum, §5 report ownership, §6 import overlays). Implementation starts at **P0 only**, then P1 → P1.5 → P5 (MVP-A).
 
-> **Integration (2026-09-24).** P6(a) merged (#49). **P6(b) implemented** on `cursor/eh-p6b-multislack-spike-ef60` (#50): per-Load VOLL slacks; shared-bus `multi_energy` via `per_load_slack`; bus roll-up retained for DtC. Spike: [`2026-09-24-eh-p6b-multislack-spike.md`](../findings/2026-09-24-eh-p6b-multislack-spike.md). **Chat tools** on `cursor/eh-chat-tools-ef60`: `run_eh_study` + `get_adequacy_results('eh_study'|'eh_reference_design')` + abort via `ADEQUACY_STUDY_ENUM`. Remaining deferrals: climate P8b, spare-lead, planned-outage MC, Class-C authoring UI.
+> **Integration (2026-09-25).** EH gap-plan v1 sealed on `master`: P6(a) #49, P6(b) #50, chat tools #51 (`run_eh_study` + `eh_study`/`eh_reference_design` kinds + abort). Local e2e seal: [`2026-09-25-eh-stack-e2e-seal.md`](../findings/2026-09-25-eh-stack-e2e-seal.md) — backend **257** / frontend **108**. **Claude handover:** [`handovers/2026-09-25-eh-reference-design-claude-handover.md`](../handovers/2026-09-25-eh-reference-design-claude-handover.md). Remaining deferrals: climate P8b, spare-lead, planned-outage MC, Class-C authoring UI.
 
 **Goal.** Package today’s solution-FMEA / cost–availability stack into a PGGI **Energy Hub reference design**: archetype packs, orchestrated study pipeline, redundancy and DtC as real levers, and a `ReferenceDesignReport` linking availability and cost.
 
