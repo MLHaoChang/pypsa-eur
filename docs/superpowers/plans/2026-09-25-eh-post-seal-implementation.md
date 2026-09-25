@@ -1,9 +1,9 @@
 # Energy Hub reference design — post-seal implementation plan
 
-**Status:** draft for review (2026-09-25)
+**Status:** revised after independent QA gate. Verdict **`GO WITH BINDING CONDITIONS`** (2026-09-25). All 14 binding conditions (B1–B14) are folded into the phases below and tagged `[Bn]`. P10 may start now. **P11 must not start until Q1, Q2 and Q7 are decided.**
 **Source of the TODO list:** [`findings/2026-09-25-eh-handover-assessment-claude.md`](../findings/2026-09-25-eh-handover-assessment-claude.md) §3–§4
 **Parent plan / spec:** [`2026-09-14-eh-reference-design-gaps.md`](2026-09-14-eh-reference-design-gaps.md), [`specs/2026-09-14-eh-reference-design.md`](../specs/2026-09-14-eh-reference-design.md)
-**Base:** `master` + `claude/epic-allen-k2t1c4` (isolation / budget / honest-failure fixes). Every phase below assumes those fixes. In particular, `run_eh_study` runs on a private network + cfg copy and enforces `budget_solves`.
+**Base:** `master` + `claude/epic-allen-k2t1c4` (isolation / budget / honest-failure fixes). Every phase assumes those fixes. In particular, `run_eh_study` runs on a private network + cfg copy and enforces `budget_solves`.
 
 **Working rules (unchanged from the parent plan):**
 - TDD: red first, then green.
@@ -12,21 +12,24 @@
 - Build on existing engines; no parallel adequacy stack.
 - Honesty over completeness: when something can't be established, report `not_established` with a reason; never invent a value.
 - Every phase adds at least one **unstubbed HTTP** EH test. The #52 seal's blind spot was that `test_energy_hub_study_http.py` stubs the driver.
+- **Spec amendments land first**, in the same PR as the phase that needs them: §4 report contract (P11), §9 (P12), decision 8 / §8 / §10 (P16), §6 (P17). The spec is binding, and `models/energy_hub.py` says "do not renegotiate" without one.
+
+**Explicit non-goals of this plan** (still deferred): climate P8(b), spare-lead severity modifier, planned-outage MC, joint MILP, in-tree EMT, and multi-area / network-aware MC (P11 stays copper-plate; see Q7).
 
 ---
 
 ## Dependency order
 
 ```
-P10 hygiene (DSR preflight, DtC stale fallbacks, campaign FMEA estimate, CI)
- ├─ P11 mc_certify stage ──────────────┐
- │    └─ P12 frontier + fmea_top stages ┤ (budget interplay → Decision Q3)
- ├─ P13 pack parameters (HTTP/UI/chat) ─┤ (needs P11 for target_lole_h / certify flags)
- │    └─ P17 energy import cap (+ lever)│
- ├─ P14 EH network tagging + readiness ─┤
- │    └─ P15 Class-C authoring UI       │
- ├─ P16 DtC per-Load attribution (spec amendment first)
- └─ P18 pipeline UI + whole-report export (after P11/P12 so the stage table is worth showing)
+P10 hygiene (DSR preflight, DtC stale fallbacks + fixed-plan, campaign FMEA estimate, CI, locked copy)
+ ├─ P11 mc_certify stage   ← blocked on Q1/Q2/Q7
+ │    └─ P12 frontier + fmea_top stages (pack-scoped frontier; budget-safe)
+ ├─ P13 pack parameters (HTTP/UI/chat)   ← after P11 (target_lole_h / certify flags)
+ │    └─ P17 energy import cap (+ lever) ← spec §6 amendment, lowest priority
+ ├─ P14 EH network tagging + readiness
+ │    └─ P15 Class-C authoring UI
+ ├─ P16 DtC per-Load attribution          ← spec amendment + VOLL-priority design (Q5)
+ └─ P18 pipeline UI + whole-report export (after P11/P12)
 ```
 
 P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-value item: it is what makes MVP-B honest.
@@ -38,84 +41,141 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
 ### P10a DSR preflight wiring (decision 15)
 - In `eh_study.run_eh_study`, replace `solver_config_patch(pack)` with `solver_config_patch_with_preflight(pack, network=network, dsr_buses=dsr_buses)` (`archetypes.py:119`).
 - New kwarg: `dsr_buses: list[str] | None = None`.
-- Warnings go to the `apply_pack` stage note and to a `levers`-independent report note. Nothing is applied when the list is empty; decision 15's "never silently global" stays.
+- **Where warnings go:** the `apply_pack` stage note, plus a new optional `ReferenceDesignReport.notes: list[str]`.
+  - Today there is no generic notes field. Adding one is a contract change, so add it to `EXPORT_KEYS` and the golden fixtures (see P11 contract rule).
+- Nothing is applied when the list is empty. Decision 15's "never silently global" stays.
 - `_assumptions_hash` also hashes `dsr_price_eur_per_mwh` and `dsr_share_of_load`; today it hashes only `dsr_buses`.
-- HTTP / chat exposure of `dsr_buses` lands in P13. Until then only the driver kwarg exists.
-- **Tests:** weak pack + `dsr_buses` gives a DSR tier with `dsr_total_mwh` in the capture. A bus hosting a StorageUnit gives the double-count warning on the stage note. No buses gives the warning "DSR stays OFF". The strong pack ignores DSR.
+- HTTP / chat exposure of `dsr_buses` lands in P13.
+- **Tests:**
+  - weak pack + `dsr_buses` → DSR tier present (`dsr_total_mwh` in capture);
+  - a bus hosting a StorageUnit → double-count warning on the note;
+  - no buses → "DSR stays OFF" warning;
+  - strong pack → DSR ignored.
 
-### P10b DtC stale fallbacks after P6(b)
-`dtc._bus_unserved_mwh` (`dtc.py:108-173`) has two fallbacks that silently stopped working after P6(b):
-- `lost_load_t` columns are now **Load ids**, not buses (:131-141);
-- the `__voll_<bus>` name lookup is stale (:159-160).
+### P10b DtC correctness
+1. **Stale fallbacks after P6(b).**
+   - `dtc._bus_unserved_mwh` (`dtc.py:108-173`): `lost_load_t` columns are now **Load ids** (`:131-141`), and the `__voll_<bus>` name lookup is stale (`:159-160`).
+   - Fix: roll `lost_load_t` up by `n.loads.bus` (or use `lost_load_load_period_mwh` + `loads.bus`). Remove the stale name match; keep the `involuntary_slack_mask` bus match.
+   - **Test:** with `lost_load_bus_period_mwh` absent, the fallback yields the same MWh as the primary path.
+2. **"Fixed plan" is not fixed [B14].**
+   - `run_dtc_stress` re-solves a plain `network.copy()` with extendables still free (`dtc.py:227-245`; no `freeze_capacities`), yet labels itself `stress_fixed_plan` (decision 8: "stress-on-fixed-plan").
+   - Fix: freeze with `sweep.freeze_capacities` (as the Class-B sweep does) and undo after.
+   - **Test:** an extendable generator does not grow under islanding in DtC stress; critical unserved > 0 where the frozen plan is short.
+   - Update `test_energy_hub_dtc.py` expectations if values change.
 
-Fix: roll `lost_load_t` up by `n.loads.bus`, or drop that fallback in favour of `lost_load_load_period_mwh` + `loads.bus`. Remove the stale name match and keep the `involuntary_slack_mask` bus match.
-- **Tests:** force the primary key (`lost_load_bus_period_mwh`) to be absent and assert the fallback still yields the same critical / non-critical MWh as the primary path.
-
-### P10c Campaign estimate for `fmea_sweep`
-- `campaign.py:272-279` estimates the Class-B sweep at K+1. `run_contingency_sweep` actually does 1 frozen base + K contingencies + 1 closing restore = **K+2** (`sweep.py:268-366`).
-- Fix the estimate, and pin it against a counted run (instrumented `run_simulation`), as the frontier estimate is.
-- Verify first. If a test already pins K+1, check whether the base solve is shared with something else before changing it.
+### P10c Campaign estimate for `fmea_sweep` [B10]
+- Actual cost is `(K+2 if K>0 else 0) + (C+2 if C>0 else 0)`. Class B and Class C each run their own `run_contingency_sweep` with a base solve and a closing restore (`fmea_sweep_runner.py:71-88`, `stress.py:525`, `sweep.py:268-366`).
+- The estimate today is `K + C + 1` (`campaign.py:271-279`).
+- Fix it, and update the pinning test `test_adequacy_campaign.py:236-248` against a counted run (instrumented `run_simulation`), as the frontier estimate is.
 
 ### P10d CI / environment
-- `pixi.toml` `[dependencies] python = ">=3.10"` → `">=3.12"`. The code already needs 3.12 (PEP 701 f-string in `gridspine/drivers/year_study.py:200`), and the lock already resolves 3.12.12/3.12.13. The floor stops a fresh solve from picking 3.11.
-- **Frontend tests are not in CI at all**: no workflow runs `npm`/`vitest`. Add a `gui-frontend-tests` job to `.github/workflows/test.yaml`:
+- `pixi.toml` `[dependencies] python = ">=3.10"` → `">=3.12"`.
+  - The code already needs 3.12 (PEP 701 f-string, `gridspine/drivers/year_study.py:200`).
+  - The lock resolves 3.12.13 on linux-64 and 3.13.0 on osx/win. 3.12.12 is only the `doc` env.
+- **Frontend tests are not in CI at all.** Add a `gui-frontend-tests` job to `.github/workflows/test.yaml`:
   - node 22, `npm ci`, `npx vitest --run`, `npx tsc --noEmit -p .`
   - path filter `pypsa-gui/frontend/**`
-- Promote `tests/test_energy_hub_study_isolation.py` (live HTTP) into the handover's seal command list.
+- Promote `tests/test_energy_hub_study_isolation.py` (live HTTP) into the seal command list.
 
-**Acceptance P10:** each item has a red → green test; `gui-tests` green; the new FE CI job green on a PR.
+### P10e Locked network copy
+- `run_eh_study` copies the **shared** network in the worker thread without the lock (`eh_study.py:185-186`). Take the copy under `lock`, and detach the model inside it.
+- **Test:** a concurrent edit (held lock) blocks the copy rather than racing.
+
+**Acceptance P10:** each item red → green; `gui-tests` green; FE CI job green on a PR.
 
 ---
 
 ## P11 — `mc_certify` stage (spec decisions 1–2, §3 MVP-B)
 
 **Engine (no new one):**
-- `mc.snapshot_inputs(n, cfg=cfg)` (`mc.py:170`), taken under `lock`.
-- Then `mc.mc_adequacy(inputs, draws=…, seed=…, stop_event=stop_event)` (`mc.py:731`).
-- No LP. It samples the **solved** plan through `copt.solved_capacity`, so an extendable row counts at `p_nom_opt`. It must run after `ens_solve`, on the same private network.
-- Reference call sequence and guards: `mc_loop_runner.start_mc` (`mc_loop_runner.py:49-219`):
-  - empty `inputs.units` → refuse;
-  - check `transition_probs(u.q, u.mttr_hours)` per unit.
+- `mc.snapshot_inputs(n, cfg=cfg)` (`mc.py:170`), under `lock`.
+- Then the **baseline** `mc.mc_adequacy(inputs, draws=…, seed=…, cov_target=…, stop_event=stop_event)` (`mc.py:731`).
+- No LP. It samples the solved plan via `copt.solved_capacity` (`copt.py:403-433`): extendables count at `p_nom_opt`.
+- Guards to reuse from `mc_loop_runner.start_mc` (`:49-219`):
+  - empty `inputs.units` → `not_established`;
+  - `transition_probs` validity per unit.
 
-**Driver changes (`eh_study.py`):**
-- Add `"mc_certify"` to `IMPLEMENTED`.
-- Default pipeline keeps `mc_certify` when `pack.mc_certify_required` **or** `pack.availability.target_lole_h is not None`; otherwise it is `skipped`.
-- The stage is blocked (skipped + reason) when `ens_solve` failed. The **solve budget is not charged** (`solves_charged=0`, consistent with `campaign.py:22,255-258`). A separate `max_draws` ceiling applies (default `mc.MAX_DRAWS=2000`, which is the engine cap).
-- Only the baseline `mc_adequacy` call passes `stop_event`. ELCC/loop replays must not (`test_adequacy_abort.py::test_F1j`). EH calls the baseline only.
-- Populate `ReferenceDesignReport.mc_lole_h`.
-- **Time basis:** `lole_hours` is per horizon, and `time_basis == "hours_per_year"` only for ~1-year horizons (`metrics.py:200`).
-  - `target_lole_h` is h/yr.
-  - Either annualise (`lole_hours / horizon_years`) with an explicit `annualised_from_horizon_years` field and note, or refuse to certify on non-annual horizons. → **Decision Q2.**
+### Fleet boundary [B1] — decide Q7 before coding
+- The MC/COPT engine is **copper-plate and network-free**: "StorageUnits, Stores, Links and imports never enter" (`copt.py:8-9`, `_membership_walk` `:449-509`).
+- A generator on the far side of an import Link is therefore counted as local firm capacity, whatever the pack did to the Link. Both MVP-B fixtures have a 200 MW `remote` gas generator on the `grid` bus (`test_energy_hub_mvp_b.py:44,82`). Gas has a carrier-default outage rate (`occurrence.py:165`), so the MC counts it.
+- Without a fix, `off_grid` would "certify" on grid capacity the pack has cut off.
+- **Required:** take the MC snapshot from an **MC-only copy with the hub boundary applied**. Remove every component on buses reachable **only** through the selected import Links (the far side of the PoC). Implement this as a helper in `archetypes.py` that reuses `select_import_links`.
+- **How `weak_flexible` import enters the MC (Q7):**
+  - (a) excluded — conservative, the default recommendation; or
+  - (b) represented as one two-state unit of `import_p_nom_mw`, only when the Link has outage data (decision 6: import is a planning limit, not firm, unless outages are modelled).
+- **Test:** `off_grid` `lole_h` == LOLE of the same network with the grid side deleted; the `remote` generator is not in `inputs.units`.
 
-**Report shape:**
-- Add a report section `certification`. This is additive: `REPORT_SECTIONS` grows by one, and the FE `completenessRows` already appends unknown names. It is kept separate so it doesn't fight SCR for `gates` on `weak_flexible` — today, the missing certification on weak is visible nowhere.
-- Payload:
+### Stage gating and order [B3, B5]
+- Default pipeline keeps `mc_certify` when any of these holds:
+  - `pack.mc_certify_required`;
+  - `pack.availability.certification_metric == "mc_lole"` (`energy_hub.py:76`);
+  - `target_lole_h is not None`.
+- **Zero-solve stages are not budget-blocked.** `_blocked` (`eh_study.py:241-255`) must block `mc_certify` only on `failed_reason` / abort, never on `_remaining() <= 0`. Otherwise `test_budget_exhausted_before_stage_skips_it` (budget 1) silently drops a required certification.
+  - **Test:** budget 1 → `mc_certify` still runs.
+- **Execute stages in decision-18 order.** Today the frontier / fmea handling sits after `dtc_stress` (`eh_study.py:591-610`). Refactor the driver into a stage table iterated in `EH_PIPELINE_STAGES` order:
+  - `frontier` → `mc_certify` → `fmea_top` → `redundancy` → `levers` → `dtc_stress` → `dtc_planning`.
+  - **Test:** pipeline record order == execution order (instrumented).
+- `solves_charged=0`, consistent with `campaign.py:22-25,255-258`. A separate draw ceiling applies (default `mc.MAX_DRAWS=2000`).
+- **Abort:** only the baseline call gets `stop_event`. Extend F1j [B6]: add `services/adequacy/eh_study.py` to the scan list and `run_eh_study` to `ALLOWED` (`test_adequacy_abort.py:670-672`).
+
+### Time basis [B4, Q2]
+- `mc_adequacy.lole_hours` is **per horizon (weighted)**. `time_basis == "hours_per_year"` only when the horizon is ~1 yr (`metrics.py:200`). The coupling loop already takes a **horizon-basis** target (`coupling_loop_runner.py:100-104`; the FE `wireTarget` multiplies by `horizon_years`, `LoopPanel.tsx:150-157`).
+- **Rule:**
+  - `AvailabilityTarget.target_lole_h` is **h/yr** — pin it in the docstring.
+  - Certification compares `lole_hours` against `target_lole_h × horizon_years(n)`. This is the loop's convention.
+  - Report both `lole_h_per_horizon` and `lole_h_per_year = lole_hours / horizon_years`.
+  - Refuse (`not_established`) when `horizon_years ≤ 0`, or when the modelled hours are shorter than the largest unit MTTR. A calendar rule is the wrong test.
+- **DoD fixtures:** the MVP-B fixtures (4 h and 12 h, `test_energy_hub_mvp_b.py:28,63`) cannot certify under that rule. Add certifying variants: ≥ 168 h with weightings, and MTTR ≤ the horizon. Keep the short fixtures for "refused with reason".
+
+### Verdict [B3, Q1]
+- Reuse the loop vocabulary (`coupling.py:508-529`: `met` = mean ≤ target; `confident` = CI upper ≤ target):
+  - `pass` — CI upper ≤ target (confident);
+  - `fail` — CI lower > target;
+  - otherwise `inconclusive`.
+- **Resolution floor:** a target below `resolution_floor_h` → `inconclusive`. Reuse `coupling_loop_runner.py:252-266`.
+- `certified = True` only for `pass`.
+  - `fail` and `inconclusive` → `False`.
+  - Decision 2: `False` even when the ENS target is met.
+  - No LOLE target, or certification `not_established` / aborted → `None`, with no verdict.
+- If DSR is on (P10a), add a note to the payload: the MC does not model DSR, so its LOLE is pessimistic relative to the LP plan.
+
+### Report contract [B2]
+- New section `certification`. Its payload:
   ```
-  {metric: "mc_lole", target_lole_h, lole_h, lole_ci, eue_mwh, eue_ci,
-   n_samples, converged, seed, time_basis, horizon_years, verdict}
+  {metric: "mc_lole", target_lole_h, target_basis: "h_per_year",
+   horizon_years, lole_h_per_horizon, lole_h_per_year, lole_ci, eue_mwh, eue_ci,
+   by_period, n_samples, converged, draws, seed, cov_target,
+   resolution_floor_h, warning (MC_WARNING_V1), fleet_boundary, verdict,
+   met_on_mean, confident}
   ```
-- `verdict ∈ {"pass", "fail", "inconclusive"}` → **Decision Q1** (mean vs CI rule).
-- `ReferenceDesignReport` gets `certified: bool | None`.
-  - Decision 2: `certified=False` whenever LOLE fails, even if the ENS target is met.
-  - `None` when no LOLE target is set or certification is `not_established`.
-- `mc_certify_required` and not run (not requested / blocked / aborted / no units) → `certification=not_established` with the reason. Remove the old "not implemented" text in `gates` for `off_grid`.
+- Contract changes, all in the same PR:
+  - `REPORT_SECTIONS` + golden `mvp_a_report_skeleton.json` (`test_energy_hub_contract.py:122-128`);
+  - `ReferenceDesignReport.certified: bool | None` + `EXPORT_KEYS` (`eh_report.py:26-42`) + golden `mvp_a_export_keys.json` (`test_energy_hub_report_p5.py:99-103`);
+  - spec §4 amendment line.
+- `mc_certify_required` and not run → `certification=not_established` with a reason. Remove the old "not implemented" text in `gates` for `off_grid`.
+- The SCR orthogonality test (`test_weak_flexible_gates_ok_does_not_imply_mc_certify`) is re-pointed at `certification`.
+- `mc_lole_h` (existing field) = `lole_h_per_year`.
 
-**Tests:**
-- live `off_grid` + `weak_flexible` MVP-B runs **without** the `mc_certify_required=False` override. Update `test_energy_hub_mvp_b.py` so these become the real DoD.
-- pass / fail fixtures: a fleet with high FOR fails at a low `target_lole_h`, while ENS is met (decision 2).
-- abort mid-MC.
+### Redundancy cadence [B7]
+- P3b pins `mc_certify_cadence="finalists_only"` (`redundancy.py:34,158`), but P11 certifies only the ENS plan.
+- In P11: set the redundancy payload's cadence disclosure to `"ens_only_finalists_not_mc_certified"`.
+- Finalist MC certification is a follow-up (P11b, optional). It uses the same helper per finalist network, 0 LP solves.
+
+### Tests
+- Live `off_grid` + `weak_flexible` MVP-B on the certifying fixtures, **without** the `mc_certify_required=False` override. These become the real DoD; the short fixtures assert "refused with reason".
+- Decision 2: a high-FOR fleet fails a low `target_lole_h` while ENS is met.
+- Fleet boundary: see B1 above.
+- Budget 1 still certifies.
+- Abort mid-MC → `not_established`, no verdict.
 - `solves_consumed` unchanged by MC.
-- seed pinned → deterministic `lole_h`.
-- non-annual horizon handled per Q2.
-- SCR orthogonality test still holds (`test_weak_flexible_gates_ok_does_not_imply_mc_certify`, re-pointed at `certification`).
+- Pinned seed → deterministic output.
+- Resolution-floor → `inconclusive`.
+- The F1j scan includes `eh_study.py`.
+- Live HTTP: the record carries `certified`.
 
-**FE:**
-- LOLE headline chip with CI, plus a certification verdict chip.
-- `certification` shows up in the completeness chips.
-
-**Chat:**
-- `get_adequacy_results('eh_reference_design')` passes it through unchanged.
-- Update the `run_eh_study` description (mc_certify no longer "not executed").
+### FE and chat
+- **FE:** LOLE/yr headline with CI, a verdict chip, and `certification` in the completeness chips.
+- **Chat:** update the `run_eh_study` description.
 
 ---
 
@@ -123,61 +183,58 @@ Fix: roll `lost_load_t` up by `n.loads.bus`, or drop that fallback in favour of 
 
 ### P12a frontier
 **Engine:** `frontier.run_frontier_sweep(network, lock, cfg, targets, *, stop_event=…)` (`frontier.py:166`).
-- One LP per target, plus a closing `_restore_base` that cannot be disabled (it's in a `finally`).
-- Needs `cfg.voll > 0`, else `FrontierConfigError`.
-- At most 12 points (`MAX_FRONTIER_POINTS`).
+- One LP per target, plus a closing `_restore_base` that cannot be disabled (it's in a `finally`). Cost is `len(targets)+1`, so ≤ 10 with the defaults.
+- Needs `cfg.voll > 0`. At most 12 points.
 
-**Isolation:** run it on **its own `network.copy()`** (detach the model first). Its re-solves overwrite `p_nom_opt`, and `mc_certify` / `fmea_top` must see the `ens_solve` plan. The closing restore then happens on the throwaway copy.
-- Cost: frontier costs `len(targets)+1` solves. Accept that, or add an opt-out kwarg to `run_frontier_sweep` for callers that pass a disposable copy. **Decision Q4.**
+**Pack scope [B8]:**
+- New pack flag `frontier_default: bool`. It is True only for `strong_grid`, where spec §3 makes the frontier the deliverable. Weak and off-grid run it only when `stages` includes it explicitly.
+- When run: `budget_share = min(remaining - 1, max(2, floor(0.4 × budget_solves)))`.
+- Targets: the pack cap is **always** kept. Fill from `DEFAULT_TARGETS_PERMYRIAD`, nearest to the pack cap first, then order loosest first per `_validate`.
+- Fewer than 2 points fit → `skipped` with the "budget" reason.
 
-**Targets:**
-- default `DEFAULT_TARGETS_PERMYRIAD` ∪ {pack cap};
-- truncated to `remaining_budget - 1` (restore);
-- loosest first, per `_validate`;
-- if fewer than 2 points fit → `skipped`, reason "budget".
+**Isolation:** run on **its own `network.copy()`**. Its re-solves overwrite `p_nom_opt`, and `mc_certify` / `fmea_top` must see the `ens_solve` plan. The closing restore then lands on the throwaway copy.
+- Q4: add `restore_base: bool = True`; EH passes False on its disposable copy.
+- Test that no HTTP route passes False (grep-style, like F1j).
 
 **Report:**
-- `sections.frontier.payload = {points, knee_index (frontier.knee_index), base_restored, aborted}`.
-- Status `ok` when ≥2 points solved; otherwise `not_established`.
-- Keep the "excludes shed cost" + period basis fields (decision 3).
+- `sections.frontier.payload = {points, knee_index (frontier.knee_index), aborted, restore_skipped_on_private_copy}`.
+- `ok` when ≥2 points solved.
+- Keep ex-shed + period basis (decision 3).
 
 ### P12b fmea_top
 **Engine:** `sweep.run_class_b_sweep(network, lock, cfg, …)` (`sweep.py:453`).
-- K = `class_b_contingencies(n)`, max 20.
-- Cost: frozen base + K + closing restore = K+2 solves.
-- It freezes capacities, so it needs the `ens_solve` `p_nom_opt`. Run it on a copy of the post-`ens_solve` private network.
+- K = `class_b_contingencies(n)`, max 20 (`SweepBudgetError`).
+- Cost: frozen base + K + restore = K+2.
+- It freezes capacities (needs the `ens_solve` `p_nom_opt`). Run it on a copy of the post-`ens_solve` private network.
 
-**Budget:** pre-count K. If K+2 > remaining → `skipped` with reason (no partial sweep: a partial top-N ranking is misleading).
+**Edge cases [B9]:**
+- K = 0 costs 0 solves (early return, `sweep.py:465-476`). This is typical on the MVP-B fixtures, because AC Links have no carrier default. → `not_established` "no Class-B-eligible Links (no occurrence data)".
+- K > 20 (`SweepBudgetError`) → `not_established` with a reason.
+- K+2 > remaining → `skipped` with the "budget" reason. No partial sweep: a partial top-N is misleading.
+- Exclude import Links the pack already closed (`off_grid` `p_*_pu→0`). Pass an exclusion set, or pre-filter on the copy.
 
 **Top-N:**
-- re-sort rows by `(-criticality_eur_per_year, mode_id)`, the worksheet rule (`test_adequacy_abort.py::test_F1k`);
+- re-sort by `(-criticality_eur_per_year, mode_id)` (worksheet rule, `test_adequacy_abort.py::test_F1k`);
 - drop rows with `failure_mode=None`, counting them in `unsolved`;
-- N = 5 by default.
+- N = 5.
+- Payload: `{rows, k_links, unsolved, in_metric_scope_counts, basis: "pack_applied_ens_plan"}` + `FMEA_TOP_LINK_PRIMARY_NOTE` (decision 14).
 
-**Report:**
-- `sections.fmea_top.payload = {rows[:N], k_links, unsolved, in_metric_scope counts, note}`.
-- Keep `FMEA_TOP_LINK_PRIMARY_NOTE` (decision 14).
-- The ranking uses the **pack-applied** plan, and the payload says so.
+**Spec §9 amendment:** "every frontier point gets its own FMEA ranking" is **deferred**. EH ranks only the `ens_solve` plan. Record this in the spec.
 
-### Budget interplay
-Rough solve counts on the default pipeline:
-- ens 1
-- frontier ≤ 9
-- redundancy 4–8
-- levers 3–6
-- DtC ~N_links
-- fmea K+2
+### Budget test [B8]
+- Default `weak_flexible` and `off_grid` at budget 30, on a fixture with K ≥ 5 outage-rated Links: levers and DtC still reach `ok`.
+- Default `strong_grid` at 30: frontier `ok` with the pack cap among the points.
+- **Tests that change** (default-pipeline expectations): `test_energy_hub_study.py:77,126` and `test_energy_hub_report_p5.py:133`.
 
-**Decision Q3:** keep 30 and document the stage order as the priority (later stages are skipped with the "budget" reason), **or** raise `DEFAULT_EH_BUDGET_SOLVES`. Spec decision 17 pins 30; raising it needs a spec edit.
+### Other tests
+- Frontier monotone in cost.
+- `mc_certify` output identical with and without frontier (copy isolation).
+- FMEA ordering = worksheet rule.
+- K=0, K>20, and budget-short cases.
+- Abort between frontier points.
+- The FMEA fixture needs `outage_rate_value` set on the Links.
 
-**Tests:**
-- live frontier over ≥2 points is monotone in cost;
-- `mc_certify` still sees the ens plan after the frontier (compare `lole_h` with/without frontier);
-- fmea top-N ordering matches the worksheet rule;
-- a budget too small for fmea gives `skipped` with the "budget" reason;
-- abort between frontier points.
-
-**FE:** a small frontier table (target, cost, achieved ENS) + CSV, and a top-N FMEA table + CSV. Reuse `downloadCSV`.
+**FE:** frontier table (target, cost, achieved ENS) + CSV; FMEA top-N table + CSV. Reuse `downloadCSV`.
 
 ---
 
@@ -187,77 +244,85 @@ Rough solve counts on the default pipeline:
 
 ```
 pack_overrides: {
-  ens_cap_permyriad?: float>0,
-  target_lole_h?: float>=0,
-  import_p_nom_mw?: float>=0,
-  mc_certify_required?: bool,
-  dtc_stress_default?: bool,
-  dtc_planning_default?: bool,
+  ens_cap_permyriad?: float>0, target_lole_h?: float>=0,
+  certification_metric?: "mc_lole"|"none",
+  import_p_nom_mw?: float>=0, mc_certify_required?: bool,
+  frontier_default?: bool, dtc_stress_default?: bool, dtc_planning_default?: bool,
   levers?: {redundancy?, import_cap?, storage_duration?}
 }
 dtc_config?: DtcConfig
 dsr_buses?: list[str]
+mc?: {draws?: int, seed?: int, cov_target?: float}
 ```
 
-- Merge onto the factory pack with `model_copy(update=…)`, then **re-validate** through `ArchetypePack.model_validate`. Any pydantic error → 422 with the field path.
-- `pack_hash` changes accordingly, since it is computed from the merged pack.
-- Unknown DtC ids / buses → 422 before the worker starts, so no worker publish happens (the guard-path discipline from #51).
+- Merge onto the factory pack via `model_copy(update=…)`, then **re-validate** through `ArchetypePack.model_validate`. Errors → 422 with the field path.
+- `pack_hash` reflects the overrides.
+- Unknown DtC ids / buses → 422 **before** the worker starts, so no publish happens (the #51 guard discipline).
 
 **Chat:**
-- `run_eh_study` gets fully-specified nested object schemas, following the asset-health `entries` pattern (`chat_tools_schema.py:832-850`).
+- Fully-specified nested object schemas, following the asset-health `entries` pattern (`chat_tools_schema.py:832-850`).
 - Python defaults for every optional field (`test_tool_schema_signature_consistency.py`).
-- Campaign charge is unchanged (`budget_solves`).
+- Campaign charge unchanged (`budget_solves`; MC is 0).
 
-**FE:** a collapsible "Pack settings" block in `EhReferenceDesignPanel`:
+**FE:** a collapsible "Pack settings" block:
 - string-state numeric inputs;
-- Run is disabled on invalid values, with the reason in `title`;
-- fields are **omitted from the body when blank** (the `LoopPanel.tsx:340-353` pattern), so the FE never invents a default;
-- a stages multi-select and a budget input.
+- Run is disabled on invalid input, with the reason in `title`;
+- **omit blank fields** (the `LoopPanel.tsx:340-353` pattern);
+- a stages multi-select and a budget input;
+- `target_lole_h` labelled **h/yr** (P11 rule).
 
 **Tests:**
-- HTTP live: weak pack with `ens_cap_permyriad` override is feasible on the MVP-B fixture, where the default pack is infeasible;
+- HTTP live: the weak pack with an `ens_cap_permyriad` override is feasible on the MVP-B fixture, where the default is infeasible;
 - invalid override → 422 with no record;
 - `pack_hash` differs;
-- chat schema ↔ signature consistency;
-- FE: body omits blank fields.
+- schema ↔ signature consistency;
+- FE omits blank fields.
 
 ---
 
 ## P14 — EH network tagging + readiness
 
 **Backend:**
-- Blockers today:
-  - `_drop_unknown_extras` (`services/network_crud.py:111-130`) keeps only catalog inputs or **existing** columns, so a first `eh_*` write is silently dropped (`tests/test_extras_passthrough.py:33-69` pins that).
+- **Blockers today:**
+  - `_drop_unknown_extras` (`services/network_crud.py:111-130`) keeps only catalog inputs or **existing** columns, so a first `eh_*` write is silently dropped (pinned by `tests/test_extras_passthrough.py:33-69`);
   - `/_bulk` returns 400 on unknown columns (`network_bulk.py:376-382`).
-- Add a typed whitelist:
+- **One shared role vocabulary [B11]:**
+  - Today the roles are split across `archetypes.py` (`grid_import`), `redundancy.py:47-54,400` (`_IMPORT_ROLES`, `_CONVERSION_ROLES`, `eh_n1_conversion`) and `levers.py:57` (`eh_import`, `import`).
+  - Move them into one `EH_LINK_ROLES` constant, e.g. in `models/energy_hub.py`. All three modules import it.
+  - The whitelist validates against it. Do not use a two-value Literal, which would break existing roles.
+- Typed whitelist:
   ```python
   EH_CUSTOM_COLUMNS = {
       "Bus":  {"eh_poc": bool, "eh_critical": bool,
                "eh_sk_mva": float, "eh_ibr_mva": float},
-      "Link": {"eh_role": Literal["", "grid_import"]},
+      "Link": {"eh_role": EH_LINK_ROLES},
   }
   ```
-- Whitelisted keys create the column with a typed default (False / NaN / ""). Non-whitelisted keys keep today's behaviour; the extras-passthrough test stays true for them.
-- Bool columns must be real `bool` dtype, or netCDF export fails (`pypsa_service.normalise_flag_column`, `:650-662`). Normalise on write and on import.
-- Declare the fields on `BusCreate` / `LinkCreate` (`schemas.py`) like `outage_rate_*`, for OpenAPI and docs.
-- `GET /results/eh_readiness?archetype=…` — a **read-only preflight** that reuses the driver's own selectors, so there is no second rule set:
-  - selected import Links + which §6 rule matched (`select_import_links`);
+- Whitelisted keys create the column with a typed default. Non-whitelisted keys keep today's behaviour, so the extras-passthrough test stays true for them.
+- **Bool normalisation [B11]:** `occurrence.normalise_flag_column` (`occurrence.py:78`) handles only the generator `p_max_pu_includes_outages` flag, called from `export_network_to_netcdf` (`pypsa_service.py:645-663`).
+  - Add a generic helper for whitelisted bool columns.
+  - Wire it into netCDF export and import, and into Excel import.
+- Declare the fields on `BusCreate` / `LinkCreate` (`schemas.py`) for OpenAPI.
+- `GET /results/eh_readiness?archetype=…` — a **read-only** preflight built from the driver's own selectors and budget estimator, shared code, not restated:
+  - selected import Links + which §6 rule matched;
   - critical buses;
-  - PoC SCR coverage (`scr_gate` inputs);
+  - PoC SCR coverage;
   - DtC derivability;
-  - storage presence (lever soft-skip);
+  - storage presence;
   - Class-B K;
-  - an estimated solve count per stage vs budget.
+  - the MC fleet boundary (P11);
+  - per-stage solve estimate vs budget.
 
 **FE:**
-- An "Energy Hub" section on `BusPanel` (`PropertiesPanel.tsx:1581`) and `LinkCard` (`:1090`), next to the existing "Adequacy" sections, using `cardKit` inputs.
-- The EH panel shows the readiness summary before Run.
+- An "Energy Hub" section on `BusPanel` (`PropertiesPanel.tsx:1581`) and `LinkCard` (`:1090`), next to "Adequacy", using `cardKit` inputs.
+- The EH panel shows readiness before Run.
 
 **Tests:**
 - PUT/`_bulk` create the whitelisted columns;
-- a non-whitelisted key is still dropped;
+- non-whitelisted keys are still dropped;
 - netCDF + xlsx round-trip keeps dtype;
-- the readiness summary matches what the driver then does (live);
+- all three role consumers use the shared constant;
+- readiness matches what the driver then does (live);
 - FE card edit → PUT body.
 
 ---
@@ -266,90 +331,99 @@ dsr_buses?: list[str]
 
 **Backend exists:**
 - `GET/PUT /api/projects/{name}/stress_scenarios` (`routers/adequacy_worksheet.py:64-77`): whole-list replace, 422 on `StressValidationError`.
-- Registry rules are in `stress.py:50-210`:
+- Rules are in `stress.py:50-210`:
   - ≤10 scenarios;
   - id `[a-z0-9_-]{1,64}`;
   - `kind ∈ {parametric, profiles}`;
   - frequency in (0, 365];
-  - parametric multipliers are bounded;
+  - parametric multipliers bounded;
   - `profiles` uses inline series or `profile_pack`.
 
-**Gap found:** `profile_pack` ids resolve against `backend/tests/fixtures/eh_class_c/` (`stress.py:59-94`). Shipped code reads from the test tree, and the frozen app won't contain it.
-- Move the packs to a data dir (e.g. `backend/data/eh_class_c/`), keeping the tests pointed at the same files.
-- Add `GET /adequacy/profile_packs` to list them.
-- Check `check_bundle.py` / `pypsa-gui.spec` include the new data dir.
+**Gap:** `profile_pack` ids resolve against `backend/tests/fixtures/eh_class_c/` (`stress.py:59-62`). Shipped code reads from the test tree.
+- Move the packs to `backend/data/eh_class_c/`; tests point at the same files.
+- Add `GET /adequacy/profile_packs`.
+- Make sure `check_bundle.py` / `pypsa-gui.spec` include the data dir. The packaging test covers it.
 
 **FE:**
 - `putStressScenarios` client.
-- A scenario editor on `FmeaTab`, following the worksheet `putWorksheet` pattern (`FmeaTab.tsx:63-72`):
+- A scenario editor on `FmeaTab`, following the `putWorksheet` pattern (`FmeaTab.tsx:63-72`):
   - add/edit/delete;
-  - parametric fields with the backend bounds mirrored client-side;
-  - a `profile_pack` picker from the new list endpoint;
-  - inline profile upload deferred;
-  - 422 messages surfaced verbatim.
+  - parametric bounds mirrored client-side;
+  - `profile_pack` picker;
+  - 422 surfaced verbatim;
+  - inline profile upload deferred.
 
 **Tests:**
-- FE round-trip (edit → PUT body → refetch);
+- FE round-trip;
 - a bounds violation shows the backend 422;
-- backend profile-pack resolution from the data dir;
-- the packaging test covers the data dir.
+- pack resolution from the data dir;
+- packaging includes the dir.
 
 ---
 
-## P16 — DtC per-Load attribution (spec amendment first)
+## P16 — DtC per-Load attribution (spec amendment + design first)
 
-**Why now:** P6(b) created one VOLL slack per Load. `last_lost_load.lost_load_load_period_mwh` is keyed by Load id (`assumptions.py:842-850`). Decision 8 and §10's premise ("one slack per bus") no longer hold.
+**Why:**
+- P6(b) created one VOLL slack per Load.
+- `last_lost_load.lost_load_load_period_mwh` is keyed by Load id (`services/solver/assumptions.py:832-872`).
+- Decision 8 / §10's premise ("one slack per bus") no longer holds.
 
-**Step 1 — spec amendment** (product sign-off, → Decision Q5):
-- Amend decision 8 / §8 non-goal / §10: DtC may attribute per Load when the capture has `lost_load_load_period_mwh`.
-- Bus-aggregate stays the fallback.
-- `DtcConfig.attribution: Literal["bus_aggregate_not_per_load", "per_load"]`, default `"auto"`, which resolves to `per_load` when the capture supports it.
+**Blocking design issue [B12]:**
+- Every per-Load slack bids the same `cfg.voll` (`assumptions.py:771-786`).
+- On a shared bus, the LP's split of shed between critical and non-critical Loads is **degenerate and arbitrary**. Per-Load numbers would be solver artefacts.
+- Pick one (Q5):
+  - (a) **VOLL priority:** critical Loads' slacks get `voll × (1 + ε_crit)`. This is a documented priority, so the LP sheds non-critical first. It affects cost only via the ε term; report ε.
+  - (b) **Bounds:** report critical unserved as the interval `[0, bus_total]` on shared buses, and exact values only for critical-only buses.
 
-**Step 2 — stress:**
-- Critical unserved = Σ over `critical_load_ids` (+ loads on critical buses) from the Load-keyed capture.
-- Drop the "different buses" requirement for `per_load`.
-- Keep the honesty notes accurate (`per_load_slack`).
+**Contract:**
+- `DtcConfig.attribution: Literal["bus_aggregate_not_per_load", "per_load"]`.
+- **Default stays `bus_aggregate_not_per_load`; `per_load` is opt-in.** There is no `"auto"`.
+- `per_load` refuses when the capture lacks Load keys.
 
-**Step 3 — planning:**
-- Retained-critical demand by **Load**: zero non-critical Loads' `p_set` even on shared buses.
-- System ENS remains the planning metric.
-- Report per-critical-Load unserved.
+**Steps:**
+1. Amend spec decision 8 / §8 non-goal / §10.
+2. Stress: critical unserved = Σ over the critical Loads from the Load-keyed capture, under (a) or (b). Drop the different-bus requirement only for `per_load`.
+3. Planning: retained-critical demand by **Load**. System ENS stays the planning metric.
 
 **Tests:**
-- update `test_energy_hub_dtc.py`: the refusal test becomes "refuses per_load when the capture lacks Load keys";
-- a shared-bus fixture (critical + comfort on one bus) now yields separate critical / non-critical MWh;
-- a bus-aggregate regression for old captures.
+- The refusal test becomes "refuses per_load without Load keys".
+- Shared-bus fixture: critical vs non-critical separated under (a), or bounded under (b).
+- Bus-aggregate regression unchanged.
+- Determinism across two solver runs (guards against degeneracy).
 
 ---
 
-## P17 — Energy import cap (spec §6)
+## P17 — Energy import cap (spec §6 amendment first; lowest priority)
 
-**Constraint:** new `extra_functionality` wrapper `_wrap_with_import_energy_cap` in `solver/adequacy.py`, modelled on `_wrap_with_ens_cap` (`:225-427`):
-- `Link-p` over the selected import links;
-- per-period buckets;
-- `≤ E × Σw_P / 8760` using weights **without** the `investment_period_weightings.years` multiplier. `snapshot_weights` includes it (`period_utils.py:80-108`), and nyears ≠ 1 is common.
+**Spec:** §6 currently says apply "must NOT add a GlobalConstraint". Amend it to allow this constraint, which is enforced via `extra_functionality` and is not a PyPSA GC row.
 
-**Config:** `SolverConfig.import_energy_cap_mwh_per_year` + `import_energy_links`, set only from the pack overlay. Never a user global — the same stance as DSR.
+**Constraint `[B13]`:** `_wrap_with_import_energy_cap` in `services/solver/adequacy.py`, modelled on `_wrap_with_ens_cap` (`:225`).
+- **Direction:** for each selected Link, determine the hub side (the bus that is not the PoC/grid side). Import energy = flow **into** the hub:
+  - `p0` when bus0 is the grid side, metered at the hub as `p0 × efficiency`;
+  - `-p1` otherwise.
+  - Pin the metering point: at the hub bus, after efficiency.
+- **Bidirectional Links** (`p_min_pu < 0`): cap only the import direction. Split into positive-part auxiliary variables, or refuse with a preflight error in v1 (recommended: refuse).
+- **Weights:** the `generators` weight column **without** the `investment_period_weightings.years` multiplier (`period_utils.py:80-108` includes it).
+  - Per period P: `Σ_t w_t · import_t ≤ E × Σ_t w_t / 8760`.
+- Refuse rolling / myopic (as the ENS cap does).
 
-**Preflight:**
-- refuse rolling / myopic (as the ENS cap does);
-- warn when `p_min_pu < 0` (bidirectional Link: `p` is not pure import).
+**Config:** `SolverConfig.import_energy_cap_mwh_per_year` + `import_energy_links`, set only from the pack overlay. Never a user global.
 
-**Pack:** `apply_archetype_pack` stops warning "reserved" and instead sets the cfg fields for `weak_flexible` when `import_energy_mwh_per_year` is set.
+**Pack:** `apply_archetype_pack` stops warning "reserved" for `weak_flexible` and sets the cfg fields instead.
 
 **Lever:** `import_energy` kind in `levers.py`:
 - default MWh ladder;
 - `OptimizationLevers.import_energy`;
-- a cfg-based branch in `apply_lever_scenario` (no network mutation);
+- a cfg-based branch in `apply_lever_scenario`;
 - the "ineffective" check extended.
 
-**Alternative:** formally re-scope spec §6 energy caps out of v1. → **Decision Q6.**
-
 **Tests:**
-- the binding cap raises cost / ENS monotonically;
-- a multi-period network with years weighting has the per-year cap honoured;
-- rolling is refused;
-- the lever table has ≥2 differentiated options.
+- A binding cap raises cost monotonically.
+- A multi-period network with years weighting honours the per-year cap.
+- Both Link orientations are metered correctly.
+- A bidirectional Link is refused.
+- Rolling is refused.
+- The lever gives ≥2 differentiated options.
 
 ---
 
@@ -367,20 +441,39 @@ dsr_buses?: list[str]
 
 ---
 
-## Open decisions (need product owner)
+## Open decisions (product owner)
 
-| # | Question | Recommendation |
+| # | Question | Recommendation (after review) |
 |---|---|---|
-| Q1 | Certification verdict rule | `pass` iff CI upper ≤ target; `fail` iff CI lower > target; else `inconclusive` (report the mean regardless) |
-| Q2 | Non-annual horizons vs `target_lole_h` (h/yr) | Annualise with explicit `annualised_from_horizon_years` + note; refuse (`not_established`) when horizon < 1 week |
-| Q3 | Default budget 30 vs full pipeline | Keep 30 (spec decision 17). Stage order is the priority, and later stages are skipped with a "budget" reason. Revisit after P12 measurements |
-| Q4 | Frontier closing restore on a disposable copy | Add `restore_base: bool = True` kwarg; EH passes False on its private copy (saves 1 solve) |
-| Q5 | DtC per-Load (amend decision 8 / §10) | Amend. P6(b) removed the premise |
-| Q6 | Energy import cap | Implement (P17) after P13; otherwise re-scope in spec |
+| Q1 | Certification verdict rule | `pass` iff CI upper ≤ target; `fail` iff CI lower > target; else `inconclusive`. `certified=True` only on `pass`. Resolution-floor guard; loop vocabulary (`met_on_mean`, `confident`) kept |
+| Q2 | Time basis | Compare against `target_lole_h × horizon_years` (loop convention). Refuse when `horizon_years ≤ 0` or modelled hours < max MTTR. Add ≥168 h certifying fixtures |
+| Q3 | Default budget 30 | Keep 30 (decision 17). Frontier is a pack default only for `strong_grid`, with a capped budget share |
+| Q4 | Frontier restore on a disposable copy | `restore_base=True` default; EH passes False; test that no route passes False |
+| Q5 | DtC per-Load | Amend the spec **only with** VOLL-priority (a) or bounds (b). Recommend (a) with a disclosed ε |
+| Q6 | Energy import cap | Implement after P13, behind a §6 amendment; lowest priority |
+| Q7 | MC fleet boundary / import in MC | Hub-boundary copy for MC. `weak_flexible` import excluded from MC unless the Link has outage data (then it becomes a two-state unit) |
+
+## QA gate record
+- **2026-09-25 — plan gate:** `GO WITH BINDING CONDITIONS`. B1–B14 incorporated above:
+  - B1 fleet boundary (P11)
+  - B2 contract/goldens (P11)
+  - B3 verdict semantics (P11)
+  - B4 time basis / fixtures (P11)
+  - B5 zero-solve gating + decision-18 execution order (P11)
+  - B6 F1j scan (P11)
+  - B7 redundancy cadence disclosure (P11)
+  - B8 pack-scoped frontier + budget test (P12)
+  - B9 fmea edge cases + §9 deferral (P12)
+  - B10 campaign formula (P10c)
+  - B11 shared role vocabulary + generic bool normaliser (P14)
+  - B12 VOLL degeneracy (P16)
+  - B13 import direction/metering/weights + §6 amendment (P17)
+  - B14 DtC fixed-plan freeze (P10b)
 
 ## Per-phase DoD (all phases)
 - Red → green evidence.
 - The phase's live HTTP test is unstubbed.
 - `pixi run gui-tests` green, and the FE CI job (P10d) green.
+- Spec amendment merged where required.
 - Plan checkbox + gate verdict recorded here.
-- The handover/seal command list is updated when new test files are added.
+- The seal command list is updated when new test files are added.

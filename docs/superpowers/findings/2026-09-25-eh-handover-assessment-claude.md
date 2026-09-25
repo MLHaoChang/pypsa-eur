@@ -59,8 +59,13 @@ Priority is my recommendation; the product owner decides.
 6. **Energy import cap** GlobalConstraint overlay (spec §6 → P3c), or formally re-scope it in the spec.
 7. **Revisit DtC attribution after P6(b).** Per-Load VOLL slacks now exist, so decision 8 / §10's "one slack per bus" premise no longer holds. DtC could report per-critical-Load unmet energy and drop the different-bus requirement.
 8. **Pipeline UI**: render per-stage status/notes (the panel now shows solves and not-established reasons, but not the stage table), plus a whole-report JSON/CSV export (`export_reference_design`).
-9. Keep the handover's own deferrals: Class-C authoring UI, climate P8(b), spare-lead modifier, planned-outage MC.
-10. CI: make sure the GUI CI runs on Python ≥ 3.12, and add at least one **unstubbed** HTTP EH study test to the seal set (now in `test_energy_hub_study_isolation.py`).
+9. **Found in plan review, not yet fixed:**
+   - DtC "fixed-plan" stress re-solves with extendables still free (`dtc.py:227-245`, no `freeze_capacities`), so it is not decision 8's stress-on-fixed-plan.
+   - The MC engine is copper-plate: `off_grid` certification must exclude generation beyond the islanded import Links.
+   - The `fmea_sweep` campaign estimate undercounts base + restore solves.
+   Plan: [`plans/2026-09-25-eh-post-seal-implementation.md`](../plans/2026-09-25-eh-post-seal-implementation.md) (P10b, P11, P10c).
+10. Keep the handover's own deferrals: Class-C authoring UI, climate P8(b), spare-lead modifier, planned-outage MC.
+11. CI: make sure the GUI CI runs on Python ≥ 3.12, and add at least one **unstubbed** HTTP EH study test to the seal set (now in `test_energy_hub_study_isolation.py`).
 
 ## 5. Verification (this branch)
 
