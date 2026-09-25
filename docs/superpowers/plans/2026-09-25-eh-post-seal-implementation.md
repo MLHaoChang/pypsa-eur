@@ -1,6 +1,6 @@
 # Energy Hub reference design — post-seal implementation plan
 
-**Status:** revised after independent QA gate. Verdict **`GO WITH BINDING CONDITIONS`** (2026-09-25). All 14 binding conditions (B1–B14) are folded into the phases below and tagged `[Bn]`. P10 may start now. **P11 must not start until Q1, Q2 and Q7 are decided.**
+**Status:** revised after two independent QA gates. Both returned `GO WITH BINDING CONDITIONS`. All conditions are folded in below: B1–B14 from the first gate, R1–R5 from the re-gate. P10 may start now. **P11 must not start until Q1, Q2 and Q7 are decided.**
 **Source of the TODO list:** [`findings/2026-09-25-eh-handover-assessment-claude.md`](../findings/2026-09-25-eh-handover-assessment-claude.md) §3–§4
 **Parent plan / spec:** [`2026-09-14-eh-reference-design-gaps.md`](2026-09-14-eh-reference-design-gaps.md), [`specs/2026-09-14-eh-reference-design.md`](../specs/2026-09-14-eh-reference-design.md)
 **Base:** `master` + `claude/epic-allen-k2t1c4` (isolation / budget / honest-failure fixes). Every phase assumes those fixes. In particular, `run_eh_study` runs on a private network + cfg copy and enforces `budget_solves`.
@@ -60,6 +60,7 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
 2. **"Fixed plan" is not fixed [B14].**
    - `run_dtc_stress` re-solves a plain `network.copy()` with extendables still free (`dtc.py:227-245`; no `freeze_capacities`), yet labels itself `stress_fixed_plan` (decision 8: "stress-on-fixed-plan").
    - Fix: freeze with `sweep.freeze_capacities` (as the Class-B sweep does) and undo after.
+   - Also strip `ens_cap_permyriad`, `ens_zone_cap_multiple` and `reserve_margin` for the frozen solve, as the sweep does (`sweep.py:298-299`). Frozen capacity plus a surviving margin is infeasible. [R5]
    - **Test:** an extendable generator does not grow under islanding in DtC stress; critical unserved > 0 where the frozen plan is short.
    - Update `test_energy_hub_dtc.py` expectations if values change.
 
@@ -99,11 +100,21 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
 - The MC/COPT engine is **copper-plate and network-free**: "StorageUnits, Stores, Links and imports never enter" (`copt.py:8-9`, `_membership_walk` `:449-509`).
 - A generator on the far side of an import Link is therefore counted as local firm capacity, whatever the pack did to the Link. Both MVP-B fixtures have a 200 MW `remote` gas generator on the `grid` bus (`test_energy_hub_mvp_b.py:44,82`). Gas has a carrier-default outage rate (`occurrence.py:165`), so the MC counts it.
 - Without a fix, `off_grid` would "certify" on grid capacity the pack has cut off.
-- **Required:** take the MC snapshot from an **MC-only copy with the hub boundary applied**. Remove every component on buses reachable **only** through the selected import Links (the far side of the PoC). Implement this as a helper in `archetypes.py` that reuses `select_import_links`.
+- **Required:** take the MC snapshot from an **MC-only copy with the hub boundary applied**. Remove every component on the **far side** of the selected import Links. Implement this as a helper `hub_boundary_copy(n, pack)` in `archetypes.py` that reuses `select_import_links`.
+- **Finding the hub side [R1]:**
+  1. Remove the selected Links and compute the connected components of the remaining bus graph (Lines, Transformers, the other Links).
+  2. **Rule 2 (`eh_poc`):** the PoC buses mark the far side, and the hub is every component without a PoC bus.
+  3. **Rule 1 (`eh_role=grid_import`):** the hub is the component holding the `eh_critical` buses; otherwise, the component with the largest weighted load.
+     - If two components tie, or the hub's side can't be told apart from the far side → `not_established` "hub side ambiguous — tag `eh_poc` on the grid-side bus".
+  4. **Rule 3 (carrier fallback):** **refuse** with `not_established` "tag `eh_role`/`eh_poc` to certify". The carrier rule also matches internal hub Links (e.g. `crit_flex` in the weak fixture), and cutting those would split the hub itself.
+- Every far-side component is removed on the MC copy; the hub keeps its Stores/Storage, which MC ignores anyway.
 - **How `weak_flexible` import enters the MC (Q7):**
   - (a) excluded — conservative, the default recommendation; or
   - (b) represented as one two-state unit of `import_p_nom_mw`, only when the Link has outage data (decision 6: import is a planning limit, not firm, unless outages are modelled).
-- **Test:** `off_grid` `lole_h` == LOLE of the same network with the grid side deleted; the `remote` generator is not in `inputs.units`.
+- **Tests:**
+  - `off_grid` `lole_h` == LOLE of the same network with the grid side deleted, and the `remote` generator is not in `inputs.units`;
+  - a carrier-rule-only network → `not_established` "tag eh_role/eh_poc";
+  - ambiguous components → `not_established`.
 
 ### Stage gating and order [B3, B5]
 - Default pipeline keeps `mc_certify` when any of these holds:
@@ -111,12 +122,14 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
   - `pack.availability.certification_metric == "mc_lole"` (`energy_hub.py:76`);
   - `target_lole_h is not None`.
 - **Zero-solve stages are not budget-blocked.** `_blocked` (`eh_study.py:241-255`) must block `mc_certify` only on `failed_reason` / abort, never on `_remaining() <= 0`. Otherwise `test_budget_exhausted_before_stage_skips_it` (budget 1) silently drops a required certification.
-  - **Test:** budget 1 → `mc_certify` still runs.
+  - **Test:** budget 1 → `mc_certify` still runs. Use a **certifying** fixture (≥168 h, max MTTR ≤ horizon). The existing 12 h `off_grid` budget test would return `not_established` under the MTTR rule (gas MTTR 50 h).
 - **Execute stages in decision-18 order.** Today the frontier / fmea handling sits after `dtc_stress` (`eh_study.py:591-610`). Refactor the driver into a stage table iterated in `EH_PIPELINE_STAGES` order:
   - `frontier` → `mc_certify` → `fmea_top` → `redundancy` → `levers` → `dtc_stress` → `dtc_planning`.
   - **Test:** pipeline record order == execution order (instrumented).
 - `solves_charged=0`, consistent with `campaign.py:22-25,255-258`. A separate draw ceiling applies (default `mc.MAX_DRAWS=2000`).
-- **Abort:** only the baseline call gets `stop_event`. Extend F1j [B6]: add `services/adequacy/eh_study.py` to the scan list and `run_eh_study` to `ALLOWED` (`test_adequacy_abort.py:670-672`).
+- **Abort:** only the baseline call gets `stop_event`. Extend F1j [B6]:
+  - add `services/adequacy/eh_study.py` to the scan list and `run_eh_study` to `ALLOWED` (`test_adequacy_abort.py:670-672`);
+  - extend its `seen_allowed` check (`:673-680`, which today reads only `mc_loop_runner.py`) to also require the `run_eh_study` call site. [R5]
 
 ### Time basis [B4, Q2]
 - `mc_adequacy.lole_hours` is **per horizon (weighted)**. `time_basis == "hours_per_year"` only when the horizon is ~1 yr (`metrics.py:200`). The coupling loop already takes a **horizon-basis** target (`coupling_loop_runner.py:100-104`; the FE `wireTarget` multiplies by `horizon_years`, `LoopPanel.tsx:150-157`).
@@ -158,7 +171,7 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
 
 ### Redundancy cadence [B7]
 - P3b pins `mc_certify_cadence="finalists_only"` (`redundancy.py:34,158`), but P11 certifies only the ENS plan.
-- In P11: set the redundancy payload's cadence disclosure to `"ens_only_finalists_not_mc_certified"`.
+- In P11: keep `mc_certify_cadence="finalists_only"`, which is pinned by `test_energy_hub_redundancy_select.py:18,116`. Add a **separate** payload field `finalists_mc_certified: false` with a note that finalists are ENS-only. [R3]
 - Finalist MC certification is a follow-up (P11b, optional). It uses the same helper per finalist network, 0 LP solves.
 
 ### Tests
@@ -188,12 +201,16 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
 
 **Pack scope [B8]:**
 - New pack flag `frontier_default: bool`. It is True only for `strong_grid`, where spec §3 makes the frontier the deliverable. Weak and off-grid run it only when `stages` includes it explicitly.
-- When run: `budget_share = min(remaining - 1, max(2, floor(0.4 × budget_solves)))`.
+- **Contract impact [R4]:**
+  - update `tests/fixtures/eh_archetypes/strong_grid_pack.json` (plus the weak/off-grid fixtures with `false`), since `test_archetype_pack_fixtures_round_trip` (`test_energy_hub_contract.py:106-118`) compares against the factory;
+  - `pack_hash` changes for **every** pack (`archetypes.py:30-33`). Note this in the PR: stored reports from before are not hash-comparable.
+- When run, the number of points is `min(remaining, max(2, floor(0.4 × budget_solves)), 12)`. With Q4, EH skips the closing restore, so no solve is reserved for it. Without Q4, use `remaining - 1`.
 - Targets: the pack cap is **always** kept. Fill from `DEFAULT_TARGETS_PERMYRIAD`, nearest to the pack cap first, then order loosest first per `_validate`.
 - Fewer than 2 points fit → `skipped` with the "budget" reason.
 
 **Isolation:** run on **its own `network.copy()`**. Its re-solves overwrite `p_nom_opt`, and `mc_certify` / `fmea_top` must see the `ens_solve` plan. The closing restore then lands on the throwaway copy.
 - Q4: add `restore_base: bool = True`; EH passes False on its disposable copy.
+- **fmea exclusions:** `run_class_b_sweep` takes no exclusion parameter. **Pre-filter on the copy** instead: drop Links the pack closed, so no engine change is needed.
 - Test that no HTTP route passes False (grep-style, like F1j).
 
 **Report:**
@@ -211,7 +228,7 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
 - K = 0 costs 0 solves (early return, `sweep.py:465-476`). This is typical on the MVP-B fixtures, because AC Links have no carrier default. → `not_established` "no Class-B-eligible Links (no occurrence data)".
 - K > 20 (`SweepBudgetError`) → `not_established` with a reason.
 - K+2 > remaining → `skipped` with the "budget" reason. No partial sweep: a partial top-N is misleading.
-- Exclude import Links the pack already closed (`off_grid` `p_*_pu→0`). Pass an exclusion set, or pre-filter on the copy.
+- Exclude import Links the pack already closed (`off_grid` `p_*_pu→0`) by pre-filtering them off the fmea copy.
 
 **Top-N:**
 - re-sort by `(-criticality_eur_per_year, mode_id)` (worksheet rule, `test_adequacy_abort.py::test_F1k`);
@@ -290,6 +307,9 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
   - Today the roles are split across `archetypes.py` (`grid_import`), `redundancy.py:47-54,400` (`_IMPORT_ROLES`, `_CONVERSION_ROLES`, `eh_n1_conversion`) and `levers.py:57` (`eh_import`, `import`).
   - Move them into one `EH_LINK_ROLES` constant, e.g. in `models/energy_hub.py`. All three modules import it.
   - The whitelist validates against it. Do not use a two-value Literal, which would break existing roles.
+- **Keep separate subsets [R5]:** `EH_IMPORT_ROLES`, `EH_CONVERSION_ROLES`, and `""`.
+  - **§6 selection rule 1 stays `grid_import` only.** If `select_import_links` matched `eh_import`/`import`, the set of Links each pack applies to would widen silently.
+  - **Test:** a Link tagged `eh_import` is not selected by rule 1.
 - Typed whitelist:
   ```python
   EH_CUSTOM_COLUMNS = {
@@ -373,6 +393,7 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
 - On a shared bus, the LP's split of shed between critical and non-critical Loads is **degenerate and arbitrary**. Per-Load numbers would be solver artefacts.
 - Pick one (Q5):
   - (a) **VOLL priority:** critical Loads' slacks get `voll × (1 + ε_crit)`. This is a documented priority, so the LP sheds non-critical first. It affects cost only via the ε term; report ε.
+    - **Scope it to the DtC stage's private cfg only** [R5], so it never changes `ens_solve`, the frontier, or the user's own solve.
   - (b) **Bounds:** report critical unserved as the interval `[0, bus_total]` on shared buses, and exact values only for critical-only buses.
 
 **Contract:**
@@ -389,7 +410,8 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
 - The refusal test becomes "refuses per_load without Load keys".
 - Shared-bus fixture: critical vs non-critical separated under (a), or bounded under (b).
 - Bus-aggregate regression unchanged.
-- Determinism across two solver runs (guards against degeneracy).
+- Under (a): on a shared bus short by X MWh, the **non-critical Loads are shed first**. Critical unserved = max(0, X − non-critical demand). [R5: "same result twice" can't detect a degenerate split]
+- `ens_solve` / frontier costs are unchanged when DtC `per_load` is on (ε scoping).
 
 ---
 
@@ -398,11 +420,10 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
 **Spec:** §6 currently says apply "must NOT add a GlobalConstraint". Amend it to allow this constraint, which is enforced via `extra_functionality` and is not a PyPSA GC row.
 
 **Constraint `[B13]`:** `_wrap_with_import_energy_cap` in `services/solver/adequacy.py`, modelled on `_wrap_with_ens_cap` (`:225`).
-- **Direction:** for each selected Link, determine the hub side (the bus that is not the PoC/grid side). Import energy = flow **into** the hub:
-  - `p0` when bus0 is the grid side, metered at the hub as `p0 × efficiency`;
-  - `-p1` otherwise.
-  - Pin the metering point: at the hub bus, after efficiency.
-- **Bidirectional Links** (`p_min_pu < 0`): cap only the import direction. Split into positive-part auxiliary variables, or refuse with a preflight error in v1 (recommended: refuse).
+- **Direction [R2]:** find the hub side with the P11 `hub_boundary_copy` logic.
+  - v1 meters only Links oriented **grid → hub**: `bus0` on the grid side. Import energy at the hub bus = `p0 × efficiency`.
+  - A one-way Link oriented hub → grid can never import: PyPSA defines `p1 = −efficiency·p0`, so `−p1 = efficiency·p0`, which is **export**. Such a Link is ignored with a stage note, or refused if it is the only selected Link.
+- **Bidirectional Links** (`p_min_pu < 0`): refuse in v1 with a preflight error. Capping only the import direction needs positive-part auxiliary variables, which is deferred.
 - **Weights:** the `generators` weight column **without** the `investment_period_weightings.years` multiplier (`period_utils.py:80-108` includes it).
   - Per period P: `Σ_t w_t · import_t ≤ E × Σ_t w_t / 8760`.
 - Refuse rolling / myopic (as the ENS cap does).
@@ -420,7 +441,7 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
 **Tests:**
 - A binding cap raises cost monotonically.
 - A multi-period network with years weighting honours the per-year cap.
-- Both Link orientations are metered correctly.
+- A grid → hub Link is metered as `p0 × efficiency`; a hub → grid one-way Link is ignored with a note.
 - A bidirectional Link is refused.
 - Rolling is refused.
 - The lever gives ≥2 differentiated options.
@@ -469,6 +490,13 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
   - B12 VOLL degeneracy (P16)
   - B13 import direction/metering/weights + §6 amendment (P17)
   - B14 DtC fixed-plan freeze (P10b)
+
+- **2026-09-25 — plan re-gate:** `GO WITH BINDING CONDITIONS`. RESOLVED: B2–B6, B8–B12, B14. PARTIAL: B1, B7, B13. New conditions, all folded in above:
+  - R1 hub-side rule (P11)
+  - R2 import metering (P17)
+  - R3 separate cadence field (P11)
+  - R4 pack fixture / `pack_hash` + budget-share formula (P12)
+  - R5 notes: margin strip, `seen_allowed`, rule-1 guard, ε scoping, shed-order test
 
 ## Per-phase DoD (all phases)
 - Red → green evidence.
