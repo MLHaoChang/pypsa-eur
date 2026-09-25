@@ -244,7 +244,22 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
 - [x] **Test update.** `test_energy_hub_study.py::test_run_marks_not_established_when_required_mc_missing` now asserts `certification`, not `gates`. This is the intended contract move.
 - [x] **FE.** LOLE h/yr + CI (per year), a verdict chip, and `certification` in the chip order.
 - [x] **Chat.** The `run_eh_study` description is updated.
-- [ ] **QA gate** — pending.
+- [x] **QA gate** (independent) — `GO WITH BINDING CONDITIONS`; both conditions fixed red → green.
+  1. **Boundary could include the grid.**
+     - An import Link whose endpoints stay connected (parallel Line or untagged Link) kept the grid inside the "hub".
+     - `eh_poc` on the hub bus inverted the hub and gave a false `certified=True` (probe P4).
+     - Now refused: any selected Link that doesn't separate its endpoints; `eh_critical` beyond the boundary; a hub with no load.
+     - End-to-end test: wrong-side tagging never certifies.
+  2. **Live DoD tests.**
+     - The unmodified default `weak_flexible` and `off_grid` packs (MC required) certify on a 168 h hub.
+     - The 4 h and 12 h fixtures are refused with the MTTR reason (`test_energy_hub_mvp_b.py`).
+- **Also done from the gate:**
+  - MC and hub-copy errors degrade to `not_established` instead of failing the study.
+  - A stage-level abort sets a reason on `certification`.
+  - New tests: straddle → `inconclusive`; gating by `certification_metric` / target / required; different seeds differ.
+  - Import-unit capacity uses the time-averaged pu.
+  - Chat wording: `certified` is also null with no target, and grid import is excluded unless outage-rated.
+- **Cost measured:** a 1-year (8,760 h) hub MC certification takes about 3–4 s at 2,000 draws.
 
 ---
 

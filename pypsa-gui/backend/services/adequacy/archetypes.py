@@ -354,13 +354,14 @@ def _import_capacity_to_hub(n, link: str, far: set[str]) -> float:
     def _pu(attr: str, default: float) -> float:
         ts = getattr(getattr(n, "links_t", None), attr, None)
         if ts is not None and link in getattr(ts, "columns", []):
-            vals = ts[link]
-            return float(vals.max() if attr == "p_max_pu" else vals.min())
+            return float(ts[link].mean())
         try:
             return float(row.get(attr, default))
         except (TypeError, ValueError):
             return default
 
+    # A two-state unit has ONE capacity: time-varying pu is averaged over the
+    # horizon (neither its peak nor its trough stands for the whole study).
     if str(row.get("bus0")) in far:          # grid → hub: forward flow
         eff = float(row.get("efficiency", 1.0) or 1.0)
         return max(p_nom * _pu("p_max_pu", 1.0), 0.0) * eff
@@ -415,6 +416,25 @@ def hub_boundary_copy(n, pack: ArchetypePack):
 
     buses = [str(b) for b in mc.buses.index]
     comps = _components(buses, _branch_edges(mc, exclude_links=set(links)))
+    comp_of = {b: i for i, c in enumerate(comps) for b in c}
+    # Every selected import Link must SEPARATE its endpoints: if a parallel
+    # Line/Link still connects both sides, removing the far side is
+    # impossible and the copper-plate MC would count the grid as local.
+    bus_cols = [c for c in mc.links.columns
+                if c.startswith("bus") and c[3:].isdigit()]
+    for link in links:
+        ends = {str(mc.links.at[link, c]) for c in bus_cols
+                if str(mc.links.at[link, c]).strip() not in ("", "nan", "None")}
+        if len({comp_of.get(b) for b in ends}) <= 1:
+            raise HubBoundaryError(
+                f"import Link {link!r} does not separate the hub from the "
+                "grid — another Line/Link still connects both sides; tag "
+                "every grid-side connection eh_role=grid_import (or tag the "
+                "grid-side bus eh_poc) so the grid can be excluded")
+    crit = set()
+    if "eh_critical" in mc.buses.columns:
+        crit = {str(b) for b in mc.buses.index
+                if _flag(mc.buses.at[b, "eh_critical"])}
     if rule == "eh_poc":
         poc = _poc_buses(mc)
         hub_comps = [c for c in comps if not (c & poc)]
@@ -424,10 +444,6 @@ def hub_boundary_copy(n, pack: ArchetypePack):
                 "bus — tag eh_poc on the grid-side bus only")
         hub = set().union(*hub_comps)
     else:  # eh_role
-        crit = set()
-        if "eh_critical" in mc.buses.columns:
-            crit = {str(b) for b in mc.buses.index
-                    if _flag(mc.buses.at[b, "eh_critical"])}
         crit_comps = [c for c in comps if c & crit]
         if len(crit_comps) == 1:
             hub = crit_comps[0]
@@ -445,6 +461,18 @@ def hub_boundary_copy(n, pack: ArchetypePack):
             hub = comps[loads[0][1]]
 
     far = set(buses) - hub
+    # Sanity of the chosen side: a critical bus beyond the boundary, or a hub
+    # that serves no load, means the tags point the wrong way — certifying
+    # would sample the grid's fleet against nothing (gate probe P4).
+    if crit & far:
+        raise HubBoundaryError(
+            "hub side inverted: eh_critical bus(es) "
+            f"{sorted(crit & far)} lie beyond the import boundary — eh_poc "
+            "must tag the GRID-side bus")
+    if _component_load(mc, hub) <= 0:
+        raise HubBoundaryError(
+            "hub side has no load — the boundary tags probably point the "
+            "wrong way (eh_poc must tag the GRID-side bus)")
     info["hub_buses"] = sorted(hub)
     info["removed_buses"] = sorted(far)
 

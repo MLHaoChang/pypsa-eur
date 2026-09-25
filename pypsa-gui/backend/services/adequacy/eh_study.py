@@ -310,10 +310,15 @@ def _stage_mc_certify(st: _Study) -> None:
         mc_net, boundary = arch.hub_boundary_copy(st.network, pack)
     except arch.HubBoundaryError as exc:
         return _not_established(str(exc))
+    except Exception as exc:  # noqa: BLE001 — degrade like every other stage
+        logger.exception("MC hub boundary failed")
+        return _not_established(f"MC certification failed: {exc}")
     try:
         with st.lock:
             inputs = mc_mod.snapshot_inputs(mc_net, cfg=st.cfg)
-    except ValueError as exc:
+    except Exception as exc:  # noqa: BLE001 — ValueError is the documented refusal
+        if not isinstance(exc, ValueError):
+            logger.exception("MC snapshot failed")
         return _not_established(f"MC snapshot refused: {exc}",
                                 {"fleet_boundary": boundary})
     if not inputs.units:
@@ -343,9 +348,14 @@ def _stage_mc_certify(st: _Study) -> None:
             {"fleet_boundary": boundary, "horizon_years": horizon_years,
              "max_mttr_hours": max_mttr})
 
-    res = mc_mod.mc_adequacy(
-        inputs, draws=st.mc_draws, seed=st.mc_seed,
-        cov_target=st.mc_cov_target, stop_event=st.stop_event)
+    try:
+        res = mc_mod.mc_adequacy(
+            inputs, draws=st.mc_draws, seed=st.mc_seed,
+            cov_target=st.mc_cov_target, stop_event=st.stop_event)
+    except Exception as exc:  # noqa: BLE001 — degrade like every other stage
+        logger.exception("MC certification failed")
+        return _not_established(f"MC certification failed: {exc}",
+                                {"fleet_boundary": boundary})
     if st.stop_event.is_set():
         st.aborted = True
         st.mark("mc_certify", "aborted", note="MC stopped by abort — no verdict")
@@ -742,7 +752,12 @@ def run_eh_study(
                 continue
             if stop_event.is_set():
                 st.aborted = True
-                st.mark(stage, "aborted")
+                st.mark(stage, "aborted", note="study aborted before this stage")
+                section = _STAGE_SECTION.get(stage)
+                if section is not None:
+                    sections.setdefault(section, (
+                        "not_established", None,
+                        "not reached: study aborted"))
                 break
             st.executed.append(stage)
             handler(st)

@@ -365,3 +365,129 @@ def test_http_off_grid_record_carries_the_certification(client, install_network)
     assert rep["certified"] is False          # 4 × 40 MW vs 3 h/yr
     exported = client.get("/api/results/eh_reference_design").json()
     assert "certified" in exported and exported["certified"] is False
+
+
+# ── P11 gate B1: the boundary must never silently include the grid ──────────
+
+
+@pytest.mark.parametrize("parallel", ["line", "untagged_link"])
+def test_import_links_that_do_not_split_the_network_are_refused(parallel):
+    n = _cert_network()
+    if parallel == "line":
+        n.add("Line", "tie", bus0="grid", bus1="hub", x=0.1, s_nom=100.0)
+    else:
+        n.add("Link", "second", bus0="grid", bus1="hub", p_nom=50.0,
+              carrier="DC")
+    with pytest.raises(A.HubBoundaryError, match="does not separate"):
+        A.hub_boundary_copy(n, _pack())
+
+
+def test_import_links_that_do_not_split_the_network_refused_without_critical():
+    n = _cert_network()
+    n.buses["eh_critical"] = False
+    n.add("Line", "tie", bus0="grid", bus1="hub", x=0.1, s_nom=100.0)
+    with pytest.raises(A.HubBoundaryError, match="does not separate"):
+        A.hub_boundary_copy(n, _pack())
+
+
+def test_poc_tagged_on_the_hub_side_is_refused_not_inverted():
+    """eh_poc on the HUB bus would make the grid the 'hub' — and certify the
+    remote plant with zero local load (gate probe P4: certified=True)."""
+    n = _cert_network(tag="poc")
+    n.buses.at["grid", "eh_poc"] = False
+    n.buses.at["hub", "eh_poc"] = True
+    with pytest.raises(A.HubBoundaryError):
+        A.hub_boundary_copy(n, _pack())
+
+
+def test_a_hub_with_no_load_is_refused():
+    n = _cert_network(tag="poc")
+    n.buses.at["hub", "eh_critical"] = False
+    n.loads.at["hub_load", "bus"] = "grid"          # all demand beyond the PoC
+    with pytest.raises(A.HubBoundaryError, match="no load"):
+        A.hub_boundary_copy(n, _pack())
+
+
+@pytest.mark.live_solve
+def test_wrong_side_poc_never_certifies_end_to_end():
+    n = _cert_network(tag="poc")
+    n.buses.at["grid", "eh_poc"] = False
+    n.buses.at["hub", "eh_poc"] = True
+    report = _run(n, _pack())
+    assert report.completeness["certification"] == "not_established"
+    assert report.certified is None
+
+
+# ── non-binding gate items ──────────────────────────────────────────────────
+
+
+@pytest.mark.live_solve
+def test_a_ci_straddling_the_target_is_inconclusive():
+    first = _cert(_run(_cert_network(units=4), _pack(target=3.0))).payload
+    # Target exactly at the mean: the CI (non-degenerate here) straddles it.
+    assert first["lole_ci"][0] < first["lole_h_per_horizon"] < first["lole_ci"][1]
+    report = _run(_cert_network(units=4),
+                  _pack(target=first["lole_h_per_year"]))
+    sec = _cert(report)
+    assert sec.payload["verdict"] == "inconclusive"
+    assert "straddles" in (sec.note or "")
+    assert report.certified is False
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("gate", ["metric_only", "target_only", "required_only"])
+def test_default_pipeline_certification_gating(gate):
+    base = _pack("strong_grid", target=None)
+    if gate == "metric_only":
+        pack = base.model_copy(update={"availability": AvailabilityTarget(
+            ens_cap_permyriad=5000.0, certification_metric="mc_lole")})
+    elif gate == "target_only":
+        pack = base.model_copy(update={"availability": AvailabilityTarget(
+            ens_cap_permyriad=5000.0, target_lole_h=3.0,
+            certification_metric="none")})
+    else:
+        pack = base.model_copy(update={"mc_certify_required": True})
+    assert S.certification_wanted(pack)
+    report = _run(_cert_network(), pack, stages=None)
+    assert "mc_certify" in [r.stage for r in report.pipeline.stages
+                            if r.status == "run"]
+
+
+@pytest.mark.live_solve
+def test_a_different_seed_draws_a_different_sample():
+    a = _cert(_run(_cert_network(), _pack(), mc_seed=1)).payload
+    b = _cert(_run(_cert_network(), _pack(), mc_seed=2)).payload
+    assert a["lole_h_per_horizon"] != b["lole_h_per_horizon"]
+
+
+@pytest.mark.live_solve
+def test_an_unexpected_mc_error_degrades_to_not_established(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("engine exploded")
+
+    monkeypatch.setattr(MC, "mc_adequacy", boom)
+    report = _run(_cert_network(), _pack(), stages=None)
+    sec = _cert(report)
+    assert sec.status == "not_established"
+    assert "engine exploded" in (sec.note or "")
+    # The rest of the study still stands.
+    assert report.completeness["target"] == "ok"
+
+
+@pytest.mark.live_solve
+def test_abort_before_mc_certify_leaves_a_reason_on_the_section():
+    class _AbortAfterSolve(threading.Event):
+        def __init__(self):
+            super().__init__()
+            self.checks = 0
+
+        def is_set(self):
+            self.checks += 1
+            return self.checks > 2        # apply_pack + ens_solve pass
+
+    report = _run(_cert_network(), _pack(), stages=None,
+                  stop_event=_AbortAfterSolve())
+    assert report.pipeline.aborted is True
+    sec = _cert(report)
+    assert sec.status == "not_established"
+    assert "abort" in (sec.note or "")
