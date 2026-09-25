@@ -6,7 +6,7 @@
 >
 > **Final gate (2026-09-14):** Assessor verdict **`GO WITH BINDING CONDITIONS`**. Binding conditions are in the companion spec (§2 decisions 6/16–18, §4 completeness enum, §5 report ownership, §6 import overlays). Implementation starts at **P0 only**, then P1 → P1.5 → P5 (MVP-A).
 
-> **Integration (2026-09-25).** EH gap-plan v1 sealed on `master`: P6(a) #49, P6(b) #50, chat tools #51 (`run_eh_study` + `eh_study`/`eh_reference_design` kinds + abort). Local e2e seal: [`2026-09-25-eh-stack-e2e-seal.md`](../findings/2026-09-25-eh-stack-e2e-seal.md) — backend **257** / frontend **108**. Remaining deferrals: climate P8b, spare-lead, planned-outage MC, Class-C authoring UI.
+> **Integration (2026-09-25).** EH gap-plan v1 sealed on `master`: P6(a) #49, P6(b) #50, chat tools #51 (`run_eh_study` + `eh_study`/`eh_reference_design` kinds + abort). Local e2e seal: [`2026-09-25-eh-stack-e2e-seal.md`](../findings/2026-09-25-eh-stack-e2e-seal.md) — backend **257** / frontend **108**. **Claude handover:** [`handovers/2026-09-25-eh-reference-design-claude-handover.md`](../handovers/2026-09-25-eh-reference-design-claude-handover.md). Remaining deferrals: climate P8b, spare-lead, planned-outage MC, Class-C authoring UI.
 
 **Goal.** Package today’s solution-FMEA / cost–availability stack into a PGGI **Energy Hub reference design**: archetype packs, orchestrated study pipeline, redundancy and DtC as real levers, and a `ReferenceDesignReport` linking availability and cost.
 
