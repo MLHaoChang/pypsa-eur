@@ -37,7 +37,8 @@ npm test -- --run \
 ## Still deferred
 
 - P6(b) multi-slack / shared-bus attribution
-- Climate P8(b), spare-lead, planned-outage MC, chat tools, Class-C authoring UI
+- Climate P8(b), spare-lead, planned-outage MC, Class-C authoring UI
+  (chat tools: landed on `cursor/eh-chat-tools-ef60`)
 
 ## Independent e2e QA
 

@@ -11,7 +11,7 @@ Let a user run an archetype pack study from Results → Adequacy and read the
 
 ## Non-goals (this slice)
 
-- Chat tools for `eh_study`
+- ~~Chat tools for `eh_study`~~ — landed on `cursor/eh-chat-tools-ef60`
 - New Adequacy IA or marketing layout
 - P2 / P6–P9 modelling
 

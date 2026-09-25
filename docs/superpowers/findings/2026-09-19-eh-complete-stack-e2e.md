@@ -32,7 +32,8 @@ Result: **4 files, 102 passed**.
 ## Still open / blocked
 
 - P6 multi-energy — BLOCKED (slack redesign)
-- Deferred: climate P8(b), spare-lead, planned-outage MC, chat tools
+- Deferred: climate P8(b), spare-lead, planned-outage MC
+  (chat tools: landed on `cursor/eh-chat-tools-ef60`)
 
 ## Independent e2e QA
 

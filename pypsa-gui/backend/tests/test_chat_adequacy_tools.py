@@ -1,5 +1,5 @@
 """
-The nine adequacy / solution-FMEA chat tools.
+The adequacy / solution-FMEA chat tools (incl. Energy Hub study).
 
 Covers what the reliability surface needs and the generic registry tests
 cannot see:
@@ -11,7 +11,7 @@ cannot see:
   * the 204 → `{"status": "no_data", …}` mapping. Every GET here answers 204
     when nothing has been computed, and a bare `Response` would reach the
     model as "<Response object at 0x…>";
-  * the guard paths of the four starters, none of which may publish a worker
+  * the guard paths of the study starters, none of which may publish a worker
     thread;
   * the fidelity caveats in the system prompt, which are the difference
     between reporting a screening proxy and reporting a standard.
@@ -39,6 +39,7 @@ ADEQUACY_TOOLS = (
     "run_mc_study",
     "run_coupling_loop",
     "run_margin_loop",
+    "run_eh_study",
     "abort_adequacy_study",
 )
 
@@ -49,7 +50,7 @@ ADEQUACY_TOOLS = (
 # exercised by the serialisability test below rather than pinned to no_data.
 STATE_BACKED_KINDS = (
     "fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
-    "adequacy", "reserve_margin",
+    "adequacy", "reserve_margin", "eh_study", "eh_reference_design",
 )
 
 
@@ -101,6 +102,7 @@ def test_schema_required_fields_have_no_python_default():
         ("run_mc_study", "execution"),
         ("run_coupling_loop", "execution"),
         ("run_margin_loop", "execution"),
+        ("run_eh_study", "execution"),
         ("abort_adequacy_study", "destructive"),
     ],
 )
@@ -111,7 +113,7 @@ def test_safety_tiers(name, expected):
 def test_every_study_starter_is_confirmation_gated():
     """Each starter is minutes of solves — none may skip the card."""
     for name in ("run_fmea_sweep", "run_frontier_study", "run_mc_study",
-                 "run_coupling_loop", "run_margin_loop",
+                 "run_coupling_loop", "run_margin_loop", "run_eh_study",
                  "abort_adequacy_study"):
         assert chat_service._safety_tier_for(name) in chat_service.DESTRUCTIVE_TIERS
 
@@ -121,7 +123,7 @@ def test_abort_enum_covers_exactly_the_threaded_studies():
     assert set(S.ADEQUACY_STUDY_ENUM) == set(T._ADEQUACY_ABORT_HANDLER_NAMES)
     assert set(S.ADEQUACY_STUDY_ENUM) <= set(S.ADEQUACY_KIND_ENUM)
     for read_only in ("copt", "fmea_modes", "adequacy", "reserve_margin",
-                      "mc_elcc_candidates"):
+                      "mc_elcc_candidates", "eh_reference_design"):
         assert read_only not in S.ADEQUACY_STUDY_ENUM
 
 
@@ -159,7 +161,7 @@ def test_no_adequacy_handler_declares_an_unresolved_dependency():
            for s in S.ADEQUACY_STUDY_ENUM]
         + [results_router.post_fmea_sweep, results_router.post_frontier,
            results_router.post_mc, results_router.post_coupling_loop,
-           results_router.post_margin_loop]
+           results_router.post_margin_loop, results_router.post_eh_study]
     )
     for handler in handlers:
         for pname, param in inspect.signature(handler).parameters.items():
@@ -290,12 +292,55 @@ def test_mc_refuses_a_non_positive_draw_count(install_network):
     _assert_idle("mc")
 
 
+def test_eh_study_refuses_an_unknown_archetype(install_network):
+    install_network(build_network())
+    with pytest.raises(HTTPException) as exc:
+        T.run_eh_study(archetype="not_a_pack")
+    assert exc.value.status_code == 422
+    assert "archetype" in str(exc.value.detail).lower() \
+        or "unknown" in str(exc.value.detail).lower()
+    _assert_idle("eh_study")
+    _assert_idle("eh_reference_design")
+
+
+def test_eh_study_refuses_empty_stages(install_network):
+    """Guard path: no worker may start on an empty stages override."""
+    install_network(build_network())
+    with pytest.raises(HTTPException) as exc:
+        T.run_eh_study(archetype="strong_grid", stages=[])
+    assert exc.value.status_code == 422
+    assert "stages" in str(exc.value.detail).lower()
+    _assert_idle("eh_study")
+
+
+def test_eh_study_refuses_an_out_of_range_budget(install_network):
+    install_network(build_network())
+    with pytest.raises(HTTPException) as exc:
+        T.run_eh_study(archetype="strong_grid", budget_solves=0)
+    assert exc.value.status_code == 422
+    assert "budget" in str(exc.value.detail).lower()
+    _assert_idle("eh_study")
+
+
+def test_eh_archetype_enum_matches_the_packs():
+    assert S.EH_ARCHETYPE_ENUM == [
+        "strong_grid", "weak_flexible", "off_grid",
+    ]
+
+
 def test_abort_of_a_never_run_study_is_404(install_network):
     install_network(build_network())
     for study in S.ADEQUACY_STUDY_ENUM:
         with pytest.raises(HTTPException) as exc:
             T.abort_adequacy_study(study)
         assert exc.value.status_code == 404, study
+
+
+def test_system_prompt_names_eh_study_chaining():
+    prompt = chat_service._build_system_prompt(chat_service.ChatSession())
+    lowered = prompt.lower()
+    assert "run_eh_study" in lowered
+    assert "eh_reference_design" in lowered
 
 
 # ── Per-project sidecars ───────────────────────────────────────────────────
