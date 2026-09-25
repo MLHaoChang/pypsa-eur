@@ -1,6 +1,6 @@
 # Energy Hub reference design — post-seal implementation plan
 
-**Status:** revised after two independent QA gates. Both returned `GO WITH BINDING CONDITIONS`. All conditions are folded in below: B1–B14 from the first gate, R1–R5 from the re-gate. P10 may start now. **P11 must not start until Q1, Q2 and Q7 are decided.**
+**Status:** revised after two independent QA gates. Both returned `GO WITH BINDING CONDITIONS`. All conditions are folded in below: B1–B14 from the first gate, R1–R5 from the re-gate. Q1–Q7 were **decided by the product owner on 2026-09-25**; each went with the recommended option (see the Decisions table). All phases are unblocked, subject to the dependency order and spec amendments.
 **Source of the TODO list:** [`findings/2026-09-25-eh-handover-assessment-claude.md`](../findings/2026-09-25-eh-handover-assessment-claude.md) §3–§4
 **Parent plan / spec:** [`2026-09-14-eh-reference-design-gaps.md`](2026-09-14-eh-reference-design-gaps.md), [`specs/2026-09-14-eh-reference-design.md`](../specs/2026-09-14-eh-reference-design.md)
 **Base:** `master` + `claude/epic-allen-k2t1c4` (isolation / budget / honest-failure fixes). Every phase assumes those fixes. In particular, `run_eh_study` runs on a private network + cfg copy and enforces `budget_solves`.
@@ -22,7 +22,7 @@
 
 ```
 P10 hygiene (DSR preflight, DtC stale fallbacks + fixed-plan, campaign FMEA estimate, CI, locked copy)
- ├─ P11 mc_certify stage   ← blocked on Q1/Q2/Q7
+ ├─ P11 mc_certify stage   (Q1/Q2/Q7 decided)
  │    └─ P12 frontier + fmea_top stages (pack-scoped frontier; budget-safe)
  ├─ P13 pack parameters (HTTP/UI/chat)   ← after P11 (target_lole_h / certify flags)
  │    └─ P17 energy import cap (+ lever) ← spec §6 amendment, lowest priority
@@ -462,17 +462,19 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
 
 ---
 
-## Open decisions (product owner)
+## Decisions (product owner, 2026-09-25)
 
-| # | Question | Recommendation (after review) |
+Each decision took the recommended option.
+
+| # | Question | Decision |
 |---|---|---|
-| Q1 | Certification verdict rule | `pass` iff CI upper ≤ target; `fail` iff CI lower > target; else `inconclusive`. `certified=True` only on `pass`. Resolution-floor guard; loop vocabulary (`met_on_mean`, `confident`) kept |
-| Q2 | Time basis | Compare against `target_lole_h × horizon_years` (loop convention). Refuse when `horizon_years ≤ 0` or modelled hours < max MTTR. Add ≥168 h certifying fixtures |
-| Q3 | Default budget 30 | Keep 30 (decision 17). Frontier is a pack default only for `strong_grid`, with a capped budget share |
-| Q4 | Frontier restore on a disposable copy | `restore_base=True` default; EH passes False; test that no route passes False |
-| Q5 | DtC per-Load | Amend the spec **only with** VOLL-priority (a) or bounds (b). Recommend (a) with a disclosed ε |
-| Q6 | Energy import cap | Implement after P13, behind a §6 amendment; lowest priority |
-| Q7 | MC fleet boundary / import in MC | Hub-boundary copy for MC. `weak_flexible` import excluded from MC unless the Link has outage data (then it becomes a two-state unit) |
+| Q1 | Certification verdict rule | **CI upper ≤ target.** `pass` iff CI upper ≤ target; `fail` iff CI lower > target; else `inconclusive`. `certified=True` only on `pass`. Resolution-floor guard; loop vocabulary (`met_on_mean`, `confident`) kept in the payload |
+| Q2 | Time basis for h/yr targets | **Scale + MTTR floor.** Compare against `target_lole_h × horizon_years`; report per-year and per-horizon values. `not_established` when `horizon_years ≤ 0` or modelled hours < max MTTR. Add ≥168 h certifying fixtures |
+| Q3 | Default budget | **Keep 30** (decision 17). Frontier is on by default only for `strong_grid`, capped at ~40% of the budget |
+| Q4 | Frontier restore on a disposable copy | **Opt-out flag.** `restore_base=True` default; EH passes False on its private copy; a test guards that no HTTP route passes False |
+| Q5 | DtC per-Load | **Yes, with a VOLL premium.** Amend decision 8 / §10. Critical Loads' slack gets a disclosed ε premium scoped to the DtC stage cfg only. `per_load` is opt-in; bus-aggregate stays the default |
+| Q6 | Energy import cap | **Build it last.** P17 after P13, behind a §6 amendment. Grid→hub Links only; bidirectional Links refused in v1 |
+| Q7 | Import in MC certification | **Exclude unless outage data.** Hub-side assets only. An import Link enters as one two-state unit of `import_p_nom_mw` only when it has outage-rate data (decision 6) |
 
 ## QA gate record
 - **2026-09-25 — plan gate:** `GO WITH BINDING CONDITIONS`. B1–B14 incorporated above:
