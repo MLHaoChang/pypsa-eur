@@ -8,6 +8,7 @@ Report emission: ``assemble_reference_design_report`` only (spec decision 16).
 """
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
@@ -44,8 +45,58 @@ __all__ = [
     "DEFAULT_EH_BUDGET_SOLVES",
     "MAX_EH_BUDGET_SOLVES",
     "FMEA_TOP_LINK_PRIMARY_NOTE",
+    "REQUIRED_STAGES",
+    "SIBLING_STORE_KEYS",
     "run_eh_study",
+    "validate_stages",
 ]
+
+# Spec decision 18: stages *after* ens_solve may be skipped — these two may not.
+# A report labelled with an archetype whose pack was never applied, or with no
+# ENS solve behind it, is not that archetype's reference design.
+REQUIRED_STAGES: tuple[str, ...] = ("apply_pack", "ens_solve")
+
+# Per-stage sibling tables served by GET /results/eh_* next to the report.
+# Cleared when a new study starts so a table from a previous archetype/run is
+# never shown beside a newer report.
+SIBLING_STORE_KEYS: tuple[str, ...] = (
+    "eh_redundancy_comparison",
+    "eh_lever_comparison",
+    "eh_dtc_stress",
+    "eh_dtc_planning",
+)
+
+# Pipeline stage → report section it fills (for unreached-stage notes).
+_STAGE_SECTION = {
+    "redundancy": "redundancy",
+    "levers": "levers",
+    "dtc_stress": "dtc",
+    "dtc_planning": "dtc",
+}
+
+
+def validate_stages(stages: Iterable[str] | None) -> tuple[str, ...] | None:
+    """Refuse unknown stage names and lists that drop a required stage.
+
+    ``None`` means the pack's default pipeline. Raises ``ValueError`` with a
+    message naming the offending stage(s) — HTTP maps it to 422.
+    """
+    if stages is None:
+        return None
+    requested = tuple(str(s) for s in stages)
+    if not requested:
+        raise ValueError("stages, when set, must be a non-empty list")
+    unknown = [s for s in requested if s not in EH_PIPELINE_STAGES]
+    if unknown:
+        raise ValueError(
+            f"unknown EH pipeline stage(s) {unknown}; expected a subset of "
+            f"{list(EH_PIPELINE_STAGES)}")
+    missing = [s for s in REQUIRED_STAGES if s not in requested]
+    if missing:
+        raise ValueError(
+            f"stages must include {list(REQUIRED_STAGES)} (only stages after "
+            f"ens_solve may be skipped); missing {missing}")
+    return requested
 
 
 def _assumptions_hash(cfg) -> str:
@@ -77,7 +128,18 @@ def run_eh_study(
     If ``store`` is provided, the finished report is persisted under
     ``eh_reference_design_report`` for ``GET /results/eh_reference_design``,
     and a redundancy stage also writes ``eh_redundancy_comparison`` for
-    ``GET /results/eh_redundancy``.
+    ``GET /results/eh_redundancy``. Sibling tables from a previous study are
+    cleared at start.
+
+    Isolation: the study runs on a private copy of ``network`` and of ``cfg``.
+    The pack's ENS target is authoritative for every stage (the report header
+    states it), the caller's ``cfg`` is never mutated, and solve side-results
+    are never published through ``state_update`` — the foreground results keep
+    describing the user's own solve (same rule as frontier ``_restore_base``).
+    ``state_update`` is accepted for runner symmetry only.
+
+    ``budget_solves`` is a ceiling: multi-solve stages receive the remaining
+    budget and a stage that would start with none left is skipped.
 
     Stage list vs ``pack.levers.redundancy`` (P3a binding condition):
     - Explicit ``stages=...`` wins: including ``\"redundancy\"`` runs the
@@ -86,10 +148,12 @@ def run_eh_study(
       ``pack.levers.redundancy`` is True. MVP-A packs ship False and therefore
       skip redundancy unless the caller opts in via levers or stages.
     """
-    from services.solver_service import run_simulation
+    from services.adequacy.redundancy import _detach_solver_model
+    from services.solver_service import SolverConfig, run_simulation
 
-    if stages is not None:
-        requested = tuple(stages)
+    requested_explicit = validate_stages(stages)
+    if requested_explicit is not None:
+        requested = requested_explicit
     else:
         def _keep(s: str) -> bool:
             if s == "redundancy":
@@ -104,7 +168,22 @@ def run_eh_study(
         requested = tuple(s for s in DEFAULT_STAGES if _keep(s))
     budget_solves = max(1, min(int(budget_solves), MAX_EH_BUDGET_SOLVES))
     log_queue = log_queue or queue.SimpleQueue()
-    state_update = state_update or (lambda **kw: None)
+
+    if store is not None:
+        for key in SIBLING_STORE_KEYS + (report_mod.EH_REPORT_STORE_KEY,):
+            store.pop(key, None)
+
+    # Private cfg: the pack target wins for every stage, the session config is
+    # left exactly as the user set it.
+    cfg = copy.copy(cfg) if cfg is not None else SolverConfig()
+    for k, v in arch.solver_config_patch(pack).items():
+        try:
+            setattr(cfg, k, v)
+        except Exception:
+            pass
+    # Private network: pack overlay + ENS solve never touch the shared one.
+    _detach_solver_model(network)
+    network = network.copy()
 
     # Stages this driver can actually execute today.
     IMPLEMENTED = frozenset({
@@ -133,6 +212,9 @@ def run_eh_study(
     section_payloads: dict[str, tuple] = {}
     solves = 0
     aborted = False
+    # Set when a stage the rest depend on (ens_solve) ran and failed — not a
+    # user abort; later stages are skipped with this reason.
+    failed_reason: str | None = None
     undo = lambda: None  # noqa: E731
     pack_h = arch.pack_hash(pack)
     ens_cap = pack.availability.ens_cap_permyriad
@@ -153,6 +235,25 @@ def run_eh_study(
                 rec.solves_charged = solves_charged
                 break
 
+    def _remaining() -> int:
+        return max(0, budget_solves - solves)
+
+    def _blocked(stage: str) -> bool:
+        """Skip a requested stage when ens_solve failed or budget is spent."""
+        if failed_reason is not None:
+            reason = f"not run: {failed_reason}"
+        elif _remaining() <= 0:
+            reason = (f"not run: budget_solves exhausted "
+                      f"({solves}/{budget_solves}) before this stage")
+        else:
+            return False
+        _mark(stage, "skipped", note=reason)
+        section = _STAGE_SECTION.get(stage)
+        if section is not None:
+            section_payloads.setdefault(
+                section, ("not_established", None, reason))
+        return True
+
     try:
         if "apply_pack" in requested:
             if stop_event.is_set():
@@ -170,25 +271,28 @@ def run_eh_study(
                 aborted = True
                 _mark("ens_solve", "aborted")
             else:
-                # Merge pack solver patch onto cfg fields we care about.
-                patch = arch.solver_config_patch(pack)
-                for k, v in patch.items():
-                    if getattr(cfg, k, None) is None:
-                        try:
-                            setattr(cfg, k, v)
-                        except Exception:
-                            pass
                 sink: dict = {}
                 status, condition = run_simulation(
                     cfg, network, lock, stop_event, log_queue,
-                    state_update=lambda **kw: (sink.update(kw),
-                                               state_update(**kw)),
+                    state_update=lambda **kw: sink.update(kw),
                 )
                 solves += 1
-                if status not in ("ok", "optimal"):
+                if status not in ("ok", "optimal") and stop_event.is_set():
                     _mark("ens_solve", "aborted",
                           note=f"{status}:{condition}", solves_charged=1)
                     aborted = True
+                elif status not in ("ok", "optimal"):
+                    failed_reason = f"ens_solve {status}:{condition}"
+                    if "infeasible" in str(condition):
+                        failed_reason += (
+                            " — the pack's ENS target cannot be met by this "
+                            "network under the pack overlay")
+                    _mark("ens_solve", "failed",
+                          note=failed_reason, solves_charged=1)
+                    for sec in ("target", "cost", "sizing", "tea",
+                                "multi_energy"):
+                        section_payloads[sec] = (
+                            "not_established", None, failed_reason)
                 else:
                     _mark("ens_solve", "run", solves_charged=1)
                     adequacy_report = sink.get("adequacy_report")
@@ -201,6 +305,7 @@ def run_eh_study(
                         ens_mwh = system.get("achieved_ens_mwh")
                         # Invert ‱ if demand known from cap_mwh.
                         cap_mwh = system.get("cap_mwh")
+                        ens_cap = getattr(cfg, "ens_cap_permyriad", ens_cap)
                         if (ens_cap is not None and cap_mwh
                                 and float(cap_mwh) > 0 and ens_mwh is not None):
                             # achieved ‱ ≈ ens_mwh / demand * 1e4;
@@ -276,7 +381,8 @@ def run_eh_study(
                 ("not_established", None, "ens_solve not run"),
             )
 
-        if not aborted and "redundancy" in requested:
+        if (not aborted and "redundancy" in requested
+                and not _blocked("redundancy")):
             if stop_event.is_set():
                 aborted = True
                 _mark("redundancy", "aborted")
@@ -293,6 +399,7 @@ def run_eh_study(
                         store=store,
                         pack_hash=pack_h,
                         assumptions_hash=_assumptions_hash(cfg),
+                        max_solves=_remaining(),
                     )
                     n_attempted = int(table.get("solves_attempted") or 0)
                     sec_status, sec_note = red.redundancy_section_status(table)
@@ -309,7 +416,8 @@ def run_eh_study(
                         "not_established", None, str(exc))
 
 
-        if not aborted and "levers" in requested:
+        if (not aborted and "levers" in requested
+                and not _blocked("levers")):
             if stop_event.is_set():
                 aborted = True
                 _mark("levers", "aborted")
@@ -328,7 +436,11 @@ def run_eh_study(
                     attempted = 0
                     skipped_kinds: list[str] = []
                     applicable_kinds: list[str] = []
+                    budget_exhausted = False
                     for kind in kinds:
+                        if budget_solves - solves - attempted <= 0:
+                            budget_exhausted = True
+                            break
                         try:
                             table = lev.compare_lever_scenarios(
                                 network, cfg,
@@ -341,6 +453,7 @@ def run_eh_study(
                                 store=None,
                                 pack_hash=pack_h,
                                 assumptions_hash=_assumptions_hash(cfg),
+                                max_solves=budget_solves - solves - attempted,
                             )
                         except lev.LeverScenarioError as exc:
                             msg = str(exc)
@@ -358,6 +471,9 @@ def run_eh_study(
                             continue
                         applicable_kinds.append(kind)
                         attempted += int(table.get("solves_attempted") or 0)
+                        budget_exhausted = (
+                            budget_exhausted
+                            or bool(table.get("budget_exhausted")))
                         if merged is None:
                             merged = table
                         else:
@@ -381,6 +497,7 @@ def run_eh_study(
                             "comparable_solved": 0,
                             "aborted": False,
                         }
+                    merged = {**merged, "budget_exhausted": budget_exhausted}
                     if skipped_kinds:
                         merged = {**merged, "skipped_kinds": list(skipped_kinds)}
                     if store is not None:
@@ -414,7 +531,8 @@ def run_eh_study(
                         "not_established", None, str(exc))
 
 
-        if not aborted and "dtc_stress" in requested:
+        if (not aborted and "dtc_stress" in requested
+                and not _blocked("dtc_stress")):
             if stop_event.is_set():
                 aborted = True
                 _mark("dtc_stress", "aborted")
@@ -454,6 +572,7 @@ def run_eh_study(
                         store=store,
                         pack_hash=pack_h,
                         assumptions_hash=_assumptions_hash(cfg),
+                        max_solves=_remaining(),
                     )
                     n_attempted = int(table.get("solves_attempted") or 0)
                     sec_status, sec_note = dtc_mod.dtc_section_status(table)
@@ -490,7 +609,8 @@ def run_eh_study(
                 section_payloads.setdefault(
                     section, ("skipped", None, reason))
 
-        if not aborted and "dtc_planning" in requested:
+        if (not aborted and "dtc_planning" in requested
+                and not _blocked("dtc_planning")):
             if stop_event.is_set():
                 aborted = True
                 _mark("dtc_planning", "aborted")
@@ -529,6 +649,7 @@ def run_eh_study(
                         store=store,
                         pack_hash=pack_h,
                         assumptions_hash=_assumptions_hash(cfg),
+                        max_solves=_remaining(),
                     )
                     n_attempted = int(table.get("solves_attempted") or 0)
                     sec_status, sec_note = dtc_mod.dtc_planning_section_status(table)
@@ -607,6 +728,19 @@ def run_eh_study(
         if tea_sec and tea_sec[0] == "ok" and isinstance(tea_sec[1], dict):
             from models.energy_hub import TeaBlock
             tea_obj = TeaBlock.model_validate(tea_sec[1])
+
+        for rec in records:
+            if rec.status == "pending" and rec.stage != "assemble":
+                reason = (
+                    "not reached: study aborted" if aborted
+                    else f"not run: {failed_reason}" if failed_reason
+                    else "not reached")
+                rec.status = "skipped"  # type: ignore[assignment]
+                rec.note = reason
+                section = _STAGE_SECTION.get(rec.stage)
+                if section is not None:
+                    section_payloads.setdefault(
+                        section, ("not_established", None, reason))
 
         if "assemble" in requested and not (aborted and adequacy_report is None):
             _mark("assemble", "run")

@@ -154,7 +154,9 @@ class ArchetypePack(BaseModel):
 
 class PipelineStageRecord(BaseModel):
     stage: EHPipelineStage
-    status: Literal["run", "skipped", "aborted", "pending"] = "pending"
+    # ``aborted`` = the user's stop event; ``failed`` = the stage ran and did
+    # not produce evidence (e.g. an infeasible ENS solve). Never both.
+    status: Literal["run", "skipped", "aborted", "failed", "pending"] = "pending"
     solves_charged: int = 0
     note: str | None = None
 

@@ -161,8 +161,13 @@ def compare_lever_scenarios(
     store: dict | None = None,
     pack_hash: str | None = None,
     assumptions_hash: str | None = None,
+    max_solves: int | None = None,
 ) -> dict[str, Any]:
-    """Solve each lever value at a fixed ENS target; return comparison table."""
+    """Solve each lever value at a fixed ENS target; return comparison table.
+
+    ``max_solves`` caps the LPs attempted (EH study budget); the loop stops
+    before exceeding it and flags ``budget_exhausted``.
+    """
     from services.solver_service import SolverConfig, run_simulation
 
     if kind not in DEFAULT_LEVER_KINDS:
@@ -189,9 +194,13 @@ def compare_lever_scenarios(
     options: list[dict[str, Any]] = []
     solves_attempted = 0
     aborted = False
+    budget_exhausted = False
     for val in values:
         if stop_event.is_set():
             aborted = True
+            break
+        if max_solves is not None and solves_attempted >= max_solves:
+            budget_exhausted = True
             break
         _detach_solver_model(network)
         nn = network.copy()
@@ -279,6 +288,7 @@ def compare_lever_scenarios(
         "options": options,
         "solves_attempted": solves_attempted,
         "aborted": aborted,
+        "budget_exhausted": budget_exhausted,
         "comparable_solved": len(solved),
         "distinct_costs": len(costs),
     }
@@ -295,6 +305,9 @@ def levers_section_status(table: dict[str, Any]) -> tuple[str, str | None]:
     """
     if table.get("aborted"):
         return "not_established", "lever compare aborted mid-loop"
+    if table.get("budget_exhausted"):
+        return ("not_established",
+                "budget_solves exhausted mid-compare; options are partial")
     solved = [
         o for o in (table.get("options") or [])
         if o.get("status") in ("ok", "optimal") and not o.get("ineffective")

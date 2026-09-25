@@ -74,6 +74,19 @@ export function statusTone(status: EhSectionStatus): string {
   return 'text-warn'
 }
 
+/** Sections that are not_established with a reason, in chip order.
+ *  Gates / multi-energy notes render in their own blocks, so they are left out. */
+export function notEstablishedNotes(
+  report: EhReferenceDesignReport,
+): { name: string; note: string }[] {
+  return completenessRows(report.completeness)
+    .filter(({ name, status }) =>
+      status === 'not_established'
+      && name !== 'gates' && name !== 'multi_energy'
+      && Boolean(report.sections?.[name]?.note))
+    .map(({ name }) => ({ name, note: String(report.sections![name].note) }))
+}
+
 /** Tone for the P9 SCR product verdict (fail reserved; thin slice uses warn). */
 export function scrTone(scr: EhScrVerdict): string {
   if (scr === 'pass') return 'text-accent'
@@ -251,14 +264,17 @@ export function EhReferenceDesignPanel() {
     enabled: !running,
   })
 
-  const report: EhReferenceDesignReport | null =
-    study?.report
-    ?? ((reportData ?? null) as EhReferenceDesignReport | null)
+  // While a new study runs, the previous report and sibling tables describe
+  // a different run — hide them rather than show them under "Studying…".
+  const report: EhReferenceDesignReport | null = running ? null
+    : study?.report
+      ?? ((reportData ?? null) as EhReferenceDesignReport | null)
 
-  const redTable = (redundancy ?? null) as EhRedundancyTable | null
-  const levTable = (levers ?? null) as EhLeverTable | null
-  const dtcTable = (dtcStress ?? null) as EhDtcStressTable | null
-  const dtcPlanTable = (dtcPlanning ?? null) as EhDtcPlanningTable | null
+  const redTable = running ? null : (redundancy ?? null) as EhRedundancyTable | null
+  const levTable = running ? null : (levers ?? null) as EhLeverTable | null
+  const dtcTable = running ? null : (dtcStress ?? null) as EhDtcStressTable | null
+  const dtcPlanTable = running ? null
+    : (dtcPlanning ?? null) as EhDtcPlanningTable | null
 
   const invalidateAll = () => {
     for (const key of [studyKey, reportKey, redKey, levKey, dtcKey, dtcPlanKey]) {
@@ -418,6 +434,16 @@ export function EhReferenceDesignPanel() {
                     )}
                   </span>
                 )}
+                {report.pipeline?.solves_consumed != null && (
+                  <span data-testid="eh-report-solves">
+                    <span className="text-muted">Solves </span>
+                    <span className="text-text font-mono">
+                      {report.pipeline.solves_consumed}
+                      {report.pipeline.budget_solves != null
+                        ? ` / ${report.pipeline.budget_solves}` : ''}
+                    </span>
+                  </span>
+                )}
                 {report.tea?.lcoe_eur_per_mwh != null && (
                   <span data-testid="eh-report-lcoe">
                     <span className="text-muted">LCOE </span>
@@ -439,8 +465,22 @@ export function EhReferenceDesignPanel() {
                       className={`text-[10px] border border-border rounded px-1.5 py-0.5 ${statusTone(status)}`}
                       data-testid={`eh-section-${name}`}
                       data-status={status}
+                      title={report.sections?.[name]?.note ?? undefined}
                     >
                       {name}: {status}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {notEstablishedNotes(report).length > 0 && (
+                <ul
+                  className="flex flex-col gap-0.5 text-[10px] text-muted"
+                  data-testid="eh-section-notes"
+                >
+                  {notEstablishedNotes(report).map(({ name, note }) => (
+                    <li key={name} data-testid={`eh-section-note-${name}`}>
+                      <span className="text-warn">{name}</span>: {note}
                     </li>
                   ))}
                 </ul>

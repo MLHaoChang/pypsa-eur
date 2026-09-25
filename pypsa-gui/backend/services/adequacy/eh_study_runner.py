@@ -85,9 +85,11 @@ def start_eh_study(
 
     stages = body.stages
     if stages is not None:
-        stages = [str(s) for s in stages]
-        if not stages:
-            raise HTTPException(422, "stages, when set, must be a non-empty list")
+        from services.adequacy.eh_study import validate_stages
+        try:
+            stages = list(validate_stages(stages))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
 
     cfg = solver_state.get("solver_config")
     if cfg is None:
@@ -129,15 +131,29 @@ def start_eh_study(
                 state_update=state_update,
                 store=solver_state,
             )
-            aborted = bool(getattr(getattr(report, "pipeline", None),
-                                   "aborted", False))
+            pipeline = getattr(report, "pipeline", None)
+            aborted = bool(getattr(pipeline, "aborted", False))
+            # A stage that ran and produced no evidence (infeasible ENS
+            # solve) is a FAILED study with a partial report — not an abort
+            # the user asked for.
+            failed = [
+                rec for rec in (getattr(pipeline, "stages", None) or [])
+                if getattr(rec, "status", None) == "failed"
+            ]
             payload = (report.model_dump(mode="json")
                        if hasattr(report, "model_dump") else report)
+            if aborted or stop_event.is_set():
+                status, error = "aborted", None
+            elif failed:
+                status = "failed"
+                error = "; ".join(rec.note or rec.stage for rec in failed)
+            else:
+                status, error = "done", None
             with PyPSAService.get_solver_state_lock():
                 record.update(
-                    status="aborted" if aborted or stop_event.is_set() else "done",
+                    status=status,
                     report=payload,
-                    error=None,
+                    error=error,
                     finished_at=time.time(),
                 )
         except Exception as exc:  # noqa: BLE001

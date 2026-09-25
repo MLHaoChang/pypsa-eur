@@ -131,6 +131,12 @@ ADEQUACY_STUDY_ENUM = [
 ADEQUACY_RESTORE_ENUM = ["base", "final"]
 # Energy Hub archetype packs — mirrors models.energy_hub.EnergyHubArchetype.
 EH_ARCHETYPE_ENUM = ["strong_grid", "weak_flexible", "off_grid"]
+# EH pipeline stages — mirrors models.energy_hub.EH_PIPELINE_STAGES (order
+# included). An explicit list must keep apply_pack + ens_solve.
+EH_STAGE_ENUM = [
+    "apply_pack", "ens_solve", "frontier", "mc_certify", "fmea_top",
+    "redundancy", "levers", "dtc_stress", "dtc_planning", "assemble",
+]
 
 # Classes whose nominal capacity the optimiser can size — mirrors
 # services/asset_results/compute._NOM_COL, the map explain_investment reads
@@ -1009,16 +1015,21 @@ TOOLS: list[dict[str, Any]] = [
         "runs the EH pipeline (ENS solve and any enabled stages), and "
         "persists a ReferenceDesignReport. `archetype` is required; omit "
         "`stages` for the pack's default pipeline, or pass a non-empty list "
-        "to override. `budget_solves` caps LP work inside the study (engine "
-        "default when omitted). Returns {status:'running'} — poll "
+        "to override (it must include apply_pack and ens_solve; frontier, "
+        "mc_certify and fmea_top are not executed yet and report skipped). "
+        "`budget_solves` (1–120, default 30) is a hard ceiling on LP solves "
+        "inside the study — stages that would exceed it are skipped and "
+        "reported not_established. Returns {status:'running'} — poll "
         "get_adequacy_results('eh_study') for status and "
         "get_adequacy_results('eh_reference_design') for the assembled "
         "report. 409 while another study or a foreground solve is running. "
         "Safety: execution.",
         {
             "archetype": {"type": "string", "enum": EH_ARCHETYPE_ENUM},
-            "stages": {"type": "array", "items": {"type": "string"}},
-            "budget_solves": {"type": "integer"},
+            "stages": {"type": "array",
+                       "items": {"type": "string", "enum": EH_STAGE_ENUM}},
+            "budget_solves": {"type": "integer", "minimum": 1,
+                              "maximum": 120},
         },
         ["archetype"],
     ),

@@ -645,9 +645,22 @@ export interface EhReferenceDesignReport {
   completeness?: Record<string, EhSectionStatus>
   sections?: Record<string, EhSectionState>
   tea?: { lcoe_eur_per_mwh?: number | null; lcoh_eur_per_kg?: number | null; notes?: string | null } | null
-  pipeline?: { aborted?: boolean; solves_consumed?: number } | null
+  pipeline?: {
+    aborted?: boolean
+    solves_consumed?: number
+    budget_solves?: number
+    stages?: EhPipelineStage[]
+  } | null
   /** Dynamics feasibility gate (SCR → EMT flag). Absent when section skipped. */
   gates?: EhGatesBlock | null
+}
+
+/** One pipeline stage record (``failed`` = ran, produced no evidence). */
+export interface EhPipelineStage {
+  stage: string
+  status: 'run' | 'skipped' | 'aborted' | 'failed' | 'pending'
+  solves_charged?: number
+  note?: string | null
 }
 
 /** Study lifecycle record from GET /results/eh_study. */

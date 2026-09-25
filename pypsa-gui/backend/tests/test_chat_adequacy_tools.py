@@ -313,6 +313,25 @@ def test_eh_study_refuses_empty_stages(install_network):
     _assert_idle("eh_study")
 
 
+@pytest.mark.parametrize("stages", [
+    ["apply_pack", "ens_solve", "not_a_stage"],
+    ["ens_solve", "assemble"],          # drops apply_pack
+])
+def test_eh_study_refuses_invalid_stage_lists(install_network, stages):
+    """Guard path: unknown stages / a dropped required stage never start."""
+    install_network(build_network())
+    with pytest.raises(HTTPException) as exc:
+        T.run_eh_study(archetype="strong_grid", stages=stages)
+    assert exc.value.status_code == 422
+    assert "stage" in str(exc.value.detail).lower()
+    _assert_idle("eh_study")
+
+
+def test_eh_stage_enum_matches_the_pipeline():
+    from models.energy_hub import EH_PIPELINE_STAGES
+    assert S.EH_STAGE_ENUM == list(EH_PIPELINE_STAGES)
+
+
 def test_eh_study_refuses_an_out_of_range_budget(install_network):
     install_network(build_network())
     with pytest.raises(HTTPException) as exc:

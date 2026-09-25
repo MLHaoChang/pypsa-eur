@@ -196,8 +196,12 @@ def run_dtc_stress(
     store: dict | None = None,
     pack_hash: str | None = None,
     assumptions_hash: str | None = None,
+    max_solves: int | None = None,
 ) -> dict[str, Any]:
-    """Island each contingency and re-dispatch; report critical vs other unserved."""
+    """Island each contingency and re-dispatch; report critical vs other unserved.
+
+    ``max_solves`` caps the LPs attempted (EH study budget).
+    """
     from services.solver_service import SolverConfig, run_simulation
 
     if not isinstance(dtc, DtcConfig):
@@ -211,9 +215,13 @@ def run_dtc_stress(
     contingencies: list[dict[str, Any]] = []
     solves = 0
     aborted = False
+    budget_exhausted = False
     for link_id in dtc.islanding_contingencies:
         if stop_event.is_set():
             aborted = True
+            break
+        if max_solves is not None and solves >= max_solves:
+            budget_exhausted = True
             break
         _detach_solver_model(network)
         nn = network.copy()
@@ -262,6 +270,7 @@ def run_dtc_stress(
         "contingencies": contingencies,
         "solves_attempted": solves,
         "aborted": aborted,
+        "budget_exhausted": budget_exhausted,
         "comparable_solved": len(solved),
         "critical_buses": sorted(critical),
     }
@@ -325,8 +334,12 @@ def run_dtc_planning(
     store: dict | None = None,
     pack_hash: str | None = None,
     assumptions_hash: str | None = None,
+    max_solves: int | None = None,
 ) -> dict[str, Any]:
-    """ENS-capped expansion under islanded + retained-critical overlay (P4b)."""
+    """ENS-capped expansion under islanded + retained-critical overlay (P4b).
+
+    ``max_solves`` caps the LPs attempted (EH study budget).
+    """
     from services.solver_service import SolverConfig, run_simulation
 
     if dtc.attribution != "bus_aggregate_not_per_load":
@@ -345,11 +358,15 @@ def run_dtc_planning(
     contingencies: list[dict[str, Any]] = []
     solves_attempted = 0
     aborted = False
+    budget_exhausted = False
     crit = sorted(_critical_buses(network, dtc))
 
     for link_id in dtc.islanding_contingencies:
         if stop_event.is_set():
             aborted = True
+            break
+        if max_solves is not None and solves_attempted >= max_solves:
+            budget_exhausted = True
             break
         _detach_solver_model(network)
         nn = network.copy()
@@ -427,6 +444,7 @@ def run_dtc_planning(
         "contingencies": contingencies,
         "solves_attempted": solves_attempted,
         "aborted": aborted,
+        "budget_exhausted": budget_exhausted,
     }
     if store is not None:
         store["eh_dtc_planning"] = out
@@ -436,6 +454,9 @@ def run_dtc_planning(
 def dtc_planning_section_status(table: dict[str, Any]) -> tuple[str, str | None]:
     if table.get("aborted"):
         return "not_established", "DtC planning aborted mid-loop"
+    if table.get("budget_exhausted"):
+        return ("not_established",
+                "budget_solves exhausted before every contingency was solved")
     solved = [
         c for c in (table.get("contingencies") or [])
         if c.get("status") in ("ok", "optimal")
@@ -448,6 +469,9 @@ def dtc_planning_section_status(table: dict[str, Any]) -> tuple[str, str | None]
 def dtc_section_status(table: dict[str, Any]) -> tuple[str, str | None]:
     if table.get("aborted"):
         return "not_established", "DtC stress aborted mid-loop"
+    if table.get("budget_exhausted"):
+        return ("not_established",
+                "budget_solves exhausted before every contingency was solved")
     solved = [
         c for c in (table.get("contingencies") or [])
         if c.get("status") in ("ok", "optimal")

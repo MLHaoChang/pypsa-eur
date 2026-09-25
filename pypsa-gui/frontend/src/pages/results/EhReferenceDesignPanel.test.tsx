@@ -14,6 +14,7 @@ import {
   leverCsvRows,
   multiEnergyCarrierEntries,
   multiEnergyLoadEntries,
+  notEstablishedNotes,
   redundancyCsvRows,
   scrTone,
   statusTone,
@@ -118,6 +119,31 @@ describe('completenessRows', () => {
   })
 })
 
+describe('notEstablishedNotes', () => {
+  it('lists not_established sections with notes, except gates / multi_energy', () => {
+    const rows = notEstablishedNotes({
+      ...REPORT,
+      completeness: {
+        target: 'not_established', levers: 'not_established', dtc: 'skipped',
+        gates: 'not_established', multi_energy: 'not_established',
+        cost: 'not_established',
+      },
+      sections: {
+        target: { status: 'not_established', note: 'infeasible' },
+        levers: { status: 'not_established', note: 'budget_solves exhausted' },
+        dtc: { status: 'skipped', note: 'not requested' },
+        gates: { status: 'not_established', note: 'x' },
+        multi_energy: { status: 'not_established', note: 'y' },
+        cost: { status: 'not_established', note: null },
+      },
+    })
+    expect(rows).toEqual([
+      { name: 'target', note: 'infeasible' },
+      { name: 'levers', note: 'budget_solves exhausted' },
+    ])
+  })
+})
+
 describe('EhReferenceDesignPanel', () => {
   it('mounts collapsed and shows empty copy when opened with no study', async () => {
     const user = await openPanel()
@@ -174,6 +200,51 @@ describe('EhReferenceDesignPanel', () => {
       .toBe('skipped')
     expect(screen.getByTestId('eh-section-gates').getAttribute('data-status'))
       .toBe('not_established')
+  })
+
+  it('shows a failed study error beside its partial report, with reasons', async () => {
+    const why = "ens_solve warning:infeasible — the pack's ENS target cannot be met"
+    const failedReport = {
+      ...REPORT,
+      achieved_ens_permyriad: null,
+      cost_at_target_eur: null,
+      tea: null,
+      completeness: { ...REPORT.completeness, target: 'not_established' as const },
+      sections: {
+        target: { status: 'not_established' as const, note: why },
+        gates: { status: 'not_established' as const, note: 'gates own note' },
+      },
+      pipeline: { aborted: false, solves_consumed: 1, budget_solves: 30 },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'failed', study: 'eh_study', archetype: 'weak_flexible',
+      report: failedReport, error: why,
+    } as never)
+    await openPanel()
+    expect((await screen.findByTestId('eh-error')).textContent).toMatch(/infeasible/)
+    expect(screen.queryByTestId('eh-aborted')).toBeNull()
+    expect(screen.getByTestId('eh-section-note-target').textContent).toMatch(/infeasible/)
+    expect(screen.queryByTestId('eh-section-note-gates')).toBeNull()
+    expect(screen.getByTestId('eh-section-target').getAttribute('title')).toBe(why)
+    expect(screen.getByTestId('eh-report-solves').textContent).toMatch(/1 \/ 30/)
+  })
+
+  it('hides the previous report and tables while a new study runs', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValueOnce({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report: null,
+    } as never).mockResolvedValue({
+      status: 'running', study: 'eh_study', archetype: 'off_grid', report: null,
+    } as never)
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(REPORT as never)
+    vi.mocked(resultsApi.getEhLevers).mockResolvedValue({
+      kind: 'storage_duration', options: [{ kind: 'storage_duration', value: 4, status: 'ok' }],
+    } as never)
+    const user = await openPanel()
+    expect(await screen.findByTestId('eh-report')).toBeTruthy()
+    await user.click(screen.getByTestId('eh-run'))
+    await screen.findByTestId('eh-abort')
+    expect(screen.queryByTestId('eh-report')).toBeNull()
+    expect(screen.queryByTestId('eh-levers')).toBeNull()
   })
 
   it('says a stopped study is stopped', async () => {
