@@ -51,7 +51,9 @@ MAX_ENTRIES = 200
 # Studies that can be charged, and how their cost is read off their arguments.
 # `mc` is present with a zero cost rather than absent: a missing key would be
 # an unknown study and refused, and the point is that MC is known and free.
-CHARGEABLE = ("frontier", "fmea_sweep", "coupling_loop", "margin_loop", "mc")
+CHARGEABLE = (
+    "frontier", "fmea_sweep", "coupling_loop", "margin_loop", "mc", "eh_study",
+)
 
 
 class CampaignError(RuntimeError):
@@ -285,6 +287,12 @@ def estimate_solves(n, study: str, **kwargs) -> int:
         # starting margin before the budget opens (spec §2.3). So the cap loop
         # costs budget + 1 and the margin loop budget + 2.
         return budget + (2 if study == "margin_loop" else 1)
+
+    if study == "eh_study":
+        # The EH pipeline's own LP ceiling — pack undo is not an extra solve.
+        from models.energy_hub import DEFAULT_EH_BUDGET_SOLVES
+        budget = kwargs.get("budget_solves")
+        return (DEFAULT_EH_BUDGET_SOLVES if budget is None else int(budget))
 
     raise CampaignBudgetError(f"unknown study '{study}'",
                               error_kind="unknown_study")

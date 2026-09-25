@@ -183,6 +183,10 @@ POST    /api/results/coupling_loop/abort                         -> post_couplin
 GET     /api/results/curtailment                                 -> get_curtailment_api_results_curtailment_get
 GET     /api/results/economics_by_carrier                        -> get_economics_by_carrier_api_results_economics_by_carrier_get
 GET     /api/results/emissions                                   -> get_emissions_api_results_emissions_get
+GET     /api/results/eh_reference_design                         -> get_eh_reference_design_api_results_eh_reference_design_get
+GET     /api/results/eh_study                                    -> get_eh_study_api_results_eh_study_get
+POST    /api/results/eh_study                                    -> post_eh_study_api_results_eh_study_post
+POST    /api/results/eh_study/abort                              -> post_eh_study_abort_api_results_eh_study_abort_post
 GET     /api/results/fmea_modes                                  -> get_fmea_modes_api_results_fmea_modes_get
 GET     /api/results/fmea_sweep                                  -> get_fmea_sweep_api_results_fmea_sweep_get
 POST    /api/results/fmea_sweep                                  -> post_fmea_sweep_api_results_fmea_sweep_post

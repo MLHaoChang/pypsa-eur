@@ -595,11 +595,11 @@ builds until the marginal MW breaks even. Without that note a near-zero
 
 The adequacy engines (`backend/services/adequacy/`) were reachable only from
 the worksheet UI — the agent could read a solved plan's cost a dozen ways and
-its reliability in none. Nine tools close that gap.
+its reliability in none. The tools below close that gap.
 
 | Tool | Tier | What it does |
 |---|---|---|
-| `get_adequacy_results` | read | One dispatcher over the ten reliability GETs (`copt`, `fmea_modes`, `fmea_sweep`, `frontier`, `mc`, `mc_elcc_candidates`, `coupling_loop`, `margin_loop`, `adequacy`, `reserve_margin`) |
+| `get_adequacy_results` | read | One dispatcher over the reliability GETs (`copt`, `fmea_modes`, `fmea_sweep`, `frontier`, `mc`, `mc_elcc_candidates`, `coupling_loop`, `margin_loop`, `adequacy`, `reserve_margin`, `eh_study`, `eh_reference_design`) |
 | `get_fmea_worksheet` | read | Per-project FMEA sidecar — expert rows + overlays |
 | `get_stress_scenarios` | read | Per-project class-C scenario registry |
 | `run_fmea_sweep` | execution | Class-B link-outage sweep + any class-C scenarios |
@@ -607,7 +607,8 @@ its reliability in none. Nine tools close that gap.
 | `run_mc_study` | execution | Sequential Monte Carlo — LOLE / EUE, optional ELCC table |
 | `run_coupling_loop` | execution | Drive a plan to an LOLE target on the **energy** lever (ENS cap) |
 | `run_margin_loop` | execution | Same target, on the **firm-capacity** lever (reserve margin) |
-| `abort_adequacy_study` | destructive | Stop any of the five studies at its next boundary |
+| `run_eh_study` | execution | Energy Hub archetype pack study → `ReferenceDesignReport` |
+| `abort_adequacy_study` | destructive | Stop any of the six studies at its next boundary |
 
 Three properties are worth knowing before reading a transcript:
 
@@ -617,7 +618,7 @@ Three properties are worth knowing before reading a transcript:
   204 to `{"status": "no_data", "kind", "message"}`, where `message` names the
   missing precondition (never run / no solve / no target), so the agent reports
   the gap rather than zero risk.
-- **The four starters are asynchronous by construction.** Each publishes a
+- **The study starters are asynchronous by construction.** Each publishes a
   worker thread and returns `{"status": "running"}`; the agent polls the
   matching `get_adequacy_results` kind for rows, points or iterations. They are
   mutually exclusive with each other and with a foreground solve — a 409 means

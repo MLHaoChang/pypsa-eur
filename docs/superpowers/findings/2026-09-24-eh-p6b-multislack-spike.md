@@ -58,7 +58,7 @@ P4b DtC already pinned `attribution=bus_aggregate_not_per_load` for the same rea
 
 - Mixed VoLL prices on the same Load (still one cost per slack).
 - DSR tier redesign (already separate in `slack.py`).
-- Climate P8(b), chat tools, Class-C authoring UI.
+- Climate P8(b), Class-C authoring UI. (Chat tools: landed on `cursor/eh-chat-tools-ef60`.)
 
 ## Gate
 

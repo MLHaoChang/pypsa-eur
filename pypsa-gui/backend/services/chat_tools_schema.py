@@ -110,23 +110,27 @@ ASSET_VIEW_MODE_ENUM = ["chronological", "duration", "monthly"]
 ASSET_RESOLUTION_ENUM = ["stats", "raw"]
 
 # Adequacy / solution-FMEA surface (services/adequacy/*, routed under
-# /api/results). Ten no-argument GETs behind ONE dispatcher tool, same shape
+# /api/results). Twelve no-argument GETs behind ONE dispatcher tool, same shape
 # as RESULTS_ENUM/get_results. Mirror routers/results.py by hand if a kind is
 # added there.
 ADEQUACY_KIND_ENUM = [
     "copt", "fmea_modes", "fmea_sweep", "frontier", "mc",
     "mc_elcc_candidates", "coupling_loop", "margin_loop", "adequacy",
-    "reserve_margin",
+    "reserve_margin", "eh_study", "eh_reference_design",
 ]
-# The five kinds that run in a worker thread, i.e. the ones that can be
+# The six kinds that run in a worker thread, i.e. the ones that can be
 # aborted. Read-only surfaces (copt / fmea_modes / adequacy / reserve_margin /
-# mc_elcc_candidates) have no thread to stop and are deliberately absent.
+# mc_elcc_candidates / eh_reference_design) have no thread to stop and are
+# deliberately absent.
 ADEQUACY_STUDY_ENUM = [
     "fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
+    "eh_study",
 ]
 # Where a reliability loop leaves the network when it finishes: at the base
 # case it started from, or at the final iterate that met the target.
 ADEQUACY_RESTORE_ENUM = ["base", "final"]
+# Energy Hub archetype packs — mirrors models.energy_hub.EnergyHubArchetype.
+EH_ARCHETYPE_ENUM = ["strong_grid", "weak_flexible", "off_grid"]
 
 # Classes whose nominal capacity the optimiser can size — mirrors
 # services/asset_results/compute._NOM_COL, the map explain_investment reads
@@ -884,13 +888,15 @@ TOOLS: list[dict[str, Any]] = [
         "kind: 'copt' (analytic capacity-outage table + class-A FMECA "
         "ranking, computed on demand, ZERO solves), 'fmea_modes' (every "
         "computed failure mode, criticality-sorted), 'fmea_sweep' / "
-        "'frontier' / 'mc' / 'coupling_loop' / 'margin_loop' (status + rows / "
-        "points / iterations of the matching study — poll these while one "
-        "runs), 'mc_elcc_candidates' (assets an ELCC study may name), "
-        "'adequacy' (achieved ENS + shed-hours vs the target of the last "
-        "target-constrained solve, and which standard bound), "
-        "'reserve_margin' (per-period peak / requirement / achieved firm MW / "
-        "met / binding, plus the derating table). Returns "
+        "'frontier' / 'mc' / 'coupling_loop' / 'margin_loop' / 'eh_study' "
+        "(status + rows / points / iterations / report of the matching "
+        "study — poll these while one runs), 'mc_elcc_candidates' (assets "
+        "an ELCC study may name), 'adequacy' (achieved ENS + shed-hours vs "
+        "the target of the last target-constrained solve, and which "
+        "standard bound), 'reserve_margin' (per-period peak / requirement / "
+        "achieved firm MW / met / binding, plus the derating table), "
+        "'eh_reference_design' (assembled Energy Hub ReferenceDesignReport "
+        "from the last EH study). Returns "
         "{status:'no_data', kind, message} when nothing has been computed — "
         "read `message` for the missing precondition, do NOT report zero "
         "risk. Safety: read.",
@@ -995,6 +1001,26 @@ TOOLS: list[dict[str, Any]] = [
             "restore": {"type": "string", "enum": ADEQUACY_RESTORE_ENUM},
         },
         ["target_lole_h"],
+    ),
+    _t(
+        "run_eh_study",
+        "Start the Energy Hub reference-design study for one archetype pack "
+        "(`strong_grid`, `weak_flexible`, or `off_grid`). Applies the pack, "
+        "runs the EH pipeline (ENS solve and any enabled stages), and "
+        "persists a ReferenceDesignReport. `archetype` is required; omit "
+        "`stages` for the pack's default pipeline, or pass a non-empty list "
+        "to override. `budget_solves` caps LP work inside the study (engine "
+        "default when omitted). Returns {status:'running'} — poll "
+        "get_adequacy_results('eh_study') for status and "
+        "get_adequacy_results('eh_reference_design') for the assembled "
+        "report. 409 while another study or a foreground solve is running. "
+        "Safety: execution.",
+        {
+            "archetype": {"type": "string", "enum": EH_ARCHETYPE_ENUM},
+            "stages": {"type": "array", "items": {"type": "string"}},
+            "budget_solves": {"type": "integer"},
+        },
+        ["archetype"],
     ),
     _t(
         "build_study_report",
@@ -2113,9 +2139,9 @@ TOOL_ROUTES: dict[str, list] = {
     "record_asset_health": [("PUT", "/api/projects/{name}/asset_health")],
     # synthesis (1) — composite in-process fusion, no HTTP route of its own
     "explain_investment": _DERIVED,
-    # adequacy_fmea (9)
+    # adequacy_fmea (10) — + run_eh_study; get kinds include EH status/report
     "get_adequacy_results": [
-        # 9 of 10 kinds map 1:1 to /api/results/{kind}; mc_elcc_candidates is
+        # 11 of 12 kinds map 1:1 to /api/results/{kind}; mc_elcc_candidates is
         # the outlier, nested under /mc (same shape as get_results'
         # ac_pf_status).
         ("GET", f"/api/results/{k}")
@@ -2128,6 +2154,7 @@ TOOL_ROUTES: dict[str, list] = {
     "run_mc_study": [("POST", "/api/results/mc")],
     "run_coupling_loop": [("POST", "/api/results/coupling_loop")],
     "run_margin_loop": [("POST", "/api/results/margin_loop")],
+    "run_eh_study": [("POST", "/api/results/eh_study")],
     # study report (1) — composite in-process fusion
     "build_study_report": _DERIVED,
     # campaign (3) — process-global study budget, no HTTP route of its own

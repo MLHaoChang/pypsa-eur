@@ -1387,14 +1387,14 @@ def force_reset_simulation() -> dict:
     return _h()
 
 
-# ── Adequacy / solution-FMEA (9) ────────────────────────────────────────────
+# ── Adequacy / solution-FMEA (10) ───────────────────────────────────────────
 #
 # The reliability surface (services/adequacy/*, routed under /api/results)
 # was reachable only from the worksheet UI: none of its endpoints had a chat
 # tool, so the agent could read a solved plan's COST in a dozen ways and its
-# RELIABILITY in none. These nine tools close that gap — one read dispatcher
-# over the ten no-argument GETs, the two per-project sidecars, the four study
-# starters and one abort.
+# RELIABILITY in none. These tools close that gap — one read dispatcher
+# over the twelve no-argument GETs, the two per-project sidecars, the five
+# study starters and one abort.
 #
 # Two properties every caller here depends on:
 #
@@ -1404,11 +1404,11 @@ def force_reset_simulation() -> dict:
 #     bare `Response` must never reach the model. What is specific here is the
 #     MESSAGE: each kind names its own missing precondition, because "no
 #     frontier" and "no reserve margin" have different remedies.
-#   * The four POSTs are ASYNCHRONOUS by construction — each publishes a
+#   * The study POSTs are ASYNCHRONOUS by construction — each publishes a
 #     worker thread and returns `{"status": "running"}` immediately. The agent
 #     must poll the matching GET kind to see rows/points/iterations land. They
 #     are execution-tier for the same reason `run_simulation` is: minutes of
-#     LP solves, and (for the sweep/frontier/loops) a network the engine
+#     LP solves, and (for the sweep/frontier/loops/EH) a network the engine
 #     mutates and restores.
 
 # kind → handler symbol in routers.results. Every one takes NO arguments.
@@ -1423,6 +1423,8 @@ _ADEQUACY_HANDLER_NAMES: dict[str, str] = {
     "margin_loop": "get_margin_loop",
     "adequacy": "get_adequacy",
     "reserve_margin": "get_reserve_margin",
+    "eh_study": "get_eh_study",
+    "eh_reference_design": "get_eh_reference_design",
 }
 
 # Why each kind can be empty. Surfaced verbatim on the no_data result so the
@@ -1450,25 +1452,32 @@ _ADEQUACY_NO_DATA_HINTS: dict[str, str] = {
         "nothing has been solved, the last solve set no reserve margin, or "
         "it produced no dispatch to judge one against"
     ),
+    "eh_study": "no Energy Hub reference-design study has run in this session",
+    "eh_reference_design": (
+        "no Energy Hub ReferenceDesignReport has been stored — run "
+        "run_eh_study first"
+    ),
 }
 
-# Path outlier, same shape as get_results' ac_pf_status (v4-MAJOR-4): nine of
-# the ten kinds map 1:1 to /api/results/{kind}; mc_elcc_candidates is nested
+# Path outlier, same shape as get_results' ac_pf_status (v4-MAJOR-4): eleven of
+# the twelve kinds map 1:1 to /api/results/{kind}; mc_elcc_candidates is nested
 # under /mc.
 _ADEQUACY_PATH_OUTLIERS: dict[str, str] = {
     "mc_elcc_candidates": "/api/results/mc/elcc_candidates",
 }
 
 # study key → abort handler symbol in routers.results. `adequacy`,
-# `reserve_margin`, `copt`, `fmea_modes` and `mc_elcc_candidates` are absent
-# BY CONSTRUCTION: they are read-only surfaces computed on demand or stashed
-# by a solve, with no worker thread to stop.
+# `reserve_margin`, `copt`, `fmea_modes`, `mc_elcc_candidates` and
+# `eh_reference_design` are absent BY CONSTRUCTION: they are read-only
+# surfaces computed on demand or stashed by a solve, with no worker thread
+# to stop.
 _ADEQUACY_ABORT_HANDLER_NAMES: dict[str, str] = {
     "fmea_sweep": "post_fmea_sweep_abort",
     "frontier": "post_frontier_abort",
     "mc": "post_mc_abort",
     "coupling_loop": "post_coupling_loop_abort",
     "margin_loop": "post_margin_loop_abort",
+    "eh_study": "post_eh_study_abort",
 }
 
 
@@ -1694,6 +1703,29 @@ def run_margin_loop(
             restore=restore,
         )),
         max_solves=max_solves)
+
+
+def run_eh_study(
+    archetype: str,
+    stages: list | None = None,
+    budget_solves: int | None = None,
+) -> dict:
+    """
+    Start the Energy Hub reference-design study for one archetype pack.
+
+    Applies the pack, runs the EH pipeline, and persists a
+    ``ReferenceDesignReport`` for ``get_adequacy_results('eh_reference_design')``.
+    Poll ``get_adequacy_results('eh_study')`` while it runs.
+    """
+    from routers.results import EhStudyRequest, post_eh_study as _h
+    return _campaign_gated(
+        "eh_study",
+        lambda: _h(EhStudyRequest(
+            archetype=archetype,
+            stages=stages,
+            budget_solves=budget_solves,
+        )),
+        budget_solves=budget_solves)
 
 
 def abort_adequacy_study(study: str) -> dict:
@@ -4574,9 +4606,9 @@ DISPATCHERS: dict[str, Any] = {
     # execution (2)
     "abort_simulation": abort_simulation,
     "force_reset_simulation": force_reset_simulation,
-    # adequacy_fmea (9) — the reliability surface: one read dispatcher over
-    # the ten no-argument GETs, the two per-project sidecars, the four study
-    # starters, one abort.
+    # adequacy_fmea (10) — the reliability surface: one read dispatcher over
+    # the twelve no-argument GETs, the two per-project sidecars, the five
+    # study starters, one abort.
     "get_adequacy_results": get_adequacy_results,
     "get_fmea_worksheet": get_fmea_worksheet,
     "get_asset_health": get_asset_health,
@@ -4587,6 +4619,7 @@ DISPATCHERS: dict[str, Any] = {
     "run_mc_study": run_mc_study,
     "run_coupling_loop": run_coupling_loop,
     "run_margin_loop": run_margin_loop,
+    "run_eh_study": run_eh_study,
     "abort_adequacy_study": abort_adequacy_study,
     # campaign (3) — one budget across a chain of studies
     "start_campaign": start_campaign,

@@ -248,6 +248,14 @@ def test_the_sweep_charges_its_contingencies_plus_the_closing_re_solve():
                              scenarios=[{"a": 1}, {"b": 2}]) == expected + 2
 
 
+def test_eh_study_charges_its_own_budget_solves():
+    from models.energy_hub import DEFAULT_EH_BUDGET_SOLVES
+
+    n = _network()
+    assert C.estimate_solves(n, "eh_study") == DEFAULT_EH_BUDGET_SOLVES
+    assert C.estimate_solves(n, "eh_study", budget_solves=8) == 8
+
+
 # ── Wiring into the study tools ────────────────────────────────────────────
 
 
