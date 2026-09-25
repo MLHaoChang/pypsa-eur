@@ -6,6 +6,7 @@
   "achieved_ens_permyriad": null,
   "achieved_shed_hours": null,
   "mc_lole_h": null,
+  "certified": null,
   "cost_at_target_eur": null,
   "period_basis": null,
   "excludes_shed_cost": true,
@@ -64,6 +65,11 @@
       "status": "not_established",
       "payload": null,
       "note": null
+    },
+    "certification": {
+      "status": "not_established",
+      "payload": null,
+      "note": null
     }
   },
   "completeness": {
@@ -77,7 +83,8 @@
     "fmea_top": "not_established",
     "tea": "not_established",
     "gates": "not_established",
-    "multi_energy": "not_established"
+    "multi_energy": "not_established",
+    "certification": "not_established"
   },
   "pipeline": {
     "stages": [

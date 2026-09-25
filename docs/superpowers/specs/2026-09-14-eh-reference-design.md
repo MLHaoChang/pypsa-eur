@@ -91,6 +91,38 @@ Electricity-only adequacy remains the default until the multi-energy phase.
 - `completeness`: map of section name → status
 - `pipeline`: stages run / skipped / aborted, budgets consumed
 
+**Amendment (2026-09-25, P11 — MC certification; product decisions Q1/Q2/Q7 in [`plans/2026-09-25-eh-post-seal-implementation.md`](../plans/2026-09-25-eh-post-seal-implementation.md)):**
+
+**New section and fields**
+- `certification` joins the section list. Its payload is the MC LOLE evidence and a verdict.
+- `certified: bool | None` is a new report field:
+  - `True` only when the verdict is `pass`;
+  - `False` on `fail` or `inconclusive`. This follows decision 2: a LOLE failure fails certification even when the ENS target is met;
+  - `None` when no LOLE target is set or certification is not established.
+- `mc_lole_h` is **per year** (`lole_hours / horizon_years`).
+- `notes: list[str]` holds study-level disclosures that belong to no single section, such as the DSR preflight.
+
+**Units and comparison**
+- `AvailabilityTarget.target_lole_h` is **h/yr**.
+- Certification compares the MC's per-horizon `lole_hours` and its 95% CI against `target_lole_h × horizon_years`, the coupling-loop convention.
+
+**Verdict**
+- `pass` iff CI upper ≤ target;
+- `fail` iff CI lower > target;
+- otherwise `inconclusive`.
+- A target below the MC `resolution_floor_h` is `inconclusive`.
+- The section is `not_established` in any of these cases:
+  - `horizon_years ≤ 0`;
+  - the modelled horizon is shorter than the largest unit MTTR;
+  - the MC fleet is empty;
+  - the run was aborted.
+
+**Fleet boundary**
+- The MC engine is copper-plate and network-free.
+- Certification therefore samples a **hub-boundary copy**: every component on the far side of the selected import Links is removed.
+- An import Link enters the MC fleet only when it carries its own outage data (decision 6). It then becomes one two-state unit of its hub-side capacity.
+- Carrier-only Link selection (§6 rule 3), or a hub side that can't be told apart from the far side, is `not_established` with the instruction "tag `eh_role`/`eh_poc`".
+
 ---
 
 ## 5. Study pipeline (normative)

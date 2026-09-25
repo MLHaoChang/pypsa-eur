@@ -225,6 +225,27 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
 - **FE:** LOLE/yr headline with CI, a verdict chip, and `certification` in the completeness chips.
 - **Chat:** update the `run_eh_study` description.
 
+**P11 status (2026-09-25, `claude/epic-allen-k2t1c4`):** implemented. `tests/test_energy_hub_mc_certify.py` has 22 tests including a live HTTP run; 21 of them fail on pre-P11 code.
+
+- [x] **Spec §4 amendment.** Adds the `certification` section, `certified`, per-year `mc_lole_h` and `notes`. `target_lole_h` is documented as h/yr.
+- [x] **Contract goldens.** `REPORT_SECTIONS`, `EXPORT_KEYS`, and both golden fixtures are updated.
+- [x] **`archetypes.hub_boundary_copy`.**
+  - Hub side found per R1, via `select_import_links_with_rule`.
+  - Carrier-only selection is refused; an ambiguous hub side is refused.
+  - Q7 import units are built from Links with their own outage data; closed or undocumented Links are excluded, each with a reason.
+- [x] **Driver refactored into a stage table.** `_STAGE_HANDLERS` runs in `EH_PIPELINE_STAGES` order, pinned by an instrumented test.
+  - `mc_certify` is a zero-solve stage and is never budget-skipped (B5).
+  - Verdict follows Q1, including the resolution floor. Time basis follows Q2, with the MTTR refusal.
+  - An abort gives no verdict.
+  - With DSR on, the payload carries the pessimism note.
+  - Gates for `off_grid` are now `skipped`; missing certification lives on `certification`.
+- [x] **F1j.** Now scans `eh_study.py` and exempts `_stage_mc_certify` by function. Exemptions must still call `mc_adequacy`. Mutation-verified.
+- [x] **Redundancy disclosure.** The table carries `finalists_mc_certified: false`. The cadence pin is unchanged.
+- [x] **Test update.** `test_energy_hub_study.py::test_run_marks_not_established_when_required_mc_missing` now asserts `certification`, not `gates`. This is the intended contract move.
+- [x] **FE.** LOLE h/yr + CI (per year), a verdict chip, and `certification` in the chip order.
+- [x] **Chat.** The `run_eh_study` description is updated.
+- [ ] **QA gate** — pending.
+
 ---
 
 ## P12 — `frontier` and `fmea_top` stages

@@ -47,7 +47,7 @@ const cell = (v: unknown) =>
 /** Stable display order for completeness chips (matches REPORT_SECTIONS). */
 export const COMPLETENESS_ORDER = [
   'target', 'cost', 'frontier', 'sizing', 'redundancy', 'levers', 'dtc',
-  'fmea_top', 'tea', 'gates', 'multi_energy',
+  'fmea_top', 'tea', 'gates', 'multi_energy', 'certification',
 ] as const
 
 export function completenessRows(
@@ -85,6 +85,37 @@ export function notEstablishedNotes(
       && name !== 'gates' && name !== 'multi_energy'
       && Boolean(report.sections?.[name]?.note))
     .map(({ name }) => ({ name, note: String(report.sections![name].note) }))
+}
+
+/** Tone for the MC certification verdict (P11). */
+export function verdictTone(verdict: string): string {
+  if (verdict === 'pass') return 'text-accent'
+  if (verdict === 'fail') return 'text-danger'
+  return 'text-warn'
+}
+
+/** MC certification headline from the `certification` section, if it ran. */
+export function certificationHeadline(report: EhReferenceDesignReport): {
+  perYear: number
+  ci: [number, number] | null
+  verdict: string | null
+  target: number | null
+} | null {
+  const payload = report.sections?.certification?.payload as
+    | Record<string, unknown> | null | undefined
+  if (!payload || typeof payload.lole_h_per_year !== 'number') return null
+  const years = typeof payload.horizon_years === 'number' ? payload.horizon_years : null
+  const raw = Array.isArray(payload.lole_ci) ? payload.lole_ci : null
+  const ci = raw && years && years > 0
+    && typeof raw[0] === 'number' && typeof raw[1] === 'number'
+    ? [raw[0] / years, raw[1] / years] as [number, number]
+    : null
+  return {
+    perYear: payload.lole_h_per_year,
+    ci,
+    verdict: typeof payload.verdict === 'string' ? payload.verdict : null,
+    target: typeof payload.target_lole_h === 'number' ? payload.target_lole_h : null,
+  }
 }
 
 /** Tone for the P9 SCR product verdict (fail reserved; thin slice uses warn). */
@@ -298,6 +329,7 @@ export function EhReferenceDesignPanel() {
     () => completenessRows(report?.completeness),
     [report?.completeness],
   )
+  const cert = report ? certificationHeadline(report) : null
   const meCarriers = report ? multiEnergyCarrierEntries(report) : []
   const meLoads = report ? multiEnergyLoadEntries(report) : []
 
@@ -432,6 +464,31 @@ export function EhReferenceDesignPanel() {
                     {report.excludes_shed_cost !== false && (
                       <span className="text-muted"> excl. shed</span>
                     )}
+                  </span>
+                )}
+                {cert && (
+                  <span data-testid="eh-report-lole">
+                    <span className="text-muted">MC LOLE </span>
+                    <span className="text-text font-mono">
+                      {cert.perYear.toFixed(2)} h/yr
+                    </span>
+                    {cert.ci && (
+                      <span className="text-muted font-mono">
+                        {' '}[{cert.ci[0].toFixed(2)}–{cert.ci[1].toFixed(2)}]
+                      </span>
+                    )}
+                  </span>
+                )}
+                {cert?.verdict && (
+                  <span
+                    data-testid="eh-certification-verdict"
+                    data-verdict={cert.verdict}
+                    className={verdictTone(cert.verdict)}
+                    title="MC LOLE certification (decision 2): certified only when the 95% CI upper bound is within the target"
+                  >
+                    {cert.verdict === 'pass' ? 'Certified' : 'Not certified'}
+                    {' '}({cert.verdict}
+                    {cert.target != null ? ` vs ${cert.target} h/yr` : ''})
                   </span>
                 )}
                 {report.pipeline?.solves_consumed != null && (

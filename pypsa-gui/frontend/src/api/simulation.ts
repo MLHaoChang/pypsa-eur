@@ -638,7 +638,10 @@ export interface EhReferenceDesignReport {
   ens_cap_permyriad?: number | null
   achieved_ens_permyriad?: number | null
   achieved_shed_hours?: number | null
+  /** MC LOLE, hours per YEAR, when the mc_certify stage ran. */
   mc_lole_h?: number | null
+  /** Decision 2: true only on a `pass` verdict; null = not established. */
+  certified?: boolean | null
   cost_at_target_eur?: number | null
   period_basis?: string | null
   excludes_shed_cost?: boolean

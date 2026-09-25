@@ -60,6 +60,7 @@ REPORT_SECTIONS: tuple[str, ...] = (
     "tea",
     "gates",
     "multi_energy",
+    "certification",
 )
 
 
@@ -69,6 +70,10 @@ class AvailabilityTarget(BaseModel):
     Planning always uses ENS when ``ens_cap_permyriad`` is set. MC LOLE is the
     acceptance metric when loops are run. If both are set, LOLE failure fails
     certification even when ENS is met.
+
+    Units: ``ens_cap_permyriad`` is ‱ of demand; ``target_lole_h`` is hours
+    per YEAR. Certification compares it with the MC's per-horizon LOLE as
+    ``target_lole_h × horizon_years`` (spec §4 amendment, P11).
     """
 
     ens_cap_permyriad: float | None = Field(default=None, gt=0)
@@ -201,7 +206,11 @@ class ReferenceDesignReport(BaseModel):
     ens_cap_permyriad: float | None = None
     achieved_ens_permyriad: float | None = None
     achieved_shed_hours: float | None = None
+    # MC LOLE in hours per YEAR (lole_hours / horizon_years), when certified.
     mc_lole_h: float | None = None
+    # Decision 2: True only on a `pass` verdict; False on fail/inconclusive;
+    # None when no LOLE target is set or certification is not established.
+    certified: bool | None = None
     cost_at_target_eur: float | None = None
     period_basis: Literal["single_period", "multi_period"] | None = None
     excludes_shed_cost: Literal[True] = True

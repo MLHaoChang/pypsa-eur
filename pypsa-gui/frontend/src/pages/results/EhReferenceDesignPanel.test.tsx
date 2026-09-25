@@ -18,6 +18,7 @@ import {
   redundancyCsvRows,
   scrTone,
   statusTone,
+  verdictTone,
 } from './EhReferenceDesignPanel'
 import { downloadCSV } from './shared'
 
@@ -116,6 +117,14 @@ describe('completenessRows', () => {
     expect(statusTone('ok')).toContain('accent')
     expect(statusTone('skipped')).toContain('muted')
     expect(statusTone('not_established')).toContain('warn')
+  })
+})
+
+describe('verdictTone', () => {
+  it('tones pass / fail / inconclusive', () => {
+    expect(verdictTone('pass')).toContain('accent')
+    expect(verdictTone('fail')).toContain('danger')
+    expect(verdictTone('inconclusive')).toContain('warn')
   })
 })
 
@@ -227,6 +236,49 @@ describe('EhReferenceDesignPanel', () => {
     expect(screen.queryByTestId('eh-section-note-gates')).toBeNull()
     expect(screen.getByTestId('eh-section-target').getAttribute('title')).toBe(why)
     expect(screen.getByTestId('eh-report-solves').textContent).toMatch(/1 \/ 30/)
+  })
+
+  it('shows MC LOLE per year with its CI and the certification verdict', async () => {
+    const certReport = {
+      ...REPORT,
+      mc_lole_h: 12.5,
+      certified: false,
+      completeness: { ...REPORT.completeness, certification: 'ok' as const },
+      sections: {
+        certification: {
+          status: 'ok' as const,
+          note: null,
+          payload: {
+            verdict: 'fail', horizon_years: 0.5, lole_h_per_year: 12.5,
+            lole_ci: [5.0, 7.5], target_lole_h: 3,
+          },
+        },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'off_grid', report: certReport,
+    } as never)
+    await openPanel()
+    const lole = await screen.findByTestId('eh-report-lole')
+    // CI is per horizon on the wire; shown per year (÷ horizon_years).
+    expect(lole.textContent).toMatch(/12\.50 h\/yr/)
+    expect(lole.textContent).toMatch(/10\.00.15\.00/)
+    const verdict = screen.getByTestId('eh-certification-verdict')
+    expect(verdict.getAttribute('data-verdict')).toBe('fail')
+    expect(verdict.textContent).toMatch(/not certified/i)
+    expect(verdict.textContent).toMatch(/3 h\/yr/)
+    expect(screen.getByTestId('eh-section-certification').getAttribute('data-status'))
+      .toBe('ok')
+  })
+
+  it('shows no LOLE block when certification did not run', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report: REPORT,
+    } as never)
+    await openPanel()
+    await screen.findByTestId('eh-report')
+    expect(screen.queryByTestId('eh-report-lole')).toBeNull()
+    expect(screen.queryByTestId('eh-certification-verdict')).toBeNull()
   })
 
   it('shows study-level notes (e.g. the DSR preflight)', async () => {

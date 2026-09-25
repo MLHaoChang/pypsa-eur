@@ -651,6 +651,13 @@ def compare_redundancy_scenarios(
         "comparable_solved": len(solved),
         "effective_voll": effective_voll_used,
         "voll_defaulted": voll_was_defaulted,
+        # P11 (plan R3): the pinned cadence says finalists are MC-certified,
+        # but the EH study certifies only the ENS plan. Disclosed here rather
+        # than by changing the pinned cadence value.
+        "finalists_mc_certified": False,
+        "finalists_mc_note": (
+            "redundancy options are compared and selected on ENS only; MC "
+            "LOLE certification covers the ENS plan, not each finalist"),
     }
     if select and budget_exhausted:
         out["selection"] = None
