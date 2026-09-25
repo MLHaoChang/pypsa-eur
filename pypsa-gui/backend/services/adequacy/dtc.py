@@ -189,6 +189,18 @@ def _bus_unserved_mwh(
     return total
 
 
+def _plan_is_nameplate(n) -> None:
+    """On an unsolved (private) copy, make ``*_nom_opt`` the nameplate."""
+    from services.adequacy.sweep import _CAPACITY_ATTRS
+
+    for attr, nom in _CAPACITY_ATTRS:
+        df = getattr(n, attr, None)
+        opt = f"{nom}_opt"
+        if df is None or df.empty or nom not in df.columns:
+            continue
+        df[opt] = df[nom].astype(float)
+
+
 def _all_load_buses(n) -> set[str]:
     if n.loads is None or n.loads.empty or "bus" not in n.loads.columns:
         return set()
@@ -217,8 +229,11 @@ def run_dtc_stress(
     """Island each contingency and re-dispatch; report critical vs other unserved.
 
     **Fixed plan** (spec decision 8): extendable capacity is frozen at its
-    solved size (``p_nom_opt`` where finite, else ``p_nom``) with the same
-    ``sweep.freeze_capacities`` the Class-B sweep uses. Islanding must not
+    solved size (``*_nom_opt``) with the same ``sweep.freeze_capacities`` the
+    Class-B sweep uses. On a network that has never been solved PyPSA holds
+    ``*_nom_opt = 0``, which would stress a brownfield extendable as if it
+    did not exist — there the plan IS the nameplate, so ``*_nom_opt`` is set
+    to ``*_nom`` on the private copy before freezing. Islanding must not
     buy new capacity, or the stress reports the shortfall a re-plan would
     fix instead of the one the plan has. The ENS cap, zone multiple and
     reserve margin are stripped for the frozen re-dispatch, as in the sweep:
@@ -254,6 +269,8 @@ def run_dtc_stress(
         _detach_solver_model(network)
         nn = network.copy()
         undo, mutation = apply_islanding_contingency(nn, str(link_id))
+        if not network.is_solved:
+            _plan_is_nameplate(nn)
         unfreeze = freeze_capacities(nn)
         sink: dict = {}
         try:

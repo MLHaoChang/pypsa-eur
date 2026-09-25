@@ -101,7 +101,23 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
   - `gui-frontend-tests` CI job (vitest + `tsc --noEmit`).
   - The seal glob `test_energy_hub_*.py` already includes the new files.
 - [x] **P10e:** the shared network is copied under its RLock.
-- [ ] **QA gate** (independent) — pending.
+- [x] **QA gate** (independent) — `GO WITH BINDING CONDITIONS`. All four conditions were fixed with red → green tests:
+  1. **DSR tier bounded per snapshot.** `p_max_pu = bus load(t) / peak`. It had the same "exceeds its own load, exports over Links" defect as the VOLL slack.
+  2. **DSR preflight reads the private copy.** It now runs after the locked copy.
+  3. **P10a acceptance asserts the capture.** The tests check `dsr_total_mwh > 0` and the `dsr_t` columns.
+  4. **DtC on an unsolved network freezes at nameplate.** PyPSA holds `*_nom_opt = 0` before any solve, so the plan is set from `*_nom` on the copy. The docstrings are corrected.
+- **Also from the gate:**
+  - VOLL slacks are added in **one batched `n.add`**. That is 1.2 s for 1,000 Loads × 8,760 h, against ~18 s projected for a per-Load loop with time series.
+  - `p_set` gaps now raise a phase warning instead of being zeroed silently.
+  - The vacuous restore test was replaced by a spy on the islanded solve's bounds and cfg (zone multiple + margin stripped).
+  - A real-capture parity test was added for the Load-keyed fallbacks.
+  - FE note keys now use the index.
+- **Behaviour change (release note):**
+  - VOLL slacks (and the DSR tier) can no longer supply more than their own Load's (bus's) demand.
+  - A shortfall caused by a non-Load sink (a Link with `p_min_pu > 0`, a Store minimum) is no longer "rescued" by phantom shedding. Such solves now report infeasible, which is the honest answer.
+- **Known limitation (not P10):**
+  - On multi-period networks with vintage bounds, `apply_vintage_bounds` (`assumptions.py` step 7) re-expands extendables after `freeze_capacities`. DtC stress and the existing Class-B sweep can therefore still build capacity there.
+  - Tracked for P12 (fmea_top), which reuses the same freeze.
 
 ---
 

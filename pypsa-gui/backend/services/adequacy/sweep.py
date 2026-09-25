@@ -62,7 +62,10 @@ _CAPACITY_ATTRS = (
 def freeze_capacities(n) -> Callable[[], None]:
     """Pin every extendable capacity to its solved size by clamping
     ``*_nom_min = *_nom_max = size`` (``*_nom_opt`` where finite, else the
-    current ``*_nom``), KEEPING extendability on.
+    current ``*_nom``), KEEPING extendability on. NOTE: PyPSA holds
+    ``*_nom_opt = 0`` (finite) before any solve, so on an unsolved network
+    this pins at 0 — callers that may see one must set ``*_nom_opt`` first
+    (see ``dtc._plan_is_nameplate``).
 
     Why bounds rather than flipping ``*_nom_extendable`` off: preflight
     rightly rejects a fixed asset with zero capacity

@@ -754,58 +754,73 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         # system-wide 10× max headroom (and a large Load is never undersized).
         p_set_t = getattr(getattr(n, "loads_t", None), "p_set", None)
         skipped_orphan = 0
+        names: list[str] = []
+        buses: list[str] = []
+        p_noms: list[float] = []
+        max_pu: dict[str, pd.Series] = {}
+        nan_loads: list[str] = []
         for load_id in n.loads.index:
             bus = str(n.loads.at[load_id, "bus"]) if "bus" in n.loads.columns else ""
             if not bus or bus not in n.buses.index:
                 skipped_orphan += 1
                 continue
-            peak = 0.0
+            name = voll_slack_name(load_id)
+            if name in n.generators.index:
+                continue  # don't double-add if a previous run leaked
+            # This Load's demand per snapshot (time series overrides static).
             try:
                 if p_set_t is not None and load_id in getattr(p_set_t, "columns", []):
-                    peak = float(p_set_t[load_id].max())
-                elif "p_set" in n.loads.columns:
-                    peak = float(n.loads.at[load_id, "p_set"] or 0.0)
+                    demand = p_set_t[load_id].reindex(n.snapshots)
+                    if demand.isna().any():
+                        nan_loads.append(str(load_id))
+                        demand = demand.fillna(0.0)
+                else:
+                    static = (float(n.loads.at[load_id, "p_set"])
+                              if "p_set" in n.loads.columns else 0.0)
+                    demand = pd.Series(
+                        static if static == static else 0.0, index=n.snapshots)
+                peak = float(demand.max()) if len(demand) else 0.0
             except (TypeError, ValueError):
-                peak = 0.0
+                demand, peak = None, 0.0
             slack_pnom = max(peak, 1.0) * 10.0
             # The slack may shed at most what ITS Load demands in each
             # snapshot. Unbounded (10× peak, p_max_pu=1) it could "shed"
             # more than its Load and export the surplus over Links — at equal
             # VoLL the LP is indifferent, so unserved energy was attributed
             # to the wrong Load/bus, even above that Load's own demand.
-            try:
-                if p_set_t is not None and load_id in getattr(p_set_t, "columns", []):
-                    demand = p_set_t[load_id].reindex(n.snapshots).fillna(0.0)
-                else:
-                    demand = pd.Series(
-                        float(n.loads.at[load_id, "p_set"] or 0.0)
-                        if "p_set" in n.loads.columns else 0.0,
-                        index=n.snapshots)
-                slack_max_pu = (demand.clip(lower=0.0) / slack_pnom).clip(upper=1.0)
-            except (TypeError, ValueError):
-                slack_max_pu = None
-            name = voll_slack_name(load_id)
-            if name in n.generators.index:
-                continue  # don't double-add if a previous run leaked
-            # Mark BEFORE n.add so a GET landing during the add window
-            # still hides the row (filtering an absent name is a no-op).
-            # On n.add failure we unmark to keep the registry consistent.
-            PyPSAService.mark_transient("Generator", name)
+            max_pu[name] = (
+                (demand.clip(lower=0.0) / slack_pnom).clip(upper=1.0)
+                if demand is not None
+                else pd.Series(1.0, index=n.snapshots))
+            names.append(name)
+            buses.append(bus)
+            p_noms.append(slack_pnom)
+        if nan_loads:
+            phase(
+                f"WARNING: {len(nan_loads)} Load(s) have p_set gaps "
+                f"({', '.join(nan_loads[:5])}); their VOLL slack is 0 in the "
+                "missing snapshots — no shedding is available there.")
+        if names:
+            # One batched add (a per-Load add with a time series is ~3× slower
+            # on large networks). Mark BEFORE n.add so a GET landing during
+            # the add window still hides the rows; unmark on failure.
+            for name in names:
+                PyPSAService.mark_transient("Generator", name)
             try:
                 n.add(
-                    "Generator", name,
-                    bus=bus,
-                    p_nom=slack_pnom,
+                    "Generator", names,
+                    bus=buses,
+                    p_nom=p_noms,
                     marginal_cost=cfg.voll,
                     # The convention's owner is services/adequacy/slack.py.
                     carrier=INVOLUNTARY_SLACK_CARRIER,
-                    **({"p_max_pu": slack_max_pu}
-                       if slack_max_pu is not None else {}),
+                    p_max_pu=pd.DataFrame(max_pu, index=n.snapshots),
                 )
             except Exception:
-                PyPSAService.unmark_transient("Generator", name)
+                for name in names:
+                    PyPSAService.unmark_transient("Generator", name)
                 raise
-            added.append(name)
+        added = list(names)
         if added:
             phase(
                 f"Added {len(added)} VOLL slack generator(s) at {cfg.voll:.0f} EUR/MWh "
@@ -950,12 +965,23 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
             name = f"{DSR_SLACK_PREFIX}{bus}"
             if name in n.generators.index:
                 continue
+            # Respond with at most `share` of the bus's load IN EACH SNAPSHOT
+            # (p_nom = share × peak, p_max_pu = load(t) / peak). A flat
+            # share × peak let the tier "respond" above the bus's own demand
+            # and export the surplus over Links — cheaper than VoLL, so it
+            # displaced shedding and peakers anywhere it could reach.
+            if hasattr(per_snap, "reindex"):
+                dsr_max_pu = (per_snap.reindex(n.snapshots).fillna(0.0)
+                              .clip(lower=0.0) / peak).clip(upper=1.0)
+            else:
+                dsr_max_pu = 1.0
             PyPSAService.mark_transient("Generator", name)
             try:
                 n.add(
                     "Generator", name,
                     bus=bus,
                     p_nom=dsr_share * peak,
+                    p_max_pu=dsr_max_pu,
                     marginal_cost=dsr_price,
                     carrier=DSR_SLACK_CARRIER,
                 )

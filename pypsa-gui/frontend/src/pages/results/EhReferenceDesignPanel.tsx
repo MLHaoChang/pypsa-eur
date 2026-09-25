@@ -459,7 +459,7 @@ export function EhReferenceDesignPanel() {
                   className="flex flex-col gap-0.5 text-[10px] text-warn"
                   data-testid="eh-report-notes"
                 >
-                  {report.notes!.map(note => <li key={note}>{note}</li>)}
+                  {report.notes!.map((note, i) => <li key={i}>{note}</li>)}
                 </ul>
               )}
 

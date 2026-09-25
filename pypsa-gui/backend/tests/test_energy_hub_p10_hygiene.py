@@ -109,11 +109,46 @@ def test_dtc_stress_strips_margin_and_ens_targets_for_the_frozen_solve():
 
 
 @pytest.mark.live_solve
-def test_dtc_stress_restores_capacity_bounds():
+def test_dtc_stress_solves_the_islanded_copy_with_pinned_capacity(monkeypatch):
+    """The islanded solve itself must see min == solved size, max ≈ size."""
+    import services.solver_service as SS
+
     n = _with_cheap_extendable(_weak_network())
-    before = n.generators[["p_nom_min", "p_nom_max"]].copy()
-    _stress(n, SolverConfig(voll=500.0))
-    assert n.generators[["p_nom_min", "p_nom_max"]].equals(before)
+    seen: list = []
+    real = SS.run_simulation
+
+    def spy(cfg_i, net, *a, **k):
+        seen.append((net is n,
+                     float(net.generators.at["peaker", "p_nom_min"]),
+                     float(net.generators.at["peaker", "p_nom_max"]),
+                     cfg_i.ens_zone_cap_multiple, cfg_i.reserve_margin))
+        return real(cfg_i, net, *a, **k)
+
+    monkeypatch.setattr(SS, "run_simulation", spy)
+    _stress(n, SolverConfig(voll=500.0, ens_zone_cap_multiple=2.0,
+                            reserve_margin=0.5))
+    assert len(seen) == 1
+    is_shared, pmin, pmax, zone, margin = seen[0]
+    assert not is_shared                       # a private copy
+    assert pmin == pytest.approx(0.0) and pmax == pytest.approx(0.0, abs=1e-5)
+    assert zone is None and margin is None
+    # The shared network's bounds are untouched.
+    assert float(n.generators.at["peaker", "p_nom_max"]) == 500.0
+
+
+@pytest.mark.live_solve
+def test_dtc_stress_on_an_unsolved_network_freezes_at_nameplate():
+    """PyPSA defaults p_nom_opt to 0 before any solve — freezing on it would
+    stress a brownfield extendable as if it did not exist."""
+    n = _weak_network()
+    n.add("Generator", "brownfield", bus="crit", carrier="gas",
+          p_nom=50.0, p_nom_min=0.0, p_nom_extendable=True, p_nom_max=500.0,
+          capital_cost=1000.0, marginal_cost=60.0)
+    assert not n.is_solved
+    table = _stress(n, SolverConfig(voll=500.0))
+    # 30 local + 50 brownfield ≥ 40 critical: nothing critical is unserved.
+    assert table["contingencies"][0]["critical_unserved_mwh"] == \
+        pytest.approx(0.0, abs=1e-6)
 
 
 # ── P10b-1: Load-keyed fallbacks ────────────────────────────────────────────
@@ -146,6 +181,33 @@ def test_unserved_fallback_uses_load_period_capture_when_bus_rollup_absent():
     assert D._bus_unserved_mwh(n, {"flex"}, sink=sink) == pytest.approx(4.0)
 
 
+@pytest.mark.live_solve
+def test_load_keyed_fallbacks_match_the_bus_rollup_of_a_real_capture():
+    """Parity: each fallback rebuilds the capture's own bus roll-up."""
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import run_simulation
+
+    n = _two_loads_one_bus()
+    n.links.at["import_poc", "p_max_pu"] = 0.0
+    n.snapshot_weightings.loc[:, :] = 3.0
+    PyPSAService.set_network(n)
+    sink: dict = {}
+    run_simulation(SolverConfig(voll=500.0), n, PyPSAService.get_lock(),
+                   threading.Event(), queue.SimpleQueue(),
+                   state_update=lambda **kw: sink.update(kw))
+    lost = sink["last_lost_load"]
+    for buses in ({"crit"}, {"flex"}, {"crit", "flex"}):
+        primary = D._bus_unserved_mwh(n, buses, sink=sink)
+        by_load = {k: v for k, v in lost.items()
+                   if k != "lost_load_bus_period_mwh"}
+        by_t = {"lost_load_t": lost["lost_load_t"]}
+        assert D._bus_unserved_mwh(
+            n, buses, sink={"last_lost_load": by_load}) == pytest.approx(primary)
+        assert D._bus_unserved_mwh(
+            n, buses, sink={"last_lost_load": by_t}) == pytest.approx(primary)
+    assert D._bus_unserved_mwh(n, {"crit", "flex"}, sink=sink) > 0
+
+
 def test_bus_rollup_with_no_matching_bus_is_zero_not_a_fallthrough():
     n = _two_loads_one_bus()
     bp = pd.DataFrame([{"crit": 5.0}], index=["ALL"])
@@ -161,7 +223,8 @@ def test_bus_rollup_with_no_matching_bus_is_zero_not_a_fallthrough():
 
 
 def _run_eh(n, pack, cfg, monkeypatch, **kw):
-    """Run the EH driver, recording the cfg each LP solve receives."""
+    """Run the EH driver, recording the cfg each LP solve receives and the
+    side-results each solve publishes (``captures``)."""
     import services.solver_service as SS
     from services.adequacy import eh_study as S
     from services.pypsa_service import PyPSAService
@@ -171,7 +234,17 @@ def _run_eh(n, pack, cfg, monkeypatch, **kw):
 
     def spy(cfg_i, *a, **k):
         seen.append(cfg_i)
+        inner = k.get("state_update")
+
+        def tee(**kw_):
+            if "last_lost_load" in kw_:
+                _run_eh.captures.append(kw_["last_lost_load"])
+            if inner is not None:
+                inner(**kw_)
+        k["state_update"] = tee
         return real(cfg_i, *a, **k)
+
+    _run_eh.captures = []
 
     monkeypatch.setattr(SS, "run_simulation", spy)
     PyPSAService.set_network(n)
@@ -198,6 +271,10 @@ def test_weak_pack_with_dsr_buses_enables_the_tier_and_warns_double_count(
                            dsr_buses=["flex"])
     assert seen and seen[0].dsr_buses == ["flex"]
     assert seen[0].dsr_price_eur_per_mwh > 0 and seen[0].dsr_share_of_load > 0
+    # The tier was actually built and dispatched in the ENS solve.
+    cap = _run_eh.captures[0]
+    assert cap.get("dsr_total_mwh", 0.0) > 0
+    assert "flex" in cap["dsr_t"].columns
     assert any("demand response" in w for w in report.notes)
     apply = next(r for r in report.pipeline.stages if r.stage == "apply_pack")
     assert "demand response" in (apply.note or "")
@@ -290,3 +367,67 @@ def test_eh_study_copies_the_shared_network_under_its_lock(monkeypatch):
     t.join(timeout=60)
     assert copies["n"] >= 1
     assert out["report"].completeness["target"] == "ok"
+
+
+
+def test_dsr_preflight_reads_the_private_network_not_the_shared_one(
+        monkeypatch):
+    """P10e: every read of the shared network happens under the lock, on
+    the private copy — including the DSR preflight."""
+    from models.energy_hub import default_weak_flexible_pack
+    from services.adequacy import archetypes as A
+    from services.adequacy import eh_study as S
+    from services.pypsa_service import PyPSAService
+    from tests.test_energy_hub_mvp_b import _weak_mvp_b_network
+
+    n = _weak_mvp_b_network()
+    seen: list = []
+    real = A.solver_config_patch_with_preflight
+
+    def spy(pack, *, network, **k):
+        seen.append(network)
+        return real(pack, network=network, **k)
+
+    monkeypatch.setattr(A, "solver_config_patch_with_preflight", spy)
+    stop = threading.Event()
+    stop.set()                       # stop before any solve; preflight ran
+    PyPSAService.set_network(n)
+    S.run_eh_study(n, default_weak_flexible_pack(), SolverConfig(voll=500.0),
+                   lock=PyPSAService.get_lock(), stop_event=stop,
+                   log_queue=queue.SimpleQueue(),
+                   stages=("apply_pack", "ens_solve", "assemble"))
+    assert seen and all(net is not n for net in seen)
+
+
+# ── P10 gate B1: the DSR tier responds with at most its bus's own load ──────
+
+
+@pytest.mark.live_solve
+def test_dsr_tier_is_bounded_by_its_bus_load_each_snapshot():
+    import pypsa
+
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import run_simulation
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.add("Carrier", "gas")
+    n.add("Bus", "A", carrier="AC")
+    n.add("Bus", "B", carrier="AC")
+    n.add("Load", "la", bus="A", p_set=[100.0, 10.0])
+    n.add("Load", "lb", bus="B", p_set=40.0)
+    n.add("Generator", "ga", bus="A", carrier="gas", p_nom=30.0,
+          marginal_cost=10.0)
+    n.add("Link", "ab", bus0="A", bus1="B", p_nom=100.0, efficiency=1.0)
+    PyPSAService.set_network(n)
+    sink: dict = {}
+    status, _ = run_simulation(
+        SolverConfig(voll=5000.0, dsr_buses=["A"], dsr_price_eur_per_mwh=50.0,
+                     dsr_share_of_load=0.5),
+        n, PyPSAService.get_lock(), threading.Event(), queue.SimpleQueue(),
+        state_update=lambda **kw: sink.update(kw))
+    assert status in ("ok", "optimal")
+    dsr = sink["last_lost_load"]["dsr_t"]["A"]
+    share_of_load = 0.5 * pd.Series([100.0, 10.0], index=n.snapshots)
+    assert (dsr <= share_of_load + 1e-6).all(), dsr.tolist()

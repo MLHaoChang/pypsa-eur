@@ -182,6 +182,12 @@ def run_eh_study(
 
     # Private cfg: the pack target wins for every stage, the session config is
     # left exactly as the user set it.
+    # Private network: pack overlay + ENS solve never touch the shared one.
+    # Copied under the network's lock so an edit in flight cannot tear it;
+    # every later read (including the DSR preflight) is of the copy.
+    with lock:
+        _detach_solver_model(network)
+        network = network.copy()
     cfg = copy.copy(cfg) if cfg is not None else SolverConfig()
     patch, pack_notes = arch.solver_config_patch_with_preflight(
         pack, network=network, dsr_buses=dsr_buses)
@@ -190,11 +196,6 @@ def run_eh_study(
             setattr(cfg, k, v)
         except Exception:
             pass
-    # Private network: pack overlay + ENS solve never touch the shared one.
-    # Copied under the network's lock so an edit in flight cannot tear it.
-    with lock:
-        _detach_solver_model(network)
-        network = network.copy()
 
     # Stages this driver can actually execute today.
     IMPLEMENTED = frozenset({
