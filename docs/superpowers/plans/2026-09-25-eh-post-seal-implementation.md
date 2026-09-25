@@ -260,6 +260,10 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
   - Import-unit capacity uses the time-averaged pu.
   - Chat wording: `certified` is also null with no target, and grid import is excluded unless outage-rated.
 - **Cost measured:** a 1-year (8,760 h) hub MC certification takes about 3–4 s at 2,000 draws.
+- **Re-gate:** **GO**.
+  - B1 and B2 are RESOLVED; the gate probes P2a/P2b/P2c/P4 are all refused now.
+  - Full backend suite: 5792 passed, 31 skipped.
+  - Frontend: 1948 passed, `tsc` clean.
 
 ---
 

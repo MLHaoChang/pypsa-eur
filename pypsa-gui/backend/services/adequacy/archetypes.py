@@ -387,6 +387,14 @@ def hub_boundary_copy(n, pack: ArchetypePack):
     * ``carrier`` fallback — refused: it also matches internal hub Links.
     * no import Links — the whole network is the hub.
 
+    Always refused (``HubBoundaryError``), whatever the rule — each would let
+    the copper-plate MC sample the grid's fleet as local capacity:
+
+    * a selected import Link whose endpoints stay connected through another
+      Line/Link (it does not separate the grid from the hub);
+    * an ``eh_critical`` bus beyond the boundary (tags point the wrong way);
+    * a hub side that serves no load.
+
     Import Links carrying their OWN outage data enter as one two-state unit
     of their hub-side capacity (decision 6: import is firm only when its
     outages are modelled); the rest are excluded.
