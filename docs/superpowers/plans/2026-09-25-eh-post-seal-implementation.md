@@ -84,6 +84,25 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
 
 **Acceptance P10:** each item red → green; `gui-tests` green; FE CI job green on a PR.
 
+**P10 status (2026-09-25, `claude/epic-allen-k2t1c4`):** implemented. Tests are in `tests/test_energy_hub_p10_hygiene.py` plus `test_adequacy_campaign.py`; all were shown red before each fix.
+
+- [x] **P10a DSR preflight.**
+  - `run_eh_study(dsr_buses=…)` goes through `solver_config_patch_with_preflight`.
+  - Warnings are on the `apply_pack` note and in the new `ReferenceDesignReport.notes` (added to `EXPORT_KEYS` and the goldens; the FE renders them).
+  - `_assumptions_hash` covers DSR price and share.
+- [x] **P10b DtC.**
+  - Fallbacks read the Load-keyed capture, rolled up by `loads.bus`. An authoritative bus roll-up is final, including 0.
+  - Stress freezes capacities and strips the ENS cap, zone multiple and reserve margin.
+  - **Also found and fixed:** P6(b) per-Load VOLL slacks had no per-snapshot bound, so a slack could "shed" more than its own Load and export the surplus over Links. The fix sets `p_max_pu = p_set / p_nom` in `services/solver/assumptions.py`.
+  - The critical/non-critical split between coupled buses remains degenerate at equal VOLL. That is the Q5 premium (P16); P10 tests pin only the physical bounds.
+- [x] **P10c:** the `fmea_sweep` estimate is `(K+2 if K) + (C+2 if C)`, pinned against counted runs.
+- [x] **P10d:**
+  - `pixi.toml` python `>=3.12`; `pixi lock --check` reports the lock is up to date.
+  - `gui-frontend-tests` CI job (vitest + `tsc --noEmit`).
+  - The seal glob `test_energy_hub_*.py` already includes the new files.
+- [x] **P10e:** the shared network is copied under its RLock.
+- [ ] **QA gate** (independent) — pending.
+
 ---
 
 ## P11 — `mc_certify` stage (spec decisions 1–2, §3 MVP-B)

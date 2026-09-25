@@ -454,6 +454,15 @@ export function EhReferenceDesignPanel() {
                 )}
               </div>
 
+              {(report.notes?.length ?? 0) > 0 && (
+                <ul
+                  className="flex flex-col gap-0.5 text-[10px] text-warn"
+                  data-testid="eh-report-notes"
+                >
+                  {report.notes!.map(note => <li key={note}>{note}</li>)}
+                </ul>
+              )}
+
               {completeness.length > 0 && (
                 <ul
                   className="flex flex-wrap gap-1.5"

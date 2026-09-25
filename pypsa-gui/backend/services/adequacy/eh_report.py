@@ -39,6 +39,7 @@ EXPORT_KEYS: tuple[str, ...] = (
     "pipeline",
     "tea",
     "gates",
+    "notes",
 )
 
 
@@ -128,6 +129,7 @@ def assemble_reference_design_report(
     period_basis: str | None = None,
     tea: TeaBlock | None = None,
     gates: GatesBlock | None = None,
+    notes: list[str] | None = None,
 ) -> ReferenceDesignReport:
     """Build the one product artifact from stage fragments + completeness."""
     sections: dict[str, SectionState] = {}
@@ -155,6 +157,7 @@ def assemble_reference_design_report(
         pipeline=pipeline,
         tea=tea,
         gates=gates,
+        notes=list(notes or []),
     )
 
 

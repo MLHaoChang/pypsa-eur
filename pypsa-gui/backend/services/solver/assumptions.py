@@ -768,6 +768,22 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
             except (TypeError, ValueError):
                 peak = 0.0
             slack_pnom = max(peak, 1.0) * 10.0
+            # The slack may shed at most what ITS Load demands in each
+            # snapshot. Unbounded (10× peak, p_max_pu=1) it could "shed"
+            # more than its Load and export the surplus over Links — at equal
+            # VoLL the LP is indifferent, so unserved energy was attributed
+            # to the wrong Load/bus, even above that Load's own demand.
+            try:
+                if p_set_t is not None and load_id in getattr(p_set_t, "columns", []):
+                    demand = p_set_t[load_id].reindex(n.snapshots).fillna(0.0)
+                else:
+                    demand = pd.Series(
+                        float(n.loads.at[load_id, "p_set"] or 0.0)
+                        if "p_set" in n.loads.columns else 0.0,
+                        index=n.snapshots)
+                slack_max_pu = (demand.clip(lower=0.0) / slack_pnom).clip(upper=1.0)
+            except (TypeError, ValueError):
+                slack_max_pu = None
             name = voll_slack_name(load_id)
             if name in n.generators.index:
                 continue  # don't double-add if a previous run leaked
@@ -783,6 +799,8 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                     marginal_cost=cfg.voll,
                     # The convention's owner is services/adequacy/slack.py.
                     carrier=INVOLUNTARY_SLACK_CARRIER,
+                    **({"p_max_pu": slack_max_pu}
+                       if slack_max_pu is not None else {}),
                 )
             except Exception:
                 PyPSAService.unmark_transient("Generator", name)

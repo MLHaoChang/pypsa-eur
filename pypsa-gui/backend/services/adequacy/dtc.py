@@ -105,71 +105,87 @@ def _critical_buses(n, dtc: DtcConfig) -> set[str]:
     return buses
 
 
+def _load_to_bus(n) -> dict[str, str]:
+    if n.loads is None or n.loads.empty or "bus" not in n.loads.columns:
+        return {}
+    return {str(i): str(b) for i, b in n.loads["bus"].items()}
+
+
+def _energy_weights(n):
+    """Snapshot weights the P6(b) capture uses for MWh (``generators``)."""
+    sw = n.snapshot_weightings
+    for col in ("generators", "objective"):
+        if col in sw.columns:
+            return sw[col]
+    return sw.iloc[:, 0]
+
+
 def _bus_unserved_mwh(
     n, bus_ids: set[str], *, sink: dict | None = None,
 ) -> float:
     """Sum unserved energy on buses (MWh).
 
-    Prefer ``last_lost_load`` from the solver sink (VOLL gens are cleaned up
-    after optimize). Fall back to residual ``__voll_*`` dispatch if present.
+    Sources, most authoritative first (P6(b) keys the capture by **Load**):
+
+    1. ``lost_load_bus_period_mwh`` — the capture's own bus roll-up. When it
+       is present it is final, including 0 for a bus that shed nothing.
+    2. ``lost_load_load_period_mwh`` rolled up by ``loads.bus``.
+    3. ``lost_load_t`` (MW, Load-keyed; legacy bus-keyed columns accepted)
+       weighted and rolled up the same way.
+    4. Residual involuntary slack dispatch on the network, if any survived.
     """
     if not bus_ids:
         return 0.0
+    load_bus = _load_to_bus(n)
+
+    def _bus_of(col) -> str:
+        return load_bus.get(str(col), str(col))
+
     if sink:
         lost = sink.get("last_lost_load")
         if isinstance(lost, dict):
             by_bus = lost.get("lost_load_bus_period_mwh")
             if by_bus is not None:
                 try:
-                    # DataFrame columns = buses; rows = periods — sum matching buses.
                     cols = [c for c in by_bus.columns if str(c) in bus_ids]
-                    if cols:
-                        return float(by_bus[cols].to_numpy().sum())
+                    return float(by_bus[cols].to_numpy().sum()) if cols else 0.0
                 except Exception:
-                    pass
-            # Time series fallback: columns = buses.
+                    logger.exception("DtC: unreadable lost_load_bus_period_mwh")
+            by_load = lost.get("lost_load_load_period_mwh")
+            if by_load is not None:
+                try:
+                    cols = [c for c in by_load.columns if _bus_of(c) in bus_ids]
+                    return float(by_load[cols].to_numpy().sum()) if cols else 0.0
+                except Exception:
+                    logger.exception("DtC: unreadable lost_load_load_period_mwh")
             lost_t = lost.get("lost_load_t")
             if lost_t is not None:
                 try:
-                    weights = (
-                        n.snapshot_weightings["objective"]
-                        if "objective" in n.snapshot_weightings.columns
-                        else n.snapshot_weightings.iloc[:, 0]
-                    )
-                    cols = [c for c in lost_t.columns if str(c) in bus_ids]
-                    if cols:
-                        return float((lost_t[cols].mul(weights, axis=0)).to_numpy().sum())
+                    weights = _energy_weights(n).reindex(lost_t.index).fillna(0.0)
+                    cols = [c for c in lost_t.columns if _bus_of(c) in bus_ids]
+                    if not cols:
+                        return 0.0
+                    return float(
+                        lost_t[cols].clip(lower=0).mul(weights, axis=0)
+                        .to_numpy().sum())
                 except Exception:
-                    pass
+                    logger.exception("DtC: unreadable lost_load_t")
     if n.generators is None or n.generators.empty:
         return 0.0
     if getattr(n, "generators_t", None) is None or n.generators_t.p is None:
         return 0.0
-    weights = (
-        n.snapshot_weightings["objective"]
-        if "objective" in n.snapshot_weightings.columns
-        else n.snapshot_weightings.iloc[:, 0]
-    )
-    from services.adequacy.slack import (
-        VOLL_SLACK_PREFIX,
-        involuntary_slack_mask,
-    )
+    weights = _energy_weights(n)
+    from services.adequacy.slack import involuntary_slack_mask
 
+    invol = involuntary_slack_mask(n.generators)
     total = 0.0
-    for bus in bus_ids:
-        cand = [f"{VOLL_SLACK_PREFIX}{bus}"]
-        cand = [c for c in cand if c in n.generators_t.p.columns]
-        if not cand:
-            invol = involuntary_slack_mask(n.generators)
-            cand = [
-                str(g) for g in n.generators.index
-                if bool(invol.at[g]) and str(n.generators.at[g, "bus"]) == bus
-            ]
-        for g in cand:
-            if g not in n.generators_t.p.columns:
-                continue
-            series = n.generators_t.p[g].fillna(0.0)
-            total += float((series * weights).sum())
+    for g in n.generators.index:
+        if not bool(invol.at[g]) or str(n.generators.at[g, "bus"]) not in bus_ids:
+            continue
+        if g not in n.generators_t.p.columns:
+            continue
+        series = n.generators_t.p[g].fillna(0.0)
+        total += float((series * weights).sum())
     return total
 
 
@@ -200,8 +216,20 @@ def run_dtc_stress(
 ) -> dict[str, Any]:
     """Island each contingency and re-dispatch; report critical vs other unserved.
 
+    **Fixed plan** (spec decision 8): extendable capacity is frozen at its
+    solved size (``p_nom_opt`` where finite, else ``p_nom``) with the same
+    ``sweep.freeze_capacities`` the Class-B sweep uses. Islanding must not
+    buy new capacity, or the stress reports the shortfall a re-plan would
+    fix instead of the one the plan has. The ENS cap, zone multiple and
+    reserve margin are stripped for the frozen re-dispatch, as in the sweep:
+    a surviving margin on pinned capacity is infeasible, and a binding ENS
+    cap would read as the target rather than as the islanding damage.
+
     ``max_solves`` caps the LPs attempted (EH study budget).
     """
+    import dataclasses
+
+    from services.adequacy.sweep import freeze_capacities
     from services.solver_service import SolverConfig, run_simulation
 
     if not isinstance(dtc, DtcConfig):
@@ -226,15 +254,15 @@ def run_dtc_stress(
         _detach_solver_model(network)
         nn = network.copy()
         undo, mutation = apply_islanding_contingency(nn, str(link_id))
+        unfreeze = freeze_capacities(nn)
         sink: dict = {}
         try:
-            cfg_i = copy.copy(cfg) if cfg is not None else SolverConfig()
+            cfg_i = dataclasses.replace(
+                cfg if cfg is not None else SolverConfig(),
+                ens_cap_permyriad=None, ens_zone_cap_multiple=None,
+                reserve_margin=None)
             if float(getattr(cfg_i, "voll", 0.0) or 0.0) <= 0:
                 cfg_i.voll = 500.0
-            try:
-                cfg_i.ens_cap_permyriad = None
-            except Exception:
-                pass
             solves += 1
             status, condition = run_simulation(
                 cfg_i, nn, lock, stop_event, log_queue,
@@ -255,6 +283,7 @@ def run_dtc_stress(
             })
         finally:
             try:
+                unfreeze()
                 undo()
             except Exception:
                 logger.exception("DtC islanding undo failed for %s", link_id)

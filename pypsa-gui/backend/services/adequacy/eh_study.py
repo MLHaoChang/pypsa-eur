@@ -104,6 +104,8 @@ def _assumptions_hash(cfg) -> str:
         "voll": getattr(cfg, "voll", None),
         "ens_cap_permyriad": getattr(cfg, "ens_cap_permyriad", None),
         "dsr_buses": list(getattr(cfg, "dsr_buses", None) or []),
+        "dsr_price_eur_per_mwh": getattr(cfg, "dsr_price_eur_per_mwh", None),
+        "dsr_share_of_load": getattr(cfg, "dsr_share_of_load", None),
     }
     blob = json.dumps(raw, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
@@ -122,6 +124,7 @@ def run_eh_study(
     state_update=None,
     store: dict | None = None,
     dtc_config=None,
+    dsr_buses: list[str] | None = None,
 ) -> ReferenceDesignReport:
     """Synchronous EH study driver (HTTP worker: ``eh_study_runner``).
 
@@ -137,6 +140,10 @@ def run_eh_study(
     are never published through ``state_update`` — the foreground results keep
     describing the user's own solve (same rule as frontier ``_restore_base``).
     ``state_update`` is accepted for runner symmetry only.
+
+    ``dsr_buses`` opts buses into the DSR tier for packs with
+    ``dsr_opt_in`` (decision 15) through the double-count preflight; the
+    preflight's warnings land on the ``apply_pack`` note and ``notes``.
 
     ``budget_solves`` is a ceiling: multi-solve stages receive the remaining
     budget and a stage that would start with none left is skipped.
@@ -176,14 +183,18 @@ def run_eh_study(
     # Private cfg: the pack target wins for every stage, the session config is
     # left exactly as the user set it.
     cfg = copy.copy(cfg) if cfg is not None else SolverConfig()
-    for k, v in arch.solver_config_patch(pack).items():
+    patch, pack_notes = arch.solver_config_patch_with_preflight(
+        pack, network=network, dsr_buses=dsr_buses)
+    for k, v in patch.items():
         try:
             setattr(cfg, k, v)
         except Exception:
             pass
     # Private network: pack overlay + ENS solve never touch the shared one.
-    _detach_solver_model(network)
-    network = network.copy()
+    # Copied under the network's lock so an edit in flight cannot tear it.
+    with lock:
+        _detach_solver_model(network)
+        network = network.copy()
 
     # Stages this driver can actually execute today.
     IMPLEMENTED = frozenset({
@@ -264,7 +275,8 @@ def run_eh_study(
                 undo = result.undo
                 pack_h = result.pack_hash
                 _mark("apply_pack", "run",
-                      note="; ".join(result.warnings) or None)
+                      note="; ".join(list(result.warnings) + pack_notes)
+                      or None)
 
         if not aborted and "ens_solve" in requested:
             if stop_event.is_set():
@@ -770,6 +782,7 @@ def run_eh_study(
         period_basis=period_basis,
         tea=tea_obj,
         gates=gates_obj,
+        notes=pack_notes,
     )
     if store is not None:
         report_mod.store_eh_report(store, report)

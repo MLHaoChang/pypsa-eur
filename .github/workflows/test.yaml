@@ -144,6 +144,54 @@ jobs:
       run: |
         pixi run gui-qa-drivers
 
+  # The pypsa-gui FRONTEND suite (vitest) and type-check. Until this job
+  # existed no workflow ran `npm`/`vitest` at all, so the ~1,900 frontend tests
+  # were only ever run by hand — the same gap `gui-backend-tests` closed for
+  # the backend.
+  gui-frontend-tests:
+    name: GUI frontend
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        shell: bash -l {0}
+        working-directory: pypsa-gui/frontend
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - uses: dorny/paths-filter@v4
+      id: filter
+      with:
+        filters: |
+          gui:
+            - 'pypsa-gui/frontend/**'
+            - '.github/workflows/test.yaml'
+
+    - name: Skip - no frontend changes
+      if: steps.filter.outputs.gui != 'true' && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
+      run: echo "Skipping tests because no pypsa-gui/frontend changes detected"
+
+    - name: Setup Node
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: pypsa-gui/frontend/package-lock.json
+
+    - name: Install
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      run: npm ci --no-audit --no-fund
+
+    - name: Type-check
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      run: npx tsc --noEmit -p .
+
+    - name: Run frontend tests
+      if: steps.filter.outputs.gui == 'true' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+      run: npx vitest --run
+
   integration-tests:
     name: Integration
     runs-on: ${{ matrix.os }}-latest

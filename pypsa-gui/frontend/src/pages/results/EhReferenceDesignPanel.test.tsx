@@ -229,6 +229,26 @@ describe('EhReferenceDesignPanel', () => {
     expect(screen.getByTestId('eh-report-solves').textContent).toMatch(/1 \/ 30/)
   })
 
+  it('shows study-level notes (e.g. the DSR preflight)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible',
+      report: { ...REPORT, notes: ['DSR stays OFF (never applied globally)'] },
+    } as never)
+    await openPanel()
+    expect((await screen.findByTestId('eh-report-notes')).textContent)
+      .toMatch(/DSR stays OFF/)
+  })
+
+  it('renders no notes block when the report has none', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid',
+      report: { ...REPORT, notes: [] },
+    } as never)
+    await openPanel()
+    await screen.findByTestId('eh-report')
+    expect(screen.queryByTestId('eh-report-notes')).toBeNull()
+  })
+
   it('hides the previous report and tables while a new study runs', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValueOnce({
       status: 'done', study: 'eh_study', archetype: 'strong_grid', report: null,

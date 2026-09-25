@@ -261,9 +261,10 @@ def estimate_solves(n, study: str, **kwargs) -> int:
     # route's own budget explicitly EXCLUDES — the frontier's `_restore_base`,
     # both loops' `_restore_closing` — and `coupling.py` says so in as many
     # words: "the wall-time budget the route promises is `max_solves + 1` (the
-    # closing restore is outside it)". The sweep's `+ 1` was always here; the
-    # others were undercharging by exactly that restore, so a campaign could
-    # overrun its budget by one solve per study.
+    # closing restore is outside it)". The others were undercharging by
+    # exactly that restore, so a campaign could overrun its budget by one
+    # solve per study. (The sweep also pays a frozen base solve per sweep —
+    # see below.)
     if study == "frontier":
         from services.adequacy.frontier import DEFAULT_TARGETS_PERMYRIAD
         targets = kwargs.get("targets_permyriad") or DEFAULT_TARGETS_PERMYRIAD
@@ -275,8 +276,12 @@ def estimate_solves(n, study: str, **kwargs) -> int:
             class_b = len(class_b_contingencies(n))
         except Exception:  # noqa: BLE001 — an unreadable frame is not a budget
             class_b = 0
-        # +1 for the closing base re-solve, which the sweep always runs.
-        return class_b + len(kwargs.get("scenarios") or []) + 1
+        class_c = len(kwargs.get("scenarios") or [])
+        # Class B and class C each run their OWN `run_contingency_sweep`: a
+        # frozen base solve, one solve per contingency, and a closing base
+        # re-solve — K+2 and C+2. A sweep with nothing to run returns before
+        # any of them (0). Pinned against a counted run in the tests.
+        return ((class_b + 2) if class_b else 0) + ((class_c + 2) if class_c else 0)
 
     if study in ("coupling_loop", "margin_loop"):
         from services.adequacy.coupling import MAX_LOOP_SOLVES

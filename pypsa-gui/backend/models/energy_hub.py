@@ -210,6 +210,9 @@ class ReferenceDesignReport(BaseModel):
     pipeline: EHStudyPipeline = Field(default_factory=EHStudyPipeline)
     tea: TeaBlock | None = None
     gates: GatesBlock | None = None
+    # Study-level disclosures that belong to no single section (e.g. the
+    # DSR opt-in preflight, decision 15).
+    notes: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _completeness_matches_sections(self) -> ReferenceDesignReport:

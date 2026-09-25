@@ -653,6 +653,8 @@ export interface EhReferenceDesignReport {
   } | null
   /** Dynamics feasibility gate (SCR → EMT flag). Absent when section skipped. */
   gates?: EhGatesBlock | null
+  /** Study-level disclosures belonging to no single section (e.g. DSR preflight). */
+  notes?: string[]
 }
 
 /** One pipeline stage record (``failed`` = ran, produced no evidence). */
