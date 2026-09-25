@@ -64,6 +64,13 @@ Priority is my recommendation; the product owner decides.
 
 ## 5. Verification (this branch)
 
+| Surface | Result |
+|---|---|
+| EH seal set (`test_energy_hub_*` incl. new isolation file, sweep, chat, campaign) | **261 passed** (247 + 14 new) |
+| `test_energy_hub_study_http.py` | **10 passed** |
+| Full backend, `-m "not slow"` | **5754 passed**. 15 failed only because the pip venv lacked `pywebview` / `python-magic` / `psycopg` / `ruff`; all 15 pass once those are installed. The pixi `test` env ships them |
+| Full frontend (`vitest --run`) | **1943 passed** (177 files); `tsc --noEmit` clean |
+
 ```bash
 cd pypsa-gui/backend
 PYTHONPATH=<repo>:<backend> python -m pytest \
