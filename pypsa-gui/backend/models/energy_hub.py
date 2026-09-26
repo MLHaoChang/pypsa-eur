@@ -153,6 +153,9 @@ class ArchetypePack(BaseModel):
     dtc_stress_default: bool = False
     # Opt-in P4b planning overlay (islanded + retained critical demand).
     dtc_planning_default: bool = False
+    # P12: the cost–availability frontier runs by default only where spec §3
+    # makes it the deliverable (strong_grid); elsewhere only when requested.
+    frontier_default: bool = False
     # DSR: weak_flexible may suggest opt-in; never silently global (decision 15).
     dsr_opt_in: bool = False
 
@@ -253,6 +256,7 @@ def default_strong_grid_pack() -> ArchetypePack:
         ),
         levers=OptimizationLevers(sizing=True),
         mc_certify_required=False,
+        frontier_default=True,
         dtc_stress_default=False,
         dtc_planning_default=False,
         dsr_opt_in=False,

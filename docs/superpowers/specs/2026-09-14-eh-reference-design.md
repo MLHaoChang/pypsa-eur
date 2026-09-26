@@ -185,6 +185,11 @@ P3b (auto-select redundancy) and P4b (DtC planning) complete co-opt but are post
 
 Solution FMEA remains the **diagnostic** under a single plan. The EH reference design is the **product wrapper**: archetype → orchestrated levers → existing co-opt/diagnostic engines → `ReferenceDesignReport`. Every point on an EH frontier still gets its own FMEA ranking (same principle as solution FMEA).
 
+**Amendment (2026-09-25, P12):**
+- **Per-frontier-point FMEA is deferred.** In v1 the EH study ranks **only the ENS plan**. `fmea_top` is the top-5 Class-B Link modes on the pack-applied `ens_solve` plan, frozen.
+- **Frontier scope.** The `frontier` stage sweeps the pack target and its nearest default targets. It runs by default only for `strong_grid` (pack flag `frontier_default`) and takes at most ~40% of `budget_solves`.
+- **Closing re-solves are skipped.** Both stages run on disposable private copies, so they skip the engines' closing re-solve (decision Q4). HTTP routes always restore.
+
 ## 10. DtC planning spike (P4b) — decision recorded
 
 **Spike question.** Plan Phase 4b required a choice before expansion under a DtC overlay:

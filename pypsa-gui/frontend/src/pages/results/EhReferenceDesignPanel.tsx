@@ -180,6 +180,52 @@ export function multiEnergyLoadEntries(
     .map(([load, mwh]) => ({ load, mwh: Number(mwh) }))
 }
 
+type FrontierPoint = {
+  target_permyriad: number
+  status: string
+  point?: { total_system_cost_eur?: number; achieved_ens_mwh?: number } | null
+}
+type FmeaRow = {
+  mode_id: string
+  name?: string
+  criticality_eur_per_year?: number
+  occurrence_per_year?: number
+  severity_eur?: number
+  delta_eue_mwh?: number | null
+}
+
+/** Frontier points from the report's `frontier` section (P12). */
+export function frontierPoints(report: EhReferenceDesignReport): FrontierPoint[] {
+  const payload = report.sections?.frontier?.payload as { points?: unknown } | null | undefined
+  return Array.isArray(payload?.points) ? (payload!.points as FrontierPoint[]) : []
+}
+
+/** Ranked FMEA rows from the report's `fmea_top` section (P12). */
+export function fmeaTopRows(report: EhReferenceDesignReport): FmeaRow[] {
+  const payload = report.sections?.fmea_top?.payload as { rows?: unknown } | null | undefined
+  return Array.isArray(payload?.rows) ? (payload!.rows as FmeaRow[]) : []
+}
+
+export function frontierCsvRows(report: EhReferenceDesignReport): unknown[][] {
+  return frontierPoints(report).map(p => [
+    p.target_permyriad,
+    p.status,
+    p.point?.total_system_cost_eur ?? '',
+    p.point?.achieved_ens_mwh ?? '',
+  ])
+}
+
+export function fmeaTopCsvRows(report: EhReferenceDesignReport): unknown[][] {
+  return fmeaTopRows(report).map(r => [
+    r.mode_id,
+    r.name ?? '',
+    r.criticality_eur_per_year ?? '',
+    r.occurrence_per_year ?? '',
+    r.severity_eur ?? '',
+    r.delta_eue_mwh ?? '',
+  ])
+}
+
 /** CSV rows for the redundancy comparison table. */
 export function redundancyCsvRows(table: EhRedundancyTable): unknown[][] {
   const selected = table.selection?.selected_id ?? ''
@@ -330,6 +376,10 @@ export function EhReferenceDesignPanel() {
     [report?.completeness],
   )
   const cert = report ? certificationHeadline(report) : null
+  const frPoints = report ? frontierPoints(report) : []
+  const frPayload = report?.sections?.frontier?.payload as
+    | { pack_target_permyriad?: number; knee_index?: number | null } | null | undefined
+  const fmeaRows = report ? fmeaTopRows(report) : []
   const meCarriers = report ? multiEnergyCarrierEntries(report) : []
   const meLoads = report ? multiEnergyLoadEntries(report) : []
 
@@ -602,6 +652,119 @@ export function EhReferenceDesignPanel() {
                     >
                       {report.sections.gates.note}
                     </p>
+                  )}
+                </div>
+              )}
+
+              {frPoints.length > 0 && (
+                <div
+                  className="flex flex-col gap-1 border-t border-border/50 pt-2"
+                  data-testid="eh-frontier"
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                      Cost vs ENS target (frontier, cost excl. shed)
+                    </h4>
+                    <CsvButton
+                      testId="eh-frontier-csv"
+                      label="CSV"
+                      onClick={() => downloadCSV(
+                        'eh-frontier.csv',
+                        ['target_permyriad', 'status', 'cost_eur', 'achieved_ens_mwh'],
+                        frontierCsvRows(report),
+                      )}
+                    />
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[10px]">
+                      <thead className="text-muted">
+                        <tr>
+                          <th className="text-right font-medium py-1 pr-3">Target ‱</th>
+                          <th className="text-left font-medium py-1 pr-3">Status</th>
+                          <th className="text-right font-medium py-1 pr-3">Cost</th>
+                          <th className="text-right font-medium py-1">ENS MWh</th>
+                        </tr>
+                      </thead>
+                      <tbody className="font-mono">
+                        {frPoints.map((p, i) => {
+                          const isPack = p.target_permyriad === frPayload?.pack_target_permyriad
+                          return (
+                            <tr
+                              key={`${p.target_permyriad}:${i}`}
+                              className={`border-t border-border/50 ${isPack ? 'text-accent' : ''}`}
+                              data-testid={`eh-frontier-row-${i}`}
+                              data-pack-target={isPack ? 'true' : 'false'}
+                            >
+                              <td className="py-0.5 pr-3 text-right">{p.target_permyriad}</td>
+                              <td className="py-0.5 pr-3 font-sans">{p.status}</td>
+                              <td className="py-0.5 pr-3 text-right">
+                                {p.point?.total_system_cost_eur != null
+                                  ? eur(p.point.total_system_cost_eur) : '—'}
+                              </td>
+                              <td className="py-0.5 text-right">
+                                {p.point?.achieved_ens_mwh != null
+                                  ? p.point.achieved_ens_mwh.toFixed(2) : '—'}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {fmeaRows.length > 0 && (
+                <div
+                  className="flex flex-col gap-1 border-t border-border/50 pt-2"
+                  data-testid="eh-fmea-top"
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                      Top Class-B failure modes (ENS plan)
+                    </h4>
+                    <CsvButton
+                      testId="eh-fmea-top-csv"
+                      label="CSV"
+                      onClick={() => downloadCSV(
+                        'eh-fmea-top.csv',
+                        ['mode_id', 'name', 'criticality_eur_per_year',
+                         'occurrence_per_year', 'severity_eur', 'delta_eue_mwh'],
+                        fmeaTopCsvRows(report),
+                      )}
+                    />
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[10px]">
+                      <thead className="text-muted">
+                        <tr>
+                          <th className="text-left font-medium py-1 pr-3">Link</th>
+                          <th className="text-right font-medium py-1 pr-3">Criticality €/yr</th>
+                          <th className="text-right font-medium py-1 pr-3">Occ./yr</th>
+                          <th className="text-right font-medium py-1">ΔEUE MWh</th>
+                        </tr>
+                      </thead>
+                      <tbody className="font-mono">
+                        {fmeaRows.map((r, i) => (
+                          <tr key={r.mode_id} className="border-t border-border/50"
+                              data-testid={`eh-fmea-row-${i}`}>
+                            <td className="py-0.5 pr-3 font-sans">{r.name ?? r.mode_id}</td>
+                            <td className="py-0.5 pr-3 text-right">
+                              {r.criticality_eur_per_year != null ? eur(r.criticality_eur_per_year) : '—'}
+                            </td>
+                            <td className="py-0.5 pr-3 text-right">
+                              {r.occurrence_per_year?.toFixed(2) ?? '—'}
+                            </td>
+                            <td className="py-0.5 text-right">
+                              {r.delta_eue_mwh != null ? r.delta_eue_mwh.toFixed(2) : '—'}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {report.sections?.fmea_top?.note && (
+                    <p className="text-[10px] text-muted">{report.sections.fmea_top.note}</p>
                   )}
                 </div>
               )}

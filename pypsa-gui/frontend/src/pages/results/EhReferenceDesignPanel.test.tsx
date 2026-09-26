@@ -10,6 +10,8 @@ import {
   dtcPlanningCsvRows,
   dtcStressCsvRows,
   EhReferenceDesignPanel,
+  fmeaTopCsvRows,
+  frontierCsvRows,
   hasMultiEnergyBlock,
   leverCsvRows,
   multiEnergyCarrierEntries,
@@ -117,6 +119,29 @@ describe('completenessRows', () => {
     expect(statusTone('ok')).toContain('accent')
     expect(statusTone('skipped')).toContain('muted')
     expect(statusTone('not_established')).toContain('warn')
+  })
+})
+
+describe('frontier / fmea CSV rows', () => {
+  it('flattens frontier points and FMEA rows', () => {
+    const rep = {
+      ...REPORT,
+      sections: {
+        frontier: { status: 'ok' as const, note: null, payload: { points: [
+          { target_permyriad: 10, status: 'ok',
+            point: { total_system_cost_eur: 1500, achieved_ens_mwh: 2 } },
+          { target_permyriad: 5, status: 'infeasible', point: null },
+        ] } },
+        fmea_top: { status: 'ok' as const, note: null, payload: { rows: [
+          { mode_id: 'a', name: 'a', criticality_eur_per_year: 9,
+            occurrence_per_year: 1, severity_eur: 9, delta_eue_mwh: 1 },
+        ] } },
+      },
+    }
+    expect(frontierCsvRows(rep as never)).toEqual([
+      [10, 'ok', 1500, 2], [5, 'infeasible', '', ''],
+    ])
+    expect(fmeaTopCsvRows(rep as never)).toEqual([['a', 'a', 9, 1, 9, 1]])
   })
 })
 
@@ -279,6 +304,54 @@ describe('EhReferenceDesignPanel', () => {
     await screen.findByTestId('eh-report')
     expect(screen.queryByTestId('eh-report-lole')).toBeNull()
     expect(screen.queryByTestId('eh-certification-verdict')).toBeNull()
+  })
+
+  it('renders the frontier and FMEA top-N tables with CSV export', async () => {
+    const rep = {
+      ...REPORT,
+      completeness: { ...REPORT.completeness, frontier: 'ok' as const, fmea_top: 'ok' as const },
+      sections: {
+        frontier: {
+          status: 'ok' as const, note: null,
+          payload: {
+            pack_target_permyriad: 10,
+            knee_index: 0,
+            points: [
+              { target_permyriad: 20, status: 'ok',
+                point: { total_system_cost_eur: 1000, achieved_ens_mwh: 5 } },
+              { target_permyriad: 10, status: 'ok',
+                point: { total_system_cost_eur: 1500, achieved_ens_mwh: 2 } },
+              { target_permyriad: 5, status: 'infeasible', point: null },
+            ],
+          },
+        },
+        fmea_top: {
+          status: 'ok' as const, note: 'Link-primary residual risk',
+          payload: {
+            k_links: 3,
+            rows: [
+              { mode_id: 'feed1', name: 'feed1', criticality_eur_per_year: 900,
+                occurrence_per_year: 7.3, severity_eur: 123, delta_eue_mwh: 4 },
+            ],
+          },
+        },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report: rep,
+    } as never)
+    const user = await openPanel()
+    const fr = await screen.findByTestId('eh-frontier')
+    expect(fr.textContent).toMatch(/infeasible/)
+    expect(screen.getByTestId('eh-frontier-row-1').getAttribute('data-pack-target'))
+      .toBe('true')
+    expect(screen.getByTestId('eh-fmea-top').textContent).toMatch(/feed1/)
+    await user.click(screen.getByTestId('eh-frontier-csv'))
+    await user.click(screen.getByTestId('eh-fmea-top-csv'))
+    expect(downloadCSV).toHaveBeenCalledWith(
+      'eh-frontier.csv', expect.any(Array), frontierCsvRows(rep as never))
+    expect(downloadCSV).toHaveBeenCalledWith(
+      'eh-fmea-top.csv', expect.any(Array), fmeaTopCsvRows(rep as never))
   })
 
   it('shows study-level notes (e.g. the DSR preflight)', async () => {

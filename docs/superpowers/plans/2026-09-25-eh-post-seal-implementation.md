@@ -328,6 +328,26 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
 
 **FE:** frontier table (target, cost, achieved ENS) + CSV; FMEA top-N table + CSV. Reuse `downloadCSV`.
 
+**P12 status (2026-09-26, `claude/epic-allen-k2t1c4`):** implemented. `tests/test_energy_hub_frontier_fmea.py` has 15 tests, all red on pre-P12 code.
+
+- [x] **Engines.** `run_frontier_sweep` and `run_contingency_sweep` / `run_class_b_sweep` take `restore_base=True`. EH passes False on its private copies, so fmea costs K+1, not K+2. A guard test pins that no route or runner passes False.
+- [x] **`frontier_default` pack flag.** True only for `strong_grid`. Pack fixtures are updated, so `pack_hash` changes for every pack.
+- [x] **Frontier stage.**
+  - Runs on its own copy, keeps the pack cap, and adds the nearest default targets.
+  - Takes `min(remaining, max(2, ⌊0.4·budget⌋), 12)` points; fewer than 2 means skipped for budget.
+  - Payload carries the points, knee and ex-shed basis.
+- [x] **fmea_top stage.**
+  - Runs on a post-`ens_solve` copy, with import Links the pack closed removed first.
+  - K=0 and K>20 are `not_established`. A sweep that doesn't fit the budget is skipped, not truncated; an abort withholds the partial ranking.
+  - Top-5 in worksheet order.
+  - Payload notes Link-primary scope and discloses active vintage bounds (the P10 limitation).
+- [x] **Spec §9.** Per-frontier-point FMEA is formally deferred.
+- [x] **Test update.** `test_energy_hub_study.py::test_default_stages_never_leave_unimplemented_pending` now expects the strong_grid frontier to be `ok`. `report_p5:133` needed no change.
+- [x] **Budget test.** The default `weak_flexible` and `off_grid` pipelines at 30 on a K=5 fixture still reach levers/DtC `ok`.
+- [x] **FE.** Frontier table (pack target highlighted) and FMEA top-N table, each with CSV.
+- [x] **Chat.** The description is updated.
+- [ ] **QA gate** — pending.
+
 ---
 
 ## P13 — Pack parameters over HTTP / UI / chat

@@ -52,6 +52,7 @@ __all__ = [
     "ZERO_SOLVE_STAGES",
     "certification_wanted",
     "default_stages_for",
+    "frontier_targets",
     "run_eh_study",
     "validate_stages",
 ]
@@ -78,7 +79,14 @@ _STAGE_SECTION = {
     "dtc_stress": "dtc",
     "dtc_planning": "dtc",
     "mc_certify": "certification",
+    "frontier": "frontier",
+    "fmea_top": "fmea_top",
 }
+
+# fmea_top: how many ranked Class-B modes the report carries.
+FMEA_TOP_N = 5
+# frontier: share of the study budget it may take by default (plan B8).
+FRONTIER_BUDGET_SHARE = 0.4
 
 # Stages that charge no LP solve. Never skipped for an exhausted budget (plan
 # B5): a spent LP budget must not silently drop a required certification.
@@ -144,6 +152,8 @@ def default_stages_for(pack: ArchetypePack) -> tuple[str, ...]:
             return bool(pack.levers.import_cap or pack.levers.storage_duration)
         if s == "mc_certify":
             return certification_wanted(pack)
+        if s == "frontier":
+            return bool(getattr(pack, "frontier_default", False))
         if s == "dtc_stress":
             return bool(pack.dtc_stress_default)
         if s == "dtc_planning":
@@ -424,6 +434,193 @@ def _stage_mc_certify(st: _Study) -> None:
             note=f"verdict {verdict}" if verdict else note)
 
 
+def _private_copy(network):
+    """A disposable copy of the (possibly solved) study network."""
+    from services.adequacy.redundancy import _detach_solver_model
+    _detach_solver_model(network)
+    return network.copy()
+
+
+def _vintage_bounds_active(network) -> bool:
+    """Multi-period vintage bounds re-expand extendables after a capacity
+    freeze (plan P10 known limitation) — disclosed where a freeze is used."""
+    import pandas as pd
+    meta = getattr(network, "meta", None)
+    bucket = meta.get("vintage_bounds") if isinstance(meta, dict) else None
+    return bool(bucket) and isinstance(network.snapshots, pd.MultiIndex)
+
+
+def frontier_targets(pack_cap: float, n_points: int) -> list[float]:
+    """The pack cap, then the default targets nearest to it (log distance),
+    ``n_points`` in total — ``run_frontier_sweep`` orders them loosest first."""
+    from services.adequacy.frontier import DEFAULT_TARGETS_PERMYRIAD
+    cap = float(pack_cap)
+    others = sorted((t for t in DEFAULT_TARGETS_PERMYRIAD if t != cap),
+                    key=lambda t: (abs(math.log(t / cap)), -t))
+    return [cap] + others[:max(0, n_points - 1)]
+
+
+def _stage_frontier(st: _Study) -> None:
+    """Cost vs availability ε-sweep around the pack target (spec §3 / P12a).
+
+    Runs on its OWN copy: each point re-optimises capacity, and later stages
+    (mc_certify, fmea_top) must read the ens_solve plan. The closing restore
+    is skipped on that disposable copy (decision Q4).
+    """
+    from services.adequacy import frontier as fr
+
+    def _not_established(reason: str, status: str = "skipped") -> None:
+        st.mark("frontier", status, note=reason)
+        st.sections["frontier"] = ("not_established", None, reason)
+
+    if st.ens_cap is None:
+        return _not_established("frontier needs the pack's ENS target")
+    n_points = min(st.remaining(),
+                   max(2, math.floor(FRONTIER_BUDGET_SHARE * st.budget_solves)),
+                   fr.MAX_FRONTIER_POINTS)
+    if n_points < 2:
+        return _not_established(
+            f"not run: budget_solves leaves {st.remaining()} solve(s) — a "
+            "frontier needs at least two points")
+    targets = frontier_targets(st.ens_cap, n_points)
+    try:
+        result = fr.run_frontier_sweep(
+            _private_copy(st.network), st.lock, st.cfg, targets,
+            log_queue=st.log_queue, stop_event=st.stop_event,
+            restore_base=False)
+    except (fr.FrontierConfigError, fr.FrontierBudgetError) as exc:
+        return _not_established(str(exc))
+    except Exception as exc:  # noqa: BLE001 — degrade like every other stage
+        logger.exception("frontier failed")
+        return _not_established(f"frontier failed: {exc}", status="aborted")
+    points = result["points"]
+    st.solves += len(points)
+    ok_points = [pt for pt in points if pt.get("status") == "ok"]
+    payload = {
+        "targets_permyriad": sorted(targets, reverse=True),
+        "pack_target_permyriad": float(st.ens_cap),
+        "points": points,
+        "knee_index": fr.knee_index(points, float(st.cfg.voll or 0.0)),
+        "warning": result.get("warning"),
+        "aborted": bool(result.get("aborted")),
+        "restore_skipped_on_private_copy": True,
+        "excludes_shed_cost": True,
+        "period_basis": next((pt.get("period_basis") for pt in ok_points), None),
+        "solves_charged": len(points),
+    }
+    if result.get("aborted"):
+        status, note = "not_established", "frontier aborted mid-sweep"
+    elif len(ok_points) < 2:
+        status, note = "not_established", "fewer than two frontier points solved"
+    else:
+        status, note = "ok", None
+    st.mark("frontier", "run", solves_charged=len(points),
+            note=note or f"{len(ok_points)} points")
+    st.sections["frontier"] = (status, payload, note)
+
+
+def _closed_import_links(network, pack) -> list[str]:
+    """Import Links the pack closed (p_*_pu → 0, e.g. off_grid)."""
+    out = []
+    for link in arch.select_import_links(network, pack.import_overlay):
+        row = network.links.loc[link]
+        pmax = [float(row.get("p_max_pu", 1.0))]
+        pmin = [float(row.get("p_min_pu", 0.0))]
+        for attr, acc in (("p_max_pu", pmax), ("p_min_pu", pmin)):
+            ts = getattr(network.links_t, attr, None)
+            if ts is not None and link in getattr(ts, "columns", []):
+                acc.extend(float(v) for v in ts[link])
+        if max(pmax) <= 0 and min(pmin) >= 0:
+            out.append(str(link))
+    return out
+
+
+def _stage_fmea_top(st: _Study) -> None:
+    """Top-N Class-B Link failure modes on the pack-applied ENS plan (P12b).
+
+    Frozen at the ens_solve plan on a disposable copy (closing restore
+    skipped, Q4). No partial sweep: a partial ranking is misleading, so a
+    sweep that does not fit the remaining budget is skipped, not truncated.
+    Every frontier point getting its own ranking is deferred (spec §9).
+    """
+    from services.adequacy import sweep as sw
+
+    def _not_established(reason: str, status: str = "skipped") -> None:
+        note = f"{FMEA_TOP_LINK_PRIMARY_NOTE}; {reason}"
+        st.mark("fmea_top", status, note=note)
+        st.sections["fmea_top"] = ("not_established", None, note)
+
+    fcopy = _private_copy(st.network)
+    closed = _closed_import_links(fcopy, st.pack)
+    if closed:
+        fcopy.remove("Link", closed)
+    try:
+        k = len(sw.class_b_contingencies(fcopy))
+    except sw.SweepBudgetError as exc:
+        return _not_established(str(exc))
+    if k == 0:
+        return _not_established(
+            "no Class-B-eligible Links (no Link carries occurrence data)")
+    cost = k + 1                       # frozen base + K; restore skipped
+    if cost > st.remaining():
+        return _not_established(
+            f"not run: the sweep needs {cost} solves and budget_solves leaves "
+            f"{st.remaining()} — a partial ranking would mislead")
+    try:
+        rows, restore = sw.run_class_b_sweep(
+            fcopy, st.lock, st.cfg, log_queue=st.log_queue,
+            stop_event=st.stop_event, restore_base=False)
+    except Exception as exc:  # noqa: BLE001 — degrade like every other stage
+        logger.exception("fmea_top sweep failed")
+        return _not_established(f"sweep failed: {exc}", status="aborted")
+    charged = 1 + len(rows)
+    st.solves += charged
+    if restore.get("aborted"):
+        st.mark("fmea_top", "run", solves_charged=charged,
+                note="aborted mid-sweep — partial ranking withheld")
+        st.sections["fmea_top"] = (
+            "not_established", None,
+            f"{FMEA_TOP_LINK_PRIMARY_NOTE}; aborted mid-sweep — partial "
+            "ranking withheld")
+        return
+    ranked = sorted(
+        (r for r in rows if r.get("failure_mode")),
+        key=lambda r: (-float(r["failure_mode"]["criticality_eur_per_year"]),
+                       str(r["failure_mode"]["mode_id"])))
+    unsolved = [{"id": r["id"], "status": r["status"]}
+                for r in rows if not r.get("failure_mode")]
+    notes = [FMEA_TOP_LINK_PRIMARY_NOTE]
+    if closed:
+        notes.append(f"import Link(s) closed by the pack excluded: {closed}")
+    if _vintage_bounds_active(st.network):
+        notes.append(
+            "multi-period vintage bounds re-expand extendables after the "
+            "capacity freeze — this ranking may understate severity")
+    payload = {
+        "rows": [r["failure_mode"] | {"delta_eue_mwh": r["delta_eue_mwh"]}
+                 for r in ranked[:FMEA_TOP_N]],
+        "top_n": FMEA_TOP_N,
+        "k_links": k,
+        "ranked": len(ranked),
+        "unsolved": unsolved,
+        "in_metric_scope_counts": {
+            "in": sum(1 for r in ranked if r["failure_mode"]["in_metric_scope"]),
+            "out": sum(1 for r in ranked
+                       if not r["failure_mode"]["in_metric_scope"]),
+        },
+        "excluded_closed_import_links": closed,
+        "basis": "pack_applied_ens_plan",
+        "solves_charged": charged,
+    }
+    note = "; ".join(notes)
+    status = "ok" if ranked else "not_established"
+    if not ranked:
+        note += "; no contingency re-solve came back optimal"
+    st.mark("fmea_top", "run", solves_charged=charged,
+            note=f"{len(ranked)} ranked of {k}")
+    st.sections["fmea_top"] = (status, payload, note)
+
+
 def _derive_dtc_config(st: _Study, error_cls, stage: str):
     """Minimal DtcConfig from import Links + ``eh_critical`` bus tags."""
     from models.energy_hub import DtcConfig
@@ -609,12 +806,13 @@ def _stage_dtc_planning(st: _Study) -> None:
         st.sections.setdefault("dtc", ("not_established", None, str(exc)))
 
 
-# Executable stages, looked up at call time. `frontier` / `fmea_top` are not
-# executed yet (P12) and are recorded as skipped with a reason.
+# Executable stages, looked up at call time.
 _STAGE_HANDLERS = {
     "apply_pack": _stage_apply_pack,
     "ens_solve": _stage_ens_solve,
+    "frontier": _stage_frontier,
     "mc_certify": _stage_mc_certify,
+    "fmea_top": _stage_fmea_top,
     "redundancy": _stage_redundancy,
     "levers": _stage_levers,
     "dtc_stress": _stage_dtc_stress,
@@ -714,12 +912,6 @@ def run_eh_study(
                 note = "required by pack but not requested — not_established"
             records.append(PipelineStageRecord(
                 stage=name, status="skipped", note=note))  # type: ignore[arg-type]
-        elif name not in _STAGE_HANDLERS and name != "assemble":
-            note = f"{name} not implemented in the sync driver yet"
-            if name == "fmea_top":
-                note = FMEA_TOP_LINK_PRIMARY_NOTE + f"; {note}"
-            records.append(PipelineStageRecord(
-                stage=name, status="skipped", note=note))  # type: ignore[arg-type]
         else:
             records.append(PipelineStageRecord(stage=name, status="pending"))  # type: ignore[arg-type]
 
@@ -767,19 +959,14 @@ def run_eh_study(
                 sections.setdefault(sec, ("not_established", None,
                                           "ens_solve not run"))
 
-        # Not-yet-executable stages → section skipped (never pending).
-        for optional in ("frontier", "fmea_top"):
-            if optional in _STAGE_HANDLERS:
-                continue
-            if optional == "fmea_top":
-                reason = FMEA_TOP_LINK_PRIMARY_NOTE + (
-                    "; stage not implemented in sync driver"
-                    if optional in requested else "; stage not requested")
-            else:
-                reason = (f"{optional} not implemented in sync driver"
-                          if optional in requested
-                          else f"{optional} not requested")
-            sections.setdefault(optional, ("skipped", None, reason))
+        if "frontier" not in requested:
+            sections.setdefault("frontier", (
+                "skipped", None,
+                "frontier not requested (default only for strong_grid)"))
+        if "fmea_top" not in requested:
+            sections.setdefault("fmea_top", (
+                "skipped", None,
+                FMEA_TOP_LINK_PRIMARY_NOTE + "; stage not requested"))
 
         if "redundancy" not in requested:
             sections.setdefault(

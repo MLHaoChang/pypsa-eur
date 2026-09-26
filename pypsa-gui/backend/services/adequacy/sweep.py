@@ -270,7 +270,8 @@ def _restore_base_guarded(network, lock, cfg, log_queue, final_state_update):
 
 def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
                           log_queue=None,
-                          final_state_update=None, stop_event=None) -> dict:
+                          final_state_update=None, stop_event=None,
+                          restore_base: bool = True) -> dict:
     """
     ``contingencies``: ``[{id, mutate(n) -> undo(), meta}, ...]``. Returns
     ``{"base": {eue_mwh, status}, "contingencies": {id: {delta_eue_mwh,
@@ -278,6 +279,10 @@ def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
     back optimal are reported with ``status`` — an infeasible contingency is
     a DISTINCT outcome (a starved transit bus has no slack, spec §6.3),
     never silently a zero.
+
+    ``restore_base=False`` skips the closing re-solve — ONLY for a caller
+    that passes a disposable private copy (Energy Hub study, plan P12 / Q4).
+    Every HTTP route keeps the default (pinned by a test).
     """
     if len(contingencies) > MAX_CONTINGENCIES:
         raise SweepBudgetError(
@@ -365,8 +370,13 @@ def run_contingency_sweep(network, lock, cfg, contingencies: list[dict], *,
     # rows an abort exists to keep — and surfaced as an opaque `failed`.
     # `base_restored` records whether the re-solve RAN, and carries its solver
     # status: `True` never meant "the plan is back", only "it did not raise".
-    results["base_restored"], results["base_restore_status"] = _restore_base_guarded(
-        network, lock, cfg, log_queue, final_state_update)
+    if restore_base:
+        results["base_restored"], results["base_restore_status"] = (
+            _restore_base_guarded(network, lock, cfg, log_queue,
+                                  final_state_update))
+    else:
+        results["base_restored"] = None
+        results["base_restore_status"] = "skipped_private_copy"
     return results
 
 
@@ -455,7 +465,8 @@ def class_b_contingencies(n) -> list[dict]:
 
 def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
                       final_state_update=None,
-                      stop_event=None) -> tuple[list[dict], dict]:
+                      stop_event=None,
+                      restore_base: bool = True) -> tuple[list[dict], dict]:
     """
     Class-B rows: sweep every eligible link outage and price it first-order
     (see the module docstring's severity semantics):
@@ -482,7 +493,8 @@ def run_class_b_sweep(network, lock, cfg, *, log_queue=None,
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)
     swept = run_contingency_sweep(
         network, lock, cfg, contingencies, stop_event=stop_event,
-        log_queue=log_queue, final_state_update=final_state_update)
+        log_queue=log_queue, final_state_update=final_state_update,
+        restore_base=restore_base)
     rows: list[dict] = []
     for c in contingencies:
         # Phase 12e: an ABORTED sweep carries only the contingencies it got

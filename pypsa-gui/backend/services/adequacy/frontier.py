@@ -165,7 +165,7 @@ def _restore_base(network, lock, cfg, log_queue, final_state_update):
 
 def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
                        log_queue=None, final_state_update=None,
-                       stop_event=None) -> dict:
+                       stop_event=None, restore_base: bool = True) -> dict:
     """
     Returns ``{"points": [...], "warning": str|None, "base_restored": bool,
     "base_restore_status": str|None, "aborted": bool}``. ``base_restored``
@@ -196,6 +196,12 @@ def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
     ``exc.frontier_result`` so the caller can report the restore truthfully
     instead of guessing. Validation failures raise BEFORE the try — nothing
     has been solved yet, so there is nothing to restore.
+
+    ``restore_base=False`` is ONLY for a caller that passes a disposable
+    private copy (the Energy Hub study, plan P12 / Q4): there is no
+    foreground to restore, so the closing solve is skipped and
+    ``base_restored`` is None with status ``"skipped_private_copy"``. Every
+    HTTP route keeps the default (pinned by a test).
     """
     from services.adequacy.sweep import _solve_once
 
@@ -257,8 +263,12 @@ def run_frontier_sweep(network, lock, cfg, targets: list[float], *,
             pass
         raise
     finally:
-        result["base_restored"], result["base_restore_status"] = _restore_base(
-            network, lock, cfg, log_queue, final_state_update)
+        if restore_base:
+            result["base_restored"], result["base_restore_status"] = _restore_base(
+                network, lock, cfg, log_queue, final_state_update)
+        else:
+            result["base_restored"] = None
+            result["base_restore_status"] = "skipped_private_copy"
     return result
 
 

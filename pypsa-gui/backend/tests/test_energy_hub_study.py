@@ -128,7 +128,11 @@ def test_default_stages_never_leave_unimplemented_pending():
     )
     for rec in report.pipeline.stages:
         assert rec.status != "pending", rec
-    assert report.completeness["frontier"] == "skipped"
+    # P12: strong_grid's default pipeline runs the frontier (spec §3), with
+    # the pack target among the swept points.
+    assert report.completeness["frontier"] == "ok"
+    fr = report.sections["frontier"].payload
+    assert 1000.0 in [pt["target_permyriad"] for pt in fr["points"]]
     assert report.completeness["cost"] == "ok"
 
 
