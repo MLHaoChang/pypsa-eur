@@ -52,6 +52,8 @@ class EhStudyRequest(_BaseModel):
     budget_solves: int | None = None
     pack_overrides: dict[str, Any] | None = None
     dtc_config: dict[str, Any] | None = None
+    # P18: per_load without writing a dtc_config (the panel derives it).
+    dtc_attribution: str | None = None
     dsr_buses: list[str] | None = None
     mc: dict[str, Any] | None = None
 
@@ -103,6 +105,32 @@ class DtcConfigRequest(_BaseModel):
     # P16: opt-in per-Load attribution (spec §10 amendment); no "auto".
     attribution: Literal["bus_aggregate_not_per_load", "per_load"] = (
         "bus_aggregate_not_per_load")
+
+
+DTC_ATTRIBUTIONS = ("bus_aggregate_not_per_load", "per_load")
+
+
+def resolve_dtc_attribution(dtc_config: dict | None, attribution: str | None
+                            ) -> tuple[dict | None, str | None]:
+    """Merge ``dtc_attribution`` onto an explicit dtc_config (P18).
+
+    Refuses an unknown value, and a dtc_config whose OWN attribution says
+    otherwise — the report would claim one mode and run the other.
+    """
+    if attribution is None:
+        return dtc_config, None
+    if attribution not in DTC_ATTRIBUTIONS:
+        raise HTTPException(
+            422, f"dtc_attribution must be one of {list(DTC_ATTRIBUTIONS)}; "
+            f"got {attribution!r} (there is no 'auto')")
+    if dtc_config is None:
+        return None, attribution
+    own = dtc_config.get("attribution")
+    if own is not None and own != attribution:
+        raise HTTPException(
+            422, f"dtc_attribution {attribution!r} conflicts with "
+            f"dtc_config.attribution {own!r}")
+    return {**dtc_config, "attribution": attribution}, attribution
 
 
 def _validation_422(prefix: str, exc: ValidationError) -> HTTPException:
@@ -268,9 +296,11 @@ def start_eh_study(
     # P13: every refusal happens HERE, before the worker exists.
     pack = apply_pack_overrides(
         _PACK_FACTORY[archetype](), body.pack_overrides, raise_http=True)
+    raw_dtc, dtc_attribution = resolve_dtc_attribution(
+        body.dtc_config, body.dtc_attribution)
     with lock:  # component names read from the live network
-        dtc_config = (_validate_dtc_config(body.dtc_config, n)
-                      if body.dtc_config is not None else None)
+        dtc_config = (_validate_dtc_config(raw_dtc, n)
+                      if raw_dtc is not None else None)
         bus_names = set(map(str, n.buses.index))
         # P17: an energy cap that cannot be oriented / metered refuses here,
         # not inside the worker (the driver patches its cfg before stage 1).
@@ -312,6 +342,7 @@ def start_eh_study(
         "stages": list(stages) if stages is not None else None,
         "budget_solves": budget,
         "pack_overrides": normalised_overrides(body.pack_overrides),
+        "dtc_attribution": dtc_attribution,
         "report": None,
         "error": None,
         "started_at": time.time(),
@@ -334,6 +365,7 @@ def start_eh_study(
                 state_update=state_update,
                 store=solver_state,
                 dtc_config=dtc_config,
+                dtc_attribution=dtc_attribution,
                 dsr_buses=dsr_buses,
                 **mc_kwargs,
             )

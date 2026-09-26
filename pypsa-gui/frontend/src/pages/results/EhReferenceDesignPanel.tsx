@@ -5,6 +5,7 @@ import {
   resultsApi,
   type EhArchetype,
   type EhReadiness,
+  type EhDtcAttribution,
   type EhDtcPlanningTable,
   type EhDtcStressTable,
   type EhLeverTable,
@@ -60,12 +61,14 @@ export interface PackForm {
   dsrBuses: string
   /** Optional stages to run; null = the pack's default pipeline. */
   stages: string[] | null
+  /** P18: '' = the default (bus aggregate); 'per_load' opts in. */
+  dtcAttribution: '' | EhDtcAttribution
 }
 
 export const EMPTY_PACK_FORM: PackForm = {
   ensCap: '', loleTarget: '', importMw: '', importEnergy: '', budget: '',
   draws: '', seed: '',
-  dsrBuses: '', stages: null,
+  dsrBuses: '', stages: null, dtcAttribution: '',
 }
 
 /** Stages a user may toggle; apply_pack / ens_solve / assemble always run. */
@@ -127,6 +130,7 @@ export function buildEhStudyBody(
     const buses = form.dsrBuses.split(',').map(b => b.trim()).filter(Boolean)
     if (buses.length > 0) body.dsr_buses = buses
   }
+  if (form.dtcAttribution) body.dtc_attribution = form.dtcAttribution
   if (form.stages !== null) {
     const chosen = new Set(['apply_pack', 'ens_solve', 'assemble', ...form.stages])
     body.stages = PIPELINE_ORDER.filter(st => chosen.has(st))
@@ -585,8 +589,10 @@ export function EhReferenceDesignPanel() {
   // and not on every keystroke of the budget field (debounced above).
   const { data: readiness } = useQuery({
     queryKey: [...nk(currentProject, 'results', 'eh_readiness'), archetype,
+      form.dtcAttribution || null,
       readinessBudget ?? null],
-    queryFn: () => resultsApi.getEhReadiness(archetype, readinessBudget),
+    queryFn: () => resultsApi.getEhReadiness(
+      archetype, readinessBudget, form.dtcAttribution || undefined),
     enabled: open && !running,
   })
 
@@ -794,6 +800,21 @@ export function EhReferenceDesignPanel() {
                     </label>
                   )}
                 </div>
+                <label className="flex items-center gap-1 text-[10px] text-muted">
+                  DtC attribution
+                  <select
+                    data-testid="eh-pack-dtc-attribution"
+                    value={form.dtcAttribution}
+                    disabled={running}
+                    onChange={e => setForm(f => ({
+                      ...f, dtcAttribution: e.target.value as PackForm['dtcAttribution'] }))}
+                    title="Per Load reports critical unserved by Load, shedding non-critical Loads first via a disclosed 5% VOLL priority (exact on loss-free paths); the default reports by bus."
+                    className="px-1 py-0.5 border border-border rounded bg-bg text-[10px] text-text"
+                  >
+                    <option value="">By bus (default)</option>
+                    <option value="per_load">Per Load</option>
+                  </select>
+                </label>
                 <fieldset className="flex flex-wrap items-center gap-2 text-[10px] text-muted">
                   <label className="flex items-center gap-1">
                     <input

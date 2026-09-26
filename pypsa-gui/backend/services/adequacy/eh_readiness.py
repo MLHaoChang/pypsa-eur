@@ -75,12 +75,19 @@ def _stage_estimate(stage: str, net, pack: ArchetypePack, ctx: dict) -> tuple[
     if stage in ("dtc_stress", "dtc_planning"):
         if not ctx["dtc"]["derivable"]:
             return 0, "exact", ctx["dtc"]["reason"]
+        if (ctx["dtc"]["attribution"] == "per_load"
+                and not ctx["dtc"]["critical_loads"]):
+            return 0, "exact", (
+                "per_load: no critical Loads on the critical buses — the "
+                "DtC stage refuses (tag a bus with Loads eh_critical, or use "
+                "bus_aggregate_not_per_load)")
         return len(ctx["dtc"]["islanding_contingencies"]), "upper_bound", None
     return 0, "exact", None
 
 
 def eh_readiness(network, pack: ArchetypePack, *, budget_solves: int,
-                 stages=None, voll: float | None = None) -> dict[str, Any]:
+                 stages=None, voll: float | None = None,
+                 dtc_attribution: str | None = None) -> dict[str, Any]:
     """Readiness of ``network`` for an EH study of ``pack`` (see module doc)."""
     from services.adequacy import levers as lev
     from services.adequacy import scr_gate as scr_mod
@@ -98,8 +105,11 @@ def eh_readiness(network, pack: ArchetypePack, *, budget_solves: int,
     except arch.ArchetypePackError as exc:
         warnings.append(f"pack cannot be applied: {exc}")
 
+    from services.adequacy import dtc as dtc_mod
+
+    attribution = dtc_attribution or "bus_aggregate_not_per_load"
     crit = S.critical_buses(net)
-    dtc = S.derive_dtc_config(net, pack)
+    dtc = S.derive_dtc_config(net, pack, attribution=attribution)
     dtc_block = ({"derivable": True,
                   "critical_bus_ids": dtc.critical_bus_ids,
                   "islanding_contingencies": dtc.islanding_contingencies,
@@ -109,6 +119,11 @@ def eh_readiness(network, pack: ArchetypePack, *, budget_solves: int,
                   "reason": ("tag at least one bus eh_critical"
                              if links else "no import Links identified")
                              + " — or pass dtc_config"})
+    # P18: the Loads a per_load stress would treat as critical (the same
+    # resolver the stage uses), so a per_load refusal is predicted.
+    dtc_block["attribution"] = attribution
+    dtc_block["critical_loads"] = (
+        sorted(dtc_mod._critical_loads(net, dtc)) if dtc is not None else [])
 
     if pack.archetype == "weak_flexible":
         _block, status, payload, note = scr_mod.evaluate_network_scr_gate(net)

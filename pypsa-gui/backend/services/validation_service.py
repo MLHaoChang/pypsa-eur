@@ -2024,14 +2024,13 @@ def _check_import_energy_cap(n, solver_config) -> list[Issue]:
             "solve strategy: each LP window would need its own share of the "
             "annual budget. Use the full strategy.",
         ))
+    from services.adequacy.archetypes import min_p_min_pu
+
     links_df = getattr(n, "links", None)
-    p_min_t = getattr(getattr(n, "links_t", None), "p_min_pu", None)
     for lid in links:
         if links_df is None or lid not in links_df.index:
             continue
-        lo = float(links_df.at[lid, "p_min_pu"]) if "p_min_pu" in links_df.columns else 0.0
-        if p_min_t is not None and lid in getattr(p_min_t, "columns", []):
-            lo = min(lo, float(p_min_t[lid].min()))
+        lo = min_p_min_pu(n, lid)
         if lo < 0:
             issues.append(_err(
                 "import_energy_link_bidirectional", "Link", lid,

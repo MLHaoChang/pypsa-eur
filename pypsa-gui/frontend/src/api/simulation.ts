@@ -635,6 +635,8 @@ export interface EhStudyRequestBody {
     attribution?: 'bus_aggregate_not_per_load' | 'per_load'
   }
   dsr_buses?: string[]
+  /** P18: attribution for the DtC config the study derives from tags. */
+  dtc_attribution?: EhDtcAttribution
   mc?: { draws?: number; seed?: number; cov_target?: number }
 }
 
@@ -716,6 +718,8 @@ export interface StressProfilePack {
   provenance?: string | null
   error?: string
 }
+
+export type EhDtcAttribution = 'bus_aggregate_not_per_load' | 'per_load'
 
 /** Read-only preflight from GET /results/eh_readiness (P14). */
 export interface EhReadiness {
@@ -1275,9 +1279,14 @@ export const resultsApi = {
     client.post('/results/eh_study', body).then(r => r.data),
   abortEhStudy: () => client.post('/results/eh_study/abort')
     .then(r => r.data as { status: string; aborting: boolean }),
-  getEhReadiness: (archetype: EhArchetype, budgetSolves?: number) =>
+  getEhReadiness: (archetype: EhArchetype, budgetSolves?: number,
+    dtcAttribution?: EhDtcAttribution) =>
     client.get('/results/eh_readiness', {
-      params: budgetSolves ? { archetype, budget_solves: budgetSolves } : { archetype },
+      params: {
+        archetype,
+        ...(budgetSolves ? { budget_solves: budgetSolves } : {}),
+        ...(dtcAttribution ? { dtc_attribution: dtcAttribution } : {}),
+      },
     }).then(r => r.data as EhReadiness),
   getEhReferenceDesign: () => client.get('/results/eh_reference_design')
     .then(r => (r.status === 204 ? null : r.data as EhReferenceDesignReport)),

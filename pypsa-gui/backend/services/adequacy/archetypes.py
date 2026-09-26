@@ -164,6 +164,28 @@ def solver_config_patch_with_preflight(
     return patch, warnings
 
 
+def min_p_min_pu(network, lid: str) -> float:
+    """Lowest ``p_min_pu`` a Link can take, static and time series. A NaN
+    static value reads as 0 (PyPSA's default) so it cannot mask a negative
+    series (``min(nan, x)`` is nan, and ``nan < 0`` is False)."""
+    import math
+
+    links = network.links
+    lo = 0.0
+    if "p_min_pu" in links.columns:
+        try:
+            v = float(links.at[lid, "p_min_pu"])
+            lo = v if math.isfinite(v) else 0.0
+        except (TypeError, ValueError):
+            lo = 0.0
+    p_min_t = getattr(getattr(network, "links_t", None), "p_min_pu", None)
+    if p_min_t is not None and lid in getattr(p_min_t, "columns", []):
+        series = p_min_t[lid].astype(float)
+        if series.notna().any():
+            lo = min(lo, float(series.min(skipna=True)))
+    return lo
+
+
 def metered_import_links(network, pack: ArchetypePack) -> tuple[list[str], list[str]]:
     """Import Links oriented grid → hub (P17), plus notes.
 
@@ -181,15 +203,12 @@ def metered_import_links(network, pack: ArchetypePack) -> tuple[list[str], list[
             f"{exc}") from exc
     hub = set(info.get("hub_buses") or [])
     links = network.links
-    p_min_t = getattr(getattr(network, "links_t", None), "p_min_pu", None)
     metered: list[str] = []
     notes: list[str] = []
     for lid in info.get("import_links") or []:
         lid = str(lid)
         b0, b1 = str(links.at[lid, "bus0"]), str(links.at[lid, "bus1"])
-        lo = float(links.at[lid, "p_min_pu"]) if "p_min_pu" in links.columns else 0.0
-        if p_min_t is not None and lid in getattr(p_min_t, "columns", []):
-            lo = min(lo, float(p_min_t[lid].min()))
+        lo = min_p_min_pu(network, lid)
         if lo < 0:
             raise ArchetypePackError(
                 f"energy import cap: import Link {lid!r} is bidirectional "
@@ -560,8 +579,18 @@ def hub_boundary_copy(n, pack: ArchetypePack):
     # Import units (Q7) — computed on the pack-applied network, before removal.
     params = resolve_outage_params(mc, "links") if links else None
     units: list[dict[str, Any]] = []
+    energy_budget = pack.import_overlay.import_energy_mwh_per_year
     for link in links:
         src = params.at[link, "source"] if params is not None else "missing"
+        if energy_budget is not None:
+            # P17 gate: the LP may import at most E MWh/yr; a full-power
+            # two-state unit available all year would certify on imports
+            # the plan was not allowed to use.
+            info["excluded_import_links"].append(
+                {"link": link, "reason": (
+                    f"energy budget of {float(energy_budget):,.0f} MWh/yr — an "
+                    "energy-limited import is not firm capacity in the MC")})
+            continue
         if src != "asset":
             info["excluded_import_links"].append(
                 {"link": link, "reason": "no outage data on the Link — import "

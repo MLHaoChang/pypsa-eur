@@ -30,8 +30,9 @@ logger = logging.getLogger("pypsa_gui.levers")
 
 DEFAULT_LEVER_KINDS: tuple[str, ...] = (
     "import_cap", "storage_duration", "import_energy")
-# P17: energy budgets as fractions of the network's annualised electrical
-# demand (an absolute MWh ladder cannot fit every network's scale).
+# P17: energy budgets as fractions of what the metered import Links can
+# deliver in a year (an absolute MWh ladder cannot fit every network's
+# scale; whole-network demand would include grid-side Loads — P17 gate).
 DEFAULT_IMPORT_ENERGY_FRACTIONS: tuple[float, ...] = (0.0, 0.25, 0.5)
 DEFAULT_IMPORT_CAPS_MW: tuple[float, ...] = (0.0, 25.0, 50.0)
 DEFAULT_STORAGE_HOURS: tuple[float, ...] = (4.0, 24.0, 72.0)
@@ -121,9 +122,29 @@ def annual_electrical_demand_mwh(n) -> float:
     return total * 8760.0 / hours
 
 
-def default_import_energy_values(n) -> tuple[float, ...]:
-    d = annual_electrical_demand_mwh(n)
-    return tuple(round(f * d, 3) for f in DEFAULT_IMPORT_ENERGY_FRACTIONS)
+def import_energy_capability_mwh(n, links: list[str]) -> float:
+    """MWh/yr the metered Links could deliver to the hub at full power."""
+    import math
+
+    total = 0.0
+    for l in links:
+        if l not in n.links.index:
+            continue
+        p_nom = float(n.links.at[l, "p_nom"])
+        eff = float(n.links.at[l, "efficiency"]) if "efficiency" in n.links.columns else 1.0
+        pu = 1.0
+        if "p_max_pu" in n.links.columns:
+            v = float(n.links.at[l, "p_max_pu"])
+            pu = min(max(v, 0.0), 1.0) if math.isfinite(v) else 1.0
+        total += max(p_nom, 0.0) * pu * max(eff, 0.0) * 8760.0
+    return total
+
+
+def default_import_energy_values(n, cfg=None) -> tuple[float, ...]:
+    links = [str(x) for x in (getattr(cfg, "import_energy_links", None) or [])]
+    base = (import_energy_capability_mwh(n, links) if links
+            else annual_electrical_demand_mwh(n))
+    return tuple(round(f * base, 3) for f in DEFAULT_IMPORT_ENERGY_FRACTIONS)
 
 
 def apply_lever_scenario(
@@ -236,7 +257,8 @@ def compare_lever_scenarios(
     if values is None:
         values = (
             DEFAULT_STORAGE_HOURS if kind == "storage_duration"
-            else default_import_energy_values(network) if kind == "import_energy"
+            else default_import_energy_values(network, cfg)
+            if kind == "import_energy"
             else DEFAULT_IMPORT_CAPS_MW
         )
     values = tuple(float(v) for v in values)
@@ -305,10 +327,21 @@ def compare_lever_scenarios(
                         f"{kind} no-op under Class-B islanding "
                         "(applied Links have p_max_pu≈0)"
                     )
+            exceeds_pack_cap = None
+            autonomy_note = mutation.get("autonomy_note")
+            if kind == "import_energy":
+                pack_cap = getattr(cfg, "import_energy_cap_mwh_per_year", None)
+                exceeds_pack_cap = (pack_cap is not None
+                                    and float(val) > float(pack_cap) + 1e-9)
+                if exceeds_pack_cap:
+                    autonomy_note = (
+                        f"looser than the pack's own cap of {float(pack_cap):,.0f} "
+                        "MWh/yr — a plan the pack does not permit")
             options.append({
                 "kind": kind,
                 "value": val,
                 "unit": mutation["unit"],
+                "exceeds_pack_cap": exceeds_pack_cap,
                 "status": status,
                 "condition": condition,
                 "cost_at_target_eur": cost.get("total_system_cost_eur"),
@@ -319,7 +352,7 @@ def compare_lever_scenarios(
                     bool(meets) and status in ("ok", "optimal")
                     if meets is not None else None),
                 "firmness": mutation["firmness"],
-                "autonomy_note": mutation.get("autonomy_note"),
+                "autonomy_note": autonomy_note,
                 "applied": mutation,
                 "ineffective": ineffective,
                 "ineffective_reason": ineffective_reason,

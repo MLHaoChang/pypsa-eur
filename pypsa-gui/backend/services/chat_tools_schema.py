@@ -1116,6 +1116,13 @@ TOOLS: list[dict[str, Any]] = [
                 },
                 "required": ["islanding_contingencies"],
             },
+            "dtc_attribution": {
+                "type": "string",
+                "enum": ["bus_aggregate_not_per_load", "per_load"],
+                "description": (
+                    "DtC attribution for the config the study derives from "
+                    "eh_critical tags (or merged onto dtc_config; a "
+                    "conflicting dtc_config.attribution is refused).")},
             "dsr_buses": {"type": "array", "items": {"type": "string"}},
             "mc": {
                 "type": "object",

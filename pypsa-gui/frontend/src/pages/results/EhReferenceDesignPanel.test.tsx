@@ -326,7 +326,7 @@ describe('EhReferenceDesignPanel', () => {
     expect(screen.getByTestId('eh-readiness-skipped').textContent)
       .toMatch(/fmea_top — skipped \(budget\): needs 21 solves/)
     await waitFor(() => expect(resultsApi.getEhReadiness)
-      .toHaveBeenCalledWith('weak_flexible', undefined))
+      .toHaveBeenCalledWith('weak_flexible', undefined, undefined))
   })
 
   it('labels every non-run prediction, including may-skip after an estimate', async () => {
@@ -360,12 +360,12 @@ describe('EhReferenceDesignPanel', () => {
   it('debounces the budget before asking for readiness', async () => {
     const user = await openPanel()
     await waitFor(() => expect(resultsApi.getEhReadiness)
-      .toHaveBeenCalledWith('strong_grid', undefined))
+      .toHaveBeenCalledWith('strong_grid', undefined, undefined))
     await user.click(screen.getByTestId('eh-pack-settings-toggle'))
     await user.type(screen.getByTestId('eh-pack-budget'), '25')
     await waitFor(() => expect(resultsApi.getEhReadiness)
-      .toHaveBeenCalledWith('strong_grid', 25), { timeout: 2000 })
-    expect(resultsApi.getEhReadiness).not.toHaveBeenCalledWith('strong_grid', 2)
+      .toHaveBeenCalledWith('strong_grid', 25, undefined), { timeout: 2000 })
+    expect(resultsApi.getEhReadiness).not.toHaveBeenCalledWith('strong_grid', 2, undefined)
   })
 
   it('starts a study with the selected archetype', async () => {
@@ -1088,5 +1088,27 @@ describe('P18 — pipeline table and whole-report export', () => {
     expect(rows).toContainEqual(['completeness', 'gates', 'not_established: no SCR data'])
     expect(rows).toContainEqual(['note', '1', 'DSR preflight: bus flex hosts a battery'])
     expect(rows.every(r => r.length === 3)).toBe(true)
+  })
+})
+
+
+describe('P18 — DtC attribution choice', () => {
+  it('sends dtc_attribution only when chosen', () => {
+    expect(buildEhStudyBody('weak_flexible', EMPTY_PACK_FORM).body)
+      .toEqual({ archetype: 'weak_flexible' })
+    expect(buildEhStudyBody('weak_flexible', {
+      ...EMPTY_PACK_FORM, dtcAttribution: 'per_load' }).body)
+      .toEqual({ archetype: 'weak_flexible', dtc_attribution: 'per_load' })
+  })
+
+  it('asks readiness for the chosen attribution and runs with it', async () => {
+    const user = await openPanel()
+    await user.click(screen.getByTestId('eh-pack-settings-toggle'))
+    await user.selectOptions(screen.getByTestId('eh-pack-dtc-attribution'), 'per_load')
+    await waitFor(() => expect(resultsApi.getEhReadiness)
+      .toHaveBeenCalledWith('strong_grid', undefined, 'per_load'))
+    await user.click(screen.getByTestId('eh-run'))
+    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
+      archetype: 'strong_grid', dtc_attribution: 'per_load' }))
   })
 })

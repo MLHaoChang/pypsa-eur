@@ -130,6 +130,10 @@ def _assumptions_hash(cfg) -> str:
         "dsr_buses": list(getattr(cfg, "dsr_buses", None) or []),
         "dsr_price_eur_per_mwh": getattr(cfg, "dsr_price_eur_per_mwh", None),
         "dsr_share_of_load": getattr(cfg, "dsr_share_of_load", None),
+        "import_energy_cap_mwh_per_year": getattr(
+            cfg, "import_energy_cap_mwh_per_year", None),
+        "import_energy_links": sorted(
+            getattr(cfg, "import_energy_links", None) or []),
     }
     blob = json.dumps(raw, sort_keys=True, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
@@ -648,16 +652,20 @@ def critical_buses(network) -> list[str]:
             if arch._flag(network.buses.at[b, "eh_critical"])]
 
 
-def derive_dtc_config(network, pack: ArchetypePack):
+def derive_dtc_config(network, pack: ArchetypePack, *,
+                      attribution: str = "bus_aggregate_not_per_load"):
     """Minimal DtcConfig from import Links + ``eh_critical`` bus tags, or
-    None when either is missing (shared by the driver and readiness)."""
+    None when either is missing (shared by the driver and readiness).
+    ``attribution`` (P18) lets a caller choose ``per_load`` without writing
+    a whole dtc_config."""
     from models.energy_hub import DtcConfig
 
     links = arch.select_import_links(network, pack.import_overlay)
     crit = critical_buses(network)
     if not links or not crit:
         return None
-    return DtcConfig(critical_bus_ids=crit, islanding_contingencies=list(links))
+    return DtcConfig(critical_bus_ids=crit, islanding_contingencies=list(links),
+                     attribution=attribution)
 
 
 def frontier_point_count(remaining: int, budget_solves: int) -> int:
@@ -678,7 +686,9 @@ def _derive_dtc_config(st: _Study, error_cls, stage: str):
     """The caller's DtcConfig, else one derived from the network tags."""
     if st.dtc_config is not None:
         return st.dtc_config
-    derived = derive_dtc_config(st.network, st.pack)
+    derived = derive_dtc_config(
+        st.network, st.pack,
+        attribution=st.dtc_attribution or "bus_aggregate_not_per_load")
     if derived is None:
         raise error_cls(
             f"{stage} requested but no import Links / critical buses "
@@ -877,6 +887,7 @@ def run_eh_study(
     state_update=None,
     store: dict | None = None,
     dtc_config=None,
+    dtc_attribution: str | None = None,
     dsr_buses: list[str] | None = None,
     mc_draws: int = DEFAULT_MC_DRAWS,
     mc_seed: int = DEFAULT_MC_SEED,
@@ -962,6 +973,7 @@ def run_eh_study(
     st = _Study(
         network=network, pack=pack, cfg=cfg, lock=lock, stop_event=stop_event,
         log_queue=log_queue, store=store, dtc_config=dtc_config,
+        dtc_attribution=dtc_attribution,
         requested=requested, records=records, budget_solves=budget_solves,
         pack_notes=pack_notes, mc_draws=int(mc_draws), mc_seed=int(mc_seed),
         mc_cov_target=float(mc_cov_target),

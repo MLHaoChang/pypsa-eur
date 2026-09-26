@@ -710,7 +710,22 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
   - Pinned: ≥ 2 solved options with distinct costs, section `ok`.
 - [x] **Monotone cost.** A binding cap raises cost monotonically (uncapped → 3e5 → 1.5e5 → 0 MWh/yr), and realised hub import stays ≤ the budget.
 - [x] **FE and chat.** The pack form has an "Import energy (MWh/yr)" field for weak_flexible, validated ≥ 0. The chat schema declares the override and the lever flag.
-- [ ] **QA gate** — pending.
+- [x] **QA gate** — GO WITH BINDING CONDITIONS, closed. 5 backend tests were red before the fix.
+  - The reviewer confirmed:
+    - The constraint math is right (η·p0, time-varying efficiency, no-years weights, per-period masks, cap=0).
+    - The multi-period test is not vacuous: a ×years budget would not bind.
+    - The fields stay pack-only through the PUT merge, solve queue, bundle import and snapshots (all rebuild via `_solver_config_from_dict`).
+    - The session cfg is untouched by a study.
+    - `pack_hash` covers the fields.
+    - An end-to-end study probe solved the lever with distinct costs.
+  1. *BINDING — MC credited an energy-budgeted import as firm.*
+     - An import Link with its own outage data entered the MC as a full-power unit all year even under E=0, so the MC could certify on imports the LP was not allowed to use.
+     - `hub_boundary_copy` now excludes every import unit when the pack sets an energy budget, with the reason "an energy-limited import is not firm capacity in the MC". This is pinned.
+  2. *NaN static `p_min_pu` masked a negative series.* A shared `archetypes.min_p_min_pu` reads a NaN static value as 0, in both the patch and the preflight. This is pinned.
+  3. *Ladder scale.* It now uses what the metered Links can deliver (`Σ p_nom·p_max_pu·η·8760`), not whole-network demand. A grid-side Load no longer pushes every rung out of reach. This is pinned.
+  4. *Options looser than the pack cap* are flagged `exceeds_pack_cap`, with a note ("a plan the pack does not permit").
+  5. `_assumptions_hash` now includes the cap and the metered Links. The goldens pin no hash values.
+  - Also updated: the Phase-1 pin `test_energy_import_field_warns_and_stays_power_only` became `…_is_power_only_on_apply`. The spec amendment deliberately removes the "reserved" warning; apply stays power-only with no GC row.
 
 ---
 
@@ -725,6 +740,22 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
 - Optionally, a flat CSV of headline + completeness + notes.
 
 **Tests:** FE table renders all statuses; download is called with the export body.
+
+**P18 status (2026-09-26, `claude/epic-allen-k2t1c4`):** implemented. FE adds 6 panel tests and 2 attribution tests; `tests/test_energy_hub_p18.py` has 8 (red: 8 of 8 before the code).
+
+- [x] **Pipeline table.** A collapsible "Pipeline (N stages)" table shows stage, status (run / skipped / aborted / failed / pending, colour-toned), solves charged and note. It is pinned for every status.
+- [x] **Export.**
+  - **Download JSON** fetches `GET /results/eh_reference_design` at click, so the file is the stored export body. It is saved as `eh-reference-design-<archetype>-<pack_hash[:8]>.json`.
+  - With no stored report it says so and saves nothing.
+  - A **Summary CSV** has rows `group,key,value` for the headline (hashes, targets, achieved values, MC LOLE, certified, cost, solves) plus completeness with notes and study notes.
+- [x] **Deferred from P16, per-Load choice in the panel.**
+  - `EhStudyRequest.dtc_attribution` is applied to the config the driver derives from tags (`derive_dtc_config(attribution=…)`), or merged onto an explicit `dtc_config`.
+  - A conflicting `dtc_config.attribution` or an unknown value is a 422. The record carries it. Chat declares it.
+  - The pack settings have a "DtC attribution" select (By bus / Per Load) that feeds both the run and readiness.
+- [x] **Deferred from P16, readiness predicts a `per_load` refusal.**
+  - `GET /eh_readiness?dtc_attribution=` (422 on unknown values) reports `dtc.attribution` and `dtc.critical_loads`, using the stage's own resolver.
+  - `dtc_stress` / `dtc_planning` are `not_established` when `per_load` resolves no critical Load. This is pinned on a critical bus without Loads.
+- [ ] **QA gate** — pending.
 
 ---
 

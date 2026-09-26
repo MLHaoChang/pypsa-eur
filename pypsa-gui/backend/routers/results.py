@@ -1425,7 +1425,8 @@ def post_eh_study(body: EhStudyRequest | None = None):
 
 @results_router.get("/eh_readiness")
 def get_eh_readiness(archetype: str, budget_solves: int | None = None,
-                     stages: str | None = None):
+                     stages: str | None = None,
+                     dtc_attribution: str | None = None):
     """
     Read-only Energy Hub readiness preflight (P14): which Links the pack
     treats as imports and by which §6 rule, critical buses, DtC derivability,
@@ -1448,6 +1449,10 @@ def get_eh_readiness(archetype: str, budget_solves: int | None = None,
     if not (1 <= budget <= MAX_EH_BUDGET_SOLVES):
         raise HTTPException(
             422, f"budget_solves must be between 1 and {MAX_EH_BUDGET_SOLVES}")
+    from services.adequacy.eh_study_runner import DTC_ATTRIBUTIONS
+    if dtc_attribution is not None and dtc_attribution not in DTC_ATTRIBUTIONS:
+        raise HTTPException(
+            422, f"dtc_attribution must be one of {list(DTC_ATTRIBUTIONS)}")
     stage_list = None
     if stages:
         stage_list = [x.strip() for x in stages.split(",") if x.strip()]
@@ -1465,7 +1470,8 @@ def get_eh_readiness(archetype: str, budget_solves: int | None = None,
         return eh_readiness(
             snapshot, _PACK_FACTORY[archetype](), budget_solves=budget,
             stages=stage_list,
-            voll=getattr(cfg, "voll", None) if cfg is not None else None)
+            voll=getattr(cfg, "voll", None) if cfg is not None else None,
+            dtc_attribution=dtc_attribution)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 

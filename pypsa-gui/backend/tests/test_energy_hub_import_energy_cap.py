@@ -281,3 +281,74 @@ def test_a_bidirectional_import_is_a_422_before_the_study_starts(
         "pack_overrides": {"import_energy_mwh_per_year": 1e5}})
     assert r.status_code == 422, r.text
     assert "bidirectional" in r.text
+
+
+# ── P17 gate ────────────────────────────────────────────────────────────────
+
+
+def test_an_energy_budgeted_import_is_not_firm_in_the_mc():
+    """BINDING: an import Link with its own outage data used to enter the MC
+    as a full-power unit all year even under E = 0 — the MC certified on
+    imports the LP was not allowed to use."""
+    n = _feeder_hub()
+    n.links.at["import", "outage_rate_value"] = 0.01
+    n.links.at["import", "mttr_hours"] = 10.0
+    _mc, free = A.hub_boundary_copy(n, _pack(None))
+    assert [u["link"] for u in free["import_units"]] == ["import"]
+    _mc, capped = A.hub_boundary_copy(n, _pack(0.0))
+    assert capped["import_units"] == []
+    reason = next(e["reason"] for e in capped["excluded_import_links"]
+                  if e["link"] == "import")
+    assert "energy budget" in reason
+
+
+def test_a_nan_static_p_min_pu_does_not_hide_a_negative_series():
+    from services.validation_service import validate_for_run
+    n = _feeder_hub()
+    n.links.at["import", "p_min_pu"] = float("nan")
+    n.links_t.p_min_pu = pd.DataFrame({"import": -1.0}, index=n.snapshots)
+    with pytest.raises(A.ArchetypePackError, match="bidirectional"):
+        A.solver_config_patch_with_preflight(_pack(1e5), network=n)
+    cfg = SolverConfig(voll=3000.0, import_energy_cap_mwh_per_year=1e5,
+                       import_energy_links=["import"])
+    codes = {i.code for i in validate_for_run(n, cfg) if i.severity == "error"}
+    assert "import_energy_link_bidirectional" in codes
+
+
+def test_the_default_ladder_scales_on_the_metered_links_capability():
+    """Not whole-network demand: a big grid-side Load must not push every
+    rung above what the import Links can deliver."""
+    from services.adequacy import levers as L
+    n = _feeder_hub()
+    A.apply_archetype_pack_detailed(n, _pack(None))    # import p_nom → 50 MW
+    n.add("Load", "grid_city", bus="grid", p_set=250.0)
+    cfg = SolverConfig(import_energy_links=["import"])
+    capability = 50.0 * 1.0 * 8760.0
+    assert L.default_import_energy_values(n, cfg) == pytest.approx(
+        tuple(f * capability for f in L.DEFAULT_IMPORT_ENERGY_FRACTIONS))
+
+
+@pytest.mark.live_solve
+def test_options_above_the_pack_cap_are_flagged():
+    from services.adequacy import levers as L
+    from services.pypsa_service import PyPSAService
+    n = _feeder_hub()
+    A.apply_archetype_pack_detailed(n, _pack(None))
+    PyPSAService.set_network(n)
+    cfg = SolverConfig(voll=3000.0, ens_cap_permyriad=10.0,
+                       import_energy_cap_mwh_per_year=100_000.0,
+                       import_energy_links=["import"])
+    table = L.compare_lever_scenarios(
+        n, cfg, lock=PyPSAService.get_lock(), stop_event=threading.Event(),
+        kind="import_energy", values=[50_000.0, 200_000.0])
+    flags = [o["exceeds_pack_cap"] for o in table["options"]]
+    assert flags == [False, True]
+    assert "looser than the pack" in table["options"][1]["autonomy_note"]
+
+
+def test_the_assumptions_hash_covers_the_cap():
+    from services.adequacy.eh_study import _assumptions_hash
+    a = SolverConfig(voll=3000.0)
+    b = SolverConfig(voll=3000.0, import_energy_cap_mwh_per_year=1e5,
+                     import_energy_links=["import"])
+    assert _assumptions_hash(a) != _assumptions_hash(b)
