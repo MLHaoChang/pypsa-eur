@@ -755,7 +755,17 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
 - [x] **Deferred from P16, readiness predicts a `per_load` refusal.**
   - `GET /eh_readiness?dtc_attribution=` (422 on unknown values) reports `dtc.attribution` and `dtc.critical_loads`, using the stage's own resolver.
   - `dtc_stress` / `dtc_planning` are `not_established` when `per_load` resolves no critical Load. This is pinned on a critical bus without Loads.
-- [ ] **QA gate** — pending.
+- [x] **QA gate** — GO WITH BINDING CONDITIONS, closed. The reviewer's end-to-end probe confirmed that `run_eh_study(dtc_attribution="per_load")` ran both DtC stages as per_load.
+  1. *BINDING — nothing pinned `dtc_attribution` reaching the driver.* The earlier "resolves" test patched the driver but never called it.
+     - A POST now asserts the worker receives `dtc_attribution="per_load"` and that the record says so. Mutation check: dropping the worker kwarg makes it fail.
+     - A driver test runs `dtc_stress` with no `dtc_config` and asserts the derived config's `per_load` attribution in the `dtc` section.
+  2. *Exports vs a cleared stored report.*
+     - A later foreground solve clears the stored report while the study record keeps its copy, so the panel still showed it.
+     - Download JSON returned nothing while Summary CSV still exported the displayed copy.
+     - Both exports now read the **stored** report, are disabled together with the note "cleared by a later solve — re-run the study to export it", and are pinned.
+  3. The stale export error is cleared when the study refreshes.
+  4. The record reports an explicit `dtc_config`'s own attribution when no top-level `dtc_attribution` is sent.
+  5. The pipeline test now includes a `pending` row, and a missing `solves_charged` reads 0.
 
 ---
 

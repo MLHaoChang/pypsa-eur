@@ -118,7 +118,9 @@ def resolve_dtc_attribution(dtc_config: dict | None, attribution: str | None
     otherwise — the report would claim one mode and run the other.
     """
     if attribution is None:
-        return dtc_config, None
+        # The record reports what runs, including an explicit dtc_config's own.
+        own = (dtc_config or {}).get("attribution") if dtc_config else None
+        return dtc_config, own
     if attribution not in DTC_ATTRIBUTIONS:
         raise HTTPException(
             422, f"dtc_attribution must be one of {list(DTC_ATTRIBUTIONS)}; "

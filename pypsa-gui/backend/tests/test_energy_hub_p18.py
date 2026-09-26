@@ -82,29 +82,73 @@ def test_the_request_refuses_bad_or_conflicting_attribution(
     assert needle in r.text
 
 
-def test_the_request_resolves_the_attribution(install_network, monkeypatch):
-    """dtc_attribution reaches the driver: onto an explicit dtc_config, or
-    as the attribution of the config the driver derives."""
+def test_the_request_resolves_the_attribution():
     from services.adequacy import eh_study_runner as R
-    seen = {}
-
-    def fake_run(network, pack, cfg, **kw):
-        seen.update(kw)
-        raise RuntimeError("stop here")
-
-    monkeypatch.setattr("services.adequacy.eh_study.run_eh_study", fake_run)
-    install_network(_feeder_hub())
-    R.resolve_dtc_attribution  # exported helper
     dtc, attr = R.resolve_dtc_attribution(
         {"critical_bus_ids": ["hub"], "islanding_contingencies": ["import"]},
         "per_load")
     assert dtc["attribution"] == "per_load" and attr == "per_load"
     dtc, attr = R.resolve_dtc_attribution(None, "per_load")
     assert dtc is None and attr == "per_load"
+    # an explicit config's own attribution is what the record reports
+    _dtc, attr = R.resolve_dtc_attribution(
+        {"critical_bus_ids": ["hub"], "islanding_contingencies": ["import"],
+         "attribution": "per_load"}, None)
+    assert attr == "per_load"
     with pytest.raises(HTTPException):
         R.resolve_dtc_attribution(
             {"critical_bus_ids": ["hub"], "islanding_contingencies": ["import"],
              "attribution": "bus_aggregate_not_per_load"}, "per_load")
+
+
+def test_the_post_hands_dtc_attribution_to_the_driver(
+        client, install_network, monkeypatch):
+    """P18 gate (BINDING): the panel's choice must reach run_eh_study — not
+    just validate — and the record must say what runs."""
+    import threading
+
+    seen: dict = {}
+    reached = threading.Event()
+
+    def fake_run(network, pack, cfg, **kw):
+        seen.update(kw)
+        reached.set()
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr("services.adequacy.eh_study.run_eh_study", fake_run)
+    install_network(_feeder_hub())
+    r = client.post("/api/results/eh_study", json={
+        "archetype": "weak_flexible", "dtc_attribution": "per_load"})
+    assert r.status_code in (200, 202), r.text
+    assert reached.wait(10)
+    assert seen["dtc_attribution"] == "per_load"
+    assert seen["dtc_config"] is None
+    body = client.get("/api/results/eh_study").json()
+    assert body.get("dtc_attribution") == "per_load"
+
+
+@pytest.mark.live_solve
+def test_the_driver_derives_a_per_load_config():
+    """No dtc_config: the stage derives one from the tags WITH the chosen
+    attribution (a regression would silently run bus aggregate)."""
+    import queue
+    import threading
+
+    from services.adequacy import eh_study as S
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig
+
+    n = _feeder_hub()
+    PyPSAService.set_network(n)
+    report = S.run_eh_study(
+        n, default_weak_flexible_pack(), SolverConfig(voll=3000.0),
+        lock=PyPSAService.get_lock(), stop_event=threading.Event(),
+        log_queue=queue.SimpleQueue(),
+        stages=["apply_pack", "ens_solve", "dtc_stress"],
+        dtc_attribution="per_load")
+    stages = {r.stage: r.status for r in report.pipeline.stages}
+    assert stages["dtc_stress"] == "run", stages
+    assert report.sections["dtc"].payload["attribution"] == "per_load"
 
 
 def test_chat_declares_dtc_attribution():

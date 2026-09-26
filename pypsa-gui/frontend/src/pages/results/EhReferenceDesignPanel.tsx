@@ -628,6 +628,11 @@ export function EhReferenceDesignPanel() {
     : study?.report
       ?? ((reportData ?? null) as EhReferenceDesignReport | null)
 
+  // Exports read the STORED report (GET /eh_reference_design), which a later
+  // foreground solve clears while the study record keeps its copy — both
+  // exports then refuse together rather than disagree (P18 gate).
+  const storedReport = running ? null
+    : (reportData ?? null) as EhReferenceDesignReport | null
   const redTable = running ? null : (redundancy ?? null) as EhRedundancyTable | null
   const levTable = running ? null : (levers ?? null) as EhLeverTable | null
   const dtcTable = running ? null : (dtcStress ?? null) as EhDtcStressTable | null
@@ -635,6 +640,7 @@ export function EhReferenceDesignPanel() {
     : (dtcPlanning ?? null) as EhDtcPlanningTable | null
 
   const invalidateAll = () => {
+    setExportError(null)
     for (const key of [studyKey, reportKey, redKey, levKey, dtcKey, dtcPlanKey]) {
       void qc.invalidateQueries({ queryKey: key })
     }
@@ -987,7 +993,7 @@ export function EhReferenceDesignPanel() {
               <div className="flex items-center gap-2 flex-wrap">
                 <button type="button" data-testid="eh-report-json"
                   onClick={() => void exportJson.mutate()}
-                  disabled={exportJson.isPending}
+                  disabled={exportJson.isPending || !storedReport}
                   title="The stable export shape served by GET /results/eh_reference_design"
                   className="px-2 py-0.5 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent disabled:opacity-50">
                   Download JSON
@@ -995,10 +1001,17 @@ export function EhReferenceDesignPanel() {
                 <CsvButton
                   testId="eh-report-summary-csv"
                   label="Summary CSV"
-                  onClick={() => downloadCSV(
-                    `eh-reference-design-${report.archetype}.csv`,
-                    REPORT_SUMMARY_CSV_HEADER, reportSummaryCsvRows(report))}
+                  disabled={!storedReport}
+                  onClick={() => storedReport && downloadCSV(
+                    `eh-reference-design-${storedReport.archetype}.csv`,
+                    REPORT_SUMMARY_CSV_HEADER, reportSummaryCsvRows(storedReport))}
                 />
+                {!storedReport && (
+                  <span className="text-[10px] text-muted" data-testid="eh-report-not-stored">
+                    Not exportable: the stored report was cleared by a later
+                    solve — re-run the study to export it.
+                  </span>
+                )}
                 {exportError && (
                   <span className="text-[10px] text-danger" data-testid="eh-report-json-error">
                     {exportError}

@@ -1024,6 +1024,7 @@ describe('P18 — pipeline table and whole-report export', () => {
     { stage: 'mc_certify', status: 'failed', solves_charged: 0,
       note: 'MC certification failed: boom' },
     { stage: 'levers', status: 'aborted', solves_charged: 2, note: 'stopped' },
+    { stage: 'dtc_stress', status: 'pending', note: null },
     { stage: 'assemble', status: 'run', solves_charged: 0, note: null },
   ]
   const WITH_PIPE = {
@@ -1043,14 +1044,14 @@ describe('P18 — pipeline table and whole-report export', () => {
     done()
     const user = await openPanel()
     const toggle = await screen.findByTestId('eh-pipeline-toggle')
-    expect(toggle.textContent).toMatch(/6 stages/)
+    expect(toggle.textContent).toMatch(/7 stages/)
     expect(screen.queryByTestId('eh-pipeline-table')).toBeNull()   // collapsed
     await user.click(toggle)
     for (const st of STAGES) {
       const row = screen.getByTestId(`eh-pipeline-row-${st.stage}`)
       expect(row.querySelector('[data-status]')?.getAttribute('data-status'))
         .toBe(st.status)
-      expect(row.textContent).toContain(String(st.solves_charged))
+      expect(row.textContent).toContain(String(st.solves_charged ?? 0))
       if (st.note) expect(row.textContent).toContain(st.note)
     }
   })
@@ -1065,11 +1066,28 @@ describe('P18 — pipeline table and whole-report export', () => {
       'eh-reference-design-strong_grid-01234567.json', exportBody))
   })
 
-  it('says so when there is no stored report to export', async () => {
+  it('refuses both exports together when the stored report was cleared', async () => {
+    // A later foreground solve clears the stored report while the study
+    // record keeps its copy: the panel still shows it, but neither export
+    // may disagree with GET /eh_reference_design.
     done()
     vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null)
+    await openPanel()
+    expect((await screen.findByTestId('eh-report-not-stored')).textContent)
+      .toMatch(/cleared by a later solve/)
+    expect((screen.getByTestId('eh-report-json') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId('eh-report-summary-csv') as HTMLButtonElement).disabled)
+      .toBe(true)
+  })
+
+  it('says so if the stored report vanished between render and click', async () => {
+    done()
+    vi.mocked(resultsApi.getEhReferenceDesign)
+      .mockResolvedValueOnce(WITH_PIPE as never).mockResolvedValue(null)
     const user = await openPanel()
-    await user.click(await screen.findByTestId('eh-report-json'))
+    const btn = await screen.findByTestId('eh-report-json')
+    await waitFor(() => expect((btn as HTMLButtonElement).disabled).toBe(false))
+    await user.click(btn)
     expect((await screen.findByTestId('eh-report-json-error')).textContent)
       .toMatch(/No stored reference design/)
     expect(downloadJSON).not.toHaveBeenCalled()
@@ -1077,8 +1095,11 @@ describe('P18 — pipeline table and whole-report export', () => {
 
   it('exports a flat summary CSV of headline, completeness and notes', async () => {
     done()
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(WITH_PIPE as never)
     const user = await openPanel()
-    await user.click(await screen.findByTestId('eh-report-summary-csv'))
+    const btn = await screen.findByTestId('eh-report-summary-csv')
+    await waitFor(() => expect((btn as HTMLButtonElement).disabled).toBe(false))
+    await user.click(btn)
     expect(downloadCSV).toHaveBeenCalledWith(
       'eh-reference-design-strong_grid.csv', ['group', 'key', 'value'],
       expect.any(Array))
