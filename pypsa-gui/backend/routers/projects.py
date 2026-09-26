@@ -489,7 +489,9 @@ def _write_meta(project_dir: pathlib.Path, data: dict) -> None:
 # is refused on the way IN; a value already stored outside it (an older bundle,
 # a hand-edited metadata.json) is passed through to the client, which shows no
 # badge rather than breaking the row.
-_SCENARIO_TYPES = ("baseline", "scenario", "stress")
+# `sensitivity` — Edge Investment Case scenario matrix (spec §10); a plain
+# string column so adding it needed no migration (P0 WP0.4).
+_SCENARIO_TYPES = ("baseline", "scenario", "stress", "sensitivity")
 
 # The retired encoding: `"[stress] cold winter"` in `scenario_description`.
 # Still READ here, never written — a bundle exported before migration 0004,

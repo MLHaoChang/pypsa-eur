@@ -392,7 +392,7 @@ describe('editing a scenario after it was created', () => {
       project({ name: 'loaded', id: 'id-loaded' }),
       project({
         name: 'exotic', id: 'id-exotic',
-        scenario_type: 'sensitivity', scenario_description: 'keep my category',
+        scenario_type: 'exotic', scenario_description: 'keep my category',
       }),
     ] as never)
     renderPanel()
