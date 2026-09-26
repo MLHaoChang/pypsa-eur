@@ -95,6 +95,10 @@ def test_invalid_overrides_are_422_with_the_field_path(overrides, path):
     ({"dtc_config": {"critical_bus_ids": ["crit"],
                      "islanding_contingencies": []}}, "dtc_config"),
     ({"dsr_buses": ["ghost"]}, "ghost"),
+    # P16: per_load is opt-in and there is no "auto"
+    ({"dtc_config": {"critical_bus_ids": ["crit"], "attribution": "auto",
+                     "islanding_contingencies": ["import_poc"]}},
+     "dtc_config.attribution"),
     ({"mc": {"draws": 0}}, "mc.draws"),
     ({"mc": {"cov_target": 2.0}}, "mc.cov_target"),
 ])
@@ -176,8 +180,11 @@ def test_chat_schema_declares_the_nested_objects():
     assert {"ens_cap_permyriad", "target_lole_h", "certification_metric",
             "import_p_nom_mw", "levers"} <= set(po["properties"])
     assert po["properties"]["certification_metric"]["enum"] == ["mc_lole", "none"]
-    assert set(props["dtc_config"]["properties"]) == {
-        "critical_bus_ids", "critical_load_ids", "islanding_contingencies"}
+    from services.adequacy.eh_study_runner import DtcConfigRequest
+    assert set(props["dtc_config"]["properties"]) == set(
+        DtcConfigRequest.model_fields)
+    assert props["dtc_config"]["properties"]["attribution"]["enum"] == [
+        "bus_aggregate_not_per_load", "per_load"]
     assert props["dsr_buses"]["items"] == {"type": "string"}
     assert set(props["mc"]["properties"]) == {"draws", "seed", "cov_target"}
 

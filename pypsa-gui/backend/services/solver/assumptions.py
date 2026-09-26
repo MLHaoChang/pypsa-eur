@@ -24,6 +24,8 @@ still does — repointing it at this module would be a behaviour-neutral tidy-up
 that widened the diff of a refactor whose whole claim is that no call site
 changed.
 """
+import contextlib
+import contextvars
 import math
 
 import pandas as pd
@@ -47,6 +49,39 @@ from services.vintage_service import apply_vintage_bounds
 # so the per-carrier load-scaler lookups on this backend match what the
 # frontend's Multi-period planning UI writes. Collapses common spellings
 # (empty / 'AC' / 'electricity') into a single 'electrical' bucket.
+
+# P16 (spec §10 amendment, decision Q5): per-Load VOLL priority for the DtC
+# stress re-dispatch. Deliberately NOT a SolverConfig field — that dataclass
+# is built from every solve request body and saved project, and R5 requires
+# the premium never reach ens_solve, the frontier, a sweep or a user solve.
+# A ContextVar is scoped to the caller's own (synchronous) run_simulation.
+_VOLL_LOAD_PREMIUM: contextvars.ContextVar[dict[str, float]] = (
+    contextvars.ContextVar("voll_load_premium", default={}))
+
+
+def current_voll_load_premium() -> dict[str, float]:
+    """Load id → VOLL multiplier in force for the current solve ({} = none)."""
+    return dict(_VOLL_LOAD_PREMIUM.get())
+
+
+@contextlib.contextmanager
+def voll_load_premium(premium: dict[str, float]):
+    """Price the named Loads' VOLL slacks at ``voll × multiplier`` for solves
+    run inside this block (DtC stress only). Multipliers must be >= 1: a
+    premium ranks shed, it never makes a Load cheaper to shed."""
+    clean: dict[str, float] = {}
+    for load_id, mult in (premium or {}).items():
+        m = float(mult)
+        if not (math.isfinite(m) and m >= 1.0):
+            raise ValueError(
+                f"VOLL premium for Load {load_id!r} must be >= 1, got {mult!r}")
+        clean[str(load_id)] = m
+    token = _VOLL_LOAD_PREMIUM.set(clean)
+    try:
+        yield clean
+    finally:
+        _VOLL_LOAD_PREMIUM.reset(token)
+
 
 _LOAD_ELECTRICAL_ALIASES = frozenset({
     "", "ac", "electricity", "electric", "electrical", "el",
@@ -747,6 +782,11 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
     #    dispatch). Sized at 10× the observed max so the slack always has
     #    headroom — bumping further would slow the solver without benefit.
     if cfg.voll > 0 and not n.buses.empty and not n.loads.empty:
+        # P16: a per-Load VOLL multiplier set ONLY by the DtC stress loop
+        # around its own re-dispatch (never a SolverConfig field — see
+        # `voll_load_premium`). Empty everywhere else.
+        premium = current_voll_load_premium()
+        costs: list[float] = []
         added = []
         # P6(b): one involuntary VOLL slack per Load (not per bus), so shared-
         # bus industrial/residential (or AC+H₂) shed is attributable. Size
@@ -795,6 +835,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
             names.append(name)
             buses.append(bus)
             p_noms.append(slack_pnom)
+            costs.append(float(cfg.voll) * float(premium.get(str(load_id), 1.0)))
         if nan_loads:
             phase(
                 f"WARNING: {len(nan_loads)} Load(s) have p_set gaps "
@@ -811,7 +852,7 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
                     "Generator", names,
                     bus=buses,
                     p_nom=p_noms,
-                    marginal_cost=cfg.voll,
+                    marginal_cost=costs if premium else cfg.voll,
                     # The convention's owner is services/adequacy/slack.py.
                     carrier=INVOLUNTARY_SLACK_CARRIER,
                     p_max_pu=pd.DataFrame(max_pu, index=n.snapshots),
@@ -825,6 +866,9 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
             phase(
                 f"Added {len(added)} VOLL slack generator(s) at {cfg.voll:.0f} EUR/MWh "
                 f"(one per Load; each sized to 10× that Load's peak)."
+                + (f" DtC priority: {sum(1 for c in costs if c != cfg.voll)} "
+                   "critical Load slack(s) carry a VOLL premium for this "
+                   "re-dispatch only." if premium else "")
                 + (f" Skipped {skipped_orphan} Load(s) with missing bus." if skipped_orphan else "")
             )
             # Restore = remove the slacks.

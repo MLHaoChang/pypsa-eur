@@ -628,6 +628,7 @@ export interface EhStudyRequestBody {
     critical_bus_ids?: string[]
     critical_load_ids?: string[]
     islanding_contingencies: string[]
+    attribution?: 'bus_aggregate_not_per_load' | 'per_load'
   }
   dsr_buses?: string[]
   mc?: { draws?: number; seed?: number; cov_target?: number }
@@ -788,6 +789,10 @@ export interface EhDtcContingency {
   contingency: string
   status: string
   condition?: string | null
+  /** `per_load` only (P16): unserved MWh per critical Load. */
+  critical_unserved_by_load?: Record<string, number> | null
+  critical_loads?: string[]
+  noncritical_loads?: string[]
   critical_unserved_mwh?: number | null
   noncritical_unserved_mwh?: number | null
   cost_at_target_eur?: number | null
@@ -797,6 +802,8 @@ export interface EhDtcContingency {
 export interface EhDtcStressTable {
   mode?: string
   attribution?: string
+  /** `per_load` only: critical Loads' VOLL premium ε (priority, not a price). */
+  voll_premium_eps?: number | null
   contingencies?: EhDtcContingency[]
   honesty_notes?: string[]
   comparable_solved?: number

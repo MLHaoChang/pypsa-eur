@@ -97,6 +97,9 @@ class DtcConfigRequest(_BaseModel):
     critical_bus_ids: list[str] = Field(default_factory=list)
     critical_load_ids: list[str] = Field(default_factory=list)
     islanding_contingencies: list[str] = Field(default_factory=list)
+    # P16: opt-in per-Load attribution (spec §10 amendment); no "auto".
+    attribution: Literal["bus_aggregate_not_per_load", "per_load"] = (
+        "bus_aggregate_not_per_load")
 
 
 def _validation_422(prefix: str, exc: ValidationError) -> HTTPException:

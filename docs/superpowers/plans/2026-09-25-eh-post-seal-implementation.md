@@ -611,6 +611,29 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
 - Under (a): on a shared bus short by X MWh, the **non-critical Loads are shed first**. Critical unserved = max(0, X − non-critical demand). [R5: "same result twice" can't detect a degenerate split]
 - `ens_solve` / frontier costs are unchanged when DtC `per_load` is on (ε scoping).
 
+**P16 status (2026-09-26, `claude/epic-allen-k2t1c4`):** implemented. Tests: `tests/test_energy_hub_dtc_per_load.py` has 14 (red: 10 of 13 before the code; the bus-aggregate regression was already green); the chat-schema pin now tracks `DtcConfigRequest`; `"auto"` is a 422. FE adds 2 panel tests.
+
+- [x] **Spec amended.** Decision 8, the §8 non-goal and §10 (P16 amendment: premise, VOLL-priority rule, scope, critical set, refusal, planning, honesty notes).
+- [x] **Contract.**
+  - `DtcConfig.attribution` / `DtcConfigRequest.attribution` / the chat schema take `bus_aggregate_not_per_load` (default) or `per_load`. There is no `"auto"`.
+  - Planning no longer refuses `per_load`.
+- [x] **Premium scoping [R5].**
+  - `CRITICAL_VOLL_PREMIUM_EPS = 0.05` is applied through a ContextVar (`assumptions.voll_load_premium`) that the DtC stress loop sets around its own `run_simulation`.
+  - It is deliberately **not** a `SolverConfig` field: `routers/simulation.py` builds `SolverConfig(**body)` from solve requests, and projects persist it.
+  - Multipliers are validated ≥ 1. The slack log line discloses the premium.
+  - Tests: no `SolverConfig` field; the scope resets; a later ordinary solve prices every slack at base VOLL; an EH study's `ens_solve` cost is identical with a `per_load` DtC stage on or off.
+- [x] **Stress.**
+  - Critical Loads = named Loads ∪ Loads on critical buses. A named Load does not promote its bus under `per_load`.
+  - Shed is read from the Load-keyed capture. Without Load keys the stage refuses (`DtcStressError`) instead of guessing.
+  - Pinned on a shared bus: short 40 < non-critical 50 → critical 0; short 70 → non-critical 50 fully shed, critical 20. Both are per snapshot.
+- [x] **Planning.** The retained-critical overlay zeroes every non-critical **Load** under `per_load`, which is pinned on a shared bus. System ENS stays the metric. Honesty note `retained_critical_by_load`.
+- [x] **FE.**
+  - The DtC chip shows the mode plus the disclosed premium.
+  - A "Critical by Load" column appears only under `per_load`.
+  - The CSV gains `critical_unserved_by_load`.
+- [~] **Deferred:** a panel control to choose `per_load` (the panel derives `dtc_config` from tags); API and chat only until the P18 pipeline UI.
+- [ ] **QA gate** — pending.
+
 ---
 
 ## P17 — Energy import cap (spec §6 amendment first; lowest priority)

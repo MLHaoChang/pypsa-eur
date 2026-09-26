@@ -1,8 +1,11 @@
 """
 DtC stress mode — fixed-plan islanding re-dispatch (Phase 4a).
 
-Spec decision 8; plan Phase 4a. Critical unmet is reported at **bus**
-aggregate (one VOLL slack per bus). Per-load shed attribution is refused.
+Spec decision 8; plan Phase 4a. By default critical unmet is reported at
+**bus** aggregate (a critical Load promotes its whole bus). P16 (spec §10
+amendment, decision Q5): ``attribution="per_load"`` reports it by **Load**,
+made non-degenerate by a critical VOLL premium (``CRITICAL_VOLL_PREMIUM_EPS``)
+scoped to the stress re-dispatch alone.
 """
 from __future__ import annotations
 
@@ -26,6 +29,24 @@ HONESTY_NOTES: tuple[str, ...] = (
 
 PLANNING_HONESTY_NOTES: tuple[str, ...] = (
     "no_per_load_attribution",
+    "retained_critical_demand",
+    "islanding_is_planning_contingency",
+    "system_ens_not_per_load",
+)
+
+# P16 — opt-in per-Load attribution. Critical Loads' VOLL slacks bid
+# VOLL × (1 + ε) in the stress re-dispatch, so the LP sheds non-critical
+# Loads first instead of splitting a shared bus arbitrarily.
+CRITICAL_VOLL_PREMIUM_EPS = 0.05
+
+PER_LOAD_HONESTY_NOTES: tuple[str, ...] = (
+    "per_load_by_voll_priority",
+    "stress_on_fixed_plan",
+    "islanding_is_planning_contingency",
+)
+
+PER_LOAD_PLANNING_HONESTY_NOTES: tuple[str, ...] = (
+    "retained_critical_by_load",
     "retained_critical_demand",
     "islanding_is_planning_contingency",
     "system_ens_not_per_load",
@@ -103,6 +124,57 @@ def _critical_buses(n, dtc: DtcConfig) -> set[str]:
             if val is True or str(val).lower() in ("true", "1", "yes"):
                 buses.add(str(b))
     return buses
+
+
+def _critical_loads(n, dtc: DtcConfig) -> set[str]:
+    """``per_load`` critical set: named Loads plus every Load on a critical
+    bus (``critical_bus_ids`` / ``eh_critical``). A named Load does NOT
+    promote its bus here — that is the whole point of per-Load attribution."""
+    if n.loads is None or n.loads.empty:
+        return set()
+    loads = {str(i) for i in n.loads.index}
+    out = {str(lid) for lid in dtc.critical_load_ids if str(lid) in loads}
+    buses = {str(b) for b in dtc.critical_bus_ids}
+    if n.buses is not None and "eh_critical" in n.buses.columns:
+        for b in n.buses.index:
+            val = n.buses.at[b, "eh_critical"]
+            if val is True or str(val).lower() in ("true", "1", "yes"):
+                buses.add(str(b))
+    if "bus" in n.loads.columns:
+        out |= {str(i) for i, b in n.loads["bus"].items() if str(b) in buses}
+    return out
+
+
+def _load_unserved_by_load(n, load_ids: set[str], *,
+                           sink: dict | None) -> dict[str, float]:
+    """Unserved MWh per Load from the Load-keyed P6(b) capture.
+
+    Refuses (``DtcStressError``) when the capture carries no Load-keyed data:
+    a bus roll-up cannot be split into Loads, and ``per_load`` never guesses.
+    """
+    lost = (sink or {}).get("last_lost_load")
+    lost = lost if isinstance(lost, dict) else {}
+    known = ({str(i) for i in n.loads.index}
+             if n.loads is not None and not n.loads.empty else set())
+    by_load = lost.get("lost_load_load_period_mwh")
+    if by_load is not None and any(str(c) in known for c in by_load.columns):
+        return {lid: (float(by_load[lid].to_numpy().sum())
+                      if lid in by_load.columns else 0.0)
+                for lid in sorted(load_ids)}
+    lost_t = lost.get("lost_load_t")
+    if lost_t is not None and any(str(c) in known for c in lost_t.columns):
+        weights = _energy_weights(n).reindex(lost_t.index).fillna(0.0)
+        return {lid: (float(lost_t[lid].clip(lower=0).mul(weights).sum())
+                      if lid in lost_t.columns else 0.0)
+                for lid in sorted(load_ids)}
+    raise DtcStressError(
+        "per_load attribution needs Load-keyed shed data "
+        "(lost_load_load_period_mwh / Load-keyed lost_load_t); the capture "
+        "has none — use attribution='bus_aggregate_not_per_load'")
+
+
+def _load_unserved_mwh(n, load_ids: set[str], *, sink: dict | None) -> float:
+    return float(sum(_load_unserved_by_load(n, load_ids, sink=sink).values()))
 
 
 def _load_to_bus(n) -> dict[str, str]:
@@ -247,13 +319,27 @@ def run_dtc_stress(
     from services.adequacy.sweep import freeze_capacities
     from services.solver_service import SolverConfig, run_simulation
 
+    from services.solver.assumptions import voll_load_premium
+
     if not isinstance(dtc, DtcConfig):
         dtc = DtcConfig.model_validate(dtc)
     log_queue = log_queue or queue.SimpleQueue()
-    critical = _critical_buses(network, dtc)
-    if not critical:
-        raise DtcStressError("no critical buses resolved from DtC config")
-    noncritical = _all_load_buses(network) - critical
+    per_load = dtc.attribution == "per_load"
+    if per_load:
+        crit_loads = _critical_loads(network, dtc)
+        if not crit_loads:
+            raise DtcStressError("no critical Loads resolved from DtC config")
+        noncrit_loads = {str(i) for i in network.loads.index} - crit_loads
+        load_bus = _load_to_bus(network)
+        critical = {load_bus.get(lid, "") for lid in crit_loads} - {""}
+        noncritical = {load_bus.get(lid, "") for lid in noncrit_loads} - {""}
+        premium = {lid: 1.0 + CRITICAL_VOLL_PREMIUM_EPS for lid in crit_loads}
+    else:
+        critical = _critical_buses(network, dtc)
+        if not critical:
+            raise DtcStressError("no critical buses resolved from DtC config")
+        noncritical = _all_load_buses(network) - critical
+        premium = {}
 
     contingencies: list[dict[str, Any]] = []
     solves = 0
@@ -281,23 +367,43 @@ def run_dtc_stress(
             if float(getattr(cfg_i, "voll", 0.0) or 0.0) <= 0:
                 cfg_i.voll = 500.0
             solves += 1
-            status, condition = run_simulation(
-                cfg_i, nn, lock, stop_event, log_queue,
-                state_update=lambda **kw: sink.update(kw),
-            )
-            contingencies.append({
+            # The premium lives only for THIS re-dispatch (R5).
+            with voll_load_premium(premium):
+                status, condition = run_simulation(
+                    cfg_i, nn, lock, stop_event, log_queue,
+                    state_update=lambda **kw: sink.update(kw),
+                )
+            row: dict[str, Any] = {
                 "contingency": str(link_id),
                 "status": status,
                 "condition": condition,
-                "critical_unserved_mwh": _bus_unserved_mwh(
-                    nn, critical, sink=sink),
-                "noncritical_unserved_mwh": _bus_unserved_mwh(
-                    nn, noncritical, sink=sink),
                 "critical_buses": sorted(critical),
                 "noncritical_buses": sorted(noncritical),
                 "applied": mutation,
                 "effective_voll": float(cfg_i.voll),
-            })
+            }
+            if per_load:
+                solved_ok = status in ("ok", "optimal")
+                by_load = (_load_unserved_by_load(nn, crit_loads, sink=sink)
+                           if solved_ok else None)
+                row.update({
+                    "critical_unserved_mwh": (float(sum(by_load.values()))
+                                              if by_load is not None else None),
+                    "noncritical_unserved_mwh": (
+                        _load_unserved_mwh(nn, noncrit_loads, sink=sink)
+                        if solved_ok else None),
+                    "critical_unserved_by_load": by_load,
+                    "critical_loads": sorted(crit_loads),
+                    "noncritical_loads": sorted(noncrit_loads),
+                })
+            else:
+                row.update({
+                    "critical_unserved_mwh": _bus_unserved_mwh(
+                        nn, critical, sink=sink),
+                    "noncritical_unserved_mwh": _bus_unserved_mwh(
+                        nn, noncritical, sink=sink),
+                })
+            contingencies.append(row)
         finally:
             try:
                 unfreeze()
@@ -309,8 +415,10 @@ def run_dtc_stress(
     solved = [c for c in contingencies if c.get("status") in ("ok", "optimal")]
     out = {
         "mode": "stress_fixed_plan",
-        "attribution": "bus_aggregate_not_per_load",
-        "honesty_notes": list(HONESTY_NOTES),
+        "attribution": dtc.attribution,
+        "honesty_notes": list(PER_LOAD_HONESTY_NOTES if per_load
+                              else HONESTY_NOTES),
+        "voll_premium_eps": CRITICAL_VOLL_PREMIUM_EPS if per_load else None,
         "pack_hash": pack_hash,
         "assumptions_hash": assumptions_hash,
         "contingencies": contingencies,
@@ -330,21 +438,32 @@ def run_dtc_stress(
 def apply_retained_critical_demand(
     n, dtc: DtcConfig,
 ) -> tuple[Callable[[], None], dict[str, Any]]:
-    """Zero non-critical-bus load ``p_set``; keep critical buses intact.
+    """Zero non-critical demand for the planning solve; undo restores.
 
-    Spec §10: retained critical demand for P4b planning. Critical and
-    non-critical loads must sit on different buses (P4a honesty boundary).
+    Spec §10: retained critical demand for P4b planning. Bus aggregate
+    (default): every Load on a non-critical bus is zeroed. ``per_load``
+    (P16): every non-critical LOAD is zeroed, including one that shares a
+    bus with a critical Load.
     """
     if n.loads is None or n.loads.empty:
         raise DtcPlanningError("no loads to apply retained-critical overlay")
-    crit = _critical_buses(n, dtc)
-    if not crit:
-        raise DtcPlanningError("no critical buses resolved for retained demand")
+    per_load = dtc.attribution == "per_load"
+    if per_load:
+        keep = _critical_loads(n, dtc)
+        if not keep:
+            raise DtcPlanningError("no critical Loads resolved for retained demand")
+        load_bus = _load_to_bus(n)
+        crit = {load_bus.get(lid, "") for lid in keep} - {""}
+    else:
+        crit = _critical_buses(n, dtc)
+        if not crit:
+            raise DtcPlanningError("no critical buses resolved for retained demand")
+        keep = {str(lid) for lid in n.loads.index
+                if "bus" in n.loads.columns and str(n.loads.at[lid, "bus"]) in crit}
     snap = n.loads.copy(deep=True)
     zeroed: list[str] = []
     for lid in list(n.loads.index):
-        bus = str(n.loads.at[lid, "bus"]) if "bus" in n.loads.columns else ""
-        if bus and bus not in crit:
+        if str(lid) not in keep:
             n.loads.at[lid, "p_set"] = 0.0
             zeroed.append(str(lid))
     # Also clear dynamic p_set for zeroed loads when present.
@@ -364,7 +483,9 @@ def apply_retained_critical_demand(
 
     return undo, {
         "action": "retain_critical_demand",
+        "attribution": dtc.attribution,
         "critical_buses": sorted(crit),
+        "critical_loads": sorted(keep),
         "zeroed_load_ids": zeroed,
     }
 
@@ -388,8 +509,6 @@ def run_dtc_planning(
     """
     from services.solver_service import SolverConfig, run_simulation
 
-    if dtc.attribution != "bus_aggregate_not_per_load":
-        raise DtcPlanningError("planning refuses per-load attribution")
     ens_cap = getattr(cfg, "ens_cap_permyriad", None) if cfg is not None else None
     try:
         ens_cap_f = float(ens_cap) if ens_cap is not None else None
@@ -405,7 +524,6 @@ def run_dtc_planning(
     solves_attempted = 0
     aborted = False
     budget_exhausted = False
-    crit = sorted(_critical_buses(network, dtc))
 
     for link_id in dtc.islanding_contingencies:
         if stop_event.is_set():
@@ -468,7 +586,7 @@ def run_dtc_planning(
                 "built_p_nom_mw": built,
                 "applied_island": island_mut,
                 "retained_critical": ret_mut,
-                "retained_critical_buses": crit,
+                "retained_critical_buses": ret_mut["critical_buses"],
             })
         finally:
             try:
@@ -483,8 +601,11 @@ def run_dtc_planning(
 
     out = {
         "mode": "planning",
-        "attribution": "bus_aggregate_not_per_load",
-        "honesty_notes": list(PLANNING_HONESTY_NOTES),
+        "attribution": dtc.attribution,
+        # No premium in planning: only critical demand remains in the solve.
+        "honesty_notes": list(PER_LOAD_PLANNING_HONESTY_NOTES
+                              if dtc.attribution == "per_load"
+                              else PLANNING_HONESTY_NOTES),
         "pack_hash": pack_hash,
         "assumptions_hash": assumptions_hash,
         "contingencies": contingencies,

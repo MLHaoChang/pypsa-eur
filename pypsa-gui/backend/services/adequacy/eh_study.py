@@ -835,7 +835,8 @@ def _stage_dtc_planning(st: _Study) -> None:
                 and prev[1].get("mode") in ("stress", "stress_fixed_plan"):
             merged = {"mode": "stress+planning", "stress": prev[1],
                       "planning": table,
-                      "attribution": "bus_aggregate_not_per_load"}
+                      "attribution": table.get("attribution",
+                                               "bus_aggregate_not_per_load")}
             st.sections["dtc"] = (sec_status, merged, sec_note)
         else:
             st.sections["dtc"] = (sec_status, table, sec_note)

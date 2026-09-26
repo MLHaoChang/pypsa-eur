@@ -778,6 +778,42 @@ describe('EhReferenceDesignPanel — sibling tables', () => {
     expect(screen.getByTestId('eh-dtc-planning')).toBeTruthy()
   })
 
+  it('shows per-Load DtC results with the disclosed VOLL premium (P16)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report: REPORT,
+    } as never)
+    vi.mocked(resultsApi.getEhDtc).mockResolvedValue({
+      attribution: 'per_load', voll_premium_eps: 0.05,
+      contingencies: [{
+        contingency: 'grid_import', status: 'optimal',
+        critical_unserved_mwh: 40, noncritical_unserved_mwh: 100,
+        critical_unserved_by_load: { hospital: 40, pump: 0 },
+        critical_loads: ['hospital', 'pump'], noncritical_loads: ['offices'],
+      }],
+    } as never)
+    await openPanel()
+    const chip = await screen.findByTestId('eh-dtc-attribution')
+    expect(chip.textContent).toMatch(/per_load · critical Loads shed last \(VOLL \+5% priority\)/)
+    expect(screen.getByTestId('eh-dtc-by-load-grid_import').textContent)
+      .toBe('hospital=40; pump=0')
+    expect(screen.getByText(/Critical by Load/)).toBeTruthy()
+    expect(dtcStressCsvRows({
+      contingencies: [{ contingency: 'x', status: 'ok',
+        critical_unserved_by_load: { hospital: 1.23456 } }],
+    })[0][5]).toBe('hospital=1.235')
+  })
+
+  it('keeps the bus-aggregate table without a per-Load column', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report: REPORT,
+    } as never)
+    vi.mocked(resultsApi.getEhDtc).mockResolvedValue(DTC as never)
+    await openPanel()
+    expect((await screen.findByTestId('eh-dtc-attribution')).textContent)
+      .toBe('bus_aggregate_not_per_load')
+    expect(screen.queryByText(/Critical by Load/)).toBeNull()
+  })
+
   it('exports CSV for each sibling table', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
       status: 'done', study: 'eh_study', archetype: 'weak_flexible', report: REPORT,

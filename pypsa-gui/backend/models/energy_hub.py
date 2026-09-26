@@ -126,24 +126,22 @@ class OptimizationLevers(BaseModel):
 
 
 class DtcConfig(BaseModel):
-    """DtC stress sidecar (spec decision 8; plan Phase 4a).
+    """DtC stress sidecar (spec decision 8; plan Phase 4a; §10 P16 amendment).
 
-    Attribution is bus-aggregate only — today's one-VOLL-per-bus model cannot
-    honestly claim per-load shed. Reject any other attribution mode.
+    ``bus_aggregate_not_per_load`` (default): a critical Load promotes its
+    whole bus. ``per_load`` (opt-in): critical Loads are reported by Load,
+    made non-degenerate by a critical VOLL premium scoped to the DtC stress
+    re-dispatch; refused when the shed capture is not Load-keyed. No "auto".
     """
 
     critical_bus_ids: list[str] = Field(default_factory=list)
     critical_load_ids: list[str] = Field(default_factory=list)
     islanding_contingencies: list[str] = Field(default_factory=list)
-    attribution: Literal["bus_aggregate_not_per_load"] = "bus_aggregate_not_per_load"
+    attribution: Literal["bus_aggregate_not_per_load", "per_load"] = (
+        "bus_aggregate_not_per_load")
 
     @model_validator(mode="after")
-    def _refuse_per_load_attribution(self) -> "DtcConfig":
-        if self.attribution != "bus_aggregate_not_per_load":
-            raise ValueError(
-                "DtC attribution must be bus_aggregate_not_per_load "
-                "(per_load shed claims are not supported on one-slack-per-bus)"
-            )
+    def _require_targets(self) -> "DtcConfig":
         if not self.critical_bus_ids and not self.critical_load_ids:
             raise ValueError("DtC config needs critical_bus_ids and/or critical_load_ids")
         if not self.islanding_contingencies:

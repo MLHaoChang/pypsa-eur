@@ -1093,6 +1093,15 @@ TOOLS: list[dict[str, Any]] = [
                     "islanding_contingencies": {"type": "array",
                                                 "items": {"type": "string"},
                                                 "minItems": 1},
+                    "attribution": {
+                        "type": "string",
+                        "enum": ["bus_aggregate_not_per_load", "per_load"],
+                        "description": (
+                            "Default bus_aggregate_not_per_load. per_load "
+                            "reports critical unserved by Load, shedding "
+                            "non-critical Loads first via a disclosed 5% "
+                            "critical VOLL premium in the DtC stress "
+                            "re-dispatch only.")},
                 },
                 "required": ["islanding_contingencies"],
             },

@@ -344,7 +344,23 @@ export function dtcStressCsvRows(table: EhDtcStressTable): unknown[][] {
     c.critical_unserved_mwh ?? '',
     c.noncritical_unserved_mwh ?? '',
     c.condition ?? '',
+    byLoadText(c.critical_unserved_by_load),
   ])
+}
+
+/** `hospital=20; pump=0` — per-Load critical unserved (P16 `per_load`). */
+export function byLoadText(m: Record<string, number> | null | undefined): string {
+  if (!m) return ''
+  return Object.entries(m).map(([k, v]) => `${k}=${+v.toFixed(3)}`).join('; ')
+}
+
+/** The attribution chip: the raw mode, plus the disclosed premium. */
+export function dtcAttributionLabel(t: EhDtcStressTable): string {
+  const base = t.attribution ?? ''
+  if (t.attribution === 'per_load' && t.voll_premium_eps != null) {
+    return `${base} · critical Loads shed last (VOLL +${+(t.voll_premium_eps * 100).toFixed(2)}% priority)`
+  }
+  return base
 }
 
 /** CSV rows for DtC planning contingencies. */
@@ -1235,7 +1251,7 @@ export function EhReferenceDesignPanel() {
                 </h4>
                 {dtcTable.attribution && (
                   <span className="text-[10px] text-muted" data-testid="eh-dtc-attribution">
-                    {dtcTable.attribution}
+                    {dtcAttributionLabel(dtcTable)}
                   </span>
                 )}
                 <CsvButton
@@ -1244,7 +1260,8 @@ export function EhReferenceDesignPanel() {
                   onClick={() => downloadCSV(
                     'eh-dtc-stress.csv',
                     ['contingency', 'status', 'critical_unserved_mwh',
-                     'noncritical_unserved_mwh', 'condition'],
+                     'noncritical_unserved_mwh', 'condition',
+                     'critical_unserved_by_load'],
                     dtcStressCsvRows(dtcTable),
                   )}
                 />
@@ -1257,6 +1274,9 @@ export function EhReferenceDesignPanel() {
                       <th className="text-left font-medium py-1 pr-3">Status</th>
                       <th className="text-right font-medium py-1 pr-3">Critical MWh</th>
                       <th className="text-right font-medium py-1">Other MWh</th>
+                      {dtcTable.attribution === 'per_load' && (
+                        <th className="text-left font-medium py-1 pl-3">Critical by Load (MWh)</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody className="font-mono">
@@ -1274,6 +1294,12 @@ export function EhReferenceDesignPanel() {
                         <td className="py-0.5 text-right">
                           {cell(c.noncritical_unserved_mwh)}
                         </td>
+                        {dtcTable.attribution === 'per_load' && (
+                          <td className="py-0.5 pl-3 font-sans"
+                              data-testid={`eh-dtc-by-load-${c.contingency}`}>
+                            {byLoadText(c.critical_unserved_by_load) || '—'}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>

@@ -38,7 +38,7 @@ Electricity-only adequacy remains the default until the multi-energy phase.
 | 5 | **Redundancy** = discrete options / train counts (scenario enum first, then outer-loop selection). Not continuous FOR derating. |
 | 6 | **Import caps** = planning overlays per **§6** (normative selection + mutation). **Not** certified interconnector adequacy unless outages are modelled. |
 | 7 | **Storage duration** = scenario enum first (hours of autonomy / `max_hours` options). Continuous expansion later. Annual ENS/LOLE alone does not claim multi-day autonomy. |
-| 8 | **DtC** = critical-load tags + islanding contingencies; **stress-on-fixed-plan first**, then **planning** per §10. No per-load shed attribution on today’s one-slack-per-bus model. |
+| 8 | **DtC** = critical-load tags + islanding contingencies; **stress-on-fixed-plan first**, then **planning** per §10. No per-load shed attribution on today’s one-slack-per-bus model. **Amended 2026-09-26 (P16, Q5):** since P6(b) there is one VOLL slack per **Load**, so `per_load` attribution is available **opt-in** under a disclosed critical VOLL premium (§10 amendment); `bus_aggregate_not_per_load` stays the default. |
 | 9 | **TEA** = post-process wrap (LCOE / optional LCOH) — no second cost engine. |
 | 10 | **Dynamics** = **feasibility gate, not co-opt lever** (v1). EMT = escalation flag behind SCR only. |
 | 11 | **RAM v1** = rate library + provenance (+ optional spare-lead-time modifier). Not full CMMS; planned-outage MC deferred. |
@@ -175,7 +175,7 @@ P3b (auto-select redundancy) and P4b (DtC planning) complete co-opt but are post
 - Statutory PRAS/Antares replacement
 - Full maintainability / spares logistics program
 - Treating import caps as firm interconnection adequacy without outage modelling
-- Per-load DtC attribution on the current single slack-per-bus geometry
+- Per-load DtC attribution on the current single slack-per-bus geometry — *superseded 2026-09-26 (P16)*: available opt-in as `attribution="per_load"` under the §10 VOLL-priority rule; never the default, never without Load-keyed shed data
 - Replacing the existing FMEA worksheet UX
 - Rebuilding shipped Class-B Link sweep
 
@@ -211,6 +211,22 @@ Solution FMEA remains the **diagnostic** under a single plan. The EH reference d
 | 4 | Report system ENS, cost@target, sizing; `attribution=bus_aggregate_not_per_load`; honesty notes must include `retained_critical_demand` and `no_per_load_attribution`. |
 
 **Not claimed.** Per-load shed ranking; certified islanding resilience without the Class-B contingency set; multi-energy critical carriers (P6).
+
+**Amendment (2026-09-26, P16 — decision Q5): opt-in per-Load attribution.**
+
+*Premise change.* P6(b) replaced one-slack-per-bus with one VOLL slack per **Load**, and the capture (`lost_load_load_period_mwh`) is keyed by Load id. The remaining obstacle was degeneracy: every slack bids the same VOLL, so on a shared bus the LP's split of shed between critical and non-critical Loads is arbitrary and any per-Load number would be a solver artefact.
+
+*Rule — VOLL priority.* With `DtcConfig.attribution="per_load"`, the DtC **stress** re-dispatch prices each **critical** Load's slack at `VOLL × (1 + ε_crit)` (ε_crit = 0.05, reported as `voll_premium_eps`). The LP therefore sheds non-critical Loads first; on a shared bus short by X MWh with non-critical demand N, critical unserved = max(0, X − N) per snapshot. The premium is a documented priority, not a valuation: it changes cost only by the ε term, and that cost is not reported.
+
+*Scope [R5].* The premium is applied **only** inside the DtC stress re-dispatch (a context the DtC loop sets around its own solve on a disposable copy). It is not a `SolverConfig` field, so no API, saved project, `ens_solve`, frontier, sweep or user solve can carry it.
+
+*Critical set.* Under `per_load`, critical Loads = `critical_load_ids` ∪ every Load on a critical bus (`critical_bus_ids` / `eh_critical`); every other Load is non-critical — including Loads that share a bus with a critical Load. Under the default `bus_aggregate_not_per_load`, a critical Load still promotes its whole bus (unchanged).
+
+*Refusal.* `per_load` refuses (the stage fails with the reason) when the shed capture carries no Load-keyed data. There is no `"auto"`.
+
+*Planning.* Under `per_load`, the retained-critical overlay zeroes every **non-critical Load** (not every non-critical bus); system ENS stays the planning metric. No premium is needed there — only critical demand remains.
+
+*Honesty notes.* Under `per_load`, stress replaces `no_per_load_attribution` with `per_load_by_voll_priority` and reports `voll_premium_eps`; its rows add `critical_unserved_by_load`, `critical_loads`, `noncritical_loads`. Planning replaces it with `retained_critical_by_load` (no premium is applied there).
 
 ---
 
