@@ -51,13 +51,13 @@ PYTHONPATH=<repo-root>:<backend> python tests/run_qa_drivers.py
 |---|---|---|
 | `test_energy_hub_*.py` + `test_adequacy_sweep.py` | **167** passed | **__EH_AFTER__** passed (+35 new: certify 12, frontier 11, fmea_top 6, lcoh 6) |
 | full backend `-m "not slow"` | (not run on master in this container) | **__FULL_AFTER__** |
-| `run_qa_drivers.py` | 19 drivers | **__QA_AFTER__** |
+| `run_qa_drivers.py` | 21 drivers | **22 drivers passed** (`qa_eh_reference_design` auto-discovered) |
 
 ### Frontend
 ```
 cd pypsa-gui/frontend
 npx vitest run src/pages/results/EhReferenceDesignPanel.test.tsx   # 23 → 32 passed
-npx vitest run                                                       # __FE_AFTER__
+npx vitest run                                                       # 177 files, 1949 passed
 ```
 `tsc --noEmit` clean. (The frontend has no eslint config in this checkout.)
 
