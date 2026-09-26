@@ -6,6 +6,7 @@ import {
   type EhArchetype,
   type EhReadiness,
   type EhDtcAttribution,
+  type EhTemplateMeta,
   type EhDtcPlanningTable,
   type EhDtcStressTable,
   type EhLeverTable,
@@ -388,6 +389,23 @@ export function dtcAttributionLabel(t: EhDtcStressTable): string {
   return base
 }
 
+/** The pack form a template recommends (P19). Only fields the form knows
+ * are carried; anything else stays the pack's own value. */
+export function formFromTemplate(meta: EhTemplateMeta): PackForm {
+  const po = meta.pack_overrides ?? {}
+  const str = (v: unknown) => (typeof v === 'number' ? String(v) : '')
+  const optional = new Set<string>(OPTIONAL_STAGES)
+  return {
+    ...EMPTY_PACK_FORM,
+    ensCap: str(po.ens_cap_permyriad),
+    loleTarget: str(po.target_lole_h),
+    importMw: str(po.import_p_nom_mw),
+    importEnergy: str(po.import_energy_mwh_per_year),
+    stages: meta.stages ? meta.stages.filter(s => optional.has(s)) : null,
+    dtcAttribution: meta.dtc_attribution ?? '',
+  }
+}
+
 /** Header for the flat report summary CSV (P18). */
 export const REPORT_SUMMARY_CSV_HEADER = ['group', 'key', 'value']
 
@@ -567,6 +585,16 @@ export function EhReferenceDesignPanel() {
   const [form, setForm] = useState<PackForm>(EMPTY_PACK_FORM)
   const built = buildEhStudyBody(archetype, form)
   const readinessBudget = useDebounced(built.body?.budget_solves, 400)
+  const { data: template } = useQuery({
+    queryKey: nk(currentProject, 'adequacy', 'eh_template'),
+    queryFn: () => resultsApi.getEhTemplate(currentProject ?? ''),
+    enabled: open && !!currentProject,
+    staleTime: Infinity,
+  })
+  const applyTemplate = (meta: EhTemplateMeta) => {
+    setArchetype(meta.recommended_archetype)
+    setForm(formFromTemplate(meta))
+  }
   const setField = (k: keyof PackForm) =>
     (e: { target: { value: string } }) => setForm(f => ({ ...f, [k]: e.target.value }))
 
@@ -746,6 +774,27 @@ export function EhReferenceDesignPanel() {
             <span className="text-muted">{selected.blurb}</span>
           </label>
 
+          {template && !running && (
+            <div className="flex flex-col gap-1 text-[10px] border border-accent/40 rounded p-2"
+                 data-testid="eh-template-banner">
+              <span>
+                <span className="font-semibold text-text">{template.name}</span>
+                <span className="text-muted"> template — recommended pack </span>
+                <span className="font-mono">{template.recommended_archetype}</span>
+              </span>
+              {(template.study_notes ?? []).map((note, i) => (
+                <span key={i} className="text-muted">• {note}</span>
+              ))}
+              {template.provenance && (
+                <span className="text-muted italic">{template.provenance}</span>
+              )}
+              <button type="button" data-testid="eh-template-apply"
+                onClick={() => applyTemplate(template)}
+                className="self-start px-2 py-0.5 border border-accent rounded text-accent hover:bg-accent/10">
+                Use recommended settings
+              </button>
+            </div>
+          )}
           {readiness && !running && (
             <ReadinessSummary r={readiness as EhReadiness} />
           )}

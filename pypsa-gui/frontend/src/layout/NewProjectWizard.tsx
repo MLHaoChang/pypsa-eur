@@ -60,6 +60,12 @@ const TEMPLATES = [
   // so a project made from it, solved and saved, is a valid dispatch source for
   // a planning → dynamics study — its generators are the detailed grid's units.
   { id: 'ieee39',  name: 'IEEE 39-Bus (New England)', description: 'The New England test system gridspine studies — 39 buses, 10 synchronous units (9 committable), 5 wind and solar sites, 24 h. Solve and save it, then pick it as a study\'s dispatch source.', buses: 39, lines: 35, badge: 'planning → dynamics', available: true },
+  // P19 Energy Hub templates (project_templates/eh_templates.py): tagged,
+  // with outage data, a stress-scenario registry, VOLL and a recommended
+  // archetype pack — open the Energy Hub panel and press Run.
+  { id: 'eh_datacenter', name: 'Data Center Energy Hub', description: '50 MW hyperscale campus behind a weak 40 MW grid connection: critical IT with UPS, gas gensets, rooftop PV, expansion candidates. Ready for an Energy Hub study (weak_flexible).', buses: 3, lines: 0, badge: 'energy hub', available: true },
+  { id: 'eh_h2_hub', name: 'Industrial Hydrogen Hub', description: 'Grid-connected site with wind, PV, electrolyser, H2 storage and fuel cell, critical process load and H2 offtake. Ready for an Energy Hub study (strong_grid).', buses: 3, lines: 0, badge: 'energy hub', available: true },
+  { id: 'eh_microgrid', name: 'Island Microgrid', description: 'Island system that must run without its subsea tie: PV, wind, battery, diesel fleet, critical hospital feeder. Ready for an off-grid Energy Hub study.', buses: 3, lines: 0, badge: 'energy hub', available: true },
 ] as const
 
 export default function NewProjectWizard({

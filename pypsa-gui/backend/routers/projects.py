@@ -1170,7 +1170,17 @@ _TEMPLATE_DEFAULT_NAMES = {
     "ieee14": "IEEE 14-Bus",
     "belgium": "Belgium Grid",
     "ieee39": "IEEE 39-Bus (New England)",
+    # P19 Energy Hub templates (project_templates/eh_templates.py).
+    "eh_datacenter": "Data Center Energy Hub",
+    "eh_h2_hub": "Industrial Hydrogen Hub",
+    "eh_microgrid": "Island Microgrid",
 }
+
+# Sidecars a template directory may carry beside network.nc (P19): the EH
+# template metadata, its Class-C stress registry and its solver settings.
+# An allow-list, never a directory copy.
+_TEMPLATE_SIDECARS = ("eh_template.json", "adequacy_stress_scenarios.json",
+                      "solver_config.json")
 
 
 def _solver_config_from_dict(data: dict):
@@ -1285,6 +1295,10 @@ def create_from_template(
     # `copy2` opens the destination for writing before it reads the source, so
     # a template that cannot be read leaves a truncated `network.nc` behind.
     atomic_copy(src_nc, dest / "network.nc")
+    for sidecar in _TEMPLATE_SIDECARS:
+        src = _PROJECT_TEMPLATES_DIR / template_key / sidecar
+        if src.is_file():
+            atomic_copy(src, dest / sidecar)
 
     # Reset + load, mirroring import_bundle / load_project.
     from services import dirty_state, undo_service
@@ -1307,8 +1321,9 @@ def create_from_template(
     if session is not None:
         active_project.set_active_project(db, session, _created_project)
 
-    # Templates ship without user_ts / solver_config — reset both to defaults
-    # so no stale state from a previously-open project leaks into the new one.
+    # Templates ship without user_ts — reset it; solver_config is the
+    # template's own when it ships one (P19 EH templates set VOLL), else the
+    # defaults, so no stale state from a previously-open project leaks in.
     from routers.network import _reapply_user_ts_to_network, _restore_user_ts
     _restore_user_ts({})
     # Atomic lifecycle reset via `_state_update` (see F11 / G2 rationale).
@@ -1316,7 +1331,15 @@ def create_from_template(
 
     from routers.simulation import _state
     from routers.simulation import _state_update as _sim_state_update
-    _state["solver_config"] = SolverConfig()
+    _tpl_cfg = dest / "solver_config.json"
+    if _tpl_cfg.is_file():
+        try:
+            _state["solver_config"] = _solver_config_from_dict(
+                json.loads(_tpl_cfg.read_text()))
+        except (OSError, ValueError, TypeError):
+            _state["solver_config"] = SolverConfig()
+    else:
+        _state["solver_config"] = SolverConfig()
     _sim_state_update(status="idle", condition=None, objective=None, solve_time=None)
 
     n = PyPSAService.get_network()

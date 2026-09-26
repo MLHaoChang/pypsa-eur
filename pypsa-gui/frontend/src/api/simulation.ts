@@ -721,6 +721,19 @@ export interface StressProfilePack {
 
 export type EhDtcAttribution = 'bus_aggregate_not_per_load' | 'per_load'
 
+/** P19 template metadata (project_templates/<id>/eh_template.json). */
+export interface EhTemplateMeta {
+  id: string
+  name: string
+  description?: string
+  recommended_archetype: EhArchetype
+  pack_overrides?: Record<string, unknown>
+  stages?: string[] | null
+  dtc_attribution?: EhDtcAttribution | null
+  study_notes?: string[]
+  provenance?: string
+}
+
 /** Read-only preflight from GET /results/eh_readiness (P14). */
 export interface EhReadiness {
   archetype: EhArchetype
@@ -1322,6 +1335,10 @@ export const resultsApi = {
   putStressScenarios: (project: string, scenarios: StressScenario[]) =>
     client.put(`/projects/${encodeURIComponent(project)}/stress_scenarios`,
       { scenarios }).then(r => r.data as { scenarios: StressScenario[] }),
+  // P19: the EH template a project was created from (204 → null).
+  getEhTemplate: (project: string) =>
+    client.get(`/projects/${encodeURIComponent(project)}/eh_template`)
+      .then(r => (r.status === 204 ? null : r.data as EhTemplateMeta)),
   getStressProfilePacks: (project: string) =>
     client.get(`/projects/${encodeURIComponent(project)}/stress_profile_packs`)
       .then(r => r.data as { packs: StressProfilePack[] }),

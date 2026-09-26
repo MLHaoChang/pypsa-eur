@@ -1,0 +1,14 @@
+{
+  "description": "Island system that must run without its 20 MW subsea tie: PV, wind, battery, three diesel units, a critical hospital feeder and residential demand. Tagged for an off-grid study.",
+  "dtc_attribution": null,
+  "id": "eh_microgrid",
+  "name": "Island Microgrid",
+  "pack_overrides": {},
+  "provenance": "synthetic illustrative data (P19 template) \u2014 representative week, public-catalogue-range costs; replace with project data before any decision",
+  "recommended_archetype": "off_grid",
+  "stages": null,
+  "study_notes": [
+    "The off_grid pack islands the subsea tie; the island must be adequate on its own resources.",
+    "Class-C stress scenarios (dunkelflaute, heatwave) are preloaded for the FMEA sweep."
+  ]
+}

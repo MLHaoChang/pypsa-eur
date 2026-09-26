@@ -1431,9 +1431,17 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "create_project_from_template",
-        "Scaffold a new project from a built-in template. Safety: destructive.",
+        "Scaffold a new project from a built-in template. Energy Hub "
+        "templates (tagged, with outage data, stress scenarios, VOLL and a "
+        "recommended archetype; read it back with get_eh_template): "
+        "eh_datacenter (weak_flexible), eh_h2_hub (strong_grid), "
+        "eh_microgrid (off_grid). Grid templates: 3bus, ieee14, belgium, "
+        "ieee39. Safety: destructive.",
         {
-            "template_id": {"type": "string"},
+            "template_id": {"type": "string",
+                            "enum": ["3bus", "ieee14", "belgium", "ieee39",
+                                     "eh_datacenter", "eh_h2_hub",
+                                     "eh_microgrid"]},
             "new_name": {"type": "string"},
         },
         ["template_id", "new_name"],

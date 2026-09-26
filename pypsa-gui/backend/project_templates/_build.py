@@ -248,11 +248,14 @@ def build_ieee39() -> pypsa.Network | None:
 
 
 def main() -> None:
+    import eh_templates  # noqa: PLC0415 — sibling module (sys.path[0] is here)
+
     builders = (
         ("3bus", build_3bus),
         ("ieee14", build_ieee14),
         ("belgium", build_belgium),
         ("ieee39", build_ieee39),
+        *eh_templates.BUILDERS.items(),
     )
     for template_id, builder in builders:
         n = builder()
@@ -260,6 +263,10 @@ def main() -> None:
             continue
         _verify_feasible(n, template_id)
         _export(n, template_id)
+        if template_id in eh_templates.TEMPLATE_META:
+            # P19: metadata, stress registry and solver settings the
+            # from_template route copies into the new project.
+            eh_templates.write_sidecars(HERE / template_id, template_id)
     print("done.")
 
 

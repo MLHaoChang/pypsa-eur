@@ -12,6 +12,7 @@ import {
   dtcPlanningCsvRows,
   dtcStressCsvRows,
   reportSummaryCsvRows,
+  formFromTemplate,
   EhReferenceDesignPanel,
   fmeaTopCsvRows,
   frontierCsvRows,
@@ -47,6 +48,7 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       getEhDtc: vi.fn(),
       getEhDtcPlanning: vi.fn(),
       getEhReadiness: vi.fn(),
+      getEhTemplate: vi.fn(),
     },
   }
 })
@@ -123,6 +125,7 @@ beforeEach(() => {
   vi.mocked(resultsApi.getEhDtc).mockReset().mockResolvedValue(null)
   vi.mocked(resultsApi.getEhDtcPlanning).mockReset().mockResolvedValue(null)
   vi.mocked(resultsApi.getEhReadiness).mockReset().mockResolvedValue(READINESS as never)
+  vi.mocked(resultsApi.getEhTemplate).mockReset().mockResolvedValue(null)
   vi.mocked(downloadCSV).mockReset()
   vi.mocked(downloadJSON).mockReset()
 })
@@ -1131,5 +1134,45 @@ describe('P18 — DtC attribution choice', () => {
     await user.click(screen.getByTestId('eh-run'))
     await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
       archetype: 'strong_grid', dtc_attribution: 'per_load' }))
+  })
+})
+
+
+describe('P19 — EH template banner', () => {
+  const META = {
+    id: 'eh_datacenter', name: 'Data Center Energy Hub',
+    recommended_archetype: 'weak_flexible',
+    pack_overrides: { import_p_nom_mw: 40 }, stages: null,
+    dtc_attribution: 'per_load',
+    study_notes: ['IT load is critical (it_bus); cooling and offices are not.'],
+    provenance: 'synthetic illustrative data',
+  }
+
+  it('maps template metadata onto the pack form', () => {
+    expect(formFromTemplate(META as never)).toEqual({
+      ...EMPTY_PACK_FORM, importMw: '40', dtcAttribution: 'per_load' })
+    expect(formFromTemplate({ ...META, stages: ['frontier', 'bogus', 'levers'] } as never)
+      .stages).toEqual(['frontier', 'levers'])
+  })
+
+  it('offers and applies the recommended settings', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(META as never)
+    const user = await openPanel()
+    const banner = await screen.findByTestId('eh-template-banner')
+    expect(banner.textContent).toMatch(/Data Center Energy Hub template/)
+    expect(banner.textContent).toMatch(/IT load is critical/)
+    await user.click(screen.getByTestId('eh-template-apply'))
+    expect((screen.getByTestId('eh-archetype') as HTMLSelectElement).value)
+      .toBe('weak_flexible')
+    await user.click(screen.getByTestId('eh-run'))
+    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
+      archetype: 'weak_flexible', pack_overrides: { import_p_nom_mw: 40 },
+      dtc_attribution: 'per_load' }))
+  })
+
+  it('shows no banner for a project not made from an EH template', async () => {
+    await openPanel()
+    await waitFor(() => expect(resultsApi.getEhTemplate).toHaveBeenCalled())
+    expect(screen.queryByTestId('eh-template-banner')).toBeNull()
   })
 })
