@@ -497,7 +497,7 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
   - An "Energy Hub" section on the Bus card (PoC, critical, SCR MVA inputs) and the Link card (role select).
   - Tags are sent only when set or already present, so ordinary edits never create columns, and existing tags can be cleared.
   - The EH panel shows readiness (import rule/links, critical buses, MC boundary, solves vs budget, predicted skips) before Run.
-- [x] **QA gate** — GO WITH BINDING CONDITIONS, all closed (11 red→green backend tests plus 5 FE tests; FE 1975 passed; full backend suite 5876 passed, 31 skipped once `/eh_readiness` was registered in the route-surface and results-range inventories):
+- [x] **QA gate** — GO WITH BINDING CONDITIONS, all closed (11 red→green backend tests plus 5 FE tests; FE 1975 passed; full backend suite 5876 passed, 2 failed, 31 skipped; the 2 were route inventories missing `/eh_readiness`, now registered and passing on re-run):
   1. *Readiness mispredicted "run".*
      - VOLL ≤ 0, which is the session default, now makes frontier/fmea_top `not_established` with 0 solves.
      - A refused MC hub boundary makes `mc_certify` `not_established`.
