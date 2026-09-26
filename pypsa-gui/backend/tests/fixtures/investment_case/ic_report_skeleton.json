@@ -4,15 +4,15 @@
   "assumptions_hash": "0000000000000000",
   "packs": {},
   "completeness": {
-    "design": {"status": "not_established"},
-    "commercial": {"status": "not_established"},
-    "dispatch_modes": {"status": "not_established"},
-    "participants": {"status": "not_established"},
-    "project": {"status": "not_established"},
-    "debt": {"status": "not_established"},
-    "tax": {"status": "not_established"},
-    "tax_equity": {"status": "not_established"},
-    "uncertainty": {"status": "not_established"},
-    "gates": {"status": "not_established"}
+    "design": "not_established",
+    "commercial": "not_established",
+    "dispatch_modes": "not_established",
+    "participants": "not_established",
+    "project": "not_established",
+    "debt": "not_established",
+    "tax": "not_established",
+    "tax_equity": "not_established",
+    "uncertainty": "not_established",
+    "gates": "not_established"
   }
 }

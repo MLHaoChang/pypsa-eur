@@ -170,6 +170,8 @@ class Tariff(BaseModel):
         ids = [i.id for i in self.items]
         if len(ids) != len(set(ids)):
             raise ValueError("tariff item ids must be unique")
+        if self.valid_to is not None and self.valid_to < self.valid_from:
+            raise ValueError("valid_to must not precede valid_from")
         return self
 
 
@@ -216,6 +218,12 @@ class PpaContract(BaseModel):
     asset_ids: list[str] = Field(min_length=1)
     reference_price: TimeSeriesRef | None = None
     changes_dispatch: bool = False
+
+    @model_validator(mode="after")
+    def _floor_below_cap(self) -> "PpaContract":
+        if self.floor is not None and self.cap is not None and self.floor > self.cap:
+            raise ValueError("PPA floor must not exceed cap")
+        return self
 
 
 class CfdContract(BaseModel):

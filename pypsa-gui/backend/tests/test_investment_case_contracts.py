@@ -38,6 +38,7 @@ def test_pipeline_and_budget_constants_match_spec():
         "uncertainty",
         "assemble",
     )
+    assert set(F.IcPipelineStage.__args__) == set(F.IC_PIPELINE_STAGES)
     assert F.IC_REPORT_SECTIONS == (
         "design",
         "commercial",
@@ -59,8 +60,9 @@ def test_export_keys_are_a_stable_tuple_and_skeleton_exports_all_as_none():
     assert list(F.IC_EXPORT_KEYS) == pinned
     r = F.InvestmentCaseReport(
         case_id="c1", assumptions_hash="a" * 16,
-        completeness=F.empty_ic_section_map())
+        completeness=F.empty_ic_completeness())
     exported = F.export_investment_case(r)
+    assert exported["completeness"] == {k: "not_established" for k in F.IC_REPORT_SECTIONS}
     assert set(exported) == set(F.IC_EXPORT_KEYS)
     # Skeleton: every headline figure is None, never 0 (ADR-0001).
     for k in ("project_irr_post_tax", "npv_at_wacc", "min_dscr",
@@ -82,6 +84,9 @@ def test_empty_section_map_covers_every_section_as_not_established():
     m = F.empty_ic_section_map()
     assert set(m) == set(F.IC_REPORT_SECTIONS)
     assert all(v.status == "not_established" for v in m.values())
+    c = F.empty_ic_completeness()
+    assert set(c) == set(F.IC_REPORT_SECTIONS)
+    assert all(v == "not_established" for v in c.values())
 
 
 # ---------------------------------------------------------------- (c) report
@@ -90,17 +95,33 @@ def test_empty_section_map_covers_every_section_as_not_established():
 def test_report_completeness_keys_must_equal_sections():
     good = F.InvestmentCaseReport(
         case_id="c1", assumptions_hash="a" * 16,
-        completeness=F.empty_ic_section_map())
+        completeness=F.empty_ic_completeness())
     assert set(good.completeness) == set(F.IC_REPORT_SECTIONS)
     with pytest.raises(pydantic.ValidationError):
         F.InvestmentCaseReport(
-            case_id="c1", assumptions_hash="a" * 16,
-            completeness={"design": F.IcSectionState(status="ok")})
-    extra = dict(F.empty_ic_section_map())
-    extra["bogus"] = F.IcSectionState(status="ok")
+            case_id="c1", assumptions_hash="a" * 16, completeness={"design": "ok"})
+    extra = dict(F.empty_ic_completeness())
+    extra["bogus"] = "ok"
     with pytest.raises(pydantic.ValidationError):
         F.InvestmentCaseReport(
             case_id="c1", assumptions_hash="a" * 16, completeness=extra)
+
+
+def test_report_sections_must_agree_with_completeness():
+    comp = F.empty_ic_completeness()
+    comp["design"] = "ok"
+    ok = F.InvestmentCaseReport(
+        case_id="c1", assumptions_hash="a" * 16, completeness=comp,
+        sections={"design": F.IcSectionState(status="ok", payload={"x": 1})})
+    assert ok.sections["design"].payload == {"x": 1}
+    with pytest.raises(pydantic.ValidationError):
+        F.InvestmentCaseReport(
+            case_id="c1", assumptions_hash="a" * 16, completeness=comp,
+            sections={"design": F.IcSectionState(status="skipped")})
+    with pytest.raises(pydantic.ValidationError):
+        F.InvestmentCaseReport(
+            case_id="c1", assumptions_hash="a" * 16, completeness=comp,
+            sections={"bogus": F.IcSectionState(status="ok")})
 
 
 def test_report_skeleton_fixture_round_trips():
@@ -109,7 +130,7 @@ def test_report_skeleton_fixture_round_trips():
     assert r.reference_design_id is None
     assert r.pipeline.budget_solves == F.DEFAULT_IC_BUDGET_SOLVES
     assert [s.stage for s in r.pipeline.stages] == list(F.IC_PIPELINE_STAGES)
-    assert all(v.status == "not_established" for v in r.completeness.values())
+    assert all(v == "not_established" for v in r.completeness.values())
     assert F.InvestmentCaseReport.model_validate_json(r.model_dump_json()) == r
 
 
@@ -142,16 +163,20 @@ def test_tariff_item_rejects_non_monotone_tiers():
     assert len(ok.tiers) == 2
 
 
-def test_tariff_item_ratchet_share_in_unit_interval():
-    with pytest.raises(pydantic.ValidationError):
-        _energy_item(kind="demand", unit="per_kw_month",
-                     ratchet=C.Ratchet(lookback_months=11, share=0.0))
-    with pytest.raises(pydantic.ValidationError):
-        _energy_item(kind="demand", unit="per_kw_month",
-                     ratchet=C.Ratchet(lookback_months=11, share=1.5))
-    ok = _energy_item(kind="demand", unit="per_kw_month",
-                      ratchet=C.Ratchet(lookback_months=11, share=1.0))
+def test_ratchet_share_in_unit_interval_and_only_on_demand_items():
+    base = dict(id="d", kind="demand", unit="per_kw_month",
+                periods=[{"name": "all", "rate": 10.0}],
+                settlement="15min", measured_on="peak_import", direction="cost")
+    for bad in (0.0, 1.5):
+        with pytest.raises(pydantic.ValidationError):
+            C.TariffItem.model_validate(
+                {**base, "ratchet": {"lookback_months": 11, "share": bad}})
+    ok = C.TariffItem.model_validate(
+        {**base, "ratchet": {"lookback_months": 11, "share": 1.0}})
     assert ok.ratchet.share == 1.0
+    # The item-level rule: a ratchet on an energy item is rejected.
+    with pytest.raises(pydantic.ValidationError):
+        _energy_item(ratchet=C.Ratchet(lookback_months=11, share=0.9))
 
 
 def test_tariff_item_enums_exact():
@@ -338,3 +363,94 @@ def test_models_do_not_import_services():
     for mod in (C, F, X):
         src = inspect.getsource(mod)
         assert "from services" not in src and "import services" not in src
+
+
+# ---------------------------------------------------------------- validators are falsifiable
+
+
+def _tp(**kw):
+    return {"name": "x", "rate": 1.0, **kw}
+
+
+@pytest.mark.parametrize("model,bad", [
+    (C.AllocationKey, dict(basis="fixed_shares", shares={"a": 0.6, "b": 0.6})),
+    (C.AllocationKey, dict(basis="fixed_shares", shares=None)),
+    (C.TariffPeriod, _tp(start_hour=8)),                       # end without start
+    (C.TariffPeriod, _tp(start_hour=8, end_hour=8)),           # empty window
+    (C.TariffPeriod, _tp(months=[13])),
+    (C.TariffPeriod, _tp(weekdays=[7])),
+    (C.Tariff, dict(id="t", name="t", jurisdiction="DE", valid_from=date(2026, 1, 1),
+                    items=[dict(id="a", kind="energy", unit="per_kwh", periods=[_tp()]),
+                           dict(id="a", kind="energy", unit="per_kwh", periods=[_tp()])])),
+    (C.Tariff, dict(id="t", name="t", jurisdiction="DE", valid_from=date(2026, 1, 1),
+                    valid_to=date(2025, 1, 1),
+                    items=[dict(id="a", kind="energy", unit="per_kwh", periods=[_tp()])])),
+    (C.DrContract, dict(id="dr", availability_eur_per_mw_year=1.0, activation_eur_per_mwh=1.0)),
+    (C.ConnectionAgreement, dict(kind="firm", import_cap_mw=1.0, available_from=date(2027, 1, 1),
+                                 capacity_fee=dict(id="e", kind="energy", unit="per_kwh",
+                                                   periods=[_tp()]))),
+    (C.PpaContract, dict(id="p", kind="baseload", price=50.0, tenor_years=10, seller="a",
+                         buyer="b", asset_ids=["pv"], floor=60.0, cap=55.0)),
+    (F.DepreciationSchedule, dict(method="straight_line")),
+    (F.DepreciationSchedule, dict(method="declining_balance")),
+    (F.DepreciationSchedule, dict(method="macrs", macrs_class=4)),
+    (F.DepreciationSchedule, dict(method="bonus")),
+    (F.FinanceInputs, dict(financial_close=date(2027, 1, 1), capex_phasing=[0.5, 0.4])),
+    (F.DebtTranche, dict(kind="term_loan", amount=1.0, gearing=0.5, rate=0.05, tenor_years=5)),
+    (X.DataCentreLoadSpec, dict(phases=[dict(cod=date(2029, 1, 1), it_mw=1.0),
+                                        dict(cod=date(2028, 1, 1), it_mw=1.0)],
+                                pue_at_design=1.2, redundancy="N", critical_share=0.5,
+                                curtailable_share=0.1)),
+    (X.EvFleetSpec, dict(fleet_size=1, charger_mw=1.0, daily_energy_mwh=1.0,
+                         arrival_hour=6, departure_hour=6)),
+])
+def test_each_validator_rejects_its_bad_input(model, bad):
+    with pytest.raises(pydantic.ValidationError):
+        model.model_validate(bad)
+
+
+_REF = dict(id="s1", version=1, hash="h" * 16, source="user", vintage_year=2026,
+            provider="test")
+
+
+@pytest.mark.parametrize("model,kwargs", [
+    (C.LeaseContract, dict(id="l", lessor="a", lessee="b", annual_payment=1000.0,
+                           tenor_years=10, asset_ids=["pv"])),
+    (C.EaasContract, dict(id="e", provider="a", customer="b", fee_eur_per_mwh=5.0,
+                          tenor_years=10, asset_ids=["pv"])),
+    (C.RetailContract, dict(id="r", retailer="a", customer="b", tariff_id="t",
+                            tenor_years=3)),
+    (C.AncillaryProduct, dict(name="aFRR", capacity_price=_REF, min_bid_mw=1.0)),
+    (C.MarketPack, dict(id="m", region="NL", valid_year=2026, pack_hash="p" * 16,
+                        price_series={"day_ahead": _REF},
+                        products=[dict(name="FCR", capacity_price=_REF)])),
+    (C.ConnectionAgreement, json.loads((FIXTURES / "fca_connection.json").read_text())),
+    (C.AllocationKey, dict(basis="fixed_shares", shares={"a": 0.25, "b": 0.75})),
+    (F.TaxPack, dict(jurisdiction="DE", corporate_rate=0.3,
+                     depreciation={"pv": dict(method="straight_line", years=20)},
+                     valid_from=date(2026, 1, 1), source="stub")),
+    (F.Incentive, dict(kind="ptc", rate=0.03,
+                       eligibility=dict(begin_construction_by=date(2026, 7, 4)),
+                       phase_out=[(date(2027, 1, 1), 0.5), (date(2028, 1, 1), 0.0)],
+                       feoc_flag=True)),
+    (F.FinanceInputs, dict(financial_close=date(2027, 1, 1),
+                           cod_by_asset={"pv": date(2028, 1, 1)},
+                           capex_phasing=[0.6, 0.4], escalation={"opex": 0.02},
+                           replacement_capex=[(2035, "bess", 1.5e6)],
+                           debt=[dict(kind="term_loan", gearing=0.6, rate=0.05,
+                                      tenor_years=15)],
+                           participants=[dict(id="o", name="O", role="site_owner")])),
+    (F.CashflowLine, dict(year=2030, participant="o", counterparty="grid",
+                          value_stream="energy_import", tariff_item="energy_tou",
+                          asset=None, amount=-12.5,
+                          provenance=dict(source="billing", mode="pf", seed=3))),
+])
+def test_remaining_spec_models_round_trip_json(model, kwargs):
+    m = model.model_validate(kwargs)
+    assert model.model_validate_json(m.model_dump_json()) == m
+
+
+def test_null_defaults_for_unsupplied_finance_assumptions():
+    fi = F.FinanceInputs(financial_close=date(2027, 1, 1))
+    assert fi.inflation is None
+    assert fi.contingency_share is None

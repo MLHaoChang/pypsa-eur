@@ -75,6 +75,8 @@ class DebtTranche(BaseModel):
     def _sizing(self) -> "DebtTranche":
         if self.amount is None and self.gearing is None:
             raise ValueError("DebtTranche needs amount or gearing")
+        if self.amount is not None and self.gearing is not None:
+            raise ValueError("DebtTranche takes amount OR gearing, not both")
         if self.sculpting == "dscr_target" and self.dscr_target is None:
             raise ValueError("dscr_target sculpting needs dscr_target")
         return self
@@ -155,14 +157,18 @@ class FinanceInputs(BaseModel):
     cod_by_asset: dict[str, date] = Field(default_factory=dict)
     construction_months_by_asset: dict[str, int] = Field(default_factory=dict)
     capex_phasing: list[float] = Field(default_factory=lambda: [1.0])
-    contingency_share: float = Field(default=0.0, ge=0)
+    # None = not supplied (ADR-0001): the engine reports the figure as
+    # not_established rather than fabricating a 0.
+    contingency_share: float | None = Field(default=None, ge=0)
     escalation: dict[str, float] = Field(default_factory=dict)
     degradation_by_asset: dict[str, float] = Field(default_factory=dict)
     replacement_capex: list[tuple[int, str, float]] = Field(default_factory=list)
     terminal_value: TerminalValueRule = Field(default_factory=TerminalValueRule)
     wacc_nominal: float | None = Field(default=None, ge=0)
     cost_of_equity: float | None = Field(default=None, ge=0)
-    inflation: float = 0.0
+    # None = not supplied; the WACC gate (spec §6.6) then reports
+    # `not_established` instead of comparing against a fabricated 0.
+    inflation: float | None = None
     debt: list[DebtTranche] = Field(default_factory=list)
     tax_pack_id: str | None = None
     incentives: list[Incentive] = Field(default_factory=list)
@@ -250,8 +256,10 @@ class InvestmentCaseReport(BaseModel):
     plcr: float | None = None
     flip_year: int | None = None
     gates: GatesBlock = Field(default_factory=GatesBlock)
+    # House shape (energy_hub.ReferenceDesignReport): `sections` carry the
+    # payloads, `completeness` is the flat status map the UI chips read.
     sections: dict[str, IcSectionState] = Field(default_factory=dict)
-    completeness: dict[str, IcSectionState]
+    completeness: dict[str, IcSectionStatus]
     pipeline: IcStudyPipeline = Field(default_factory=IcStudyPipeline)
     cashflow_lines: list[CashflowLine] = Field(default_factory=list)
 
@@ -263,15 +271,25 @@ class InvestmentCaseReport(BaseModel):
             raise ValueError(
                 f"completeness must cover exactly IC_REPORT_SECTIONS "
                 f"(missing={sorted(missing)}, extra={sorted(extra)})")
+        if set(self.sections) - set(IC_REPORT_SECTIONS):
+            raise ValueError("sections may only name IC_REPORT_SECTIONS")
         for name, st in self.sections.items():
-            if name in self.completeness and self.completeness[name].status != st.status:
+            if self.completeness[name] != st.status:
                 raise ValueError(
-                    f"completeness[{name!r}] disagrees with sections[{name!r}].status")
+                    f"completeness[{name!r}]={self.completeness[name]!r} disagrees "
+                    f"with sections[{name!r}].status={st.status!r}")
         return self
+
+
+def empty_ic_completeness(
+        *, default: IcSectionStatus = "not_established") -> dict[str, IcSectionStatus]:
+    return {name: default for name in IC_REPORT_SECTIONS}
 
 
 def empty_ic_section_map(
         *, default: IcSectionStatus = "not_established") -> dict[str, IcSectionState]:
+    """Section states for `InvestmentCaseReport.sections` (mirror of
+    `energy_hub.empty_section_map`)."""
     return {name: IcSectionState(status=default) for name in IC_REPORT_SECTIONS}
 
 
@@ -281,7 +299,7 @@ def export_investment_case(report: InvestmentCaseReport) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for k in IC_EXPORT_KEYS:
         if k == "completeness":
-            out[k] = {n: s["status"] for n, s in raw["completeness"].items()}
+            out[k] = dict(raw["completeness"])
         elif k in ("wacc_vs_discount_rate_consistent", "conservation_ok"):
             out[k] = raw["gates"].get(k)
         else:

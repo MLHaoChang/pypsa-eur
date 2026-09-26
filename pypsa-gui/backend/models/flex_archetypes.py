@@ -82,6 +82,12 @@ class EvFleetSpec(BaseModel):
     v2x: bool = False
     public_utilisation_ref: TimeSeriesRef | None = None
 
+    @model_validator(mode="after")
+    def _window_not_empty(self) -> "EvFleetSpec":
+        if self.arrival_hour == self.departure_hour:
+            raise ValueError("arrival_hour and departure_hour must differ")
+        return self
+
 
 class ThermalFlexSpec(BaseModel):
     heat_demand_mw_peak: float = Field(gt=0)
