@@ -566,7 +566,7 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
   - The backend 422 is shown verbatim and the form stays open.
   - Fields the editor does not own (inline series, provenance) survive an edit; a kind switch drops the other kind's fields.
   - Inline profile upload is deferred.
-- [x] **QA gate** — GO WITH BINDING CONDITIONS. All closed, with 9 backend and 7 FE tests that were red before the fix.
+- [x] **QA gate** — GO WITH BINDING CONDITIONS. All closed, with 9 backend and 7 FE tests that were red before the fix. Full suites: backend 5876→5901 passed, 31 skipped, 0 failed; FE 2001 passed.
   1. *BINDING — a chosen pack was overridden by inline series.* The backend lets inline series override a pack. Picking a pack on an inline scenario used to keep the series, so the list said "pack X" while the sweep ran the old series. `scenarioFrom` now drops inline series when a pack is chosen, and the list shows "inline series (override pack X)" for such registries.
   2. *API-written registries.* `draftFrom` coerces with `String()`. The backend requires string ids, uses `fullmatch` (so `"abc\n"` is refused) and refuses bool frequencies.
   3. *Unreadable registry.* `load_scenarios_checked` reports corrupt JSON, a non-object or another schema. The GET returns `error`, and the editor disables every write so a whole-list PUT cannot replace the file. The sweep's reader is unchanged. Last-write-wins between two windows remains (no version/ETag), which matches the worksheet.
