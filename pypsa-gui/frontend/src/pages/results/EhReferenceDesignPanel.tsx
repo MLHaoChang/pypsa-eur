@@ -380,6 +380,13 @@ export function EhReferenceDesignPanel() {
   const frPayload = report?.sections?.frontier?.payload as
     | { pack_target_permyriad?: number; knee_index?: number | null } | null | undefined
   const fmeaRows = report ? fmeaTopRows(report) : []
+  const fmeaUnsolved = ((report?.sections?.fmea_top?.payload as
+    | { unsolved?: { id: string; status: string }[] } | null | undefined)
+    ?.unsolved) ?? []
+  // knee_index indexes the OK points (loosest first), not all points.
+  const okFr = frPoints.filter(p => p.status === 'ok')
+  const kneeTarget = frPayload?.knee_index != null
+    ? okFr[frPayload.knee_index]?.target_permyriad : undefined
   const meCarriers = report ? multiEnergyCarrierEntries(report) : []
   const meLoads = report ? multiEnergyLoadEntries(report) : []
 
@@ -695,7 +702,12 @@ export function EhReferenceDesignPanel() {
                               data-testid={`eh-frontier-row-${i}`}
                               data-pack-target={isPack ? 'true' : 'false'}
                             >
-                              <td className="py-0.5 pr-3 text-right">{p.target_permyriad}</td>
+                              <td className="py-0.5 pr-3 text-right">
+                                {p.target_permyriad}
+                                {p.target_permyriad === kneeTarget && p.status === 'ok' && (
+                                  <span className="text-warn font-sans" data-testid="eh-frontier-knee"> knee</span>
+                                )}
+                              </td>
                               <td className="py-0.5 pr-3 font-sans">{p.status}</td>
                               <td className="py-0.5 pr-3 text-right">
                                 {p.point?.total_system_cost_eur != null
@@ -763,6 +775,12 @@ export function EhReferenceDesignPanel() {
                       </tbody>
                     </table>
                   </div>
+                  {fmeaUnsolved.length > 0 && (
+                    <p className="text-[10px] text-warn" data-testid="eh-fmea-unsolved">
+                      Unsolved outages (may be the worst cases):{' '}
+                      {fmeaUnsolved.map(u => `${u.id} (${u.status})`).join(', ')}
+                    </p>
+                  )}
                   {report.sections?.fmea_top?.note && (
                     <p className="text-[10px] text-muted">{report.sections.fmea_top.note}</p>
                   )}

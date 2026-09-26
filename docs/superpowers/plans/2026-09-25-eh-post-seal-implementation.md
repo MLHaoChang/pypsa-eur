@@ -346,7 +346,17 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
 - [x] **Budget test.** The default `weak_flexible` and `off_grid` pipelines at 30 on a K=5 fixture still reach levers/DtC `ok`.
 - [x] **FE.** Frontier table (pack target highlighted) and FMEA top-N table, each with CSV.
 - [x] **Chat.** The description is updated.
-- [ ] **QA gate** — pending.
+- [x] **QA gate** (independent) — `GO WITH BINDING CONDITIONS`; the condition is fixed red → green.
+  - **Condition:** an abort inside `frontier` or `fmea_top` left `pipeline.aborted=False` when that stage was last, which is the default strong_grid pipeline. Both stages now set `st.aborted` and mark the stage `aborted`, with tests for each as the last stage.
+  - **Also from the gate:**
+    - Engine or config errors are `failed`/`skipped`, never `aborted`.
+    - Error paths charge the solves that ran: frontier partial points, fmea's failed base solve.
+    - `knee_index_basis: ok_points` is documented.
+    - The route guard is now an AST check: only a literal `True`, or the sweep's own pass-through, outside `eh_study.py`.
+    - A frontier with no pack ENS target is `not_established`.
+    - FE lists unsolved FMEA outages and marks the knee.
+    - Chat notes that `fmea_top` is in every archetype's default pipeline.
+  - **Gate budget probes (K=20, budget 30):** strong_grid used exactly 30 (frontier 8 + fmea 21) with both `ok`; weak_flexible used 29 with all `ok`.
 
 ---
 

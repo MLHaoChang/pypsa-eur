@@ -492,7 +492,14 @@ def _stage_frontier(st: _Study) -> None:
         return _not_established(str(exc))
     except Exception as exc:  # noqa: BLE001 — degrade like every other stage
         logger.exception("frontier failed")
-        return _not_established(f"frontier failed: {exc}", status="aborted")
+        partial = getattr(exc, "frontier_result", None) or {}
+        charged = len(partial.get("points") or [])
+        st.solves += charged
+        st.mark("frontier", "failed", note=f"frontier failed: {exc}",
+                solves_charged=charged)
+        st.sections["frontier"] = ("not_established", None,
+                                   f"frontier failed: {exc}")
+        return
     points = result["points"]
     st.solves += len(points)
     ok_points = [pt for pt in points if pt.get("status") == "ok"]
@@ -500,7 +507,9 @@ def _stage_frontier(st: _Study) -> None:
         "targets_permyriad": sorted(targets, reverse=True),
         "pack_target_permyriad": float(st.ens_cap),
         "points": points,
+        # Index into the OK points (loosest first), not into `points`.
         "knee_index": fr.knee_index(points, float(st.cfg.voll or 0.0)),
+        "knee_index_basis": "ok_points",
         "warning": result.get("warning"),
         "aborted": bool(result.get("aborted")),
         "restore_skipped_on_private_copy": True,
@@ -514,8 +523,12 @@ def _stage_frontier(st: _Study) -> None:
         status, note = "not_established", "fewer than two frontier points solved"
     else:
         status, note = "ok", None
-    st.mark("frontier", "run", solves_charged=len(points),
-            note=note or f"{len(ok_points)} points")
+    if result.get("aborted"):
+        st.aborted = True
+        st.mark("frontier", "aborted", solves_charged=len(points), note=note)
+    else:
+        st.mark("frontier", "run", solves_charged=len(points),
+                note=note or f"{len(ok_points)} points")
     st.sections["frontier"] = (status, payload, note)
 
 
@@ -572,11 +585,18 @@ def _stage_fmea_top(st: _Study) -> None:
             stop_event=st.stop_event, restore_base=False)
     except Exception as exc:  # noqa: BLE001 — degrade like every other stage
         logger.exception("fmea_top sweep failed")
-        return _not_established(f"sweep failed: {exc}", status="aborted")
+        # A failed frozen base solve is a real LP solve; charge it.
+        charged = 1 if "base operational solve failed" in str(exc) else 0
+        st.solves += charged
+        note = f"{FMEA_TOP_LINK_PRIMARY_NOTE}; sweep failed: {exc}"
+        st.mark("fmea_top", "failed", note=note, solves_charged=charged)
+        st.sections["fmea_top"] = ("not_established", None, note)
+        return
     charged = 1 + len(rows)
     st.solves += charged
     if restore.get("aborted"):
-        st.mark("fmea_top", "run", solves_charged=charged,
+        st.aborted = True
+        st.mark("fmea_top", "aborted", solves_charged=charged,
                 note="aborted mid-sweep — partial ranking withheld")
         st.sections["fmea_top"] = (
             "not_established", None,

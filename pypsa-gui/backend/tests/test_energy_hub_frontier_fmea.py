@@ -281,3 +281,113 @@ def test_no_route_or_runner_skips_the_closing_restore():
         f"restore_base=False: {offenders}")
     eh = (root / "services/adequacy/eh_study.py").read_text()
     assert len(re.findall(r"restore_base\s*=\s*False\s*[,)]", eh)) == 2
+
+
+# ── P12 gate: aborts inside the LAST stage still mark the study aborted ─────
+
+
+def _stop_on_second_sweep_solve(monkeypatch, stop):
+    real = SW._solve_once
+    calls = {"n": 0}
+
+    def once(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            stop.set()
+        return real(*a, **k)
+
+    monkeypatch.setattr(SW, "_solve_once", once)
+
+
+@pytest.mark.live_solve
+def test_abort_inside_frontier_as_last_stage_marks_the_study_aborted(monkeypatch):
+    stop = threading.Event()
+    _stop_on_second_sweep_solve(monkeypatch, stop)
+    report = _run(_ens_net(), _strong(20.0), stop_event=stop,
+                  stages=("apply_pack", "ens_solve", "frontier", "assemble"))
+    assert report.pipeline.aborted is True
+    rec = next(r for r in report.pipeline.stages if r.stage == "frontier")
+    assert rec.status == "aborted"
+    assert rec.solves_charged == len(report.sections["frontier"].payload["points"])
+
+
+@pytest.mark.live_solve
+def test_abort_inside_fmea_top_as_last_stage_marks_the_study_aborted(monkeypatch):
+    stop = threading.Event()
+    _stop_on_second_sweep_solve(monkeypatch, stop)
+    report = _run(_feeder_hub(), _strong(5000.0), stages=FMEA, stop_event=stop,
+                  cfg=SolverConfig(voll=3000.0))
+    assert report.pipeline.aborted is True
+    rec = next(r for r in report.pipeline.stages if r.stage == "fmea_top")
+    assert rec.status == "aborted"
+    assert report.completeness["fmea_top"] == "not_established"
+
+
+# ── P12 gate: non-binding items ─────────────────────────────────────────────
+
+
+@pytest.mark.live_solve
+def test_frontier_without_a_pack_ens_target_is_not_established():
+    pack = default_strong_grid_pack().model_copy(update={
+        "availability": AvailabilityTarget(target_lole_h=3.0)})
+    report = _run(_ens_net(), pack,
+                  stages=("apply_pack", "ens_solve", "frontier", "assemble"))
+    sec = report.sections["frontier"]
+    assert sec.status == "not_established"
+    assert "ENS target" in (sec.note or "")
+
+
+@pytest.mark.live_solve
+def test_frontier_config_error_is_failed_not_aborted():
+    report = _run(_ens_net(), _strong(20.0), cfg=SolverConfig(voll=0.0),
+                  stages=("apply_pack", "ens_solve", "frontier", "assemble"))
+    rec = next(r for r in report.pipeline.stages if r.stage == "frontier")
+    assert rec.status in ("skipped", "failed")
+    assert report.pipeline.aborted is False
+
+
+@pytest.mark.live_solve
+def test_a_failed_fmea_base_solve_is_still_charged(monkeypatch):
+    real = SW._solve_once
+
+    def failing_base(cfg, network, lock, log_queue, sink):
+        real(cfg, network, lock, log_queue, sink)
+        sink["_status"], sink["_condition"] = "warning", "infeasible"
+
+    monkeypatch.setattr(SW, "_solve_once", failing_base)
+    report = _run(_feeder_hub(), _strong(5000.0), stages=FMEA,
+                  cfg=SolverConfig(voll=3000.0))
+    rec = next(r for r in report.pipeline.stages if r.stage == "fmea_top")
+    assert rec.status == "failed"
+    assert rec.solves_charged == 1
+    assert report.pipeline.solves_consumed == 2
+    assert report.pipeline.aborted is False
+
+
+def test_no_caller_passes_anything_but_the_default_restore():
+    """AST guard: outside the EH study (and the sweep's own pass-through), a
+    `restore_base=` keyword may only be the literal True."""
+    import ast
+    root = pathlib.Path(__file__).resolve().parent.parent
+    allowed = {"services/adequacy/eh_study.py"}
+    offenders = []
+    for path in list((root / "routers").rglob("*.py")) + \
+            list((root / "services").rglob("*.py")):
+        rel = path.relative_to(root).as_posix()
+        if rel in allowed:
+            continue
+        for node in ast.walk(ast.parse(path.read_text())):
+            if not isinstance(node, ast.Call):
+                continue
+            for kw in node.keywords:
+                if kw.arg is None and rel != "services/adequacy/sweep.py":
+                    continue                    # **kwargs — not this flag
+                if kw.arg == "restore_base":
+                    literal_true = (isinstance(kw.value, ast.Constant)
+                                    and kw.value.value is True)
+                    passthrough = (rel == "services/adequacy/sweep.py"
+                                   and isinstance(kw.value, ast.Name)
+                                   and kw.value.id == "restore_base")
+                    if not (literal_true or passthrough):
+                        offenders.append(f"{rel}:{node.lineno}")
+    assert offenders == [], offenders

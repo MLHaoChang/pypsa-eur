@@ -329,6 +329,7 @@ describe('EhReferenceDesignPanel', () => {
           status: 'ok' as const, note: 'Link-primary residual risk',
           payload: {
             k_links: 3,
+            unsolved: [{ id: 'feed2', status: 'infeasible' }],
             rows: [
               { mode_id: 'feed1', name: 'feed1', criticality_eur_per_year: 900,
                 occurrence_per_year: 7.3, severity_eur: 123, delta_eue_mwh: 4 },
@@ -346,6 +347,9 @@ describe('EhReferenceDesignPanel', () => {
     expect(screen.getByTestId('eh-frontier-row-1').getAttribute('data-pack-target'))
       .toBe('true')
     expect(screen.getByTestId('eh-fmea-top').textContent).toMatch(/feed1/)
+    expect(screen.getByTestId('eh-fmea-unsolved').textContent).toMatch(/feed2 \(infeasible\)/)
+    // knee_index 0 of the OK points → the 20‱ row.
+    expect(screen.getByTestId('eh-frontier-row-0').textContent).toMatch(/knee/)
     await user.click(screen.getByTestId('eh-frontier-csv'))
     await user.click(screen.getByTestId('eh-fmea-top-csv'))
     expect(downloadCSV).toHaveBeenCalledWith(
