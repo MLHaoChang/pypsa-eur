@@ -1,8 +1,11 @@
 """
-Energy Hub study orchestrator (Phase 1.5).
+Energy Hub study orchestrator (Phase 1.5; stages completed 2026-09-26).
 
-Runs archetype pack → ENS solve → assemble. Optional stages may be skipped;
-required-but-missing stages surface as ``not_established`` / pipeline notes.
+Runs archetype pack → ENS solve → frontier → MC certify → FMEA top-N →
+redundancy → levers → DtC → assemble (spec decision 18). Optional stages may
+be skipped; required-but-missing stages surface as ``not_established`` /
+pipeline notes. The frontier / mc_certify / fmea_top stage bodies live in
+``eh_stages`` (plan docs/superpowers/plans/2026-09-26-eh-wire-skipped-stages.md).
 
 Report emission: ``assemble_reference_design_report`` only (spec decision 16).
 """
@@ -25,18 +28,14 @@ from models.energy_hub import (
 )
 from services.adequacy import archetypes as arch
 from services.adequacy import eh_report as report_mod
+from services.adequacy import eh_stages as stages_mod
+# Spec decision 14 / P2 — the note is owned by ``eh_stages`` and re-exported
+# here for the tests and callers that import it from the driver.
+from services.adequacy.eh_stages import FMEA_TOP_LINK_PRIMARY_NOTE
 
 logger = logging.getLogger("pypsa_gui.eh_study")
 
 DEFAULT_STAGES = EH_PIPELINE_STAGES
-
-# Spec decision 14 / P2: FMEA top-N from the EH study is Link-primary Class-B
-# residual risk. AC Line/Transformer N-1 stays on SCLOPF and is omitted from
-# the FMEA ranking unless a future product decision merges them.
-FMEA_TOP_LINK_PRIMARY_NOTE = (
-    "Link-primary residual risk (Class-B Link sweep); "
-    "AC Line/Transformer N-1 remains on SCLOPF and is omitted from FMEA ranking"
-)
 
 # Re-export for tests / callers.
 __all__ = [
@@ -79,6 +78,10 @@ def run_eh_study(
     and a redundancy stage also writes ``eh_redundancy_comparison`` for
     ``GET /results/eh_redundancy``.
 
+    ``frontier`` / ``mc_certify`` / ``fmea_top`` run in decision-18 order
+    (bodies in ``eh_stages``); ``mc_certify`` and the class-A half of
+    ``fmea_top`` read the plan FROZEN at the end of ``ens_solve``.
+
     Stage list vs ``pack.levers.redundancy`` (P3a binding condition):
     - Explicit ``stages=...`` wins: including ``\"redundancy\"`` runs the
       compare even when ``levers.redundancy`` is False.
@@ -106,25 +109,16 @@ def run_eh_study(
     log_queue = log_queue or queue.SimpleQueue()
     state_update = state_update or (lambda **kw: None)
 
-    # Stages this driver can actually execute today.
-    IMPLEMENTED = frozenset({
-        "apply_pack", "ens_solve", "redundancy", "levers", "dtc_stress", "dtc_planning", "assemble",
-    })
-
+    # Every default stage is executable; a stage is ``skipped`` only when not
+    # requested (or when the budget cannot afford it — noted on the record).
     records: list[PipelineStageRecord] = []
     for name in DEFAULT_STAGES:
         if name not in requested:
             note = None
             if name == "mc_certify" and pack.mc_certify_required:
                 note = "required by pack but not requested — not_established"
-            records.append(PipelineStageRecord(
-                stage=name, status="skipped", note=note))  # type: ignore[arg-type]
-        elif name not in IMPLEMENTED:
-            note = f"{name} not implemented in P1.5 sync driver"
-            if name == "mc_certify" and pack.mc_certify_required:
-                note = "required by pack but not implemented — not_established"
             elif name == "fmea_top":
-                note = FMEA_TOP_LINK_PRIMARY_NOTE + f"; {note}"
+                note = FMEA_TOP_LINK_PRIMARY_NOTE + "; stage not requested"
             records.append(PipelineStageRecord(
                 stage=name, status="skipped", note=note))  # type: ignore[arg-type]
         else:
@@ -143,6 +137,11 @@ def run_eh_study(
     adequacy_report: dict[str, Any] | None = None
     tea_obj = None
     gates_obj = None
+    mc_lole_h: float | None = None
+    ens_met: bool | None = None
+    # The fixed plan mc_certify / fmea_top read (frozen at the end of a
+    # successful ens_solve, BEFORE the frontier re-solves the network).
+    frozen: stages_mod.FixedPlanSnapshot | None = None
 
     def _mark(stage: str, status: str, *, note: str | None = None,
               solves_charged: int = 0) -> None:
@@ -152,6 +151,18 @@ def run_eh_study(
                 rec.note = note
                 rec.solves_charged = solves_charged
                 break
+
+    def _remaining() -> int:
+        return int(budget_solves) - int(solves)
+
+    def _budget_gate(stage: str) -> bool:
+        """False (and the stage recorded ``skipped``) when no LP solve is
+        left — spec decision 17: never run over the budget silently."""
+        if _remaining() > 0:
+            return True
+        _mark(stage, "skipped",
+              note=f"budget exhausted ({solves}/{budget_solves} solves)")
+        return False
 
     try:
         if "apply_pack" in requested:
@@ -208,6 +219,9 @@ def run_eh_study(
                             demand = float(cap_mwh) / (float(ens_cap) / 1e4)
                             achieved_ens_permyriad = (
                                 float(ens_mwh) / demand * 1e4 if demand else None)
+                            # Planning metric met? (feeds the certification
+                            # payload; never the verdict — decision 2.)
+                            ens_met = float(ens_mwh) <= float(cap_mwh) * (1.0 + 1e-4)
                         section_payloads["target"] = (
                             "ok",
                             {"binding": tgt.get("binding"),
@@ -243,7 +257,8 @@ def run_eh_study(
                             served = max(0.0, demand - float(ens_mwh))
                         tea_block = report_mod.compute_tea(
                             cost_eur=cost_at_target,
-                            served_energy_mwh=served)
+                            served_energy_mwh=served,
+                            network=network, cfg=cfg)
                         if tea_block.lcoe_eur_per_mwh is not None:
                             section_payloads["tea"] = (
                                 "ok",
@@ -266,6 +281,10 @@ def run_eh_study(
                                 network, capture))
                         section_payloads["multi_energy"] = (
                             me_status, me_payload, me_note)
+                    # Freeze the plan the report describes for the stages
+                    # that certify / screen it (see eh_stages docstring).
+                    if "mc_certify" in requested or "fmea_top" in requested:
+                        frozen = stages_mod.freeze_fixed_plan(network, cfg, lock)
         elif "ens_solve" not in requested:
             section_payloads.setdefault(
                 "target", ("not_established", None, "ens_solve not run"))
@@ -276,7 +295,91 @@ def run_eh_study(
                 ("not_established", None, "ens_solve not run"),
             )
 
-        if not aborted and "redundancy" in requested:
+        # ── frontier (WP2) ─────────────────────────────────────────────
+        if not aborted and "frontier" in requested:
+            if stop_event.is_set():
+                aborted = True
+                _mark("frontier", "aborted")
+            elif adequacy_report is None:
+                _mark("frontier", "skipped", note="ens_solve did not run")
+                section_payloads["frontier"] = (
+                    "not_established", None, "ens_solve did not run")
+            else:
+                fr_status, fr_payload, fr_note, fr_solves = (
+                    stages_mod.run_frontier_stage(
+                        network, lock, cfg,
+                        ens_cap_permyriad=ens_cap,
+                        remaining_solves=_remaining(),
+                        stop_event=stop_event,
+                        log_queue=log_queue,
+                        final_state_update=state_update,
+                    ))
+                solves += fr_solves
+                section_payloads["frontier"] = (fr_status, fr_payload, fr_note)
+                if fr_status == "skipped" or (
+                        fr_status != "ok" and fr_solves == 0):
+                    # Not requested-but-unaffordable, or refused before any
+                    # solve (e.g. VOLL ≤ 0): nothing ran, nothing charged.
+                    _mark("frontier", "skipped", note=fr_note)
+                elif fr_payload is not None and fr_payload.get("aborted"):
+                    aborted = True
+                    _mark("frontier", "aborted", note=fr_note,
+                          solves_charged=fr_solves)
+                else:
+                    _mark("frontier", "run", note=fr_note,
+                          solves_charged=fr_solves)
+
+        # ── mc_certify (WP1) ───────────────────────────────────────────
+        if not aborted and "mc_certify" in requested:
+            if stop_event.is_set():
+                aborted = True
+                _mark("mc_certify", "aborted")
+            elif frozen is None:
+                note = "ens_solve did not run — no fixed plan to certify"
+                _mark("mc_certify", "skipped", note=note)
+                section_payloads["certification"] = (
+                    "not_established", None, note)
+            else:
+                c_status, c_payload, c_note, mc_lole_h = (
+                    stages_mod.run_mc_certify_stage(
+                        frozen, pack, stop_event=stop_event, ens_met=ens_met))
+                section_payloads["certification"] = (c_status, c_payload, c_note)
+                if stop_event.is_set():
+                    aborted = True
+                    _mark("mc_certify", "aborted", note=c_note)
+                elif c_status == "ok":
+                    _mark("mc_certify", "run", note=c_note)
+                else:
+                    _mark("mc_certify", "skipped", note=c_note)
+
+        # ── fmea_top (WP3) ─────────────────────────────────────────────
+        if not aborted and "fmea_top" in requested:
+            if stop_event.is_set():
+                aborted = True
+                _mark("fmea_top", "aborted")
+            elif frozen is None:
+                note = FMEA_TOP_LINK_PRIMARY_NOTE + "; ens_solve did not run"
+                _mark("fmea_top", "skipped", note=note)
+                section_payloads["fmea_top"] = ("not_established", None, note)
+            else:
+                f_status, f_payload, f_note, f_solves = (
+                    stages_mod.run_fmea_top_stage(
+                        network, lock, cfg, frozen,
+                        remaining_solves=_remaining(),
+                        stop_event=stop_event,
+                        log_queue=log_queue,
+                        final_state_update=state_update,
+                    ))
+                solves += f_solves
+                section_payloads["fmea_top"] = (f_status, f_payload, f_note)
+                if f_status == "ok":
+                    _mark("fmea_top", "run", note=f_note,
+                          solves_charged=f_solves)
+                else:
+                    _mark("fmea_top", "skipped", note=f_note,
+                          solves_charged=f_solves)
+
+        if not aborted and "redundancy" in requested and _budget_gate("redundancy"):
             if stop_event.is_set():
                 aborted = True
                 _mark("redundancy", "aborted")
@@ -309,7 +412,7 @@ def run_eh_study(
                         "not_established", None, str(exc))
 
 
-        if not aborted and "levers" in requested:
+        if not aborted and "levers" in requested and _budget_gate("levers"):
             if stop_event.is_set():
                 aborted = True
                 _mark("levers", "aborted")
@@ -414,7 +517,7 @@ def run_eh_study(
                         "not_established", None, str(exc))
 
 
-        if not aborted and "dtc_stress" in requested:
+        if not aborted and "dtc_stress" in requested and _budget_gate("dtc_stress"):
             if stop_event.is_set():
                 aborted = True
                 _mark("dtc_stress", "aborted")
@@ -469,28 +572,40 @@ def run_eh_study(
                         "not_established", None, str(exc))
 
 
-        # Optional / not-yet-implemented stages → section skipped (never pending).
-        for optional, section in (
-            ("frontier", "frontier"),
-            ("fmea_top", "fmea_top"),
-        ):
-            if optional not in IMPLEMENTED:
-                if optional == "fmea_top":
-                    reason = FMEA_TOP_LINK_PRIMARY_NOTE
-                    if optional not in requested:
-                        reason = f"{reason}; stage not requested"
-                    else:
-                        reason = f"{reason}; stage not implemented in sync driver"
-                else:
-                    reason = (
-                        f"{optional} not implemented in sync driver"
-                        if optional in requested
-                        else f"{optional} not requested"
-                    )
+        # Stages that did not get to run → section skipped / not_established
+        # (never pending). A stage that was requested but aborted before it
+        # ran is ``not_established`` — it was expected and produced nothing.
+        if "frontier" not in requested:
+            section_payloads.setdefault(
+                "frontier", ("skipped", None, "frontier not requested"))
+        else:
+            section_payloads.setdefault(
+                "frontier", ("not_established", None,
+                             "frontier did not run (aborted earlier)"))
+        if "fmea_top" not in requested:
+            section_payloads.setdefault(
+                "fmea_top", ("skipped", None,
+                             FMEA_TOP_LINK_PRIMARY_NOTE + "; stage not requested"))
+        else:
+            section_payloads.setdefault(
+                "fmea_top", ("not_established", None,
+                             FMEA_TOP_LINK_PRIMARY_NOTE
+                             + "; stage did not run (aborted earlier)"))
+        if "mc_certify" not in requested:
+            if pack.mc_certify_required:
                 section_payloads.setdefault(
-                    section, ("skipped", None, reason))
+                    "certification", (
+                        "not_established", None,
+                        "mc_certify required by pack but not requested"))
+            else:
+                section_payloads.setdefault(
+                    "certification", ("skipped", None, "mc_certify not requested"))
+        else:
+            section_payloads.setdefault(
+                "certification", ("not_established", None,
+                                  "mc_certify did not run (aborted earlier)"))
 
-        if not aborted and "dtc_planning" in requested:
+        if not aborted and "dtc_planning" in requested and _budget_gate("dtc_planning"):
             if stop_event.is_set():
                 aborted = True
                 _mark("dtc_planning", "aborted")
@@ -574,11 +689,6 @@ def run_eh_study(
             section_payloads["gates"] = (gate_status, gate_payload, gate_note)
             if gate_block is not None:
                 gates_obj = gate_block
-        elif pack.mc_certify_required and "mc_certify" not in IMPLEMENTED:
-            section_payloads["gates"] = (
-                "not_established", None,
-                "mc_certify required by pack but not implemented in P1.5",
-            )
         elif pack.mc_certify_required and "mc_certify" not in requested:
             section_payloads["gates"] = (
                 "not_established", None,
@@ -598,10 +708,6 @@ def run_eh_study(
             "multi_energy",
             ("skipped", None, "multi_energy not produced (ens_solve did not run)"),
         )
-        section_payloads.setdefault(
-            "fmea_top", section_payloads.get(
-                "fmea_top", ("skipped", None, "fmea_top not requested")))
-
         tea_obj = None
         tea_sec = section_payloads.get("tea")
         if tea_sec and tea_sec[0] == "ok" and isinstance(tea_sec[1], dict):
@@ -632,6 +738,7 @@ def run_eh_study(
         ens_cap_permyriad=ens_cap,
         achieved_ens_permyriad=achieved_ens_permyriad,
         achieved_shed_hours=achieved_shed_hours,
+        mc_lole_h=mc_lole_h,
         cost_at_target_eur=cost_at_target,
         period_basis=period_basis,
         tea=tea_obj,

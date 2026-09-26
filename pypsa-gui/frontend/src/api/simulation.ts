@@ -630,6 +630,70 @@ export interface EhSectionState {
   note?: string | null
 }
 
+/** TEA wrap (spec decision 9). LCOH is null + a flag when it cannot be
+ *  established (ADR-0001) — `lcoh_status` says `skipped` (no electrolyser
+ *  Links) or `not_established` (Links that produced no H₂). */
+export interface EhTeaBlock {
+  lcoe_eur_per_mwh?: number | null
+  lcoh_eur_per_kg?: number | null
+  notes?: string | null
+  lcoh_status?: EhSectionStatus | null
+  lcoh_note?: string | null
+}
+
+/** MC LOLE certification verdict (spec decision 2). */
+export type EhCertificationVerdict =
+  | 'certified' | 'failed' | 'no_target' | 'not_established'
+
+/** `sections.certification.payload` from the mc_certify stage. */
+export interface EhCertificationPayload {
+  metric?: string
+  target_lole_h?: number | null
+  mc_lole_h?: number | null
+  lole_ci?: [number, number] | number[] | null
+  eue_mwh?: number | null
+  n_samples?: number | null
+  draws_requested?: number | null
+  converged?: boolean | null
+  resolution_floor_h?: number | null
+  time_basis?: string | null
+  ens_met?: boolean | null
+  verdict?: EhCertificationVerdict
+  warning?: string | null
+}
+
+/** One ε-constraint point in `sections.frontier.payload.points`. */
+export interface EhFrontierPoint {
+  target_permyriad: number
+  status: string
+  point?: {
+    cap_mwh?: number
+    achieved_ens_mwh?: number
+    achieved_shed_hours?: number
+    total_system_cost_eur?: number
+    engine?: string
+    fidelity?: string
+  } | null
+  binding?: string | null
+  period_basis?: string | null
+  excludes_shed_cost?: boolean
+}
+
+/** One ranked mode in `sections.fmea_top.payload.top`. */
+export interface EhFmeaTopMode {
+  rank: number
+  mode_id: string
+  component_class: string
+  name: string
+  failure_class: string
+  occurrence_per_year?: number | null
+  severity_eur?: number | null
+  criticality_eur_per_year?: number | null
+  delta_eue_mwh?: number | null
+  engine?: string
+  note?: string
+}
+
 /** Durable product artifact from GET /results/eh_reference_design. */
 export interface EhReferenceDesignReport {
   archetype: EhArchetype
@@ -644,7 +708,7 @@ export interface EhReferenceDesignReport {
   excludes_shed_cost?: boolean
   completeness?: Record<string, EhSectionStatus>
   sections?: Record<string, EhSectionState>
-  tea?: { lcoe_eur_per_mwh?: number | null; lcoh_eur_per_kg?: number | null; notes?: string | null } | null
+  tea?: EhTeaBlock | null
   pipeline?: { aborted?: boolean; solves_consumed?: number } | null
   /** Dynamics feasibility gate (SCR → EMT flag). Absent when section skipped. */
   gates?: EhGatesBlock | null

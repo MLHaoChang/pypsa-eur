@@ -123,7 +123,12 @@ def test_default_stages_never_leave_unimplemented_pending():
     )
     for rec in report.pipeline.stages:
         assert rec.status != "pending", rec
-    assert report.completeness["frontier"] == "skipped"
+    # 2026-09-26: the frontier is wired (plan eh-wire-skipped-stages WP2) —
+    # on the default pipeline it RUNS; it may still be not_established on a
+    # fixture where fewer than three points solve, but it is never skipped.
+    assert report.completeness["frontier"] in ("ok", "not_established")
+    frontier = next(s for s in report.pipeline.stages if s.stage == "frontier")
+    assert frontier.status == "run"
     assert report.completeness["cost"] == "ok"
 
 

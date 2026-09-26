@@ -48,8 +48,24 @@ EHPipelineStage = Literal[
 DEFAULT_EH_BUDGET_SOLVES = 30
 MAX_EH_BUDGET_SOLVES = 120
 
+# mc_certify draw budget per pack. The engine's own product cap is
+# ``services.adequacy.mc.MAX_DRAWS`` (2000); the literal here keeps this
+# contract module free of service imports and is asserted equal in tests.
+DEFAULT_EH_MC_DRAWS = 200
+MAX_EH_MC_DRAWS = 2000
+
+# Certification verdict (spec decision 2): LOLE failure fails certification
+# even when ENS is met; ``no_target`` = LOLE reported, no target to certify
+# against; ``not_established`` = the MC could not run (reason on the section).
+CertificationVerdict = Literal[
+    "certified", "failed", "no_target", "not_established"]
+
 REPORT_SECTIONS: tuple[str, ...] = (
     "target",
+    # MC LOLE certification of the fixed plan (spec decisions 1–2); filled by
+    # the ``mc_certify`` stage, ``skipped`` when not requested, and
+    # ``not_established`` with the reason when required but not run.
+    "certification",
     "cost",
     "frontier",
     "sizing",
@@ -150,6 +166,12 @@ class ArchetypePack(BaseModel):
     dtc_planning_default: bool = False
     # DSR: weak_flexible may suggest opt-in; never silently global (decision 15).
     dsr_opt_in: bool = False
+    # mc_certify draw budget (sequential MC solves nothing; this bounds the
+    # arithmetic, not the LP budget). Seed + CoV target are the engine's
+    # defaults so a pack certifies reproducibly.
+    mc_draws: int = Field(default=DEFAULT_EH_MC_DRAWS, ge=1, le=MAX_EH_MC_DRAWS)
+    mc_seed: int = 0
+    mc_cov_target: float = Field(default=0.05, gt=0)
 
 
 class PipelineStageRecord(BaseModel):
@@ -182,6 +204,11 @@ class TeaBlock(BaseModel):
     lcoe_eur_per_mwh: float | None = None
     lcoh_eur_per_kg: float | None = None
     notes: str | None = None
+    # LCOH completeness (ADR-0001: an unresolvable number is null + a flag,
+    # never 0). ``skipped`` = no electrolyser Links; ``not_established`` =
+    # Links exist but produced no H₂ / the engine could not price them.
+    lcoh_status: SectionStatus | None = None
+    lcoh_note: str | None = None
 
 
 class GatesBlock(BaseModel):

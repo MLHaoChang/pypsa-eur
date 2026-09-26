@@ -15,6 +15,11 @@
       "payload": null,
       "note": null
     },
+    "certification": {
+      "status": "not_established",
+      "payload": null,
+      "note": null
+    },
     "cost": {
       "status": "not_established",
       "payload": null,
@@ -68,6 +73,7 @@
   },
   "completeness": {
     "target": "not_established",
+    "certification": "not_established",
     "cost": "not_established",
     "frontier": "not_established",
     "sizing": "not_established",

@@ -599,7 +599,7 @@ its reliability in none. The tools below close that gap.
 
 | Tool | Tier | What it does |
 |---|---|---|
-| `get_adequacy_results` | read | One dispatcher over the reliability GETs (`copt`, `fmea_modes`, `fmea_sweep`, `frontier`, `mc`, `mc_elcc_candidates`, `coupling_loop`, `margin_loop`, `adequacy`, `reserve_margin`, `eh_study`, `eh_reference_design`) |
+| `get_adequacy_results` | read | One dispatcher over the reliability GETs (`copt`, `fmea_modes`, `fmea_sweep`, `frontier`, `mc`, `mc_elcc_candidates`, `coupling_loop`, `margin_loop`, `adequacy`, `reserve_margin`, `eh_study`, `eh_reference_design` — the EH report carries `mc_lole_h` + a `certification` verdict, `frontier` points, `fmea_top` ranking and a TEA with LCOE/LCOH; unfilled sections say why in `note`) |
 | `get_fmea_worksheet` | read | Per-project FMEA sidecar — expert rows + overlays |
 | `get_stress_scenarios` | read | Per-project class-C scenario registry |
 | `run_fmea_sweep` | execution | Class-B link-outage sweep + any class-C scenarios |
@@ -607,7 +607,7 @@ its reliability in none. The tools below close that gap.
 | `run_mc_study` | execution | Sequential Monte Carlo — LOLE / EUE, optional ELCC table |
 | `run_coupling_loop` | execution | Drive a plan to an LOLE target on the **energy** lever (ENS cap) |
 | `run_margin_loop` | execution | Same target, on the **firm-capacity** lever (reserve margin) |
-| `run_eh_study` | execution | Energy Hub archetype pack study → `ReferenceDesignReport` |
+| `run_eh_study` | execution | Energy Hub archetype pack study → `ReferenceDesignReport` (ENS plan → frontier → MC LOLE certify → FMEA top-N → redundancy / levers / DtC; every stage budget-charged, `skipped` / `not_established` with a reason rather than silently overrun) |
 | `abort_adequacy_study` | destructive | Stop any of the six studies at its next boundary |
 
 Three properties are worth knowing before reading a transcript:
