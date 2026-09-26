@@ -478,6 +478,27 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
 - readiness matches what the driver then does (live);
 - FE card edit → PUT body.
 
+**P14 status (2026-09-26, `claude/epic-allen-k2t1c4`):** implemented. Tests: `tests/test_energy_hub_tagging.py` has 20 (red: no module); FE adds 6 card/readiness tests, red without the wiring.
+
+- [x] **One role vocabulary.** `EH_IMPORT_ROLES` / `EH_CONVERSION_ROLES` / `EH_INTERNAL_ROLES` / `EH_LINK_ROLES` in `models/energy_hub.py`; redundancy and levers import them. §6 rule 1 stays `grid_import` only (tested).
+- [x] **Whitelist and helpers.** `EH_CUSTOM_COLUMNS` plus `services/adequacy/eh_columns.py`:
+  - coercion is typed (bool / float ≥ 0 / role), and a bad value is a 422 naming the rule;
+  - a first write creates the column with typed defaults;
+  - the normaliser never invents columns.
+- [x] **CRUD and bulk.** PUT/POST keep whitelisted keys; other custom keys are still dropped (D21 unchanged). `/_bulk` creates whitelisted columns before its unknown-column check and refuses bad roles with 422.
+- [x] **dtype safety.** The normaliser runs at netCDF export/import, the clustering swap, the solver restore, and the Excel/CSV imports.
+- [~] **`BusCreate` / `LinkCreate` declarations — deliberately not done.** Create dumps every field (no `exclude_unset`), so declaring the tags would add `eh_*` columns to every new bus/link. `extra='allow'` plus the whitelist already carries them.
+- [x] **`GET /results/eh_readiness`.**
+  - A read-only preflight on a pack-applied copy, built from the driver's own helpers (`critical_buses`, `derive_dtc_config`, `frontier_point_count`, `fmea_solve_cost`, `_closed_import_links`, `hub_boundary_copy`), which are now shared with the driver.
+  - Exact estimates are pinned against a live run (budgets 30 and 4).
+  - The route inventory is updated.
+  - Pack overrides are not previewed.
+- [x] **FE.**
+  - An "Energy Hub" section on the Bus card (PoC, critical, SCR MVA inputs) and the Link card (role select).
+  - Tags are sent only when set or already present, so ordinary edits never create columns, and existing tags can be cleared.
+  - The EH panel shows readiness (import rule/links, critical buses, MC boundary, solves vs budget, predicted skips) before Run.
+- [ ] **QA gate** — pending.
+
 ---
 
 ## P15 — Class-C authoring UI (handover priority 1)

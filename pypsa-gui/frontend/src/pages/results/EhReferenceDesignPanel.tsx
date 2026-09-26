@@ -4,6 +4,7 @@ import { Hexagon, Square } from 'lucide-react'
 import {
   resultsApi,
   type EhArchetype,
+  type EhReadiness,
   type EhDtcPlanningTable,
   type EhDtcStressTable,
   type EhLeverTable,
@@ -373,6 +374,47 @@ function CsvButton({
   )
 }
 
+/** Pre-run readiness: what the study will find and which stages will run. */
+export function ReadinessSummary({ r }: { r: EhReadiness }) {
+  const skipped = r.stages.filter(s =>
+    s.prediction === 'skipped_budget' || s.prediction === 'not_established')
+  return (
+    <div className="flex flex-col gap-0.5 text-[10px] border border-border/60 rounded p-2"
+         data-testid="eh-readiness">
+      <span className="uppercase tracking-wide font-semibold text-muted">Readiness</span>
+      <span data-testid="eh-readiness-import">
+        <span className="text-muted">Import Links </span>
+        {r.import.links.length ? r.import.links.join(', ') : 'none'}
+        <span className="text-muted"> (rule: {r.import.rule})</span>
+      </span>
+      <span data-testid="eh-readiness-critical">
+        <span className="text-muted">Critical buses </span>
+        {r.critical_buses.length ? r.critical_buses.join(', ') : 'none tagged'}
+      </span>
+      <span data-testid="eh-readiness-boundary"
+            className={r.mc_boundary.ok ? '' : 'text-warn'}>
+        <span className="text-muted">MC hub boundary </span>
+        {r.mc_boundary.ok ? (r.mc_boundary.hub_buses ?? []).join(', ') : r.mc_boundary.error}
+      </span>
+      <span data-testid="eh-readiness-solves">
+        <span className="text-muted">Estimated solves </span>
+        {r.estimated_solves} / {r.budget_solves}
+        <span className="text-muted"> · Class-B Links {r.class_b.k}</span>
+      </span>
+      {skipped.length > 0 && (
+        <ul className="text-warn" data-testid="eh-readiness-skipped">
+          {skipped.map(s => (
+            <li key={s.stage}>{s.stage}: {s.reason ?? s.prediction}</li>
+          ))}
+        </ul>
+      )}
+      {r.warnings.map((w, i) => (
+        <span key={i} className="text-warn">{w}</span>
+      ))}
+    </div>
+  )
+}
+
 export function EhReferenceDesignPanel() {
   const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
@@ -382,6 +424,13 @@ export function EhReferenceDesignPanel() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [form, setForm] = useState<PackForm>(EMPTY_PACK_FORM)
   const built = buildEhStudyBody(archetype, form)
+  const readinessBudget = built.body?.budget_solves
+  const { data: readiness } = useQuery({
+    queryKey: [...nk(currentProject, 'results', 'eh_readiness'), archetype,
+      readinessBudget ?? null],
+    queryFn: () => resultsApi.getEhReadiness(archetype, readinessBudget),
+    enabled: open,
+  })
   const setField = (k: keyof PackForm) =>
     (e: { target: { value: string } }) => setForm(f => ({ ...f, [k]: e.target.value }))
 
@@ -525,6 +574,10 @@ export function EhReferenceDesignPanel() {
             </select>
             <span className="text-muted">{selected.blurb}</span>
           </label>
+
+          {readiness && !running && (
+            <ReadinessSummary r={readiness as EhReadiness} />
+          )}
 
           <div className="flex flex-col gap-1.5">
             <button

@@ -1423,6 +1423,48 @@ def post_eh_study(body: EhStudyRequest | None = None):
     )
 
 
+@results_router.get("/eh_readiness")
+def get_eh_readiness(archetype: str, budget_solves: int | None = None,
+                     stages: str | None = None):
+    """
+    Read-only Energy Hub readiness preflight (P14): which Links the pack
+    treats as imports and by which §6 rule, critical buses, DtC derivability,
+    SCR coverage, Class-B K, the MC hub boundary, and a per-stage solve
+    estimate against the budget — computed with the study driver's own
+    selectors on a private copy, so it cannot disagree with the run.
+
+    ``stages`` is an optional comma-separated override (same rules as
+    ``POST /eh_study``). Pack overrides are not previewed.
+    """
+    from models.energy_hub import DEFAULT_EH_BUDGET_SOLVES, MAX_EH_BUDGET_SOLVES
+    from services.adequacy.eh_readiness import eh_readiness
+    from services.adequacy.eh_study_runner import _PACK_FACTORY
+
+    if archetype not in _PACK_FACTORY:
+        raise HTTPException(
+            422, f"unknown archetype {archetype!r}; expected one of "
+            f"{', '.join(_PACK_FACTORY)}")
+    budget = DEFAULT_EH_BUDGET_SOLVES if budget_solves is None else budget_solves
+    if not (1 <= budget <= MAX_EH_BUDGET_SOLVES):
+        raise HTTPException(
+            422, f"budget_solves must be between 1 and {MAX_EH_BUDGET_SOLVES}")
+    stage_list = None
+    if stages:
+        stage_list = [x.strip() for x in stages.split(",") if x.strip()]
+    n = PyPSAService.get_network()
+    if n is None:
+        raise HTTPException(422, "no network is loaded")
+    cfg = _state.get("solver_config")
+    with PyPSAService.get_lock():
+        try:
+            return eh_readiness(
+                n, _PACK_FACTORY[archetype](), budget_solves=budget,
+                stages=stage_list,
+                voll=getattr(cfg, "voll", None) if cfg is not None else None)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+
 @results_router.get("/eh_reference_design")
 def get_eh_reference_design():
     """

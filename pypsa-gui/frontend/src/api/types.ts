@@ -1,6 +1,11 @@
 export interface Bus {
   name: string; v_nom: number; carrier: string; x: number; y: number
   country: string; unit: string; control: string; sub_network: string
+  // Energy Hub tags (P14, custom columns — absent until first set).
+  eh_poc?: boolean | null
+  eh_critical?: boolean | null
+  eh_sk_mva?: number | null
+  eh_ibr_mva?: number | null
 }
 export interface Carrier {
   name: string; co2_emissions: number; color: string; nice_name: string; unit: string
@@ -27,6 +32,8 @@ export interface Line {
   lifetime: number | null
 }
 export interface Link {
+  // Energy Hub role (P14, custom column — absent until first set).
+  eh_role?: string | null
   // Adequacy occurrence attributes (custom GUI columns, spec §5.4).
   // null/NaN = unset → per-carrier library default at analysis time.
   outage_rate_value?: number | null

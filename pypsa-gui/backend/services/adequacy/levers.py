@@ -18,7 +18,13 @@ import queue
 import threading
 from typing import Any, Callable, Iterable
 
-from models.energy_hub import AvailabilityTarget, ImportOverlaySpec
+from models.energy_hub import (
+    EH_IMPORT_ROLES,
+    AvailabilityTarget,
+    ImportOverlaySpec,
+)
+
+IMPORT_ROLES = EH_IMPORT_ROLES
 
 logger = logging.getLogger("pypsa_gui.levers")
 
@@ -54,7 +60,7 @@ def _import_link_ids(n) -> list[str]:
     if "eh_role" in n.links.columns:
         return [
             str(i) for i in n.links.index
-            if str(n.links.at[i, "eh_role"]) in ("grid_import", "eh_import", "import")
+            if str(n.links.at[i, "eh_role"]) in IMPORT_ROLES
         ]
     return []
 

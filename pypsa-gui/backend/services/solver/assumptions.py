@@ -1217,8 +1217,10 @@ def _apply_modelling_assumptions(n, cfg: "SolverConfig", phase):
         # ValidationRefused and the generic exception path all reach it
         # through `_guarded_restore`).
         try:
+            from services.adequacy.eh_columns import normalise_eh_columns
             from services.adequacy.occurrence import normalise_flag_column
             normalise_flag_column(n)
+            normalise_eh_columns(n)
         except Exception:
             pass
 

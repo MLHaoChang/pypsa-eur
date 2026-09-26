@@ -17,6 +17,28 @@ EnergyHubArchetype = Literal["strong_grid", "weak_flexible", "off_grid"]
 
 SectionStatus = Literal["ok", "not_established", "skipped"]
 
+# ── Energy Hub network tags (P14; plan B11 / R5) ─────────────────────────────
+# ONE role vocabulary for Link `eh_role`, shared by archetypes (§6 selection),
+# redundancy and levers. Kept as separate subsets: §6 selection rule 1 is
+# `grid_import` ONLY — widening it to every import role would silently change
+# which Links each pack applies to.
+EH_IMPORT_ROLES: tuple[str, ...] = ("grid_import", "eh_import", "import")
+EH_CONVERSION_ROLES: tuple[str, ...] = (
+    "eh_conversion", "conversion", "electrolyser", "fuel_cell")
+# Written by the redundancy study on its own private copies only.
+EH_INTERNAL_ROLES: tuple[str, ...] = ("eh_n1_conversion",)
+EH_LINK_ROLES: tuple[str, ...] = (
+    ("",) + EH_IMPORT_ROLES + EH_CONVERSION_ROLES + EH_INTERNAL_ROLES)
+
+# Custom (non-PyPSA) columns the GUI may write. Each maps to a kind:
+# "bool" (flag, default False), "float_nonneg" (MVA, default NaN) or
+# "role" (one of EH_LINK_ROLES, default "").
+EH_CUSTOM_COLUMNS: dict[str, dict[str, str]] = {
+    "Bus": {"eh_poc": "bool", "eh_critical": "bool",
+            "eh_sk_mva": "float_nonneg", "eh_ibr_mva": "float_nonneg"},
+    "Link": {"eh_role": "role"},
+}
+
 # Spec decision 18 — ordered default pipeline.
 EH_PIPELINE_STAGES: tuple[str, ...] = (
     "apply_pack",

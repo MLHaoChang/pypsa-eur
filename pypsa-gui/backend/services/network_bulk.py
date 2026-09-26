@@ -376,6 +376,14 @@ def apply_bulk_update(body: dict) -> dict:
         # Validate every column exists, across EVERY batch. PyPSA defines its
         # schema lazily, so the column may exist on the frame with no row
         # setting it — this catches typos like "p_min_pu " (trailing space).
+        # P14: whitelisted Energy Hub tags may be the FIRST write of their
+        # column — create it typed, so the dtype dispatch below sees bool.
+        from services.adequacy.eh_columns import eh_columns_for, ensure_eh_column
+        _eh_cols = eh_columns_for(component_class)
+        for c in sorted(touched_cols):
+            if c in _eh_cols:
+                ensure_eh_column(n, component_class, c)
+        df = getattr(n, attr)
         unknown_cols = [c for c in sorted(touched_cols) if c not in df.columns]
         if unknown_cols:
             raise HTTPException(400,
@@ -392,6 +400,13 @@ def apply_bulk_update(body: dict) -> dict:
         for _targets, _updates in batches:
             coerced: dict[str, Any] = {}
             for col, value in _updates.items():
+                if col in _eh_cols:
+                    from services.adequacy.eh_columns import coerce_eh_value
+                    try:
+                        coerced[col] = coerce_eh_value(component_class, col, value)
+                    except ValueError as exc:
+                        raise HTTPException(422, str(exc)) from exc
+                    continue
                 col_dtype = df[col].dtype
                 if pd.api.types.is_bool_dtype(col_dtype):
                     if isinstance(value, str):

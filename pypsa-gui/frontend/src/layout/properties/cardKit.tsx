@@ -989,3 +989,77 @@ export function ExtrasSection({ componentClass, fs, set, curated }: {
     </div>
   )
 }
+
+// ── Energy Hub tags (P14) ─────────────────────────────────────────────────────
+// Custom columns the EH study reads: which bus is the grid point of
+// connection, which buses are critical, the PoC short-circuit data for the
+// SCR gate, and which Link is the grid import. Mirrors the backend's
+// `models.energy_hub.EH_LINK_ROLES` (the backend refuses anything else).
+export const EH_LINK_ROLES = [
+  '', 'grid_import', 'eh_import', 'import',
+  'eh_conversion', 'conversion', 'electrolyser', 'fuel_cell',
+] as const
+
+const EH_BUS_BOOLS = ['eh_poc', 'eh_critical'] as const
+const EH_BUS_NUMS = ['eh_sk_mva', 'eh_ibr_mva'] as const
+
+/** Form seed for a Bus's EH tags (booleans as 'true'/'false'). */
+export function ehBusFS(bus: object): FS {
+  const row = bus as Record<string, unknown>
+  const out: FS = {}
+  for (const k of EH_BUS_BOOLS) out[k] = row[k] === true ? 'true' : 'false'
+  for (const k of EH_BUS_NUMS) {
+    const v = row[k]
+    out[k] = typeof v === 'number' && Number.isFinite(v) ? String(v) : ''
+  }
+  return out
+}
+
+/**
+ * The EH part of a Bus PUT. A tag is sent only when the user set it or the
+ * column already exists on the row — so editing an ordinary bus never
+ * creates `eh_*` columns across the network, and an existing tag can still
+ * be cleared.
+ */
+export function ehBusPayload(fs: FS, current: object): Record<string, unknown> {
+  const row = current as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const k of EH_BUS_BOOLS) {
+    if (fs[k] === 'true' || k in row) out[k] = fs[k] === 'true'
+  }
+  for (const k of EH_BUS_NUMS) {
+    const v = no(fs, k)
+    if (v !== null || k in row) out[k] = v
+  }
+  return out
+}
+
+/** The EH part of a Link PUT (same send-only-when-meaningful rule). */
+export function ehLinkPayload(fs: FS, current: object): Record<string, unknown> {
+  const role = (fs.eh_role ?? '').trim()
+  return role !== '' || 'eh_role' in (current as Record<string, unknown>)
+    ? { eh_role: role } : {}
+}
+
+export function EhBusInputs({ fs, set }: { fs: FS; set: SetFS }) {
+  return (
+    <>
+      <ChkInput label="Grid point of connection (PoC)" k="eh_poc" fs={fs} set={set}
+        tip="Energy Hub: the GRID-side bus of the import boundary. The hub is everything on the other side of the import Links (used for MC certification and the SCR gate)." />
+      <ChkInput label="Critical bus" k="eh_critical" fs={fs} set={set}
+        tip="Energy Hub: demand here must be served under islanding (DtC stress/planning)." />
+      <NumInput label="Short-circuit level" k="eh_sk_mva" fs={fs} set={set} unit="MVA"
+        tip="Energy Hub SCR gate: grid short-circuit capacity at this PoC." />
+      <NumInput label="IBR capacity" k="eh_ibr_mva" fs={fs} set={set} unit="MVA"
+        tip="Energy Hub SCR gate: inverter-based capacity at this PoC (defaults to installed IBR generators when blank)." />
+    </>
+  )
+}
+
+export function EhLinkInputs({ fs, set }: { fs: FS; set: SetFS }) {
+  return (
+    <SelInput label="Energy Hub role" k="eh_role" fs={fs} set={set}
+      options={[...EH_LINK_ROLES]}
+      tip="grid_import marks the Link the archetype packs cap or island (spec §6 rule 1). Conversion roles identify electrolysers / fuel cells for redundancy scenarios." />
+  )
+}

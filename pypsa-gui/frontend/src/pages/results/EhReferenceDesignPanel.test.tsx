@@ -45,6 +45,7 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       getEhLevers: vi.fn(),
       getEhDtc: vi.fn(),
       getEhDtcPlanning: vi.fn(),
+      getEhReadiness: vi.fn(),
     },
   }
 })
@@ -71,6 +72,25 @@ const REPORT = {
     multi_energy: 'skipped' as const,
   },
   tea: { lcoe_eur_per_mwh: 42, lcoh_eur_per_kg: null, notes: null },
+}
+
+const READINESS = {
+  archetype: 'weak_flexible',
+  import: { rule: 'eh_role', links: ['import'], applied: true },
+  critical_buses: ['hub'],
+  dtc: { derivable: true, reason: null },
+  scr: { status: 'not_established', note: null, min_scr: null },
+  storage_units: 1,
+  class_b: { k: 5, closed_import_links: [], error: null },
+  mc_boundary: { ok: false, error: 'tag eh_role/eh_poc to certify' },
+  budget_solves: 30,
+  estimated_solves: 14,
+  stages: [
+    { stage: 'fmea_top', prediction: 'skipped_budget', solves: 0, basis: 'exact',
+      reason: 'needs 21 solves, 9 left' },
+    { stage: 'ens_solve', prediction: 'run', solves: 1, basis: 'exact', reason: null },
+  ],
+  warnings: [],
 }
 
 function renderPanel() {
@@ -101,6 +121,7 @@ beforeEach(() => {
   vi.mocked(resultsApi.getEhLevers).mockReset().mockResolvedValue(null)
   vi.mocked(resultsApi.getEhDtc).mockReset().mockResolvedValue(null)
   vi.mocked(resultsApi.getEhDtcPlanning).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhReadiness).mockReset().mockResolvedValue(READINESS as never)
   vi.mocked(downloadCSV).mockReset()
 })
 
@@ -282,6 +303,19 @@ describe('EhReferenceDesignPanel', () => {
       archetype: 'weak_flexible',
       pack_overrides: { ens_cap_permyriad: 5000 },
     }))
+  })
+
+  it('shows readiness for the selected archetype before Run', async () => {
+    const user = await openPanel()
+    await user.selectOptions(screen.getByTestId('eh-archetype'), 'weak_flexible')
+    const box = await screen.findByTestId('eh-readiness')
+    expect(box.textContent).toMatch(/import/)
+    expect(screen.getByTestId('eh-readiness-solves').textContent).toMatch(/14 \/ 30/)
+    expect(screen.getByTestId('eh-readiness-boundary').textContent).toMatch(/eh_role/)
+    expect(screen.getByTestId('eh-readiness-skipped').textContent)
+      .toMatch(/fmea_top: needs 21 solves/)
+    await waitFor(() => expect(resultsApi.getEhReadiness)
+      .toHaveBeenCalledWith('weak_flexible', undefined))
   })
 
   it('starts a study with the selected archetype', async () => {

@@ -687,6 +687,23 @@ export interface EhPipelineStage {
   note?: string | null
 }
 
+/** Read-only preflight from GET /results/eh_readiness (P14). */
+export interface EhReadiness {
+  archetype: EhArchetype
+  import: { rule: string; links: string[]; applied: boolean }
+  critical_buses: string[]
+  dtc: { derivable: boolean; reason: string | null }
+  scr: { status: string; note: string | null; min_scr: number | null }
+  storage_units: number
+  class_b: { k: number; closed_import_links: string[]; error: string | null }
+  mc_boundary: { ok: boolean; error: string | null; hub_buses?: string[] }
+  budget_solves: number
+  estimated_solves: number
+  stages: { stage: string; prediction: string; solves: number; basis: string;
+            reason: string | null }[]
+  warnings: string[]
+}
+
 /** Study lifecycle record from GET /results/eh_study. */
 export interface EhStudyPayload {
   status: string
@@ -1216,6 +1233,10 @@ export const resultsApi = {
     client.post('/results/eh_study', body).then(r => r.data),
   abortEhStudy: () => client.post('/results/eh_study/abort')
     .then(r => r.data as { status: string; aborting: boolean }),
+  getEhReadiness: (archetype: EhArchetype, budgetSolves?: number) =>
+    client.get('/results/eh_readiness', {
+      params: budgetSolves ? { archetype, budget_solves: budgetSolves } : { archetype },
+    }).then(r => r.data as EhReadiness),
   getEhReferenceDesign: () => client.get('/results/eh_reference_design')
     .then(r => (r.status === 204 ? null : r.data as EhReferenceDesignReport)),
   getEhRedundancy: () => client.get('/results/eh_redundancy')

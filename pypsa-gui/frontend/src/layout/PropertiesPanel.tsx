@@ -44,6 +44,11 @@ import {
   SetFS,
   NumInput,
   OutageInputs,
+  EhBusInputs,
+  EhLinkInputs,
+  ehBusFS,
+  ehBusPayload,
+  ehLinkPayload,
   IncludesOutagesInput,
   outagePayload,
   useGlobalDiscountRate,
@@ -1156,6 +1161,7 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       payload.discount_rate = drPct === null ? null : drPct / 100
       // Adequacy occurrence trio — nullable, blank clears (spec §5.4).
       Object.assign(payload, outagePayload(form))
+      Object.assign(payload, ehLinkPayload(form, current))
       // Extras last: the ...current spread and the explicit payload.X = no(...)
       // lines above would otherwise overwrite a value the user just typed.
       Object.assign(payload, extrasPatch(form, loadExtras(editScope('Link'))))
@@ -1178,6 +1184,7 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
     setForm(seedExtras(link, {
       ...base,
       discount_rate_pct: discountRatePct(link.discount_rate),
+      eh_role: link.eh_role ?? '',
     }, loadExtras(editScope('Link'))))
     setOpen(true)
   }
@@ -1354,6 +1361,8 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost for this asset. Leave blank to use the global rate from Solver Settings." />
       <SectionHdr title="Adequacy" />
       <OutageInputs fs={form} set={setForm} />
+      <SectionHdr title="Energy Hub" />
+      <EhLinkInputs fs={form} set={setForm} />
       <SectionHdr title="Lifecycle" />
       <BuildYearSelect fs={form} set={setForm} tip={docTip('link.build_year')} />
       <NumInput label="Lifetime" k="lifetime" fs={form} set={setForm} unit="yr" tip={docTip('link.lifetime')} />
@@ -1608,7 +1617,10 @@ function BusPanel({ name }: { name: string }) {
 
   const startEdit = () => {
     if (!bus) return
-    setForm(seedExtras(bus, toFS(bus, ['name', 'v_nom', 'carrier', 'control', 'country', 'sub_network', 'x', 'y']), loadExtras(editScope('Bus'))))
+    setForm(seedExtras(bus, {
+      ...toFS(bus, ['name', 'v_nom', 'carrier', 'control', 'country', 'sub_network', 'x', 'y']),
+      ...ehBusFS(bus),
+    }, loadExtras(editScope('Bus'))))
     setEditing(true)
   }
 
@@ -1634,6 +1646,7 @@ function BusPanel({ name }: { name: string }) {
           sub_network: form.sub_network ?? current.sub_network,
           x: nf(form, 'x', current.x),
           y: nf(form, 'y', current.y),
+          ...ehBusPayload(form, current),
         }))
       // updateBus's typed response — the chokepoint is row-agnostic, so the
       // shape is reasserted where it is consumed.
@@ -1711,6 +1724,8 @@ function BusPanel({ name }: { name: string }) {
           <CoordPairInput fs={form} set={setForm} tip={docTip('bus.coordinates')} />
           <NumInput label="Longitude (x)" k="x" fs={form} set={setForm} tip={docTip('bus.x')} />
           <NumInput label="Latitude (y)" k="y" fs={form} set={setForm} tip={docTip('bus.y')} />
+          <SectionHdr title="Energy Hub" />
+          <EhBusInputs fs={form} set={setForm} />
           <ExtrasSection
             componentClass="Bus"
             fs={form}

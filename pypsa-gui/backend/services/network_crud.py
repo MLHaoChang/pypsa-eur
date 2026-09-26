@@ -122,12 +122,24 @@ def _drop_unknown_extras(component_class: str, attr: str, kwargs: dict) -> dict:
     behaviour for fields a Create model declares but PyPSA marks Output —
     narrowing to catalog-Input alone would be a silent behaviour change.
     """
+    from services.adequacy.eh_columns import coerce_eh_value, eh_columns_for
+
     n = PyPSAService.get_network()
+    # P14: whitelisted Energy Hub tags pass even before their column exists,
+    # coerced to their typed value (a bad value is a 422 naming the rule).
+    eh = eh_columns_for(component_class)
+    out_eh = {}
+    for k in [k for k in kwargs if k in eh]:
+        try:
+            out_eh[k] = coerce_eh_value(component_class, k, kwargs.pop(k))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
     allowed = attribute_catalog.input_attributes(n, component_class)
     if not allowed:
-        return kwargs
+        return {**kwargs, **out_eh}
     columns = set(getattr(n, attr).columns)
-    return {k: v for k, v in kwargs.items() if k in allowed or k in columns}
+    kept = {k: v for k, v in kwargs.items() if k in allowed or k in columns}
+    return {**kept, **out_eh}
 
 
 def _normalise_flag_column(n, attr: str) -> None:
@@ -140,6 +152,15 @@ def _normalise_flag_column(n, attr: str) -> None:
     boundary that can add a row or replace a frame; a no-op on anything but
     generators, and 0.17 ms on a 300-row frame.
     """
+    if attr in ("buses", "links"):
+        # P14: a first write of an eh_* tag creates the column with NaN for
+        # every other row — make it typed (False / "") before anything saves.
+        try:
+            from services.adequacy.eh_columns import normalise_eh_columns
+            normalise_eh_columns(n)
+        except Exception:                                     # noqa: BLE001
+            pass
+        return
     if attr != "generators":
         return
     try:

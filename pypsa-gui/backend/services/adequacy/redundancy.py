@@ -44,14 +44,11 @@ _PLACEHOLDER_STORAGE_MW = 40.0
 
 # Positive conversion identity only. Never treat bare AC/electricity as
 # conversion — those match grid-import Links on weak_flexible packs.
-_CONVERSION_ROLES = (
-    "eh_conversion",
-    "conversion",
-    "electrolyser",
-    "fuel_cell",
-)
+from models.energy_hub import EH_CONVERSION_ROLES, EH_IMPORT_ROLES  # noqa: E402
+
+_CONVERSION_ROLES = EH_CONVERSION_ROLES
 _CONVERSION_CARRIERS = ("H2", "heat", "methanol", "ammonia")
-_IMPORT_ROLES = frozenset({"grid_import", "eh_import", "import"})
+_IMPORT_ROLES = frozenset(EH_IMPORT_ROLES)
 
 
 class RedundancyScenarioError(ValueError):

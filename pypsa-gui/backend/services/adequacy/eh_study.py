@@ -475,9 +475,7 @@ def _stage_frontier(st: _Study) -> None:
 
     if st.ens_cap is None:
         return _not_established("frontier needs the pack's ENS target")
-    n_points = min(st.remaining(),
-                   max(2, math.floor(FRONTIER_BUDGET_SHARE * st.budget_solves)),
-                   fr.MAX_FRONTIER_POINTS)
+    n_points = frontier_point_count(st.remaining(), st.budget_solves)
     if n_points < 2:
         return _not_established(
             f"not run: budget_solves leaves {st.remaining()} solve(s) — a "
@@ -574,7 +572,7 @@ def _stage_fmea_top(st: _Study) -> None:
     if k == 0:
         return _not_established(
             "no Class-B-eligible Links (no Link carries occurrence data)")
-    cost = k + 1                       # frozen base + K; restore skipped
+    cost = fmea_solve_cost(k)          # frozen base + K; restore skipped
     if cost > st.remaining():
         return _not_established(
             f"not run: the sweep needs {cost} solves and budget_solves leaves "
@@ -641,29 +639,51 @@ def _stage_fmea_top(st: _Study) -> None:
     st.sections["fmea_top"] = (status, payload, note)
 
 
-def _derive_dtc_config(st: _Study, error_cls, stage: str):
-    """Minimal DtcConfig from import Links + ``eh_critical`` bus tags."""
+def critical_buses(network) -> list[str]:
+    """Buses tagged ``eh_critical``."""
+    if network.buses is None or "eh_critical" not in getattr(
+            network.buses, "columns", []):
+        return []
+    return [str(b) for b in network.buses.index
+            if arch._flag(network.buses.at[b, "eh_critical"])]
+
+
+def derive_dtc_config(network, pack: ArchetypePack):
+    """Minimal DtcConfig from import Links + ``eh_critical`` bus tags, or
+    None when either is missing (shared by the driver and readiness)."""
     from models.energy_hub import DtcConfig
 
+    links = arch.select_import_links(network, pack.import_overlay)
+    crit = critical_buses(network)
+    if not links or not crit:
+        return None
+    return DtcConfig(critical_bus_ids=crit, islanding_contingencies=list(links))
+
+
+def frontier_point_count(remaining: int, budget_solves: int) -> int:
+    """Frontier points the stage may take (plan B8 / R4), before the cap on
+    available targets."""
+    from services.adequacy.frontier import MAX_FRONTIER_POINTS
+    return min(remaining, max(2, math.floor(FRONTIER_BUDGET_SHARE * budget_solves)),
+               MAX_FRONTIER_POINTS)
+
+
+def fmea_solve_cost(k_links: int) -> int:
+    """Frozen base + K contingencies; the closing restore is skipped on the
+    private copy (Q4). Nothing runs when K = 0."""
+    return k_links + 1 if k_links else 0
+
+
+def _derive_dtc_config(st: _Study, error_cls, stage: str):
+    """The caller's DtcConfig, else one derived from the network tags."""
     if st.dtc_config is not None:
         return st.dtc_config
-    network = st.network
-    links = arch.select_import_links(network, st.pack.import_overlay)
-    crit_buses: list[str] = []
-    if network.buses is not None and "eh_critical" in getattr(
-            network.buses, "columns", []):
-        crit_buses = [
-            str(b) for b in network.buses.index
-            if network.buses.at[b, "eh_critical"] is True
-            or str(network.buses.at[b, "eh_critical"]).lower()
-            in ("true", "1", "yes")
-        ]
-    if not links or not crit_buses:
+    derived = derive_dtc_config(st.network, st.pack)
+    if derived is None:
         raise error_cls(
             f"{stage} requested but no import Links / critical buses "
             "resolved; pass dtc_config")
-    return DtcConfig(critical_bus_ids=crit_buses,
-                     islanding_contingencies=list(links))
+    return derived
 
 
 def _stage_redundancy(st: _Study) -> None:
