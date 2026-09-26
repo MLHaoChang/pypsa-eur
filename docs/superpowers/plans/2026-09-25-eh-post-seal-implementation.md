@@ -356,6 +356,7 @@ P10, P14 and P16's spec amendment can start in parallel. P11 is the highest-valu
     - A frontier with no pack ENS target is `not_established`.
     - FE lists unsolved FMEA outages and marks the knee.
     - Chat notes that `fmea_top` is in every archetype's default pipeline.
+  - **Suites after the fixes:** backend 5813 passed, 31 skipped; frontend 1950 passed, `tsc` clean.
   - **Gate budget probes (K=20, budget 30):** strong_grid used exactly 30 (frontier 8 + fmea 21) with both `ok`; weak_flexible used 29 with all `ok`.
 
 ---
