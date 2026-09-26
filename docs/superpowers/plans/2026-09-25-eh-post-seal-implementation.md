@@ -632,7 +632,7 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
   - A "Critical by Load" column appears only under `per_load`.
   - The CSV gains `critical_unserved_by_load`.
 - [~] **Deferred:** a panel control to choose `per_load` (the panel derives `dtc_config` from tags); API and chat only until the P18 pipeline UI.
-- [x] **QA gate** — GO WITH BINDING CONDITIONS, closed. 4 backend and 2 FE tests were red before the fix.
+- [x] **QA gate** — GO WITH BINDING CONDITIONS, closed. 4 backend and 2 FE tests were red before the fix. Full suites: backend 5920 passed, 31 skipped, 0 failed; FE 2005 passed.
   - The reviewer confirmed that R5 scoping holds and that nothing assumes all slacks cost VOLL. Across threads, a new `threading.Thread` does not inherit the ContextVar, and the `with` block contains no `await`.
   - The reviewer also confirmed that ε really breaks the tie: with ε=0 both pinned cases fail.
   1. *BINDING — "critical shed last" is not guaranteed on lossy paths.*
