@@ -687,6 +687,31 @@ export interface EhPipelineStage {
   note?: string | null
 }
 
+/** One Class-C stress scenario (`services/adequacy/stress.py`). Fields the
+ * editor does not know (inline series, provenance) round-trip untouched. */
+export interface StressScenario {
+  id: string
+  name?: string
+  kind: 'parametric' | 'profiles'
+  frequency_per_year: number
+  electrical_load_multiplier?: number | null
+  renewable_availability_multiplier?: number | null
+  profile_pack?: string | null
+  [extra: string]: unknown
+}
+
+/** A shipped synthetic profile pack (GET .../stress_profile_packs). */
+export interface StressProfilePack {
+  id: string
+  name?: string
+  frequency_per_year?: number | null
+  snapshots?: number | null
+  loads?: string[]
+  generators?: string[]
+  provenance?: string | null
+  error?: string
+}
+
 /** Read-only preflight from GET /results/eh_readiness (P14). */
 export interface EhReadiness {
   archetype: EhArchetype
@@ -1266,6 +1291,14 @@ export const resultsApi = {
     client.post('/results/fmea_sweep', { scenarios }).then(r => r.data),
   getStressScenarios: (project: string) =>
     client.get(`/projects/${encodeURIComponent(project)}/stress_scenarios`).then(r => r.data),
+  // Class-C registry (P15): whole-list replace; the backend's 422 names the
+  // rule a scenario breaks and the editor shows it verbatim.
+  putStressScenarios: (project: string, scenarios: StressScenario[]) =>
+    client.put(`/projects/${encodeURIComponent(project)}/stress_scenarios`,
+      { scenarios }).then(r => r.data as { scenarios: StressScenario[] }),
+  getStressProfilePacks: (project: string) =>
+    client.get(`/projects/${encodeURIComponent(project)}/stress_profile_packs`)
+      .then(r => r.data as { packs: StressProfilePack[] }),
   getLostLoad: (range?: TSRange) => client.get<{
     index: string[]; columns: string[]; data: number[][];
     total_mwh: number; total_cost_eur: number;

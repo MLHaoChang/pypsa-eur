@@ -152,6 +152,7 @@ POST    /api/projects/{name}/snapshots                           -> create_snaps
 DELETE  /api/projects/{name}/snapshots/{snapshot_id}             -> delete_snapshot_api_projects__name__snapshots__snapshot_id__delete
 POST    /api/projects/{name}/snapshots/{snapshot_id}/restore     -> restore_snapshot_api_projects__name__snapshots__snapshot_id__restore_post
 GET     /api/projects/{name}/statistics                          -> project_statistics_api_projects__name__statistics_get
+GET     /api/projects/{name}/stress_profile_packs                -> get_stress_profile_packs_api_projects__name__stress_profile_packs_get
 GET     /api/projects/{name}/stress_scenarios                    -> get_stress_scenarios_api_projects__name__stress_scenarios_get
 PUT     /api/projects/{name}/stress_scenarios                    -> put_stress_scenarios_api_projects__name__stress_scenarios_put
 GET     /api/projects/{name}/uploads                             -> get_uploads_api_projects__name__uploads_get

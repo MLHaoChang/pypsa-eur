@@ -24,6 +24,8 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       postFmeaSweep: vi.fn(),
       abortFmeaSweep: vi.fn(),
       getStressScenarios: vi.fn(),
+      putStressScenarios: vi.fn(),
+      getStressProfilePacks: vi.fn(),
     },
   }
 })
@@ -304,4 +306,11 @@ it('warns, with the solver\'s word, when the plan was not put back', async () =>
     expect(note).toContain(word)
     cleanup()
   }
+})
+
+it('hosts the class-C stress-scenario editor (P15)', async () => {
+  vi.mocked(resultsApi.getStressProfilePacks).mockResolvedValue({ packs: [] })
+  renderTab()
+  const editor = await screen.findByTestId('stress-editor')
+  await waitFor(() => expect(editor.textContent).toMatch(/cold_snap/))
 })

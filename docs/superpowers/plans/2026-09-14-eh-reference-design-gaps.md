@@ -323,7 +323,7 @@ the P1.5 HTTP follow-up — [HTTP re-gate](bc-b3498f66-fa5e-5466-8e30-478f4d3d4f
 **Shipped (a)**
 - Inline `loads_p_set` / `generators_p_max_pu` (or `profile_pack`) swaps absolute series
 - Occurrence basis `scenario:profiles`; incomplete → fail-closed `profiles_incomplete`
-- Synthetic packs: `tests/fixtures/eh_class_c/synth_*.json`
+- Synthetic packs: `tests/fixtures/eh_class_c/synth_*.json` (moved to `backend/data/eh_class_c/` in P15)
 - Abort/partial via shared contingency sweep (same as parametric)
 
 **Acceptance**

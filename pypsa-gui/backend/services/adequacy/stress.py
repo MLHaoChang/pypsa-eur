@@ -54,13 +54,11 @@ _ID_RE = re.compile(r"^[a-z0-9_\-]{1,64}$")
 VALID_KINDS = ("parametric", "profiles")
 
 # Bundled synthetic profile packs (P8a). Real climate years are NOT here —
-# they are a procurement follow-up. Paths relative to this module resolve
-# to the test fixtures tree when present; production can overlay a
-# directory later without changing the scenario schema.
-_SYNTHETIC_PACK_DIRS: tuple[pathlib.Path, ...] = (
-    pathlib.Path(__file__).resolve().parents[2]
-    / "tests" / "fixtures" / "eh_class_c",
-)
+# they are a procurement follow-up. P15: the packs ship in ``backend/data``
+# (never the tests tree, which a frozen build does not bundle); the spec
+# writes the directory to the same relative place under _MEIPASS.
+PROFILE_PACK_DIR: pathlib.Path = (
+    pathlib.Path(__file__).resolve().parents[2] / "data" / "eh_class_c")
 
 
 class StressValidationError(ValueError):
@@ -73,10 +71,8 @@ def load_synthetic_profile_pack(pack_id: str) -> dict:
     if not sid or not _ID_RE.match(sid):
         raise StressValidationError(
             f"profile_pack id '{pack_id}' must match [a-z0-9_-]{{1,64}}")
-    for root in _SYNTHETIC_PACK_DIRS:
-        path = root / f"{sid}.json"
-        if not path.is_file():
-            continue
+    path = PROFILE_PACK_DIR / f"{sid}.json"
+    if path.is_file():
         try:
             raw = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError) as exc:
@@ -91,7 +87,41 @@ def load_synthetic_profile_pack(pack_id: str) -> dict:
         return out
     raise StressValidationError(
         f"unknown synthetic profile_pack '{sid}' "
-        f"(looked in {[str(p) for p in _SYNTHETIC_PACK_DIRS]})")
+        f"(available: {[p['id'] for p in list_profile_packs()] or 'none'})")
+
+
+def list_profile_packs() -> list[dict]:
+    """Summaries of every shipped pack, sorted by id, for the editor's picker.
+
+    A pack that does not parse is LISTED with its ``error`` (and a scenario
+    naming it still fails at save) rather than silently vanishing.
+    """
+    out: list[dict] = []
+    root = PROFILE_PACK_DIR
+    if not root.is_dir():
+        return out
+    for path in sorted(root.glob("*.json")):
+        sid = path.stem
+        if not _ID_RE.match(sid):
+            continue
+        try:
+            raw = load_synthetic_profile_pack(sid)
+        except StressValidationError as exc:
+            out.append({"id": sid, "error": str(exc)})
+            continue
+        loads = _series_map(raw.get("loads_p_set")) or {}
+        gens = _series_map(raw.get("generators_p_max_pu")) or {}
+        lengths = {len(v) for v in [*loads.values(), *gens.values()]}
+        out.append({
+            "id": sid,
+            "name": str(raw.get("name") or sid),
+            "frequency_per_year": raw.get("frequency_per_year"),
+            "snapshots": lengths.pop() if len(lengths) == 1 else None,
+            "loads": sorted(loads),
+            "generators": sorted(gens),
+            "provenance": raw.get("provenance"),
+        })
+    return out
 
 
 def _series_map(raw) -> dict[str, list[float]] | None:
@@ -151,12 +181,41 @@ def _profiles_match_horizon(scenario: dict, n_snapshots: int) -> bool:
     return True
 
 
+def _multipliers(scenario: dict) -> tuple[float, float]:
+    """(load, availability) multipliers; absent/None means 1.0.
+
+    An explicit 0 is a VALUE (availability 0 = a full renewables drought),
+    never "unset" — ``x or 1.0`` used to run such a scenario unstressed.
+    """
+    sid = scenario.get("id", "")
+    out = []
+    for key in ("electrical_load_multiplier",
+                "renewable_availability_multiplier"):
+        raw = scenario.get(key)
+        if raw is None:
+            out.append(1.0)
+            continue
+        if isinstance(raw, bool):
+            raise StressValidationError(
+                f"scenario '{sid}': {key} must be a number, got {raw!r}")
+        try:
+            out.append(float(raw))
+        except (TypeError, ValueError):
+            raise StressValidationError(
+                f"scenario '{sid}': {key} must be a number, got {raw!r}"
+            ) from None
+    return out[0], out[1]
+
+
 def _validate(scenarios: list[dict]) -> None:
     if len(scenarios) > MAX_SCENARIOS:
         raise StressValidationError(
             f"too many scenarios ({len(scenarios)} > {MAX_SCENARIOS})")
     seen: set[str] = set()
-    for sc in scenarios:
+    for i, sc in enumerate(scenarios):
+        if not isinstance(sc, dict):
+            raise StressValidationError(
+                f"scenario #{i + 1} must be an object, got {type(sc).__name__}")
         sid = str(sc.get("id", ""))
         if not _ID_RE.match(sid):
             raise StressValidationError(
@@ -176,8 +235,7 @@ def _validate(scenarios: list[dict]) -> None:
                 f"scenario '{sid}': frequency_per_year must be in (0, 365] — "
                 "it is the empirical events-per-year of the stress condition")
         if sc.get("kind") == "parametric":
-            lm = float(sc.get("electrical_load_multiplier", 1.0) or 1.0)
-            rm = float(sc.get("renewable_availability_multiplier", 1.0) or 1.0)
+            lm, rm = _multipliers(sc)
             if not (0 < lm <= 10):
                 raise StressValidationError(
                     f"scenario '{sid}': load multiplier {lm:g} outside (0, 10]")
@@ -234,8 +292,7 @@ def save_scenarios(project_dir: pathlib.Path, scenarios: list[dict]) -> list[dic
 # ── the re-solve ──────────────────────────────────────────────────────────
 
 def _parametric_mutate(scenario: dict):
-    lm = float(scenario.get("electrical_load_multiplier", 1.0) or 1.0)
-    rm = float(scenario.get("renewable_availability_multiplier", 1.0) or 1.0)
+    lm, rm = _multipliers(scenario)
 
     def mutate(n):
         from services.adequacy.metrics import electrical_columns

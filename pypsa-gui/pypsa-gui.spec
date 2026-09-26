@@ -75,6 +75,9 @@ datas = [
     # below puts `services/llm_config.py` at _MEIPASS-root/`services/`, so its
     # `parent.parent` is _MEIPASS root itself).
     (str(BACKEND / "presets.json"), "."),
+    # Class-C synthetic profile packs (P15): `services/adequacy/stress.py`
+    # resolves `parents[2] / "data" / "eh_class_c"`, i.e. _MEIPASS root.
+    (str(BACKEND / "data" / "eh_class_c"), "data/eh_class_c"),
     # The SPA the backend serves in local mode. `settings.frontend_dist`
     # resolves `<backend>/../frontend/dist`, which under _MEIPASS means this
     # exact layout.

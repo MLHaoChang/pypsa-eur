@@ -13,6 +13,7 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { downloadCSV } from './shared'
 import { blockerMessage } from './McPanel'
+import StressScenarioEditor from './StressScenarioEditor'
 import { SortHeader, TableSearchBox, useFilterableTable } from './useFilterableTable'
 import {
   buildManualRow,
@@ -313,6 +314,8 @@ export default function FmeaTab() {
           their own provenance badge and never impersonate an engine.
         </p>
       </div>
+
+      <StressScenarioEditor project={currentProject} />
     </div>
   )
 }

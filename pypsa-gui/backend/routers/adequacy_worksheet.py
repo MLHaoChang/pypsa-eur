@@ -23,6 +23,7 @@ from services.adequacy.asset_health import (
 )
 from services.adequacy.stress import (
     StressValidationError,
+    list_profile_packs,
     load_scenarios,
     save_scenarios,
 )
@@ -74,6 +75,14 @@ def put_stress_scenarios(body: StressScenariosPut,
         return {"scenarios": save_scenarios(project.directory, body.scenarios)}
     except StressValidationError as exc:
         raise HTTPException(422, str(exc))
+
+
+@router.get("/{name}/stress_profile_packs")
+def get_stress_profile_packs(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """The shipped synthetic profile packs a ``kind="profiles"`` scenario can
+    name as ``profile_pack`` (P15 editor picker). Global data; served under
+    the project with the registry it feeds, same authorization."""
+    return {"packs": list_profile_packs()}
 
 
 class AssetHealthPut(BaseModel):

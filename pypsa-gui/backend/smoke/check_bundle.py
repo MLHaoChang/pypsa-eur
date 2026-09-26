@@ -121,6 +121,8 @@ EXPECTED = (
     # data the code reads at run time, so a bundle without them launches fine
     # and 500s on the first study.
     "case39_units.yaml", "case39.json",
+    # Class-C profile packs (P15): read by `stress.py` at scenario save/run.
+    "synth_dunkelflaute.json",
 )
 
 # Info.plist usage-description keys macOS TCC requires before the app may

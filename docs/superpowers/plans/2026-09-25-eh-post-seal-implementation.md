@@ -546,6 +546,28 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
 - pack resolution from the data dir;
 - packaging includes the dir.
 
+**P15 status (2026-09-26, `claude/epic-allen-k2t1c4`):** implemented. Tests: `tests/test_energy_hub_class_c_authoring.py` has 14, red before the fix; FE `StressScenarioEditor.test.tsx` has 22 plus one FmeaTab host test.
+
+- [x] **Packs out of the test tree.** They moved to `backend/data/eh_class_c/` (git mv). `stress.PROFILE_PACK_DIR` is the one location. The P8a tests read the same files.
+- [x] **Pack listing.**
+  - Served as `GET /api/projects/{name}/stress_profile_packs`, beside the registry it feeds and with the same authorization. This differs from the planned `/adequacy/profile_packs` because no `/api/adequacy` prefix exists.
+  - `list_profile_packs()` gives id, name, frequency, snapshots, loads, generators and provenance. An unparseable pack is listed with its `error` instead of vanishing.
+  - An unknown `profile_pack` 422 names the available ids.
+- [x] **Packaging.** The spec `datas` ships `data/eh_class_c` at the path `stress.py` resolves under _MEIPASS. `check_bundle.EXPECTED` includes `synth_dunkelflaute.json`. Both are pinned by tests.
+- [x] **Bug found while authoring (fixed).**
+  - `float(x or 1.0)` read an explicit `renewable_availability_multiplier: 0` as 1.0. That value is allowed by [0, 1.5] and means a full renewables drought, yet the scenario ran with no stress at all.
+  - The same pattern accepted a load multiplier of 0 against the (0, 10] rule.
+  - A non-numeric multiplier or a non-object scenario raised a bare `ValueError`/`AttributeError`, which the route turned into a 500.
+  - The fix is `_multipliers()`, used by both validation and the run: absent/None means 1.0, and a bad value is a `StressValidationError` (422).
+- [x] **FE.**
+  - `putStressScenarios` / `getStressProfilePacks` clients.
+  - A `StressScenarioEditor` on `FmeaTab` with list/add/edit/delete, whole-list PUT and the parametric bounds, id rule, uniqueness and 10-scenario cap mirrored client-side (Save disabled with the rule named).
+  - A pack picker in which unreadable packs are shown but disabled.
+  - The backend 422 is shown verbatim and the form stays open.
+  - Fields the editor does not own (inline series, provenance) survive an edit; a kind switch drops the other kind's fields.
+  - Inline profile upload is deferred.
+- [ ] **QA gate** — pending.
+
 ---
 
 ## P16 — DtC per-Load attribution (spec amendment + design first)
