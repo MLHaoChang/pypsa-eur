@@ -50,7 +50,7 @@ Same loop as the parent plan: **red** (failing test encodes the acceptance) → 
 - [x] Fleet without occurrence data → `not_established`, note names "no electrical generator carries resolvable occurrence data".
 - [x] `pipeline.solves_consumed` unchanged by the MC stage.
 
-**TDD evidence:** `ImportError: eh_stages` / `TypeError: compute_tea() got an unexpected keyword argument 'network'` (red) → `eh_stages.py` + driver wiring → `test_energy_hub_certify.py` 12 green (incl. the off_grid decision-2 `failed` verdict on a met ENS target). One P1.5 fixture premise corrected: `gas` HAS a carrier-default outage rate, so the "no occurrence data" fixture uses a carrier without one.
+**TDD evidence:** `ImportError: eh_stages` / `TypeError: compute_tea() got an unexpected keyword argument 'network'` (red) → `eh_stages.py` + driver wiring → `test_energy_hub_certify.py` 14 green (incl. the off_grid decision-2 `failed` verdict on a met ENS target). One P1.5 fixture premise corrected: `gas` HAS a carrier-default outage rate, so the "no occurrence data" fixture uses a carrier without one.
 
 ---
 

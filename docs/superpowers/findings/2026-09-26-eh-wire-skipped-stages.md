@@ -49,7 +49,7 @@ PYTHONPATH=<repo-root>:<backend> python tests/run_qa_drivers.py
 
 | Suite | Before (master `ec23302`) | After |
 |---|---|---|
-| `test_energy_hub_*.py` + `test_adequacy_sweep.py` | **167** passed | **__EH_AFTER__** passed (+35 new: certify 12, frontier 11, fmea_top 6, lcoh 6) |
+| `test_energy_hub_*.py` + `test_adequacy_sweep.py` | **167** passed | **204** passed (+37 new: certify 14, frontier 11, fmea_top 6, lcoh 6; 0 failed) |
 | full backend `-m "not slow"` | (not run on master in this container) | **__FULL_AFTER__** |
 | `run_qa_drivers.py` | 21 drivers | **22 drivers passed** (`qa_eh_reference_design` auto-discovered) |
 
