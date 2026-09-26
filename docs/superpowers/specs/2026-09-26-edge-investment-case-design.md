@@ -1,6 +1,6 @@
 # Design — Edge Investment Case: commercial layer, project finance, participants and flexibility archetypes (v1)
 
-**Status:** design, awaiting plan. Companion research: `docs/superpowers/notes/2026-09-26-edge-client-feature-benchmark.md`, `docs/superpowers/notes/2026-09-26-competitive-landscape-edge-financial-modelling.md`.
+**Status:** design, revised 2026-09-26 after an independent adversarial review (verdict PASS WITH CONDITIONS; all spec-level conditions applied in this revision, plan-level conditions carried into §13/§16). Companion research: `docs/superpowers/notes/2026-09-26-edge-client-feature-benchmark.md`, `docs/superpowers/notes/2026-09-26-competitive-landscape-edge-financial-modelling.md`.
 **Decided with the product owner on 2026-09-26** (two question rounds; answers pinned in §2).
 
 **Goal.** Turn the reliability-first Energy Hub design engine into a tool that supports
@@ -25,14 +25,15 @@ probabilistic adequacy, N-1 redundancy, grid-strength gates and sector coupling 
 |---|---|
 | PyPSA network, multi-period vintages, per-vintage bounds | Physical model; grid arriving in year N; augmentation vintages |
 | `extra_functionality` wrappers (`services/solver/objective.py`: CAPEX budget, curtailment cost, objective scale) | Pattern for the peak-demand-charge variables and group-capacity constraints |
-| `solve_strategy="rolling"` (`optimize_with_rolling_horizon`) in `solver_service` | Substrate for the realistic-controller mode (§9) |
+| `solve_strategy="rolling"` (PyPSA `optimize_with_rolling_horizon`) and the `myopic.py` driver in `services/solver/` | **Pattern only** for the realistic-controller mode (§9): PyPSA's rolling helper has no per-window input hook and is forbidden with multi-period, so realism gets its own driver beside `myopic.py` |
 | `periodized_costs.py` (annuity, PV factors, overnight ↔ annualised) | Source of asset capex, build year, lifetime for the cashflow engine |
 | `services/results/asset_economics.py`, `cost_breakdown.py`, `objective_decomposition.py` | Physical quantities and reconciliation; the finance layer consumes, never re-derives, dispatch |
 | EH archetype packs (`models/energy_hub.py`), `EHStudyRunner`, `ReferenceDesignReport`, completeness enum `ok | not_established | skipped`, `assumptions_hash` | Pattern for jurisdiction/market packs, flexibility archetype builders and the `InvestmentCaseReport` |
 | Adequacy stack (ENS cap, COPT, MC LOLE, redundancy, DtC, SCR gate) | Unchanged; the investment case sits beside the reliability certificate |
 | Campaign budget, solve queue, scenario tree (`scenario_type`), Compare | Substrate for the scenario matrix and finance-only re-evaluation |
 | User time-series store, snapshot manager with `freq`, representative weeks | 15-minute snapshots and interval meter data |
-| Trustworthy-numbers doctrine (ADR-0001), metric registry | Every financial figure is `null`+flag when unresolvable, never 0 |
+| Trustworthy-numbers doctrine (ADR-0001), metric registry, `objective_decomposition.py` gap gate | Every financial figure is `null`+flag when unresolvable, never 0; every new objective term gets a `cost_breakdown` row so the LP-vs-breakdown gap stays 0 |
+| `RESULT_STATE_KEYS` (`services/project_context.py`) → `results_state.pkl` in the project bundle | Persistence path for the `InvestmentCaseReport` and cached billing frames |
 | Copilot tools, confirmation tiers, `build_study_report` | Guided path for clients; report narration |
 | Multi-tenant projects, ACL, locks, bundles, xlsx export | Unchanged; the case lives in the project bundle |
 
@@ -44,13 +45,13 @@ probabilistic adequacy, N-1 redundancy, grid-strength gates and sector coupling 
 |---|---|---|
 | 1 | **Finance depth = full project finance including tax equity.** Per-participant cashflows, NPV/IRR/payback, debt (term loans, DSCR sculpting, DSRA, fees), corporate tax, depreciation, incentives, and **partnership-flip tax equity**; sale-leaseback and inverted lease are schema-ready, implemented after flip. | Owner Q1 |
 | 2 | **Jurisdictions v1 = EU (DE, NL) and North America (US federal + Canada federal).** Shipped as dated, hashed **packs**; a missing rule yields `not_established`, never a silent default. State/provincial packs are slots, not v1 content. | Owner Q2 |
-| 3 | **Dispatch realism in v1: rolling horizon with forecast error** as a first-class *valuation* mode. Design/sizing still uses perfect foresight; valuation re-dispatches the fixed design under imperfect forecasts. Perfect-foresight revenue is always reported as the labelled upper bound beside it. | Owner Q3 |
+| 3 | **Dispatch realism in v1: rolling horizon with forecast error** as a first-class *valuation* mode, implemented as its own `solve_strategy="realistic"` driver (§9), not as an extension of PyPSA's rolling helper. Design/sizing still uses perfect foresight; valuation re-dispatches the fixed design, flattened to one representative year per investment period, under imperfect forecasts. Perfect-foresight revenue is always reported as the labelled upper bound beside it. | Owner Q3, review F1/F11 |
 | 4 | **Participants & value flows are first-class in the v1 UI.** Every cashflow line carries `participant`, `counterparty`, `value_stream`, `tariff_item`. Templates: single owner, BTM PPA, landlord/tenant, DSO/developer, energy-hub members with allocation keys. | Owner Q4 |
 | 5 | **Flexibility archetype builders in v1: data-centre load, BESS (degradation/augmentation/warranty), EV fleets & charging hubs, thermal/industrial process flex.** Each is a pack that emits PyPSA components plus commercial and finance metadata. | Owner Q5 |
 | 6 | **Users: consultants first; client self-serve later** through the copilot. New capability surfaces as an **Investment Case** panel beside the EH reference-design panel, plus a Library, a Tariff builder and a Participants designer. Headless API and chat tools ship with each phase. | Owner Q6 |
 | 7 | **Tariff depth = billing-grade engine**: per tariff item, 15-minute settlement, seasonal/TOU periods, tiers, ratchets, demand charges, network/retail/certificate items. Implemented as **two passes**: a convex *dispatch-grade* approximation inside the LP, and an exact *billing pass* that rates the resulting dispatch; the report shows both and their gap. | Owner Q7 |
 | 8 | **Scale: edge in v1, large-system compatible by design.** Contracts and the cashflow engine are per-asset and vectorised; a PyPSA-Eur-scale acceptance test is a later gate (§14 P8), not v1. | Owner Q8 |
-| 9 | **The LP objective stays system cost.** Commercial constructs enter the LP only as prices, capacities and constraints on the point-of-connection (PoC) and asset bounds (§5). Participant economics are never in the objective; multi-party co-optimisation (Gridcog's DSO+developer NPV) is a **later** option behind a flag. | Research §5.2 |
+| 9 | **The LP objective is the single-entity site cost at the point of connection.** Import energy, export revenue, capacity fee and demand charges are priced from the PoC owner's view (§5), so the optimiser minimises *the client's bill plus annuitised asset cost*, not a social-planner system cost. Participant splits (§7) never enter the objective; multi-party co-optimisation (Gridcog's DSO+developer NPV) is a **later** option behind a flag. Every new objective term has a matching `cost_breakdown` row so `objective_decomposition` reconciles to gap 0. | Research §5.2, review F2/F15 |
 | 10 | **Finance is a post-processor.** It consumes solved dispatch, capacities and build years; it never mutates the network. Its only feedback into the LP is the WACC ↔ `discount_rate` reconciliation check (§6.6). | Research §5.2 |
 | 11 | **Physical quantities have one source.** The finance layer reads energy, capacity and prices through the same seams the Economics tab uses (`result_df`, `periodized_capital_costs`), so the two can never disagree (trustworthy-numbers rule). | ADR-0001, `specs/2026-08-01-trustworthy-numbers-design.md` |
 | 12 | **Time axis of the cashflow model is annual** from financial close to end of life, with construction phasing; operating years are built from the modelled representative year(s) with escalation and degradation. Sub-annual finance is out of scope. | This spec |
@@ -58,7 +59,10 @@ probabilistic adequacy, N-1 redundancy, grid-strength gates and sector coupling 
 | 14 | **Oracles**: NREL SAM (single-owner PPA and partnership flip) and REopt.jl (US tariff/incentive/MACRS) are the external test oracles; billing-engine correctness is proven against hand-rated bills. | This spec |
 | 15 | **Report name = `InvestmentCaseReport`**, assembled only by one assembler, linked to a `ReferenceDesignReport` when one exists. Sections may be `not_established` / `skipped`. | EH decision 12/16 pattern |
 | 16 | **Study budget**: an investment-case run is one solve (design) plus N valuation re-dispatches plus finance-only re-evaluations; it shares the campaign budget substrate (`DEFAULT_BUDGET_SOLVES`). | EH decision 17 pattern |
-| 17 | **No external data curated in-tree.** Tariff databases, price forecasts and interconnection data arrive through import schemas (§11.4); the Library stores what the user brings plus the shipped packs. | Research §5.4 |
+| 17 | **Series store.** Price curves, forecast-vs-actual pairs, meter history and market series live in a **Library series store** (org-scoped, versioned, persisted beside the project), not in the component-bound `_user_ts` store; `lp_bindings` materialises them into component `_t` attributes at solve time. | Review F4 |
+| 18 | **15-minute settlement requires weightings from frequency.** `set_snapshots` and profile templates derive `snapshot_weightings` from `freq` (0.25 h for `15min`) instead of defaulting to 1.0; hourly-hardcoded paths (`_annual_hourly_reference`, sample weeks, `HOURS_PER_YEAR` uses) are audited in P1. | Review F3 |
+| 19 | **Sensitivity scenarios** add `"sensitivity"` to `_SCENARIO_TYPES` (backend) and `SCEN_TYPES`/`SCEN_TYPE_LABEL`/`TAG_RE` (frontend); no DB migration (plain string column). | Review F6 |
+| 20 | **No external data curated in-tree.** Tariff databases, price forecasts and interconnection data arrive through import schemas (§11.4); the Library stores what the user brings plus the shipped packs. | Research §5.4 |
 
 ---
 
@@ -111,12 +115,14 @@ Module placement follows the backend conventions (`.cursor/skills/gui-backend-ch
 | `services/finance/debt.py`, `tax.py`, `incentives.py`, `tax_equity.py` | Sub-engines |
 | `services/finance/metrics.py` | NPV, IRR (robust bracketing), payback, DSCR/LLCR/PLCR, solve-for-PPA |
 | `services/finance/packs/` | `eu_de.py`, `eu_nl.py`, `us_federal.py`, `ca_federal.py` (dated, hashed) |
-| `services/finance/report.py` | `assemble_investment_case_report` (the only assembler) |
+| `services/finance/report.py` | `assemble_investment_case_report` (the only assembler); persisted under `investment_case_report` in `RESULT_STATE_KEYS` |
+| `services/library/series_store.py` | Standalone versioned series store (decision 17); `TimeSeriesRef` resolution |
+| `services/results/billing.py`, `cfe_score.py` | Thin `compute_billing` / `compute_cfe_score` (seam-tested like every `/results/*` handler); `tariff_engine.py` is the engine underneath |
 | `services/flex/dc_load.py`, `bess.py`, `ev_fleet.py`, `thermal_flex.py` | Archetype builders emitting components + metadata |
-| `services/solver/realistic_dispatch.py` | Rolling horizon with forecast-error injection; calibrated noise models; seeds |
+| `services/solver/realistic_dispatch.py` | `solve_strategy="realistic"` driver: own window loop over `n.optimize(window_sns)`, forecast-error injection, settlement of realised deviations, seeds. Same DAG position as `myopic.py`; never imports `solver_service` |
 | `services/finance/scenario_matrix.py` | Scenario axes, finance-only re-evaluation, P50/P90 |
-| `services/investment_case_runner.py` | `start_investment_case`, `InvestmentCaseRequest` (thin router in `routers/results.py`) |
-| `routers/library.py` | Library CRUD (tariffs, contracts, series, packs) |
+| `services/finance/investment_case_runner.py` | `start_investment_case`, `InvestmentCaseRequest` — same injected-dependency pattern as `services/adequacy/eh_study_runner.py` (`solver_state=`, `state_update=`, `publish_study=`); thin handler in `routers/results.py`; study key registered in `STUDY_KEYS`/`ABORTABLE_STUDIES` |
+| `routers/library.py` + Alembic migration | Library CRUD (tariffs, contracts, series, packs); org-scoped tables with a new org-level access rule (existing `project_acl.py` is project-tree scoped) |
 
 Leaf modules never import routers. Everything under `services/finance/` is pure: network in,
 frames out.
@@ -169,8 +175,9 @@ MarketPack(id, region: Literal["DE","NL","GB","US_ERCOT","US_PJM","CA_ON",...],
            products: list[AncillaryProduct], pack_hash, valid_year)
 ```
 
-Every `TimeSeriesRef` resolves through the existing user time-series store and carries
-`source`, `vintage_year`, `provider`.
+Every `TimeSeriesRef` resolves through the Library series store (decision 17) and carries
+`source`, `vintage_year`, `provider`, `version`. The component-bound `_user_ts` store is not used for
+commercial series.
 
 ### 4.2 Finance
 
@@ -244,6 +251,25 @@ The LP sees a **dispatch-grade** convex approximation; the billing pass (§5.5) 
 | DR contract | DSR resource (existing) with activation cost; availability payment in Contracts | no double count (FMEA §4.4) |
 | PPA / CfD | **no LP change** (settlement only) unless `ppa_changes_dispatch=True`, in which case pay-as-produced price replaces the export price for the contracted asset | disclosed |
 
+### 5.1 Where the bindings live in the solve
+`lp_bindings.py` exposes `_wrap_with_commercial_bindings(network, user_fn, cfg, log_queue=None)` with the
+same closure/chaining shape as `_wrap_with_capex_budget`; `run_simulation` composes it after the reserve
+margin wrapper and **before `_wrap_with_objective_scale`** (scale must stay last). Each objective term it adds
+has a matching row in `cost_breakdown.py` (`network_capacity`, `demand_charge`, `energy_import`,
+`energy_export`), so `objective_decomposition.gap_pct` stays 0 — this is a P1 acceptance test.
+
+### 5.2 Peak variables under partial coverage
+- **Representative periods**: a billing month with no sampled snapshots gets no `P_peak[m]`; its demand
+  charge is `not_established` in the report, never weighted from neighbours.
+- **Windowed dispatch (§9)**: `P_peak[m]` is re-created per window with a lower bound equal to the running
+  month maximum already committed, so the controller cannot "forget" a peak it has set.
+
+### 5.3 Non-convex tiers
+Decreasing marginal rates (the common NL Energiebelasting and C&I volume case) are non-convex in a
+minimisation. Such items are flagged `nonconvex_tier`; the LP prices them at the rate of the tier the meter
+history (or the previous iteration) predicts the month will land in, disclosed in the report; the billing
+pass bills them exactly.
+
 ### 5.5 Billing pass (`tariff_engine.py`)
 
 Input: dispatch at settlement resolution (resampled from LP resolution with a disclosed
@@ -251,8 +277,12 @@ Input: dispatch at settlement resolution (resampled from LP resolution with a di
 `(interval, tariff_item, quantity, rate, amount)` and monthly/annual bills. Rules: tiers are
 applied on cumulative monthly volume; demand charges on the maximum of `measured_on` within the
 period; ratchets on the lookback maximum; fixed items pro-rated. Every amount is exact and
-traceable to one item. The gap between LP cost and billed cost is reported as
-`billing_vs_lp_gap_pct`; a gap above a threshold (default 5 %) raises a `warn` gate.
+traceable to one item. The gap between LP cost and billed cost is reported **per item kind** as
+`billing_vs_lp_gap_pct[item_kind]` with an attributed cause: `resolution` (LP resolution coarser than
+settlement flattens peaks, billed ≤ LP), `nonconvex_tier` (billed may be below the LP rate), `fixed`
+(fixed items are not in the LP, billed > LP), `ratchet_seed` (history-seeded ratchets). Gaps with a
+disclosed cause are reported; a gap above the threshold (default 5 %) with **no** attributable cause raises
+the `warn` gate. There is no general "billed ≥ LP" invariant.
 
 ---
 
@@ -270,8 +300,11 @@ Fuel is a separate stream once heat rate and fuel price are split (§8 BESS/gens
 
 ### 6.3 Debt
 Tranches sized by gearing or **sculpted to a DSCR target** on CFADS; annuity or level
-alternatives; DSRA funding/release; fees; IDC capitalised. Outputs: schedule, min/avg DSCR,
-LLCR, PLCR.
+alternatives; DSRA funding/release; fees; IDC capitalised. Sculpting is **circular** (debt service ←
+CFADS ← tax ← interest ← schedule; IDC ← drawdowns ← debt amount): solve by fixed-point iteration on
+(debt amount, schedule) with relative tolerance 1e-6 and at most 50 iterations; non-convergence sets the
+`debt` section `not_established` with the residual. CFADS is defined **post-tax, pre-financing** (SAM's
+convention) and the definition is printed in the report. Outputs: schedule, min/avg DSCR, LLCR, PLCR.
 
 ### 6.4 Tax and depreciation
 Per jurisdiction pack: corporate rate; depreciation methods (straight-line, declining balance,
@@ -285,15 +318,22 @@ contracts (§4.1) and flow as revenue.
 
 ### 6.6 Returns and consistency
 Project IRR (pre/post tax), equity IRR per participant, NPV at WACC, payback, finance-consistent
-LCOE, **solve-for-PPA-price** (bisection on the PPA price to a target equity IRR). Gate: the LP's
-`discount_rate` must equal the finance WACC within tolerance, else `wacc_vs_discount_rate_consistent=false`
-and the report says which number the sizing used.
+LCOE, **solve-for-PPA-price** (bisection on the PPA price to a target equity IRR). Gate (real/nominal aware): the LP applies `cfg.discount_rate` (nominal) inside the annuity on
+real-priced costs, and — only when `auto_discount_periods` is on — a Fisher real rate for cross-period
+PV (`services/solver/assumptions.py` L641–698). The gate therefore compares `wacc_nominal` to
+`cfg.discount_rate` **and** finance `inflation` to `cfg.inflation_rate`, and the report states the annuity
+basis (nominal rate on real costs) and the PV basis (real) separately; a mismatch sets
+`wacc_vs_discount_rate_consistent=false` and names the number the sizing used.
 
 ### 6.7 Tax equity (partnership flip)
-Allocations of taxable income/loss, credits and cash between sponsor and tax-equity investor
-pre- and post-flip; flip year found where the TE investor reaches `target_flip_irr` (capped);
-DRO cap respected; outputs per participant. Sale-leaseback and inverted lease: schema present,
-implementation P7.
+Oracle: **SAM "Single Owner" for P4 and SAM "Partnership Flip with Debt"** (and without debt as a
+second case) for P7. `TaxEquityStructure` carries, beyond the shares in §4.2: `itc_share_te` (credit
+allocation separate from income allocation), `developer_fee`, `target_irr_basis` (after-tax cash plus
+tax benefits, SAM's test), capital-account tracking with the DRO cap, ITC recapture schedule, and
+`debt_in_structure: bool`. Flip year is the first year the TE investor's after-tax IRR reaches
+`target_flip_irr` (capped at `flip_year_cap`). Outputs per participant. Documented deviations from SAM
+are listed in the P7 findings note. Sale-leaseback and inverted lease: schema present, implementation
+after flip parity.
 
 ---
 
@@ -328,21 +368,32 @@ depreciation, degradation curve, contract eligibility).
 ## 9. Dispatch realism (valuation modes)
 
 Sizing is solved with perfect foresight (upper bound, labelled). Valuation re-dispatches the
-fixed design (`p_nom_extendable=False`) in two modes:
+**fixed design** (`p_nom_extendable=False`, capacities from `p_nom_opt`) in two modes. Because
+PyPSA's `optimize_with_rolling_horizon` has no per-window input hook and is disabled for
+multi-period networks, valuation first **flattens** the design to one representative operating
+year per investment period (a single-period network with that period's capacities), then runs:
 
-1. **Perfect foresight** — existing full solve.
-2. **Realistic controller** — extends `solve_strategy="rolling"`: for each window (`horizon`,
-   `overlap`), the controller sees *forecasts* of price, load and VRE built as realised series
-   plus an error process (AR(1) with horizon-scaled standard deviation; parameters per series
-   kind, calibratable from user-supplied forecast-vs-actual pairs, defaults disclosed), commits
-   the first `step` intervals, then the realised series settle. Multiple seeds give a revenue
-   distribution; the report shows mean, P10/P90 and the **haircut** vs perfect foresight.
-   Ancillary-service reservations reduce available energy/power in the window.
+1. **Perfect foresight** — one full solve of the flattened year.
+2. **Realistic controller** — `solve_strategy="realistic"` in `services/solver/realistic_dispatch.py`
+   (own window loop, same DAG position as `myopic.py`; never imports `solver_service`):
+   - Vocabulary: window length `horizon`, `overlap`; each window **commits `horizon − overlap`**
+     intervals (the same convention the existing rolling strategy uses).
+   - Forecasts: for each window the controller sees `forecast = realised + ε`, with ε an AR(1)
+     process whose standard deviation grows with lead time; parameters per series kind (price, load,
+     wind, solar) with disclosed defaults, calibratable from user-supplied forecast-vs-actual pairs in
+     the Library.
+   - **Settlement rule** (what makes the schedule physically consistent): the committed schedule of
+     *steerable* assets (storage, gensets, flexible loads, exports) is kept; realised load and VRE
+     replace the forecast; the resulting imbalance is absorbed by the PoC import/export within its
+     connection envelope and **billed at the tariff or imbalance price**, and any residual beyond the
+     envelope is curtailment or unserved energy, reported as such. Storage state of charge is carried
+     from the **realised** balance, not the forecast solve. `P_peak[m]` carries its running maximum (§5.2).
+   - Ancillary-service reservations reduce the power and energy available to the controller in the
+     window and are settled from the MarketPack.
+   - Multiple seeds give a revenue distribution; the report shows mean, P10/P90 and the **haircut**
+     versus perfect foresight; the `mode` and `seed` ride on every downstream line's provenance.
 
-Both modes feed the same billing pass and finance engine; every downstream number carries
-`mode` in its provenance.
-
----
+Both modes feed the same billing pass and finance engine.
 
 ## 10. Uncertainty on money
 
@@ -387,7 +438,9 @@ and min DSCR, P50/P90 tables, scenario matrix stored as child projects with
 (which lines drive IRR/DSCR), `solve_ppa_price`, `run_scenario_matrix`, `get_investment_case`.
 Tiers per existing convention; runs are `execution_long_running`.
 
-**UI (consultant-first)**: Investment Case panel under Results (beside the EH panel):
+**UI (consultant-first)**: a new Results tab `investment` (added to the `Results.tsx` tab union and
+routing; the EH panel itself is mounted inside `AdequacyTab.tsx`, so the Investment Case panel gets its
+own tab rather than another stacked panel) containing:
 Participants designer (roles, templates, Sankey), Tariff builder (items/periods/tiers/ratchets,
 bill preview on current dispatch), Connection agreement editor, Finance inputs (tranches, tax
 pack, incentives, tax-equity), Valuation mode selector with haircut chip, Results (per
@@ -405,18 +458,18 @@ findings note under `docs/superpowers/findings/`.
 
 | Phase | Work packages | Phase e2e QA |
 |---|---|---|
-| **P0 Contracts & seams** | WP0.1 `models/commercial.py`, `finance.py`, `flex_archetypes.py`, `InvestmentCaseReport` skeleton + completeness; WP0.2 pack loader + hashing + `not_established` semantics; WP0.3 results seam: physical-quantity accessor used by both Economics and finance (regression test that they agree); WP0.4 `scenario_type="sensitivity"` | schema round-trip, hash stability, seam agreement |
-| **P1 Commercial layer, dispatch-grade** | WP1.1 PoC price binding + export price; WP1.2 capacity fee + connection agreement kinds (firm / non-firm static / envelope / FCA / available_from); WP1.3 peak-demand variables + ratchet + convex tiers in `lp_bindings.py`; WP1.4 group contract; WP1.5 validation preflight (double counting, missing PoC) | `qa_commercial_lp.py`: a 3-bus edge network billed under DE and US tariffs, LP cost vs analytic |
-| **P2 Billing pass & contracts** | WP2.1 `tariff_engine.py` exact rating at 15-min incl. tiers/ratchets/demand; WP2.2 contracts settlement (PPA variants, CfD, DR, lease, EaaS, retail); WP2.3 `billing_vs_lp_gap` gate; WP2.4 Library CRUD + import schemas | hand-rated bills (fixtures) match to the cent; REopt URDB fixture parity |
+| **P0 Contracts & seams** | WP0.1 `models/commercial.py`, `finance.py`, `flex_archetypes.py`, `InvestmentCaseReport` skeleton + completeness; WP0.2 pack loader + hashing + `not_established` semantics; WP0.3 results seam: physical-quantity accessor used by both Economics and finance (regression test that they agree); WP0.4 `scenario_type="sensitivity"` backend + frontend enums; WP0.5 persistence: `investment_case_report` + billing cache in `RESULT_STATE_KEYS`, bundle round-trip; WP0.6 tripwire tests for `services/commercial|finance|library` (no router imports, no `solver_service` import, docstring-only `__init__`) | schema round-trip, hash stability, seam agreement, save/load round-trip |
+| **P1 Commercial layer, dispatch-grade** | WP1.0 weightings-from-frequency (`set_snapshots`, profile templates) + 15-min fixture + hourly-assumption audit; WP1.1 Library series store + `TimeSeriesRef` resolution + Alembic migration + org access rule; WP1.2 **`tariff_engine` core** (energy/TOU/fixed items, hand-rated fixtures) — built *before* the LP bindings so the LP is validated against the billing engine; WP1.3 PoC price binding + export price; WP1.4 capacity fee + connection agreement kinds (firm / non-firm static / envelope / FCA / available_from); WP1.5a peak-demand variables; WP1.5b ratchet + running-max carry; WP1.5c convex tiers + `nonconvex_tier` flag; WP1.6 group contract; WP1.7 `cost_breakdown` rows for every new term + `objective_decomposition` gap 0; WP1.8 validation preflight (double counting, missing PoC) | `qa_commercial_lp.py`: a 3-bus edge network under DE and US tariffs at 15-min; LP cost vs `tariff_engine` rating; objective gap 0 |
+| **P2 Billing pass & contracts** | WP2.1 `tariff_engine` demand/ratchet/tier rating at 15-min; WP2.2 contracts settlement (PPA variants, CfD, DR, lease, EaaS, retail); WP2.3 per-item-kind `billing_vs_lp_gap` with cause attribution + gate; WP2.4 Library CRUD + import schemas; WP2.5 `compute_billing` / `compute_cfe_score` thin results + seam cases | hand-rated bills (fixtures) match to the cent; REopt URDB fixture parity |
 | **P3 Participants & value flows** | WP3.1 participants + assignment + conservation; WP3.2 templates; WP3.3 per-participant tables + Sankey (FE) | conservation on all templates; FE tests |
-| **P4 Finance engine (single owner)** | WP4.1 time axis, capex phasing, escalation, degradation, replacement, terminal value; WP4.2 debt (gearing, DSCR sculpting, DSRA, fees, IDC); WP4.3 tax & depreciation with `eu_de`, `eu_nl`, `us_federal`, `ca_federal`; WP4.4 incentives with dated rules (OBBBA); WP4.5 metrics + solve-for-PPA + WACC gate; WP4.6 xlsx export | **SAM single-owner oracle** parity within tolerance on 3 reference cases; Excel round-trip |
+| **P4 Finance engine (single owner)** | WP4.1 time axis, capex phasing, escalation, degradation, replacement, terminal value; WP4.2a debt: gearing-sized tranches, annuity/level schedules, fees, IDC; WP4.2b DSCR sculpting fixed-point + DSRA; WP4.3a tax & depreciation engine with `eu_de` and `us_federal` packs; WP4.3b `eu_nl` and `ca_federal` packs (post-MVP-A); WP4.4 incentives with dated rules (OBBBA); WP4.5 metrics + solve-for-PPA + real/nominal WACC gate; WP4.6 xlsx export | **SAM Single Owner oracle** parity within tolerance on 3 reference cases; Excel round-trip |
 | **P5 Flex archetypes** | WP5.1 DC load + CFE score; WP5.2 BESS degradation/augmentation/warranty; WP5.3 EV fleet/hub; WP5.4 thermal/process flex; WP5.5 archetype UI forms + chat tools | each archetype: build → solve → bill → finance on a fixture; EH pipeline still passes with archetype networks |
 | **P6 Dispatch realism** | WP6.1 valuation re-dispatch API (fixed design); WP6.2 forecast-error processes + calibration; WP6.3 rolling controller with reservations; WP6.4 seeds, distribution, haircut chip | PF ≥ realistic mean on every fixture (monotonicity); reproducible seeds; BESS arbitrage haircut in a plausible band on a GB/DE price fixture |
-| **P7 Tax equity & uncertainty** | WP7.1 partnership flip; WP7.2 sale-leaseback/inverted lease (schema-first, implement if time); WP7.3 scenario matrix + finance-only path + tornado + P50/P90; WP7.4 `InvestmentCaseReport` assembler, chat narration, link to `ReferenceDesignReport` | **SAM partnership-flip oracle** parity; matrix reproducibility; report completeness |
+| **P7 Tax equity & uncertainty** | WP7.1 partnership flip (SAM "Partnership Flip with Debt" oracle, deviations documented); WP7.2 sale-leaseback/inverted lease (schema-first, implement if time); WP7.3 scenario matrix + finance-only path + tornado + P50/P90; WP7.4 `InvestmentCaseReport` assembler, chat narration, link to `ReferenceDesignReport` | **SAM partnership-flip oracle** parity; matrix reproducibility; report completeness |
 | **P8 Scale & hardening** | WP8.1 PyPSA-Eur clustered network acceptance (aggregate per-carrier cashflows); WP8.2 performance budget for 15-min year; WP8.3 security review (uploads, packs) | acceptance gate per decision 8 |
 
 **MVP-A** = P0–P4 on `single_owner` with `eu_de` + `us_federal` (a data-centre archetype may be
-hand-built). **MVP-B** = + P5 + P6. **v1** = through P7. P8 is post-v1 hardening.
+hand-built; `eu_nl`/`ca_federal` follow in WP4.3b). **MVP-B** = + P5 + P6. **v1** = through P7. P8 is post-v1 hardening.
 
 ---
 
@@ -458,3 +511,9 @@ hand-built). **MVP-B** = + P5 + P6. **v1** = through P7. P8 is post-v1 hardening
    supplies forecast-vs-actual data.
 5. The process-global live network limits parallel scenario matrices; finance-only paths avoid
    this, re-solve axes queue through the campaign budget.
+6. Flattening a multi-period design to per-period operating years for valuation loses inter-period
+   storage coupling (seasonal stores); the report labels valuation as per-year and the P6 plan tests
+   that annual energy balances match the design solve within tolerance.
+7. Review conditions carried into plans: F10 (gap attribution) → P2; F13 (flip fields, oracle) → P7;
+   F16 (billing core before LP bindings) → P1 order above; F17 (migration, series store,
+   `RESULT_STATE_KEYS`, cost-breakdown rows, weightings, tab/route, chat + facade tests) → P0/P1/P2.
