@@ -9,6 +9,7 @@
   "stages": null,
   "study_notes": [
     "The off_grid pack islands the subsea tie; the island must be adequate on its own resources.",
+    "The subsea tie is normally open (p_max_pu = 0), so the FMEA worksheet sweeps the same islanded system; set it to 1 to study tie-connected operation.",
     "Class-C stress scenarios (dunkelflaute, heatwave) are preloaded for the FMEA sweep."
   ]
 }

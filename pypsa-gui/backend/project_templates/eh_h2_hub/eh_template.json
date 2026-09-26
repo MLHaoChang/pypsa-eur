@@ -1,5 +1,5 @@
 {
-  "description": "Grid-connected industrial site: 120 MW wind, 80 MW PV, 60 MW electrolyser, H\u2082 storage and fuel cell, 40 MW critical process load and 25 MW H\u2082 offtake. Tagged for an Energy Hub study.",
+  "description": "Grid-connected industrial site: 120 MW wind, 80 MW PV, 60 MW electrolyser, H\u2082 storage, an extendable fuel cell and a site battery, 40 MW critical process load and 25 MW H\u2082 offtake. Tagged for an Energy Hub study.",
   "dtc_attribution": null,
   "id": "eh_h2_hub",
   "name": "Industrial Hydrogen Hub",

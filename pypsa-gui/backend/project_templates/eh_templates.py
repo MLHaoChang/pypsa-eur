@@ -114,7 +114,9 @@ def build_eh_datacenter() -> pypsa.Network:
     n.generators_t.marginal_cost = pd.DataFrame(
         {"grid_supply": price}, index=SNAPSHOTS)
 
-    n.add("Link", "grid_import", bus0="grid", bus1="dc_mv", p_nom=80.0,
+    # The weak connection: 40 MW is the physical rating, so the FMEA
+    # worksheet (saved network) and the EH study (pack cap) see one system.
+    n.add("Link", "grid_import", bus0="grid", bus1="dc_mv", p_nom=40.0,
           efficiency=0.995, carrier="AC")
     n.add("Link", "site_transformer", bus0="dc_mv", bus1="it_bus", p_nom=80.0,
           efficiency=0.99, carrier="AC")
@@ -155,7 +157,10 @@ def build_eh_datacenter() -> pypsa.Network:
 
     _tag_columns(n)
     n.buses.at["grid", "eh_poc"] = True
-    n.buses.at["grid", "eh_sk_mva"] = 1500.0
+    # SCR gate inputs at the PoC: a weak 250 MVA fault level against ~30 MVA
+    # of inverter-based resources (PV + UPS/BESS inverters).
+    n.buses.at["grid", "eh_sk_mva"] = 250.0
+    n.buses.at["grid", "eh_ibr_mva"] = 30.0
     n.buses.at["dc_mv", "eh_sk_mva"] = 220.0
     n.buses.at["dc_mv", "eh_ibr_mva"] = 25.0
     n.buses.at["it_bus", "eh_critical"] = True
@@ -199,7 +204,7 @@ def build_eh_h2_hub() -> pypsa.Network:
     n.add("Generator", "solar_park", bus="hub", carrier="solar", p_nom=80.0,
           marginal_cost=0.0)
     n.add("Generator", "wind_new", bus="hub", carrier="wind", p_nom=0.0,
-          p_nom_extendable=True, p_nom_max=150.0, capital_cost=120_000.0)
+          p_nom_extendable=True, p_nom_max=300.0, capital_cost=120_000.0)
     n.add("Generator", "solar_new", bus="hub", carrier="solar", p_nom=0.0,
           p_nom_extendable=True, p_nom_max=150.0, capital_cost=45_000.0)
     wind, sun = _wind(), _solar()
@@ -211,8 +216,19 @@ def build_eh_h2_hub() -> pypsa.Network:
           efficiency=0.68, carrier="electrolysis")
     n.add("Store", "h2_storage", bus="h2", carrier="H2", e_nom=2000.0,
           e_cyclic=True)
+    # Extendable fuel cell: the H₂ chain is the hub's firm backup when the
+    # grid connection is lost (DtC planning sizes it).
     n.add("Link", "fuel_cell", bus0="h2", bus1="hub", p_nom=10.0,
-          efficiency=0.50, carrier="fuel cell")
+          p_nom_extendable=True, p_nom_min=10.0, p_nom_max=80.0,
+          capital_cost=90_000.0, efficiency=0.50, carrier="fuel cell")
+    n.add("Carrier", "battery", co2_emissions=0.0)
+    n.add("StorageUnit", "site_battery", bus="hub", carrier="battery",
+          p_nom=20.0, max_hours=2.0, efficiency_store=0.95,
+          efficiency_dispatch=0.95, cyclic_state_of_charge=True)
+    n.add("StorageUnit", "bess_new", bus="hub", carrier="battery", p_nom=0.0,
+          p_nom_extendable=True, p_nom_max=200.0, max_hours=6.0,
+          capital_cost=48_000.0, efficiency_store=0.95,
+          efficiency_dispatch=0.95, cyclic_state_of_charge=True)
 
     n.add("Load", "process_load", bus="hub", carrier="AC")
     n.add("Load", "h2_offtake", bus="h2", carrier="H2", p_set=25.0)
@@ -257,8 +273,11 @@ def build_eh_microgrid() -> pypsa.Network:
 
     n.add("Generator", "mainland_supply", bus="mainland", carrier="grid",
           p_nom=100.0, marginal_cost=110.0)
+    # Normally OPEN (p_max_pu = 0): the island runs on its own resources, so
+    # the FMEA worksheet sweeps the same islanded system the off_grid study
+    # assesses. Set p_max_pu = 1 to study tie-connected operation.
     n.add("Link", "subsea_tie", bus0="mainland", bus1="island", p_nom=20.0,
-          efficiency=0.97, carrier="AC")
+          p_max_pu=0.0, efficiency=0.97, carrier="AC")
     n.add("Link", "hospital_feeder", bus0="island", bus1="hospital",
           p_nom=10.0, efficiency=0.98, carrier="AC")
 
@@ -341,8 +360,9 @@ TEMPLATE_META: dict[str, dict] = {
         "name": "Industrial Hydrogen Hub",
         "description": (
             "Grid-connected industrial site: 120 MW wind, 80 MW PV, 60 MW "
-            "electrolyser, H₂ storage and fuel cell, 40 MW critical process "
-            "load and 25 MW H₂ offtake. Tagged for an Energy Hub study."),
+            "electrolyser, H₂ storage, an extendable fuel cell and a site "
+            "battery, 40 MW critical process load and 25 MW H₂ offtake. "
+            "Tagged for an Energy Hub study."),
         "recommended_archetype": "strong_grid",
         "pack_overrides": {},
         "stages": None,
@@ -368,6 +388,9 @@ TEMPLATE_META: dict[str, dict] = {
         "study_notes": [
             "The off_grid pack islands the subsea tie; the island must be "
             "adequate on its own resources.",
+            "The subsea tie is normally open (p_max_pu = 0), so the FMEA "
+            "worksheet sweeps the same islanded system; set it to 1 to "
+            "study tie-connected operation.",
             "Class-C stress scenarios (dunkelflaute, heatwave) are "
             "preloaded for the FMEA sweep.",
         ],

@@ -673,6 +673,23 @@ def run_dtc_planning(
     return out
 
 
+def _unsolved_detail(table: dict[str, Any], *, planning: bool) -> str:
+    """Why no contingency solved: each one's condition, plus the likely fix
+    for an infeasible re-solve (P20 — the bare "none solved" gave no reason)."""
+    parts = [f"{c.get('contingency')}: {c.get('condition') or c.get('status')}"
+             for c in (table.get("contingencies") or [])]
+    detail = f" ({'; '.join(parts)})" if parts else ""
+    if any("infeasible" in str(c.get("condition") or "")
+           for c in (table.get("contingencies") or [])):
+        detail += (
+            " — islanded, the candidate set cannot meet the ENS target: raise "
+            "candidate p_nom_max, add firm/storage candidates, or relax the "
+            "ENS target" if planning else
+            " — islanded on the fixed plan the re-dispatch is infeasible; "
+            "check VOLL > 0 and the islanded buses' supply")
+    return detail
+
+
 def dtc_planning_section_status(table: dict[str, Any]) -> tuple[str, str | None]:
     if table.get("aborted"):
         return "not_established", "DtC planning aborted mid-loop"
@@ -684,7 +701,8 @@ def dtc_planning_section_status(table: dict[str, Any]) -> tuple[str, str | None]
         if c.get("status") in ("ok", "optimal")
     ]
     if len(solved) < 1:
-        return "not_established", "no DtC planning contingency solved"
+        return ("not_established", "no DtC planning contingency solved"
+                + _unsolved_detail(table, planning=True))
     return "ok", None
 
 
@@ -701,5 +719,6 @@ def dtc_section_status(table: dict[str, Any]) -> tuple[str, str | None]:
         if c.get("status") in ("ok", "optimal")
     ]
     if len(solved) < 1:
-        return "not_established", "no DtC contingency solved"
+        return ("not_established", "no DtC contingency solved"
+                + _unsolved_detail(table, planning=False))
     return "ok", None
