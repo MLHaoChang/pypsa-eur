@@ -1,0 +1,18 @@
+{
+  "case_id": "skeleton",
+  "reference_design_id": null,
+  "assumptions_hash": "0000000000000000",
+  "packs": {},
+  "completeness": {
+    "design": {"status": "not_established"},
+    "commercial": {"status": "not_established"},
+    "dispatch_modes": {"status": "not_established"},
+    "participants": {"status": "not_established"},
+    "project": {"status": "not_established"},
+    "debt": {"status": "not_established"},
+    "tax": {"status": "not_established"},
+    "tax_equity": {"status": "not_established"},
+    "uncertainty": {"status": "not_established"},
+    "gates": {"status": "not_established"}
+  }
+}

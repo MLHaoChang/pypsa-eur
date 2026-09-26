@@ -1,0 +1,1 @@
+["case_id", "reference_design_id", "assumptions_hash", "cost_at_target_eur", "excludes_shed_cost", "haircut_pct", "project_irr_pre_tax", "project_irr_post_tax", "npv_at_wacc", "lcoe_finance_consistent_eur_per_mwh", "ppa_price_for_target_irr_eur_per_mwh", "min_dscr", "avg_dscr", "llcr", "plcr", "flip_year", "wacc_vs_discount_rate_consistent", "conservation_ok", "completeness"]
