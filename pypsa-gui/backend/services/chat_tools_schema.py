@@ -932,6 +932,46 @@ TOOLS: list[dict[str, Any]] = [
         ["name"],
     ),
     _t(
+        "put_stress_scenarios",
+        "Replace a project's class-C stress-scenario registry (WHOLE list: "
+        "read it with get_stress_scenarios, change it, send it back). Each "
+        "scenario: {id [a-z0-9_-], name?, kind: parametric|profiles, "
+        "frequency_per_year in (0,365], electrical_load_multiplier (0,10], "
+        "renewable_availability_multiplier [0,1.5]} or a profile_pack. A 422 "
+        "names the broken rule. Safety: write.",
+        {"name": {"type": "string"},
+         "scenarios": {"type": "array", "items": {"type": "object"}}},
+        ["name", "scenarios"],
+    ),
+    _t(
+        "get_eh_template",
+        "The Energy Hub template a project was created from: recommended "
+        "archetype, pack_overrides, stages, dtc_attribution and study notes "
+        "— pass them to run_eh_study unchanged. no_data for other projects. "
+        "Safety: read.",
+        {"name": {"type": "string"}},
+        ["name"],
+    ),
+    _t(
+        "get_feature_guide",
+        "The in-app Energy Hub / FMEA guide — the SAME wording the GUI's "
+        "guided tours and hover tips show. Use it to explain what a field or "
+        "control does and what to enter. No args: index of tours and fields; "
+        "tour=eh_study|fmea|eh_tagging: its steps; field=<name>: one field's "
+        "help (e.g. eh_poc, dtc_attribution, target_lole_h). Safety: read.",
+        {"tour": {"type": "string"}, "field": {"type": "string"}},
+        [],
+    ),
+    _empty(
+        "review_eh_study",
+        "Analyse the latest Energy Hub study: summary plus findings sorted "
+        "by severity, each with the evidence it read, a recommendation and "
+        "(where fully determined) `actions` — an existing tool and its exact "
+        "args (run_eh_study re-runs, update_solver_config, ...). Present "
+        "findings with their numbers; OFFER actions and run one only when "
+        "the user agrees. Safety: read.",
+    ),
+    _t(
         "run_fmea_sweep",
         "Start the contingency sweep: class B (every single link outage) plus "
         "any class-C `scenarios` given (get them from get_stress_scenarios). "
@@ -2274,6 +2314,10 @@ TOOL_ROUTES: dict[str, list] = {
     ] + [("GET", "/api/results/mc/elcc_candidates")],
     "get_fmea_worksheet": [("GET", "/api/projects/{name}/worksheet")],
     "get_stress_scenarios": [("GET", "/api/projects/{name}/stress_scenarios")],
+    "put_stress_scenarios": [("PUT", "/api/projects/{name}/stress_scenarios")],
+    "get_eh_template": [("GET", "/api/projects/{name}/eh_template")],
+    "get_feature_guide": [("GET", "/api/guides/{topic}")],
+    "review_eh_study": _DERIVED,  # eh_reference_design + eh_study, analysed
     "run_fmea_sweep": [("POST", "/api/results/fmea_sweep")],
     "run_frontier_study": [("POST", "/api/results/frontier")],
     "run_mc_study": [("POST", "/api/results/mc")],

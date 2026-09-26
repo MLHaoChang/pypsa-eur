@@ -19,6 +19,7 @@ import {
   type EhStudyRequestBody,
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
+import { useChatStore } from '../../store/chatStore'
 import { nk } from '../../utils/queryKeys'
 import { blockerMessage } from './McPanel'
 import { downloadCSV, downloadJSON } from './shared'
@@ -620,6 +621,10 @@ export function EhReferenceDesignPanel() {
     enabled: open && !!currentProject,
     staleTime: Infinity,
   })
+  const askAssistant = (text: string) => {
+    useUIStore.getState().setAssistantDockOpen(true)
+    useChatStore.getState().seedComposer(text)
+  }
   const applyTemplate = (meta: EhTemplateMeta) => {
     setArchetype(meta.recommended_archetype)
     setForm(formFromTemplate(meta))
@@ -783,6 +788,17 @@ export function EhReferenceDesignPanel() {
             <GuideButton tourId="eh_study" testId="eh-guide-button" />
             <GuideButton tourId="eh_tagging" testId="eh-tagging-guide-button"
                          label="How to tag the network" />
+            <button type="button" data-testid="eh-ask-assistant"
+              onClick={() => askAssistant(report
+                ? 'Review my latest Energy Hub study: what did it establish, '
+                  + 'what failed or is not established, and what do you '
+                  + 'recommend changing? Offer the changes before applying them.'
+                : 'Help me set up an Energy Hub study for this network: which '
+                  + 'archetype fits, what must I tag, and what should I enter?')}
+              title="Opens the assistant with a request prefilled — nothing is sent or changed until you send it and confirm any action."
+              className="inline-flex items-center gap-1 px-2 py-0.5 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent">
+              {report ? 'Ask the assistant to review' : 'Ask the assistant'}
+            </button>
           </div>
           <p className="text-[11px] text-muted">
             Runs an Energy Hub archetype pack through the reference-design

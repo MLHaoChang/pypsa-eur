@@ -2147,6 +2147,39 @@ _ADEQUACY_GUIDE_CHAINING = (
 )
 _ADEQUACY_GUIDE = _ADEQUACY_GUIDE_FACTS + _ADEQUACY_GUIDE_CHAINING
 
+# Energy Hub workflow support (plan 2026-09-26 P22). A NEW part, per the
+# sanctioned way past the pinned-prompt hashes. FACTS names no tool (the
+# tools-off model still needs the vocabulary); CHAINING is the workflow.
+_EH_GUIDE_FACTS = (
+    "Energy Hub (EH) studies. An archetype pack is the planning situation: "
+    "strong_grid (free import), weak_flexible (capped import, SCR gate, DSR "
+    "opt-in), off_grid (import islanded). A ReferenceDesignReport marks each "
+    "section ok, skipped or not_established — a not_established section "
+    "was requested but could not be shown and its note says why; never "
+    "report it as zero. Certification is pass only when the MC LOLE 95 % CI "
+    "lies below the target; inconclusive is not a failure. Templates "
+    "(data center, hydrogen hub, island microgrid) are SYNTHETIC "
+    "illustrative data — say so before anyone reads a decision into them. "
+)
+_EH_GUIDE_CHAINING = (
+    "Supporting the EH workflow: to explain what a field or control does "
+    "or what to enter, read get_feature_guide (the same wording the GUI's "
+    "tour shows) instead of paraphrasing from memory. For a template "
+    "project, read get_eh_template and pass its recommended archetype, "
+    "pack_overrides, stages and dtc_attribution to run_eh_study unchanged. "
+    "After a study finishes, call review_eh_study, present its findings "
+    "with their evidence numbers (highest severity first), and OFFER the "
+    "listed actions — never apply one the user has not asked for; each "
+    "action names the exact tool and arguments, and write / execution "
+    "tools will ask the user to confirm. When the user agrees, run exactly "
+    "that action, wait for the study, and call review_eh_study again to "
+    "report what changed. Class-C scenarios are added with "
+    "put_stress_scenarios (read the registry first, send the whole list). "
+    "A finding without an action (e.g. a tag whose value only the user "
+    "knows) is a question for the user, not a guess."
+)
+_EH_GUIDE = _EH_GUIDE_FACTS + _EH_GUIDE_CHAINING
+
 # Untrusted-content boundary clause (#2, prompt half). Pairs with the
 # <untrusted_data> wrapping in _result_to_anthropic_content + the attachment
 # prefix so the model is told, in-band, that delimited text is data.
@@ -2654,6 +2687,7 @@ def _build_system_prompt(
         # (it can check nothing), and the half that names tools is
         # unusable there.
         _ADEQUACY_GUIDE if include_tools else _ADEQUACY_GUIDE_FACTS,
+        _EH_GUIDE if include_tools else _EH_GUIDE_FACTS,
         _UNTRUSTED_DATA_CLAUSE,
     ]
     if live_meta:

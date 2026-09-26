@@ -217,3 +217,36 @@ The verdict was **GO WITH CONDITIONS**, with 0 blockers. Every invariant held ac
 - Every `action` validates against the target tool's schema.
 - Chat tool registration and the schema match.
 - The prompt part is present.
+
+**P22 status:** implemented. `tests/test_energy_hub_review.py` has 12, including a live loop on the data-center template. FE adds 2 tests: the composer seed and the panel button.
+
+- [x] **`services/adequacy/eh_review.py`.** It reviews the stored report plus the study record and emits findings sorted by severity (high / medium / low / info).
+  - Each finding has evidence numbers quoted from the report, a recommendation, and `actions` (tool + exact args) only where the arguments are fully determined.
+  - Rules:
+    - certification fail (a tighter ENS re-plan with redundancy and storage levers), inconclusive (more MC draws), no target (certify at 3 h/yr);
+    - ENS missed;
+    - not_established by reason: budget → a bigger budget; VOLL → `update_solver_config`; missing tags, SCR data, outage data or an infeasible islanded plan → a recommendation only;
+    - frontier knee;
+    - dominant fmea_top mode (price redundancy);
+    - DtC critical unserved (run dtc_planning), the DtC priority caveat and the planning build;
+    - the cheapest lever option and ineffective options;
+    - an SCR warning;
+    - a tight budget;
+    - DSR opted in but unused.
+  - Re-run actions keep the user's previous request: stages, budget, overrides and attribution.
+- [x] **Chat tools.**
+  - `review_eh_study` (read). It falls back to the study record's copy when a later solve cleared the stored report.
+  - `get_feature_guide` (read). It is the P21 catalogue: index, tour or field.
+  - `get_eh_template` (read).
+  - `put_stress_scenarios` (write, confirmation card).
+  - The endpoint map and safety tiers are pinned.
+- [x] **Prompt.** A new `_EH_GUIDE` part.
+  - FACTS, shown without tools: the vocabulary, "not_established ≠ zero", the certification rule, "templates are synthetic".
+  - CHAINING: explain via `get_feature_guide`; pass template settings unchanged; after a study call `review_eh_study`; present findings with numbers; OFFER actions and never auto-apply; run exactly the agreed action, then review again.
+- [x] **Actions are valid by construction.** Every emitted action validates against its tool's schema. For `run_eh_study` it also passes the study request's own validation (`EhStudyRequest`, `apply_pack_overrides`, `McOptions`, the attribution resolver, stages).
+- [x] **Live loop (data-center template).**
+  1. chat `run_eh_study` → poll → `review_eh_study` gives `certification_fail` (LOLE > target).
+  2. Its action is applied verbatim.
+  3. `review_eh_study` again: the new ENS target is in force and LOLE did not get worse.
+- [x] **FE.**
+  - An "Ask the assistant (to review)" button on the EH panel opens the assistant with the request **prefilled but not sent** (`chatStore.composerSeed`), so the user stays the one who sends and confirms.

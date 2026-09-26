@@ -144,6 +144,10 @@ interface ChatState {
   uploadBatches: Record<string, UploadBatch>
 
   // Actions
+  /** Text another panel asks to place in the composer (P22) — shown, never
+   * auto-sent: the user stays the one who sends. Consumed by ChatPanel. */
+  composerSeed: string | null
+  seedComposer: (text: string | null) => void
   setSessionId: (id: string | null) => void
   setProfileId: (id: string | null) => void
   appendMessage: (msg: Omit<ChatMessage, 'id' | 'ts'>) => void
@@ -273,6 +277,7 @@ function newMessageId() {
 
 export const useChatStore = create<ChatState>((set, get) => ({
   sessionId: null,
+  composerSeed: null,
   profileId: null,
   suppressHydrationOnce: false,
   newChatSeq: 0,
@@ -295,6 +300,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   uploadBatches: {},
 
   setSessionId: (id) => set({ sessionId: id }),
+  seedComposer: (text) => set({ composerSeed: text }),
   setProfileId: (id) => set({ profileId: id }),
   appendMessage: (msg) => set((s) => ({
     messages: [...s.messages, { ...msg, id: newMessageId(), ts: Date.now() }],

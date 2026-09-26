@@ -1660,6 +1660,15 @@ export default function ChatPanel() {
   }, [uploads, bumpUnseenExport])
 
   const [input, setInput] = useState('')
+  // P22: another panel (e.g. the EH panel's "Ask the assistant") seeds the
+  // composer; the text is shown for the user to send, never auto-sent.
+  const composerSeed = useChatStore((st) => st.composerSeed)
+  useEffect(() => {
+    if (!composerSeed) return
+    setInput(composerSeed)
+    useChatStore.getState().seedComposer(null)
+    requestAnimationFrame(() => textareaRef.current?.focus())
+  }, [composerSeed])
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 

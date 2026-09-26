@@ -1215,3 +1215,19 @@ it('offers the study and tagging walkthroughs (P21)', async () => {
   expect(screen.getByTestId('eh-tagging-guide-button').textContent)
     .toMatch(/How to tag the network/)
 })
+
+
+it('opens the assistant with a review request prefilled, not sent (P22)', async () => {
+  const { useChatStore } = await import('../../store/chatStore')
+  vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+    status: 'done', study: 'eh_study', archetype: 'strong_grid', report: REPORT,
+  } as never)
+  useUIStore.setState({ assistantDockOpen: false })
+  const user = await openPanel()
+  const btn = await screen.findByTestId('eh-ask-assistant')
+  expect(btn.textContent).toMatch(/review/)
+  await user.click(btn)
+  expect(useUIStore.getState().assistantDockOpen).toBe(true)
+  expect(useChatStore.getState().composerSeed).toMatch(/Review my latest Energy Hub study/)
+  useChatStore.getState().seedComposer(null)
+})

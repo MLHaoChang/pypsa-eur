@@ -1554,6 +1554,81 @@ def get_stress_scenarios(name: str) -> dict:
     return _h(project=_authorized_project(name))
 
 
+def put_stress_scenarios(name: str, scenarios: list) -> dict:
+    """Replace the per-project class-C registry (whole list; 422 names the
+    rule a scenario breaks). P22: lets the assistant apply a recommended
+    scenario — read the registry first and send it back with the change."""
+    from routers.adequacy_worksheet import (
+        StressScenariosPut,
+    )
+    from routers.adequacy_worksheet import put_stress_scenarios as _h
+    return _h(body=StressScenariosPut(scenarios=scenarios),
+              project=_authorized_project(name))
+
+
+def get_eh_template(name: str) -> dict:
+    """The Energy Hub template a project was created from (P19): recommended
+    archetype, pack overrides, stages, DtC attribution and study notes."""
+    from routers.adequacy_worksheet import get_eh_template as _h
+    out = _h(project=_authorized_project(name))
+    if not isinstance(out, dict):
+        return {"status": "no_data",
+                "message": f"project {name!r} was not created from an Energy "
+                           "Hub template"}
+    return out
+
+
+def get_feature_guide(tour: str | None = None, field: str | None = None) -> dict:
+    """The in-app guide (P21) the GUI's tours and hover tips show — the same
+    wording, so explanations match the screen. ``tour`` returns one tour's
+    steps; ``field`` one field's help; neither returns the index."""
+    from services.guides import load_guide
+    guide = load_guide("eh_fmea")
+    if field is not None:
+        text = guide["fields"].get(field)
+        if text is None:
+            raise HTTPException(
+                404, f"no guide entry for field {field!r}; known: "
+                f"{sorted(guide['fields'])}")
+        return {"field": field, "help": text}
+    if tour is not None:
+        t = guide["tours"].get(tour)
+        if t is None:
+            raise HTTPException(
+                404, f"no tour {tour!r}; known: {sorted(guide['tours'])}")
+        return {"tour": tour, **t}
+    return {"tours": {k: {"title": v["title"], "intro": v.get("intro"),
+                          "steps": len(v["steps"])}
+                      for k, v in guide["tours"].items()},
+            "fields": sorted(guide["fields"])}
+
+
+def review_eh_study() -> dict:
+    """Analyse the latest Energy Hub study (P22): findings with evidence,
+    recommendations and exact tool actions the user may choose to apply."""
+    from routers import results as R
+    from services.adequacy.eh_report import eh_reference_design_http_payload
+    from services.adequacy.eh_review import review_report
+
+    record = R.get_eh_study()
+    record = record if isinstance(record, dict) else None
+    if record and record.get("status") == "running":
+        return {"status": "running",
+                "message": "the EH study is still running — poll "
+                           "get_adequacy_results('eh_study') first"}
+    body, status = eh_reference_design_http_payload(R._state)
+    source = "stored report"
+    if status == 204 or not isinstance(body, dict):
+        body = (record or {}).get("report")
+        source = "study record (the stored report was cleared by a later solve)"
+    if not isinstance(body, dict):
+        return {"status": "no_data",
+                "message": _ADEQUACY_NO_DATA_HINTS["eh_reference_design"]}
+    out = review_report(body, record)
+    out["source"] = source
+    return out
+
+
 def _campaign_gated(study: str, start, **estimate_kwargs):
     """
     Run a study under the active campaign's budget, if there is one.
@@ -4634,6 +4709,10 @@ DISPATCHERS: dict[str, Any] = {
     "get_asset_health": get_asset_health,
     "record_asset_health": record_asset_health,
     "get_stress_scenarios": get_stress_scenarios,
+    "put_stress_scenarios": put_stress_scenarios,
+    "get_eh_template": get_eh_template,
+    "get_feature_guide": get_feature_guide,
+    "review_eh_study": review_eh_study,
     "run_fmea_sweep": run_fmea_sweep,
     "run_frontier_study": run_frontier_study,
     "run_mc_study": run_mc_study,
