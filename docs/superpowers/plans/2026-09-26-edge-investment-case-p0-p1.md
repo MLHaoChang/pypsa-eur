@@ -9,7 +9,7 @@
 > **Spec:** `docs/superpowers/specs/2026-09-26-edge-investment-case-design.md` (revised after adversarial review;
 > decisions 1–20). **Companion notes:** `docs/superpowers/notes/2026-09-26-*.md`.
 >
-> **Plan status:** v2 — revised after plan review round 1 (`PASS WITH CONDITIONS`; all conditions closed in this revision, see § Plan review). Awaiting round-2 confirmation.
+> **Plan status:** v2.1 — passed the plan review loop (round 1 `PASS WITH CONDITIONS`, round 2 `PASS WITH CONDITIONS`, all conditions closed in text; see § Plan review). Implementation starts at P0.
 
 **Goal of P0–P1.** Freeze the contracts (commercial, finance, archetypes, report), make the tool bill and
 optimise against the client's point-of-connection (PoC) tariff at 15-minute settlement with the objective
@@ -214,7 +214,8 @@ Files: `backend/services/library/__init__.py`, `series_store.py`, `backend/servi
 - [ ] Red: `put_series(org, name, series, meta)` returns `TimeSeriesRef(id, version, hash)`; re-put with same
   content is idempotent (same version), changed content bumps version; `resolve(ref)` returns the exact
   series; files live under the reserved prefix `<projects_root>/_library/<org>/…` (never under a project
-  directory) via `storage_paths.library_dir`, honouring `use_org_segment()`; `taken_names` ignores `_library`;
+  directory) via `storage_paths.library_dir`; the path **always** carries the org id (`_library/<org_id>/`)
+  whether or not `use_org_segment()` is on for project dirs; `taken_names` ignores `_library`;
   items persist across app restart; CSV+gzip payload hashed on canonical bytes (`float_format="%.10g"`,
   ISO tz-aware `date_format`) so idempotency is deterministic; `tests/test_alembic_sqlite.py::
   test_migrated_schema_matches_the_model_schema` is the migration tripwire (goes red until 0008 lands).
@@ -260,7 +261,8 @@ reserve-margin wrapper and before `_wrap_with_objective_scale`; re-export both i
 `backend/models/schemas.py` (`SolverConfigSchema.commercial: CommercialConfig | None`), `SolverConfig.commercial:
 dict | None` (dumped at the router in `update_solver_config`), `frontend/src/api/types.ts` mirror,
 `backend/tests/test_solver_config_parity.py` (**new**: dataclass field names == `SolverConfigSchema.model_fields`),
-`backend/tests/test_lp_bindings_poc_price.py`.
+`backend/services/results/cost_breakdown.py` (`energy_import` / `energy_export` rows from the persisted
+materialised prices — needed for this WP's gap-0 invariant), `backend/tests/test_lp_bindings_poc_price.py`.
 
 - [ ] Red: after a solve with an energy-only TOU item bound, `n.links_t.marginal_cost[poc]` equals the
   tariff-period rates at every snapshot (persisted, not transient); BESS charging energy inside the cheapest
@@ -285,10 +287,13 @@ Files: `backend/services/commercial/connection.py`, `backend/tests/test_connecti
 - [ ] Green: implementation.
 
 ### WP1.4b Connection agreement — dynamic envelope and FCA
-- [ ] Design line first: `services/adequacy/stress.py` knows `VALID_KINDS=("parametric","profiles")` and
-  `_parametric_mutate` only scales load/availability. An FCA curtailment-hours entry is expressed as a
-  **`profiles` entry** whose profile is the PoC Link `p_max_pu` series with the curtailed hours zeroed
-  (deterministic, disclosed as `fca_synthetic_hours`), not a new stress kind.
+- [ ] Design line first: `services/adequacy/stress.py` knows `VALID_KINDS=("parametric","profiles")`, and its
+  `profiles` entries accept only `loads_p_set` and `generators_p_max_pu` (`_profile_series` L123–129, validator
+  L191–197) — there is no Link slot. WP1.4b therefore **extends the `profiles` schema with a `links_p_max_pu`
+  key** (validate / mutate / undo mirroring `generators_p_max_pu`; a small, disclosed extension, not a new
+  kind) and expresses the FCA curtailment-hours entry as a `profiles` entry whose `links_p_max_pu` series is
+  the PoC Link's envelope with the curtailed hours zeroed (deterministic, disclosed as `fca_synthetic_hours`).
+  Red test for the schema extension comes first.
 - [ ] Red: `non_firm_dynamic` → time-varying `p_max_pu` from the envelope series (resolved via WP1.1a);
   `fca` → envelope plus the stress entry registered; undo restores; **gap 0**.
 - [ ] Green: implementation.
@@ -314,8 +319,10 @@ Files: `lp_bindings.py`, `backend/tests/test_lp_bindings_peak_demand.py`.
   snapshot weights — per period, not per interval); the fixture's evening peak import is **strictly lower** than
   the no-demand-charge solve by > 1 % ; LP demand cost equals `tariff_engine` demand item on the same dispatch
   (exact for a single-tier demand charge); a month with no snapshots produces no variable and is reported
-  `not_established` in the bindings summary; the solved `ic_peak_import` values are written into
-  `last_commercial_terms` (WP0.5) for reload-safe reconciliation; **gap 0**.
+  `not_established` in the bindings summary; after optimize, **`run_simulation`** (not `lp_bindings`, which
+  never touches state) reads `n.model.variables["ic_peak_import"].solution` and publishes it via
+  `_emit_state(last_commercial_terms=…)` in the same block that publishes `last_reserve_margin`
+  (`solver_service.py` ~L1101–1113), clearing it to `None` on solves without bindings; **gap 0**.
 - [ ] Green: implementation.
 
 ### WP1.5b Ratchet
@@ -357,7 +364,9 @@ persisted, so nothing may be read from `n._`):
   cap; representative-weeks variant) `cost_breakdown` contains the rows with per-period values and
   `objective_decomposition.gap_pct == 0` within 1e-6 relative **both before and after a bundle save → load**.
 - [ ] Green: implementation; `test_results_seam.py` case for `compute_cost_breakdown` with the new keyword;
-  `test_results_facade_surface.py` `_LIFTED`/`_HANDLER_PARAMS` updated (keyword-only, not exposed on the router).
+  `test_results_facade_surface.py` `_HANDLER_PARAMS` **unchanged** (`get_cost_breakdown: []` — a keyword-only
+  service argument does not change the route's positional list); the thin handler passes
+  `_state["last_commercial_terms"]`; rule (d) (keyword-only, not exposed on the router) holds.
 - Acceptance: gap 0 on all seven cases, pre- and post-reload.
 
 ### WP1.8 Preflight validation
@@ -429,7 +438,11 @@ Files: `backend/services/validation_service.py`, `backend/tests/test_validation_
   sample-weeks refusal + pinned audit size + KPI endpoint named; F9 module-scope solved fixture; F10 phantom
   branch wording; splits WP1.1a/b/c and WP1.4a/b; per-WP gap-0 invariant; spike before 1.5a; strict-inequality
   acceptance; FCA stress design line; library chat tools deferred to P2 (stated); `main.py` registration.
-- [ ] Round 2: confirm conditions closed.
+- [x] **Round 2 (2026-09-26): `PASS WITH CONDITIONS`** — all round-1 conditions confirmed closed except the FCA
+  stress design line, which needed a `links_p_max_pu` extension of the `profiles` schema (now in WP1.4b); three
+  minors closed in this text (cost_breakdown in WP1.3 file list; `run_simulation` publishes `ic_peak_import`
+  via `_emit_state`; `_HANDLER_PARAMS` unchanged); F4 wording nit closed. Reviewer: no further code re-check
+  needed. **Plan passes; implementation may start at P0.**
 
 ## Resolved open items
 
