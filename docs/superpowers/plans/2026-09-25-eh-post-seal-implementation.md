@@ -679,6 +679,39 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
 - Rolling is refused.
 - The lever gives ≥2 differentiated options.
 
+**P17 status (2026-09-26, `claude/epic-allen-k2t1c4`):** implemented. Tests: `tests/test_energy_hub_import_energy_cap.py` has 19 (red: 18 of 19 before the code); FE adds 1 builder test and extends 2.
+
+- [x] **Spec §6 amended.** The energy field is real for `weak_flexible` and refused for `strong_grid` / `off_grid`. The table covers metering, direction, bidirectional Links, the boundary, the per-period budget, strategy and scope.
+- [x] **Constraint.**
+  - `_wrap_with_import_energy_cap` (`services/solver/adequacy.py`) is registered after the ENS cap.
+  - Per period: `Σ w·η·p0 ≤ E × Σw / 8760`, where `w` is the `generators` weighting **without** years. It is pinned on a two-period network with years=10: per-period import equals `E × 4/8760`, not ×10.
+  - A time-varying `links_t.efficiency` is honoured.
+  - It is an extra_functionality constraint, not a PyPSA GlobalConstraint row.
+- [x] **Direction [R2].**
+  - `archetypes.metered_import_links` orients the Links with the P11 `hub_boundary_copy` hub side. grid → hub is metered as `η·p0`, pinned at η=0.8.
+  - A one-way hub → grid Link is left out with a note, and is refused when it is the only Link.
+  - A bidirectional Link (`p_min_pu < 0`, static or time series) is refused.
+  - An unorientable boundary (carrier rule, ambiguous hub) is refused.
+- [x] **Preflight.** `import_energy_cap_unsupported_strategy` (rolling/myopic) and `import_energy_link_bidirectional` are errors in `validate_for_run`.
+- [x] **Scope.**
+  - `SolverConfig.import_energy_cap_mwh_per_year` / `import_energy_links` are set only by `solver_config_patch_with_preflight` from the pack.
+  - They are absent from `SolverConfigSchema` (the PUT API) and stripped by `projects._solver_config_from_dict` (project load / bundle import). Both are pinned.
+- [x] **Pack and request.**
+  - `apply_archetype_pack` no longer warns "reserved".
+  - `PackOverrides.import_energy_mwh_per_year` (≥ 0) and `levers.import_energy` are accepted for weak_flexible; other archetypes get a 422.
+  - An unmeterable cap is a 422 before the worker starts (`import_energy_patch` in the runner).
+  - Readiness predicts `apply_pack` fails for it, and counts the lever's solves.
+- [x] **Lever.**
+  - `import_energy` kind, with default ladder `(0, 0.25, 0.5) ×` annualised electrical demand (an absolute MWh ladder cannot fit every network).
+  - `OptimizationLevers.import_energy`.
+  - A cfg-based branch in `apply_lever_scenario` (`mutation["cfg_patch"]`).
+  - The Class-B "ineffective" check covers it.
+  - The study's levers stage runs it when the flag is on.
+  - Pinned: ≥ 2 solved options with distinct costs, section `ok`.
+- [x] **Monotone cost.** A binding cap raises cost monotonically (uncapped → 3e5 → 1.5e5 → 0 MWh/yr), and realised hub import stays ≤ the budget.
+- [x] **FE and chat.** The pack form has an "Import energy (MWh/yr)" field for weak_flexible, validated ≥ 0. The chat schema declares the override and the lever flag.
+- [ ] **QA gate** — pending.
+
 ---
 
 ## P18 — Pipeline UI + whole-report export

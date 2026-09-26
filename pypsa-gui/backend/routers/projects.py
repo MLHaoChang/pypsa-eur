@@ -1188,7 +1188,10 @@ def _solver_config_from_dict(data: dict):
     from dataclasses import fields as _dc_fields
 
     from services.solver_service import SolverConfig
-    valid_keys = {f.name for f in _dc_fields(SolverConfig)}
+    # EH P17: the energy import cap is PACK-ONLY (spec §6 amendment) — a
+    # saved or foreign config can never switch it on for an ordinary solve.
+    pack_only = {"import_energy_cap_mwh_per_year", "import_energy_links"}
+    valid_keys = {f.name for f in _dc_fields(SolverConfig)} - pack_only
     clean = {k: v for k, v in (data or {}).items() if k in valid_keys}
     # The 'lpf' mode was removed in v1.x — coerce any legacy value to 'lopf'.
     if clean.get("mode") == "lpf":

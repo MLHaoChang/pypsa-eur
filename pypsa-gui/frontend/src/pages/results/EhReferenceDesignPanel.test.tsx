@@ -11,6 +11,7 @@ import {
   completenessRows,
   dtcPlanningCsvRows,
   dtcStressCsvRows,
+  reportSummaryCsvRows,
   EhReferenceDesignPanel,
   fmeaTopCsvRows,
   frontierCsvRows,
@@ -24,11 +25,11 @@ import {
   statusTone,
   verdictTone,
 } from './EhReferenceDesignPanel'
-import { downloadCSV } from './shared'
+import { downloadCSV, downloadJSON } from './shared'
 
 vi.mock('./shared', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./shared')>()
-  return { ...actual, downloadCSV: vi.fn() }
+  return { ...actual, downloadCSV: vi.fn(), downloadJSON: vi.fn() }
 })
 
 vi.mock('../../api/simulation', async (importOriginal) => {
@@ -123,6 +124,7 @@ beforeEach(() => {
   vi.mocked(resultsApi.getEhDtcPlanning).mockReset().mockResolvedValue(null)
   vi.mocked(resultsApi.getEhReadiness).mockReset().mockResolvedValue(READINESS as never)
   vi.mocked(downloadCSV).mockReset()
+  vi.mocked(downloadJSON).mockReset()
 })
 
 afterEach(() => { cleanup(); vi.clearAllMocks() })
@@ -178,13 +180,14 @@ describe('buildEhStudyBody', () => {
     const { body, error } = buildEhStudyBody('weak_flexible', {
       ...EMPTY_PACK_FORM,
       ensCap: '5000', loleTarget: ' ', importMw: '80', budget: '12',
-      draws: '300', seed: '', dsrBuses: 'flex, crit ',
+      draws: '300', seed: '', dsrBuses: 'flex, crit ', importEnergy: '0',
     })
     expect(error).toBeNull()
     expect(body).toEqual({
       archetype: 'weak_flexible',
       budget_solves: 12,
-      pack_overrides: { ens_cap_permyriad: 5000, import_p_nom_mw: 80 },
+      pack_overrides: { ens_cap_permyriad: 5000, import_p_nom_mw: 80,
+        import_energy_mwh_per_year: 0 },
       mc: { draws: 300 },
       dsr_buses: ['flex', 'crit'],
     })
@@ -192,7 +195,7 @@ describe('buildEhStudyBody', () => {
 
   it('ignores weak-only knobs for other archetypes', () => {
     const { body } = buildEhStudyBody('off_grid', {
-      ...EMPTY_PACK_FORM, importMw: '80', dsrBuses: 'flex',
+      ...EMPTY_PACK_FORM, importMw: '80', dsrBuses: 'flex', importEnergy: '1000',
     })
     expect(body).toEqual({ archetype: 'off_grid' })
   })
@@ -219,6 +222,14 @@ describe('buildEhStudyBody', () => {
     })
     expect(body).toBeNull()
     expect(error).toMatch(msg)
+  })
+
+  it('rejects a negative import energy budget on weak_flexible', () => {
+    const { body, error } = buildEhStudyBody('weak_flexible', {
+      ...EMPTY_PACK_FORM, importEnergy: '-5',
+    })
+    expect(body).toBeNull()
+    expect(error).toMatch(/import energy budget/)
   })
 
   it('rejects a zero import cap on weak_flexible', () => {
@@ -1000,5 +1011,82 @@ describe('P6b per-Load multi-energy disclosure', () => {
     expect(screen.getByTestId('eh-multi-energy-load-l_h2').textContent).toMatch(/40/)
     expect(screen.getByTestId('eh-multi-energy-attribution').textContent)
       .toMatch(/per_load_slack/)
+  })
+})
+
+
+describe('P18 — pipeline table and whole-report export', () => {
+  const STAGES = [
+    { stage: 'apply_pack', status: 'run', solves_charged: 0, note: null },
+    { stage: 'ens_solve', status: 'run', solves_charged: 1, note: null },
+    { stage: 'frontier', status: 'skipped', solves_charged: 0,
+      note: 'frontier not requested' },
+    { stage: 'mc_certify', status: 'failed', solves_charged: 0,
+      note: 'MC certification failed: boom' },
+    { stage: 'levers', status: 'aborted', solves_charged: 2, note: 'stopped' },
+    { stage: 'assemble', status: 'run', solves_charged: 0, note: null },
+  ]
+  const WITH_PIPE = {
+    ...REPORT, certified: false, mc_lole_h: 4.2,
+    pipeline: { aborted: false, solves_consumed: 3, budget_solves: 30, stages: STAGES },
+    sections: { gates: { status: 'not_established', note: 'no SCR data' } },
+    notes: ['DSR preflight: bus flex hosts a battery'],
+  }
+
+  function done() {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report: WITH_PIPE,
+    } as never)
+  }
+
+  it('renders every stage with its status, solves and note', async () => {
+    done()
+    const user = await openPanel()
+    const toggle = await screen.findByTestId('eh-pipeline-toggle')
+    expect(toggle.textContent).toMatch(/6 stages/)
+    expect(screen.queryByTestId('eh-pipeline-table')).toBeNull()   // collapsed
+    await user.click(toggle)
+    for (const st of STAGES) {
+      const row = screen.getByTestId(`eh-pipeline-row-${st.stage}`)
+      expect(row.querySelector('[data-status]')?.getAttribute('data-status'))
+        .toBe(st.status)
+      expect(row.textContent).toContain(String(st.solves_charged))
+      if (st.note) expect(row.textContent).toContain(st.note)
+    }
+  })
+
+  it('downloads the stored export body as JSON', async () => {
+    done()
+    const exportBody = { ...WITH_PIPE, pack_hash: '0123456789abcdef' }
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(exportBody as never)
+    const user = await openPanel()
+    await user.click(await screen.findByTestId('eh-report-json'))
+    await waitFor(() => expect(downloadJSON).toHaveBeenCalledWith(
+      'eh-reference-design-strong_grid-01234567.json', exportBody))
+  })
+
+  it('says so when there is no stored report to export', async () => {
+    done()
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null)
+    const user = await openPanel()
+    await user.click(await screen.findByTestId('eh-report-json'))
+    expect((await screen.findByTestId('eh-report-json-error')).textContent)
+      .toMatch(/No stored reference design/)
+    expect(downloadJSON).not.toHaveBeenCalled()
+  })
+
+  it('exports a flat summary CSV of headline, completeness and notes', async () => {
+    done()
+    const user = await openPanel()
+    await user.click(await screen.findByTestId('eh-report-summary-csv'))
+    expect(downloadCSV).toHaveBeenCalledWith(
+      'eh-reference-design-strong_grid.csv', ['group', 'key', 'value'],
+      expect.any(Array))
+    const rows = reportSummaryCsvRows(WITH_PIPE as never)
+    expect(rows).toContainEqual(['headline', 'certified', false])
+    expect(rows).toContainEqual(['headline', 'solves_consumed', 3])
+    expect(rows).toContainEqual(['completeness', 'gates', 'not_established: no SCR data'])
+    expect(rows).toContainEqual(['note', '1', 'DSR preflight: bus flex hosts a battery'])
+    expect(rows.every(r => r.length === 3)).toBe(true)
   })
 })

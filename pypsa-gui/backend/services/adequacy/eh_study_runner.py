@@ -61,6 +61,7 @@ class LeverOverrides(_BaseModel):
     redundancy: bool | None = None
     import_cap: bool | None = None
     storage_duration: bool | None = None
+    import_energy: bool | None = None
 
 
 class PackOverrides(_BaseModel):
@@ -76,6 +77,8 @@ class PackOverrides(_BaseModel):
     # (link_p_nom_invalid) AFTER the worker starts; an islanded hub is the
     # off_grid archetype, not a weak_flexible cap of zero.
     import_p_nom_mw: float | None = Field(default=None, gt=0)
+    # P17: annual energy import budget at the hub (weak_flexible only).
+    import_energy_mwh_per_year: float | None = Field(default=None, ge=0)
     mc_certify_required: bool | None = None
     frontier_default: bool | None = None
     dtc_stress_default: bool | None = None
@@ -127,6 +130,9 @@ def apply_pack_overrides(pack: ArchetypePack, overrides: dict | None, *,
                 avail[key] = val
         if ov.import_p_nom_mw is not None:
             merged["import_overlay"]["import_p_nom_mw"] = ov.import_p_nom_mw
+        if ov.import_energy_mwh_per_year is not None:
+            merged["import_overlay"]["import_energy_mwh_per_year"] = (
+                ov.import_energy_mwh_per_year)
         for key in ("mc_certify_required", "frontier_default",
                     "dtc_stress_default", "dtc_planning_default"):
             val = getattr(ov, key)
@@ -147,6 +153,13 @@ def apply_pack_overrides(pack: ArchetypePack, overrides: dict | None, *,
         problems.append(
             f"pack_overrides.import_p_nom_mw: only weak_flexible applies an "
             f"import cap; {out.archetype} does not")
+    if (ov.import_energy_mwh_per_year is not None
+            or (ov.levers is not None and ov.levers.import_energy)) \
+            and out.archetype != "weak_flexible":
+        problems.append(
+            f"pack_overrides.import_energy_mwh_per_year / levers.import_energy: "
+            f"only weak_flexible applies an energy import cap; "
+            f"{out.archetype} does not")
     if out.archetype == "off_grid" and out.levers.import_cap:
         problems.append(
             "pack_overrides.levers.import_cap: off_grid islands the import "
@@ -259,6 +272,13 @@ def start_eh_study(
         dtc_config = (_validate_dtc_config(body.dtc_config, n)
                       if body.dtc_config is not None else None)
         bus_names = set(map(str, n.buses.index))
+        # P17: an energy cap that cannot be oriented / metered refuses here,
+        # not inside the worker (the driver patches its cfg before stage 1).
+        from services.adequacy import archetypes as _arch
+        try:
+            _arch.import_energy_patch(n, pack)
+        except _arch.ArchetypePackError as exc:
+            raise HTTPException(422, str(exc)) from exc
     dsr_buses = None
     if body.dsr_buses is not None:
         dsr_buses = list(dict.fromkeys(str(b) for b in body.dsr_buses))

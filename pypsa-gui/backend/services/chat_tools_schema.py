@@ -1067,6 +1067,13 @@ TOOLS: list[dict[str, Any]] = [
                                              "enum": ["mc_lole", "none"]},
                     "import_p_nom_mw": {"type": "number",
                                         "exclusiveMinimum": 0},
+                    "import_energy_mwh_per_year": {
+                        "type": "number", "minimum": 0,
+                        "description": (
+                            "weak_flexible only: annual energy import budget "
+                            "at the hub (MWh/yr), metered as efficiency × p0 "
+                            "on the grid→hub import Links, per year of each "
+                            "investment period.")},
                     "mc_certify_required": {"type": "boolean"},
                     "frontier_default": {"type": "boolean"},
                     "dtc_stress_default": {"type": "boolean"},
@@ -1078,6 +1085,7 @@ TOOLS: list[dict[str, Any]] = [
                             "redundancy": {"type": "boolean"},
                             "import_cap": {"type": "boolean"},
                             "storage_duration": {"type": "boolean"},
+                            "import_energy": {"type": "boolean"},
                         },
                     },
                 },

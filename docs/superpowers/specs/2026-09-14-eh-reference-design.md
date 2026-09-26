@@ -151,7 +151,19 @@ If none match: `strong_grid` is a no-op; `weak_flexible` / `off_grid` **prefligh
 | `weak_flexible` | Set each selected Link `p_nom` (and `p_nom_max` if present) to pack `import_p_nom_mw` (per-link equal split if one number); optional static `p_max_pu` left unchanged | restore saved `p_nom` / `p_nom_max` |
 | `off_grid` | Force selected Links **out of service via `p_max_pu`/`p_min_pu` → 0** (keep `p_nom` > 0 so preflight `link_p_nom_invalid` does not fire — same discipline as Class-B Link outages). Optionally also clamp `p_nom_max` if present | restore saved `p_max_pu` / `p_min_pu` / `p_nom_max` |
 
-**Energy (optional field on pack):** `import_energy_mwh_per_year` is **reserved**. Phase 1 apply is **power-only**; if the field is set, `apply_archetype_pack` MUST emit a warning and must NOT add a GlobalConstraint. Energy import caps land in P3c (or a later overlay phase), not P1.
+**Energy (optional field on pack):** `import_energy_mwh_per_year` is **reserved** — *superseded 2026-09-26 by the P17 amendment below*. Phase 1 apply is **power-only**; if the field is set, `apply_archetype_pack` MUST emit a warning and must NOT add a GlobalConstraint. Energy import caps land in P3c (or a later overlay phase), not P1.
+
+**Amendment (2026-09-26, P17): energy import cap.** The reserved field becomes a real constraint for `weak_flexible` (the only archetype with a finite import that an energy budget can bind; `strong_grid` imports freely and `off_grid` imports nothing, so the field is refused there rather than ignored). It is **not** a PyPSA `GlobalConstraint` row: it is added through `extra_functionality` (`_wrap_with_import_energy_cap`), like the ENS cap.
+
+| Rule | Normative |
+|---|---|
+| Metered Links | The selected import Links oriented **grid → hub** (`bus0` beyond, `bus1` inside the hub side established by the P11 hub-boundary rule). Hub-side energy = `p0 × efficiency`. |
+| Wrong direction | A one-way Link oriented hub → grid can never import (`−p1 = η·p0` is export): it is left out with a note; if it is the only selected Link, the pack is refused. |
+| Bidirectional | A metered Link that can run backwards (`p_min_pu < 0`, static or time series) is **refused** in v1 — capping only the import direction needs positive-part variables. |
+| Boundary | If the hub side cannot be established (carrier-rule selection, ambiguous hub), the pack is refused: an unoriented cap would meter the wrong quantity. |
+| Budget per period | For each investment period P: `Σ_{t∈P} w_t · η · p0_t ≤ E × Σ_{t∈P} w_t / 8760`, with `w` the `generators` snapshot weighting **without** the `years` multiplier (the cap is per year of the period). |
+| Strategy | Rolling / myopic refused (a window would need its own budget), as the ENS cap. |
+| Scope | `SolverConfig.import_energy_cap_mwh_per_year` / `import_energy_links` are set only from the pack (`solver_config_patch`); they are not part of the solver-config API schema and are stripped from saved/loaded project configs. |
 
 **Firmness:** overlays are **planning limits**, not adequacy of the external grid. Report `levers.import_firmness = "planning_limit_only"` unless Link outages are modelled in the same study.
 

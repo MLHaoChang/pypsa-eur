@@ -618,11 +618,15 @@ export interface EhStudyRequestBody {
     target_lole_h?: number
     certification_metric?: 'mc_lole' | 'none'
     import_p_nom_mw?: number
+    import_energy_mwh_per_year?: number
     mc_certify_required?: boolean
     frontier_default?: boolean
     dtc_stress_default?: boolean
     dtc_planning_default?: boolean
-    levers?: { redundancy?: boolean; import_cap?: boolean; storage_duration?: boolean }
+    levers?: {
+      redundancy?: boolean; import_cap?: boolean; storage_duration?: boolean
+      import_energy?: boolean
+    }
   }
   dtc_config?: {
     critical_bus_ids?: string[]

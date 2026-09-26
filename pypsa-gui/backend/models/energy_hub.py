@@ -123,6 +123,8 @@ class OptimizationLevers(BaseModel):
     redundancy: bool = False
     import_cap: bool = False
     storage_duration: bool = False
+    # P17: compare energy import budgets (weak_flexible only).
+    import_energy: bool = False
 
 
 class DtcConfig(BaseModel):

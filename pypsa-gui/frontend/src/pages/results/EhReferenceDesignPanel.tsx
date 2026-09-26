@@ -8,6 +8,7 @@ import {
   type EhDtcPlanningTable,
   type EhDtcStressTable,
   type EhLeverTable,
+  type EhPipelineStage,
   type EhRedundancyTable,
   type EhReferenceDesignReport,
   type EhScrVerdict,
@@ -18,7 +19,7 @@ import {
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { blockerMessage } from './McPanel'
-import { downloadCSV } from './shared'
+import { downloadCSV, downloadJSON } from './shared'
 
 const ARCHETYPES: { id: EhArchetype; label: string; blurb: string }[] = [
   {
@@ -51,6 +52,8 @@ export interface PackForm {
   ensCap: string
   loleTarget: string
   importMw: string
+  /** weak_flexible only (P17): annual energy import budget, MWh/yr. */
+  importEnergy: string
   budget: string
   draws: string
   seed: string
@@ -60,7 +63,8 @@ export interface PackForm {
 }
 
 export const EMPTY_PACK_FORM: PackForm = {
-  ensCap: '', loleTarget: '', importMw: '', budget: '', draws: '', seed: '',
+  ensCap: '', loleTarget: '', importMw: '', importEnergy: '', budget: '',
+  draws: '', seed: '',
   dsrBuses: '', stages: null,
 }
 
@@ -95,6 +99,9 @@ export function buildEhStudyBody(
     lole: num(form.loleTarget, 'LOLE target', v => v >= 0, '≥ 0 h/yr'),
     imp: archetype === 'weak_flexible'
       ? num(form.importMw, 'import cap', v => v > 0, '> 0 MW') : undefined,
+    energy: archetype === 'weak_flexible'
+      ? num(form.importEnergy, 'import energy budget', v => v >= 0,
+        '≥ 0 MWh/yr') : undefined,
     budget: num(form.budget, 'budget', v => Number.isInteger(v) && v >= 1 && v <= 120,
       'an integer 1–120'),
     draws: num(form.draws, 'MC draws', v => Number.isInteger(v) && v >= 1 && v <= 2000,
@@ -109,6 +116,7 @@ export function buildEhStudyBody(
   if (typeof checks.ens === 'number') po.ens_cap_permyriad = checks.ens
   if (typeof checks.lole === 'number') po.target_lole_h = checks.lole
   if (typeof checks.imp === 'number') po.import_p_nom_mw = checks.imp
+  if (typeof checks.energy === 'number') po.import_energy_mwh_per_year = checks.energy
   if (Object.keys(po).length > 0) body.pack_overrides = po
   if (typeof checks.budget === 'number') body.budget_solves = checks.budget
   const mc: NonNullable<EhStudyRequestBody['mc']> = {}
@@ -376,6 +384,86 @@ export function dtcAttributionLabel(t: EhDtcStressTable): string {
   return base
 }
 
+/** Header for the flat report summary CSV (P18). */
+export const REPORT_SUMMARY_CSV_HEADER = ['group', 'key', 'value']
+
+/** Flat CSV of the report headline, completeness and notes (P18). */
+export function reportSummaryCsvRows(r: EhReferenceDesignReport): unknown[][] {
+  const head: [string, unknown][] = [
+    ['archetype', r.archetype], ['pack_hash', r.pack_hash],
+    ['assumptions_hash', r.assumptions_hash],
+    ['ens_cap_permyriad', r.ens_cap_permyriad],
+    ['achieved_ens_permyriad', r.achieved_ens_permyriad],
+    ['achieved_shed_hours', r.achieved_shed_hours],
+    ['mc_lole_h', r.mc_lole_h], ['certified', r.certified],
+    ['cost_at_target_eur', r.cost_at_target_eur],
+    ['period_basis', r.period_basis],
+    ['solves_consumed', r.pipeline?.solves_consumed],
+    ['budget_solves', r.pipeline?.budget_solves],
+    ['aborted', r.pipeline?.aborted],
+  ]
+  const rows: unknown[][] = head.map(([k, v]) => ['headline', k, v ?? ''])
+  for (const [section, status] of Object.entries(r.completeness ?? {})) {
+    const note = r.sections?.[section]?.note
+    rows.push(['completeness', section, note ? `${status}: ${note}` : status])
+  }
+  for (const [i, note] of (r.notes ?? []).entries()) rows.push(['note', String(i + 1), note])
+  return rows
+}
+
+/** Tone for a pipeline stage status (P18 table). */
+export function stageTone(status: string): string {
+  switch (status) {
+    case 'run': return 'text-accent'
+    case 'failed': return 'text-danger'
+    case 'aborted': return 'text-warn'
+    default: return 'text-muted'
+  }
+}
+
+/** Collapsible pipeline table: every stage, its status, solves and note. */
+export function PipelineTable({ stages }: { stages: EhPipelineStage[] }) {
+  const [open, setOpen] = useState(false)
+  if (stages.length === 0) return null
+  return (
+    <div className="flex flex-col gap-1" data-testid="eh-pipeline">
+      <button type="button" onClick={() => setOpen(o => !o)}
+        data-testid="eh-pipeline-toggle" aria-expanded={open}
+        className="self-start text-[10px] font-semibold uppercase tracking-wide text-muted hover:text-text">
+        Pipeline ({stages.length} stages) {open ? '▾' : '▸'}
+      </button>
+      {open && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[10px]" data-testid="eh-pipeline-table">
+            <thead className="text-muted">
+              <tr>
+                <th className="text-left font-medium py-1 pr-3">Stage</th>
+                <th className="text-left font-medium py-1 pr-3">Status</th>
+                <th className="text-right font-medium py-1 pr-3">Solves</th>
+                <th className="text-left font-medium py-1">Note</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stages.map(s => (
+                <tr key={s.stage} className="border-t border-border/50"
+                    data-testid={`eh-pipeline-row-${s.stage}`}>
+                  <td className="py-0.5 pr-3 font-mono">{s.stage}</td>
+                  <td className={`py-0.5 pr-3 ${stageTone(s.status)}`}
+                      data-status={s.status}>{s.status}</td>
+                  <td className="py-0.5 pr-3 text-right font-mono">
+                    {s.solves_charged ?? 0}
+                  </td>
+                  <td className="py-0.5 text-muted">{s.note ?? ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** CSV rows for DtC planning contingencies. */
 export function dtcPlanningCsvRows(table: EhDtcPlanningTable): unknown[][] {
   return (table.contingencies ?? []).map(c => [
@@ -546,6 +634,25 @@ export function EhReferenceDesignPanel() {
     }
   }
 
+  // P18: the durable export body, fetched fresh at click so the file is the
+  // stored report (not a render-time copy of it).
+  const [exportError, setExportError] = useState<string | null>(null)
+  const exportJson = useMutation({
+    mutationFn: () => resultsApi.getEhReferenceDesign(),
+    onMutate: () => setExportError(null),
+    onSuccess: (body: unknown) => {
+      if (body == null) {
+        setExportError('No stored reference design to export yet.')
+        return
+      }
+      const r = body as EhReferenceDesignReport
+      downloadJSON(
+        `eh-reference-design-${r.archetype}-${String(r.pack_hash ?? '').slice(0, 8)}.json`,
+        body)
+    },
+    onError: (e: unknown) => setExportError(blockerMessage(e)),
+  })
+
   const run = useMutation({
     mutationFn: () => resultsApi.startEhStudy(built.body!),
     onMutate: () => setBlocked(null),
@@ -651,6 +758,8 @@ export function EhReferenceDesignPanel() {
                     ['ensCap', 'ENS target (‱)', 'eh-pack-ens-cap', true],
                     ['loleTarget', 'LOLE target (h/yr)', 'eh-pack-lole-target', true],
                     ['importMw', 'Import cap (MW)', 'eh-pack-import-mw',
+                      archetype === 'weak_flexible'],
+                    ['importEnergy', 'Import energy (MWh/yr)', 'eh-pack-import-energy',
                       archetype === 'weak_flexible'],
                     ['budget', 'Budget (LP solves)', 'eh-pack-budget', true],
                     ['draws', 'MC draws', 'eh-pack-draws', true],
@@ -853,6 +962,30 @@ export function EhReferenceDesignPanel() {
                   </span>
                 )}
               </div>
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <button type="button" data-testid="eh-report-json"
+                  onClick={() => void exportJson.mutate()}
+                  disabled={exportJson.isPending}
+                  title="The stable export shape served by GET /results/eh_reference_design"
+                  className="px-2 py-0.5 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent disabled:opacity-50">
+                  Download JSON
+                </button>
+                <CsvButton
+                  testId="eh-report-summary-csv"
+                  label="Summary CSV"
+                  onClick={() => downloadCSV(
+                    `eh-reference-design-${report.archetype}.csv`,
+                    REPORT_SUMMARY_CSV_HEADER, reportSummaryCsvRows(report))}
+                />
+                {exportError && (
+                  <span className="text-[10px] text-danger" data-testid="eh-report-json-error">
+                    {exportError}
+                  </span>
+                )}
+              </div>
+
+              <PipelineTable stages={report.pipeline?.stages ?? []} />
 
               {(report.notes?.length ?? 0) > 0 && (
                 <ul

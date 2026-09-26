@@ -64,6 +64,8 @@ def _stage_estimate(stage: str, net, pack: ArchetypePack, ctx: dict) -> tuple[
             total += len(lev.DEFAULT_STORAGE_HOURS)
         if pack.levers.import_cap and ctx["lever_import_links"]:
             total += len(lev.DEFAULT_IMPORT_CAPS_MW)
+        if getattr(pack.levers, "import_energy", False) and ctx["metered_links"]:
+            total += len(lev.DEFAULT_IMPORT_ENERGY_FRACTIONS)
         if not pack.levers.storage_duration and not pack.levers.import_cap \
                 and ctx["storage_units"]:
             total += len(lev.DEFAULT_STORAGE_HOURS)
@@ -132,6 +134,17 @@ def eh_readiness(network, pack: ArchetypePack, *, budget_solves: int,
     except arch.HubBoundaryError as exc:
         mc_boundary = {"ok": False, "error": str(exc), "rule": rule}
 
+    # P17: the Links the energy cap / import_energy lever would meter.
+    metered: list[str] = []
+    try:
+        _patch, energy_notes = arch.import_energy_patch(net, pack)
+        metered = list(_patch.get("import_energy_links") or [])
+        warnings.extend(energy_notes)
+    except arch.ArchetypePackError as exc:
+        # The study patches its cfg before any stage: this refusal stops it.
+        applied = None
+        warnings.insert(0, f"pack cannot be applied: {exc}")
+
     # The driver's cfg VOLL (a session config without one reads as 0 there).
     voll_v = float(voll or 0.0)
     if voll_v <= 0:
@@ -142,7 +155,8 @@ def eh_readiness(network, pack: ArchetypePack, *, budget_solves: int,
            "voll": voll_v, "voll_ok": voll_v > 0,
            "storage_units": int(len(net.storage_units)),
            # The levers stage selects with its OWN rule, not the pack's §6.
-           "lever_import_links": lev._import_link_ids(net)}
+           "lever_import_links": lev._import_link_ids(net),
+           "metered_links": metered}
     rows = []
     total = 0
     after_upper = False

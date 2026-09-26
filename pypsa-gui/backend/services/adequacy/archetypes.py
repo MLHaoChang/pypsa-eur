@@ -137,9 +137,16 @@ def solver_config_patch_with_preflight(
         dsr_price_eur_per_mwh: float = 100.0,
         dsr_share_of_load: float = 0.1,
 ) -> tuple[dict[str, Any], list[str]]:
-    """Patch + warnings. Enables DSR only when dsr_opt_in and buses provided."""
+    """Patch + warnings. Enables DSR only when dsr_opt_in and buses provided.
+
+    P17: also orients and sets the energy import cap (pack-only cfg fields);
+    raises ``ArchetypePackError`` where the cap cannot be honestly metered.
+    """
     patch = solver_config_patch(pack)
     warnings: list[str] = []
+    energy_patch, energy_notes = import_energy_patch(network, pack)
+    patch.update(energy_patch)
+    warnings.extend(energy_notes)
     if not pack.dsr_opt_in:
         return patch, warnings
     buses = [str(b) for b in (dsr_buses or [])]
@@ -155,6 +162,77 @@ def solver_config_patch_with_preflight(
     patch["dsr_share_of_load"] = float(dsr_share_of_load)
     patch["dsr_buses"] = buses
     return patch, warnings
+
+
+def metered_import_links(network, pack: ArchetypePack) -> tuple[list[str], list[str]]:
+    """Import Links oriented grid → hub (P17), plus notes.
+
+    The hub side comes from the P11 boundary rule (``hub_boundary_copy``);
+    a Link with ``bus0`` beyond and ``bus1`` inside the hub is metered as
+    ``η·p0`` delivered. A one-way hub → grid Link can only export and is
+    left out with a note. Raises ``ArchetypePackError`` for an unorientable
+    boundary, a bidirectional Link, or no grid → hub Link at all.
+    """
+    try:
+        _copy, info = hub_boundary_copy(network, pack)
+    except HubBoundaryError as exc:
+        raise ArchetypePackError(
+            "energy import cap needs the hub side of the import boundary: "
+            f"{exc}") from exc
+    hub = set(info.get("hub_buses") or [])
+    links = network.links
+    p_min_t = getattr(getattr(network, "links_t", None), "p_min_pu", None)
+    metered: list[str] = []
+    notes: list[str] = []
+    for lid in info.get("import_links") or []:
+        lid = str(lid)
+        b0, b1 = str(links.at[lid, "bus0"]), str(links.at[lid, "bus1"])
+        lo = float(links.at[lid, "p_min_pu"]) if "p_min_pu" in links.columns else 0.0
+        if p_min_t is not None and lid in getattr(p_min_t, "columns", []):
+            lo = min(lo, float(p_min_t[lid].min()))
+        if lo < 0:
+            raise ArchetypePackError(
+                f"energy import cap: import Link {lid!r} is bidirectional "
+                f"(p_min_pu {lo:g} < 0); capping only its import direction is "
+                "not supported in v1")
+        if b1 in hub and b0 not in hub:
+            metered.append(lid)
+        elif b0 in hub and b1 not in hub:
+            notes.append(
+                f"energy import cap: Link {lid!r} runs hub → grid (one-way), "
+                "so it can only export — left out of the cap")
+        else:
+            notes.append(
+                f"energy import cap: Link {lid!r} does not cross the hub "
+                "boundary — left out of the cap")
+    if not metered:
+        raise ArchetypePackError(
+            "energy import cap: no selected import Link runs grid → hub "
+            "(bus0 beyond the hub, bus1 inside it)")
+    return sorted(metered), notes
+
+
+def import_energy_patch(network, pack: ArchetypePack) -> tuple[dict[str, Any], list[str]]:
+    """The pack-only energy-cap cfg fields (spec §6 P17 amendment)."""
+    energy = pack.import_overlay.import_energy_mwh_per_year
+    wants_lever = bool(getattr(pack.levers, "import_energy", False))
+    if energy is None and not wants_lever:
+        return {}, []
+    if pack.archetype != "weak_flexible":
+        raise ArchetypePackError(
+            "import_energy_mwh_per_year / the import_energy lever apply only "
+            f"to weak_flexible; {pack.archetype} "
+            + ("imports freely" if pack.archetype == "strong_grid"
+               else "imports nothing"))
+    if network is None:
+        raise ArchetypePackError("energy import cap needs the network to orient")
+    links, notes = metered_import_links(network, pack)
+    patch: dict[str, Any] = {"import_energy_links": links}
+    if energy is not None:
+        patch["import_energy_cap_mwh_per_year"] = float(energy)
+        notes = [f"energy import cap {float(energy):,.0f} MWh/yr on "
+                 f"{', '.join(links)} (η·p0 at the hub)"] + notes
+    return patch, notes
 
 
 def _save_link_power(n, name: str) -> dict[str, float]:
@@ -239,11 +317,6 @@ def apply_archetype_pack_detailed(n, pack: ArchetypePack) -> ApplyResult:
                         n.links.at[name, "p_nom_max"] = each
                 except (TypeError, ValueError):
                     pass
-        if overlay.import_energy_mwh_per_year is not None:
-            warnings.append(
-                "import_energy_mwh_per_year is reserved for a GlobalConstraint "
-                "overlay; power-only apply used in Phase 1"
-            )
     else:
         raise ArchetypePackError(f"unknown archetype {pack.archetype!r}")
 

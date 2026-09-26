@@ -28,7 +28,11 @@ IMPORT_ROLES = EH_IMPORT_ROLES
 
 logger = logging.getLogger("pypsa_gui.levers")
 
-DEFAULT_LEVER_KINDS: tuple[str, ...] = ("import_cap", "storage_duration")
+DEFAULT_LEVER_KINDS: tuple[str, ...] = (
+    "import_cap", "storage_duration", "import_energy")
+# P17: energy budgets as fractions of the network's annualised electrical
+# demand (an absolute MWh ladder cannot fit every network's scale).
+DEFAULT_IMPORT_ENERGY_FRACTIONS: tuple[float, ...] = (0.0, 0.25, 0.5)
 DEFAULT_IMPORT_CAPS_MW: tuple[float, ...] = (0.0, 25.0, 50.0)
 DEFAULT_STORAGE_HOURS: tuple[float, ...] = (4.0, 24.0, 72.0)
 
@@ -95,10 +99,61 @@ def _import_links_flow_blocked(n, link_ids: list[str]) -> bool:
     return True
 
 
+def annual_electrical_demand_mwh(n) -> float:
+    """Σ electrical demand, weighted and annualised per year of horizon."""
+    from services.adequacy.metrics import electrical_columns
+
+    if n.loads is None or n.loads.empty:
+        return 0.0
+    w = n.snapshot_weightings
+    w = w["generators"] if "generators" in w.columns else w.iloc[:, 0]
+    hours = float(w.sum())
+    if hours <= 0:
+        return 0.0
+    loads = electrical_columns(n, [str(i) for i in n.loads.index])
+    p_set_t = getattr(getattr(n, "loads_t", None), "p_set", None)
+    total = 0.0
+    for l in loads:
+        if p_set_t is not None and l in getattr(p_set_t, "columns", []):
+            total += float((p_set_t[l].fillna(0.0) * w).sum())
+        else:
+            total += float(n.loads.at[l, "p_set"] or 0.0) * hours
+    return total * 8760.0 / hours
+
+
+def default_import_energy_values(n) -> tuple[float, ...]:
+    d = annual_electrical_demand_mwh(n)
+    return tuple(round(f * d, 3) for f in DEFAULT_IMPORT_ENERGY_FRACTIONS)
+
+
 def apply_lever_scenario(
-    n, kind: str, *, value: float,
+    n, kind: str, *, value: float, cfg=None,
 ) -> tuple[Callable[[], None], dict[str, Any]]:
-    """Mutate ``n`` for one lever setting; return ``(undo, mutation)``."""
+    """Mutate ``n`` for one lever setting; return ``(undo, mutation)``.
+
+    ``import_energy`` (P17) mutates no network: its ``mutation["cfg_patch"]``
+    is applied to the per-option solver config by the caller.
+    """
+    if kind == "import_energy":
+        links = [str(x) for x in (getattr(cfg, "import_energy_links", None) or [])]
+        links = [l for l in links if l in n.links.index]
+        if not links:
+            raise LeverScenarioError(
+                "no metered import Links for import_energy (the weak_flexible "
+                "pack orients them)")
+        cap = float(value)
+        if cap < 0:
+            raise LeverScenarioError("import_energy must be >= 0")
+        return (lambda: None), {
+            "kind": kind,
+            "value": cap,
+            "unit": "MWh/yr",
+            "applied_links": links,
+            "cfg_patch": {"import_energy_cap_mwh_per_year": cap,
+                          "import_energy_links": links},
+            "firmness": "planning_limit_only",
+            "autonomy_note": None,
+        }
     if kind == "import_cap":
         links = _import_link_ids(n)
         if not links:
@@ -181,6 +236,7 @@ def compare_lever_scenarios(
     if values is None:
         values = (
             DEFAULT_STORAGE_HOURS if kind == "storage_duration"
+            else default_import_energy_values(network) if kind == "import_energy"
             else DEFAULT_IMPORT_CAPS_MW
         )
     values = tuple(float(v) for v in values)
@@ -210,10 +266,12 @@ def compare_lever_scenarios(
             break
         _detach_solver_model(network)
         nn = network.copy()
-        undo, mutation = apply_lever_scenario(nn, kind, value=val)
+        undo, mutation = apply_lever_scenario(nn, kind, value=val, cfg=cfg)
         sink: dict = {}
         try:
             cfg_i = copy.copy(cfg) if cfg is not None else SolverConfig()
+            for key, v in (mutation.get("cfg_patch") or {}).items():
+                setattr(cfg_i, key, v)
             try:
                 cfg_i.ens_cap_permyriad = float(ens_cap)
             except Exception:
@@ -239,12 +297,12 @@ def compare_lever_scenarios(
                 meets = None
             ineffective = False
             ineffective_reason = None
-            if kind == "import_cap":
+            if kind in ("import_cap", "import_energy"):
                 applied_links = list(mutation.get("applied_links") or [])
                 if _import_links_flow_blocked(nn, applied_links):
                     ineffective = True
                     ineffective_reason = (
-                        "import_cap no-op under Class-B islanding "
+                        f"{kind} no-op under Class-B islanding "
                         "(applied Links have p_max_pu≈0)"
                     )
             options.append({

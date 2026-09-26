@@ -717,6 +717,8 @@ def _stage_levers(st: _Study) -> None:
             kinds.append("storage_duration")
         if pack.levers.import_cap:
             kinds.append("import_cap")
+        if getattr(pack.levers, "import_energy", False):
+            kinds.append("import_energy")
         if not kinds:
             kinds = ["storage_duration"]
         # Primary kind first; merge options if both enabled.
@@ -742,7 +744,8 @@ def _stage_levers(st: _Study) -> None:
                 msg = str(exc)
                 # Soft-skip only asset-absence — config/unknown-kind errors
                 # must fail closed with the original message.
-                if not ("no StorageUnits" in msg or "no import Links" in msg):
+                if not ("no StorageUnits" in msg or "no import Links" in msg
+                        or "no metered import Links" in msg):
                     raise
                 skipped_kinds.append(f"{kind}:{exc}")
                 logger.info("lever kind %s not applicable: %s", kind, exc)
