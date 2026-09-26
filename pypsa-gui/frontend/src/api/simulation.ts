@@ -612,6 +612,25 @@ export interface EhStudyRequestBody {
   archetype: EhArchetype
   stages?: string[]
   budget_solves?: number
+  /** P13: validated server-side (422 names the field). Omit blank knobs. */
+  pack_overrides?: {
+    ens_cap_permyriad?: number
+    target_lole_h?: number
+    certification_metric?: 'mc_lole' | 'none'
+    import_p_nom_mw?: number
+    mc_certify_required?: boolean
+    frontier_default?: boolean
+    dtc_stress_default?: boolean
+    dtc_planning_default?: boolean
+    levers?: { redundancy?: boolean; import_cap?: boolean; storage_duration?: boolean }
+  }
+  dtc_config?: {
+    critical_bus_ids?: string[]
+    critical_load_ids?: string[]
+    islanding_contingencies: string[]
+  }
+  dsr_buses?: string[]
+  mc?: { draws?: number; seed?: number; cov_target?: number }
 }
 
 export type EhSectionStatus = 'ok' | 'not_established' | 'skipped'

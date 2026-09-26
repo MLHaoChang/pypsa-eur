@@ -12,6 +12,7 @@ import {
   type EhScrVerdict,
   type EhSectionStatus,
   type EhStudyPayload,
+  type EhStudyRequestBody,
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
@@ -43,6 +44,86 @@ const eur = (v: number) =>
 
 const cell = (v: unknown) =>
   v == null || v === '' ? '—' : String(v)
+
+/** Pack-settings form state: strings, so a half-typed value is not coerced. */
+export interface PackForm {
+  ensCap: string
+  loleTarget: string
+  importMw: string
+  budget: string
+  draws: string
+  seed: string
+  dsrBuses: string
+  /** Optional stages to run; null = the pack's default pipeline. */
+  stages: string[] | null
+}
+
+export const EMPTY_PACK_FORM: PackForm = {
+  ensCap: '', loleTarget: '', importMw: '', budget: '', draws: '', seed: '',
+  dsrBuses: '', stages: null,
+}
+
+/** Stages a user may toggle; apply_pack / ens_solve / assemble always run. */
+export const OPTIONAL_STAGES = [
+  'frontier', 'mc_certify', 'fmea_top', 'redundancy', 'levers', 'dtc_stress',
+  'dtc_planning',
+] as const
+
+const PIPELINE_ORDER = [
+  'apply_pack', 'ens_solve', ...OPTIONAL_STAGES, 'assemble',
+] as const
+
+/**
+ * The POST body from the form. Blank fields are OMITTED (never defaulted
+ * here — the engine owns its defaults); an invalid value returns an error
+ * naming it instead of a body. Import MW and DSR buses are weak_flexible only.
+ */
+export function buildEhStudyBody(
+  archetype: EhArchetype, form: PackForm,
+): { body: EhStudyRequestBody | null; error: string | null } {
+  const body: EhStudyRequestBody = { archetype }
+  const num = (raw: string, label: string, ok: (v: number) => boolean,
+    rule: string): number | undefined | string => {
+    if (raw.trim() === '') return undefined
+    const v = Number(raw)
+    if (!Number.isFinite(v) || !ok(v)) return `${label} must be ${rule}`
+    return v
+  }
+  const checks = {
+    ens: num(form.ensCap, 'ENS target', v => v > 0, '> 0 ‱'),
+    lole: num(form.loleTarget, 'LOLE target', v => v >= 0, '≥ 0 h/yr'),
+    imp: archetype === 'weak_flexible'
+      ? num(form.importMw, 'import cap', v => v >= 0, '≥ 0 MW') : undefined,
+    budget: num(form.budget, 'budget', v => Number.isInteger(v) && v >= 1 && v <= 120,
+      'an integer 1–120'),
+    draws: num(form.draws, 'MC draws', v => Number.isInteger(v) && v >= 1 && v <= 2000,
+      'an integer 1–2000'),
+    seed: num(form.seed, 'MC seed', v => Number.isInteger(v) && v >= 0,
+      'an integer ≥ 0'),
+  }
+  for (const v of Object.values(checks)) {
+    if (typeof v === 'string') return { body: null, error: v }
+  }
+  const po: NonNullable<EhStudyRequestBody['pack_overrides']> = {}
+  if (typeof checks.ens === 'number') po.ens_cap_permyriad = checks.ens
+  if (typeof checks.lole === 'number') po.target_lole_h = checks.lole
+  if (typeof checks.imp === 'number') po.import_p_nom_mw = checks.imp
+  if (Object.keys(po).length > 0) body.pack_overrides = po
+  if (typeof checks.budget === 'number') body.budget_solves = checks.budget
+  const mc: NonNullable<EhStudyRequestBody['mc']> = {}
+  if (typeof checks.draws === 'number') mc.draws = checks.draws
+  if (typeof checks.seed === 'number') mc.seed = checks.seed
+  if (Object.keys(mc).length > 0) body.mc = mc
+  if (archetype === 'weak_flexible') {
+    const buses = form.dsrBuses.split(',').map(b => b.trim()).filter(Boolean)
+    if (buses.length > 0) body.dsr_buses = buses
+  }
+  if (form.stages !== null) {
+    const chosen = new Set(['apply_pack', 'ens_solve', 'assemble', ...form.stages])
+    body.stages = PIPELINE_ORDER.filter(st => chosen.has(st))
+  }
+  return { body, error: null }
+}
 
 /** Stable display order for completeness chips (matches REPORT_SECTIONS). */
 export const COMPLETENESS_ORDER = [
@@ -298,6 +379,11 @@ export function EhReferenceDesignPanel() {
   const [open, setOpen] = useState(false)
   const [archetype, setArchetype] = useState<EhArchetype>('strong_grid')
   const [blocked, setBlocked] = useState<string | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [form, setForm] = useState<PackForm>(EMPTY_PACK_FORM)
+  const built = buildEhStudyBody(archetype, form)
+  const setField = (k: keyof PackForm) =>
+    (e: { target: { value: string } }) => setForm(f => ({ ...f, [k]: e.target.value }))
 
   const studyKey = nk(currentProject, 'results', 'eh_study')
   const reportKey = nk(currentProject, 'results', 'eh_reference_design')
@@ -360,7 +446,7 @@ export function EhReferenceDesignPanel() {
   }
 
   const run = useMutation({
-    mutationFn: () => resultsApi.startEhStudy({ archetype }),
+    mutationFn: () => resultsApi.startEhStudy(built.body!),
     onMutate: () => setBlocked(null),
     onSuccess: () => invalidateAll(),
     onError: (e: unknown) => setBlocked(blockerMessage(e)),
@@ -440,11 +526,106 @@ export function EhReferenceDesignPanel() {
             <span className="text-muted">{selected.blurb}</span>
           </label>
 
+          <div className="flex flex-col gap-1.5">
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(o => !o)}
+              data-testid="eh-pack-settings-toggle"
+              className="self-start text-[10px] uppercase tracking-wide font-semibold text-muted hover:text-accent"
+            >
+              Pack settings {settingsOpen ? '▾' : '▸'}
+            </button>
+            {settingsOpen && (
+              <div className="flex flex-col gap-1.5 border border-border/60 rounded p-2"
+                   data-testid="eh-pack-settings">
+                <p className="text-[10px] text-muted">
+                  Blank fields keep the archetype pack's own value.
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  {([
+                    ['ensCap', 'ENS target (‱)', 'eh-pack-ens-cap', true],
+                    ['loleTarget', 'LOLE target (h/yr)', 'eh-pack-lole-target', true],
+                    ['importMw', 'Import cap (MW)', 'eh-pack-import-mw',
+                      archetype === 'weak_flexible'],
+                    ['budget', 'Budget (LP solves)', 'eh-pack-budget', true],
+                    ['draws', 'MC draws', 'eh-pack-draws', true],
+                    ['seed', 'MC seed', 'eh-pack-seed', true],
+                  ] as [keyof PackForm, string, string, boolean][])
+                    .filter(([, , , show]) => show)
+                    .map(([key, label, testId]) => (
+                      <label key={key} className="flex flex-col gap-0.5 text-[10px] text-muted">
+                        {label}
+                        <input
+                          type="number"
+                          step="any"
+                          data-testid={testId}
+                          value={form[key] as string}
+                          disabled={running}
+                          onChange={setField(key)}
+                          className="w-24 px-1 py-0.5 border border-border rounded bg-bg text-[10px] font-mono text-text"
+                        />
+                      </label>
+                    ))}
+                  {archetype === 'weak_flexible' && (
+                    <label className="flex flex-col gap-0.5 text-[10px] text-muted">
+                      DSR buses (comma-separated)
+                      <input
+                        type="text"
+                        data-testid="eh-pack-dsr-buses"
+                        value={form.dsrBuses}
+                        disabled={running}
+                        onChange={setField('dsrBuses')}
+                        className="w-40 px-1 py-0.5 border border-border rounded bg-bg text-[10px] font-mono text-text"
+                      />
+                    </label>
+                  )}
+                </div>
+                <fieldset className="flex flex-wrap items-center gap-2 text-[10px] text-muted">
+                  <label className="flex items-center gap-1">
+                    <input
+                      type="checkbox"
+                      data-testid="eh-pack-stages-default"
+                      checked={form.stages === null}
+                      disabled={running}
+                      onChange={e => setForm(f => ({
+                        ...f, stages: e.target.checked ? null : [],
+                      }))}
+                    />
+                    pack's default stages
+                  </label>
+                  {form.stages !== null && OPTIONAL_STAGES.map(st => (
+                    <label key={st} className="flex items-center gap-1 font-mono">
+                      <input
+                        type="checkbox"
+                        data-testid={`eh-pack-stage-${st}`}
+                        checked={form.stages!.includes(st)}
+                        disabled={running}
+                        onChange={e => setForm(f => ({
+                          ...f,
+                          stages: e.target.checked
+                            ? [...(f.stages ?? []), st]
+                            : (f.stages ?? []).filter(x => x !== st),
+                        }))}
+                      />
+                      {st}
+                    </label>
+                  ))}
+                </fieldset>
+                {built.error && (
+                  <p className="text-[10px] text-warn" data-testid="eh-pack-error">
+                    {built.error}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
               onClick={() => run.mutate()}
-              disabled={running}
+              disabled={running || built.error !== null}
+              title={built.error ?? undefined}
               data-testid="eh-run"
               className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent disabled:opacity-50"
             >

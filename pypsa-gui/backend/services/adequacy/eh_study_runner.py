@@ -12,12 +12,17 @@ import queue as _queue
 import threading as _threading
 import time
 
+from typing import Any, Literal
+
 from fastapi import HTTPException
 from pydantic import BaseModel as _BaseModel
+from pydantic import ConfigDict, Field, ValidationError
 
 from models.energy_hub import (
     DEFAULT_EH_BUDGET_SOLVES,
     MAX_EH_BUDGET_SOLVES,
+    ArchetypePack,
+    DtcConfig,
     default_off_grid_pack,
     default_strong_grid_pack,
     default_weak_flexible_pack,
@@ -34,11 +39,108 @@ _PACK_FACTORY = {
 
 
 class EhStudyRequest(_BaseModel):
-    """Start an EH reference-design study for one archetype pack."""
+    """Start an EH reference-design study for one archetype pack.
+
+    The P13 knobs arrive as plain objects and are validated in
+    ``start_eh_study`` (not by FastAPI), so the HTTP route and the chat tool
+    — which builds this model directly — refuse with the same 422 and the
+    same field path.
+    """
 
     archetype: str | None = None
     stages: list[str] | None = None
     budget_solves: int | None = None
+    pack_overrides: dict[str, Any] | None = None
+    dtc_config: dict[str, Any] | None = None
+    dsr_buses: list[str] | None = None
+    mc: dict[str, Any] | None = None
+
+
+class LeverOverrides(_BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    redundancy: bool | None = None
+    import_cap: bool | None = None
+    storage_duration: bool | None = None
+
+
+class PackOverrides(_BaseModel):
+    """What a caller may change on the factory pack (plan P13). Anything
+    else is refused rather than silently ignored."""
+
+    model_config = ConfigDict(extra="forbid")
+    ens_cap_permyriad: float | None = Field(default=None, gt=0)
+    target_lole_h: float | None = Field(default=None, ge=0)
+    certification_metric: Literal["mc_lole", "none"] | None = None
+    import_p_nom_mw: float | None = Field(default=None, ge=0)
+    mc_certify_required: bool | None = None
+    frontier_default: bool | None = None
+    dtc_stress_default: bool | None = None
+    dtc_planning_default: bool | None = None
+    levers: LeverOverrides | None = None
+
+
+class McOptions(_BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    draws: int | None = Field(default=None, ge=1)
+    seed: int | None = Field(default=None, ge=0)
+    cov_target: float | None = Field(default=None, gt=0, le=1)
+
+
+def _validation_422(prefix: str, exc: ValidationError) -> HTTPException:
+    parts = []
+    for err in exc.errors():
+        loc = ".".join(str(x) for x in (prefix, *err.get("loc", ())) if x != "")
+        parts.append(f"{loc}: {err.get('msg')}")
+    return HTTPException(422, "; ".join(parts))
+
+
+def apply_pack_overrides(pack: ArchetypePack, overrides: dict | None, *,
+                         raise_http: bool = False) -> ArchetypePack:
+    """Merge caller overrides onto a factory pack and RE-VALIDATE the result
+    (so pack-level rules — e.g. an AvailabilityTarget needs a target — hold
+    for the merged pack, not just for each field). ``pack_hash`` follows."""
+    if not overrides:
+        return pack
+    try:
+        ov = PackOverrides.model_validate(overrides)
+        merged = pack.model_dump(mode="python")
+        avail = merged["availability"]
+        for key in ("ens_cap_permyriad", "target_lole_h", "certification_metric"):
+            val = getattr(ov, key)
+            if val is not None:
+                avail[key] = val
+        if ov.import_p_nom_mw is not None:
+            merged["import_overlay"]["import_p_nom_mw"] = ov.import_p_nom_mw
+        for key in ("mc_certify_required", "frontier_default",
+                    "dtc_stress_default", "dtc_planning_default"):
+            val = getattr(ov, key)
+            if val is not None:
+                merged[key] = val
+        if ov.levers is not None:
+            for key, val in ov.levers.model_dump(exclude_none=True).items():
+                merged["levers"][key] = val
+        return ArchetypePack.model_validate(merged)
+    except ValidationError as exc:
+        if raise_http:
+            raise _validation_422("pack_overrides", exc) from exc
+        raise
+
+
+def _validate_dtc_config(raw: dict, n) -> DtcConfig:
+    try:
+        dtc = DtcConfig.model_validate(raw)
+    except ValidationError as exc:
+        raise _validation_422("dtc_config", exc) from exc
+    missing = (
+        [f"bus {b!r}" for b in dtc.critical_bus_ids if b not in n.buses.index]
+        + [f"load {x!r}" for x in dtc.critical_load_ids if x not in n.loads.index]
+        + [f"link {x!r}" for x in dtc.islanding_contingencies
+           if x not in n.links.index])
+    if missing:
+        raise HTTPException(
+            422, "dtc_config names components not on the network: "
+            + ", ".join(missing))
+    return dtc
 
 
 def start_eh_study(
@@ -83,6 +185,8 @@ def start_eh_study(
             f"budget_solves must be between 1 and {MAX_EH_BUDGET_SOLVES}; "
             f"got {budget}")
 
+    from services.adequacy import mc as _mc
+
     stages = body.stages
     if stages is not None:
         from services.adequacy.eh_study import validate_stages
@@ -100,7 +204,37 @@ def start_eh_study(
         raise HTTPException(422, "no network is loaded")
     lock = PyPSAService.get_lock()
 
-    pack = _PACK_FACTORY[archetype]()
+    # P13: every refusal happens HERE, before the worker exists.
+    pack = apply_pack_overrides(
+        _PACK_FACTORY[archetype](), body.pack_overrides, raise_http=True)
+    with lock:  # component names read from the live network
+        dtc_config = (_validate_dtc_config(body.dtc_config, n)
+                      if body.dtc_config is not None else None)
+        bus_names = set(map(str, n.buses.index))
+    dsr_buses = None
+    if body.dsr_buses is not None:
+        dsr_buses = [str(b) for b in body.dsr_buses]
+        if not pack.dsr_opt_in:
+            raise HTTPException(
+                422, f"dsr_buses only apply to packs with dsr_opt_in "
+                f"(weak_flexible); {archetype!r} does not opt into DSR")
+        unknown = [b for b in dsr_buses if b not in bus_names]
+        if unknown:
+            raise HTTPException(
+                422, f"dsr_buses names buses not on the network: {unknown}")
+    try:
+        mc_opts = McOptions.model_validate(body.mc or {})
+    except ValidationError as exc:
+        raise _validation_422("mc", exc) from exc
+    if mc_opts.draws is not None and mc_opts.draws > _mc.MAX_DRAWS:
+        raise HTTPException(
+            422, f"mc.draws must be at most {_mc.MAX_DRAWS} (the MC draw cap); "
+            f"got {mc_opts.draws}")
+    mc_kwargs = {k: v for k, v in (("mc_draws", mc_opts.draws),
+                                   ("mc_seed", mc_opts.seed),
+                                   ("mc_cov_target", mc_opts.cov_target))
+                 if v is not None}
+
     stop_event = _threading.Event()
     log_queue: _queue.SimpleQueue = _queue.SimpleQueue()
     record: dict = {
@@ -109,6 +243,7 @@ def start_eh_study(
         "archetype": archetype,
         "stages": list(stages) if stages is not None else None,
         "budget_solves": budget,
+        "pack_overrides": body.pack_overrides or None,
         "report": None,
         "error": None,
         "started_at": time.time(),
@@ -130,6 +265,9 @@ def start_eh_study(
                 budget_solves=budget,
                 state_update=state_update,
                 store=solver_state,
+                dtc_config=dtc_config,
+                dsr_buses=dsr_buses,
+                **mc_kwargs,
             )
             pipeline = getattr(report, "pipeline", None)
             aborted = bool(getattr(pipeline, "aborted", False))

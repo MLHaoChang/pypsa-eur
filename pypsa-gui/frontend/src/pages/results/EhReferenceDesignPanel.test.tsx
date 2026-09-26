@@ -5,7 +5,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import {
+  buildEhStudyBody,
   COMPLETENESS_ORDER,
+  EMPTY_PACK_FORM,
   completenessRows,
   dtcPlanningCsvRows,
   dtcStressCsvRows,
@@ -145,6 +147,60 @@ describe('frontier / fmea CSV rows', () => {
   })
 })
 
+describe('buildEhStudyBody', () => {
+  it('sends only the archetype when the form is blank', () => {
+    expect(buildEhStudyBody('strong_grid', EMPTY_PACK_FORM))
+      .toEqual({ body: { archetype: 'strong_grid' }, error: null })
+  })
+
+  it('omits blank fields and nests the rest', () => {
+    const { body, error } = buildEhStudyBody('weak_flexible', {
+      ...EMPTY_PACK_FORM,
+      ensCap: '5000', loleTarget: ' ', importMw: '80', budget: '12',
+      draws: '300', seed: '', dsrBuses: 'flex, crit ',
+    })
+    expect(error).toBeNull()
+    expect(body).toEqual({
+      archetype: 'weak_flexible',
+      budget_solves: 12,
+      pack_overrides: { ens_cap_permyriad: 5000, import_p_nom_mw: 80 },
+      mc: { draws: 300 },
+      dsr_buses: ['flex', 'crit'],
+    })
+  })
+
+  it('ignores weak-only knobs for other archetypes', () => {
+    const { body } = buildEhStudyBody('off_grid', {
+      ...EMPTY_PACK_FORM, importMw: '80', dsrBuses: 'flex',
+    })
+    expect(body).toEqual({ archetype: 'off_grid' })
+  })
+
+  it('sends a custom stage list that always keeps the required stages', () => {
+    const { body } = buildEhStudyBody('strong_grid', {
+      ...EMPTY_PACK_FORM, stages: ['frontier'],
+    })
+    expect(body?.stages).toEqual(['apply_pack', 'ens_solve', 'frontier', 'assemble'])
+  })
+
+  it.each([
+    ['ensCap', '0', /ENS target/],
+    ['ensCap', 'abc', /ENS target/],
+    ['loleTarget', '-1', /LOLE target/],
+    ['budget', '0', /budget/],
+    ['budget', '121', /budget/],
+    ['budget', '2.5', /budget/],
+    ['draws', '5000', /draws/],
+    ['seed', '-3', /seed/],
+  ])('rejects %s=%s', (field, value, msg) => {
+    const { body, error } = buildEhStudyBody('strong_grid', {
+      ...EMPTY_PACK_FORM, [field]: value,
+    })
+    expect(body).toBeNull()
+    expect(error).toMatch(msg)
+  })
+})
+
 describe('verdictTone', () => {
   it('tones pass / fail / inconclusive', () => {
     expect(verdictTone('pass')).toContain('accent')
@@ -189,6 +245,25 @@ describe('EhReferenceDesignPanel', () => {
     await user.selectOptions(screen.getByTestId('eh-archetype'), 'off_grid')
     expect((screen.getByTestId('eh-archetype') as HTMLSelectElement).value)
       .toBe('off_grid')
+  })
+
+  it('sends pack settings and blocks Run on an invalid value', async () => {
+    const user = await openPanel()
+    await user.selectOptions(screen.getByTestId('eh-archetype'), 'weak_flexible')
+    await user.click(screen.getByTestId('eh-pack-settings-toggle'))
+    await user.type(screen.getByTestId('eh-pack-ens-cap'), '0')
+    const run = screen.getByTestId('eh-run') as HTMLButtonElement
+    expect(run.disabled).toBe(true)
+    expect(run.getAttribute('title')).toMatch(/ENS target/)
+    await user.clear(screen.getByTestId('eh-pack-ens-cap'))
+    await user.type(screen.getByTestId('eh-pack-ens-cap'), '5000')
+    expect(screen.getByTestId('eh-pack-lole-target').closest('label')?.textContent)
+      .toMatch(/h\/yr/)
+    await user.click(run)
+    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
+      archetype: 'weak_flexible',
+      pack_overrides: { ens_cap_permyriad: 5000 },
+    }))
   })
 
   it('starts a study with the selected archetype', async () => {

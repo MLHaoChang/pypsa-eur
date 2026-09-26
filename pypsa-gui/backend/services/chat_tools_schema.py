@@ -1038,6 +1038,13 @@ TOOLS: list[dict[str, Any]] = [
         "get_adequacy_results('eh_study') for status and "
         "get_adequacy_results('eh_reference_design') for the assembled "
         "report. 409 while another study or a foreground solve is running. "
+        "Optional knobs (all validated before anything runs; a bad value is "
+        "a 422 naming the field): `pack_overrides` changes the archetype "
+        "pack (ENS target ‱, LOLE target h/yr, certification metric, import "
+        "cap MW, stage defaults, levers); `dtc_config` names the critical "
+        "buses/loads and islanding Links for DtC; `dsr_buses` opts buses "
+        "into demand response (weak_flexible only); `mc` sets the "
+        "certification draws/seed/cov_target. "
         "Safety: execution.",
         {
             "archetype": {"type": "string", "enum": EH_ARCHETYPE_ENUM},
@@ -1045,6 +1052,56 @@ TOOLS: list[dict[str, Any]] = [
                        "items": {"type": "string", "enum": EH_STAGE_ENUM}},
             "budget_solves": {"type": "integer", "minimum": 1,
                               "maximum": 120},
+            "pack_overrides": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "ens_cap_permyriad": {"type": "number",
+                                          "exclusiveMinimum": 0},
+                    "target_lole_h": {"type": "number", "minimum": 0},
+                    "certification_metric": {"type": "string",
+                                             "enum": ["mc_lole", "none"]},
+                    "import_p_nom_mw": {"type": "number", "minimum": 0},
+                    "mc_certify_required": {"type": "boolean"},
+                    "frontier_default": {"type": "boolean"},
+                    "dtc_stress_default": {"type": "boolean"},
+                    "dtc_planning_default": {"type": "boolean"},
+                    "levers": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "redundancy": {"type": "boolean"},
+                            "import_cap": {"type": "boolean"},
+                            "storage_duration": {"type": "boolean"},
+                        },
+                    },
+                },
+            },
+            "dtc_config": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "critical_bus_ids": {"type": "array",
+                                         "items": {"type": "string"}},
+                    "critical_load_ids": {"type": "array",
+                                          "items": {"type": "string"}},
+                    "islanding_contingencies": {"type": "array",
+                                                "items": {"type": "string"}},
+                },
+                "required": ["islanding_contingencies"],
+            },
+            "dsr_buses": {"type": "array", "items": {"type": "string"}},
+            "mc": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "draws": {"type": "integer", "minimum": 1,
+                              "maximum": 2000},
+                    "seed": {"type": "integer", "minimum": 0},
+                    "cov_target": {"type": "number", "exclusiveMinimum": 0,
+                                   "maximum": 1},
+                },
+            },
         },
         ["archetype"],
     ),

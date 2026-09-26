@@ -401,6 +401,22 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
 - schema ↔ signature consistency;
 - FE omits blank fields.
 
+**P13 status (2026-09-26, `claude/epic-allen-k2t1c4`):** implemented. `tests/test_energy_hub_pack_overrides.py` has 20 tests, all red before (incl. live HTTP); frontend adds 13 tests, red before.
+
+- [x] **`EhStudyRequest` fields.** `pack_overrides`, `dtc_config`, `dsr_buses` and `mc` arrive as plain objects and are validated in `start_eh_study`, so HTTP and chat get the same 422 with the field path.
+  - `PackOverrides`, `LeverOverrides` and `McOptions` use `extra="forbid"`: an unknown knob is refused, never ignored.
+- [x] **`apply_pack_overrides`.** Merges onto the factory pack and re-validates through `ArchetypePack`; `pack_hash` follows. The record carries `pack_overrides`.
+- [x] **Checks before any worker exists**, reading component names under the lock:
+  - `dtc_config` ids must exist on the network;
+  - `dsr_buses` must exist, and the pack must have `dsr_opt_in` (else 422, not silently ignored);
+  - `mc.draws` ≤ `MAX_DRAWS`.
+- [x] **Chat.** Fully specified nested schemas (`additionalProperties: false`); Python defaults; description updated. Campaign charge unchanged.
+- [x] **FE "Pack settings".**
+  - ENS ‱, LOLE h/yr, import MW (weak only), budget, MC draws/seed, DSR buses (weak only), and a stage picker. The required stages are always kept.
+  - Blank fields are omitted; an invalid value disables Run with the reason.
+  - `dtc_config` is API/chat only until P14 adds tagging UI.
+- [ ] **QA gate** — pending.
+
 ---
 
 ## P14 — EH network tagging + readiness

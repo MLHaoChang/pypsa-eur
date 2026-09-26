@@ -1709,6 +1709,10 @@ def run_eh_study(
     archetype: str,
     stages: list | None = None,
     budget_solves: int | None = None,
+    pack_overrides: dict | None = None,
+    dtc_config: dict | None = None,
+    dsr_buses: list | None = None,
+    mc: dict | None = None,
 ) -> dict:
     """
     Start the Energy Hub reference-design study for one archetype pack.
@@ -1724,6 +1728,10 @@ def run_eh_study(
             archetype=archetype,
             stages=stages,
             budget_solves=budget_solves,
+            pack_overrides=pack_overrides,
+            dtc_config=dtc_config,
+            dsr_buses=dsr_buses,
+            mc=mc,
         )),
         budget_solves=budget_solves)
 
