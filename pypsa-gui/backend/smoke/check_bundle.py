@@ -162,7 +162,23 @@ def scan(root: Path) -> tuple[list[str], list[str]]:
             problems.append(f"SECRET-SHAPED FILE   {rel}")
 
     missing = [want for want in EXPECTED if want not in seen]
+    missing += check_rooted(root)
     return problems, missing
+
+
+# Files a `__file__`-relative read resolves against the _MEIPASS root, so a
+# right basename in the wrong folder still 500s. Anchored on `alembic.ini`,
+# which the spec writes to "." — i.e. that same root.
+ROOTED = (
+    # `stress.PROFILE_PACK_DIR` = parents[2] of services/adequacy/stress.py.
+    "data/eh_class_c/synth_dunkelflaute.json",
+)
+
+
+def check_rooted(root: Path) -> list[str]:
+    roots = [p.parent for p in root.rglob("alembic.ini") if p.is_file()]
+    return [f"{rel} (beside alembic.ini)" for rel in ROOTED
+            if not any((r / rel).is_file() for r in roots)]
 
 
 def check_info_plist(root: Path) -> list[str]:

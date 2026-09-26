@@ -68,7 +68,7 @@ class StressValidationError(ValueError):
 def load_synthetic_profile_pack(pack_id: str) -> dict:
     """Load a bundled synthetic profiles scenario by id (no ``.json``)."""
     sid = str(pack_id).strip()
-    if not sid or not _ID_RE.match(sid):
+    if not sid or not _ID_RE.fullmatch(sid):
         raise StressValidationError(
             f"profile_pack id '{pack_id}' must match [a-z0-9_-]{{1,64}}")
     path = PROFILE_PACK_DIR / f"{sid}.json"
@@ -102,7 +102,9 @@ def list_profile_packs() -> list[dict]:
         return out
     for path in sorted(root.glob("*.json")):
         sid = path.stem
-        if not _ID_RE.match(sid):
+        # is_file: a DIRECTORY named x.json would raise "unknown pack", whose
+        # message lists the packs — i.e. calls this again, forever.
+        if not path.is_file() or not _ID_RE.fullmatch(sid):
             continue
         try:
             raw = load_synthetic_profile_pack(sid)
@@ -216,8 +218,10 @@ def _validate(scenarios: list[dict]) -> None:
         if not isinstance(sc, dict):
             raise StressValidationError(
                 f"scenario #{i + 1} must be an object, got {type(sc).__name__}")
-        sid = str(sc.get("id", ""))
-        if not _ID_RE.match(sid):
+        raw_id = sc.get("id", "")
+        sid = str(raw_id)
+        # fullmatch: `$` also matches before a trailing newline ("abc\n").
+        if not isinstance(raw_id, str) or not _ID_RE.fullmatch(sid):
             raise StressValidationError(
                 f"scenario id '{sid}' must match [a-z0-9_-]{{1,64}}")
         if sid in seen:
@@ -226,8 +230,10 @@ def _validate(scenarios: list[dict]) -> None:
         if sc.get("kind") not in VALID_KINDS:
             raise StressValidationError(
                 f"scenario '{sid}': kind must be one of {VALID_KINDS}")
+        raw_freq = sc.get("frequency_per_year")
         try:
-            freq = float(sc.get("frequency_per_year"))
+            freq = (float("nan") if isinstance(raw_freq, bool)
+                    else float(raw_freq))
         except (TypeError, ValueError):
             freq = float("nan")
         if not (math.isfinite(freq) and 0 < freq <= 365):
@@ -267,17 +273,27 @@ def _validate(scenarios: list[dict]) -> None:
                 load_synthetic_profile_pack(str(sc["profile_pack"]))
 
 
-def load_scenarios(project_dir: pathlib.Path) -> list[dict]:
+def load_scenarios_checked(project_dir: pathlib.Path) -> tuple[list[dict], str | None]:
+    """(scenarios, error). ``error`` names why an EXISTING sidecar reads as
+    empty (corrupt JSON, wrong shape, another schema) so an editor can refuse
+    a whole-list save that would silently replace it (P15 gate)."""
     path = project_dir / SIDECAR_NAME
     if not path.exists():
-        return []
+        return [], None
     try:
         raw = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return []
-    if not isinstance(raw, dict) or raw.get("__schema__") != SCHEMA:
-        return []
-    return list(raw.get("scenarios") or [])
+    except (OSError, json.JSONDecodeError) as exc:
+        return [], f"stress-scenario registry unreadable: {exc}"
+    if not isinstance(raw, dict):
+        return [], "stress-scenario registry unreadable: not a JSON object"
+    if raw.get("__schema__") != SCHEMA:
+        return [], (f"stress-scenario registry has schema "
+                    f"{raw.get('__schema__')!r}; this version reads {SCHEMA}")
+    return list(raw.get("scenarios") or []), None
+
+
+def load_scenarios(project_dir: pathlib.Path) -> list[dict]:
+    return load_scenarios_checked(project_dir)[0]
 
 
 def save_scenarios(project_dir: pathlib.Path, scenarios: list[dict]) -> list[dict]:

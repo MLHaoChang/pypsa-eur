@@ -24,7 +24,7 @@ from services.adequacy.asset_health import (
 from services.adequacy.stress import (
     StressValidationError,
     list_profile_packs,
-    load_scenarios,
+    load_scenarios_checked,
     save_scenarios,
 )
 from services.adequacy.worksheet import (
@@ -64,8 +64,10 @@ class StressScenariosPut(BaseModel):
 @router.get("/{name}/stress_scenarios")
 def get_stress_scenarios(project: AuthorizedProject = ProjectAccessDep) -> dict:
     """Class-C stress-scenario registry (adequacy Phase 4 Task 3) — same
-    sidecar pattern and authorization as the worksheet."""
-    return {"scenarios": load_scenarios(project.directory)}
+    sidecar pattern and authorization as the worksheet. ``error`` is set
+    when an existing file cannot be read (the list then reads empty)."""
+    scenarios, error = load_scenarios_checked(project.directory)
+    return {"scenarios": scenarios, "error": error}
 
 
 @router.put("/{name}/stress_scenarios")

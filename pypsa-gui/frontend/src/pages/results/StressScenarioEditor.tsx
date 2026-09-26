@@ -37,15 +37,17 @@ export const EMPTY_DRAFT: ScenarioDraft = {
 }
 
 export function draftFrom(sc: StressScenario): ScenarioDraft {
+  // String() everywhere: a registry written through the API may carry
+  // numbers where the form expects text, and render must not throw on it.
   const num = (v: unknown) => (v == null ? '1' : String(v))
   return {
-    id: sc.id,
-    name: sc.name ?? '',
-    kind: sc.kind,
-    frequency: String(sc.frequency_per_year ?? ''),
+    id: String(sc.id ?? ''),
+    name: sc.name == null ? '' : String(sc.name),
+    kind: sc.kind === 'profiles' ? 'profiles' : 'parametric',
+    frequency: sc.frequency_per_year == null ? '' : String(sc.frequency_per_year),
     loadMult: num(sc.electrical_load_multiplier),
     availMult: num(sc.renewable_availability_multiplier),
-    pack: sc.profile_pack ?? '',
+    pack: sc.profile_pack == null ? '' : String(sc.profile_pack),
   }
 }
 
@@ -74,9 +76,9 @@ export function validateDraft(
     if (d.availMult.trim() === '' || !Number.isFinite(rm) || rm < 0 || rm > 1.5) {
       return 'Renewable availability multiplier must be in [0, 1.5]'
     }
-  } else if (!d.pack && !hasInlineSeries(base)) {
-    return 'A profiles scenario needs a profile pack'
   }
+  // A profiles scenario with neither pack nor series is a legal registry
+  // stub (the sweep reports it `profiles_incomplete`), as in stress.py.
   return null
 }
 
@@ -101,8 +103,16 @@ export function scenarioFrom(d: ScenarioDraft, base?: StressScenario): StressSce
   } else {
     delete out.electrical_load_multiplier
     delete out.renewable_availability_multiplier
-    if (d.pack) out.profile_pack = d.pack
-    else delete out.profile_pack
+    if (d.pack) {
+      // The backend lets inline series OVERRIDE a pack, so choosing a pack
+      // must replace them — or the list would say "pack X" while the sweep
+      // ran the old series.
+      out.profile_pack = d.pack
+      delete out.loads_p_set
+      delete out.generators_p_max_pu
+    } else {
+      delete out.profile_pack
+    }
   }
   return out
 }
@@ -112,6 +122,9 @@ function describe(sc: StressScenario): string {
     const lm = sc.electrical_load_multiplier ?? 1
     const rm = sc.renewable_availability_multiplier ?? 1
     return `load ×${lm}, renewables ×${rm}`
+  }
+  if (sc.profile_pack && hasInlineSeries(sc)) {
+    return `inline series (override pack ${sc.profile_pack})`
   }
   if (sc.profile_pack) return `pack ${sc.profile_pack}`
   return hasInlineSeries(sc) ? 'inline series' : 'no profiles (incomplete)'
@@ -134,8 +147,11 @@ export default function StressScenarioEditor({ project }: { project: string | nu
     enabled: !!project,
     staleTime: Infinity,
   })
-  const scenarios = ((reg as { scenarios?: StressScenario[] } | undefined)
-    ?.scenarios ?? []) as StressScenario[]
+  const regBody = reg as { scenarios?: StressScenario[]; error?: string | null } | undefined
+  const scenarios = (regBody?.scenarios ?? []) as StressScenario[]
+  // The sidecar exists but cannot be read (corrupt / newer schema): the list
+  // reads as empty, and a whole-list PUT would silently replace the file.
+  const registryError = regBody?.error ?? null
   const packs: StressProfilePack[] = packData?.packs ?? []
 
   // null = no form open; '' = adding; otherwise the id being edited.
@@ -187,7 +203,8 @@ export default function StressScenarioEditor({ project }: { project: string | nu
         <p className="text-[10px] font-semibold text-muted uppercase tracking-wide">
           Stress scenarios (class C) · {scenarios.length}/{MAX_STRESS_SCENARIOS}
         </p>
-        <button onClick={() => open()} disabled={full || editing !== null}
+        <button onClick={() => open()}
+          disabled={full || editing !== null || !!registryError}
           data-testid="stress-add"
           title={full ? `At most ${MAX_STRESS_SCENARIOS} scenarios` : undefined}
           className="inline-flex items-center gap-1 px-2 py-0.5 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent disabled:opacity-50">
@@ -195,6 +212,11 @@ export default function StressScenarioEditor({ project }: { project: string | nu
         </button>
       </div>
 
+      {registryError && (
+        <p className="text-[10px] text-danger mb-1.5" data-testid="stress-registry-error">
+          {registryError} — editing is disabled so the file is not overwritten.
+        </p>
+      )}
       {scenarios.length === 0 ? (
         <p className="text-[10px] text-muted">
           No stress scenarios. Each one is a whole-scenario re-solve in the
@@ -223,12 +245,14 @@ export default function StressScenarioEditor({ project }: { project: string | nu
                 <td className="py-1 pr-2">{describe(sc)}</td>
                 <td className="py-1 text-right whitespace-nowrap">
                   <button onClick={() => open(sc)} title={`Edit ${sc.id}`}
-                    aria-label={`Edit ${sc.id}`} disabled={editing !== null}
+                    aria-label={`Edit ${sc.id}`}
+                    disabled={editing !== null || !!registryError}
                     className="text-muted hover:text-accent mr-1.5 disabled:opacity-50">
                     <Pencil size={11} />
                   </button>
                   <button onClick={() => remove(sc.id)} title={`Delete ${sc.id}`}
-                    aria-label={`Delete ${sc.id}`} disabled={save.isPending}
+                    aria-label={`Delete ${sc.id}`}
+                    disabled={save.isPending || editing !== null || !!registryError}
                     className="text-muted hover:text-danger disabled:opacity-50">
                     <Trash2 size={11} />
                   </button>
@@ -280,8 +304,9 @@ export default function StressScenarioEditor({ project }: { project: string | nu
               ))}
             </select>
           )}
-          <button onClick={submit} disabled={!!clientError || save.isPending}
-            data-testid="stress-save"
+          <button onClick={submit}
+            disabled={!!clientError || save.isPending || !!registryError}
+            data-testid="stress-save" aria-label={editing ? 'Save scenario' : 'Add scenario'}
             className="inline-flex items-center gap-1 px-2 py-1 bg-accent text-white rounded text-[10px] font-semibold hover:bg-accent/90 disabled:opacity-50">
             {editing ? 'Save' : 'Add'}
           </button>

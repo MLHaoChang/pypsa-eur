@@ -7,6 +7,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import StressScenarioEditor, {
+  draftFrom,
   EMPTY_DRAFT,
   scenarioFrom,
   validateDraft,
@@ -72,7 +73,6 @@ describe('validateDraft mirrors stress.py', () => {
     [{ loadMult: '10.5' }, /Load multiplier/],
     [{ availMult: '-0.1' }, /availability/],
     [{ availMult: '1.6' }, /availability/],
-    [{ kind: 'profiles' as const }, /profile pack/],
   ])('%o is refused', (patch, re) => {
     expect(validateDraft({ ...ok, ...patch }, ['taken'])).toMatch(re)
   })
@@ -82,6 +82,8 @@ describe('validateDraft mirrors stress.py', () => {
       availMult: '0' }, [])).toBeNull()
     expect(validateDraft({ ...ok, kind: 'profiles', pack: 'p' }, [])).toBeNull()
     expect(validateDraft({ ...ok, kind: 'profiles' }, [], INLINE)).toBeNull()
+    // an empty profiles stub is legal in stress.py (profiles_incomplete)
+    expect(validateDraft({ ...ok, kind: 'profiles' }, [])).toBeNull()
   })
 
   it('keeps fields it does not own and drops the other kind\'s fields', () => {
@@ -94,6 +96,23 @@ describe('validateDraft mirrors stress.py', () => {
       INLINE)
     expect(toParam.loads_p_set).toBeUndefined()
     expect(toParam.renewable_availability_multiplier).toBe(0)
+  })
+
+  it('choosing a pack replaces inline series (they would override it)', () => {
+    const withPack = scenarioFrom({ ...EMPTY_DRAFT, id: 'inline_df',
+      kind: 'profiles', frequency: '0.1', pack: 'synth_dunkelflaute' }, INLINE)
+    expect(withPack.loads_p_set).toBeUndefined()
+    expect(withPack.generators_p_max_pu).toBeUndefined()
+    expect(withPack.profile_pack).toBe('synth_dunkelflaute')
+    expect(withPack.provenance).toBe('hand-made')
+  })
+
+  it('draftFrom tolerates non-string fields from an API-written registry', () => {
+    const d = draftFrom({ id: 123, name: 5, kind: 'parametric',
+      frequency_per_year: 0.1 } as unknown as StressScenario)
+    expect(d.id).toBe('123')
+    expect(d.name).toBe('5')
+    expect(() => validateDraft(d, [])).not.toThrow()
   })
 })
 
@@ -162,7 +181,6 @@ describe('StressScenarioEditor', () => {
     await waitFor(() => expect(picker.options.length).toBe(3))
     const broken = [...picker.options].find(o => o.value === 'broken')!
     expect(broken.disabled).toBe(true)
-    expect((screen.getByTestId('stress-save') as HTMLButtonElement).disabled).toBe(true)     // no pack yet
     await user.selectOptions(picker, 'synth_dunkelflaute')
     await user.click(screen.getByTestId('stress-save'))
     await waitFor(() => expect(resultsApi.putStressScenarios).toHaveBeenCalledWith(
@@ -189,6 +207,45 @@ describe('StressScenarioEditor', () => {
     await user.click(screen.getByLabelText('Delete cold_snap'))
     await waitFor(() => expect(resultsApi.putStressScenarios)
       .toHaveBeenCalledWith('Demo', [INLINE]))
+  })
+
+  it('shows a bounds 422 from the backend verbatim', async () => {
+    // the backend is the authority: a bound the client cannot see (here a
+    // stale client) still reaches the user as the backend's own sentence
+    const detail = "scenario 'cold_snap': load multiplier 12 outside (0, 10]"
+    vi.mocked(resultsApi.putStressScenarios).mockRejectedValue(
+      { response: { status: 422, data: { detail } } })
+    const user = userEvent.setup()
+    renderEditor()
+    await screen.findByTestId('stress-list')
+    await user.click(screen.getByLabelText('Delete inline_df'))
+    expect((await screen.findByTestId('stress-server-error')).textContent).toBe(detail)
+  })
+
+  it('refuses to edit an unreadable registry instead of overwriting it', async () => {
+    vi.mocked(resultsApi.getStressScenarios).mockResolvedValue({
+      scenarios: [], error: 'stress-scenario registry unreadable: bad JSON' })
+    renderEditor()
+    expect((await screen.findByTestId('stress-registry-error')).textContent)
+      .toMatch(/unreadable.*editing is disabled/)
+    expect((screen.getByTestId('stress-add') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('disables Delete while a form is open (a save would drop the draft)', async () => {
+    const user = userEvent.setup()
+    renderEditor()
+    await screen.findByTestId('stress-list')
+    await user.click(screen.getByLabelText('Edit cold_snap'))
+    expect((screen.getByLabelText('Delete inline_df') as HTMLButtonElement).disabled)
+      .toBe(true)
+  })
+
+  it('lists an inline scenario that also names a pack as overriding it', async () => {
+    vi.mocked(resultsApi.getStressScenarios).mockResolvedValue({
+      scenarios: [{ ...INLINE, profile_pack: 'synth_dunkelflaute' }] })
+    renderEditor()
+    expect((await screen.findByTestId('stress-list')).textContent)
+      .toMatch(/inline series \(override pack synth_dunkelflaute\)/)
   })
 
   it('disables Add at the scenario cap', async () => {

@@ -566,7 +566,16 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
   - The backend 422 is shown verbatim and the form stays open.
   - Fields the editor does not own (inline series, provenance) survive an edit; a kind switch drops the other kind's fields.
   - Inline profile upload is deferred.
-- [ ] **QA gate** — pending.
+- [x] **QA gate** — GO WITH BINDING CONDITIONS. All closed, with 9 backend and 7 FE tests that were red before the fix.
+  1. *BINDING — a chosen pack was overridden by inline series.* The backend lets inline series override a pack. Picking a pack on an inline scenario used to keep the series, so the list said "pack X" while the sweep ran the old series. `scenarioFrom` now drops inline series when a pack is chosen, and the list shows "inline series (override pack X)" for such registries.
+  2. *API-written registries.* `draftFrom` coerces with `String()`. The backend requires string ids, uses `fullmatch` (so `"abc\n"` is refused) and refuses bool frequencies.
+  3. *Unreadable registry.* `load_scenarios_checked` reports corrupt JSON, a non-object or another schema. The GET returns `error`, and the editor disables every write so a whole-list PUT cannot replace the file. The sweep's reader is unchanged. Last-write-wins between two windows remains (no version/ETag), which matches the worksheet.
+  4. *Behaviour change (release note).* A stored parametric scenario with an explicit multiplier of 0 now behaves as stated. Availability 0 applies a full drought where it used to run unstressed. Load 0 is refused, so a registry holding one fails the class-C sweep with that scenario named, until it is edited.
+  5. The FE allows the backend-legal profiles stub (no pack, no series), which the sweep reports `profiles_incomplete`.
+  6. `list_profile_packs` skips non-files, so a directory named `x.json` no longer recurses forever.
+  7. `check_bundle.check_rooted` requires `data/eh_class_c/synth_dunkelflaute.json` beside `alembic.ini`, the spec's `.` destination and therefore the _MEIPASS root, not merely the basename anywhere.
+  8. Added a contract test that the exact payloads the editor builds save through the real PUT, plus a bounds-message 422 FE test.
+  9. The Save button is labelled "Add scenario"/"Save scenario" (no duplicate "Add"). Delete is disabled while a form is open.
 
 ---
 
