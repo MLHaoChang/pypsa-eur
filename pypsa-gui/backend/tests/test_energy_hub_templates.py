@@ -114,3 +114,30 @@ def test_chat_names_every_template():
     tool = next(t for t in TOOLS if t["name"] == "create_project_from_template")
     enum = tool["input_schema"]["properties"]["template_id"]["enum"]
     assert set(enum) == set(_TEMPLATE_DEFAULT_NAMES)
+
+
+def test_eh_templates_build_on_demand_when_network_nc_is_missing(
+        client, tmp_path, monkeypatch, tmp_projects_dir):
+    """network.nc is a gitignored build artifact (only build-macos.sh makes
+    it). The EH templates are pure builders, so a fresh checkout / dev start
+    must still create them instead of 404-ing."""
+    import shutil
+
+    from routers import projects as projects_router
+    shutil.copy(TPL_DIR / "eh_templates.py", tmp_path / "eh_templates.py")
+    src = tmp_path / "eh_microgrid"
+    src.mkdir()
+    T.write_sidecars(src, "eh_microgrid")               # sidecars, no .nc
+    monkeypatch.setattr(projects_router, "_PROJECT_TEMPLATES_DIR", tmp_path)
+    r = client.post("/api/projects/from_template/eh_microgrid",
+                    params={"name": "mg_fresh"})
+    assert r.status_code == 200, r.text
+    links = {r["name"]: r for r in client.get("/api/network/links").json()}
+    assert links["subsea_tie"]["eh_role"] == "grid_import"
+    buses = {r["name"]: r for r in client.get("/api/network/buses").json()}
+    assert buses["hospital"]["eh_critical"] is True
+    name = r.json().get("name", "mg_fresh")
+    assert client.get(f"/api/projects/{name}/eh_template").status_code == 200
+    # a non-EH template still needs its prebuilt network.nc
+    assert client.post("/api/projects/from_template/3bus",
+                       params={"name": "x"}).status_code == 404

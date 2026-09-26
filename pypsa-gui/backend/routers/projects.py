@@ -1183,6 +1183,26 @@ _TEMPLATE_SIDECARS = ("eh_template.json", "adequacy_stress_scenarios.json",
                       "solver_config.json")
 
 
+def _eh_template_builder(template_key: str):
+    """The EH template builder for ``template_key``, or None.
+
+    Loaded from ``project_templates/eh_templates.py`` by FILE PATH (the
+    directory is shipped as data, not as a package), so it works in a
+    checkout and in the frozen app alike.
+    """
+    import importlib.util
+
+    path = _PROJECT_TEMPLATES_DIR / "eh_templates.py"
+    if not path.is_file():
+        return None
+    spec = importlib.util.spec_from_file_location("_eh_templates", path)
+    if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return getattr(mod, "BUILDERS", {}).get(template_key)
+
+
 def _solver_config_from_dict(data: dict):
     """
     Build a SolverConfig from a (possibly legacy/foreign) solver_config.json dict.
@@ -1276,7 +1296,13 @@ def create_from_template(
             f"{', '.join(sorted(_TEMPLATE_DEFAULT_NAMES))}.",
         )
     src_nc = _PROJECT_TEMPLATES_DIR / template_key / "network.nc"
+    eh_builder = None
     if not src_nc.exists():
+        # P19: network.nc is a gitignored build artifact (build-macos.sh);
+        # the EH templates are pure builders (no solve), so a fresh checkout
+        # or dev start builds them here instead of refusing.
+        eh_builder = _eh_template_builder(template_key)
+    if not src_nc.exists() and eh_builder is None:
         raise HTTPException(
             404,
             f"Template '{template_id}' is registered but its network.nc is "
@@ -1294,7 +1320,10 @@ def create_from_template(
     dest = project_registry.ensure_project_dir(_created_project)
     # `copy2` opens the destination for writing before it reads the source, so
     # a template that cannot be read leaves a truncated `network.nc` behind.
-    atomic_copy(src_nc, dest / "network.nc")
+    if eh_builder is not None:
+        eh_builder().export_to_netcdf(str(dest / "network.nc"))
+    else:
+        atomic_copy(src_nc, dest / "network.nc")
     for sidecar in _TEMPLATE_SIDECARS:
         src = _PROJECT_TEMPLATES_DIR / template_key / sidecar
         if src.is_file():
