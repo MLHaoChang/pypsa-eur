@@ -112,8 +112,14 @@ Verified by grep across the whole repository:
 | **Financial sensitivity / Monte Carlo (prices, capex, CF), P50/P90** | **No** — all MC is outage-only | |
 | Fuel price vs heat rate as separate inputs | No — folded into `marginal_cost` | |
 
-One consistency defect worth a ticket: `frontend/src/utils/propertyDocs.ts` (L60, L90) tells the
-user `capital_cost = overnight × annuity + fom_cost`, while the backend treats FOM as informational.
+One reconciliation defect worth a ticket (verified 2026-09-26): PyPSA 1.1.2 adds `fom_cost` to the
+annuitised investment cost in the LP objective (`pypsa/costs.py::periodized_cost`, `Component.periodized_cost`),
+and the tooltip in `frontend/src/utils/propertyDocs.ts` (L60, L90) says so correctly. But the GUI's per-asset
+economics (`services/results/asset_economics.py` ~L314–324) computes `fixed_cost = capital_cost × p_nom_opt`
+from the **no-FOM** `capital_cost`, shows FOM as informational, and derives LCOE/LCOS/LCOH and net profit
+without it — so every economic surface under-reports fixed cost against the objective by `fom_cost × p_nom_opt`
+whenever FOM is non-zero. `periodized_costs.py`, `cost_breakdown.py` and `objective_decomposition.py` contain no
+FOM handling at all. Delegated to a parallel session (branch `claude/fix-fom-reconciliation`).
 
 ---
 
