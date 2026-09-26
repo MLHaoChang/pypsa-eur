@@ -351,6 +351,7 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # comparison tables / study lifecycle status, no snapshot series.
         "/eh_study",
         "/eh_reference_design",
+        "/eh_readiness",
         "/eh_redundancy",
         "/eh_levers",
         "/eh_dtc",
