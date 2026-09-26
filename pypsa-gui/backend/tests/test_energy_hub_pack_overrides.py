@@ -190,3 +190,127 @@ def test_chat_invalid_override_is_422_and_idle(install_network):
                        pack_overrides={"ens_cap_permyriad": -1})
     assert exc.value.status_code == 422
     assert "pack_overrides.ens_cap_permyriad" in str(exc.value.detail)
+
+
+# ── P13 gate: overrides must never be accepted and then ignored or broken ───
+
+
+def test_certification_metric_none_conflicting_with_a_lole_target_is_refused():
+    with pytest.raises(HTTPException) as exc:
+        RUN.apply_pack_overrides(default_weak_flexible_pack(),
+                                 {"certification_metric": "none"},
+                                 raise_http=True)
+    assert exc.value.status_code == 422
+    assert "certification_metric" in str(exc.value.detail)
+
+
+def test_certification_metric_none_on_a_pack_without_a_lole_target_is_fine():
+    pack = RUN.apply_pack_overrides(default_strong_grid_pack(),
+                                    {"certification_metric": "none"},
+                                    raise_http=True)
+    assert pack.availability.certification_metric == "none"
+
+
+@pytest.mark.parametrize("archetype", ["strong_grid", "off_grid"])
+def test_import_cap_on_a_pack_that_does_not_apply_it_is_refused(archetype):
+    from models.energy_hub import default_off_grid_pack
+    factory = {"strong_grid": default_strong_grid_pack,
+               "off_grid": default_off_grid_pack}[archetype]
+    with pytest.raises(HTTPException) as exc:
+        RUN.apply_pack_overrides(factory(), {"import_p_nom_mw": 80.0},
+                                 raise_http=True)
+    assert exc.value.status_code == 422
+    assert "import_p_nom_mw" in str(exc.value.detail)
+
+
+def test_zero_import_cap_is_refused_before_it_can_break_the_run():
+    with pytest.raises(HTTPException) as exc:
+        RUN.apply_pack_overrides(default_weak_flexible_pack(),
+                                 {"import_p_nom_mw": 0.0}, raise_http=True)
+    assert "pack_overrides.import_p_nom_mw" in str(exc.value.detail)
+
+
+def test_import_cap_lever_on_off_grid_is_refused_as_a_known_no_op():
+    from models.energy_hub import default_off_grid_pack
+    with pytest.raises(HTTPException) as exc:
+        RUN.apply_pack_overrides(default_off_grid_pack(),
+                                 {"levers": {"import_cap": True}},
+                                 raise_http=True)
+    assert "import_cap" in str(exc.value.detail)
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("nan")])
+def test_non_finite_numbers_are_refused(value):
+    with pytest.raises(HTTPException):
+        RUN.apply_pack_overrides(default_weak_flexible_pack(),
+                                 {"ens_cap_permyriad": value}, raise_http=True)
+
+
+@pytest.mark.parametrize("body,needle", [
+    ({"archetype": "off_grid", "pack_overrides": {"import_p_nom_mw": 80.0}},
+     "import_p_nom_mw"),
+    ({"archetype": "weak_flexible",
+      "pack_overrides": {"certification_metric": "none"}},
+     "certification_metric"),
+    ({"archetype": "weak_flexible",
+      "dtc_config": {"critical_bus_ids": ["crit"],
+                     "islanding_contingencies": ["import_poc"],
+                     "critical_load_idz": ["x"]}}, "critical_load_idz"),
+])
+def test_http_gate_refusals_publish_no_record(client, install_network, body,
+                                              needle):
+    _setup(client, install_network, _weak_net())
+    r = client.post(STUDY_URL, json=body)
+    assert r.status_code == 422, r.text
+    assert needle in r.text
+    assert client.get(STUDY_URL).status_code == 204
+
+
+def test_chat_refusal_leaves_campaign_spend_unchanged(install_network):
+    from services import chat_tools as T
+    from services.adequacy import campaign as C
+    install_network(_weak_net())
+    C.start("certify the hub")
+    before = C.status()["spent_solves"]
+    with pytest.raises(HTTPException):
+        T.run_eh_study(archetype="off_grid",
+                       pack_overrides={"import_p_nom_mw": 80.0})
+    assert C.status()["spent_solves"] == before
+
+
+@pytest.mark.live_solve
+def test_record_carries_normalised_overrides_and_dsr_buses_are_deduplicated(
+        client, install_network, monkeypatch):
+    import services.adequacy.eh_study as S
+    seen = {}
+    real = S.run_eh_study
+
+    def spy(*a, **k):
+        seen["dsr_buses"] = k.get("dsr_buses")
+        return real(*a, **k)
+
+    monkeypatch.setattr(S, "run_eh_study", spy)
+    _setup(client, install_network, _weak_net(), voll=500.0)
+    r = client.post(STUDY_URL, json={
+        "archetype": "weak_flexible",
+        "stages": ["apply_pack", "ens_solve", "assemble"],
+        "pack_overrides": {"ens_cap_permyriad": "5000",
+                           "target_lole_h": None},
+        "dsr_buses": ["flex", "flex"],
+    })
+    assert r.status_code == 200, r.text
+    body = _poll(client)
+    assert body["pack_overrides"] == {"ens_cap_permyriad": 5000.0}
+    assert seen["dsr_buses"] == ["flex"]
+
+
+def test_schema_limits_are_the_engine_constants():
+    from models.energy_hub import MAX_EH_BUDGET_SOLVES
+    from services.adequacy import mc
+    from services.chat_tools_schema import TOOLS
+    props = next(t for t in TOOLS if t["name"] == "run_eh_study")[
+        "input_schema"]["properties"]
+    assert props["mc"]["properties"]["draws"]["maximum"] == mc.MAX_DRAWS
+    assert props["budget_solves"]["maximum"] == MAX_EH_BUDGET_SOLVES
+    assert props["pack_overrides"]["properties"]["import_p_nom_mw"] == {
+        "type": "number", "exclusiveMinimum": 0}

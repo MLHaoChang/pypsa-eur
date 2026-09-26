@@ -65,13 +65,17 @@ class LeverOverrides(_BaseModel):
 
 class PackOverrides(_BaseModel):
     """What a caller may change on the factory pack (plan P13). Anything
-    else is refused rather than silently ignored."""
+    else is refused rather than silently ignored. ``null`` means "keep the
+    pack's value" — overrides set, they never clear."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     ens_cap_permyriad: float | None = Field(default=None, gt=0)
     target_lole_h: float | None = Field(default=None, ge=0)
     certification_metric: Literal["mc_lole", "none"] | None = None
-    import_p_nom_mw: float | None = Field(default=None, ge=0)
+    # > 0: a 0 MW cap on a fixed import Link is refused by preflight
+    # (link_p_nom_invalid) AFTER the worker starts; an islanded hub is the
+    # off_grid archetype, not a weak_flexible cap of zero.
+    import_p_nom_mw: float | None = Field(default=None, gt=0)
     mc_certify_required: bool | None = None
     frontier_default: bool | None = None
     dtc_stress_default: bool | None = None
@@ -80,10 +84,19 @@ class PackOverrides(_BaseModel):
 
 
 class McOptions(_BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     draws: int | None = Field(default=None, ge=1)
     seed: int | None = Field(default=None, ge=0)
     cov_target: float | None = Field(default=None, gt=0, le=1)
+
+
+class DtcConfigRequest(_BaseModel):
+    """Request-side DtC config: a mistyped key is refused, not ignored."""
+
+    model_config = ConfigDict(extra="forbid")
+    critical_bus_ids: list[str] = Field(default_factory=list)
+    critical_load_ids: list[str] = Field(default_factory=list)
+    islanding_contingencies: list[str] = Field(default_factory=list)
 
 
 def _validation_422(prefix: str, exc: ValidationError) -> HTTPException:
@@ -119,16 +132,48 @@ def apply_pack_overrides(pack: ArchetypePack, overrides: dict | None, *,
         if ov.levers is not None:
             for key, val in ov.levers.model_dump(exclude_none=True).items():
                 merged["levers"][key] = val
-        return ArchetypePack.model_validate(merged)
+        out = ArchetypePack.model_validate(merged)
     except ValidationError as exc:
         if raise_http:
             raise _validation_422("pack_overrides", exc) from exc
         raise
+    # Accepted-then-ignored is refused: the report would claim a parameter
+    # the driver never applied (decision 6 / P3c-B1 honesty; P13 gate).
+    problems: list[str] = []
+    if ov.import_p_nom_mw is not None and out.archetype != "weak_flexible":
+        problems.append(
+            f"pack_overrides.import_p_nom_mw: only weak_flexible applies an "
+            f"import cap; {out.archetype} does not")
+    if out.archetype == "off_grid" and out.levers.import_cap:
+        problems.append(
+            "pack_overrides.levers.import_cap: off_grid islands the import "
+            "Links, so an import-cap lever is a no-op there")
+    a = out.availability
+    if a.certification_metric == "none" and (
+            a.target_lole_h is not None or out.mc_certify_required):
+        problems.append(
+            "pack_overrides.certification_metric: 'none' conflicts with the "
+            "pack's LOLE target / mc_certify_required, which still certify — "
+            "overrides cannot clear a target")
+    if problems:
+        if raise_http:
+            raise HTTPException(422, "; ".join(problems))
+        raise ValueError("; ".join(problems))
+    return out
+
+
+def normalised_overrides(overrides: dict | None) -> dict | None:
+    """The validated overrides as the study used them (None-free)."""
+    if not overrides:
+        return None
+    return PackOverrides.model_validate(overrides).model_dump(
+        exclude_none=True) or None
 
 
 def _validate_dtc_config(raw: dict, n) -> DtcConfig:
     try:
-        dtc = DtcConfig.model_validate(raw)
+        dtc = DtcConfig.model_validate(
+            DtcConfigRequest.model_validate(raw).model_dump())
     except ValidationError as exc:
         raise _validation_422("dtc_config", exc) from exc
     missing = (
@@ -213,7 +258,7 @@ def start_eh_study(
         bus_names = set(map(str, n.buses.index))
     dsr_buses = None
     if body.dsr_buses is not None:
-        dsr_buses = [str(b) for b in body.dsr_buses]
+        dsr_buses = list(dict.fromkeys(str(b) for b in body.dsr_buses))
         if not pack.dsr_opt_in:
             raise HTTPException(
                 422, f"dsr_buses only apply to packs with dsr_opt_in "
@@ -243,7 +288,7 @@ def start_eh_study(
         "archetype": archetype,
         "stages": list(stages) if stages is not None else None,
         "budget_solves": budget,
-        "pack_overrides": body.pack_overrides or None,
+        "pack_overrides": normalised_overrides(body.pack_overrides),
         "report": None,
         "error": None,
         "started_at": time.time(),

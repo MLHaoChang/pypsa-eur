@@ -415,7 +415,17 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
   - ENS ‱, LOLE h/yr, import MW (weak only), budget, MC draws/seed, DSR buses (weak only), and a stage picker. The required stages are always kept.
   - Blank fields are omitted; an invalid value disables Run with the reason.
   - `dtc_config` is API/chat only until P14 adds tagging UI.
-- [ ] **QA gate** — pending.
+- [x] **QA gate** (independent) — `GO WITH BINDING CONDITIONS`; all fixed red → green.
+  1. **`certification_metric: "none"`** alongside a LOLE target or `mc_certify_required` was accepted but still certified. It is now a 422; overrides set values, they never clear them.
+  2. **`import_p_nom_mw`** is refused outside weak_flexible, where it was recorded but never applied. It must now be > 0: a 0 MW cap passed validation, then failed preflight inside the worker after publish and charge. The chat schema and FE now match.
+  3. **Tests** now pin that a chat refusal leaves campaign `spent_solves` unchanged.
+  - **Also done:**
+    - Request-side `DtcConfigRequest` refuses mistyped keys.
+    - Non-finite numbers are refused.
+    - The schema's draw and budget limits are imported from the engine constants, with a test.
+    - The record stores the normalised overrides.
+    - `dsr_buses` are deduplicated.
+    - `levers.import_cap` on off_grid is refused as a known no-op.
 
 ---
 

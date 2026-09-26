@@ -93,7 +93,7 @@ export function buildEhStudyBody(
     ens: num(form.ensCap, 'ENS target', v => v > 0, '> 0 ‱'),
     lole: num(form.loleTarget, 'LOLE target', v => v >= 0, '≥ 0 h/yr'),
     imp: archetype === 'weak_flexible'
-      ? num(form.importMw, 'import cap', v => v >= 0, '≥ 0 MW') : undefined,
+      ? num(form.importMw, 'import cap', v => v > 0, '> 0 MW') : undefined,
     budget: num(form.budget, 'budget', v => Number.isInteger(v) && v >= 1 && v <= 120,
       'an integer 1–120'),
     draws: num(form.draws, 'MC draws', v => Number.isInteger(v) && v >= 1 && v <= 2000,

@@ -199,6 +199,24 @@ describe('buildEhStudyBody', () => {
     expect(body).toBeNull()
     expect(error).toMatch(msg)
   })
+
+  it('rejects a zero import cap on weak_flexible', () => {
+    const { body, error } = buildEhStudyBody('weak_flexible', {
+      ...EMPTY_PACK_FORM, importMw: '0',
+    })
+    expect(body).toBeNull()
+    expect(error).toMatch(/import cap/)
+  })
+
+  it.each([
+    ['draws', '0', /draws/],
+  ])('rejects %s=%s', (field, value, msg) => {
+    const { body, error } = buildEhStudyBody('strong_grid', {
+      ...EMPTY_PACK_FORM, [field]: value,
+    })
+    expect(body).toBeNull()
+    expect(error).toMatch(msg)
+  })
 })
 
 describe('verdictTone', () => {

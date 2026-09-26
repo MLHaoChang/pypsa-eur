@@ -129,6 +129,10 @@ ADEQUACY_STUDY_ENUM = [
 # Where a reliability loop leaves the network when it finishes: at the base
 # case it started from, or at the final iterate that met the target.
 ADEQUACY_RESTORE_ENUM = ["base", "final"]
+# Engine limits the run_eh_study schema states — imported, never restated.
+from models.energy_hub import MAX_EH_BUDGET_SOLVES as _MAX_EH_BUDGET_SOLVES  # noqa: E402
+from services.adequacy.mc import MAX_DRAWS as _MC_MAX_DRAWS  # noqa: E402
+
 # Energy Hub archetype packs — mirrors models.energy_hub.EnergyHubArchetype.
 EH_ARCHETYPE_ENUM = ["strong_grid", "weak_flexible", "off_grid"]
 # EH pipeline stages — mirrors models.energy_hub.EH_PIPELINE_STAGES (order
@@ -1051,7 +1055,7 @@ TOOLS: list[dict[str, Any]] = [
             "stages": {"type": "array",
                        "items": {"type": "string", "enum": EH_STAGE_ENUM}},
             "budget_solves": {"type": "integer", "minimum": 1,
-                              "maximum": 120},
+                              "maximum": _MAX_EH_BUDGET_SOLVES},
             "pack_overrides": {
                 "type": "object",
                 "additionalProperties": False,
@@ -1061,7 +1065,8 @@ TOOLS: list[dict[str, Any]] = [
                     "target_lole_h": {"type": "number", "minimum": 0},
                     "certification_metric": {"type": "string",
                                              "enum": ["mc_lole", "none"]},
-                    "import_p_nom_mw": {"type": "number", "minimum": 0},
+                    "import_p_nom_mw": {"type": "number",
+                                        "exclusiveMinimum": 0},
                     "mc_certify_required": {"type": "boolean"},
                     "frontier_default": {"type": "boolean"},
                     "dtc_stress_default": {"type": "boolean"},
@@ -1086,7 +1091,8 @@ TOOLS: list[dict[str, Any]] = [
                     "critical_load_ids": {"type": "array",
                                           "items": {"type": "string"}},
                     "islanding_contingencies": {"type": "array",
-                                                "items": {"type": "string"}},
+                                                "items": {"type": "string"},
+                                                "minItems": 1},
                 },
                 "required": ["islanding_contingencies"],
             },
@@ -1096,7 +1102,7 @@ TOOLS: list[dict[str, Any]] = [
                 "additionalProperties": False,
                 "properties": {
                     "draws": {"type": "integer", "minimum": 1,
-                              "maximum": 2000},
+                              "maximum": _MC_MAX_DRAWS},
                     "seed": {"type": "integer", "minimum": 0},
                     "cov_target": {"type": "number", "exclusiveMinimum": 0,
                                    "maximum": 1},
