@@ -710,7 +710,7 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
   - Pinned: ≥ 2 solved options with distinct costs, section `ok`.
 - [x] **Monotone cost.** A binding cap raises cost monotonically (uncapped → 3e5 → 1.5e5 → 0 MWh/yr), and realised hub import stays ≤ the budget.
 - [x] **FE and chat.** The pack form has an "Import energy (MWh/yr)" field for weak_flexible, validated ≥ 0. The chat schema declares the override and the lever flag.
-- [x] **QA gate** — GO WITH BINDING CONDITIONS, closed. 5 backend tests were red before the fix.
+- [x] **QA gate** — GO WITH BINDING CONDITIONS, closed. 5 backend tests were red before the fix. Full suites (P17+P18 together): backend 5954 passed, 31 skipped, 0 failed; FE 2013 passed.
   - The reviewer confirmed:
     - The constraint math is right (η·p0, time-varying efficiency, no-years weights, per-period masks, cap=0).
     - The multi-period test is not vacuous: a ×years budget would not bind.
@@ -755,7 +755,7 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
 - [x] **Deferred from P16, readiness predicts a `per_load` refusal.**
   - `GET /eh_readiness?dtc_attribution=` (422 on unknown values) reports `dtc.attribution` and `dtc.critical_loads`, using the stage's own resolver.
   - `dtc_stress` / `dtc_planning` are `not_established` when `per_load` resolves no critical Load. This is pinned on a critical bus without Loads.
-- [x] **QA gate** — GO WITH BINDING CONDITIONS, closed. The reviewer's end-to-end probe confirmed that `run_eh_study(dtc_attribution="per_load")` ran both DtC stages as per_load.
+- [x] **QA gate** — GO WITH BINDING CONDITIONS, closed. The reviewer's end-to-end probe confirmed that `run_eh_study(dtc_attribution="per_load")` ran both DtC stages as per_load. Full suites (P17+P18 together): backend 5954 passed, 31 skipped, 0 failed; FE 2013 passed.
   1. *BINDING — nothing pinned `dtc_attribution` reaching the driver.* The earlier "resolves" test patched the driver but never called it.
      - A POST now asserts the worker receives `dtc_attribution="per_load"` and that the record says so. Mutation check: dropping the worker kwarg makes it fail.
      - A driver test runs `dtc_stress` with no `dtc_config` and asserts the derived config's `per_load` attribution in the `dtc` section.
