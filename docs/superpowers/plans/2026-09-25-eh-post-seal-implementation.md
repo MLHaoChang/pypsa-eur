@@ -632,7 +632,19 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
   - A "Critical by Load" column appears only under `per_load`.
   - The CSV gains `critical_unserved_by_load`.
 - [~] **Deferred:** a panel control to choose `per_load` (the panel derives `dtc_config` from tags); API and chat only until the P18 pipeline UI.
-- [ ] **QA gate** — pending.
+- [x] **QA gate** — GO WITH BINDING CONDITIONS, closed. 4 backend and 2 FE tests were red before the fix.
+  - The reviewer confirmed that R5 scoping holds and that nothing assumes all slacks cost VOLL. Across threads, a new `threading.Thread` does not inherit the ContextVar, and the `with` block contains no `await`.
+  - The reviewer also confirmed that ε really breaks the tie: with ε=0 both pinned cases fail.
+  1. *BINDING — "critical shed last" is not guaranteed on lossy paths.*
+     - Serving a critical Load through efficiency η costs V/η against (1+ε)·V of critical shed, so the priority inverts once η < 1/(1+ε) ≈ 0.952. This is pinned: a critical Load behind a 0.9 Link is shed first.
+     - `_priority_caveats` reports `priority_exact`, `priority_caveat_links` and `priority_caveat_line_losses`. It conservatively names every electrical↔electrical Link below the threshold, islanded contingencies excepted.
+     - When the priority is not exact, the honesty note `priority_may_invert_on_lossy_paths` is added.
+     - The spec, the chat description and the panel chip now scope the claim, and the panel shows the caveat.
+     - ε is not raised: a larger premium would act as a valuation.
+  2. *`ens_solve` test cannot fail.* `ens_solve` and `frontier` run before `dtc_stress`, so R5 is actually proven by `test_premium_does_not_leak_into_a_later_solve`: after a `per_load` stress, an ordinary solve prices every slack at base VOLL. The `ens_solve` test stays as a contract pin.
+  3. *Refusal mid-loop.* It now keeps the rows and solves already spent: row `status: "refused"`, table `refused`, and the section is `not_established` with the reason. The panel shows it.
+  4. *Non-binding, accepted.* Under `per_load` the informational `critical_buses` / `noncritical_buses` lists can overlap on a shared bus. The `*_loads` lists are the attribution.
+  5. *Non-binding, deferred to P18.* Readiness derives bus-aggregate configs only, so a `per_load` request whose critical buses hold no Loads is refused at the stage, not predicted.
 
 ---
 

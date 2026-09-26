@@ -804,6 +804,12 @@ export interface EhDtcStressTable {
   attribution?: string
   /** `per_load` only: critical Loads' VOLL premium ε (priority, not a price). */
   voll_premium_eps?: number | null
+  /** `per_load` only: false where a lossy path can invert the priority. */
+  priority_exact?: boolean
+  priority_caveat_links?: string[]
+  priority_caveat_line_losses?: boolean
+  /** Set when `per_load` refused (no Load-keyed shed data). */
+  refused?: string | null
   contingencies?: EhDtcContingency[]
   honesty_notes?: string[]
   comparable_solved?: number

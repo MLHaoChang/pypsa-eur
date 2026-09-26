@@ -257,3 +257,74 @@ def test_the_runner_accepts_per_load():
                                 "islanding_contingencies": ["import_poc"],
                                 "attribution": "per_load"}, n)
     assert dtc.attribution == "per_load"
+
+
+# ── P16 gate: the priority claim is exact only on loss-free paths ───────────
+
+
+def _lossy(eta: float) -> pypsa.Network:
+    """Critical Load on bus A, fed only through a Link (efficiency eta) from
+    bus B, which holds the non-critical Load and 40 MW of generation."""
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=H, freq="h"))
+    n.snapshot_weightings.loc[:, :] = 1.0
+    for c in ("gas", "AC"):
+        n.add("Carrier", c)
+    for b in ("A", "B", "grid"):
+        n.add("Bus", b, carrier="AC")
+    n.add("Load", "hospital", bus="A", p_set=30.0)
+    n.add("Load", "offices", bus="B", p_set=50.0)
+    n.add("Generator", "local", bus="B", carrier="gas", p_nom=40.0,
+          marginal_cost=80.0)
+    n.add("Generator", "remote", bus="grid", carrier="gas", p_nom=500.0,
+          marginal_cost=10.0)
+    n.add("Link", "feeder", bus0="B", bus1="A", p_nom=100.0, efficiency=eta,
+          carrier="AC")
+    n.add("Link", "import_poc", bus0="grid", bus1="B", p_nom=200.0,
+          efficiency=1.0, carrier="AC")
+    return n
+
+
+@pytest.mark.live_solve
+def test_a_lossy_path_can_invert_the_priority_and_is_flagged():
+    """V/eta > (1+eps)·V once eta < 1/(1+eps): serving the critical Load
+    costs more than shedding it. The table must say so, not claim priority."""
+    table = _stress(_lossy(0.9), _dtc(attribution="per_load"))
+    row = table["contingencies"][0]
+    assert row["critical_unserved_mwh"] > 0            # the inversion is real
+    assert table["priority_exact"] is False
+    assert table["priority_caveat_links"] == ["feeder"]
+    assert "priority_may_invert_on_lossy_paths" in table["honesty_notes"]
+
+
+@pytest.mark.live_solve
+def test_a_loss_free_network_is_flagged_exact():
+    lossless = _stress(_lossy(1.0), _dtc(attribution="per_load"))
+    assert lossless["priority_exact"] is True
+    assert lossless["priority_caveat_links"] == []
+    assert lossless["contingencies"][0]["critical_unserved_mwh"] == \
+        pytest.approx(0.0, abs=1e-6)
+    shared = _stress(_shared_bus(10.0), _dtc(attribution="per_load"))
+    assert shared["priority_exact"] is True
+    assert "priority_may_invert_on_lossy_paths" not in shared["honesty_notes"]
+
+
+def test_line_losses_make_the_priority_inexact():
+    n = _shared_bus(10.0)
+    assert D._priority_caveats(n, SolverConfig(transmission_losses=True),
+                               exclude=set()) == (False, [], True)
+    assert D._priority_caveats(n, SolverConfig(), exclude=set()) == (True, [], False)
+
+
+@pytest.mark.live_solve
+def test_a_refusal_keeps_the_rows_and_solves_already_spent(monkeypatch):
+    def refuse(*a, **kw):
+        raise D.DtcStressError("per_load attribution needs Load-keyed shed data")
+
+    monkeypatch.setattr(D, "_load_unserved_by_load", refuse)
+    table = _stress(_shared_bus(10.0), _dtc(attribution="per_load"))
+    assert table["solves_attempted"] == 1
+    assert table["refused"].startswith("per_load attribution needs Load-keyed")
+    assert table["contingencies"][0]["status"] == "refused"
+    status, note = D.dtc_section_status(table)
+    assert status == "not_established" and "Load-keyed" in note

@@ -1098,10 +1098,13 @@ TOOLS: list[dict[str, Any]] = [
                         "enum": ["bus_aggregate_not_per_load", "per_load"],
                         "description": (
                             "Default bus_aggregate_not_per_load. per_load "
-                            "reports critical unserved by Load, shedding "
-                            "non-critical Loads first via a disclosed 5% "
-                            "critical VOLL premium in the DtC stress "
-                            "re-dispatch only.")},
+                            "reports critical unserved by Load, ranking "
+                            "non-critical Loads to shed first via a "
+                            "disclosed 5% critical VOLL premium in the DtC "
+                            "stress re-dispatch only. The ranking is exact "
+                            "on loss-free paths; the result flags "
+                            "priority_exact=false where lossy Links or line "
+                            "losses can invert it.")},
                 },
                 "required": ["islanding_contingencies"],
             },

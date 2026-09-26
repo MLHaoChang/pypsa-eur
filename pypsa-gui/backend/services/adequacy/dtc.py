@@ -177,6 +177,41 @@ def _load_unserved_mwh(n, load_ids: set[str], *, sink: dict | None) -> float:
     return float(sum(_load_unserved_by_load(n, load_ids, sink=sink).values()))
 
 
+def _priority_caveats(n, cfg, *, exclude: set[str],
+                      eps: float = CRITICAL_VOLL_PREMIUM_EPS,
+                      ) -> tuple[bool, list[str], bool]:
+    """(exact, lossy_links, line_losses) for the per-Load VOLL priority.
+
+    Serving a critical Load through a path of efficiency η costs V/η of
+    non-critical shed against (1+ε)·V of critical shed, so the priority is
+    exact only where every electrical path is at least 1/(1+ε) efficient.
+    Conservative: every electrical↔electrical Link below that threshold is
+    named (the islanded contingencies excepted), and LP line losses make
+    the claim inexact outright.
+    """
+    from services.adequacy.metrics import electrical_columns
+
+    threshold = 1.0 / (1.0 + eps) - 1e-9
+    lossy: list[str] = []
+    links = getattr(n, "links", None)
+    if links is not None and not links.empty:
+        eff_t = getattr(getattr(n, "links_t", None), "efficiency", None)
+        for lid in links.index:
+            if str(lid) in exclude:
+                continue
+            ends = [str(links.at[lid, "bus0"]), str(links.at[lid, "bus1"])]
+            if len(electrical_columns(n, ends)) < 2:
+                continue
+            eff = float(links.at[lid, "efficiency"]) \
+                if "efficiency" in links.columns else 1.0
+            if eff_t is not None and lid in getattr(eff_t, "columns", []):
+                eff = min(eff, float(eff_t[lid].min()))
+            if 0.0 < eff < threshold:
+                lossy.append(str(lid))
+    line_losses = bool(getattr(cfg, "transmission_losses", False))
+    return (not lossy and not line_losses), sorted(lossy), line_losses
+
+
 def _load_to_bus(n) -> dict[str, str]:
     if n.loads is None or n.loads.empty or "bus" not in n.loads.columns:
         return {}
@@ -345,6 +380,7 @@ def run_dtc_stress(
     solves = 0
     aborted = False
     budget_exhausted = False
+    refused: str | None = None
     for link_id in dtc.islanding_contingencies:
         if stop_event.is_set():
             aborted = True
@@ -384,8 +420,18 @@ def run_dtc_stress(
             }
             if per_load:
                 solved_ok = status in ("ok", "optimal")
-                by_load = (_load_unserved_by_load(nn, crit_loads, sink=sink)
-                           if solved_ok else None)
+                try:
+                    by_load = (_load_unserved_by_load(nn, crit_loads, sink=sink)
+                               if solved_ok else None)
+                except DtcStressError as exc:
+                    # Keep the solve already spent and stop: the capture's
+                    # shape does not change between contingencies.
+                    refused = str(exc)
+                    row.update({"status": "refused", "condition": refused,
+                                "critical_unserved_mwh": None,
+                                "noncritical_unserved_mwh": None})
+                    contingencies.append(row)
+                    break
                 row.update({
                     "critical_unserved_mwh": (float(sum(by_load.values()))
                                               if by_load is not None else None),
@@ -419,6 +465,7 @@ def run_dtc_stress(
         "honesty_notes": list(PER_LOAD_HONESTY_NOTES if per_load
                               else HONESTY_NOTES),
         "voll_premium_eps": CRITICAL_VOLL_PREMIUM_EPS if per_load else None,
+        "refused": refused,
         "pack_hash": pack_hash,
         "assumptions_hash": assumptions_hash,
         "contingencies": contingencies,
@@ -428,6 +475,14 @@ def run_dtc_stress(
         "comparable_solved": len(solved),
         "critical_buses": sorted(critical),
     }
+    if per_load:
+        exact, lossy, line_losses = _priority_caveats(
+            network, cfg, exclude={str(x) for x in dtc.islanding_contingencies})
+        out["priority_exact"] = exact
+        out["priority_caveat_links"] = lossy
+        out["priority_caveat_line_losses"] = line_losses
+        if not exact:
+            out["honesty_notes"].append("priority_may_invert_on_lossy_paths")
     if store is not None:
         store["eh_dtc_stress"] = out
     return out
@@ -634,6 +689,8 @@ def dtc_planning_section_status(table: dict[str, Any]) -> tuple[str, str | None]
 
 
 def dtc_section_status(table: dict[str, Any]) -> tuple[str, str | None]:
+    if table.get("refused"):
+        return "not_established", str(table["refused"])
     if table.get("aborted"):
         return "not_established", "DtC stress aborted mid-loop"
     if table.get("budget_exhausted"):

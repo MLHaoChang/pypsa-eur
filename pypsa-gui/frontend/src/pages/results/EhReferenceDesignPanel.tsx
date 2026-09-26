@@ -354,11 +354,24 @@ export function byLoadText(m: Record<string, number> | null | undefined): string
   return Object.entries(m).map(([k, v]) => `${k}=${+v.toFixed(3)}`).join('; ')
 }
 
+/** Why the per-Load priority may not hold, or null when it is exact. */
+export function dtcPriorityCaveat(t: EhDtcStressTable): string | null {
+  if (t.attribution !== 'per_load' || t.priority_exact !== false) return null
+  const parts: string[] = []
+  if (t.priority_caveat_links?.length) {
+    parts.push(`lossy Links ${t.priority_caveat_links.join(', ')}`)
+  }
+  if (t.priority_caveat_line_losses) parts.push('line losses')
+  return 'Critical Loads are shed last only on loss-free paths — ' +
+    `${parts.join(' and ') || 'a lossy path'} can invert the priority, ` +
+    'so a critical Load behind them may be shed first.'
+}
+
 /** The attribution chip: the raw mode, plus the disclosed premium. */
 export function dtcAttributionLabel(t: EhDtcStressTable): string {
   const base = t.attribution ?? ''
   if (t.attribution === 'per_load' && t.voll_premium_eps != null) {
-    return `${base} · critical Loads shed last (VOLL +${+(t.voll_premium_eps * 100).toFixed(2)}% priority)`
+    return `${base} · critical VOLL +${+(t.voll_premium_eps * 100).toFixed(2)}% priority`
   }
   return base
 }
@@ -1252,6 +1265,18 @@ export function EhReferenceDesignPanel() {
                 {dtcTable.attribution && (
                   <span className="text-[10px] text-muted" data-testid="eh-dtc-attribution">
                     {dtcAttributionLabel(dtcTable)}
+                  </span>
+                )}
+                {dtcPriorityCaveat(dtcTable) && (
+                  <span className="text-[10px] text-warn w-full"
+                        data-testid="eh-dtc-priority-caveat">
+                    {dtcPriorityCaveat(dtcTable)}
+                  </span>
+                )}
+                {dtcTable.refused && (
+                  <span className="text-[10px] text-danger w-full"
+                        data-testid="eh-dtc-refused">
+                    {dtcTable.refused}
                   </span>
                 )}
                 <CsvButton
