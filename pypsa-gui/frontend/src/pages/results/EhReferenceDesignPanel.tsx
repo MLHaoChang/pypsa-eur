@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Hexagon, Square } from 'lucide-react'
 import {
@@ -23,7 +23,8 @@ import { useChatStore } from '../../store/chatStore'
 import { nk } from '../../utils/queryKeys'
 import { blockerMessage } from './McPanel'
 import { downloadCSV, downloadJSON } from './shared'
-import { GuideButton } from '../../components/GuidedTour'
+import { GuideButton, useGuide } from '../../components/GuidedTour'
+import { InfoTip } from '../../layout/properties/cardKit'
 
 const ARCHETYPES: { id: EhArchetype; label: string; blurb: string }[] = [
   {
@@ -621,6 +622,10 @@ export function EhReferenceDesignPanel() {
     enabled: open && !!currentProject,
     staleTime: Infinity,
   })
+  // Hover help for every pack control (P21 catalogue — the tour's and the
+  // assistant's wording); undefined until the catalogue loads.
+  const { data: guide } = useGuide()
+  const fieldTip = (key: string): string | undefined => guide?.fields?.[key]
   const askAssistant = (text: string) => {
     useUIStore.getState().setAssistantDockOpen(true)
     useChatStore.getState().seedComposer(text)
@@ -629,6 +634,18 @@ export function EhReferenceDesignPanel() {
     setArchetype(meta.recommended_archetype)
     setForm(formFromTemplate(meta))
   }
+  // P19–P22 gate: "open the panel and press Run" on a template project must
+  // run the RECOMMENDED pack, not the strong_grid default — preselect once per
+  // project, and only while the user has not touched the form.
+  const preselectedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!template || preselectedFor.current === currentProject) return
+    preselectedFor.current = currentProject
+    const untouched = archetype === 'strong_grid'
+      && JSON.stringify(form) === JSON.stringify(EMPTY_PACK_FORM)
+    if (untouched) applyTemplate(template)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [template, currentProject])
   const setField = (k: keyof PackForm) =>
     (e: { target: { value: string } }) => setForm(f => ({ ...f, [k]: e.target.value }))
 
@@ -811,7 +828,9 @@ export function EhReferenceDesignPanel() {
           </p>
 
           <label className="flex flex-col gap-1 text-[10px] text-muted">
-            <span className="uppercase tracking-wide font-semibold">Archetype</span>
+            <span className="uppercase tracking-wide font-semibold">
+              <InfoTip text={fieldTip('archetype')}>Archetype</InfoTip>
+            </span>
             <select
               data-testid="eh-archetype"
               value={archetype}
@@ -868,20 +887,21 @@ export function EhReferenceDesignPanel() {
                 </p>
                 <div className="flex flex-wrap gap-3">
                   {([
-                    ['ensCap', 'ENS target (‱)', 'eh-pack-ens-cap', true],
-                    ['loleTarget', 'LOLE target (h/yr)', 'eh-pack-lole-target', true],
+                    ['ensCap', 'ENS target (‱)', 'eh-pack-ens-cap', true, 'ens_cap_permyriad'],
+                    ['loleTarget', 'LOLE target (h/yr)', 'eh-pack-lole-target', true, 'target_lole_h'],
                     ['importMw', 'Import cap (MW)', 'eh-pack-import-mw',
-                      archetype === 'weak_flexible'],
+                      archetype === 'weak_flexible', 'import_p_nom_mw'],
                     ['importEnergy', 'Import energy (MWh/yr)', 'eh-pack-import-energy',
-                      archetype === 'weak_flexible'],
-                    ['budget', 'Budget (LP solves)', 'eh-pack-budget', true],
-                    ['draws', 'MC draws', 'eh-pack-draws', true],
-                    ['seed', 'MC seed', 'eh-pack-seed', true],
-                  ] as [keyof PackForm, string, string, boolean][])
+                      archetype === 'weak_flexible', 'import_energy_mwh_per_year'],
+                    ['budget', 'Budget (LP solves)', 'eh-pack-budget', true, 'budget_solves'],
+                    ['draws', 'MC draws', 'eh-pack-draws', true, 'mc_draws'],
+                    ['seed', 'MC seed', 'eh-pack-seed', true, 'mc_seed'],
+                  ] as [keyof PackForm, string, string, boolean, string][])
                     .filter(([, , , show]) => show)
-                    .map(([key, label, testId]) => (
-                      <label key={key} className="flex flex-col gap-0.5 text-[10px] text-muted">
-                        {label}
+                    .map(([key, label, testId, , guideKey]) => (
+                      <label key={key} className="flex flex-col gap-0.5 text-[10px] text-muted"
+                             data-testid={`${testId}-label`}>
+                        <InfoTip text={fieldTip(guideKey)}>{label}</InfoTip>
                         <input
                           type="number"
                           step="any"
@@ -895,7 +915,7 @@ export function EhReferenceDesignPanel() {
                     ))}
                   {archetype === 'weak_flexible' && (
                     <label className="flex flex-col gap-0.5 text-[10px] text-muted">
-                      DSR buses (comma-separated)
+                      <InfoTip text={fieldTip('dsr_buses')}>DSR buses (comma-separated)</InfoTip>
                       <input
                         type="text"
                         data-testid="eh-pack-dsr-buses"
@@ -908,7 +928,7 @@ export function EhReferenceDesignPanel() {
                   )}
                 </div>
                 <label className="flex items-center gap-1 text-[10px] text-muted">
-                  DtC attribution
+                  <InfoTip text={fieldTip('dtc_attribution')}>DtC attribution</InfoTip>
                   <select
                     data-testid="eh-pack-dtc-attribution"
                     value={form.dtcAttribution}
@@ -925,7 +945,7 @@ export function EhReferenceDesignPanel() {
                 <fieldset className="flex flex-wrap items-center gap-2 text-[10px] text-muted"
                           data-testid="eh-pack-levers">
                   <span title="Which design levers the levers stage compares. 'pack' keeps the archetype pack's own choice.">
-                    Levers
+                    <InfoTip text={fieldTip('levers')}>Levers</InfoTip>
                   </span>
                   {leverKeysFor(archetype).map(k => (
                     <label key={k} className="flex items-center gap-1 font-mono">
@@ -958,7 +978,7 @@ export function EhReferenceDesignPanel() {
                         ...f, stages: e.target.checked ? null : [],
                       }))}
                     />
-                    pack's default stages
+                    <InfoTip text={fieldTip('stages')}>pack's default stages</InfoTip>
                   </label>
                   {form.stages !== null && OPTIONAL_STAGES.map(st => (
                     <label key={st} className="flex items-center gap-1 font-mono">

@@ -1665,7 +1665,8 @@ export default function ChatPanel() {
   const composerSeed = useChatStore((st) => st.composerSeed)
   useEffect(() => {
     if (!composerSeed) return
-    setInput(composerSeed)
+    // Never overwrite an unsent draft: the request goes below it.
+    setInput((prev) => (prev.trim() ? `${prev}\n\n${composerSeed}` : composerSeed))
     useChatStore.getState().seedComposer(null)
     requestAnimationFrame(() => textareaRef.current?.focus())
   }, [composerSeed])

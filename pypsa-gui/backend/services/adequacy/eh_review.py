@@ -58,6 +58,9 @@ class _Rerun:
             self.base["pack_overrides"] = copy.deepcopy(rec["pack_overrides"])
         if rec.get("dtc_attribution"):
             self.base["dtc_attribution"] = rec["dtc_attribution"]
+        for key in ("mc", "dsr_buses", "dtc_config"):
+            if rec.get(key):
+                self.base[key] = copy.deepcopy(rec[key])
 
     def with_(self, *, pack: dict | None = None, levers: dict | None = None,
               add_stages: list[str] | None = None, **top) -> dict:
@@ -67,10 +70,14 @@ class _Rerun:
             po.update(pack or {})
             if levers:
                 po.setdefault("levers", {}).update(levers)
-        if add_stages and args.get("stages"):
+        if add_stages:
             from models.energy_hub import EH_PIPELINE_STAGES
-            wanted = set(args["stages"]) | set(add_stages)
+            wanted = (set(args.get("stages") or
+                          ("apply_pack", "ens_solve", "mc_certify", "assemble"))
+                      | set(add_stages))
             args["stages"] = [s for s in EH_PIPELINE_STAGES if s in wanted]
+        if "mc" in top:
+            top = {**top, "mc": {**(args.get("mc") or {}), **top["mc"]}}
         args.update(top)
         return args
 
@@ -110,20 +117,45 @@ def review_report(report: dict, record: dict | None = None,
           "lole_ci_per_horizon": ci, "draws": cert.get("draws"),
           "converged": cert.get("converged")}
     if verdict == "fail":
-        tighter = max(round((pack_ens or 10.0) / 4.0, 4), 0.01)
-        add("certification_fail", "high",
-            f"Not certified: LOLE {_fmt(lole, 'h/yr')} exceeds the "
-            f"{_fmt(target, 'h/yr')} target",
-            ev,
-            "The ENS-sized plan does not meet the LOLE target once outages are "
-            "sampled. Tighten the ENS target so the expansion buys firm "
-            "capacity, and price redundancy / storage options; then re-certify.",
-            [_action("run_eh_study",
-                     rerun.with_(pack={"ens_cap_permyriad": tighter},
-                                 levers={"redundancy": True,
-                                         "storage_duration": True}),
-                     f"re-plan at ENS {tighter:g} ‱ (was {_fmt(pack_ens, '‱')}) "
-                     "with redundancy and storage levers, then re-certify")])
+        achieved0 = _num(report.get("achieved_ens_permyriad"))
+        energy_limited = (achieved0 is not None and pack_ens
+                          and achieved0 >= 0.5 * pack_ens)
+        ev["achieved_ens_permyriad"] = achieved0
+        if energy_limited:
+            tighter = max(round((pack_ens or 10.0) / 4.0, 4), 0.01)
+            add("certification_fail", "high",
+                f"Not certified: LOLE {_fmt(lole, 'h/yr')} exceeds the "
+                f"{_fmt(target, 'h/yr')} target",
+                ev,
+                "The plan sits near its ENS limit, so it sheds energy by design "
+                "and the sampled LOLE follows. Tighten the ENS target so the "
+                "expansion buys more capacity, then re-certify.",
+                [_action("run_eh_study",
+                         rerun.with_(pack={"ens_cap_permyriad": tighter}),
+                         f"re-plan at ENS {tighter:g} ‱ (was "
+                         f"{_fmt(pack_ens, '‱')}), then re-certify")])
+        else:
+            # P19–P22 gate: the plan already serves (nearly) all demand, so a
+            # tighter ENS target changes nothing — the LOLE is OUTAGE-driven
+            # (unit / import unavailability the deterministic solve never
+            # sees). Only the user can choose which firm capacity to add.
+            add("certification_fail", "high",
+                f"Not certified: LOLE {_fmt(lole, 'h/yr')} exceeds the "
+                f"{_fmt(target, 'h/yr')} target — outage-driven",
+                ev,
+                "The deterministic plan already serves the demand "
+                f"(achieved ENS {_fmt(achieved0, '‱')}), so tightening the "
+                "ENS target would not change it: the LOLE comes from outages "
+                "(generator and import unavailability) the plan does not "
+                "anticipate. Add firm local capacity — e.g. an N+1 unit, a "
+                "higher p_nom_min on an expansion candidate, storage sized "
+                "for the outage duration — or reduce the dominant outage "
+                "rate. Sizing islanded operation (dtc_planning) shows how "
+                "much local capacity keeps the critical demand on.",
+                [_action("run_eh_study",
+                         rerun.with_(add_stages=["dtc_stress", "dtc_planning"]),
+                         "size the local capacity that islanded operation "
+                         "needs (dtc_stress + dtc_planning)")])
     elif verdict == "inconclusive":
         draws = int(cert.get("draws") or 500)
         more = min(_MC_MAX_DRAWS, max(draws * 2, draws + 1))
@@ -249,11 +281,15 @@ def review_report(report: dict, record: dict | None = None,
                  top.get("severity_eur")},
                 f"One failure mode dominates: consider a redundant path or a "
                 f"spare for {top.get('name')}, or reduce its outage rate / "
-                "repair time. Pricing redundancy shows what N+1 costs.",
+                "repair time. The redundancy stage prices GENERIC N+1 "
+                "generation / conversion / storage options (indicative "
+                f"costs), not a spare {top.get('name')} itself — use it as "
+                "an order of magnitude.",
                 [_action("run_eh_study",
                          rerun.with_(levers={"redundancy": True},
                                      add_stages=["redundancy"]),
-                         "price N / N+1 / spare scenarios")])
+                         "price generic N / N+1 / storage scenarios "
+                         "(indicative)")])
 
     # ── DtC ────────────────────────────────────────────────────────────
     dtc = (sections.get("dtc") or {}).get("payload") or {}
@@ -311,9 +347,11 @@ def review_report(report: dict, record: dict | None = None,
 
     # ── levers ─────────────────────────────────────────────────────────
     lev = (sections.get("levers") or {}).get("payload") or {}
+    # Options looser than the pack / connection permits are not candidates.
     opts = [o for o in lev.get("options") or []
             if o.get("status") in ("ok", "optimal") and not o.get("ineffective")
             and o.get("meets_target") is not False
+            and not o.get("exceeds_pack_cap")
             and _num(o.get("cost_at_target_eur")) is not None]
     if len(opts) >= 2:
         best = min(opts, key=lambda o: _num(o["cost_at_target_eur"]))
@@ -324,9 +362,8 @@ def review_report(report: dict, record: dict | None = None,
             {"kind": best.get("kind"), "value": best.get("value"),
              "cost_at_target_eur": best.get("cost_at_target_eur"),
              "spread_eur": worst_cost - _num(best["cost_at_target_eur"])},
-            "Of the compared options meeting the target, this one is cheapest. "
-            + ("It is looser than the pack's own cap — a plan the pack does "
-               "not permit." if best.get("exceeds_pack_cap") else ""))
+            "Of the compared options meeting the target within the pack's "
+            "limits, this one is cheapest.")
     for o in lev.get("options") or []:
         if o.get("ineffective"):
             add(f"lever_ineffective_{o.get('kind')}_{o.get('value')}", "low",

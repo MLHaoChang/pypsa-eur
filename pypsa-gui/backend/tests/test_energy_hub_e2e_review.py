@@ -153,3 +153,35 @@ def test_chat_reads_every_eh_sibling_table(install_network):
         assert kind in ADEQUACY_KIND_ENUM
         out = T.get_adequacy_results(kind)          # nothing ran: no_data
         assert isinstance(out, dict) and out.get("status") == "no_data", out
+
+
+@pytest.mark.live_solve
+def test_an_engine_bug_is_failed_not_skipped(monkeypatch):
+    """P19–P22 gate BINDING 3: only the engines' own refusal classes are
+    'skipped'; a numpy/pandas ValueError is an error — 'failed'."""
+    from services.adequacy import levers as L
+    from tests.test_energy_hub_frontier_fmea import _feeder_hub
+
+    def boom(*a, **k):
+        raise ValueError("operands could not be broadcast together")
+
+    monkeypatch.setattr(L, "compare_lever_scenarios", boom)
+    rep = _study(_feeder_hub(), ["apply_pack", "ens_solve", "levers"])
+    lev = next(r for r in rep.pipeline.stages if r.stage == "levers")
+    assert lev.status == "failed" and "broadcast" in lev.note
+
+
+@pytest.mark.live_solve
+def test_import_cap_rungs_above_the_rating_are_flagged():
+    from services.adequacy import levers as L
+    from services.pypsa_service import PyPSAService
+    from tests.test_energy_hub_frontier_fmea import _feeder_hub
+    n = _feeder_hub()
+    n.links.at["import", "p_nom"] = 40.0
+    PyPSAService.set_network(n)
+    table = L.compare_lever_scenarios(
+        n, SolverConfig(voll=3000.0, ens_cap_permyriad=10.0),
+        lock=PyPSAService.get_lock(), stop_event=threading.Event(),
+        kind="import_cap", values=[25.0, 50.0])
+    assert [o["exceeds_pack_cap"] for o in table["options"]] == [False, True]
+    assert "40 MW rating" in table["options"][1]["autonomy_note"]

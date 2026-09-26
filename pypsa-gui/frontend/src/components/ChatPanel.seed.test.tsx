@@ -99,3 +99,13 @@ it('places a seeded request in the composer without sending it', async () => {
   expect(useChatStore.getState().composerSeed).toBeNull()      // consumed once
   expect(createChatStream).not.toHaveBeenCalled()              // not auto-sent
 })
+
+
+it('keeps an unsent draft and adds the request below it', async () => {
+  const user = (await import('@testing-library/user-event')).default.setup()
+  renderPanel()
+  const box = await screen.findByRole('textbox') as HTMLTextAreaElement
+  await user.type(box, 'my draft')
+  act(() => { useChatStore.getState().seedComposer('Review my study') })
+  await vi.waitFor(() => expect(box.value).toBe('my draft\n\nReview my study'))
+})

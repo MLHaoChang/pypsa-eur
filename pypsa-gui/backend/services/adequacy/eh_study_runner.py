@@ -345,6 +345,11 @@ def start_eh_study(
         "budget_solves": budget,
         "pack_overrides": normalised_overrides(body.pack_overrides),
         "dtc_attribution": dtc_attribution,
+        # The rest of the request (P19–P22 gate): a re-run built from this
+        # record must not silently drop the user's MC / DSR / DtC choices.
+        "mc": dict(body.mc) if body.mc else None,
+        "dsr_buses": list(dsr_buses) if dsr_buses else None,
+        "dtc_config": dict(raw_dtc) if raw_dtc else None,
         "report": None,
         "error": None,
         "started_at": time.time(),

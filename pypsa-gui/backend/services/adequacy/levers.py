@@ -290,6 +290,14 @@ def compare_lever_scenarios(
         raise LeverScenarioError(
             "lever compare requires ens_cap_permyriad > 0")
 
+    # import_cap rungs above what the Links are rated for NOW (the pack's cap
+    # / the physical connection) are plans the pack does not permit.
+    rated = None
+    if kind == "import_cap":
+        links_now = [l for l in _import_link_ids(network)
+                     if l in network.links.index]
+        if links_now:
+            rated = float(max(network.links.loc[links_now, "p_nom"]))
     options: list[dict[str, Any]] = []
     solves_attempted = 0
     aborted = False
@@ -348,6 +356,12 @@ def compare_lever_scenarios(
                     )
             exceeds_pack_cap = None
             autonomy_note = mutation.get("autonomy_note")
+            if kind == "import_cap" and rated is not None:
+                exceeds_pack_cap = float(val) > rated + 1e-9
+                if exceeds_pack_cap:
+                    autonomy_note = (
+                        f"above the connection's current {rated:g} MW rating "
+                        "— a plan the pack does not permit")
             if kind == "import_energy":
                 pack_cap = getattr(cfg, "import_energy_cap_mwh_per_year", None)
                 exceeds_pack_cap = (pack_cap is not None

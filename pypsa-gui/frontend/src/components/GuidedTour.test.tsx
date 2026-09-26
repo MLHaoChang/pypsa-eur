@@ -19,7 +19,7 @@ const CATALOGUE: GuideCatalogue = {
         { target: 'a', title: 'Step A', body: 'Body A', enter: 'Enter A' },
         { target: 'maybe', title: 'Optional', body: 'Only if present', optional: true },
         { target: 'hidden', reveal: 'opener', title: 'Step H', body: 'Revealed' },
-        { target: 'absent', title: 'Step X', body: 'Not on screen' },
+        { target: 'absent', title: 'Step X', body: 'Not on screen', after_run: true },
       ],
     },
   },
@@ -31,6 +31,7 @@ function Harness() {
   return (
     <div>
       <div data-testid="a" style={{ width: 10, height: 10 }}>A</div>
+      <input data-testid="field" />
       <button data-testid="opener" onClick={() => setShown(true)}>open</button>
       {shown && <div data-testid="hidden">H</div>}
       <GuideButton tourId="demo" testId="start" />
@@ -71,7 +72,8 @@ describe('GuidedTour', () => {
 
     await user.click(screen.getByTestId('guide-next'))
     expect(screen.getByTestId('guide-step-title').textContent).toBe('Step X')
-    expect(screen.getByTestId('guide-step-missing')).toBeTruthy()        // no crash
+    expect(screen.getByTestId('guide-step-missing').textContent)        // no crash
+      .toMatch(/appears after a study has run/)
     expect(screen.getByTestId('guide-next').textContent).toBe('Done')
 
     await user.click(screen.getByTestId('guide-back'))
@@ -117,4 +119,16 @@ describe('useGuideField', () => {
     renderWith(<Tip k="unknown" />)
     expect(screen.getByTestId('tip').textContent).toBe('fallback')
   })
+})
+
+
+it('never hijacks keys typed into a form field', async () => {
+  const user = userEvent.setup()
+  renderWith(<Harness />)
+  await user.click(screen.getByTestId('start'))
+  await screen.findByTestId('guide-tour')
+  screen.getByTestId('field').focus()
+  await user.keyboard('{ArrowRight}{Escape}')
+  expect(screen.getByTestId('guide-tour')).toBeTruthy()
+  expect(screen.getByTestId('guide-step-title').textContent).toBe('Step A')
 })

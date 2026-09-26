@@ -78,8 +78,8 @@ def _validate_action(action: dict) -> None:
 # ── rules ───────────────────────────────────────────────────────────────────
 
 
-def test_a_failed_certification_is_high_with_a_tighter_replan():
-    out = review_report(_report(), RECORD)
+def test_a_failed_energy_limited_plan_is_high_with_a_tighter_replan():
+    out = review_report(_report(achieved_ens_permyriad=9.5), RECORD)
     f = _by_id(out, "certification_fail")
     assert f["severity"] == "high" and out["findings"][0] is f
     assert f["evidence"]["lole_h_per_year"] == 12.4
@@ -88,7 +88,6 @@ def test_a_failed_certification_is_high_with_a_tighter_replan():
     assert act["tool"] == "run_eh_study"
     po = act["args"]["pack_overrides"]
     assert po["ens_cap_permyriad"] == 2.5 and po["import_p_nom_mw"] == 40.0
-    assert po["levers"] == {"redundancy": True, "storage_duration": True}
     assert act["args"]["dtc_attribution"] == "per_load"     # request preserved
     _validate_action(act)
 
@@ -235,18 +234,21 @@ def test_review_then_apply_the_recommended_action_on_the_datacenter(
     first = T.review_eh_study()
     fail = _by_id(first, "certification_fail")
     assert fail["evidence"]["lole_h_per_year"] > fail["evidence"]["target_lole_h"]
+    assert "outage" in fail["title"]                    # ENS already met
     action = copy.deepcopy(fail["actions"][0])
     _validate_action(action)
-    assert action["args"]["stages"] == stages          # the user's request kept
+    assert set(stages) <= set(action["args"]["stages"])  # request kept
+    assert action["args"]["pack_overrides"] == meta["pack_overrides"]
+    assert action["args"]["dtc_attribution"] == "per_load"
 
-    # "apply it": the exact tool + args the finding named
+    # "apply it": the exact tool + args the finding named — and it must
+    # produce NEW evidence (the islanded sizing), not re-run a no-op
     T.run_eh_study(**action["args"])
     assert _chat_poll()["status"] == "done"
     second = T.review_eh_study()
-    assert second["summary"]["ens_cap_permyriad"] == \
-        action["args"]["pack_overrides"]["ens_cap_permyriad"]
-    assert second["summary"]["mc_lole_h_per_year"] <= \
-        first["summary"]["mc_lole_h_per_year"] + 1e-9
+    assert second["summary"]["completeness"]["dtc"] == "ok"
+    assert "dtc" not in first["summary"]["completeness"] or \
+        first["summary"]["completeness"]["dtc"] != "ok"
 
 
 def test_get_eh_template_and_put_stress_scenarios_via_chat(tmp_path, monkeypatch):
@@ -267,3 +269,67 @@ def test_get_eh_template_and_put_stress_scenarios_via_chat(tmp_path, monkeypatch
         T.put_stress_scenarios("p", reg + [{"id": "bad", "kind": "parametric",
                                             "frequency_per_year": 0}])
     assert exc.value.status_code == 422
+
+
+# ── P19–P22 gate ────────────────────────────────────────────────────────────
+
+
+def test_an_outage_driven_fail_does_not_offer_a_no_op_ens_tightening():
+    """BINDING 1: with the ENS target already met (achieved 0 ‱), tightening
+    ENS changes nothing — the LOLE comes from outages the deterministic plan
+    never sees. Offer the islanded sizing step instead, and say why."""
+    out = review_report(_report(achieved_ens_permyriad=0.0), RECORD)
+    f = _by_id(out, "certification_fail")
+    assert "outage" in f["recommendation"].lower()
+    assert not any("ens_cap_permyriad" in (a["args"].get("pack_overrides") or {})
+                   for a in f["actions"])
+    assert f["actions"] and "dtc_planning" in f["actions"][0]["args"]["stages"]
+    for a in f["actions"]:
+        _validate_action(a)
+
+
+def test_an_energy_limited_fail_still_offers_a_tighter_target():
+    out = review_report(_report(achieved_ens_permyriad=9.0), RECORD)
+    act = _by_id(out, "certification_fail")["actions"][0]
+    assert act["args"]["pack_overrides"]["ens_cap_permyriad"] == 2.5
+    _validate_action(act)
+
+
+def test_rerun_actions_keep_mc_dsr_and_dtc_config():
+    """BINDING 2: the record now carries mc / dsr_buses / dtc_config and
+    every re-run action keeps them."""
+    record = {**RECORD, "mc": {"draws": 300, "seed": 3},
+              "dsr_buses": ["dc_mv"],
+              "dtc_config": {"critical_bus_ids": ["it_bus"],
+                             "islanding_contingencies": ["grid_import"]}}
+    rep = _report(sections={"certification": {"status": "ok", "payload": {
+        "verdict": "inconclusive", "target_lole_h": 3.0, "draws": 300}}})
+    act = _by_id(review_report(rep, record), "certification_inconclusive")["actions"][0]
+    assert act["args"]["mc"] == {"draws": 600, "seed": 3}
+    assert act["args"]["dsr_buses"] == ["dc_mv"]
+    assert act["args"]["dtc_config"]["critical_bus_ids"] == ["it_bus"]
+    _validate_action(act)
+
+
+def test_the_study_record_stores_the_whole_request(client, install_network,
+                                                   monkeypatch):
+    import threading
+    reached = threading.Event()
+
+    def fake_run(network, pack, cfg, **kw):
+        reached.set()
+        raise RuntimeError("stop")
+
+    monkeypatch.setattr("services.adequacy.eh_study.run_eh_study", fake_run)
+    from tests.test_energy_hub_frontier_fmea import _feeder_hub
+    install_network(_feeder_hub())
+    body = {"archetype": "weak_flexible", "mc": {"draws": 300, "seed": 3},
+            "dsr_buses": ["hub"],
+            "dtc_config": {"critical_bus_ids": ["hub"],
+                           "islanding_contingencies": ["import"]}}
+    assert client.post("/api/results/eh_study", json=body).status_code == 200
+    assert reached.wait(10)
+    rec = client.get("/api/results/eh_study").json()
+    assert rec["mc"] == {"draws": 300, "seed": 3}
+    assert rec["dsr_buses"] == ["hub"]
+    assert rec["dtc_config"]["islanding_contingencies"] == ["import"]

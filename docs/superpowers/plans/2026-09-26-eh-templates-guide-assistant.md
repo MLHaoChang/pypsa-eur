@@ -250,3 +250,42 @@ The verdict was **GO WITH CONDITIONS**, with 0 blockers. Every invariant held ac
   3. `review_eh_study` again: the new ENS target is in force and LOLE did not get worse.
 - [x] **FE.**
   - An "Ask the assistant (to review)" button on the EH panel opens the assistant with the request **prefilled but not sent** (`chatStore.composerSeed`), so the user stays the one who sends and confirms.
+
+## QA gate — P19–P22
+
+**GO WITH BINDING CONDITIONS**, now closed. The reviewer checked and found sound:
+- the template numbers and tags;
+- the sidecar allow-list, with pack-only fields stripped;
+- the guide text against the code (stage order, the CI rule, top-5 fmea_top, 5 % priority, IBR default);
+- `put_stress_scenarios` at write tier;
+- the "offer, never apply" prompt;
+- the fresh-checkout build of the EH templates (on-demand, commit `4eeae01`).
+
+Each item was fixed test-first.
+
+1. **BINDING — the headline recommendation was a no-op.**
+   - On the data center, the plan already serves all demand (achieved ENS 0 ‱). "Tighten the ENS target" therefore changed nothing: LOLE stayed 12.38 h/yr and cost and sizing were identical. The live test only asserted `<=`.
+   - `certification_fail` now tells the two cases apart:
+     - **Energy-limited** (achieved ≥ ½ cap): keep the tighter-ENS re-plan.
+     - **Outage-driven:** say so and list the firm-capacity options for the user to choose, including N+1, a candidate `p_nom_min`, outage-duration storage and a lower dominant outage rate. The action sizes islanded operation (adds `dtc_stress` + `dtc_planning`).
+   - The live loop now asserts the applied action yields NEW evidence: the DtC section goes from absent to `ok`.
+   - A reserve-margin action was probed and rejected, because preflight refuses it on this network.
+2. **BINDING — re-runs dropped `mc`, `dsr_buses` and `dtc_config`.** The study record now stores the whole request. `_Rerun` carries these fields, and `mc` merges (keeping the seed when draws are raised).
+3. **BINDING — every `ValueError` counted as a refusal.**
+   - `_stage_exception` now treats only the engines' own refusal classes as `skipped`: lever, redundancy, DtC stress / planning / config, pack and hub boundary.
+   - Anything else is `failed`. This is pinned with a numpy broadcast error.
+4. **BINDING — no hover help on the main EH form.**
+   - Every pack control carries an `InfoTip` with the catalogue wording: archetype, ENS / LOLE targets, import cap / energy, budget, MC draws / seed, DSR buses, DtC attribution, levers and stages.
+   - `mc_seed` was added to the catalogue.
+   - A test pins every key the panel uses to the catalogue.
+5. **Non-binding, fixed.**
+   - **Tour behaviour.** It ignores keys typed in form fields, focuses Next, and announces the step body (`aria-live`). Post-run steps are marked `after_run`: "appears after a study has run".
+   - **fmea_top recommendation.** The redundancy wording is qualified: it prices GENERIC N+1 options, indicatively, not a spare for the named Link.
+   - **Levers.** `import_cap` rungs above the connection's current rating are flagged `exceeds_pack_cap` and excluded from "cheapest option".
+   - **Template project defaults.** A template project preselects its recommended settings once, if the form is untouched, so "open the panel, press Run" runs the right pack.
+   - **Chat draft.** A composer seed no longer overwrites an unsent draft.
+   - **Wording.** The data-center "weak" comment is corrected: the connection is capacity-weak, and its SCR of 8.3 passes.
+6. **Non-binding, recorded rather than changed.**
+   - **Sizing.** The sizing section counts `grid_supply` (the wholesale source beyond the PoC). Sizing is P6 behaviour across every network; restricting it to the hub side belongs with the sizing engine, not this phase.
+   - **Template review rule.** The "template's recommended next step" rule in `review_eh_study` is not wired. The template's notes reach the user through `get_eh_template` and the panel banner instead.
+   - **Chat context in tests.** The chat context is not a product bug: chat turns run under the request's bound context. The live P22 loop uses `install_network`, because direct tool calls in tests fall back to the default context.

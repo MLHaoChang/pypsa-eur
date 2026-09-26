@@ -1231,3 +1231,39 @@ it('opens the assistant with a review request prefilled, not sent (P22)', async 
   expect(useChatStore.getState().composerSeed).toMatch(/Review my latest Energy Hub study/)
   useChatStore.getState().seedComposer(null)
 })
+
+describe('P19–P22 gate — panel', () => {
+  it('shows catalogue hover help on the pack controls (BINDING 4)', async () => {
+    const { guidesApi } = await import('../../components/GuidedTour')
+    vi.spyOn(guidesApi, 'getGuide').mockResolvedValue({
+      version: 1, tours: {},
+      fields: { ens_cap_permyriad: 'ENS target — the share of energy demand allowed unserved.' },
+    } as never)
+    const user = await openPanel()
+    await user.click(screen.getByTestId('eh-pack-settings-toggle'))
+    const label = screen.getByTestId('eh-pack-ens-cap-label')
+    const trigger = await waitFor(() => {
+      const t = label.querySelector('[tabindex="0"]')
+      if (!t) throw new Error('help icon not rendered yet')
+      return t
+    })
+    await user.hover(trigger)
+    expect(await screen.findByText(/share of energy demand allowed unserved/)).toBeTruthy()
+  })
+
+  it('preselects the template recommendation so Run runs the right pack', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({
+      id: 'eh_datacenter', name: 'Data Center Energy Hub',
+      recommended_archetype: 'weak_flexible',
+      pack_overrides: { import_p_nom_mw: 40 }, stages: null,
+      dtc_attribution: 'per_load',
+    } as never)
+    const user = await openPanel()
+    await waitFor(() => expect(
+      (screen.getByTestId('eh-archetype') as HTMLSelectElement).value).toBe('weak_flexible'))
+    await user.click(screen.getByTestId('eh-run'))
+    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
+      archetype: 'weak_flexible', pack_overrides: { import_p_nom_mw: 40 },
+      dtc_attribution: 'per_load' }))
+  })
+})

@@ -69,25 +69,29 @@
           "target": "eh-completeness",
           "title": "10 · Read the completeness chips",
           "body": "Each section is ok (evidence produced), skipped (not requested or not applicable) or not established (requested but could not be shown — the reason is listed). A missing number is never reported as zero.",
-          "enter": "Start with the not-established reasons: they are your to-do list."
+          "enter": "Start with the not-established reasons: they are your to-do list.",
+          "after_run": true
         },
         {
           "target": "eh-certification-verdict",
           "title": "11 · Certification verdict",
           "body": "Certified only when the MC LOLE 95 % confidence interval lies entirely below the target (pass). Fail = entirely above; inconclusive = the interval straddles it (more draws help).",
-          "enter": "An inconclusive verdict is not a failure — raise MC draws or tighten the plan."
+          "enter": "An inconclusive verdict is not a failure — raise MC draws or tighten the plan.",
+          "after_run": true
         },
         {
           "target": "eh-pipeline-toggle",
           "title": "12 · Pipeline",
           "body": "Every stage with its status (run / skipped / failed / aborted), the LP solves it charged and its note — the audit trail of the study.",
-          "enter": "Open it when a section is not established to see which stage said why."
+          "enter": "Open it when a section is not established to see which stage said why.",
+          "after_run": true
         },
         {
           "target": "eh-report-json",
           "title": "13 · Export",
           "body": "Download JSON saves the stored report exactly as the API serves it; Summary CSV flattens the headline, completeness and notes for a spreadsheet.",
-          "enter": "Exports are disabled after a later solve cleared the stored report — re-run the study."
+          "enter": "Exports are disabled after a later solve cleared the stored report — re-run the study.",
+          "after_run": true
         }
       ]
     },
@@ -184,6 +188,7 @@
     "frequency_per_year": "Empirical events per year of the stress condition, in (0, 365].",
     "electrical_load_multiplier": "Electrical loads × this factor, in (0, 10].",
     "renewable_availability_multiplier": "Profile-borne generators' availability × this factor, in [0, 1.5]; 0 = no renewable output.",
-    "profile_pack": "A shipped series pack; its Load/Generator names must exist on your network."
+    "profile_pack": "A shipped series pack; its Load/Generator names must exist on your network.",
+    "mc_seed": "Random seed of the Monte-Carlo sample — fix it to reproduce a certification exactly."
   }
 }

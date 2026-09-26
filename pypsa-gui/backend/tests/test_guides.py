@@ -82,3 +82,15 @@ def test_the_build_ships_the_guide_where_the_loader_reads_it():
     finally:
         sys.path.pop(0)
     assert "data/guides/eh_fmea_guide.json" in check_bundle.ROOTED
+
+
+def test_every_panel_hover_key_is_in_the_catalogue():
+    """P19–P22 gate: the EH panel's hover tips read catalogue keys — a key
+    missing here renders a control with no help."""
+    src = (FE_SRC / "pages" / "results" / "EhReferenceDesignPanel.tsx").read_text()
+    keys = set(re.findall(r"fieldTip\('([a-z_]+)'\)", src))
+    keys |= set(re.findall(r"'eh-pack-[a-z-]+', [^\]]*?, '([a-z_]+)'\]", src))
+    assert {"ens_cap_permyriad", "target_lole_h", "mc_seed", "dsr_buses",
+            "dtc_attribution", "levers", "stages", "archetype"} <= keys
+    fields = G.load_guide("eh_fmea")["fields"]
+    assert keys <= set(fields), keys - set(fields)

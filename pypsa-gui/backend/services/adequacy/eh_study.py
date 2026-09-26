@@ -696,15 +696,24 @@ def _derive_dtc_config(st: _Study, error_cls, stage: str):
     return derived
 
 
+def _refusal_classes() -> tuple[type[Exception], ...]:
+    """The engines' OWN config refusals (P19–P22 gate): anything else —
+    including a numpy/pandas ValueError — is a real error, not a skip."""
+    from services.adequacy import archetypes as a
+    from services.adequacy import dtc, levers, redundancy
+    return (levers.LeverScenarioError, redundancy.RedundancyScenarioError,
+            dtc.DtcStressError, dtc.DtcPlanningError, dtc.DtcConfigError,
+            a.ArchetypePackError, a.HubBoundaryError)
+
+
 def _stage_exception(st: _Study, stage: str, section: str,
                      exc: Exception) -> None:
     """E2E review m1: ``aborted`` means the user's stop event only.
 
-    A ``ValueError`` (every engine's config refusal: DtC, lever, redundancy)
-    is ``skipped`` with its reason; anything else ran and produced no
-    evidence — ``failed``.
+    An engine's own config refusal (``_refusal_classes``) is ``skipped``
+    with its reason; anything else ran and produced no evidence — ``failed``.
     """
-    refusal = isinstance(exc, ValueError)
+    refusal = isinstance(exc, _refusal_classes())
     note = str(exc) if refusal else f"{stage} failed: {exc}"
     st.mark(stage, "skipped" if refusal else "failed", note=note)
     if stage == "dtc_planning" and section in st.sections:

@@ -20,6 +20,8 @@ export interface GuideStep {
   enter?: string
   reveal?: string
   optional?: boolean
+  /** The control only exists once a study has run (report, pipeline, …). */
+  after_run?: boolean
 }
 
 export interface GuideTour {
@@ -156,6 +158,11 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Never hijack typing: the tour points users INTO form fields.
+      const t = e.target as HTMLElement | null
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) {
+        return
+      }
       if (e.key === 'Escape') close(false)
       else if (e.key === 'ArrowRight') next()
       else if (e.key === 'ArrowLeft') back()
@@ -209,7 +216,7 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
           <p className="mb-2 text-muted" data-testid="guide-intro">{tour.intro}</p>
         )}
         <h4 className="font-semibold" data-testid="guide-step-title">{step.title}</h4>
-        <p className="mt-1" data-testid="guide-step-body">{step.body}</p>
+        <p className="mt-1" data-testid="guide-step-body" aria-live="polite">{step.body}</p>
         {step.enter && (
           <p className="mt-1 text-accent" data-testid="guide-step-enter">
             <span className="font-semibold">What to enter: </span>{step.enter}
@@ -217,8 +224,9 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
         )}
         {!rect && (
           <p className="mt-1 text-warn" data-testid="guide-step-missing">
-            This control is not on screen right now — open the panel or select
-            the component it belongs to, then continue.
+            {step.after_run
+              ? 'This appears after a study has run — run one, then revisit this step.'
+              : 'This control is not on screen right now — open the panel or select the component it belongs to, then continue.'}
           </p>
         )}
         <div className="mt-2 flex items-center gap-2">
@@ -232,7 +240,7 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
                   className="rounded border border-border px-2 py-0.5 disabled:opacity-40">
             Back
           </button>
-          <button type="button" onClick={next} data-testid="guide-next"
+          <button type="button" onClick={next} data-testid="guide-next" autoFocus
                   className="rounded bg-accent px-2 py-0.5 font-semibold text-white">
             {idx >= steps.length - 1 ? 'Done' : 'Next'}
           </button>

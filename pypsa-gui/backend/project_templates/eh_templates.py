@@ -157,8 +157,9 @@ def build_eh_datacenter() -> pypsa.Network:
 
     _tag_columns(n)
     n.buses.at["grid", "eh_poc"] = True
-    # SCR gate inputs at the PoC: a weak 250 MVA fault level against ~30 MVA
-    # of inverter-based resources (PV + UPS/BESS inverters).
+    # SCR gate inputs at the PoC: a 250 MVA fault level against ~30 MVA of
+    # inverter-based resources (PV + UPS/BESS inverters) → SCR ≈ 8, which
+    # passes. The connection is CAPACITY-weak (40 MW), not SCR-weak.
     n.buses.at["grid", "eh_sk_mva"] = 250.0
     n.buses.at["grid", "eh_ibr_mva"] = 30.0
     n.buses.at["dc_mv", "eh_sk_mva"] = 220.0
