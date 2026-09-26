@@ -27,6 +27,8 @@ PUT     /api/chat/settings/api-key                               -> put_api_key_
 POST    /api/chat/stream                                         -> chat_stream_api_chat_stream_post
 POST    /api/chat/{session_id}/abort                             -> chat_abort_api_chat__session_id__abort_post
 POST    /api/chat/{session_id}/confirm                           -> chat_confirm_api_chat__session_id__confirm_post
+GET     /api/guides                                              -> list_guides_api_guides_get
+GET     /api/guides/{topic}                                      -> get_guide_api_guides__topic__get
 GET     /api/health                                              -> health_api_health_get
 GET     /api/io/export/csv                                       -> export_csv_api_io_export_csv_get
 GET     /api/io/export/excel                                     -> export_excel_api_io_export_excel_get

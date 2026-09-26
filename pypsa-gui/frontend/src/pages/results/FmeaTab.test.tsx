@@ -328,3 +328,12 @@ it('refuses to sweep without a readable stress registry (E2E review m4)', async 
     expect.stringMatching(/unreadable.*sweep not started/)))
   expect(resultsApi.postFmeaSweep).not.toHaveBeenCalled()
 })
+
+it('offers the FMEA walkthrough and anchors its targets (P21)', async () => {
+  vi.mocked(resultsApi.getStressProfilePacks).mockResolvedValue({ packs: [] })
+  renderTab()
+  expect(await screen.findByTestId('fmea-guide-button')).toBeTruthy()
+  expect(screen.getByTestId('fmea-sweep')).toBeTruthy()
+  expect(screen.getByTestId('fmea-expert-form')).toBeTruthy()
+  expect(await screen.findByTestId('fmea-table')).toBeTruthy()
+})

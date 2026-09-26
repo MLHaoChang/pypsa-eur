@@ -1208,3 +1208,10 @@ describe('E2E review — panel fixes', () => {
     { timeout: 2000 })
   })
 })
+
+it('offers the study and tagging walkthroughs (P21)', async () => {
+  await openPanel()
+  expect(screen.getByTestId('eh-guide-button').textContent).toMatch(/Guide/)
+  expect(screen.getByTestId('eh-tagging-guide-button').textContent)
+    .toMatch(/How to tag the network/)
+})

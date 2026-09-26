@@ -172,6 +172,8 @@ def scan(root: Path) -> tuple[list[str], list[str]]:
 ROOTED = (
     # `stress.PROFILE_PACK_DIR` = parents[2] of services/adequacy/stress.py.
     "data/eh_class_c/synth_dunkelflaute.json",
+    # `services.guides.GUIDE_DIR` = parents[1] of services/guides.py (P21).
+    "data/guides/eh_fmea_guide.json",
 )
 
 

@@ -4,10 +4,10 @@
 // MiniProfileChart, VintageCloneButton. Extracted verbatim from PropertiesPanel
 // (Step 1 of the card-split) — pure leaf helpers; the Edit cards stay in
 // PropertiesPanel and import these. No back-dependency on PropertiesPanel.
-
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useCatalog } from '../../hooks/useCatalog'
+import { useGuideField } from '../../components/GuidedTour'
 import { editScope, loadExtras, saveExtras } from '../../utils/extrasStore'
 import type { SolveMode } from '../../utils/attributeCatalog'
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
@@ -1046,24 +1046,30 @@ export function ehLinkPayload(fs: FS, current: object): Record<string, unknown> 
 }
 
 export function EhBusInputs({ fs, set }: { fs: FS; set: SetFS }) {
+  // Hover text comes from the guide catalogue (P21) — the same wording the
+  // tour and the assistant use; the literals are the offline fallback.
+  const tip = {
+    poc: useGuideField('eh_poc', 'Energy Hub: the GRID-side bus of the import boundary. The hub is everything on the other side of the import Links (used for MC certification and the SCR gate).'),
+    crit: useGuideField('eh_critical', 'Energy Hub: demand here must be served under islanding (DtC stress/planning).'),
+    sk: useGuideField('eh_sk_mva', 'Energy Hub SCR gate: grid short-circuit capacity at this PoC.'),
+    ibr: useGuideField('eh_ibr_mva', 'Energy Hub SCR gate: inverter-based capacity at this PoC (defaults to installed IBR generators when blank).'),
+  }
   return (
-    <>
-      <ChkInput label="Grid point of connection (PoC)" k="eh_poc" fs={fs} set={set}
-        tip="Energy Hub: the GRID-side bus of the import boundary. The hub is everything on the other side of the import Links (used for MC certification and the SCR gate)." />
-      <ChkInput label="Critical bus" k="eh_critical" fs={fs} set={set}
-        tip="Energy Hub: demand here must be served under islanding (DtC stress/planning)." />
-      <NumInput label="Short-circuit level" k="eh_sk_mva" fs={fs} set={set} unit="MVA"
-        tip="Energy Hub SCR gate: grid short-circuit capacity at this PoC." />
-      <NumInput label="IBR capacity" k="eh_ibr_mva" fs={fs} set={set} unit="MVA"
-        tip="Energy Hub SCR gate: inverter-based capacity at this PoC (defaults to installed IBR generators when blank)." />
-    </>
+    <div data-testid="eh-bus-fields" className="col-span-2 grid grid-cols-2 gap-x-2 gap-y-1.5">
+      <ChkInput label="Grid point of connection (PoC)" k="eh_poc" fs={fs} set={set} tip={tip.poc} />
+      <ChkInput label="Critical bus" k="eh_critical" fs={fs} set={set} tip={tip.crit} />
+      <NumInput label="Short-circuit level" k="eh_sk_mva" fs={fs} set={set} unit="MVA" tip={tip.sk} />
+      <NumInput label="IBR capacity" k="eh_ibr_mva" fs={fs} set={set} unit="MVA" tip={tip.ibr} />
+    </div>
   )
 }
 
 export function EhLinkInputs({ fs, set }: { fs: FS; set: SetFS }) {
+  const tip = useGuideField('eh_role', 'grid_import marks the Link the archetype packs cap or island (spec §6 rule 1). Conversion roles identify electrolysers / fuel cells for redundancy scenarios.')
   return (
-    <SelInput label="Energy Hub role" k="eh_role" fs={fs} set={set}
-      options={[...EH_LINK_ROLES]}
-      tip="grid_import marks the Link the archetype packs cap or island (spec §6 rule 1). Conversion roles identify electrolysers / fuel cells for redundancy scenarios." />
+    <div data-testid="eh-link-role" className="col-span-2">
+      <SelInput label="Energy Hub role" k="eh_role" fs={fs} set={set}
+        options={[...EH_LINK_ROLES]} tip={tip} />
+    </div>
   )
 }

@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "title": "Energy Hub & FMEA guide",
+  "tours": {
+    "eh_study": {
+      "title": "Run an Energy Hub reference-design study",
+      "intro": "An Energy Hub study sizes a site behind its grid connection to an availability target, then tells you — section by section — what it could and could not establish. This tour walks through each control once.",
+      "steps": [
+        {
+          "target": "eh-archetype",
+          "title": "1 · Choose the archetype pack",
+          "body": "The pack is the planning situation: strong_grid (imports freely), weak_flexible (capped import, SCR gate, DSR opt-in) or off_grid (the import Links are islanded). It sets the ENS target, the LOLE certification rule and the default stages.",
+          "enter": "Pick the situation that matches the site's grid connection. A template project preselects it for you."
+        },
+        {
+          "target": "eh-template-banner",
+          "title": "2 · Template recommendation",
+          "body": "Projects made from an Energy Hub template carry a recommended pack, settings and study notes. 'Use recommended settings' fills the form in one click.",
+          "enter": "Optional — only shown for template projects.",
+          "optional": true
+        },
+        {
+          "target": "eh-readiness",
+          "title": "3 · Check readiness before you run",
+          "body": "Readiness is a free preview: which Links count as imports and by which rule, the critical buses, the hub boundary the MC uses, and a per-stage prediction of what will run, be skipped (and why) and how many LP solves it costs.",
+          "enter": "Fix any 'not established' reason here (usually a missing tag) before spending solves."
+        },
+        {
+          "target": "eh-pack-settings-toggle",
+          "title": "4 · Pack settings",
+          "body": "Blank fields keep the pack's own values. Everything you set here is validated before the study starts — nothing is silently ignored.",
+          "enter": "Open it to adjust targets, the budget, MC draws, DSR buses, the energy import budget, levers and stages."
+        },
+        {
+          "target": "eh-pack-settings",
+          "reveal": "eh-pack-settings-toggle",
+          "title": "5 · Targets and budget",
+          "body": "ENS target (‱ of energy demand unserved) drives the capacity expansion; LOLE target (h/yr) is what the Monte-Carlo certifies against; Budget caps the LP solves across all stages; Import cap / Import energy (weak_flexible) limit grid imports in MW and MWh/yr.",
+          "enter": "Typical: ENS 1–10 ‱, LOLE 3 h/yr, budget 30–60 solves."
+        },
+        {
+          "target": "eh-pack-dtc-attribution",
+          "reveal": "eh-pack-settings-toggle",
+          "title": "6 · DtC attribution",
+          "body": "Design-to-critical (DtC) islands the import and checks critical demand. 'By bus' counts every Load on a critical bus; 'Per Load' reports each critical Load and sheds non-critical Loads first (a disclosed 5 % VOLL priority, exact on loss-free paths).",
+          "enter": "Use Per Load when critical and non-critical Loads share a bus."
+        },
+        {
+          "target": "eh-pack-levers",
+          "reveal": "eh-pack-settings-toggle",
+          "title": "7 · Levers",
+          "body": "The levers stage compares design options at the same target: storage duration, import cap, energy import budget, redundancy. 'pack' keeps the archetype's own choice.",
+          "enter": "Turn on the levers you want priced; each option costs one solve."
+        },
+        {
+          "target": "eh-pack-stages-default",
+          "reveal": "eh-pack-settings-toggle",
+          "title": "8 · Stages",
+          "body": "apply_pack → ens_solve → frontier → mc_certify → fmea_top → redundancy → levers → dtc_stress → dtc_planning → assemble. Untick 'pack's default stages' to choose; the required ones always run.",
+          "enter": "Readiness updates as you change stages, so you see the solve cost first."
+        },
+        {
+          "target": "eh-run",
+          "title": "9 · Run",
+          "body": "The study runs on a private copy — your network and solver settings are never changed. You can abort; solves already spent are kept and reported.",
+          "enter": "Press Run; progress appears here."
+        },
+        {
+          "target": "eh-completeness",
+          "title": "10 · Read the completeness chips",
+          "body": "Each section is ok (evidence produced), skipped (not requested or not applicable) or not established (requested but could not be shown — the reason is listed). A missing number is never reported as zero.",
+          "enter": "Start with the not-established reasons: they are your to-do list."
+        },
+        {
+          "target": "eh-certification-verdict",
+          "title": "11 · Certification verdict",
+          "body": "Certified only when the MC LOLE 95 % confidence interval lies entirely below the target (pass). Fail = entirely above; inconclusive = the interval straddles it (more draws help).",
+          "enter": "An inconclusive verdict is not a failure — raise MC draws or tighten the plan."
+        },
+        {
+          "target": "eh-pipeline-toggle",
+          "title": "12 · Pipeline",
+          "body": "Every stage with its status (run / skipped / failed / aborted), the LP solves it charged and its note — the audit trail of the study.",
+          "enter": "Open it when a section is not established to see which stage said why."
+        },
+        {
+          "target": "eh-report-json",
+          "title": "13 · Export",
+          "body": "Download JSON saves the stored report exactly as the API serves it; Summary CSV flattens the headline, completeness and notes for a spreadsheet.",
+          "enter": "Exports are disabled after a later solve cleared the stored report — re-run the study."
+        }
+      ]
+    },
+    "fmea": {
+      "title": "Rank failure modes in the FMEA worksheet",
+      "intro": "The worksheet ranks failure modes by expected cost per year (criticality = occurrence × severity). Classes A–C are computed by engines; class D rows are your expert judgement.",
+      "steps": [
+        {
+          "target": "fmea-sweep",
+          "title": "1 · Run the B/C sweep",
+          "body": "Class B re-solves each Link outage that carries outage data; class C re-solves each stress scenario below. Capacities are frozen at the plan, and the network is restored afterwards.",
+          "enter": "Needs VOLL > 0 in the solver settings; costs one solve per contingency."
+        },
+        {
+          "target": "fmea-table",
+          "title": "2 · Read the ranking",
+          "body": "Class A = generator forced outages (analytic COPT screening); B = Link outages (LP re-solve); C = stress scenarios; D = expert rows. The badge names the engine and its fidelity — none of these is a statutory reliability figure.",
+          "enter": "Sort by criticality (€/yr) to see where risk concentrates."
+        },
+        {
+          "target": "fmea-table",
+          "title": "3 · Mitigability",
+          "body": "The one editable cell on computed rows. What you type is stored with the project and survives re-solves (it is an overlay, not a row edit).",
+          "enter": "e.g. 'N+1 genset', 'spare transformer on site', 'accept'."
+        },
+        {
+          "target": "fmea-expert-form",
+          "title": "4 · Add an expert (class D) mode",
+          "body": "For risks no engine models — cyber, fuel supply, cooling plant. Criticality is computed from what you enter; the row is badged 'expert' and never impersonates an engine.",
+          "enter": "Name, events/yr, severity in €, optional mitigability."
+        },
+        {
+          "target": "stress-editor",
+          "title": "5 · Stress scenarios (class C)",
+          "body": "Correlated weather/demand extremes that independent outage draws cannot compose. Parametric scenarios scale electrical load (0–10×) and profile-borne renewable availability (0–1.5×); profiles scenarios swap whole series from a pack.",
+          "enter": "Frequency is the empirical events per year, in (0, 365]."
+        },
+        {
+          "target": "stress-add",
+          "title": "6 · Add a scenario",
+          "body": "Bounds are checked as you type; the server's message is shown verbatim if it still refuses. A profile pack must name Loads/Generators that exist on your network, or the sweep reports it incomplete.",
+          "enter": "e.g. heatwave: load ×1.15, renewables ×0.85, 0.3 /yr."
+        }
+      ]
+    },
+    "eh_tagging": {
+      "title": "Tag your network for an Energy Hub study",
+      "intro": "Four bus tags and one Link role tell the study where the grid ends, what must stay on, and how strong the connection is. Select a bus or a Link on the map to see these fields in the Properties panel.",
+      "steps": [
+        {
+          "target": "eh-bus-fields",
+          "title": "1 · Bus tags",
+          "body": "Point of connection = the GRID-side bus of the import; Critical bus = its demand must be served when islanded; Short-circuit level and IBR capacity feed the SCR (grid-strength) gate at the PoC.",
+          "enter": "Select a bus, open Edit, then tick/enter the Energy Hub fields."
+        },
+        {
+          "target": "eh-link-role",
+          "title": "2 · Link role",
+          "body": "grid_import marks the import Link the packs cap or island. Conversion roles (electrolyser, fuel_cell, conversion) identify units for redundancy scenarios and the multi-energy report.",
+          "enter": "Select the import Link, open Edit, choose grid_import."
+        }
+      ]
+    }
+  },
+  "fields": {
+    "archetype": "Planning situation: strong_grid (free import), weak_flexible (capped import, SCR gate, DSR opt-in), off_grid (import islanded).",
+    "ens_cap_permyriad": "ENS target — the share of energy demand allowed unserved, in ‱ (1 ‱ = 0.01 %). Drives the capacity expansion.",
+    "target_lole_h": "LOLE target — expected hours per year with unserved load. The Monte-Carlo certifies against it (certified only when the 95 % CI is below it).",
+    "import_p_nom_mw": "weak_flexible import cap in MW, split equally across the import Links.",
+    "import_energy_mwh_per_year": "weak_flexible energy import budget in MWh per year, metered at the hub (efficiency × flow) on grid→hub Links, per year of each period.",
+    "budget_solves": "Ceiling on LP solves across all stages. Stages that would exceed it are skipped with a reason.",
+    "mc_draws": "Monte-Carlo sample years for certification; more draws narrow the confidence interval.",
+    "dsr_buses": "weak_flexible only: buses whose demand may be curtailed at a DSR price. Never applied globally.",
+    "dtc_attribution": "By bus (default): a critical Load makes its whole bus critical. Per Load: each critical Load is reported, non-critical Loads are shed first (5 % VOLL priority, exact on loss-free paths).",
+    "levers": "Design options priced at the same target: storage_duration, import_cap, import_energy, redundancy.",
+    "stages": "apply_pack, ens_solve, frontier, mc_certify, fmea_top, redundancy, levers, dtc_stress, dtc_planning, assemble.",
+    "frontier": "Cost vs availability: re-optimises the plan at several ENS targets around the pack's; the knee is where extra reliability stops paying at your VOLL.",
+    "mc_certify": "Sequential Monte-Carlo LOLE of the solved plan on the hub side of the boundary; verdict pass / fail / inconclusive.",
+    "fmea_top": "The five costliest Link failure modes on the plan (Class-B sweep).",
+    "redundancy": "Compares N, N+1 and spare-unit scenarios for conversion equipment.",
+    "dtc_stress": "Islands each import on the fixed plan and measures critical vs non-critical unserved energy.",
+    "dtc_planning": "Re-plans islanded with only critical demand retained; reports the extra capacity and cost.",
+    "completeness": "ok = evidence produced; skipped = not requested / not applicable; not_established = requested but could not be shown (reason listed).",
+    "certification": "pass = CI entirely below the target; fail = entirely above; inconclusive = straddles it.",
+    "eh_poc": "Point of connection: the GRID-side bus of the import boundary. The hub is everything on the other side of the import Links.",
+    "eh_critical": "Demand on this bus must be served when the import is lost (DtC stress / planning).",
+    "eh_sk_mva": "Grid short-circuit level at this PoC in MVA — the SCR gate's numerator.",
+    "eh_ibr_mva": "Inverter-based capacity at this PoC in MVA — the SCR gate's denominator (defaults to installed IBR generators when blank).",
+    "eh_role": "grid_import = the import the packs cap or island; electrolyser / fuel_cell / conversion = conversion units for redundancy and the multi-energy report.",
+    "failure_class": "A = generator forced outages (COPT screening); B = Link outages (LP re-solve); C = stress scenarios; D = expert entry.",
+    "criticality": "Expected cost per year = occurrence (events/yr) × severity (€ per event).",
+    "mitigability": "Your note on how a mode is mitigated; stored with the project, survives re-solves.",
+    "stress_kind": "parametric = scale load and renewables; profiles = swap whole series from a pack (names must exist on the network).",
+    "frequency_per_year": "Empirical events per year of the stress condition, in (0, 365].",
+    "electrical_load_multiplier": "Electrical loads × this factor, in (0, 10].",
+    "renewable_availability_multiplier": "Profile-borne generators' availability × this factor, in [0, 1.5]; 0 = no renewable output.",
+    "profile_pack": "A shipped series pack; its Load/Generator names must exist on your network."
+  }
+}

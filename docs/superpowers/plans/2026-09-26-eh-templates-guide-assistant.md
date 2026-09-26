@@ -144,7 +144,7 @@ The verdict was **GO WITH CONDITIONS**, with 0 blockers. Every invariant held ac
   - Step-by-step coach marks that highlight the target, show the text, and offer Back / Next / Skip.
   - Keyboard: Esc and arrow keys.
   - "Seen" state is kept per tour in `localStorage`, which is try/catch safe.
-  - A step whose target is not on screen is skipped with a note, not crashed on.
+  - A step whose target is not on screen first tries its `reveal` control, then is shown centred with a note. Optional steps are skipped. It never crashes.
 - **Tours.**
   - "Energy Hub study": archetype, readiness, pack settings, DtC attribution, energy budget, run, report headline, completeness, pipeline, exports.
   - "FMEA worksheet": sweep, rows and badges, mitigability, class D, stress scenarios.
@@ -155,6 +155,33 @@ The verdict was **GO WITH CONDITIONS**, with 0 blockers. Every invariant held ac
 - The catalogue's targets all exist in the rendered components; this is pinned so a renamed test id breaks the build.
 - The tour navigates, skips missing targets, and persists "seen".
 - The route serves the catalogue.
+
+**P21 status:** implemented. There are backend tests (`tests/test_guides.py`, 5) and FE tests (`GuidedTour.test.tsx`, 4, plus 2 panel tests). FE suite: 2027 passed.
+
+- [x] **Catalogue.** `backend/data/guides/eh_fmea_guide.json` holds three tours:
+  - `eh_study`, 13 steps: pack, template, readiness, settings, targets, DtC, levers, stages, run, completeness, verdict, pipeline, export;
+  - `fmea`, 6 steps: sweep, ranking, mitigability, class D, stress scenarios, adding one;
+  - `eh_tagging`, 2 steps: bus tags, Link role.
+
+  It also has a `fields` help map for every EH tag, pack override, stage, status, failure class and stress field.
+- [x] **Serving.**
+  - `services/guides.py` validates and caches the catalogue.
+  - `GET /api/guides` and `/api/guides/{topic}` serve it from an allow-list, 404 otherwise.
+  - The route inventory is updated.
+  - The spec ships `data/guides`, and `check_bundle.ROOTED` requires it beside `alembic.ini`.
+- [x] **Pins.**
+  - Every tour target and reveal is a `data-testid` a component really renders.
+  - Every EH tag column and the key pack overrides have help text.
+  - A malformed catalogue is refused.
+- [x] **FE.**
+  - `components/GuidedTour.tsx`:
+    - highlight ring and popover with a "What to enter" line;
+    - Back / Next / Skip, plus Esc and the arrow keys;
+    - reveals then re-checks a hidden target; skips optional steps; shows a missing target with a note;
+    - "seen" kept in `localStorage`, try/catch safe, with a dot until finished.
+  - Guide buttons: EH panel ("Guide", "How to tag the network") and FMEA tab ("Guide").
+  - New tour anchors: `fmea-sweep`, `fmea-table`, `fmea-expert-form`, `eh-bus-fields`, `eh-link-role`.
+  - Bus/Link EH hover tips read the catalogue wording (`useGuideField`), with the old text as an offline fallback.
 
 ## P22 — Assistant support: explain, analyse, recommend, apply
 

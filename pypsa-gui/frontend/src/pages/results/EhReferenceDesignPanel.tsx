@@ -22,6 +22,7 @@ import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { blockerMessage } from './McPanel'
 import { downloadCSV, downloadJSON } from './shared'
+import { GuideButton } from '../../components/GuidedTour'
 
 const ARCHETYPES: { id: EhArchetype; label: string; blurb: string }[] = [
   {
@@ -778,6 +779,11 @@ export function EhReferenceDesignPanel() {
       </button>
       {open && (
         <div className="p-3 flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <GuideButton tourId="eh_study" testId="eh-guide-button" />
+            <GuideButton tourId="eh_tagging" testId="eh-tagging-guide-button"
+                         label="How to tag the network" />
+          </div>
           <p className="text-[11px] text-muted">
             Runs an Energy Hub archetype pack through the reference-design
             pipeline (apply pack → ENS solve → assemble, plus any levers the

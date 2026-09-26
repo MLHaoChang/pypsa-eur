@@ -78,6 +78,9 @@ datas = [
     # Class-C synthetic profile packs (P15): `services/adequacy/stress.py`
     # resolves `parents[2] / "data" / "eh_class_c"`, i.e. _MEIPASS root.
     (str(BACKEND / "data" / "eh_class_c"), "data/eh_class_c"),
+    # In-app guide catalogue (P21): `services/guides.py` resolves
+    # `parents[1] / "data" / "guides"`, i.e. _MEIPASS root.
+    (str(BACKEND / "data" / "guides"), "data/guides"),
     # The SPA the backend serves in local mode. `settings.frontend_dist`
     # resolves `<backend>/../frontend/dist`, which under _MEIPASS means this
     # exact layout.
