@@ -81,6 +81,13 @@ describe('EH payload helpers', () => {
     expect(ehLinkPayload({ eh_role: '' }, link({ eh_role: 'grid_import' })))
       .toEqual({ eh_role: '' })
   })
+
+  it('does not re-send an unchanged role (study-internal roles are refused)', () => {
+    expect(ehLinkPayload({ eh_role: 'eh_n1_conversion' },
+      link({ eh_role: 'eh_n1_conversion' }))).toEqual({})
+    expect(ehLinkPayload({ eh_role: 'grid_import' },
+      link({ eh_role: 'eh_n1_conversion' }))).toEqual({ eh_role: 'grid_import' })
+  })
 })
 
 describe('Bus card — Energy Hub section', () => {

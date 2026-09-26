@@ -1454,15 +1454,20 @@ def get_eh_readiness(archetype: str, budget_solves: int | None = None,
     n = PyPSAService.get_network()
     if n is None:
         raise HTTPException(422, "no network is loaded")
+    from services.adequacy.eh_study import _private_copy
+
     cfg = _state.get("solver_config")
+    # Copy under the lock, compute outside it: the preflight applies a pack
+    # and walks the network, and must not stall edits or a solve meanwhile.
     with PyPSAService.get_lock():
-        try:
-            return eh_readiness(
-                n, _PACK_FACTORY[archetype](), budget_solves=budget,
-                stages=stage_list,
-                voll=getattr(cfg, "voll", None) if cfg is not None else None)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
+        snapshot = _private_copy(n)
+    try:
+        return eh_readiness(
+            snapshot, _PACK_FACTORY[archetype](), budget_solves=budget,
+            stages=stage_list,
+            voll=getattr(cfg, "voll", None) if cfg is not None else None)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @results_router.get("/eh_reference_design")

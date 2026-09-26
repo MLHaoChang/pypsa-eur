@@ -13,9 +13,10 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
 import pandas as pd
 
-from models.energy_hub import EH_CUSTOM_COLUMNS, EH_LINK_ROLES
+from models.energy_hub import EH_CUSTOM_COLUMNS, EH_INTERNAL_ROLES, EH_LINK_ROLES
 
 _ATTR_OF = {"Bus": "buses", "Link": "links"}
 _TRUE = ("true", "1", "yes", "y", "t")
@@ -27,11 +28,12 @@ def eh_columns_for(component_class: str) -> dict[str, str]:
 
 
 def _as_bool(value) -> bool:
-    if value is None or (isinstance(value, float) and math.isnan(value)):
+    if value is None or (isinstance(value, (float, np.floating))
+                         and math.isnan(value)):
         return False
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)) and value in (0, 1):
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (int, float, np.integer, np.floating)) and value in (0, 1):
         return bool(value)
     if isinstance(value, str) and value.strip().lower() in _TRUE + _FALSE:
         return value.strip().lower() in _TRUE
@@ -39,7 +41,12 @@ def _as_bool(value) -> bool:
 
 
 def coerce_eh_value(component_class: str, col: str, value):
-    """The stored value for one whitelisted cell; ValueError names the rule."""
+    """The stored value for one API-written cell; ValueError names the rule.
+
+    Study-internal roles (``EH_INTERNAL_ROLES``) are refused here: a user
+    tag of ``eh_n1_conversion`` would silently change what a redundancy
+    scenario counts. The normaliser still keeps them on load.
+    """
     kind = eh_columns_for(component_class)[col]
     if kind == "bool":
         try:
@@ -58,10 +65,14 @@ def coerce_eh_value(component_class: str, col: str, value):
         return v
     if kind == "role":
         v = "" if value is None else str(value).strip()
+        if v in EH_INTERNAL_ROLES:
+            raise ValueError(
+                f"{col}: {v!r} is set by the redundancy study, not by hand")
         if v not in EH_LINK_ROLES:
             raise ValueError(
                 f"{col}: {v!r} is not an Energy Hub role; expected one of "
-                f"{[r for r in EH_LINK_ROLES if r]} (or empty)")
+                f"{[r for r in EH_LINK_ROLES if r and r not in EH_INTERNAL_ROLES]}"
+                " (or empty)")
         return v
     raise ValueError(f"{col}: unknown kind {kind!r}")  # pragma: no cover
 

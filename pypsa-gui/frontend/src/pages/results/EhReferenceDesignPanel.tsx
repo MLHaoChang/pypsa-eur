@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Hexagon, Square } from 'lucide-react'
 import {
@@ -374,10 +374,28 @@ function CsvButton({
   )
 }
 
+/** `value`, settled for `ms` (the latest value wins). */
+function useDebounced<T>(value: T, ms: number): T {
+  const [settled, setSettled] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(value), ms)
+    return () => clearTimeout(t)
+  }, [value, ms])
+  return settled
+}
+
+const PREDICTION_LABEL: Record<string, string> = {
+  may_skip_budget: 'may skip (budget)',
+  skipped_budget: 'skipped (budget)',
+  not_established: 'not established',
+  fails: 'fails',
+  not_reached: 'not reached',
+}
+
 /** Pre-run readiness: what the study will find and which stages will run. */
 export function ReadinessSummary({ r }: { r: EhReadiness }) {
   const skipped = r.stages.filter(s =>
-    s.prediction === 'skipped_budget' || s.prediction === 'not_established')
+    s.prediction !== 'run' && s.prediction !== 'not_requested')
   return (
     <div className="flex flex-col gap-0.5 text-[10px] border border-border/60 rounded p-2"
          data-testid="eh-readiness">
@@ -404,7 +422,10 @@ export function ReadinessSummary({ r }: { r: EhReadiness }) {
       {skipped.length > 0 && (
         <ul className="text-warn" data-testid="eh-readiness-skipped">
           {skipped.map(s => (
-            <li key={s.stage}>{s.stage}: {s.reason ?? s.prediction}</li>
+            <li key={s.stage}>
+              {s.stage} — {PREDICTION_LABEL[s.prediction] ?? s.prediction}
+              {s.reason ? `: ${s.reason}` : ''}
+            </li>
           ))}
         </ul>
       )}
@@ -424,13 +445,7 @@ export function EhReferenceDesignPanel() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [form, setForm] = useState<PackForm>(EMPTY_PACK_FORM)
   const built = buildEhStudyBody(archetype, form)
-  const readinessBudget = built.body?.budget_solves
-  const { data: readiness } = useQuery({
-    queryKey: [...nk(currentProject, 'results', 'eh_readiness'), archetype,
-      readinessBudget ?? null],
-    queryFn: () => resultsApi.getEhReadiness(archetype, readinessBudget),
-    enabled: open,
-  })
+  const readinessBudget = useDebounced(built.body?.budget_solves, 400)
   const setField = (k: keyof PackForm) =>
     (e: { target: { value: string } }) => setForm(f => ({ ...f, [k]: e.target.value }))
 
@@ -449,6 +464,14 @@ export function EhReferenceDesignPanel() {
   })
   const study = (studyData ?? null) as EhStudyPayload | null
   const running = study?.status === 'running'
+  // Readiness copies the network under its lock: not while a study runs,
+  // and not on every keystroke of the budget field (debounced above).
+  const { data: readiness } = useQuery({
+    queryKey: [...nk(currentProject, 'results', 'eh_readiness'), archetype,
+      readinessBudget ?? null],
+    queryFn: () => resultsApi.getEhReadiness(archetype, readinessBudget),
+    enabled: open && !running,
+  })
 
   const { data: reportData } = useQuery({
     queryKey: reportKey,

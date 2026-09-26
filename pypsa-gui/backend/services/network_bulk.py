@@ -378,8 +378,20 @@ def apply_bulk_update(body: dict) -> dict:
         # setting it — this catches typos like "p_min_pu " (trailing space).
         # P14: whitelisted Energy Hub tags may be the FIRST write of their
         # column — create it typed, so the dtype dispatch below sees bool.
-        from services.adequacy.eh_columns import eh_columns_for, ensure_eh_column
+        from services.adequacy.eh_columns import (
+            coerce_eh_value, eh_columns_for, ensure_eh_column)
         _eh_cols = eh_columns_for(component_class)
+        # Validate every EH cell BEFORE creating a column: a refused batch
+        # must leave the frame exactly as it was.
+        _eh_values = ([up for _, up in pairs] if row_form
+                      else [updates])
+        for _up in _eh_values:
+            for col, value in (_up or {}).items():
+                if col in _eh_cols:
+                    try:
+                        coerce_eh_value(component_class, col, value)
+                    except ValueError as exc:
+                        raise HTTPException(422, str(exc)) from exc
         for c in sorted(touched_cols):
             if c in _eh_cols:
                 ensure_eh_column(n, component_class, c)

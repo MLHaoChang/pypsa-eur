@@ -240,7 +240,8 @@ def test_readiness_exact_estimates_match_the_run(budget):
         elif row["basis"] == "exact" and row["prediction"] == "run":
             assert rec.status == "run", (row, rec)
             assert rec.solves_charged == row["solves"], (row, rec)
-        elif row["prediction"] in ("skipped_budget", "not_established"):
+        elif row["prediction"] in ("skipped_budget", "not_established",
+                                   "may_skip_budget"):
             assert rec.status == "skipped", (row, rec)
             assert rec.solves_charged == 0
     assert ready["class_b"]["k"] == report.sections["fmea_top"].payload["k_links"] \
@@ -298,3 +299,165 @@ def test_readiness_http(client, install_network):
                       params={"archetype": "nope"}).status_code == 422
     assert client.get("/api/results/eh_readiness", params={
         "archetype": "off_grid", "stages": "bogus"}).status_code == 422
+
+
+# ── P14 gate: readiness mirrors the driver's skips and failures ─────────────
+
+
+def _row(ready, stage):
+    return next(r for r in ready["stages"] if r["stage"] == stage)
+
+
+@pytest.mark.parametrize("voll", [None, 0.0])
+def test_readiness_without_voll_predicts_frontier_and_fmea_not_established(voll):
+    """The session default VOLL is 0: the frontier raises its config error
+    and the Class-B sweep refuses, so neither may read as 'run'."""
+    from models.energy_hub import AvailabilityTarget, default_strong_grid_pack
+    from services.adequacy.eh_readiness import eh_readiness
+    from tests.test_energy_hub_frontier_fmea import _feeder_hub
+
+    pack = default_strong_grid_pack().model_copy(update={
+        "availability": AvailabilityTarget(ens_cap_permyriad=5000.0)})
+    ready = eh_readiness(_feeder_hub(), pack, budget_solves=30, voll=voll)
+    for stage in ("frontier", "fmea_top"):
+        row = _row(ready, stage)
+        assert row["prediction"] == "not_established", row
+        assert row["solves"] == 0 and "VOLL" in row["reason"]
+
+
+def test_readiness_mc_certify_follows_the_hub_boundary():
+    from models.energy_hub import default_weak_flexible_pack
+    from services.adequacy.eh_readiness import eh_readiness
+    from tests.test_energy_hub_frontier_fmea import _feeder_hub
+
+    ok = eh_readiness(_feeder_hub(), default_weak_flexible_pack(),
+                      budget_solves=30, voll=3000.0)
+    assert _row(ok, "mc_certify")["prediction"] == "run"
+    n = _feeder_hub()
+    n.links["eh_role"] = ""                     # carrier rule → boundary refused
+    bad = eh_readiness(n, default_weak_flexible_pack(), budget_solves=30,
+                       voll=3000.0)
+    row = _row(bad, "mc_certify")
+    assert bad["mc_boundary"]["ok"] is False
+    assert row["prediction"] == "not_established"
+    assert row["reason"] == bad["mc_boundary"]["error"]
+
+
+def test_readiness_pack_apply_failure_fails_apply_pack_and_reaches_nothing():
+    from models.energy_hub import default_weak_flexible_pack
+    from services.adequacy.eh_readiness import eh_readiness
+
+    n = _net()
+    n.remove("Link", "imp")                     # weak_flexible needs an import
+    ready = eh_readiness(n, default_weak_flexible_pack(), budget_solves=30,
+                         voll=3000.0)
+    assert ready["import"]["applied"] is False
+    assert _row(ready, "apply_pack")["prediction"] == "fails"
+    for row in ready["stages"]:
+        if row["stage"] != "apply_pack" and row["prediction"] != "not_requested":
+            assert row["prediction"] == "not_reached", row
+    assert ready["estimated_solves"] == 0
+
+
+def test_readiness_levers_use_the_levers_import_selector(monkeypatch):
+    """The levers stage picks import Links with its own selector, not §6."""
+    from models.energy_hub import default_strong_grid_pack
+    from services.adequacy import levers as lev
+    from services.adequacy.eh_readiness import eh_readiness
+    from tests.test_energy_hub_frontier_fmea import _feeder_hub
+
+    pack = default_strong_grid_pack().model_copy(
+        update={"levers": default_strong_grid_pack().levers.model_copy(
+            update={"import_cap": True, "storage_duration": True})})
+    stages = ["apply_pack", "ens_solve", "levers"]
+    both = eh_readiness(_feeder_hub(), pack, budget_solves=30, voll=3000.0,
+                        stages=stages)
+    assert _row(both, "levers")["solves"] == (
+        len(lev.DEFAULT_STORAGE_HOURS) + len(lev.DEFAULT_IMPORT_CAPS_MW))
+    monkeypatch.setattr(lev, "_import_link_ids", lambda n: [])
+    storage_only = eh_readiness(_feeder_hub(), pack, budget_solves=30,
+                                voll=3000.0, stages=stages)
+    assert _row(storage_only, "levers")["solves"] == len(lev.DEFAULT_STORAGE_HOURS)
+
+
+def test_readiness_budget_skip_after_an_upper_bound_is_only_may_skip():
+    from models.energy_hub import default_weak_flexible_pack
+    from services.adequacy.eh_readiness import eh_readiness
+    from tests.test_energy_hub_frontier_fmea import _feeder_hub
+
+    ready = eh_readiness(
+        _feeder_hub(), default_weak_flexible_pack(), budget_solves=4,
+        voll=3000.0, stages=["apply_pack", "ens_solve", "redundancy",
+                             "levers", "dtc_stress"])
+    assert _row(ready, "redundancy")["prediction"] == "run"
+    assert _row(ready, "redundancy")["basis"] == "upper_bound"
+    later = [_row(ready, s)["prediction"] for s in ("levers", "dtc_stress")]
+    assert "skipped_budget" not in later
+    assert "may_skip_budget" in later
+
+
+def test_numpy_bools_survive_normalisation():
+    import numpy as np
+    n = _net()
+    n.buses["eh_critical"] = pd.Series([True, None], index=n.buses.index,
+                                       dtype=object)
+    n.buses.at["grid", "eh_critical"] = np.True_
+    EC.normalise_eh_columns(n)
+    assert n.buses["eh_critical"].dtype == bool
+    assert n.buses["eh_critical"].tolist() == [True, True]
+    obj = pd.Series([True, None, np.True_, np.int64(0), np.int64(1)],
+                    dtype=object)
+    assert [EC._as_bool(v) for v in obj] == [True, False, True, False, True]
+
+
+def test_bulk_refused_batch_leaves_no_stray_column(client, install_network):
+    n = _net()
+    install_network(n)
+    r = client.patch(BULK, json={"component_class": "Link", "names": ["imp"],
+                                 "updates": {"eh_role": "nope"}})
+    assert r.status_code == 422
+    assert "eh_role" not in n.links.columns
+
+
+@pytest.mark.parametrize("path", ["put", "bulk"])
+def test_internal_roles_are_refused_through_the_api(client, install_network, path):
+    install_network(_net())
+    if path == "bulk":
+        r = client.patch(BULK, json={"component_class": "Link", "names": ["imp"],
+                                     "updates": {"eh_role": "eh_n1_conversion"}})
+    else:
+        r = client.put("/api/network/links/imp",
+                       json={**LINK, "eh_role": "eh_n1_conversion"})
+    assert r.status_code == 422, r.text
+    assert "redundancy" in r.text
+
+
+def test_readiness_route_computes_outside_the_network_lock(
+        client, install_network, monkeypatch):
+    from services.adequacy import eh_readiness as R
+    from services.pypsa_service import PyPSAService
+    from tests.test_energy_hub_frontier_fmea import _feeder_hub
+
+    install_network(_feeder_hub())
+    seen = {}
+    real = R.eh_readiness
+
+    def spy(network, *a, **kw):
+        import threading
+        lock = PyPSAService.get_lock()           # an RLock: probe off-thread
+
+        def probe():
+            got = lock.acquire(blocking=False)
+            seen["free"] = got
+            if got:
+                lock.release()
+        t = threading.Thread(target=probe)
+        t.start()
+        t.join()
+        seen["shared"] = network is PyPSAService.get_network()
+        return real(network, *a, **kw)
+
+    monkeypatch.setattr(R, "eh_readiness", spy)
+    r = client.get("/api/results/eh_readiness", params={"archetype": "off_grid"})
+    assert r.status_code == 200, r.text
+    assert seen == {"free": True, "shared": False}

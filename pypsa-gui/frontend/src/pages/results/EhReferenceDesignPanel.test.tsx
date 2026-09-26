@@ -313,9 +313,48 @@ describe('EhReferenceDesignPanel', () => {
     expect(screen.getByTestId('eh-readiness-solves').textContent).toMatch(/14 \/ 30/)
     expect(screen.getByTestId('eh-readiness-boundary').textContent).toMatch(/eh_role/)
     expect(screen.getByTestId('eh-readiness-skipped').textContent)
-      .toMatch(/fmea_top: needs 21 solves/)
+      .toMatch(/fmea_top — skipped \(budget\): needs 21 solves/)
     await waitFor(() => expect(resultsApi.getEhReadiness)
       .toHaveBeenCalledWith('weak_flexible', undefined))
+  })
+
+  it('labels every non-run prediction, including may-skip after an estimate', async () => {
+    vi.mocked(resultsApi.getEhReadiness).mockResolvedValue({
+      ...READINESS,
+      stages: [
+        { stage: 'apply_pack', prediction: 'run', solves: 0, basis: 'exact', reason: null },
+        { stage: 'redundancy', prediction: 'run', solves: 4, basis: 'upper_bound', reason: null },
+        { stage: 'levers', prediction: 'may_skip_budget', solves: 0, basis: 'exact',
+          reason: 'budget_solves exhausted before this stage' },
+        { stage: 'dtc_stress', prediction: 'not_reached', solves: 0, basis: 'exact',
+          reason: 'apply_pack fails' },
+      ],
+    } as never)
+    await openPanel()
+    const list = await screen.findByTestId('eh-readiness-skipped')
+    expect(list.textContent).toMatch(/levers — may skip \(budget\)/)
+    expect(list.textContent).toMatch(/dtc_stress — not reached: apply_pack fails/)
+    expect(list.textContent).not.toMatch(/redundancy/)
+  })
+
+  it('does not ask for readiness while a study runs', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(
+      { status: 'running', study: 'eh_study', archetype: 'strong_grid' } as never)
+    await openPanel()
+    await waitFor(() => expect(resultsApi.getEhStudy).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 50))
+    expect(resultsApi.getEhReadiness).not.toHaveBeenCalled()
+  })
+
+  it('debounces the budget before asking for readiness', async () => {
+    const user = await openPanel()
+    await waitFor(() => expect(resultsApi.getEhReadiness)
+      .toHaveBeenCalledWith('strong_grid', undefined))
+    await user.click(screen.getByTestId('eh-pack-settings-toggle'))
+    await user.type(screen.getByTestId('eh-pack-budget'), '25')
+    await waitFor(() => expect(resultsApi.getEhReadiness)
+      .toHaveBeenCalledWith('strong_grid', 25), { timeout: 2000 })
+    expect(resultsApi.getEhReadiness).not.toHaveBeenCalledWith('strong_grid', 2)
   })
 
   it('starts a study with the selected archetype', async () => {

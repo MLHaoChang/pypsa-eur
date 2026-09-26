@@ -1037,8 +1037,12 @@ export function ehBusPayload(fs: FS, current: object): Record<string, unknown> {
 /** The EH part of a Link PUT (same send-only-when-meaningful rule). */
 export function ehLinkPayload(fs: FS, current: object): Record<string, unknown> {
   const role = (fs.eh_role ?? '').trim()
-  return role !== '' || 'eh_role' in (current as Record<string, unknown>)
-    ? { eh_role: role } : {}
+  const cur = current as Record<string, unknown>
+  // An unchanged role is not re-sent: a study-internal role (set by the
+  // redundancy scenarios) is refused by the API as a hand-set value, and must
+  // not block an unrelated edit of the same Link.
+  if ('eh_role' in cur && String(cur.eh_role ?? '') === role) return {}
+  return role !== '' || 'eh_role' in cur ? { eh_role: role } : {}
 }
 
 export function EhBusInputs({ fs, set }: { fs: FS; set: SetFS }) {

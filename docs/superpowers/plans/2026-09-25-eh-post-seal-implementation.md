@@ -497,7 +497,20 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
   - An "Energy Hub" section on the Bus card (PoC, critical, SCR MVA inputs) and the Link card (role select).
   - Tags are sent only when set or already present, so ordinary edits never create columns, and existing tags can be cleared.
   - The EH panel shows readiness (import rule/links, critical buses, MC boundary, solves vs budget, predicted skips) before Run.
-- [ ] **QA gate** — pending.
+- [x] **QA gate** — GO WITH BINDING CONDITIONS, all closed (11 red→green backend tests plus 4 FE tests; tagging suite 31 passed, FE 1975 passed, EH/CRUD/bulk/chat subset 471 passed):
+  1. *Readiness mispredicted "run".*
+     - VOLL ≤ 0, which is the session default, now makes frontier/fmea_top `not_established` with 0 solves.
+     - A refused MC hub boundary makes `mc_certify` `not_established`.
+     - A pack the driver cannot apply makes `apply_pack` `fails` and every later stage `not_reached`.
+     - The levers import estimate uses `levers._import_link_ids`, which is the stage's own selector, not §6.
+     - A budget skip that follows an upper-bound estimate reads `may_skip_budget`.
+  2. *Lock scope.* The route copies under the network lock and computes outside it, which a test checks with an off-thread probe. The FE query waits on `open && !running` and debounces the budget by 400 ms.
+  3. *numpy bools.* `_as_bool` accepts `np.bool_` / `np.integer` / `np.floating`. `[True, None, np.True_]` normalises to `[True, False, True]`.
+  - Non-binding items taken:
+    - `/_bulk` validates EH cells before creating a column, so a refused batch leaves no stray column.
+    - Study-internal roles (`eh_n1_conversion`) are refused through the API.
+    - The FE does not re-send an unchanged role, so an internal role never blocks an unrelated edit.
+    - An unknown current role already renders as an option (`SelInput`).
 
 ---
 
