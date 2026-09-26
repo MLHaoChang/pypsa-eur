@@ -15,6 +15,7 @@ from services.finance.packs.base import JurisdictionPack, register
 def make_pack() -> JurisdictionPack:
     return JurisdictionPack(
         jurisdiction="us_federal",
+        country="US",
         valid_from=date(2026, 1, 1),
         source="stub — no rules yet; P4 WP4.3a/WP4.4 fill from cited statutes",
         rules={},
