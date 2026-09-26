@@ -426,6 +426,7 @@ mc?: {draws?: int, seed?: int, cov_target?: float}
     - The record stores the normalised overrides.
     - `dsr_buses` are deduplicated.
     - `levers.import_cap` on off_grid is refused as a known no-op.
+  - **Suites:** backend 5847 passed, 31 skipped; frontend 1965 passed, `tsc` clean.
 
 ---
 
