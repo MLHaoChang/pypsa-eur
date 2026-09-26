@@ -696,6 +696,22 @@ def _derive_dtc_config(st: _Study, error_cls, stage: str):
     return derived
 
 
+def _stage_exception(st: _Study, stage: str, section: str,
+                     exc: Exception) -> None:
+    """E2E review m1: ``aborted`` means the user's stop event only.
+
+    A ``ValueError`` (every engine's config refusal: DtC, lever, redundancy)
+    is ``skipped`` with its reason; anything else ran and produced no
+    evidence — ``failed``.
+    """
+    refusal = isinstance(exc, ValueError)
+    note = str(exc) if refusal else f"{stage} failed: {exc}"
+    st.mark(stage, "skipped" if refusal else "failed", note=note)
+    if stage == "dtc_planning" and section in st.sections:
+        return          # keep the stress evidence already in the dtc section
+    st.sections[section] = ("not_established", None, note)
+
+
 def _stage_redundancy(st: _Study) -> None:
     from services.adequacy import redundancy as red
     try:
@@ -714,8 +730,7 @@ def _stage_redundancy(st: _Study) -> None:
         st.solves += n_attempted
     except Exception as exc:
         logger.exception("redundancy compare failed")
-        st.mark("redundancy", "aborted", note=str(exc))
-        st.sections["redundancy"] = ("not_established", None, str(exc))
+        _stage_exception(st, "redundancy", "redundancy", exc)
 
 
 def _stage_levers(st: _Study) -> None:
@@ -801,8 +816,7 @@ def _stage_levers(st: _Study) -> None:
         st.solves += attempted
     except Exception as exc:
         logger.exception("lever compare failed")
-        st.mark("levers", "aborted", note=str(exc))
-        st.sections["levers"] = ("not_established", None, str(exc))
+        _stage_exception(st, "levers", "levers", exc)
 
 
 def _stage_dtc_stress(st: _Study) -> None:
@@ -823,8 +837,7 @@ def _stage_dtc_stress(st: _Study) -> None:
         st.solves += n_attempted
     except Exception as exc:
         logger.exception("DtC stress failed")
-        st.mark("dtc_stress", "aborted", note=str(exc))
-        st.sections["dtc"] = ("not_established", None, str(exc))
+        _stage_exception(st, "dtc_stress", "dtc", exc)
 
 
 def _stage_dtc_planning(st: _Study) -> None:
@@ -856,8 +869,7 @@ def _stage_dtc_planning(st: _Study) -> None:
         st.solves += n_attempted
     except Exception as exc:
         logger.exception("DtC planning failed")
-        st.mark("dtc_planning", "aborted", note=str(exc))
-        st.sections.setdefault("dtc", ("not_established", None, str(exc)))
+        _stage_exception(st, "dtc_planning", "dtc", exc)
 
 
 # Executable stages, looked up at call time.

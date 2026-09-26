@@ -8,6 +8,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import StressScenarioEditor, {
   draftFrom,
+  packLabel,
   EMPTY_DRAFT,
   scenarioFrom,
   validateDraft,
@@ -256,4 +257,12 @@ describe('StressScenarioEditor', () => {
     await screen.findByTestId('stress-list')
     expect((screen.getByTestId('stress-add') as HTMLButtonElement).disabled).toBe(true)
   })
+})
+
+
+it('labels a pack with its length, the names it swaps and fixture status', () => {
+  expect(packLabel({ id: 'synth_mild_snap', name: 'Synthetic mild cold snap (2h)',
+    snapshots: 2, loads: ['l'], generators: ['wind1'],
+    provenance: 'synthetic_fixture_v1' }))
+    .toBe('Synthetic mild cold snap (2h) · 2 h · swaps l, wind1 · test fixture')
 })

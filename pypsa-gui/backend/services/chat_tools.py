@@ -1425,6 +1425,12 @@ _ADEQUACY_HANDLER_NAMES: dict[str, str] = {
     "reserve_margin": "get_reserve_margin",
     "eh_study": "get_eh_study",
     "eh_reference_design": "get_eh_reference_design",
+    # EH sibling tables (E2E review m5): the report summarises them; these
+    # are the per-option / per-contingency rows behind each section.
+    "eh_redundancy": "get_eh_redundancy",
+    "eh_levers": "get_eh_levers",
+    "eh_dtc": "get_eh_dtc",
+    "eh_dtc_planning": "get_eh_dtc_planning",
 }
 
 # Why each kind can be empty. Surfaced verbatim on the no_data result so the
@@ -1457,6 +1463,10 @@ _ADEQUACY_NO_DATA_HINTS: dict[str, str] = {
         "no Energy Hub ReferenceDesignReport has been stored — run "
         "run_eh_study first"
     ),
+    "eh_redundancy": "no EH study with the redundancy stage has run",
+    "eh_levers": "no EH study with the levers stage has run",
+    "eh_dtc": "no EH study with the dtc_stress stage has run",
+    "eh_dtc_planning": "no EH study with the dtc_planning stage has run",
 }
 
 # Path outlier, same shape as get_results' ac_pf_status (v4-MAJOR-4): eleven of

@@ -181,15 +181,30 @@ def apply_lever_scenario(
             raise LeverScenarioError("no import Links to apply import_cap")
         snap = n.links.copy(deep=True)
         cap = float(value)
+        ts_snap: dict[str, object] = {}
         for name in links:
-            if "p_nom_max" in n.links.columns:
-                n.links.at[name, "p_nom_max"] = cap
-            if "p_nom" in n.links.columns:
-                n.links.at[name, "p_nom"] = cap
+            if cap <= 0:
+                # E2E review M2: p_nom = 0 is refused by preflight
+                # (link_p_nom_invalid). A "no import" rung closes the Link
+                # the off_grid way — p_*_pu → 0, p_nom kept.
+                n.links.at[name, "p_max_pu"] = 0.0
+                n.links.at[name, "p_min_pu"] = 0.0
+                for attr in ("p_max_pu", "p_min_pu"):
+                    ts = getattr(getattr(n, "links_t", None), attr, None)
+                    if ts is not None and name in getattr(ts, "columns", []):
+                        ts_snap[(attr, name)] = ts[name].copy()
+                        ts[name] = 0.0
+            else:
+                if "p_nom_max" in n.links.columns:
+                    n.links.at[name, "p_nom_max"] = cap
+                if "p_nom" in n.links.columns:
+                    n.links.at[name, "p_nom"] = cap
             if "p_nom_extendable" in n.links.columns:
                 n.links.at[name, "p_nom_extendable"] = False
         def undo() -> None:
             n.links = snap
+            for (attr, name), series in ts_snap.items():
+                getattr(n.links_t, attr)[name] = series
         return undo, {
             "kind": kind,
             "value": cap,
@@ -300,11 +315,13 @@ def compare_lever_scenarios(
                 pass
             if float(getattr(cfg_i, "voll", 0.0) or 0.0) <= 0:
                 cfg_i.voll = 150.0
-            solves_attempted += 1
             status, condition = run_simulation(
                 cfg_i, nn, lock, stop_event, log_queue,
                 state_update=lambda **kw: sink.update(kw),
             )
+            # A preflight refusal builds no LP: not a solve (E2E review M2).
+            if condition != "validation_failed":
+                solves_attempted += 1
             rep = sink.get("adequacy_report") if isinstance(
                 sink.get("adequacy_report"), dict) else {}
             tgt = (rep or {}).get("target") or {}
@@ -321,7 +338,9 @@ def compare_lever_scenarios(
             ineffective_reason = None
             if kind in ("import_cap", "import_energy"):
                 applied_links = list(mutation.get("applied_links") or [])
-                if _import_links_flow_blocked(nn, applied_links):
+                # Blocked BEFORE the lever (Class-B islanding) — a 0 MW rung
+                # blocks the Links itself and is a real option.
+                if _import_links_flow_blocked(network, applied_links):
                     ineffective = True
                     ineffective_reason = (
                         f"{kind} no-op under Class-B islanding "

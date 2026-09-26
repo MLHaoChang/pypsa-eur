@@ -117,6 +117,7 @@ ADEQUACY_KIND_ENUM = [
     "copt", "fmea_modes", "fmea_sweep", "frontier", "mc",
     "mc_elcc_candidates", "coupling_loop", "margin_loop", "adequacy",
     "reserve_margin", "eh_study", "eh_reference_design",
+    "eh_redundancy", "eh_levers", "eh_dtc", "eh_dtc_planning",
 ]
 # The six kinds that run in a worker thread, i.e. the ones that can be
 # aborted. Read-only surfaces (copt / fmea_modes / adequacy / reserve_margin /

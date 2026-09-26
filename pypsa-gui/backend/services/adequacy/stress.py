@@ -172,6 +172,25 @@ def _profiles_ready(scenario: dict) -> bool:
     return len(set(lengths)) == 1 and lengths[0] > 0
 
 
+def _profiles_unmatched(scenario: dict, network) -> dict[str, list[str]]:
+    """Series keys with no matching Load / Generator on ``network``."""
+    loads, gens = _profiles_payload(scenario)
+    out: dict[str, list[str]] = {}
+    loads_df = getattr(network, "loads", None)
+    gens_df = getattr(network, "generators", None)
+    if loads_df is None or gens_df is None:
+        return {}                 # not a network (test doubles): no check
+    have_loads = set(map(str, loads_df.index))
+    have_gens = set(map(str, gens_df.index))
+    bad_l = sorted(k for k in (loads or {}) if k not in have_loads)
+    bad_g = sorted(k for k in (gens or {}) if k not in have_gens)
+    if bad_l:
+        out["loads"] = bad_l
+    if bad_g:
+        out["generators"] = bad_g
+    return out
+
+
 def _profiles_match_horizon(scenario: dict, n_snapshots: int) -> bool:
     """True when every series length equals the live network horizon."""
     loads, gens = _profiles_payload(scenario)
@@ -579,6 +598,19 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
                     "id": sid, "status": "profiles_incomplete",
                     "delta_eue_mwh": None, "failure_mode": None,
                     "meta": {**meta, "note": "series_length_ne_snapshots"},
+                })
+                continue
+            # E2E review M1: a series keyed on a Load / Generator the
+            # network lacks used to be skipped silently, so the scenario ran
+            # UNSTRESSED and reported severity 0 as if evaluated.
+            missing = _profiles_unmatched(sc, network)
+            if missing:
+                rows.append({
+                    "id": sid, "status": "profiles_incomplete",
+                    "delta_eue_mwh": None, "failure_mode": None,
+                    "meta": {**meta, "note": (
+                        "profile series name components not on the network: "
+                        + "; ".join(f"{k} {v}" for k, v in missing.items()))},
                 })
                 continue
             contingencies.append({

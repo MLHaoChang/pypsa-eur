@@ -13,6 +13,7 @@ import {
   dtcStressCsvRows,
   reportSummaryCsvRows,
   formFromTemplate,
+  leverKeysFor,
   EhReferenceDesignPanel,
   fmeaTopCsvRows,
   frontierCsvRows,
@@ -329,7 +330,7 @@ describe('EhReferenceDesignPanel', () => {
     expect(screen.getByTestId('eh-readiness-skipped').textContent)
       .toMatch(/fmea_top — skipped \(budget\): needs 21 solves/)
     await waitFor(() => expect(resultsApi.getEhReadiness)
-      .toHaveBeenCalledWith('weak_flexible', undefined, undefined))
+      .toHaveBeenCalledWith('weak_flexible', undefined, undefined, {}))
   })
 
   it('labels every non-run prediction, including may-skip after an estimate', async () => {
@@ -363,12 +364,13 @@ describe('EhReferenceDesignPanel', () => {
   it('debounces the budget before asking for readiness', async () => {
     const user = await openPanel()
     await waitFor(() => expect(resultsApi.getEhReadiness)
-      .toHaveBeenCalledWith('strong_grid', undefined, undefined))
+      .toHaveBeenCalledWith('strong_grid', undefined, undefined, {}))
     await user.click(screen.getByTestId('eh-pack-settings-toggle'))
     await user.type(screen.getByTestId('eh-pack-budget'), '25')
     await waitFor(() => expect(resultsApi.getEhReadiness)
-      .toHaveBeenCalledWith('strong_grid', 25, undefined), { timeout: 2000 })
-    expect(resultsApi.getEhReadiness).not.toHaveBeenCalledWith('strong_grid', 2, undefined)
+      .toHaveBeenCalledWith('strong_grid', 25, undefined, {}), { timeout: 2000 })
+    expect(resultsApi.getEhReadiness).not.toHaveBeenCalledWith(
+      'strong_grid', 2, undefined, {})
   })
 
   it('starts a study with the selected archetype', async () => {
@@ -1130,7 +1132,7 @@ describe('P18 — DtC attribution choice', () => {
     await user.click(screen.getByTestId('eh-pack-settings-toggle'))
     await user.selectOptions(screen.getByTestId('eh-pack-dtc-attribution'), 'per_load')
     await waitFor(() => expect(resultsApi.getEhReadiness)
-      .toHaveBeenCalledWith('strong_grid', undefined, 'per_load'))
+      .toHaveBeenCalledWith('strong_grid', undefined, 'per_load', {}))
     await user.click(screen.getByTestId('eh-run'))
     await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
       archetype: 'strong_grid', dtc_attribution: 'per_load' }))
@@ -1174,5 +1176,35 @@ describe('P19 — EH template banner', () => {
     await openPanel()
     await waitFor(() => expect(resultsApi.getEhTemplate).toHaveBeenCalled())
     expect(screen.queryByTestId('eh-template-banner')).toBeNull()
+  })
+})
+
+
+describe('E2E review — panel fixes', () => {
+  it('certifies a LOLE target with the MC (strong_grid factory metric is none)', () => {
+    expect(buildEhStudyBody('strong_grid', { ...EMPTY_PACK_FORM, loleTarget: '3' }).body)
+      .toEqual({ archetype: 'strong_grid',
+        pack_overrides: { target_lole_h: 3, certification_metric: 'mc_lole' } })
+  })
+
+  it('sends only the lever flags the user set, per archetype', () => {
+    const form = { ...EMPTY_PACK_FORM,
+      levers: { import_energy: 'on' as const, redundancy: 'off' as const } }
+    expect(buildEhStudyBody('weak_flexible', form).body?.pack_overrides)
+      .toEqual({ levers: { import_energy: true, redundancy: false } })
+    // import_energy is weak_flexible only — never sent for strong_grid
+    expect(buildEhStudyBody('strong_grid', form).body?.pack_overrides)
+      .toEqual({ levers: { redundancy: false } })
+    expect(leverKeysFor('off_grid')).not.toContain('import_cap')
+  })
+
+  it('previews the stages and overrides that will run', async () => {
+    const user = await openPanel()
+    await user.click(screen.getByTestId('eh-pack-settings-toggle'))
+    await user.type(screen.getByTestId('eh-pack-lole-target'), '3')
+    await waitFor(() => expect(resultsApi.getEhReadiness).toHaveBeenCalledWith(
+      'strong_grid', undefined, undefined,
+      { pack_overrides: { target_lole_h: 3, certification_metric: 'mc_lole' } }),
+    { timeout: 2000 })
   })
 })

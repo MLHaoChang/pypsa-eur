@@ -1426,7 +1426,8 @@ def post_eh_study(body: EhStudyRequest | None = None):
 @results_router.get("/eh_readiness")
 def get_eh_readiness(archetype: str, budget_solves: int | None = None,
                      stages: str | None = None,
-                     dtc_attribution: str | None = None):
+                     dtc_attribution: str | None = None,
+                     pack_overrides: str | None = None):
     """
     Read-only Energy Hub readiness preflight (P14): which Links the pack
     treats as imports and by which §6 rule, critical buses, DtC derivability,
@@ -1435,7 +1436,9 @@ def get_eh_readiness(archetype: str, budget_solves: int | None = None,
     selectors on a private copy, so it cannot disagree with the run.
 
     ``stages`` is an optional comma-separated override (same rules as
-    ``POST /eh_study``). Pack overrides are not previewed.
+    ``POST /eh_study``). ``pack_overrides`` is the same JSON object the
+    study takes (E2E review m3), validated identically — so the preview
+    describes the pack that will actually run.
     """
     from models.energy_hub import DEFAULT_EH_BUDGET_SOLVES, MAX_EH_BUDGET_SOLVES
     from services.adequacy.eh_readiness import eh_readiness
@@ -1449,7 +1452,21 @@ def get_eh_readiness(archetype: str, budget_solves: int | None = None,
     if not (1 <= budget <= MAX_EH_BUDGET_SOLVES):
         raise HTTPException(
             422, f"budget_solves must be between 1 and {MAX_EH_BUDGET_SOLVES}")
-    from services.adequacy.eh_study_runner import DTC_ATTRIBUTIONS
+    import json as _json
+
+    from services.adequacy.eh_study_runner import (
+        DTC_ATTRIBUTIONS,
+        apply_pack_overrides,
+    )
+    overrides = None
+    if pack_overrides:
+        try:
+            overrides = _json.loads(pack_overrides)
+        except ValueError as exc:
+            raise HTTPException(
+                422, f"pack_overrides must be a JSON object: {exc}") from exc
+        if not isinstance(overrides, dict):
+            raise HTTPException(422, "pack_overrides must be a JSON object")
     if dtc_attribution is not None and dtc_attribution not in DTC_ATTRIBUTIONS:
         raise HTTPException(
             422, f"dtc_attribution must be one of {list(DTC_ATTRIBUTIONS)}")
@@ -1468,7 +1485,10 @@ def get_eh_readiness(archetype: str, budget_solves: int | None = None,
         snapshot = _private_copy(n)
     try:
         return eh_readiness(
-            snapshot, _PACK_FACTORY[archetype](), budget_solves=budget,
+            snapshot,
+            apply_pack_overrides(_PACK_FACTORY[archetype](), overrides,
+                                 raise_http=True),
+            budget_solves=budget,
             stages=stage_list,
             voll=getattr(cfg, "voll", None) if cfg is not None else None,
             dtc_attribution=dtc_attribution)

@@ -99,6 +99,41 @@ Assertions:
 
 Findings are fixed test-first.
 
+**P20 status:** done.
+- `tests/test_energy_hub_templates_e2e.py` runs live over HTTP on all three templates: readiness → full 10-stage study → report and export → Class-C sweep. It asserts:
+  - every stage `run`;
+  - Σ charged = consumed ≤ budget;
+  - honest sections;
+  - `certified` consistent with the verdict;
+  - the session network untouched by both the study and the sweep.
+- Findings fixed:
+  - **Data center.** The 40 MW connection is the physical rating, so the worksheet and the study see one system. The PoC carries SCR inputs, and the gate now reads `ok`, SCR 8.3.
+  - **H₂ hub.** Levers were `not_established` because there was no StorageUnit, and islanded DtC planning was infeasible. It now has a site battery, an extendable fuel cell and wider candidates.
+  - **Microgrid.** The Class-C sweep ran on the tie-connected system (severity 0). The tie is now normally open.
+  - **DtC notes.** "No DtC (planning) contingency solved" now names each contingency's condition and, for infeasible ones, the likely fix.
+- The honest outcomes on the templates are:
+  - data center: MC `fail` (LOLE 12.4 h/yr vs 3). Grid-import unavailability alone exceeds the target, which is P22's showcase for recommendations.
+  - H₂ hub: LOLE reported, not certified; strong_grid has no target.
+  - microgrid: `inconclusive`.
+
+## E2E review (P10–P18, cross-phase)
+
+The verdict was **GO WITH CONDITIONS**, with 0 blockers. Every invariant held across 14 live HTTP study runs, and so did abort, the foreground solve after a study, and the chat path. Each finding is fixed test-first in `tests/test_energy_hub_e2e_review.py` plus FE tests:
+- **M1.** A `profiles` scenario keyed on Loads/Generators not on the network was skipped silently. It ran unstressed with severity 0, reported as evaluated.
+  - The sweep now returns `profiles_incomplete` with a note naming the unmatched components.
+  - The pack picker labels each pack with its length, the names it swaps and "test fixture".
+- **M2.** The default `import_cap` ladder's 0 MW rung failed preflight (`p_nom = 0`) and was charged as a solve.
+  - 0 MW is now a "no import" rung (`p_*_pu → 0`, `p_nom` kept), so every default rung solves.
+  - The "ineffective" check reads the pre-lever state.
+  - A `validation_failed` refusal is not charged.
+- **m1.** A stage exception was recorded as `aborted`. It is now `skipped` for a config refusal (any `ValueError`) and `failed` for an error. `aborted` stays reserved for the stop event.
+- **m2.** The panel's LOLE target on strong_grid gave a 422 (factory metric `none`). A target now also sends `certification_metric: "mc_lole"`.
+- **m3.** Readiness did not preview what runs. `GET /eh_readiness` now takes `pack_overrides` (JSON, validated like the study), and the panel sends its stages and overrides, debounced.
+- **m4.** The FMEA tab silently swept class-B only when the registry was unreadable. It now refuses with the reason.
+- **m5.**
+  - The panel gains lever toggles (pack / on / off per archetype), including the P17 `import_energy` lever.
+  - Chat `get_adequacy_results` reads `eh_redundancy`, `eh_levers`, `eh_dtc` and `eh_dtc_planning`, and the route inventory lists them.
+
 ## P21 — In-app walkthrough guide (FMEA / Energy Hub)
 
 **Why:** the new features have many inputs whose meaning is not obvious. Users need "what goes where, and why" at the point of use.

@@ -64,12 +64,25 @@ export interface PackForm {
   stages: string[] | null
   /** P18: '' = the default (bus aggregate); 'per_load' opts in. */
   dtcAttribution: '' | EhDtcAttribution
+  /** E2E review m5: lever flags; '' keeps the pack's own value. */
+  levers: Partial<Record<LeverKey, 'on' | 'off'>>
+}
+
+export type LeverKey = 'import_cap' | 'storage_duration' | 'redundancy' | 'import_energy'
+
+/** Lever toggles offered per archetype (the backend refuses the others). */
+export function leverKeysFor(archetype: EhArchetype): LeverKey[] {
+  if (archetype === 'weak_flexible') {
+    return ['storage_duration', 'import_cap', 'import_energy', 'redundancy']
+  }
+  if (archetype === 'off_grid') return ['storage_duration', 'redundancy']
+  return ['storage_duration', 'import_cap', 'redundancy']
 }
 
 export const EMPTY_PACK_FORM: PackForm = {
   ensCap: '', loleTarget: '', importMw: '', importEnergy: '', budget: '',
   draws: '', seed: '',
-  dsrBuses: '', stages: null, dtcAttribution: '',
+  dsrBuses: '', stages: null, dtcAttribution: '', levers: {},
 }
 
 /** Stages a user may toggle; apply_pack / ens_solve / assemble always run. */
@@ -118,9 +131,20 @@ export function buildEhStudyBody(
   }
   const po: NonNullable<EhStudyRequestBody['pack_overrides']> = {}
   if (typeof checks.ens === 'number') po.ens_cap_permyriad = checks.ens
-  if (typeof checks.lole === 'number') po.target_lole_h = checks.lole
+  if (typeof checks.lole === 'number') {
+    // A target certifies with the MC; strong_grid's factory metric is
+    // 'none', which the backend refuses beside a target (E2E review m2).
+    po.target_lole_h = checks.lole
+    po.certification_metric = 'mc_lole'
+  }
   if (typeof checks.imp === 'number') po.import_p_nom_mw = checks.imp
   if (typeof checks.energy === 'number') po.import_energy_mwh_per_year = checks.energy
+  const levers: Record<string, boolean> = {}
+  for (const k of leverKeysFor(archetype)) {
+    const v = form.levers[k]
+    if (v) levers[k] = v === 'on'
+  }
+  if (Object.keys(levers).length > 0) po.levers = levers
   if (Object.keys(po).length > 0) body.pack_overrides = po
   if (typeof checks.budget === 'number') body.budget_solves = checks.budget
   const mc: NonNullable<EhStudyRequestBody['mc']> = {}
@@ -585,6 +609,10 @@ export function EhReferenceDesignPanel() {
   const [form, setForm] = useState<PackForm>(EMPTY_PACK_FORM)
   const built = buildEhStudyBody(archetype, form)
   const readinessBudget = useDebounced(built.body?.budget_solves, 400)
+  // The stages and overrides that will run, settled like the budget.
+  const readinessPreview = useDebounced(JSON.stringify({
+    stages: built.body?.stages, pack_overrides: built.body?.pack_overrides,
+  }), 400)
   const { data: template } = useQuery({
     queryKey: nk(currentProject, 'adequacy', 'eh_template'),
     queryFn: () => resultsApi.getEhTemplate(currentProject ?? ''),
@@ -618,9 +646,11 @@ export function EhReferenceDesignPanel() {
   const { data: readiness } = useQuery({
     queryKey: [...nk(currentProject, 'results', 'eh_readiness'), archetype,
       form.dtcAttribution || null,
-      readinessBudget ?? null],
+      readinessBudget ?? null, readinessPreview],
     queryFn: () => resultsApi.getEhReadiness(
-      archetype, readinessBudget, form.dtcAttribution || undefined),
+      archetype, readinessBudget, form.dtcAttribution || undefined,
+      JSON.parse(readinessPreview) as {
+        stages?: string[]; pack_overrides?: Record<string, unknown> }),
     enabled: open && !running,
   })
 
@@ -870,6 +900,31 @@ export function EhReferenceDesignPanel() {
                     <option value="per_load">Per Load</option>
                   </select>
                 </label>
+                <fieldset className="flex flex-wrap items-center gap-2 text-[10px] text-muted"
+                          data-testid="eh-pack-levers">
+                  <span title="Which design levers the levers stage compares. 'pack' keeps the archetype pack's own choice.">
+                    Levers
+                  </span>
+                  {leverKeysFor(archetype).map(k => (
+                    <label key={k} className="flex items-center gap-1 font-mono">
+                      {k}
+                      <select
+                        data-testid={`eh-pack-lever-${k}`}
+                        value={form.levers[k] ?? ''}
+                        disabled={running}
+                        onChange={e => setForm(f => ({
+                          ...f, levers: { ...f.levers,
+                            [k]: (e.target.value || undefined) as 'on' | 'off' | undefined },
+                        }))}
+                        className="px-1 py-0.5 border border-border rounded bg-bg text-[10px] text-text"
+                      >
+                        <option value="">pack</option>
+                        <option value="on">on</option>
+                        <option value="off">off</option>
+                      </select>
+                    </label>
+                  ))}
+                </fieldset>
                 <fieldset className="flex flex-wrap items-center gap-2 text-[10px] text-muted">
                   <label className="flex items-center gap-1">
                     <input

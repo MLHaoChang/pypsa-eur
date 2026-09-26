@@ -117,6 +117,18 @@ export function scenarioFrom(d: ScenarioDraft, base?: StressScenario): StressSce
   return out
 }
 
+/** Picker label: the series length and the component names a pack swaps,
+ * so a pack keyed on other names is recognisable before the sweep reports
+ * it `profiles_incomplete` (E2E review M1). */
+export function packLabel(p: StressProfilePack): string {
+  const parts = [p.name ?? p.id]
+  if (p.snapshots) parts.push(`${p.snapshots} h`)
+  const names = [...(p.loads ?? []), ...(p.generators ?? [])]
+  if (names.length) parts.push(`swaps ${names.join(', ')}`)
+  if (p.provenance?.includes('fixture')) parts.push('test fixture')
+  return parts.join(' · ')
+}
+
 function describe(sc: StressScenario): string {
   if (sc.kind === 'parametric') {
     const lm = sc.electrical_load_multiplier ?? 1
@@ -298,8 +310,7 @@ export default function StressScenarioEditor({ project }: { project: string | nu
               {packs.map(p => (
                 <option key={p.id} value={p.id} disabled={!!p.error}
                   title={p.error ?? p.provenance ?? undefined}>
-                  {p.error ? `${p.id} (unreadable)` : `${p.name ?? p.id}` +
-                    (p.snapshots ? ` · ${p.snapshots} h` : '')}
+                  {p.error ? `${p.id} (unreadable)` : packLabel(p)}
                 </option>
               ))}
             </select>

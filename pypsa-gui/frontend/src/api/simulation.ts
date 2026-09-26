@@ -1293,12 +1293,17 @@ export const resultsApi = {
   abortEhStudy: () => client.post('/results/eh_study/abort')
     .then(r => r.data as { status: string; aborting: boolean }),
   getEhReadiness: (archetype: EhArchetype, budgetSolves?: number,
-    dtcAttribution?: EhDtcAttribution) =>
+    dtcAttribution?: EhDtcAttribution,
+    preview?: { stages?: string[]; pack_overrides?: Record<string, unknown> }) =>
     client.get('/results/eh_readiness', {
       params: {
         archetype,
         ...(budgetSolves ? { budget_solves: budgetSolves } : {}),
         ...(dtcAttribution ? { dtc_attribution: dtcAttribution } : {}),
+        // E2E review m3: preview what will actually run.
+        ...(preview?.stages ? { stages: preview.stages.join(',') } : {}),
+        ...(preview?.pack_overrides
+          ? { pack_overrides: JSON.stringify(preview.pack_overrides) } : {}),
       },
     }).then(r => r.data as EhReadiness),
   getEhReferenceDesign: () => client.get('/results/eh_reference_design')

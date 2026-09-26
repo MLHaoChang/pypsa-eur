@@ -185,6 +185,10 @@ POST    /api/results/coupling_loop/abort                         -> post_couplin
 GET     /api/results/curtailment                                 -> get_curtailment_api_results_curtailment_get
 GET     /api/results/economics_by_carrier                        -> get_economics_by_carrier_api_results_economics_by_carrier_get
 GET     /api/results/emissions                                   -> get_emissions_api_results_emissions_get
+GET     /api/results/eh_dtc                                      -> get_eh_dtc_api_results_eh_dtc_get
+GET     /api/results/eh_dtc_planning                             -> get_eh_dtc_planning_api_results_eh_dtc_planning_get
+GET     /api/results/eh_levers                                   -> get_eh_levers_api_results_eh_levers_get
+GET     /api/results/eh_redundancy                               -> get_eh_redundancy_api_results_eh_redundancy_get
 GET     /api/results/eh_readiness                                -> get_eh_readiness_api_results_eh_readiness_get
 GET     /api/results/eh_reference_design                         -> get_eh_reference_design_api_results_eh_reference_design_get
 GET     /api/results/eh_study                                    -> get_eh_study_api_results_eh_study_get

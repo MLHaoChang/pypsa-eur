@@ -90,10 +90,24 @@ export default function FmeaTab() {
 
   const sweep = useMutation({
     mutationFn: async () => {
-      const reg = currentProject
-        ? await resultsApi.getStressScenarios(currentProject).catch(() => null)
-        : null
-      return resultsApi.postFmeaSweep(reg?.scenarios ?? [])
+      // E2E review m4: an unreadable registry used to start a class-B-only
+      // sweep silently — the class C rows would just be missing.
+      let scenarios: Array<Record<string, unknown>> = []
+      if (currentProject) {
+        let reg: { scenarios?: Array<Record<string, unknown>>; error?: string | null }
+        try {
+          reg = await resultsApi.getStressScenarios(currentProject)
+        } catch (e) {
+          throw new Error(
+            `could not read this project's stress-scenario registry ` +
+            `(${blockerMessage(e)}) — sweep not started, class C would be missing`)
+        }
+        if (reg?.error) {
+          throw new Error(`${reg.error} — sweep not started, class C would be missing`)
+        }
+        scenarios = reg?.scenarios ?? []
+      }
+      return resultsApi.postFmeaSweep(scenarios)
     },
     onSuccess: () => { void refetchModes() },
     // The backend's own sentence (a 409 names the study that blocks the
