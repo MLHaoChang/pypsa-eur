@@ -363,7 +363,9 @@ Existing tests updated to annual `capital_cost`:
 - **LP fixtures whose sizing decisions depended on the old coefficient** now
   type the annual equivalent, the per-period cost × 8,760 ÷ modelled hours, so
   each LP is unchanged. These are the reserve-margin vintage network, the
-  adequacy frontier and both myopic analytic networks.
+  adequacy frontier, both myopic analytic networks and the adequacy
+  coupling loop's live network. The coupling test is marked `slow`, so
+  only CI's full run caught it; `-m slow` locally now passes 11 of 11.
 - **Myopic cost tests** call the myopic driver and the perfect-foresight solve
   inside the periodized-cost fill. That is what `run_simulation` does before
   either, via the modelling assumptions. Solving outside it charges the annual

@@ -775,7 +775,10 @@ def _live_network() -> pypsa.Network:
           marginal_cost=10.0)
     n.add("Generator", "peak", bus="b", carrier="gas", p_nom=0.0,
           p_nom_extendable=True, p_nom_max=40.0,
-          capital_cost=400_000.0, marginal_cost=250.0)
+          # Annual; the model covers len(LOADS) x WEIGHT hours of a year, so
+          # the LP charges 400 k€/MW for them (capital_cost is annual and
+          # scaled by the modelled share of a year).
+          capital_cost=400_000.0 * 8760 / (len(LOADS) * WEIGHT), marginal_cost=250.0)
     return n
 
 
