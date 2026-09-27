@@ -42,7 +42,9 @@ def _solved_link_network() -> pypsa.Network:
         efficiency       = 0.5
         p1 (h2 out)      = [-50, -100] MW     price at h2   = 200 €/MWh
         marginal_cost    = 10 €/MWh of INPUT
-        capital_cost     = 1000 €/MW/yr, p_nom_opt = 200 MW
+        capital_cost     = 4_380_000 €/MW/yr, p_nom_opt = 200 MW — two
+                           modelled hours are 2/8760 of a year, so the LP
+                           charges 1000 €/MW for them
 
         gross revenue  = (50 + 100) × 200          = 30_000
         electricity    = (100 + 200) × 50          = 15_000
@@ -59,7 +61,8 @@ def _solved_link_network() -> pypsa.Network:
     n.add(
         "Link", "Electrolyzer 1",
         bus0="elec", bus1="h2", carrier="H2",
-        efficiency=0.5, p_nom=200.0, marginal_cost=10.0, capital_cost=1000.0,
+        efficiency=0.5, p_nom=200.0, marginal_cost=10.0,
+        capital_cost=1000.0 * 8760.0 / 2,  # annual; 1000 €/MW for 2 modelled hours
     )
     # A generator keeps the dispatch-freshness gate honest: it checks every
     # component class, so a network with links_t populated and generators_t

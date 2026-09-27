@@ -1278,6 +1278,12 @@ def test_a_margin_only_run_reports_the_energy_it_actually_shed():
 # reported as `met=False`. The built size is recoverable from the per-vintage
 # breakdown the restore persists into `n.meta["vintage_results"]`.
 
+# capital_cost is ANNUAL and the LP charges the share of a year each period
+# models: 4 one-hour snapshots are 4/8760 of a year. Typing per-period costs
+# x 8760/4 keeps the LP coefficients these vintage tests were written for.
+PER_PERIOD_TO_ANNUAL = 8760.0 / 4
+
+
 def _vintage_network(*, alternating: bool = False) -> pypsa.Network:
     """Two periods, one load, a cheap must-take wind candidate with per-period
     bounds and an absurdly expensive peaker, so the margin is met by wind.
@@ -1302,11 +1308,11 @@ def _vintage_network(*, alternating: bool = False) -> pypsa.Network:
     n.add("Generator", "base", bus="b", carrier="gas", p_nom=200.0,
           marginal_cost=10.0, build_year=2000, lifetime=100)
     n.add("Generator", "peaker", bus="b", carrier="gas", p_nom=0.0,
-          p_nom_extendable=True, p_nom_max=500.0, capital_cost=5e6,
+          p_nom_extendable=True, p_nom_max=500.0, capital_cost=5e6 * PER_PERIOD_TO_ANNUAL,
           marginal_cost=500.0, build_year=2030, lifetime=100)
     # must-take (carrier absent from the defaults library), flat profile 1.0
     n.add("Generator", "wind", bus="b", carrier="wind", p_nom=0.0,
-          p_nom_extendable=True, p_nom_max=500.0, capital_cost=1000.0,
+          p_nom_extendable=True, p_nom_max=500.0, capital_cost=1000.0 * PER_PERIOD_TO_ANNUAL,
           marginal_cost=0.0, build_year=2030, lifetime=100,
           p_max_pu=pd.Series(
               ([1.0, 0.0, 1.0, 0.0] * 2) if alternating else 1.0, index=sns))

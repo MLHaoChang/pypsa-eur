@@ -40,7 +40,9 @@ PKGS=(
   "pandas==2.3.3" "numpy==2.4.6" "scipy==1.17.1"
   netcdf4 openpyxl geopandas pytest pytest-asyncio python-dotenv ruff
   # gridspine + desktop suites; lightsim2grid 1.x lacks LSGrid.get_lineor_res.
-  pandapower pywebview "lightsim2grid==0.10.1"
+  # Exact pins from pixi.toml's [pypi-dependencies] / desktop feature: an
+  # unpinned pandapower or pywebview drifts from what CI and pixi test.
+  "pandapower==3.1.2" "pywebview==6.2.1" "lightsim2grid==0.10.1"
 )
 if [ -n "$UV" ]; then
   "$UV" pip install --python "${VENV}/bin/python" -q "${PKGS[@]}" \

@@ -68,7 +68,9 @@ def test_capacity_capex_agrees_with_periodized_capital_costs(golden):
         for name in df.index:
             if ext_only and not bool(df.at[name, f"{nom}_extendable"]):
                 continue
-            cc = pcc.get(attr, {}).get(name, {}).get("capital_cost", 0.0)
+            # `fixed_cost` = annuitised investment + fixed O&M, the LP coefficient;
+            # `capital_cost` alone is investment-only (see periodized_capital_costs).
+            cc = pcc.get(attr, {}).get(name, {}).get("fixed_cost", 0.0)
             opt = float(df.at[name, f"{nom}_opt"] if f"{nom}_opt" in df.columns
                         else df.at[name, nom])
             expected += cc * opt * horizon_years

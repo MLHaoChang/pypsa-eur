@@ -282,6 +282,8 @@ it('shows the unavailable marker — not a raw fallback number — for an asset 
       'Line 1': {
         // Annualised resolves fine — independent of the upfront resolve.
         capital_cost: 50_000,
+        fom_cost: 0,
+        fixed_cost: 50_000,
         overnight_cost: null,
         overnight_cost_pv: null,
         overnight_cost_available: false,
@@ -319,6 +321,8 @@ it('still derives a real per-asset PV figure when the upfront cost resolved', as
     lines: {
       'Line 1': {
         capital_cost: 50_000,
+        fom_cost: 0,
+        fixed_cost: 50_000,
         overnight_cost: 1_000,
         overnight_cost_pv: 1_000,
         overnight_cost_available: true,

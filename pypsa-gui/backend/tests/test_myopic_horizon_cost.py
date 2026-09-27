@@ -34,7 +34,11 @@ import pytest
 
 from routers.simulation import _compute_run_objective
 from services.cost_totals import horizon_system_cost
-from services.solver_service import SolverConfig, _run_myopic_foresight
+from services.solver_service import (
+    SolverConfig,
+    _run_myopic_foresight,
+    with_periodized_cost_defaults,
+)
 
 PERIODS = [2030, 2031, 2032]
 
@@ -62,7 +66,10 @@ def _analytic_network() -> pypsa.Network:
     n.add("Carrier", "gas")
     n.add("Load", "L", bus="B", p_set=100.0)
     n.add("Generator", "g", bus="B", carrier="gas", p_nom_extendable=True,
-          capital_cost=100.0, marginal_cost=10.0, p_nom_max=10_000.0)
+          # Annual 100 x 8760 EUR/MW/yr: each period models one hour, so the
+          # LP charges 100 EUR/MW per period (capital_cost is annual and
+          # scaled by the modelled share of a year).
+          capital_cost=100.0 * 8760, marginal_cost=10.0, p_nom_max=10_000.0)
     return n
 
 
@@ -75,13 +82,24 @@ def _solve_myopic(n: pypsa.Network, cfg: SolverConfig) -> tuple[str, str]:
     tmp = pathlib.Path(tempfile.mktemp(suffix=".log"))
     tmp.touch()
     try:
-        status, condition, _ = _run_myopic_foresight(
-            n, cfg, lambda m: None, merged_solver_options={}, extra_fn=None,
-            tmp_log=tmp, stop_event=None, iteration_undo=[],
-        )
+        # `run_simulation` applies the modelling assumptions — including the
+        # periodized-cost fill that puts annual capital_cost on the modelled
+        # horizon — before it hands the network to the myopic driver. Calling
+        # the driver directly must do the same or the LP sees a different cost.
+        with with_periodized_cost_defaults(n, cfg):
+            status, condition, _ = _run_myopic_foresight(
+                n, cfg, lambda m: None, merged_solver_options={}, extra_fn=None,
+                tmp_log=tmp, stop_event=None, iteration_undo=[],
+            )
         return status, condition
     finally:
         tmp.unlink(missing_ok=True)
+
+
+def _solve_full(n: pypsa.Network) -> None:
+    """A perfect-foresight solve the way `run_simulation` does it: in the fill."""
+    with with_periodized_cost_defaults(n, _cfg()):
+        n.optimize(solver_name="highs", multi_investment_periods=True)
 
 
 def test_myopic_objective_is_the_true_horizon_cost():
@@ -125,7 +143,7 @@ def test_perfect_foresight_objective_is_unchanged():
     and the statistics total agree — and the fix must not disturb it.
     """
     n = _analytic_network()
-    n.optimize(solver_name="highs", multi_investment_periods=True)
+    _solve_full(n)
 
     assert not getattr(n, "_myopic_period_objectives", None), (
         "a full-horizon solve must not populate the myopic accumulator"
@@ -145,7 +163,7 @@ def test_myopic_and_perfect_foresight_are_priced_on_the_same_basis():
     cfg = _cfg()
     _solve_myopic(n_my, cfg)
     n_pf = _analytic_network()
-    n_pf.optimize(solver_name="highs", multi_investment_periods=True)
+    _solve_full(n_pf)
 
     assert float(n_my.generators.p_nom_opt.iloc[0]) == pytest.approx(
         float(n_pf.generators.p_nom_opt.iloc[0]), rel=1e-6)

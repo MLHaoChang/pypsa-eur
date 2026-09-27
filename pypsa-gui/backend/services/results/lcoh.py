@@ -33,7 +33,7 @@ def compute_lcoh(n, cfg, *, result_df):
     import math
 
     import pandas as _pd
-    from services.solver_service import with_periodized_cost_defaults
+    from services.solver_service import fom_per_horizon, with_periodized_cost_defaults
 
 
     links_df = n.links
@@ -74,11 +74,30 @@ def compute_lcoh(n, cfg, *, result_df):
 
     try:
         with with_periodized_cost_defaults(n, cfg):
+            # `.copy()` is load-bearing: for an asset without overnight_cost
+            # PyPSA returns the `capital_cost` COLUMN itself, and the fill's
+            # revert restores the typed values into that same object on exit,
+            # so an uncopied read here would lose the horizon scaling.
             cap_costs = n.c["Link"].capital_cost
             if not isinstance(cap_costs, _pd.Series):
                 cap_costs = _pd.Series(cap_costs, index=links_df.index)
+            cap_costs = cap_costs.copy()
     except Exception:
-        cap_costs = links_df.get("capital_cost", _pd.Series(0.0, index=links_df.index))
+        # Typed annualised figure → the per-horizon basis the LP charged
+        # (`fom_per_horizon` applies exactly that scaling to any column).
+        cap_costs = fom_per_horizon(
+            n, links_df.get("capital_cost", _pd.Series(0.0, index=links_df.index)))
+    # Fixed O&M. `n.c["Link"].capital_cost` is PyPSA's INVESTMENT-only accessor
+    # (`fom_cost=None`); the LP objective paid `periodized_cost = capital_cost
+    # + fom_cost` per MW, and so must the LCOH numerator, or an electrolyser
+    # with FOM levelises too low against the objective and against
+    # /results/asset_economics. Reported separately as `fom_eur_per_year` too.
+    # `fom_per_horizon`: the typed FOM is annual, the LP charged it per
+    # modelled horizon (see `services.solver.periodized_costs.fom_horizon_factor`).
+    if "fom_cost" in links_df.columns:
+        fom_costs = fom_per_horizon(n, links_df["fom_cost"])
+    else:
+        fom_costs = _pd.Series(0.0, index=links_df.index)
 
     # bus0 marginal prices for the electricity-cost term. Use the merit-order
     # SUBSIDY-REMOVED duals (the same correction asset_economics and the Compare
@@ -107,6 +126,7 @@ def compute_lcoh(n, cfg, *, result_df):
     # compatibility). `fleet_capex_total` is the horizon-total CAPEX used
     # in the LCOH numerator — see total_years_factor comment below.
     fleet_capex_per_year = 0.0
+    fleet_fom_per_year = 0.0
     fleet_capex_total = 0.0
     fleet_vom = 0.0
     fleet_elec = 0.0
@@ -163,7 +183,17 @@ def compute_lcoh(n, cfg, *, result_df):
             cc = 0.0
         if not math.isfinite(cc) or cc < 0:
             cc = 0.0
-        capex_eur_per_year = cc * p_nom_opt
+        try:
+            fom_rate = float(fom_costs.at[name]) if name in fom_costs.index else 0.0
+        except Exception:
+            fom_rate = 0.0
+        if not math.isfinite(fom_rate) or fom_rate < 0:
+            fom_rate = 0.0
+        # `capex_eur_per_year` is the asset's FIXED cost: annuitised investment
+        # + FOM (the LP coefficient × p_nom_opt). The field name predates FOM
+        # and is API; `fom_eur_per_year` is the FOM share of it.
+        fom_eur_per_year = fom_rate * p_nom_opt
+        capex_eur_per_year = (cc + fom_rate) * p_nom_opt
 
         try:
             eff = float(links_df.at[name, "efficiency"])
@@ -197,6 +227,7 @@ def compute_lcoh(n, cfg, *, result_df):
                 "p_nom_opt_mw": p_nom_opt,
                 "efficiency": eff,
                 "capex_eur_per_year": capex_eur_per_year,
+                "fom_eur_per_year": fom_eur_per_year,
                 "vom_cost_eur": 0.0,
                 "electricity_cost_eur": 0.0,
                 "h2_produced_mwh": 0.0,
@@ -263,7 +294,9 @@ def compute_lcoh(n, cfg, *, result_df):
                         elec_p = float((consume_p * bp_p * weights_p).sum())
                     except Exception:
                         elec_p = 0.0
-                capex_p = capex_eur_per_year * period_year_factor.get(int(p), 1.0)
+                years_p = period_year_factor.get(int(p), 1.0)
+                capex_p = capex_eur_per_year * years_p
+                fom_p = fom_eur_per_year * years_p
                 tot_p = capex_p + vom_p + elec_p
                 lcoh_p = tot_p / h2_p_mwh if h2_p_mwh > 0 else None
                 lcoh_p_kg = lcoh_p * 0.03333 if lcoh_p is not None else None
@@ -271,6 +304,7 @@ def compute_lcoh(n, cfg, *, result_df):
                     "period": int(p),
                     "h2_produced_mwh": h2_p_mwh,
                     "capex_eur": capex_p,
+                    "fom_eur": fom_p,
                     "vom_cost_eur": vom_p,
                     "electricity_cost_eur": elec_p,
                     "lcoh_eur_per_mwh_h2": lcoh_p,
@@ -278,11 +312,12 @@ def compute_lcoh(n, cfg, *, result_df):
                 })
                 # Roll into fleet per-period totals.
                 fb = fleet_by_period.setdefault(int(p), {
-                    "h2_produced_mwh": 0.0, "capex_eur": 0.0,
+                    "h2_produced_mwh": 0.0, "capex_eur": 0.0, "fom_eur": 0.0,
                     "vom_cost_eur": 0.0, "electricity_cost_eur": 0.0,
                 })
                 fb["h2_produced_mwh"] += h2_p_mwh
                 fb["capex_eur"] += capex_p
+                fb["fom_eur"] += fom_p
                 fb["vom_cost_eur"] += vom_p
                 fb["electricity_cost_eur"] += elec_p
 
@@ -292,6 +327,7 @@ def compute_lcoh(n, cfg, *, result_df):
             "p_nom_opt_mw": p_nom_opt,
             "efficiency": eff,
             "capex_eur_per_year": capex_eur_per_year,
+            "fom_eur_per_year": fom_eur_per_year,
             "vom_cost_eur": vom_cost,
             "electricity_cost_eur": elec_cost,
             "h2_produced_mwh": h2_produced_mwh,
@@ -302,6 +338,7 @@ def compute_lcoh(n, cfg, *, result_df):
         # Two CAPEX accumulators: annualised €/yr for display, horizon-total
         # for the LCOH numerator (apples-to-apples with OPEX/elec/H₂ totals).
         fleet_capex_per_year += capex_eur_per_year
+        fleet_fom_per_year += fom_eur_per_year
         fleet_capex_total += capex_total_eur
         fleet_vom += vom_cost
         fleet_elec += elec_cost
@@ -323,6 +360,7 @@ def compute_lcoh(n, cfg, *, result_df):
                 "period": p,
                 "h2_produced_mwh": fb["h2_produced_mwh"],
                 "capex_eur": fb["capex_eur"],
+                "fom_eur": fb["fom_eur"],
                 "vom_cost_eur": fb["vom_cost_eur"],
                 "electricity_cost_eur": fb["electricity_cost_eur"],
                 "lcoh_eur_per_mwh_h2": lcoh_p,
@@ -331,6 +369,7 @@ def compute_lcoh(n, cfg, *, result_df):
         total = {
             "h2_produced_mwh": fleet_h2,
             "capex_eur_per_year": fleet_capex_per_year,
+            "fom_eur_per_year": fleet_fom_per_year,
             "vom_cost_eur": fleet_vom,
             "electricity_cost_eur": fleet_elec,
             "lcoh_eur_per_mwh_h2": fleet_lcoh,

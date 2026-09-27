@@ -36,6 +36,10 @@ def _network_with_costly_store() -> pypsa.Network:
     """One bus, one generator, one Load, and a Store that carries capex."""
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    # Four snapshots standing for a whole year (nyears = 1): capital_cost is
+    # annual and the LP charges the modelled share of it, so a full-year
+    # weighting keeps this file's CAPEX figures equal to the typed cost.
+    n.snapshot_weightings.loc[:, :] = 8760.0 / 4
     n.add("Bus", "A")
     n.add("Carrier", "gas")
     n.add("Carrier", "h2")
