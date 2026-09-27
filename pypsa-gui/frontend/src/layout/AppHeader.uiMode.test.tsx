@@ -6,6 +6,8 @@ import toast from 'react-hot-toast'
 import AppHeader from './AppHeader'
 import { useUIStore } from '../store/uiStore'
 import { WRITABLE } from '../utils/lockState'
+import { activeJobForProject } from '../hooks/useSolveQueue'
+import { useSimulationStore } from '../store/simulationStore'
 
 // Guided-mode spec §3.3 — the header's Guided / Expert segmented control.
 
@@ -13,7 +15,7 @@ vi.mock('../hooks/useSolveQueue', () => ({
   useSolveQueue: () => ({ data: { jobs: [], running: [], paused: false } }),
   useEnqueueSolve: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useAbortJob: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  activeJobForProject: () => undefined,
+  activeJobForProject: vi.fn(() => undefined),
 }))
 vi.mock('../api/network', () => ({
   networkApi: {
@@ -124,6 +126,26 @@ describe('AppHeader — the Run button per mode', () => {
     useUIStore.setState({ uiMode: 'guided' })
     renderHeader()
     expect(screen.queryByTitle(/queues the solve/)).toBeNull()
+  })
+
+  // Re-gate R15: the safety half — a solve in flight stays abortable.
+  it('Guided: a running solve still shows Abort', () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    useSimulationStore.setState({ status: 'running' })
+    try {
+      renderHeader()
+      expect(screen.getByTitle('Abort the running simulation').textContent).toContain('Abort')
+    } finally { useSimulationStore.setState({ status: 'idle' }) }
+  })
+
+  it('Guided: a queued solve still shows its cancel button', () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(activeJobForProject).mockReturnValue(
+      { project_id: 'demo', status: 'queued', position: 2 } as never)
+    try {
+      renderHeader()
+      expect(screen.getByTitle('Cancel this queued solve').textContent).toContain('Queued #2')
+    } finally { vi.mocked(activeJobForProject).mockReturnValue(undefined) }
   })
 
   it('Expert: the Run button is there', () => {

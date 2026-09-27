@@ -39,11 +39,20 @@ export default function HubDesignPanel() {
   const status = !project || studyQ.data === undefined ? undefined : study?.status ?? null
   useStudyFinishedInvalidation(status)
 
-  // Reset for a new project once its study record and template are read,
-  // so the first step shown is the one §5.4 names.
-  const settled = !project || (!studyQ.isPending && !templateQ.isPending)
-  useEffect(() => {
-    if (!settled || (ready && storeProject === project)) return
+  // Reset for a new project once its study record and template are read
+  // (or failed to be read), so the first step shown is the one §5.4 names.
+  //
+  // P24-FE re-gate B4: `settled` LATCHES per project through the store's
+  // reset. react-query puts a never-successful query back to `pending` on
+  // each refetch; gating the card on `isPending` alone unmounted it, and the
+  // card's own observers refetched on remount — an endless request loop.
+  const readNow = !studyQ.isPending && !templateQ.isPending
+  const latched = ready && storeProject === project
+  const settled = !project || readNow || latched
+  const failed = studyQ.isError || templateQ.isError
+  // A project reset while a read had failed is re-derived once it recovers.
+  const resetWhileFailed = useRef<string | null>(null)
+  const reset = () => {
     const po = template?.pack_overrides ?? {}
     const str = (v: unknown) => (typeof v === 'number' ? String(v) : '')
     useHubDesignStore.getState().resetFor(project, {
@@ -52,8 +61,21 @@ export default function HubDesignPanel() {
       loleTarget: str(po.target_lole_h),
       ensCap: str(po.ens_cap_permyriad),
     })
+    resetWhileFailed.current = failed ? project : null
+  }
+  useEffect(() => {
+    if (!settled || latched) return
+    reset()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settled, project, ready, storeProject])
+  }, [settled, project, latched])
+  useEffect(() => {
+    if (resetWhileFailed.current === project && readNow && !failed) reset()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readNow, failed, project])
+  const retry = () => {
+    if (studyQ.isError) void studyQ.refetch()
+    if (templateQ.isError) void templateQ.refetch()
+  }
 
   // Auto-advance (§5.6): running → done opens Results unless the user moved
   // the rail since; any → running opens Goal. Every transition re-arms it.
@@ -86,7 +108,18 @@ export default function HubDesignPanel() {
             onPick={s => setStep(s, { user: useUIStore.getState().guidedTourHolds === 0 })} />
           <GuideButton tourId="hub_design" testId="hub-guide-button" label="Guide" />
         </div>
-        {(project === null || settled) ? <Card /> : (
+        {project !== null && failed && (
+          <div data-testid="hub-load-error" role="alert"
+            className="flex flex-wrap items-center gap-2 rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">
+            This project's study state could not be read from the server, so the steps below
+            may be incomplete.
+            <button type="button" data-testid="hub-load-retry" onClick={retry}
+              className="rounded border border-warn/60 px-2 py-0.5 text-[11px] hover:bg-warn/10">
+              Retry
+            </button>
+          </div>
+        )}
+        {settled ? <Card /> : (
           <p className="text-[12px] text-muted">Loading the project…</p>
         )}
       </div>

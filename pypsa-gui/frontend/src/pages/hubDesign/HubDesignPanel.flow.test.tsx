@@ -238,6 +238,54 @@ describe('hub_design tour before any study (gate B2)', () => {
   })
 })
 
+// P24-FE re-gate B4: a first read that fails used to flip the card between
+// "Loading the project…" and mounted, each remount refetching — an endless
+// request loop. An errored read counts as settled, the card stays mounted, a
+// plain error line offers Retry, and the request count stays bounded.
+describe('a failed first read (re-gate B4)', () => {
+  const boom = () => Object.assign(new Error('Request failed with status code 500'),
+    { response: { status: 500, data: { detail: 'boom' } } })
+
+  it('eh_study rejects: error line + card, a bounded number of requests, Retry recovers', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockRejectedValue(boom())
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
+    const user = mount()
+    const line = await screen.findByTestId('hub-load-error')
+    expect(line.textContent).toMatch(/could not be read/i)
+    expect(screen.getByTestId('hub-card-site')).toBeTruthy()
+    await new Promise(r => setTimeout(r, 500))
+    expect(vi.mocked(resultsApi.getEhStudy).mock.calls.length).toBeLessThanOrEqual(3)
+    expect(screen.queryByText('Loading the project…')).toBeNull()
+    // the server recovers with a finished study: Retry clears the line and
+    // the rail moves to where that study belongs
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(DONE)
+    await user.click(screen.getByTestId('hub-load-retry'))
+    await screen.findByTestId('hub-card-results')
+    expect(screen.queryByTestId('hub-load-error')).toBeNull()
+  })
+
+  it('eh_template rejects: error line + card, a bounded number of requests, Retry recovers', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockRejectedValue(boom())
+    const user = mount()
+    await screen.findByTestId('hub-load-error')
+    expect(screen.getByTestId('hub-card-start')).toBeTruthy()   // read as an own network
+    await new Promise(r => setTimeout(r, 500))
+    expect(vi.mocked(resultsApi.getEhTemplate).mock.calls.length).toBeLessThanOrEqual(3)
+    expect(vi.mocked(resultsApi.getEhStudy).mock.calls.length).toBeLessThanOrEqual(3)
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(DC_TEMPLATE)
+    await user.click(screen.getByTestId('hub-load-retry'))
+    await screen.findByTestId('hub-card-site')                  // now a template project
+    expect(screen.queryByTestId('hub-load-error')).toBeNull()
+  })
+
+  it('the hub reads the study and template quietly (the card shows the error, no toast storm)', async () => {
+    mount()
+    await screen.findByTestId('hub-card-site')
+    expect(resultsApi.getEhStudy).toHaveBeenCalledWith({ quiet: true })
+    expect(resultsApi.getEhTemplate).toHaveBeenCalledWith('Demo', { quiet: true })
+  })
+})
+
 describe('tour anchors', () => {
   it('renders the rail and the guide button', async () => {
     mount()

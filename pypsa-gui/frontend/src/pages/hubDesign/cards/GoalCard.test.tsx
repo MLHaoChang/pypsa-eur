@@ -169,6 +169,9 @@ describe('GoalCard run', () => {
   it('shows VOLL read-only when it is set', async () => {
     mount()
     await waitFor(() => expect(screen.getByTestId('hub-goal-voll').textContent).toContain('€5,000'))
+    // the colon sits with its label (no flex gap before it)
+    expect(screen.getByTestId('term-voll_plain').parentElement!.textContent)
+      .toBe('Price of undelivered energy:')
     expect(screen.queryByTestId('hub-goal-voll-fix')).toBeNull()
   })
 })

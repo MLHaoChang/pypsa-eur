@@ -43,8 +43,8 @@ describe('hub data hooks return named fields, never a spread query result', () =
       readiness: useHubReadiness(null, false, true),
     }), { wrapper: wrap })
     expect(Object.keys(result.current.study).sort()).toEqual(
-      ['data', 'isPending', 'running', 'study'])
-    expect(Object.keys(result.current.template).sort()).toEqual(['isPending', 'template'])
+      ['data', 'isError', 'isPending', 'refetch', 'running', 'study'])
+    expect(Object.keys(result.current.template).sort()).toEqual(['isError', 'isPending', 'refetch', 'template'])
     expect(Object.keys(result.current.review).sort()).toEqual(['review'])
     expect(Object.keys(result.current.readiness).sort()).toEqual(['isError', 'readiness'])
     expect(resultsApi.getEhReview).not.toHaveBeenCalled()

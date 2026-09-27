@@ -1339,7 +1339,10 @@ export const resultsApi = {
   // Energy Hub reference-design study (P1.5 HTTP / P5 panel). 204 = none this
   // session. Poll while status === 'running'; durable report also on
   // getEhReferenceDesign.
-  getEhStudy: () => client.get('/results/eh_study')
+  // `quiet`: no global error toast — the hub-design panel shows its own
+  // error line with Retry (P24-FE re-gate B4). The Expert panel is unchanged.
+  getEhStudy: (opts?: { quiet?: boolean }) => client.get('/results/eh_study',
+    opts?.quiet ? { skipErrorToast: true } : undefined)
     .then(r => (r.status === 204 ? null : r.data as EhStudyPayload)),
   startEhStudy: (body: EhStudyRequestBody) =>
     client.post('/results/eh_study', body).then(r => r.data),
@@ -1398,8 +1401,9 @@ export const resultsApi = {
     client.put(`/projects/${encodeURIComponent(project)}/stress_scenarios`,
       { scenarios }).then(r => r.data as { scenarios: StressScenario[] }),
   // P19: the EH template a project was created from (204 → null).
-  getEhTemplate: (project: string) =>
-    client.get(`/projects/${encodeURIComponent(project)}/eh_template`)
+  getEhTemplate: (project: string, opts?: { quiet?: boolean }) =>
+    client.get(`/projects/${encodeURIComponent(project)}/eh_template`,
+      opts?.quiet ? { skipErrorToast: true } : undefined)
       .then(r => (r.status === 204 ? null : r.data as EhTemplateMeta)),
   getStressProfilePacks: (project: string) =>
     client.get(`/projects/${encodeURIComponent(project)}/stress_profile_packs`)

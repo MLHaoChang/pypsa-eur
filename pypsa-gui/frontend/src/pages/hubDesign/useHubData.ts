@@ -24,12 +24,13 @@ export function useHubStudy() {
   const project = useUIStore(s => s.currentProject)
   const q = useQuery({
     queryKey: nk(project, 'results', 'eh_study'),
-    queryFn: () => resultsApi.getEhStudy(),
+    queryFn: () => resultsApi.getEhStudy({ quiet: true }),
     refetchInterval: ehStudyRefetchInterval,
     enabled: !!project,
   })
   const study = (q.data ?? null) as EhStudyPayload | null
-  return { data: q.data, isPending: q.isPending, study, running: study?.status === 'running' }
+  return { data: q.data, isPending: q.isPending, isError: q.isError, refetch: q.refetch,
+    study, running: study?.status === 'running' }
 }
 
 /** The template the project was created from (null for an own network). */
@@ -37,11 +38,12 @@ export function useHubTemplate() {
   const project = useUIStore(s => s.currentProject)
   const q = useQuery({
     queryKey: nk(project, 'adequacy', 'eh_template'),
-    queryFn: () => resultsApi.getEhTemplate(project ?? ''),
+    queryFn: () => resultsApi.getEhTemplate(project ?? '', { quiet: true }),
     enabled: !!project,
     staleTime: Infinity,
   })
-  return { isPending: q.isPending, template: (q.data ?? null) as EhTemplateMeta | null }
+  return { isPending: q.isPending, isError: q.isError, refetch: q.refetch,
+    template: (q.data ?? null) as EhTemplateMeta | null }
 }
 
 /** GET /results/eh_review — read only once the study has results. */

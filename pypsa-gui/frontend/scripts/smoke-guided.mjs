@@ -1079,6 +1079,42 @@ async function phaseP24(browser) {
     await runStudy('mg', { expectLole: '3' })
 
     info(`verdicts: ${JSON.stringify(verdicts)}`)
+
+    // ── re-gate B4: the first eh_study read fails ─────────────────────────
+    step('B4: eh_study answers 500 on a freshly opened project → error line + Retry, bounded requests, no toasts')
+    const ctx2 = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+    try {
+      const p2 = await ctx2.newPage()
+      p2.on('console', m => consoleLines.push(`[b4:${m.type()}] ${m.text()}`))
+      const by2 = id => p2.locator(`[data-testid="${id}"]`)
+      let n = 0
+      const fail = r => { n++; return r.fulfill({ status: 500, contentType: 'application/json', body: '{"detail":"boom"}' }) }
+      await p2.route('**/api/results/eh_study', fail)
+      await p2.goto(`${WEB}/app?project=${encodeURIComponent(TEMPLATE_NAMES.eh_datacenter)}`, { waitUntil: 'domcontentloaded' })
+      await by2('hub-load-error').waitFor({ state: 'visible', timeout: 60_000 })
+      check(/could not be read/.test(await by2('hub-load-error').textContent()), 'plain error line shown')
+      await by2('hub-card-site').waitFor({ state: 'visible', timeout: 15_000 })
+      ok('the Site card renders under the error line (not "Loading the project…")')
+      const n0 = n
+      await sleep(10_000)
+      const burst = n - n0
+      check(burst <= 2, `eh_study requests in the 10 s after the error: ${burst} (total ${n})`)
+      check((await p2.getByText('Loading the project…').count()) === 0, 'no "Loading the project…"')
+      const toasts = await p2.locator('[role="status"]').filter({ hasText: 'boom' }).count()
+      check(toasts === 0, `error toasts for the failed read: ${toasts}`)
+      await shot(p2, 'p24-b4-study-500-error-line')
+      await p2.unroute('**/api/results/eh_study', fail)
+      await by2('hub-load-retry').click()
+      await by2('hub-load-error').waitFor({ state: 'detached', timeout: 30_000 })
+      await by2('hub-card-site').waitFor({ state: 'visible', timeout: 15_000 })
+      ok('Retry recovers once the 500 is lifted: error line gone, Site card shown')
+      const n1 = n
+      await sleep(4_000)
+      check(n === n1, 'no further failing requests after recovery')
+      await shot(p2, 'p24-b4-after-retry')
+    } finally {
+      await ctx2.close()
+    }
   } catch (e) {
     try { await shot(page, 'FAILURE') } catch { /* page gone */ }
     const logFile = path.join(args.out, 'FAILURE-console.log')

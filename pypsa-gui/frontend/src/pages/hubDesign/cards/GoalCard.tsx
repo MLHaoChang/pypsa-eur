@@ -117,7 +117,7 @@ export function GoalCard() {
       </div>
 
       <div data-testid="hub-goal-voll" className="flex flex-wrap items-center gap-2 text-[12px]">
-        <Term k="voll_plain">Price of undelivered energy</Term>:{' '}
+        <span><Term k="voll_plain">Price of undelivered energy</Term>:</span>
         {voll == null ? <span className="text-muted">…</span>
           : vollMissing ? (
             <>

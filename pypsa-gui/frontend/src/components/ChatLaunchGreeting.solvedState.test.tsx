@@ -35,7 +35,8 @@ function renderGreeting() {
 beforeEach(() => {
   cleanup()
   vi.clearAllMocks()
-  useUIStore.setState({ currentProject: 'dc' })
+  // Expert: the sentences below are Expert's (a Guided case follows).
+  useUIStore.setState({ currentProject: 'dc', uiMode: 'expert' })
   vi.mocked(networkApi.getMeta).mockResolvedValue({ name: 'dc', bus_count: 3, snapshot_count: 24 })
   vi.mocked(getApiKeySettings).mockResolvedValue({
     configured: true, source: 'settings', hint: '…wxyz',
@@ -85,3 +86,20 @@ describe('greeting solve line (bug 2)', () => {
     )
   })
 })
+
+// P24-FE re-gate: Guided hides the header Run button, so after a study the
+// greeting must not send the user to "run a simulation"; it points to the hub.
+describe('greeting solve line in Guided', () => {
+  it('after a study re-solve it points to Hub design, not to a hidden Run', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({
+      running: false, status: 'idle', condition: null,
+      objective: null, solve_time: null, dispatch: 'fresh',
+    })
+    renderGreeting()
+    const line = await screen.findByTestId('chat-launch-solve')
+    expect(line.textContent).toBe('A study has run on this network — its results are in Hub design.')
+    expect(line.textContent).not.toMatch(/run a simulation/i)
+  })
+})
+

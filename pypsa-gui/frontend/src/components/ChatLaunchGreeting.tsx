@@ -46,7 +46,7 @@ import ApiKeySetup, { API_KEY_SETTINGS_KEY } from './ApiKeySetup'
 import type { SimulationStatus } from '../api/types'
 
 /** One sentence about the solve, or null while we do not yet know. */
-function solveLine(status: SimulationStatus | undefined): string | null {
+function solveLine(status: SimulationStatus | undefined, guided = false): string | null {
   if (!status) return null
   if (status.running) return 'A solve is running right now.'
   switch (status.dispatch) {
@@ -58,6 +58,8 @@ function solveLine(status: SimulationStatus | undefined): string | null {
       if (status.condition != null && status.solve_time != null) {
         return 'Solved — the results match the network as it stands.'
       }
+      // Guided hides the header Run (P24-FE gate): point to the hub instead.
+      if (guided) return 'A study has run on this network — its results are in Hub design.'
       return 'The network carries dispatch from a study re-solve, but no foreground solve is recorded — run a simulation for results you can read here.'
     case 'stale':
       // The most useful thing the greeting can say, and the reason staleness
@@ -71,6 +73,7 @@ function solveLine(status: SimulationStatus | undefined): string | null {
 
 export default function ChatLaunchGreeting() {
   const currentProject = useUIStore((s) => s.currentProject)
+  const guided = useUIStore((s) => s.uiMode) === 'guided'
   const [showKeyForm, setShowKeyForm] = useState(false)
 
   // Same keys OverviewPanel uses, so on the common path these resolve from
@@ -106,7 +109,7 @@ export default function ChatLaunchGreeting() {
     window.dispatchEvent(new CustomEvent('chat:open-new-project-wizard'))
   }
 
-  const solve = solveLine(status)
+  const solve = solveLine(status, guided)
   const needsKey = keySettings?.configured === false
 
   return (
