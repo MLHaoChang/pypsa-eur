@@ -83,6 +83,10 @@ class FixedPlanSnapshot:
     # MC certifies on these and the COPT screens ``mc_inputs`` (the v1 hub
     # fleet incl. the sampled Link units — the grid surplus is MC-only).
     zonal_inputs: Any = None
+    # The fleet the COPT screening actually ranked (``_screening_fleet``) and
+    # the screening's fidelity note (profiled units beyond K_EXACT netted).
+    screening_units: list = field(default_factory=list)
+    copt_fidelity_note: str | None = None
 
 
 # ── the hub's fleet, not the copper plate ─────────────────────────────────
@@ -197,7 +201,7 @@ class FleetScope:
         """How the COPT screening (fmea_top class A) holds the import."""
         if self.mode != "hub_side":
             return None
-        if self.zonal:
+        if self.zonal and self.copt_fractions:
             return "expected_surplus_profile"
         if self.import_units:
             return "two_state"
@@ -206,15 +210,19 @@ class FleetScope:
         return None
 
     def copt_import_note(self) -> str | None:
-        if not self.zonal:
+        if not (self.zonal and self.copt_fractions):
             return None
-        return ("COPT screening: each sampled Link stays a two-state unit, "
-                "but its UP capacity per hour is scaled by the expected share "
-                "of its cap the grid area can back, E[min(cap, surplus)]/cap "
-                "from the area's own COPT — the grid's randomness is netted "
-                "at its expected value (the MC samples it exactly); grid "
-                "storage is not in the COPT; firm-block Links are derated "
-                "the same way")
+        return ("COPT screening (class-A ranking): each sampled Link stays a "
+                "two-state unit, but its UP capacity per hour is scaled by "
+                "the expected share of its AREA's total Link cap the grid can "
+                "back, E[min(cap, surplus)]/cap from the area's own COPT; "
+                "firm-block Links are derated the same way. The grid's "
+                "randomness is netted at its expected value, so the screening "
+                "LOLE may over- or under-state LOLE against the MC (review: "
+                "±40 % measured) — it ranks modes, it does not certify. "
+                "copt_metrics.import_exact carries the analytic LOLE / EUE "
+                "with the import distribution mixed in exactly (no storage); "
+                "the MC certifies. Grid storage is not in the COPT")
 
     def as_payload(self) -> dict:
         firm = self.import_firm_mw
@@ -659,6 +667,23 @@ def _screening_fleet(inputs, zonal, scope: FleetScope):
     """
     units = list(inputs.units)
     res = np.array(inputs.residual, dtype=np.float64, copy=True)
+    # A Link with an HOURLY cap (time-varying p_max_pu) carries an hourly
+    # capacity series; the per-period COPT refuses a series that is not
+    # constant within a block. Fold the hourly shape into the profile
+    # (UP = cap_max × shape) — exact for a mixed unit (review of WP3).
+    for i, u in enumerate(units):
+        if not u.name.startswith("link:") or u.capacity_series is None:
+            continue
+        cs = np.asarray(u.capacity_series, dtype=np.float64)
+        if all(float(np.ptp(cs[a:b])) <= 1e-9 * max(float(cs[a:b].max()), 1.0)
+               for _l, a, b in inputs.periods if b > a):
+            continue
+        cap = float(u.capacity_mw)
+        shape = cs / cap if cap > 0 else np.zeros_like(cs)
+        base = (np.ones_like(cs) if u.profile is None
+                else np.asarray(u.profile, dtype=np.float64))
+        units[i] = dataclasses.replace(u, capacity_series=None,
+                                       profile=base * shape)
     if zonal is None:
         return units, res
     for k, area in enumerate(zonal.areas):
@@ -666,8 +691,11 @@ def _screening_fleet(inputs, zonal, scope: FleetScope):
         if f is None or bool(np.all(f >= 1.0)):
             continue
         for i in area.import_idx:
-            units[i] = dataclasses.replace(units[i], profile=np.asarray(
-                f, dtype=np.float64).copy())
+            prev = units[i].profile
+            prof = np.asarray(f, dtype=np.float64).copy()
+            if prev is not None:
+                prof = prof * np.asarray(prev, dtype=np.float64)
+            units[i] = dataclasses.replace(units[i], profile=prof)
         res = res + np.asarray(area.firm_import_mw, dtype=np.float64) * (1.0 - f)
     return units, res
 
@@ -748,11 +776,23 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
                                                     scope)
         residual = pd.Series(screen_res, index=network.snapshots)
         weights = pd.Series(inputs.weights, index=network.snapshots)
+        snap.screening_units = list(screen_units)
         analysis = screening_analysis(
             screen_units, residual, weights=weights, voll=snap.voll,
             delta_mw=1.0)
         snap.copt_rows = list(analysis.get("rows") or [])
         snap.copt_metrics = dict(analysis.get("metrics") or {})
+        snap.copt_fidelity_note = analysis.get("fidelity_note")
+        if snap.zonal_inputs is not None:
+            from services.adequacy.mc_zonal import exact_import_metrics
+            try:
+                snap.copt_metrics["import_exact"] = exact_import_metrics(
+                    snap.zonal_inputs)
+            except Exception as exc:  # noqa: BLE001 — disclosed, not fatal
+                logger.exception("EH exact import metric failed")
+                snap.copt_metrics["import_exact"] = {
+                    "lole_hours": None, "eue_mwh": None,
+                    "note": f"exact import metric not computed: {exc}"}
     except Exception as exc:  # noqa: BLE001
         logger.exception("EH fixed-plan COPT screening failed")
         snap.copt_error = f"COPT screening failed: {exc}"
@@ -1124,6 +1164,7 @@ def run_fmea_top_stage(
         "classes_included": sorted(classes),
         "class_b": class_b,
         "copt_metrics": frozen.copt_metrics,
+        "copt_fidelity_note": getattr(frozen, "copt_fidelity_note", None),
         "fleet_scope": frozen.scope,
         "voll_eur_per_mwh": frozen.voll,
         "ranking": "criticality_eur_per_year desc, mode_id",

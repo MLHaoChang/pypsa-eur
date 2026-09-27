@@ -44,6 +44,7 @@ outages are independent of hub outages like every other unit
 from __future__ import annotations
 
 import dataclasses
+import itertools
 from dataclasses import dataclass
 
 import numpy as np
@@ -377,10 +378,10 @@ def zonal_mc_adequacy(z: ZonalInputs, *, draws: int = 500, seed=0,
 
 # ── WP3: the grid surplus as the COPT screening sees it ──────────────────
 
-def _grid_expected_shortfall(units, x, periods) -> np.ndarray:
+def _grid_surface(units, x, periods) -> tuple[np.ndarray, np.ndarray]:
     """
-    ``ES_h(x_h) = E[max(x_h − C_h, 0)]`` for the grid fleet ``units``,
-    per hour — the COPT surface's own recipe (``copt._screen_block``):
+    Per hour ``(P[C_h < x_h], E[max(x_h − C_h, 0)])`` for the fleet
+    ``units`` — the COPT surface's own recipe (``copt._screen_block``):
     split the fleet, net the units beyond ``K_EXACT`` at expectation and
     the rate-zero profiled ones at full availability, convolve the two-state
     units, mix the profiled ones exactly. Units with a per-period capacity
@@ -401,7 +402,8 @@ def _grid_expected_shortfall(units, x, periods) -> np.ndarray:
     has_series = any(getattr(u, "capacity_series", None) is not None
                      for u in units)
     blocks = tuple(periods) if has_series else (("ALL", 0, H),)
-    out = np.zeros(H, dtype=np.float64)
+    lolp = np.zeros(H, dtype=np.float64)
+    es = np.zeros(H, dtype=np.float64)
     for _label, start, end in blocks:
         block_units = []
         for u in units:
@@ -419,9 +421,19 @@ def _grid_expected_shortfall(units, x, periods) -> np.ndarray:
         xb = (xb - netted_expectation(split.netted, hb)
               - deterministic_output(split.deterministic, hb))
         dist = build_copt(list(split.table))
-        _lolp, es = mixture_hourly(dist, xb, split.mixed)
-        out[start:end] = es
-    return out
+        lolp[start:end], es[start:end] = mixture_hourly(dist, xb, split.mixed)
+    return lolp, es
+
+
+def _grid_expected_shortfall(units, x, periods) -> np.ndarray:
+    """``E[max(x_h − C_h, 0)]`` per hour (``_grid_surface``'s second half)."""
+    return _grid_surface(units, x, periods)[1]
+
+
+#: ``f`` within this of 1 is 1: an ample grid with q > 0 gives f = 1 − 5e-15,
+#: which would otherwise profile the Link (and cost it a K_EXACT slot) for
+#: nothing (review of WP3).
+SURPLUS_SNAP_TOL = 1e-9
 
 
 def expected_surplus_fraction(grid_units, grid_residual, *, cap, ratio,
@@ -448,4 +460,136 @@ def expected_surplus_fraction(grid_units, grid_residual, *, cap, ratio,
         f = np.where(live, ratio * (c_grid + es_r - es_rc) / np.where(
             live, cap, 1.0), 1.0)
     f = np.where(cap > 0.0, np.where(ratio > 0.0, f, 0.0), 1.0)
-    return np.clip(f, 0.0, 1.0)
+    f = np.clip(f, 0.0, 1.0)
+    return np.where(f >= 1.0 - SURPLUS_SNAP_TOL, 1.0, f)
+
+
+# ── review of WP3: the exact import metric ───────────────────────────────
+
+#: At most this many levels for the hub-side import distribution; the level
+#: width is ``max(1 MW, total import cap / MAX_IMPORT_LEVELS)``.
+MAX_IMPORT_LEVELS = 128
+
+
+def _area_common_mode_q(area) -> float:
+    """
+    Probability that the area's common-mode event is DOWN in an hour
+    (independent chains: 1 − Π(1 − q_j)); 0 without common-mode data.
+    """
+    up = 1.0
+    for c in getattr(area, "common_mode", ()) or ():
+        up *= 1.0 - float(c.q)
+    return 1.0 - up
+
+
+def exact_import_metrics(z: ZonalInputs, *,
+                         max_levels: int = MAX_IMPORT_LEVELS) -> dict:
+    """
+    LOLE / EUE with the import's per-hour DISTRIBUTION mixed in exactly —
+    the analytic twin of the zonal MC without storage.
+
+    The class-A screening holds the grid at its expected surplus
+    (``expected_surplus_fraction``), which the WP3 review measured off by
+    −39 % … +39 % in LOLE. Hours are independent in the COPT, so the exact
+    per-hour answer is a mixture over the import's levels:
+
+        LOLP_h = Σ_j P[D_h = j·δ] · P[C_hub,h < r_h − j·δ]
+
+    where ``D_h = Σ_areas up_cm · min(Σ s_i·cap_i,h + firm_h,
+    ratio_h·(C_grid,h − r_grid,h)⁺)``. Per area: every Link state
+    combination (2^m, m sampled Links in the area), the grid survival
+    ``P[D ≥ j·δ] = P[C_grid ≥ r + j·δ/ratio]`` from the area's own COPT, the
+    common-mode event (WP4) as a point mass at 0; areas are independent and
+    convolved per hour. ``D`` is rounded DOWN to the level grid (≤ δ MW
+    conservative; exact when every quantity is a multiple of δ, e.g. δ = 1
+    MW on integer data). With no hub or grid storage this equals the MC's
+    expected LOLE / EUE (pinned against a 4000-draw MC).
+    """
+    from services.adequacy.copt import _availability_mw
+
+    hub = z.hub
+    H = hub.residual.size
+    imp_all = {int(i) for a in z.areas for i in a.import_idx}
+    base = [u for i, u in enumerate(hub.units) if i not in imp_all]
+    firm_total = np.zeros(H, dtype=np.float64)
+    specs = []
+    total_max = 0.0
+    for a in z.areas:
+        firm = np.asarray(a.firm_import_mw, dtype=np.float64)
+        firm_total = firm_total + firm
+        links = [(float(hub.units[i].q), _availability_mw(hub.units[i], H))
+                 for i in a.import_idx]
+        omax = float(firm.max(initial=0.0)) + sum(float(v.max(initial=0.0))
+                                                  for _q, v in links)
+        total_max += omax
+        specs.append((a, firm, links, omax))
+    delta = max(1.0, total_max / float(max_levels)) if total_max > 0 else 1.0
+    res = hub.residual + firm_total
+
+    pmf = np.ones((H, 1), dtype=np.float64)
+    for a, firm, links, omax in specs:
+        L = int(np.floor(omax / delta + 1e-9))
+        js = np.arange(L + 2)
+        # S[:, j] = P[D_grid ≥ j·δ] before the Link cap; S[:, 0] = 1.
+        S = np.zeros((H, L + 2), dtype=np.float64)
+        S[:, 0] = 1.0
+        if a.grid is None:
+            S[:, 1:] = 1.0
+        else:
+            ratio = np.asarray(a.delivery_ratio, dtype=np.float64)
+            r = a.grid.residual
+            for j in range(1, L + 2):
+                y = np.where(ratio > 0.0,
+                             r + j * delta / np.where(ratio > 0.0, ratio, 1.0),
+                             np.inf)
+                finite = np.isfinite(y)
+                lolp_y = np.ones(H, dtype=np.float64)
+                if finite.any():
+                    lp, _ = _grid_surface(a.grid.units, np.where(finite, y, 0.0),
+                                          a.grid.periods)
+                    lolp_y = np.where(finite, lp, 1.0)
+                S[:, j] = 1.0 - lolp_y
+        pk = np.zeros((H, L + 1), dtype=np.float64)
+        for bits in itertools.product((0, 1), repeat=len(links)):
+            p = 1.0
+            o = firm.copy()
+            for (q, avail), b in zip(links, bits):
+                p *= (1.0 - q) if b else q
+                if b:
+                    o = o + avail
+            if p <= 0.0:
+                continue
+            J = np.floor(o / delta + 1e-9).astype(np.int64)      # (H,)
+            capped = np.where(js[None, :] <= J[:, None], S, 0.0)  # (H, L+2)
+            pk += p * (capped[:, :-1] - capped[:, 1:])
+        q_cm = _area_common_mode_q(a)
+        if q_cm > 0.0:
+            pk *= (1.0 - q_cm)
+            pk[:, 0] += q_cm
+        new = np.zeros((H, pmf.shape[1] + L), dtype=np.float64)
+        for j in range(pmf.shape[1]):
+            new[:, j:j + L + 1] += pmf[:, j:j + 1] * pk
+        pmf = new
+
+    lolp = np.zeros(H, dtype=np.float64)
+    eue = np.zeros(H, dtype=np.float64)
+    for j in range(pmf.shape[1]):
+        w = pmf[:, j]
+        if not (w > 0.0).any():
+            continue
+        lp, es = _grid_surface(base, res - j * delta, hub.periods)
+        lolp += w * lp
+        eue += w * es
+    weights = np.asarray(hub.weights, dtype=np.float64)
+    return {
+        "lole_hours": float((weights * lolp).sum()),
+        "eue_mwh": float((weights * eue).sum()),
+        "delta_mw": float(delta),
+        "levels": int(pmf.shape[1]),
+        "storage_included": False,
+        "note": ("analytic LOLE / EUE with the import's per-hour distribution "
+                 "(Link states × grid-area COPT × common mode) mixed in "
+                 "exactly; hours independent, no storage — the MC's "
+                 "expectation when neither the hub nor the grid has storage; "
+                 f"import rounded down to {delta:g} MW levels"),
+    }

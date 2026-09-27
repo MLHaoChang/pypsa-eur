@@ -59,3 +59,26 @@ All three reviewer mutants were re-run against the new tests and each fails at l
 | R2.4 | Stale module docstring (said grid storage is not dispatched and one area only) | nit | Rewritten. |
 | R2.5 | `demand_peak_mw` was `0.0` for an empty residual | nit | Now `null` (ADR-0001). |
 | R2.6 | Surviving mutants: stream index ignored; a `grid=None` area gives no import; firm series in the wrong area; delivery ratio pooled across areas; multi-Link areas and interleaved order untested; refused-snapshot branch never run | test gaps | Six tests added: identical fleets on the two areas draw different paths; an unsampled area replays v1 bit for bit; a firm Link lands in its own area; per-area ratios with efficiencies 0.9 / 0.5; interleaved `a, b, a2` groups as `[a, a2], [b]`; a refused snapshot is marked unsampled with its reason and `null` values. All five in-place mutants were re-run and each now fails at least one test. The stream test needed truly identical fleets (same MTTR) to bite. |
+
+## WP3 — two-area COPT screening
+
+**What changed.**
+- `mc_zonal.expected_surplus_fraction` computes `f_h = E[min(cap_h, S_h)]/cap_h` from the grid area's own COPT. It uses `E[min(c', (C−r)⁺)] = c' + ES(r) − ES(r+c')`, which is exact on the COPT grid.
+- `eh_stages._screening_fleet` gives each area's sampled Link unit the profile `f_h` for the class-A screening only (UP = `f_h × cap`). Firm-block Links are derated by adding `(1 − f_h) × firm` back to the residual.
+- The MC keeps unprofiled units; profiling them would count the grid twice.
+- Disclosed as `fleet_scope.copt_import_model` (`expected_surplus_profile` / `two_state` / `firm_block`), `copt_import_note`, and `grid_areas[k].copt_surplus_fraction_min`.
+
+**TDD.** Red: 8 of 9 tests failed (`AttributeError: expected_surplus_fraction`, missing `copt_import_model`). Green: `test_energy_hub_zonal_copt.py`, including hand-computed PMFs for one unit at q = 0.2 (0.64 / 0.8 / 0) and for delivery ratio 0.5.
+
+**Review findings (independent reviewer, `e75d379..2d88570`) and resolution.**
+
+| # | Finding | Severity | Resolution |
+|---|---|---|---|
+| R3.1 | The identity (negative r, beyond-table, ratio 0, cap 0; brute-forced on 200 random fleets to 1e-9), the grid surface matching `_screen_block`, mixed firm and sampled Links in one area, and `_rank_import_links_once` with a profiled Link | no bug | — |
+| R3.2 | **Holding the grid at its expected value can misstate LOLE in either direction, and the payload did not say so.** Measured: 13.1 h against an exact 21.6 h on a case where the hub is barely short; 802 h against 576 h on the fixture | risk | Two parts. (a) `copt_import_note` now says the screening "may over- or under-state LOLE against the MC", that it ranks and does not certify, and points to the exact figure. (b) **A new exact analytic metric, `copt_metrics.import_exact`** (`mc_zonal.exact_import_metrics`). It mixes the import's per-hour distribution in exactly (Link states × the area's grid COPT × common mode, areas convolved), with the import rounded down to at most 128 levels (1 MW on the fixtures). Without storage it equals the MC expectation. It is pinned inside a 4000-draw MC's CI on three fixtures (grid short, grid unreliable, firm Link) and on a two-Link area. With an unbound grid it equals the v1 COPT to 1e-9, reached by an independent route. |
+| R3.3 | An ample grid with q > 0 gave `f = 1 − 5e-15`, which profiled the Link for nothing and cost it a `K_EXACT` slot | risk | `f` is snapped to 1 when it is within `SURPLUS_SNAP_TOL = 1e-9`. Test: ten 100 MW grid units at q = 0.02 leave the screening Link unprofiled. |
+| R3.4 | The `K_EXACT` change was under-disclosed: `screening_analysis`'s `fidelity_note` was dropped | risk | Kept as `snap.copt_fidelity_note` and `fmea_top.copt_fidelity_note`. |
+| R3.5 | Note wording: `f` is the area's share, not a single Link's | nit | Reworded ("its AREA's total Link cap"). |
+| R3.6 | `copt_import_model` said `expected_surplus_profile` even when every fraction failed | nit | Now based on `copt_fractions` being non-empty, otherwise `two_state`. Tests cover both the failure path (`copt_note` present) and the normal path (`copt_note` absent). |
+| R3.7 | Pre-existing crash, now more visible: a Link with an hourly `p_max_pu` gets an hourly `capacity_series`, and the per-period COPT failed with "not constant over the block" | bug (pre-existing) | `_screening_fleet` folds a non-block-constant Link series into the profile (UP = `cap_max × shape`, exact for a mixed unit). Tests pass in `auto` and `sampled_unit` modes. |
+| R3.8 | Surviving mutants: `f` applied from the wrong area; ratio wired as ones; snap removed; `r` clamped at 0; `periods` ignored | test gaps | Tests added: two areas with different fractions; end-to-end efficiency 0.5 (`f ≤ 0.4`); the snap test; negative grid residual (0.92); ratio 0 → 0; a per-period grid surface (`[10, 10, 50, 50]`). All five mutants were re-run and each now fails at least one test. |
