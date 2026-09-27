@@ -236,6 +236,13 @@ Files: `backend/routers/library.py` (series endpoints only in P1), `backend/main
 - [ ] Green: `library_acl.can_read/can_write(user, org)` (org membership or super-admin), distinct from
   `project_acl`. Chat tools for the Library are **deferred to P2 WP2.4** (stated deviation from "tools ship per
   phase": nothing in P1 is user-facing yet).
+- As implemented (review round 1 PASS WITH CONDITIONS → closed): ACL unit tests live in
+  `test_library_router.py` (no separate `test_library_acl.py`). Routes: `GET/POST /api/library/series`,
+  `GET /api/library/series/{name}?version=`; `org_id` other than the caller's → 403 unless super-admin, an
+  unknown org → 404 (was a 500 via the FK retry loop). Timestamps: all-with-offset (kept in `timezone`, else
+  UTC) or all-naive (stored naive; naive + `timezone` → 422, the tariff engine's rule); mixed → 422. Names are
+  stripped and refuse `/`, blanks and control characters (one path segment). `MAX_POINTS` = 1,000,000. A
+  stale/missing payload → 409 `{code: "library_ref_stale"}`. `route_inventory_phase0.txt` regenerated.
 
 ### WP1.1c Bundle pins library versions
 - [ ] Red: a project bundle records `(id, version, hash)` of every series it references in a sidecar

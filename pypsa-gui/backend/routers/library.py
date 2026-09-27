@@ -16,10 +16,10 @@ from uuid import UUID
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session as DBSession
 
-from db.models import User
+from db.models import Organization, User
 from db.session import get_db
 from deps import require_user
 from models.commercial import PriceSeriesRef
@@ -28,13 +28,36 @@ from services.library import series_store as S
 
 router = APIRouter()
 
+# A 15-minute year is 35,040 points; this admits ~28 of them. JSON bodies have
+# no upload guard in this repo (`upload_guard` covers UploadFile only).
+MAX_POINTS = 1_000_000
+
+# An offset at the end of an ISO time part: Z, +01, +0100, +01:00.
+_OFFSET_RE = r"(?:Z|[+-]\d{2}(?::?\d{2})?)$"
+
 
 class SeriesIn(BaseModel):
+    """One upload. `timestamps` are ISO strings. Either ALL carry an offset
+    (instants; `timezone`, if given, is the zone to keep them in, else UTC) or
+    NONE do (naive wall-clock, stored naive; `timezone` is then refused, the
+    same rule as the tariff engine's: a naive axis plus a zone is ambiguous
+    across DST)."""
+
     name: str = Field(min_length=1, max_length=128)
-    timestamps: list[str] = Field(min_length=1)
-    values: list[float] = Field(min_length=1)
+    timestamps: list[str] = Field(min_length=1, max_length=MAX_POINTS)
+    values: list[float] = Field(min_length=1, max_length=MAX_POINTS)
     timezone: str | None = None
     meta: dict = Field(default_factory=dict)
+
+    @field_validator("name")
+    @classmethod
+    def _fetchable_name(cls, v: str) -> str:
+        # `GET /series/{name}` is one path segment: a "/" could never be
+        # fetched back, and control characters or a blank name are no name.
+        v = v.strip()
+        if not v or "/" in v or any(ord(ch) < 32 for ch in v):
+            raise ValueError("name must be non-blank, without '/' or control characters")
+        return v
 
 
 class SeriesOut(BaseModel):
@@ -49,6 +72,11 @@ def _target_org(db: DBSession, user: User, org_id: UUID | None, *, write: bool) 
     target = org_id or own
     if target is None:
         raise HTTPException(403, "You belong to no organization; the Library is per organization.")
+    if org_id is not None and org_id != own and not library_acl.can_read(db, user, org_id):
+        # Refuse before the existence check so a non-admin cannot probe org ids.
+        raise HTTPException(403, "Not allowed to access that organization's Library.")
+    if org_id is not None and db.get(Organization, org_id) is None:
+        raise HTTPException(404, "No such organization.")
     allowed = (library_acl.can_write if write else library_acl.can_read)(db, user, target)
     if not allowed:
         raise HTTPException(403, "Not allowed to access that organization's Library.")
@@ -58,13 +86,22 @@ def _target_org(db: DBSession, user: User, org_id: UUID | None, *, write: bool) 
 def _series_from(body: SeriesIn) -> pd.Series:
     if len(body.timestamps) != len(body.values):
         raise HTTPException(422, "timestamps and values must have the same length")
+    raw = pd.Series(body.timestamps, dtype=str).str.strip()
+    time_part = raw.str.extract(r"[T ](.*)$")[0].fillna("")
+    aware = time_part.str.contains(_OFFSET_RE, regex=True)
+    if aware.any() and not aware.all():
+        raise HTTPException(422, "timestamps mix offset-carrying and naive values; "
+                                 "send every timestamp with an offset, or none")
+    if not aware.any() and body.timezone is not None:
+        raise HTTPException(422, "timestamps carry no UTC offset, so `timezone` is ambiguous "
+                                 "across DST; send ISO timestamps with an offset")
     try:
-        idx = pd.DatetimeIndex(pd.to_datetime(body.timestamps, utc=body.timezone is not None))
+        idx = pd.DatetimeIndex(pd.to_datetime(list(raw), utc=bool(aware.all())))
     except (ValueError, TypeError) as exc:
         raise HTTPException(422, f"unparseable timestamp: {exc}") from exc
-    if body.timezone is not None:
+    if aware.all():
         try:
-            idx = idx.tz_convert(body.timezone)
+            idx = idx.tz_convert(body.timezone or "UTC")
         except Exception as exc:  # noqa: BLE001 — bad zone name
             raise HTTPException(422, f"unknown timezone {body.timezone!r}") from exc
     return pd.Series(np.asarray(body.values, dtype=float), index=idx)
@@ -91,18 +128,16 @@ def put_series(body: SeriesIn, org_id: UUID | None = None, db: DBSession = Depen
 def get_series(name: str, version: int | None = None, org_id: UUID | None = None,
                db: DBSession = Depends(get_db), user: User = Depends(require_user)):
     org = _target_org(db, user, org_id, write=False)
-    refs = {r.id: r for r in S.list_series(db, org)}
-    if name not in refs:
-        raise HTTPException(404, f"No series {name!r} in this Library")
-    ref = refs[name]
-    if version is not None and version != ref.version:
-        ref = S.ref_for(db, org, name, version)
-        if ref is None:
-            raise HTTPException(404, f"No version {version} of series {name!r}")
+    ref = S.latest_ref(db, org, name) if version is None else S.ref_for(db, org, name, version)
+    if ref is None:
+        what = f"series {name!r}" if version is None else f"version {version} of series {name!r}"
+        raise HTTPException(404, f"No {what} in this Library")
     try:
         series = S.resolve(db, org, ref)
+    except S.LibraryRefNotFound as exc:  # removed between the two reads
+        raise HTTPException(404, str(exc)) from exc
     except S.LibraryRefStale as exc:
-        raise HTTPException(409, str(exc)) from exc
+        raise HTTPException(409, {"code": "library_ref_stale", "message": str(exc)}) from exc
     tz = str(series.index.tz) if series.index.tz is not None else None
     return SeriesOut(ref=ref, timestamps=[t.isoformat() for t in series.index],
                      values=[float(v) for v in series.to_numpy()], timezone=tz)

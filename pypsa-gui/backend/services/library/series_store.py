@@ -201,6 +201,12 @@ def _row_for(db: DBSession, org_id: UUID, ref: PriceSeriesRef) -> LibraryItem:
     return row
 
 
+def latest_ref(db: DBSession, org_id: UUID, name: str) -> PriceSeriesRef | None:
+    """The ref of the latest version of `name`, or None."""
+    row = _latest_row(db, org_id, name)
+    return None if row is None else _ref(row)
+
+
 def ref_for(db: DBSession, org_id: UUID, name: str, version: int) -> PriceSeriesRef | None:
     """The ref of one specific version, or None."""
     row = db.scalars(select(LibraryItem).where(
