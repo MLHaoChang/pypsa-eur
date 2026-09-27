@@ -75,6 +75,27 @@ Source: the click-through report. Spec §2.
 - [ ] 6 independent QA-gate review: GO (`docs/superpowers/qa/2026-09-27-guided-mode-gate-P22.9-BE.md`)
 - [ ] 7 Expert-unchanged review signed (additive field + restore only)
 
+**Phase note — the twelve `run_simulation(` sites (spec §2.1 fix 3).** Line numbers are the spec's (pre-change). Several of the listed sites are `_solve_once` calls or the call into `_restore_base`; `_solve_once` is a thin wrapper over `run_simulation`, so they are classified the same way.
+
+| # | Site | What it solves | Live / copy | Action |
+|---|---|---|---|---|
+| 1 | `frontier.py:145` (`_restore_base` → `run_simulation`) | closing re-solve | **live** from `POST /api/results/frontier` (`frontier_loop_runner.py`, `PyPSAService.get_network()`); the EH study passes a copy with `restore_base=False` and never reaches it | covered by `preserve_bus_topology` around the whole `run_frontier_sweep` body |
+| 2 | `frontier.py:229` (`_solve_once` per point) | each ε point | **live** from the route; copy from the EH study | same wrapper |
+| 3 | `frontier.py:267` (the `_restore_base` call in the `finally`) | closing re-solve | **live** from the route | same wrapper (the restore runs inside it) |
+| 4 | `coupling_loop_runner.py:319` (`solve_at` → `_solve_once`) | each iterate | **live** (`n = PyPSAService.get_network()`) | the worker runs inside `preserve_bus_topology(n)`; closed explicitly after `_restore_closing`, before the record flips |
+| 5 | `coupling_loop_runner.py:464` (`_restore_closing`) | closing re-solve | **live** | same wrapper |
+| 6 | `margin_loop_runner.py:453` (`solve_at` → `_solve_once`) | each iterate (probe included) | **live** | same pattern as the coupling loop |
+| 7 | `margin_loop_runner.py:772` (`_restore_closing`) | closing re-solve | **live** | same wrapper |
+| 8 | `dtc.py:408` | islanding contingency | copy (`nn = network.copy()`) | left alone |
+| 9 | `dtc.py:608` | planning contingency | copy (`nn = network.copy()`) | left alone |
+| 10 | `levers.py:326` | lever scenario | copy (`nn = network.copy()`) | left alone |
+| 11 | `redundancy.py:593` | redundancy scenario | copy (`nn = network.copy()` at 554) | left alone |
+| 12 | `eh_study.py:219` (`ens_solve`) | ENS solve | copy (the study copies under the lock, `eh_study.py:969–971`) | left alone |
+
+Outside the twelve: `sweep.py` `_solve_once` / `_restore_base_guarded` (the FMEA sweep; **live** from `POST /api/results/fmea_sweep` for class B and class C, copy from the EH study's `fmea_top`) are the bug-3 sites and are wrapped in `run_contingency_sweep` itself; `routers/simulation.py` (the foreground solve) and `solve_queue.py` (a queued user solve) are user solves and out of scope (spec §2.1 fix 4).
+
+**Links difference, characterised (review appendix A asked for it).** After the sweep and the fix, `/buses` rows are equal. `/links` differs in exactly one column, `p_nom_opt` (0 → the link's `p_nom` on `grid_import` and `site_transformer`). It is written by the sweep's closing base re-solve, which solves the user's own config on purpose — the same solve that leaves `dispatch: fresh` (bug 2). It is an optimisation output, not a user input, and restoring it would leave `fresh` dispatch next to zero capacities. The invariant tests therefore compare whole rows with that one column excluded on the sweep paths only, and pin it instead: on every fixed link `p_nom_opt == p_nom`. The study guard compares whole rows with no exclusion. **Changed assertion vs. the spec's literal "whole rows" — for the QA gate to accept or reject.**
+
 ## P22.9-FE — Expert-flow fixes, frontend half
 
 | Item | Report ref | Contract | Files | Tests |

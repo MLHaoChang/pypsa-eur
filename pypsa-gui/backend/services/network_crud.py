@@ -58,7 +58,36 @@ def _serialize_component(
             v = row.get("outage_rate_basis")
             if isinstance(v, str) and v.strip() in _BLANK_SPELLINGS:
                 row["outage_rate_basis"] = None
+    if attr == "loads":
+        _add_load_peak(n, rows)
     return rows
+
+
+def _add_load_peak(n: Any, rows: list[dict]) -> None:
+    """
+    Additive ``p_set_peak`` on Load rows (P22.9 bug 4): the largest value of
+    ``loads_t.p_set[name]`` when the load has a time series, else the static
+    ``p_set``, else ``None``. A load whose demand lives only in the series has
+    a static ``p_set`` of 0, so a panel summing the static column showed a
+    loaded bus as "0 MW". Computed here so the shim and the path-scoped route
+    serve the same number.
+    """
+    try:
+        ts = n.loads_t.p_set
+    except AttributeError:
+        ts = pd.DataFrame()
+    for row in rows:
+        name = row.get("name")
+        peak = None
+        if name in ts.columns:
+            v = ts[name].max()
+            if pd.notna(v):
+                peak = float(v)
+        if peak is None:
+            v = row.get("p_set")
+            if isinstance(v, (int, float)) and math.isfinite(v):
+                peak = float(v)
+        row["p_set_peak"] = peak
 
 
 def _get_component(component_class: str, attr: str) -> list[dict]:
