@@ -1,70 +1,74 @@
 #!/bin/bash
-# SessionStart hook for Claude Code on the web.
-#
-# Builds the SAME environment CI and `pixi run gui-tests` use — pixi's `test`
-# environment, straight from pixi.lock — so a cloud session can run the whole
-# pypsa-gui backend suite, including the GridSpine tests (need the repo's own
-# `gridspine` package, Python 3.12, pandapower and lightsim2grid) and the
-# desktop tests (need pywebview). A hand-built venv that skipped those reported
-# 136 failures that were only missing packages.
-#
-# Also installs the frontend's npm dependencies so vitest and tsc run.
-#
-# Idempotent: pixi and npm both no-op when already up to date, and the
-# container is cached after this hook completes.
+# SessionStart hook for Claude Code on the web: a pixi-free environment in
+# which the pypsa-gui suites run —
+#   cd pypsa-gui/backend && python -m pytest -m "not slow"
+#   cd pypsa-gui/backend && python tests/run_qa_drivers.py
+#   cd pypsa-gui/frontend && npx vitest run
+# Versions mirror pixi.toml / pixi.lock (see
+# docs/superpowers/findings/2026-09-26-eh-wire-skipped-stages.md for why each
+# pin matters). Idempotent: re-runs are no-ops once the venv is satisfied.
 set -euo pipefail
 
-# Local sessions manage their own environment.
 if [ "${CLAUDE_CODE_REMOTE:-}" != "true" ]; then
   exit 0
 fi
 
 REPO="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
-PIXI_VERSION="v0.68.1"   # keep in step with .github/workflows/test.yaml
-PIXI_HOME="${HOME}/.pixi"
-PIXI_BIN="${PIXI_HOME}/bin/pixi"
+VENV="${HOME}/.venv-pypsa-gui"
 
-# The cloud proxy re-signs TLS; point pixi (rattler) at its CA bundle.
-if [ -f /root/.ccr/ca-bundle.crt ]; then
-  export SSL_CERT_FILE=/root/.ccr/ca-bundle.crt
+# gridspine uses Python-3.12-only f-strings; pixi pins 3.12.12.
+PY312="$(command -v python3.12 || true)"
+if [ -z "$PY312" ]; then
+  echo "session-start: python3.12 not found; pypsa-gui backend needs 3.12" >&2
+  exit 1
 fi
 
-# pixi.sh is not reachable from the sandbox, so fetch the release binary from
-# GitHub directly.
-if [ ! -x "$PIXI_BIN" ] || ! "$PIXI_BIN" --version 2>/dev/null | grep -q "${PIXI_VERSION#v}"; then
-  mkdir -p "${PIXI_HOME}/bin"
-  tmp="$(mktemp -d)"
-  curl -fsSL --retry 4 --retry-delay 2 \
-    -o "${tmp}/pixi.tgz" \
-    "https://github.com/prefix-dev/pixi/releases/download/${PIXI_VERSION}/pixi-x86_64-unknown-linux-musl.tar.gz"
-  tar -xzf "${tmp}/pixi.tgz" -C "${PIXI_HOME}/bin"
-  rm -rf "$tmp"
-fi
+UV="$(command -v uv || true)"
+[ -z "$UV" ] && [ -x "${HOME}/.local/bin/uv" ] && UV="${HOME}/.local/bin/uv"
 
-cd "$REPO"
-"$PIXI_BIN" install -e test --locked
-
-# Frontend: `npm ci`, which installs exactly what package-lock.json pins and
-# never rewrites it. (`npm install` from a newer npm rewrote the lockfile's
-# `peer` flags and left every session with a dirty tree.) Skipped when
-# node_modules is already newer than the lockfile, so the cached container
-# is reused.
-FRONTEND="pypsa-gui/frontend"
-if [ -f "${FRONTEND}/package-lock.json" ]; then
-  marker="${FRONTEND}/node_modules/.package-lock.json"
-  if [ ! -f "$marker" ] || [ "${FRONTEND}/package-lock.json" -nt "$marker" ]; then
-    (cd "$FRONTEND" && npm ci --no-audit --no-fund)
+if [ ! -x "${VENV}/bin/python" ]; then
+  if [ -n "$UV" ]; then
+    "$UV" venv --python "$PY312" "$VENV" -q
+  else
+    "$PY312" -m venv "$VENV"
   fi
 fi
 
-# Make pixi and the CA bundle available to every command in the session.
-if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
-  {
-    echo "export PATH=\"${PIXI_HOME}/bin:\$PATH\""
-    if [ -f /root/.ccr/ca-bundle.crt ]; then
-      echo "export SSL_CERT_FILE=/root/.ccr/ca-bundle.crt"
-    fi
-  } >> "$CLAUDE_ENV_FILE"
+PKGS=(
+  "pypsa==1.1.2" "linopy==0.8.0" "highspy==1.14.0" "xarray<2025.7"
+  # pandas 3.x breaks network.copy() / frozen re-solves (StringDtype).
+  "pandas==2.3.3" "numpy==2.4.6" "scipy==1.17.1"
+  netcdf4 openpyxl geopandas pytest pytest-asyncio python-dotenv ruff
+  # gridspine + desktop suites; lightsim2grid 1.x lacks LSGrid.get_lineor_res.
+  # Exact pins from pixi.toml's [pypi-dependencies] / desktop feature: an
+  # unpinned pandapower or pywebview drifts from what CI and pixi test.
+  "pandapower==3.1.2" "pywebview==6.2.1" "lightsim2grid==0.10.1"
+)
+if [ -n "$UV" ]; then
+  "$UV" pip install --python "${VENV}/bin/python" -q "${PKGS[@]}" \
+    -r "${REPO}/pypsa-gui/backend/requirements.txt"
+else
+  "${VENV}/bin/python" -m pip install -q "${PKGS[@]}" \
+    -r "${REPO}/pypsa-gui/backend/requirements.txt"
 fi
 
-echo "pypsa-gui test environment ready: pixi run -e test gui-tests (backend), npx vitest run (frontend)"
+# Frontend. `npm ci` installs exactly the committed lockfile and never
+# rewrites it (`npm install` would, dirtying the tree every session); it is
+# skipped when node_modules is already at least as new as the lockfile, so
+# the cached container state is reused.
+FE="${REPO}/pypsa-gui/frontend"
+if [ -f "${FE}/package-lock.json" ]; then
+  if [ ! -f "${FE}/node_modules/.package-lock.json" ] \
+      || [ "${FE}/package-lock.json" -nt "${FE}/node_modules/.package-lock.json" ]; then
+    (cd "$FE" && npm ci --no-audit --no-fund --loglevel=error)
+  fi
+fi
+
+if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+  {
+    echo "export VIRTUAL_ENV=\"${VENV}\""
+    echo "export PATH=\"${VENV}/bin:\$PATH\""
+    # Backend imports gridspine from the repo root.
+    echo "export PYTHONPATH=\"${REPO}:${REPO}/pypsa-gui/backend\${PYTHONPATH:+:\$PYTHONPATH}\""
+  } >> "$CLAUDE_ENV_FILE"
+fi
