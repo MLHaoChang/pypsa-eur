@@ -468,3 +468,16 @@ def test_a_negative_demand_rate_is_refused():
     """#5: it would make the LP unbounded."""
     with pytest.raises(L.CommercialBindingError, match="negative"):
         L.materialise_poc_prices(_site(), _commercial(_tariff(_demand(rate=-5.0))))
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+def test_a_non_finite_rate_is_refused_by_the_model(bad):
+    """Round 4: NaN < 0 is False, so the sign check alone let a NaN demand
+    rate through and the row came out NaN (ADR-0001)."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        _tariff(_demand(rate=bad))
+    with pytest.raises(ValidationError):
+        _tariff({"id": "e", "kind": "energy", "unit": "per_kwh",
+                 "periods": [{"name": "all", "rate": bad}]})

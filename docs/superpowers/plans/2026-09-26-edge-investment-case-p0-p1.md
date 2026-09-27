@@ -489,6 +489,8 @@ Files: `lp_bindings.py`, `backend/tests/test_lp_bindings_peak_demand.py`.
   items, timezone, meter history, peak floors and the snapshot axis; a negative demand rate is refused (it
   would make the LP unbounded). Not changed: with unsampled months the rows sum the sampled months plus a
   flag while the engine withholds `per_item` (both disclosed; different conventions).
+- Round 4 → **PASS**. Minor closed: tariff rates and tier thresholds refuse NaN/inf in the model
+  (`allow_inf_nan=False`), so a NaN rate can no longer produce a NaN row.
 
 - [ ] (Gate P0 condition 3) with `realistic_dispatch` or any other new `services/solver/` module, add
   the assertion that `test_solver_facade_surface.py`'s glob covers it.
@@ -617,6 +619,7 @@ Files: `backend/services/validation_service.py`, `backend/tests/test_validation_
   years (weather-year timestamps no longer warn); an axis whose every step exceeds the gap bound uses its
   smallest step for `demand_resolution`; a connection agreement on a non-datetime axis is refused too; the
   stale `preflight.py` hourly-audit allowance is removed (43 sites in 21 files).
+- Round 3 → **PASS**.
 
 ### Phase 1 e2e QA gate
 - [ ] `backend/tests/qa_commercial_lp.py` (auto-discovered by `run_qa_drivers.py`): build the 15-min fixture

@@ -102,7 +102,7 @@ class TariffPeriod(BaseModel):
     """
 
     name: str = Field(min_length=1)
-    rate: float
+    rate: float = Field(allow_inf_nan=False)  # a NaN rate would price nothing silently
     months: list[int] = Field(default_factory=list)
     weekdays: list[int] = Field(default_factory=list)  # 0 = Monday
     start_hour: int | None = Field(default=None, ge=0, le=23)
@@ -124,8 +124,8 @@ class TariffPeriod(BaseModel):
 class Tier(BaseModel):
     """Cumulative-volume tier: applies to volume above ``threshold`` up to the next one."""
 
-    threshold: float = Field(ge=0)
-    rate: float
+    threshold: float = Field(ge=0, allow_inf_nan=False)
+    rate: float = Field(allow_inf_nan=False)
 
 
 class Ratchet(BaseModel):
