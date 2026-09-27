@@ -126,6 +126,14 @@ Outside the twelve: `sweep.py` `_solve_once` / `_restore_base_guarded` (the FMEA
 
 **Not in P22.9 (deferred, recorded):** bug 5 (FMEA severity-0 rows without explanation), bug 6 (one-off 409 on resume), obstacles 10–12 (popover placement, `gen_zero_costs` warning, misleading save path). Obstacles 1, 4, 6, 7, 8 are answered by the Guided flow (mapping in spec §1) and, for 1/4, partly by the quick win above.
 
+**Known limitation (Send gate, recorded at the P22.9-FE re-gate):**
+- **The case.** A session was bound server-side to profile X on an earlier turn. The store's `profileId` is null again, for example after a reload. Send is then gated on the active profile's readiness, while the backend keeps running turns on X. If X is ready and the active profile is not, Send is wrongly disabled.
+- **Why it is acceptable.**
+  - The dropdown shows `profileId ?? active`, so what the user sees matches the gate.
+  - Picking X lifts it in one click.
+  - It needs an admin to switch the active profile away from a working one mid-session.
+- **Follow-up.** Expose the session's bound profile id to the client and compare against that.
+
 **P22.9-FE integration gate (spec §8):**
 - [ ] 1 full backend suite — zero new failures
 - [ ] 2 targeted EH set green

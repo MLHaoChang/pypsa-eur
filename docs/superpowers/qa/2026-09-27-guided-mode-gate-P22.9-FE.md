@@ -160,3 +160,70 @@ None of these can pass without the fix.
 ### The 14 accepted deviations and 2 follow-ups
 
 I reviewed them all. The only one with a system-level defect is the send gate's profile scope (B1). The `text-success` token exists (`index.css:71`, `--color-success`). The `EhReferenceDesignPanel.test.tsx` `statusTone` edit is justified in the plan per §8.3.
+
+---
+
+## Re-gate at `28774ad` (diff `32a56d7..28774ad`)
+
+### Verdict: **GO**
+
+B1 is fixed and pinned by tests that fail without the fix. Notes 1–3 and note 10 are addressed. Rows 3–5 and `test_guides.py` are green. I edited no source or test file. Row 1, the full backend suite, is still the orchestrator's to report.
+
+### B1: closed
+
+`ChatPanel.tsx:1221–1222`:
+
+```ts
+notReady = chat_ready === false && (profileId == null || profileId === active_profile?.id)
+```
+
+I checked this against the backend's per-turn profile rule (`routers/chat.py:1120–1166`, `chat_service._resolve_turn_profile`):
+
+- A named `profile_id` rebinds the session and the turn runs on it. The gate is off unless that profile is the active one, which is correct.
+- `profile_id` absent on an unbound session means `resolve_legacy_model(None)`, which returns `resolve_active()`. The turn runs on the active profile, so gating on `chat_ready` is correct.
+- Fail-open is kept: when `chatHealth` is undefined, `notReady` is false.
+
+**The limitation.** It is not written in the repo; the commit and the code comment do not name it. I take it to be this case:
+
+- The session was bound to profile X on an earlier turn, and the store's `profileId` is null again (after a reload, or because `session_init` deliberately never pins the pick).
+- The backend then keeps X, because a bound session with no named target keeps its binding (C-8/C-9).
+- The gate, however, reads the active profile's readiness.
+
+If X is ready and the active profile is not, Send is gated although the turn would succeed.
+
+**I accept it** as non-blocking, for three reasons:
+- The dropdown shows `profileId ?? active`, so the UI is at least self-consistent with the gate.
+- The escape is one click: pick X in the dropdown, which sets `profileId` and lifts the gate.
+- It needs the admin to change the active profile away from a working one mid-session.
+
+The other direction (X keyless, active ready) fails open into the existing `missing_api_key` banner, as before.
+
+**Please record it in the plan's P22.9-FE section** per §8.3; the coordinator's message is currently the only record. A later fix could expose the session's bound profile id to the client, via `session_init` or history, and compare against that.
+
+### Notes 1–3 and 10: addressed
+
+1. **Tour across a project switch and duplicate tours.**
+   - `GuidedTourHost` stores the launch project and clears the slot when `currentProject` changes. It also clears the slot on unmount.
+   - `GuideButton.start` returns early when the host already shows the same tour.
+   - A side effect: re-clicking "How to tag the network" while its own tour is open is now a no-op rather than a restart. This is harmless.
+2. **Catalogue wording** now says the Link step appears "only when it is started with a Link's Edit form open", which is accurate.
+3. **Popover overflow** is still obstacle 10, which remains deferred. It is unchanged, and screenshot 10 still clips the "What to enter" text.
+10. **Screenshot 08 timing.** The smoke now waits until `fmea-sweep` is re-enabled with the text "Run B/C sweep" and the table has class-B rows. The new screenshot 08 shows exactly that: the "Run B/C sweep" button, `site_transformer` and `grid_import` as class B (€13.0 M / €7.9 M, €403.9 k / €589.6 k), then the class-A gensets. **It now matches its step.**
+
+   The dock greeting in 08 still reads "Not solved yet." because the status refetch lands a moment later. Step 09 asserts and shows the study-re-solve sentence.
+
+### Evidence
+
+| Check | Result |
+|---|---|
+| Repro `QA.sessionProfileGate.test.tsx` (scratch), run with the new `ChatPanel.sendGate.test.tsx` and `GuidedTour.prepare.test.tsx` | 3 files, **15 passed** |
+| Mutation: B1 clause removed | **2 failed**: the implementer's repro test and mine |
+| Mutation: clause reduced to `profileId == null` | **1 failed** ("explicitly picked the active (not ready) profile → still gated") |
+| Mutation: host ignores project staleness | **1 failed** ("closes the host tour when the project switches") |
+| Mutation: dedupe guard removed | **1 failed** ("does not open a second copy") |
+| `npx tsc --noEmit -p .` | EXIT 0 |
+| `npx vitest run` | **195 files, 2094 passed**, 0 failed (+4 over the first gate) |
+| `pytest tests/test_guides.py` | **6 passed** |
+| Smoke `--phase P22.9 --out scratchpad/qa229fe/smoke2` | **PASS**, 10 screenshots, EXIT 0; the new check "FMEA tab shows the finished sweep (button re-enabled, class-B rows)" is ok; stub, vite and uvicorn stopped |
+
+After the smoke, no uvicorn, vite, stub or chrome process remained. `git status` is clean apart from this file.
