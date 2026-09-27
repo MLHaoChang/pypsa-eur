@@ -52,7 +52,7 @@ Semantics
   ``notes`` (``resolution:dispatch_Xh_settlement_Yh``); it does not make the
   result incomplete.
 * Anything the core cannot price is listed in ``unsupported_items`` with a
-  reason in ``flags`` (tiers → P1 WP1.5c, demand/capacity → P2 WP2.1, …).
+  reason in ``flags`` (tiers → P1 WP1.5c, ratchets → P1 WP1.5b, capacity → the connection agreement, …); single-rate demand items bill rate × monthly max kW per period window (WP1.5a, `demand_lines`).
 """
 from __future__ import annotations
 
@@ -83,6 +83,10 @@ class RatingResult:
     flags: dict[str, list[str]] = field(default_factory=dict)   # incompleteness
     notes: dict[str, list[str]] = field(default_factory=dict)   # disclosures
     unsupported_items: list[str] = field(default_factory=list)
+    # One row per (month, demand item, period window): the peak and its bill
+    # (WP1.5a). Empty when the tariff has no demand items.
+    demand_lines: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(
+        columns=["month", "tariff_item", "period", "peak_kw", "rate", "amount"]))
 
     @property
     def complete(self) -> bool:
@@ -178,9 +182,41 @@ def _rates(item: TariffItem, local: pd.DatetimeIndex) -> np.ndarray:
     return rates
 
 
+def _is_demand(item: TariffItem) -> bool:
+    return item.kind == "demand" or item.measured_on == "peak_import"
+
+
+def _period_index(item: TariffItem, local: pd.DatetimeIndex) -> np.ndarray:
+    """Index of the first period matching each interval (-1: none) — the
+    same first-match rule as `_rates`."""
+    n = len(local)
+    out = np.full(n, -1)
+    month = np.asarray(local.month)
+    weekday = np.asarray(local.weekday)
+    hour = np.asarray(local.hour + local.minute / 60.0, dtype=float)
+    for k, p in enumerate(item.periods):
+        mask = out < 0
+        if p.months:
+            mask &= np.isin(month, p.months)
+        if p.weekdays:
+            mask &= np.isin(weekday, p.weekdays)
+        if p.start_hour is not None:
+            mask &= (hour >= p.start_hour) & (hour < p.end_hour)
+        out[mask] = k
+    return out
+
+
 def _unsupported_reason(item: TariffItem) -> str | None:
-    if item.kind in ("demand", "capacity") or item.measured_on == "peak_import":
-        return "unsupported:demand_P2_WP2.1"
+    if item.kind == "capacity":
+        return "unsupported:capacity_via_connection_agreement"
+    if _is_demand(item):
+        if item.ratchet is not None:
+            return "unsupported:ratchet_P1_WP1.5b"
+        if item.tiers:
+            return "unsupported:tiers_P1_WP1.5c"
+        if item.unit != "per_kw_month":
+            return f"unsupported:unit_{item.unit}_for_demand"
+        return None
     if item.tiers:
         return "unsupported:tiers_P1_WP1.5c"
     if item.kind == "fixed":
@@ -239,7 +275,7 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
          billing_period: tuple | None = None, represents_hours=None,
          meter_history: pd.DataFrame | None = None) -> RatingResult:
     """Rate ``dispatch`` against ``tariff`` (see module docstring).
-    ``meter_history`` is accepted for the P2 demand/ratchet items and unused here."""
+    ``meter_history`` is accepted for ratchets (WP1.5b) and unused here."""
     idx = _validate(dispatch, timezone)
     dur = _durations(idx, step_hours)
     energy_h = dur if represents_hours is None else _per_row(idx, represents_hours, "represents_hours")
@@ -264,6 +300,7 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
     notes: dict[str, list[str]] = {}
     unsupported: list[str] = []
     monthly_parts: dict[str, pd.Series] = {}
+    demand_rows: list[dict] = []
 
     for item in tariff.items:
         reason = _unsupported_reason(item)
@@ -272,6 +309,40 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             flags[item.id] = [reason]
             continue
         sign = sign_of[item.direction]
+        if _is_demand(item):
+            # WP1.5a: per local month and period window, rate × max kW. A
+            # window list without a catch-all measures only inside its windows.
+            q_kw = _quantity_mw(item, imp, exp) * _KWH_PER_MWH
+            if item.measured_on == "peak_import":
+                q_kw = imp * _KWH_PER_MWH
+            pidx = _period_index(item, local)
+            n_nan = int(np.isnan(q_kw).sum())
+            flags[item.id] = [f"nan_quantity:{n_nan}"] if n_nan else []
+            by_month: dict[str, float] = {}
+            for key in sorted(set(month_key)):
+                in_month = month_key == key
+                if np.isnan(q_kw[in_month]).any():
+                    by_month[key] = float("nan")
+                    continue
+                amt = 0.0
+                for k, per in enumerate(item.periods):
+                    sel = in_month & (pidx == k)
+                    if not sel.any():
+                        continue
+                    peak = float(q_kw[sel].max())
+                    line = sign * per.rate * peak
+                    demand_rows.append({"month": key, "tariff_item": item.id, "period": per.name,
+                                        "peak_kw": peak, "rate": per.rate, "amount": line})
+                    amt += line
+                by_month[key] = amt
+                covered = float(dur[in_month].sum())
+                if covered < _month_hours(key, timezone) - 1e-9:
+                    note = notes.setdefault(item.id, [])
+                    if "demand_on_partial_month" not in note:
+                        note.append("demand_on_partial_month")
+            per_item[item.id] = None if flags[item.id] else float(sum(by_month.values()))
+            monthly_parts[item.id] = pd.Series(by_month, dtype=float)
+            continue
         if item.kind == "fixed":
             monthly_rate = item.periods[0].rate
             if billing_period is not None:
@@ -340,6 +411,9 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
     total_supported = None if any(v is None for v in totals) else float(sum(totals))
     partial_energy = any("energy_on_partial_coverage" in v for v in notes.values())
     total = None if (unsupported or partial_energy) else total_supported
+    demand_lines = pd.DataFrame(demand_rows, columns=["month", "tariff_item", "period",
+                                                      "peak_kw", "rate", "amount"])
     return RatingResult(lines=lines, fixed_lines=fixed_lines, monthly=monthly, annual=annual,
                         per_item=per_item, total=total, total_supported=total_supported,
-                        flags=flags, notes=notes, unsupported_items=unsupported)
+                        flags=flags, notes=notes, unsupported_items=unsupported,
+                        demand_lines=demand_lines)

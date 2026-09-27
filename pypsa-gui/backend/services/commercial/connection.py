@@ -357,7 +357,8 @@ def apply_commercial_for_solve(n, commercial: dict | None, *, log=None,
     With no commercial config nothing is mutated and commit clears stale records."""
     from services.commercial.lp_bindings import materialise_poc_prices
 
-    prices = materialise_poc_prices(n, commercial, log=log)
+    prices = materialise_poc_prices(n, commercial, log=log, solve_strategy=solve_strategy,
+                                    multi_period=multi_period)
     try:
         conn = apply_for_config(n, commercial, solve_strategy=solve_strategy,
                                 multi_period=multi_period)

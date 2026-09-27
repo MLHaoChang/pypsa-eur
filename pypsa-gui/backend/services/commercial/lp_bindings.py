@@ -65,12 +65,15 @@ import numpy as np
 import pandas as pd
 
 from models.commercial import CommercialConfig, TariffItem
-from services.commercial.tariff_engine import _rates
+from services.commercial.tariff_engine import _is_demand, _period_index, _rates
 
 EXPORT_PRICE_ATTR = "ic_export_price"
 ENERGY_PRICE_ATTR = "ic_energy_price"
 META_LINKS = "ic_poc_links"
 META_PRICE_AXIS = "ic_export_price_axis"
+META_DEMAND = "ic_demand_peaks"
+DEMAND_SPEC_ATTR = "_ic_demand_spec"   # transient: set by apply, read by the LP wrapper
+DEMAND_BUILT_ATTR = "_ic_demand_built"  # transient: set by the LP wrapper
 _KWH_PER_MWH = 1000.0
 
 
@@ -135,11 +138,22 @@ def _axis_hash(snapshots: pd.Index) -> str:
 
 
 def _lp_reason(item: TariffItem) -> str | None:
-    """Why `item` is not a per-interval energy price on a PoC Link, or None."""
+    """Why `item` is neither a per-interval energy price nor a peak-demand
+    term the LP carries (WP1.5a), or None."""
     if item.kind == "fixed":
         return "fixed_not_in_lp"
-    if item.kind == "demand" or item.measured_on == "peak_import":
-        return "demand_WP1.5a"
+    if _is_demand(item):
+        if item.ratchet is not None:
+            return "ratchet_WP1.5b"
+        if item.tiers:
+            return "tiers_WP1.5c"
+        if item.unit != "per_kw_month":
+            return f"unit_{item.unit}_not_demand"
+        if item.direction != "cost":
+            return "demand_revenue_not_supported"
+        if item.measured_on == "export":
+            return "export_demand_not_supported"
+        return None
     if item.kind == "capacity":
         return "capacity_WP1.4a"
     if item.tiers:
@@ -202,6 +216,8 @@ def _adders(n, cfg: CommercialConfig) -> tuple[dict[str, np.ndarray], list[str],
         if reason is not None:
             not_in_lp[item.id] = reason
             continue
+        if _is_demand(item):
+            continue  # a peak term, built by `_demand_spec`
         side = _side(item)
         if side == "export" and cfg.export_link is None:
             raise CommercialBindingError(
@@ -328,11 +344,108 @@ def _export_price(n, cfg: CommercialConfig) -> np.ndarray:
     return col.to_numpy(dtype=float)
 
 
+# ── peak demand (WP1.5a) ───────────────────────────────────────────────────
+
+
+def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list[str]]:
+    """(spec for the LP wrapper, demand item ids, months not established).
+
+    One key per (item, period window, investment period, local month) with at
+    least one snapshot; the months between the first and last snapshot that
+    have none are listed as not established (spec §5.2), and never weighted
+    from their neighbours."""
+    items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
+             if _is_demand(i) and _lp_reason(i) is None]
+    if not items:
+        return None, [], []
+    local = _local_clock(n.snapshots, cfg.timezone)
+    months = np.asarray(local.strftime("%Y-%m"))
+    inv = (np.asarray(n.snapshots.get_level_values(0)) if isinstance(n.snapshots, pd.MultiIndex)
+           else np.full(len(n.snapshots), None, dtype=object))
+    missing: list[str] = []
+    for p in pd.unique(inv):
+        sel = inv == p
+        span = pd.period_range(local[sel].min().strftime("%Y-%m"),
+                               local[sel].max().strftime("%Y-%m"), freq="M").strftime("%Y-%m")
+        gone = sorted(set(span) - set(months[sel]))
+        missing += [m if p is None else f"{p}:{m}" for m in gone]
+    keys: list[dict] = []
+    for item in items:
+        pidx = _period_index(item, local)
+        for k, per in enumerate(item.periods):
+            if per.rate == 0:
+                continue
+            for p in pd.unique(inv):
+                for m in sorted(set(months[(inv == p) & (pidx == k)])):
+                    pos = np.flatnonzero((inv == p) & (pidx == k) & (months == m))
+                    keys.append({
+                        "key": f"{item.id}|{k}|{'' if p is None else p}|{m}",
+                        "item": item.id, "period": per.name, "month": m,
+                        "inv_period": None if p is None else int(p),
+                        "eur_per_mw": float(per.rate) * _KWH_PER_MWH,
+                        "net": item.measured_on == "net", "positions": pos})
+    spec = {"import_link": cfg.poc_link, "export_link": cfg.export_link, "keys": keys}
+    return spec, [i.id for i in items], missing
+
+
+def add_demand_terms(n) -> None:
+    """`ic_peak_import[key] ≥ p_import[t]` for the key's snapshots, and
+    objective += Σ w_obj(period) · €/MW · ic_peak_import (no snapshot weights:
+    a demand charge is per month). Called from the LP wrapper."""
+    import xarray as xr
+
+    spec = getattr(n, DEMAND_SPEC_ATTR, None)
+    if not spec or not spec["keys"]:
+        return
+    m = n.model
+    names = [k["key"] for k in spec["keys"]]
+    peak = m.add_variables(lower=0, name="ic_peak_import",
+                           coords=[pd.Index(names, name="key")])
+    link_p = m["Link-p"]
+    imp = link_p.sel(name=spec["import_link"])
+    exp = link_p.sel(name=spec["export_link"]) if spec["export_link"] else None
+    for i, k in enumerate(spec["keys"]):
+        flow = imp.isel(snapshot=k["positions"])
+        if k["net"] and exp is not None:
+            flow = flow - exp.isel(snapshot=k["positions"])
+        m.add_constraints(flow - peak.sel(key=k["key"]) <= 0, name=f"ic_peak_import_def_{i}")
+    if isinstance(n.snapshots, pd.MultiIndex):
+        w_obj = n.investment_period_weightings["objective"]
+        weight = [float(w_obj.loc[k["inv_period"]]) for k in spec["keys"]]
+    else:
+        weight = [1.0] * len(names)
+    coef = xr.DataArray([w * k["eur_per_mw"] for w, k in zip(weight, spec["keys"])],
+                        coords={"key": names}, dims="key")
+    m.objective += (peak * coef).sum()
+    setattr(n, DEMAND_BUILT_ATTR, True)
+
+
+def _read_demand_solution(n, spec: dict) -> dict | None:
+    """The solved peaks, read from `n.model` while it still exists."""
+    model = getattr(n, "model", None)
+    if not getattr(n, DEMAND_BUILT_ATTR, False) or model is None:
+        return None
+    try:
+        sol = model.variables["ic_peak_import"].solution.to_pandas()
+    except Exception:  # noqa: BLE001 — unsolved / infeasible: nothing to commit
+        return None
+    out = {}
+    for k in spec["keys"]:
+        v = float(sol.loc[k["key"]])
+        if not np.isfinite(v):
+            return None
+        out[k["key"]] = {"item": k["item"], "period": k["period"], "month": k["month"],
+                         "inv_period": k["inv_period"], "eur_per_mw": k["eur_per_mw"],
+                         "peak_mw": v}
+    return out
+
+
 # ── materialisation (transient, committed on success) ──────────────────────
 
 
 def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
-                           *, log=None) -> Applied:
+                           *, log=None, solve_strategy: str = "full",
+                           multi_period: bool = False) -> Applied:
     """Apply PoC energy prices for one solve (see module docstring).
 
     Always returns an `Applied`: with no commercial config it mutates nothing,
@@ -349,6 +462,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
             if hasattr(n.links_t, "get") and n.links_t.get(ENERGY_PRICE_ATTR) is not None:
                 n.links_t[ENERGY_PRICE_ATTR] = pd.DataFrame(index=n.snapshots)
             n.meta.pop(META_LINKS, None)
+            n.meta.pop(META_DEMAND, None)
 
         applied._commit.append(clear)
         return applied
@@ -356,6 +470,12 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
     cfg = _parse(commercial)
     validate_for_network(n, cfg)
     adders, energy_items, not_in_lp, notes = _adders(n, cfg)
+    demand, demand_items, demand_missing = _demand_spec(n, cfg)
+    if demand is not None and (solve_strategy == "rolling"
+                               or (solve_strategy == "myopic" and multi_period)):
+        raise CommercialBindingError(
+            f"demand charges with solve_strategy={solve_strategy!r} would be re-created per "
+            "window without the month's running peak (spec §5.2, P6); not supported in P1")
     has_price = cfg.export_price_ref is not None
     if has_price:
         adders["export"] = adders["export"] - _export_price(n, cfg)
@@ -383,10 +503,29 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
 
         applied._undo.append(undo)
 
+    solved_peaks: dict = {}
+    if demand is not None:
+        setattr(n, DEMAND_SPEC_ATTR, demand)
+
+        def undo_demand() -> None:
+            # Read the solved peaks BEFORE the spec goes: commit runs after undo.
+            got = _read_demand_solution(n, demand)
+            if got is not None:
+                solved_peaks["v"] = got
+            for attr in (DEMAND_SPEC_ATTR, DEMAND_BUILT_ATTR):
+                if hasattr(n, attr):
+                    delattr(n, attr)
+
+        applied._undo.append(undo_demand)
+
     def commit() -> None:
         frame = pd.DataFrame({link: add for link, add in targets.items()}, index=n.snapshots)
         n.links_t[ENERGY_PRICE_ATTR] = frame
         n.meta[META_LINKS] = {"import": cfg.poc_link, "export": cfg.export_link}
+        if "v" in solved_peaks:
+            n.meta[META_DEMAND] = solved_peaks["v"]
+        else:
+            n.meta.pop(META_DEMAND, None)
 
     applied._commit.append(commit)
 
@@ -404,6 +543,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
     applied.facts = {
         "poc_link": cfg.poc_link, "export_link": cfg.export_link,
         "priced_links": sorted(targets), "energy_items": energy_items,
+        "demand_items": demand_items, "demand_not_established_months": demand_missing,
         "not_in_lp": not_in_lp, "notes": notes, "timezone": cfg.timezone,
         "simultaneous_flow_risk_snapshots": risk,
         "export_price_ref": (cfg.export_price_ref.model_dump(mode="json")
@@ -429,6 +569,7 @@ def _wrap_with_commercial_bindings(network, user_fn, cfg, log_queue=None):
         from services.commercial import connection  # lazy: connection imports this module
 
         connection.add_fee_term(n)
+        add_demand_terms(n)
 
     return fn
 

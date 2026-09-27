@@ -747,8 +747,9 @@ def run_simulation(
                     phase("Commercial binding failed. Aborting.")
                     status, condition = "error", "commercial_binding_failed"
                     return status, condition
-                if _ic_conn.facts.get("poc_link"):
-                    _emit_state(last_commercial_terms=_ic_conn.facts)
+                # Cleared to None on a solve without commercial terms (WP1.5a).
+                _emit_state(last_commercial_terms=(
+                    _ic_conn.facts if _ic_conn.facts.get("poc_link") else None))
                 try:
                     _real_restore, captured = _apply_modelling_assumptions(network, config, phase)
                 except BaseException:
@@ -1106,6 +1107,11 @@ def run_simulation(
                 # prices with another run's dispatch).
                 if status in ("ok", "optimal"):
                     _ic_conn.commit()
+                    if _ic_conn.facts.get("poc_link"):
+                        # The solved peaks join the published terms (WP1.5a).
+                        _emit_state(last_commercial_terms={
+                            **_ic_conn.facts,
+                            "demand_peaks": network.meta.get("ic_demand_peaks")})
                 # Adequacy report — emitted whenever a target was enforced
                 # AND the solve actually produced a dispatch, INCLUDING the
                 # nothing-shed case (achieved 0, binding=voll).

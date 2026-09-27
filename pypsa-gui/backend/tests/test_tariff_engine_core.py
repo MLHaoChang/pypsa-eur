@@ -16,7 +16,8 @@ Conventions pinned here:
     matching period wins; an interval no period covers is NOT rated (NaN) and
     the item is flagged — never silently priced at 0 (ADR-0001);
   * fixed monthly items are pro-rated by calendar days covered;
-  * demand / capacity items are P2 (WP2.1): reported as unsupported, not priced.
+  * capacity items belong to the connection agreement and are reported unsupported here;
+    single-rate demand items are rated since WP1.5a (test_tariff_engine_demand.py).
 """
 from __future__ import annotations
 
@@ -349,10 +350,11 @@ def test_unsupported_items_say_why():
          "settlement": "15min", "measured_on": "import", "direction": "cost"}]})
     res = rate(_dispatch("2030-01-07 00:00", 4), t, step_hours=0.25, timezone="Europe/Berlin")
     assert res.flags["tiered"] == ["unsupported:tiers_P1_WP1.5c"]
-    assert res.flags["demand"] == ["unsupported:demand_P2_WP2.1"]
+    # WP1.5a: a single-rate demand item is rated now (tests: test_tariff_engine_demand.py).
+    assert res.flags["demand"] == []
     assert res.flags["kw_energy"] == ["unsupported:unit_per_kw_year_for_energy"]
     assert res.flags["windowed_fixed"] == ["unsupported:fixed_with_windows"]
-    assert set(res.unsupported_items) == {"tiered", "demand", "kw_energy", "windowed_fixed"}
+    assert set(res.unsupported_items) == {"tiered", "kw_energy", "windowed_fixed"}
 
 
 def test_a_month_outside_a_seasonal_period_falls_through_to_the_next():

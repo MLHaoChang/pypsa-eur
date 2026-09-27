@@ -72,6 +72,16 @@ def commercial_cost_terms(n, commercial: dict | None) -> dict:
         if "simultaneous_snapshots" in rows:
             block["simultaneous_snapshots"] = rows["simultaneous_snapshots"]
 
+    # Peak-demand charges (WP1.5a): €/MW × solved monthly peak, per period.
+    peaks = n.meta.get(_lp.META_DEMAND)
+    if peaks:
+        total = 0.0
+        for v in peaks.values():
+            amount = float(v["eur_per_mw"]) * float(v["peak_mw"])
+            items.append(("demand_charge", v.get("inv_period"), 0.0, amount))
+            total += amount
+        block["demand_charge"] = total
+
     # Connection capacity fee in the LP (WP1.4a).
     fee = n.meta.get(_conn.META_FEE)
     agreement = None
