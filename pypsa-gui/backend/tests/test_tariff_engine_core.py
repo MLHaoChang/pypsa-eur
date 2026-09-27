@@ -160,12 +160,15 @@ def test_demand_and_capacity_items_are_reported_unsupported_not_priced():
     assert "energy_tou" in res.per_item and "customer_charge" in res.per_item
 
 
-def test_step_hours_is_inferred_from_a_regular_index():
+def test_step_hours_is_required():
+    """Review WP1.2 #5: a median-inferred step hides irregular and overlapping
+    intervals. The caller states the interval length (a float, or a per-row
+    Series of hours)."""
     from services.commercial.tariff_engine import rate
 
     raw, tariff, df = _load("leap_february_fixed.json")
-    res = rate(df, tariff, timezone="Europe/Berlin")
-    assert round(res.total, 2) == 7355.17
+    with pytest.raises(TypeError):
+        rate(df, tariff, timezone="Europe/Berlin")  # noqa: missing step_hours
 
 
 def test_a_15min_year_rates_in_under_a_second():
@@ -189,3 +192,221 @@ def test_engine_is_pure_no_lp_or_router_imports():
     src = inspect.getsource(m)
     for bad in ("linopy", "pypsa", "routers", "solver_service"):
         assert f"import {bad}" not in src and f"from {bad}" not in src, bad
+
+
+
+# ── review WP1.2: the oracle must never price bad input as a confident number ──
+
+
+def _dispatch(start, n, tz="Europe/Berlin", imp=1.0, exp=0.0, freq="15min"):
+    idx = pd.date_range(start, periods=n, freq=freq, tz=tz)
+    return pd.DataFrame({"import_mw": imp, "export_mw": exp}, index=idx)
+
+
+def test_nan_quantity_is_flagged_not_priced_as_zero():
+    from services.commercial.tariff_engine import rate
+
+    df = _dispatch("2030-03-04 12:00", 4)
+    df.iloc[1, 0] = np.nan
+    res = rate(df, _flat_tariff(), step_hours=0.25, timezone="Europe/Berlin")
+    assert res.flags["flat"] == ["nan_quantity:1"]
+    assert res.per_item["flat"] is None and res.total is None
+    assert res.complete is False
+    assert np.isnan(res.monthly.loc["2030-03", "flat"])
+
+
+def test_an_unrated_month_makes_the_year_unrated_too():
+    from services.commercial.tariff_engine import rate
+
+    t = Tariff.model_validate({"id": "t", "name": "t", "jurisdiction": "DE",
+                               "valid_from": "2030-01-01", "items": [{
+                                   "id": "jan_only", "kind": "energy", "unit": "per_kwh",
+                                   "periods": [{"name": "jan", "rate": 0.1, "months": [1]}],
+                                   "settlement": "15min", "measured_on": "import",
+                                   "direction": "cost"}]})
+    df = pd.concat([_dispatch("2030-01-15 00:00", 4), _dispatch("2030-12-15 00:00", 4)])
+    res = rate(df, t, step_hours=0.25, timezone="Europe/Berlin")
+    assert res.monthly.loc["2030-01", "jan_only"] == pytest.approx(4 * 250 * 0.1)
+    assert np.isnan(res.monthly.loc["2030-12", "jan_only"])
+    assert np.isnan(res.annual.loc["2030", "jan_only"])
+
+
+def test_a_tz_aware_index_requires_a_timezone():
+    from services.commercial.tariff_engine import rate
+
+    df = _dispatch("2030-01-07 16:00", 4, tz="UTC")
+    with pytest.raises(ValueError, match="timezone"):
+        rate(df, _flat_tariff(), step_hours=0.25, timezone=None)
+
+
+def test_a_naive_index_with_a_timezone_is_refused():
+    """A naive LOCAL index cannot represent the repeated fall-back hour."""
+    from services.commercial.tariff_engine import rate
+
+    df = _dispatch("2030-01-07 16:00", 4, tz=None)
+    with pytest.raises(ValueError, match="naive"):
+        rate(df, _flat_tariff(), step_hours=0.25, timezone="Europe/Berlin")
+    # Naive with no timezone is allowed: a wall clock without DST, documented.
+    res = rate(df, _flat_tariff(), step_hours=0.25, timezone=None)
+    assert res.total == pytest.approx(4 * 50.0)
+
+
+@pytest.mark.parametrize("mutate,match", [
+    (lambda d: pd.concat([d, d.iloc[[0]]]).sort_index(), "increasing"),
+    (lambda d: d.iloc[::-1], "increasing"),
+    (lambda d: d.assign(import_mw=-5.0), "negative"),
+    (lambda d: d.drop(columns=["import_mw"]), "import_mw"),
+    (lambda d: d.drop(columns=["export_mw"]), "export_mw"),
+])
+def test_invalid_dispatch_is_refused(mutate, match):
+    from services.commercial.tariff_engine import rate
+
+    df = mutate(_dispatch("2030-03-04 12:00", 4))
+    with pytest.raises(ValueError, match=match):
+        rate(df, _flat_tariff(), step_hours=0.25, timezone="Europe/Berlin")
+
+
+def test_per_row_durations_are_honoured():
+    """Time-segmented snapshots: rows of 1 h and 3 h."""
+    from services.commercial.tariff_engine import rate
+
+    idx = pd.DatetimeIndex(["2030-03-04 00:00", "2030-03-04 01:00"]).tz_localize("Europe/Berlin")
+    df = pd.DataFrame({"import_mw": [1.0, 1.0], "export_mw": 0.0}, index=idx)
+    dur = pd.Series([1.0, 3.0], index=idx)
+    res = rate(df, _flat_tariff(), step_hours=dur, timezone="Europe/Berlin")
+    assert res.total == pytest.approx((1000 + 3000) * 0.2)
+    with pytest.raises(ValueError, match="overlap"):
+        rate(df, _flat_tariff(), step_hours=pd.Series([2.0, 1.0], index=idx),
+             timezone="Europe/Berlin")
+
+
+def _fixed_tariff(monthly=310.0):
+    return Tariff.model_validate({"id": "t", "name": "t", "jurisdiction": "DE",
+                                  "valid_from": "2030-01-01", "items": [{
+                                      "id": "meter", "kind": "fixed", "unit": "per_month",
+                                      "periods": [{"name": "all", "rate": monthly}],
+                                      "settlement": "15min", "measured_on": "import",
+                                      "direction": "cost"}]})
+
+
+def test_fixed_charge_prorates_by_local_hours_so_a_utc_year_bills_twelve_months():
+    """A full UTC year rated in Berlin covers 23 h of 1 Jan (local) … and 1 h
+    of 1 Jan 2031 (local). Pro-rating by HOURS gives 12 months less one hour
+    plus one hour: 12 × 310 to within 310/744 × 2."""
+    from services.commercial.tariff_engine import rate
+
+    idx = pd.date_range("2030-01-01", "2030-12-31 23:45", freq="15min", tz="UTC")
+    df = pd.DataFrame({"import_mw": 0.0, "export_mw": 0.0}, index=idx)
+    res = rate(df, _fixed_tariff(), step_hours=0.25, timezone="Europe/Berlin")
+    assert res.per_item["meter"] == pytest.approx(12 * 310.0, abs=1.0)
+    # The 2031 sliver is one local hour of January, not a whole day.
+    assert res.monthly.loc["2031-01", "meter"] == pytest.approx(310.0 / 744, rel=1e-9)
+
+
+def test_dst_months_have_their_real_number_of_hours():
+    from services.commercial.tariff_engine import rate
+
+    # All of March 2030 in Berlin = 743 h; covering it fully bills exactly one month.
+    idx = pd.date_range(pd.Timestamp("2030-03-01").tz_localize("Europe/Berlin"),
+                        pd.Timestamp("2030-04-01").tz_localize("Europe/Berlin"),
+                        freq="15min", inclusive="left")
+    assert len(idx) == 743 * 4
+    df = pd.DataFrame({"import_mw": 0.0, "export_mw": 0.0}, index=idx)
+    res = rate(df, _fixed_tariff(), step_hours=0.25, timezone="Europe/Berlin")
+    assert res.per_item["meter"] == pytest.approx(310.0, rel=1e-12)
+
+
+def test_representative_weeks_bill_fixed_charges_on_the_billing_period():
+    from services.commercial.tariff_engine import rate
+
+    weeks = [_dispatch(f"2030-{m:02d}-07 00:00", 7 * 96, imp=0.0) for m in (1, 4, 7, 10)]
+    df = pd.concat(weeks)
+    partial = rate(df, _fixed_tariff(), step_hours=0.25, timezone="Europe/Berlin")
+    assert "fixed_prorated_on_partial_coverage" in partial.notes["meter"]
+    full = rate(df, _fixed_tariff(), step_hours=0.25, timezone="Europe/Berlin",
+                billing_period=("2030-01-01", "2031-01-01"))
+    assert full.per_item["meter"] == pytest.approx(12 * 310.0, rel=1e-9)
+    assert "fixed_prorated_on_partial_coverage" not in full.notes.get("meter", [])
+
+
+def test_unsupported_items_say_why():
+    from services.commercial.tariff_engine import rate
+
+    t = Tariff.model_validate({"id": "t", "name": "t", "jurisdiction": "NL",
+                               "valid_from": "2030-01-01", "items": [
+        {"id": "tiered", "kind": "energy", "unit": "per_kwh",
+         "periods": [{"name": "all", "rate": 0.1}],
+         "tiers": [{"threshold": 0, "rate": 0.12}, {"threshold": 10000, "rate": 0.05}],
+         "settlement": "15min", "measured_on": "import", "direction": "cost"},
+        {"id": "demand", "kind": "demand", "unit": "per_kw_month",
+         "periods": [{"name": "all", "rate": 10.0}],
+         "settlement": "15min", "measured_on": "peak_import", "direction": "cost"},
+        {"id": "kw_energy", "kind": "energy", "unit": "per_kw_year",
+         "periods": [{"name": "all", "rate": 1.0}],
+         "settlement": "15min", "measured_on": "import", "direction": "cost"},
+        {"id": "windowed_fixed", "kind": "fixed", "unit": "per_month",
+         "periods": [{"name": "win", "rate": 5.0, "months": [1]}],
+         "settlement": "15min", "measured_on": "import", "direction": "cost"}]})
+    res = rate(_dispatch("2030-01-07 00:00", 4), t, step_hours=0.25, timezone="Europe/Berlin")
+    assert res.flags["tiered"] == ["unsupported:tiers_P1_WP1.5c"]
+    assert res.flags["demand"] == ["unsupported:demand_P2_WP2.1"]
+    assert res.flags["kw_energy"] == ["unsupported:unit_per_kw_year_for_energy"]
+    assert res.flags["windowed_fixed"] == ["unsupported:fixed_with_windows"]
+    assert set(res.unsupported_items) == {"tiered", "demand", "kw_energy", "windowed_fixed"}
+
+
+def test_a_month_outside_a_seasonal_period_falls_through_to_the_next():
+    from services.commercial.tariff_engine import rate
+
+    raw, tariff, df = _load("tou_weekday_evening.json")
+    # Same Monday-evening hours in February: the January-only peak does not apply.
+    feb = df.copy()
+    feb.index = feb.index + pd.Timedelta(days=28)
+    res = rate(feb, tariff, step_hours=0.25, timezone="Europe/Berlin")
+    assert res.total == pytest.approx(5 * 100.0)
+
+
+def test_tou_window_on_the_fall_back_day_counts_both_repeated_hours():
+    """Europe/Berlin 2030-10-27: 02:00–03:00 local happens twice. A 02–03 window
+    must see all 8 quarter-hours (2 × 4)."""
+    from services.commercial.tariff_engine import rate
+
+    t = Tariff.model_validate({"id": "t", "name": "t", "jurisdiction": "DE",
+                               "valid_from": "2030-01-01", "items": [{
+                                   "id": "night", "kind": "energy", "unit": "per_kwh",
+                                   "periods": [{"name": "w", "rate": 1.0, "start_hour": 2, "end_hour": 3},
+                                               {"name": "else", "rate": 0.0}],
+                                   "settlement": "15min", "measured_on": "import",
+                                   "direction": "cost"}]})
+    idx = pd.date_range(pd.Timestamp("2030-10-27").tz_localize("Europe/Berlin"),
+                        pd.Timestamp("2030-10-28").tz_localize("Europe/Berlin"),
+                        freq="15min", inclusive="left")
+    df = pd.DataFrame({"import_mw": 1.0, "export_mw": 0.0}, index=idx.tz_convert("UTC"))
+    res = rate(df, t, step_hours=0.25, timezone="Europe/Berlin")
+    assert res.total == pytest.approx(8 * 250 * 1.0)
+
+
+def test_net_revenue_item_pays_on_net_export_floored_at_zero():
+    """Per-interval (instantaneous) netting — documented semantics."""
+    from services.commercial.tariff_engine import rate
+
+    t = Tariff.model_validate({"id": "t", "name": "t", "jurisdiction": "US",
+                               "valid_from": "2030-01-01", "items": [{
+                                   "id": "net_credit", "kind": "energy", "unit": "per_kwh",
+                                   "periods": [{"name": "all", "rate": 0.04}],
+                                   "settlement": "15min", "measured_on": "net",
+                                   "direction": "revenue"}]})
+    idx = pd.date_range("2030-06-01 12:00", periods=2, freq="15min", tz="America/Chicago")
+    df = pd.DataFrame({"import_mw": [1.0, 3.0], "export_mw": [3.0, 1.0]}, index=idx)
+    res = rate(df, t, step_hours=0.25, timezone="America/Chicago")
+    # interval 1: net export 2 MW → 500 kWh × 0.04 = 20 revenue; interval 2: net import → 0
+    assert res.lines["amount"].tolist() == pytest.approx([-20.0, 0.0])
+
+
+def test_a_dispatch_step_different_from_settlement_is_disclosed():
+    from services.commercial.tariff_engine import rate
+
+    df = _dispatch("2030-03-04 12:00", 4, freq="h")
+    res = rate(df, _flat_tariff(), step_hours=1.0, timezone="Europe/Berlin")
+    assert res.notes["flat"] == ["resolution:dispatch_1h_settlement_0.25h"]
+    assert res.complete is True     # disclosed, not incomplete

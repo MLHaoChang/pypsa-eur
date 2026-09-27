@@ -3,24 +3,42 @@ Tariff rating engine — core (Edge Investment Case P1 WP1.2; spec §5.5).
 
 Rates a dispatch against a `Tariff` item by item and interval by interval. It
 is the ORACLE the dispatch-grade LP bindings are checked against, so it knows
-nothing about the LP: plain pandas in, frames out.
+nothing about the LP and refuses to turn bad input into a confident number.
 
-Conventions
------------
-* ``dispatch`` has columns ``import_mw`` / ``export_mw`` (MW, ≥ 0) on a
-  DatetimeIndex. A tz-aware index is converted to the tariff's ``timezone``
-  for period matching; a naive index is taken to be local already. Each row
-  is one interval of ``step_hours`` (inferred from the index when omitted), so
-  a DST day rates its 92 or 100 real quarter-hours, each once.
-* energy (kWh) = MW × step_hours × 1000.
-* ``amount`` is signed from the SITE's view: + cost, − revenue.
-* A TOU item's periods are tried in order on the LOCAL clock; the first match
-  wins. An interval no period covers is NOT rated: its amount is NaN, the item
-  total is ``None`` and the item is flagged (ADR-0001 — never a silent 0).
-* ``fixed`` items with unit ``per_month`` are pro-rated by the local calendar
-  days the dispatch covers in each month.
-* ``demand`` / ``capacity`` items (and anything measured on ``peak_import``)
-  are P2 WP2.1: listed in ``unsupported_items``, never priced here.
+Input contract (violations raise ``ValueError`` / ``TypeError``)
+-------------------------------------------------------------
+* ``dispatch`` has columns ``import_mw`` and ``export_mw`` (MW, ≥ 0; NaN is
+  allowed but flagged) on a DatetimeIndex whose INSTANTS are strictly
+  increasing (duplicates would double-bill).
+* ``step_hours`` is REQUIRED: a float, or a per-row Series of hours for
+  time-segmented snapshots. Rows may not overlap (row start + duration must
+  not pass the next row's start). Gaps are allowed (representative weeks).
+* ``timezone``: required when the index is tz-aware (TOU windows and billing
+  months are LOCAL); refused when the index is naive, because a naive local
+  index cannot represent the repeated fall-back hour. A naive index with no
+  timezone is a wall clock without DST.
+
+Semantics
+---------
+* energy (kWh) = MW × row hours × 1000; ``amount`` signed from the SITE's view:
+  + cost, − revenue.
+* TOU periods are tried in order on the LOCAL clock; first match wins.
+* ``measured_on="net"`` is per-interval (instantaneous) netting: a cost item
+  bills net import floored at 0, a revenue item pays net export floored at 0.
+  Monthly netting (NEM 1.0) is not expressible here.
+* An interval that no period covers, or whose quantity is NaN, is NOT rated:
+  the item total is None, its month and year are NaN, and the item is flagged
+  (``unrated_intervals:N`` / ``nan_quantity:N``) — ADR-0001, never a silent 0.
+* ``fixed`` ``per_month`` items are pro-rated by the HOURS covered in each local
+  month over that month's real hours (743 / 745 in DST months). With gaps and
+  no ``billing_period``, the item carries the note
+  ``fixed_prorated_on_partial_coverage``; ``billing_period=(start, end)`` bills
+  the months it spans instead (representative weeks standing for a year).
+* A dispatch step different from the item's ``settlement`` is DISCLOSED in
+  ``notes`` (``resolution:dispatch_Xh_settlement_Yh``); it does not make the
+  result incomplete.
+* Anything the core cannot price is listed in ``unsupported_items`` with a
+  reason in ``flags`` (tiers → P1 WP1.5c, demand/capacity → P2 WP2.1, …).
 """
 from __future__ import annotations
 
@@ -33,20 +51,23 @@ import pandas as pd
 from models.commercial import Tariff, TariffItem
 
 _KWH_PER_MWH = 1000.0
+_SETTLEMENT_HOURS = {"15min": 0.25, "30min": 0.5, "h": 1.0}
+_REQUIRED = ("import_mw", "export_mw")
 
 
 @dataclass
 class RatingResult:
-    lines: pd.DataFrame            # interval-rated items: interval, tariff_item, quantity_kwh, rate, amount
-    fixed_lines: pd.DataFrame      # month, tariff_item, days_covered, days_in_month, amount
-    monthly: pd.DataFrame          # index "YYYY-MM" (local), columns = items
-    annual: pd.DataFrame           # index year (local), columns = items
+    lines: pd.DataFrame            # interval, tariff_item, quantity_kwh, rate, amount
+    fixed_lines: pd.DataFrame      # month, tariff_item, hours_covered, hours_in_month, amount
+    monthly: pd.DataFrame          # index "YYYY-MM" (local), columns = items; NaN = unrated
+    annual: pd.DataFrame           # index "YYYY" (local); NaN if any month is NaN
     per_item: dict[str, float | None]
     # None when ANY item is unrated or unsupported: a bill missing its demand
     # charge is not a total (ADR-0001). `total_supported` is the honest partial.
     total: float | None
     total_supported: float | None
-    flags: dict[str, list[str]] = field(default_factory=dict)
+    flags: dict[str, list[str]] = field(default_factory=dict)   # incompleteness
+    notes: dict[str, list[str]] = field(default_factory=dict)   # disclosures
     unsupported_items: list[str] = field(default_factory=list)
 
     @property
@@ -54,20 +75,49 @@ class RatingResult:
         return not self.unsupported_items and not any(self.flags.values())
 
 
-def _infer_step_hours(idx: pd.DatetimeIndex) -> float:
-    if len(idx) < 2:
-        raise ValueError("step_hours must be given for a dispatch with fewer than two intervals")
-    deltas = np.diff(idx.asi8) / 3.6e12  # ns → hours
-    step = float(np.median(deltas))
-    if step <= 0:
-        raise ValueError("dispatch index must be increasing")
-    return step
+# ── input validation ──────────────────────────────────────────────────────────
 
 
-def _local(idx: pd.DatetimeIndex, timezone: str | None) -> pd.DatetimeIndex:
-    if idx.tz is not None and timezone:
-        return idx.tz_convert(timezone)
+def _validate(dispatch: pd.DataFrame, timezone: str | None) -> pd.DatetimeIndex:
+    for col in _REQUIRED:
+        if col not in dispatch.columns:
+            raise ValueError(f"dispatch is missing the required column {col!r}")
+    if not isinstance(dispatch.index, pd.DatetimeIndex):
+        raise ValueError("dispatch must have a DatetimeIndex")
+    idx = dispatch.index
+    if idx.tz is not None and not timezone:
+        raise ValueError("a tz-aware dispatch needs a `timezone` to rate TOU windows and "
+                         "billing months on the local clock")
+    if idx.tz is None and timezone:
+        raise ValueError("a naive dispatch index cannot be rated in a timezone: a naive "
+                         "local clock cannot represent the repeated fall-back hour — "
+                         "localise the index first")
+    instants = idx.asi8
+    if len(instants) > 1 and not (np.diff(instants) > 0).all():
+        raise ValueError("dispatch instants must be strictly increasing (no duplicates)")
+    vals = dispatch[list(_REQUIRED)].to_numpy(dtype=float)
+    if (vals[~np.isnan(vals)] < 0).any():
+        raise ValueError("import_mw / export_mw must not be negative")
     return idx
+
+
+def _durations(idx: pd.DatetimeIndex, step_hours) -> np.ndarray:
+    if isinstance(step_hours, pd.Series):
+        dur = step_hours.reindex(idx).to_numpy(dtype=float)
+        if np.isnan(dur).any():
+            raise ValueError("step_hours Series must cover every dispatch row")
+    else:
+        dur = np.full(len(idx), float(step_hours))
+    if (dur <= 0).any():
+        raise ValueError("step_hours must be positive")
+    if len(idx) > 1:
+        gap_h = np.diff(idx.asi8) / 3.6e12
+        if (dur[:-1] > gap_h + 1e-9).any():
+            raise ValueError("dispatch rows overlap: a row's duration runs past the next row")
+    return dur
+
+
+# ── rating helpers ────────────────────────────────────────────────────────────
 
 
 def _quantity_mw(item: TariffItem, imp: np.ndarray, exp: np.ndarray) -> np.ndarray:
@@ -75,8 +125,7 @@ def _quantity_mw(item: TariffItem, imp: np.ndarray, exp: np.ndarray) -> np.ndarr
         return imp
     if item.measured_on == "export":
         return exp
-    # net: the flow in the item's billing direction, floored at 0
-    net = imp - exp
+    net = imp - exp  # per-interval netting, floored at 0 in the billing direction
     return np.clip(net if item.direction == "cost" else -net, 0.0, None)
 
 
@@ -100,81 +149,148 @@ def _rates(item: TariffItem, local: pd.DatetimeIndex) -> np.ndarray:
     return rates
 
 
-def _supported_interval_item(item: TariffItem) -> bool:
-    return item.kind in ("energy", "certificate", "tax_levy") and item.unit == "per_kwh" \
-        and item.measured_on != "peak_import" and not item.tiers
+def _unsupported_reason(item: TariffItem) -> str | None:
+    if item.kind in ("demand", "capacity") or item.measured_on == "peak_import":
+        return "unsupported:demand_P2_WP2.1"
+    if item.tiers:
+        return "unsupported:tiers_P1_WP1.5c"
+    if item.kind == "fixed":
+        if item.unit != "per_month":
+            return f"unsupported:unit_{item.unit}_for_fixed"
+        p = item.periods[0]
+        if len(item.periods) != 1 or p.months or p.weekdays or p.start_hour is not None:
+            return "unsupported:fixed_with_windows"
+        return None
+    if item.unit != "per_kwh":
+        return f"unsupported:unit_{item.unit}_for_{item.kind}"
+    return None
 
 
-def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours: float | None = None,
-         timezone: str | None = None, meter_history: pd.DataFrame | None = None) -> RatingResult:
-    """Rate ``dispatch`` against ``tariff``. ``meter_history`` is accepted for
-    the P2 demand/ratchet items and unused by the core."""
-    idx = pd.DatetimeIndex(dispatch.index)
-    step_h = float(step_hours) if step_hours is not None else _infer_step_hours(idx)
-    local = _local(idx, timezone)
-    imp = dispatch["import_mw"].to_numpy(dtype=float) if "import_mw" in dispatch else np.zeros(len(idx))
-    exp = dispatch["export_mw"].to_numpy(dtype=float) if "export_mw" in dispatch else np.zeros(len(idx))
+def _nan_aware_sum(values: pd.Series, keys) -> pd.Series:
+    """Group sum where any NaN in a group makes the group NaN."""
+    frame = pd.DataFrame({"v": values.to_numpy(), "k": np.asarray(keys)})
+    sums = frame.groupby("k")["v"].sum()
+    bad = frame["v"].isna().groupby(frame["k"]).any()
+    sums[bad] = np.nan
+    return sums
+
+
+def _month_hours(key: str, tz: str | None) -> float:
+    y, m = map(int, key.split("-"))
+    if tz is None:
+        return calendar.monthrange(y, m)[1] * 24.0
+    start = pd.Timestamp(year=y, month=m, day=1).tz_localize(tz)
+    end = (pd.Timestamp(year=y, month=m, day=1) + pd.offsets.MonthBegin(1)).tz_localize(tz)
+    return (end - start).total_seconds() / 3600.0
+
+
+def _hours_by_month_in_period(start, end, tz: str | None) -> dict[str, float]:
+    s = pd.Timestamp(start)
+    e = pd.Timestamp(end)
+    if tz is not None:
+        s = s.tz_localize(tz) if s.tz is None else s.tz_convert(tz)
+        e = e.tz_localize(tz) if e.tz is None else e.tz_convert(tz)
+    out: dict[str, float] = {}
+    cur = s
+    while cur < e:
+        nxt_naive = (cur.tz_localize(None) if cur.tz is not None else cur).normalize().replace(day=1) \
+            + pd.offsets.MonthBegin(1)
+        nxt = nxt_naive.tz_localize(tz) if tz is not None else nxt_naive
+        stop = min(nxt, e)
+        key = cur.strftime("%Y-%m")
+        out[key] = out.get(key, 0.0) + (stop - cur).total_seconds() / 3600.0
+        cur = stop
+    return out
+
+
+# ── the engine ────────────────────────────────────────────────────────────────
+
+
+def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | None,
+         billing_period: tuple | None = None,
+         meter_history: pd.DataFrame | None = None) -> RatingResult:
+    """Rate ``dispatch`` against ``tariff`` (see module docstring).
+    ``meter_history`` is accepted for the P2 demand/ratchet items and unused here."""
+    idx = _validate(dispatch, timezone)
+    dur = _durations(idx, step_hours)
+    local = idx.tz_convert(timezone) if idx.tz is not None else idx
+    imp = dispatch["import_mw"].to_numpy(dtype=float)
+    exp = dispatch["export_mw"].to_numpy(dtype=float)
     month_key = np.asarray(local.strftime("%Y-%m"))
     sign_of = {"cost": 1.0, "revenue": -1.0}
+    covered_span_h = ((idx.asi8[-1] - idx.asi8[0]) / 3.6e12 + dur[-1]) if len(idx) else 0.0
+    has_gaps = len(idx) > 0 and dur.sum() < covered_span_h - 1e-9
 
     interval_frames: list[pd.DataFrame] = []
     fixed_rows: list[dict] = []
     per_item: dict[str, float | None] = {}
     flags: dict[str, list[str]] = {}
+    notes: dict[str, list[str]] = {}
     unsupported: list[str] = []
     monthly_parts: dict[str, pd.Series] = {}
 
     for item in tariff.items:
-        sign = sign_of[item.direction]
-        if _supported_interval_item(item):
-            q_kwh = _quantity_mw(item, imp, exp) * step_h * _KWH_PER_MWH
-            r = _rates(item, local)
-            amount = sign * q_kwh * r
-            interval_frames.append(pd.DataFrame({
-                "interval": idx, "tariff_item": item.id, "quantity_kwh": q_kwh,
-                "rate": r, "amount": amount}))
-            n_unrated = int(np.isnan(r).sum())
-            flags[item.id] = [f"unrated_intervals:{n_unrated}"] if n_unrated else []
-            per_item[item.id] = None if n_unrated else float(np.nansum(amount))
-            monthly_parts[item.id] = pd.Series(amount).groupby(month_key).sum(min_count=1)
-            if n_unrated:
-                monthly_parts[item.id] = pd.Series(amount).groupby(month_key).apply(
-                    lambda s: np.nan if s.isna().any() else s.sum())
-        elif item.kind == "fixed" and item.unit == "per_month":
-            if len(item.periods) != 1 or item.periods[0].months or item.periods[0].weekdays \
-                    or item.periods[0].start_hour is not None:
-                unsupported.append(item.id)
-                continue
-            monthly_rate = item.periods[0].rate
-            dates = pd.Series(pd.DatetimeIndex(local.normalize()).tz_localize(None)
-                              if local.tz is not None else local.normalize()).drop_duplicates()
-            by_month: dict[str, float] = {}
-            for key, grp in dates.groupby(dates.dt.strftime("%Y-%m")):
-                y, m = map(int, key.split("-"))
-                dim = calendar.monthrange(y, m)[1]
-                days = int(grp.nunique())
-                amt = sign * monthly_rate * days / dim
-                by_month[key] = amt
-                fixed_rows.append({"month": key, "tariff_item": item.id,
-                                   "days_covered": days, "days_in_month": dim, "amount": amt})
-            flags[item.id] = []
-            per_item[item.id] = float(sum(by_month.values()))
-            monthly_parts[item.id] = pd.Series(by_month)
-        else:
+        reason = _unsupported_reason(item)
+        if reason is not None:
             unsupported.append(item.id)
+            flags[item.id] = [reason]
+            continue
+        sign = sign_of[item.direction]
+        if item.kind == "fixed":
+            monthly_rate = item.periods[0].rate
+            if billing_period is not None:
+                covered = _hours_by_month_in_period(billing_period[0], billing_period[1], timezone)
+            else:
+                covered = pd.Series(dur).groupby(month_key).sum().to_dict()
+            by_month: dict[str, float] = {}
+            for key, hours in sorted(covered.items()):
+                mh = _month_hours(key, timezone)
+                amt = sign * monthly_rate * hours / mh
+                by_month[key] = amt
+                fixed_rows.append({"month": key, "tariff_item": item.id, "hours_covered": hours,
+                                   "hours_in_month": mh, "amount": amt})
+            flags[item.id] = []
+            if has_gaps and billing_period is None:
+                notes[item.id] = ["fixed_prorated_on_partial_coverage"]
+            per_item[item.id] = float(sum(by_month.values()))
+            monthly_parts[item.id] = pd.Series(by_month, dtype=float)
+            continue
+
+        q_kwh = _quantity_mw(item, imp, exp) * dur * _KWH_PER_MWH
+        r = _rates(item, local)
+        amount = sign * q_kwh * r
+        interval_frames.append(pd.DataFrame({
+            "interval": idx, "tariff_item": item.id, "quantity_kwh": q_kwh,
+            "rate": r, "amount": amount}))
+        item_flags = []
+        n_unrated = int(np.isnan(r).sum())
+        n_nan_q = int(np.isnan(q_kwh).sum())
+        if n_unrated:
+            item_flags.append(f"unrated_intervals:{n_unrated}")
+        if n_nan_q:
+            item_flags.append(f"nan_quantity:{n_nan_q}")
+        flags[item.id] = item_flags
+        per_item[item.id] = None if item_flags else float(amount.sum())
+        monthly_parts[item.id] = _nan_aware_sum(pd.Series(amount), month_key)
+        settle_h = _SETTLEMENT_HOURS[item.settlement]
+        uniq = np.unique(dur)
+        if len(uniq) != 1 or abs(uniq[0] - settle_h) > 1e-9:
+            d = f"{uniq[0]:g}h" if len(uniq) == 1 else "mixed"
+            notes.setdefault(item.id, []).append(f"resolution:dispatch_{d}_settlement_{settle_h:g}h")
 
     lines = (pd.concat(interval_frames, ignore_index=True) if interval_frames else
              pd.DataFrame(columns=["interval", "tariff_item", "quantity_kwh", "rate", "amount"]))
-    fixed_lines = pd.DataFrame(fixed_rows, columns=["month", "tariff_item", "days_covered",
-                                                    "days_in_month", "amount"])
+    fixed_lines = pd.DataFrame(fixed_rows, columns=["month", "tariff_item", "hours_covered",
+                                                    "hours_in_month", "amount"])
     monthly = pd.DataFrame(monthly_parts).sort_index()
+    monthly.index = monthly.index.astype(str)
     monthly.index.name = "month"
-    annual = monthly.groupby(monthly.index.str.slice(0, 4)).sum(min_count=1)
+    year_key = np.asarray([m[:4] for m in monthly.index])
+    annual = pd.DataFrame({c: _nan_aware_sum(monthly[c], year_key) for c in monthly.columns})
     annual.index.name = "year"
     totals = list(per_item.values())
     total_supported = None if any(v is None for v in totals) else float(sum(totals))
     total = None if unsupported else total_supported
     return RatingResult(lines=lines, fixed_lines=fixed_lines, monthly=monthly, annual=annual,
                         per_item=per_item, total=total, total_supported=total_supported,
-                        flags=flags,
-                        unsupported_items=unsupported)
+                        flags=flags, notes=notes, unsupported_items=unsupported)

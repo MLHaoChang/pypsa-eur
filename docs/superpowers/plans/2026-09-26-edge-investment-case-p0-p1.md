@@ -255,6 +255,14 @@ computed by hand and cross-checked in a spreadsheet committed as CSV).
   an interval; all-zero dispatch gives fixed-only bill; amounts sum to the hand-rated fixture to the cent.
 - [ ] Green: pure pandas implementation; no LP awareness.
 - Acceptance: fixtures match exactly; runtime < 1 s for a 15-min year.
+- As implemented (review round 1 FAIL → fixed): `rate(dispatch, tariff, *, step_hours, timezone,
+  billing_period=None)` returns `RatingResult(lines[interval, tariff_item, quantity_kwh, rate, amount],
+  fixed_lines, monthly, annual, per_item, total, total_supported, flags, notes, unsupported_items)`.
+  `step_hours` is required (float or per-row Series); tz-aware input requires `timezone`; naive input
+  with a timezone is refused; NaN quantities and unrated intervals propagate to month and year; fixed
+  items pro-rate by local HOURS (743/745 in DST months) or bill `billing_period`; unsupported items
+  carry a reason. The engine is currency-agnostic (project currency is decision 13); "unit
+  conversions" = MW × h → kWh, and non-`per_kwh` energy units are unsupported with a reason.
 
 ### WP1.3 PoC price materialisation, export binding, typed commercial config
 Files: `backend/services/commercial/lp_bindings.py` (`materialise_poc_prices`, `_wrap_with_commercial_bindings`),
