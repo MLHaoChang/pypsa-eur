@@ -362,40 +362,68 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             continue
         sign = sign_of[item.direction]
         if _is_demand(item):
-            # WP1.5a: per local month and period window, rate × max kW. A
-            # window list without a catch-all measures only inside its windows.
+            # WP1.5a: per local month and period window, rate × max kW over
+            # the item's demand INTERVALS (`settlement`): finer dispatch is
+            # averaged to the interval first. A window list without a
+            # catch-all measures only inside its windows.
             q_kw = _quantity_mw(item, imp, exp) * _KWH_PER_MWH
             if item.measured_on == "peak_import":
                 q_kw = imp * _KWH_PER_MWH
-            pidx = _period_index(item, local)
-            n_nan = int(np.isnan(q_kw).sum())
-            flags[item.id] = [f"nan_quantity:{n_nan}"] if n_nan else []
+            settle_freq = {"15min": "15min", "30min": "30min", "h": "h"}[item.settlement]
+            interval = np.asarray(local.floor(settle_freq).asi8)
+            grp = pd.DataFrame({"g": interval, "qd": q_kw * dur, "d": dur,
+                                "nan": np.isnan(q_kw)})
+            agg = grp.groupby("g", sort=True).agg(qd=("qd", "sum"), d=("d", "sum"),
+                                                  nan=("nan", "any"))
+            first = pd.Series(np.arange(len(interval))).groupby(interval).first()
+            q_int = np.where(agg["nan"].to_numpy(), np.nan,
+                             agg["qd"].to_numpy() / agg["d"].to_numpy())
+            g_month = month_key[first.to_numpy()]
+            g_pidx = _period_index(item, local)[first.to_numpy()]
+            flags[item.id] = []
             months_sorted = sorted(set(month_key))
+            # Months the bill covers but the dispatch does not (spec §5.2):
+            # not established — never a "complete" bill missing a month.
+            if billing_period is not None:
+                lo = pd.Timestamp(billing_period[0])
+                hi = pd.Timestamp(billing_period[1]) - pd.Timedelta(seconds=1)
+                if timezone is not None:
+                    lo = lo.tz_localize(timezone) if lo.tz is None else lo.tz_convert(timezone)
+                    hi = hi.tz_localize(timezone) if hi.tz is None else hi.tz_convert(timezone)
+                span = pd.period_range(lo.strftime("%Y-%m"), hi.strftime("%Y-%m"), freq="M")
+            else:
+                span = pd.period_range(months_sorted[0], months_sorted[-1], freq="M")
+            for m in span.strftime("%Y-%m"):
+                if m not in set(months_sorted):
+                    flags[item.id].append(f"demand_month_not_established:{m}")
             # Actual peak per (month, window) first: a ratchet reads ACTUAL
             # peaks of earlier months, never billed ones (WP1.5b).
             actual: dict[tuple[str, int], float] = {}
+            nan_windows = 0
             for key in months_sorted:
-                in_month = month_key == key
                 for k in range(len(item.periods)):
-                    sel = in_month & (pidx == k)
-                    if sel.any():
-                        actual[(key, k)] = float(q_kw[sel].max())
+                    sel = (g_month == key) & (g_pidx == k)
+                    if not sel.any():
+                        continue
+                    if np.isnan(q_int[sel]).any():
+                        nan_windows += 1  # only the window's own intervals matter
+                        actual[(key, k)] = float("nan")
+                    else:
+                        actual[(key, k)] = float(q_int[sel].max())
+            if nan_windows:
+                flags[item.id].append(f"nan_quantity:{int(np.isnan(q_kw).sum())}")
             by_month: dict[str, float] = {}
             for key in months_sorted:
-                in_month = month_key == key
-                if np.isnan(q_kw[in_month]).any():
-                    by_month[key] = float("nan")
-                    continue
                 amt = 0.0
                 for k, per in enumerate(item.periods):
                     if (key, k) not in actual:
                         continue
                     peak = actual[(key, k)]
                     billed = peak
-                    if item.ratchet is not None:
+                    if item.ratchet is not None and np.isfinite(peak):
                         prior, missing = _ratchet_prior(key, k, item.ratchet.lookback_months,
                                                         actual, meter_history)
-                        if prior is not None:
+                        if prior is not None and np.isfinite(prior):
                             billed = max(peak, item.ratchet.share * prior)
                         if missing:
                             note = notes.setdefault(item.id, [])
@@ -407,11 +435,17 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                                         "amount": line})
                     amt += line
                 by_month[key] = amt
-                covered = float(dur[in_month].sum())
+                covered = float(dur[month_key == key].sum())
                 if covered < _month_hours(key, timezone) - 1e-9:
                     note = notes.setdefault(item.id, [])
                     if "demand_on_partial_month" not in note:
                         note.append("demand_on_partial_month")
+            settle_h = _SETTLEMENT_HOURS[item.settlement]
+            uniq = np.unique(dur)
+            if len(uniq) != 1 or abs(uniq[0] - settle_h) > 1e-9:
+                d = f"{uniq[0]:g}h" if len(uniq) == 1 else "mixed"
+                notes.setdefault(item.id, []).append(
+                    f"resolution:dispatch_{d}_settlement_{settle_h:g}h")
             per_item[item.id] = None if flags[item.id] else float(sum(by_month.values()))
             monthly_parts[item.id] = pd.Series(by_month, dtype=float)
             continue

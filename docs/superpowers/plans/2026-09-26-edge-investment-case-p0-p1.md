@@ -463,8 +463,18 @@ Files: `lp_bindings.py`, `backend/tests/test_lp_bindings_peak_demand.py`.
   `_emit_state(last_commercial_terms=…)` in the same block that publishes `last_reserve_margin`
   (`solver_service.py` ~L1101–1113), clearing it to `None` on solves without bindings; **gap 0**.
 - [ ] Green: implementation.
+- As implemented (deviations): the solved peaks are read inside the transient apply's undo (while `n.model` and the
+  spec still exist) and committed to `n.meta["ic_demand_peaks"]`/`["ic_demand_info"]` on success — the rows come
+  from `n.meta` (spec §5.1 "As implemented"), and `run_simulation` publishes `last_commercial_terms` (with
+  `demand_peaks`) only after a successful solve, `None` after a plain one.
+- Review round 1 → **FAIL**, fixed: the engine flags `demand_month_not_established:<YYYY-MM>` for months of the
+  billing period (else the dispatch span) with no rows — per-item/total withheld; demand is measured on the item's
+  `settlement` interval mean (engine and LP) with a `resolution:` note; a NaN outside every window no longer
+  unrates the month; the LP span is the represented calendar year when a period's weights sum to a year;
+  partial months are charged in full and disclosed (spec §5.2 decision); rows flag `config_changed_since_solve`,
+  `demand_charge_not_established`, `demand_months_not_established`, `demand_partial_months`; rolling is refused
+  only when it would actually run (not with SCLOPF or multi-period, which fall back to full).
 
-### WP1.5b Ratchet
 - [ ] (Gate P0 condition 3) with `realistic_dispatch` or any other new `services/solver/` module, add
   the assertion that `test_solver_facade_surface.py`'s glob covers it.
 - [ ] Red: `ratchet(lookback_months=11, share=0.9)` adds `ic_peak_import[m] ≥ 0.9·ic_peak_import[k]` for

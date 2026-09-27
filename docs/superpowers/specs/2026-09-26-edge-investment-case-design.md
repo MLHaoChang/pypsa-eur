@@ -282,7 +282,14 @@ names and skips dash-less ones cleanly.
 
 ### 5.2 Peak variables under partial coverage
 - **Representative periods**: a billing month with no sampled snapshots gets no `P_peak[m]`; its demand
-  charge is `not_established` in the report, never weighted from neighbours.
+  charge is `not_established` in the report, never weighted from neighbours. When a period's weights represent
+  a whole year (Σw ≈ 8760 h), every calendar month of that year is in scope.
+- **Partial months (decided in P1 WP1.5a review)**: a month the snapshots cover only in part is charged the
+  FULL monthly demand charge, in the LP and in the billing engine alike (that is how the bill works), and is
+  disclosed (`demand_partial_months` in the terms and rows; `demand_on_partial_month` in the bill). A short
+  horizon therefore over-weights demand against energy; the preflight (WP1.8) warns.
+- **Demand intervals**: the peak is on the item's `settlement` interval mean (e.g. hourly demand on 15-min
+  dispatch), in the LP (`Σ w·p − W·P_peak ≤ 0` per interval) and in the engine.
 - **Windowed dispatch (§9)**: `P_peak[m]` is re-created per window with a lower bound equal to the running
   month maximum already committed, so the controller cannot "forget" a peak it has set.
 

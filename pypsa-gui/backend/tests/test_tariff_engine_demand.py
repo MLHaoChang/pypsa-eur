@@ -110,3 +110,39 @@ def test_a_full_month_is_not_flagged_partial():
                step_hours=1.0, timezone="America/Chicago")
     assert "demand_on_partial_month" not in res.notes.get("demand", [])
     assert res.per_item["demand"] == pytest.approx(10_000.0)
+
+
+# ── WP1.5a review round 1 ──────────────────────────────────────────────────
+
+
+def test_a_month_without_rows_inside_the_billing_period_is_not_established():
+    """#1: never a 'complete' bill missing a month's demand charge."""
+    jan = _dispatch([2.0] * 3, start="2030-01-10 00:00")
+    mar = _dispatch([3.0] * 3, start="2030-03-10 00:00")
+    res = rate(pd.concat([jan, mar]), _tariff(_demand()), step_hours=1.0,
+               timezone="America/Chicago",
+               billing_period=(pd.Timestamp("2030-01-01", tz="America/Chicago"),
+                               pd.Timestamp("2030-04-01", tz="America/Chicago")))
+    assert "demand_month_not_established:2030-02" in res.flags["demand"]
+    assert res.per_item["demand"] is None and res.total is None and res.complete is False
+
+
+def test_the_demand_interval_averages_finer_dispatch():
+    """#5: an hourly demand interval on 15-min dispatch bills the max HOURLY mean."""
+    imp = [1.0, 1.0, 1.0, 5.0] + [2.0] * 4  # hour 0 mean 2.0, hour 1 mean 2.0
+    item = _demand(settlement="h")
+    res = rate(_dispatch(imp, start="2030-07-01 00:00", freq="15min"), _tariff(item),
+               step_hours=0.25, timezone="America/Chicago")
+    assert res.per_item["demand"] == pytest.approx(10.0 * 2000)
+    assert any(x.startswith("resolution:") for x in res.notes["demand"])
+
+
+def test_a_nan_outside_every_window_does_not_unrate_the_month():
+    """#8: only the window's own intervals matter."""
+    imp = [1.0] * 24
+    imp[3] = float("nan")
+    imp[18] = 2.5
+    item = _demand(periods=[{"name": "on_peak", "rate": 20.0, "start_hour": 16, "end_hour": 21}])
+    res = rate(_dispatch(imp, start="2030-07-01 00:00"), _tariff(item), step_hours=1.0,
+               timezone="America/Chicago")
+    assert res.per_item["demand"] == pytest.approx(20.0 * 2500)

@@ -224,7 +224,12 @@ def _validate(n, agreement: ConnectionAgreement, poc_link: str, export_link: str
         if bool(n.links.at[poc_link, "p_nom_extendable"]) or p_nom <= 0:
             raise CommercialBindingError(
                 f"{agreement.kind} needs a PoC Link with a fixed physical p_nom > 0")
-        if agreement.import_cap_mw > p_nom:
+        # A study's planning limit clamps the contract BEFORE this check, so a
+        # lever below the contract caps rather than fails (round 4 condition 1).
+        limit = (getattr(n, LINK_LIMITS_ATTR, None) or {}).get(poc_link)
+        cap_eff = agreement.import_cap_mw if limit is None else min(agreement.import_cap_mw,
+                                                                     float(limit))
+        if cap_eff > p_nom:
             raise CommercialBindingError(
                 f"{agreement.kind} cap {agreement.import_cap_mw} MW exceeds the PoC Link's "
                 f"p_nom {p_nom} MW")

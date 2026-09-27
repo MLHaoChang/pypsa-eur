@@ -94,6 +94,7 @@ from services.solver.adequacy import (  # noqa: F401
 # Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
 # the LP-terms wrapper, re-exported with the rest of the solver seams.
 from services.commercial.lp_bindings import (  # noqa: F401
+    META_DEMAND as _IC_META_DEMAND,
     CommercialBindingError,
     _wrap_with_commercial_bindings,
     materialise_poc_prices,
@@ -737,19 +738,22 @@ def run_simulation(
                 # the user's marginal_cost is never modified on disk. Runs with
                 # no commercial config as well — its commit clears stale frames.
                 try:
+                    # The strategy that will actually RUN (rolling falls back to
+                    # full with SCLOPF or multi-period; WP1.5a review #7).
+                    _ic_strategy = getattr(config, "solve_strategy", "full")
+                    if _ic_strategy == "rolling" and (
+                            use_sclopf or config.multi_investment_periods):
+                        _ic_strategy = "full"
                     _ic_conn = apply_commercial_for_solve(
                         network, getattr(config, "commercial", None),
                         log=lambda m: _safe_log(log_queue, m),
-                        solve_strategy=getattr(config, "solve_strategy", "full"),
+                        solve_strategy=_ic_strategy,
                         multi_period=bool(config.multi_investment_periods))
                 except CommercialBindingError as exc:
                     log_queue.put(f"[COMMERCIAL] ERROR: {exc}")
                     phase("Commercial binding failed. Aborting.")
                     status, condition = "error", "commercial_binding_failed"
                     return status, condition
-                # Cleared to None on a solve without commercial terms (WP1.5a).
-                _emit_state(last_commercial_terms=(
-                    _ic_conn.facts if _ic_conn.facts.get("poc_link") else None))
                 try:
                     _real_restore, captured = _apply_modelling_assumptions(network, config, phase)
                 except BaseException:
@@ -1107,11 +1111,12 @@ def run_simulation(
                 # prices with another run's dispatch).
                 if status in ("ok", "optimal"):
                     _ic_conn.commit()
-                    if _ic_conn.facts.get("poc_link"):
-                        # The solved peaks join the published terms (WP1.5a).
-                        _emit_state(last_commercial_terms={
-                            **_ic_conn.facts,
-                            "demand_peaks": network.meta.get("ic_demand_peaks")})
+                    # Published only after a successful solve, like the commit
+                    # (WP1.5a review #6); None after a plain successful solve.
+                    _emit_state(last_commercial_terms=(
+                        {**_ic_conn.facts,
+                         "demand_peaks": network.meta.get(_IC_META_DEMAND)}
+                        if _ic_conn.facts.get("poc_link") else None))
                 # Adequacy report — emitted whenever a target was enforced
                 # AND the solve actually produced a dispatch, INCLUDING the
                 # nothing-shed case (achieved 0, binding=voll).

@@ -72,6 +72,7 @@ ENERGY_PRICE_ATTR = "ic_energy_price"
 META_LINKS = "ic_poc_links"
 META_PRICE_AXIS = "ic_export_price_axis"
 META_DEMAND = "ic_demand_peaks"
+META_DEMAND_INFO = "ic_demand_info"
 DEMAND_SPEC_ATTR = "_ic_demand_spec"   # transient: set by apply, read by the LP wrapper
 DEMAND_BUILT_ATTR = "_ic_demand_built"  # transient: set by the LP wrapper
 META_TIERS = "ic_tier_volumes"
@@ -396,23 +397,44 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
     months = np.asarray(local.strftime("%Y-%m"))
     inv = (np.asarray(n.snapshots.get_level_values(0)) if isinstance(n.snapshots, pd.MultiIndex)
            else np.full(len(n.snapshots), None, dtype=object))
+    w = n.snapshot_weightings.objective.to_numpy(dtype=float)
     missing: list[str] = []
+    partial: list[str] = []
     for p in pd.unique(inv):
         sel = inv == p
-        span = pd.period_range(local[sel].min().strftime("%Y-%m"),
-                               local[sel].max().strftime("%Y-%m"), freq="M").strftime("%Y-%m")
+        if abs(w[sel].sum() - 8760.0) <= 0.01 * 8760.0:
+            # The period's snapshots represent a whole year (representative
+            # weeks): every calendar month of that year is billed (review #2).
+            year = local[sel].min().year
+            span = pd.period_range(f"{year}-01", f"{year}-12", freq="M").strftime("%Y-%m")
+        else:
+            span = pd.period_range(local[sel].min().strftime("%Y-%m"),
+                                   local[sel].max().strftime("%Y-%m"),
+                                   freq="M").strftime("%Y-%m")
+            # A full monthly charge against part of a month's operation (§5.2,
+            # decided: full month, as billed) is disclosed (review #4).
+            for m in sorted(set(months[sel])):
+                hours = pd.Period(m, freq="M").days_in_month * 24.0
+                if w[sel & (months == m)].sum() < hours - 1e-6:
+                    partial.append(m if p is None else f"{p}:{m}")
         gone = sorted(set(span) - set(months[sel]))
         missing += [m if p is None else f"{p}:{m}" for m in gone]
     keys: list[dict] = []
     for item in items:
         pidx = _period_index(item, local)
+        # Demand INTERVALS (`settlement`): the bound is on the interval mean,
+        # as billed (review #5); singleton groups when snapshots are that fine.
+        interval = np.asarray(local.floor({"15min": "15min", "30min": "30min",
+                                           "h": "h"}[item.settlement]).asi8)
         for k, per in enumerate(item.periods):
             if per.rate == 0:
                 continue
             for p in pd.unique(inv):
                 for m in sorted(set(months[(inv == p) & (pidx == k)])):
                     pos = np.flatnonzero((inv == p) & (pidx == k) & (months == m))
+                    _, group = np.unique(interval[pos], return_inverse=True)
                     keys.append({
+                        "group": group,
                         "key": f"{item.id}|{k}|{'' if p is None else p}|{m}",
                         "item": item.id, "period": per.name, "month": m,
                         "inv_period": None if p is None else int(p),
@@ -446,7 +468,9 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
     floors = {k["key"]: cfg.initial_peak_lower_bound[k["month"]] for k in keys
               if k["month"] in cfg.initial_peak_lower_bound}
     spec = {"import_link": cfg.poc_link, "export_link": cfg.export_link, "keys": keys,
-            "ratchets": ratchets, "floors": floors}
+            "ratchets": ratchets, "floors": floors,
+            "info": {"items": [i.id for i in items], "not_established": missing,
+                     "partial_months": partial}}
     return spec, [i.id for i in items], missing, notes
 
 
@@ -480,11 +504,24 @@ def add_demand_terms(n) -> None:
     link_p = m["Link-p"]
     imp = link_p.sel(name=spec["import_link"])
     exp = link_p.sel(name=spec["export_link"]) if spec["export_link"] else None
+    w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
     for i, k in enumerate(spec["keys"]):
-        flow = imp.isel(snapshot=k["positions"])
+        pos = k["positions"]
+        flow = imp.isel(snapshot=pos)
         if k["net"] and exp is not None:
-            flow = flow - exp.isel(snapshot=k["positions"])
-        m.add_constraints(flow - peak.sel(key=k["key"]) <= 0, name=f"ic_peak_import_def_{i}")
+            flow = flow - exp.isel(snapshot=pos)
+        group = k["group"]
+        if group.max() + 1 == len(pos):  # one snapshot per demand interval
+            m.add_constraints(flow - peak.sel(key=k["key"]) <= 0, name=f"ic_peak_import_def_{i}")
+            continue
+        # Interval mean ≤ peak:  Σ_{t∈g} w_t·flow_t − (Σ_{t∈g} w_t)·peak ≤ 0.
+        gda = xr.DataArray(group, coords={"snapshot": flow.indexes["snapshot"]},
+                           dims="snapshot", name="interval")
+        weighted = (flow * w_all[pos]).groupby(gda).sum()
+        wsum = np.bincount(group, weights=w_all[pos])
+        wda = xr.DataArray(wsum, coords={"interval": np.arange(len(wsum))}, dims="interval")
+        m.add_constraints(weighted - wda * peak.sel(key=k["key"]) <= 0,
+                          name=f"ic_peak_import_def_{i}")
     if isinstance(n.snapshots, pd.MultiIndex):
         w_obj = n.investment_period_weightings["objective"]
         weight = [float(w_obj.loc[k["inv_period"]]) for k in spec["keys"]]
@@ -625,6 +662,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
                 n.links_t[ENERGY_PRICE_ATTR] = pd.DataFrame(index=n.snapshots)
             n.meta.pop(META_LINKS, None)
             n.meta.pop(META_DEMAND, None)
+            n.meta.pop(META_DEMAND_INFO, None)
             n.meta.pop(META_TIERS, None)
 
         applied._commit.append(clear)
@@ -713,8 +751,10 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
                               "priced": sorted(targets)}
         if "v" in solved_peaks:
             n.meta[META_DEMAND] = solved_peaks["v"]
+            n.meta[META_DEMAND_INFO] = demand["info"]
         else:
             n.meta.pop(META_DEMAND, None)
+            n.meta.pop(META_DEMAND_INFO, None)
 
     applied._commit.append(commit)
 
@@ -733,6 +773,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
         "poc_link": cfg.poc_link, "export_link": cfg.export_link,
         "priced_links": sorted(targets), "energy_items": energy_items,
         "demand_items": demand_items, "demand_not_established_months": demand_missing,
+        "demand_partial_months": (demand or {}).get("info", {}).get("partial_months", []),
         "tiered_items": tiered_items, "nonconvex_tier_items": nonconvex_items,
         "not_in_lp": not_in_lp, "notes": notes, "timezone": cfg.timezone,
         "simultaneous_flow_risk_snapshots": risk,

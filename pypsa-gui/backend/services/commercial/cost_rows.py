@@ -81,15 +81,35 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
         if "simultaneous_snapshots" in rows:
             block["simultaneous_snapshots"] = rows["simultaneous_snapshots"]
 
-    # Peak-demand charges (WP1.5a): €/MW × solved monthly peak, per period.
+    # Peak-demand charges (WP1.5a): €/MW × solved (billed) monthly peak.
     peaks = n.meta.get(_lp.META_DEMAND)
+    info = n.meta.get(_lp.META_DEMAND_INFO) or {}
+    wanted: list[str] = []
+    if commercial:
+        try:
+            cfg_parsed = _lp._parse(commercial)
+            wanted = [i.id for i in (cfg_parsed.import_tariff.items
+                                     if cfg_parsed.import_tariff is not None else [])
+                      if _lp._is_demand(i) and _lp._lp_reason(i) is None]
+        except Exception:  # noqa: BLE001
+            wanted = []
     if peaks:
-        total = 0.0
         for v in peaks.values():
             amount = float(v["eur_per_mw"]) * float(v.get("billed_mw", v["peak_mw"]))
             items.append(("demand_charge", v.get("inv_period"), 0.0, amount))
-            total += amount
         block["demand_charge"] = weighted("demand_charge")
+        if sorted(info.get("items", [])) != sorted(wanted):
+            flags.append("config_changed_since_solve" if commercial else
+                         "config_cleared_since_solve")
+        if info.get("not_established"):
+            flags.append("demand_months_not_established")
+            block["demand_months_not_established"] = list(info["not_established"])
+        if info.get("partial_months"):
+            flags.append("demand_partial_months")
+            block["demand_partial_months"] = list(info["partial_months"])
+    elif wanted:
+        block["demand_charge"] = None
+        flags.append("demand_charge_not_established")
 
     # Convex tiered energy (WP1.5c): Σ rate_k × q_k per month and period.
     tiers = n.meta.get(_lp.META_TIERS)

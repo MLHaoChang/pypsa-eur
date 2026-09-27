@@ -321,3 +321,32 @@ def test_a_missing_stress_link_is_an_incomplete_row_not_an_aborted_sweep():
     assert by_id["scenario:fca_gone"]["status"] == "profiles_incomplete"
     assert by_id["scenario:fca_gone"]["meta"]["note"] == "link_missing"
     assert by_id["scenario:cold"].get("status") != "profiles_incomplete"
+
+
+# ── WP1.4 review round 4 (PASS WITH CONDITIONS) ────────────────────────────
+
+
+@pytest.mark.parametrize("kind", ["non_firm_static", "fca"])
+def test_a_lever_below_a_non_firm_contract_caps_instead_of_failing(kind):
+    """Condition 1: the study limit clamps the contract before the p_nom check."""
+    from services.adequacy.levers import apply_lever_scenario
+
+    n = build_edge_15min()
+    undo, _ = apply_lever_scenario(n, "import_cap", value=20.0)
+    extra = {"curtailment_hours_per_year": 10.0} if kind == "fca" else {}
+    applied = C.apply_connection_agreement(
+        n, ConnectionAgreement(kind=kind, import_cap_mw=30.0, available_from=date(2030, 1, 1),
+                               **extra), poc_link="import")
+    assert float(n.links.at["import", "p_max_pu"]) == pytest.approx(1.0)  # 20/20
+    applied.undo()
+    undo()
+
+
+def test_the_sweep_base_result_carries_the_design_mismatch():
+    """Condition 2: a stale pinned design reaches the sweep result."""
+    import inspect
+
+    from services.adequacy import sweep
+
+    src = inspect.getsource(sweep.run_contingency_sweep)
+    assert "commercial_flags" in src

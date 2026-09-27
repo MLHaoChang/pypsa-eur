@@ -194,3 +194,98 @@ def test_demand_rows_survive_a_netcdf_round_trip(tmp_path):
     n.export_to_netcdf(path)
     after = compute_cost_breakdown(pypsa.Network(path), cfg)["commercial"]["demand_charge"]
     assert after == pytest.approx(before, rel=1e-12)
+
+
+# ── WP1.5a review round 1 ──────────────────────────────────────────────────
+
+
+def _rep_weeks():
+    """Four representative weeks (Jan, Apr, Jul, Oct) weighted to a full year."""
+    n = _site()
+    parts = [pd.date_range(f"2030-{m:02d}-07", periods=96 * 7, freq="15min") for m in (1, 4, 7, 10)]
+    idx = parts[0].append(parts[1:])
+    n.set_snapshots(idx)
+    n.snapshot_weightings.loc[:, :] = 8760.0 / len(idx)
+    n.loads_t.p_set = pd.DataFrame({"site_load": 30.0}, index=idx)
+    n.generators_t.p_max_pu = pd.DataFrame({"pv": 0.0}, index=idx)
+    return n
+
+
+def test_a_year_represented_by_weeks_lists_every_unsampled_month():
+    """#2: the span is the represented calendar year, not first..last snapshot."""
+    applied = L.materialise_poc_prices(_rep_weeks(), _commercial(_tariff(_demand())))
+    assert applied.facts["demand_not_established_months"] == [
+        "2030-02", "2030-03", "2030-05", "2030-06", "2030-08", "2030-09", "2030-11", "2030-12"]
+
+
+def test_partial_months_are_disclosed():
+    """#4: a full monthly charge against part of a month's energy is disclosed."""
+    applied = L.materialise_poc_prices(_site(start="2030-01-28 00:00"),
+                                       _commercial(_tariff(_demand())))
+    assert applied.facts["demand_partial_months"] == ["2030-01", "2030-02"]
+
+
+def test_demand_rows_flag_config_drift_and_missing_commits():
+    """#3 ADR-0001: rows say when the config and the committed peaks disagree."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _site()
+    commercial = _commercial(_tariff(_demand()))
+    # The config names a demand item, but no solve committed peaks.
+    terms = commercial_cost_terms(n, commercial)
+    assert terms["block"]["demand_charge"] is None
+    assert "demand_charge_not_established" in terms["flags"]
+    # Peaks committed for a demand item the config no longer names.
+    n.meta[L.META_DEMAND] = {"demand|0||2030-01": {
+        "item": "demand", "period": "all", "month": "2030-01", "inv_period": None,
+        "eur_per_mw": 15000.0, "peak_mw": 10.0, "billed_mw": 10.0}}
+    n.meta[L.META_DEMAND_INFO] = {"items": ["demand"], "not_established": ["2030-02"],
+                                  "partial_months": ["2030-01"]}
+    energy_only = _commercial(_tariff({"id": "e", "kind": "energy", "unit": "per_kwh",
+                                       "periods": [{"name": "all", "rate": 0.1}]}))
+    terms = commercial_cost_terms(n, energy_only)
+    assert "config_changed_since_solve" in terms["flags"]
+    terms = commercial_cost_terms(n, commercial)
+    assert "demand_months_not_established" in terms["flags"]
+    assert "demand_partial_months" in terms["flags"]
+
+
+@pytest.mark.live_solve
+def test_terms_are_published_only_after_a_successful_solve():
+    """#6: a failed solve must not replace the published terms."""
+    n = _site()
+    sink, _ = _solve(n, _commercial(_tariff(_demand())))
+    good = sink["last_commercial_terms"]
+    assert good["demand_peaks"]
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig, run_simulation
+
+    n.loads_t.p_set["site_load"] = 10_000.0  # infeasible without slack
+    sink2: dict = {"last_commercial_terms": good}
+    status, _ = run_simulation(SolverConfig(commercial=_commercial(_tariff(_demand()))), n,
+                               PyPSAService.get_lock(), threading.Event(), queue.SimpleQueue(),
+                               state_update=lambda **kw: sink2.update(kw))
+    assert status not in ("ok", "optimal")
+    assert sink2["last_commercial_terms"] is good
+
+
+def test_rolling_is_refused_only_when_it_would_run():
+    """#7: rolling on a multi-period axis falls back to full; not refused."""
+    n = _site()
+    L.materialise_poc_prices(n, _commercial(_tariff(_demand())), solve_strategy="full")
+    with pytest.raises(L.CommercialBindingError):
+        L.materialise_poc_prices(n, _commercial(_tariff(_demand())), solve_strategy="rolling")
+
+
+@pytest.mark.live_solve
+def test_an_hourly_demand_interval_is_bounded_on_hourly_means_and_matches_the_bill():
+    """#5 LP side: the bound is on the interval mean, as billed."""
+    n = _site()
+    item = _demand(settlement="h")
+    _solve(n, _commercial(_tariff(item)))
+    peaks = n.meta[L.META_DEMAND]
+    lp = sum(v["eur_per_mw"] * v["billed_mw"] for v in peaks.values())
+    dispatch = pd.DataFrame({"import_mw": n.links_t.p0["import"].to_numpy(), "export_mw": 0.0},
+                            index=n.snapshots)
+    billed = engine_rate(dispatch, _tariff(item), step_hours=0.25, timezone=None)
+    assert billed.per_item["demand"] == pytest.approx(lp, rel=1e-6)
