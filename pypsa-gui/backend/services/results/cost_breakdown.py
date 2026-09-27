@@ -419,7 +419,8 @@ def compute_cost_breakdown(n, cfg):
     # as the component "Commercial" so Σ by_component == totals, per period
     # too. Same years weighting as the statistics rows.
     from services.commercial.cost_rows import commercial_cost_terms
-    _commercial = commercial_cost_terms(n, getattr(cfg, "commercial", None))
+    _commercial = commercial_cost_terms(n, getattr(cfg, "commercial", None),
+                                        years=_years_for_period)
     for _label, _period, _cx, _ox in _commercial["items"]:
         _yrs = _years_for_period(_period) if _period is not None else 1.0
         _accumulate("Commercial", _label, _period, _cx * _yrs, _ox * _yrs)

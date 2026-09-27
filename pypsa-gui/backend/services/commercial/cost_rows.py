@@ -44,12 +44,20 @@ def _energy_by_period(n, link: str, prices: pd.DataFrame) -> dict | None:
     return {None: float(amount.sum())}
 
 
-def commercial_cost_terms(n, commercial: dict | None) -> dict:
+def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
     """{"items": [(label, period, capex, opex)], "block": {...}, "flags": [...]}.
 
-    `block` is the `cost_breakdown["commercial"]` payload (horizon totals per
-    label, before the caller's years weighting on a multi-period axis).
+    Items are unweighted per period; `block` (the `cost_breakdown["commercial"]`
+    payload) sums them with the SAME `years(period)` weighting the caller
+    applies to the items, so a label in the block equals what the totals carry
+    (WP1.3 review round 3 #2). `years` defaults to 1 per period.
     """
+    yrs = years or (lambda p: 1.0)
+
+    def weighted(label: str) -> float:
+        return float(sum((cx + ox) * (yrs(p) if p is not None else 1.0)
+                         for lab, p, cx, ox in items if lab == label))
+
     flags: list[str] = []
     items: list[tuple] = []
     block: dict = {"included_in_total": True}
@@ -69,6 +77,7 @@ def commercial_cost_terms(n, commercial: dict | None) -> dict:
             for p, v in (per or {}).items():
                 if v:
                     items.append((label, p, 0.0, v))
+            block[label] = weighted(label)
         if "simultaneous_snapshots" in rows:
             block["simultaneous_snapshots"] = rows["simultaneous_snapshots"]
 
@@ -80,7 +89,7 @@ def commercial_cost_terms(n, commercial: dict | None) -> dict:
             amount = float(v["eur_per_mw"]) * float(v["peak_mw"])
             items.append(("demand_charge", v.get("inv_period"), 0.0, amount))
             total += amount
-        block["demand_charge"] = total
+        block["demand_charge"] = weighted("demand_charge")
 
     # Connection capacity fee in the LP (WP1.4a).
     fee = n.meta.get(_conn.META_FEE)
@@ -102,7 +111,7 @@ def commercial_cost_terms(n, commercial: dict | None) -> dict:
                 amount = float(eur_per_mw) * p_nom_opt
                 items.append(("network_capacity", period, amount, 0.0))
                 total += amount
-            block["network_capacity"] = total
+            block["network_capacity"] = weighted("network_capacity")
         else:
             block["network_capacity"] = None
             flags.append("network_capacity_not_established")
@@ -116,8 +125,10 @@ def commercial_cost_terms(n, commercial: dict | None) -> dict:
     # Fixed connection fee — reported, NOT in the reconciled total (§5.5).
     fixed = n.meta.get(_conn.META_FIXED_FEE)
     if fixed:
+        by_p = fixed.get("eur_by_period") or {"_": fixed.get("eur", 0.0)}
+        eur = sum(float(v) * (yrs(int(k)) if k != "_" else 1.0) for k, v in by_p.items())
         block["network_capacity_fixed"] = {
-            "eur": float(fixed["eur"]), "kind": fixed.get("kind"),
+            "eur": float(eur), "kind": fixed.get("kind"),
             "included_in_total": False, "flags": ["fixed_charge_not_in_lp"]}
 
     block["flags"] = list(dict.fromkeys(flags))

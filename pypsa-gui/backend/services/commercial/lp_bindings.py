@@ -250,6 +250,14 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
         raise CommercialBindingError(
             "import_tariff_id names a Library tariff, which arrives in P2 (WP2.4); "
             "carry the tariff inline as import_tariff")
+    bounds = (n.meta.get("vintage_bounds") or {}).get("Link") if hasattr(n, "meta") else None
+    if isinstance(bounds, dict):
+        clash = [l for l in (cfg.poc_link, cfg.export_link) if l and l in bounds]
+        if clash:
+            raise CommercialBindingError(
+                f"per-period vintage bounds on the PoC Link(s) {clash} are not supported with "
+                "the commercial layer in P1 (the vintage clones would carry dispatch the "
+                "commercial rows do not read)")
     _adders(n, cfg)  # dry run: export items without an export Link, unrated snapshots
 
 
@@ -521,7 +529,8 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
     def commit() -> None:
         frame = pd.DataFrame({link: add for link, add in targets.items()}, index=n.snapshots)
         n.links_t[ENERGY_PRICE_ATTR] = frame
-        n.meta[META_LINKS] = {"import": cfg.poc_link, "export": cfg.export_link}
+        n.meta[META_LINKS] = {"import": cfg.poc_link, "export": cfg.export_link,
+                              "priced": sorted(targets)}
         if "v" in solved_peaks:
             n.meta[META_DEMAND] = solved_peaks["v"]
         else:
@@ -619,7 +628,12 @@ def energy_cost_rows(n, commercial: dict | None) -> dict | None:
         if link is None:
             return None
         if link not in prices.columns:
-            return 0.0 if link in n.links.index else None  # priced nothing on this Link
+            # 0.0 only for a Link the solve deliberately left unpriced; a
+            # priced Link whose record is gone is not established (ADR-0001).
+            if link in n.links.index and link not in (solved.get("priced") or []):
+                return 0.0
+            flags.append(f"{label}_not_established")
+            return None
         add = prices[link]
         p0 = p0_of(link)
         if p0 is None or add.isna().any():

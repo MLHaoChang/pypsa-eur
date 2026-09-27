@@ -178,3 +178,54 @@ def test_route_refuses_a_dynamic_envelope_without_a_zone_for_a_zoned_series(
     r = client.put("/api/simulation/solver_config", json={"commercial": {
         "poc_link": "import", "connection": agreement.model_dump(mode="json")}})
     assert r.status_code == 422 and r.json()["detail"]["code"] == "timezone_required"
+
+
+# ── WP1.4 review round 2: FCA registration ─────────────────────────────────
+
+
+def _fca_body(hours=100.0):
+    agreement = ConnectionAgreement(kind="fca", import_cap_mw=40.0,
+                                    curtailment_hours_per_year=hours,
+                                    available_from=date(2030, 1, 1))
+    return {"commercial": {"poc_link": "import", "connection": agreement.model_dump(mode="json")}}
+
+
+def test_fca_on_an_unsaved_project_is_refused(client, install_network):
+    install_network(build_edge_15min())
+    r = client.put("/api/simulation/solver_config", json=_fca_body())
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "fca_needs_saved_project"
+
+
+def _saved_edge(client, install_network, name):
+    install_network(build_edge_15min(), name=name)
+    assert client.post(f"/api/projects/{name}",
+                       params={"force": True, "rebind": True}).status_code == 200
+
+
+def test_clearing_or_changing_the_config_removes_the_fca_entry(
+        client, install_network, project_storage_dir):
+    _saved_edge(client, install_network, "fca2")
+    assert client.put("/api/simulation/solver_config", json=_fca_body()).status_code == 200
+    assert [e["id"] for e in ST.load_scenarios(project_storage_dir("fca2"))] == ["fca_import"]
+    assert client.put("/api/simulation/solver_config",
+                      json={"commercial": None}).status_code == 200
+    assert ST.load_scenarios(project_storage_dir("fca2")) == []
+
+
+def test_a_full_registry_is_a_422_and_writes_nothing(client, install_network, project_storage_dir):
+    _saved_edge(client, install_network, "fca3")
+    full = [{"id": f"s{i}", "kind": "parametric", "frequency_per_year": 1.0}
+            for i in range(ST.MAX_SCENARIOS)]
+    ST.save_scenarios(project_storage_dir("fca3"), full)
+    r = client.put("/api/simulation/solver_config", json=_fca_body())
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "stress_registry_invalid"
+    assert len(ST.load_scenarios(project_storage_dir("fca3"))) == ST.MAX_SCENARIOS
+
+
+def test_an_unreadable_registry_is_not_overwritten(client, install_network, project_storage_dir):
+    _saved_edge(client, install_network, "fca4")
+    path = project_storage_dir("fca4") / ST.SIDECAR_NAME
+    path.write_text("{corrupt")
+    r = client.put("/api/simulation/solver_config", json=_fca_body())
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "stress_registry_unreadable"
+    assert path.read_text() == "{corrupt"

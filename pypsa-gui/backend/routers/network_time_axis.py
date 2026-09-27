@@ -1184,6 +1184,10 @@ async def upload_timeseries(
       column stitch (replace that period's rows, keep the others). Required
       for "different weather year per period" workflows.
     """
+    if attribute.startswith("ic_"):
+        # `ic_*` are the Edge Investment Case's internal records (a pinned
+        # Library price, committed prices): an upload must not spoof them.
+        raise HTTPException(404, f"'{attribute}' is not a user time series")
     import io
 
     import numpy as _np

@@ -55,6 +55,7 @@ Pure service: imports neither routers nor `solver_service`.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -76,6 +77,10 @@ META_FEE = "ic_connection_fee"
 META_FIXED_FEE = "ic_connection_fixed_fee"
 FEE_SPEC_ATTR = "_ic_fee_spec"          # transient: set by apply, read by the LP wrapper
 FEE_BUILT_ATTR = "_ic_fee_built"        # transient: set by the LP wrapper, read by commit
+# Set by `adequacy.sweep.freeze_capacities`: the solve is OPERATIONAL (the design
+# is fixed). The agreement then pins the connection at its designed size and
+# adds no fee term, and nothing is committed (WP1.4 review round 2 #1).
+OPERATIONAL_ATTR = "_ic_operational"
 FCA_DISCLOSURE = "fca_synthetic_hours"
 
 __all__ = ["Applied", "CommercialBindingError", "ENVELOPE_ATTR", "apply_commercial_for_solve",
@@ -234,7 +239,10 @@ def _available_mask(n, agreement: ConnectionAgreement, timezone: str | None):
         moved = first_open is not None and first_open > int(min(n.investment_periods))
         return closed, (first_open if moved else None)
     if timezone is not None:
-        start = start.tz_localize(timezone).tz_convert("UTC").tz_localize(None)
+        # A zone whose DST gap is at midnight (America/Santiago) has no 00:00
+        # on that day: the date then starts at the first instant that exists.
+        start = (start.tz_localize(timezone, nonexistent="shift_forward", ambiguous=False)
+                 .tz_convert("UTC").tz_localize(None))
     return np.asarray(pd.DatetimeIndex(n.snapshots) < start), None
 
 
@@ -247,9 +255,21 @@ def apply_connection_agreement(n, agreement: ConnectionAgreement, *, poc_link: s
     fee = _validate(n, agreement, poc_link, export_link, solve_strategy, multi_period)
     applied = Applied()
     cap = float(agreement.import_cap_mw)
-    fixed_fee_eur = None
+    operational = bool(getattr(n, OPERATIONAL_ATTR, False))
+    fixed_fee_by_period: dict | None = None
+    closed, first_open = _available_mask(n, agreement, timezone)
     try:
-        if agreement.kind == "firm":
+        if agreement.kind == "firm" and fee is not None and operational:
+            # The design is fixed: pin the connection at the size the design
+            # solve chose (freeze_capacities' min = size, max = size + ε).
+            size = float(n.links.at[poc_link, "p_nom_opt"]) \
+                if "p_nom_opt" in n.links.columns else float("nan")
+            if not np.isfinite(size):
+                size = float(n.links.at[poc_link, "p_nom"])
+            _set_static(n, applied, poc_link, "p_nom_extendable", True)
+            _set_static(n, applied, poc_link, "p_nom_min", size)
+            _set_static(n, applied, poc_link, "p_nom_max", size + 1e-6)
+        elif agreement.kind == "firm":
             if fee is not None:
                 _set_static(n, applied, poc_link, "p_nom_extendable", True)
                 _set_static(n, applied, poc_link, "p_nom_min", 0.0)
@@ -281,11 +301,17 @@ def apply_connection_agreement(n, agreement: ConnectionAgreement, *, poc_link: s
                 _set_static(n, applied, poc_link, "p_max_pu",
                             min(float(n.links.at[poc_link, "p_max_pu"]), cap / p_nom))
             if fee is not None:
-                fixed_fee_eur = fee * cap * horizon_years(n)
+                # Fixed charge, accruing only while the connection is open.
+                w = n.snapshot_weightings.objective.to_numpy(dtype=float) * ~closed
+                if isinstance(n.snapshots, pd.MultiIndex):
+                    per = pd.Series(w, index=n.snapshots).groupby(level=0).sum()
+                    fixed_fee_by_period = {str(int(k)): fee * cap * float(v) / _HOURS_PER_YEAR
+                                           for k, v in per.items() if v > 0}
+                else:
+                    fixed_fee_by_period = {"_": fee * cap * float(w.sum()) / _HOURS_PER_YEAR}
         if agreement.export_cap_mw is not None:
             _set_static(n, applied, export_link, "p_nom", float(agreement.export_cap_mw))
 
-        closed, first_open = _available_mask(n, agreement, timezone)
         if closed.any():
             _set_p_max_pu_t(n, applied, poc_link,
                             np.where(closed, 0.0, _base_p_max_pu(n, poc_link)))
@@ -301,9 +327,9 @@ def apply_connection_agreement(n, agreement: ConnectionAgreement, *, poc_link: s
             n.meta[META_FEE] = built
         else:
             n.meta.pop(META_FEE, None)
-        if fixed_fee_eur is not None:
-            n.meta[META_FIXED_FEE] = {"eur": float(fixed_fee_eur), "kind": agreement.kind,
-                                      "link": poc_link}
+        if fixed_fee_by_period is not None:
+            n.meta[META_FIXED_FEE] = {"eur_by_period": fixed_fee_by_period,
+                                      "kind": agreement.kind, "link": poc_link}
         else:
             n.meta.pop(META_FIXED_FEE, None)
 
@@ -329,8 +355,12 @@ def apply_connection_agreement(n, agreement: ConnectionAgreement, *, poc_link: s
     applied._commit.append(commit_from_box)
     applied.facts = {"connection": {
         "kind": agreement.kind, "poc_link": poc_link, "import_cap_mw": cap,
-        "fee_eur_per_mw_year": fee, "fee_in_lp": agreement.kind == "firm" and fee is not None,
-        "fixed_fee_eur": fixed_fee_eur, "available_from": agreement.available_from.isoformat(),
+        "fee_eur_per_mw_year": fee,
+        "fee_in_lp": agreement.kind == "firm" and fee is not None and not operational,
+        "operational": operational,
+        "fixed_fee_eur": (None if fixed_fee_by_period is None
+                          else float(sum(fixed_fee_by_period.values()))),
+        "available_from": agreement.available_from.isoformat(),
         "snapshots_before_available": int(closed.sum())}}
     return applied
 
@@ -374,7 +404,12 @@ def apply_commercial_for_solve(n, commercial: dict | None, *, log=None,
         conn._commit.append(clear_fee)
     elif log is not None:
         log(f"[COMMERCIAL] connection agreement applied: {conn.facts['connection']}")
-    return prices.chain(conn)
+    both = prices.chain(conn)
+    if getattr(n, OPERATIONAL_ATTR, False):
+        # An operational (adequacy sweep) solve is not the design: it must not
+        # overwrite the committed commercial records.
+        both._commit = []
+    return both
 
 
 # ── the LP term (called from lp_bindings' extra_functionality wrapper) ─────
@@ -421,43 +456,80 @@ def _site_load(n) -> np.ndarray:
     return total
 
 
-def fca_stress_entry(n, agreement: ConnectionAgreement, *, poc_link: str) -> dict:
+def fca_stress_entry(n, agreement: ConnectionAgreement, *, poc_link: str,
+                     timezone: str | None = None,
+                     envelope_mw: np.ndarray | None = None) -> dict:
     """The FCA curtailment hours as a `profiles` stress entry on the PoC Link.
 
     Which hours are curtailed is not in the agreement, so the entry takes the
-    deterministic worst case. It zeroes the highest-load snapshots (earliest
-    first on ties) until their weighted hours reach
+    deterministic worst case. It zeroes the highest-load OPEN snapshots
+    (earliest first on ties; never where `available_from` or the envelope
+    already closes the connection) while their weighted hours stay within
     `curtailment_hours_per_year × horizon years`, and discloses the choice as
-    `fca_synthetic_hours`. Every other snapshot keeps the agreement's normal
-    availability. `frequency_per_year = 1`: the curtailment is a yearly
-    condition, not a rare event.
+    `fca_synthetic_hours` with `target_hours` and `achieved_hours`. Every
+    other snapshot keeps the agreement's normal availability.
+    `frequency_per_year = 1`: the curtailment is a yearly condition, not a
+    rare event. `envelope_mw` lets the config route build the entry from an
+    envelope it has aligned but not yet written.
     """
     if agreement.kind != "fca" or agreement.curtailment_hours_per_year is None:
         raise CommercialBindingError("fca_stress_entry needs an fca agreement with "
                                      "curtailment_hours_per_year")
     p_nom = float(n.links.at[poc_link, "p_nom"])
     cap = float(agreement.import_cap_mw)
-    base = (np.minimum(_envelope_mw(n, poc_link), cap) / p_nom if agreement.envelope is not None
-            else np.full(len(n.snapshots), cap / p_nom))
-    base = np.minimum(_base_p_max_pu(n, poc_link), base)
+    if agreement.envelope is not None:
+        env = envelope_mw if envelope_mw is not None else _envelope_mw(n, poc_link)
+        base = np.minimum(env, cap) / p_nom
+    else:
+        base = np.full(len(n.snapshots), cap / p_nom)
+    closed, _ = _available_mask(n, agreement, timezone)
+    base = np.where(closed, 0.0, np.minimum(_base_p_max_pu(n, poc_link), base))
     weights = n.snapshot_weightings.objective.to_numpy(dtype=float)
     target_h = float(agreement.curtailment_hours_per_year) * weights.sum() / _HOURS_PER_YEAR
-    order = np.argsort(-_site_load(n), kind="stable")
-    step = float(np.median(weights)) if len(weights) else 1.0
-    k = int(round(target_h / step)) if step > 0 else 0
-    k = max(0, min(k, len(order)))
     series = base.copy()
-    series[order[:k]] = 0.0
+    achieved = 0.0
+    for i in np.argsort(-_site_load(n), kind="stable"):
+        if base[i] <= 0.0:
+            continue  # already closed: curtailing it changes nothing
+        if achieved + weights[i] > target_h + 1e-9:
+            continue
+        series[i] = 0.0
+        achieved += weights[i]
     slug = re.sub(r"[^a-z0-9_-]+", "_", poc_link.lower()).strip("_")[:55] or "poc"
     return {"id": f"fca_{slug}", "kind": "profiles", "frequency_per_year": 1.0,
             "label": f"FCA curtailment on {poc_link} ({agreement.curtailment_hours_per_year:g} h/yr)",
-            "disclosure": FCA_DISCLOSURE,
+            "disclosure": FCA_DISCLOSURE, "target_hours": float(target_h),
+            "achieved_hours": float(achieved),
             "links_p_max_pu": {poc_link: [float(v) for v in series]}}
 
 
-def register_fca_entry(project_dir, entry: dict) -> None:
-    """Add or replace the entry (by id) in the project's stress registry."""
+class StressRegistryUnreadable(CommercialBindingError):
+    code = "stress_registry_unreadable"
+
+
+def plan_fca_registry(project_dir, entry: dict | None) -> list[dict]:
+    """The project's stress registry with every FCA entry this layer owns
+    replaced by `entry` (or removed when None), validated but NOT written.
+
+    Refuses (`StressRegistryUnreadable`) when the sidecar exists but cannot be
+    read: rewriting it would destroy the user's scenarios. Raises
+    `stress.StressValidationError` when the result is invalid (e.g. full)."""
     from services.adequacy import stress
 
-    current = [e for e in stress.load_scenarios(project_dir) if e.get("id") != entry["id"]]
-    stress.save_scenarios(project_dir, current + [entry])
+    path = Path(project_dir) / stress.SIDECAR_NAME
+    current = stress.load_scenarios(project_dir)
+    if path.exists() and not current and not stress.registry_is_empty(project_dir):
+        raise StressRegistryUnreadable(
+            f"{stress.SIDECAR_NAME} exists but cannot be read; fix or remove it before an "
+            "FCA agreement can register its curtailment scenario")
+    kept = [e for e in current if e.get("disclosure") != FCA_DISCLOSURE]
+    planned = kept + ([entry] if entry is not None else [])
+    stress._validate(planned)
+    return planned
+
+
+def register_fca_entry(project_dir, entry: dict | None) -> None:
+    """Write `plan_fca_registry(project_dir, entry)`."""
+    from services.adequacy import stress
+
+    stress.save_scenarios(project_dir, plan_fca_registry(project_dir, entry))

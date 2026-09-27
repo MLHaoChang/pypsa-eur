@@ -358,6 +358,12 @@ materialised prices — needed for this WP's gap-0 invariant), `backend/tests/te
     gaps (window = min(next snapshot, one step)); `ic_*` frames are hidden from and refused by the time-series
     routes. **Plan acceptance amended:** "`links_t.marginal_cost[poc]` equals the rates (persisted)" is met by
     the persisted `ic_energy_price` frame; the LP sees the rates during the solve.
+  - Round 3 → **PASS WITH CONDITIONS**, closed: `n.meta["ic_poc_links"]["priced"]` records the Links the
+    solve priced — a priced Link whose record is gone is None + `*_not_established`, 0.0 only for a Link left
+    unpriced (ADR-0001); `cost_rows` weights the block with the caller's `years(period)`, so the block equals
+    what the totals carry; the upload route refuses `ic_*`; per-period vintage bounds on a PoC Link are refused
+    (their clones would carry dispatch the rows do not read). Disclosure: `n.statistics()`/asset economics
+    exclude the (transient) commercial terms; `cost_breakdown` and `horizon_system_cost` are the reconciled totals.
 
 ### WP1.4a Connection agreement — firm, non-firm static, `available_from`
 Files: `backend/services/commercial/connection.py`, `backend/tests/test_connection_agreement.py`.
@@ -392,6 +398,16 @@ Files: `backend/services/commercial/connection.py`, `backend/tests/test_connecti
   cost_rows.commercial_cost_terms` is the one source for the commercial rows: `cost_breakdown` folds them in as
   the component "Commercial" (Σ by_component == totals, per period) and `cost_totals.horizon_system_cost` adds
   the same items (#5, #9); a fee named by the config but not committed is None + `network_capacity_not_established`.
+- Round 2 (with WP1.4b) → **FAIL**, fixed: adequacy sweeps no longer re-size the connection —
+  `freeze_capacities` marks the network operational (`_ic_operational`), the agreement then pins the designed
+  `p_nom_opt` (min = size, max = size + ε) with no fee term, and operational solves commit nothing; the block
+  is years-weighted like the totals; FCA curtailment is chosen among OPEN snapshots only, accumulating real
+  weights (never above target) with `target_hours`/`achieved_hours` disclosed; the fixed fee accrues only
+  while open, per period; a DST gap at midnight shifts forward instead of raising; the route resolves, aligns
+  and plans the registry BEFORE any write — FCA on an unsaved project → 409 `fca_needs_saved_project`, a full or
+  invalid registry → 422 `stress_registry_invalid`, an unreadable registry is never overwritten → 409
+  `stress_registry_unreadable`, and re-binding or clearing (`commercial: null`) removes this layer's FCA entry;
+  a `links_p_max_pu` entry naming a missing Link fails closed (`link_missing`).
 
 ### WP1.4b Connection agreement — dynamic envelope and FCA
 - [ ] Design line first: `services/adequacy/stress.py` knows `VALID_KINDS=("parametric","profiles")`, and its

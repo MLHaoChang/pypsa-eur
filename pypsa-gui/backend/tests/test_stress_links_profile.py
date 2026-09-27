@@ -82,8 +82,8 @@ def test_mutate_refuses_a_wrong_length_without_partial_apply():
     assert "import" not in n.links_t.p_max_pu.columns
 
 
-def test_unknown_links_are_skipped():
+def test_a_missing_link_fails_the_scenario_closed():
+    """WP1.4 review #6: a renamed PoC Link must not solve an unmutated network."""
     n = _net()
-    undo = ST._profiles_mutate(_entry(**{"ghost": [0.0] * N}))(n)
-    assert "ghost" not in n.links_t.p_max_pu.columns
-    undo()
+    with pytest.raises(ST.StressValidationError, match="link_missing"):
+        ST._profiles_mutate(_entry(**{"ghost": [0.0] * N}))(n)

@@ -217,6 +217,21 @@ def load_scenarios(project_dir: pathlib.Path) -> list[dict]:
     return list(raw.get("scenarios") or [])
 
 
+def registry_is_empty(project_dir: pathlib.Path) -> bool:
+    """True when the sidecar is absent or a VALID registry with no scenarios;
+    False when it exists but cannot be read (so a caller never mistakes a
+    corrupt file for an empty one and overwrites it)."""
+    path = project_dir / SIDECAR_NAME
+    if not path.exists():
+        return True
+    try:
+        raw = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return (isinstance(raw, dict) and raw.get("__schema__") == SCHEMA
+            and not raw.get("scenarios"))
+
+
 def save_scenarios(project_dir: pathlib.Path, scenarios: list[dict]) -> list[dict]:
     _validate(scenarios)
     atomic_write_text(
@@ -444,9 +459,15 @@ def _profiles_mutate(scenario: dict):
         if links_map:
             # Link availability (WP1.4b): any named Link, time-varying p_max_pu.
             pmp_l = n.links_t.p_max_pu
+            missing = [k for k in links_map if k not in n.links.index]
+            if missing:
+                # Fail closed: a renamed PoC Link must not solve an unmutated
+                # network and report ΔEUE 0 (WP1.4 review round 2 #6).
+                for op in reversed(undo_ops):
+                    op()
+                raise StressValidationError(
+                    f"scenario '{scenario.get('id')}': links_p_max_pu link_missing: {missing}")
             for name, series in links_map.items():
-                if name not in n.links.index:
-                    continue
                 if name in pmp_l.columns:
                     orig_t = pmp_l[name].copy()
 

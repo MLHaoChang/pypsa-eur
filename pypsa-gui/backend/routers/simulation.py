@@ -329,20 +329,27 @@ def get_solver_config():
     return asdict(_state["solver_config"])
 
 
-def _bind_commercial(commercial, user) -> dict:
+def _bind_commercial(commercial, user) -> dict | None:
     """
-    Check a submitted commercial block against the live network and resolve
-    its Library export price onto the export Link (Edge Investment Case WP1.3).
+    Check a submitted commercial block against the live network, resolve its
+    Library series (export price, connection envelope) and keep the project's
+    FCA stress entry in step (Edge Investment Case WP1.3 / WP1.4).
 
-    The price is resolved in the ACTIVE PROJECT's org (the caller's org for an
-    unsaved network), aligned on the current snapshot axis and written to
-    `links_t["ic_export_price"]` only when every snapshot is covered; it then
-    persists with the network, and `library_refs.json` pins the version
-    (WP1.1c). Returns the plain dict stored on `SolverConfig.commercial`.
-    Refusals carry `{code, message}`.
+    Every refusal happens BEFORE any write: the series are resolved and aligned
+    and the stress registry is planned and validated first; only then are the
+    network columns written and the registry saved. Series resolve in the
+    ACTIVE PROJECT's org (the caller's org for an unsaved network). Refusals
+    carry `{code, message}`. `commercial=None` (clearing) only removes the FCA
+    entry this layer owns. Returns the plain dict stored on
+    `SolverConfig.commercial`.
     """
+    import pathlib
+    from uuid import UUID
+
     from fastapi import HTTPException
 
+    from services.adequacy.stress import StressValidationError
+    from services.commercial import connection as conn
     from services.commercial import lp_bindings
     from services.library import series_store
 
@@ -354,7 +361,25 @@ def _bind_commercial(commercial, user) -> dict:
         raise refuse(409, "solver_in_flight",
                      "a solve is running on this project; change the commercial config "
                      "after it finishes")
+    project_dir = pathlib.Path(ctx.storage_dir) if ctx.storage_dir else None
     n = PyPSAService.get_network()
+
+    def plan_registry(entry):
+        try:
+            return conn.plan_fca_registry(project_dir, entry)
+        except conn.StressRegistryUnreadable as exc:
+            raise refuse(409, exc.code, str(exc)) from exc
+        except StressValidationError as exc:
+            raise refuse(422, "stress_registry_invalid", str(exc)) from exc
+
+    if commercial is None:
+        if project_dir is not None:
+            try:
+                conn.register_fca_entry(project_dir, None)
+            except (conn.StressRegistryUnreadable, StressValidationError):
+                pass  # clearing never fails on an unreadable registry; nothing written
+        return None
+
     try:
         lp_bindings.validate_for_network(n, commercial)
     except lp_bindings.CommercialBindingError as exc:
@@ -364,8 +389,6 @@ def _bind_commercial(commercial, user) -> dict:
         from db.models import User
         from db.session import SessionLocal
         from services import library_acl
-
-        from uuid import UUID
 
         # The context carries the org id as a string (`org:uuid` registry key).
         org = UUID(str(ctx.org_id)) if ctx.org_id else None
@@ -381,39 +404,55 @@ def _bind_commercial(commercial, user) -> dict:
             except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
                 raise refuse(409, "library_ref_stale", str(exc)) from exc
 
-    def materialise(ref, writer, link, code):
-        series = resolve(ref)
+    def aligned(ref, code):
         try:
-            with PyPSAService.get_lock():
-                uncovered = writer(n, link, series, commercial.timezone)
+            values = lp_bindings.align_to_snapshots(resolve(ref), n.snapshots,
+                                                    commercial.timezone)
         except lp_bindings.CommercialBindingError as exc:
             raise refuse(422, exc.code, str(exc)) from exc
-        if uncovered:
+        if values.isna().any():
             raise refuse(422, code,
                          f"Library series {ref.id!r} v{ref.version} does not cover "
-                         f"{uncovered} snapshot(s); nothing was written")
+                         f"{int(values.isna().sum())} snapshot(s); nothing was written")
+        return values
 
-    if commercial.export_price_ref is not None:
-        materialise(commercial.export_price_ref, lp_bindings.write_export_price,
-                    commercial.export_link, "export_price_coverage")
+    # 1. Resolve + check everything (no writes yet).
+    price = (aligned(commercial.export_price_ref, "export_price_coverage")
+             if commercial.export_price_ref is not None else None)
     agreement = commercial.connection
-    if agreement is not None:
-        # WP1.4b: the envelope is resolved like the export price; an FCA's
-        # curtailment hours are registered as a stress entry on the PoC Link.
-        from services.commercial import connection as conn
+    envelope = (aligned(agreement.envelope, "envelope_coverage")
+                if agreement is not None and agreement.envelope is not None else None)
+    fca = agreement is not None and agreement.kind == "fca" \
+        and agreement.curtailment_hours_per_year is not None
+    planned = None
+    if fca:
+        if project_dir is None:
+            raise refuse(409, "fca_needs_saved_project",
+                         "save the project first: an FCA agreement registers its curtailment "
+                         "hours as a stress scenario in the project")
+        try:
+            entry = conn.fca_stress_entry(
+                n, agreement, poc_link=commercial.poc_link, timezone=commercial.timezone,
+                envelope_mw=None if envelope is None else envelope.to_numpy(dtype=float))
+        except lp_bindings.CommercialBindingError as exc:
+            raise refuse(422, exc.code, str(exc)) from exc
+        planned = plan_registry(entry)
+    elif project_dir is not None:
+        try:
+            planned = conn.plan_fca_registry(project_dir, None)  # drop a stale FCA entry
+        except (conn.StressRegistryUnreadable, StressValidationError):
+            planned = None  # nothing of ours to drop from an unreadable registry
 
-        if agreement.envelope is not None:
-            materialise(agreement.envelope, conn.write_envelope, commercial.poc_link,
-                        "envelope_coverage")
-        if agreement.kind == "fca" and agreement.curtailment_hours_per_year is not None:
-            try:
-                entry = conn.fca_stress_entry(n, agreement, poc_link=commercial.poc_link)
-            except lp_bindings.CommercialBindingError as exc:
-                raise refuse(422, exc.code, str(exc)) from exc
-            if ctx.storage_dir:
-                import pathlib
+    # 2. Write.
+    with PyPSAService.get_lock():
+        if price is not None:
+            lp_bindings.write_export_price(n, commercial.export_link, price, None)
+        if envelope is not None:
+            conn.write_envelope(n, commercial.poc_link, envelope, None)
+    if planned is not None:
+        from services.adequacy import stress
 
-                conn.register_fca_entry(pathlib.Path(ctx.storage_dir), entry)
+        stress.save_scenarios(project_dir, planned)
     return commercial.model_dump(mode="json")
 
 
@@ -426,9 +465,10 @@ def update_solver_config(cfg: SolverConfigSchema, user=Depends(optional_user)):
     # silently overwrite live state (e.g. "PUT run_ac_pf_after_lopf=true"
     # used to reset voll/discount_rate/sclopf back to defaults).
     submitted = cfg.model_dump(exclude_unset=True)
-    if cfg.commercial is not None:
+    if "commercial" in submitted:
         # A direct in-process call (chat tools) passes no user: the Depends
         # default is not a User, and `_bind_commercial` then uses the project org.
+        # An explicit null clears the layer (and its FCA stress entry).
         submitted["commercial"] = _bind_commercial(cfg.commercial, user)
     # Legacy mode 'lpf' was removed in v1.x — coerce to 'lopf' silently so
     # old saved configs and stale frontend caches don't 400 the user. Same

@@ -185,7 +185,7 @@ def test_after_a_solve_the_poc_price_is_persisted_and_the_users_cost_untouched()
     sink = _solve(n, _commercial(_tariff()))
     assert np.allclose(n.links_t[L.ENERGY_PRICE_ATTR]["import"], _expected_eur_per_mwh(n.snapshots))
     assert "import" not in n.links_t.marginal_cost.columns  # applied for the solve, undone
-    assert n.meta[L.META_LINKS] == {"import": "import", "export": None}
+    assert n.meta[L.META_LINKS] == {"import": "import", "export": None, "priced": ["import"]}
     assert sink["last_commercial_terms"]["poc_link"] == "import"
 
 
@@ -606,3 +606,49 @@ def test_ic_frames_are_not_listed_as_user_time_series(client, install_network):
     assert client.get(f"/api/network/timeseries/links/{L.EXPORT_PRICE_ATTR}").status_code == 404
     assert client.put(f"/api/network/timeseries/links/{L.EXPORT_PRICE_ATTR}",
                       json={}).status_code == 404
+
+
+# ── Review round 3 (PASS WITH CONDITIONS) ──────────────────────────────────
+
+
+def test_a_priced_link_that_lost_its_record_is_not_established_not_zero():
+    """#1 ADR-0001: only a Link the solve deliberately left unpriced is 0.0."""
+    n = build_edge_15min()
+    applied = L.materialise_poc_prices(n, _commercial(_tariff()))
+    applied.commit()
+    applied.undo()
+    n.links_t.p0 = pd.DataFrame({"import": 1.0}, index=n.snapshots)
+    n.links_t[L.ENERGY_PRICE_ATTR] = pd.DataFrame(index=n.snapshots)  # the column is gone
+    rows = L.energy_cost_rows(n, _commercial(_tariff()))
+    assert rows["energy_import"] is None
+    assert "energy_import_not_established" in rows["flags"]
+
+
+def test_the_block_is_weighted_like_the_component_table():
+    """#2: `commercial.energy_import` == Σ Commercial energy items × years."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = build_edge_15min()
+    applied = L.materialise_poc_prices(n, _commercial(_tariff()))
+    applied.commit()
+    applied.undo()
+    n.links_t.p0 = pd.DataFrame({"import": 1.0}, index=n.snapshots)
+    terms = commercial_cost_terms(n, _commercial(_tariff()), years=lambda p: 3.0)
+    items = sum(ox for label, _, _, ox in terms["items"] if label == "energy_import")
+    assert terms["block"]["energy_import"] == pytest.approx(items * 1.0)  # flat: period None → ×1
+
+
+def test_the_upload_route_refuses_ic_attributes(client, install_network):
+    """#3: an upload must not spoof the pinned Library price."""
+    install_network(build_edge_15min())
+    r = client.post(f"/api/network/timeseries/upload?component=links&attribute={L.EXPORT_PRICE_ATTR}",
+                    files={"file": ("p.csv", b"snapshot,export\n2030-01-07 00:00,1\n", "text/csv")})
+    assert r.status_code == 404
+
+
+def test_vintage_bounds_on_the_poc_link_are_refused():
+    """#5: per-period vintage clones would carry dispatch the rows do not read."""
+    n = build_edge_15min()
+    n.meta["vintage_bounds"] = {"Link": {"import": {"2030": {"p_nom_max": 50.0}}}}
+    with pytest.raises(L.CommercialBindingError, match="vintage"):
+        L.materialise_poc_prices(n, _commercial(_tariff()))

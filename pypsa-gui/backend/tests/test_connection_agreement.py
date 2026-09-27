@@ -432,3 +432,76 @@ def test_a_fee_not_established_after_the_solve_is_flagged_not_dropped():
     n = build_edge_15min()
     terms = commercial_cost_terms(n, _conn(_agreement(fee=_fee(80.0))))
     assert "network_capacity_not_established" in terms["flags"]
+
+
+# ── Review round 2 (FAIL) ──────────────────────────────────────────────────
+
+
+def test_an_operational_solve_pins_the_designed_connection():
+    """#1: adequacy sweeps (freeze_capacities) must not re-size the connection."""
+    n = build_edge_15min()
+    n.links.loc["import", "p_nom_opt"] = 35.5
+    setattr(n, C.OPERATIONAL_ATTR, True)
+    applied = C.apply_connection_agreement(n, _agreement(fee=_fee(500.0)), poc_link="import")
+    row = n.links.loc["import"]
+    assert bool(row.p_nom_extendable) and row.p_nom_min == pytest.approx(35.5)
+    assert row.p_nom_max == pytest.approx(35.5 + 1e-6)
+    assert not hasattr(n, C.FEE_SPEC_ATTR)  # no fee term in an operational solve
+    applied.undo()
+    assert not bool(n.links.at["import", "p_nom_extendable"])
+
+
+def test_freeze_capacities_marks_the_network_operational():
+    from services.adequacy.sweep import freeze_capacities
+
+    n = build_edge_15min()
+    undo = freeze_capacities(n)
+    assert getattr(n, C.OPERATIONAL_ATTR, False) is True
+    undo()
+    assert not getattr(n, C.OPERATIONAL_ATTR, False)
+
+
+def test_the_block_network_capacity_matches_the_weighted_total():
+    """#2: the block carries the same years weighting as the capex it is in."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = build_edge_15min()
+    n.meta[C.META_FEE] = {"link": "import", "fee_eur_per_mw_year": 1.0,
+                          "eur_per_mw_by_period": {"_": 100.0}}
+    n.links.loc["import", "p_nom_opt"] = 2.0
+    terms = commercial_cost_terms(n, _conn(_agreement(fee=_fee(1.0))), years=lambda p: 5.0)
+    assert terms["block"]["network_capacity"] == pytest.approx(200.0)  # flat: ×1
+
+
+def test_fca_hours_are_chosen_among_open_snapshots_and_disclosed():
+    """#3/#9: never spend curtailment where the connection is already closed;
+    accumulate real weights; disclose target and achieved hours."""
+    n = build_edge_15min()
+    agr = ConnectionAgreement(kind="fca", import_cap_mw=40.0, curtailment_hours_per_year=876.0,
+                              available_from=date(2030, 1, 10))
+    entry = C.fca_stress_entry(n, agr, poc_link="import")
+    series = np.asarray(entry["links_p_max_pu"]["import"])
+    closed = np.asarray(n.snapshots < pd.Timestamp("2030-01-10"))
+    zeroed_open = (series == 0.0) & ~closed
+    assert zeroed_open.sum() > 0
+    assert entry["target_hours"] == pytest.approx(876.0 * 168 / 8760)
+    assert entry["achieved_hours"] <= entry["target_hours"] + 1e-9
+    assert entry["achieved_hours"] == pytest.approx(0.25 * zeroed_open.sum())
+
+
+def test_a_dst_gap_at_midnight_does_not_crash():
+    """#8: America/Santiago skips 00:00 on 2030-09-08."""
+    n = build_edge_15min()
+    C.apply_connection_agreement(n, _agreement(available_from=date(2030, 9, 8)),
+                                 poc_link="import", timezone="America/Santiago")
+
+
+def test_the_fixed_fee_counts_only_open_time():
+    """#7: a fixed fee accrues only while the connection is available."""
+    n = build_edge_15min()
+    applied = C.apply_connection_agreement(
+        n, _agreement(kind="non_firm_static", cap=30.0, fee=_fee(80.0),
+                      available_from=date(2030, 1, 10)), poc_link="import")
+    open_h = float(n.snapshot_weightings.objective[n.snapshots >= pd.Timestamp("2030-01-10")].sum())
+    assert applied.facts["connection"]["fixed_fee_eur"] == pytest.approx(
+        80_000.0 * 30.0 * open_h / 8760)

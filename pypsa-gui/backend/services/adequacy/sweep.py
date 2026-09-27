@@ -75,6 +75,16 @@ def freeze_capacities(n) -> Callable[[], None]:
     same in the base and in every contingency, cancelling out of every
     ΔEUE. Returns an undo closure restoring both bound columns exactly."""
     undo_ops: list[Callable[[], None]] = []
+    # Edge Investment Case: tell the commercial layer this is an OPERATIONAL
+    # solve, so a connection agreement pins the designed connection instead
+    # of re-sizing it per contingency (WP1.4 review round 2 #1).
+    setattr(n, "_ic_operational", True)
+
+    def _clear_operational(n=n):
+        if hasattr(n, "_ic_operational"):
+            delattr(n, "_ic_operational")
+
+    undo_ops.append(_clear_operational)
     for attr, nom in _CAPACITY_ATTRS:
         df = getattr(n, attr, None)
         ext_col = f"{nom}_extendable"
