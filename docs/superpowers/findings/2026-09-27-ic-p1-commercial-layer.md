@@ -106,4 +106,10 @@ and export revenue matches the engine on the summed member dispatch per item.
   4. (alongside P2, by WP2.4) router logic into services — open; `demand_items` refused — **closed**;
   5. (alongside P2, before WP2.3) FOM branch merged or resolved — open;
   6. (alongside P2) spec §5 table and §5.1 "As implemented" brought up to date — **closed**.
+- [x] **Closure confirmed (2026-09-27, 850aade): Phase 2 may start.** The assessor re-ran `qa_commercial_lp.py`
+  (30/30) and 16 files (413 passed) and probed drift through the real routes (re-PUT, save → load, project switch,
+  bundle import, two periods): no false positives, every edited field flagged. Harness leak found and fixed:
+  `install_network_into_backend` now clears the process-global user time series like `POST /network/reset`.
+  INFO items carried into the P2 plan (WP2.3): agreements that commit no fee record are not hash-checked;
+  the non-firm fixed-fee drift path has no test; flag order in `block["flags"]` is check-order dependent.
 

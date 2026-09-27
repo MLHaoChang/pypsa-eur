@@ -243,6 +243,9 @@ the flag. The gap compares sampled to sampled.
   is attributed `fixed`; a deliberately mismatched rate (monkeypatched adder) produces an unattributed gap
   and the warn gate.
 - Acceptance: tests green; requires WP2.0 (a plain-solve gap of 0).
+- P1 gate INFO items folded in: every committed connection agreement (not only one with a fee record) carries
+  `agreement_hash`, so a cap edit on a fee-less agreement is drift; a test for the non-firm fixed-fee drift path;
+  `block["flags"]` sorted in a stable, documented order.
 
 ## WP2.4a Library items: tariffs, contracts, connection agreements
 

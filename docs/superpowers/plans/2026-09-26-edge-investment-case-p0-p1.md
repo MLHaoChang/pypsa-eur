@@ -657,6 +657,12 @@ Files: `backend/services/validation_service.py`, `backend/tests/test_validation_
      is now refused at binding (implemented selection is P2);
   5. (alongside P2, before WP2.3) merge or resolve the FOM branch (plain-solve gap must be 0);
   6. (alongside P2) bring spec §5 table and §5.1 "As implemented" up to date — **closed** with this gate.
+- **Closure confirmed by the assessor (850aade):** conditions 1, 2, 3 and 6 closed and the `demand_items` part of 4;
+  no false `config_changed_since_solve` across re-PUT, save → load, project switch, bundle import and two
+  investment periods; true positives on every edited field. **Phase 2 may start.** Open alongside P2: 4 (router
+  logic → services, by WP2.4) and 5 (FOM, before WP2.3). A test-harness leak the assessor found
+  (`install_network_into_backend` did not clear the process-global `_user_ts`, so a later save wrote the previous
+  project's profiles) is fixed with `tests/test_install_network_harness.py`.
 
 ---
 

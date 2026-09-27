@@ -673,6 +673,13 @@ def install_network_into_backend(n: pypsa.Network, name: str | None = None) -> p
     """
     PyPSAService.set_network(n)
     sim_router._state["solver_config"] = SolverConfig()
+    # The previous install's user time series are process-global; the real
+    # "New Project" route clears them (`routers/network.reset_network`), so a
+    # later save must not write them into this network's project (P1 gate).
+    from services.user_timeseries import _user_ts, _user_ts_lock
+
+    with _user_ts_lock:
+        _user_ts.clear()
     if name is not None:
         n.name = name
         PyPSAService.set_loaded_project(name)
