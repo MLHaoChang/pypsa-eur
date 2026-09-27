@@ -78,6 +78,8 @@ The same seed gives the same generator draws in both hubs, because the Link is a
 
 ## Still open / deliberately not done
 
+> **All four items below were closed on 2026-09-28.** See [`2026-09-28-eh-zonal-mc-open-items.md`](2026-09-28-eh-zonal-mc-open-items.md): grid storage dispatched (WP1), one area per grid (WP2), the COPT screening sees the grid surplus plus an exact import metric (WP3), and common-mode events from opt-in Link data (WP4).
+
 - **Grid-side storage is not dispatched** in the zonal area, which is conservative. Dispatching it needs a joint hub/grid storage policy, and that is a design question, not a mechanical one.
 - **One grid area.** A hub with PoC Links into several disconnected grid components stays on v1 and says so.
 - **The COPT screening is single-area.** Class A sees the sampled Link (v1 membership) but not the grid-side surplus, because a surplus-limited import is not a unit a convolution can hold. The MC is the certifying number. The fleet-scope note and the `import_model` field tell the two apart.

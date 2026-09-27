@@ -34,11 +34,11 @@ Grid stores are derated by their resolved outage rate exactly as hub stores are 
 **Files.** `services/adequacy/mc_zonal.py`, `services/adequacy/eh_stages.py` (`grid_area.storage_dispatched`), `tests/test_energy_hub_zonal_storage.py` (new).
 
 **Acceptance**
-- [ ] Grid without storage → per-draw arrays identical to the 2026-09-27 zonal engine (a frozen copy of that kernel in the test is the oracle).
-- [ ] A grid battery that bridges the grid's own shortfall raises the hub's import and lowers hub LOLE vs the same grid with storage disabled.
-- [ ] Remote support is bounded by the Link headroom (a 1000 MW grid battery behind a 50 MW Link never delivers more than 50 MW).
-- [ ] Grid storage never charges from power offered to the hub.
-- [ ] `grid_area.storage_dispatched` is `true` with the store names when the grid has storage.
+- [x] Grid without storage → per-draw arrays identical to the 2026-09-27 zonal engine (a frozen copy of that kernel in the test is the oracle).
+- [x] A grid battery that bridges the grid's own shortfall raises the hub's import and lowers hub LOLE vs the same grid with storage disabled.
+- [x] Remote support is bounded by the Link headroom (a 1000 MW grid battery behind a 50 MW Link never delivers more than 50 MW).
+- [x] Grid storage never charges from power offered to the hub.
+- [x] `grid_area.storage_dispatched` is `true` with the store names when the grid has storage.
 
 ## WP2 — several grid areas
 
@@ -47,10 +47,10 @@ Grid stores are derated by their resolved outage rate exactly as hub stores are 
 **Files.** `services/adequacy/mc_zonal.py`, `services/adequacy/eh_stages.py` (`hub_fleet_scope` groups Links by grid component; `grid_areas` payload replaces `grid_area`), frontend types, `tests/test_energy_hub_zonal_areas.py` (new).
 
 **Acceptance**
-- [ ] One area → identical to WP1 (area 0 keeps `GRID_STREAM_KEY`).
-- [ ] Two Links into two separate grids, both sampled → `import_model == "zonal"`, `len(grid_areas) == 2`; LOLE ≥ v1 on the same seed.
-- [ ] One sampled grid + one grid without data → zonal, the unsampled area reported with `sampled: false` and its reason.
-- [ ] A component reached only by islanded Links gets no area.
+- [x] One area → identical to WP1 (area 0 keeps `GRID_STREAM_KEY`).
+- [x] Two Links into two separate grids, both sampled → `import_model == "zonal"`, `len(grid_areas) == 2`; LOLE ≥ v1 on the same seed.
+- [x] One sampled grid + one grid without data → zonal, the unsampled area reported with `sampled: false` and its reason.
+- [x] A component reached only by islanded Links gets no area.
 
 ## WP3 — two-area COPT screening
 
@@ -59,10 +59,10 @@ Grid stores are derated by their resolved outage rate exactly as hub stores are 
 **Files.** `services/adequacy/eh_stages.py`, `services/adequacy/mc_zonal.py` (`expected_surplus_fraction`), `tests/test_energy_hub_zonal_copt.py` (new).
 
 **Acceptance**
-- [ ] Unbound grid → profile ≡ 1, `copt_metrics` identical to the v1 screening.
-- [ ] A grid whose load eats its supply → COPT LOLE (and the Link's class-A ΔEUE) rises over v1.
-- [ ] `fleet_scope.copt_import_model == "expected_surplus_profile"` with a note; `"two_state"` in v1.
-- [ ] Unit test of `expected_surplus_fraction` against a hand-computed PMF.
+- [x] Unbound grid → profile ≡ 1, `copt_metrics` identical to the v1 screening.
+- [x] A grid whose load eats its supply → COPT LOLE (and the Link's class-A ΔEUE) rises over v1.
+- [x] `fleet_scope.copt_import_model == "expected_surplus_profile"` with a note; `"two_state"` in v1.
+- [x] Unit test of `expected_surplus_fraction` against a hand-computed PMF.
 
 ## WP4 — common-mode import outage (opt-in data on the Link)
 
@@ -71,11 +71,11 @@ Grid stores are derated by their resolved outage rate exactly as hub stores are 
 **Files.** `services/adequacy/mc_zonal.py`, `services/adequacy/eh_stages.py`, `tests/test_energy_hub_common_mode.py` (new).
 
 **Acceptance**
-- [ ] No common-mode data → identical to WP3.
-- [ ] `common_mode_rate > 0` raises LOLE on the same seed; payload `import_common_mode: [{link, rate, mttr_hours, basis, area}]`.
-- [ ] Rate without MTTR → not modelled, reason in the note; rate outside `[0, 1)` → snapshot refused with the Link named.
-- [ ] Islanded Link with common-mode data → not applied ("islanded"), LOLE unchanged.
-- [ ] COPT: `q_eff` on the Link unit; a firm Link with common-mode data becomes a sampled unit at `q_cm`.
+- [x] No common-mode data → identical to WP3.
+- [x] `common_mode_rate > 0` raises LOLE on the same seed; payload `import_common_mode: [{link, rate, mttr_hours, basis, area}]`.
+- [x] Rate without MTTR → not modelled, reason in the note; rate outside `[0, 1)` → snapshot refused with the Link named.
+- [x] Islanded Link with common-mode data → not applied ("islanded"), LOLE unchanged.
+- [x] ~~COPT: `q_eff` on the Link unit; a firm Link with common-mode data becomes a sampled unit at `q_cm`.~~ **Superseded by the WP4 review (R1):** a shared event is not an independent per-unit rate (q_cm² instead of q_cm). The screening now mixes the event states exactly and ranks each event as its own class-A mode. Link units keep their own q; firm blocks stay firm in the "event up" state.
 
 ## WP5 — report, panel, chat copy
 

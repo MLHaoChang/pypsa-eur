@@ -107,3 +107,44 @@ All three reviewer mutants were re-run against the new tests and each fails at l
 | R4.7 | **R4:** grid storage keeps serving the area's own deficit during an event | risk (conservative) | Disclosed in the area note: the event cuts the export only. |
 | R4.8 | Nits: a q = 0 event still recorded a chain (switching a v1 hub to the two-area engine); the screening units carried the first chain's MTTR | nit | A q = 0 event records no chain (test added). The screening units were removed along with R4.4. |
 | R4.9 | Surviving mutants: surplus not zeroed during the event; all chains on one stream; the exact metric using only the first chain; no B1 / B2 / R1 fixes | test gaps | New tests: the grid charges strictly less during an event; two chains in one area give P(up) ≈ 0.49 over 20 000 draws; the exact metric matches the MC for two chains in one area and for events in two areas; plus the B1 / B2 / R1 pins above. All seven mutants were re-run and each now fails at least one test. |
+
+## WP5 — report, panel, chat copy
+
+**What changed.**
+- `EhReferenceDesignPanel.tsx`:
+  - The certification block gains a grid-areas line (count, sampled, dispatched grid storage, and the reason for each unsampled area) and one line per common-mode event (applied, or why not).
+  - The FMEA block gains the COPT import line (the screening model, whether events are mixed, and the exact import LOLE with its rounding) and the COPT caveat and fidelity notes.
+  - `importModelLabel` distinguishes a firm block under a sampled event, and a zonal hub whose Links are firm.
+- `api/simulation.ts`: `EhGridArea`, `EhCommonModeEvent`, and the new `EhFleetScope` fields.
+- The chat tool description and the `CHATBOT.md` row describe grid areas, grid storage, common mode and `import_exact` (zonal / event path only, no storage).
+
+**TDD.** Red: 4 new panel tests failed on missing exports. Green. `EhReferenceDesignPanel.test.tsx` went from 35 to 39 tests, then to 45 after the review.
+
+**Review findings (independent reviewer, `17ee034..6554d4d`) and resolution.**
+
+| # | Finding | Severity | Resolution |
+|---|---|---|---|
+| R5.1 | `EhImportFirmness` lacked `common_mode_sampled`; `import_common_mode_sampled`, `copt_common_mode`, `import_units` and `EhGridArea.copt_note` were emitted but untyped | bug (type) / risk | Added. `tsc` is clean. |
+| R5.2 | `importModelLabel` said "firm … (no Link outage data)" for a firm block under a sampled event, and "Link outages … sampled" for a zonal hub whose Links are firm | wording | It now branches on `import_firmness`: "firm block; common-mode event sampled" and "grid-side surplus sampled; Links firm". Tests added. |
+| R5.3 | `coptImportSummary` ignored the event mixture and never rendered the ±40 % caveat or the fidelity note; "exact" hid the Δ-MW rounding | wording | It appends "common-mode events mixed exactly" and "import rounded down to Δ MW levels" when Δ > 1. A new `fmeaCoptNotes` renders `copt_import_note` and `copt_fidelity_note`. Tests added. |
+| R5.4 | A q = 0 event was shown as an event | nit | Now "q=0 — no effect". |
+| R5.5 | `copt_import_model` was still set when the COPT was skipped (no sampled hub unit) | nit | The backend nulls `copt_import_model` / `copt_import_note` on that path. |
+| R5.6 | `CHATBOT.md` stated `import_exact` without its scope | nit | Now "zonal / common-mode path only, no storage". |
+| R5.7 | QA: `_fmea` never ran the JSON-clean check; the event-only path, `import_model == "zonal"` under an event, and a non-null `copt_surplus_fraction_min` were all unchecked | test gaps | All added to QA section 4, with a q = 0 control for the event-only path. |
+| R5.8 | Frontend test gaps: the new labels, a `firm_block` COPT line, events mixed, a pre-change report, a rendered `CommonMode` row, ignored entries, idle storage | test gaps | Six tests added. |
+
+Clean per the reviewer: no 0 / NaN / "undefined" render path; nothing in the QA driver passes vacuously (every ordering step requires numeric values); with-vs-without pairs share the same draws, so the orderings are meaningful.
+
+## End-to-end QA — `tests/qa_eh_reference_design.py` (108 / 108 steps over HTTP)
+
+Section 4 is new. Every run is weak_flexible (`apply_pack → ens_solve → mc_certify → assemble` over HTTP), pack MC 200 draws, seed 0.
+
+| Scenario | MC LOLE (h) | Control | Reading |
+|---|---|---|---|
+| Grid short of its own load when its unit is out, **with** a 200 MW / 8 h grid battery | **516.84** | **1307.61** without the battery | The battery bridges the grid's own 150 MW deficit and still has 50 MW for the hub. 516.84 h is exactly the 2026-09-27 v1 figure, i.e. a grid that can always back the Link: an independent consistency check. |
+| Hub on two separate grids | **1004.59** | — | `import_model = zonal`, two areas (`poc_a`, `poc_b`), both sampled, each with a COPT surplus fraction |
+| Common-mode event on the PoC (q = 0.05, MTTR 24 h), sampled grid | **785.03** | **585.28** without the event | Applied, area 0, engine `mc_zonal`. The event is ranked as its own class-A mode. |
+| The same, class-A screening vs exact | screening **965.98** | exact **751.36** | The expected-surplus screening overstates here, as disclosed. `import_exact` is the no-storage analytic figure and sits within the MC's range. |
+| Event only: firm Link, unsampled grid, event q = 0.05 | **626.34** | **415.005** with q = 0 | `import_firmness = common_mode_sampled`. The q = 0 control reproduces the 2026-09-27 firm-block LOLE exactly. |
+
+Sections 1–3 (the 2026-09-27 journeys) are unchanged: weak_flexible 585.2775 h (zonal), pair 499.32 h vs 415.005 h, off_grid 1400.48 h = 1400.48 h.
