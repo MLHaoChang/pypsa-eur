@@ -6,7 +6,7 @@
 **Contract:** spec §3, §8, §9, §10; plan P23 section; decisions G1–G4 (G4 read literally)
 **Scratch evidence:** `/tmp/claude-0/-home-user-pypsa-eur/93e65137-63f8-5e19-b114-b55788c10af8/scratchpad/qa23/`
 
-## Verdict: **NO-GO**
+## Verdict (first gate, b8ac655): **NO-GO**. Re-gate (c23d6cf): **GO**, see "Re-gate" at the end.
 
 Rows 2–5 are green, and every new test killed its mutants. The Expert snapshots match what the base commit renders. But the review found three system-level integration bugs. Each has a failing repro test. Spec §8.3 says "zero system-level bugs; a bug found during the gate blocks the gate; it is fixed or explicitly deferred by the product owner in the plan". Every blocker is small to fix. B2 and B3 are gaps in the spec itself (the implementation follows §3.6 and §3.5/§3.7 literally), so they need a spec decision (Fable or the owner) before the fix.
 
@@ -164,3 +164,72 @@ Reading each new test: none is vacuous.
 
 ### Row 1
 The orchestrator runs the full backend suite. It is not re-run here.
+
+---
+
+## Re-gate: c23d6cf (`git diff 2579b3b..HEAD`)
+
+**Verdict: GO.** B1–B3 are fixed as the spec's "§10 addendum: P23 gate decisions" says. No new blocker was found. The notes below do not block, but N-R1 and N-R2 should be done before P24 starts to build on the tour and hold mechanism.
+Scratch evidence: `qa23/r2/`.
+
+### Blockers: status
+
+| # | Status | How it was verified |
+|---|---|---|
+| B1 | **Fixed** | `ProjectTabs.tsx:240` (`'blank'`), `Sidebar.tsx:1048` (`'file'`), `ImportExport.tsx:128` (`'file'`, only in the no-current-project branch). Mutants N10–N12 are killed by `ProjectTabs.newProject`, `Sidebar.newProject` and `ImportExport.uiMode`. |
+| B2 | **Fixed** | `App.tsx:188-205`: a project counts as auto-opened once any panel is open for it in Guided, and the auto-open is also blocked while `guidedTourHolds > 0`. My repro is now in the real suite. The smoke's new step 17 shows it in a real browser (shot `r2/s23/13`: Guided, tagging tour coach mark on `eh-bus-fields`, no hubDesign). |
+| B3 | **Fixed** | `Results.tsx`: an explicitly requested tab (`requestedTab`) is shown as an "Advanced" tab until the user picks another tab. A stored hidden tab still falls back to Adequacy. Shot `r2/s23/12`: Adequacy · FMEA · **Asset Detail [ADVANCED]**, with the asset rendered. My repros are now in the real suite (`Results.hiddenTabRequest.test.tsx`). |
+| Notes | **Done** | Multi-tab: `noteNewProjectCreated` re-reads the explicit flag from storage (N9 is killed). Guided copy: the subtitle and the greeting chips change in Guided (shots 03 and 12; N13 is killed). |
+
+### Rows
+
+| Row | Result |
+|---|---|
+| 2 | 405 passed, exit 0 (`r2/row2.txt`). The backend is unchanged since the first gate (`git diff 2579b3b..HEAD -- pypsa-gui/backend` is empty). |
+| 3 | `tsc` exit 0 |
+| 4 | vitest **212 files / 2215 tests passed**, exit 0 (`r2/vitest.txt`) |
+| 5 | P23 smoke: **PASS**, exit 0, 17 steps and 13 shots (`r2/smoke-p23.log`). New steps 15–17 were checked against the screenshots: step 15 (Expert on Results, switch to Guided, Results stays, closing it opens no hubDesign) through the log's checks; steps 16 and 17 through shots 12 and 13. P22.9 smoke: **PASS**, exit 0, 10 shots; shot 10 shows the tour on `eh-bus-fields` in Expert. After both runs no uvicorn, vite, stub or chromium process is left. |
+| 7 | The `.snap` files are unchanged in this diff, and the snapshot tests pass, so the Expert render is still byte-identical to what `0302a5c` renders (checked by `cmp` at the first gate). Expert arms of the new code: `advancedTab` is always null in Expert, so there is no `data-advanced` attribute and no chip (mutant N14 is killed by the Expert test in `Results.hiddenTabRequest`). The Expert subtitle and chips are unchanged. |
+
+### Mutation testing of the new logic (`qa23/mutate2.py`, scratch worktree of c23d6cf; results in `r2/mutations2.txt`)
+
+**11 of 15 mutants were killed.** The 4 that survived mark missing tests; no bug was found behind them.
+
+| Mutant | Result |
+|---|---|
+| N1 App effect ignores `guidedTourHolds` | killed |
+| N2 GuideButton takes no hold during `prepare` | **survived**. The any-open-panel rule already covers every path that is reachable today: `prepare` runs from Results, which has already marked the project. The hold is defence in depth. |
+| N3 GuideButton never releases its `prepare` hold (leak) | **survived** |
+| N4 GuidedTour takes no hold on mount | killed |
+| N5 GuidedTour never releases its hold on unmount (leak) | **survived** |
+| N6 an open panel no longer marks the project | killed |
+| N7 `pickTab` does not clear `requestedTab` | **survived**. This is almost an equivalent mutant: choosing another tab already makes `requestedTab !== tab`. It shows only on the path Guided (request Economics) → pick Adequacy → Expert → click Economics → Guided, where the mutant would bring the Advanced chip back. |
+| N8 `requestedTab` never recorded, N15 `effectiveTab` ignores `advancedTab` | killed |
+| N9 no storage re-read, N10–N12 creation calls dropped, N13 Expert chips in Guided, N14 marker shown in Expert | killed |
+
+**N-R1 (test gap):** no test checks that the holds are **released**. A leaked hold would silently switch off the auto-open for every later project in the session. The current code releases correctly: `finally` in `GuideButton`, and the effect cleanup in `GuidedTour`, which also runs on error-boundary unmount and when `GuidedTourHost` closes a stale tour. But nothing pins this. Suggested tests:
+- after the tour closes, `guidedTourHolds` is 0;
+- after a failing `prepare`, it is 0;
+- after a project switch closes the tour, it is 0.
+
+Add a test for N7 as well.
+
+### New integration findings
+
+**N-R2 (minor, not blocking): switching project while a tour is on screen consumes the new project's auto-open.**
+- The auto-open effect in `App.tsx` reads `guidedTourHolds` from its render closure.
+- On a project switch, `GuidedTourHost` closes the stale tour, and the hold is released in the same commit. But the effect still sees `holds = 1`, so it marks the **new** project as auto-opened without opening anything.
+- After that, `hubDesign` never auto-opens for that project in this session. The user lands on the canvas and has to click "Hub design" in the sidebar, which contradicts §3.6's "once per project" rule (the project was never opened).
+
+Repro: `qa23/repro/App.qaRegateTourSwitch.snippet.tsx`. On c23d6cf, `holds` goes back to 0, but `activeSlidePanel` is `null` where `hubDesign` is expected.
+
+The existing test "a held tour blocks it, and releasing the hold does not open it afterwards" pins this behaviour deliberately, with a synthetic hold. So it is a design reading of "the tour always wins", not an oversight. Suggested change: while a hold is active, **skip without marking**. B2 stays fixed, because the any-open-panel rule already marks the tour's own project. The owner can accept the current behaviour instead; the impact is one extra click.
+
+**N-R3 (confirmed, no action):** the `vitest.setup.ts` `beforeAll` seed clear does not change any suite's Expert assumption. I probed `initialUiMode` over the full suite: 138 store instances loaded as stored explicit Expert. The only other resolutions (first-run Guided or existing-user Expert) came from the three store tests that clear storage and re-import on purpose: `uiStore.uiMode`, `uiStore.firstRunOrder`, and `uiStore.assistantDock` (dock-only; mode is irrelevant there). No other test file calls `vi.resetModules`, and none loads `uiStore` lazily after `beforeAll`. `projectActions.switch.test.ts` imports it with a top-level await during collection, before the hook runs. The clear only affects later runtime reads of storage (`noteNewProjectCreated`, `readStoredUiMode`). Every in-memory store is already explicit Expert, and the handler tests set `uiModeExplicit: false` themselves.
+
+**Checked, no issue:**
+- **Advanced tab across a project switch:** the panel's `ErrorBoundary` is keyed on `${activeSlidePanel}-${currentProject}` (`App.tsx:660`), so Results remounts and `requestedTab` resets. Because the requested tab was written to storage, it then falls back to Adequacy in Guided, which is the addendum's rule for a stored tab.
+- **Holds under StrictMode or a crash:** the mount/unmount pairs stay balanced.
+- **Failing `prepare`:** it still launches the tour and releases the hold in `finally`.
+- **Multi-tab re-read:** it adopts the other tab's explicit mode through `setUiMode(stored, {explicit:true})` rather than overriding it.
+- **`ImportZone` with a current project:** it imports into that project, which is not a new project, and does not call `noteNewProjectCreated`.
