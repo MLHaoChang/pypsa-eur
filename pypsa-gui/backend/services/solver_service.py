@@ -1115,7 +1115,8 @@ def run_simulation(
                     # (WP1.5a review #6); None after a plain successful solve.
                     _emit_state(last_commercial_terms=(
                         {**_ic_conn.facts,
-                         "demand_peaks": network.meta.get(_IC_META_DEMAND)}
+                         "demand_peaks": network.meta.get(_IC_META_DEMAND),
+                         "group": network.meta.get("ic_group")}
                         if _ic_conn.facts.get("poc_link") else None))
                 # Adequacy report — emitted whenever a target was enforced
                 # AND the solve actually produced a dispatch, INCLUDING the

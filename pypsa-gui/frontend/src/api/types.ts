@@ -355,6 +355,9 @@ export interface CommercialConfig {
   timezone?: string | null
   connection?: ConnectionAgreement | null
   group_contract?: string | null
+  /** Energy-hub group contract: member PoC Links, combined import ≤ group_cap_mw. */
+  group_members?: string[]
+  group_cap_mw?: number | null
   demand_items?: string[]
   /** Metered monthly import peaks before the horizon, {"YYYY-MM": kW} (ratchet seed). */
   meter_history_peaks_kw?: Record<string, number>

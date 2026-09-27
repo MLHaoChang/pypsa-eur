@@ -518,6 +518,11 @@ Files: `lp_bindings.py`, `backend/tests/test_group_contract.py` (fixture: two me
   allocation reported as energy shares (cost allocation is P3); undo restores; **gap 0** (a pure constraint
   adds no objective term).
 - [ ] Green: constraint over the member Links' `Link-p` variables.
+- As implemented: `CommercialConfig.group_members` + `group_cap_mw` (both or neither; unique; members must be
+  one-way Links); the transient apply sets the spec, `_wrap_with_commercial_bindings` adds
+  `Σ Link-p[members] ≤ cap` per snapshot (`ic_group_cap`), and the commit stores `n.meta["ic_group"]` with each
+  member's share of the group's import energy (also in `last_commercial_terms["group"]`). No objective term.
+  Tests: `test_group_contract.py`.
 
 ### WP1.7 Reload-safe cost-breakdown rows and objective reconciliation (the P1 gate)
 Files: `backend/services/results/cost_breakdown.py`, `objective_decomposition.py`,
@@ -539,6 +544,12 @@ persisted, so nothing may be read from `n._`):
   service argument does not change the route's positional list); the thin handler passes
   `_state["last_commercial_terms"]`; rule (d) (keyword-only, not exposed on the router) holds.
 - Acceptance: gap 0 on all seven cases, pre- and post-reload.
+- As implemented (**deviation**, consistent with spec §5.1 "As implemented"): no `commercial_terms=` keyword —
+  every row is recomputed from records committed on success into the network itself (`links_t["ic_energy_price"]`,
+  `n.meta["ic_poc_links" | "ic_connection_fee" | "ic_demand_peaks" | "ic_demand_info" | "ic_tier_volumes" |
+  "ic_group"]`), which ride `network.nc`; `_HANDLER_PARAMS` unchanged. `test_commercial_objective_reconciliation.py`
+  runs the seven cases through the real project save/load routes: gap < 1e-6 and identical rows and totals before
+  and after the reload (the representative-weeks case discloses its unsampled months as not established).
 
 ### WP1.8 Preflight validation
 Files: `backend/services/validation_service.py`, `backend/tests/test_validation_commercial.py`.

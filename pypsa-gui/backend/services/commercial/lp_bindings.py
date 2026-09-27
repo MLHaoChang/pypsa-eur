@@ -76,6 +76,8 @@ META_DEMAND_INFO = "ic_demand_info"
 DEMAND_SPEC_ATTR = "_ic_demand_spec"   # transient: set by apply, read by the LP wrapper
 DEMAND_BUILT_ATTR = "_ic_demand_built"  # transient: set by the LP wrapper
 META_TIERS = "ic_tier_volumes"
+META_GROUP = "ic_group"
+GROUP_SPEC_ATTR = "_ic_group_spec"      # transient: set by apply, read by the LP wrapper
 TIER_SPEC_ATTR = "_ic_tier_spec"        # transient: set by apply, read by the LP wrapper
 TIER_BUILT_ATTR = "_ic_tier_built"
 _KWH_PER_MWH = 1000.0
@@ -277,6 +279,9 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
                 f"per-period vintage bounds on the PoC Link(s) {clash} are not supported with "
                 "the commercial layer in P1 (the vintage clones would carry dispatch the "
                 "commercial rows do not read)")
+    for member in cfg.group_members:
+        _require_link(n, member, "group_members")
+        _require_one_way(n, member, "group_members")
     _adders(n, cfg)  # dry run: export items without an export Link, unrated snapshots
 
 
@@ -639,6 +644,32 @@ def _read_tier_solution(n, spec: dict) -> dict | None:
     return out
 
 
+# ── energy-hub group contract (WP1.6) ──────────────────────────────────────
+
+
+def add_group_terms(n) -> None:
+    """Σ_members p_import[t] ≤ group cap, every snapshot. A pure constraint:
+    no objective term, nothing to reconcile."""
+    spec = getattr(n, GROUP_SPEC_ATTR, None)
+    if not spec:
+        return
+    flow = n.model["Link-p"].sel(name=spec["members"]).sum("name")
+    n.model.add_constraints(flow <= float(spec["cap_mw"]), name="ic_group_cap")
+
+
+def _group_shares(n, spec: dict) -> dict | None:
+    """Each member's share of the group's import energy (cost allocation is P3)."""
+    p0 = n.links_t.p0
+    if any(m not in p0.columns for m in spec["members"]):
+        return None
+    w = n.snapshot_weightings.objective
+    energy = {m: float((w * p0[m].clip(lower=0.0)).sum()) for m in spec["members"]}
+    total = sum(energy.values())
+    if total <= 0:
+        return {m: None for m in spec["members"]}
+    return {m: e / total for m, e in energy.items()}
+
+
 # ── materialisation (transient, committed on success) ──────────────────────
 
 
@@ -664,6 +695,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
             n.meta.pop(META_DEMAND, None)
             n.meta.pop(META_DEMAND_INFO, None)
             n.meta.pop(META_TIERS, None)
+            n.meta.pop(META_GROUP, None)
 
         applied._commit.append(clear)
         return applied
@@ -726,6 +758,17 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
 
         applied._undo.append(undo_demand)
 
+    group = ({"name": cfg.group_contract, "members": list(cfg.group_members),
+              "cap_mw": float(cfg.group_cap_mw)} if cfg.group_members else None)
+    if group is not None:
+        setattr(n, GROUP_SPEC_ATTR, group)
+
+        def undo_group() -> None:
+            if hasattr(n, GROUP_SPEC_ATTR):
+                delattr(n, GROUP_SPEC_ATTR)
+
+        applied._undo.append(undo_group)
+
     solved_tiers: dict = {}
     if tier_spec is not None:
         setattr(n, TIER_SPEC_ATTR, tier_spec)
@@ -741,6 +784,10 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
         applied._undo.append(undo_tiers)
 
     def commit() -> None:
+        if group is not None:
+            n.meta[META_GROUP] = {**group, "energy_share": _group_shares(n, group)}
+        else:
+            n.meta.pop(META_GROUP, None)
         if "v" in solved_tiers:
             n.meta[META_TIERS] = solved_tiers["v"]
         else:
@@ -802,6 +849,7 @@ def _wrap_with_commercial_bindings(network, user_fn, cfg, log_queue=None):
         connection.add_fee_term(n)
         add_demand_terms(n)
         add_tier_terms(n)
+        add_group_terms(n)
 
     return fn
 
