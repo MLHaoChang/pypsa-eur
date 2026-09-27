@@ -44,9 +44,17 @@ fi
 cd "$REPO"
 "$PIXI_BIN" install -e test --locked
 
-# Frontend: `npm install` (not `ci`) so the cached container is reused.
-if [ -f pypsa-gui/frontend/package.json ]; then
-  (cd pypsa-gui/frontend && npm install --no-audit --no-fund)
+# Frontend: `npm ci`, which installs exactly what package-lock.json pins and
+# never rewrites it. (`npm install` from a newer npm rewrote the lockfile's
+# `peer` flags and left every session with a dirty tree.) Skipped when
+# node_modules is already newer than the lockfile, so the cached container
+# is reused.
+FRONTEND="pypsa-gui/frontend"
+if [ -f "${FRONTEND}/package-lock.json" ]; then
+  marker="${FRONTEND}/node_modules/.package-lock.json"
+  if [ ! -f "$marker" ] || [ "${FRONTEND}/package-lock.json" -nt "$marker" ]; then
+    (cd "$FRONTEND" && npm ci --no-audit --no-fund)
+  fi
 fi
 
 # Make pixi and the CA bundle available to every command in the session.
