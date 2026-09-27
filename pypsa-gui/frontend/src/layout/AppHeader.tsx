@@ -102,6 +102,7 @@ export function undoErrorMessage(e: unknown): string | null {
 
 export default function AppHeader() {
   const { status, setStatus, clearLog, appendLog } = useSimulationStore()
+  const uiMode = useUIStore(s => s.uiMode)
   const {
     projectName, setProjectName,
     rightPanelOpen, toggleRightPanel, openRightPanel,
@@ -953,6 +954,10 @@ export default function AppHeader() {
       {(() => {
         // amber for both queued + running; brand red only at idle.
         const amber = jobQueued || jobRunning || isRunning
+        // Guided (P24-FE gate decision): the hub design has its own Run, so
+        // the idle solve button is hidden; a queued / running solve still
+        // shows here so it can be cancelled or aborted.
+        if (uiMode === 'guided' && !amber) return null
         const queuedLabel = `Queued${myJob?.position != null ? ` #${myJob.position}` : ''}`
         return (
           <button

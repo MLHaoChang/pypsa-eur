@@ -18,7 +18,10 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
   return { ...actual, resultsApi: { ...actual.resultsApi, getEhTemplate: vi.fn(), getEhStudy: vi.fn() } }
 })
 const create = { mutate: vi.fn(), isPending: false, variables: undefined as string | undefined }
-vi.mock('../../../hooks/useCreateFromTemplate', () => ({ useCreateFromTemplate: vi.fn(() => create) }))
+vi.mock('../../../hooks/useCreateFromTemplate', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../hooks/useCreateFromTemplate')>()),
+  useCreateFromTemplate: vi.fn(() => create),
+}))
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Data Center Energy Hub' })
@@ -65,6 +68,24 @@ describe('StartCard', () => {
     expect(p.textContent).toContain('Synthetic example data — not a real site.')
     expect(p.textContent).toContain('The grid connection is capped at 40 MW.')
     expect(p.textContent).not.toContain('Second note.')
+  })
+
+  it('the provenance line carries no internal phase id', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({ ...DC_TEMPLATE,
+      provenance: 'synthetic illustrative data (P19 template) — not a real site.' })
+    mount()
+    const p = await screen.findByTestId('hub-start-provenance')
+    expect(p.textContent).toContain('synthetic illustrative data — not a real site.')
+    expect(p.textContent).not.toMatch(/P\d+/)
+  })
+
+  it('while a study runs the templates are disabled, with the reason', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'running' })
+    mount()
+    const b = screen.getByTestId('hub-start-template-eh_h2_hub') as HTMLButtonElement
+    await vi.waitFor(() => expect(b.disabled).toBe(true))
+    expect(b.getAttribute('title')).toBe(
+      'A study is still running — wait for it to finish or abort it before switching project.')
   })
 
   it('"Use my network" moves the rail to Site', async () => {

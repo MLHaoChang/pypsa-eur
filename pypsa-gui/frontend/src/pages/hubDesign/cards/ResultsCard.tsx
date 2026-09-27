@@ -11,20 +11,8 @@ import { headline } from '../headline'
 import { CardShell } from '../shared/CardShell'
 import { Term } from '../shared/Term'
 import { useHubReport, useHubReview, useHubStudy } from '../useHubData'
+import { SECTION_LABEL } from '../sectionLabels'
 
-/** Report sections in words — the card never shows a stage id (§5.8). */
-export const SECTION_LABEL: Record<string, string> = {
-  target: 'Reliability target',
-  cost: 'Cost',
-  frontier: 'Cost versus reliability',
-  sizing: 'Equipment sizing',
-  redundancy: 'Spare-equipment options',
-  levers: 'Design options',
-  dtc: 'Running without the grid',
-  fmea_top: 'Top risks',
-  tea: 'Cost of energy',
-  certification: 'Reliability check',
-}
 
 export const STALE_TEXT =
   'These results are from an earlier study; the network was solved since. Run again to refresh.'
@@ -70,9 +58,11 @@ export function ResultsCard() {
       )}
 
       {cost != null && (
+        // The cost of the planned design at the pack's energy target, without
+        // shortfall costs — never "the cost of your goal" (P24-FE gate B1).
         <p data-testid="hub-results-cost" className="text-[12px]">
-          <Term k="cost_at_target">Cost at your goal</Term>:{' '}
-          <span className="font-mono text-text">{fmtCurrency(cost)}</span> per year
+          <Term k="cost_at_target">Yearly cost of this design (before any shortfall costs)</Term>:{' '}
+          <span className="font-mono text-text">{fmtCurrency(cost)}</span>
         </p>
       )}
 
@@ -84,7 +74,11 @@ export function ResultsCard() {
               <li key={r.mode_id} data-testid={`hub-results-risks-${i}`}>
                 {r.name || r.mode_id}
                 {r.criticality_eur_per_year != null && (
-                  <span className="text-muted"> — about {fmtCurrency(r.criticality_eur_per_year)} per year</span>
+                  <span className="text-muted">
+                    {' — '}{r.criticality_eur_per_year > 0
+                      ? `about ${fmtCurrency(r.criticality_eur_per_year)} per year`
+                      : 'no measurable cost'}
+                  </span>
                 )}
               </li>
             ))}

@@ -34,7 +34,7 @@ export const TERM_FALLBACK = {
   verdict:
     "The study's answer: certified (the goal is met), not certified (it is missed), not decided (more random trials are needed) or no goal set (nothing to check against).",
   cost_at_target:
-    "The yearly cost of the plan that meets your reliability goal, including new equipment and running costs, in euros.",
+    "The yearly cost of the planned design, including new equipment and running costs. It leaves out the cost of any shortfall; the verdict above says how reliable the design is.",
   top_risks:
     "The failures that cost the most per year, combining how often they happen with how much damage each one does.",
   not_established:

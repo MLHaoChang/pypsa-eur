@@ -12,6 +12,19 @@ import { getPostLoginPath } from '../auth/resume'
 import { useUIStore } from '../store/uiStore'
 import { appLog } from '../store/simulationStore'
 import { invalidateNetworkQueries } from '../utils/projectActions'
+import { blockerMessage } from '../utils/blockerMessage'
+
+/** A project switch refused because a study runs on the current network
+ *  (P24-FE gate decision): plain words instead of the status-code line. */
+export const STUDY_RUNNING_SWITCH =
+  'A study is still running — wait for it to finish or abort it before switching project.'
+
+function createErrorMessage(e: unknown): string {
+  const status = (e as { response?: { status?: number } })?.response?.status
+  const detail = blockerMessage(e)
+  if (status === 409 && /\bis running\b/.test(detail)) return STUDY_RUNNING_SWITCH
+  return `Template import failed: ${detail}`
+}
 
 // The wizard also renders outside a router (unit tests), where there is
 // nowhere to navigate; router presence is fixed for a mount, so the
@@ -65,6 +78,6 @@ export function useCreateFromTemplate(options?: CreateFromTemplateOptions) {
       onCreated?.(res.imported)
       openInWorkbench(res.imported)
     },
-    onError: (e: Error) => toast.error(`Template import failed: ${e.message}`),
+    onError: (e: unknown) => toast.error(createErrorMessage(e)),
   })
 }

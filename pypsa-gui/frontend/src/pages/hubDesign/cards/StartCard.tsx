@@ -10,7 +10,8 @@ import { BLOCKED_NO_PROJECT } from '../flow'
 import { useHubDesignStore } from '../hubDesignStore'
 import { CardShell } from '../shared/CardShell'
 import { Term } from '../shared/Term'
-import { useHubTemplate } from '../useHubData'
+import { useHubStudy, useHubTemplate } from '../useHubData'
+import { STUDY_RUNNING_SWITCH } from '../../../hooks/useCreateFromTemplate'
 
 const HUB_TEMPLATES = TEMPLATES.filter(t => t.id.startsWith('eh_'))
 
@@ -21,11 +22,19 @@ export function purpose(description: string): string {
   return i < 0 ? description : description.slice(0, i + 1)
 }
 
+/** Internal phase ids ("(P19 template)") are not for the user. */
+export function plainProvenance(text: string): string {
+  return text.replace(/\s*\(P\d+[^)]*\)/g, '')
+}
+
 export function StartCard() {
   const project = useUIStore(s => s.currentProject)
   const setStep = useHubDesignStore(s => s.setStep)
   const create = useCreateFromTemplate()
   const { template } = useHubTemplate()
+  // A new project would replace the network under a running study (the
+  // backend refuses with 409): say so on the buttons instead.
+  const { running } = useHubStudy()
 
   return (
     <CardShell step="start" testId="hub-card-start" title="Start">
@@ -36,7 +45,7 @@ export function StartCard() {
           {template.provenance && (
             <span className="text-muted">
               <Term k="template_provenance">Where the numbers come from</Term>{' '}
-              {template.provenance}
+              {plainProvenance(template.provenance)}
             </span>
           )}
           {template.study_notes?.[0] && (
@@ -53,8 +62,8 @@ export function StartCard() {
             return (
               <button key={t.id} type="button" data-testid={`hub-start-template-${t.id}`}
                 onClick={() => create.mutate(t.id)}
-                disabled={create.isPending}
-                title={`Create a new project from the ${t.name} example`}
+                disabled={create.isPending || running}
+                title={running ? STUDY_RUNNING_SWITCH : `Create a new project from the ${t.name} example`}
                 className="flex flex-col gap-1 rounded-lg border border-border p-3 text-left hover:border-accent/60 hover:bg-accent/5 disabled:opacity-50">
                 <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-text">
                   <Hexagon size={12} className="text-accent" /> {t.name}

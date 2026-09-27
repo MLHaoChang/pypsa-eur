@@ -81,7 +81,9 @@ export default function HubDesignPanel() {
       <div className="mx-auto flex max-w-3xl flex-col gap-4 p-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <StepRail flow={flow} step={shown} isTemplate={isTemplate}
-            onPick={s => setStep(s, { user: true })} />
+            // A tour's reveal clicks are not the user moving the rail: they
+            // must not suppress the jump to Results (P24-FE gate B2).
+            onPick={s => setStep(s, { user: useUIStore.getState().guidedTourHolds === 0 })} />
           <GuideButton tourId="hub_design" testId="hub-guide-button" label="Guide" />
         </div>
         {(project === null || settled) ? <Card /> : (

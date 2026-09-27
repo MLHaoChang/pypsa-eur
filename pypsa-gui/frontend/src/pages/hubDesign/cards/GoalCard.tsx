@@ -70,9 +70,11 @@ export function GoalCard() {
   const status = study?.status
   const again = status === 'failed' || status === 'aborted' || status === 'done'
   const pipeline = study?.report?.pipeline
-  const runningText = pipeline?.budget_solves
-    ? `Studying… ${pipeline.solves_consumed ?? 0} of ${pipeline.budget_solves} solves`
-    : study?.budget_solves ? `Studying… (up to ${study.budget_solves} solves)` : 'Studying…'
+  // Plain words, and a count only when the record has one — never "0 of N".
+  const budget = pipeline?.budget_solves ?? study?.budget_solves
+  const runningText = pipeline?.budget_solves && typeof pipeline.solves_consumed === 'number'
+    ? `Studying… ${pipeline.solves_consumed} of ${pipeline.budget_solves} calculation steps`
+    : budget ? `Studying… (up to ${budget} calculation steps)` : 'Studying…'
   const problem = built.error ?? blocked
   const ensDefault = readiness?.pack_defaults?.ens_cap_permyriad
 

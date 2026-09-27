@@ -55,7 +55,7 @@ describe('ResultsCard headline (§5.5)', () => {
     ['inconclusive', review({ summary: { verdict: 'inconclusive', mc_lole_h_per_year: 3.2, target_lole_h: 3 } }),
       { ...REPORT, sections: { certification: { status: 'ok', payload: {
         verdict: 'inconclusive', lole_h_per_year: 3.2, lole_ci: [2.4, 4.1], horizon_years: 1, target_lole_h: 3 } } } },
-      'Not decided: the shortfall estimate (2–4 h/yr) straddles the 3 h/yr goal — more Monte-Carlo draws would settle it.'],
+      'Not decided: the shortfall estimate (2–4 h/yr) straddles the 3 h/yr goal — more simulation runs would settle it.'],
     ['pass', review({ summary: { verdict: 'pass', mc_lole_h_per_year: 0.44, target_lole_h: 3 } }), REPORT,
       'Certified: about 0.4 h/yr of shortfall, under the 3 h/yr goal.'],
     ['no target', review({ summary: { verdict: null, mc_lole_h_per_year: 1.25, target_lole_h: null } }), REPORT,
@@ -78,6 +78,29 @@ describe('ResultsCard headline (§5.5)', () => {
   }
 })
 
+// P24-FE gate B1: `cost_at_target_eur` is the cost of the planned design at
+// the pack's energy target, without shortfall costs — never the cost of
+// meeting the user's reliability goal.
+describe('ResultsCard cost label (gate B1)', () => {
+  const LABEL = 'Yearly cost of this design (before any shortfall costs)'
+  const cases: [string, ReturnType<typeof review>][] = [
+    ['fail', review()],
+    ['no goal', review({ summary: { verdict: null, mc_lole_h_per_year: null, target_lole_h: null } })],
+  ]
+  for (const [name, rv] of cases) {
+    it(`${name}: the cost is the design's, and "goal" is not next to it`, async () => {
+      vi.mocked(resultsApi.getEhReview).mockResolvedValue(rv)
+      mount()
+      const cost = await screen.findByTestId('hub-results-cost')
+      expect(cost.textContent).toContain(LABEL)
+      expect(cost.textContent).toContain(fmtCurrency(12_345_678))
+      expect(cost.textContent).not.toMatch(/goal/i)
+      expect(cost.querySelector('[data-testid="term-cost_at_target"]')?.getAttribute('data-tip'))
+        .not.toMatch(/goal/i)
+    })
+  }
+})
+
 describe('ResultsCard body', () => {
   it('cost via fmtCurrency, three risks, the gaps', async () => {
     mount()
@@ -91,6 +114,19 @@ describe('ResultsCard body', () => {
     expect(gaps).toContain('VOLL must be above zero for the frontier.')
     expect(gaps).not.toMatch(/\bfrontier:/)      // a plain label, not the section id
     expect(screen.queryByTestId('hub-results-stale')).toBeNull()
+  })
+
+  it('a risk with no measurable cost says so instead of "€0.00"', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(study({ ...REPORT, sections: { ...REPORT.sections,
+      fmea_top: { status: 'ok', payload: { rows: [
+        { mode_id: 'B:a', name: 'site_transformer', criticality_eur_per_year: 7_890_000 },
+        { mode_id: 'B:e', name: 'electrolyser', criticality_eur_per_year: 0 },
+      ] } } } }))
+    mount()
+    const r1 = await screen.findByTestId('hub-results-risks-1')
+    expect(r1.textContent).toContain('electrolyser')
+    expect(r1.textContent).toContain('no measurable cost')
+    expect(r1.textContent).not.toContain('€0')
   })
 
   it('stale banner from the boolean (not the source text)', async () => {

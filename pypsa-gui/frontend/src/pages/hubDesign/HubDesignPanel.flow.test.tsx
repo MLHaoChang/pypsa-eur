@@ -15,6 +15,7 @@ import { HUB_DESIGN_INITIAL, useHubDesignStore } from './hubDesignStore'
 import { BLOCKED_NO_PROJECT, BLOCKED_NO_STUDY } from './flow'
 import { DC_TEMPLATE, REPORT, readiness, review } from './testFixtures'
 import HubDesignPanel from './HubDesignPanel'
+import guide from '../../../../backend/data/guides/eh_fmea_guide.json'
 
 vi.mock('../../api/simulation', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../api/simulation')>()
@@ -191,6 +192,49 @@ describe('auto-advance (§5.6)', () => {
     await screen.findByTestId('hub-card-site')
     expect(useHubDesignStore.getState()).toMatchObject({ archetype: 'weak_flexible',
       loleTarget: '2', loleSource: 'template', ensCap: '4' })
+  })
+})
+
+// P24-FE gate B2: a first-time user opens the tour on the Site card before
+// any study. Every step it shows must be on screen (no "not on screen" dead
+// end), and the tour's own rail clicks are not manual moves — the rail still
+// jumps to Results when a study then finishes.
+describe('hub_design tour before any study (gate B2)', () => {
+  it('walks every shown step with its target on screen, then auto-advance still works', async () => {
+    vi.mocked(guidesApi.getGuide).mockResolvedValue(guide as never)
+    const rect = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(
+      { top: 10, left: 10, width: 50, height: 20, right: 60, bottom: 30, x: 10, y: 10,
+        toJSON: () => ({}) } as DOMRect)
+    Element.prototype.scrollIntoView = vi.fn()
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review())
+    const user = mount()
+    await screen.findByTestId('hub-card-site')
+    await user.click(screen.getByTestId('hub-guide-button'))
+    const seen: string[] = []
+    for (let i = 0; i < 12; i++) {
+      const tour = await screen.findByTestId('guide-tour')
+      const target = tour.getAttribute('data-step-target')!
+      // a reveal re-renders on the next commit; GuidedTour looks again at 60 ms
+      await waitFor(() => expect(screen.queryByTestId('guide-step-missing')).toBeNull(), { timeout: 500 })
+      expect(screen.queryByTestId(target)).not.toBeNull()
+      seen.push(target)
+      const next = screen.getByTestId('guide-next')
+      const last = next.textContent === 'Done'
+      await user.click(next)
+      if (last) break
+      await waitFor(() => expect(screen.getByTestId('guide-tour')
+        .getAttribute('data-step-target')).not.toBe(target))
+    }
+    expect(seen).toEqual(['hub-rail', 'hub-start-templates', 'hub-site-readiness',
+      'hub-site-type', 'hub-goal-lole', 'hub-goal-run'])
+    expect(screen.queryByTestId('guide-tour')).toBeNull()
+    // the tour's reveal clicks did not count as the user moving the rail
+    expect(useHubDesignStore.getState().userMovedRail).toBe(false)
+    setStudy(RUNNING)
+    await screen.findByTestId('hub-card-goal')
+    setStudy(DONE)
+    await screen.findByTestId('hub-card-results')
+    rect.mockRestore()
   })
 })
 

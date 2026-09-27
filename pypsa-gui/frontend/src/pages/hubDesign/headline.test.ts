@@ -52,7 +52,7 @@ describe('headline (§5.5)', () => {
       id: 'certification_inconclusive', severity: 'medium', title: 't', recommendation: 'r', actions: [],
       evidence: { verdict: 'inconclusive', lole_ci_per_horizon: [4.4, 7.8] } }])
     expect(headline(rv, r)).toBe(
-      'Not decided: the shortfall estimate (2–4 h/yr) straddles the 3 h/yr goal — more Monte-Carlo draws would settle it.')
+      'Not decided: the shortfall estimate (2–4 h/yr) straddles the 3 h/yr goal — more simulation runs would settle it.')
   })
 
   it('inconclusive without a horizon: the evidence interval is read as is', () => {
@@ -60,7 +60,7 @@ describe('headline (§5.5)', () => {
       id: 'certification_inconclusive', severity: 'medium', title: 't', recommendation: 'r', actions: [],
       evidence: { lole_ci_per_horizon: [1.6, 4.2] } }])
     expect(headline(rv, report())).toBe(
-      'Not decided: the shortfall estimate (2–4 h/yr) straddles the 3 h/yr goal — more Monte-Carlo draws would settle it.')
+      'Not decided: the shortfall estimate (2–4 h/yr) straddles the 3 h/yr goal — more simulation runs would settle it.')
   })
 
   it('pass: one decimal, under the goal', () => {

@@ -13,6 +13,7 @@ import { useHubDesignStore } from '../hubDesignStore'
 import {
   ARCHETYPE_SHORT, actionText, askText, stressScenarioText,
 } from '../delegate'
+import { evidenceValue, plainWords } from '../plainWords'
 import { AskButton, CardShell, DelegateButton } from '../shared/CardShell'
 import { Term } from '../shared/Term'
 import { useHubReview, useHubStudy, useHubTemplate } from '../useHubData'
@@ -26,6 +27,14 @@ export function openFmeaTab(): void {
 function Finding({ f }: { f: EhReviewFinding }) {
   const [why, setWhy] = useState(false)
   const doText = actionText(f)
+  const effect = f.actions?.[0]?.effect
+  // The card shows the title and the action in plain words; the review's own
+  // prose (recommendation, effect) and its numbers go in "Why" (§5.8, gate B3).
+  const technical: [string, string][] = [
+    ['recommendation', f.recommendation],
+    ...(effect ? [['action', effect] as [string, string]] : []),
+    ...Object.entries(f.evidence ?? {}).map(([k, v]) => [k, evidenceValue(v)] as [string, string]),
+  ]
   return (
     <li data-testid={`hub-improve-${f.id}`}
       className="flex flex-col gap-2 rounded border border-border p-3 text-[12px]">
@@ -33,11 +42,10 @@ function Finding({ f }: { f: EhReviewFinding }) {
         <span className={`mt-0.5 text-[10px] font-semibold uppercase ${f.severity === 'high' ? 'text-danger' : 'text-warn'}`}>
           {f.severity === 'high' ? 'Important' : 'Worth doing'}
         </span>
-        <span className="font-semibold text-text">{f.title}</span>
+        <span className="font-semibold text-text">{plainWords(f.title)}</span>
       </div>
-      <p className="text-muted">{f.recommendation}</p>
-      {doText && f.actions[0]?.effect && (
-        <p className="text-muted">What it would do: {f.actions[0].effect}</p>
+      {doText && effect && (
+        <p className="text-muted">The assistant would {plainWords(effect)}.</p>
       )}
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" data-testid={`hub-improve-why-${f.id}`} aria-expanded={why}
@@ -52,10 +60,10 @@ function Finding({ f }: { f: EhReviewFinding }) {
         <div data-testid={`hub-improve-evidence-${f.id}`} className="rounded bg-bg p-2">
           <span className="text-[10px] uppercase tracking-wide text-muted">Technical evidence</span>
           <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono text-[11px]">
-            {Object.entries(f.evidence ?? {}).map(([k, v]) => (
+            {technical.map(([k, v]) => (
               <div key={k} className="contents">
                 <dt className="text-muted">{k}</dt>
-                <dd className="text-text break-all">{typeof v === 'string' ? v : JSON.stringify(v)}</dd>
+                <dd className="text-text break-words">{v}</dd>
               </div>
             ))}
           </dl>
@@ -102,15 +110,17 @@ export function ImproveCard() {
             className="rounded border border-border px-2 py-1 text-[11px] text-muted hover:border-accent hover:text-accent">
             See the risk table
           </button>
-          <DelegateButton testId="hub-improve-add-stress" text={stressScenarioText(context)}
-            label="Add a stress scenario" />
         </div>
         {sweep.isSuccess && (
           <p data-testid="hub-improve-fmea-started" className="text-muted">
             Started — the check runs in the background; the risk table fills in as it goes.
           </p>
         )}
-        <span className="text-muted"><Term k="stress_scenario">About stress scenarios</Term></span>
+        <div data-testid="hub-improve-stress-row" className="flex flex-wrap items-center gap-2">
+          <span className="text-text"><Term k="stress_scenario">Hard conditions to test</Term>:</span>
+          <DelegateButton testId="hub-improve-add-stress" text={stressScenarioText(context)}
+            label="Add a stress scenario" />
+        </div>
       </div>
     </CardShell>
   )

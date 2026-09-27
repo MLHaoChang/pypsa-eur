@@ -164,7 +164,9 @@ _HUB_TOUR = [
     ("hub-goal-run", "hub-rail-step-goal", False),
     ("hub-results-verdict", "hub-rail-step-results", True),
     ("hub-improve-list", "hub-rail-step-improve", True),
-    ("hub-improve-fmea", "hub-rail-step-improve", False),
+    # optional + after_run (P24-FE gate B2): Improve is blocked until a
+    # study has finished, so before one the step would dead-end.
+    ("hub-improve-fmea", "hub-rail-step-improve", True),
 ]
 
 

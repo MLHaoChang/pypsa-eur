@@ -366,7 +366,7 @@ New tour `hub_design` (title "Design a hub in five steps") — added in **P24-FE
 | `hub-goal-run` | `hub-rail-step-goal` | no |
 | `hub-results-verdict` | `hub-rail-step-results` | yes (after a run) |
 | `hub-improve-list` | `hub-rail-step-improve` | yes |
-| `hub-improve-fmea` | `hub-rail-step-improve` | no |
+| `hub-improve-fmea` | `hub-rail-step-improve` | yes (after a run; P24-FE gate B2, §10) |
 
 `test_guides.py::test_every_tour_target_is_a_rendered_test_id` pins them; add `test_hub_fields_present` listing the twenty keys, and `test_field_text_is_plain` (no key's text contains `P19`, `decision 6`, `Class-B`, `‱`, `lp_proxy`, `copt`).
 
@@ -436,7 +436,7 @@ Initial `step` on `resetFor(project)`: `no_project`→`start`; template project 
 
 `headline(review, report)`:
 - verdict `fail`: `Not certified: about {lole:.0f} h/yr of shortfall vs a {target:g} h/yr goal — driven by {topRisk}` where `topRisk` = first `fmea_top` row name, else "the plan's energy limit".
-- `inconclusive`: `Not decided: the shortfall estimate ({lo:.0f}–{hi:.0f} h/yr) straddles the {target:g} h/yr goal — more Monte-Carlo draws would settle it.`
+- `inconclusive`: `Not decided: the shortfall estimate ({lo:.0f}–{hi:.0f} h/yr) straddles the {target:g} h/yr goal — more simulation runs would settle it.` (wording changed at the P24-FE gate; §10)
 - `pass`: `Certified: about {lole:.1f} h/yr of shortfall, under the {target:g} h/yr goal.`
 - no target: `No reliability goal was set — the study reports {lole:.1f} h/yr of shortfall. Set a goal to certify.`
 - MC not run / `not_established`: `The study could not certify reliability: {note}`.
@@ -731,3 +731,12 @@ A separate agent (not the implementer; Fable reviews the plan, an Opus-class rev
 | Explicitly requested hidden tabs (gate B3) | In Guided, an **explicit** request for a hidden Results tab is honoured. That covers asset-detail buttons, canvas and bottom-panel menus, `ui_open_panel` with `results_tab`, and greeting chips. The tab renders, and the strip shows it as one extra temporary tab, marked as advanced, until the user picks another tab. Only a **stored** tab (from localStorage) falls back to Adequacy. This keeps the promise that hidden panels are "reachable through the assistant". |
 | Multi-tab explicit flag (gate note) | `noteNewProjectCreated` and the initial read re-read `ui-mode-explicit` from storage, not only from memory. |
 | Guided copy (gate note) | In Guided, the Results subtitle lists only the visible tabs. The greeting chips offer only Guided-visible destinations, plus "Hub design". |
+
+### §10 addendum: P24-FE gate decisions (2026-09-27, coordinator)
+| Gate item | Decision |
+|---|---|
+| B1 — cost label | `report.cost_at_target_eur` is the cost of the planned design at the pack's energy target, without shortfall costs. The Results card labels it "Yearly cost of this design (before any shortfall costs)" and never ties it to the user's goal. The `cost_at_target` catalogue text and its `TERM_FALLBACK` copy change together (no "goal"). |
+| B2 — tour | `hub-improve-fmea` is `optional: true` + `after_run: true` (like the other steps whose target needs a finished study), so a tour opened before any study has no dead end (§4.3 row amended). Clicks the tour makes on the rail (while a tour holds, `guidedTourHolds > 0`) are not manual moves, so the jump to Results after a study still happens. Step 1's text describes the rail as it behaves: Start, Site and Goal are always open; Results and Improve open once a study has finished. |
+| B3 — Improve text | The card shows the finding's title and its first action's effect in plain words (a small glossary: LOLE, ENS / ‱, p_nom*, dtc_planning / dtc_stress, N+1, SCR, MC, stage; "&lt;section&gt;: not established" → the section's plain label). The review's own prose (`recommendation`, `effect`) and the evidence go in the "Why" list, labelled technical (§5.8). |
+| Smaller notes | Start provenance drops internal phase ids ("(P19 template)"). The header's idle Run button is hidden in Guided (a queued / running solve still shows so it can be cancelled or aborted); Expert unchanged. "Monte-Carlo draws" → "simulation runs" (§5.5 inconclusive row), "solves" → "calculation steps", and no "0 of N" when the count is missing. Top risks with no cost read "no measurable cost". Evidence numbers are rounded to four significant digits. The stress-scenario hover labels its button row instead of standing alone. The Start card's templates are disabled while a study runs; a project switch refused with 409 because a study runs reads "A study is still running — wait for it to finish or abort it before switching project." (other 409s keep the backend's own sentence). |
+

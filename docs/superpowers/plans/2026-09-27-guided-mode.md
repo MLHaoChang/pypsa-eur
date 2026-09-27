@@ -247,6 +247,10 @@ State machine `no_project / no_study / running / done / stale` (§5.4, `stale` f
 | Panel, rail (literal `RAIL_IDS`), five cards, `Term`, `CardShell`, store, `delegate.ts` (= `ask` until P25) | `FE/pages/hubDesign/**` | `HubDesignPanel.flow`, `StartCard`, `SiteCard`, `GoalCard`, `ResultsCard`, `ImproveCard`, `Term` (imports the catalogue JSON) tests (§5.10) |
 | `hub_design` tour in the catalogue (targets/reveals now rendered) | `BE/data/guides/eh_fmea_guide.json` | `test_guides.py` target pin |
 
+Changed assertions (spec §8.3):
+- `test_guides.py::_HUB_TOUR`: `hub-improve-fmea` is now optional. Justification: P24-FE gate B2. Improve is blocked until a study has finished, so a non-optional step dead-ends the tour before a first study (spec §10, P24-FE gate decisions).
+- `App.hubDesignAutoOpen.test.tsx`: asserts `hub-rail`, not the P23 placeholder text. Justification: P24 replaces the placeholder (spec §3.6).
+
 **P24-FE integration gate (spec §8):**
 - [ ] 1 full backend suite — zero new failures
 - [ ] 2 targeted EH set green

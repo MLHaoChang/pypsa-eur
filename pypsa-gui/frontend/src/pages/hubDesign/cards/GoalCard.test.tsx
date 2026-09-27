@@ -179,11 +179,29 @@ describe('GoalCard study states (from the study record, N2)', () => {
     vi.mocked(resultsApi.abortEhStudy).mockResolvedValue({ status: 'running', aborting: true })
     const user = mount()
     const t = await screen.findByTestId('hub-goal-running')
-    expect(t.textContent).toMatch(/^Studying…/)
-    expect(t.textContent).not.toMatch(/poll|get_adequacy_results/)
+    expect(t.textContent).toBe('Studying… (up to 40 calculation steps)')
+    expect(t.textContent).not.toMatch(/poll|get_adequacy_results|solves/)
     expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(true)
     await user.click(screen.getByTestId('hub-goal-abort'))
     expect(resultsApi.abortEhStudy).toHaveBeenCalled()
+  })
+
+  it('running text: plain words, and never "0 of N" when the count is missing', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'running', budget_solves: 40,
+      report: { archetype: 'weak_flexible', pack_hash: 'h', assumptions_hash: 'a',
+        pipeline: { budget_solves: 40 } } })
+    mount()
+    const t = await screen.findByTestId('hub-goal-running')
+    expect(t.textContent).toBe('Studying… (up to 40 calculation steps)')
+  })
+
+  it('running text with a count: "n of N calculation steps"', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'running',
+      report: { archetype: 'weak_flexible', pack_hash: 'h', assumptions_hash: 'a',
+        pipeline: { budget_solves: 40, solves_consumed: 12 } } })
+    mount()
+    expect((await screen.findByTestId('hub-goal-running')).textContent)
+      .toBe('Studying… 12 of 40 calculation steps')
   })
 
   it('failed: the error and Run again', async () => {

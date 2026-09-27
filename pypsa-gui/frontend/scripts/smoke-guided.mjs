@@ -790,7 +790,7 @@ function expectedHeadline(review, report) {
         if (Array.isArray(raw)) { ci = raw; break }
       }
     }
-    if (ci) return `Not decided: the shortfall estimate (${ci[0].toFixed(0)}–${ci[1].toFixed(0)} h/yr) straddles the ${g(target)} h/yr goal — more Monte-Carlo draws would settle it.`
+    if (ci) return `Not decided: the shortfall estimate (${ci[0].toFixed(0)}–${ci[1].toFixed(0)} h/yr) straddles the ${g(target)} h/yr goal — more simulation runs would settle it.`
   }
   if (verdict === 'pass' && lole != null && target != null) {
     return `Certified: about ${lole.toFixed(1)} h/yr of shortfall, under the ${g(target)} h/yr goal.`
@@ -854,7 +854,7 @@ async function phaseP24(browser) {
     return r
   }
 
-  async function runStudy(label, { expectLole }) {
+  async function runStudy(label, { expectLole, tourWhileRunning = false }) {
     await byId('hub-rail-step-goal').click()
     await byId('hub-goal-lole').waitFor({ state: 'visible', timeout: 15_000 })
     await page.waitForFunction(v =>
@@ -874,6 +874,12 @@ async function phaseP24(browser) {
     check(runText.startsWith('Studying…') && !/poll|get_adequacy_results/.test(runText),
       `running text is the card's own: "${runText}" (N3)`)
     await shot(page, `p24-${label}-running`)
+    if (tourWhileRunning) {
+      // Gate B2: the tour's rail clicks are not manual moves, so the jump to
+      // Results still happens when the study finishes after the tour.
+      info('walking the tour while the study runs')
+      await walkTour(PRE_STUDY_TOUR)
+    }
     await byId('hub-card-results').waitFor({ state: 'visible', timeout: 10 * 60_000 })
     check(await railState('results') === 'current', 'done → the rail moved to Results (auto-advance)')
     const study = await api('GET', '/api/results/eh_study')
@@ -916,8 +922,8 @@ async function phaseP24(browser) {
     return seen
   }
 
-  const TOUR = ['hub-rail', 'hub-start-templates', 'hub-site-readiness', 'hub-site-type',
-    'hub-goal-lole', 'hub-goal-run', 'hub-results-verdict', 'hub-improve-list', 'hub-improve-fmea']
+  const PRE_STUDY_TOUR = ['hub-rail', 'hub-start-templates', 'hub-site-readiness', 'hub-site-type',
+    'hub-goal-lole', 'hub-goal-run']
 
   try {
     step('stub model profile (every phase)')
@@ -937,7 +943,12 @@ async function phaseP24(browser) {
     check(await railState('site') === 'current' && await railState('start') === 'done',
       'rail: Start ✓, Site current')
     check(await railState('results') === 'blocked', 'Results blocked before a study')
+    check((await page.getByTitle(/queues the solve/).count()) === 0, 'Guided: no idle "Run LOPF" in the header')
     await shot(page, 'p24-dc-opened-at-site')
+
+    step('hub_design tour before any study (gate B2): every shown step on screen, no dead end')
+    await walkTour(PRE_STUDY_TOUR)
+    await byId('hub-rail-step-site').click()
 
     step('Start card: three templates, the project\'s provenance')
     await byId('hub-rail-step-start').click()
@@ -959,7 +970,8 @@ async function phaseP24(browser) {
     step('Goal (pack default) → Run → running → done → Results headline')
     const dc = await runStudy('dc', { expectLole: '3' })
     const cost = await textOf('hub-results-cost').catch(() => '')
-    info(`cost line: ${cost}`)
+    check(cost.startsWith('Yearly cost of this design (before any shortfall costs)') && !/goal/i.test(cost),
+      `cost line (gate B1): "${cost}"`)
     const risks = await page.locator('[data-testid^="hub-results-risks-"]').count()
     info(`risks shown: ${risks}; gaps: ${await byId('hub-results-gaps').count() ? await textOf('hub-results-gaps') : '(none)'}`)
 
@@ -1030,14 +1042,14 @@ async function phaseP24(browser) {
     await shot(page, 'p24-dc-fmea-tab')
 
     // ── tour ──────────────────────────────────────────────────────────────
-    step('hub_design tour: walked from Results, then from Improve (each drops the other optional step)')
+    step('hub_design tour after a study: walked from Results, then from Improve')
     await byId('sidebar-hub-design').click()
     await byId('hub-rail-step-results').click()
     await byId('hub-card-results').waitFor({ state: 'visible', timeout: 15_000 })
-    await walkTour(TOUR.filter(t => t !== 'hub-improve-list'))
+    await walkTour([...PRE_STUDY_TOUR, 'hub-results-verdict'])
     await byId('hub-rail-step-improve').click()
     await byId('hub-card-improve').waitFor({ state: 'visible', timeout: 15_000 })
-    await walkTour(TOUR.filter(t => t !== 'hub-results-verdict'))
+    await walkTour([...PRE_STUDY_TOUR, 'hub-improve-list', 'hub-improve-fmea'])
     await shot(page, 'p24-dc-after-tour')
 
     // ── other verdict paths: the H2 hub (no goal) from the Start card ─────
@@ -1051,7 +1063,7 @@ async function phaseP24(browser) {
     check(await railState('results') === 'blocked', 'new project: Results blocked again')
     await checkSite('eh_h2_hub', 'strong_grid')
     await shot(page, 'p24-h2-site')
-    await runStudy('h2', { expectLole: '' })
+    await runStudy('h2', { expectLole: '' , tourWhileRunning: true })
     check(verdicts.h2.headline === 'No reliability goal is set for this site, so the study did not certify it — set an allowed shortfall in step 3 (Goal) to get a verdict.',
       'H2 hub (no goal, no shortfall number): the decided §5.5 sentence')
 

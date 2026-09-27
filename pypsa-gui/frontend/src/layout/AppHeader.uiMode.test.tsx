@@ -115,3 +115,20 @@ describe('AppHeader — Guided / Expert switch', () => {
     expect(screen.getByTestId('ui-mode-expert').getAttribute('aria-pressed')).toBe('true')
   })
 })
+
+// P24-FE gate decision: the header's "Run LOPF" competes with the hub
+// design's own Run in Guided, so it is hidden there while idle; Expert keeps it
+// (its snapshot is unchanged).
+describe('AppHeader — the Run button per mode', () => {
+  it('Guided: no idle Run button', () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    renderHeader()
+    expect(screen.queryByTitle(/queues the solve/)).toBeNull()
+  })
+
+  it('Expert: the Run button is there', () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    renderHeader()
+    expect(screen.getByTitle(/queues the solve/)).toBeTruthy()
+  })
+})

@@ -133,6 +133,28 @@ describe('useCreateFromTemplate', () => {
     await waitFor(() => expect(hook.result.current.isPending).toBe(false))
   })
 
+  it('a 409 because a study is running: a plain message, not the status line', async () => {
+    const toast = (await import('react-hot-toast')).default
+    vi.mocked(projectsApi.createFromTemplate).mockRejectedValue(Object.assign(
+      new Error('Request failed with status code 409'), { response: { status: 409, data: {
+        detail: 'the Energy Hub study is running on this network. Trying to load a project now would detach it.' } } }))
+    const { hook } = render('/app')
+    act(() => hook.result.current.mutate('eh_h2_hub'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      'A study is still running — wait for it to finish or abort it before switching project.'))
+  })
+
+  it('another 409 (the project exists) keeps its own sentence', async () => {
+    const toast = (await import('react-hot-toast')).default
+    vi.mocked(projectsApi.createFromTemplate).mockRejectedValue(Object.assign(
+      new Error('Request failed with status code 409'), { response: { status: 409, data: {
+        detail: "Project 'Island Microgrid' already exists" } } }))
+    const { hook } = render('/app')
+    act(() => hook.result.current.mutate('eh_microgrid'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(
+      "Template import failed: Project 'Island Microgrid' already exists"))
+  })
+
   it('a failed create toasts and changes nothing (no G4 note, no tab)', async () => {
     const toast = (await import('react-hot-toast')).default
     vi.mocked(projectsApi.createFromTemplate).mockRejectedValue(new Error('boom'))
