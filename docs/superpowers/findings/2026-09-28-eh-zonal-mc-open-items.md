@@ -148,3 +148,24 @@ Section 4 is new. Every run is weak_flexible (`apply_pack → ens_solve → mc_c
 | Event only: firm Link, unsampled grid, event q = 0.05 | **626.34** | **415.005** with q = 0 | `import_firmness = common_mode_sampled`. The q = 0 control reproduces the 2026-09-27 firm-block LOLE exactly. |
 
 Sections 1–3 (the 2026-09-27 journeys) are unchanged: weak_flexible 585.2775 h (zonal), pair 499.32 h vs 415.005 h, off_grid 1400.48 h = 1400.48 h.
+
+## Integration — before / after
+
+Environment: the SessionStart venv (`~/.venv-pypsa-gui`, Python 3.12, pandas 2.3.3, pixi-lock pins).
+
+| Suite | Before (`d4a30d1`, end of 2026-09-27) | After (`24efd72`) |
+|---|---|---|
+| `test_energy_hub_*.py` + `test_adequacy_sweep.py` | 243 | **317** (+74: `zonal_storage` 13, `zonal_areas` 13, `zonal_copt` 25, `common_mode` 23), 0 failed |
+| full backend `pytest -m "not slow"` | 5792 passed, 31 skipped | **5866 passed, 31 skipped, 0 failed** |
+| `run_qa_drivers.py` | 22 drivers | **22 drivers passed** |
+| `qa_eh_reference_design.py` | 64 / 64 steps | **108 / 108** steps |
+| frontend `npx vitest run` | 1952 | **1962** (177 files; `EhReferenceDesignPanel.test.tsx` 35 → 45); `tsc --noEmit` clean |
+| `ruff check` on changed backend files | — | clean. `mc.py` is untouched in this round and still carries its 19 pre-existing docstring-style hits, the same as master. |
+
+The single-area engine (`mc.py`) was not modified in this round. The MC, ELCC and coupling-loop suites run unchanged inside the full backend count.
+
+## What is still deliberately not done
+
+- **The class-A screening's grid is held at its expected value.** It ranks modes but does not certify; the ±40 % caveat is on the payload. `import_exact` (exact, no storage) and the MC (certifying) sit beside it. Exact per-mode attribution under the grid distribution would need a multi-state unit in `copt.py`'s attribution engine; that is a larger change, left for a later round.
+- **The grid-storage policy is pinned, not optimal:** grid-first, remote support within the Link headroom, and charging only from surplus not offered to the hub. That is non-anticipative and conservative, and disclosed.
+- **Common-mode events are opt-in data only.** Nothing is defaulted, and there is no library of event rates.
