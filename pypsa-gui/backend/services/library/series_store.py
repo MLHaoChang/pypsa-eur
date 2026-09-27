@@ -25,6 +25,7 @@ import json
 import os
 import re
 import tempfile
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -229,6 +230,9 @@ def resolve(db: DBSession, org_id: UUID, ref: PriceSeriesRef, *, root: Path | No
         data = gzip.decompress(path.read_bytes())
     except FileNotFoundError as exc:
         raise LibraryRefStale(f"Library file for {ref.id!r} v{ref.version} is missing") from exc
+    except (OSError, EOFError, zlib.error) as exc:  # BadGzipFile is an OSError
+        raise LibraryRefStale(f"Library file for {ref.id!r} v{ref.version} is unreadable "
+                              f"({type(exc).__name__})") from exc
     if hashlib.sha256(data).hexdigest() != row.hash:
         raise LibraryRefStale(f"Library file for {ref.id!r} v{ref.version} was modified")
     meta = json.loads(row.meta_json or "{}")

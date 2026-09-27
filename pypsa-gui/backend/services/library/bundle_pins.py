@@ -8,10 +8,12 @@ is in `routers.projects._BUNDLE_FILES`, so it travels with a bundle export, a
 snapshot and a scenario fork.
 
 `check_pins` re-verifies the pins against the org's Library when a project is
-opened, imported or cold-activated. A pin that no longer resolves to exactly
+opened, imported or activated. A pin that no longer resolves to exactly
 the pinned bytes is reported as a `library_ref_stale` issue. Nothing here ever
-moves a ref to another version: the config keeps naming what it named, and
-resolution at solve time (`series_store.resolve`) refuses a mismatch.
+moves a ref to another version: the config keeps naming what it named. The
+solve itself reads the price already materialised on the network at config
+time (`links_t["ic_export_price"]`), i.e. the pinned bytes; re-applying the
+config re-resolves through `series_store.resolve`, which refuses a mismatch.
 
 Issue reasons:
 
@@ -26,8 +28,6 @@ Pure service: imports neither routers nor `solver_service` (plan gate rubric).
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -37,6 +37,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session as DBSession
 
 from models.commercial import PriceSeriesRef
+from services.atomic_io import atomic_write_text
 from services.library import series_store as S
 
 SIDECAR_NAME = "library_refs.json"
@@ -89,23 +90,30 @@ def write_pins(project_dir: Path, refs: Iterable[PriceSeriesRef]) -> None:
     body = json.dumps({"schema": SCHEMA,
                        "refs": [{"id": i, "version": v, "hash": h} for i, v, h in pins]},
                       indent=2)
-    fd, tmp = tempfile.mkstemp(dir=str(target.parent), prefix=f".{SIDECAR_NAME}.")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(body)
-        os.replace(tmp, target)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
+    # The house writer (`<name>.tmp` + replace): an interrupted write leaves an
+    # orphan `storage_reconcile.sweep_tmp` knows how to clean up.
+    atomic_write_text(target, body)
 
 
 def _issue(reason: str, pin: dict | None, message: str) -> dict:
     pin = pin or {}
     return {"code": ISSUE_CODE, "reason": reason, "id": pin.get("id"),
             "version": pin.get("version"), "hash": pin.get("hash"), "message": message}
+
+
+def _strict_pin(r: Any) -> dict:
+    """A pin exactly as written, or ValueError: a hand-edited `2.7` must not
+    quietly become version 2 and check a different item."""
+    if not isinstance(r, dict):
+        raise ValueError("pin is not an object")
+    i, v, h = r.get("id"), r.get("version"), r.get("hash")
+    if not isinstance(i, str) or not i:
+        raise ValueError("pin id must be a non-empty string")
+    if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+        raise ValueError("pin version must be an integer >= 1")
+    if not isinstance(h, str) or len(h) < 8:
+        raise ValueError("pin hash must be a string")
+    return {"id": i, "version": v, "hash": h}
 
 
 def read_pins(project_dir: Path) -> tuple[list[dict], list[dict]]:
@@ -120,8 +128,7 @@ def read_pins(project_dir: Path) -> tuple[list[dict], list[dict]]:
         refs = data["refs"]
         if data.get("schema") != SCHEMA or not isinstance(refs, list):
             raise ValueError("unexpected shape")
-        pins = [{"id": str(r["id"]), "version": int(r["version"]), "hash": str(r["hash"])}
-                for r in refs]
+        pins = [_strict_pin(r) for r in refs]
     except (ValueError, KeyError, TypeError) as exc:
         return [], [_issue("sidecar_unreadable", None,
                            f"{SIDECAR_NAME} is unreadable ({type(exc).__name__}); "
@@ -129,11 +136,16 @@ def read_pins(project_dir: Path) -> tuple[list[dict], list[dict]]:
     return pins, []
 
 
-def check_pins(db: DBSession, org_id: UUID, project_dir: Path, *, config: Any,
+def check_pins(db: DBSession, org_id: UUID, project_dir: Path | None, *, config: Any,
                root: Path | None = None) -> list[dict]:
     """Issues for every pin (and every config ref) that does not resolve to
-    exactly its pinned bytes in `org_id`'s Library. Empty list = all good."""
-    pins, issues = read_pins(project_dir)
+    exactly its pinned bytes in `org_id`'s Library. Empty list = all good.
+
+    `project_dir=None` checks the config's refs alone (a resident context,
+    whose in-memory config may be ahead of the sidecar on disk)."""
+    pins, issues = read_pins(project_dir) if project_dir is not None else ([], [])
+    if project_dir is None:
+        pins = [_pin(r) for r in collect_refs(config)]
     pinned = {(p["id"], p["version"], p["hash"]) for p in pins}
     to_check = list(pins)
     for ref in collect_refs(config):
@@ -161,4 +173,8 @@ def check_pins(db: DBSession, org_id: UUID, project_dir: Path, *, config: Any,
             S.resolve(db, org_id, PriceSeriesRef(**pin, source=current.source), root=root)
         except (S.LibraryRefStale, S.LibraryRefNotFound) as exc:
             issues.append(_issue("payload_unreadable", pin, str(exc)))
+        except Exception as exc:  # noqa: BLE001 — this check must never break an open
+            issues.append(_issue("payload_unreadable", pin,
+                                 f"Library series {label} could not be read "
+                                 f"({type(exc).__name__})"))
     return issues

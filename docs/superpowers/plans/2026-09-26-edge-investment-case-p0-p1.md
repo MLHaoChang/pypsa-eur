@@ -264,6 +264,13 @@ Files: `backend/routers/library.py` (series endpoints only in P1), `backend/main
   `test_library_bundle_pins.py`; `qa_save_load_roundtrip.py` has four IC library-pin steps. Tampered
   sidecars are tested through bundles: an on-disk edit under a resident project is overwritten by its
   write-back on the next open.
+- Review round 1 → PASS WITH CONDITIONS, all closed: a corrupt payload (`BadGzipFile`, `EOFError`,
+  `zlib.error`, other `OSError`) is `LibraryRefStale` in `series_store.resolve`, and `check_pins` never raises
+  (`payload_unreadable`); opening or importing a project without `solver_config.json` resets to defaults
+  instead of inheriting the previous project's config; `activate` re-checks a RESIDENT context's in-memory
+  refs (`check_pins(project_dir=None)`), since the session resolver, the dispatcher and path reads hydrate
+  without a check; the sidecar uses the house `atomic_write_text`; pins are validated strictly (no `2.7 → 2`);
+  a snapshot restore without pins drops the live sidecar.
 
 ### WP1.2 `tariff_engine` core (energy / TOU / fixed) — the oracle
 Files: `backend/services/commercial/__init__.py`, `tariff_engine.py`, `backend/tests/test_tariff_engine_core.py`,

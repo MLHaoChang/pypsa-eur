@@ -1074,13 +1074,17 @@ async def import_bundle(
         active_project.set_active_project(db, session, _imported_project)
 
     cfg_path = dest / "solver_config.json"
+    from routers.simulation import _state
     if cfg_path.exists():
-        from routers.simulation import _state
         cfg_data = json.loads(cfg_path.read_text())
         # Shared legacy-tolerant loader (filter unknown keys + coerce removed
         # enum values) — same path load_project uses, so a bundle from an older
         # GUI version imports instead of 500-ing on an unexpected key.
         _state["solver_config"] = _solver_config_from_dict(cfg_data)
+    else:
+        # Defaults, not the previously open project's config (WP1.1c review #2).
+        from services.solver_service import SolverConfig
+        _state["solver_config"] = SolverConfig()
 
     from routers.network import (
         _ensure_snapshots_cover_user_ts,
@@ -2359,7 +2363,7 @@ def activate_project(
         raise HTTPException(status_code=409, detail=_study)
 
     evicted: list[str] = []
-    library_issues: list[dict] = []  # resident projects were checked when opened
+    library_issues: list[dict] = []
     # Hold this key's hydrate lock across the MISS so a concurrent cold path
     # (a path-scoped read, the session resolver, the solve dispatcher) cannot
     # build a SECOND context for the same project. A resident hit takes no
@@ -2393,6 +2397,19 @@ def activate_project(
     # by uuid, but everything downstream (frontend `currentProject`, autosave
     # `expect=`, chat.jsonl path) speaks names. `evicted` likewise — it lets the
     # frontend drop those projects' retained React Query caches.
+    if resident is not None:
+        # A context can be resident without ever having been checked (the
+        # session resolver, the solve dispatcher and path-scoped reads hydrate
+        # without it; WP1.1c review #3). Check its IN-MEMORY config's refs —
+        # the sidecar on disk may lag unsaved edits.
+        from services.library import bundle_pins
+        cfg = PyPSAService.get_active_context().solver_state.get("solver_config")
+        library_issues = bundle_pins.check_pins(
+            db, project.org_id, None, config=asdict(cfg) if cfg is not None else {})
+        for issue in library_issues:
+            change_log_service.log(
+                "warn", "Project", project.name,
+                f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}")
     return {"activated": project.name, "evicted": evicted, "lock": lock_info,
             "library_issues": library_issues}
 
@@ -2547,14 +2564,21 @@ def load_project(
         project_registry.bind_context(PyPSAService.get_active_context(), project)
 
     cfg_path = src / "solver_config.json"
+    from routers.simulation import _state
     if cfg_path.exists():
-        from routers.simulation import _state
         data = json.loads(cfg_path.read_text())
         # Shared legacy-tolerant loader: filter to the live dataclass field set
         # (a missing key picks up the current default; unknown keys would
         # otherwise raise TypeError) and coerce removed enum values. Same path
         # import_bundle uses, so both routes accept old files identically.
         _state["solver_config"] = _solver_config_from_dict(data)
+    else:
+        # No file → defaults, not the PREVIOUS project's config (which
+        # `reset_network` carries forward): a later save would otherwise write
+        # that project's settings, commercial block and Library pins into this
+        # one (WP1.1c review #2; `create_from_template` already does this).
+        from services.solver_service import SolverConfig
+        _state["solver_config"] = SolverConfig()
 
     # Hydrate simulation state from metadata when the saved network has
     # dispatch tables. Without this, even though `n.generators_t.p` etc. are
