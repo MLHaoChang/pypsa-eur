@@ -182,15 +182,18 @@ def test_preserve_bus_topology_restores_on_an_exception():
     n.add("Line", "l", bus0="a", bus1="b", x=0.1, s_nom=10.0)
     before = n.buses[["control", "sub_network", "generator"]].copy()
     line_before = n.lines["sub_network"].copy()
+    gen_before = n.generators["control"].copy()
     assert n.sub_networks.empty
     with pytest.raises(RuntimeError, match="boom"):
         with preserve_bus_topology(n):
             n.determine_network_topology()
             n.buses.loc[:, "control"] = "Slack"
+            n.generators.loc[:, "control"] = "Slack"
             assert not n.sub_networks.empty
             raise RuntimeError("boom")
     assert n.buses[["control", "sub_network", "generator"]].equals(before)
     assert n.lines["sub_network"].equals(line_before)
+    assert n.generators["control"].equals(gen_before)
     assert n.sub_networks.empty
 
 

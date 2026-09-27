@@ -66,14 +66,21 @@ Source: the click-through report. Spec §2.
 | Contradictory solved state — backend evidence | Bug 2 | §2.2 — one test documenting `dispatch: fresh` with `condition: null` after a sweep (the FE sentence in P22.9-FE describes it) | — | `test_live_network_untouched.py::test_after_a_sweep_status_reports_dispatch_fresh_without_a_foreground_condition` |
 | Loaded bus shows 0 MW — backend half | Bug 4 | §2.3 — additive `p_set_peak` inside `_serialize_component` under `attr == "loads"` (both routes agree) | `BE/services/network_crud.py` | `test_network_loads_peak.py` (static, time-series, none; both routes) |
 
-**P22.9-BE integration gate (spec §8):**
-- [ ] 1 full backend suite — zero new failures vs. baseline
-- [ ] 2 targeted EH set green (`test_energy_hub_templates_e2e.py`, `test_energy_hub_review.py`, `test_guides.py`, `test_energy_hub_study_isolation.py`, `test_live_network_untouched.py`, `test_chat_tools_endpoint_map.py`, `test_chat_tools_dispatch.py`)
-- [ ] 3 `npx tsc --noEmit -p .` clean
-- [ ] 4 `npx vitest run` — zero new failures
-- [ ] 5 browser smoke: not yet available (the script is a P22.9-FE deliverable); instead the HTTP reproduction of §2.1 is run by hand against a live uvicorn (buses/links equal after study and sweep) and the transcript is attached
-- [ ] 6 independent QA-gate review: GO (`docs/superpowers/qa/2026-09-27-guided-mode-gate-P22.9-BE.md`)
-- [ ] 7 Expert-unchanged review signed (additive field + restore only)
+**P22.9-BE integration gate (spec §8): GO on `e0dc3f7`, 2026-09-27.** (The first pass was NO-GO because `Generator.control` was not restored; that is fixed.) Evidence:
+- Row 1: full backend `6049 passed, 31 skipped, 11 deselected in 2176.48s`. The baseline was 6033, 16 tests are new, and there are 0 failures.
+- Row 2 (the reviewer's run): 560 passed.
+- Rows 3–4: tsc exit 0; vitest 2033/2033 (no FE change).
+- Row 5: a live uvicorn reproduction over nine tables. After the sweep and after the study, only `*_nom_opt` differs.
+- The independent gate file is `docs/superpowers/qa/2026-09-27-guided-mode-gate-P22.9-BE.md`.
+- After the gate, the unit test also asserts `generators.control`. Its mutation check (Generator skipped in `_topology_tables`) turns the test red.
+
+- [x] 1 full backend suite — zero new failures vs. baseline
+- [x] 2 targeted EH set green (`test_energy_hub_templates_e2e.py`, `test_energy_hub_review.py`, `test_guides.py`, `test_energy_hub_study_isolation.py`, `test_live_network_untouched.py`, `test_chat_tools_endpoint_map.py`, `test_chat_tools_dispatch.py`)
+- [x] 3 `npx tsc --noEmit -p .` clean
+- [x] 4 `npx vitest run` — zero new failures
+- [x] 5 browser smoke: not yet available (the script is a P22.9-FE deliverable); instead the HTTP reproduction of §2.1 is run by hand against a live uvicorn (buses/links equal after study and sweep) and the transcript is attached
+- [x] 6 independent QA-gate review: GO (`docs/superpowers/qa/2026-09-27-guided-mode-gate-P22.9-BE.md`)
+- [x] 7 Expert-unchanged review signed (additive field + restore only)
 
 **Phase note — the twelve `run_simulation(` sites (spec §2.1 fix 3).** Line numbers are the spec's (pre-change). Several of the listed sites are `_solve_once` calls or the call into `_restore_base`; `_solve_once` is a thin wrapper over `run_simulation`, so they are classified the same way.
 
