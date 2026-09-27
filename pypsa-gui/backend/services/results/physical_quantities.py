@@ -15,8 +15,19 @@ Conventions (identical to `asset_economics.py`):
   * fixed_cost_eur = capital_cost_annualised × capacity × Σ period years
   * fom_cost_eur_annual = fom_cost × capacity  (annual; the horizon figure is
     fom_cost_eur_annual × Σ years — exposed separately as `fom_cost_eur`)
-  * Link output = −p1 (− p2 − p3 − p4 for multi-port), fallback p0 × efficiency
+  * Link output = −p1 (− p2 − p3 − p4 for multi-port), falling back to
+    p0 × efficiency PER LINK when p1 has no column for it
   * StorageUnit / Store: discharge = p⁺, charge = (−p)⁺
+  * a NaN snapshot weight counts as 1.0 (asset_economics' `fillna(1.0)`)
+
+Deliberate superset: the seam lists every asset of a class, including ones
+asset_economics skips (a bus with no price column, a Link absent from p0);
+their energy is 0, not missing.
+
+PoC flows are GROSS per link at the grid-side port (p0): with several PoC
+links, one importing while another exports in the same hour counts in both
+`import_mw` and `export_mw`; `net_mw` = import − export. WP1.8's arbitrage
+check needs the gross form, the bill needs the net one.
 
 Dispatch frames arrive ONLY through the injected `result_df(n, accessor,
 attr, source)` callable, never from router state. Nothing here imports a
@@ -34,6 +45,10 @@ from services.period_utils import is_multi_period, period_years_map, snapshot_we
 from services.solver_service import periodized_capital_costs
 
 logger = logging.getLogger(__name__)
+
+# Same role set as services/adequacy/redundancy.py `_IMPORT_ROLES`; the
+# archetype packs write only "grid_import", older networks carry the others.
+POC_ROLES: frozenset[str] = frozenset({"grid_import", "eh_import", "import"})
 
 _CLASSES: tuple[tuple[str, str, str, str], ...] = (
     # (frame attr on n, result accessor, capacity column, cost-facts key)
@@ -76,8 +91,8 @@ def physical_quantities(n, cfg, *, result_df: Callable[..., Any]) -> dict[str, A
     years_map = period_years_map(n) if is_multi else {}
     periods = list(years_map) if years_map else []
     total_years_factor = float(sum(years_map.values())) if years_map else 1.0
-    w_cost = snapshot_weights(n, "objective")
-    w_energy = snapshot_weights(n, "generators")
+    w_cost = snapshot_weights(n, "objective").fillna(1.0)
+    w_energy = snapshot_weights(n, "generators").fillna(1.0)
 
     capital_costs_available = True
     try:
@@ -131,12 +146,14 @@ def physical_quantities(n, cfg, *, result_df: Callable[..., Any]) -> dict[str, A
             p0 = result_df(n, accessor, "p0", "lopf")
             p1 = result_df(n, accessor, "p1", "lopf")
             p0_df = pd.DataFrame({c: _series_or_zero(p0, c, sns) for c in cols})
-            if p1 is not None:
-                out_df = pd.DataFrame({c: -_series_or_zero(p1, c, sns) for c in cols})
-            else:
-                eff = df["efficiency"].fillna(1.0).astype(float) if "efficiency" in df.columns \
-                    else pd.Series(1.0, index=df.index)
-                out_df = p0_df.multiply(eff.values, axis=1)
+            eff = df["efficiency"].fillna(1.0).astype(float) if "efficiency" in df.columns \
+                else pd.Series(1.0, index=df.index)
+            p1_cols = set(getattr(p1, "columns", []))
+            out_df = pd.DataFrame({
+                c: (-_series_or_zero(p1, c, sns) if c in p1_cols
+                    else p0_df[c] * float(eff.get(c, 1.0)))
+                for c in cols
+            })
             for port in ("2", "3", "4"):
                 bus_col = f"bus{port}"
                 if bus_col not in df.columns:
@@ -177,7 +194,7 @@ def physical_quantities(n, cfg, *, result_df: Callable[..., Any]) -> dict[str, A
     poc: dict[str, Any] | None = None
     links = getattr(n, "links", None)
     if links is not None and not links.empty and "eh_role" in links.columns:
-        poc_links = [str(i) for i in links.index if str(links.at[i, "eh_role"]) == "grid_import"]
+        poc_links = [str(i) for i in links.index if str(links.at[i, "eh_role"]) in POC_ROLES]
         if poc_links:
             p0 = result_df(n, "links_t", "p0", "lopf")
             imp = sum(_series_or_zero(p0, c, sns).clip(lower=0.0) for c in poc_links)
@@ -186,6 +203,7 @@ def physical_quantities(n, cfg, *, result_df: Callable[..., Any]) -> dict[str, A
                 "links": poc_links,
                 "import_mw": imp,
                 "export_mw": exp,
+                "net_mw": imp - exp,
                 "import_mwh": float((imp * w_energy).sum()),
                 "export_mwh": float((exp * w_energy).sum()),
             }
