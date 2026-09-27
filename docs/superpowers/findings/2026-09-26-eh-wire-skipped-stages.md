@@ -69,10 +69,10 @@ npx vitest run                                                       # 177 files
 |---|---|
 | `pipeline.solves_consumed / budget_solves` | 14 / 30 (ens 1 + frontier 6 + Class-B 3 + levers 3 + DtC 1) |
 | `achieved_ens_permyriad` | 10.0 (cap binds; ENS target **met**) |
-| `mc_lole_h` | 82.125 h |
-| `certification.verdict` | **failed** — "MC LOLE 82.1 h > target 3 h — certification FAILED although the ENS target is met (spec decision 2)" |
+| `mc_lole_h` | 415.005 h (hub-side fleet; 82.1 h before the fleet fix below, when the 200 MW grid unit was sampled) |
+| `certification.verdict` | **failed** — "MC LOLE 415 h > target 3 h — certification FAILED although the ENS target is met (spec decision 2)" |
 | `frontier` | 5/5 points at 40 / 20 / 10 / 5 / 2.5 ‱, every point `excludes_shed_cost: true`, `period_basis: single_period`, `base_restored: true (optimal)` |
-| `fmea_top` | 4 modes, classes A+B, rank 1 = Link `import_poc` (Class B), note carries "Link-primary" + "SCLOPF" |
+| `fmea_top` | 3 modes (B `import_poc`, A `base`, A `peaker` — the grid-side unit is out of the hub fleet), note carries "Link-primary" + "SCLOPF" |
 | `tea` | LCOE established; `lcoh_eur_per_kg: null`, `lcoh_status: skipped` |
 | `levers` / `dtc` | `ok` / `ok` (unchanged sibling stages) |
 
@@ -80,9 +80,22 @@ npx vitest run                                                       # 177 files
 
 That first row is the point of the work: a report that *looks* adequate on ENS is now told, in its own words, that it is not bankable on LOLE.
 
+## Follow-up fix: the MC / COPT fleet is the hub's, not the copper plate
+
+Reviewing the shipped stages turned up an optimistic verdict. The MC and the COPT are single-area, so they sampled generators **behind** the import Link. On an `off_grid` hub, whose PoC Link the pack islands, a 200 MW grid-side unit the LP cannot reach still covered the hub's deficits: the test `test_off_grid_certification_ignores_generation_behind_the_islanded_poc` was red with **"MC LOLE 0 h ≤ target 3 h — certified"** for a hub that sheds.
+
+`eh_stages.hub_fleet_scope` now splits the network at the import Link(s) before the freeze:
+
+- Only Links identified by `eh_role == grid_import` or an `eh_poc` endpoint are trusted as the boundary. The carrier fallback can match Links inside the hub, so it keeps the whole network in scope with a note.
+- The grid side is the Link's `bus0` (import flows bus0 → bus1), flipped when only bus0's side carries an `eh_critical` bus. `eh_poc` is not used for orientation, because fixtures and the SCR gate tag it on either side.
+- If another branch still connects the two sides, there is no hub boundary, and the scope falls back to the whole network with a note.
+- On the hub side, the MC and COPT read a pruned copy of the solved network. The import is a firm block up to the Link's planning cap per snapshot: 0 MW when islanded, the pack's 50 MW for `weak_flexible`. It is disclosed as `fleet_scope` on the certification and fmea_top payloads, with `import_firmness: planning_limit_only`. Link outages stay in the Class-B ranking rather than being sampled.
+
+Tests: `test_energy_hub_certify_scope.py` (6: off_grid verdict flips to `failed`, weak_flexible counts 50 MW not 200 MW and screens only hub units, carrier-only and non-separating fallbacks, bus0 orientation and its critical-side flip).
+
 ## Still open / deliberately not done
 
-- **MC is single-area copper plate** (its standing `MC_WARNING_V1`): the import Link's cap and the `off_grid` islanding are not seen by the sampler, so a grid-side generator in the same electrical fleet counts at full capacity. The fixture keeps nothing behind the PoC for that reason; a zonal MC is a separate engine change.
+- **The import is firm up to its cap.** The hub-side scope treats the PoC Link as a firm block (planning limit), not as a unit with its own outage chain; a zonal MC that samples the Link and the grid behind it is a separate engine change. The carrier-fallback case still certifies on the whole copper plate and says so.
 - The legacy `gates` fallback ("mc_certify required by pack but not requested") is kept for the pinned P1.5 test; with the `certification` section in place it is redundant and can be retired with a frontend change.
 - `fmea_top` Class B is Link-primary only (decision 14); SCLOPF Line/Transformer rows remain omitted and the note says so.
 - Pack-level frontier ladder / top-N are module constants (`EH_FRONTIER_LADDER`, `FMEA_TOP_N`), not pack fields — promote when a pack needs a different curve.

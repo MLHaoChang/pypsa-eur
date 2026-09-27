@@ -284,7 +284,8 @@ def run_eh_study(
                     # Freeze the plan the report describes for the stages
                     # that certify / screen it (see eh_stages docstring).
                     if "mc_certify" in requested or "fmea_top" in requested:
-                        frozen = stages_mod.freeze_fixed_plan(network, cfg, lock)
+                        frozen = stages_mod.freeze_fixed_plan(
+                            network, cfg, lock, overlay=pack.import_overlay)
         elif "ens_solve" not in requested:
             section_payloads.setdefault(
                 "target", ("not_established", None, "ens_solve not run"))
