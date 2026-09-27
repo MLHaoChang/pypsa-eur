@@ -365,6 +365,8 @@ No precedent exists (`grep add_variables services/ tests/` → 0 hits). Half a d
 - [ ] Pin the naming convention in the spec §5.1: new variables are **dash-less with an `ic_` prefix**.
 - Exit: go/no-go for WP1.5a; if no-go, fall back to modelling `P_peak[m]` as an auxiliary extendable Link per
   month (documented alternative).
+- Result (2026-09-27): **GO** — see `docs/superpowers/findings/2026-09-27-ic-p1-linopy-spike.md`. Peak values
+  needed after a reload go into `last_commercial_terms`; `ic_*` duals are read from `n.model` post-solve.
 
 ### WP1.5a Peak-demand variables
 Files: `lp_bindings.py`, `backend/tests/test_lp_bindings_peak_demand.py`.
