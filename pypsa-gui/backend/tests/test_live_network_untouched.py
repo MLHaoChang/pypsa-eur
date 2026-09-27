@@ -174,6 +174,7 @@ def test_preserve_bus_topology_restores_on_an_exception():
     n.add("Generator", "g", bus="a", p_nom=10.0)
     n.add("Line", "l", bus0="a", bus1="b", x=0.1, s_nom=10.0)
     before = n.buses[["control", "sub_network", "generator"]].copy()
+    line_before = n.lines["sub_network"].copy()
     assert n.sub_networks.empty
     with pytest.raises(RuntimeError, match="boom"):
         with preserve_bus_topology(n):
@@ -182,6 +183,7 @@ def test_preserve_bus_topology_restores_on_an_exception():
             assert not n.sub_networks.empty
             raise RuntimeError("boom")
     assert n.buses[["control", "sub_network", "generator"]].equals(before)
+    assert n.lines["sub_network"].equals(line_before)
     assert n.sub_networks.empty
 
 
@@ -225,3 +227,48 @@ def test_coupling_loop_leaves_the_live_buses_equal(client, install_network):
     body = _poll_loop(client, timeout=600.0)
     assert body["base_restored"] is True, body
     assert _tables(client)["buses"] == before["buses"]
+
+
+def _branchy_network():
+    import pandas as pd
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2025-01-01", periods=3, freq="h"))
+    n.add("Bus", "hv", v_nom=110.0)
+    n.add("Bus", "mv1", v_nom=20.0)
+    n.add("Bus", "mv2", v_nom=20.0)
+    n.add("Generator", "grid", bus="hv", p_nom=100.0, marginal_cost=20.0)
+    n.add("Transformer", "tr", bus0="hv", bus1="mv1", x=0.1, s_nom=80.0)
+    n.add("Line", "ln", bus0="mv1", bus1="mv2", x=0.05, r=0.01, s_nom=60.0)
+    n.add("Load", "ld", bus="mv2", p_set=30.0)
+    return n
+
+
+@pytest.mark.live_solve
+def test_contingency_sweep_restores_branch_sub_network():
+    # `determine_network_topology` also writes `sub_network` on every passive
+    # branch (Line, Transformer); the sweep must put those back too.
+    import queue
+
+    from services.adequacy.sweep import run_contingency_sweep
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig
+
+    n = _branchy_network()
+    PyPSAService.set_network(n)
+    bus_cols = ["control", "sub_network", "generator"]
+    before_bus = n.buses[bus_cols].copy()
+    before_branch = {c: n.static(c)["sub_network"].copy()
+                     for c in sorted(n.passive_branch_components)}
+    assert set(before_branch) >= {"Line", "Transformer"}
+    res = run_contingency_sweep(
+        n, PyPSAService.get_lock(),
+        SolverConfig(solver_name="highs", voll=3000.0), [],
+        log_queue=queue.SimpleQueue())
+    assert res["base_restored"] is True, res
+    assert n.buses[bus_cols].equals(before_bus), n.buses[bus_cols]
+    for c, before in before_branch.items():
+        after = n.static(c)["sub_network"]
+        assert after.equals(before), (c, before.tolist(), after.tolist())
+    assert n.sub_networks.empty

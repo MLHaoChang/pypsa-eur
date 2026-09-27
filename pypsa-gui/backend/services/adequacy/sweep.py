@@ -63,6 +63,21 @@ _CAPACITY_ATTRS = (
 _TOPOLOGY_BUS_COLS = ["control", "sub_network", "generator"]
 
 
+def _passive_branch_tables(n) -> dict:
+    """``{class: static table}`` for every passive-branch class whose table
+    carries ``sub_network`` (Line and Transformer in PyPSA 1.1) — looked up
+    through PyPSA's own class set, not a hard-coded list."""
+    out = {}
+    for cls in sorted(getattr(n, "passive_branch_components", ()) or ()):
+        try:
+            df = n.components[cls].static
+        except (AttributeError, KeyError, TypeError):
+            continue
+        if "sub_network" in df.columns:
+            out[cls] = df
+    return out
+
+
 @contextlib.contextmanager
 def preserve_bus_topology(n):
     """
@@ -70,12 +85,13 @@ def preserve_bus_topology(n):
     bug 3). PyPSA's optimize post-processing runs
     ``determine_network_topology()`` when the network has no ``SubNetwork``,
     and that writes ``buses.control`` (one Slack per sub-network),
-    ``buses.sub_network`` and ``buses.generator`` and adds ``SubNetwork``
-    rows. A study that solves the user's own network in place restored
-    dispatch and capacities afterwards, never these — so after an FMEA sweep
-    every bus in the Buses table had changed.
+    ``buses.sub_network``, ``buses.generator`` and ``sub_network`` on every
+    passive branch (Line, Transformer), and adds ``SubNetwork`` rows. A study
+    that solves the user's own network in place restored dispatch and
+    capacities afterwards, never these — so after an FMEA sweep every bus in
+    the Buses table had changed.
 
-    On exit — every path, exceptions and the stop event included — the three
+    On exit — every path, exceptions and the stop event included — those
     columns are written back and every ``SubNetwork`` row that was not there
     before is removed. It must enclose the study's CLOSING re-solve too: that
     solve is itself an optimize and would re-apply the columns. A mismatch
@@ -85,6 +101,8 @@ def preserve_bus_topology(n):
         cols = [c for c in _TOPOLOGY_BUS_COLS if c in n.buses.columns]
         saved = n.buses[cols].copy()
         saved_index = sorted(n.sub_networks.index)
+        saved_branch = {cls: df["sub_network"].copy()
+                        for cls, df in _passive_branch_tables(n).items()}
     except AttributeError:
         # Not a PyPSA network (a test double with no Bus table): there is no
         # topology to protect, and the guard must never stop the study.
@@ -98,19 +116,29 @@ def preserve_bus_topology(n):
             added = [s for s in n.sub_networks.index if s not in before]
             if added:
                 n.remove("SubNetwork", added)
-            # Buses cannot change inside a study (mutations are undone), but
+            # Rows cannot change inside a study (mutations are undone), but
             # align on the saved index so a surprise never becomes a crash.
             idx = saved.index.intersection(n.buses.index)
             n.buses.loc[idx, cols] = saved.loc[idx, cols]
-            if not (n.buses[cols].equals(saved)
-                    and sorted(n.sub_networks.index) == saved_index):
+            same = n.buses[cols].equals(saved)
+            tables = _passive_branch_tables(n)
+            for cls, col in saved_branch.items():
+                df = tables.get(cls)
+                if df is None:
+                    same = False
+                    continue
+                bidx = col.index.intersection(df.index)
+                df.loc[bidx, "sub_network"] = col.loc[bidx]
+                same = same and df["sub_network"].equals(col)
+            if not (same and sorted(n.sub_networks.index) == saved_index):
                 logger.warning(
-                    "preserve_bus_topology: the Bus topology columns or the "
+                    "preserve_bus_topology: the topology columns or the "
                     "SubNetwork rows still differ after the restore")
         except Exception:                                     # noqa: BLE001
             logger.exception(
-                "preserve_bus_topology: restoring the Bus topology columns "
-                "FAILED — the Buses table may show solver-written values")
+                "preserve_bus_topology: restoring the topology columns "
+                "FAILED — the Buses / branch tables may show solver-written "
+                "values")
 
 
 def freeze_capacities(n) -> Callable[[], None]:
