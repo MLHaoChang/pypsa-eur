@@ -359,13 +359,16 @@ def _bind_commercial(commercial, user) -> dict:
         lp_bindings.validate_for_network(n, commercial)
     except lp_bindings.CommercialBindingError as exc:
         raise refuse(422, exc.code, str(exc)) from exc
-    ref = commercial.export_price_ref
-    if ref is not None:
+
+    def resolve(ref):
         from db.models import User
         from db.session import SessionLocal
         from services import library_acl
 
-        org = ctx.org_id
+        from uuid import UUID
+
+        # The context carries the org id as a string (`org:uuid` registry key).
+        org = UUID(str(ctx.org_id)) if ctx.org_id else None
         with SessionLocal() as db:
             if org is None and isinstance(user, User):
                 org = library_acl.org_of(db, user)
@@ -374,19 +377,43 @@ def _bind_commercial(commercial, user) -> dict:
                              "save the project first: a Library ref resolves in the "
                              "project's organization")
             try:
-                series = series_store.resolve(db, org, ref)
+                return series_store.resolve(db, org, ref)
             except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
                 raise refuse(409, "library_ref_stale", str(exc)) from exc
+
+    def materialise(ref, writer, link, code):
+        series = resolve(ref)
         try:
             with PyPSAService.get_lock():
-                uncovered = lp_bindings.write_export_price(
-                    n, commercial.export_link, series, commercial.timezone)
+                uncovered = writer(n, link, series, commercial.timezone)
         except lp_bindings.CommercialBindingError as exc:
             raise refuse(422, exc.code, str(exc)) from exc
         if uncovered:
-            raise refuse(422, "export_price_coverage",
+            raise refuse(422, code,
                          f"Library series {ref.id!r} v{ref.version} does not cover "
                          f"{uncovered} snapshot(s); nothing was written")
+
+    if commercial.export_price_ref is not None:
+        materialise(commercial.export_price_ref, lp_bindings.write_export_price,
+                    commercial.export_link, "export_price_coverage")
+    agreement = commercial.connection
+    if agreement is not None:
+        # WP1.4b: the envelope is resolved like the export price; an FCA's
+        # curtailment hours are registered as a stress entry on the PoC Link.
+        from services.commercial import connection as conn
+
+        if agreement.envelope is not None:
+            materialise(agreement.envelope, conn.write_envelope, commercial.poc_link,
+                        "envelope_coverage")
+        if agreement.kind == "fca" and agreement.curtailment_hours_per_year is not None:
+            try:
+                entry = conn.fca_stress_entry(n, agreement, poc_link=commercial.poc_link)
+            except lp_bindings.CommercialBindingError as exc:
+                raise refuse(422, exc.code, str(exc)) from exc
+            if ctx.storage_dir:
+                import pathlib
+
+                conn.register_fca_entry(pathlib.Path(ctx.storage_dir), entry)
     return commercial.model_dump(mode="json")
 
 

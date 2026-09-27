@@ -412,6 +412,18 @@ def compute_cost_breakdown(n, cfg):
             cx *= years; ox *= years
             _accumulate(comp, carrier, row_period, cx, ox)
 
+    # Edge Investment Case (spec §5.1, WP1.3/WP1.4a): the commercial terms the
+    # last solve charged. They were applied for the solve and undone, so they
+    # are not in `n.statistics()`; `commercial_cost_terms` recomputes them from
+    # what the solve committed (identical after a reload), and they fold in
+    # as the component "Commercial" so Σ by_component == totals, per period
+    # too. Same years weighting as the statistics rows.
+    from services.commercial.cost_rows import commercial_cost_terms
+    _commercial = commercial_cost_terms(n, getattr(cfg, "commercial", None))
+    for _label, _period, _cx, _ox in _commercial["items"]:
+        _yrs = _years_for_period(_period) if _period is not None else 1.0
+        _accumulate("Commercial", _label, _period, _cx * _yrs, _ox * _yrs)
+
     # Materialise by_carrier as a flat list now that all rows have been folded.
     for (comp, carrier), v in by_carrier_dict.items():
         by_carrier.append({
@@ -646,22 +658,8 @@ def compute_cost_breakdown(n, cfg):
                 key=lambda r: -(r["capex"] + r["opex"]),
             ),
         })
-    # Edge Investment Case (spec §5.1, WP1.3): the PoC energy import/export
-    # cost as labelled rows. Already inside `opex` (the Links' statistics
-    # OPEX), so a split of the total, never added to it; recomputed from the
-    # persisted `links_t.marginal_cost`, so identical after a reload.
-    from services.commercial.connection import network_capacity_row
-    from services.commercial.lp_bindings import energy_cost_rows
-    commercial_rows = energy_cost_rows(n, getattr(cfg, "commercial", None))
-    # The connection fee (WP1.4a) is applied for the solve and undone, so it
-    # is NOT in `n.statistics()`: this row is ADDED to capex and the total.
-    network_capacity = network_capacity_row(n, getattr(cfg, "commercial", None))
-    if network_capacity is not None:
-        commercial_rows = dict(commercial_rows or {"included_in_total": True})
-        commercial_rows["network_capacity"] = network_capacity
-        capex_total = capex_total + network_capacity
     return {
-        "commercial": commercial_rows,
+        "commercial": _commercial["block"],
         "capex": capex_total,
         "capex_lifetime": capex_lifetime_total,
         "capex_expansion": capex_expansion_total,

@@ -65,7 +65,7 @@ def _expected_eur_per_mwh(idx, tz=None) -> np.ndarray:
 
 def test_tou_rates_land_on_the_poc_link_in_eur_per_mwh():
     n = build_edge_15min()
-    terms = L.materialise_poc_prices(n, _commercial(_tariff()))
+    terms = L.materialise_poc_prices(n, _commercial(_tariff())).facts
     mc = n.links_t.marginal_cost["import"].to_numpy()
     assert np.allclose(mc, _expected_eur_per_mwh(n.snapshots))
     assert terms["poc_link"] == "import" and terms["energy_items"] == ["energy"]
@@ -81,13 +81,15 @@ def test_rates_follow_the_site_clock_when_snapshots_are_utc():
     assert mc[at] == pytest.approx(PEAK * 1000)
 
 
-def test_materialisation_is_idempotent_and_keeps_the_static_cost():
+def test_apply_adds_to_the_static_cost_and_undo_puts_it_back():
     n = build_edge_15min()
     n.links.loc["import", "marginal_cost"] = 3.0
-    L.materialise_poc_prices(n, _commercial(_tariff()))
-    L.materialise_poc_prices(n, _commercial(_tariff()))
-    mc = n.links_t.marginal_cost["import"].to_numpy()
-    assert np.allclose(mc, _expected_eur_per_mwh(n.snapshots) + 3.0)
+    first = L.materialise_poc_prices(n, _commercial(_tariff()))
+    assert np.allclose(n.links_t.marginal_cost["import"], _expected_eur_per_mwh(n.snapshots) + 3.0)
+    first.undo()
+    assert "import" not in n.links_t.marginal_cost.columns
+    L.materialise_poc_prices(n, _commercial(_tariff()))  # a re-solve starts from the base again
+    assert np.allclose(n.links_t.marginal_cost["import"], _expected_eur_per_mwh(n.snapshots) + 3.0)
 
 
 def _with_export(n, price=None):
@@ -116,7 +118,7 @@ def test_net_items_bill_import_when_cost_and_pay_export_when_revenue():
     cost = _tou("net_cost", measured_on="net")
     rev = TariffItem(id="net_rev", kind="energy", unit="per_kwh", measured_on="net",
                      direction="revenue", periods=[TariffPeriod(name="all", rate=0.03)])
-    terms = L.materialise_poc_prices(n, _commercial(_tariff(cost, rev), export_link="export"))
+    terms = L.materialise_poc_prices(n, _commercial(_tariff(cost, rev), export_link="export")).facts
     assert np.allclose(n.links_t.marginal_cost["import"], _expected_eur_per_mwh(n.snapshots))
     assert np.allclose(n.links_t.marginal_cost["export"], 0.01 - 30.0)
     assert "net_split_by_direction" in terms["notes"]
@@ -142,14 +144,14 @@ def test_tiered_and_non_energy_items_are_left_to_later_bindings_and_reported():
     fixed = TariffItem(id="standing", kind="fixed", unit="per_month",
                        periods=[TariffPeriod(name="all", rate=10.0)])
     n = build_edge_15min()
-    terms = L.materialise_poc_prices(n, _commercial(_tariff(_tou(), tiered, fixed)))
+    terms = L.materialise_poc_prices(n, _commercial(_tariff(_tou(), tiered, fixed))).facts
     assert terms["energy_items"] == ["energy"]
     assert terms["not_in_lp"] == {"tiered": "tiers_WP1.5c", "standing": "fixed_not_in_lp"}
 
 
 def test_no_commercial_config_is_a_no_op():
     n = build_edge_15min()
-    assert L.materialise_poc_prices(n, None) is None
+    assert L.materialise_poc_prices(n, None).facts == {}
     assert "import" not in n.links_t.marginal_cost.columns
 
 
@@ -178,10 +180,12 @@ def _tariff_only_site(pv=True):
 
 
 @pytest.mark.live_solve
-def test_after_a_solve_the_poc_price_is_persisted_on_the_network():
+def test_after_a_solve_the_poc_price_is_persisted_and_the_users_cost_untouched():
     n = _tariff_only_site()
     sink = _solve(n, _commercial(_tariff()))
-    assert np.allclose(n.links_t.marginal_cost["import"], _expected_eur_per_mwh(n.snapshots))
+    assert np.allclose(n.links_t[L.ENERGY_PRICE_ATTR]["import"], _expected_eur_per_mwh(n.snapshots))
+    assert "import" not in n.links_t.marginal_cost.columns  # applied for the solve, undone
+    assert n.meta[L.META_LINKS] == {"import": "import", "export": None}
     assert sink["last_commercial_terms"]["poc_link"] == "import"
 
 
@@ -201,7 +205,7 @@ def test_lp_import_cost_equals_the_tariff_engine_energy_total():
     _solve(n, _commercial(_tariff()))
     w = n.snapshot_weightings.objective.to_numpy()
     p0 = n.links_t.p0["import"].to_numpy()
-    lp_cost = float((w * p0 * n.links_t.marginal_cost["import"].to_numpy()).sum())
+    lp_cost = float((w * p0 * n.links_t[L.ENERGY_PRICE_ATTR]["import"].to_numpy()).sum())
     dispatch = pd.DataFrame({"import_mw": p0, "export_mw": 0.0}, index=n.snapshots)
     billed = rate(dispatch, _tariff(), step_hours=0.25, timezone=None)
     assert billed.per_item["energy"] == pytest.approx(lp_cost, rel=1e-6)
@@ -233,8 +237,9 @@ def test_objective_gap_is_zero_and_energy_rows_match_the_lp():
     dec = compute_objective_decomposition(n, cb)
     assert abs(dec["gap_pct"]) < 1e-6, dec
     w = n.snapshot_weightings.objective
-    imp = float((w * n.links_t.p0["import"] * n.links_t.marginal_cost["import"]).sum())
-    exp = float((w * n.links_t.p0["export"] * n.links_t.marginal_cost["export"]).sum())
+    price = n.links_t[L.ENERGY_PRICE_ATTR]
+    imp = float((w * n.links_t.p0["import"] * price["import"]).sum())
+    exp = float((w * n.links_t.p0["export"] * price["export"]).sum())
     rows = cb["commercial"]
     assert rows["energy_import"] == pytest.approx(imp, rel=1e-9)
     assert rows["energy_export"] == pytest.approx(exp, rel=1e-9)
@@ -336,13 +341,15 @@ def test_clearing_the_commercial_config_restores_the_plain_solve():
     assert _solve_cfg(n, None)[0] in ("ok", "optimal")
     assert float(n.objective) == pytest.approx(_plain_objective(_tariff_only_site), rel=1e-9)
     assert "import" not in n.links_t.marginal_cost.columns
+    # The plain solve's commit cleared the previous config's price frame.
+    assert L.META_LINKS not in n.meta
 
 
 def test_repointing_poc_link_restores_the_old_link():
     """#1: the previously priced Link goes back to its base cost."""
     n = build_edge_15min()
     n.add("Link", "import2", bus0="grid", bus1="poc", p_nom=80.0, carrier="AC")
-    L.materialise_poc_prices(n, _commercial(_tariff()))
+    L.materialise_poc_prices(n, _commercial(_tariff())).undo()
     L.materialise_poc_prices(n, {"poc_link": "import2",
                                  "import_tariff": _tariff().model_dump(mode="json")})
     assert "import" not in n.links_t.marginal_cost.columns
@@ -353,8 +360,9 @@ def test_dropping_export_items_restores_the_export_link():
     n = _with_export(build_edge_15min(), price=np.zeros(672))
     credit = TariffItem(id="fee", kind="energy", unit="per_kwh", measured_on="export",
                         periods=[TariffPeriod(name="all", rate=0.002)])
-    L.materialise_poc_prices(n, _commercial(_tariff(_tou(), credit), export_link="export"))
+    first = L.materialise_poc_prices(n, _commercial(_tariff(_tou(), credit), export_link="export"))
     assert "export" in n.links_t.marginal_cost.columns
+    first.undo()
     L.materialise_poc_prices(n, _commercial(_tariff(), export_link="export"))
     assert "export" not in n.links_t.marginal_cost.columns
 
@@ -364,17 +372,16 @@ def test_an_uploaded_price_series_on_the_poc_link_is_the_base():
     n = build_edge_15min()
     spot = np.linspace(10.0, 100.0, len(n.snapshots))
     n.links_t.marginal_cost["import"] = spot
-    L.materialise_poc_prices(n, _commercial(_tariff()))
-    L.materialise_poc_prices(n, _commercial(_tariff()))  # idempotent on a dynamic base
+    applied = L.materialise_poc_prices(n, _commercial(_tariff()))
     assert np.allclose(n.links_t.marginal_cost["import"], spot + _expected_eur_per_mwh(n.snapshots))
-    L.materialise_poc_prices(n, None)
+    applied.undo()
     assert np.allclose(n.links_t.marginal_cost["import"], spot)
 
 
 def test_a_newly_uploaded_base_replaces_the_remembered_one():
     """#2: `_reapply_ts` rewriting the column between solves is the new base."""
     n = build_edge_15min()
-    L.materialise_poc_prices(n, _commercial(_tariff()))
+    L.materialise_poc_prices(n, _commercial(_tariff())).undo()
     new_spot = np.full(len(n.snapshots), 7.0)
     n.links_t.marginal_cost["import"] = new_spot
     L.materialise_poc_prices(n, _commercial(_tariff()))
@@ -397,7 +404,7 @@ def test_snapshots_where_export_pays_more_than_import_costs_are_flagged():
     """#4: simultaneous import/export would lower cost; say so."""
     n = _with_export(build_edge_15min(), price=np.full(672, 300.0))
     terms = L.materialise_poc_prices(n, _commercial(_tariff(), export_link="export",
-                                                    export_price_ref=_REF))
+                                                    export_price_ref=_REF)).facts
     # Export pays 300 €/MWh; import costs 50/200/400 — every snapshot outside
     # the 400 €/MWh evening peak (4 h × 4 × 7 days = 112) is a circulation risk.
     assert terms["simultaneous_flow_risk_snapshots"] == 672 - 112
@@ -437,7 +444,9 @@ def test_rows_follow_the_links_the_last_solve_priced():
     """#7: after re-pointing poc_link without a re-solve, rows are flagged, not relabelled."""
     n = build_edge_15min()
     n.add("Link", "import2", bus0="grid", bus1="poc", p_nom=80.0, carrier="AC")
-    L.materialise_poc_prices(n, _commercial(_tariff()))
+    applied = L.materialise_poc_prices(n, _commercial(_tariff()))
+    applied.commit()
+    applied.undo()
     n.links_t.p0 = pd.DataFrame({"import": 1.0, "import2": 0.0}, index=n.snapshots)
     rows = L.energy_cost_rows(n, {"poc_link": "import2"})
     assert rows["energy_import"] is not None  # still the solved Link's cost
@@ -524,3 +533,76 @@ def test_route_coverage_refusal_leaves_the_previous_price_intact(client, install
     assert r.status_code == 422 and r.json()["detail"]["code"] == "export_price_coverage"
     col = session_ctx(client).network.links_t[L.EXPORT_PRICE_ATTR]["export"]
     assert not col.isna().any() and (col == 5.0).all()
+
+
+
+# ── Review round 2 (FAIL) — the tariff never lives in the user's cost ──────
+
+
+def test_an_uncommitted_apply_leaves_no_price_frame():
+    """#5: a failed solve undoes without commit; no rows from a mixed run."""
+    n = build_edge_15min()
+    L.materialise_poc_prices(n, _commercial(_tariff())).undo()
+    assert L.META_LINKS not in n.meta
+    assert n.links_t.get(L.ENERGY_PRICE_ATTR) is None or \
+        "import" not in n.links_t[L.ENERGY_PRICE_ATTR].columns
+
+
+@pytest.mark.live_solve
+def test_editing_the_poc_link_between_solves_does_not_double_the_tariff(client, install_network,
+                                                                       session_ctx):
+    """#1: a Properties edit (remove + add) must not adopt a tariffed column."""
+    n = _tariff_only_site()
+    n.links.loc["import", "marginal_cost"] = 3.0
+    install_network(n)
+    body = {"commercial": _commercial(_tariff())}
+    assert client.put("/api/simulation/solver_config", json=body).status_code == 200
+    live = session_ctx(client).network
+    assert _solve_cfg(live, _commercial(_tariff()))[0] in ("ok", "optimal")
+    r = client.put("/api/network/links/import",
+                   json={"name": "import", "bus0": "grid", "bus1": "poc", "p_nom": 90.0,
+                         "marginal_cost": 3.0, "carrier": "AC"})
+    assert r.status_code == 200, r.text
+    live = session_ctx(client).network
+    assert "import" not in live.links_t.marginal_cost.columns
+    assert _solve_cfg(live, _commercial(_tariff()))[0] in ("ok", "optimal")
+    assert np.allclose(live.links_t[L.ENERGY_PRICE_ATTR]["import"],
+                       _expected_eur_per_mwh(live.snapshots))
+
+
+@pytest.mark.live_solve
+def test_changing_the_snapshot_axis_between_solves_does_not_double_the_tariff():
+    """#2: extend the axis; the second solve prices from the base again."""
+    n = _tariff_only_site()
+    assert _solve_cfg(n, _commercial(_tariff()))[0] in ("ok", "optimal")
+    longer = pd.date_range(n.snapshots[0], periods=len(n.snapshots) + 96, freq="15min")
+    n.set_snapshots(longer)
+    n.snapshot_weightings.loc[:, :] = 0.25
+    n.loads_t.p_set = n.loads_t.p_set.ffill()
+    n.generators_t.p_max_pu = n.generators_t.p_max_pu.fillna(0.0)
+    assert _solve_cfg(n, _commercial(_tariff()))[0] in ("ok", "optimal")
+    assert "import" not in n.links_t.marginal_cost.columns
+    assert np.allclose(n.links_t[L.ENERGY_PRICE_ATTR]["import"], _expected_eur_per_mwh(n.snapshots))
+
+
+def test_averaging_does_not_run_across_a_gap():
+    """#3: the last snapshot before a gap averages one step, not the gap."""
+    fine = pd.Series(np.arange(24 * 4 * 40, dtype=float),
+                     index=pd.date_range("2030-01-01", periods=24 * 4 * 40, freq="15min"))
+    snaps = pd.DatetimeIndex(list(pd.date_range("2030-01-01", periods=24, freq="h"))
+                             + list(pd.date_range("2030-02-01", periods=24, freq="h")))
+    out = L.align_to_snapshots(fine, snaps)
+    at = snaps.get_loc(pd.Timestamp("2030-01-01 23:00"))
+    assert out.iloc[at] == pytest.approx(fine.loc["2030-01-01 23:00":"2030-01-01 23:45"].mean())
+
+
+def test_ic_frames_are_not_listed_as_user_time_series(client, install_network):
+    """#4: internal frames never reach the Time-Series tab or its GET."""
+    n = _with_export(build_edge_15min(), price=np.full(672, 5.0))
+    n.links_t[L.ENERGY_PRICE_ATTR] = pd.DataFrame({"import": 1.0}, index=n.snapshots)
+    install_network(n)
+    listed = {(e["component"], e["attribute"]) for e in client.get("/api/network/timeseries").json()}
+    assert not [a for c, a in listed if a.startswith("ic_")]
+    assert client.get(f"/api/network/timeseries/links/{L.EXPORT_PRICE_ATTR}").status_code == 404
+    assert client.put(f"/api/network/timeseries/links/{L.EXPORT_PRICE_ATTR}",
+                      json={}).status_code == 404

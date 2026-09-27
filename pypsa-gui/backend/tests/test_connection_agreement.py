@@ -53,10 +53,12 @@ def test_firm_with_a_fee_makes_the_poc_link_extendable_up_to_the_cap():
     applied = C.apply_connection_agreement(n, _agreement(fee=_fee(50.0)), poc_link="import")
     row = n.links.loc["import"]
     assert bool(row.p_nom_extendable) and row.p_nom_max == 60.0 and row.p_nom_min == 0.0
-    # €50/kW/yr = €50,000/MW/yr, scaled to a 7-day horizon.
-    assert row.capital_cost == pytest.approx(50_000.0 * 7 * 24 / 8760)
-    assert applied.facts["fee_eur_per_mw_year"] == 50_000.0
-    assert applied.facts["horizon_years"] == pytest.approx(7 * 24 / 8760)
+    # The fee is an explicit LP term (review #1/#4), not the user's capital_cost.
+    assert row.capital_cost == 0.0
+    assert applied.facts["connection"]["fee_eur_per_mw_year"] == 50_000.0
+    assert getattr(n, C.FEE_SPEC_ATTR) == {"link": "import", "fee_eur_per_mw_year": 50_000.0}
+    applied.undo()
+    assert not hasattr(n, C.FEE_SPEC_ATTR)
 
 
 def test_firm_without_a_fee_fixes_the_connection_at_the_cap():
@@ -128,10 +130,11 @@ def test_a_fee_in_an_unsupported_unit_is_refused_before_any_mutation():
     pd.testing.assert_frame_equal(before_static, _snapshot_links(n)[0])
 
 
-def test_non_firm_dynamic_and_fca_are_left_to_wp1_4b():
+def test_a_dynamic_agreement_without_a_materialised_envelope_is_refused():
+    # WP1.4b binds envelopes; one never resolved onto the network is refused.
     n = build_edge_15min()
     env = {"id": "env", "version": 1, "hash": "a" * 64, "source": "t"}
-    with pytest.raises(C.CommercialBindingError, match="WP1.4b"):
+    with pytest.raises(C.CommercialBindingError, match="envelope"):
         C.apply_connection_agreement(
             n, _agreement(kind="non_firm_dynamic", envelope=env), poc_link="import")
 
@@ -141,7 +144,7 @@ def test_a_monthly_fee_is_twelve_times_the_annual_rate():
     monthly = TariffItem(id="m", kind="capacity", unit="per_kw_month",
                          periods=[TariffPeriod(name="all", rate=4.0)])
     applied = C.apply_connection_agreement(n, _agreement(fee=monthly), poc_link="import")
-    assert applied.facts["fee_eur_per_mw_year"] == 48_000.0
+    assert applied.facts["connection"]["fee_eur_per_mw_year"] == 48_000.0
 
 
 # ── multi-period `available_from` ──────────────────────────────────────────
@@ -265,3 +268,167 @@ def test_multi_period_available_from_blocks_the_early_period_and_reconciles():
     cb = compute_cost_breakdown(n, cfg)
     dec = compute_objective_decomposition(n, cb)
     assert abs(dec["gap_pct"]) < 1e-6, dec
+
+
+# ── Review round 1 (FAIL) — each finding pinned before its fix ─────────────
+
+
+def _run(n, commercial, **cfg_kw):
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig, run_simulation
+
+    PyPSAService.set_network(n)
+    cfg = SolverConfig(commercial=commercial, **cfg_kw)
+    status, condition = run_simulation(cfg, n, PyPSAService.get_lock(), threading.Event(),
+                                       queue.SimpleQueue(), state_update=lambda **kw: None)
+    return status, condition, cfg
+
+
+def _gap_and_cb(n, cfg):
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.results.objective_decomposition import compute_objective_decomposition
+
+    cb = compute_cost_breakdown(n, cfg)
+    return compute_objective_decomposition(n, cb)["gap_pct"], cb
+
+
+@pytest.mark.live_solve
+def test_a_fee_on_a_fixed_non_firm_connection_is_reported_outside_the_lp_total():
+    """#1: a fee on fixed capacity is a fixed charge — not in the LP, so not in
+    the reconciled total; reported, flagged, billed by the billing pass."""
+    n = build_edge_15min()
+    n.add("Generator", "backup", bus="site", p_nom=100.0, marginal_cost=500.0, carrier="grid")
+    status, _, cfg = _run(n, _conn(_agreement(kind="non_firm_static", cap=30.0, fee=_fee(80.0))))
+    assert status in ("ok", "optimal")
+    gap, cb = _gap_and_cb(n, cfg)
+    assert abs(gap) < 1e-6
+    fixed = cb["commercial"]["network_capacity_fixed"]
+    assert fixed["included_in_total"] is False and "fixed_charge_not_in_lp" in fixed["flags"]
+    assert fixed["eur"] == pytest.approx(80_000.0 * 30.0 * 7 * 24 / 8760)
+
+
+def _promoted_two_period():
+    """Flat weather-year snapshots promoted to periods — the GUI's layout: the
+    SAME timestamps repeat in every period."""
+    base = build_edge_15min()
+    n = base.copy()
+    n.set_snapshots(base.snapshots[:96])
+    n.snapshot_weightings.loc[:, :] = 0.25
+    n.loads_t.p_set = base.loads_t.p_set.iloc[:96]
+    n.generators_t.p_max_pu = base.generators_t.p_max_pu.iloc[:96]
+    n.set_investment_periods([2030, 2035])
+    n.add("Generator", "backup", bus="site", p_nom=100.0, marginal_cost=500.0, carrier="grid")
+    return n
+
+
+def test_available_from_on_repeated_timestamps_blocks_by_period():
+    """#2: timestamps are 2030 in both periods; 2035 must stay open."""
+    n = _promoted_two_period()
+    C.apply_connection_agreement(n, _agreement(available_from=date(2035, 1, 1)),
+                                 poc_link="import")
+    pmp = n.links_t.p_max_pu["import"]
+    assert (pmp.loc[2030] == 0.0).all() and (pmp.loc[2035] > 0.0).all()
+    assert int(n.links.at["import", "build_year"]) == 2035
+
+
+def test_non_firm_static_respects_an_existing_availability_profile():
+    """#3: PyPSA reads the time-varying column when one exists."""
+    n = build_edge_15min()
+    n.links_t.p_max_pu["import"] = 0.9
+    applied = C.apply_connection_agreement(n, _agreement(kind="non_firm_static", cap=30.0),
+                                           poc_link="import")
+    assert np.allclose(n.links_t.p_max_pu["import"], 30.0 / 80.0)
+    applied.undo()
+    assert np.allclose(n.links_t.p_max_pu["import"], 0.9)
+
+
+@pytest.mark.live_solve
+def test_a_fee_reconciles_when_the_poc_link_carries_an_overnight_cost():
+    """#4: the fee is an explicit LP term, not smuggled into capital_cost."""
+    n = build_edge_15min()
+    n.links.loc["import", ["overnight_cost", "lifetime"]] = [1000.0, 40.0]
+    status, _, cfg = _run(n, _conn(_agreement(fee=_fee(80.0))))
+    assert status in ("ok", "optimal")
+    gap, cb = _gap_and_cb(n, cfg)
+    assert abs(gap) < 1e-6, gap
+    assert cb["commercial"]["network_capacity"] > 0
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("strategy", ["rolling"])
+def test_a_fee_with_windowed_dispatch_is_refused(strategy):
+    """#5/#6: myopic/rolling charge per window; refused in P1 (P6 scope)."""
+    n = build_edge_15min()
+    status, condition, _ = _run(n, _conn(_agreement(fee=_fee(80.0))), solve_strategy=strategy)
+    assert (status, condition) == ("error", "commercial_binding_failed")
+
+
+def test_a_fee_with_myopic_foresight_is_refused():
+    from models.commercial import CommercialConfig
+
+    n = _promoted_two_period()
+    with pytest.raises(C.CommercialBindingError, match="myopic"):
+        C.apply_commercial_for_solve(n, _conn(_agreement(fee=_fee(80.0))),
+                                     solve_strategy="myopic", multi_period=True)
+
+
+@pytest.mark.live_solve
+def test_horizon_system_cost_agrees_with_the_breakdown_with_commercial_terms():
+    """#5: the solve-queue/status-bar total must include the commercial rows."""
+    from services.cost_totals import horizon_system_cost
+
+    n = build_edge_15min()
+    status, _, cfg = _run(n, {**_conn(_agreement(fee=_fee(80.0))),
+                              "import_tariff": {
+                                  "id": "t", "name": "t", "jurisdiction": "DE",
+                                  "valid_from": "2030-01-01",
+                                  "items": [{"id": "e", "kind": "energy", "unit": "per_kwh",
+                                             "periods": [{"name": "all", "rate": 0.1}]}]}})
+    assert status in ("ok", "optimal")
+    gap, cb = _gap_and_cb(n, cfg)
+    assert abs(gap) < 1e-6
+    assert horizon_system_cost(n, cfg) == pytest.approx(cb["total"], rel=1e-9)
+
+
+@pytest.mark.live_solve
+def test_firm_without_a_fee_keeps_a_user_extendable_link_extendable():
+    """#7: capped, not fixed, so the user's own capital cost still reconciles."""
+    n = build_edge_15min()
+    n.links.loc["import", ["p_nom_extendable", "capital_cost", "p_nom_max"]] = [True, 1000.0, 200.0]
+    status, _, cfg = _run(n, _conn(_agreement(cap=60.0, fee=None)))
+    assert status in ("ok", "optimal")
+    assert n.links.at["import", "p_nom_opt"] <= 60.0 + 1e-6
+    gap, _ = _gap_and_cb(n, cfg)
+    assert abs(gap) < 1e-6, gap
+
+
+@pytest.mark.live_solve
+def test_breakdown_components_still_sum_to_the_totals():
+    """#9: the commercial terms are a component, so Σ by_component == totals."""
+    n = build_edge_15min()
+    status, _, cfg = _run(n, _conn(_agreement(fee=_fee(80.0))))
+    assert status in ("ok", "optimal")
+    _, cb = _gap_and_cb(n, cfg)
+    comps = cb["by_component"]
+    assert sum(c["capex"] for c in comps) == pytest.approx(cb["capex"], rel=1e-9)
+    assert sum(c["opex"] for c in comps) == pytest.approx(cb["opex"], rel=1e-9)
+    assert any(c["component"] == "Commercial" for c in comps)
+
+
+def test_available_from_is_read_on_the_site_clock_when_snapshots_are_utc():
+    """#10: midnight in Berlin is 23:00 UTC the day before."""
+    n = build_edge_15min()
+    C.apply_connection_agreement(n, _agreement(available_from=date(2030, 1, 10)),
+                                 poc_link="import", timezone="Europe/Berlin")
+    pmp = n.links_t.p_max_pu["import"]
+    assert pmp.loc[pd.Timestamp("2030-01-09 22:45")] == 0.0
+    assert pmp.loc[pd.Timestamp("2030-01-09 23:00")] == 1.0
+
+
+def test_a_fee_not_established_after_the_solve_is_flagged_not_dropped():
+    """#10 ADR-0001: config names a fee, no committed coefficient → flag."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = build_edge_15min()
+    terms = commercial_cost_terms(n, _conn(_agreement(fee=_fee(80.0))))
+    assert "network_capacity_not_established" in terms["flags"]

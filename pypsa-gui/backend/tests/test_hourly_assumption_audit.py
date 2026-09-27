@@ -24,6 +24,9 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "adequacy/sweep.py": (3, "same occurrence formula as occurrence.py — a unit"),
     "asset_results/compute.py": (2, "prose explaining why Σweights/8760 is avoided"),
     "chat_service.py": (1, "prompt text about CSV row counts"),
+    "commercial/connection.py": (4, "8760 h/yr converts an ANNUAL connection fee to the "
+                                    "operating time the snapshots represent (Σ weights / 8760) "
+                                    "— a unit, not a step (IC WP1.4a)"),
     "chat_tools.py": (2, "prose / output-budget guidance"),
     "chat_tools_schema.py": (3, "tool descriptions (row counts, default hours)"),
     "legacy_import.py": (1, "prose describing a legacy fixture"),
@@ -61,6 +64,6 @@ def test_every_hourly_assumption_site_is_listed_with_a_reason():
 
 
 def test_the_initial_inventory_is_pinned_at_38_sites_in_19_files():
-    assert sum(c for c, _ in ALLOWED.values()) == 38
-    assert len(ALLOWED) == 19
+    assert sum(c for c, _ in ALLOWED.values()) == 42
+    assert len(ALLOWED) == 20
     assert all(reason for _, reason in ALLOWED.values())

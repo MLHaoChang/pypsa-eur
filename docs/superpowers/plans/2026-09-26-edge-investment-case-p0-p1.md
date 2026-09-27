@@ -349,6 +349,15 @@ materialised prices — needed for this WP's gap-0 invariant), `backend/tests/te
     (export item without export Link, unrated snapshots → 422); (9) refusals are `{code, message}`
     (`commercial_binding_invalid`, `library_org_unknown`); (10) a finer series is averaged per snapshot step and
     a resampled axis is refused via `n.meta["ic_export_price_axis"]`.
+  - Re-review → **FAIL** (a Properties-panel edit or a snapshot-axis change re-adopted the tariffed column as the
+    base: double counting). **Redesign: the PoC prices are TRANSIENT** like every other LP transform — applied
+    for the solve on top of the user's cost and undone after it, so the user's `marginal_cost` is never modified
+    on disk and no base/written bookkeeping exists. `Applied.commit()` (called only after a successful solve)
+    persists the €/MWh added per Link in `links_t["ic_energy_price"]` and `n.meta["ic_poc_links"]`; the rows are
+    recomputed from those and ADDED to the totals (they are not in `n.statistics()`). Averaging no longer spans
+    gaps (window = min(next snapshot, one step)); `ic_*` frames are hidden from and refused by the time-series
+    routes. **Plan acceptance amended:** "`links_t.marginal_cost[poc]` equals the rates (persisted)" is met by
+    the persisted `ic_energy_price` frame; the LP sees the rates during the solve.
 
 ### WP1.4a Connection agreement — firm, non-firm static, `available_from`
 Files: `backend/services/commercial/connection.py`, `backend/tests/test_connection_agreement.py`.
@@ -371,6 +380,18 @@ Files: `backend/services/commercial/connection.py`, `backend/tests/test_connecti
   restore. `cost_breakdown["commercial"]["network_capacity"]` is recomputed from config + `p_nom_opt` and ADDED
   to capex (the fee is not on the Link after the undo); gap 0 single- and multi-period. Tests:
   `test_connection_agreement.py` (18, 6 live).
+- Review round 1 → **FAIL**, fixed: the fee is an **explicit LP term** on the PoC Link's `p_nom`
+  (`connection.add_fee_term`, via `_wrap_with_commercial_bindings`), never `capital_cost` — so `overnight_cost`
+  and fixed capacity cannot drop it (#1, #4); per period `w_obj(p)·fee·nyears(p)`, the same rule on flat and
+  multi-period axes (#8), with the per-period €/MW committed to `n.meta["ic_connection_fee"]` on success; a fee
+  on FIXED capacity (non-firm, fca) is a fixed charge reported as `network_capacity_fixed` outside the total,
+  flagged `fixed_charge_not_in_lp` (#1); `available_from` closes by PERIOD on a multi-period axis (flat
+  snapshots promoted repeat their timestamps) and by site-clock date on a flat one (#2, #10); non-firm
+  availability respects an existing `p_max_pu` profile (#3); firm without fee caps a user-extendable Link
+  instead of fixing it (#7); a fee with rolling/myopic is refused in P1 (#5, #6). `services/commercial/
+  cost_rows.commercial_cost_terms` is the one source for the commercial rows: `cost_breakdown` folds them in as
+  the component "Commercial" (Σ by_component == totals, per period) and `cost_totals.horizon_system_cost` adds
+  the same items (#5, #9); a fee named by the config but not committed is None + `network_capacity_not_established`.
 
 ### WP1.4b Connection agreement — dynamic envelope and FCA
 - [ ] Design line first: `services/adequacy/stress.py` knows `VALID_KINDS=("parametric","profiles")`, and its
@@ -383,6 +404,14 @@ Files: `backend/services/commercial/connection.py`, `backend/tests/test_connecti
 - [ ] Red: `non_firm_dynamic` → time-varying `p_max_pu` from the envelope series (resolved via WP1.1a);
   `fca` → envelope plus the stress entry registered; undo restores; **gap 0**.
 - [ ] Green: implementation.
+- As implemented: `stress.py` profiles accept `links_p_max_pu` (validate / mutate / undo like
+  `generators_p_max_pu`; `test_stress_links_profile.py`). The config route resolves `connection.envelope` from the
+  Library into `links_t["ic_envelope_mw"]` (aligned, written only when covered, axis-hashed; `envelope_coverage`,
+  `timezone_required`). `non_firm_dynamic`/`fca`+envelope → `p_max_pu = min(existing, min(envelope, cap)/p_nom)`
+  for the solve; `fca` without envelope → capped at the contracted capacity. `fca_stress_entry` zeroes the
+  highest-load snapshots worth `curtailment_hours_per_year × horizon years` (stable order, deterministic),
+  `frequency_per_year = 1`, `disclosure: fca_synthetic_hours`; the route registers it (replace by id) in the
+  project's stress registry. Tests: `test_connection_envelope.py`.
 
 ### WP1.5a-0 Spike — new linopy variables inside `extra_functionality`
 No precedent exists (`grep add_variables services/ tests/` → 0 hits). Half a day, recorded in

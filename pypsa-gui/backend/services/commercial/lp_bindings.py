@@ -15,18 +15,20 @@ Links as a time-varying `marginal_cost` before the linopy model is built:
     `export_price_ref` from the Library and writes it there (see
     `routers/simulation._bind_commercial`).
 
-**Base cost and restore (review round 1 #1, #2).** The base is what the Link
-costs without the commercial layer: a user-uploaded time-varying cost (an
-indexed/spot price, re-applied from the user-TS store before this runs) or else
-the static `marginal_cost`. Two persisted custom frames remember, per Link, the
-base (`ic_base_marginal_cost`, NaN = the static cost) and the column last
-written (`ic_written_marginal_cost`). On every LOPF solve, including one with no
-commercial config, a Link that was priced before and is not priced now goes back
-to its base. A column that differs from what was written was changed by someone
-else (a re-upload) and becomes the new base. The columns persist with the
-network, and the reported energy cost is recomputed from them after a reload
-(spec §5.1: rows from persisted data, never transient stashes).
-`n.meta["ic_poc_links"]` records which Links the last materialisation priced.
+**Transient, like every other LP transform (re-review #1, #2).** The prices are
+applied for ONE solve on top of whatever the Link costs without the commercial
+layer (a user-uploaded time-varying cost re-applied from the user-TS store, or
+else the static `marginal_cost`), and `Applied.undo()` puts the column back
+exactly as it was. The user's `marginal_cost` is therefore never modified on
+disk. A Properties-panel edit, a snapshot-axis change, a re-upload or a
+cleared config cannot turn an old tariff into a new base. What the report needs
+afterwards, the €/MWh ADDED per priced Link, is written to the persisted custom
+frame `links_t["ic_energy_price"]` by `Applied.commit()`, which `run_simulation`
+calls only after a successful solve (#5), together with
+`n.meta["ic_poc_links"]` (which Links that solve priced). `energy_cost_rows`
+recomputes the energy import/export rows from those persisted frames and the
+dispatch, so the rows are identical after a reload (spec §5.1). They are NOT in
+`n.statistics()` (the prices were undone) and are ADDED to the total.
 
 **Two-way Links are refused (#3).** An import item bills `max(import, 0)`; a
 PoC Link with `p_min_pu < 0` would be paid the import tariff on reverse flow.
@@ -66,8 +68,7 @@ from models.commercial import CommercialConfig, TariffItem
 from services.commercial.tariff_engine import _rates
 
 EXPORT_PRICE_ATTR = "ic_export_price"
-BASE_ATTR = "ic_base_marginal_cost"
-WRITTEN_ATTR = "ic_written_marginal_cost"
+ENERGY_PRICE_ATTR = "ic_energy_price"
 META_LINKS = "ic_poc_links"
 META_PRICE_AXIS = "ic_export_price_axis"
 _KWH_PER_MWH = 1000.0
@@ -81,6 +82,38 @@ class CommercialBindingError(ValueError):
 
 class TimezoneRequired(CommercialBindingError):
     code = "timezone_required"
+
+
+class Applied:
+    """A transient transform for one solve: `undo()` restores every mutated
+    attribute (reverse order, once); `commit()` persists what the report needs
+    and is called only after a successful solve."""
+
+    def __init__(self, facts: dict | None = None):
+        self.facts: dict = facts or {}
+        self._undo: list = []
+        self._commit: list = []
+        self._done = False
+
+    def undo(self) -> None:
+        if self._done:
+            return
+        self._done = True
+        for fn in reversed(self._undo):
+            fn()
+
+    def commit(self) -> None:
+        for fn in self._commit:
+            fn()
+
+    def chain(self, other: "Applied | None") -> "Applied":
+        """Compose `other` (applied AFTER self): undone first, committed after."""
+        if other is None:
+            return self
+        both = Applied({**self.facts, **other.facts})
+        both._undo = [self.undo, other.undo]
+        both._commit = [self.commit, other.commit]
+        return both
 
 
 # ── small helpers ──────────────────────────────────────────────────────────
@@ -239,7 +272,11 @@ def align_to_snapshots(series: pd.Series, snapshots: pd.Index,
     sv = s.to_numpy(dtype=float)
     if src_step is not None and tgt_step is not None and src_step < tgt_step:
         # Finer source: mean over [t, t + step) for each snapshot.
-        nxt = np.append(target[1:].asi8, target[-1].value + tgt_step.value)
+        # The window ends at the next snapshot OR one step on, whichever is
+        # first: across a gap (representative weeks, a period boundary) the
+        # last snapshot must not average the whole gap (re-review #3).
+        nxt = np.minimum(np.append(target[1:].asi8, np.iinfo(np.int64).max),
+                         target.asi8 + tgt_step.value)
         lo = np.searchsorted(s.index.asi8, target.asi8, side="left")
         hi = np.searchsorted(s.index.asi8, nxt, side="left")
         csum = np.concatenate([[0.0], np.cumsum(sv)])
@@ -291,64 +328,30 @@ def _export_price(n, cfg: CommercialConfig) -> np.ndarray:
     return col.to_numpy(dtype=float)
 
 
-# ── materialisation with base / restore ────────────────────────────────────
-
-
-def _base_for(n, link: str, base: pd.DataFrame, written: pd.DataFrame) -> np.ndarray | None:
-    """The link's base cost per snapshot (None = the static cost)."""
-    mc = n.links_t.marginal_cost
-    current = mc[link].to_numpy(dtype=float) if link in mc.columns else None
-    if link in written.columns and current is not None:
-        was = written[link].to_numpy(dtype=float)
-        if np.allclose(current, was, equal_nan=True, rtol=0, atol=1e-9):
-            remembered = base[link].to_numpy(dtype=float) if link in base.columns else None
-            if remembered is None or np.isnan(remembered).all():
-                return None
-            return np.where(np.isnan(remembered), float(n.links.at[link, "marginal_cost"]),
-                            remembered)
-    return current  # someone else's column (a re-upload) or none: the new base
-
-
-def _restore(n, links, base: pd.DataFrame, written: pd.DataFrame) -> None:
-    mc = n.links_t.marginal_cost
-    for link in list(links):
-        if link in mc.columns and link in written.columns and np.allclose(
-                mc[link].to_numpy(dtype=float), written[link].to_numpy(dtype=float),
-                equal_nan=True, rtol=0, atol=1e-9):
-            b = base[link].to_numpy(dtype=float) if link in base.columns else None
-            if b is None or np.isnan(b).all():
-                n.links_t.marginal_cost = mc.drop(columns=[link])
-                mc = n.links_t.marginal_cost
-            else:
-                mc[link] = np.where(np.isnan(b), float(n.links.at[link, "marginal_cost"]), b)
-        base.drop(columns=[link], inplace=True, errors="ignore")
-        written.drop(columns=[link], inplace=True, errors="ignore")
-
-
-def _store_markers(n, base: pd.DataFrame, written: pd.DataFrame) -> None:
-    n.links_t[BASE_ATTR] = base
-    n.links_t[WRITTEN_ATTR] = written
+# ── materialisation (transient, committed on success) ──────────────────────
 
 
 def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
-                           *, log=None) -> dict | None:
-    """Write PoC energy prices onto the network (see module docstring).
+                           *, log=None) -> Applied:
+    """Apply PoC energy prices for one solve (see module docstring).
 
-    Runs on EVERY LOPF solve: with no commercial config it restores any Link a
-    previous config priced and returns None. Otherwise returns the terms
-    applied (for `last_commercial_terms`). Raises `CommercialBindingError` when
-    the config cannot bind; a missing price is refused, never priced at 0.
+    Always returns an `Applied`: with no commercial config it mutates nothing,
+    and its `commit()` clears the persisted price frame, so a plain solve does
+    not keep reporting a previous config's energy rows. `facts` holds the terms
+    (`last_commercial_terms`), or is empty. Raises `CommercialBindingError`
+    when the config cannot bind; a missing price is refused, never priced at 0.
+    Validation runs before the first mutation.
     """
-    base = _frame(n, BASE_ATTR)
-    written = _frame(n, WRITTEN_ATTR)
     if not commercial:
-        if len(written.columns):
-            _restore(n, list(written.columns), base, written)
-            _store_markers(n, base, written)
-            if log is not None:
-                log("[COMMERCIAL] no commercial config: PoC Links restored to their base cost")
-        n.meta.pop(META_LINKS, None)
-        return None
+        applied = Applied()
+
+        def clear() -> None:
+            if hasattr(n.links_t, "get") and n.links_t.get(ENERGY_PRICE_ATTR) is not None:
+                n.links_t[ENERGY_PRICE_ATTR] = pd.DataFrame(index=n.snapshots)
+            n.meta.pop(META_LINKS, None)
+
+        applied._commit.append(clear)
+        return applied
 
     cfg = _parse(commercial)
     validate_for_network(n, cfg)
@@ -363,59 +366,84 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
     if cfg.export_link is not None and (has_price or adders["export"].any()):
         targets[cfg.export_link] = adders["export"]
 
-    _restore(n, [l for l in written.columns if l not in targets], base, written)
+    applied = Applied()
     mc = n.links_t.marginal_cost
     for link, add in targets.items():
-        b = _base_for(n, link, base, written)
-        static = float(n.links.at[link, "marginal_cost"])
-        values = (static if b is None else b) + add
-        mc[link] = values
-        base[link] = np.nan if b is None else b
-        written[link] = values
-    _store_markers(n, base, written)
-    n.meta[META_LINKS] = {"import": cfg.poc_link, "export": cfg.export_link}
+        had = link in mc.columns
+        old = mc[link].copy() if had else None
+        base = old.to_numpy(dtype=float) if had else float(n.links.at[link, "marginal_cost"])
+        mc[link] = base + add
+
+        def undo(link=link, had=had, old=old) -> None:
+            live = n.links_t.marginal_cost
+            if had:
+                live[link] = old
+            elif link in live.columns:
+                n.links_t.marginal_cost = live.drop(columns=[link])
+
+        applied._undo.append(undo)
+
+    def commit() -> None:
+        frame = pd.DataFrame({link: add for link, add in targets.items()}, index=n.snapshots)
+        n.links_t[ENERGY_PRICE_ATTR] = frame
+        n.meta[META_LINKS] = {"import": cfg.poc_link, "export": cfg.export_link}
+
+    applied._commit.append(commit)
 
     risk = 0
     if cfg.export_link is not None:
-        imp = (mc[cfg.poc_link].to_numpy(dtype=float) if cfg.poc_link in mc.columns
-               else np.full(len(n.snapshots), float(n.links.at[cfg.poc_link, "marginal_cost"])))
-        exp = (mc[cfg.export_link].to_numpy(dtype=float) if cfg.export_link in mc.columns
-               else np.full(len(n.snapshots),
-                            float(n.links.at[cfg.export_link, "marginal_cost"])))
-        risk = int(((imp + exp) < -1e-9).sum())  # export revenue > import cost
+        def cost(link):
+            return (mc[link].to_numpy(dtype=float) if link in mc.columns
+                    else np.full(len(n.snapshots), float(n.links.at[link, "marginal_cost"])))
+        risk = int(((cost(cfg.poc_link) + cost(cfg.export_link)) < -1e-9).sum())
     if log is not None:
-        log(f"[COMMERCIAL] PoC prices materialised on {sorted(targets)} "
+        log(f"[COMMERCIAL] PoC prices applied on {sorted(targets)} "
             f"({len(energy_items)} energy item(s); {len(not_in_lp)} left to later bindings"
             + (f"; WARNING {risk} snapshot(s) pay more to export than to import" if risk else "")
             + ")")
-    return {"poc_link": cfg.poc_link, "export_link": cfg.export_link,
-            "priced_links": sorted(targets), "energy_items": energy_items,
-            "not_in_lp": not_in_lp, "notes": notes, "timezone": cfg.timezone,
-            "simultaneous_flow_risk_snapshots": risk,
-            "export_price_ref": (cfg.export_price_ref.model_dump(mode="json")
-                                 if cfg.export_price_ref is not None else None)}
+    applied.facts = {
+        "poc_link": cfg.poc_link, "export_link": cfg.export_link,
+        "priced_links": sorted(targets), "energy_items": energy_items,
+        "not_in_lp": not_in_lp, "notes": notes, "timezone": cfg.timezone,
+        "simultaneous_flow_risk_snapshots": risk,
+        "export_price_ref": (cfg.export_price_ref.model_dump(mode="json")
+                             if cfg.export_price_ref is not None else None)}
+    return applied
 
 
 def _wrap_with_commercial_bindings(network, user_fn, cfg, log_queue=None):
     """`extra_functionality` hook for LP-level commercial terms (spec §5.1).
 
-    Same closure/chaining shape as `_wrap_with_capex_budget`. WP1.3 adds no
-    LP rows (energy prices are `marginal_cost`), so this returns `user_fn`
-    unchanged; WP1.5–WP1.6 add their constraints here.
+    Same closure/chaining shape as `_wrap_with_capex_budget`: the user's
+    callback runs first, then the commercial terms. WP1.4a adds the connection
+    capacity fee on the PoC Link's `p_nom` (`connection.add_fee_term`); peaks,
+    ratchets, tiers and group caps (WP1.5-WP1.6) join here. Returns `user_fn`
+    unchanged when there is no commercial config.
     """
-    return user_fn
+    if not getattr(cfg, "commercial", None):
+        return user_fn
+
+    def fn(n, sns):
+        if user_fn is not None:
+            user_fn(n, sns)
+        from services.commercial import connection  # lazy: connection imports this module
+
+        connection.add_fee_term(n)
+
+    return fn
 
 
 # ── cost rows (persisted data) ─────────────────────────────────────────────
 
 
 def energy_cost_rows(n, commercial: dict | None) -> dict | None:
-    """`energy_import` / `energy_export` for `cost_breakdown`, from the
-    PERSISTED `links_t.marginal_cost`, dispatch and `n.meta["ic_poc_links"]`
-    (the Links the last solve priced), so identical after a reload.
+    """`energy_import` / `energy_export` for `cost_breakdown`: the tariff (and,
+    on export, − the export price) the last successful solve charged, from the
+    PERSISTED `links_t["ic_energy_price"]`, `n.meta["ic_poc_links"]` and the
+    dispatch. They are identical after a reload.
 
-    Both are already inside the statistics OPEX of their Links, so the rows
-    are a labelled split of the total, not an addition to it. A value that
+    The prices were applied transiently, so these amounts are NOT inside
+    `n.statistics()` OPEX: the caller ADDS them to the total. A value that
     cannot be computed is None with a flag (ADR-0001), never 0.
     """
     solved = n.meta.get(META_LINKS) if hasattr(n, "meta") else None
@@ -435,10 +463,13 @@ def energy_cost_rows(n, commercial: dict | None) -> dict | None:
     if cfg is not None and (cfg.poc_link != solved.get("import")
                             or cfg.export_link != solved.get("export")):
         flags.append("config_changed_since_solve")
+    if not commercial:
+        flags.append("config_cleared_since_solve")
     w = n.snapshot_weightings.objective
     if isinstance(n.snapshots, pd.MultiIndex):
         years = n.investment_period_weightings["objective"]
         w = w * years.reindex(n.snapshots.get_level_values(0)).to_numpy()
+    prices = _frame(n, ENERGY_PRICE_ATTR)
 
     def p0_of(link):
         return n.links_t.p0[link] if link in n.links_t.p0.columns else None
@@ -446,12 +477,14 @@ def energy_cost_rows(n, commercial: dict | None) -> dict | None:
     def row(link: str | None, label: str) -> float | None:
         if link is None:
             return None
-        if link not in n.links.index or p0_of(link) is None:
+        if link not in prices.columns:
+            return 0.0 if link in n.links.index else None  # priced nothing on this Link
+        add = prices[link]
+        p0 = p0_of(link)
+        if p0 is None or add.isna().any():
             flags.append(f"{label}_not_established")
             return None
-        mc = (n.links_t.marginal_cost[link] if link in n.links_t.marginal_cost.columns
-              else pd.Series(float(n.links.at[link, "marginal_cost"]), index=n.snapshots))
-        return float((w * p0_of(link) * mc).sum())
+        return float((w * p0 * add).sum())
 
     imp_link, exp_link = solved.get("import"), solved.get("export")
     out = {"energy_import": row(imp_link, "energy_import"),

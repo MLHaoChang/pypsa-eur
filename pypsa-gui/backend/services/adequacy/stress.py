@@ -113,28 +113,28 @@ def _series_map(raw) -> dict[str, list[float]] | None:
     return out or None
 
 
+_PROFILE_SLOTS = ("loads_p_set", "generators_p_max_pu", "links_p_max_pu")
+
+
 def _profiles_payload(scenario: dict) -> tuple[
-        dict[str, list[float]] | None, dict[str, list[float]] | None]:
-    """Resolve inline series or ``profile_pack`` into (loads, gens) maps."""
+        dict[str, list[float]] | None, dict[str, list[float]] | None,
+        dict[str, list[float]] | None]:
+    """Resolve inline series or ``profile_pack`` into (loads, gens, links) maps.
+
+    ``links_p_max_pu`` (Edge Investment Case WP1.4b) carries a Link's
+    availability — an FCA connection's curtailment hours on the PoC Link."""
     sc = scenario
-    if sc.get("profile_pack"):
-        pack = load_synthetic_profile_pack(str(sc["profile_pack"]))
-        # Inline keys on the scenario override pack fields.
-        loads = _series_map(sc.get("loads_p_set")) or _series_map(
-            pack.get("loads_p_set"))
-        gens = _series_map(sc.get("generators_p_max_pu")) or _series_map(
-            pack.get("generators_p_max_pu"))
-        return loads, gens
-    return (_series_map(sc.get("loads_p_set")),
-            _series_map(sc.get("generators_p_max_pu")))
+    pack = load_synthetic_profile_pack(str(sc["profile_pack"])) if sc.get("profile_pack") else {}
+    # Inline keys on the scenario override pack fields.
+    return tuple(_series_map(sc.get(slot)) or _series_map(pack.get(slot))
+                 for slot in _PROFILE_SLOTS)
 
 
 def _profiles_ready(scenario: dict) -> bool:
-    loads, gens = _profiles_payload(scenario)
-    if loads is None and gens is None:
+    maps = _profiles_payload(scenario)
+    if all(m is None for m in maps):
         return False
-    lengths = [len(v) for v in (loads or {}).values()]
-    lengths += [len(v) for v in (gens or {}).values()]
+    lengths = [len(v) for m in maps for v in (m or {}).values()]
     if not lengths:
         return False
     return len(set(lengths)) == 1 and lengths[0] > 0
@@ -142,8 +142,7 @@ def _profiles_ready(scenario: dict) -> bool:
 
 def _profiles_match_horizon(scenario: dict, n_snapshots: int) -> bool:
     """True when every series length equals the live network horizon."""
-    loads, gens = _profiles_payload(scenario)
-    for series_map in (loads, gens):
+    for series_map in _profiles_payload(scenario):
         if series_map is None:
             continue
         if any(len(v) != n_snapshots for v in series_map.values()):
@@ -188,18 +187,14 @@ def _validate(scenarios: list[dict]) -> None:
         elif sc.get("kind") == "profiles":
             # Incomplete is allowed in the registry (forward-compat climate
             # stub) but series that ARE present must be finite + equal length.
-            loads = _series_map(sc.get("loads_p_set"))
-            gens = _series_map(sc.get("generators_p_max_pu"))
-            if sc.get("loads_p_set") is not None and loads is None:
-                raise StressValidationError(
-                    f"scenario '{sid}': loads_p_set must be "
-                    "{{name: [finite floats, ...]}}")
-            if sc.get("generators_p_max_pu") is not None and gens is None:
-                raise StressValidationError(
-                    f"scenario '{sid}': generators_p_max_pu must be "
-                    "{{name: [finite floats, ...]}}")
-            lengths = [len(v) for v in (loads or {}).values()]
-            lengths += [len(v) for v in (gens or {}).values()]
+            lengths: list[int] = []
+            for slot in _PROFILE_SLOTS:
+                parsed = _series_map(sc.get(slot))
+                if sc.get(slot) is not None and parsed is None:
+                    raise StressValidationError(
+                        f"scenario '{sid}': {slot} must be "
+                        "{{name: [finite floats, ...]}}")
+                lengths += [len(v) for v in (parsed or {}).values()]
             if lengths and len(set(lengths)) != 1:
                 raise StressValidationError(
                     f"scenario '{sid}': profile series length mismatch "
@@ -328,7 +323,7 @@ def _profiles_mutate(scenario: dict):
     Series length must equal ``len(n.snapshots)`` at mutate time; otherwise
     the contingency fails closed (no partial apply).
     """
-    loads_map, gens_map = _profiles_payload(scenario)
+    loads_map, gens_map, links_map = _profiles_payload(scenario)
 
     def mutate(n):
         import pandas as pd
@@ -338,7 +333,8 @@ def _profiles_mutate(scenario: dict):
 
         h = len(n.snapshots)
         for series_map, label in ((loads_map, "loads_p_set"),
-                                  (gens_map, "generators_p_max_pu")):
+                                  (gens_map, "generators_p_max_pu"),
+                                  (links_map, "links_p_max_pu")):
             if series_map is None:
                 continue
             bad = [k for k, v in series_map.items() if len(v) != h]
@@ -444,6 +440,30 @@ def _profiles_mutate(scenario: dict):
                                 live_t.drop(columns=[col], inplace=True)
 
                         undo_ops.append(_undo_gs)
+
+        if links_map:
+            # Link availability (WP1.4b): any named Link, time-varying p_max_pu.
+            pmp_l = n.links_t.p_max_pu
+            for name, series in links_map.items():
+                if name not in n.links.index:
+                    continue
+                if name in pmp_l.columns:
+                    orig_t = pmp_l[name].copy()
+
+                    def _undo_lt_link(n=n, col=name, orig=orig_t):
+                        live = n.links_t.p_max_pu
+                        if col in live.columns:
+                            live[col] = orig
+
+                    undo_ops.append(_undo_lt_link)
+                else:
+                    def _undo_ls_link(n=n, col=name):
+                        live = n.links_t.p_max_pu
+                        if col in live.columns:
+                            live.drop(columns=[col], inplace=True)
+
+                    undo_ops.append(_undo_ls_link)
+                pmp_l[name] = pd.Series(series, index=idx)
 
         def undo():
             for op in reversed(undo_ops):

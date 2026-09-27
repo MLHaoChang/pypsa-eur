@@ -164,4 +164,12 @@ def horizon_system_cost(n, cfg) -> float | None:
             ox = safe_float(row[opex_col]) or 0.0
             total += (cx + ox) * mul
 
+    # Edge Investment Case: the commercial terms the solve charged are not in
+    # `n.statistics()` (applied for the solve and undone). Same items and
+    # weighting as `/results/cost_breakdown`, so the two totals keep agreeing.
+    from services.commercial.cost_rows import commercial_cost_terms
+    for _label, period, cx, ox in commercial_cost_terms(
+            n, getattr(cfg, "commercial", None))["items"]:
+        total += (cx + ox) * (years(period) if period is not None else 1.0)
+
     return total

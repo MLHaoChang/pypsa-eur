@@ -1020,6 +1020,10 @@ def list_timeseries():
             continue
         comp_class = _ATTR_TO_CLASS.get(component, component)
         for attr in ts_store:
+            # `ic_*` frames are the Edge Investment Case's internal records
+            # (resolved Library series, committed prices), not user series.
+            if str(attr).startswith("ic_"):
+                continue
             df = ts_store[attr]
             if not df.empty:
                 # Filter transient column names (vintage clones'
@@ -1048,6 +1052,8 @@ def get_timeseries(component: str, attribute: str, columns: str | None = None):
     ts_store = getattr(n, f"{component}_t", None)
     if ts_store is None:
         raise HTTPException(404, f"Component '{component}' not found")
+    if attribute.startswith("ic_"):
+        raise HTTPException(404, f"'{attribute}' is not a user time series")
 
     net_df = ts_store.get(attribute)
     wanted = [c.strip() for c in columns.split(",")] if columns else None
@@ -1129,8 +1135,8 @@ def set_timeseries(component: str, attribute: str, body: dict):
     import pandas as pd
     n = PyPSAService.get_network()
     ts_store = getattr(n, f"{component}_t", None)
-    if ts_store is None:
-        raise HTTPException(404)
+    if ts_store is None or attribute.startswith("ic_"):
+        raise HTTPException(404)  # `ic_*`: internal records, not user series
     with PyPSAService.get_lock():
         idx = pd.DatetimeIndex(body.get("index", []))
         cols = body.get("columns", [])

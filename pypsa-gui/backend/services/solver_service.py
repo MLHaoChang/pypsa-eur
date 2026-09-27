@@ -99,7 +99,7 @@ from services.commercial.lp_bindings import (  # noqa: F401
     materialise_poc_prices,
 )
 from services.commercial.connection import (  # noqa: F401
-    apply_for_config as apply_connection_for_config,
+    apply_commercial_for_solve,
 )
 # ── The branch's own dependencies ────────────────────────────────────────────
 # The adequacy standards below (`reserve_margin_facts`, the ENS-cap and
@@ -668,25 +668,6 @@ def run_simulation(
                     phase(f"Validation failed: {len(_nf)} error(s). Aborting.")
                     status, condition = "error", "validation_failed"
                     return status, condition
-                # Edge Investment Case (spec §5.1, WP1.3): PoC energy prices
-                # onto the import/export Links. HERE because the user-TS reapply
-                # above would clobber an earlier write and `extra_functionality`
-                # runs after the model is built. The columns persist with the
-                # network (reload-safe cost rows). A bare return is still safe:
-                # `restore_modelling` is not bound yet.
-                # Runs with NO commercial config too: it restores any PoC Link a
-                # previous config priced (review round 1 #1).
-                try:
-                    _ic_terms = materialise_poc_prices(
-                        network, getattr(config, "commercial", None),
-                        log=lambda m: _safe_log(log_queue, m))
-                except CommercialBindingError as exc:
-                    log_queue.put(f"[COMMERCIAL] ERROR: {exc}")
-                    phase("Commercial binding failed. Aborting.")
-                    status, condition = "error", "commercial_binding_failed"
-                    return status, condition
-                if _ic_terms is not None:
-                    _emit_state(last_commercial_terms=_ic_terms)
             # Clear stale *_t.p_set persisted by a prior AC-PF dispatch fix.
             # PyPSA's create_model adds a `Generator-p_set` equality constraint
             # for every non-null row, locking dispatch. Plain LOPF still solves
@@ -752,31 +733,34 @@ def run_simulation(
                 # transient transform like the modelling assumptions. Applied
                 # first, undone LAST (chained after their restore), so the
                 # assumptions snapshot and restore the agreement's state.
+                # WP1.3 PoC prices are transient too (spec §5.1; re-review #1/#2):
+                # the user's marginal_cost is never modified on disk. Runs with
+                # no commercial config as well — its commit clears stale frames.
                 try:
-                    _ic_conn = apply_connection_for_config(
-                        network, getattr(config, "commercial", None))
+                    _ic_conn = apply_commercial_for_solve(
+                        network, getattr(config, "commercial", None),
+                        log=lambda m: _safe_log(log_queue, m),
+                        solve_strategy=getattr(config, "solve_strategy", "full"),
+                        multi_period=bool(config.multi_investment_periods))
                 except CommercialBindingError as exc:
                     log_queue.put(f"[COMMERCIAL] ERROR: {exc}")
                     phase("Commercial binding failed. Aborting.")
                     status, condition = "error", "commercial_binding_failed"
                     return status, condition
-                if _ic_conn is not None:
-                    _safe_log(log_queue, f"[COMMERCIAL] connection agreement applied: "
-                                         f"{_ic_conn.facts}")
+                if _ic_conn.facts.get("poc_link"):
+                    _emit_state(last_commercial_terms=_ic_conn.facts)
                 try:
                     _real_restore, captured = _apply_modelling_assumptions(network, config, phase)
                 except BaseException:
-                    if _ic_conn is not None:
-                        _ic_conn.undo()
+                    _ic_conn.undo()
                     raise
-                if _ic_conn is not None:
-                    _assumptions_restore = _real_restore
+                _assumptions_restore = _real_restore
 
-                    def _real_restore() -> None:
-                        try:
-                            _assumptions_restore()
-                        finally:
-                            _ic_conn.undo()
+                def _real_restore() -> None:
+                    try:
+                        _assumptions_restore()
+                    finally:
+                        _ic_conn.undo()
                 # Once-guarded restore wrapper. The network now carries the LP
                 # transforms; restore MUST run exactly once before the network
                 # can be serialised. The solve try/finally below calls this on
@@ -1117,6 +1101,11 @@ def run_simulation(
                         except Exception as exc:
                             phase(f"Myopic restore: skipped one entry ({exc})")
                     restore_modelling()
+                # Persist the commercial price frame only for a solve that
+                # produced a dispatch (re-review #5: no rows mixing one run's
+                # prices with another run's dispatch).
+                if status in ("ok", "optimal"):
+                    _ic_conn.commit()
                 # Adequacy report — emitted whenever a target was enforced
                 # AND the solve actually produced a dispatch, INCLUDING the
                 # nothing-shed case (achieved 0, binding=voll).

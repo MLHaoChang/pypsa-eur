@@ -271,7 +271,12 @@ has a matching row in `cost_breakdown.py` (`network_capacity`, `demand_charge`, 
 `energy_export`), so `objective_decomposition.gap_pct` stays 0 — this is a P1 acceptance test. Rows are
 recomputed from **persisted** data (materialised `links_t.marginal_cost`, `p_nom_opt`, and a
 `last_commercial_terms` entry in `RESULT_STATE_KEYS`), never from transient `n._*` stashes, so the gap is
-0 before and after a project reload. New linopy variables added by the bindings are **dash-less with an
+0 before and after a project reload. **As implemented (P1 WP1.3/WP1.4a reviews):** every commercial transform is TRANSIENT (applied for the solve,
+undone after it — the user's `marginal_cost`, `capital_cost` and availability are never modified on disk); what
+the rows need is committed after a successful solve only (`links_t["ic_energy_price"]`, `n.meta["ic_poc_links"]`,
+`n.meta["ic_connection_fee"]`), and `services/commercial/cost_rows` folds the rows into `cost_breakdown` as the
+component "Commercial" and into `cost_totals.horizon_system_cost`. The connection fee is an explicit objective
+term on the PoC Link's `p_nom`, not `capital_cost`. New linopy variables added by the bindings are **dash-less with an
 `ic_` prefix** (`ic_peak_import`, `ic_tier_q`), because PyPSA's `assign_solution` parses `Component-attr`
 names and skips dash-less ones cleanly.
 
