@@ -35,7 +35,7 @@
 
 ## Environment note (for the next person)
 
-`pixi` is not available in the cloud container. `gridspine/drivers/year_study.py` uses Python-3.12 nested-quote f-strings, so the backend does **not** import under 3.11 — the venv must be 3.12 (`pixi.toml` pins `3.12.12`). With an unpinned `pip install`, pandas resolves to 3.x and ten EH/sweep tests fail with `Cannot interpret '<StringDtype…>' as a data type` inside `network.copy()` / frozen re-solves; pin to the lock (`pandas==2.3.3 numpy==2.4.6 scipy==1.17.1`) and they pass. That failure is an environment artefact, not a code defect.
+`pixi` is not available in the cloud container. `gridspine/drivers/year_study.py` uses Python-3.12 nested-quote f-strings, so the backend does **not** import under 3.11 — the venv must be 3.12 (`pixi.toml` pins `3.12.12`). With an unpinned `pip install`, pandas resolves to 3.x and ten EH/sweep tests fail with `Cannot interpret '<StringDtype…>' as a data type` inside `network.copy()` / frozen re-solves; pin to the lock (`pandas==2.3.3 numpy==2.4.6 scipy==1.17.1`) and they pass. The gridspine and desktop suites additionally need `pandapower`, `pywebview` and `lightsim2grid==0.10.1` (all pixi-provided, none in `requirements.txt`). These failures are environment artefacts, not code defects.
 
 ## Local verification
 
@@ -50,7 +50,7 @@ PYTHONPATH=<repo-root>:<backend> python tests/run_qa_drivers.py
 | Suite | Before (master `ec23302`) | After |
 |---|---|---|
 | `test_energy_hub_*.py` + `test_adequacy_sweep.py` | **167** passed | **204** passed (+37 new: certify 14, frontier 11, fmea_top 6, lcoh 6; 0 failed) |
-| full backend `-m "not slow"` | (not run on master in this container) | 5775 collected: **5607 passed**, 32 skipped, 136 failed/errored — every one of the 136 is `No module named pandapower` (gridspine pipeline → 503) or `No module named webview` (desktop), packages pixi ships that the venv lacked; none in EH / adequacy / results / chat files. __RERUN__ |
+| full backend `-m "not slow"` | (not run on master in this container) | 5775 collected: **5607 passed**, 32 skipped, 136 failed/errored — every one of the 136 is `No module named pandapower` (gridspine pipeline → 503) or `No module named webview` (desktop), packages pixi ships that the venv lacked; none in EH / adequacy / results / chat files. After `pip install pandapower pywebview "lightsim2grid==0.10.1"` (the pixi pin — 1.1.0 lacks `LSGrid.get_lineor_res`) the twelve affected files were re-run: **241/241 passed**, so the suite is **5743 passed, 32 skipped, 0 failed** end to end. |
 | `run_qa_drivers.py` | 21 drivers | **22 drivers passed** (`qa_eh_reference_design` auto-discovered) |
 
 ### Frontend
