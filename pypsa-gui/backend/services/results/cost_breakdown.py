@@ -23,6 +23,7 @@ from services.period_utils import (
     period_years_map,
     years_for_period,
 )
+from services.economics import statistics_fom_lookup
 from services.serialization import safe_float as _safe_float
 from services.solver_service import (
     upfront_cost_series as _upfront_cost_series,
@@ -111,8 +112,19 @@ def compute_cost_breakdown(n, cfg):
 
     Two CAPEX bases, and they are not interchangeable:
 
-      • `capex` / `capex_expansion` — ANNUALISED, straight from
-        `n.statistics()`. Always a number.
+      • `capex` / `capex_expansion` — ANNUALISED fixed cost: PyPSA's
+        `n.statistics()` "Capital Expenditure" (annuitised investment) PLUS
+        `n.statistics.fom()` (fixed O&M), each cell scaled by the period's
+        years. Always a number. The sum is what the LP objective paid —
+        `periodized_cost = capital_cost + fom_cost` per unit of capacity —
+        so `total` reconciles with `n.objective` and
+        `/results/objective_decomposition` reads a zero gap. PyPSA's
+        `statistics.capex` is investment-only (its docstring says otherwise;
+        measured, see `services.economics.statistics_fom_lookup`), and
+        before 2026-09-26 this payload inherited that omission: every asset
+        with FOM under-reported by `fom_cost × capacity × years`. `fom`
+        (top level, per component, per carrier, per period) breaks the O&M
+        share back out.
       • `capex_lifetime` / `capex_expansion_lifetime` /
         `storage_capex_expansion_lifetime` — the present value of the UPFRONT
         (overnight) investment, `number | null`. `null` means PyPSA could not
@@ -164,6 +176,9 @@ def compute_cost_breakdown(n, cfg):
         # (`pypsa.costs.periodized_cost`).
         with with_periodized_cost_defaults(n, cfg, for_back_calculation=True):
             stats = n.statistics()
+            # Fixed O&M per (component, carrier, period) — added to every
+            # "Capital Expenditure" cell below. See the docstring.
+            fom_lookup = statistics_fom_lookup(n)
             exp_series = None
             try:
                 exp_series = n.statistics.expanded_capex()
@@ -321,21 +336,28 @@ def compute_cost_breakdown(n, cfg):
     by_carrier_dict: dict[tuple[str, str], dict[str, float]] = {}
     capex_total = 0.0
     opex_total = 0.0
+    fom_total = 0.0
 
-    def _accumulate(comp: str, carrier: str, period: Any, capex_v: float, opex_v: float) -> None:
+    def _accumulate(comp: str, carrier: str, period: Any, capex_v: float, opex_v: float,
+                    fom_v: float = 0.0) -> None:
         """
         Add one (component, carrier, period) row to all accumulators. period
         may be None for single-period or when stats has no period dimension.
+        `fom_v` is the fixed-O&M share ALREADY INCLUDED in `capex_v`; it is
+        accumulated separately so consumers can break it back out.
         """
-        nonlocal capex_total, opex_total
+        nonlocal capex_total, opex_total, fom_total
         capex_total += capex_v
         opex_total  += opex_v
-        bucket = by_class.setdefault(comp, {"capex": 0.0, "opex": 0.0, "capex_expansion": 0.0})
+        fom_total   += fom_v
+        bucket = by_class.setdefault(comp, {"capex": 0.0, "opex": 0.0, "fom": 0.0, "capex_expansion": 0.0})
         bucket["capex"] += capex_v
         bucket["opex"]  += opex_v
-        cb = by_carrier_dict.setdefault((comp, carrier), {"capex": 0.0, "opex": 0.0})
+        bucket["fom"]   += fom_v
+        cb = by_carrier_dict.setdefault((comp, carrier), {"capex": 0.0, "opex": 0.0, "fom": 0.0})
         cb["capex"] += capex_v
         cb["opex"]  += opex_v
+        cb["fom"]   += fom_v
         if period is None:
             return
         pkey = _normalize_period_key(period)
@@ -344,20 +366,23 @@ def compute_cost_breakdown(n, cfg):
         # `by_period` and `by_carrier` so the frontend can show
         # "OPEX by carrier for period 2026" without re-aggregating client-side.
         p_entry = by_period.setdefault(
-            pkey, {"capex": 0.0, "opex": 0.0, "by_component": {}, "by_carrier": {}},
+            pkey, {"capex": 0.0, "opex": 0.0, "fom": 0.0, "by_component": {}, "by_carrier": {}},
         )
         p_entry["capex"] += capex_v
         p_entry["opex"]  += opex_v
-        p_bucket = p_entry["by_component"].setdefault(comp, {"capex": 0.0, "opex": 0.0})
+        p_entry["fom"]   += fom_v
+        p_bucket = p_entry["by_component"].setdefault(comp, {"capex": 0.0, "opex": 0.0, "fom": 0.0})
         p_bucket["capex"] += capex_v
         p_bucket["opex"]  += opex_v
+        p_bucket["fom"]   += fom_v
         # Group by carrier alone within the period — collapses Generator/gas
         # + Link/gas (rare but possible) into a single "gas" row. The
         # frontend already does the same flattening on `cost.by_carrier` for
         # the horizon-wide view.
-        c_bucket = p_entry["by_carrier"].setdefault(carrier or "", {"capex": 0.0, "opex": 0.0})
+        c_bucket = p_entry["by_carrier"].setdefault(carrier or "", {"capex": 0.0, "opex": 0.0, "fom": 0.0})
         c_bucket["capex"] += capex_v
         c_bucket["opex"]  += opex_v
+        c_bucket["fom"]   += fom_v
 
 
     for idx, row in stats.iterrows():
@@ -379,6 +404,9 @@ def compute_cost_breakdown(n, cfg):
             carrier = str(levels[1]) if len(levels) >= 2 else ""
         else:
             comp, carrier = str(idx), ""
+        # The statistics table's own carrier spelling — `statistics_fom_lookup`
+        # is keyed by it, so look FOM up before the lowercasing below.
+        carrier_raw = carrier
         # Normalise carrier to lowercase for cross-endpoint matching with
         # emissions / carrier_kpis. PyPSA's statistics index sometimes
         # uses title-cased values from nice_name; emissions uses the raw
@@ -387,6 +415,11 @@ def compute_cost_breakdown(n, cfg):
         carrier = carrier.lower() if carrier else ""
         if not comp or _is_period_only(comp):
             continue
+
+        def _fom_for(period) -> float:
+            """Fixed O&M for this row in `period` (None on a flat network)."""
+            key_period = _normalize_period_key(period) if period is not None else None
+            return fom_lookup.get((comp, carrier_raw, key_period), 0.0)
 
         if cols_are_multi:
             # Iterate (metric, period) cells. row.items() yields (col_tuple, val).
@@ -397,9 +430,11 @@ def compute_cost_breakdown(n, cfg):
                 if not isinstance(metric, str): continue
                 ml = metric.lower()
                 if "capital" not in ml and "operational" not in ml: continue
-                v = _safe_float(val) * _years_for_period(period)
+                years = _years_for_period(period)
+                v = _safe_float(val) * years
                 if "capital" in ml:
-                    _accumulate(comp, carrier, period, v, 0.0)
+                    fom_v = _fom_for(period) * years
+                    _accumulate(comp, carrier, period, v + fom_v, 0.0, fom_v)
                 else:
                     _accumulate(comp, carrier, period, 0.0, v)
         else:
@@ -409,14 +444,16 @@ def compute_cost_breakdown(n, cfg):
             # periods by PyPSA. If the row index carries a period, scale by
             # years; otherwise the row is horizon-total already.
             years = _years_for_period(row_period) if row_period is not None else 1.0
-            cx *= years; ox *= years
-            _accumulate(comp, carrier, row_period, cx, ox)
+            fom_v = _fom_for(row_period) * years
+            cx = cx * years + fom_v
+            ox *= years
+            _accumulate(comp, carrier, row_period, cx, ox, fom_v)
 
     # Materialise by_carrier as a flat list now that all rows have been folded.
     for (comp, carrier), v in by_carrier_dict.items():
         by_carrier.append({
             "component": comp, "carrier": carrier,
-            "capex": v["capex"], "opex": v["opex"],
+            "capex": v["capex"], "opex": v["opex"], "fom": v["fom"],
             "total": v["capex"] + v["opex"],
         })
 
@@ -487,6 +524,28 @@ def compute_cost_breakdown(n, cfg):
                     bucket["capex_expansion"] = max(bucket.get("capex_expansion", 0.0), comp_sum)
         if manual_total > capex_expansion_total:
             capex_expansion_total = manual_total
+
+    # Fixed O&M on the NEW capacity. Both expansion paths above price only the
+    # investment share (`expanded_capex` and the manual fallback read
+    # `comp.capital_cost`), while `capex` above now carries FOM — without this
+    # `capex − capex_expansion` ("existing-capacity CAPEX" on the frontend
+    # waterfall) would silently absorb the new capacity's O&M. Σ years puts it
+    # on the same horizon basis as the per-period `expanded_capex` cells.
+    horizon_years = float(sum(period_years.values())) if period_years else 1.0
+    for comp_attr, comp_class, nom in NOM_PAIRS:
+        df = getattr(n, comp_attr, None)
+        if (df is None or df.empty or "fom_cost" not in df.columns
+                or f"{nom}_opt" not in df.columns or nom not in df.columns):
+            continue
+        nom_col = df[nom].fillna(0.0)
+        opt_col = df[f"{nom}_opt"].fillna(nom_col)
+        delta = (opt_col - nom_col).clip(lower=0)
+        fom_exp = float((df["fom_cost"].fillna(0.0) * delta).sum()) * horizon_years
+        if not _math.isfinite(fom_exp) or fom_exp <= 0:
+            continue
+        capex_expansion_total += fom_exp
+        bucket = by_class.setdefault(comp_class, {"capex": 0.0, "opex": 0.0, "fom": 0.0, "capex_expansion": 0.0})
+        bucket["capex_expansion"] = bucket.get("capex_expansion", 0.0) + fom_exp
 
     # Null-propagating totals. One unknown class makes the horizon figure
     # unknown — see `_sum_lifetime`. `capex_lifetime_available` is the summary
@@ -628,9 +687,10 @@ def compute_cost_breakdown(n, cfg):
             "period": p,
             "capex": entry["capex"],
             "opex": entry["opex"],
+            "fom": entry["fom"],
             "total": entry["capex"] + entry["opex"],
             "by_component": [
-                {"component": c, "capex": v["capex"], "opex": v["opex"]}
+                {"component": c, "capex": v["capex"], "opex": v["opex"], "fom": v["fom"]}
                 for c, v in sorted(entry["by_component"].items())
             ],
             # Per-carrier breakdown WITHIN the period — sorted by total
@@ -640,7 +700,7 @@ def compute_cost_breakdown(n, cfg):
             # `by_carrier` otherwise.
             "by_carrier": sorted(
                 [
-                    {"carrier": c, "capex": v["capex"], "opex": v["opex"]}
+                    {"carrier": c, "capex": v["capex"], "opex": v["opex"], "fom": v["fom"]}
                     for c, v in entry.get("by_carrier", {}).items()
                 ],
                 key=lambda r: -(r["capex"] + r["opex"]),
@@ -652,6 +712,11 @@ def compute_cost_breakdown(n, cfg):
         "capex_expansion": capex_expansion_total,
         "capex_expansion_lifetime": capex_expansion_lifetime_total,
         "opex": opex_total,
+        # Fixed O&M share of `capex` (already included in it and in `total`),
+        # broken out so the annuitised-investment part is recoverable as
+        # `capex − fom`. The `*_lifetime` figures are upfront investment and
+        # never contain FOM.
+        "fom": fom_total,
         "total": capex_total + opex_total,
         # Renewable-curtailment penalty (Σ curtailment_t × curtailment_cost).
         # Zero unless the user set curtailment_cost > 0 on at least one
@@ -679,6 +744,7 @@ def compute_cost_breakdown(n, cfg):
                 "capex_expansion_lifetime": _class_lifetime(
                     capex_expansion_lifetime_by_class, c),
                 "opex": v["opex"],
+                "fom": v.get("fom", 0.0),
                 "total": v["capex"] + v["opex"],
             }
             for c, v in sorted(by_class.items())

@@ -263,16 +263,32 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
     ``{component_attr: {name: {"capital_cost": float, "overnight_cost": float | None,
     "overnight_cost_available": bool, "lifetime": float}}}``.
 
-    Two different cost numbers per asset:
+    Four different cost numbers per asset:
 
-      * ``capital_cost`` — PyPSA's annualised cost (`comp.capital_cost`), i.e.
-        ``overnight × annuity × nyears`` for assets parameterised via
-        overnight_cost, or the raw `capital_cost` column otherwise. This is
-        what the LP objective sees and what the "Annualised" toggle on the
-        frontend displays. Always a real, finite number — unaffected by
-        whether the upfront cost below resolves (see
-        `with_periodized_cost_defaults`'s docstring: filling `discount_rate`
-        for the back-calculation population cannot move this value).
+      * ``capital_cost`` — PyPSA's annuitised INVESTMENT cost
+        (`comp.capital_cost`), i.e. ``overnight × annuity × nyears`` for
+        assets parameterised via overnight_cost, or the raw `capital_cost`
+        column otherwise. Investment only: this accessor passes
+        ``fom_cost=None`` to `pypsa.costs.periodized_cost`. Always a real,
+        finite number — unaffected by whether the upfront cost below resolves
+        (see `with_periodized_cost_defaults`'s docstring: filling
+        `discount_rate` for the back-calculation population cannot move this
+        value).
+
+      * ``fom_cost`` — the asset's fixed O&M column, EUR per unit of capacity
+        per year, NaN read as 0 (PyPSA's own rule in `periodized_cost`).
+
+      * ``fixed_cost`` — ``capital_cost + fom_cost``. This is PyPSA's
+        `comp.periodized_cost`, the coefficient the LP objective multiplies
+        the optimised capacity by (`pypsa/optimization/optimize.py` reads
+        `c.periodized_cost`, never `c.capital_cost`). It is therefore the
+        number every reporting surface must call the asset's fixed cost:
+        report `capital_cost` alone and the Economics tab under-states fixed
+        cost against the objective by `fom_cost × p_nom_opt × years`, LCOE
+        reads too low and net profit too high. MEASURED 2026-09-26: a
+        4-snapshot network with `capital_cost=1000, fom_cost=200` solved to
+        an objective of 175 371.43 while every fixed-cost surface reported
+        148 228.57 — the gap was exactly `200 × p_nom_opt`.
 
       * ``overnight_cost`` — the upfront lump-sum investment per unit of
         capacity (`comp.overnight_cost`, via `upfront_cost_series`). Returned
@@ -349,6 +365,7 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
             pv_series = _pv_factor_series(df, cfg, reference_year)
             mapping: dict[str, dict[str, float | bool | None]] = {}
             raw_cc = df["capital_cost"] if "capital_cost" in df.columns else None
+            raw_fom = df["fom_cost"] if "fom_cost" in df.columns else None
             raw_lt = df["lifetime"] if "lifetime" in df.columns else None
             raw_by = df["build_year"] if "build_year" in df.columns else None
             for name in df.index:
@@ -359,6 +376,16 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
                     v_ann = float("nan")
                 if math.isnan(v_ann) or math.isinf(v_ann):
                     v_ann = float(raw_cc.loc[name]) if raw_cc is not None and name in raw_cc.index else 0.0
+                # Fixed O&M — NaN is zero, exactly as `pypsa.costs.periodized_cost`
+                # reads it before adding it to the LP coefficient.
+                v_fom = 0.0
+                if raw_fom is not None and name in raw_fom.index:
+                    try:
+                        v_fom = float(raw_fom.loc[name])
+                    except (TypeError, ValueError):
+                        v_fom = 0.0
+                    if math.isnan(v_fom) or math.isinf(v_fom):
+                        v_fom = 0.0
                 # Upfront (overnight). NaN if PyPSA couldn't back-calculate
                 # AND the user didn't set overnight_cost. NEVER substituted
                 # with the annualised number below — `capital_cost` is
@@ -403,6 +430,10 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
                     by_val = None  # type: ignore[assignment]
                 entry: dict[str, float | bool | None] = {
                     "capital_cost": v_ann,
+                    "fom_cost": v_fom,
+                    # The LP coefficient — see the docstring. Every surface
+                    # that reports a fixed cost, CAPEX or LCOx reads THIS.
+                    "fixed_cost": v_ann + v_fom,
                     "overnight_cost": v_upf if upfront_available else None,
                     "overnight_cost_pv": v_upf_pv if upfront_available else None,
                     "overnight_cost_available": upfront_available,

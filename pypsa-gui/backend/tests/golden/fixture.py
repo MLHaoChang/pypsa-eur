@@ -23,6 +23,14 @@ GOLDEN_PERIODS = (2030, 2035)
 # exactly the class of error the 22% Asset Detail gap belonged to.
 GOLDEN_YEARS = (5, 10)
 SNAPSHOTS_PER_PERIOD = 24
+# Fixed O&M on the extendable, overnight-priced generator. Added 2026-09-26
+# by incident: PyPSA charges `capital_cost + fom_cost` per MW in the LP
+# objective while every reporting surface (and PyPSA's own
+# `statistics.capex`) priced fixed cost off `capital_cost` alone, so an asset
+# with FOM under-reported against the objective on all nine surfaces at once.
+# On `gas` because it is the asset whose capacity the LP actually sizes, so
+# the FOM term is exercised at a real, non-zero p_nom_opt.
+GOLDEN_GAS_FOM = 12_000.0  # EUR/MW/yr
 
 _SOLVED: pypsa.Network | None = None
 
@@ -66,7 +74,7 @@ def build_golden_network() -> pypsa.Network:
         bus="elec_a", carrier="gas",
         p_nom=100.0, p_nom_extendable=True, p_nom_max=1000.0,
         marginal_cost=50.0,
-        overnight_cost=900_000.0, lifetime=25.0,
+        overnight_cost=900_000.0, lifetime=25.0, fom_cost=GOLDEN_GAS_FOM,
         build_year=GOLDEN_PERIODS[0],
     )
     # --- the shape that works: capital_cost supplied directly, NOT extendable

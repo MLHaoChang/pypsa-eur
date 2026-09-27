@@ -143,7 +143,8 @@ _CLS_TO_ATTR: dict[str, str] = {
 
 def _safe_capital_cost(row, pcc: dict, comp_attr: str) -> float:
     """
-    LP-effective annuitised EUR/MW/yr for one asset row.
+    LP-effective fixed cost, EUR/MW/yr, for one asset row: annuitised
+    investment PLUS fixed O&M (``fixed_cost`` in the resolver's entry).
 
     Delegates entirely to ``services.solver_service.periodized_capital_costs``
     -- the SAME resolution ``asset_economics``, ``cost_breakdown``,
@@ -191,7 +192,17 @@ def _safe_capital_cost(row, pcc: dict, comp_attr: str) -> float:
     entry = (pcc.get(comp_attr) or {}).get(name)
     if not entry:
         return 0.0
-    return _safe_float(entry.get("capital_cost"), 0.0)
+    # `fixed_cost` = annuitised investment + fixed O&M = PyPSA's
+    # `periodized_cost`, the coefficient the LP objective actually paid per
+    # unit of capacity. `capital_cost` alone is investment-only (PyPSA's
+    # accessor passes `fom_cost=None`), and reading it here made every Compare
+    # CAPEX / LCOE / LCOH figure short by `fom_cost × p_nom_opt` against the
+    # objective and against /results/asset_economics — see
+    # `periodized_capital_costs`'s docstring and tests/test_fom_reconciliation.py.
+    fixed = entry.get("fixed_cost")
+    if fixed is None:
+        fixed = _safe_float(entry.get("capital_cost"), 0.0) + _safe_float(entry.get("fom_cost"), 0.0)
+    return _safe_float(fixed, 0.0)
 
 
 def _classify_build_year(value) -> int | None:

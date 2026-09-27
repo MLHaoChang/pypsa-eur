@@ -59,3 +59,16 @@ def horizon_capex(rate_per_mw: float, p_nom_opt: float, years: tuple[int, ...]) 
     `annualised_capital_cost`.
     """
     return rate_per_mw * p_nom_opt * sum(years)
+
+
+def fixed_cost_rate(annualised_investment: float, fom_cost: float) -> float:
+    """
+    What the LP objective multiplies each MW of optimised capacity by.
+
+    MEASURED against PyPSA 1.1.2 on 2026-09-26: `Component.periodized_cost`
+    (the accessor `optimize.py` reads) is `capital_cost + fom_cost`;
+    `Component.capital_cost` — and therefore `statistics.capex()` — is the
+    investment share alone. Every surface's "fixed cost" / "CAPEX" must use
+    the sum, or it disagrees with the objective by `fom_cost x p_nom_opt`.
+    """
+    return annualised_investment + fom_cost

@@ -402,7 +402,10 @@ def nom_capacity_delta(ctx: Ctx):
 
 def capex_annual(ctx: Ctx):
     """
-    Annualised CAPEX, EUR/a.
+    Annualised fixed cost, EUR/a: annuitised investment PLUS fixed O&M —
+    PyPSA's `periodized_cost`, the coefficient the LP objective paid per unit
+    of optimised capacity. The metric id stays `capex_annual` (it is API);
+    its label and formula in `registry.py` say what it now contains.
 
     Resolves through `periodized_capital_costs` rather than reading the raw
     `capital_cost` column. MEASURED 2026-07-31: the raw column is 0.0 whenever
@@ -410,6 +413,9 @@ def capex_annual(ctx: Ctx):
     real figure on the components accessor, not on the DataFrame — so a raw
     read reported 22.3% low for a gas plant, 41.7% low for solar and EUR 0 for
     an electrolyser, against the Economics tab's figure for the same asset.
+    MEASURED 2026-09-26: reading the resolver's `capital_cost` (investment
+    only) left FOM out, so this disagreed with the objective by
+    `fom_cost × p_nom_opt` — the resolver's `fixed_cost` is the LP figure.
     """
     opt = nom_capacity_opt(ctx)
     if opt is None:
@@ -421,20 +427,21 @@ def capex_annual(ctx: Ctx):
     cfg = _state.get("solver_config")
     try:
         costs = periodized_capital_costs(ctx.n, cfg)
-        cc = float(
-            costs.get(attr_for(ctx.component_class), {})
-                 .get(ctx.name, {})
-                 .get("capital_cost", 0.0)
-        )
-    except Exception as exc:  # noqa: BLE001 — fall back to the raw column, never crash
+        entry = costs.get(attr_for(ctx.component_class), {}).get(ctx.name, {}) or {}
+        fixed = entry.get("fixed_cost")
+        if fixed is None:
+            fixed = float(entry.get("capital_cost", 0.0) or 0.0) + float(entry.get("fom_cost", 0.0) or 0.0)
+        cc = float(fixed)
+    except Exception as exc:  # noqa: BLE001 — fall back to the raw columns, never crash
         logger.warning(
             "capex_annual: periodized_capital_costs failed for %s %r, falling "
-            "back to raw capital_cost column (reports 0.0 for an "
+            "back to raw capital_cost + fom_cost columns (reports 0.0 for an "
             "overnight_cost-priced asset): %s",
             ctx.component_class, ctx.name, exc,
         )
         raw = _static(ctx, "capital_cost")
-        cc = float(raw) if raw is not None else 0.0
+        raw_fom = _static(ctx, "fom_cost")
+        cc = (float(raw) if raw is not None else 0.0) + (float(raw_fom) if raw_fom is not None else 0.0)
 
     return cc * opt
 
