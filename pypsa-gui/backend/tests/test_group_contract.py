@@ -100,3 +100,94 @@ def test_the_group_adds_no_objective_term():
     cfg, _ = _solve(n, _commercial(cap=60.0))
     cb = compute_cost_breakdown(n, cfg)
     assert abs(compute_objective_decomposition(n, cb)["gap_pct"]) < 1e-6
+
+
+# ── review conditions (WP1.6 round 2) ──────────────────────────────────────
+# A group contract is ONE customer under ONE tariff: every member pays the
+# per-kWh import adders, and demand charges and tiers are measured on the
+# members' combined import (the group meter), so no member is a free route.
+
+TOU = {"id": "energy", "kind": "energy", "unit": "per_kwh", "periods": [
+    {"name": "night", "rate": 0.05, "start_hour": 0, "end_hour": 6},
+    {"name": "day", "rate": 0.20}]}
+DEMAND = {"id": "demand", "kind": "demand", "unit": "per_kw_month",
+          "periods": [{"name": "all", "rate": 12.0}], "measured_on": "import"}
+
+
+def _tariff(*items):
+    return {"id": "t", "name": "t", "jurisdiction": "DE", "valid_from": "2029-01-01",
+            "items": list(items)}
+
+
+def test_every_member_carries_the_import_price():
+    n = _two_members()
+    applied = L.materialise_poc_prices(n, {**_commercial(), "import_tariff": _tariff(TOU)})
+    mc = n.links_t.marginal_cost
+    assert {"import", "import_b"} <= set(mc.columns)
+    assert np.allclose(mc["import"], mc["import_b"])
+    assert applied.facts["import_links"] == ["import", "import_b"]
+    applied.undo()
+    assert "import_b" not in n.links_t.marginal_cost.columns
+
+
+def test_demand_is_measured_on_the_group_meter():
+    n = _two_members()
+    L.materialise_poc_prices(n, {**_commercial(), "import_tariff": _tariff(DEMAND)})
+    assert getattr(n, L.DEMAND_SPEC_ATTR)["import_links"] == ["import", "import_b"]
+
+
+@pytest.mark.parametrize("members,msg", [
+    (["import_b"], "poc_link"),               # the tariffed PoC must be a member
+    (["import", "export"], "export_link"),    # export is not an import member
+    (["import", "poc_site_b"], "bus0"),       # a member on the site side
+])
+def test_a_member_that_is_not_an_import_connection_is_refused(members, msg):
+    n = _two_members()
+    n.add("Link", "export", bus0="poc", bus1="grid", p_nom=80.0, carrier="AC")
+    with pytest.raises(L.CommercialBindingError, match=msg):
+        L.materialise_poc_prices(n, {**_commercial(members=members), "export_link": "export"})
+
+
+def test_a_named_group_without_members_is_refused():
+    from models.commercial import CommercialConfig
+
+    with pytest.raises(ValueError, match="group_contract"):
+        CommercialConfig.model_validate({"poc_link": "import", "group_contract": "hub"})
+    with pytest.raises(ValueError, match="group_contract"):
+        CommercialConfig.model_validate({"poc_link": "import", "group_members": ["import"],
+                                         "group_cap_mw": 10.0})
+
+
+@pytest.mark.live_solve
+def test_no_member_is_a_free_route_and_the_bill_matches_the_engine():
+    from models.commercial import Tariff
+    from services.commercial.tariff_engine import rate
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.results.objective_decomposition import compute_objective_decomposition
+
+    n = _two_members()
+    commercial = {**_commercial(cap=60.0), "import_tariff": _tariff(TOU, DEMAND)}
+    cfg, sink = _solve(n, commercial)
+    p0 = n.links_t.p0
+    billed = rate(pd.DataFrame({"import_mw": (p0["import"] + p0["import_b"]).to_numpy(),
+                                "export_mw": 0.0}, index=n.snapshots),
+                  Tariff.model_validate(_tariff(TOU, DEMAND)), step_hours=0.25, timezone=None)
+    cb = compute_cost_breakdown(n, cfg)
+    rows = cb["commercial"]
+    assert rows["energy_import"] == pytest.approx(billed.per_item["energy"], rel=1e-6)
+    assert rows["demand_charge"] == pytest.approx(billed.per_item["demand"], rel=1e-6)
+    assert abs(compute_objective_decomposition(n, cb)["gap_pct"]) < 1e-6
+    assert sink["last_commercial_terms"]["import_links"] == ["import", "import_b"]
+
+
+@pytest.mark.live_solve
+def test_a_changed_group_is_flagged_as_drift():
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    n = _two_members()
+    _solve(n, _commercial(cap=60.0))
+    cb = compute_cost_breakdown(n, SolverConfig(commercial=_commercial(cap=50.0)))
+    assert "config_changed_since_solve" in cb["commercial"]["flags"]
+    cb = compute_cost_breakdown(n, SolverConfig(commercial=_commercial(cap=60.0)))
+    assert "config_changed_since_solve" not in (cb["commercial"] or {}).get("flags", [])

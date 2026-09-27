@@ -95,6 +95,7 @@ from services.solver.adequacy import (  # noqa: F401
 # the LP-terms wrapper, re-exported with the rest of the solver seams.
 from services.commercial.lp_bindings import (  # noqa: F401
     META_DEMAND as _IC_META_DEMAND,
+    META_GROUP as _IC_META_GROUP,
     CommercialBindingError,
     _wrap_with_commercial_bindings,
     materialise_poc_prices,
@@ -1116,7 +1117,7 @@ def run_simulation(
                     _emit_state(last_commercial_terms=(
                         {**_ic_conn.facts,
                          "demand_peaks": network.meta.get(_IC_META_DEMAND),
-                         "group": network.meta.get("ic_group")}
+                         "group": network.meta.get(_IC_META_GROUP)}
                         if _ic_conn.facts.get("poc_link") else None))
                 # Adequacy report — emitted whenever a target was enforced
                 # AND the solve actually produced a dispatch, INCLUDING the

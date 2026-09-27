@@ -188,6 +188,28 @@ def _side(item: TariffItem) -> str:
     return "import" if item.direction == "cost" else "export"  # net
 
 
+def tier_items_hash(cfg: CommercialConfig) -> str | None:
+    """The hash of the convex tiered items a solve would bind (drift check)."""
+    items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
+             if i.tiers and not _is_demand(i) and _lp_reason(i) is None
+             and tiers_are_convex(i.tiers)]
+    return _items_hash(items) if items else None
+
+
+def group_spec(cfg: CommercialConfig) -> dict | None:
+    """The group contract a solve would bind, as committed to `ic_group`."""
+    if not cfg.group_members:
+        return None
+    return {"name": cfg.group_contract, "members": list(cfg.group_members),
+            "cap_mw": float(cfg.group_cap_mw)}
+
+
+def import_links(cfg: CommercialConfig) -> list[str]:
+    """The Links the import tariff is charged on: the group's members (one
+    customer under one tariff, WP1.6 round 2), else the PoC alone."""
+    return list(cfg.group_members) if cfg.group_members else [cfg.poc_link]
+
+
 def _require_link(n, name: str | None, what: str) -> None:
     if name is None or name not in n.links.index:
         raise CommercialBindingError(f"commercial.{what} {name!r} is not a Link in this network")
@@ -285,9 +307,25 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
                 f"per-period vintage bounds on the PoC Link(s) {clash} are not supported with "
                 "the commercial layer in P1 (the vintage clones would carry dispatch the "
                 "commercial rows do not read)")
-    for member in cfg.group_members:
-        _require_link(n, member, "group_members")
-        _require_one_way(n, member, "group_members")
+    if cfg.group_members:
+        # One customer under one tariff: every member is an import connection
+        # on the PoC's grid side, and the tariffed PoC is one of them.
+        if cfg.poc_link not in cfg.group_members:
+            raise CommercialBindingError(
+                f"group_members must include poc_link {cfg.poc_link!r}: the group's tariff "
+                "is the PoC's")
+        grid_bus = n.links.at[cfg.poc_link, "bus0"]
+        for member in cfg.group_members:
+            _require_link(n, member, "group_members")
+            _require_one_way(n, member, "group_members")
+            if member == cfg.export_link:
+                raise CommercialBindingError(
+                    f"group member {member!r} is the export_link; members are import "
+                    "connections")
+            if n.links.at[member, "bus0"] != grid_bus:
+                raise CommercialBindingError(
+                    f"group member {member!r} has bus0 {n.links.at[member, 'bus0']!r}, not the "
+                    f"PoC's grid bus {grid_bus!r}: members are import connections")
     _adders(n, cfg)  # dry run: export items without an export Link, unrated snapshots
 
 
@@ -495,7 +533,7 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
                 notes.append("ratchet_seed_missing")
     floors = {k["key"]: cfg.initial_peak_lower_bound[k["month"]] for k in keys
               if k["month"] in cfg.initial_peak_lower_bound}
-    spec = {"import_link": cfg.poc_link, "export_link": cfg.export_link, "keys": keys,
+    spec = {"import_links": import_links(cfg), "export_link": cfg.export_link, "keys": keys,
             "ratchets": ratchets, "floors": floors,
             "info": {"items": [i.id for i in items], "not_established": missing,
                      "partial_months": partial, "notes": list(notes),
@@ -531,7 +569,8 @@ def add_demand_terms(n) -> None:
     for i, (key, floor) in enumerate(spec.get("floors", {}).items()):
         m.add_constraints(peak.sel(key=key) >= float(floor), name=f"ic_peak_floor_{i}")
     link_p = m["Link-p"]
-    imp = link_p.sel(name=spec["import_link"])
+    # The group meter: the members' combined import (a single PoC otherwise).
+    imp = link_p.sel(name=spec["import_links"]).sum("name")
     exp = link_p.sel(name=spec["export_link"]) if spec["export_link"] else None
     w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
     for i, k in enumerate(spec["keys"]):
@@ -612,7 +651,8 @@ def _tier_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list[s
                              "tiers": [{"k": k, "width_mwh": th[k + 1] - th[k],
                                         "rate_eur_per_mwh": float(t.rate) * _KWH_PER_MWH}
                                        for k, t in enumerate(item.tiers)]})
-    return {"import_link": cfg.poc_link, "keys": keys}, [i.id for i in convex], nonconvex
+    return ({"import_links": import_links(cfg), "keys": keys, "items_hash": _items_hash(convex)},
+            [i.id for i in convex], nonconvex)
 
 
 def add_tier_terms(n) -> None:
@@ -636,7 +676,7 @@ def add_tier_terms(n) -> None:
     idx = pd.Index(names, name="tier")
     q = m.add_variables(lower=0, upper=xr.DataArray(uppers, coords={"tier": names}, dims="tier"),
                         name="ic_tier_q", coords=[idx])
-    imp = m["Link-p"].sel(name=spec["import_link"])
+    imp = m["Link-p"].sel(name=spec["import_links"]).sum("name")
     w = n.snapshot_weightings.objective.to_numpy(dtype=float)
     for i, key in enumerate(spec["keys"]):
         pos = key["positions"]
@@ -664,7 +704,8 @@ def _read_tier_solution(n, spec: dict) -> dict | None:
                 return None
             out[name] = {"item": key["item"], "month": key["month"],
                          "inv_period": key["inv_period"], "tier": t["k"],
-                         "rate_eur_per_mwh": t["rate_eur_per_mwh"], "q_mwh": v}
+                         "rate_eur_per_mwh": t["rate_eur_per_mwh"], "q_mwh": v,
+                         "items_hash": spec.get("items_hash")}
     return out
 
 
@@ -687,6 +728,9 @@ def _group_shares(n, spec: dict) -> dict | None:
     if any(m not in p0.columns for m in spec["members"]):
         return None
     w = n.snapshot_weightings.objective
+    if isinstance(n.snapshots, pd.MultiIndex):  # each period stands for its years
+        years = n.investment_period_weightings["years"]
+        w = w * years.reindex(n.snapshots.get_level_values(0)).to_numpy()
     energy = {m: float((w * p0[m].clip(lower=0.0)).sum()) for m in spec["members"]}
     total = sum(energy.values())
     if total <= 0:
@@ -746,7 +790,8 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
 
     targets: dict[str, np.ndarray] = {}
     if adders["import"].any():
-        targets[cfg.poc_link] = adders["import"]
+        for link in import_links(cfg):
+            targets[link] = adders["import"]
     if cfg.export_link is not None and (has_price or adders["export"].any()):
         targets[cfg.export_link] = adders["export"]
 
@@ -782,8 +827,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
 
         applied._undo.append(undo_demand)
 
-    group = ({"name": cfg.group_contract, "members": list(cfg.group_members),
-              "cap_mw": float(cfg.group_cap_mw)} if cfg.group_members else None)
+    group = group_spec(cfg)
     if group is not None:
         setattr(n, GROUP_SPEC_ATTR, group)
 
@@ -819,6 +863,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
         frame = pd.DataFrame({link: add for link, add in targets.items()}, index=n.snapshots)
         n.links_t[ENERGY_PRICE_ATTR] = frame
         n.meta[META_LINKS] = {"import": cfg.poc_link, "export": cfg.export_link,
+                              "import_members": import_links(cfg),
                               "priced": sorted(targets)}
         if "v" in solved_peaks:
             n.meta[META_DEMAND] = solved_peaks["v"]
@@ -842,7 +887,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
             + ")")
     applied.facts = {
         "poc_link": cfg.poc_link, "export_link": cfg.export_link,
-        "priced_links": sorted(targets), "energy_items": energy_items,
+        "import_links": import_links(cfg), "priced_links": sorted(targets), "energy_items": energy_items,
         "demand_items": demand_items, "demand_not_established_months": demand_missing,
         "demand_partial_months": (demand or {}).get("info", {}).get("partial_months", []),
         "tiered_items": tiered_items, "nonconvex_tier_items": nonconvex_items,
@@ -881,6 +926,16 @@ def _wrap_with_commercial_bindings(network, user_fn, cfg, log_queue=None):
 # ── cost rows (persisted data) ─────────────────────────────────────────────
 
 
+def solved_import_links(solved: dict | None) -> list[str]:
+    """The import Links a committed solve charged (`ic_poc_links`); records
+    written before group pricing name the PoC alone."""
+    solved = solved or {}
+    members = solved.get("import_members")
+    if members:
+        return list(members)
+    return [solved["import"]] if solved.get("import") else []
+
+
 def energy_cost_rows(n, commercial: dict | None) -> dict | None:
     """`energy_import` / `energy_export` for `cost_breakdown`: the tariff (and,
     on export, − the export price) the last successful solve charged, from the
@@ -906,7 +961,8 @@ def energy_cost_rows(n, commercial: dict | None) -> dict | None:
         return {"energy_import": None, "energy_export": None, "included_in_total": True,
                 "flags": flags}
     if cfg is not None and (cfg.poc_link != solved.get("import")
-                            or cfg.export_link != solved.get("export")):
+                            or cfg.export_link != solved.get("export")
+                            or import_links(cfg) != solved_import_links(solved)):
         flags.append("config_changed_since_solve")
     if not commercial:
         flags.append("config_cleared_since_solve")
@@ -919,29 +975,36 @@ def energy_cost_rows(n, commercial: dict | None) -> dict | None:
     def p0_of(link):
         return n.links_t.p0[link] if link in n.links_t.p0.columns else None
 
-    def row(link: str | None, label: str) -> float | None:
-        if link is None:
-            return None
+    def one(link: str) -> float | None:
         if link not in prices.columns:
             # 0.0 only for a Link the solve deliberately left unpriced; a
             # priced Link whose record is gone is not established (ADR-0001).
             if link in n.links.index and link not in (solved.get("priced") or []):
                 return 0.0
-            flags.append(f"{label}_not_established")
             return None
         add = prices[link]
         p0 = p0_of(link)
         if p0 is None or add.isna().any():
-            flags.append(f"{label}_not_established")
             return None
         return float((w * p0 * add).sum())
 
-    imp_link, exp_link = solved.get("import"), solved.get("export")
-    out = {"energy_import": row(imp_link, "energy_import"),
-           "energy_export": row(exp_link, "energy_export"),
+    def row(links: list[str], label: str) -> float | None:
+        if not links:
+            return None
+        parts = [one(link) for link in links]
+        if any(v is None for v in parts):
+            flags.append(f"{label}_not_established")
+            return None
+        return float(sum(parts))
+
+    imp_links, exp_link = solved_import_links(solved), solved.get("export")
+    out = {"energy_import": row(imp_links, "energy_import"),
+           "energy_export": row([exp_link] if exp_link else [], "energy_export"),
            "included_in_total": True}
-    if imp_link and exp_link and p0_of(imp_link) is not None and p0_of(exp_link) is not None:
-        both = (p0_of(imp_link) > 1e-6) & (p0_of(exp_link) > 1e-6)
+    imp_p0 = [p0_of(link) for link in imp_links]
+    if imp_links and exp_link and all(v is not None for v in imp_p0) \
+            and p0_of(exp_link) is not None:
+        both = (sum(imp_p0) > 1e-6) & (p0_of(exp_link) > 1e-6)
         if bool(both.any()):
             flags.append("simultaneous_import_export")
             out["simultaneous_snapshots"] = int(both.sum())

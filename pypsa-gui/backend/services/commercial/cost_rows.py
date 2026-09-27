@@ -68,15 +68,17 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
         flags += [f for f in rows.get("flags", []) if f not in flags]
         solved = n.meta.get(_lp.META_LINKS) or {}
         prices = _lp._frame(n, _lp.ENERGY_PRICE_ATTR)
-        for label, role in (("energy_import", "import"), ("energy_export", "export")):
-            link = solved.get(role)
+        exp = solved.get("export")
+        for label, links in (("energy_import", _lp.solved_import_links(solved)),
+                             ("energy_export", [exp] if exp else [])):
             block[label] = rows.get(label)
-            if link is None or rows.get(label) is None:
+            if not links or rows.get(label) is None:
                 continue
-            per = _energy_by_period(n, link, prices)
-            for p, v in (per or {}).items():
-                if v:
-                    items.append((label, p, 0.0, v))
+            for link in links:  # a group's members each carry the tariff
+                per = _energy_by_period(n, link, prices)
+                for p, v in (per or {}).items():
+                    if v:
+                        items.append((label, p, 0.0, v))
             block[label] = weighted(label)
         if "simultaneous_snapshots" in rows:
             block["simultaneous_snapshots"] = rows["simultaneous_snapshots"]
@@ -120,6 +122,17 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
         block["demand_charge"] = None
         flags.append("demand_charge_not_established")
 
+    cfg_now = None
+    if commercial:
+        try:
+            cfg_now = _lp._parse(commercial)
+        except Exception:  # noqa: BLE001
+            cfg_now = None
+
+    def drifted() -> None:
+        flags.append("config_changed_since_solve" if commercial else
+                     "config_cleared_since_solve")
+
     # Convex tiered energy (WP1.5c): Σ rate_k × q_k per month and period.
     tiers = n.meta.get(_lp.META_TIERS)
     if tiers:
@@ -128,6 +141,19 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
             if amount:
                 items.append(("energy_tiers", v.get("inv_period"), 0.0, amount))
         block["energy_tiers"] = weighted("energy_tiers")
+        solved_hash = next(iter(tiers.values())).get("items_hash")
+        wanted_tiers = _lp.tier_items_hash(cfg_now) if cfg_now is not None else None
+        if solved_hash is not None and solved_hash != wanted_tiers:
+            drifted()
+
+    # Energy-hub group contract (WP1.6): no money of its own; the members'
+    # shares of the group's import energy are reported (allocation is P3).
+    group = n.meta.get(_lp.META_GROUP)
+    if group:
+        block["group"] = {k: group.get(k) for k in ("name", "members", "cap_mw", "energy_share")}
+        wanted_group = _lp.group_spec(cfg_now) if cfg_now is not None else None
+        if wanted_group != {k: group.get(k) for k in ("name", "members", "cap_mw")}:
+            drifted()
 
     # Connection capacity fee in the LP (WP1.4a).
     fee = n.meta.get(_conn.META_FEE)

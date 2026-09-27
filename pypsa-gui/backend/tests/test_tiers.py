@@ -141,3 +141,20 @@ def test_windowed_tiers_are_left_out_of_the_lp_with_a_reason():
     applied = L.materialise_poc_prices(
         n, {"poc_link": "import", "import_tariff": _tariff(item).model_dump(mode="json")})
     assert applied.facts["not_in_lp"] == {"tiered": "tiers_with_windows"}
+
+
+@pytest.mark.live_solve
+def test_changed_tiers_after_the_solve_are_flagged_as_drift():
+    """The volumes committed are the solved tiers'; editing the tiers without
+    a re-solve must not report them silently as the new tariff's (WP1.6/1.7
+    review #4)."""
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    n = _site()
+    cfg, _ = _solve(n, _tariff(_tiered(RISING)))
+    assert "config_changed_since_solve" not in compute_cost_breakdown(n, cfg)["commercial"]["flags"]
+    steeper = [{"threshold": 0, "rate": 0.10}, {"threshold": 100_000, "rate": 0.50}]
+    edited = SolverConfig(commercial={"poc_link": "import", "import_tariff":
+                                      _tariff(_tiered(steeper)).model_dump(mode="json")})
+    assert "config_changed_since_solve" in compute_cost_breakdown(n, edited)["commercial"]["flags"]

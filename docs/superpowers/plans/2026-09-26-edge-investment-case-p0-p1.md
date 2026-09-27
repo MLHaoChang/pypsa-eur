@@ -530,6 +530,15 @@ Files: `lp_bindings.py`, `backend/tests/test_group_contract.py` (fixture: two me
   `Σ Link-p[members] ≤ cap` per snapshot (`ic_group_cap`), and the commit stores `n.meta["ic_group"]` with each
   member's share of the group's import energy (also in `last_commercial_terms["group"]`). No objective term.
   Tests: `test_group_contract.py`.
+- Review round 1 (PASS WITH CONDITIONS) → closed: a group is **one customer under one tariff**. Every member
+  carries the per-kWh import adders (no member is a free route), and demand charges and tiers are metered on the
+  members' combined import (`import_links(cfg)`; the group meter, as a group transport agreement is billed).
+  `ic_poc_links.import_members` records the charged Links, and the energy rows sum over them (older records fall back
+  to the PoC). Refused: `poc_link` not a member, the `export_link` as a member, and a member whose `bus0` is not the
+  PoC's grid bus. `group_contract` and `group_members` must be set together. Shares are years-weighted across
+  investment periods. The cost block carries `group` (name, members, cap, energy shares), and a changed group or
+  changed tiers after the solve raise `config_changed_since_solve`. The connection agreement (fee, envelope) stays
+  on `poc_link`.
 
 ### WP1.7 Reload-safe cost-breakdown rows and objective reconciliation (the P1 gate)
 Files: `backend/services/results/cost_breakdown.py`, `objective_decomposition.py`,
@@ -557,6 +566,9 @@ persisted, so nothing may be read from `n._`):
   "ic_group"]`), which ride `network.nc`; `_HANDLER_PARAMS` unchanged. `test_commercial_objective_reconciliation.py`
   runs the seven cases through the real project save/load routes: gap < 1e-6 and identical rows and totals before
   and after the reload (the representative-weeks case discloses its unsampled months as not established).
+- Review round 1 (PASS WITH CONDITIONS) → closed: nine cases (+ two investment periods with TOU, demand and fee;
+  + a two-period group metered on the group). After the reload the gap must be computed (no silent skip) and < 1e-6,
+  and the flags, the not-established months and the `group` record must be identical.
 
 ### WP1.8 Preflight validation
 Files: `backend/services/validation_service.py`, `backend/tests/test_validation_commercial.py`.

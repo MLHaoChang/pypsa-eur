@@ -10,8 +10,11 @@ recomputes the rows after a reload with no solver state at all, and
 `_HANDLER_PARAMS` is unchanged (no new route argument; plan deviation from the
 `commercial_terms=` keyword, recorded in the plan).
 
-Seven cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
-tiers; + group cap; a representative-weeks axis.
+Nine cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
+tiers; + group cap; a representative-weeks axis; two investment periods (TOU +
+demand + fee); a two-period group whose demand is metered on the group.
+After the reload the gap must still be computed (never None), and the flags,
+the not-established months and the group record must be the same.
 """
 from __future__ import annotations
 
@@ -63,6 +66,14 @@ def _two_members():
     return n
 
 
+def _two_periods(build):
+    def make():
+        n = build()
+        n.set_investment_periods([2030, 2040])
+        return n
+    return make
+
+
 def _rep_weeks():
     n = _edge()
     parts = [pd.date_range(f"2030-{m:02d}-07", periods=96 * 7, freq="15min") for m in (1, 7)]
@@ -85,6 +96,11 @@ CASES = {
     "group": (_two_members, {"import_tariff": _tariff(TOU), "group_contract": "hub",
                              "group_members": ["import", "import_b"], "group_cap_mw": 60.0}),
     "rep_weeks": (_rep_weeks, {"import_tariff": _tariff(TOU, DEMAND)}),
+    "multi_period": (_two_periods(_edge), {"import_tariff": _tariff(TOU, DEMAND),
+                                           "connection": FEE}),
+    "group_multi_period": (_two_periods(_two_members),
+                           {"import_tariff": _tariff(TOU, DEMAND), "group_contract": "hub",
+                            "group_members": ["import", "import_b"], "group_cap_mw": 60.0}),
 }
 
 
@@ -139,6 +155,13 @@ def test_rows_reconcile_before_and_after_a_save_and_load(case, client, install_n
         if before.get(key) is None:
             continue
         assert after.get(key) == pytest.approx(before[key], rel=1e-9), (case, key)
+    assert after["flags"] == before["flags"], case
+    assert after.get("demand_months_not_established") == \
+        before.get("demand_months_not_established"), case
+    assert after.get("group") == before.get("group"), case
+    if extra.get("group_members"):
+        assert before["group"]["members"] == ["import", "import_b"]
+        assert sum(before["group"]["energy_share"].values()) == pytest.approx(1.0)
     assert cb2["total"] == pytest.approx(cb["total"], rel=1e-9)
-    if dec2["gap_pct"] is not None:
-        assert abs(dec2["gap_pct"]) < 1e-6, (case, dec2)
+    assert dec2["gap_pct"] is not None, (case, dec2)
+    assert abs(dec2["gap_pct"]) < 1e-6, (case, dec2)

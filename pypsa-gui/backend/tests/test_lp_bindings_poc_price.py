@@ -186,7 +186,8 @@ def test_after_a_solve_the_poc_price_is_persisted_and_the_users_cost_untouched()
     sink = _solve(n, _commercial(_tariff()))
     assert np.allclose(n.links_t[L.ENERGY_PRICE_ATTR]["import"], _expected_eur_per_mwh(n.snapshots))
     assert "import" not in n.links_t.marginal_cost.columns  # applied for the solve, undone
-    assert n.meta[L.META_LINKS] == {"import": "import", "export": None, "priced": ["import"]}
+    assert n.meta[L.META_LINKS] == {"import": "import", "export": None,
+                                    "import_members": ["import"], "priced": ["import"]}
     assert sink["last_commercial_terms"]["poc_link"] == "import"
 
 

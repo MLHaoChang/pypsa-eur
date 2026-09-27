@@ -335,6 +335,10 @@ class CommercialConfig(BaseModel):
 
         if bool(self.group_members) != (self.group_cap_mw is not None):
             raise ValueError("a group contract needs both group_members and group_cap_mw")
+        if bool(self.group_members) != (self.group_contract is not None):
+            # A named group that binds nothing, or members with no contract
+            # name, would say nothing about what the solve did (ADR-0001).
+            raise ValueError("group_contract and group_members are set together")
         if len(set(self.group_members)) != len(self.group_members):
             raise ValueError("group_members must be unique")
 
