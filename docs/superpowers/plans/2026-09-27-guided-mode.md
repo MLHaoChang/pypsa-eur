@@ -252,15 +252,36 @@ Changed assertions (spec §8.3):
 - `App.hubDesignAutoOpen.test.tsx`: asserts `hub-rail`, not the P23 placeholder text. Justification: P24 replaces the placeholder (spec §3.6).
 
 **P24-FE integration gate (spec §8):**
-- [ ] 1 full backend suite — zero new failures
-- [ ] 2 targeted EH set green
-- [ ] 3 `tsc` clean
-- [ ] 4 `vitest` — zero new failures
-- [ ] 5 browser smoke `--phase P24` on the data-center template: Start (template banner) → Site rows populated → Goal default 3 h/yr → Run → running → done → rail at Results, headline "Not certified…" → Improve lists findings → Check risks → FMEA tab; Open full report scrolls `eh-report` into view; buses/links equal before/after; the `hub_design` tour walks all steps
-- [ ] 6 QA-gate review GO (`…-gate-P24-FE.md`)
-- [ ] 7 Expert-unchanged review signed
+- [x] 1 full backend suite — zero new failures
+- [x] 2 targeted EH set green
+- [x] 3 `tsc` clean
+- [x] 4 `vitest` — zero new failures
+- [x] 5 browser smoke `--phase P24` on the data-center template: Start (template banner) → Site rows populated → Goal default 3 h/yr → Run → running → done → rail at Results, headline "Not certified…" → Improve lists findings → Check risks → FMEA tab; Open full report scrolls `eh-report` into view; buses/links equal before/after; the `hub_design` tour walks all steps
+- [x] 6 QA-gate review GO (`…-gate-P24-FE.md`)
+- [x] 7 Expert-unchanged review signed
 
 ---
+
+**P24-FE result: GO at Re-gate 2 on `81f7bad`, 2026-09-27.** The gate took three rounds.
+- **First gate: NO-GO**, three blockers:
+  - B1: the cost label claimed the plan met the goal.
+  - B2: the tour dead-ended before a first study.
+  - B3: engine jargon on the Improve card.
+- **Re-gate: NO-GO.** New blocker B4: a failed first read left the hub panel loading forever while it re-requested about twice a second. This was also the real cause of the intermittent vitest hang.
+- **Re-gate 2: GO.**
+
+| Row | Evidence |
+|---|---|
+| 1 | Full backend `6111 passed` at `37a1693`, plus one flaky failure (`test_chat_sse::test_invalid_decision…`). Its root cause was a TTL race, reproduced with a 0.5 s stall and fixed in `40eda09`. `e3ded59` fixed another flaky test (`id()` reuse on freed connections). The backend is otherwise unchanged. |
+| 2 | 516 passed |
+| 3 | tsc clean |
+| 4 | vitest 229 files / 2365 passed |
+| Stress | App plus hub tests ×30, 0 failures (9/25 before the fix) |
+| 5 | All four smokes pass (P24 has 21 screenshots, including the B4 step). A B4 probe covered 500/404/403 on both reads: no loop, no toasts, Retry recovers, and Expert toasts are unaffected. |
+
+Mutation checks killed 24 of 27. The three survivors are all in the API-layer quiet mapping; those tests are carried into P25 step 0.
+
+The gate file is `docs/superpowers/qa/2026-09-27-guided-mode-gate-P24-FE.md`.
 
 ## P25 — The assistant does the steps
 

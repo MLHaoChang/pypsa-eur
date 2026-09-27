@@ -329,3 +329,136 @@ The two failing tests in every case are "guided tour holds are released › afte
 | Probe | `qa-probe2.mjs --phase QA2`: reproduces B4 in the real app (`rg/qa2`, `rg/qa2b`). |
 | Mutants | 16 run on a scratch copy (`qa24fe/mutate2.py`, `mutants2.txt`): 14 killed; R8 and R15 survived (notes above). |
 | Stress | See B4: 9/25 and 5/15 failed at HEAD; 0/15 with the panel stubbed; 20/20 passed for the App test alone. |
+
+---
+
+# Re-gate 2 (2026-09-27, commit `81f7bad`, `git diff d3d8d4a..HEAD`)
+
+## Verdict: **GO**
+
+- B4 is fixed, both in the real app and in the tests.
+- R8 and R15 are now pinned by tests.
+- The plain-words rules, the Guided greeting and the VOLL colon are correct and tested.
+- There are no new blockers. The notes below are non-blocking.
+
+Scratch evidence is in `qa24fe/rg2/` (`qa24fe` = `/tmp/claude-0/-home-user-pypsa-eur/93e65137-63f8-5e19-b114-b55788c10af8/scratchpad/qa24fe`). The source tree was not edited, and `git status` is clean.
+
+## B4: fixed
+
+**Code** (`HubDesignPanel.tsx:49–78`, `:111–124`):
+- `settled = !project || readNow || latched`. An errored read is not pending, so it settles.
+- `latched = ready && storeProject === project` keeps the card mounted through react-query's pending flip on a refetch.
+- `resetWhileFailed` re-derives the step once the read recovers.
+- Retry refetches only the query that errored.
+
+**Real app.** Probe `rg2/qa-probe3.mjs --phase QA3` (the HEAD smoke plus one phase). The logs are `rg2/qa3.txt` and `rg2/qa3b.txt`; the screenshots are in `rg2/qa3/` and `rg2/qa3b/`. Each case opens the data-center project in a fresh Guided profile.
+
+| Forced failure | Error line | Card | `eh_*` requests in 10 s after it settled | "Loading…" flips | Toasts | Retry while still failing | Retry after lifting |
+|---|---|---|---|---|---|---|---|
+| `eh_study` 500 | yes | Site | **0** (4 before settling) | 0 | **0** | 2 requests (retry:1), line returns, 0 toasts | line gone, Site, rail consistent |
+| `eh_template` 500 | yes | Start (read as own network) | 0 | 0 | 0 | same | line gone, Site |
+| `eh_study` 404 | yes | Site | 0 | 0 | 0 | same | recovers |
+| `eh_study` 403 | yes | Site | 0 | 0 | 0 | same, no auth redirect | recovers |
+| `eh_template` 404 | yes | Start | 0 | 0 | 0 | same | recovers |
+
+**Project switch after a failed read** (latch check). DC's `eh_study` fails, then the user switches in the same tab to the H₂ project with the route lifted, then back to DC:
+- H₂ shows no error line and its own Site card, with 0 "Loading…".
+- DC re-reads: the error line is gone and the rail is consistent.
+
+The latch is per project (`storeProject === project`), so it cannot carry across a switch. Mutant L3 below confirms this.
+
+## Regression: quiet reads do not silence Expert
+
+Measured with a MutationObserver toast recorder. The first probe run counted on-screen toasts after they had expired and reported 0; the recorder replaced it.
+- **Expert profile, `eh_study` → 500, Results → Adequacy → EH panel:** 2 requests, **2 "boom" toasts**. The Expert calls are unchanged (`EhReferenceDesignPanel.tsx:674,714`).
+- **Guided hub first (0 toasts), then the user switches to Expert and opens the EH panel:** **2 toasts** in Expert. This matters because react-query keeps the last observer's `queryFn` on the shared query. Each observer's own fetch uses its own options, so the hub's quiet `queryFn` does not leak into Expert. The hub and the Results panel are never mounted together (one slide panel at a time).
+
+## Stress
+
+`App.hubDesignAutoOpen.test.tsx` + `src/pages/hubDesign` on the real tree:
+- **30/30 passed, 0 failures** (`rg2/stress-real.txt`, 134 tests each). The pre-fix count was 9/25.
+- About ten of the runs overlapped with row 2 and the browser probe, so they were under load.
+- The two tests that used to hang (project switch → "Other" with failing reads) passed every time.
+
+## Mutants: 27 run, 24 killed, 3 survived
+
+The mutants were run on a scratch copy (`rg2/mut`, `rg2/mutate3.py`; logs `rg2/mutants3.txt` and `rg2/mutants3-rerun.txt`).
+
+**Killed:**
+- **Latch and settled:**
+  - L1: latch removed. Killed by the B4 flow tests: request bound and Retry.
+  - L2: an errored read does not count as settled.
+  - L3: the latch ignores the project. Killed by "a new project resets the store…".
+  - L4: no re-derive after recovery.
+  - L5: `resetWhileFailed` is never set.
+- **Quiet reads at the hub:** Q1 and Q2 (the hub reads loud). Killed by "the hub reads … quietly".
+- **Retry and the error line:**
+  - RT1: Retry does nothing.
+  - RT2: Retry skips the template.
+  - RT3: Retry skips the study.
+  - RT4: the error line is never shown.
+  - RT5: the error line shows only for the study.
+- **R15:**
+  - R15a: Guided hides the button even while a solve is running or queued.
+  - R15b: queued is ignored.
+  - R15c: running is ignored.
+- **Greeting:**
+  - G1: the Guided line is removed.
+  - G2: the mode is inverted.
+  - G3: the Guided line is always shown. Killed by the Expert cases that now set `uiMode: 'expert'`.
+- **Plain words:** P1–P5 (VOLL, VOLL>0, frontier, fmea_top and the "an N+1 unit" rule each removed).
+- **VOLL colon:** C1 (the colon fix reverted).
+
+**Survived.** These change the mapping from `{quiet}` to `skipErrorToast` in `api/simulation.ts:1344–1345` and `:1404–1406`:
+- **Q3:** `quiet` is ignored, so the hub toasts again.
+- **Q4:** `getEhStudy` is always quiet, so the Expert panel is silenced.
+- **Q5:** `getEhTemplate` is always quiet.
+
+No unit test pins the API layer. The P24 smoke's B4 step would catch Q3 (it asserts 0 toasts). No smoke or unit test catches Q4 or Q5, the "Expert still toasts" guarantee. The code is correct today, as the probe above shows, so this is a note and not a blocker.
+
+(An earlier Q3–Q5 run reported them "killed", but only because `ChatPanel.manifest.test.tsx` cannot find `pypsa-gui/tool-error-kinds.json` in the scratch copy. The rerun with that file is authoritative.)
+
+## Backend flaky-test fixes
+
+- **`40eda09` (`test_chat_sse.py::test_invalid_decision_returns_400_and_preserves_token`): sound.**
+  - The local `monkeypatch` sets `CONFIRMATION_TTL_SECONDS = 60` after the autouse 0.3 s fixture.
+  - `issue_confirmation` reads the module global at call time (`chat_service.py:553`).
+  - The test still fails if the token is not preserved: the second request would get 404 or 409.
+- **`e3ded59`:** judged sound at the previous re-gate. Nothing changed since.
+
+## Non-blocking notes
+
+1. **API-layer test gap.** Add a `resultsApi` test that `getEhStudy()` / `getEhTemplate(p)` pass no `skipErrorToast` and that `{quiet:true}` passes it. That kills Q3–Q5.
+2. **Error-line wording when the template read fails.** The line says "This project's **study state** could not be read" even when only `eh_template` failed. The hub then treats the project as the user's own network:
+   - the Start card is current, and it offers the same project's template button (`rg2/qa3/03-qa3-template500-error.png`);
+   - on the Goal card, "Run study" would run with the `strong_grid` default rather than the template's recommended pack.
+
+   The warning line does cover this ("steps below may be incomplete"). Still, consider disabling Run study while the template read has failed, or naming what failed.
+3. **Vacuous smoke check.** In the smoke's B4 step, "no further failing requests after recovery" (`smoke-guided.mjs`, the `n === n1` check) is vacuous. `n` counts only the handler's fulfils, and the route is already removed. A `page.on('request')` counter would make it real.
+4. **Mid-run blip.** A transient poll failure mid-run (the query has data and is in `isError`) shows the error line until the next successful poll. Polling continues at 2 s because `ehStudyRefetchInterval` reads the retained data. Acceptable.
+5. **Greeting scope.** The Guided greeting "A study has run on this network — its results are in Hub design." is used for any `dispatch: 'fresh'` without a foreground solve. A re-solve left by a non-hub study, run from Expert or by the assistant before the user switched to Guided, would also point to Hub design. Low risk. Screenshot: `rg2/smoke-P24/11`.
+6. **`skipErrorToast` also skips `appLog`** (`client.ts:202`), so a failed hub read leaves no line in the app log. Consider logging it at INFO.
+7. **Latch across a same-name re-create.** When a project is deleted and re-created under the same name, the store is not re-derived, because `storeProject === project` stays true. This is pre-existing: the old guard used the same condition, and it is not made worse here.
+
+## Evidence (re-gate 2)
+
+| Row | Result |
+|---|---|
+| 2 | Targeted EH set + `test_qa_support_sandbox.py` + `test_chat_sse.py`: **516 passed in 460 s**, exit 0 (`rg2/row2.txt`) |
+| 3 | `tsc --noEmit`: exit 0, no output (`rg2/row3.txt`) |
+| 4 | `vitest run`: **229 files, 2365 passed**, exit 0 (`rg2/row4.txt`) |
+| Stress | 30/30 green (`rg2/stress-real.txt`) |
+| Smokes | All exit 0 (`rg2/smoke-*.txt`, screenshots `rg2/smoke-*/`). |
+| Probe | `rg2/qa-probe3.mjs --phase QA3`: the B4 matrix above, the Expert toast check, and the switch check (`rg2/qa3.txt`, `rg2/qa3b.txt`) |
+| Mutants | 27 run: 24 killed, 3 survived (Q3–Q5, note 1) |
+| Processes | 0 left over (uvicorn, vite, chromium, stub, vitest) |
+
+**Smoke details:**
+- **P24** PASS, 21 screenshots, including the new B4 step:
+  - 0 requests in 10 s;
+  - 0 toasts;
+  - Retry recovers (`20-p24-b4-study-500-error-line.png`, `21-p24-b4-after-retry.png`).
+- **P24 verdicts** are unchanged: data center fail, H₂ no goal, microgrid inconclusive. The live tables are equal around all studies.
+- **P23**, **P24-BE** and **P22.9** all PASS.
+
+**Screenshots read as a first-time user:** the B4 line is plain and the Retry button is obvious. The VOLL line now reads "Price of undelivered energy ⓘ: €5,000 per MWh" (`17`), and the Improve card has no jargon (`09`, `11`).
