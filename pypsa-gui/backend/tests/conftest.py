@@ -416,7 +416,10 @@ def _reset_tenant_tables(_auth_db):
 
     yield
     with engine.begin() as conn:
-        for table in ("project_locks", "project_memberships", "projects", "solve_jobs"):
+        # `library_items` (Edge Investment Case WP1.1a): per-org Library rows
+        # must not leak a version number from one test into the next.
+        for table in ("project_locks", "project_memberships", "projects", "solve_jobs",
+                      "library_items"):
             conn.execute(text(f"DELETE FROM {table}"))
 
 @pytest.fixture(autouse=True)

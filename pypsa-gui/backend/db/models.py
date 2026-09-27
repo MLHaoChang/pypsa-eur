@@ -212,3 +212,34 @@ class SolveJobRow(Base):
     dismissed_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
     )
+
+
+class LibraryItem(Base):
+    """
+    One VERSION of an org-scoped Library item (Edge Investment Case WP1.1a).
+
+    Price curves, dynamic operating envelopes, meter history and forecast
+    pairs are not component attributes, so they live here rather than in the
+    component-bound `_user_ts` store (spec decision 17). A row is immutable:
+    changed content is a new `version`, so a project pinned to v1 keeps v1.
+    `path` is relative to the org's library directory, never absolute (same
+    reason as `Project.storage_path`). `kind` is a plain string ('series'
+    today; tariffs and contracts join in P2) — the validating edge is
+    `services/library`.
+    """
+
+    __tablename__ = "library_items"
+    __table_args__ = (UniqueConstraint("org_id", "kind", "name", "version"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    name: Mapped[str] = mapped_column(String(128))
+    version: Mapped[int] = mapped_column()
+    hash: Mapped[str] = mapped_column(String(64))
+    path: Mapped[str] = mapped_column(Text)
+    meta_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

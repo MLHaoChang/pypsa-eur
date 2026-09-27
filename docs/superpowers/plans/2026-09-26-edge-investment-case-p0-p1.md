@@ -218,7 +218,7 @@ Files: `backend/services/library/__init__.py`, `series_store.py`, `backend/servi
 - [ ] Red: `put_series(org, name, series, meta)` returns `TimeSeriesRef(id, version, hash)`; re-put with same
   content is idempotent (same version), changed content bumps version; `resolve(ref)` returns the exact
   series; files live under the reserved prefix `<projects_root>/_library/<org>/…` (never under a project
-  directory) via `storage_paths.library_dir`; the path **always** carries the org id (`_library/<org_id>/`)
+  directory) via `storage_paths.library_dir`; the path **always** carries the org id (`.library/<org_id>/` — a HIDDEN directory: implementation found that `legacy_migrate._scan_root` offers any non-hidden, non-UUID directory under the projects root as a claimable leftover it may move, which `_library/` would have been)
   whether or not `use_org_segment()` is on for project dirs; `taken_names` ignores `_library`;
   items persist across app restart; CSV+gzip payload hashed on canonical bytes (`float_format="%.10g"`,
   ISO tz-aware `date_format`) so idempotency is deterministic; `tests/test_alembic_sqlite.py::
