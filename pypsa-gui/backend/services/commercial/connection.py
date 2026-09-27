@@ -75,6 +75,9 @@ ENVELOPE_ATTR = "ic_envelope_mw"
 META_ENV_AXIS = "ic_envelope_axis"
 META_FEE = "ic_connection_fee"
 META_FIXED_FEE = "ic_connection_fixed_fee"
+# Every committed agreement, fee or not: its content hash (P2 WP2.0 — a cap edit on
+# a fee-less agreement without a re-solve is drift).
+META_AGREEMENT = "ic_connection"
 FEE_SPEC_ATTR = "_ic_fee_spec"          # transient: set by apply, read by the LP wrapper
 FEE_BUILT_ATTR = "_ic_fee_built"        # transient: set by the LP wrapper, read by commit
 # Set by `adequacy.sweep.freeze_capacities`: the solve is OPERATIONAL (the design
@@ -337,6 +340,8 @@ def apply_connection_agreement(n, agreement: ConnectionAgreement, *, poc_link: s
         raise
 
     def commit() -> None:
+        n.meta[META_AGREEMENT] = {"kind": agreement.kind, "link": poc_link,
+                                  "agreement_hash": agreement_hash(agreement)}
         built = getattr(n, FEE_BUILT_ATTR, None)
         if built is not None:
             n.meta[META_FEE] = {**built, "agreement_hash": agreement_hash(agreement)}
@@ -430,6 +435,7 @@ def apply_commercial_for_solve(n, commercial: dict | None, *, log=None,
         def clear_fee() -> None:
             n.meta.pop(META_FEE, None)
             n.meta.pop(META_FIXED_FEE, None)
+            n.meta.pop(META_AGREEMENT, None)
 
         conn = Applied()
         conn._commit.append(clear_fee)

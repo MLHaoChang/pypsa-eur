@@ -12,9 +12,13 @@ service seam, not a `/results/*` handler.
 Conventions (identical to `asset_economics.py`):
   * COST weights  = `snapshot_weights(n, "objective")`  (× period years)
   * ENERGY weights = `snapshot_weights(n, "generators")` (× period years)
-  * fixed_cost_eur = capital_cost_annualised × capacity × Σ period years
-  * fom_cost_eur_annual = fom_cost × capacity  (annual; the horizon figure is
-    fom_cost_eur_annual × Σ years — exposed separately as `fom_cost_eur`)
+  * fixed_cost_eur = (capital_cost_annualised + FOM per horizon) × capacity ×
+    the years the asset is ACTIVE (`period_utils.active_period_years`; every
+    period's years on a flat network) — the rule the LP, `cost_breakdown` and
+    `asset_economics` apply since the FOM reconciliation (P2 WP2.0). The rate
+    is the `fixed_cost` of the `periodized_capital_costs` entry when present.
+  * fom_cost_eur = FOM per horizon × capacity × active years (the FOM share of
+    fixed_cost_eur); fom_cost_eur_annual = typed `fom_cost` × capacity
   * Link output = −p1 (− p2 − p3 − p4 for multi-port), falling back to
     p0 × efficiency PER LINK when p1 has no column for it
   * StorageUnit / Store: discharge = p⁺, charge = (−p)⁺
@@ -41,7 +45,13 @@ from typing import Any, Callable
 import numpy as np
 import pandas as pd
 
-from services.period_utils import is_multi_period, period_years_map, snapshot_weights
+from services.period_utils import (
+    active_period_years,
+    is_multi_period,
+    period_years_map,
+    snapshot_weights,
+)
+from services.solver.periodized_costs import fom_per_horizon
 from services.solver_service import periodized_capital_costs
 
 logger = logging.getLogger(__name__)
@@ -49,6 +59,10 @@ logger = logging.getLogger(__name__)
 # Same role set as services/adequacy/redundancy.py `_IMPORT_ROLES`; the
 # archetype packs write only "grid_import", older networks carry the others.
 POC_ROLES: frozenset[str] = frozenset({"grid_import", "eh_import", "import"})
+
+# frame attr → PyPSA component class, for `active_period_years`.
+_COMPONENT: dict[str, str] = {"generators": "Generator", "storage_units": "StorageUnit",
+                              "stores": "Store", "links": "Link"}
 
 _CLASSES: tuple[tuple[str, str, str, str], ...] = (
     # (frame attr on n, result accessor, capacity column, cost-facts key)
@@ -135,10 +149,33 @@ def physical_quantities(n, cfg, *, result_df: Callable[..., Any]) -> dict[str, A
         fom = (df["fom_cost"].fillna(0.0) if "fom_cost" in df.columns
                else pd.Series(0.0, index=df.index)).astype(float)
         out["fom_cost_per_unit"] = fom.values
-        out["fixed_cost_eur"] = (out["capital_cost_annualised"] * out["p_nom_opt"]
-                                 * total_years_factor).values
+        # Fixed cost as the LP charged it (P2 WP2.0, the merged FOM rule, same
+        # as `asset_economics._fixed_rates`): the entry's `fixed_cost`
+        # (annuitised investment + FOM per horizon), else capital_cost + FOM
+        # per horizon; times capacity; times the years the asset is ACTIVE.
+        fom_h = pd.Series(fom_per_horizon(n, fom).values, index=out.index)
+        fom_rate = pd.Series({str(k): v.get("fom_cost") for k, v in facts.items()},
+                             dtype="float64").reindex(out.index).fillna(fom_h)
+        fixed_rate = pd.Series({str(k): v.get("fixed_cost") for k, v in facts.items()},
+                               dtype="float64").reindex(out.index)
+        fixed_rate = fixed_rate.fillna(out["capital_cost_annualised"] + fom_rate)
+        if not capital_costs_available:
+            fixed_rate[:] = np.nan
+        try:
+            active = active_period_years(n, _COMPONENT[frame_attr])
+        except Exception:
+            logger.exception("activity lookup failed for %s in physical_quantities; charging "
+                             "fixed cost for the whole horizon", frame_attr)
+            active = None
+        if active is None:
+            years = pd.Series(total_years_factor, index=out.index)
+        else:
+            years = active.sum(axis=1)
+            years.index = years.index.astype(str)
+            years = years.reindex(out.index).fillna(total_years_factor)
+        out["fixed_cost_eur"] = (fixed_rate * out["p_nom_opt"] * years).values
         out["fom_cost_eur_annual"] = (out["fom_cost_per_unit"] * out["p_nom_opt"]).values
-        out["fom_cost_eur"] = (out["fom_cost_eur_annual"] * total_years_factor).values
+        out["fom_cost_eur"] = (fom_rate * out["p_nom_opt"] * years).values
 
         # ── dispatch → energy ────────────────────────────────────────────
         cols = list(df.index)

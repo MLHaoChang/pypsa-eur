@@ -82,12 +82,10 @@ def test_agrees_with_asset_economics_generators(golden):
         assert _close(row["p_nom_opt_mw"], gens.at[g, "p_nom_opt"]), g
         assert _close(row["energy_mwh"], gens.at[g, "energy_mwh"]), g
         assert _close(row["fixed_cost_eur"], gens.at[g, "fixed_cost_eur"]), g
-        # TODO(FOM): asset_economics reports FOM as an annual informational
-        # figure only and excludes it from fixed cost; the objective includes
-        # it (see notes/2026-09-26-edge-client-feature-benchmark.md §1.6, fix
-        # delegated). Until that lands, the seam exposes both and we compare
-        # the annual FOM figure explicitly.
-        assert _close(row["fom_cost_eur"], gens.at[g, "fom_cost_eur_annual"]), g
+        # FOM is part of fixed cost on both surfaces since the FOM
+        # reconciliation (P2 WP2.0); `fom_cost_eur` is its share, on the same
+        # per-horizon, active-years basis.
+        assert _close(row["fom_cost_eur"], gens.at[g, "fom_cost_eur"]), g
 
 
 def test_agrees_with_asset_economics_storage_and_links(golden):
@@ -114,14 +112,23 @@ def test_agrees_with_asset_economics_storage_and_links(golden):
         assert _close(row["fixed_cost_eur"], links.at[ln, "fixed_cost_eur"]), ln
 
 
-def test_fixed_cost_is_capital_cost_times_capacity_times_years(golden):
+def test_fixed_cost_is_the_lp_rate_times_capacity_times_active_years(golden):
+    """P2 WP2.0 (the merged FOM rule): (annuitised investment + FOM per horizon)
+    × capacity × the years the asset is active — what the LP charges."""
+    from services.period_utils import active_period_years
     from services.results.physical_quantities import physical_quantities
+    from services.solver.periodized_costs import fom_per_horizon
 
     pq = physical_quantities(golden, _cfg(), result_df=_plain_result_df)
     gens = pq["components"]["generators"]
-    expect = gens["capital_cost_annualised"] * gens["p_nom_opt"] * pq["total_years_factor"]
+    fom = fom_per_horizon(golden, golden.generators["fom_cost"]).rename(str)
+    active = active_period_years(golden, "Generator")
+    years = (active.sum(axis=1).rename(str) if active is not None
+             else pd.Series(pq["total_years_factor"], index=gens.index))
+    expect = (gens["capital_cost_annualised"] + fom.reindex(gens.index)) * gens["p_nom_opt"] \
+        * years.reindex(gens.index)
     pd.testing.assert_series_equal(gens["fixed_cost_eur"], expect.rename("fixed_cost_eur"),
-                                   check_exact=False, rtol=1e-12)
+                                   check_exact=False, rtol=1e-9)
 
 
 def test_energy_by_period_sums_to_horizon_total(golden):

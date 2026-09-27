@@ -534,3 +534,60 @@ def test_a_changed_connection_agreement_after_the_solve_is_drift(changed):
     assert "config_changed_since_solve" not in same
     edited = SolverConfig(commercial=_conn(changed()))
     assert "config_changed_since_solve" in compute_cost_breakdown(n, edited)["commercial"]["flags"]
+
+
+# ── P2 WP2.0: P1 gate INFO hygiene ─────────────────────────────────────────
+
+
+@pytest.mark.live_solve
+def test_a_changed_fee_less_agreement_after_the_solve_is_drift():
+    """A firm agreement with no fee commits no fee record; its cap still shaped
+    the dispatch, so editing it without a re-solve is drift."""
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    n = build_edge_15min()
+    status, _, cfg = _run(n, {**_conn(_agreement(cap=60.0)), "import_tariff": _tou_tariff()})
+    assert status in ("ok", "optimal")
+    assert "config_changed_since_solve" not in compute_cost_breakdown(n, cfg)["commercial"]["flags"]
+    edited = SolverConfig(commercial={**_conn(_agreement(cap=50.0)), "import_tariff": _tou_tariff()})
+    assert "config_changed_since_solve" in compute_cost_breakdown(n, edited)["commercial"]["flags"]
+
+
+@pytest.mark.live_solve
+def test_a_changed_non_firm_fixed_fee_after_the_solve_is_drift():
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    n = build_edge_15min()
+    base = _agreement(kind="non_firm_static", cap=60.0, fee=_fee(40.0))
+    status, _, cfg = _run(n, {**_conn(base), "import_tariff": _tou_tariff()})
+    assert status in ("ok", "optimal")
+    block = compute_cost_breakdown(n, cfg)["commercial"]
+    assert block.get("network_capacity_fixed") is not None
+    assert "config_changed_since_solve" not in block["flags"]
+    edited = _agreement(kind="non_firm_static", cap=60.0, fee=_fee(80.0))
+    flags = compute_cost_breakdown(n, SolverConfig(commercial={**_conn(edited),
+                                                               "import_tariff": _tou_tariff()}))
+    assert "config_changed_since_solve" in flags["commercial"]["flags"]
+
+
+@pytest.mark.live_solve
+def test_the_block_flags_are_in_a_stable_order():
+    """Documented order: sorted, so a consumer can compare the lists."""
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    n = build_edge_15min()
+    status, _, cfg = _run(n, {**_conn(_agreement(fee=_fee(60.0))), "import_tariff": _tou_tariff()})
+    edited = SolverConfig(commercial={**_conn(_agreement(fee=_fee(90.0))),
+                                      "import_tariff": _tou_tariff(0.09)})
+    flags = compute_cost_breakdown(n, edited)["commercial"]["flags"]
+    assert flags == sorted(set(flags))
+
+
+def _tou_tariff(rate_night=0.07):
+    return {"id": "t", "name": "t", "jurisdiction": "DE", "valid_from": "2030-01-01",
+            "items": [{"id": "e", "kind": "energy", "unit": "per_kwh", "periods": [
+                {"name": "night", "rate": rate_night, "start_hour": 0, "end_hour": 6},
+                {"name": "day", "rate": 0.2}]}]}

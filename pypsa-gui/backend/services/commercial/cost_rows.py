@@ -203,6 +203,16 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
         block["network_capacity"] = None
         flags.append("network_capacity_not_established")
 
+    # The agreement itself (fee or not) — its cap and availability shaped the
+    # dispatch, so an edit without a re-solve is drift (P2 WP2.0).
+    solved_agreement = n.meta.get(_conn.META_AGREEMENT)
+    if solved_agreement and solved_agreement.get("agreement_hash") != \
+            _conn.agreement_hash(agreement):
+        flags.append("config_changed_since_solve" if commercial else
+                     "config_cleared_since_solve")
+    elif not solved_agreement and agreement is not None and n.meta.get(_lp.META_LINKS):
+        flags.append("config_changed_since_solve")  # an agreement the solve did not bind
+
     # Fixed connection fee — reported, NOT in the reconciled total (§5.5).
     fixed = n.meta.get(_conn.META_FIXED_FEE)
     if fixed:
@@ -216,7 +226,8 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
             "eur": float(eur), "kind": fixed.get("kind"),
             "included_in_total": False, "flags": ["fixed_charge_not_in_lp"]}
 
-    block["flags"] = list(dict.fromkeys(flags))
+    # Documented order: sorted and unique, so consumers can compare lists (P2 WP2.0).
+    block["flags"] = sorted(set(flags))
     if len(block) == 2 and not items:  # only included_in_total + empty flags
         return {"items": [], "block": None, "flags": []}
     return {"items": items, "block": block, "flags": block["flags"]}

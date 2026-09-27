@@ -10,9 +10,9 @@ recomputes the rows after a reload with no solver state at all, and
 `_HANDLER_PARAMS` is unchanged (no new route argument; plan deviation from the
 `commercial_terms=` keyword, recorded in the plan).
 
-Nine cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
+Ten cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
 tiers; + group cap; a representative-weeks axis; two investment periods (TOU +
-demand + fee); a two-period group whose demand is metered on the group.
+demand + fee); a two-period group whose demand is metered on the group; annual FOM on the extendable assets (WP2.0).
 After the reload the gap must still be computed (never None), and the flags,
 the not-established months and the group record must be the same.
 """
@@ -74,6 +74,17 @@ def _two_periods(build):
     return make
 
 
+def _with_fom():
+    """WP2.0 (P1 binding condition 5): annual FOM on the extendable assets; the
+    plain-solve objective pays it, so the rows must too."""
+    n = _edge()
+    n.storage_units.loc["bess", ["p_nom_extendable", "p_nom_max", "capital_cost", "fom_cost"]] = \
+        [True, 60.0, 20_000.0, 3_000.0]
+    n.generators.loc["pv", ["p_nom_extendable", "p_nom_max", "capital_cost", "fom_cost"]] = \
+        [True, 120.0, 30_000.0, 800.0]
+    return n
+
+
 def _rep_weeks():
     n = _edge()
     parts = [pd.date_range(f"2030-{m:02d}-07", periods=96 * 7, freq="15min") for m in (1, 7)]
@@ -98,6 +109,7 @@ CASES = {
     "rep_weeks": (_rep_weeks, {"import_tariff": _tariff(TOU, DEMAND)}),
     "multi_period": (_two_periods(_edge), {"import_tariff": _tariff(TOU, DEMAND),
                                            "connection": FEE}),
+    "fom": (_with_fom, {"import_tariff": _tariff(TOU)}),
     "group_multi_period": (_two_periods(_two_members),
                            {"import_tariff": _tariff(TOU, DEMAND), "group_contract": "hub",
                             "group_members": ["import", "import_b"], "group_cap_mw": 60.0}),
