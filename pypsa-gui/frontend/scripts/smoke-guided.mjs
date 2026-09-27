@@ -5,7 +5,18 @@
  *
  *   cd pypsa-gui/frontend
  *   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs \
- *     --phase P22.9|P23|P24-BE [--template eh_datacenter] [--out <dir>] [--keep]
+ *     --phase P22.9|P23|P24-BE|P24 [--template eh_datacenter] [--out <dir>] [--keep]
+ *
+ * P24 walks the Guided hub design (spec §5) as a first-time user: the
+ * template from /projects opens hubDesign at Site; Site rows match the
+ * readiness body; Goal shows the pack default; Run → running → done → the
+ * rail moves to Results with the §5.5 headline; Open full report; Improve
+ * lists findings; "Let the assistant do this" seeds the composer (P24 sends
+ * nothing); Check risks (FMEA) runs the sweep and opens the FMEA tab; the
+ * hub_design tour walks its steps. Then the other two templates are created
+ * from the Start card: the H2 hub (no goal → "No reliability goal…") and the
+ * island microgrid (off-grid wording on Site, its own verdict). Live tables
+ * are compared around every study and the sweep.
  *
  * P24-BE re-runs the P22.9 (Expert) path unchanged and, around its study,
  * checks GET /api/results/eh_review with curl: 204 before, `running` while
@@ -52,7 +63,7 @@ const TEMPLATE_NAMES = {
   eh_h2_hub: 'Industrial Hydrogen Hub',
   eh_microgrid: 'Island Microgrid',
 }
-const PHASES = new Set(['P22.9', 'P23', 'P24-BE'])
+const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24'])
 
 // ── args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -753,6 +764,315 @@ async function phaseP23(browser) {
   }
 }
 
+// ── the P24 path (spec §5, plan P24-FE gate item 5) ────────────────────────
+// The §5.5 headline, recomputed from the review / report bodies the app
+// read, so the smoke checks the rendered sentence character for character.
+function expectedHeadline(review, report) {
+  const num = v => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+  const g = v => String(Number(v.toPrecision(6)))
+  const s = review.summary ?? {}
+  const verdict = typeof s.verdict === 'string' ? s.verdict : null
+  const lole = num(s.mc_lole_h_per_year) ?? num(report?.mc_lole_h)
+  const target = num(s.target_lole_h)
+  const rows = report?.sections?.fmea_top?.payload?.rows ?? []
+  const cert = report?.sections?.certification?.payload ?? {}
+  if (verdict === 'fail' && lole != null && target != null) {
+    const top = rows[0] ? String(rows[0].name || rows[0].mode_id) : "the plan's energy limit"
+    return `Not certified: about ${lole.toFixed(0)} h/yr of shortfall vs a ${g(target)} h/yr goal — driven by ${top}`
+  }
+  if (verdict === 'inconclusive' && target != null) {
+    let ci = null
+    const yrs = num(cert.horizon_years)
+    if (Array.isArray(cert.lole_ci) && yrs && yrs > 0) ci = [cert.lole_ci[0] / yrs, cert.lole_ci[1] / yrs]
+    if (!ci) {
+      for (const f of review.findings ?? []) {
+        const raw = f.evidence?.lole_ci_per_horizon
+        if (Array.isArray(raw)) { ci = raw; break }
+      }
+    }
+    if (ci) return `Not decided: the shortfall estimate (${ci[0].toFixed(0)}–${ci[1].toFixed(0)} h/yr) straddles the ${g(target)} h/yr goal — more Monte-Carlo draws would settle it.`
+  }
+  if (verdict === 'pass' && lole != null && target != null) {
+    return `Certified: about ${lole.toFixed(1)} h/yr of shortfall, under the ${g(target)} h/yr goal.`
+  }
+  if (lole != null && target == null) {
+    return `No reliability goal was set — the study reports ${lole.toFixed(1)} h/yr of shortfall. Set a goal to certify.`
+  }
+  const note = report?.sections?.certification?.note
+  return `The study could not certify reliability: ${note ? String(note) : 'the reliability check was not part of this run.'}`
+}
+
+async function phaseP24(browser) {
+  const consoleLines = []
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const page = await context.newPage()
+  page.on('console', m => consoleLines.push(`[${m.type()}] ${m.text()}`))
+  page.on('pageerror', e => consoleLines.push(`[pageerror] ${e.message}`))
+  const byId = id => page.locator(`[data-testid="${id}"]`)
+  const railState = async s => byId(`hub-rail-step-${s}`).getAttribute('data-state')
+  const waitRail = (s, state, timeout = 30_000) => page.waitForFunction(([id, st]) =>
+    document.querySelector(`[data-testid="${id}"]`)?.getAttribute('data-state') === st,
+  [`hub-rail-step-${s}`, state], { timeout })
+  const textOf = async id => ((await byId(id).textContent()) ?? '').trim()
+  const verdicts = {}
+
+  async function readinessFor(templateId, archetype) {
+    const meta = await api('GET', `/api/projects/${encodeURIComponent(TEMPLATE_NAMES[templateId])}/eh_template`)
+    const po = { ...(meta?.pack_overrides ?? {}) }
+    if (archetype !== 'weak_flexible') { delete po.import_p_nom_mw; delete po.import_energy_mwh_per_year }
+    const q = new URLSearchParams({ archetype })
+    if (Object.keys(po).length) q.set('pack_overrides', JSON.stringify(po))
+    return api('GET', `/api/results/eh_readiness?${q}`)
+  }
+
+  async function checkSite(templateId, archetype) {
+    await byId('hub-site-grid').waitFor({ state: 'visible', timeout: 60_000 })
+    check((await byId('hub-site-type').inputValue()) === archetype, `site type = ${archetype}`)
+    const r = await readinessFor(templateId, archetype)
+    const grid = await textOf('hub-site-grid')
+    const critical = await textOf('hub-site-critical')
+    const strength = await textOf('hub-site-strength')
+    const outage = await textOf('hub-site-outage')
+    info(`Site: ${grid} | ${critical} | ${strength} | ${outage}`)
+    for (const l of r.import.links) check(grid.includes(l), `grid row names ${l}`)
+    if (archetype === 'off_grid') {
+      check(/island/.test(grid) && !/\d MW/.test(grid), 'off-grid: the tie is "normally open", no MW rating shown (N4)')
+      check(!/without/.test(outage), 'off-grid: the open tie is not reported as missing outage data (N4)')
+      check((await byId('hub-site-fix-grid').count()) === 0 && (await byId('hub-site-fix-outage').count()) === 0,
+        'off-grid: no grid / outage fix buttons')
+    } else if (r.import_p_nom_mw != null) {
+      check(grid.includes(`(${Number(r.import_p_nom_mw.toPrecision(6))} MW)`), `grid row shows ${r.import_p_nom_mw} MW`)
+    }
+    for (const b of r.critical_buses) check(critical.includes(b), `critical row names ${b}`)
+    const wantStrength = r.scr.status === 'ok' ? 'data present'
+      : r.scr.status === 'not_required' ? 'not needed' : 'data missing'
+    check(strength.includes(wantStrength), `strength row: scr ${r.scr.status} → "${wantStrength}"`)
+    check(outage.includes(`${r.outage_units.count} units`), `outage row: ${r.outage_units.count} units`)
+    return r
+  }
+
+  async function runStudy(label, { expectLole }) {
+    await byId('hub-rail-step-goal').click()
+    await byId('hub-goal-lole').waitFor({ state: 'visible', timeout: 15_000 })
+    await page.waitForFunction(v =>
+      document.querySelector('[data-testid="hub-goal-lole"]')?.value === v, expectLole, { timeout: 30_000 })
+    ok(`Goal shows the pack default "${expectLole}"`)
+    await page.waitForFunction(() => /€[\d,]+ per MWh/.test(
+      document.querySelector('[data-testid="hub-goal-voll"]')?.textContent ?? ''), null, { timeout: 15_000 })
+    info(`VOLL line: ${await textOf('hub-goal-voll')}`)
+    await shot(page, `p24-${label}-goal`)
+    const before = await snapshotTables()
+    await byId('hub-goal-run').click()
+    await byId('hub-goal-running').waitFor({ state: 'visible', timeout: 30_000 })
+    check(await byId('hub-rail-spinner').isVisible(), 'rail spinner on Goal while running')
+    check(await railState('results') === 'blocked' && await railState('improve') === 'blocked',
+      'Results / Improve blocked while running')
+    const runText = await textOf('hub-goal-running')
+    check(runText.startsWith('Studying…') && !/poll|get_adequacy_results/.test(runText),
+      `running text is the card's own: "${runText}" (N3)`)
+    await shot(page, `p24-${label}-running`)
+    await byId('hub-card-results').waitFor({ state: 'visible', timeout: 10 * 60_000 })
+    check(await railState('results') === 'current', 'done → the rail moved to Results (auto-advance)')
+    const study = await api('GET', '/api/results/eh_study')
+    check(study?.status === 'done', `study done (${study?.archetype})`)
+    const review = await api('GET', '/api/results/eh_review')
+    const report = study.report ?? await api('GET', '/api/results/eh_reference_design')
+    await byId('hub-results-verdict').waitFor({ state: 'visible', timeout: 30_000 })
+    const got = await textOf('hub-results-verdict')
+    const want = expectedHeadline(review, report)
+    verdicts[label] = { verdict: review.summary?.verdict ?? null, headline: got }
+    info(`verdict=${review.summary?.verdict} stale=${review.stale}`)
+    check(got === want, `headline (§5.5): "${got}"`)
+    check(review.stale === false && (await byId('hub-results-stale').count()) === 0, 'no stale banner')
+    const diffs = tableDiffs(before, await snapshotTables())
+    check(diffs.diffs.length === 0, `buses/links/generators equal after the study (*_nom_opt changes: ${diffs.nomOpt})`)
+    await shot(page, `p24-${label}-results`)
+    return { review, report }
+  }
+
+  async function walkTour(expectTargets) {
+    await byId('hub-guide-button').click()
+    const seen = []
+    for (let i = 0; i < 20; i++) {
+      const tour = byId('guide-tour')
+      await tour.waitFor({ state: 'visible', timeout: 15_000 })
+      const target = await tour.getAttribute('data-step-target')
+      await sleep(250)   // a reveal renders on the next commit (GuidedTour retries after 60 ms)
+      const missing = await byId('guide-step-missing').isVisible().catch(() => false)
+      check(!missing, `tour step ${seen.length + 1}: ${target} on screen`)
+      seen.push(target)
+      const next = byId('guide-next')
+      const last = ((await next.textContent()) ?? '').trim() === 'Done'
+      await next.click()
+      if (last) break
+      await page.waitForFunction(t =>
+        document.querySelector('[data-testid="guide-tour"]')?.getAttribute('data-step-target') !== t,
+      target, { timeout: 10_000 })
+    }
+    check(JSON.stringify(seen) === JSON.stringify(expectTargets), `tour walked ${seen.length} steps: ${seen.join(', ')}`)
+    return seen
+  }
+
+  const TOUR = ['hub-rail', 'hub-start-templates', 'hub-site-readiness', 'hub-site-type',
+    'hub-goal-lole', 'hub-goal-run', 'hub-results-verdict', 'hub-improve-list', 'hub-improve-fmea']
+
+  try {
+    step('stub model profile (every phase)')
+    await activateStubProfile()
+
+    // ── 1. Start: the data center from /projects, first-time user ────────
+    step('fresh profile → Guided; data center template → workbench with hub-design-panel at Site')
+    await page.goto(`${WEB}/projects`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: /From template/ }).first().waitFor({ timeout: 30_000 })
+    check(await page.evaluate(k => localStorage.getItem(k), MODE_KEY) === 'guided', 'first-time user is Guided')
+    await page.getByRole('button', { name: /From template/ }).first().click()
+    await byId('new-project-wizard').waitFor({ state: 'visible', timeout: 15_000 })
+    await page.getByRole('button', { name: new RegExp(TEMPLATE_NAMES.eh_datacenter) }).click()
+    await page.waitForURL(/\/app\?project=/, { timeout: 60_000 })
+    await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 30_000 })
+    await byId('hub-card-site').waitFor({ state: 'visible', timeout: 30_000 })
+    check(await railState('site') === 'current' && await railState('start') === 'done',
+      'rail: Start ✓, Site current')
+    check(await railState('results') === 'blocked', 'Results blocked before a study')
+    await shot(page, 'p24-dc-opened-at-site')
+
+    step('Start card: three templates, the project\'s provenance')
+    await byId('hub-rail-step-start').click()
+    await byId('hub-start-templates').waitFor({ state: 'visible', timeout: 15_000 })
+    const tplCount = await page.locator('[data-testid^="hub-start-template-"]').count()
+    check(tplCount === 3, `${tplCount} energy-hub templates offered`)
+    const prov = await textOf('hub-start-provenance')
+    check(prov.includes(TEMPLATE_NAMES.eh_datacenter) && /synthetic|example/i.test(prov),
+      `provenance: "${prov.slice(0, 120)}…"`)
+    await shot(page, 'p24-dc-start-card')
+
+    // ── 2. Site ───────────────────────────────────────────────────────────
+    step('Site: grid link, critical bus, strength, outage count from readiness')
+    await byId('hub-rail-step-site').click()
+    await checkSite('eh_datacenter', 'weak_flexible')
+    await shot(page, 'p24-dc-site')
+
+    // ── 3–5. Goal → running → Results ─────────────────────────────────────
+    step('Goal (pack default) → Run → running → done → Results headline')
+    const dc = await runStudy('dc', { expectLole: '3' })
+    const cost = await textOf('hub-results-cost').catch(() => '')
+    info(`cost line: ${cost}`)
+    const risks = await page.locator('[data-testid^="hub-results-risks-"]').count()
+    info(`risks shown: ${risks}; gaps: ${await byId('hub-results-gaps').count() ? await textOf('hub-results-gaps') : '(none)'}`)
+
+    step('Open full report → Results → Adequacy, eh-report scrolled into view')
+    await byId('hub-results-open-report').click()
+    await byId('eh-report').waitFor({ state: 'visible', timeout: 30_000 })
+    await sleep(1200)
+    const inView = await page.evaluate(() => {
+      const r = document.querySelector('[data-testid="eh-report"]')?.getBoundingClientRect()
+      return !!r && r.top >= -2 && r.top < window.innerHeight
+    })
+    check(inView, 'eh-report in view')
+    check((await byId('results-tab-adequacy').getAttribute('class')).includes('border-accent'), 'Adequacy tab active')
+    await shot(page, 'p24-dc-full-report')
+    await byId('sidebar-hub-design').click()
+    await byId('hub-card-results').waitFor({ state: 'visible', timeout: 15_000 })
+
+    // ── 6. Improve ────────────────────────────────────────────────────────
+    step('Improve lists the high / medium findings; Why; Let the assistant do this seeds the composer')
+    await byId('hub-rail-step-improve').click()
+    await byId('hub-improve-list').waitFor({ state: 'visible', timeout: 15_000 })
+    const items = await byId('hub-improve-list').locator(':scope > li').count()
+    const hm = dc.review.findings.filter(f => f.severity === 'high' || f.severity === 'medium')
+    check(items >= 1 && items === hm.length, `${items} findings listed (${hm.map(f => f.id).join(', ')})`)
+    const withAction = hm.find(f => f.actions?.length)
+    const first = withAction ?? hm[0]
+    await byId(`hub-improve-why-${first.id}`).click()
+    check(/technical evidence/i.test(await textOf(`hub-improve-evidence-${first.id}`)), 'Why shows the technical evidence')
+    if (withAction) {
+      await byId(`hub-improve-do-${withAction.id}`).click()
+      await byId('chat-input').waitFor({ state: 'visible', timeout: 15_000 })
+      await page.waitForFunction(() =>
+        (document.querySelector('[data-testid="chat-input"]')?.value ?? '').includes('Run the tool'),
+      null, { timeout: 10_000 })
+      const seeded = await byId('chat-input').inputValue()
+      check(seeded.includes(`Run the tool ${withAction.actions[0].tool} with exactly these arguments: ${JSON.stringify(withAction.actions[0].args)}`),
+        'composer seeded with the §5.7 action text (P24: shown, not sent)')
+      await shot(page, 'p24-dc-improve-delegate-seeded')
+      await byId('chat-input').fill('')
+    } else {
+      info('no high / medium finding carries an action on this run')
+    }
+    await shot(page, 'p24-dc-improve')
+
+    // ── 7. Check risks (FMEA) ─────────────────────────────────────────────
+    step('Check risks (FMEA) runs the sweep → FMEA tab with rows; live tables equal')
+    const beforeSweep = await snapshotTables()
+    await byId('hub-improve-fmea').click()
+    await byId('hub-improve-fmea-started').waitFor({ state: 'visible', timeout: 30_000 })
+    const until = Date.now() + 10 * 60_000
+    let sweep = null
+    await sleep(1000)
+    while (Date.now() < until) {
+      sweep = await api('GET', '/api/results/fmea_sweep')
+      if (sweep && sweep.status !== 'running') break
+      await sleep(1000)
+    }
+    check(sweep?.status === 'done', `sweep done (base_restored=${sweep?.base_restored})`)
+    await byId('hub-improve-open-fmea').click()
+    await byId('results-tab-fmea').waitFor({ state: 'visible', timeout: 30_000 })
+    await page.waitForFunction(() =>
+      [...document.querySelectorAll('[data-testid="fmea-table"] tbody tr')]
+        .some(tr => tr.querySelectorAll('td')[1]?.textContent?.trim() === 'B'),
+    null, { timeout: 30_000 })
+    check((await byId('results-tab-fmea').getAttribute('class')).includes('border-accent'), 'FMEA tab active with class-B rows')
+    const sweepDiffs = tableDiffs(beforeSweep, await snapshotTables())
+    check(sweepDiffs.diffs.length === 0, `buses/links/generators equal after the sweep (*_nom_opt changes: ${sweepDiffs.nomOpt})`)
+    await shot(page, 'p24-dc-fmea-tab')
+
+    // ── tour ──────────────────────────────────────────────────────────────
+    step('hub_design tour: walked from Results, then from Improve (each drops the other optional step)')
+    await byId('sidebar-hub-design').click()
+    await byId('hub-rail-step-results').click()
+    await byId('hub-card-results').waitFor({ state: 'visible', timeout: 15_000 })
+    await walkTour(TOUR.filter(t => t !== 'hub-improve-list'))
+    await byId('hub-rail-step-improve').click()
+    await byId('hub-card-improve').waitFor({ state: 'visible', timeout: 15_000 })
+    await walkTour(TOUR.filter(t => t !== 'hub-results-verdict'))
+    await shot(page, 'p24-dc-after-tour')
+
+    // ── other verdict paths: the H2 hub (no goal) from the Start card ─────
+    step('Start card → Industrial Hydrogen Hub (strong grid, no goal)')
+    await byId('hub-rail-step-start').click()
+    await byId('hub-start-template-eh_h2_hub').click()
+    await page.waitForFunction(n =>
+      (document.querySelector('[data-testid="hub-start-provenance"]')?.textContent ?? '').includes(n)
+      || document.querySelector('[data-testid="hub-card-site"]') !== null, TEMPLATE_NAMES.eh_h2_hub, { timeout: 60_000 })
+    await waitRail('site', 'current', 60_000)
+    check(await railState('results') === 'blocked', 'new project: Results blocked again')
+    await checkSite('eh_h2_hub', 'strong_grid')
+    await shot(page, 'p24-h2-site')
+    await runStudy('h2', { expectLole: '' })
+
+    // ── off-grid wording: the island microgrid from the Start card ────────
+    step('Start card → Island Microgrid (off-grid wording, its own verdict)')
+    await byId('hub-rail-step-start').click()
+    await byId('hub-start-template-eh_microgrid').click()
+    await waitRail('site', 'current', 60_000)
+    await page.waitForFunction(() =>
+      (document.querySelector('[data-testid="hub-site-type"]')?.value) === 'off_grid', null, { timeout: 60_000 })
+    await checkSite('eh_microgrid', 'off_grid')
+    await shot(page, 'p24-mg-site-offgrid')
+    await runStudy('mg', { expectLole: '3' })
+
+    info(`verdicts: ${JSON.stringify(verdicts)}`)
+  } catch (e) {
+    try { await shot(page, 'FAILURE') } catch { /* page gone */ }
+    const logFile = path.join(args.out, 'FAILURE-console.log')
+    fs.writeFileSync(logFile, consoleLines.join('\n'))
+    info(`console log ${logFile}`)
+    throw e
+  } finally {
+    await context.close()
+  }
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 let code = 0
 let browser
@@ -797,6 +1117,7 @@ try {
   if (args.phase === 'P22.9') await phaseP229(browser)
   else if (args.phase === 'P24-BE') await phaseP229(browser, { reviewChecks: true })
   else if (args.phase === 'P23') await phaseP23(browser)
+  else if (args.phase === 'P24') await phaseP24(browser)
   console.log(`\nPASS — ${shots.length} screenshots in ${args.out}`)
 } catch (e) {
   code = e instanceof ToolingError ? 3 : 1

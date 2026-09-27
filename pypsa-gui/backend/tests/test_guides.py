@@ -125,3 +125,56 @@ def test_field_text_is_plain(key):
     bad = [w for w in _JARGON if w.lower() in text.lower()]
     assert not bad, (key, bad)
     assert len(text.split()) <= 30, (key, len(text.split()))
+
+
+# P24-BE gate N5: a first-time user reads these as hovers — no unit or
+# equipment jargon, and the step intros are statements (the card footer's
+# "Ask" button carries the question).
+_HUB_JARGON = ("MVA", "MWh", "inverter")
+
+
+@pytest.mark.parametrize("key", HUB_FIELDS)
+def test_field_text_has_no_unit_jargon(key):
+    text = G.load_guide("eh_fmea")["fields"][key]
+    bad = [w for w in _HUB_JARGON if w.lower() in text.lower()]
+    assert not bad, (key, bad)
+
+
+@pytest.mark.parametrize("key", [k for k in HUB_FIELDS if k.startswith("hub_")])
+def test_hub_step_text_is_a_statement(key):
+    text = G.load_guide("eh_fmea")["fields"][key]
+    assert "?" not in text, key
+
+
+def test_verdict_text_covers_the_no_target_case():
+    text = G.load_guide("eh_fmea")["fields"]["verdict"].lower()
+    for outcome in ("not certified", "certified", "not decided", "no goal"):
+        assert outcome in text, outcome
+
+
+# P24-FE: the hub-design tour (spec §4.3) — targets in order, each revealed by
+# the rail step that shows its card. Its ids are literal test ids in the step
+# cards, which `test_every_tour_target_is_a_rendered_test_id` pins.
+_HUB_TOUR = [
+    ("hub-rail", None, False),
+    ("hub-start-templates", "hub-rail-step-start", False),
+    ("hub-site-readiness", "hub-rail-step-site", False),
+    ("hub-site-type", "hub-rail-step-site", False),
+    ("hub-goal-lole", "hub-rail-step-goal", False),
+    ("hub-goal-run", "hub-rail-step-goal", False),
+    ("hub-results-verdict", "hub-rail-step-results", True),
+    ("hub-improve-list", "hub-rail-step-improve", True),
+    ("hub-improve-fmea", "hub-rail-step-improve", False),
+]
+
+
+def test_hub_design_tour_matches_the_spec():
+    tour = G.load_guide("eh_fmea")["tours"]["hub_design"]
+    assert tour["title"] == "Design a hub in five steps"
+    got = [(s["target"], s.get("reveal"), bool(s.get("optional")))
+           for s in tour["steps"]]
+    assert got == _HUB_TOUR
+    for s in tour["steps"]:
+        text = f"{s['title']} {s['body']} {s.get('enter', '')}"
+        bad = [w for w in _JARGON + _HUB_JARGON if w.lower() in text.lower()]
+        assert not bad, (s["target"], bad)

@@ -157,6 +157,70 @@
           "enter": "Select the import Link, open Edit, choose grid_import."
         }
       ]
+    },
+    "hub_design": {
+      "title": "Design a hub in five steps",
+      "intro": "Five cards take you from an example site to a checked design. Each card asks for at most three choices, and the assistant can do any step for you.",
+      "steps": [
+        {
+          "target": "hub-rail",
+          "title": "1 · The five steps",
+          "body": "Start, Site, Goal, Results and Improve. A tick marks a finished step; a greyed step opens once the one before it is done."
+        },
+        {
+          "target": "hub-start-templates",
+          "reveal": "hub-rail-step-start",
+          "title": "2 · Pick a starting point",
+          "body": "Each example site comes ready to study, with made-up but realistic data. You can also work on the network you already have."
+        },
+        {
+          "target": "hub-site-readiness",
+          "reveal": "hub-rail-step-site",
+          "title": "3 · Check the site",
+          "body": "What the study needs to know: the grid connection, the load that must stay on, grid strength and how often equipment breaks. Anything missing has a fix button that asks the assistant."
+        },
+        {
+          "target": "hub-site-type",
+          "reveal": "hub-rail-step-site",
+          "title": "4 · Say how the site meets the grid",
+          "body": "A strong grid you can always import from, a weak or limited connection, or no grid at all. This choice decides which checks the study runs."
+        },
+        {
+          "target": "hub-goal-lole",
+          "reveal": "hub-rail-step-goal",
+          "title": "5 · Set your goal",
+          "body": "How many hours per year some demand may go unserved. The example sites fill in a usual value; leave it empty to see the shortfall without a pass or fail answer.",
+          "enter": "3 hours per year is a common planning goal."
+        },
+        {
+          "target": "hub-goal-run",
+          "reveal": "hub-rail-step-goal",
+          "title": "6 · Run the study",
+          "body": "The study sizes the equipment, then tests the design against random breakdowns. It takes a few minutes; the rail moves on when it finishes."
+        },
+        {
+          "target": "hub-results-verdict",
+          "reveal": "hub-rail-step-results",
+          "optional": true,
+          "after_run": true,
+          "title": "7 · Read the answer",
+          "body": "One sentence says whether your goal is met, followed by the cost, the biggest risks and anything the study could not work out."
+        },
+        {
+          "target": "hub-improve-list",
+          "reveal": "hub-rail-step-improve",
+          "optional": true,
+          "after_run": true,
+          "title": "8 · Improve the design",
+          "body": "The most useful changes the study found. Why shows the evidence; the assistant can make a change for you after you confirm it."
+        },
+        {
+          "target": "hub-improve-fmea",
+          "reveal": "hub-rail-step-improve",
+          "title": "9 · Check what breaks",
+          "body": "Switches off each piece of equipment in turn, and tests hard conditions, to rank the failures that hurt the site most."
+        }
+      ]
     }
   },
   "fields": {
@@ -193,25 +257,25 @@
     "renewable_availability_multiplier": "Profile-borne generators' availability × this factor, in [0, 1.5]; 0 = no renewable output.",
     "profile_pack": "A shipped series pack; its Load/Generator names must exist on your network.",
     "mc_seed": "Random seed of the Monte-Carlo sample — fix it to reproduce a certification exactly.",
-    "hub_start": "Start from a ready-made example site, or use the network you already have. Which one fits my situation?",
-    "hub_site": "Check what the study needs to know about the site: the grid connection, the load that must stay on, grid strength and how often equipment breaks. What is missing?",
-    "hub_goal": "Set how many hours of shortfall per year you can accept, then run the study. What goal suits my site?",
-    "hub_results": "Read what the study found: whether the goal is met, what it costs and the biggest risks. What does this mean for me?",
-    "hub_improve": "Work through the study's recommendations, check what happens when equipment fails, and add hard conditions to test. What should I do first?",
+    "hub_start": "Start from a ready-made example site, or use the network you already have.",
+    "hub_site": "Check what the study needs to know about the site: the grid connection, the load that must stay on, grid strength and how often equipment breaks.",
+    "hub_goal": "Set how many hours of shortfall per year you can accept, then run the study.",
+    "hub_results": "Read what the study found: whether the goal is met, what it costs and the biggest risks.",
+    "hub_improve": "Work through the study's recommendations, check what happens when equipment fails, and add hard conditions to test.",
     "site_type": "How the site relates to the grid: a strong grid you can always import from, a weak or limited connection, or no grid connection at all.",
     "grid_connection": "The line or transformer that brings power from the public grid to the site, and how much power it can carry.",
     "critical_load": "The demand that must keep running even when the grid connection fails, for example servers, operating theatres or cooling.",
-    "grid_strength": "How strong the public grid is where the site connects, given as its short-circuit power in MVA. A weak grid limits how much inverter equipment can connect.",
+    "grid_strength": "How strong the public grid is where the site connects. A weak grid limits how much solar, wind and battery equipment the site can safely connect.",
     "outage_data": "How often each generator or connection breaks down and how long a repair takes. The study needs this to estimate shortfall.",
     "shortfall_hours": "Expected hours per year when some demand cannot be served. Lower is more reliable; the study checks the site against your goal.",
     "energy_strictness": "How much of the yearly energy demand may go unserved at most, as a very small share. Stricter means more backup equipment and higher cost.",
-    "verdict": "The study's answer: certified (the goal is met), not certified (it is missed) or not decided (more random trials are needed to be sure).",
+    "verdict": "The study's answer: certified (the goal is met), not certified (it is missed), not decided (more random trials are needed) or no goal set (nothing to check against).",
     "cost_at_target": "The yearly cost of the plan that meets your reliability goal, including new equipment and running costs, in euros.",
     "top_risks": "The failures that cost the most per year, combining how often they happen with how much damage each one does.",
     "not_established": "Parts of the study that could not be worked out, with the reason, so you know what the result does not cover.",
     "stress_scenario": "A hard condition to test the site against, such as a heatwave or a dark, windless week, with how often it happens.",
     "fmea_check": "A check that switches off each piece of equipment in turn and in stress conditions, to find the failures that hurt the site most.",
     "template_provenance": "Where the example site's numbers come from. Example sites use made-up but realistic data, so replace them with your own before deciding.",
-    "voll_plain": "The price put on each unit of energy that cannot be delivered, in euros per MWh. The study needs it above zero to weigh shortfall against cost."
+    "voll_plain": "What each unit of energy that cannot be delivered is worth to you, in euros. The study needs a price above zero to weigh shortfall against the cost of backup."
   }
 }

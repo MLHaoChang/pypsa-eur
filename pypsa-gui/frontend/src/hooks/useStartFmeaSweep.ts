@@ -8,7 +8,7 @@ import toast from 'react-hot-toast'
 import { resultsApi } from '../api/simulation'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
-import { blockerMessage } from '../pages/results/McPanel'
+import { blockerMessage } from '../utils/blockerMessage'
 
 export interface StartFmeaSweepOptions {
   /** Runs once the sweep has started. FmeaTab refetches its modes query

@@ -88,6 +88,10 @@ def _stage_estimate(stage: str, net, pack: ArchetypePack, ctx: dict) -> tuple[
 _OUTAGE_CLASSES = (("Generator", "generators"), ("Link", "links"),
                    ("StorageUnit", "storage_units"))
 _OUTAGE_MISSING_CAP = 20
+# Carriers ``_gen_category`` files under "conventional" that are modelling
+# devices (a VOLL slack, a load-shedding sink, a dump / spill), not equipment
+# that breaks down: never "missing outage data" (P24-BE gate N4).
+_NOT_EQUIPMENT_KW = ("slack", "sink", "dump", "spill")
 
 
 def _outage_units(net, import_links) -> dict[str, Any]:
@@ -121,9 +125,11 @@ def _outage_units(net, import_links) -> dict[str, Any]:
             if ok:
                 continue
             if cls == "Generator":
-                thermal = _gen_category(
-                    str(df.at[name, "carrier"]) if "carrier" in df.columns
-                    else "") == "conventional"
+                carrier = (str(df.at[name, "carrier"])
+                           if "carrier" in df.columns else "")
+                thermal = (_gen_category(carrier) == "conventional"
+                           and not any(k in carrier.lower()
+                                       for k in _NOT_EQUIPMENT_KW))
             else:
                 thermal = cls == "Link" and name in imports
             if thermal:
@@ -131,6 +137,17 @@ def _outage_units(net, import_links) -> dict[str, Any]:
         by_class[cls] = count
     return {"count": sum(by_class.values()), "by_class": by_class,
             "missing": missing[:_OUTAGE_MISSING_CAP]}
+
+
+def _finite_or_none(v) -> float | None:
+    """A JSON-safe float: an unbounded (``inf``) or missing rating is None,
+    never a 500 from the serializer (P24-BE gate N7)."""
+    import math
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
 
 
 def eh_readiness(network, pack: ArchetypePack, *, budget_solves: int,
@@ -279,6 +296,6 @@ def eh_readiness(network, pack: ArchetypePack, *, budget_solves: int,
             "certification_metric": pack.availability.certification_metric,
         },
         "outage_units": _outage_units(net, links),
-        "import_p_nom_mw": (float(net.links.loc[list(links), "p_nom"].sum())
-                            if links else None),
+        "import_p_nom_mw": _finite_or_none(
+            net.links.loc[list(links), "p_nom"].sum()) if links else None,
     }

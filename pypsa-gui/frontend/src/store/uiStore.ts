@@ -424,6 +424,10 @@ interface UIStore {
   // tagging tour's targets only render in Edit). Consumed then cleared by the
   // card, like resultsTabRequest.
   propertiesEditRequest: 'Bus' | 'Link' | null
+  // Ask the Energy Hub reference-design panel (Results → Adequacy) to open
+  // and bring its report into view — the hub-design Results card's "Open
+  // full report" (guided-mode P24). Consumed then cleared by the panel.
+  ehReportRequest: boolean
   // Deep-link into the Asset Detail tab (Task 13). Consumed then cleared by
   // AssetDetail.tsx's effect. Set only via `requestAssetDetail`.
   assetDetailRequest: AssetDetailRequest | null
@@ -525,6 +529,8 @@ interface UIStore {
   clearSettingsSectionRequest: () => void
   requestPropertiesEdit: (c: 'Bus' | 'Link') => void
   clearPropertiesEditRequest: () => void
+  requestEhReport: () => void
+  clearEhReportRequest: () => void
   // ONE path for all four entry points (Properties, bottom table, map,
   // chatbot). Each of them only has to call this — the panel, the tab and
   // the selection all move together, so none of them can drift out of step.
@@ -587,6 +593,7 @@ export const useUIStore = create<UIStore>((set) => ({
   resultsTabRequest: null,
   settingsSectionRequest: null,
   propertiesEditRequest: null,
+  ehReportRequest: false,
   assetDetailRequest: null,
   compareNavRequest: null,
   ioModalRequest: null,
@@ -768,6 +775,8 @@ export const useUIStore = create<UIStore>((set) => ({
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
   requestPropertiesEdit: (c) => set({ propertiesEditRequest: c }),
   clearPropertiesEditRequest: () => set({ propertiesEditRequest: null }),
+  requestEhReport: () => set({ ehReportRequest: true }),
+  clearEhReportRequest: () => set({ ehReportRequest: false }),
   requestAssetDetail: (req) => set({
     assetDetailRequest: req,
     selectedComponent: { type: req.componentClass, name: req.name },

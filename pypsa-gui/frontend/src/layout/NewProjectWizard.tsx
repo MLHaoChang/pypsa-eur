@@ -53,7 +53,9 @@ type Tab = NewProjectTab
 // projectsApi.createFromTemplate. See project_templates/_build.py for how each
 // is generated (3bus/ieee14 are synthetic; belgium is PyPSA-Eur's own test
 // network — the OSM-derived Belgian grid clustered to 5 nodes).
-const TEMPLATES = [
+// Exported for the hub-design Start card (guided-mode spec §5.3), which offers
+// the energy-hub rows of this same table.
+export const TEMPLATES = [
   { id: '3bus',    name: '3-Bus Tutorial', description: 'Minimal AC network — 3 buses, 3 lines, 1 generator. Best starting point for learning PyPSA.', buses: 3,  lines: 3,  badge: 'simple',    available: true },
   { id: 'ieee14',  name: 'IEEE 14-Bus',    description: 'Classic test case. 14 buses, 20 lines, 5 generators. Stable baseline for benchmarking.',     buses: 14, lines: 20, badge: 'reference', available: true },
   { id: 'belgium', name: 'Belgium Grid',   description: "PyPSA-Eur's Belgian network — OSM-derived HV grid clustered to 5 nodes, with wind, solar, nuclear, gas, batteries and H2. Solves out of the box.", buses: 10, lines: 6, badge: 'PyPSA-Eur', available: true },

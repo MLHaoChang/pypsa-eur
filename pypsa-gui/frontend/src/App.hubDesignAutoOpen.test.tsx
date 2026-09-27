@@ -107,11 +107,12 @@ beforeEach(() => {
 })
 
 describe('the hubDesign panel slot', () => {
-  it('renders the placeholder full-screen with its breadcrumb', () => {
+  it('renders the hub design full-screen with its breadcrumb', () => {
     useUIStore.setState({ uiMode: 'expert', activeSlidePanel: 'hubDesign' })
     renderApp()
     const panel = screen.getByTestId('hub-design-panel')
-    expect(panel.textContent).toContain('Coming in the next step')
+    // P24 replaced the P23 placeholder with the step rail and cards (§3.6).
+    expect(panel.querySelector('[data-testid="hub-rail"]')).not.toBeNull()
     const container = screen.getByTestId('panel-container')
     expect(container.textContent).toContain('GUIDED')
     expect(container.textContent).toContain('Hub design')

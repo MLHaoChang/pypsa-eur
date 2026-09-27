@@ -634,6 +634,27 @@ export function ReadinessSummary({ r }: { r: EhReadiness }) {
   )
 }
 
+/** The study record's poll: every 2 s while it runs. One export so the
+ *  hub-design cards share the query (same key, same options — spec §9). */
+export const ehStudyRefetchInterval = (q: { state: { data: unknown } }): number | false =>
+  (q.state.data as EhStudyPayload | null)?.status === 'running' ? 2000 : false
+
+/** Everything a new study makes stale — the panel's `invalidateAll` set,
+ *  shared with the hub-design Goal card's Run. */
+export function ehStudyQueryKeys(project: string | null) {
+  return [
+    nk(project, 'results', 'eh_study'),
+    nk(project, 'results', 'eh_reference_design'),
+    nk(project, 'results', 'eh_redundancy'),
+    nk(project, 'results', 'eh_levers'),
+    nk(project, 'results', 'eh_dtc'),
+    nk(project, 'results', 'eh_dtc_planning'),
+    // P24: the hub-design cards' review (GET /results/eh_review) goes stale
+    // with the study.
+    nk(project, 'results', 'eh_review'),
+  ]
+}
+
 export function EhReferenceDesignPanel() {
   const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
@@ -687,15 +708,11 @@ export function EhReferenceDesignPanel() {
   const levKey = nk(currentProject, 'results', 'eh_levers')
   const dtcKey = nk(currentProject, 'results', 'eh_dtc')
   const dtcPlanKey = nk(currentProject, 'results', 'eh_dtc_planning')
-  // P24: the hub-design cards' review (GET /results/eh_review) goes stale
-  // with the study, so it is invalidated with the panel's own set.
-  const reviewKey = nk(currentProject, 'results', 'eh_review')
 
   const { data: studyData } = useQuery({
     queryKey: studyKey,
     queryFn: () => resultsApi.getEhStudy(),
-    refetchInterval: (q) =>
-      (q.state.data as EhStudyPayload | null)?.status === 'running' ? 2000 : false,
+    refetchInterval: ehStudyRefetchInterval,
   })
   const study = (studyData ?? null) as EhStudyPayload | null
   const running = study?.status === 'running'
@@ -724,6 +741,16 @@ export function EhReferenceDesignPanel() {
     setFinishedCue(false)
     prevStudyStatus.current = null
   }, [currentProject])
+  // P24: the hub-design Results card's "Open full report" — open the
+  // collapsed panel and scroll the report into view once it renders.
+  const ehReportRequest = useUIStore(s => s.ehReportRequest)
+  const scrollToReport = useRef(false)
+  useEffect(() => {
+    if (!ehReportRequest) return
+    useUIStore.getState().clearEhReportRequest()
+    scrollToReport.current = true
+    setOpen(true)
+  }, [ehReportRequest])
   const viewReport = () => {
     setFinishedCue(false)
     document.querySelector('[data-testid="eh-report"]')
@@ -779,6 +806,14 @@ export function EhReferenceDesignPanel() {
   // exports then refuse together rather than disagree (P18 gate).
   const storedReport = running ? null
     : (reportData ?? null) as EhReferenceDesignReport | null
+  const hasReport = report != null
+  useEffect(() => {
+    if (!open || !hasReport || !scrollToReport.current) return
+    scrollToReport.current = false
+    // After the frame that lays the report out.
+    requestAnimationFrame(() => document.querySelector('[data-testid="eh-report"]')
+      ?.scrollIntoView?.({ block: 'start', behavior: 'smooth' }))
+  }, [open, hasReport])
   const redTable = running ? null : (redundancy ?? null) as EhRedundancyTable | null
   const levTable = running ? null : (levers ?? null) as EhLeverTable | null
   const dtcTable = running ? null : (dtcStress ?? null) as EhDtcStressTable | null
@@ -787,8 +822,7 @@ export function EhReferenceDesignPanel() {
 
   const invalidateAll = () => {
     setExportError(null)
-    for (const key of [studyKey, reportKey, redKey, levKey, dtcKey, dtcPlanKey,
-      reviewKey]) {
+    for (const key of ehStudyQueryKeys(currentProject)) {
       void qc.invalidateQueries({ queryKey: key })
     }
   }

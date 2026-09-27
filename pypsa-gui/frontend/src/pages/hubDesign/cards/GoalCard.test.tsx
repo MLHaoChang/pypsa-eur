@@ -1,0 +1,204 @@
+// Guided-mode spec §5.3 (Goal): the allowed shortfall defaults from the
+// template, then from the pack readiness reports; Run posts exactly what the
+// Expert panel's `buildEhStudyBody` builds for the same inputs; VOLL ≤ 0
+// blocks the run and offers the assistant fix; running / failed / aborted are
+// read from the study record (P24-BE gate N2).
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { resultsApi, simulationApi } from '../../../api/simulation'
+import { useChatStore } from '../../../store/chatStore'
+import { useUIStore } from '../../../store/uiStore'
+import { buildEhStudyBody, EMPTY_PACK_FORM, formFromTemplate } from '../../results/EhReferenceDesignPanel'
+import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
+import { VOLL_TEXT } from '../delegate'
+import { DC_TEMPLATE, readiness } from '../testFixtures'
+import { GoalCard } from './GoalCard'
+
+vi.mock('../../../api/simulation', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../api/simulation')>()
+  return {
+    ...actual,
+    resultsApi: {
+      ...actual.resultsApi,
+      getEhStudy: vi.fn(), getEhReadiness: vi.fn(), getEhTemplate: vi.fn(),
+      startEhStudy: vi.fn(), abortEhStudy: vi.fn(),
+    },
+    simulationApi: { ...actual.simulationApi, getSolverConfig: vi.fn() },
+  }
+})
+
+beforeEach(() => {
+  useUIStore.setState({ currentProject: 'Demo', assistantDockOpen: false })
+  useChatStore.setState({ composerSeed: null })
+  useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true,
+    step: 'goal', archetype: 'weak_flexible' })
+  vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(DC_TEMPLATE)
+  vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness())
+  vi.mocked(resultsApi.startEhStudy).mockResolvedValue({ status: 'running' })
+  vi.mocked(simulationApi.getSolverConfig).mockResolvedValue({ voll: 5000 } as never)
+})
+afterEach(() => { cleanup(); vi.clearAllMocks() })
+
+function mount() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(<QueryClientProvider client={client}><GoalCard /></QueryClientProvider>)
+  return userEvent.setup()
+}
+const input = (id: string) => screen.getByTestId(id) as HTMLInputElement
+
+describe('GoalCard defaults', () => {
+  it('a template override wins over the pack default', async () => {
+    useHubDesignStore.setState({ loleTarget: '1.5', loleSource: 'template' })
+    mount()
+    await waitFor(() => expect(resultsApi.getEhReadiness).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 0))
+    expect(input('hub-goal-lole').value).toBe('1.5')
+  })
+
+  it('without one, the pack default from readiness (3 h/yr on the data center)', async () => {
+    mount()
+    await waitFor(() => expect(input('hub-goal-lole').value).toBe('3'))
+    expect(useHubDesignStore.getState().loleSource).toBe('pack')
+  })
+
+  it('a pack without a target leaves the goal empty', async () => {
+    vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness({
+      pack_defaults: { target_lole_h: null, ens_cap_permyriad: 10, certification_metric: 'none' } }))
+    mount()
+    await waitFor(() => expect(resultsApi.getEhReadiness).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 0))
+    expect(input('hub-goal-lole').value).toBe('')
+  })
+
+  // The pack default depends on the site type: strong_grid has none here.
+  const byType = (a: string) => readiness({ pack_defaults: a === 'strong_grid'
+    ? { target_lole_h: null, ens_cap_permyriad: 10, certification_metric: 'none' }
+    : { target_lole_h: 3, ens_cap_permyriad: 10, certification_metric: 'mc_lole' } })
+
+  it('a pack-seeded goal follows the pack when the site type changes', async () => {
+    vi.mocked(resultsApi.getEhReadiness).mockImplementation(async a => byType(a))
+    mount()
+    await waitFor(() => expect(input('hub-goal-lole').value).toBe('3'))
+    act(() => useHubDesignStore.getState().setArchetype('strong_grid'))
+    await waitFor(() => expect(input('hub-goal-lole').value).toBe(''))
+  })
+
+  it('the user\'s own value is never overwritten by the pack', async () => {
+    vi.mocked(resultsApi.getEhReadiness).mockImplementation(async a => byType(a))
+    const user = mount()
+    await waitFor(() => expect(input('hub-goal-lole').value).toBe('3'))
+    await user.clear(input('hub-goal-lole'))
+    await user.type(input('hub-goal-lole'), '7')
+    expect(useHubDesignStore.getState()).toMatchObject({ loleTarget: '7', loleSource: 'user' })
+    act(() => useHubDesignStore.getState().setArchetype('strong_grid'))
+    await waitFor(() => expect(resultsApi.getEhReadiness).toHaveBeenCalledWith(
+      'strong_grid', undefined, undefined, expect.anything()))
+    await new Promise(r => setTimeout(r, 20))
+    expect(input('hub-goal-lole').value).toBe('7')
+  })
+
+  it('energy strictness sits behind the advanced toggle', async () => {
+    const user = mount()
+    expect(screen.queryByTestId('hub-goal-ens')).toBeNull()
+    await user.click(screen.getByTestId('hub-goal-advanced'))
+    await user.type(input('hub-goal-ens'), '2')
+    expect(useHubDesignStore.getState().ensCap).toBe('2')
+  })
+})
+
+describe('GoalCard run', () => {
+  it('posts the Expert panel\'s body for the same inputs', async () => {
+    const user = mount()
+    await waitFor(() => expect(input('hub-goal-lole').value).toBe('3'))
+    await user.click(screen.getByTestId('hub-goal-advanced'))
+    await user.type(input('hub-goal-ens'), '5')
+    await waitFor(() => expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(false))
+    await user.click(screen.getByTestId('hub-goal-run'))
+    const expected = buildEhStudyBody('weak_flexible',
+      { ...formFromTemplate(DC_TEMPLATE), loleTarget: '3', ensCap: '5' }).body
+    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(resultsApi.startEhStudy).mock.calls[0][0]).toEqual(expected)
+    expect(expected?.pack_overrides).toMatchObject({ import_p_nom_mw: 40, target_lole_h: 3,
+      ens_cap_permyriad: 5, certification_metric: 'mc_lole' })
+  })
+
+  it('an own network runs from the empty pack form', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(null)
+    useHubDesignStore.setState({ archetype: 'strong_grid' })
+    vi.mocked(resultsApi.getEhReadiness).mockResolvedValue(readiness({
+      pack_defaults: { target_lole_h: null, ens_cap_permyriad: 10, certification_metric: 'none' } }))
+    const user = mount()
+    await waitFor(() => expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(false))
+    await user.click(screen.getByTestId('hub-goal-run'))
+    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith(
+      buildEhStudyBody('strong_grid', EMPTY_PACK_FORM).body))
+  })
+
+  it('an invalid goal blocks the run with the builder\'s own message', async () => {
+    const user = mount()
+    await waitFor(() => expect(input('hub-goal-lole').value).toBe('3'))
+    await user.clear(input('hub-goal-lole'))
+    await user.type(input('hub-goal-lole'), '-1')
+    expect(screen.getByTestId('hub-goal-blocked').textContent).toContain('LOLE target must be ≥ 0 h/yr')
+    expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('a refused start (409) shows the backend sentence', async () => {
+    vi.mocked(resultsApi.startEhStudy).mockRejectedValue(Object.assign(new Error('409'),
+      { response: { status: 409, data: { detail: 'an FMEA sweep is running — wait for it' } } }))
+    const user = mount()
+    await waitFor(() => expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(false))
+    await user.click(screen.getByTestId('hub-goal-run'))
+    await waitFor(() => expect(screen.getByTestId('hub-goal-blocked').textContent)
+      .toContain('an FMEA sweep is running — wait for it'))
+  })
+
+  it('VOLL ≤ 0 disables Run and offers the assistant fix', async () => {
+    vi.mocked(simulationApi.getSolverConfig).mockResolvedValue({ voll: 0 } as never)
+    const user = mount()
+    await screen.findByTestId('hub-goal-voll-fix')
+    expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(true)
+    await user.click(screen.getByTestId('hub-goal-voll-fix'))
+    expect(useChatStore.getState().composerSeed).toBe(VOLL_TEXT)
+    expect(useUIStore.getState().assistantDockOpen).toBe(true)
+  })
+
+  it('shows VOLL read-only when it is set', async () => {
+    mount()
+    await waitFor(() => expect(screen.getByTestId('hub-goal-voll').textContent).toContain('€5,000'))
+    expect(screen.queryByTestId('hub-goal-voll-fix')).toBeNull()
+  })
+})
+
+describe('GoalCard study states (from the study record, N2)', () => {
+  it('running: the card\'s own running text and Abort — never the review\'s message', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'running', budget_solves: 40 })
+    vi.mocked(resultsApi.abortEhStudy).mockResolvedValue({ status: 'running', aborting: true })
+    const user = mount()
+    const t = await screen.findByTestId('hub-goal-running')
+    expect(t.textContent).toMatch(/^Studying…/)
+    expect(t.textContent).not.toMatch(/poll|get_adequacy_results/)
+    expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(true)
+    await user.click(screen.getByTestId('hub-goal-abort'))
+    expect(resultsApi.abortEhStudy).toHaveBeenCalled()
+  })
+
+  it('failed: the error and Run again', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(
+      { status: 'failed', error: 'solver infeasible', report: null })
+    mount()
+    await waitFor(() => expect(screen.getByTestId('hub-goal-error').textContent)
+      .toContain('solver infeasible'))
+    expect(screen.getByTestId('hub-goal-run').textContent).toBe('Run again')
+  })
+
+  it('aborted: says so and offers Run again', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'aborted', report: null })
+    mount()
+    await waitFor(() => expect(screen.getByTestId('hub-goal-error').textContent).toMatch(/Stopped/))
+    expect(screen.getByTestId('hub-goal-run').textContent).toBe('Run again')
+  })
+})

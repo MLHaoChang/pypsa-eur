@@ -14,13 +14,29 @@ import { useUIStore } from '../store/uiStore'
 import { useCreateFromTemplate } from './useCreateFromTemplate'
 
 vi.mock('../api/projects')
+// P24-BE gate N1: the navigate call itself is recorded (synchronously, in
+// the same `calls` log as addTab), so the order addTab → navigate is pinned —
+// a re-render of <Where> would only ever see the final location.
+const calls = vi.hoisted(() => [] as string[])
+vi.mock('react-router-dom', async (importOriginal) => {
+  const rr = await importOriginal<typeof import('react-router-dom')>()
+  return {
+    ...rr,
+    useNavigate: () => {
+      const navigate = rr.useNavigate()
+      return ((to: unknown, opts?: unknown) => {
+        calls.push(`nav:${String(to)}`)
+        return navigate(to as never, opts as never)
+      }) as typeof navigate
+    },
+  }
+})
 vi.mock('react-hot-toast', () => {
   const t = Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() })
   return { default: t }
 })
 
 const NAME = 'Data Center Energy Hub'
-const calls: string[] = []
 let where = ''
 
 function Where() {
@@ -85,7 +101,8 @@ describe('useCreateFromTemplate', () => {
     await waitFor(() => expect(where).toBe('/app?project=Data%20Center%20Energy%20Hub'))
     expect(projectsApi.createFromTemplate).toHaveBeenCalledWith('eh_datacenter')
     expect(calls).toEqual([
-      'note:template', `current:${NAME}`, `created:${NAME}`, `tab:${NAME}`])
+      'note:template', `current:${NAME}`, `created:${NAME}`, `tab:${NAME}`,
+      'nav:/app?project=Data%20Center%20Energy%20Hub'])
     expect(useUIStore.getState().projectName).toBe(NAME)
     expect(inv).toHaveBeenCalledWith({ queryKey: ['projects'] })
   })

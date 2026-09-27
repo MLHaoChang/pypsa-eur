@@ -611,3 +611,50 @@ def _net_no_import() -> pypsa.Network:
     n.add("Load", "l", bus="hub", p_set=10.0)
     n.add("Generator", "g", bus="hub", carrier="gas", p_nom=20.0)
     return n
+
+
+def test_readiness_outage_missing_skips_slack_sink_and_dump_generators():
+    """P24-BE gate N4: ``_gen_category`` files slack / sink / dump carriers
+    under "conventional", but a VOLL slack or a dump is not equipment that
+    breaks down — it must not be reported as missing outage data."""
+    from models.energy_hub import default_strong_grid_pack
+    from services.adequacy.eh_readiness import eh_readiness
+    from tests.test_energy_hub_frontier_fmea import _feeder_hub
+
+    n = _feeder_hub()
+    bus = n.buses.index[0]
+    for name, carrier in (("voll_slack", "slack"), ("load_shed", "load_sink"),
+                          ("curtail_dump", "dump"), ("spill", "spillage"),
+                          ("real_diesel", "diesel_unrated")):
+        n.add("Generator", name, bus=bus, carrier=carrier, p_nom=1.0)
+        n.generators.at[name, "outage_rate_value"] = float("nan")
+        n.generators.at[name, "mttr_hours"] = float("nan")
+    ready = eh_readiness(n, default_strong_grid_pack(), budget_solves=10)
+    missing = {m["name"] for m in ready["outage_units"]["missing"]
+               if m["class"] == "Generator"}
+    assert "real_diesel" in missing            # a real thermal unit still is
+    assert not missing & {"voll_slack", "load_shed", "curtail_dump", "spill"}
+
+
+def test_readiness_non_finite_import_rating_does_not_500(
+        client, install_network):
+    """P24-BE gate N7: an import Link with ``p_nom = inf`` must not make the
+    readiness body unserialisable (Starlette refuses NaN / inf)."""
+    import json
+
+    from models.energy_hub import default_strong_grid_pack
+    from services.adequacy.eh_readiness import eh_readiness
+    from tests.test_energy_hub_frontier_fmea import _feeder_hub
+
+    fh = _feeder_hub()
+    links = eh_readiness(fh, default_strong_grid_pack(),
+                         budget_solves=10)["import"]["links"]
+    assert links
+    fh.links.loc[links, "p_nom"] = float("inf")
+    ready = eh_readiness(fh, default_strong_grid_pack(), budget_solves=10)
+    assert ready["import_p_nom_mw"] is None
+    install_network(fh)
+    r = client.get("/api/results/eh_readiness",
+                   params={"archetype": "strong_grid"})
+    assert r.status_code == 200, r.text
+    assert json.loads(r.text)["import_p_nom_mw"] is None
