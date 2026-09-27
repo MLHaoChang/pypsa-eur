@@ -87,7 +87,11 @@ dev/*
 
 # ai coding tools
 CLAUDE.md
-.claude/
+.claude/*
+# ...except the shared SessionStart hook that builds the pypsa-gui test
+# environment for Claude Code on the web (personal settings stay ignored).
+!.claude/settings.json
+!.claude/hooks/
 .github/copilot-instructions.md
 CLAUDE.local.md
 # generated DAGs for docs
