@@ -35,7 +35,7 @@
 
 ## Environment note (for the next person)
 
-`pixi` is not available in the cloud container. `gridspine/drivers/year_study.py` uses Python-3.12 nested-quote f-strings, so the backend does **not** import under 3.11 — the venv must be 3.12 (`pixi.toml` pins `3.12.12`). With an unpinned `pip install`, pandas resolves to 3.x and ten EH/sweep tests fail with `Cannot interpret '<StringDtype…>' as a data type` inside `network.copy()` / frozen re-solves; pin to the lock (`pandas==2.3.3 numpy==2.4.6 scipy==1.17.1`) and they pass. The gridspine and desktop suites additionally need `pandapower`, `pywebview` and `lightsim2grid==0.10.1` (all pixi-provided, none in `requirements.txt`). These failures are environment artefacts, not code defects.
+`pixi` is not available in the cloud container. `gridspine/drivers/year_study.py` uses Python-3.12 nested-quote f-strings, so the backend does **not** import under 3.11 — the venv must be 3.12 (`pixi.toml` pins `3.12.12`). With an unpinned `pip install`, pandas resolves to 3.x and ten EH/sweep tests fail with `Cannot interpret '<StringDtype…>' as a data type` inside `network.copy()` / frozen re-solves; pin to the lock (`pandas==2.3.3 numpy==2.4.6 scipy==1.17.1`) and they pass. The gridspine and desktop suites additionally need `pandapower`, `pywebview` and `lightsim2grid==0.10.1` (all pixi-provided, none in `requirements.txt`). These failures are environment artefacts, not code defects. `.claude/hooks/session-start.sh` now builds exactly this environment for Claude Code on the web sessions (venv at `~/.venv-pypsa-gui`, `PYTHONPATH` set, frontend `npm install`); `.gitignore` whitelists only that hook and `.claude/settings.json`.
 
 ## Local verification
 
