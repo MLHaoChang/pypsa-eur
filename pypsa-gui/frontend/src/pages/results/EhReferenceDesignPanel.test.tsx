@@ -11,12 +11,14 @@ import {
   dtcPlanningCsvRows,
   dtcStressCsvRows,
   EhReferenceDesignPanel,
+  fmeaImportRankingNote,
   fmeaTopCsvRows,
   fmeaTopModes,
   frontierCsvRows,
   frontierPoints,
   hasCertificationBlock,
   hasMultiEnergyBlock,
+  importModelLabel,
   lcohChip,
   leverCsvRows,
   multiEnergyCarrierEntries,
@@ -771,5 +773,71 @@ describe('wired stages — certification / frontier / fmea_top / LCOH (2026-09-2
     expect(screen.queryByTestId('eh-report-mc-lole')).toBeNull()
     expect(screen.queryByTestId('eh-report-lcoh')).toBeNull()
     expect(screen.queryByTestId('eh-report-lcoh-flag')).toBeNull()
+  })
+})
+
+describe('import model in the certification (2026-09-27)', () => {
+  const scope = (over: Record<string, unknown> = {}) => ({
+    mode: 'hub_side' as const, import_links: ['import_poc'],
+    import_cap_mw_max: 50, import_firm_mw_max: null,
+    note: 'MC / COPT fleet restricted to the hub side of import Link(s) import_poc',
+    ...over,
+  })
+  const cert = (over: Record<string, unknown> = {}) => ({
+    metric: 'mc_lole', target_lole_h: 3, mc_lole_h: 585.28, verdict: 'failed' as const,
+    n_samples: 200, ens_met: true, ...over,
+  })
+
+  it('labels each import model and never invents one', () => {
+    expect(importModelLabel(cert({ import_model: 'zonal', fleet_scope: scope() })))
+      .toMatch(/grid-side surplus sampled.*cap 50 MW/)
+    expect(importModelLabel(cert({ import_model: 'sampled_unit', fleet_scope: scope() })))
+      .toMatch(/Link outages sampled/)
+    expect(importModelLabel(cert({ import_model: 'islanded',
+      fleet_scope: scope({ import_cap_mw_max: 0, import_firm_mw_max: 0 }) })))
+      .toBe('islanded (0 MW)')
+    expect(importModelLabel(cert({ import_model: 'firm_block',
+      fleet_scope: scope({ import_firm_mw_max: 50 }) }))).toMatch(/firm at the planning limit/)
+    expect(importModelLabel(cert({ import_model: 'mixed', fleet_scope: scope() })))
+      .toMatch(/partly sampled/)
+    // A pre-2026-09-27 report: hub-side scope, no import_model → it WAS firm.
+    expect(importModelLabel(cert({ fleet_scope: { mode: 'hub_side',
+      import_firm_mw_max: 50, import_firmness: 'planning_limit_only' } })))
+      .toMatch(/firm at the planning limit.*50 MW/)
+    // Whole-network scope / no scope: nothing to say.
+    expect(importModelLabel(cert({ fleet_scope: { mode: 'whole_network' } }))).toBeNull()
+    expect(importModelLabel(cert())).toBeNull()
+    expect(importModelLabel(null)).toBeNull()
+  })
+
+  it('states how the sampled Link is ranked in fmea_top', () => {
+    const base = { ...REPORT, sections: { fmea_top: { status: 'ok' as const,
+      payload: { top: [], import_link_ranking: { import_poc: 'class_b' },
+        import_link_ranking_note: 'ranked ONCE' }, note: null } } }
+    expect(fmeaImportRankingNote(base)).toMatch(/import_poc: Class-B row.*ranked ONCE/)
+    expect(fmeaImportRankingNote(REPORT)).toBeNull()
+  })
+
+  it('renders the import line and the fleet-scope note in the certification block', async () => {
+    const report = {
+      ...REPORT,
+      archetype: 'weak_flexible' as const,
+      mc_lole_h: 585.28,
+      completeness: { ...REPORT.completeness, certification: 'ok' as const },
+      sections: {
+        certification: { status: 'ok' as const, note: 'MC LOLE 585 h > target 3 h',
+          payload: cert({ import_model: 'zonal', import_firmness: 'outage_and_grid_sampled',
+            fleet_scope: scope({ import_model: 'zonal' }) }) },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report,
+    } as never)
+    await openPanel()
+    const line = await screen.findByTestId('eh-certification-import')
+    expect(line.getAttribute('data-import-model')).toBe('zonal')
+    expect(line.textContent).toMatch(/two-area MC/)
+    expect(screen.getByTestId('eh-certification-scope-note').textContent)
+      .toMatch(/hub side/)
   })
 })

@@ -18,7 +18,12 @@ while the worker runs the whole default pipeline, then read the persisted
   note (WP3),
 * a TEA whose LCOH is ``null`` + ``lcoh_status`` on a network with no
   electrolyser, and finite on one with (WP4),
-* ``solves_consumed ≤ budget_solves`` (decision 17), and a JSON-clean body.
+* ``solves_consumed ≤ budget_solves`` (decision 17), and a JSON-clean body,
+* the import SAMPLED rather than counted firm (plan 2026-09-27): the
+  weak_flexible certification samples the PoC Link and the grid behind it
+  (``import_model == "zonal"``); on a firm-vs-sampled fixture pair a
+  reliable Link with q > 0 raises the MC LOLE over the firm block, while an
+  islanded off_grid hub certifies to the same LOLE either way.
 
 Runs in CI through ``tests/run_qa_drivers.py`` (``pixi run gui-qa-drivers``).
 Exit 0 = every step passed.
@@ -40,6 +45,7 @@ from tests.eh_stage_fixtures import (  # noqa: E402
     VOLL,
     certifiable_weak_network,
     electrolyser_network,
+    firm_vs_sampled_import_pair,
 )
 
 PROJECT = "qa_eh_reference_design"
@@ -48,6 +54,8 @@ MIN_FRONTIER_POINTS = 3
 
 PASS = 0
 FAIL = 0
+#: Printed at the end — the findings note quotes these numbers.
+WEAK_EVIDENCE: dict = {}
 
 
 def _step(label: str, ok: bool, msg: str = "") -> None:
@@ -179,6 +187,24 @@ def section_1_weak_flexible() -> None:
           and _stage(rep, "mc_certify").get("status") == "run",
           str(_stage(rep, "mc_certify")))
     _step("the MC warning travels with the number", bool(payload.get("warning")))
+    scope = payload.get("fleet_scope") or {}
+    _step("the import is sampled, not counted firm",
+          payload.get("import_model") in ("sampled_unit", "zonal")
+          and payload.get("import_firmness") != "planning_limit_only",
+          f"import_model={payload.get('import_model')} "
+          f"firmness={payload.get('import_firmness')}")
+    _step("the PoC Link is a sampled unit at the pack's 50 MW cap",
+          [m.get("model") for m in scope.get("import_link_models") or []]
+          == ["sampled_unit"]
+          and scope.get("import_cap_mw_max") == 50.0
+          and scope.get("import_firm_mw_max") is None,
+          str(scope.get("import_link_models"))[:200])
+    _step("the grid behind the Link is sampled as a second area",
+          payload.get("import_model") == "zonal"
+          and (scope.get("grid_area") or {}).get("units") == ["grid_supply"],
+          str(scope.get("grid_area"))[:200])
+    WEAK_EVIDENCE["mc_lole_h"] = lole
+    WEAK_EVIDENCE["import_model"] = payload.get("import_model")
 
     # WP2 — frontier around the target.
     fr = sections.get("frontier") or {}
@@ -216,6 +242,11 @@ def section_1_weak_flexible() -> None:
     _step("the import Link's outage is a ranked Class-B mode",
           any(m.get("failure_class") == "B" and m.get("component_class") == "Link"
               for m in top), str([(m.get("failure_class"), m.get("name")) for m in top]))
+    _step("the sampled import Link is ranked once (its Class-B row)",
+          sum(1 for m in top if m.get("name") in ("import_poc", "link:import_poc"))
+          == 1 and (fm.get("payload") or {}).get("import_link_ranking")
+          == {"import_poc": "class_b"},
+          str((fm.get("payload") or {}).get("import_link_ranking")))
 
     # WP4 — LCOH flag on an electrical-only network.
     tea = rep.get("tea") or {}
@@ -262,6 +293,62 @@ def section_2_electrolyser_lcoh() -> None:
           str({k: comp.get(k) for k in ("certification", "frontier", "fmea_top")}))
 
 
+def _certify(network, archetype: str) -> dict:
+    """
+    Install ``network``, run ``apply_pack → ens_solve → mc_certify →
+    assemble`` and return the certification payload (+ ``mc_lole_h``).
+    """
+    c = qa_support.client()
+    qa_support.install_network(network)
+    _configure(VOLL)
+    study = _run_study(archetype, stages=["apply_pack", "ens_solve",
+                                          "mc_certify", "assemble"])
+    if study.get("status") != "done":
+        return {}
+    r = c.get("/api/results/eh_reference_design")
+    if r.status_code != 200:
+        _step("the report is persisted for GET", False, f"HTTP {r.status_code}")
+        return {}
+    rep = r.json()
+    _step(f"{archetype}: the report is JSON-clean", not _nonfinite(rep),
+          str(_nonfinite(rep)[:5]))
+    cert = ((rep.get("sections") or {}).get("certification") or {})
+    return {**(cert.get("payload") or {}), "_mc_lole_h": rep.get("mc_lole_h"),
+            "_status": (rep.get("completeness") or {}).get("certification")}
+
+
+def section_3_import_outages() -> None:
+    print("\n[3] the import Link sampled vs firm — and the islanded control")
+    sampled_n, firm_n = firm_vs_sampled_import_pair()
+    s = _certify(sampled_n, "weak_flexible")
+    f = _certify(firm_n, "weak_flexible")
+    _step("the Link with occurrence data is sampled (v1)",
+          s.get("import_model") == "sampled_unit"
+          and s.get("import_firmness") == "outage_sampled",
+          f"{s.get('import_model')} / {s.get('import_firmness')}")
+    _step("the Link without occurrence data is a firm block",
+          f.get("import_model") == "firm_block"
+          and f.get("import_firmness") == "planning_limit_only",
+          f"{f.get('import_model')} / {f.get('import_firmness')}")
+    ls, lf = s.get("_mc_lole_h"), f.get("_mc_lole_h")
+    _step("a reliable Link with q > 0 RAISES the MC LOLE over the firm block",
+          isinstance(ls, (int, float)) and isinstance(lf, (int, float))
+          and ls > lf, f"sampled={ls} firm={lf}")
+    WEAK_EVIDENCE["pair_sampled_lole_h"] = ls
+    WEAK_EVIDENCE["pair_firm_lole_h"] = lf
+
+    s_isl, f_isl = firm_vs_sampled_import_pair(peaker_mw=65.0)
+    a = _certify(s_isl, "off_grid")
+    b = _certify(f_isl, "off_grid")
+    _step("off_grid islands the Link either way",
+          a.get("import_model") == b.get("import_model") == "islanded",
+          f"{a.get('import_model')} / {b.get('import_model')}")
+    la, lb = a.get("_mc_lole_h"), b.get("_mc_lole_h")
+    _step("the islanded hub's LOLE is unchanged by the Link's occurrence data",
+          isinstance(la, (int, float)) and la == lb, f"{la} vs {lb}")
+    WEAK_EVIDENCE["off_grid_lole_h"] = (la, lb)
+
+
 def main() -> int:
     print("=" * 60)
     print("QA: the Energy Hub reference design (wired stages)")
@@ -272,6 +359,7 @@ def main() -> int:
         qa_support.delete_project(PROJECT)
         section_1_weak_flexible()
         section_2_electrolyser_lcoh()
+        section_3_import_outages()
     except Exception as exc:                                     # noqa: BLE001
         crashed = True
         import traceback
@@ -284,6 +372,8 @@ def main() -> int:
         except Exception as exc:                                 # noqa: BLE001
             print(f"  ! cleanup raised {type(exc).__name__}: {exc}")
 
+    if WEAK_EVIDENCE:
+        print(f"\n  evidence: {WEAK_EVIDENCE}")
     total = PASS + FAIL + (1 if crashed else 0)
     print("\n" + "=" * 60)
     print(f"Total: {total}")

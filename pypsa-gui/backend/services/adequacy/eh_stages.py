@@ -79,9 +79,39 @@ class FixedPlanSnapshot:
     # Which fleet the MC / COPT saw (see ``hub_fleet_scope``) — disclosed on
     # the certification and fmea_top payloads.
     scope: dict | None = None
+    # The two-area inputs when the zonal path applies (``mc_zonal``); the
+    # MC certifies on these and the COPT screens ``mc_inputs`` (the v1 hub
+    # fleet incl. the sampled Link units — the grid surplus is MC-only).
+    zonal_inputs: Any = None
 
 
 # ── the hub's fleet, not the copper plate ─────────────────────────────────
+
+#: How the two FMEA views relate for a sampled import Link — carried on the
+#: fmea_top payload so a reader never wonders why the Link appears once.
+IMPORT_LINK_RANKING_NOTE = (
+    "A sampled import Link is part of the COPT / MC fleet (it shapes every "
+    "class-A row and the certified LOLE) but is ranked ONCE: by its Class-B "
+    "row (LP re-solve on the full network) when the sweep ran, otherwise by "
+    "its class-A COPT row relabelled as a Link")
+
+
+@dataclass
+class ImportLinkModel:
+    """How ONE identified import Link enters the hub's MC / COPT fleet."""
+
+    name: str
+    model: str                 # sampled_unit | firm_block | islanded
+    cap_mw_max: float
+    q: float | None = None
+    mttr_hours: float | None = None
+    basis: str | None = None
+    source: str = "missing"
+    reason: str | None = None  # why firm_block when data exists but is unusable
+
+    def as_payload(self) -> dict:
+        return dataclasses.asdict(self)
+
 
 @dataclass
 class FleetScope:
@@ -94,10 +124,15 @@ class FleetScope:
     grid-side unit the LP cannot reach still covered the hub's deficits and
     the verdict came back ``certified`` for a hub that sheds. ``hub_side``
     restricts the fleet and the demand to the hub's side of the identified
-    import Link(s) and counts the import as a firm block up to the Link's
-    planning cap (0 MW when islanded) — ``import_firmness=planning_limit_only``,
-    never certified interconnector adequacy (spec §6). ``whole_network`` is
-    the fallback when the sides cannot be told apart, with the reason.
+    import Link(s). Each Link then enters the hub fleet one of three ways
+    (``ImportLinkModel``): a two-state ``sampled_unit`` at its planning cap
+    when it carries resolvable occurrence data (plan 2026-09-27, WP1), a
+    deterministic ``firm_block`` at that cap when it does not
+    (``import_firmness=planning_limit_only``, spec §6), or ``islanded`` when
+    the cap is zero every hour. ``freeze_fixed_plan`` may upgrade the whole
+    import to ``zonal`` (WP2) when the grid side can be sampled too.
+    ``whole_network`` is the fallback when the sides cannot be told apart,
+    with the reason.
     """
 
     mode: str
@@ -105,18 +140,67 @@ class FleetScope:
     import_links: list[str] = field(default_factory=list)
     excluded_buses: list[str] = field(default_factory=list)
     excluded_units: list[str] = field(default_factory=list)
-    import_firm_mw: Any = None  # np.ndarray (H,) or None
+    # The FIRM-BLOCK part only (Links without occurrence data, islanded
+    # Links at 0): netted out of the hub residual. np.ndarray (H,) or None.
+    import_firm_mw: Any = None
+    # Every non-islanded Link's planning cap at the hub, per snapshot.
+    import_cap_mw: Any = None
+    link_models: list[ImportLinkModel] = field(default_factory=list)
+    # CoptUnits appended to the hub fleet for the sampled Links.
+    import_units: list = field(default_factory=list)
+    # Per snapshot: MW delivered at the hub per MW withdrawn from the grid.
+    delivery_ratio: Any = None
+    n_grid_components: int = 0
+    # Set by freeze_fixed_plan when the zonal (two-area) path applies.
+    grid_area: dict | None = None
+
+    def base_import_model(self) -> str | None:
+        if self.mode != "hub_side":
+            return None
+        live = [m.model for m in self.link_models if m.model != "islanded"]
+        if not live:
+            return "islanded"
+        if all(m == "sampled_unit" for m in live):
+            return "sampled_unit"
+        if all(m == "firm_block" for m in live):
+            return "firm_block"
+        return "mixed"
+
+    def import_model(self) -> str | None:
+        return "zonal" if self.grid_area is not None else self.base_import_model()
+
+    def import_firmness(self) -> str | None:
+        base = self.base_import_model()
+        if base is None:
+            return None
+        sampled = base in ("sampled_unit", "mixed")
+        if self.grid_area is not None:
+            return "outage_and_grid_sampled" if sampled else "grid_sampled"
+        return {"sampled_unit": "outage_sampled",
+                "mixed": "partially_outage_sampled"}.get(
+                    base, "planning_limit_only")
 
     def as_payload(self) -> dict:
         firm = self.import_firm_mw
+        cap = self.import_cap_mw
+        has_firm = any(m.model in ("firm_block", "islanded")
+                       for m in self.link_models)
         return {
             "mode": self.mode,
             "import_links": list(self.import_links),
             "excluded_buses": list(self.excluded_buses),
             "excluded_units": list(self.excluded_units),
-            "import_firm_mw_max": (float(np.max(firm)) if firm is not None
-                                   and len(firm) else None),
-            "import_firmness": "planning_limit_only",
+            "import_model": self.import_model(),
+            "import_firmness": self.import_firmness(),
+            # null (not 0) when no Link is a firm block — ADR-0001.
+            "import_firm_mw_max": (float(np.max(firm)) if has_firm and firm
+                                   is not None and len(firm) else None),
+            "import_cap_mw_max": (float(np.max(cap)) if cap is not None
+                                  and len(cap) else None),
+            "import_link_models": [m.as_payload() for m in self.link_models],
+            "import_units": {u.name: u.name.split(":", 1)[1]
+                             for u in self.import_units},
+            "grid_area": self.grid_area,
             "note": self.note,
         }
 
@@ -174,7 +258,7 @@ def _series(n, name: str, attr: str, default: float) -> np.ndarray:
     return np.full(len(n.snapshots), v, dtype=float)
 
 
-def hub_fleet_scope(n, overlay) -> FleetScope:
+def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
     """
     Split the network at the identified import Link(s) → ``FleetScope``.
 
@@ -188,6 +272,13 @@ def hub_fleet_scope(n, overlay) -> FleetScope:
       and the SCR gate tag the PoC on either side.
     * The Links must actually separate the two sides once removed; a
       parallel Line / Link means there is no hub boundary to certify on.
+    * Each Link's planning cap at the hub, per snapshot, is
+      ``p_nom × p_max_pu × efficiency`` (forward) or ``p_nom × −p_min_pu``
+      (reverse). With ``sample_links`` and resolvable occurrence data
+      (``resolve_outage_params(n, "links")`` — the Class-B sweep's resolver)
+      the Link becomes a two-state ``CoptUnit`` with that cap as its UP
+      capacity; otherwise it is a firm block at the cap. A rate outside
+      ``[0, 1)`` raises ``OutageRateError`` exactly as a generator's does.
     """
     from services.adequacy.archetypes import select_import_links
     from services.adequacy.copt import solved_capacity
@@ -244,29 +335,124 @@ def hub_fleet_scope(n, overlay) -> FleetScope:
         if df is not None and not df.empty:
             units += [str(u) for u in df.index if str(df.at[u, "bus"]) in ex_set]
 
-    firm = np.zeros(len(n.snapshots), dtype=float)
+    from services.adequacy.copt import CoptUnit
+    from services.adequacy.occurrence import (
+        OutageRateError,
+        rate_is_usable,
+        resolve_outage_params,
+    )
+
+    H = len(n.snapshots)
+    params = resolve_outage_params(n, "links")
+    firm = np.zeros(H, dtype=float)
+    cap_total = np.zeros(H, dtype=float)
+    sending_total = np.zeros(H, dtype=float)
+    models: list[ImportLinkModel] = []
+    import_units: list = []
+    bad: list[str] = []
     for lk in links:
         g, h = orient[lk]
         cap = solved_capacity(ldf.loc[lk])
         if h == str(ldf.at[lk, "bus1"]):
             eff = _series(n, lk, "efficiency", 1.0)
-            firm += cap * np.clip(_series(n, lk, "p_max_pu", 1.0), 0.0, None) * eff
+            sending = cap * np.clip(_series(n, lk, "p_max_pu", 1.0), 0.0, None)
+            delivered = sending * eff
         else:
-            firm += cap * np.clip(-_series(n, lk, "p_min_pu", 0.0), 0.0, None)
+            # Reverse flow bus1 → bus0: PyPSA withdraws eff × |p0| at bus1.
+            eff = _series(n, lk, "efficiency", 1.0)
+            delivered = cap * np.clip(-_series(n, lk, "p_min_pu", 0.0), 0.0, None)
+            sending = delivered * eff
+        cap_max = float(delivered.max()) if H else 0.0
+        occ = params.loc[lk]
+        src = str(occ["source"])
+        if cap_max <= 0.0:
+            models.append(ImportLinkModel(name=str(lk), model="islanded",
+                                          cap_mw_max=0.0, source=src))
+            continue
+        cap_total += delivered
+        sending_total += sending
+        mttr = float(occ["mttr_hours"]) if src != "missing" else float("nan")
+        if sample_links and src != "missing":
+            if not rate_is_usable(occ["rate"]):
+                bad.append(f"{lk} (rate {float(occ['rate']):g})")
+                continue
+            if math.isfinite(mttr) and mttr > 0:
+                constant = bool(np.all(delivered == delivered[0]))
+                unit = CoptUnit(
+                    name=f"link:{lk}", capacity_mw=cap_max, q=float(occ["rate"]),
+                    basis=str(occ["basis"] or "FOR"), mttr_hours=mttr,
+                    source=src,
+                    capacity_series=None if constant else delivered.copy())
+                import_units.append(unit)
+                models.append(ImportLinkModel(
+                    name=str(lk), model="sampled_unit", cap_mw_max=cap_max,
+                    q=float(occ["rate"]), mttr_hours=mttr,
+                    basis=str(occ["basis"] or "FOR"), source=src))
+                continue
+            reason = "outage rate resolved but no finite MTTR — cannot build a chain"
+        elif src == "missing":
+            reason = "no occurrence data on the Link"
+        else:
+            reason = "Link sampling disabled (firm-block comparison)"
+        firm += delivered
+        models.append(ImportLinkModel(
+            name=str(lk), model="firm_block", cap_mw_max=cap_max,
+            q=float(occ["rate"]) if src != "missing" else None,
+            mttr_hours=mttr if math.isfinite(mttr) else None,
+            basis=str(occ["basis"]) if src != "missing" else None,
+            source=src, reason=reason))
+    if bad:
+        raise OutageRateError(
+            f"outage rate outside [0, 1) on import Link(s): {', '.join(bad)}. "
+            "An outage rate is a probability-like unavailability; fix the "
+            "value (or clear it) before certifying the hub.")
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ratio = np.where(sending_total > 0, cap_total / sending_total, 1.0)
+    scope = FleetScope(mode="hub_side", note="", import_links=list(links),
+                       excluded_buses=excluded, excluded_units=sorted(units),
+                       import_firm_mw=firm, import_cap_mw=cap_total,
+                       link_models=models, import_units=import_units,
+                       delivery_ratio=ratio,
+                       n_grid_components=len(grid_comps))
+    scope.note = _scope_note(scope)
+    return scope
+
+
+def _scope_note(scope: FleetScope, extra: str | None = None) -> str:
+    parts = []
+    for m in scope.link_models:
+        if m.model == "sampled_unit":
+            parts.append(f"{m.name}: sampled two-state unit at its planning cap "
+                         f"(q={m.q:.3g}, MTTR {m.mttr_hours:.3g} h)")
+        elif m.model == "islanded":
+            parts.append(f"{m.name}: islanded (0 MW)")
+        else:
+            parts.append(f"{m.name}: firm block up to its planning cap "
+                         f"({m.reason or 'no occurrence data'})")
+    cap = scope.import_cap_mw
+    peak = float(cap.max()) if cap is not None and len(cap) else 0.0
     note = (
         f"MC / COPT fleet restricted to the hub side of import Link(s) "
-        f"{', '.join(links)}: {len(excluded)} grid-side bus(es) and "
-        f"{len(units)} unit(s) excluded; the import is counted as a firm block "
-        f"up to its planning cap (peak {float(firm.max()) if len(firm) else 0.0:.4g} MW, "
-        "import_firmness=planning_limit_only — Link outages are ranked in "
-        "fmea_top, not sampled here)")
-    return FleetScope(mode="hub_side", note=note, import_links=list(links),
-                      excluded_buses=excluded, excluded_units=sorted(units),
-                      import_firm_mw=firm)
+        f"{', '.join(scope.import_links)}: {len(scope.excluded_buses)} grid-side "
+        f"bus(es) and {len(scope.excluded_units)} unit(s) excluded from the hub "
+        f"area; import peak {peak:.4g} MW — " + "; ".join(parts)
+        + f" (import_model={scope.import_model()}, "
+        f"import_firmness={scope.import_firmness()})")
+    if scope.grid_area is not None:
+        note += (f"; grid side sampled as a second area "
+                 f"({len(scope.grid_area['units'])} unit(s)): the hub receives "
+                 "min(Link availability, grid surplus) each hour")
+    if extra:
+        note += f"; {extra}"
+    return note
 
 
 def _hub_side_copy(network, excluded_buses: list[str]):
-    """A copy of the solved network with the grid side removed."""
+    """
+    A copy of the solved network with ``excluded_buses`` (and everything
+    attached to them) removed — the grid side for the hub area, or the hub
+    side for the zonal grid area.
+    """
     from services.adequacy.redundancy import _detach_solver_model
 
     _detach_solver_model(network)
@@ -294,7 +480,59 @@ def _hub_side_copy(network, excluded_buses: list[str]):
     return nn
 
 
-def freeze_fixed_plan(network, cfg, lock, *, overlay=None) -> FixedPlanSnapshot:
+def _grid_area(network, cfg, scope: FleetScope, hub_inputs):
+    """
+    The zonal (v2) grid area → ``(ZonalInputs | None, reason | None)``.
+
+    Eligible when at least one import Link is live, the grid side is ONE
+    connected component (surplus in one grid cannot reach another except
+    through the hub) and its snapshot has a non-empty sampled fleet. Any
+    other outcome is a reason and the certification stays on v1.
+    """
+    from services.adequacy.mc import snapshot_inputs
+    from services.adequacy.mc_zonal import ZonalInputs
+
+    live = [m for m in scope.link_models if m.model != "islanded"]
+    if not live:
+        return None, None
+    if scope.n_grid_components != 1:
+        return None, (f"grid side is {scope.n_grid_components} separate "
+                      "components — zonal grid area not modelled, v1 applies")
+    hub_buses = [str(b) for b in network.buses.index
+                 if str(b) not in set(scope.excluded_buses)]
+    try:
+        grid = snapshot_inputs(_hub_side_copy(network, hub_buses), cfg=cfg)
+    except Exception as exc:  # noqa: BLE001 — the reason is the note
+        return None, (f"grid-side snapshot refused ({exc}) — zonal grid area "
+                      "not modelled, v1 applies")
+    if not grid.units:
+        return None, ("grid side has no occurrence data (no grid-side unit "
+                      "carries a resolvable outage rate) — the grid behind the "
+                      "Link is assumed to have surplus, v1 applies")
+    n_hub = len(hub_inputs.units) - len(scope.import_units)
+    z = ZonalInputs(
+        hub=hub_inputs, grid=grid,
+        import_idx=tuple(range(n_hub, len(hub_inputs.units))),
+        firm_import_mw=np.ascontiguousarray(
+            np.asarray(scope.import_firm_mw, dtype=np.float64)),
+        delivery_ratio=np.ascontiguousarray(
+            np.asarray(scope.delivery_ratio, dtype=np.float64)))
+    peak = float(np.max(grid.residual)) if grid.residual.size else 0.0
+    scope.grid_area = {
+        "units": [u.name for u in grid.units],
+        "n_units": len(grid.units),
+        "capacity_mw": float(sum(u.capacity_mw for u in grid.units)),
+        "demand_peak_mw": peak,
+        "storage_dispatched": False,
+        "note": ("grid side sampled as a second area: its own fleet and "
+                 "demand (residual after its must-take); grid-side storage "
+                 "is not dispatched (conservative for the hub)"),
+    }
+    return z, None
+
+
+def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
+                      import_model: str = "auto") -> FixedPlanSnapshot:
     """
     Snapshot the MC inputs and screen the fleet, ONCE, under ``lock``.
 
@@ -304,16 +542,28 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None) -> FixedPlanSnapshot:
     walking the network a second time.
 
     With ``overlay`` (the pack's import overlay) the fleet and the demand are
-    those of the HUB side of the import Link(s) and the import is a firm
-    block up to its cap (``hub_fleet_scope``); without it, the whole network.
+    those of the HUB side of the import Link(s) (``hub_fleet_scope``). Each
+    sampled import Link is appended to the hub fleet AFTER the generators (so
+    every generator keeps its positional CRN substream) and the COPT screens
+    that same list; firm-block Links are netted out of the residual. Without
+    an overlay, the whole network.
+
+    ``import_model``: ``"auto"`` (default) samples Links with occurrence data
+    and adds the zonal grid area when the grid side can be sampled;
+    ``"sampled_unit"`` stops at v1; ``"firm_block"`` is the pre-2026-09-27
+    behaviour (every Link a firm block) — kept for comparisons and tests.
     """
     from services.adequacy.copt import screening_analysis
     from services.adequacy.mc import snapshot_inputs
 
+    if import_model not in ("auto", "sampled_unit", "firm_block"):
+        raise ValueError(f"unknown import_model {import_model!r}")
     snap = FixedPlanSnapshot(voll=float(getattr(cfg, "voll", 0.0) or 0.0))
     with lock:
         try:
-            scope = (hub_fleet_scope(network, overlay) if overlay is not None
+            scope = (hub_fleet_scope(network, overlay,
+                                     sample_links=import_model != "firm_block")
+                     if overlay is not None
                      else FleetScope(mode="whole_network",
                                      note="no import overlay given"))
             if scope.mode == "hub_side":
@@ -321,7 +571,13 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None) -> FixedPlanSnapshot:
                     _hub_side_copy(network, scope.excluded_buses), cfg=cfg)
                 firm = np.asarray(scope.import_firm_mw, dtype=np.float64)
                 inputs = dataclasses.replace(
-                    inputs, residual=np.ascontiguousarray(inputs.residual - firm))
+                    inputs,
+                    units=tuple(inputs.units) + tuple(scope.import_units),
+                    residual=np.ascontiguousarray(inputs.residual - firm))
+                if import_model == "auto":
+                    snap.zonal_inputs, why = _grid_area(network, cfg, scope,
+                                                        inputs)
+                    scope.note = _scope_note(scope, why)
             else:
                 inputs = snapshot_inputs(network, cfg=cfg)
         except Exception as exc:  # noqa: BLE001 — the reason is the payload
@@ -329,6 +585,13 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None) -> FixedPlanSnapshot:
             snap.copt_error = snap.mc_error
             return snap
     snap.scope = scope.as_payload()
+    if not inputs.units and snap.zonal_inputs is not None:
+        # Nothing sampled on the hub side, but the grid behind a firm Link
+        # is: the two-area MC can still certify; the COPT has no unit to rank.
+        snap.mc_inputs = inputs
+        snap.copt_error = ("COPT screening skipped: no sampled unit on the hub "
+                           "side (the grid-side area is MC-only)")
+        return snap
     if not inputs.units:
         snap.mc_error = (
             "nothing to sample: no electrical generator carries resolvable "
@@ -381,23 +644,37 @@ def run_mc_certify_stage(
     This is the study's OWN baseline, not an ELCC replay, so it is the one
     kind of call site that may carry ``stop_event`` into ``mc_adequacy``
     (see that function's note on common random numbers). Charges no solves.
+
+    When the freeze built a zonal grid area (``frozen.zonal_inputs``) the
+    two-area engine (``mc_zonal``) runs instead — same batching, same
+    payload keys; ``import_model`` / ``import_firmness`` say which applied.
     """
     from services.adequacy.mc import MC_WARNING_V1, mc_adequacy
+    from services.adequacy.mc_zonal import zonal_mc_adequacy
 
     target = pack.availability.target_lole_h
+    scope = frozen.scope or {}
+    import_disclosure = {"import_model": scope.get("import_model"),
+                         "import_firmness": scope.get("import_firmness")}
     if frozen.mc_inputs is None:
         note = frozen.mc_error or "MC inputs unavailable"
         return "not_established", {
             "metric": "mc_lole", "target_lole_h": target, "mc_lole_h": None,
             "verdict": "not_established", "ens_met": ens_met,
-            "fleet_scope": frozen.scope,
+            "fleet_scope": frozen.scope, **import_disclosure,
         }, note, None
     draws = int(getattr(pack, "mc_draws", 200))
     seed = int(getattr(pack, "mc_seed", 0))
     cov_target = float(getattr(pack, "mc_cov_target", 0.05))
+    zonal = getattr(frozen, "zonal_inputs", None)
     try:
-        metrics = mc_adequacy(frozen.mc_inputs, draws=draws, seed=seed,
-                              cov_target=cov_target, stop_event=stop_event)
+        if zonal is not None:
+            metrics = zonal_mc_adequacy(zonal, draws=draws, seed=seed,
+                                        cov_target=cov_target,
+                                        stop_event=stop_event)
+        else:
+            metrics = mc_adequacy(frozen.mc_inputs, draws=draws, seed=seed,
+                                  cov_target=cov_target, stop_event=stop_event)
     except Exception as exc:  # noqa: BLE001
         logger.exception("EH mc_certify failed")
         return "not_established", {
@@ -434,10 +711,12 @@ def run_mc_certify_stage(
         "horizon_years": metrics.get("horizon_years"),
         "ens_met": ens_met,
         "verdict": verdict,
-        "engine": "mc",
-        "fidelity": "sequential_mc",
+        "engine": "mc_zonal" if zonal is not None else "mc",
+        "fidelity": ("sequential_mc_two_area" if zonal is not None
+                     else "sequential_mc"),
         "warning": MC_WARNING_V1,
         "fleet_scope": frozen.scope,
+        **import_disclosure,
     }
     if verdict == "certified":
         note = f"MC LOLE {lole:.3g} h ≤ target {float(target):.3g} h — certified"
@@ -576,6 +855,41 @@ def _flatten_mode(row: dict, *, rank: int) -> dict:
     return out
 
 
+def _rank_import_links_once(modes: list[dict], scope: dict | None
+                            ) -> tuple[list[dict], dict[str, str]]:
+    """
+    A sampled import Link sits in the COPT fleet, so the screening produced
+    a class-A row for it — and the Class-B sweep may have produced another.
+    Rank it ONCE (``IMPORT_LINK_RANKING_NOTE``): drop the class-A row when a
+    Class-B row names the same Link, otherwise relabel the class-A row as the
+    Link's own (``component_class="Link"``, ``link:<name>:forced_outage``).
+    Returns the filtered modes and ``{link: "class_b" | "class_a"}``.
+    """
+    unit_to_link = dict((scope or {}).get("import_units") or {})
+    if not unit_to_link:
+        return modes, {}
+    b_links = {str((r.get("failure_mode") or {}).get("name"))
+               for r in modes
+               if (r.get("failure_mode") or {}).get("failure_class") == "B"}
+    out: list[dict] = []
+    ranking: dict[str, str] = {}
+    for r in modes:
+        fm = r.get("failure_mode") or {}
+        uname = str(fm.get("name"))
+        if fm.get("failure_class") != "A" or uname not in unit_to_link:
+            out.append(r)
+            continue
+        link = unit_to_link[uname]
+        if link in b_links:
+            ranking[link] = "class_b"
+            continue
+        ranking[link] = "class_a"
+        out.append({**r, "name": link, "failure_mode": {
+            **fm, "name": link, "component_class": "Link",
+            "mode_id": f"link:{link}:forced_outage"}})
+    return out, ranking
+
+
 def run_fmea_top_stage(
     network, lock, cfg, frozen: FixedPlanSnapshot, *,
     remaining_solves: int,
@@ -649,6 +963,7 @@ def run_fmea_top_stage(
         except Exception as exc:  # noqa: BLE001
             logger.exception("EH fmea_top Class-B sweep failed")
             class_b.update(status="failed", reason=f"Class-B sweep failed: {exc}")
+    modes, link_ranking = _rank_import_links_once(modes, frozen.scope)
     if not modes:
         return "not_established", {
             "top": [], "n_total_modes": 0, "classes_included": [],
@@ -670,6 +985,9 @@ def run_fmea_top_stage(
         "voll_eur_per_mwh": frozen.voll,
         "ranking": "criticality_eur_per_year desc, mode_id",
         "note": FMEA_TOP_LINK_PRIMARY_NOTE,
+        "import_link_ranking": link_ranking,
+        "import_link_ranking_note": (IMPORT_LINK_RANKING_NOTE if link_ranking
+                                     else None),
     }
     note = FMEA_TOP_LINK_PRIMARY_NOTE + (
         f"; top {len(top)} of {len(modes)} modes, classes {'+'.join(sorted(classes))}")

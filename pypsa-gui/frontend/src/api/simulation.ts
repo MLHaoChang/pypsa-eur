@@ -645,6 +645,53 @@ export interface EhTeaBlock {
 export type EhCertificationVerdict =
   | 'certified' | 'failed' | 'no_target' | 'not_established'
 
+/**
+ * How the import enters the hub's MC / COPT fleet (plan 2026-09-27):
+ * a sampled two-state Link unit, a firm block at the planning cap, an
+ * islanded Link (0 MW), a mix of those, or the zonal two-area path that also
+ * samples the grid behind the Link.
+ */
+export type EhImportModel =
+  | 'sampled_unit' | 'firm_block' | 'islanded' | 'mixed' | 'zonal'
+
+export type EhImportFirmness =
+  | 'planning_limit_only' | 'outage_sampled' | 'partially_outage_sampled'
+  | 'grid_sampled' | 'outage_and_grid_sampled'
+
+/** One import Link in `fleet_scope.import_link_models`. */
+export interface EhImportLinkModel {
+  name: string
+  model: 'sampled_unit' | 'firm_block' | 'islanded'
+  cap_mw_max: number
+  q?: number | null
+  mttr_hours?: number | null
+  basis?: string | null
+  source?: string
+  reason?: string | null
+}
+
+/** Which fleet the MC / COPT saw (`fleet_scope` on certification / fmea_top). */
+export interface EhFleetScope {
+  mode: 'hub_side' | 'whole_network'
+  import_links?: string[]
+  excluded_buses?: string[]
+  excluded_units?: string[]
+  import_model?: EhImportModel | null
+  import_firmness?: EhImportFirmness | null
+  import_firm_mw_max?: number | null
+  import_cap_mw_max?: number | null
+  import_link_models?: EhImportLinkModel[]
+  grid_area?: {
+    units: string[]
+    n_units: number
+    capacity_mw: number
+    demand_peak_mw: number
+    storage_dispatched: boolean
+    note?: string
+  } | null
+  note?: string
+}
+
 /** `sections.certification.payload` from the mc_certify stage. */
 export interface EhCertificationPayload {
   metric?: string
@@ -660,6 +707,9 @@ export interface EhCertificationPayload {
   ens_met?: boolean | null
   verdict?: EhCertificationVerdict
   warning?: string | null
+  import_model?: EhImportModel | null
+  import_firmness?: EhImportFirmness | null
+  fleet_scope?: EhFleetScope | null
 }
 
 /** One ε-constraint point in `sections.frontier.payload.points`. */

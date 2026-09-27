@@ -103,6 +103,36 @@ export function certificationPayload(
   return payload as EhCertificationPayload
 }
 
+/**
+ * One line saying how the import entered the certification fleet, or null
+ * when the payload says nothing about it (whole-network scope, or a report
+ * without a hub-side scope). A report from before 2026-09-27 carries a
+ * `fleet_scope` with `import_firmness: planning_limit_only` and no
+ * `import_model` — that was a firm block.
+ */
+export function importModelLabel(payload: EhCertificationPayload | null): string | null {
+  if (!payload) return null
+  const scope = payload.fleet_scope ?? null
+  const model = payload.import_model ?? scope?.import_model
+    ?? (scope?.mode === 'hub_side' ? 'firm_block' : null)
+  const cap = scope?.import_cap_mw_max ?? scope?.import_firm_mw_max
+  const capText = cap != null ? ` (cap ${Number(cap).toFixed(0)} MW)` : ''
+  switch (model) {
+    case 'zonal':
+      return `Link outages + grid-side surplus sampled (two-area MC)${capText}`
+    case 'sampled_unit':
+      return `Link outages sampled (two-state unit at its planning cap)${capText}`
+    case 'mixed':
+      return `partly sampled: Links without outage data counted firm${capText}`
+    case 'islanded':
+      return 'islanded (0 MW)'
+    case 'firm_block':
+      return `firm at the planning limit (no Link outage data)${capText}`
+    default:
+      return null
+  }
+}
+
 /** True when there is a certification verdict or an honest reason to show. */
 export function hasCertificationBlock(report: EhReferenceDesignReport): boolean {
   const section = report.sections?.certification
@@ -150,6 +180,20 @@ export function fmeaTopModes(report: EhReferenceDesignReport): EhFmeaTopMode[] {
       Boolean(m) && typeof m === 'object'
       && typeof (m as EhFmeaTopMode).mode_id === 'string',
   )
+}
+
+/** How a sampled import Link is ranked in fmea_top (once: B, else A). */
+export function fmeaImportRankingNote(report: EhReferenceDesignReport): string | null {
+  const payload = report.sections?.fmea_top?.payload as {
+    import_link_ranking?: Record<string, string>
+    import_link_ranking_note?: string | null
+  } | undefined
+  const ranking = payload?.import_link_ranking
+  if (!ranking || Object.keys(ranking).length === 0) return null
+  const parts = Object.entries(ranking).map(
+    ([link, view]) => `${link}: ${view === 'class_b' ? 'Class-B row' : 'class-A row'}`)
+  return `Import Link ranked once — ${parts.join(', ')}.`
+    + (payload?.import_link_ranking_note ? ` ${payload.import_link_ranking_note}` : '')
 }
 
 /** CSV rows for the FMEA top-N table. */
@@ -637,7 +681,22 @@ export function EhReferenceDesignPanel() {
                           <span className="text-text">{certification.ens_met ? 'met' : 'missed'}</span>
                         </span>
                       )}
+                      {importModelLabel(certification) && (
+                        <span
+                          data-testid="eh-certification-import"
+                          data-import-model={certification.import_model
+                            ?? certification.fleet_scope?.import_model ?? 'firm_block'}
+                        >
+                          <span className="text-muted">import </span>
+                          <span className="text-text">{importModelLabel(certification)}</span>
+                        </span>
+                      )}
                     </div>
+                  )}
+                  {certification?.fleet_scope?.note && (
+                    <p className="text-[10px] text-muted" data-testid="eh-certification-scope-note">
+                      {certification.fleet_scope.note}
+                    </p>
                   )}
                   {report.sections?.certification?.note && (
                     <p className="text-[10px] text-muted" data-testid="eh-certification-note">
@@ -790,6 +849,11 @@ export function EhReferenceDesignPanel() {
                   {report.sections?.fmea_top?.note && (
                     <p className="text-[10px] text-muted" data-testid="eh-fmea-top-note">
                       {report.sections.fmea_top.note}
+                    </p>
+                  )}
+                  {fmeaImportRankingNote(report) && (
+                    <p className="text-[10px] text-muted" data-testid="eh-fmea-top-import-ranking">
+                      {fmeaImportRankingNote(report)}
                     </p>
                   )}
                 </div>
