@@ -10,6 +10,8 @@ import type { ProjectInfo } from '../api/types'
 import { projectsApi } from '../api/projects'
 import { formatApiDetail } from '../api/client'
 import { useAuthMode } from '../auth/AuthModeProvider'
+import { getPostLoginPath } from '../auth/resume'
+import { useInRouterContext, useNavigate, type NavigateFunction } from 'react-router-dom'
 import FromFolderTab from './FromFolderTab'
 import { ioApi } from '../api/io'
 import { networkApi } from '../api/network'
@@ -247,10 +249,32 @@ function BlankTab({ existingProjects, onConfirm, onClose, isPending }: NewProjec
 
 // ── Tab 2: Template — curated example networks ────────────────────────────
 
+// Obstacle 2 (guided-mode spec §2.6): a project created here must open the
+// workbench. The wizard also renders outside a router (unit tests), where
+// there is nowhere to navigate; router presence is fixed for a mount, so the
+// conditional hook call is stable.
+function useOptionalNavigate(): NavigateFunction | null {
+  const inRouter = useInRouterContext()
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  return inRouter ? useNavigate() : null
+}
+
+/** Add the new project's tab (parity with Sidebar.newProjectMut) and, when
+ *  created from outside the workbench (/projects), open it. */
+function useOpenInWorkbench(): (name: string) => void {
+  const addTab = useUIStore(s => s.addTab)
+  const navigate = useOptionalNavigate()
+  return (name: string) => {
+    addTab(name)
+    if (navigate && window.location.pathname !== '/app') navigate(getPostLoginPath(name))
+  }
+}
+
 function TemplateTab({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
   const setCurrentProject = useUIStore(s => s.setCurrentProject)
   const setProjectName    = useUIStore(s => s.setProjectName)
+  const openInWorkbench = useOpenInWorkbench()
 
   // Available templates import via the backend's /projects/from_template/<id>
   // endpoint, which copies the bundled network.nc into a fresh project dir and
@@ -265,6 +289,7 @@ function TemplateTab({ onClose }: { onClose: () => void }) {
       appLog('INFO', `Created '${res.imported}' from template (${res.summary.buses} buses)`)
       toast.success(`Created '${res.imported}' from template`)
       onClose()
+      openInWorkbench(res.imported)
     },
     onError: (e: Error) => toast.error(`Template import failed: ${e.message}`),
   })
@@ -352,6 +377,7 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
   const setCurrentProject = useUIStore(s => s.setCurrentProject)
   const setProjectName    = useUIStore(s => s.setProjectName)
+  const openInWorkbench = useOpenInWorkbench()
   const [dragOver, setDragOver] = useState(false)
   const { data: existingProjects = [] } = useQuery({
     queryKey: ['projects'],
@@ -389,6 +415,7 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
       appLog('INFO', `Imported '${res.imported}' via wizard (${res.summary.buses} buses)`)
       toast.success(`Opened project '${res.imported}'`)
       onClose()
+      openInWorkbench(res.imported)
     },
     onError: (e: Error) => toast.error(`Import failed: ${e.message}`),
   })
@@ -450,6 +477,7 @@ function CloneTab({ existingProjects, onClose }: {
   const setCurrentProject = useUIStore(s => s.setCurrentProject)
   const setProjectName    = useUIStore(s => s.setProjectName)
   const currentProject    = useUIStore(s => s.currentProject)
+  const openInWorkbench = useOpenInWorkbench()
   const [sourceId, setSourceId] = useState<string | null>(null)
   const [newName, setNewName]   = useState('')
 
@@ -500,6 +528,7 @@ function CloneTab({ existingProjects, onClose }: {
       appLog('INFO', `Cloned '${sourceId}' → '${res.saved}' via wizard`)
       toast.success(`Cloned to '${res.saved}'`)
       onClose()
+      openInWorkbench(res.saved)
     },
     onError: (e: Error) => {
       // Same seam ScenariosPanel/`formatApiDetail` use to read a structured

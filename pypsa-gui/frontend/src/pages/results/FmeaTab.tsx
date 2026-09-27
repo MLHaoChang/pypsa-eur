@@ -11,7 +11,7 @@ import { Download, Plus, RefreshCw, Square, Trash2 } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
-import { downloadCSV } from './shared'
+import { downloadCSV, fmtCurrency } from './shared'
 import { blockerMessage } from './McPanel'
 import StressScenarioEditor from './StressScenarioEditor'
 import { GuideButton } from '../../components/GuidedTour'
@@ -276,8 +276,8 @@ export default function FmeaTab() {
                   <td className="py-1 pr-2">{r.failure_class}</td>
                   <td className="py-1 pr-2 font-mono">{r.occurrence_per_year.toFixed(2)}
                     <span className="text-muted"> {r.occurrence_basis}</span></td>
-                  <td className="py-1 pr-2 font-mono">{r.severity_eur.toFixed(0)}</td>
-                  <td className="py-1 pr-2 font-mono font-semibold">{r.criticality_eur_per_year.toFixed(0)}</td>
+                  <td className="py-1 pr-2 font-mono">{fmtCurrency(r.severity_eur, 1)}</td>
+                  <td className="py-1 pr-2 font-mono font-semibold">{fmtCurrency(r.criticality_eur_per_year, 1)}</td>
                   <td className="py-1 pr-2">
                     <input
                       className="bg-bg border border-border rounded px-1.5 py-0.5 text-[10px] w-44 focus:outline-none focus:border-accent"

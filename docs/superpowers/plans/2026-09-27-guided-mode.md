@@ -122,6 +122,8 @@ Outside the twelve: `sweep.py` `_solve_once` / `_restore_base_guarded` (the FMEA
 | Quick win: name + finished cue | Obstacles 1, 4 | §2.10 — header "Energy Hub reference design"; `eh-study-finished-cue` scrolls to `eh-report`; banner stays while running | `EhReferenceDesignPanel.tsx` | `…finishedCue.test.tsx`, `…banner.test.tsx` |
 | Smoke script | — | §8.4 — `scripts/smoke-guided.mjs`: absolute-path Playwright load, self-check, send-gate check **before** stub-profile activation, `--phase P22.9` path (§2.11) | `FE/scripts/smoke-guided.mjs` | runs green |
 
+**Further justified test edit (§8.3):** `EhReferenceDesignPanel.test.tsx` "tones ok / skipped / not_established differently" asserted `statusTone('ok')` contains `accent`; §2.9 moves "ok" to the success token (`text-success`), so that one assertion now reads `success` (the skipped/not_established assertions are unchanged).
+
 **Not in P22.9 (deferred, recorded):** bug 5 (FMEA severity-0 rows without explanation), bug 6 (one-off 409 on resume), obstacles 10–12 (popover placement, `gen_zero_costs` warning, misleading save path). Obstacles 1, 4, 6, 7, 8 are answered by the Guided flow (mapping in spec §1) and, for 1/4, partly by the quick win above.
 
 **P22.9-FE integration gate (spec §8):**

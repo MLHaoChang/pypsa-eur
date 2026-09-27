@@ -25,14 +25,16 @@
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
 import {
   createChatStream,
+  getChatHealth,
   getChatHistory,
   postChatAbort,
   postChatConfirm,
   type ChatFrame,
+  type ChatHealth,
   type InterruptedTurn,
 } from '../api/chat'
 import { useChatProfiles, CHAT_PROFILES_QUERY_KEY } from '../hooks/useChatProfiles'
@@ -1194,6 +1196,21 @@ export default function ChatPanel() {
   const setError = useChatStore((s) => s.setError)
   const setStreamCleanup = useChatStore((s) => s.setStreamCleanup)
   const closeStream = useChatStore((s) => s.closeStream)
+  const chatError = useChatStore((s) => s.error)
+
+  // Send gate (click-through obstacle 9): without a key for the ACTIVE
+  // profile every send came back as "API key missing". Same key ApiKeySetup
+  // and AssistantModelSettings use, so a key save or a profile switch
+  // re-reads it. Only an explicit `chat_ready: false` gates; unknown (probe
+  // failed, older backend without the field) stays open — a probe outage
+  // must not lock the assistant.
+  const { data: chatHealth } = useQuery<ChatHealth>({
+    queryKey: ['chat', 'health'],
+    queryFn: getChatHealth,
+    staleTime: 30_000,
+    retry: false,
+  })
+  const notReady = chatHealth?.chat_ready === false
 
   const currentProject = useUIStore((s) => s.currentProject)
   // Read only for the autoscroll effect below — see the dependency-array
@@ -2146,7 +2163,7 @@ export default function ChatPanel() {
 
   const onSend = useCallback(() => {
     const text = input.trim()
-    if (!text || streaming) return
+    if (!text || streaming || notReady) return
     const attachIds = useChatStore.getState().attachedFileIds.slice()
     // First-send confirmation modal (default-ON friction killer).
     const firstAck = readPref('chat:firstSendAck') === '1'
@@ -2156,7 +2173,7 @@ export default function ChatPanel() {
       return
     }
     dispatchSend(text, attachIds)
-  }, [input, streaming, dispatchSend])
+  }, [input, streaming, notReady, dispatchSend])
 
   const confirmSendWithAttachments = useCallback(() => {
     if (pendingSendText == null) return
@@ -2815,6 +2832,15 @@ export default function ChatPanel() {
         onDelete={onDeleteChip}
         currentProject={currentProject}
       />
+      {/* The key form, inline, while Send is gated — unless the error
+          banner above already shows it for a missing_api_key turn. */}
+      {notReady && chatError?.error_kind !== 'missing_api_key' && (
+        <div className="px-3 py-2 border-t border-border bg-bg-2 shrink-0 text-[12px] text-muted"
+             data-testid="chat-send-gate">
+          The assistant needs an API key for the active model before it can answer.
+          <ApiKeySetup />
+        </div>
+      )}
       <div
         className="flex flex-col border-t border-border bg-bg-2 shrink-0"
         style={{ height: promptHeight }}
@@ -2942,10 +2968,12 @@ export default function ChatPanel() {
           <button
             className="self-end px-3 py-1.5 text-xs rounded bg-accent text-bg disabled:opacity-50 max-w-[260px]"
             onClick={onSend}
-            disabled={streaming || !input.trim()}
+            disabled={streaming || !input.trim() || notReady}
             data-testid="chat-send"
             title={
-              attachedFileIds.length > 0
+              notReady
+                ? 'Add an API key first (Settings → Assistant)'
+                : attachedFileIds.length > 0
                 ? `Sending with ${attachedFileIds.length} file(s): ` +
                   attachedFileIds
                     .map((fid) => uploads.find((u) => u.file_id === fid)?.filename || fid)

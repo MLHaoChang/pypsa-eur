@@ -22,8 +22,9 @@ import { useUIStore } from '../../store/uiStore'
 import { useChatStore } from '../../store/chatStore'
 import { nk } from '../../utils/queryKeys'
 import { blockerMessage } from './McPanel'
-import { downloadCSV, downloadJSON } from './shared'
+import { downloadCSV, downloadJSON, fmtCurrency, fmtEnergy } from './shared'
 import { GuideButton, useGuide } from '../../components/GuidedTour'
+import { prepareTaggingTour } from './prepareTaggingTour'
 import { InfoTip } from '../../layout/properties/cardKit'
 
 const ARCHETYPES: { id: EhArchetype; label: string; blurb: string }[] = [
@@ -51,6 +52,15 @@ const eur = (v: number) =>
 
 const cell = (v: unknown) =>
   v == null || v === '' ? '—' : String(v)
+
+/** A numeric table cell: MWh via fmtEnergy (scales to GWh/TWh), € via
+ *  fmtCurrency; anything else (or a non-number) renders like `cell`. */
+export const cellNum = (v: unknown, kind: 'mwh' | 'eur' | 'plain'): string => {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return cell(v)
+  if (kind === 'mwh') return fmtEnergy(v, 2)
+  if (kind === 'eur') return fmtCurrency(v, 2)
+  return String(v)
+}
 
 /** Pack-settings form state: strings, so a half-typed value is not coerced. */
 export interface PackForm {
@@ -191,7 +201,9 @@ export function completenessRows(
 }
 
 export function statusTone(status: EhSectionStatus): string {
-  if (status === 'ok') return 'text-accent'
+  // The theme's success token: the accent is the brand red, which read as an
+  // error on every "ok" chip (click-through obstacle 5).
+  if (status === 'ok') return 'text-success'
   if (status === 'skipped') return 'text-muted'
   return 'text-warn'
 }
@@ -216,12 +228,20 @@ export function verdictTone(verdict: string): string {
   return 'text-warn'
 }
 
+/** What to do after each verdict (spec §2.9); null when nothing is owed. */
+export const CERTIFICATION_NEXT = {
+  fail: 'Next: tighten the energy target or add firm capacity — press Ask the assistant for a reviewed recommendation.',
+  inconclusive: 'Next: raise MC draws (Pack settings → Draws) or tighten the plan; an inconclusive verdict is not a failure.',
+  noTarget: 'Next: set a shortfall target (Pack settings → LOLE target) to certify.',
+} as const
+
 /** MC certification headline from the `certification` section, if it ran. */
 export function certificationHeadline(report: EhReferenceDesignReport): {
   perYear: number
   ci: [number, number] | null
   verdict: string | null
   target: number | null
+  next: string | null
 } | null {
   const payload = report.sections?.certification?.payload as
     | Record<string, unknown> | null | undefined
@@ -232,11 +252,20 @@ export function certificationHeadline(report: EhReferenceDesignReport): {
     && typeof raw[0] === 'number' && typeof raw[1] === 'number'
     ? [raw[0] / years, raw[1] / years] as [number, number]
     : null
+  const verdict = typeof payload.verdict === 'string' ? payload.verdict : null
+  // No target (the study reports LOLE but certifies nothing) and the 'none'
+  // metric both leave the verdict empty: the next step is to set a target.
+  const next = verdict === 'fail' ? CERTIFICATION_NEXT.fail
+    : verdict === 'inconclusive' ? CERTIFICATION_NEXT.inconclusive
+      : verdict === 'pass' ? null
+        : (verdict == null || verdict === 'none' || payload.metric === 'none')
+          ? CERTIFICATION_NEXT.noTarget : null
   return {
     perYear: payload.lole_h_per_year,
     ci,
-    verdict: typeof payload.verdict === 'string' ? payload.verdict : null,
+    verdict,
     target: typeof payload.target_lole_h === 'number' ? payload.target_lole_h : null,
+    next,
   }
 }
 
@@ -664,6 +693,35 @@ export function EhReferenceDesignPanel() {
   })
   const study = (studyData ?? null) as EhStudyPayload | null
   const running = study?.status === 'running'
+
+  // Finished cue (click-through obstacles 1/4): the report lands below the
+  // fold with nothing saying the run ended. Only a running → done transition
+  // seen while mounted shows it; a fresh mount on a done study does not.
+  const studyStatus = study?.status ?? null
+  const prevStudyStatus = useRef<string | null>(null)
+  const [finishedCue, setFinishedCue] = useState(false)
+  useEffect(() => {
+    const prev = prevStudyStatus.current
+    prevStudyStatus.current = studyStatus
+    if (studyStatus === 'running') { setFinishedCue(false); return }
+    if (prev !== 'running') return
+    if (studyStatus === 'done') setFinishedCue(true)
+    else if (studyStatus === 'failed' || studyStatus === 'aborted') {
+      // No cue for a failed / stopped run: bring its message into view once.
+      const id = studyStatus === 'failed' ? 'eh-error' : 'eh-aborted'
+      document.querySelector(`[data-testid="${id}"]`)
+        ?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' })
+    }
+  }, [studyStatus])
+  useEffect(() => {
+    setFinishedCue(false)
+    prevStudyStatus.current = null
+  }, [currentProject])
+  const viewReport = () => {
+    setFinishedCue(false)
+    document.querySelector('[data-testid="eh-report"]')
+      ?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+  }
   // Readiness copies the network under its lock: not while a study runs,
   // and not on every keystroke of the budget field (debounced above).
   const { data: readiness } = useQuery({
@@ -797,14 +855,22 @@ export function EhReferenceDesignPanel() {
         data-testid="eh-reference-design-toggle"
         className="w-full flex items-center gap-2 px-3 py-1.5 border-b border-border bg-panel text-[10px] font-semibold uppercase tracking-wide text-muted hover:text-accent"
       >
-        <Hexagon size={11} /> Reference design {open ? '▾' : '▸'}
+        <Hexagon size={11} /> Energy Hub reference design {open ? '▾' : '▸'}
       </button>
       {open && (
         <div className="p-3 flex flex-col gap-3">
+          {finishedCue && (
+            <button type="button" data-testid="eh-study-finished-cue"
+              onClick={viewReport}
+              className="sticky top-0 z-10 self-start px-2.5 py-0.5 rounded-full border border-success/50 bg-bg text-[10px] font-semibold text-success shadow-sm hover:bg-success/10">
+              Study finished — view report
+            </button>
+          )}
           <div className="flex items-center gap-2">
             <GuideButton tourId="eh_study" testId="eh-guide-button" />
             <GuideButton tourId="eh_tagging" testId="eh-tagging-guide-button"
-                         label="How to tag the network" />
+                         label="How to tag the network"
+                         prepare={() => prepareTaggingTour(qc, currentProject)} />
             <button type="button" data-testid="eh-ask-assistant"
               onClick={() => askAssistant(report
                 ? 'Review my latest Energy Hub study: what did it establish, '
@@ -845,7 +911,8 @@ export function EhReferenceDesignPanel() {
             <span className="text-muted">{selected.blurb}</span>
           </label>
 
-          {template && !running && (
+          {/* Stays while a study runs: it is the context the run was set up from. */}
+          {template && (
             <div className="flex flex-col gap-1 text-[10px] border border-accent/40 rounded p-2"
                  data-testid="eh-template-banner">
               <span>
@@ -861,13 +928,20 @@ export function EhReferenceDesignPanel() {
               )}
               <button type="button" data-testid="eh-template-apply"
                 onClick={() => applyTemplate(template)}
-                className="self-start px-2 py-0.5 border border-accent rounded text-accent hover:bg-accent/10">
+                disabled={running}
+                className="self-start px-2 py-0.5 border border-accent rounded text-accent hover:bg-accent/10 disabled:opacity-50">
                 Use recommended settings
               </button>
             </div>
           )}
           {readiness && !running && (
             <ReadinessSummary r={readiness as EhReadiness} />
+          )}
+          {running && (
+            <p className="text-[10px] text-muted border border-border/60 rounded p-2"
+               data-testid="eh-readiness-paused">
+              Readiness is paused while the study runs
+            </p>
           )}
 
           <div className="flex flex-col gap-1.5">
@@ -1135,6 +1209,12 @@ export function EhReferenceDesignPanel() {
                   </span>
                 )}
               </div>
+
+              {cert?.next && (
+                <p className="text-[10px] text-muted" data-testid="eh-certification-next">
+                  {cert.next}
+                </p>
+              )}
 
               <div className="flex items-center gap-2 flex-wrap">
                 <button type="button" data-testid="eh-report-json"
@@ -1610,8 +1690,8 @@ export function EhReferenceDesignPanel() {
                     <tr>
                       <th className="text-left font-medium py-1 pr-3">Contingency</th>
                       <th className="text-left font-medium py-1 pr-3">Status</th>
-                      <th className="text-right font-medium py-1 pr-3">Critical MWh</th>
-                      <th className="text-right font-medium py-1">Other MWh</th>
+                      <th className="text-right font-medium py-1 pr-3">Critical unserved</th>
+                      <th className="text-right font-medium py-1">Other unserved</th>
                       {dtcTable.attribution === 'per_load' && (
                         <th className="text-left font-medium py-1 pl-3">Critical by Load (MWh)</th>
                       )}
@@ -1627,10 +1707,10 @@ export function EhReferenceDesignPanel() {
                         <td className="py-0.5 pr-3 font-sans">{c.contingency}</td>
                         <td className="py-0.5 pr-3 font-sans">{c.status}</td>
                         <td className="py-0.5 pr-3 text-right">
-                          {cell(c.critical_unserved_mwh)}
+                          {cellNum(c.critical_unserved_mwh, 'mwh')}
                         </td>
                         <td className="py-0.5 text-right">
-                          {cell(c.noncritical_unserved_mwh)}
+                          {cellNum(c.noncritical_unserved_mwh, 'mwh')}
                         </td>
                         {dtcTable.attribution === 'per_load' && (
                           <td className="py-0.5 pl-3 font-sans"
@@ -1684,8 +1764,7 @@ export function EhReferenceDesignPanel() {
                         <td className="py-0.5 pr-3 font-sans">{c.contingency}</td>
                         <td className="py-0.5 pr-3 font-sans">{c.status}</td>
                         <td className="py-0.5 pr-3 text-right">
-                          {c.cost_at_target_eur != null
-                            ? eur(c.cost_at_target_eur) : '—'}
+                          {cellNum(c.cost_at_target_eur, 'eur')}
                         </td>
                         <td className="py-0.5 text-right">
                           {cell(c.built_p_nom_mw)}

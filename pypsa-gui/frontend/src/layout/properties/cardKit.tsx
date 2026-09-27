@@ -195,9 +195,12 @@ export function ExpandedProps({ items }: { items: ExpandedItem[] }) {
 // same pattern as BusPanel's "Edit Bus" footer so the layout matches across
 // every asset type in the single-asset right panel.
 export function DetailFooter({
-  editLabel, assetName, onEdit, onDelete, deletePending, hasProfile, showChart, onToggleChart,
+  editLabel, testId, assetName, onEdit, onDelete, deletePending, hasProfile, showChart, onToggleChart,
 }: {
   editLabel: string
+  // Test id of the Edit button — a tour anchor (EH tagging tour `reveal`,
+  // spec §2.7). Named `testId` so test_guides.py's literal scan finds it.
+  testId?: string
   // The asset's own name (gen.name / su.name / …) — used only to disambiguate
   // the Delete button's accessible name when several DetailFooters stack in
   // the "all connected assets" view (PropertiesPanel's per-bus asset list).
@@ -225,6 +228,7 @@ export function DetailFooter({
       <div className="flex gap-2 mt-2">
         <button
           onClick={onEdit}
+          data-testid={testId}
           className="flex-1 py-1.5 border border-border rounded text-xs text-muted hover:border-accent hover:text-accent transition-colors flex items-center justify-center gap-1.5"
         >
           <Pencil size={11} /> {editLabel}

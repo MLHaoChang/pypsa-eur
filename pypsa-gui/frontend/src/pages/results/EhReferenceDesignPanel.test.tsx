@@ -145,7 +145,8 @@ describe('completenessRows', () => {
   })
 
   it('tones ok / skipped / not_established differently', () => {
-    expect(statusTone('ok')).toContain('accent')
+    // Guided-mode spec §2.9: 'ok' moved from the brand accent to the success token.
+    expect(statusTone('ok')).toContain('success')
     expect(statusTone('skipped')).toContain('muted')
     expect(statusTone('not_established')).toContain('warn')
   })

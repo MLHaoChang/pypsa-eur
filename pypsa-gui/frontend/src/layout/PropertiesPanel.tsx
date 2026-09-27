@@ -26,6 +26,7 @@ import { tip as docTip } from '../utils/propertyDocs'
 import { CARRIER_CATALOG_NAMES } from '../utils/carrierCatalog'
 import { vintageCloneToast } from '../utils/toasts'
 import VintagePeriodBoundsModal from '../components/VintagePeriodBoundsModal'
+import { GuideButton } from '../components/GuidedTour'
 
 import {
   TOOLTIP_VIEWPORT_MARGIN,
@@ -1189,6 +1190,16 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
     setOpen(true)
   }
 
+  // Same request as the Bus card; only the selected Link's detail view takes
+  // it (card mode stacks several Links in one asset group).
+  const editRequest = useUIStore(s => s.propertiesEditRequest)
+  useEffect(() => {
+    if (editRequest !== 'Link' || mode !== 'detail') return
+    if (!open) startEdit()
+    useUIStore.getState().clearPropertiesEditRequest()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest, mode])
+
   const isExt = form.p_nom_extendable === 'true'
 
   const bus0Obj = (buses as Bus[]).find(b => b.name === link.bus0)
@@ -1238,6 +1249,7 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
         )}
         <DetailFooter
           editLabel="Edit Link"
+          testId="props-edit-link"
           assetName={link.name}
           onEdit={startEdit}
           // Link delete is exposed in the panel header (canDelete === true)
@@ -1610,7 +1622,9 @@ function BusPanel({ name }: { name: string }) {
   const busLinks  = (links as Link[]).filter((l: Link) => l.bus0 === name)
 
   const totalGen  = busGens.reduce((s: number, g: Generator) => s + (g.p_nom ?? 0), 0)
-  const totalLoad = busLoads.reduce((s: number, l: Load) => s + Math.abs(l.p_set ?? 0), 0)
+  // `p_set_peak` covers loads whose demand lives in `loads_t.p_set` — summing
+  // the static p_set alone showed "0 MW" on a time-series-loaded bus.
+  const totalLoad = busLoads.reduce((s: number, l: Load) => s + Math.abs(l.p_set_peak ?? l.p_set ?? 0), 0)
 
   const thermalGens   = busGens.filter(g => !isRenewableCarrier(g.carrier))
   const renewableGens = busGens.filter(g => isRenewableCarrier(g.carrier))
@@ -1623,6 +1637,17 @@ function BusPanel({ name }: { name: string }) {
     }, loadExtras(editScope('Bus'))))
     setEditing(true)
   }
+
+  // The EH tagging tour (prepareTaggingTour / the `props-edit-bus` reveal)
+  // asks for Edit before the bus row may have loaded: wait for it, then
+  // consume the request.
+  const editRequest = useUIStore(s => s.propertiesEditRequest)
+  useEffect(() => {
+    if (editRequest !== 'Bus' || !bus) return
+    if (!editing) startEdit()
+    useUIStore.getState().clearPropertiesEditRequest()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRequest, bus])
 
   const updateMut = useMutation({
     // Chokepoint (utils/assetWrite.ts) owns fetch/spread/PUT/invalidate.
@@ -1707,7 +1732,7 @@ function BusPanel({ name }: { name: string }) {
               lat, lng pair into its properties"), so showing Null Island
               here undermines that guidance. */}
           <Row label="Coordinates" value={isPlaced(bus) ? `${bus.x?.toFixed(3)}, ${bus.y?.toFixed(3)}` : 'not set'} tip={docTip('bus.coordinates')} />
-          <button onClick={startEdit}
+          <button onClick={startEdit} data-testid="props-edit-bus"
             className="w-full mt-2 py-1.5 border border-border rounded text-xs text-muted hover:border-accent hover:text-accent transition-colors flex items-center justify-center gap-1.5">
             <Pencil size={11} /> Edit Bus
           </button>
@@ -1724,7 +1749,10 @@ function BusPanel({ name }: { name: string }) {
           <CoordPairInput fs={form} set={setForm} tip={docTip('bus.coordinates')} />
           <NumInput label="Longitude (x)" k="x" fs={form} set={setForm} tip={docTip('bus.x')} />
           <NumInput label="Latitude (y)" k="y" fs={form} set={setForm} tip={docTip('bus.y')} />
-          <SectionHdr title="Energy Hub" />
+          <div className="col-span-2 flex items-end justify-between gap-2">
+            <div className="flex-1"><SectionHdr title="Energy Hub" /></div>
+            <GuideButton tourId="eh_tagging" testId="eh-bus-guide-button" label="How to tag" />
+          </div>
           <EhBusInputs fs={form} set={setForm} />
           <ExtrasSection
             componentClass="Bus"
@@ -1737,7 +1765,7 @@ function BusPanel({ name }: { name: string }) {
 
       <Section title="Capacity Summary">
         <Row label="Total generation" value={totalGen}  unit=" MW" />
-        <Row label="Total load"       value={totalLoad} unit=" MW" />
+        <Row label="Peak load"        value={totalLoad} unit=" MW" tip="Largest hourly load across the horizon (time-series aware)" />
         <Row label="Generators"       value={busGens.length} />
         <Row label="Loads"            value={busLoads.length} />
         <Row label="Storage units"    value={busSus.length} />

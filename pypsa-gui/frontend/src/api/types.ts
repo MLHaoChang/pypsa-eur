@@ -120,6 +120,10 @@ export interface Store {
 }
 export interface Load {
   name: string; bus: string; carrier: string; p_set: number; q_set: number; sign: number
+  // Read-only, from `_serialize_component`: the largest-magnitude value of
+  // `loads_t.p_set[name]` when the load has a profile, else the static p_set,
+  // else null. The Bus card's "Peak load" row reads it (bug 4).
+  p_set_peak?: number | null
 }
 export interface Transformer {
   name: string; bus0: string; bus1: string; type: string; s_nom: number

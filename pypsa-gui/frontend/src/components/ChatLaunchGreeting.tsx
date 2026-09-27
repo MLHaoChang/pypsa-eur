@@ -51,7 +51,14 @@ function solveLine(status: SimulationStatus | undefined): string | null {
   if (status.running) return 'A solve is running right now.'
   switch (status.dispatch) {
     case 'fresh':
-      return 'Solved — the results match the network as it stands.'
+      // One signal with the canvas footer and SnapshotPicker (`hasResults`):
+      // a study's closing re-solve (FMEA sweep) leaves fresh dispatch on the
+      // network but records no foreground solve, so "Solved" there would
+      // contradict "Run a simulation to enable" next to it.
+      if (status.condition != null && status.solve_time != null) {
+        return 'Solved — the results match the network as it stands.'
+      }
+      return 'The network carries dispatch from a study re-solve, but no foreground solve is recorded — run a simulation for results you can read here.'
     case 'stale':
       // The most useful thing the greeting can say, and the reason staleness
       // is in the spec at all: results that exist but no longer describe the

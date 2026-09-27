@@ -110,11 +110,13 @@ export default function ApiKeySetup({
 
   function refreshDependents() {
     void qc.invalidateQueries({ queryKey: API_KEY_SETTINGS_KEY })
-    // Clearing the banner is what makes the save legible. Nothing gates the
-    // panel on a cached health probe — `getChatHealth` exists but has no
-    // callers, and the backend reads `os.environ` at request time — so the
-    // next send just works. Leaving the red "API key missing" box on screen
-    // underneath a form that reported success would say otherwise.
+    // ChatPanel gates Send on this probe's `chat_ready` (obstacle 9): re-read
+    // it so a saved key re-enables Send at once (and a forgotten one gates).
+    void qc.invalidateQueries({ queryKey: ['chat', 'health'] })
+    // Clearing the banner is what makes the save legible. The backend reads
+    // `os.environ` at request time, so the next send just works. Leaving the
+    // red "API key missing" box on screen underneath a form that reported
+    // success would say otherwise.
     setError(null)
   }
 

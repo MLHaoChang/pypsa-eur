@@ -342,6 +342,10 @@ interface UIStore {
   // anchor has to live outside it — a set(SlidePanel) parameter cannot
   // survive that remount. Consumed then cleared by the section itself.
   settingsSectionRequest: string | null
+  // Ask the Properties panel's Bus / Link card to open its Edit form (the EH
+  // tagging tour's targets only render in Edit). Consumed then cleared by the
+  // card, like resultsTabRequest.
+  propertiesEditRequest: 'Bus' | 'Link' | null
   // Deep-link into the Asset Detail tab (Task 13). Consumed then cleared by
   // AssetDetail.tsx's effect. Set only via `requestAssetDetail`.
   assetDetailRequest: AssetDetailRequest | null
@@ -426,6 +430,8 @@ interface UIStore {
   clearResultsTabRequest: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
+  requestPropertiesEdit: (c: 'Bus' | 'Link') => void
+  clearPropertiesEditRequest: () => void
   // ONE path for all four entry points (Properties, bottom table, map,
   // chatbot). Each of them only has to call this — the panel, the tab and
   // the selection all move together, so none of them can drift out of step.
@@ -487,6 +493,7 @@ export const useUIStore = create<UIStore>((set) => ({
   bottomTabRequest: null,
   resultsTabRequest: null,
   settingsSectionRequest: null,
+  propertiesEditRequest: null,
   assetDetailRequest: null,
   compareNavRequest: null,
   ioModalRequest: null,
@@ -627,6 +634,8 @@ export const useUIStore = create<UIStore>((set) => ({
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
+  requestPropertiesEdit: (c) => set({ propertiesEditRequest: c }),
+  clearPropertiesEditRequest: () => set({ propertiesEditRequest: null }),
   requestAssetDetail: (req) => set({
     assetDetailRequest: req,
     selectedComponent: { type: req.componentClass, name: req.name },

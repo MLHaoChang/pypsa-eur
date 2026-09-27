@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { HelpCircle } from 'lucide-react'
+import { create } from 'zustand'
 import client from '../api/client'
 
 export interface GuideStep {
@@ -250,18 +251,51 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
   )
 }
 
-/** "Guide" button that starts a tour; dotted until the tour was finished. */
-export function GuideButton({ tourId, testId, label = 'Guide' }: {
+// A tour launched after a `prepare` step. `prepare` may unmount the button
+// that started it (the tagging tour closes the Results panel the button sits
+// in), so such a tour is rendered by the app-level GuidedTourHost instead of
+// by the button. `seq` remounts the tour when the same one is relaunched.
+const useLaunchedTour = create<{ tourId: string | null; seq: number }>(() => ({
+  tourId: null, seq: 0,
+}))
+
+/** Renders the tour a prepared GuideButton launched (mounted once in App). */
+export function GuidedTourHost() {
+  const { tourId, seq } = useLaunchedTour()
+  if (!tourId) return null
+  return (
+    <GuidedTour key={seq} tourId={tourId}
+      onClose={() => useLaunchedTour.setState({ tourId: null })} />
+  )
+}
+
+/** "Guide" button that starts a tour; dotted until the tour was finished.
+ *  `prepare` (optional) runs and is awaited before the tour mounts; a failed
+ *  prepare still opens the tour, which then notes the missing target. */
+export function GuideButton({ tourId, testId, label = 'Guide', prepare }: {
   tourId: string
   testId: string
   label?: string
+  prepare?: () => void | Promise<void>
 }) {
   const [open, setOpen] = useState(false)
   const [seen, setSeen] = useState(() => tourSeen(tourId))
+  const start = async () => {
+    if (!prepare) {
+      setOpen(true)
+      return
+    }
+    try {
+      await prepare()
+    } catch (e) {
+      console.warn(`Guide '${tourId}': prepare failed`, e)
+    }
+    useLaunchedTour.setState(s => ({ tourId, seq: s.seq + 1 }))
+  }
   return (
     <>
       <button type="button" data-testid={testId}
-              onClick={() => setOpen(true)}
+              onClick={() => void start()}
               title="Step-by-step walkthrough of this panel: what each control does and what to enter."
               className="relative inline-flex items-center gap-1 px-2 py-0.5 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent">
         <HelpCircle size={11} /> {label}

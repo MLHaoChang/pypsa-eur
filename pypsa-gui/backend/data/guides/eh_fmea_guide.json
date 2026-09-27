@@ -76,7 +76,7 @@
           "target": "eh-certification-verdict",
           "title": "11 · Certification verdict",
           "body": "Certified only when the MC LOLE 95 % confidence interval lies entirely below the target (pass). Fail = entirely above; inconclusive = the interval straddles it (more draws help).",
-          "enter": "An inconclusive verdict is not a failure — raise MC draws or tighten the plan.",
+          "enter": "Fail: tighten the energy target or add firm capacity, then ask the assistant for a reviewed recommendation. Inconclusive is not a failure: raise MC draws (Pack settings → Draws) or tighten the plan.",
           "after_run": true
         },
         {
@@ -143,14 +143,17 @@
       "steps": [
         {
           "target": "eh-bus-fields",
+          "reveal": "props-edit-bus",
           "title": "1 · Bus tags",
           "body": "Point of connection = the GRID-side bus of the import; Critical bus = its demand must be served when islanded; Short-circuit level and IBR capacity feed the SCR (grid-strength) gate at the PoC.",
-          "enter": "Select a bus, open Edit, then tick/enter the Energy Hub fields."
+          "enter": "Select a bus, open Edit, then tick/enter the Energy Hub fields. Then select the import Link and set its Energy Hub role (step 2 shows when a Link's Edit form is open)."
         },
         {
           "target": "eh-link-role",
+          "reveal": "props-edit-link",
+          "optional": true,
           "title": "2 · Link role",
-          "body": "grid_import marks the import Link the packs cap or island. Conversion roles (electrolyser, fuel_cell, conversion) identify units for redundancy scenarios and the multi-energy report.",
+          "body": "Select the import Link on the map to see this field (the tour opens a bus first). grid_import marks the import Link the packs cap or island. Conversion roles (electrolyser, fuel_cell, conversion) identify units for redundancy scenarios and the multi-energy report.",
           "enter": "Select the import Link, open Edit, choose grid_import."
         }
       ]
