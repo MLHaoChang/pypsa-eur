@@ -4,8 +4,12 @@ import { Hexagon, Square } from 'lucide-react'
 import {
   resultsApi,
   type EhArchetype,
+  type EhCertificationPayload,
+  type EhCertificationVerdict,
   type EhDtcPlanningTable,
   type EhDtcStressTable,
+  type EhFmeaTopMode,
+  type EhFrontierPoint,
   type EhLeverTable,
   type EhRedundancyTable,
   type EhReferenceDesignReport,
@@ -46,8 +50,8 @@ const cell = (v: unknown) =>
 
 /** Stable display order for completeness chips (matches REPORT_SECTIONS). */
 export const COMPLETENESS_ORDER = [
-  'target', 'cost', 'frontier', 'sizing', 'redundancy', 'levers', 'dtc',
-  'fmea_top', 'tea', 'gates', 'multi_energy',
+  'target', 'certification', 'cost', 'frontier', 'sizing', 'redundancy',
+  'levers', 'dtc', 'fmea_top', 'tea', 'gates', 'multi_energy',
 ] as const
 
 export function completenessRows(
@@ -79,6 +83,103 @@ export function scrTone(scr: EhScrVerdict): string {
   if (scr === 'pass') return 'text-accent'
   if (scr === 'fail') return 'text-danger'
   return 'text-warn'
+}
+
+/** Tone for the MC LOLE certification verdict (spec decision 2). */
+export function verdictTone(verdict: EhCertificationVerdict | null | undefined): string {
+  if (verdict === 'certified') return 'text-accent'
+  if (verdict === 'failed') return 'text-danger'
+  if (verdict === 'no_target') return 'text-muted'
+  return 'text-warn'
+}
+
+/** The certification payload when the mc_certify stage produced one. */
+export function certificationPayload(
+  report: EhReferenceDesignReport,
+): EhCertificationPayload | null {
+  const section = report.sections?.certification
+  const payload = section?.payload
+  if (!payload || typeof payload !== 'object') return null
+  return payload as EhCertificationPayload
+}
+
+/** True when there is a certification verdict or an honest reason to show. */
+export function hasCertificationBlock(report: EhReferenceDesignReport): boolean {
+  const section = report.sections?.certification
+  if (!section) return report.mc_lole_h != null
+  if (section.status === 'skipped') return false
+  return report.mc_lole_h != null || Boolean(section.note)
+    || certificationPayload(report) != null
+}
+
+/** The frontier points (loosest first, as the engine orders them). */
+export function frontierPoints(report: EhReferenceDesignReport): EhFrontierPoint[] {
+  const payload = report.sections?.frontier?.payload
+  if (!payload || typeof payload !== 'object') return []
+  const pts = (payload as { points?: unknown }).points
+  if (!Array.isArray(pts)) return []
+  return pts.filter(
+    (p): p is EhFrontierPoint =>
+      Boolean(p) && typeof p === 'object'
+      && typeof (p as EhFrontierPoint).target_permyriad === 'number',
+  )
+}
+
+/** CSV rows for the frontier table — cost is ex-shed by construction. */
+export function frontierCsvRows(points: EhFrontierPoint[]): unknown[][] {
+  return points.map(p => [
+    p.target_permyriad,
+    p.status,
+    p.point?.total_system_cost_eur ?? '',
+    p.point?.achieved_ens_mwh ?? '',
+    p.point?.achieved_shed_hours ?? '',
+    p.binding ?? '',
+    p.period_basis ?? '',
+    p.excludes_shed_cost === false ? 'no' : 'yes',
+  ])
+}
+
+/** The ranked residual failure modes (top-N) from the fmea_top stage. */
+export function fmeaTopModes(report: EhReferenceDesignReport): EhFmeaTopMode[] {
+  const payload = report.sections?.fmea_top?.payload
+  if (!payload || typeof payload !== 'object') return []
+  const top = (payload as { top?: unknown }).top
+  if (!Array.isArray(top)) return []
+  return top.filter(
+    (m): m is EhFmeaTopMode =>
+      Boolean(m) && typeof m === 'object'
+      && typeof (m as EhFmeaTopMode).mode_id === 'string',
+  )
+}
+
+/** CSV rows for the FMEA top-N table. */
+export function fmeaTopCsvRows(modes: EhFmeaTopMode[]): unknown[][] {
+  return modes.map(m => [
+    m.rank,
+    m.failure_class,
+    m.component_class,
+    m.name,
+    m.criticality_eur_per_year ?? '',
+    m.delta_eue_mwh ?? '',
+    m.occurrence_per_year ?? '',
+    m.severity_eur ?? '',
+    m.engine ?? '',
+  ])
+}
+
+/** LCOH headline: the number when established, else the flag to show. */
+export function lcohChip(
+  report: EhReferenceDesignReport,
+): { value: number | null; status: EhSectionStatus | null; note: string | null } | null {
+  const tea = report.tea
+  if (!tea) return null
+  if (tea.lcoh_eur_per_kg != null) {
+    return { value: tea.lcoh_eur_per_kg, status: tea.lcoh_status ?? 'ok', note: tea.lcoh_note ?? null }
+  }
+  if (tea.lcoh_status) {
+    return { value: null, status: tea.lcoh_status, note: tea.lcoh_note ?? null }
+  }
+  return null
 }
 
 /** True when the report carries SCR/EMT values or an honest gates note. */
@@ -284,6 +385,10 @@ export function EhReferenceDesignPanel() {
   )
   const meCarriers = report ? multiEnergyCarrierEntries(report) : []
   const meLoads = report ? multiEnergyLoadEntries(report) : []
+  const certification = report ? certificationPayload(report) : null
+  const frontier = report ? frontierPoints(report) : []
+  const fmeaTop = report ? fmeaTopModes(report) : []
+  const lcoh = report ? lcohChip(report) : null
 
   const selected = ARCHETYPES.find(a => a.id === archetype)!
   const selectedId = redTable?.selection?.selected_id ?? null
@@ -311,8 +416,8 @@ export function EhReferenceDesignPanel() {
         <div className="p-3 flex flex-col gap-3">
           <p className="text-[11px] text-muted">
             Runs an Energy Hub archetype pack through the reference-design
-            pipeline (apply pack → ENS solve → assemble, plus any levers the
-            pack enables). Produces one{' '}
+            pipeline (apply pack → ENS solve → frontier → MC LOLE certify →
+            FMEA top-N → assemble, plus any levers the pack enables). Produces one{' '}
             <code className="font-mono">ReferenceDesignReport</code> linking
             availability and cost. Sibling tables (redundancy, levers, DtC)
             appear when those stages ran. Shares the study mesh — one study at
@@ -426,6 +531,50 @@ export function EhReferenceDesignPanel() {
                     </span>
                   </span>
                 )}
+                {lcoh && lcoh.value != null && (
+                  <span data-testid="eh-report-lcoh">
+                    <span className="text-muted">LCOH </span>
+                    <span className="text-text font-mono">
+                      €{lcoh.value.toFixed(2)}/kg
+                    </span>
+                  </span>
+                )}
+                {lcoh && lcoh.value == null && lcoh.status && (
+                  <span
+                    data-testid="eh-report-lcoh-flag"
+                    data-status={lcoh.status}
+                    className={statusTone(lcoh.status)}
+                    title={lcoh.note ?? undefined}
+                  >
+                    <span className="text-muted">LCOH </span>
+                    {lcoh.status === 'skipped' ? 'n/a (no electrolyser)' : 'not established'}
+                  </span>
+                )}
+                {report.mc_lole_h != null && (
+                  <span data-testid="eh-report-mc-lole">
+                    <span className="text-muted">MC LOLE </span>
+                    <span className="text-text font-mono">
+                      {Number(report.mc_lole_h).toFixed(2)} h
+                    </span>
+                    {certification?.target_lole_h != null && (
+                      <span className="text-muted">
+                        {' '}(target {certification.target_lole_h} h)
+                      </span>
+                    )}
+                  </span>
+                )}
+                {certification?.verdict && (
+                  <span
+                    data-testid="eh-report-verdict"
+                    data-verdict={certification.verdict}
+                    className={`font-medium ${verdictTone(certification.verdict)}`}
+                  >
+                    {certification.verdict === 'certified' ? 'certified'
+                      : certification.verdict === 'failed' ? 'certification failed'
+                        : certification.verdict === 'no_target' ? 'LOLE reported (no target)'
+                          : 'certification not established'}
+                  </span>
+                )}
               </div>
 
               {completeness.length > 0 && (
@@ -444,6 +593,206 @@ export function EhReferenceDesignPanel() {
                     </li>
                   ))}
                 </ul>
+              )}
+
+              {hasCertificationBlock(report) && (
+                <div
+                  className="flex flex-col gap-1 border-t border-border/50 pt-2"
+                  data-testid="eh-certification"
+                >
+                  <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                    MC LOLE certification
+                  </h4>
+                  {certification && certification.mc_lole_h != null && (
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+                      <span data-testid="eh-certification-lole">
+                        <span className="text-muted">LOLE </span>
+                        <span className="text-text font-mono">
+                          {Number(certification.mc_lole_h).toFixed(2)} h
+                          {Array.isArray(certification.lole_ci) && certification.lole_ci.length === 2
+                            ? ` [${Number(certification.lole_ci[0]).toFixed(2)}, ${Number(certification.lole_ci[1]).toFixed(2)}]`
+                            : ''}
+                        </span>
+                      </span>
+                      {certification.eue_mwh != null && (
+                        <span data-testid="eh-certification-eue">
+                          <span className="text-muted">EUE </span>
+                          <span className="text-text font-mono">
+                            {Number(certification.eue_mwh).toFixed(2)} MWh
+                          </span>
+                        </span>
+                      )}
+                      {certification.n_samples != null && (
+                        <span data-testid="eh-certification-samples">
+                          <span className="text-muted">draws </span>
+                          <span className="text-text font-mono">
+                            {certification.n_samples}
+                            {certification.converged === false ? ' (not converged)' : ''}
+                          </span>
+                        </span>
+                      )}
+                      {certification.ens_met != null && (
+                        <span data-testid="eh-certification-ens">
+                          <span className="text-muted">ENS target </span>
+                          <span className="text-text">{certification.ens_met ? 'met' : 'missed'}</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {report.sections?.certification?.note && (
+                    <p className="text-[10px] text-muted" data-testid="eh-certification-note">
+                      {report.sections.certification.note}
+                    </p>
+                  )}
+                  {certification?.warning && (
+                    <p className="text-[10px] text-muted" data-testid="eh-certification-warning">
+                      {certification.warning}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {frontier.length > 0 && (
+                <div
+                  className="flex flex-col gap-1.5 border-t border-border/50 pt-2"
+                  data-testid="eh-frontier"
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                      Cost vs availability
+                    </h4>
+                    <span className="text-[10px] text-muted" data-testid="eh-frontier-basis">
+                      cost excl. shed
+                      {typeof report.sections?.frontier?.payload?.period_basis === 'string'
+                        ? ` · ${String(report.sections.frontier.payload.period_basis)}`
+                        : ''}
+                    </span>
+                    <CsvButton
+                      testId="eh-frontier-csv"
+                      label="CSV"
+                      onClick={() => downloadCSV(
+                        'eh-frontier.csv',
+                        ['target_permyriad', 'status', 'total_system_cost_eur_ex_shed',
+                         'achieved_ens_mwh', 'achieved_shed_hours', 'binding',
+                         'period_basis', 'excludes_shed_cost'],
+                        frontierCsvRows(frontier),
+                      )}
+                    />
+                  </div>
+                  {typeof report.sections?.frontier?.payload?.warning === 'string' && (
+                    <p className="text-[10px] text-warn" data-testid="eh-frontier-warning">
+                      {String(report.sections.frontier.payload.warning)}
+                    </p>
+                  )}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[10px]">
+                      <thead className="text-muted">
+                        <tr>
+                          <th className="text-right font-medium py-1 pr-3">Target ‱</th>
+                          <th className="text-left font-medium py-1 pr-3">Status</th>
+                          <th className="text-right font-medium py-1 pr-3">Cost (ex-shed)</th>
+                          <th className="text-right font-medium py-1 pr-3">ENS MWh</th>
+                          <th className="text-right font-medium py-1">Shed h</th>
+                        </tr>
+                      </thead>
+                      <tbody className="font-mono">
+                        {frontier.map((p, i) => {
+                          const knee = report.sections?.frontier?.payload?.knee_index
+                          const isKnee = typeof knee === 'number' && knee === i
+                          return (
+                            <tr
+                              key={`${p.target_permyriad}:${i}`}
+                              className="border-t border-border/50"
+                              data-testid={`eh-frontier-row-${i}`}
+                              data-knee={isKnee ? 'true' : 'false'}
+                            >
+                              <td className="py-0.5 pr-3 text-right">{p.target_permyriad}</td>
+                              <td className="py-0.5 pr-3 font-sans">{p.status}</td>
+                              <td className="py-0.5 pr-3 text-right">
+                                {p.point?.total_system_cost_eur != null
+                                  ? eur(p.point.total_system_cost_eur) : '—'}
+                                {isKnee ? ' ◆' : ''}
+                              </td>
+                              <td className="py-0.5 pr-3 text-right">
+                                {cell(p.point?.achieved_ens_mwh)}
+                              </td>
+                              <td className="py-0.5 text-right">
+                                {cell(p.point?.achieved_shed_hours)}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {report.sections?.frontier?.note && (
+                    <p className="text-[10px] text-muted" data-testid="eh-frontier-note">
+                      {report.sections.frontier.note}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {fmeaTop.length > 0 && (
+                <div
+                  className="flex flex-col gap-1.5 border-t border-border/50 pt-2"
+                  data-testid="eh-fmea-top"
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                      Residual failure modes (top {fmeaTop.length})
+                    </h4>
+                    <CsvButton
+                      testId="eh-fmea-top-csv"
+                      label="CSV"
+                      onClick={() => downloadCSV(
+                        'eh-fmea-top.csv',
+                        ['rank', 'class', 'component', 'name', 'criticality_eur_per_year',
+                         'delta_eue_mwh', 'occurrence_per_year', 'severity_eur', 'engine'],
+                        fmeaTopCsvRows(fmeaTop),
+                      )}
+                    />
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[10px]">
+                      <thead className="text-muted">
+                        <tr>
+                          <th className="text-right font-medium py-1 pr-3">#</th>
+                          <th className="text-left font-medium py-1 pr-3">Class</th>
+                          <th className="text-left font-medium py-1 pr-3">Component</th>
+                          <th className="text-right font-medium py-1 pr-3">Criticality €/yr</th>
+                          <th className="text-right font-medium py-1">ΔEUE MWh</th>
+                        </tr>
+                      </thead>
+                      <tbody className="font-mono">
+                        {fmeaTop.map(m => (
+                          <tr
+                            key={m.mode_id}
+                            className="border-t border-border/50"
+                            data-testid={`eh-fmea-top-row-${m.rank}`}
+                            data-class={m.failure_class}
+                          >
+                            <td className="py-0.5 pr-3 text-right">{m.rank}</td>
+                            <td className="py-0.5 pr-3 font-sans">{m.failure_class}</td>
+                            <td className="py-0.5 pr-3 font-sans">
+                              {m.component_class} {m.name}
+                            </td>
+                            <td className="py-0.5 pr-3 text-right">
+                              {m.criticality_eur_per_year != null
+                                ? eur(m.criticality_eur_per_year) : '—'}
+                            </td>
+                            <td className="py-0.5 text-right">{cell(m.delta_eue_mwh)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {report.sections?.fmea_top?.note && (
+                    <p className="text-[10px] text-muted" data-testid="eh-fmea-top-note">
+                      {report.sections.fmea_top.note}
+                    </p>
+                  )}
+                </div>
               )}
 
               {hasGatesBlock(report) && (

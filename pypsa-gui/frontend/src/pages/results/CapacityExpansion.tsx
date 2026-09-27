@@ -196,7 +196,13 @@ export default function CapacityExpansion() {
       const v = m.overnight_cost_pv
       return v != null && Number.isFinite(v) && v > 0 ? v : raw
     }
-    const v = m.capital_cost
+    // Annualised mode: the asset's FIXED cost — annuitised investment plus
+    // fixed O&M (`fixed_cost`, PyPSA's periodized_cost). That is the
+    // coefficient the LP objective paid per MW and what cost_breakdown.capex
+    // / capex_expansion now carry, so the per-asset table and the KPI row
+    // above it stay on one basis. `capital_cost` (investment only) is the
+    // fallback for a payload that predates the `fixed_cost` key.
+    const v = m.fixed_cost ?? m.capital_cost
     return v != null && Number.isFinite(v) && v > 0 ? v : raw
   }
 
@@ -980,8 +986,8 @@ export default function CapacityExpansion() {
             hint={costMode === 'lifetime'
               ? 'PV of upfront investment + LP OPEX. Mixed-horizon by design — toggle to Annualised for an apples-to-apples comparison.'
               : periodEntry
-                ? `Annualised CAPEX (installed) + LP OPEX for period ${filter.selectedPeriod}.`
-                : 'Annualised CAPEX (installed) + LP OPEX, summed across periods.'} />
+                ? `Annualised fixed cost (CAPEX + fixed O&M, installed) + LP OPEX for period ${filter.selectedPeriod}. Reconciles with the LP objective.`
+                : 'Annualised fixed cost (CAPEX + fixed O&M, installed) + LP OPEX, summed across periods. Reconciles with the LP objective.'} />
           {/* Curtailment / storage-charge / storage-investment — market or
               investment slices that are NOT folded into LP OPEX above. */}
           <KPI

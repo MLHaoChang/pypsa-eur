@@ -95,11 +95,16 @@ def horizon_system_cost(n, cfg) -> float | None:
     """
     # Local import: services.solver_service imports plenty of this package, and
     # routers.results imports solver_service — keep this module leaf-ish.
+    from services.economics import statistics_fom_lookup
     from services.solver_service import with_periodized_cost_defaults
 
     try:
         with with_periodized_cost_defaults(n, cfg):
             stats = n.statistics()
+            # "Capital Expenditure" is investment-only; the objective also paid
+            # fixed O&M. Add it back per (component, carrier, period) so this
+            # total reconciles with the LP — see `statistics_fom_lookup`.
+            fom_lookup = statistics_fom_lookup(n)
     except Exception:
         return None
     if stats is None or stats.empty:
@@ -136,12 +141,21 @@ def horizon_system_cost(n, cfg) -> float | None:
         if isinstance(idx, tuple):
             levels = idx[1:] if row_period is not None else idx
             comp = str(levels[0]) if len(levels) >= 1 else ""
+            carrier = str(levels[1]) if len(levels) >= 2 else ""
         else:
             comp = str(idx)
+            carrier = ""
         # PyPSA emits bare-year "period total" rows alongside the real ones;
         # counting those would double the horizon.
         if not comp or is_period_only(comp):
             continue
+
+        def fom(period) -> float:
+            try:
+                key_period = int(period) if period is not None else None
+            except (TypeError, ValueError):
+                key_period = period
+            return fom_lookup.get((comp, carrier, key_period), 0.0)
 
         if cols_are_multi:
             for col, val in row.items():
@@ -154,13 +168,16 @@ def horizon_system_cost(n, cfg) -> float | None:
                 if "capital" not in ml and "operational" not in ml:
                     continue
                 period = col[col_period_level] if row_period is None else row_period
-                total += (safe_float(val) or 0.0) * years(period)
+                v = safe_float(val) or 0.0
+                if "capital" in ml:
+                    v += fom(period)
+                total += v * years(period)
         else:
             # Flat columns: PyPSA already aggregated across periods. A row that
             # still carries a period gets that period's years; otherwise the
             # value is a horizon total already.
             mul = years(row_period) if row_period is not None else 1.0
-            cx = safe_float(row[capex_col]) or 0.0
+            cx = (safe_float(row[capex_col]) or 0.0) + fom(row_period)
             ox = safe_float(row[opex_col]) or 0.0
             total += (cx + ox) * mul
 

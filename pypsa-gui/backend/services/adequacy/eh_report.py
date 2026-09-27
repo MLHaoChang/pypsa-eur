@@ -8,6 +8,7 @@ Phase 5 adds sizing summary, TEA/LCOE wrap, stable export, and store/GET helpers
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from models.energy_hub import (
@@ -101,16 +102,92 @@ def served_energy_mwh_from_network(n, *, ens_mwh: float | None = None) -> float 
     return float(demand)
 
 
+# The electrolyser-Link carrier tokens ``services.results.lcoh.compute_lcoh``
+# filters on (and the frontend's ``isElectrolyzerCarrier``). Read from the
+# engine's own frame walk below rather than duplicated as a rule: this module
+# only asks "are there any such Links" before spending the engine's time.
+def _live_result_df(n, accessor_name: str, attr: str, source: str = "lopf"):
+    """``result_df`` for a network with no router state: the live frames.
+
+    ``compute_lcoh`` reads bus duals through ``corrected_marginal_prices``,
+    which takes the router's ``_result_df`` (LP-stage snapshot first, live
+    network as fallback). Inside the EH study the network IS the just-solved
+    plan, so the live frame is the right answer and there is no router state
+    to prefer.
+    """
+    frame = getattr(getattr(n, accessor_name, None), attr, None)
+    if frame is None:
+        raise KeyError(f"{accessor_name}.{attr} not available")
+    return frame
+
+
+def has_electrolyser_links(n) -> bool:
+    """Any Link whose carrier the LCOH engine would price as an electrolyser."""
+    links = getattr(n, "links", None)
+    if links is None or links.empty or "carrier" not in links.columns:
+        return False
+    tokens = ("electrol", "p2g", "p2h2", "power-to-h2", "power-to-gas",
+              "power2gas", "hydrogen", "h2")
+    for c in links["carrier"].astype(str).str.strip().str.lower():
+        if any(t in c for t in tokens):
+            return True
+    return False
+
+
 def compute_tea(*, cost_eur: float | None,
-                served_energy_mwh: float | None) -> TeaBlock:
-    """Post-process LCOE from existing cost + energy — no second cost engine."""
+                served_energy_mwh: float | None,
+                network=None, cfg=None) -> TeaBlock:
+    """Post-process LCOE (+ optional LCOH) from existing cost + energy — no
+    second cost engine (spec decision 9).
+
+    LCOE = ``cost_at_target_eur / served_energy_mwh`` (ex-shed cost). LCOH is
+    the fleet ``lcoh_eur_per_kg_h2`` of ``services.results.lcoh.compute_lcoh``
+    over the solved network's electrolyser Links, when ``network`` is given
+    and has any. ADR-0001: an LCOH that cannot be established is ``None`` +
+    ``lcoh_status``/``lcoh_note`` — ``skipped`` when there is no electrolyser
+    Link, ``not_established`` when there is one but it produced no H₂ (or the
+    engine could not price it). Never 0.
+    """
     if cost_eur is None or served_energy_mwh is None or served_energy_mwh <= 0:
-        return TeaBlock(
+        block = TeaBlock(
             notes="LCOE not established: need cost_at_target_eur and served energy > 0")
-    return TeaBlock(
-        lcoe_eur_per_mwh=float(cost_eur) / float(served_energy_mwh),
-        notes="LCOE = cost_at_target_eur / served_energy_mwh (ex-shed cost)",
-    )
+    else:
+        block = TeaBlock(
+            lcoe_eur_per_mwh=float(cost_eur) / float(served_energy_mwh),
+            notes="LCOE = cost_at_target_eur / served_energy_mwh (ex-shed cost)",
+        )
+    if network is None:
+        return block
+    if not has_electrolyser_links(network):
+        block.lcoh_status = "skipped"
+        block.lcoh_note = "LCOH skipped: the network has no electrolyser Links"
+        return block
+    try:
+        from services.results.lcoh import compute_lcoh
+        from services.solver_service import SolverConfig
+
+        payload = compute_lcoh(network, cfg or SolverConfig(),
+                               result_df=_live_result_df)
+    except Exception as exc:  # noqa: BLE001 — flagged, never zeroed
+        block.lcoh_status = "not_established"
+        block.lcoh_note = f"LCOH not established: LCOH engine failed ({exc})"
+        return block
+    total = (payload or {}).get("total") or {}
+    value = total.get("lcoh_eur_per_kg_h2")
+    if value is None or not math.isfinite(float(value)):
+        n_rows = len((payload or {}).get("rows") or [])
+        block.lcoh_status = "not_established"
+        block.lcoh_note = (
+            f"LCOH not established: {n_rows} electrolyser Link(s) but no H₂ "
+            "produced in the solved dispatch (Links never consumed)")
+        return block
+    block.lcoh_eur_per_kg = float(value)
+    block.lcoh_status = "ok"
+    block.lcoh_note = (
+        f"LCOH = fleet (CAPEX + VOM + electricity) / H₂ produced over "
+        f"{len(payload.get('rows') or [])} electrolyser Link(s), LHV basis")
+    block.notes = f"{block.notes}; {block.lcoh_note}"
+    return block
 
 
 def assemble_reference_design_report(
