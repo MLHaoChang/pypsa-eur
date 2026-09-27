@@ -306,7 +306,35 @@ class CommercialConfig(BaseModel):
 
     poc_link: str = Field(min_length=1)
     import_tariff_id: str | None = None
+    # P1 carries the tariff inline: Library CRUD for tariffs is P2 WP2.4, from
+    # which point `import_tariff_id` names a Library tariff (plan WP1.3 note).
+    import_tariff: Tariff | None = None
     export_price_ref: TimeSeriesRef | None = None
+    # The `poc→grid` Link that carries export (spec §5: export price = −price
+    # on a second PoC Link). Required by an export price or an export item.
+    export_link: str | None = None
+    # The site's IANA zone. Set → naive snapshots are UTC and tariff windows
+    # are read on this clock; None → snapshots already are the site clock.
+    timezone: str | None = None
     connection: ConnectionAgreement | None = None
     group_contract: str | None = None
     demand_items: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _tariff_and_links(self) -> "CommercialConfig":
+        # An id with no inline tariff is valid data (a Library tariff, P2
+        # WP2.4); the P1 binding refuses it (`lp_bindings.validate_for_network`).
+        if (self.import_tariff_id is not None and self.import_tariff is not None
+                and self.import_tariff_id != self.import_tariff.id):
+            raise ValueError("import_tariff_id must equal import_tariff.id")
+        if self.export_price_ref is not None and self.export_link is None:
+            raise ValueError("export_price_ref needs export_link")
+        if self.export_link is not None and self.export_link == self.poc_link:
+            raise ValueError("export_link must be a different Link from poc_link")
+        if self.timezone is not None:
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+            try:
+                ZoneInfo(self.timezone)
+            except (ZoneInfoNotFoundError, ValueError) as exc:
+                raise ValueError(f"unknown timezone {self.timezone!r}") from exc
+        return self

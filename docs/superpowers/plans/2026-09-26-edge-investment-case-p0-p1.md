@@ -252,6 +252,18 @@ Files: `backend/routers/library.py` (series endpoints only in P1), `backend/main
   `library_refs.json`; reload with a missing/changed item yields a `library_ref_stale` issue rather than a
   silent substitution; `qa_save_load_roundtrip.py` extended.
 - [ ] Green: sidecar write/read in `routers/projects.py` bundle paths (`_BUNDLE_FILES`).
+- As implemented: `services/library/bundle_pins.py` (`collect_refs` walks the solver-config dict for any
+  valid `PriceSeriesRef`-shaped dict; `write_pins` atomic, removes the sidecar when nothing is pinned;
+  `check_pins(db, org, dir, config=)` → issues `{code: library_ref_stale, reason, id, version, hash, message}`,
+  reasons `missing | changed | payload_unreadable | unpinned | sidecar_unreadable`). `SolverConfig.commercial:
+  dict | None = None` lands here (WP1.3 types it on the API schema) so the pins have a carrier. Save writes
+  the sidecar beside `solver_config.json`; open (`GET /api/projects/{name}`), `import_bundle` and a cold
+  `activate` return `library_issues` and log each to the changelog; a resident activate returns `[]` (checked
+  when opened). Pins are checked against the PROJECT's org, so a bundle imported into another org reports
+  `missing` rather than resolving against that org's Library. Nothing rewrites a ref. Tests:
+  `test_library_bundle_pins.py`; `qa_save_load_roundtrip.py` has four IC library-pin steps. Tampered
+  sidecars are tested through bundles: an on-disk edit under a resident project is overwritten by its
+  write-back on the next open.
 
 ### WP1.2 `tariff_engine` core (energy / TOU / fixed) — the oracle
 Files: `backend/services/commercial/__init__.py`, `tariff_engine.py`, `backend/tests/test_tariff_engine_core.py`,
@@ -296,6 +308,27 @@ materialised prices — needed for this WP's gap-0 invariant), `backend/tests/te
 - [ ] Green: materialisation from Library series / tariff periods; export Link; wrapper chaining identical to
   `_wrap_with_capex_budget`; `_safe_log(log_queue, "[COMMERCIAL] ...")`.
 - Acceptance: all red items green; facade tests green.
+- As implemented (deviations recorded):
+  - **Inline tariff in P1.** Library tariff CRUD is P2 WP2.4, so `CommercialConfig.import_tariff: Tariff` carries
+    it; a bare `import_tariff_id` is valid data but refused by the P1 binding (422 at the route). New fields
+    `export_link` (the `poc→grid` Link) and `timezone` (set → naive snapshots are UTC, tariff windows read on
+    the site clock; None → snapshots are the site clock, as `tariff_engine.rate(timezone=None)`).
+  - **Export price resolution at config time.** `run_simulation` has a dozen callers (every adequacy study) and
+    no org or DB, so `PUT /api/simulation/solver_config` resolves `export_price_ref` in the active project's org
+    (the caller's org for an unsaved network), aligns it (coarser series held; uncovered → 422
+    `export_price_coverage`) and writes `links_t["ic_export_price"]`, a custom dynamic attribute that survives
+    `copy()` and netCDF and is not an Input, so the user-TS backup leaves it alone. A snapshot change leaves
+    NaN rows, which the solve refuses (`commercial_binding_failed`) rather than pricing at 0. An unresolvable
+    ref → 409 `library_ref_stale`.
+  - **Solve time.** `materialise_poc_prices` runs in LOPF after the reapply/normalise/non-finite block and
+    before `_apply_modelling_assumptions`; it rewrites `links_t.marginal_cost[poc|export]` = static + items
+    (− price) every solve (idempotent) and emits `last_commercial_terms`. `net` items are split by direction
+    (cost → import, revenue → export; exact without simultaneous import/export). Fixed, tiered, demand and
+    capacity items are listed in `not_in_lp` with the WP that binds them. `_wrap_with_commercial_bindings`
+    is composed after the reserve margin and before the objective scale; it chains only in WP1.3.
+  - **Rows.** `cost_breakdown["commercial"] = {energy_import, energy_export, included_in_total: true}` from the
+    persisted columns — a labelled split of the Links' statistics OPEX, so the gap stays 0 by construction.
+  - Tests: `test_lp_bindings_poc_price.py` (21), `test_solver_config_parity.py`; `types.ts` mirrors the types.
 
 ### WP1.4a Connection agreement — firm, non-firm static, `available_from`
 Files: `backend/services/commercial/connection.py`, `backend/tests/test_connection_agreement.py`.

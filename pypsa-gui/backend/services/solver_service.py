@@ -91,6 +91,13 @@ from services.solver.adequacy import (  # noqa: F401
     _wrap_with_reserve_margin,
     reserve_margin_facts,
 )
+# Edge Investment Case commercial layer (spec §5.1): the PoC price writer and
+# the LP-terms wrapper, re-exported with the rest of the solver seams.
+from services.commercial.lp_bindings import (  # noqa: F401
+    CommercialBindingError,
+    _wrap_with_commercial_bindings,
+    materialise_poc_prices,
+)
 # ── The branch's own dependencies ────────────────────────────────────────────
 # The adequacy standards below (`reserve_margin_facts`, the ENS-cap and
 # reserve-margin extra-functionality wrappers) are solver-layer code that
@@ -373,6 +380,11 @@ class SolverConfig:
     lf_period_length_h: int = 168           # 168 = weekly; 24 = daily
     lf_cluster_method: str = "hierarchical"  # tsam: hierarchical | k_means | k_medoids
     lf_include_extreme: bool = True         # append peak-load + renewable-drought period
+    # Edge Investment Case commercial layer (spec §5.1). A plain dict here;
+    # the typed `CommercialConfig` lives on the API schema (P1 WP1.3). Any
+    # Library ref nested in it is pinned by `services/library/bundle_pins`
+    # at save (WP1.1c). None = no commercial layer: the LP is unchanged.
+    commercial: dict | None = None
 
     def __post_init__(self):
         # ── Sanitize solver_options ───────────────────────────────────────
@@ -493,6 +505,11 @@ def run_simulation(
         # Firm-capacity standard: a per-period planning reserve margin on
         # derated installed capacity. Adds work only when a margin is set.
         extra_fn = _wrap_with_reserve_margin(
+            network, extra_fn, config, log_queue=log_queue)
+        # Edge Investment Case LP-level commercial terms (peaks, ratchets,
+        # tiers, group caps; spec §5.1). After the reserve margin, before the
+        # objective scale, which must stay last.
+        extra_fn = _wrap_with_commercial_bindings(
             network, extra_fn, config, log_queue=log_queue)
         # User-supplied numerical-conditioning scale on the LP objective.
         # Multiplies model.objective by a positive constant right before
@@ -648,6 +665,23 @@ def run_simulation(
                     phase(f"Validation failed: {len(_nf)} error(s). Aborting.")
                     status, condition = "error", "validation_failed"
                     return status, condition
+                # Edge Investment Case (spec §5.1, WP1.3): PoC energy prices
+                # onto the import/export Links. HERE because the user-TS reapply
+                # above would clobber an earlier write and `extra_functionality`
+                # runs after the model is built. The columns persist with the
+                # network (reload-safe cost rows). A bare return is still safe:
+                # `restore_modelling` is not bound yet.
+                if getattr(config, "commercial", None):
+                    try:
+                        _ic_terms = materialise_poc_prices(
+                            network, config.commercial,
+                            log=lambda m: _safe_log(log_queue, m))
+                    except CommercialBindingError as exc:
+                        log_queue.put(f"[COMMERCIAL] ERROR: {exc}")
+                        phase("Commercial binding failed. Aborting.")
+                        status, condition = "error", "commercial_binding_failed"
+                        return status, condition
+                    _emit_state(last_commercial_terms=_ic_terms)
             # Clear stale *_t.p_set persisted by a prior AC-PF dispatch fix.
             # PyPSA's create_model adds a `Generator-p_set` equality constraint
             # for every non-null row, locking dispatch. Plain LOPF still solves

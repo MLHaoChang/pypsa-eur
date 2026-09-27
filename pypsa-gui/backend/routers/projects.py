@@ -96,7 +96,11 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # not have. test_bundle_sidecars now enumerates every
                  # SIDECAR_NAME under services/adequacy/ so a fourth sidecar
                  # cannot repeat this.
-                 "asset_health.json")
+                 "asset_health.json",
+                 # Edge Investment Case WP1.1c: the (id, version, hash) of every
+                 # Library series the project references, re-checked on open.
+                 # `test_library_bundle_pins` pins it equal to SIDECAR_NAME.
+                 "library_refs.json")
 
 # Per-project subdirectories that travel alongside the bundle FILES on every
 # project-to-project transition. Chatbot uploads (Phase A) live here under
@@ -1144,8 +1148,13 @@ async def import_bundle(
         f"Imported project bundle '{file.filename}' as '{target_name}' "
         f"({len(n.buses)} buses, {len(n.snapshots)} snapshots)",
     )
+    from routers.simulation import _state as _sim_state
+    library_issues = _library_pin_issues(
+        db, _imported_project, dest,
+        _sim_state.get("solver_config") if cfg_path.exists() else None)
     return {
         "imported": target_name,
+        "library_issues": library_issues,
         "summary": ImportSummary(
             buses=len(n.buses),
             generators=len(n.generators),
@@ -1890,6 +1899,9 @@ def _save_context(
     cfg = ctx.solver_state.get("solver_config")
     if cfg is not None:
         _atomic_write_text(dest / "solver_config.json", json.dumps(asdict(cfg), indent=2))
+        # Pin the Library versions the config references (WP1.1c).
+        from services.library import bundle_pins
+        bundle_pins.write_pins(dest, bundle_pins.collect_refs(asdict(cfg)))
 
     # Persist solve-time _state fields that n.export_to_netcdf doesn't
     # capture. Without these, after reload:
@@ -2143,6 +2155,26 @@ def _queue_solve_conflict(name: str) -> HTTPException:
     )
 
 
+def _library_pin_issues(db, project, src: pathlib.Path, cfg) -> list[dict]:
+    """
+    Re-check the project's Library pins (WP1.1c) against ITS org's Library and
+    log each issue. Reported, never repaired: the config keeps naming the
+    pinned version, and resolution at solve time refuses a mismatch.
+    """
+    from services.library import bundle_pins
+
+    if db is None or project is None:
+        return []
+    issues = bundle_pins.check_pins(
+        db, project.org_id, src, config=asdict(cfg) if cfg is not None else {})
+    for issue in issues:
+        change_log_service.log(
+            "warn", "Project", project.name,
+            f"Library pin {issue['code']} ({issue['reason']}): {issue['message']}",
+        )
+    return issues
+
+
 def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
     """
     Populate a (typically OFF-TO-THE-SIDE, background) ProjectContext from the
@@ -2327,6 +2359,7 @@ def activate_project(
         raise HTTPException(status_code=409, detail=_study)
 
     evicted: list[str] = []
+    library_issues: list[dict] = []  # resident projects were checked when opened
     # Hold this key's hydrate lock across the MISS so a concurrent cold path
     # (a path-scoped read, the session resolver, the solve dispatcher) cannot
     # build a SECOND context for the same project. A resident hit takes no
@@ -2346,6 +2379,8 @@ def activate_project(
             _hydrate_context_from_disk(ctx, src, project.name)
             project_registry.bind_context(ctx, project)
             evicted = PyPSAService.activate_context(ctx, register=True)
+            library_issues = _library_pin_issues(
+                db, project, src, ctx.solver_state.get("solver_config"))
 
     # Persist the pointer (Step 0b). Until this, "which project am I looking
     # at" lived only in process memory, so it was shared by every user on the
@@ -2358,7 +2393,8 @@ def activate_project(
     # by uuid, but everything downstream (frontend `currentProject`, autosave
     # `expect=`, chat.jsonl path) speaks names. `evicted` likewise — it lets the
     # frontend drop those projects' retained React Query caches.
-    return {"activated": project.name, "evicted": evicted, "lock": lock_info}
+    return {"activated": project.name, "evicted": evicted, "lock": lock_info,
+            "library_issues": library_issues}
 
 
 @router.post("/{project_id}/lock")
@@ -2655,7 +2691,9 @@ def load_project(
         transformers=len(n.transformers),
         snapshots=len(n.snapshots),
     )
-    return {**summary.model_dump(), "lock": lock_info}
+    from routers.simulation import _state as _sim_state
+    library_issues = _library_pin_issues(db, project, src, _sim_state.get("solver_config"))
+    return {**summary.model_dump(), "lock": lock_info, "library_issues": library_issues}
 
 
 def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> ProjectInfo:

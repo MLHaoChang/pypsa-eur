@@ -301,6 +301,61 @@ export interface SolverConfig {
   // a sensible default for UC. mip_time_limit_s = 0 disables the cap.
   mip_gap: number
   mip_time_limit_s: number
+  // Edge Investment Case commercial layer (P1 WP1.3). Mirrors
+  // backend/models/commercial.py `CommercialConfig`; null = no commercial layer.
+  commercial?: CommercialConfig | null
+}
+/** A pinned Library item (backend `PriceSeriesRef`). */
+export interface LibraryRef {
+  id: string; version: number; hash: string; source: string
+  vintage_year?: number | null; provider?: string | null
+}
+export interface TariffPeriod {
+  name: string; rate: number
+  months?: number[]; weekdays?: number[]
+  start_hour?: number | null; end_hour?: number | null
+}
+export interface TariffTier { threshold: number; rate: number }
+export interface TariffRatchet { lookback_months: number; share: number }
+export interface TariffItem {
+  id: string
+  kind: 'energy' | 'demand' | 'capacity' | 'fixed' | 'certificate' | 'tax_levy'
+  unit: 'per_kwh' | 'per_kw_month' | 'per_kw_year' | 'per_month' | 'per_kva_year'
+  periods: TariffPeriod[]
+  tiers?: TariffTier[] | null
+  ratchet?: TariffRatchet | null
+  settlement?: '15min' | '30min' | 'h'
+  measured_on?: 'import' | 'export' | 'net' | 'peak_import'
+  direction?: 'cost' | 'revenue'
+}
+export interface Tariff {
+  id: string; name: string; jurisdiction: string
+  dso_or_retailer?: string | null
+  valid_from: string; valid_to?: string | null
+  items: TariffItem[]
+  pack_hash?: string | null
+}
+export interface ConnectionAgreement {
+  kind: 'firm' | 'non_firm_static' | 'non_firm_dynamic' | 'fca'
+  import_cap_mw: number
+  export_cap_mw?: number | null
+  envelope?: LibraryRef | null
+  curtailment_hours_per_year?: number | null
+  curtailment_compensation_eur_per_mwh?: number | null
+  capacity_fee?: TariffItem | null
+  available_from: string
+  group?: string | null
+}
+export interface CommercialConfig {
+  poc_link: string
+  import_tariff_id?: string | null
+  import_tariff?: Tariff | null
+  export_price_ref?: LibraryRef | null
+  export_link?: string | null
+  timezone?: string | null
+  connection?: ConnectionAgreement | null
+  group_contract?: string | null
+  demand_items?: string[]
 }
 /**
  * Actionable failure card for a finished solve. Produced by the backend's

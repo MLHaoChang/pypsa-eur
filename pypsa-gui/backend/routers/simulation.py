@@ -151,7 +151,8 @@ class BufferedLogQueue:
         with self._sub_lock:
             self._subscribers.pop(sub_id, None)
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
+from deps import optional_user
 from models.schemas import SolverConfigSchema
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.pypsa_service import PyPSAService
@@ -328,8 +329,56 @@ def get_solver_config():
     return asdict(_state["solver_config"])
 
 
+def _bind_commercial(commercial, user) -> dict:
+    """
+    Check a submitted commercial block against the live network and resolve
+    its Library export price onto the export Link (Edge Investment Case WP1.3).
+
+    The price is resolved in the ACTIVE PROJECT's org (the caller's org for an
+    unsaved network) and written to `links_t["ic_export_price"]`, where it
+    persists with the network; `library_refs.json` pins the version (WP1.1c).
+    Returns the plain dict stored on `SolverConfig.commercial`.
+    """
+    from fastapi import HTTPException
+
+    from services.commercial import lp_bindings
+    from services.library import series_store
+
+    n = PyPSAService.get_network()
+    try:
+        lp_bindings.validate_for_network(n, commercial)
+    except lp_bindings.CommercialBindingError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    ref = commercial.export_price_ref
+    if ref is not None:
+        from db.models import User
+        from db.session import SessionLocal
+        from services import library_acl
+
+        org = PyPSAService.get_active_context().org_id
+        with SessionLocal() as db:
+            if org is None and isinstance(user, User):
+                org = library_acl.org_of(db, user)
+            if org is None:
+                raise HTTPException(409, {"code": "library_ref_stale",
+                                          "message": "save the project first: a Library "
+                                                     "ref resolves in the project's org"})
+            try:
+                series = series_store.resolve(db, org, ref)
+            except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
+                raise HTTPException(409, {"code": "library_ref_stale",
+                                          "message": str(exc)}) from exc
+        with PyPSAService.get_lock():
+            uncovered = lp_bindings.write_export_price(n, commercial.export_link, series)
+        if uncovered:
+            raise HTTPException(422, {"code": "export_price_coverage",
+                                      "message": f"Library series {ref.id!r} v{ref.version} "
+                                                 f"does not cover {uncovered} snapshot(s)"})
+    return commercial.model_dump(mode="json")
+
+
 @router.put("/solver_config")
-def update_solver_config(cfg: SolverConfigSchema):
+def update_solver_config(cfg: SolverConfigSchema, user=Depends(optional_user)):
     # Real partial-PUT: merge submitted fields over the existing config so
     # callers can flip a single knob without echoing the rest of the
     # payload. exclude_unset=True only emits fields the request body
@@ -337,6 +386,10 @@ def update_solver_config(cfg: SolverConfigSchema):
     # silently overwrite live state (e.g. "PUT run_ac_pf_after_lopf=true"
     # used to reset voll/discount_rate/sclopf back to defaults).
     submitted = cfg.model_dump(exclude_unset=True)
+    if cfg.commercial is not None:
+        # A direct in-process call (chat tools) passes no user: the Depends
+        # default is not a User, and `_bind_commercial` then uses the project org.
+        submitted["commercial"] = _bind_commercial(cfg.commercial, user)
     # Legacy mode 'lpf' was removed in v1.x — coerce to 'lopf' silently so
     # old saved configs and stale frontend caches don't 400 the user. Same
     # treatment applied in projects.py at load time.

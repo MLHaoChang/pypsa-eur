@@ -4,6 +4,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
+from models.commercial import CommercialConfig
+
 # Frontend Edit-card UX sends `null` for blanked optional bounds (so the
 # spread-then-override idiom can actually un-set a previously-typed value).
 # PyPSA's native sentinel for "no bound" on `_max` / `lifetime` is +inf,
@@ -679,6 +681,10 @@ class SolverConfigSchema(BaseModel):
     # 0.01 = stop within 1 % of optimal. mip_time_limit_s = 0 disables the cap.
     mip_gap: float = 0.01
     mip_time_limit_s: float = 0
+    # Edge Investment Case commercial layer (P1 WP1.3): typed here, a plain
+    # dict on the `SolverConfig` dataclass (`update_solver_config` dumps it).
+    # Explicit null clears it.
+    commercial: CommercialConfig | None = None
 
 
 class ImportSummary(BaseModel):

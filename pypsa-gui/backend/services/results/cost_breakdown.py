@@ -646,7 +646,14 @@ def compute_cost_breakdown(n, cfg):
                 key=lambda r: -(r["capex"] + r["opex"]),
             ),
         })
+    # Edge Investment Case (spec §5.1, WP1.3): the PoC energy import/export
+    # cost as labelled rows. Already inside `opex` (the Links' statistics
+    # OPEX), so a split of the total, never added to it; recomputed from the
+    # persisted `links_t.marginal_cost`, so identical after a reload.
+    from services.commercial.lp_bindings import energy_cost_rows
+    commercial_rows = energy_cost_rows(n, getattr(cfg, "commercial", None))
     return {
+        "commercial": commercial_rows,
         "capex": capex_total,
         "capex_lifetime": capex_lifetime_total,
         "capex_expansion": capex_expansion_total,

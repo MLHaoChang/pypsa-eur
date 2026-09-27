@@ -97,6 +97,49 @@ def _assert_ic_result_state_round_trip() -> None:
           st.get("last_commercial_terms") == _IC_TERMS, repr(st.get("last_commercial_terms")))
 
 
+def _library_ref():
+    """Put one series into the QA org's Library and return its ref."""
+    from services.library import series_store
+
+    idx = pd.date_range("2025-01-01", periods=4, freq="h", tz="UTC")
+    with qa_support.db_session() as db:
+        return series_store.put_series(
+            db, qa_support.org_id(), "qa_export_price",
+            pd.Series([40.0, 41.0, 42.0, 43.0], index=idx), {"source": "qa driver"})
+
+
+def _load(name: str) -> dict:
+    with qa_support.db_session() as db:
+        return projects_router.load_project(
+            name, db=db, user=qa_support.user(), session=qa_support.session_row(db))
+
+
+def _assert_library_pins(cfg_before: SolverConfig, first_load: dict) -> None:
+    import json
+
+    from db.models import LibraryItem
+    from services.library import bundle_pins
+
+    ref = cfg_before.commercial["export_price_ref"]
+    side = qa_support.project_dir(PROJECT_NAME) / bundle_pins.SIDECAR_NAME
+    pins = json.loads(side.read_text())["refs"] if side.exists() else None
+    _step("IC: library_refs.json pins the referenced version",
+          pins == [{"id": ref["id"], "version": ref["version"], "hash": ref["hash"]}], repr(pins))
+    _step("IC: intact Library reloads with no library issue",
+          first_load.get("library_issues") == [], repr(first_load.get("library_issues")))
+    with qa_support.db_session() as db:
+        db.query(LibraryItem).filter(LibraryItem.org_id == qa_support.org_id()).delete()
+        db.commit()
+    _wipe_in_memory()
+    second = _load(PROJECT_NAME)
+    reasons = [i.get("reason") for i in second.get("library_issues") or []]
+    _step("IC: a removed Library item reloads as a library_ref_stale 'missing' issue",
+          reasons == ["missing"], repr(second.get("library_issues")))
+    after = sim_router._state["solver_config"].commercial or {}
+    _step("IC: the config still names the pinned version (no silent substitution)",
+          after.get("export_price_ref") == ref, repr(after.get("export_price_ref")))
+
+
 def _build_pre_save_state() -> SolverConfig:
     """Populate the in-memory network + SolverConfig with every new extension."""
     n = pypsa.Network()
@@ -146,6 +189,9 @@ def _build_pre_save_state() -> SolverConfig:
         capex_budget_per_period={"2025": 1e9, "2030": 5e8},
         user_objective_scale=1e-3,
         presolve_enabled=True,
+        # Edge Investment Case (P1 WP1.1c): a Library ref in the commercial
+        # block must be pinned in library_refs.json and re-checked on load.
+        commercial={"export_price_ref": _library_ref().model_dump()},
     )
     sim_router._state["solver_config"] = cfg
     # Edge Investment Case (P0 WP0.5): the three result-state keys must ride
@@ -274,6 +320,7 @@ def test_round_trip() -> None:
     _assert_cfg_round_trip(cfg_before, cfg_after)
     _assert_network_round_trip()
     _assert_ic_result_state_round_trip()
+    _assert_library_pins(cfg_before, summary)
 
 
 def _cleanup() -> None:
