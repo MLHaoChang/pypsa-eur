@@ -166,6 +166,13 @@ class FleetScope:
     # WP3: area index → f_h, the expected share of the area's Link cap its
     # grid can back (``mc_zonal.expected_surplus_fraction``) — screening only.
     copt_fractions: dict = field(default_factory=dict)
+    # WP4: common-mode events from opt-in Link data — one entry per import
+    # Link that carries ``common_mode_rate`` (applied or not, with the reason).
+    common_mode: list = field(default_factory=list)
+    # WP4: firm-block Links in an area with an applied common-mode event
+    # are UNITS in the screening fleet (q = q_cm); their names join
+    # ``import_units``. Filled by ``_grid_areas``.
+    screen_link_units: list = field(default_factory=list)
 
     @property
     def zonal(self) -> bool:
@@ -242,8 +249,10 @@ class FleetScope:
             "import_cap_mw_max": (float(np.max(cap)) if cap is not None
                                   and len(cap) else None),
             "import_link_models": [m.as_payload() for m in self.link_models],
-            "import_units": {u.name: u.name.split(":", 1)[1]
-                             for u in self.import_units},
+            "import_units": {
+                **{u.name: u.name.split(":", 1)[1] for u in self.import_units},
+                **{f"link:{lk}": lk for lk in self.screen_link_units}},
+            "import_common_mode": [dict(e) for e in self.common_mode],
             "grid_areas": list(self.grid_areas),
             "copt_import_model": self.copt_import_model(),
             "copt_import_note": self.copt_import_note(),
@@ -397,6 +406,8 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
     import_units: list = []
     link_grid: dict = {}
     bad: list[str] = []
+    bad_cm: list[str] = []
+    common_mode: list[dict] = []
     for lk in links:
         g, h = orient[lk]
         cap = solved_capacity(ldf.loc[lk])
@@ -412,6 +423,12 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
         cap_max = float(delivered.max()) if H else 0.0
         occ = params.loc[lk]
         src = str(occ["source"])
+        cm = _common_mode_entry(ldf, str(lk), islanded=cap_max <= 0.0)
+        if cm is not None:
+            if cm.pop("_bad", False):
+                bad_cm.append(f"{lk} (common_mode_rate {cm['rate']:g})")
+            else:
+                common_mode.append(cm)
         if cap_max <= 0.0:
             models.append(ImportLinkModel(name=str(lk), model="islanded",
                                           cap_mw_max=0.0, source=src))
@@ -450,6 +467,12 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
             mttr_hours=mttr if math.isfinite(mttr) else None,
             basis=str(occ["basis"]) if src != "missing" else None,
             source=src, reason=reason))
+    if bad_cm:
+        raise OutageRateError(
+            f"common_mode_rate outside [0, 1) on import Link(s): "
+            f"{', '.join(bad_cm)}. A common-mode rate is a probability-like "
+            "unavailability; fix the value (or clear it) before certifying "
+            "the hub.")
     if bad:
         raise OutageRateError(
             f"outage rate outside [0, 1) on import Link(s): {', '.join(bad)}. "
@@ -465,9 +488,59 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
                        n_grid_components=len(grid_comps),
                        link_grid=link_grid,
                        grid_components={c: sorted(by_comp[c])
-                                        for c in sorted(grid_comps)})
+                                        for c in sorted(grid_comps)},
+                       common_mode=common_mode)
     scope.note = _scope_note(scope)
     return scope
+
+
+def _link_value(ldf, lk: str, col: str):
+    """A Link attribute as a finite float, or None when unset / blank / NaN."""
+    if col not in ldf.columns:
+        return None
+    v = ldf.at[lk, col]
+    if v is None or str(v).strip() in ("", "nan", "None"):
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return None
+    return f if math.isfinite(f) else None
+
+
+def _common_mode_entry(ldf, lk: str, *, islanded: bool) -> dict | None:
+    """
+    The Link's opt-in common-mode data (plan 2026-09-28, WP4) → payload
+    entry, or None when the Link carries no ``common_mode_rate``. Never
+    defaulted: a rate without a finite positive MTTR is reported and NOT
+    modelled; a rate outside ``[0, 1)`` is flagged ``_bad`` for the caller
+    to refuse, like any rate.
+    """
+    from services.adequacy.occurrence import rate_is_usable
+
+    rate = _link_value(ldf, lk, "common_mode_rate")
+    if rate is None:
+        return None
+    mttr = _link_value(ldf, lk, "common_mode_mttr_hours")
+    basis = "FOR"
+    if "common_mode_basis" in ldf.columns:
+        b = str(ldf.at[lk, "common_mode_basis"] or "").strip()
+        if b and b not in ("nan", "None"):
+            basis = b
+    entry = {"link": lk, "rate": rate, "mttr_hours": mttr, "basis": basis,
+             "area": None, "applied": False, "reason": None}
+    if not rate_is_usable(rate):
+        entry["_bad"] = True
+        return entry
+    if islanded:
+        entry["reason"] = "Link islanded — no live import for the event to take down"
+    elif mttr is None or mttr <= 0.0:
+        entry["reason"] = ("common_mode_rate given without a finite positive "
+                           "common_mode_mttr_hours — not modelled (an MTTR is "
+                           "never guessed)")
+    else:
+        entry["applied"] = True
+    return entry
 
 
 def _scope_note(scope: FleetScope, extra: str | None = None) -> str:
@@ -548,6 +621,7 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
     """
     from services.adequacy.mc import snapshot_inputs
     from services.adequacy.mc_zonal import (
+        CommonMode,
         GridArea,
         ZonalInputs,
         expected_surplus_fraction,
@@ -569,6 +643,7 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
     areas: list = []
     payload: list[dict] = []
     reasons: list[str] = []
+    cm_seen: list[str] = []
     for k, c in enumerate(comps):
         links = [m.name for m in live if scope.link_grid[m.name]["comp"] == c]
         firm = np.zeros(H, dtype=np.float64)
@@ -596,7 +671,21 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
         except Exception as exc:  # noqa: BLE001 — the reason is the payload
             why = (f"grid-side snapshot refused ({exc}) — its Links see an "
                    "unbounded surplus (v1)")
+        area_cm = []
+        for e in scope.common_mode:
+            if e["applied"] and e["link"] in links:
+                e["area"] = k
+                area_cm.append(CommonMode(link=e["link"], q=float(e["rate"]),
+                                          mttr_hours=float(e["mttr_hours"]),
+                                          stream=len(cm_seen)))
+                cm_seen.append(e["link"])
+        if area_cm:
+            # The event takes the WHOLE area down: every firm-block Link in
+            # it becomes a screening unit at q_cm, own data or not.
+            scope.screen_link_units += [lk for lk in links
+                                        if lk not in sampled_links]
         areas.append(GridArea(
+            common_mode=tuple(area_cm),
             grid=grid,
             import_idx=tuple(unit_pos[f"link:{lk}"] for lk in links
                              if lk in sampled_links),
@@ -647,8 +736,15 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
             reasons.append(f"area {k} ({', '.join(links)}): {why}")
         payload.append(entry)
     if not any(a.grid is not None for a in areas):
-        return None, ("no grid area is sampled — " + "; ".join(reasons)
-                      + "; v1 applies")
+        why = "no grid area is sampled — " + "; ".join(reasons)
+        if not cm_seen:
+            return None, why + "; v1 applies"
+        # WP4: a common-mode event still needs the two-area engine; every
+        # area is unbounded (v1 for its Links) apart from the event.
+        scope.grid_areas = payload
+        return ZonalInputs(hub=hub_inputs, areas=tuple(areas)), (
+            why + f"; common-mode event(s) on {', '.join(cm_seen)} sampled "
+            "through the two-area engine (areas unbounded)")
     scope.grid_areas = payload
     return ZonalInputs(hub=hub_inputs, areas=tuple(areas)), None
 
@@ -686,17 +782,47 @@ def _screening_fleet(inputs, zonal, scope: FleetScope):
                                        profile=base * shape)
     if zonal is None:
         return units, res
+    from services.adequacy.copt import CoptUnit
+    from services.adequacy.mc_zonal import _area_common_mode_q
+
     for k, area in enumerate(zonal.areas):
         f = scope.copt_fractions.get(k)
-        if f is None or bool(np.all(f >= 1.0)):
-            continue
+        f_eff = None if f is None or bool(np.all(f >= 1.0)) else f
+        q_cm = _area_common_mode_q(area)
         for i in area.import_idx:
-            prev = units[i].profile
-            prof = np.asarray(f, dtype=np.float64).copy()
-            if prev is not None:
-                prof = prof * np.asarray(prev, dtype=np.float64)
-            units[i] = dataclasses.replace(units[i], profile=prof)
-        res = res + np.asarray(area.firm_import_mw, dtype=np.float64) * (1.0 - f)
+            u = units[i]
+            prof = u.profile
+            if f_eff is not None:
+                prof = (np.asarray(f_eff, dtype=np.float64).copy() if prof is None
+                        else np.asarray(prof, dtype=np.float64) * f_eff)
+            # WP4: two independent two-state events in one hour are one:
+            # q_eff = 1 − (1 − q_link)(1 − q_cm) — exact per hour.
+            q = u.q if q_cm <= 0.0 else 1.0 - (1.0 - u.q) * (1.0 - q_cm)
+            units[i] = dataclasses.replace(u, profile=prof, q=q)
+        firm = np.asarray(area.firm_import_mw, dtype=np.float64)
+        firm_links = [lk for lk in scope.screen_link_units
+                      if lk in (scope.grid_areas[k]["links"]
+                                if k < len(scope.grid_areas) else [])]
+        if q_cm > 0.0 and firm_links:
+            # WP4: a firm-block Link whose area carries a common-mode event
+            # is no longer firm — it becomes a screening unit at q_cm (the
+            # MC samples the same event as a chain on the firm block).
+            res = res + firm
+            cm0 = area.common_mode[0]
+            for lk in firm_links:
+                deliv = np.asarray(scope.link_grid[lk]["delivered"],
+                                   dtype=np.float64)
+                cap = float(deliv.max())
+                shape = deliv / cap if cap > 0 else np.zeros_like(deliv)
+                prof = shape if f_eff is None else shape * f_eff
+                if bool(np.all(prof == 1.0)):
+                    prof = None
+                units.append(CoptUnit(
+                    name=f"link:{lk}", capacity_mw=cap, q=q_cm,
+                    basis="FOR", mttr_hours=float(cm0.mttr_hours),
+                    source="common_mode", profile=prof))
+        elif f_eff is not None:
+            res = res + firm * (1.0 - f_eff)
     return units, res
 
 

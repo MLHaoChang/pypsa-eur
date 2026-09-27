@@ -165,3 +165,38 @@ def test_a_firm_link_with_common_mode_becomes_a_screening_unit():
     # The MC keeps the firm block (its common-mode chain is sampled in the
     # engine), so no Link unit enters the MC fleet.
     assert "link:import_poc" not in [u.name for u in cm.mc_inputs.units]
+
+
+def test_the_event_takes_every_link_of_its_area_down():
+    """
+    A second, FIRM Link into the same grid without common-mode data of
+    its own still loses its import when the event hits the area — in the
+    screening it must become a unit at q_cm too.
+    """
+    n = _weak(rate=0.05, mttr=24.0)
+    n.add("Link", "poc_firm", bus0="grid", bus1="hub", p_nom=20.0,
+          carrier="AC")
+    n.links.at["poc_firm", "eh_role"] = "grid_import"
+    frozen = _freeze(n)
+    names = {u.name: u for u in frozen.screening_units}
+    assert "link:poc_firm" in names
+    assert names["link:poc_firm"].q == pytest.approx(0.05)
+    assert frozen.scope["import_units"]["link:poc_firm"] == "poc_firm"
+
+
+@pytest.mark.parametrize("kw", [
+    {"rate": 0.05, "mttr": 24.0},
+    {"rate": 0.05, "mttr": 24.0, "grid_sampled": False},
+    {"rate": 0.05, "mttr": 24.0, "firm_link": True},
+])
+def test_the_exact_metric_with_common_mode_is_the_mc_expectation(kw):
+    frozen = _freeze(_weak(**kw))
+    exact = frozen.copt_metrics["import_exact"]
+    res = Z.zonal_mc_adequacy(frozen.zonal_inputs, draws=4000, seed=21,
+                              cov_target=0.0, max_draws=4000)
+    lo, hi = res["lole_ci"]
+    half = (hi - lo) / 2.0
+    assert lo - half <= exact["lole_hours"] <= hi + half, (exact, res["lole_hours"])
+    lo, hi = res["eue_ci"]
+    half = (hi - lo) / 2.0
+    assert lo - half <= exact["eue_mwh"] <= hi + half, (exact, res["eue_mwh"])

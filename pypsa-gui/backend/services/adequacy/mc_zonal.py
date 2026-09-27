@@ -63,6 +63,9 @@ from services.adequacy.mc import (
 #: Unit substreams are ``spawn_key + (i,)`` for positions ``i < len(units)``,
 #: so a key this large cannot collide with any fleet position.
 GRID_STREAM_KEY = 2**32 - 1
+#: Common-mode chains (WP4): ``CM_STREAM_KEY − j``. 2²⁰ below the grid keys,
+#: so neither range can reach the other for any realistic area / event count.
+CM_STREAM_KEY = 2**32 - 2**20
 
 
 @dataclass(frozen=True)
@@ -84,6 +87,19 @@ class GridArea:
     delivery_ratio: np.ndarray    # (H,) MW delivered at the hub per MW
     #                               withdrawn from the grid (Link efficiency)
     stream: int = 0               # the area's index k → substream GRID_STREAM_KEY − k
+    # WP4: common-mode events that take this area's Links AND its grid down
+    # together — (CommonMode, ...), one two-state chain each.
+    common_mode: tuple = ()
+
+
+@dataclass(frozen=True)
+class CommonMode:
+    """One common-mode event from an import Link's opt-in data (WP4)."""
+
+    link: str
+    q: float
+    mttr_hours: float
+    stream: int                   # global index j → substream CM_STREAM_KEY − j
 
 
 @dataclass(frozen=True)
@@ -199,6 +215,20 @@ class _AreaState:
                            if grid_storage_enabled else ())
         self.any_series = any(getattr(s, "capacity_series", None) is not None
                               for s in self.stores)
+        # WP4: the area is UP only while every common-mode chain is up. A
+        # q = 0 chain consumes nothing and is skipped (bit-identity).
+        self.cm_up = None
+        for cm in getattr(area, "common_mode", ()) or ():
+            if float(cm.q) <= 0.0:
+                continue
+            from services.adequacy.copt import CoptUnit
+
+            chain = CoptUnit(name=f"cm:{cm.link}", capacity_mw=1.0,
+                             q=float(cm.q), mttr_hours=float(cm.mttr_hours))
+            up = np.ascontiguousarray(sample_capacity(
+                (chain,), H, draws, _fresh(ss, (CM_STREAM_KEY - int(cm.stream),)),
+                periods=hub.periods).T).astype(np.float64)
+            self.cm_up = up if self.cm_up is None else self.cm_up * up
         self.soc_frac = float(initial_soc_frac)
         self.draws = draws
 
@@ -216,6 +246,9 @@ class _AreaState:
         also leaves the hour's grid state for ``support`` / ``charge``.
         """
         offered = self.link_t[h].astype(np.float64) + self.firm[h]
+        if self.cm_up is not None:
+            # A common-mode event takes the Links AND the grid down together.
+            offered = offered * self.cm_up[h]
         if self.grid_t is None:
             self.p_rem = None
             self.surplus_g = None
@@ -231,6 +264,8 @@ class _AreaState:
                 self.own_mwh += float(given.sum())
                 g_def = np.where(g_def > 0.0, unmet, g_def)
         self.surplus_g = np.maximum(-g_def, 0.0)
+        if self.cm_up is not None:
+            self.surplus_g = self.surplus_g * self.cm_up[h]
         return offered, np.minimum(offered, self.surplus_g * self.ratio[h])
 
     def support(self, h, deficit, offered, imp):
