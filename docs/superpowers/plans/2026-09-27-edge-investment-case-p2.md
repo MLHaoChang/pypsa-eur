@@ -13,7 +13,7 @@
 > §13 P2 row, §15). **P1 findings:** `docs/superpowers/findings/2026-09-27-ic-p1-commercial-layer.md`.
 >
 > **Plan status:** v0.3 — round 1 `FAIL` (22 findings) → v0.2; round 2 `PASS WITH CONDITIONS` (C1–C7 +
-> 9 LOW) → all closed in this text (§ Plan review). Implementation may start at WP2.0.
+> 9 LOW) → v0.3; round 3 **PASS** (three residues closed in text). Implementation starts at WP2.0.
 
 **Goal of P2.** Every tariff item a US or EU site is billed is rated **exactly** on the solved dispatch (the
 billing pass), including the URDB constructs P1 left out; every contract is settled into attributable lines;
@@ -138,7 +138,9 @@ items; `CommercialConfig.power_factor: float | None` (for `per_kva_year`).
 
 - **Per-day fixed**: rate × covered days on the local clock (partial days pro-rated by hours).
 - **Capacity items** (`per_kw_year`, `per_kva_year`): rated on the **PoC `p_nom_opt`** (the sized connection —
-  the same quantity P1's connection fee charges), pro-rated by covered hours / hours in the calendar year;
+  the same quantity P1's connection fee charges), pro-rated like the LP's fee: by **represented hours (Σ
+  objective weights) / 8760** — the `nyears` of `connection.add_fee_term` — so leap years and representative
+  weeks agree with the LP to the cent;
   `per_kva_year` divides by `power_factor`, absent ⇒ `not_established`. A tariff capacity item **and** a
   `ConnectionAgreement.capacity_fee` on the same PoC is a preflight error `commercial.capacity_double_count`.
   The engine takes the capacity as an argument; the adapter (WP2.1b) supplies `p_nom_opt`.
@@ -179,7 +181,9 @@ None` (designated months, URDB `lookbackMonths`) and `Ratchet.cyclic_year: bool 
   its own key (P1). Cyclic range mode and months mode: a lookback month of the rate year Y that is not modelled
   (e.g. representative weeks) reads meter history under its **same-rate-year key** `f"{Y}-{mm}"`; if absent it
   is unknown ⇒ `ratchet_seed_missing` (the bill a lower bound, `total` withheld); never inferred from other
-  months.
+  months. Consequence (stated in the engine docstring and the Library meter-data help): the same-rate-year key
+  resolves only when the modelled year is a metered year; for a future year use range mode with meter history
+  (or `cyclic_year=True`, which reads the modelled months themselves).
 - Ratchets apply to the demand item they sit on; the URDB importer (WP2.4b-i) attaches the URDB lookback to
   the **facility** (flat) demand item only (REopt behaviour).
 
@@ -284,8 +288,8 @@ Files: `backend/services/library/items.py` (new; JSON payload written as a file 
 Files: `services/results/physical_quantities.py` (extension), `services/solver/assumptions.py` (DSR capture
 hand-off, no refactor), `services/solver_service.py` (the DSR commit site, no drive-by refactor),
 `services/commercial/binding.py`, `models/commercial.py` (`CommercialConfig.contracts: list[Contract]` lands
-**here**, discriminated by `type` — see WP2.2a on the discriminator), `routers/network_time_axis.py` (guards),
-tests.
+**here**, discriminated by `type` — see WP2.2a on the discriminator), `routers/network_time_axis.py` (guards), the bus create / rename code paths (`routers/network*.py` and their
+services) and the netCDF upload path (refuse bus names starting `ic:`), tests.
 
 - **Interval quantities.** `physical_quantities` additionally returns interval frames per asset (Generator
   `p`, StorageUnit `p` split into charge/discharge, Store, Link `p0`/`p1`) and per **load**, plus the PoC
@@ -319,7 +323,7 @@ Files: `models/commercial.py`, `backend/services/commercial/contracts.py` (new, 
 
 | Model | New fields |
 |---|---|
-| all contracts | `type: Literal[...]` discriminator, `base_year: int \| None`, `library_ref: LibraryItemRef \| None` |
+| all contracts | `type: Literal[...]` discriminator **with a per-class default** (so `PpaContract(...)` without `type` still constructs), `base_year: int \| None`, `library_ref: LibraryItemRef \| None` |
 | `PpaContract` | `pricing: Literal["fixed","market_plus_premium"] = "fixed"`, `premium_eur_per_mwh: float \| None` (any sign; `price` stays `ge=0` for fixed pricing), `baseload_mw: float \| None`, `sleeving_fee_eur_per_mwh: float \| None`, `sleeving_party: str \| None` |
 | `CfdContract` | `generator_owner: str \| None`, `counterparty: str \| None`, `indexation_pct_per_year: float = 0.0`, `reference: Literal["interval","monthly_capture"] = "interval"`, `suspend_on_negative_price: bool = False` |
 
@@ -570,3 +574,7 @@ timing in the QA driver, NOTICE and derived marks, `types.ts` (#22).
   - CFE: "on-site" defined, storage limitation disclosed;
   - the §15 amendment goes into the spec text;
   - `RetailContract.tariff_id` compares against `Tariff.id`.
+
+**Round 3 (PASS).** Residues closed in text: capacity items pro-rated by represented hours / 8760 like the LP
+fee (no leap-year or representative-week gap); bus create/rename and netCDF upload paths in WP2.2-0's files;
+per-class default for the contract `type`; the same-rate-year history consequence stated.
