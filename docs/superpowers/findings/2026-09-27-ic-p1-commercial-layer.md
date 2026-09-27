@@ -32,9 +32,9 @@ interval meter reads the interval's net energy; a group is billed as one custome
 |---|---|
 | `tests/qa_commercial_lp.py` (DE: TOU + firm fee + Library export price + bundle round-trip; US: TOU + ratcheted demand) | **26/26** — LP cost == engine per item, gap 0 before and after project reload, evening peak shaved, user Links untouched, bundle keeps config and Library pins |
 | Reconciliation gate `test_commercial_objective_reconciliation.py` (energy, fee, demand, ratchet, tiers, group, representative weeks, two periods, two-period group) | **9/9** — gap < 1e-6 before and after the real project save/load routes; rows, flags, not-established months and group record identical |
-| Commercial regression (P1 test files + adequacy + library + cost totals) | FILL |
-| Full backend suite (`-m "not slow"`, Python 3.12 venv pinned to `pixi.lock`) | FILL |
-| QA drivers (`tests/run_qa_drivers.py`) | FILL |
+| Tests touched after the full run started (17 commercial / library / audit / tripwire files + the two other `models.commercial` importers) | **398 passed** + **98 passed** |
+| Full backend suite (`-m "not slow"`, Python 3.12 venv pinned to `pixi.lock`), started at the WP1.5a-round-3 / WP1.6-round-2 / WP1.8-round-1 tree | **6,215 passed, 31 skipped, 0 failed** (31 min) |
+| QA drivers (`tests/run_qa_drivers.py`) | **22/22 passed** (incl. `qa_commercial_lp`, `qa_save_load_roundtrip`, adequacy journeys) |
 | Frontend `vitest run` | **178 files, 1,947 tests passed** |
 | Frontend `tsc --noEmit` | clean |
 
@@ -68,4 +68,4 @@ and export revenue matches the engine on the summed member dispatch per item.
 
 ## Gate verdict
 
-- [ ] Assessor verdict: FILL
+- [ ] Assessor verdict: pending (independent assessor running).
