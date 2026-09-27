@@ -318,6 +318,9 @@ export default function ProjectsHomePage() {
       return name
     },
     onSuccess: (name: string) => {
+      // G4 (guided-mode spec §3.4): a new project starts Guided unless the
+      // user chose a mode explicitly. First, before the navigation below.
+      useUIStore.getState().noteNewProjectCreated('blank')
       invalidateNetworkQueries(queryClient, name)
       addTab(name)
       setCurrentProject(name)

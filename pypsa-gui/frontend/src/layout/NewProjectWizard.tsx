@@ -282,6 +282,9 @@ function TemplateTab({ onClose }: { onClose: () => void }) {
   const importMut = useMutation({
     mutationFn: (templateId: string) => projectsApi.createFromTemplate(templateId),
     onSuccess: (res) => {
+      // G4 (guided-mode spec §3.4): a new project starts Guided unless the
+      // user chose a mode explicitly. First, before any navigation.
+      useUIStore.getState().noteNewProjectCreated('template')
       invalidateNetworkQueries(qc, res.imported)
       qc.invalidateQueries({ queryKey: ['projects'] })
       setCurrentProject(res.imported)
@@ -407,6 +410,9 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
       )
     },
     onSuccess: (res) => {
+      // G4 (guided-mode spec §3.4): a new project starts Guided unless the
+      // user chose a mode explicitly. First, before any navigation.
+      useUIStore.getState().noteNewProjectCreated('file')
       invalidateNetworkQueries(qc, res.imported)
       qc.invalidateQueries({ queryKey: nk(res.imported, 'results') })
       qc.invalidateQueries({ queryKey: ['projects'] })
@@ -521,6 +527,9 @@ function CloneTab({ existingProjects, onClose }: {
       return res
     },
     onSuccess: (res) => {
+      // G4 (guided-mode spec §3.4): a new project starts Guided unless the
+      // user chose a mode explicitly. First, before any navigation.
+      useUIStore.getState().noteNewProjectCreated('clone')
       invalidateNetworkQueries(qc, res.saved)
       setCurrentProject(res.saved)
       setProjectName(res.saved)

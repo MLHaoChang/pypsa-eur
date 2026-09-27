@@ -5,7 +5,7 @@
  *
  *   cd pypsa-gui/frontend
  *   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs \
- *     --phase P22.9 [--template eh_datacenter] [--out <dir>] [--keep]
+ *     --phase P22.9|P23 [--template eh_datacenter] [--out <dir>] [--keep]
  *
  * It starts its own uvicorn (local mode, ANTHROPIC_API_KEY unset, app data
  * and projects under a scratch dir), Vite on 5173 and — after the send-gate
@@ -47,7 +47,7 @@ const TEMPLATE_NAMES = {
   eh_h2_hub: 'Industrial Hydrogen Hub',
   eh_microgrid: 'Island Microgrid',
 }
-const PHASES = new Set(['P22.9'])
+const PHASES = new Set(['P22.9', 'P23'])
 
 // ── args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -178,11 +178,46 @@ function tableDiffs(before, after) {
   return { diffs, nomOpt }
 }
 
+// ── the stub model (every phase, spec §8.4 step 2) ─────────────────────────
+async function activateStubProfile() {
+  start('stub', PYTHON, [path.join(BACKEND, 'smoke', 'stub_openai_endpoint.py')], { cwd: BACKEND })
+  await waitFor(`http://127.0.0.1:${STUB_PORT}/v1/models`, 'stub model', 30_000)
+  await api('PUT', `/api/chat/settings/llm/profiles/${STUB_PROFILE}`, {
+    label: 'Smoke stub', preset: 'custom', wire: 'openai',
+    base_url: `http://127.0.0.1:${STUB_PORT}/v1`, model: 'stub-model',
+    tools: true, vision: false, auth: 'none', fallback_model: null, max_output_tokens: null,
+  })
+  await api('POST', '/api/chat/settings/llm/active', { profile_id: STUB_PROFILE })
+  const h = await api('GET', '/api/chat/health')
+  check(h.chat_ready === true && h.active_profile?.id === STUB_PROFILE,
+    `health: active_profile=${h.active_profile?.id} chat_ready=true`)
+}
+
+// Seeds localStorage once per context, before the app's first script runs
+// (the store decides the Guided/Expert mode at import). Later navigations in
+// the same context keep whatever the app itself wrote since.
+async function seedStorageOnce(context, entries) {
+  await context.addInitScript((kv) => {
+    try {
+      if (localStorage.getItem('smoke:seeded') === '1') return
+      for (const [k, v] of Object.entries(kv)) localStorage.setItem(k, v)
+      localStorage.setItem('smoke:seeded', '1')
+    } catch { /* about:blank has no storage */ }
+  }, entries)
+}
+
 // ── the P22.9 path (spec §2.11) ─────────────────────────────────────────────
 async function phaseP229(browser) {
   const consoleLines = []
   const requests = []
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  // P22.9 is the Expert flow. Since P23 a fresh profile is a first-time user
+  // and starts in Guided (spec §3.2), where the sidebar's Results entry this
+  // path clicks is hidden — so this context is a user who chose Expert.
+  await seedStorageOnce(context, {
+    'network-diagram:ui-mode': 'expert',
+    'network-diagram:ui-mode-explicit': '1',
+  })
   const page = await context.newPage()
   page.on('console', m => consoleLines.push(`[${m.type()}] ${m.text()}`))
   page.on('pageerror', e => consoleLines.push(`[pageerror] ${e.message}`))
@@ -224,17 +259,7 @@ async function phaseP229(browser) {
 
     // (b) only now: the stub model, as an auth:none profile, activated
     step('stub profile activated → Send enabled')
-    start('stub', PYTHON, [path.join(BACKEND, 'smoke', 'stub_openai_endpoint.py')], { cwd: BACKEND })
-    await waitFor(`http://127.0.0.1:${STUB_PORT}/v1/models`, 'stub model', 30_000)
-    await api('PUT', `/api/chat/settings/llm/profiles/${STUB_PROFILE}`, {
-      label: 'Smoke stub', preset: 'custom', wire: 'openai',
-      base_url: `http://127.0.0.1:${STUB_PORT}/v1`, model: 'stub-model',
-      tools: true, vision: false, auth: 'none', fallback_model: null, max_output_tokens: null,
-    })
-    await api('POST', '/api/chat/settings/llm/active', { profile_id: STUB_PROFILE })
-    const h1 = await api('GET', '/api/chat/health')
-    check(h1.chat_ready === true && h1.active_profile?.id === STUB_PROFILE,
-      `health: active_profile=${h1.active_profile?.id} chat_ready=true`)
+    await activateStubProfile()
     await page.reload({ waitUntil: 'domcontentloaded' })
     await openDockInput()
     await page.waitForFunction(
@@ -254,6 +279,8 @@ async function phaseP229(browser) {
     const project = new URL(page.url()).searchParams.get('project')
     check(Boolean(project), `navigated to /app?project=${project}`)
     await resultsNav().waitFor({ timeout: 30_000 })
+    check((await byId('ui-mode-expert').getAttribute('aria-pressed')) === 'true',
+      'Expert mode (explicit choice) survives creating the template project')
     check(!(await byId('new-project-wizard').isVisible().catch(() => false)), 'wizard closed')
     check(!(await page.getByRole('button', { name: /^Resume/ }).isVisible().catch(() => false)),
       'no "Resume" step on the way in')
@@ -401,6 +428,226 @@ async function phaseP229(browser) {
   }
 }
 
+// ── the P23 path (spec §3, plan P23 gate item 5) ───────────────────────────
+const MODE_KEY = 'network-diagram:ui-mode'
+const EXPLICIT_KEY = 'network-diagram:ui-mode-explicit'
+// PROJECT rows Guided hides (spec §3.5); Save / Recent / Projects home stay.
+const GUIDED_HIDDEN_PROJECT_ROWS = ['Project info', 'Snapshots', 'Scenarios', 'Duplicate project',
+  'Export bundle', 'Workspace panel']
+
+async function phaseP23(browser) {
+  const consoleLines = []
+  const opened = []
+  async function freshPage(seed) {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+    opened.push(context)
+    if (seed) await seedStorageOnce(context, seed)
+    const page = await context.newPage()
+    page.on('console', m => consoleLines.push(`[${m.type()}] ${m.text()}`))
+    page.on('pageerror', e => consoleLines.push(`[pageerror] ${e.message}`))
+    return page
+  }
+  let page = null
+  const byId = id => page.locator(`[data-testid="${id}"]`)
+  const stored = () => page.evaluate(([m, e]) => ({
+    mode: localStorage.getItem(m), explicit: localStorage.getItem(e),
+  }), [MODE_KEY, EXPLICIT_KEY])
+  const pressed = async m => (await byId(`ui-mode-${m}`).getAttribute('aria-pressed')) === 'true'
+  const sidebar = () => page.locator('aside').first()
+  const resultsTabIds = () => page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid^="results-tab-"]')]
+      .map(el => el.getAttribute('data-testid').slice('results-tab-'.length)))
+
+  // A template creates a project under the template's fixed name, and a
+  // second creation of the same template on one backend is a 409 — so each
+  // creation in this path uses its own template.
+  async function fromTemplate(templateId) {
+    await page.goto(`${WEB}/projects`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: /From template/ }).first().click()
+    await byId('new-project-wizard').waitFor({ state: 'visible', timeout: 15_000 })
+    await page.getByRole('button', { name: new RegExp(TEMPLATE_NAMES[templateId]) }).click()
+    await page.waitForURL(/\/app\?project=/, { timeout: 60_000 })
+    const name = new URL(page.url()).searchParams.get('project') ?? TEMPLATE_NAMES[templateId]
+    await byId('ui-mode-switch').waitFor({ state: 'visible', timeout: 30_000 })
+    return name
+  }
+  async function blank(name) {
+    await page.goto(`${WEB}/projects`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: 'New project', exact: true }).first().click()
+    await byId('new-project-wizard').waitFor({ state: 'visible', timeout: 15_000 })
+    const input = page.getByPlaceholder('my_project')
+    await input.fill(name)
+    await input.press('Enter')
+    await page.waitForURL(/\/app\?project=/, { timeout: 60_000 })
+    const got = new URL(page.url()).searchParams.get('project') ?? name
+    await byId('ui-mode-switch').waitFor({ state: 'visible', timeout: 30_000 })
+    return got
+  }
+  async function palette(title) {
+    await page.keyboard.press('Control+k')
+    await page.getByPlaceholder(/Type a command/i).fill(title)
+    await page.getByText(title, { exact: true }).first().click()
+  }
+  async function assertGuidedChrome() {
+    check(await pressed('guided') && !(await pressed('expert')), 'ui-mode-guided is pressed')
+    check(await byId('sidebar-assistant').isVisible(), 'sidebar: Assistant shown')
+    check(await byId('sidebar-hub-design').isVisible(), 'sidebar: Hub design shown')
+    check(await byId('sidebar-section-project').isVisible(), 'sidebar: PROJECT shown')
+    for (const id of ['sidebar-section-data', 'sidebar-section-simulation', 'sidebar-mode-switcher']) {
+      check((await byId(id).count()) === 0, `sidebar: ${id} not in the DOM`)
+    }
+    for (const label of GUIDED_HIDDEN_PROJECT_ROWS) {
+      check((await sidebar().getByRole('button', { name: label, exact: true }).count()) === 0,
+        `sidebar: "${label}" not in the DOM`)
+    }
+    for (const label of ['Save', 'Projects home']) {
+      check(await sidebar().getByRole('button', { name: label, exact: true }).first().isVisible(),
+        `sidebar: "${label}" shown`)
+    }
+    check((await sidebar().getByRole('button', { name: 'Solve Queue' }).count()) === 0,
+      'sidebar: Solve Queue row not in the DOM')
+  }
+  async function assertExpertChrome() {
+    check(await pressed('expert') && !(await pressed('guided')), 'ui-mode-expert is pressed')
+    for (const id of ['sidebar-section-project', 'sidebar-section-data', 'sidebar-section-simulation',
+      'sidebar-mode-switcher']) {
+      check(await byId(id).isVisible(), `sidebar: ${id} visible`)
+    }
+    check((await byId('sidebar-hub-design').count()) === 0, 'sidebar: no Hub design row')
+    for (const label of [...GUIDED_HIDDEN_PROJECT_ROWS, 'Solve Queue']) {
+      check(await sidebar().getByRole('button', { name: label }).first().isVisible(),
+        `sidebar: "${label}" shown`)
+    }
+  }
+
+  try {
+    step('stub model profile (every phase)')
+    await activateStubProfile()
+
+    // ── A. first-time user ───────────────────────────────────────────────
+    step('fresh profile (first-time user) → Guided, persisted implicitly')
+    page = await freshPage()
+    await page.goto(`${WEB}/projects`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: 'New project', exact: true }).first().waitFor({ timeout: 30_000 })
+    const s0 = await stored()
+    check(s0.mode === 'guided' && s0.explicit === null,
+      `first load stored ui-mode=${s0.mode}, explicit=${s0.explicit}`)
+    await shot(page, 'p23-first-time-projects')
+
+    step(`first-time user creates ${args.template} → Guided workbench, hubDesign open`)
+    const others = Object.keys(TEMPLATE_NAMES).filter(t => t !== args.template)
+    const tpl1 = await fromTemplate(args.template)
+    info(`project ${tpl1}`)
+    await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 30_000 })
+    ok('hub-design-panel auto-opened')
+    await assertGuidedChrome()
+    await shot(page, 'p23-guided-template-hubdesign')
+
+    step('Guided Results shows exactly adequacy + FMEA (via the palette)')
+    await palette('Open results panel')
+    await byId('results-tab-adequacy').waitFor({ state: 'visible', timeout: 30_000 })
+    const guidedTabs = await resultsTabIds()
+    check(JSON.stringify(guidedTabs) === JSON.stringify(['adequacy', 'fmea']),
+      `results tabs: ${guidedTabs.join(', ')}`)
+    await shot(page, 'p23-guided-results-two-tabs')
+
+    step('a hidden panel stays reachable through the palette')
+    await palette('Open solver settings')
+    await page.getByText('Solver settings', { exact: true }).first().waitFor({ state: 'visible', timeout: 15_000 })
+    ok('Solver settings panel opened in Guided')
+    await shot(page, 'p23-guided-palette-solver')
+
+    step('switch to Expert → everything back')
+    await palette('Open results panel')
+    await byId('results-tab-adequacy').waitFor({ state: 'visible', timeout: 30_000 })
+    await byId('ui-mode-expert').click()
+    await byId('sidebar-section-data').waitFor({ state: 'visible', timeout: 10_000 })
+    await assertExpertChrome()
+    const expertTabs = await resultsTabIds()
+    check(expertTabs.length >= 12 && ['dispatch', 'prices', 'adequacy', 'fmea', 'asset'].every(t => expertTabs.includes(t)),
+      `results tabs back (${expertTabs.length}): ${expertTabs.join(', ')}`)
+    const s1 = await stored()
+    check(s1.mode === 'expert' && s1.explicit === '1', `stored ui-mode=${s1.mode}, explicit=${s1.explicit}`)
+    await shot(page, 'p23-expert-everything')
+
+    step('reload keeps the explicit Expert choice')
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await byId('ui-mode-switch').waitFor({ state: 'visible', timeout: 30_000 })
+    await byId('sidebar-section-data').waitFor({ state: 'visible', timeout: 30_000 })
+    await assertExpertChrome()
+    await sleep(1000)
+    check((await byId('hub-design-panel').count()) === 0, 'Expert never auto-opens hubDesign')
+    await shot(page, 'p23-expert-after-reload')
+
+    step('explicit Expert creates a blank and a template project → stays Expert')
+    const blankX = await blank('smoke_p23_explicit_blank')
+    info(`project ${blankX}`)
+    await byId('sidebar-section-data').waitFor({ state: 'visible', timeout: 30_000 })
+    check(await pressed('expert'), 'blank project: still Expert')
+    const tplX = await fromTemplate(others[0])
+    info(`project ${tplX}`)
+    await byId('sidebar-section-data').waitFor({ state: 'visible', timeout: 30_000 })
+    check(await pressed('expert'), 'template project: still Expert')
+    await sleep(1000)
+    check((await byId('hub-design-panel').count()) === 0, 'no hubDesign auto-open in Expert')
+    const s2 = await stored()
+    check(s2.mode === 'expert' && s2.explicit === '1', `stored ui-mode=${s2.mode}, explicit=${s2.explicit}`)
+    await shot(page, 'p23-explicit-expert-new-project')
+
+    // ── B. existing user (implicit Expert) → blank project ────────────────
+    step('existing user (seeded current-project) → Expert, nothing written')
+    page = await freshPage({ 'network-diagram:current-project': blankX })
+    await page.goto(`${WEB}/app`, { waitUntil: 'domcontentloaded' })
+    await byId('ui-mode-switch').waitFor({ state: 'visible', timeout: 30_000 })
+    check(await pressed('expert'), 'existing user starts in Expert')
+    const s3 = await stored()
+    check(s3.mode === null && s3.explicit === null, `nothing stored (ui-mode=${s3.mode})`)
+    await shot(page, 'p23-existing-user-expert')
+
+    step('implicit Expert creates a blank project → Guided')
+    const blankI = await blank('smoke_p23_implicit_blank')
+    info(`project ${blankI}`)
+    await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 30_000 })
+    await assertGuidedChrome()
+    const s4 = await stored()
+    check(s4.mode === 'guided' && s4.explicit === null, `stored ui-mode=${s4.mode}, explicit=${s4.explicit}`)
+    await shot(page, 'p23-implicit-blank-guided')
+
+    // ── C. existing user (implicit Expert) → template project ─────────────
+    step(`implicit Expert creates ${others[1]} → Guided, hubDesign open`)
+    page = await freshPage({ 'network-diagram:current-project': blankX })
+    await page.goto(`${WEB}/app`, { waitUntil: 'domcontentloaded' })
+    await byId('ui-mode-switch').waitFor({ state: 'visible', timeout: 30_000 })
+    check(await pressed('expert'), 'existing user starts in Expert')
+    const tplI = await fromTemplate(others[1])
+    info(`project ${tplI}`)
+    await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 30_000 })
+    await assertGuidedChrome()
+    await shot(page, 'p23-implicit-template-guided')
+
+    step('Guided hidden panel is pruned on switching; closing hubDesign is respected')
+    await byId('ui-mode-expert').click()
+    await byId('sidebar-section-simulation').waitFor({ state: 'visible', timeout: 10_000 })
+    await sidebar().getByRole('button', { name: 'Solver Settings' }).first().click()
+    await page.getByText('Solver settings', { exact: true }).first().waitFor({ state: 'visible', timeout: 15_000 })
+    await byId('ui-mode-guided').click()
+    await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 10_000 })
+    ok('solver settings → hubDesign on switching to Guided')
+    await page.getByTitle('Close (Esc)').first().click()
+    await sleep(1500)
+    check((await byId('hub-design-panel').count()) === 0, 'closed hubDesign stays closed')
+    await shot(page, 'p23-guided-closed-hubdesign')
+  } catch (e) {
+    try { if (page) await shot(page, 'FAILURE') } catch { /* page gone */ }
+    const logFile = path.join(args.out, 'FAILURE-console.log')
+    fs.writeFileSync(logFile, consoleLines.join('\n'))
+    info(`console log ${logFile}`)
+    throw e
+  } finally {
+    for (const c of opened) await c.close().catch(() => {})
+  }
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 let code = 0
 let browser
@@ -443,6 +690,7 @@ try {
 
   browser = await chromium.launch({ headless: true })
   if (args.phase === 'P22.9') await phaseP229(browser)
+  else if (args.phase === 'P23') await phaseP23(browser)
   console.log(`\nPASS — ${shots.length} screenshots in ${args.out}`)
 } catch (e) {
   code = e instanceof ToolingError ? 3 : 1

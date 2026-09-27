@@ -145,6 +145,8 @@ function _normalizePanelId(raw: string): string {
     OpenProject: 'project_picker',
     NewProject: 'new_project', new_project: 'new_project',
     NewProjectWizard: 'new_project',
+    // Guided-mode spec §3.6 — the hub-design panel slot.
+    HubDesign: 'hubDesign', hubDesign: 'hubDesign', hub_design: 'hubDesign',
   }
   return aliases[key] ?? key
 }
@@ -223,7 +225,7 @@ function applyUiNavigate(d: {
     panel === 'results' || panel === 'simparams' || panel === 'timeseries'
     || panel === 'capacityBounds' || panel === 'overview' || panel === 'issues'
     || panel === 'scenarios' || panel === 'snapshots' || panel === 'horizon'
-    || panel === 'solveQueue'
+    || panel === 'solveQueue' || panel === 'hubDesign'
   ) {
     ui.setSlidePanel(panel)
   }
@@ -527,6 +529,10 @@ function ConfirmationCard() {
 const RETRYABLE_ERROR_KINDS = new Set([
   'rate_limited', 'upstream_error', 'internal_error', 'tool_call_cap_exceeded',
 ])
+// Exported for ChatPanel.hubDesignPanel.test.tsx only: drives the ui_event
+// navigate path without standing up a streamed turn.
+export const APPLY_UI_NAVIGATE_FOR_TEST = applyUiNavigate
+
 // Exported for the completeness test only (N-6): a kind listed here without
 // KIND_COPY renders a retry button under a raw snake_case title.
 export const RETRYABLE_ERROR_KINDS_FOR_TEST = RETRYABLE_ERROR_KINDS

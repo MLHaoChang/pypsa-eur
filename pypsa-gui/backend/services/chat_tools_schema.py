@@ -70,6 +70,8 @@ SAFETY_PANEL_ENUM = [
     "SolveQueue", "solveQueue",
     "ProjectPicker", "project_picker", "OpenProject",
     "NewProject", "new_project", "NewProjectWizard",
+    # Guided-mode hub-design panel (frontend normalises both to 'hubDesign').
+    "HubDesign", "hubDesign",
 ]
 RESULTS_TAB_ENUM = [
     "overview", "capex", "dispatch", "loadflow", "prices", "economics",
@@ -1661,7 +1663,8 @@ TOOLS: list[dict[str, Any]] = [
         "Results sub-tab (capex, dispatch, economics, …), a bottom asset "
         "table tab (Buses, Generators, …), and/or the A|B compare rail with "
         "scenario picks. Use project_picker when the user wants to browse "
-        "saved projects without naming one. Safety: read.",
+        "saved projects without naming one. hubDesign opens the step-by-step "
+        "Energy Hub design panel (Guided mode's main view). Safety: read.",
         {
             "panel_id": {"type": "string", "enum": SAFETY_PANEL_ENUM},
             "results_tab": {"type": "string", "enum": RESULTS_TAB_ENUM},

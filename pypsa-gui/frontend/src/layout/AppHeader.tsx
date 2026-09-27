@@ -9,7 +9,8 @@ import { downloadProjectBundle, saveProjectQuietly, type BundleSaveResult } from
 import { useSolveQueue, useEnqueueSolve, useAbortJob, activeJobForProject } from '../hooks/useSolveQueue'
 import { nk } from '../utils/queryKeys'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { useUIStore } from '../store/uiStore'
+import { useUIStore, type UiMode } from '../store/uiStore'
+import { UI_MODE_TITLES, uiModeToast } from '../utils/uiMode'
 import { evaluateMutation, readOnlyMessage, READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
 import { useAuthMode } from '../auth/AuthModeProvider'
 import UserMenu from './UserMenu'
@@ -993,6 +994,8 @@ export default function AppHeader() {
         )
       })()}
 
+      <UiModeSwitch />
+
       {/* Status indicator — bordered pill with a glowing LED (design system).
           A queued (not-yet-running) job shows "Queued #N" instead of "Idle"
           without disturbing the simulationStore `status` semantics. */}
@@ -1023,5 +1026,44 @@ export default function AppHeader() {
           Auth mode only; the legacy single-user workbench has no account. */}
       {authEnabled && <UserMenu />}
     </header>
+  )
+}
+
+// Guided / Expert segmented control (guided-mode spec §3.3). Rendered in both
+// modes so the user can always switch back; a click is an explicit choice,
+// which the new-project rule never overrides.
+function UiModeSwitch() {
+  const uiMode = useUIStore(s => s.uiMode)
+  const setUiMode = useUIStore(s => s.setUiMode)
+  const pick = (m: UiMode) => {
+    setUiMode(m, { explicit: true })
+    toast.success(uiModeToast(m))
+  }
+  return (
+    <div
+      data-testid="ui-mode-switch"
+      role="group"
+      aria-label="Interface mode"
+      className="flex items-center h-7 p-0.5 rounded-md border border-border bg-bg-2"
+    >
+      {(['guided', 'expert'] as const).map(m => {
+        const on = uiMode === m
+        return (
+          <button
+            key={m}
+            type="button"
+            data-testid={`ui-mode-${m}`}
+            aria-pressed={on}
+            title={UI_MODE_TITLES[m]}
+            onClick={() => pick(m)}
+            className={`h-full px-2 rounded text-[10px] font-semibold transition-colors ${
+              on ? 'bg-accent text-white' : 'text-muted hover:text-text'
+            }`}
+          >
+            {m === 'guided' ? 'Guided' : 'Expert'}
+          </button>
+        )
+      })}
+    </div>
   )
 }

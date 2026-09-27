@@ -25,6 +25,7 @@ import CompareView from './pages/CompareView'
 import SolveQueuePanel from './pages/SolveQueuePanel'
 import GridspinePanel from './pages/GridspinePanel'
 import LocalSettings from './pages/LocalSettings'
+import HubDesignPanel from './pages/hubDesign/HubDesignPanel'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
 import RescaleDialogHost from './components/RescaleDialogHost'
@@ -112,12 +113,13 @@ const PANEL_META: Record<SlidePanel, { eyebrow: string; title: string }> = {
   gridspine:  { eyebrow: 'SIMULATION', title: 'Planning → dynamics' },
   workspace:  { eyebrow: 'PROJECT',    title: 'Workspace' },
   settings:   { eyebrow: 'APPLICATION', title: 'Settings' },
+  hubDesign:  { eyebrow: 'GUIDED',     title: 'Hub design' },
 }
 
 // Tabs that take the whole main area (canvas hidden) rather than opening as a
 // half-width panel beside the canvas — their charts, tables, and two-column
 // layouts need the full width.
-const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine'])
+const FULL_SCREEN_TABS = new Set<SlidePanel>(['results', 'timeseries', 'capacityBounds', 'gridspine', 'hubDesign'])
 
 function fullPageContent(panel: SlidePanel): React.ReactNode {
   switch (panel) {
@@ -138,6 +140,7 @@ function fullPageContent(panel: SlidePanel): React.ReactNode {
     case 'solveQueue': return <SolveQueuePanel />
     case 'gridspine':  return <GridspinePanel />
     case 'settings':   return <LocalSettings />
+    case 'hubDesign':  return <HubDesignPanel />
     default:           return null
   }
 }
@@ -174,12 +177,24 @@ export default function App() {
   const {
     activeSlidePanel, setSlidePanel, currentProject, canvasView,
     lastProjectId, lastSavedByProject, markProjectSaved, pruneRecents, recents, setLastProjectId,
-    theme, density, compareRailOpen, setCompareRailOpen,
+    theme, density, compareRailOpen, setCompareRailOpen, uiMode,
   } = useUIStore()
 
   // Results + Time Series take the whole main area (see FULL_SCREEN_TABS);
   // every other sidebar tab opens as a half-width panel beside the canvas.
   const fullScreenTab = activeSlidePanel != null && FULL_SCREEN_TABS.has(activeSlidePanel)
+
+  // Guided default-open (guided-mode spec §3.6): with a project open and no
+  // panel showing, Guided opens the hub-design flow — once per project per
+  // session, so closing it is respected. Expert never auto-opens anything.
+  const hubDesignAutoOpenedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (uiMode === 'guided' && currentProject && activeSlidePanel == null
+        && hubDesignAutoOpenedFor.current !== currentProject) {
+      hubDesignAutoOpenedFor.current = currentProject
+      setSlidePanel('hubDesign')
+    }
+  }, [uiMode, currentProject, activeSlidePanel, setSlidePanel])
 
   // Apply theme + density to <html> so CSS-var overrides in index.css kick in.
   // Done on <html> (not <body>) because the @theme block lives at :root scope —

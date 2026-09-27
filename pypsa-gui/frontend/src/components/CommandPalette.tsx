@@ -5,12 +5,13 @@ import {
   Search, X, FolderOpen, Camera, Save as SaveIcon, FilePlus, Settings2,
   TrendingUp, Clock, Zap, RotateCcw, LayoutDashboard,
   Sun, Moon, Rows2, Rows3, GitBranch, Layers, ListChecks, LayoutGrid, Users,
-  SlidersHorizontal, MessageSquare,
+  SlidersHorizontal, MessageSquare, Compass,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { Dialog } from './Dialog'
 import { ConfirmDialog } from './ConfirmDialog'
 import { useUIStore } from '../store/uiStore'
+import { uiModeToast } from '../utils/uiMode'
 import { networkApi } from '../api/network'
 import { projectsApi } from '../api/projects'
 import { appLog } from '../store/simulationStore'
@@ -284,6 +285,8 @@ function useCommands(mode: PaletteMode): Command[] {
   const density              = useUIStore(s => s.density)
   const toggleTheme          = useUIStore(s => s.toggleTheme)
   const toggleDensity        = useUIStore(s => s.toggleDensity)
+  const uiMode               = useUIStore(s => s.uiMode)
+  const setUiMode            = useUIStore(s => s.setUiMode)
   // Same gate the Sidebar row uses (Task 15: EITHER surface reachable) —
   // shares each hook's own cached query, so this costs no extra request.
   const localSettingsAvailable = useLocalSettingsAvailable()
@@ -486,6 +489,20 @@ function useCommands(mode: PaletteMode): Command[] {
             toast.success(`${density === 'comfortable' ? 'Compact' : 'Comfortable'} density on`)
           },
         },
+        {
+          // Guided-mode spec §3.3 — same action as the header switch: an
+          // explicit choice. Titled by the next state, like the theme entry.
+          id: 'act-ui-mode',
+          kind: 'action',
+          title: uiMode === 'guided' ? 'Switch to Expert mode' : 'Switch to Guided mode',
+          subtitle: `Currently: ${uiMode}`,
+          icon: uiMode === 'guided' ? <SlidersHorizontal size={14} /> : <Compass size={14} />,
+          run: () => {
+            const next = uiMode === 'guided' ? 'expert' : 'guided'
+            setUiMode(next, { explicit: true })
+            toast.success(uiModeToast(next))
+          },
+        },
       )
       // Desktop-only: its routes 404 on a web deployment, and setSlidePanel
       // would still open a half-width panel whose body renders null (the
@@ -646,6 +663,7 @@ function useCommands(mode: PaletteMode): Command[] {
     setHighlightedComponent, openRightPanel, setSlidePanel, setCompareRailOpen, markProjectSaved,
     setProjectSwitchInProgress,
     theme, density, toggleTheme, toggleDensity,
+    uiMode, setUiMode,
     settingsAvailable,
   ])
 }
