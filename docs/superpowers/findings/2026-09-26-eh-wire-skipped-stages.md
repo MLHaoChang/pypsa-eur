@@ -49,8 +49,8 @@ PYTHONPATH=<repo-root>:<backend> python tests/run_qa_drivers.py
 
 | Suite | Before (master `ec23302`) | After |
 |---|---|---|
-| `test_energy_hub_*.py` + `test_adequacy_sweep.py` | **167** passed | **204** passed (+37 new: certify 14, frontier 11, fmea_top 6, lcoh 6; 0 failed) |
-| full backend `-m "not slow"` | (not run on master in this container) | 5775 collected: **5607 passed**, 32 skipped, 136 failed/errored — every one of the 136 is `No module named pandapower` (gridspine pipeline → 503) or `No module named webview` (desktop), packages pixi ships that the venv lacked; none in EH / adequacy / results / chat files. After `pip install pandapower pywebview "lightsim2grid==0.10.1"` (the pixi pin — 1.1.0 lacks `LSGrid.get_lineor_res`) the twelve affected files were re-run: **241/241 passed**, so the suite is **5743 passed, 32 skipped, 0 failed** end to end. |
+| `test_energy_hub_*.py` + `test_adequacy_sweep.py` | **167** passed | **221** passed on the final head (+54 new: certify 14, certify scope 6, frontier 21, fmea_top 7, lcoh 6; two P1.5 tests updated deliberately; 0 failed) |
+| full backend `-m "not slow"` | (not run on master in this container) | **5770 passed, 31 skipped, 0 failed** on the final head (venv matched to pixi: Python 3.12, pandas 2.3.3, plus pandapower, pywebview and `lightsim2grid==0.10.1` for the gridspine/desktop files; with lightsim2grid 1.1.0 they fail on `LSGrid.get_lineor_res`, an environment artefact) |
 | `run_qa_drivers.py` | 21 drivers | **22 drivers passed** (`qa_eh_reference_design` auto-discovered) |
 
 ### Frontend
