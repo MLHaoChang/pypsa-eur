@@ -230,3 +230,102 @@ All eight are handled as claimed.
 | — | `vite build --outDir qa24fe/build` | OK. No backend catalogue in the bundle. |
 
 Row 1 (the full backend suite) is run by the orchestrator and was not re-run here.
+
+---
+
+# Re-gate (2026-09-27, commits `8adf8d6..5c87736`)
+
+## Verdict: **NO-GO**
+
+- B1, B2 and B3 are fixed, and the tests now pin them.
+- Most of the smaller notes are fixed.
+- The render-loop "hang fix" does **not** fix the hang. The stress runs still reproduce it, and I traced it to a real app defect in `HubDesignPanel`: an endless refetch loop whenever the first read of the study (or template) fails. That is blocker **B4**.
+
+Scratch evidence is in `qa24fe/rg/` (`qa24fe` = `/tmp/claude-0/-home-user-pypsa-eur/93e65137-63f8-5e19-b114-b55788c10af8/scratchpad/qa24fe`).
+
+## Blocker
+
+### B4: when the first `eh_study` / `eh_template` read fails, the hub panel loops forever (request storm, error toasts, stuck on "Loading the project…")
+
+**Where:** `pypsa-gui/frontend/src/pages/hubDesign/HubDesignPanel.tsx:44` and `:89`.
+
+```tsx
+const settled = !project || (!studyQ.isPending && !templateQ.isPending)
+…
+{(project === null || settled) ? <Card /> : (<p>Loading the project…</p>)}
+```
+
+**Mechanism.** I traced it by instrumenting a scratch copy (`qa24fe/mutD`). The log in `rg/hD2.txt` shows `errorUpdateCount` rising by 1 about every 2 renders, 438 times within one test:
+1. A read errors on a project whose cache has no data yet.
+2. When react-query v5 refetches a query that has never had data, it resets the status to `pending`.
+3. That makes `settled` false, so the card unmounts and "Loading the project…" shows.
+4. The fetch fails again, so the status goes back to `error`.
+5. That makes `settled` true, so the card remounts.
+6. The card's own `useHubStudy()` / `useHubTemplate()` observers refetch on mount, which returns to step 2.
+
+**In the real app.** Run `qa24fe/qa-probe2.mjs --phase QA2`. It is the smoke harness plus one phase. It makes `GET /api/results/eh_study` answer 500, then creates the data-center project in Guided.
+- The hub stays on "Loading the project…" and never shows a card.
+- The app sends `eh_study` about **2 times a second without end**: 20 requests in 10 s after it settles.
+- A stack of red error toasts builds up (`rg/qa2/01-qa2-study-500.png`).
+- Closing the hub panel stops the storm (0 requests in the next 10 s, `rg/qa2b`), so the panel is the cause.
+- A backend hiccup or a 403/404 on the project's first load is enough to trigger it.
+
+**In the tests.** This is the "hang" the implementer attributed to the `{...q}` spread. Removing the spread did not fix it.
+
+| Run | Failures | Where |
+|---|---|---|
+| `App.hubDesignAutoOpen.test.tsx` + `src/pages/hubDesign`, 25 runs on the real tree | **9/25 failed** | `rg/stress.txt` |
+| Same, 15 runs on a scratch copy of HEAD | **5/15 failed** | `rg/hang-A.txt` |
+| Same, with `HubDesignPanel` stubbed in the App test only | **0/15 failed** | `rg/hang-B.txt` |
+
+The two failing tests in every case are "guided tour holds are released › after a project switch closes the tour" and "QA re-gate: project switch while a tour is on screen › the next project still gets its once-per-project hubDesign".
+- Both reported times of 27–38 s against a 5 s timeout, so the event loop was blocked. In jsdom the rejected request resolves at once, so the loop runs as microtasks.
+- Both switch to a project called "Other" that has no backend, so its first `eh_study` / `eh_template` reads error.
+- The App test alone, run on its own, passes 20/20 (`rg/hangA.txt`), because the timing depends on load. The implementer's single green vitest run (2354 passing) was luck. My row 4 run was also green.
+
+**Fix direction:**
+- Treat a read that has errored as settled, and latch `settled` per project once it has been reached, so a refetch never unmounts the card.
+- Show a plain error line with a retry instead of "Loading the project…" forever.
+- Add a flow test in which `getEhStudy` (and separately `getEhTemplate`) rejects. It should assert:
+  - the card or an error line renders;
+  - the mock was called a bounded number of times, for example 3 or fewer over 500 ms.
+- Then stress `App.hubDesignAutoOpen.test.tsx` together with `src/pages/hubDesign` 20 or more times with zero failures.
+
+## B1–B3 and the smaller notes
+
+| Item | Status | Evidence |
+|---|---|---|
+| B1 cost label | **Fixed.** Label "Yearly cost of this design (before any shortfall costs)", with the catalogue text and fallback changed together. The smoke checks the text and that "goal" does not appear. | `rg/P24/06`, `15`, `19`. Mutants R1 and R2 killed. |
+| B2 pre-study tour | **Fixed.** `hub-improve-fmea` is optional + `after_run`. Before a study the tour walks 6 steps with no dead end, in the P24 smoke and my probe (`rg/qa-probe.txt`). Clicks the tour makes on the rail no longer count as manual moves, and the jump to Results still happens after a tour walked mid-run (H₂ in the smoke). Step 1's text is corrected. | Mutant R3 killed. |
+| B3 Improve jargon | **Fixed on the template paths.** The title and effect go through `plainWords`, and the raw prose moved into "Why" (`rg/P24/08`, `09`, `11`). | Mutants R4–R7 killed; **R8 survived** (see notes). |
+| Provenance phase id | Fixed (`rg/P24/02`) | R13 killed |
+| Header Run LOPF in Guided | Hidden while idle (`rg/P24/*`). A queued or running solve still shows it. | R14 killed; **R15 survived** (see notes) |
+| "Monte-Carlo draws" / "solves" | "simulation runs" / "calculation steps", with no "0 of N" | R11 killed |
+| €0 risks | "no measurable cost" (`rg/P24/15`) | R10 killed |
+| Evidence rounding | 4 significant digits (`[7.683, 17.08]`) | test only |
+| Stress-scenario hover | It now labels its button row (`rg/P24/11`) | test only |
+| Start templates during a study | Disabled, with the title "A study is still running — wait for it to finish or abort it before switching project." (probe). The backend still answers 409. | R12 killed |
+| 409 message in the Expert wizard | The wizard shows `STUDY_RUNNING_SWITCH` only for a 409 whose detail says "… is running". On this route that detail comes only from `refuse_if_study_running` → `study_swap_refusal`, so the mapping is accurate. Other 409s now show the backend's sentence ("Template import failed: <detail>") instead of "Request failed with status code 409". **Acceptable.** Clearer, not a regression; Expert snapshots unchanged. | R16 killed |
+| Tour-hold rail rule | `guidedTourHolds === 0` decides whether a rail click counts as manual. Only `GuidedTour` and `GuideButton.prepare` take holds, so it is correct. A user's own rail click while a tour is open does not count as manual, which does not matter in practice. | R3 killed |
+| `test_qa_support_sandbox.py` (e3ded59) | **Sound.** The connection objects are kept alive, so `id()`s cannot be reused. A `Barrier(4)` keeps all four sessions open together, so the four connections exist at the same time. The StaticPool regression still fails the assertion (one object appended four times gives one id). If a thread breaks the barrier, `seen` still has four entries and the id check still holds. Row 2 with this file: 498 passed. | — |
+
+## Non-blocking notes (re-gate)
+
+- **R8 survived.** The lone `dtc_planning` rule in `plainWords.ts` has no test, because the combined `(dtc_stress + dtc_planning)` rule covers the fixture. The review can emit the effect "size what islanded operation needs (dtc_planning)" (`eh_review.py` ~line 309, finding `dtc_critical_unserved`, high severity).
+- **VOLL effect not translated.** A `not_established_*` finding (medium) can carry the effect "set VOLL to 5000 €/MWh (frontier and fmea_top need VOLL > 0)". `plainWords` has no rule for `VOLL`, `frontier` or `fmea_top`, so the card would say "The assistant would set VOLL to 5000 €/MWh (frontier and fmea_top need VOLL > 0)." The three templates do not reach it, because VOLL is 5000 and the Goal card refuses VOLL ≤ 0. A study run from Expert or by the assistant with VOLL 0 would reach it. Add rules or a fixture. Also: "Critical demand unserved when X is lost: N MWh" keeps "MWh".
+- **R15 survived.** No test shows the header Run/Abort button in Guided while a solve is queued or running. The code is right (`if (uiMode === 'guided' && !amber) return null`), but that is the safety half of the decision. Add one test.
+- **Greeting contradiction.** After a study, the dock greeting still says "…run a simulation for results you can read here" (`rg/P24/11`). Guided now hides the only Run button. This is pre-existing text, but it now points at a hidden control.
+- **Goal card VOLL line.** It still has a space before the colon ("Price of undelivered energy ⓘ : €5,000 per MWh"), and "MWh" has no hover. Cosmetic.
+
+## Evidence (re-gate)
+
+| Row | Result |
+|---|---|
+| 2 | Targeted set + `test_qa_support_sandbox.py`: **498 passed**, exit 0 (`rg/row2.txt`) |
+| 3 | `tsc`: exit 0, no output (`rg/row3.txt`) |
+| 4 | `vitest`: **228 files, 2354 passed**, exit 0 (`rg/row4.txt`). A single green run hides B4 (see the stress rows). |
+| 5 | Smokes: P24 **PASS** (19 screenshots; tour before, during and after a study; verdicts fail / no-goal / inconclusive; cost-label check; live tables equal), P23 PASS, P24-BE PASS, P22.9 PASS (`rg/smoke-*.txt`). 0 processes left over. |
+| Probe | `qa-probe.mjs --phase QA`: tour before a study has 6 steps with no dead end; template buttons disabled mid-run; the Expert panel shows the hub's running study; 0 `eh_*` requests while idle (`rg/qa-probe.txt`). |
+| Probe | `qa-probe2.mjs --phase QA2`: reproduces B4 in the real app (`rg/qa2`, `rg/qa2b`). |
+| Mutants | 16 run on a scratch copy (`qa24fe/mutate2.py`, `mutants2.txt`): 14 killed; R8 and R15 survived (notes above). |
+| Stress | See B4: 9/25 and 5/15 failed at HEAD; 0/15 with the panel stubbed; 20/20 passed for the App test alone. |
