@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { useEffect } from 'react'
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from './store/uiStore'
 
@@ -220,7 +220,13 @@ describe('a project counts as auto-opened once any panel was open for it in Guid
 })
 
 describe('the auto-open never fires while a guided tour is preparing or running', () => {
-  it('a held tour blocks it, and releasing the hold does not open it afterwards', () => {
+  // Re-gate N-R2: a hold SKIPS the auto-open without marking the project, so
+  // a project that was never opened still gets its once-per-project
+  // hubDesign when the hold is released. (This replaces the earlier pin that
+  // a released hold never opens it — that consumed the new project's
+  // auto-open.) B2 stays fixed: the tour's own project is marked by the
+  // any-panel-open rule, not by the hold.
+  it('a held tour blocks it; releasing the hold opens it once for a never-opened project', () => {
     useUIStore.setState({ uiMode: 'guided', currentProject: 'Demo', activeSlidePanel: 'results' })
     renderApp()
     act(() => { useUIStore.getState().holdGuidedTour() })
@@ -228,6 +234,15 @@ describe('the auto-open never fires while a guided tour is preparing or running'
     expect(useUIStore.getState().activeSlidePanel).toBeNull()
     act(() => { useUIStore.getState().releaseGuidedTour() })
     expect(useUIStore.getState().guidedTourHolds).toBe(0)
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
+  })
+
+  it('releasing the hold does not reopen hubDesign for the tour’s own (already marked) project', () => {
+    useUIStore.setState({ uiMode: 'guided', currentProject: 'Demo', activeSlidePanel: 'results' })
+    renderApp()
+    act(() => { useUIStore.getState().holdGuidedTour() })
+    act(() => { useUIStore.getState().setSlidePanel(null) })
+    act(() => { useUIStore.getState().releaseGuidedTour() })
     expect(useUIStore.getState().activeSlidePanel).toBeNull()
   })
 
@@ -256,3 +271,76 @@ describe('the auto-open never fires while a guided tour is preparing or running'
     expect(useUIStore.getState().guidedTourHolds).toBeGreaterThan(0)
   })
 })
+
+// Re-gate N-R2 repro (qa23/repro/App.qaRegateTourSwitch.snippet.tsx), verbatim.
+describe('QA re-gate: project switch while a tour is on screen', () => {
+  it('the next project still gets its once-per-project hubDesign', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    qc.setQueryData(nk('Fresh', 'buses'), [{ name: 'B1', eh_poc: true }])
+    useUIStore.setState({ uiMode: 'guided', currentProject: 'Fresh', activeSlidePanel: 'results' })
+    render(<QueryClientProvider client={qc}><App />
+      <GuideButton tourId="eh_tagging" testId="eh-tagging-guide-button"
+        prepare={() => prepareTaggingTour(qc, 'Fresh', { waitMs: 50 })} /></QueryClientProvider>)
+    await act(async () => { fireEvent.click(screen.getByTestId('eh-tagging-guide-button')); await new Promise(r => setTimeout(r, 150)) })
+    expect(useUIStore.getState().guidedTourHolds).toBeGreaterThan(0)
+    await act(async () => { useUIStore.setState({ currentProject: 'Other' }); await new Promise(r => setTimeout(r, 50)) })
+    expect(useUIStore.getState().guidedTourHolds).toBe(0)          // passes: hold released
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign') // FAILS on c23d6cf: null
+  })
+})
+
+// Re-gate N-R1: a leaked hold would silently switch the auto-open off for
+// every later project, so every way a tour ends must release its hold.
+describe('guided tour holds are released', () => {
+  function renderWithButton(prepare: () => Promise<void>) {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    qc.setQueryData(nk('Demo', 'buses'), [{ name: 'B1', eh_poc: true }])
+    render(<QueryClientProvider client={qc}><App />
+      <GuideButton tourId="eh_tagging" testId="eh-tagging-guide-button" prepare={prepare} /></QueryClientProvider>)
+    return qc
+  }
+  async function start() {
+    await act(async () => { fireEvent.click(screen.getByTestId('eh-tagging-guide-button')); await new Promise(r => setTimeout(r, 150)) })
+  }
+  // jsdom has no backend, so the catalogue fetch fails and the tour renders
+  // its "could not be loaded" dialog — which has the tour's own Close.
+  async function closeTour() {
+    const dlg = await screen.findByTestId('guide-tour')
+    await act(async () => { fireEvent.click(within(dlg).getByRole('button', { name: 'Close' })) })
+  }
+
+  beforeEach(() => {
+    useUIStore.setState({ uiMode: 'guided', currentProject: 'Demo', activeSlidePanel: 'results', guidedTourHolds: 0 })
+  })
+
+  it('after the tour closes', async () => {
+    const qc = renderWithButton(async () => { await prepareTaggingTour(qcRef.qc!, 'Demo', { waitMs: 50 }) })
+    qcRef.qc = qc
+    await start()
+    expect(useUIStore.getState().guidedTourHolds).toBe(1)
+    await closeTour()
+    expect(screen.queryByTestId('guide-tour')).toBeNull()
+    expect(useUIStore.getState().guidedTourHolds).toBe(0)
+  })
+
+  it('after a failing prepare (the button’s own hold is released; the tour’s goes on close)', async () => {
+    renderWithButton(async () => { throw new Error('no bus to tag') })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    await start()
+    warn.mockRestore()
+    expect(useUIStore.getState().guidedTourHolds).toBe(1)
+    await closeTour()
+    expect(useUIStore.getState().guidedTourHolds).toBe(0)
+  })
+
+  it('after a project switch closes the tour', async () => {
+    const qc = renderWithButton(async () => { await prepareTaggingTour(qcRef.qc!, 'Demo', { waitMs: 50 }) })
+    qcRef.qc = qc
+    await start()
+    expect(useUIStore.getState().guidedTourHolds).toBe(1)
+    await act(async () => { useUIStore.setState({ currentProject: 'Other' }); await new Promise(r => setTimeout(r, 50)) })
+    expect(screen.queryByTestId('guide-tour')).toBeNull()
+    expect(useUIStore.getState().guidedTourHolds).toBe(0)
+  })
+})
+const qcRef: { qc: QueryClient | null } = { qc: null }

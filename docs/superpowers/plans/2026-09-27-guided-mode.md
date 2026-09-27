@@ -173,15 +173,28 @@ Spec §3.
 | Panel slot, auto-open | `App.tsx`, `pages/hubDesign/HubDesignPanel.tsx` (placeholder), `ChatPanel.tsx`, `BE/services/chat_tools_schema.py` | `App.hubDesignAutoOpen.test.tsx`, `BE/tests/test_chat_tools_schema_panels.py` |
 
 **P23 integration gate (spec §8):**
-- [ ] 1 full backend suite — zero new failures
-- [ ] 2 targeted EH set green
-- [ ] 3 `tsc` clean
-- [ ] 4 `vitest` — zero new failures
-- [ ] 5 browser smoke `--phase P23`: fresh context → Guided on; sidebar shows Assistant / Hub design / Project basics only; Results shows two tabs; switch to Expert → everything back; reload keeps Expert; existing-user context (seeded `network-diagram:current-project`) → Expert; creating a blank project and a template project with implicit Expert → Guided; with explicit Expert → stays Expert
-- [ ] 6 QA-gate review GO (`…-gate-P23.md`)
-- [ ] 7 Expert-unchanged review signed
+- [x] 1 full backend suite — zero new failures
+- [x] 2 targeted EH set green
+- [x] 3 `tsc` clean
+- [x] 4 `vitest` — zero new failures
+- [x] 5 browser smoke `--phase P23`: fresh context → Guided on; sidebar shows Assistant / Hub design / Project basics only; Results shows two tabs; switch to Expert → everything back; reload keeps Expert; existing-user context (seeded `network-diagram:current-project`) → Expert; creating a blank project and a template project with implicit Expert → Guided; with explicit Expert → stays Expert
+- [x] 6 QA-gate review GO (`…-gate-P23.md`)
+- [x] 7 Expert-unchanged review signed
 
 ---
+
+**P23 result: GO, 2026-09-27.** The first gate was NO-GO with three blockers (B1–B3); they were fixed following the spec's "§10 addendum: P23 gate decisions". The re-gate was GO, and its notes N-R1 and N-R2 were closed afterwards.
+
+| Check | Result |
+|---|---|
+| Row 1, full backend suite | `6054 passed, 31 skipped, 11 deselected`, 0 failures; the backend is unchanged since |
+| Row 2 | 405 passed |
+| Row 3, tsc | exit 0 |
+| Row 4, vitest (orchestrator's run after N-R1/N-R2) | 212 files / 2222 passed |
+| Row 5, smokes | P23 (17 steps) and P22.9 both PASS |
+| Row 7, Expert snapshots | byte-identical to the base render |
+
+Gate file: `docs/superpowers/qa/2026-09-27-guided-mode-gate-P23.md`.
 
 ## P24-BE — Review route, readiness additions, catalogue, hook lifts
 

@@ -139,3 +139,34 @@ describe('Guided Results copy', () => {
     expect(screen.getByText('Capacity expansion, dispatch, load flow, prices, and emissions from the last solve.')).toBeTruthy()
   })
 })
+
+// Re-gate N7: picking a tab clears the explicit request, across modes.
+describe('picking a tab clears requestedTab (Guided → Expert → Guided)', () => {
+  it('after a pick in Expert, returning to Guided shows no advanced chip and falls back', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    useUIStore.getState().requestResultsTab('economics')
+    await renderResults()
+    expect(screen.getByTestId('results-tab-economics').getAttribute('data-advanced')).toBe('true')
+    act(() => { useUIStore.setState({ uiMode: 'expert' }) })
+    expect(screen.getByTestId('economics-stub')).toBeTruthy()
+    fireEvent.click(screen.getByTestId('results-tab-prices'))
+    // Picking the formerly requested tab by hand is a pick, not a request:
+    // back in Guided it is a stored hidden tab and falls back.
+    fireEvent.click(screen.getByTestId('results-tab-economics'))
+    act(() => { useUIStore.setState({ uiMode: 'guided' }) })
+    expect(tabIds()).toEqual(['adequacy', 'fmea'])
+    expect(document.querySelector('[data-advanced]')).toBeNull()
+    expect(screen.getByTestId('adequacy-stub')).toBeTruthy()
+    expect(localStorage.getItem('results:active-tab')).toBe('economics')
+  })
+
+  it('without a pick the request still stands when Guided returns', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    useUIStore.getState().requestResultsTab('economics')
+    await renderResults()
+    act(() => { useUIStore.setState({ uiMode: 'expert' }) })
+    act(() => { useUIStore.setState({ uiMode: 'guided' }) })
+    expect(screen.getByTestId('results-tab-economics').getAttribute('data-advanced')).toBe('true')
+    expect(screen.getByTestId('economics-stub')).toBeTruthy()
+  })
+})

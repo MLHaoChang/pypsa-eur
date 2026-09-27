@@ -190,13 +190,16 @@ export default function App() {
   // counts as auto-opened as soon as ANY slide panel has been open for it in
   // Guided (a panel reaching null afterwards is the user's or a tour's doing,
   // not "nothing is open yet"), and while a guided tour is preparing or
-  // running the auto-open never fires — the tour always wins. Expert never
-  // auto-opens anything.
+  // running the auto-open never fires — the tour always wins. A hold only
+  // SKIPS, it does not mark: a project switched to mid-tour still gets its
+  // once-per-project open when the hold is released (the tour's own project
+  // is already marked by its open panel). Expert never auto-opens anything.
   const hubDesignAutoOpenedFor = useRef<string | null>(null)
   useEffect(() => {
     if (uiMode !== 'guided' || !currentProject) return
     if (hubDesignAutoOpenedFor.current === currentProject) return
-    if (activeSlidePanel != null || guidedTourHolds > 0) {
+    if (guidedTourHolds > 0) return
+    if (activeSlidePanel != null) {
       hubDesignAutoOpenedFor.current = currentProject
       return
     }
