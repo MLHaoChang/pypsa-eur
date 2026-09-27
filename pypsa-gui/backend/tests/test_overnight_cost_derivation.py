@@ -83,10 +83,18 @@ def test_line_overnight_cost_is_derived_not_left_at_annualised_value():
     out = periodized_capital_costs(n, cfg)
     entry = out["lines"]["L"]
 
-    # Independent oracle: same fill, read PyPSA's own accessor directly.
+    # Independent oracle: same fill, read PyPSA's own accessor directly. The
+    # fill also puts the typed (annual) capital_cost on PyPSA's per-horizon
+    # basis — × `n.nyears`, 1/8760 for this one-snapshot network — so the
+    # oracle does the same by hand. Without it PyPSA back-calculates
+    # `capital_cost / (annuity × nyears)` from an annual figure and reports an
+    # upfront cost 8760x too high.
     oracle_n = _line_only_network()
     oracle_n.lines.loc["L", "discount_rate"] = cfg.discount_rate
+    oracle_n.lines.loc["L", "capital_cost"] = 1_000_000.0 * float(oracle_n.nyears)
     expected = float(oracle_n.c["Line"].overnight_cost.loc["L"])
+    # ...which is the annual rate over the annuity, as an upfront cost should be.
+    assert expected == pytest.approx(1_000_000.0 / 0.07, rel=1e-9)
     assert math.isfinite(expected) and expected > 0, (
         "test setup bug: the oracle itself failed to back-calculate"
     )
@@ -98,8 +106,11 @@ def test_line_overnight_cost_is_derived_not_left_at_annualised_value():
     # Guard the fixture actually discriminates: the annualised rate is a
     # completely different quantity (EUR/MW/yr vs EUR/MW), not a smaller
     # version of the same number. Old buggy code reports these EQUAL.
-    assert entry["capital_cost"] == pytest.approx(1_000_000.0)
+    # `capital_cost` is reported per modelled horizon: the annual 1 M EUR x
+    # the one-hour share of a year this network models.
+    assert entry["capital_cost"] == pytest.approx(1_000_000.0 / 8760.0)
     assert entry["overnight_cost"] != pytest.approx(entry["capital_cost"], rel=1e-6)
+    assert entry["overnight_cost"] != pytest.approx(1_000_000.0, rel=1e-6)
 
 
 # ── Test 1: genuinely unresolved is reported as such, never substituted ────
@@ -124,9 +135,10 @@ def test_genuinely_unresolvable_upfront_cost_is_not_the_annualised_rate():
     assert entry["overnight_cost_available"] is False
     assert entry["overnight_cost"] is None
     assert entry["overnight_cost_pv"] is None
-    # The annualised rate is unaffected (it never routes through overnight_cost
-    # for a no-overnight_cost asset — see with_periodized_cost_defaults).
-    assert entry["capital_cost"] == pytest.approx(1_000_000.0)
+    # The annualised rate is unaffected by the failed upfront resolve (it never
+    # routes through overnight_cost for a no-overnight_cost asset — see
+    # with_periodized_cost_defaults); reported per modelled horizon, 1/8760.
+    assert entry["capital_cost"] == pytest.approx(1_000_000.0 / 8760.0)
 
 
 # ── Test 4: the lifetime-fill regression stays pinned ───────────────────────

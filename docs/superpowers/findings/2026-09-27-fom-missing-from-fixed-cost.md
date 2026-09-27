@@ -357,6 +357,18 @@ Existing tests updated to annual `capital_cost`:
   baseline inside the same fill as the total it is compared with.
 - **Golden anchors:** the line and solar anchors use
   `oracle.capital_cost_per_horizon`.
+- **LP fixtures whose sizing decisions depended on the old coefficient** now
+  type the annual equivalent, the per-period cost × 8,760 ÷ modelled hours, so
+  each LP is unchanged. These are the reserve-margin vintage network, the
+  adequacy frontier and both myopic analytic networks.
+- **Myopic cost tests** call the myopic driver and the perfect-foresight solve
+  inside the periodized-cost fill. That is what `run_simulation` does before
+  either, via the modelling assumptions. Solving outside it charges the annual
+  figure unscaled.
+- **`test_overnight_cost_derivation.py`:** the oracle applies the same
+  horizon scaling by hand. The back-calculated upfront cost is now
+  `1 M ÷ annuity`. Before, it was 8,760 times that on this one-snapshot
+  network, the bug the scaling fixes.
 
 | Run | Result |
 |---|---|
