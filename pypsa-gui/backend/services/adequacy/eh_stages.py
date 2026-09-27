@@ -159,6 +159,9 @@ class FleetScope:
     # Set by freeze_fixed_plan: one entry per grid area when the zonal path
     # applies (at least one area sampled); empty otherwise.
     grid_areas: list = field(default_factory=list)
+    # WP3: area index → f_h, the expected share of the area's Link cap its
+    # grid can back (``mc_zonal.expected_surplus_fraction``) — screening only.
+    copt_fractions: dict = field(default_factory=dict)
 
     @property
     def zonal(self) -> bool:
@@ -190,6 +193,29 @@ class FleetScope:
                 "mixed": "partially_outage_sampled"}.get(
                     base, "planning_limit_only")
 
+    def copt_import_model(self) -> str | None:
+        """How the COPT screening (fmea_top class A) holds the import."""
+        if self.mode != "hub_side":
+            return None
+        if self.zonal:
+            return "expected_surplus_profile"
+        if self.import_units:
+            return "two_state"
+        if any(m.model == "firm_block" for m in self.link_models):
+            return "firm_block"
+        return None
+
+    def copt_import_note(self) -> str | None:
+        if not self.zonal:
+            return None
+        return ("COPT screening: each sampled Link stays a two-state unit, "
+                "but its UP capacity per hour is scaled by the expected share "
+                "of its cap the grid area can back, E[min(cap, surplus)]/cap "
+                "from the area's own COPT — the grid's randomness is netted "
+                "at its expected value (the MC samples it exactly); grid "
+                "storage is not in the COPT; firm-block Links are derated "
+                "the same way")
+
     def as_payload(self) -> dict:
         firm = self.import_firm_mw
         cap = self.import_cap_mw
@@ -211,6 +237,8 @@ class FleetScope:
             "import_units": {u.name: u.name.split(":", 1)[1]
                              for u in self.import_units},
             "grid_areas": list(self.grid_areas),
+            "copt_import_model": self.copt_import_model(),
+            "copt_import_note": self.copt_import_note(),
             "note": self.note,
         }
 
@@ -511,7 +539,11 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
     stays on v1 and the reasons go into the note.
     """
     from services.adequacy.mc import snapshot_inputs
-    from services.adequacy.mc_zonal import GridArea, ZonalInputs
+    from services.adequacy.mc_zonal import (
+        GridArea,
+        ZonalInputs,
+        expected_surplus_fraction,
+    )
 
     live = [m for m in scope.link_models if m.model != "islanded"]
     if not live:
@@ -564,8 +596,22 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
             delivery_ratio=np.ascontiguousarray(ratio),
             stream=k))
         entry = {"area": k, "links": links, "buses": sorted(keep),
-                 "sampled": grid is not None, "reason": why}
+                 "sampled": grid is not None, "reason": why,
+                 "copt_surplus_fraction_min": None}
         if grid is not None:
+            try:
+                f = expected_surplus_fraction(
+                    grid.units, grid.residual, cap=deliv, ratio=ratio,
+                    periods=grid.periods)
+                scope.copt_fractions[k] = f
+                live_h = deliv > 0.0
+                entry["copt_surplus_fraction_min"] = (
+                    float(np.min(f[live_h])) if live_h.any() else None)
+            except Exception as exc:  # noqa: BLE001 — screening keeps v1
+                logger.exception("EH zonal COPT surplus fraction failed")
+                entry["copt_note"] = (f"expected surplus not computed ({exc}); "
+                                      "the screening holds this area's Links "
+                                      "as in v1")
             stores = [s.name for s in grid.storage
                       if s.p_nom_mw > 0 and (s.capacity_series is None
                                              or float(np.max(s.capacity_series)) > 0)]
@@ -597,6 +643,33 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
                       + "; v1 applies")
     scope.grid_areas = payload
     return ZonalInputs(hub=hub_inputs, areas=tuple(areas)), None
+
+
+def _screening_fleet(inputs, zonal, scope: FleetScope):
+    """
+    The COPT screening's fleet and residual (plan 2026-09-28, WP3).
+
+    v1: the MC's own units and residual — the membership invariant. Zonal:
+    the SAME units, but each area's sampled Link unit carries the area's
+    ``f_h`` as its availability profile (UP = ``f_h × cap``), and the
+    area's firm-block Links, netted out of the residual at full cap, are
+    added back by ``(1 − f_h) × firm``. An area whose ``f`` is 1 every hour
+    changes nothing, so an unbound grid screens exactly like v1. The MC keeps
+    the unprofiled units: profiling them there would count the grid twice.
+    """
+    units = list(inputs.units)
+    res = np.array(inputs.residual, dtype=np.float64, copy=True)
+    if zonal is None:
+        return units, res
+    for k, area in enumerate(zonal.areas):
+        f = scope.copt_fractions.get(k)
+        if f is None or bool(np.all(f >= 1.0)):
+            continue
+        for i in area.import_idx:
+            units[i] = dataclasses.replace(units[i], profile=np.asarray(
+                f, dtype=np.float64).copy())
+        res = res + np.asarray(area.firm_import_mw, dtype=np.float64) * (1.0 - f)
+    return units, res
 
 
 def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
@@ -671,10 +744,12 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
     try:
         import pandas as pd
 
-        residual = pd.Series(inputs.residual, index=network.snapshots)
+        screen_units, screen_res = _screening_fleet(inputs, snap.zonal_inputs,
+                                                    scope)
+        residual = pd.Series(screen_res, index=network.snapshots)
         weights = pd.Series(inputs.weights, index=network.snapshots)
         analysis = screening_analysis(
-            list(inputs.units), residual, weights=weights, voll=snap.voll,
+            screen_units, residual, weights=weights, voll=snap.voll,
             delta_mw=1.0)
         snap.copt_rows = list(analysis.get("rows") or [])
         snap.copt_metrics = dict(analysis.get("metrics") or {})
