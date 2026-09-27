@@ -678,7 +678,9 @@ Files: `backend/services/validation_service.py`, `backend/tests/test_validation_
 - **P3 Participants & value flows** — participants, assignment, conservation invariant (internal streams sum
   to zero), templates (`single_owner`, `btm_ppa`, `landlord_tenant`, `dso_developer`, `energy_hub` with
   allocation keys), per-participant tables + Sankey in a new Results tab `investment` (add to `Results.tsx`
-  tab union + route). Gate: conservation on all templates; FE tests.
+  tab union + route); **the Tariff builder, Library browser (tariffs / contracts / connection agreements /
+  series, URDB import) and Contracts editor** (API and chat land in P2; the UI lands here, spec §12).
+  Gate: conservation on all templates; FE tests.
 - **P4 Finance engine (single owner)** — WP4.1 time axis/capex phasing/escalation/degradation/replacement/
   terminal value; WP4.2a debt sizing + schedules + fees + IDC; WP4.2b DSCR sculpting fixed-point (1e-6, ≤50
   iters, `not_established` on failure; CFADS post-tax pre-financing) + DSRA; WP4.3a tax/depreciation with
