@@ -132,8 +132,11 @@ upstream behaviour itself: the objective charges FOM while
 | `qa_results_summary_compare.py` | not rerun | 53/53 pass |
 
 Every backend failure and error on both sides is in desktop, GridSpine,
-shutdown and packaging tests. Those need `pywebview` and GridSpine tooling
-that this container does not have. None touch economics, and the set is the
+shutdown and packaging tests. They failed because the hand-built Python 3.11
+venv used for these runs lacked four packages that `pixi.toml` installs:
+`gridspine` (this repo's own package, which needs Python 3.12), `pandapower`,
+`lightsim2grid` and `pywebview`. The container could run them all along; see
+"Environment correction" at the end of this note. None touch economics, and the set is the
 same before and after: the 136 failing and erroring test ids match exactly.
 Collection grew from 5737 to 5752, which is the 15 new tests, and all 15 pass.
 Both backend rows are counted from the progress marks, because the master run
@@ -375,3 +378,26 @@ Existing tests updated to annual `capital_cost`:
 | Backend `-m "not slow"` | 5602 passed, 29 failed, 107 errors, 32 skipped; the 136 failures and errors are the same test ids as on master |
 | Frontend `npx vitest run` | 1940 passed; `tsc --noEmit` clean |
 | QA drivers (`run_qa_drivers.py`) | all 21 pass |
+
+## Environment correction
+
+Earlier sections said the 136 failing and erroring backend tests need tools
+this container lacks. That was wrong. Their error messages show two causes,
+both gaps in the hand-built Python 3.11 venv, not in the container:
+
+| Cause | Tests |
+|---|---:|
+| `No module named 'gridspine'`: the GridSpine pipeline answers 503 and its tests get 503 instead of 200, 409 or 422 | 124 |
+| `No module named 'webview'` (pywebview): the desktop shell, shutdown and packaging checks | 12 |
+
+`pixi.toml` installs `gridspine` editable from the repo root, with its engines
+`pandapower==3.1.2` and `lightsim2grid==0.10.1`, and `pywebview==6.2.1` in the
+`test` environment. `gridspine` requires Python 3.12, which is why it would not
+install into the 3.11 venv.
+
+A Python 3.12 venv with the same pins plus those four packages runs all 12
+affected files green: 241 passed, 0 failed. The full suite on that environment is recorded below once it finishes.
+
+None of these tests touch economics, and none showed a product defect: each
+failed only because a package was missing. `pixi run gui-tests` runs in the
+environment that provides all four.
