@@ -178,6 +178,9 @@ def test_bundle_check_requires_the_pack_at_the_frozen_root(tmp_path):
     right = root / "data" / "eh_class_c"
     right.mkdir(parents=True)
     (right / "synth_dunkelflaute.json").write_text("{}")
+    guides = root / "data" / "guides"                # the P21 guide is rooted too
+    guides.mkdir(parents=True)
+    (guides / "eh_fmea_guide.json").write_text("{}")
     assert cb.check_rooted(tmp_path) == []
 
 

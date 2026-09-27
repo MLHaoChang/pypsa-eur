@@ -248,7 +248,15 @@ def build_ieee39() -> pypsa.Network | None:
 
 
 def main() -> None:
-    import eh_templates  # noqa: PLC0415 — sibling module (sys.path[0] is here)
+    # Loaded by file path, as routers/projects.py does: this directory is
+    # shipped as data, not as a package.
+    import importlib.util  # noqa: PLC0415
+
+    spec = importlib.util.spec_from_file_location(
+        "_eh_templates", HERE / "eh_templates.py"
+    )
+    eh_templates = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(eh_templates)
 
     builders = (
         ("3bus", build_3bus),

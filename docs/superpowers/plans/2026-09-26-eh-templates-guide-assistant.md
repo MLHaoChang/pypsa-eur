@@ -289,3 +289,10 @@ Each item was fixed test-first.
    - **Sizing.** The sizing section counts `grid_supply` (the wholesale source beyond the PoC). Sizing is P6 behaviour across every network; restricting it to the hub side belongs with the sizing engine, not this phase.
    - **Template review rule.** The "template's recommended next step" rule in `review_eh_study` is not wired. The template's notes reach the user through `get_eh_template` and the panel banner instead.
    - **Chat context in tests.** The chat context is not a product bug: chat turns run under the request's bound context. The live P22 loop uses `install_network`, because direct tool calls in tests fall back to the default context.
+7. **Full suites after the gate fixes.**
+   - The GUI backend suite (`-m "not slow"`) on `f934560` gave **6031 passed, 2 failed, 31 skipped**. Both failures were stale tests, not product bugs, and both are fixed:
+     - `test_bundle_check_requires_the_pack_at_the_frozen_root` built a bundle without the P21 guide, which `check_bundle.ROOTED` now requires. The fixture now includes it.
+     - `test_every_unguarded_third_party_import_is_pinned_for_the_build` saw `_build.py`'s bare `import eh_templates` as a third-party import. `_build.py` now loads the module by file path, as `routers/projects.py` does.
+   - After the fixes, the affected files pass: 46 tests.
+   - The repo-root `tests/` has two `gridspine` packaging failures, `PackageNotFoundError`. They are environmental: `gridspine` is not pip-installed in the test venv. They are unrelated to this work.
+   - The frontend suite gave 2033 passed.
