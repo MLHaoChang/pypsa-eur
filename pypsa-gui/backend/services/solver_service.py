@@ -98,6 +98,9 @@ from services.commercial.lp_bindings import (  # noqa: F401
     _wrap_with_commercial_bindings,
     materialise_poc_prices,
 )
+from services.commercial.connection import (  # noqa: F401
+    apply_for_config as apply_connection_for_config,
+)
 # ── The branch's own dependencies ────────────────────────────────────────────
 # The adequacy standards below (`reserve_margin_facts`, the ENS-cap and
 # reserve-margin extra-functionality wrappers) are solver-layer code that
@@ -671,16 +674,18 @@ def run_simulation(
                 # runs after the model is built. The columns persist with the
                 # network (reload-safe cost rows). A bare return is still safe:
                 # `restore_modelling` is not bound yet.
-                if getattr(config, "commercial", None):
-                    try:
-                        _ic_terms = materialise_poc_prices(
-                            network, config.commercial,
-                            log=lambda m: _safe_log(log_queue, m))
-                    except CommercialBindingError as exc:
-                        log_queue.put(f"[COMMERCIAL] ERROR: {exc}")
-                        phase("Commercial binding failed. Aborting.")
-                        status, condition = "error", "commercial_binding_failed"
-                        return status, condition
+                # Runs with NO commercial config too: it restores any PoC Link a
+                # previous config priced (review round 1 #1).
+                try:
+                    _ic_terms = materialise_poc_prices(
+                        network, getattr(config, "commercial", None),
+                        log=lambda m: _safe_log(log_queue, m))
+                except CommercialBindingError as exc:
+                    log_queue.put(f"[COMMERCIAL] ERROR: {exc}")
+                    phase("Commercial binding failed. Aborting.")
+                    status, condition = "error", "commercial_binding_failed"
+                    return status, condition
+                if _ic_terms is not None:
                     _emit_state(last_commercial_terms=_ic_terms)
             # Clear stale *_t.p_set persisted by a prior AC-PF dispatch fix.
             # PyPSA's create_model adds a `Generator-p_set` equality constraint
@@ -743,7 +748,35 @@ def run_simulation(
                 # writes originals and re-solves don't double-apply.
                 # `captured` collects solve-only data (VOLL slack dispatch)
                 # that the restore step would otherwise wipe.
-                _real_restore, captured = _apply_modelling_assumptions(network, config, phase)
+                # Edge Investment Case (WP1.4a): the connection agreement is a
+                # transient transform like the modelling assumptions. Applied
+                # first, undone LAST (chained after their restore), so the
+                # assumptions snapshot and restore the agreement's state.
+                try:
+                    _ic_conn = apply_connection_for_config(
+                        network, getattr(config, "commercial", None))
+                except CommercialBindingError as exc:
+                    log_queue.put(f"[COMMERCIAL] ERROR: {exc}")
+                    phase("Commercial binding failed. Aborting.")
+                    status, condition = "error", "commercial_binding_failed"
+                    return status, condition
+                if _ic_conn is not None:
+                    _safe_log(log_queue, f"[COMMERCIAL] connection agreement applied: "
+                                         f"{_ic_conn.facts}")
+                try:
+                    _real_restore, captured = _apply_modelling_assumptions(network, config, phase)
+                except BaseException:
+                    if _ic_conn is not None:
+                        _ic_conn.undo()
+                    raise
+                if _ic_conn is not None:
+                    _assumptions_restore = _real_restore
+
+                    def _real_restore() -> None:
+                        try:
+                            _assumptions_restore()
+                        finally:
+                            _ic_conn.undo()
                 # Once-guarded restore wrapper. The network now carries the LP
                 # transforms; restore MUST run exactly once before the network
                 # can be serialised. The solve try/finally below calls this on

@@ -650,8 +650,16 @@ def compute_cost_breakdown(n, cfg):
     # cost as labelled rows. Already inside `opex` (the Links' statistics
     # OPEX), so a split of the total, never added to it; recomputed from the
     # persisted `links_t.marginal_cost`, so identical after a reload.
+    from services.commercial.connection import network_capacity_row
     from services.commercial.lp_bindings import energy_cost_rows
     commercial_rows = energy_cost_rows(n, getattr(cfg, "commercial", None))
+    # The connection fee (WP1.4a) is applied for the solve and undone, so it
+    # is NOT in `n.statistics()`: this row is ADDED to capex and the total.
+    network_capacity = network_capacity_row(n, getattr(cfg, "commercial", None))
+    if network_capacity is not None:
+        commercial_rows = dict(commercial_rows or {"included_in_total": True})
+        commercial_rows["network_capacity"] = network_capacity
+        capex_total = capex_total + network_capacity
     return {
         "commercial": commercial_rows,
         "capex": capex_total,

@@ -279,7 +279,8 @@ def test_config_route_materialises_a_library_export_price(client, install_networ
         "name": "da_price", "timestamps": [t.isoformat() for t in idx],
         "values": [float(i % 96) for i in range(len(idx))], "meta": {"source": "t"}}).json()
     r = client.put("/api/simulation/solver_config", json={"commercial": {
-        "poc_link": "import", "export_link": "export", "export_price_ref": ref}})
+        "poc_link": "import", "export_link": "export", "export_price_ref": ref,
+        "timezone": "UTC"}})
     assert r.status_code == 200, r.text
     live = session_ctx(client).network
     got = live.links_t[L.EXPORT_PRICE_ATTR]["export"].to_numpy()
@@ -299,3 +300,227 @@ def test_a_bare_library_tariff_id_is_refused_in_p1():
     with pytest.raises(L.CommercialBindingError, match="P2"):
         L.materialise_poc_prices(build_edge_15min(),
                                  {"poc_link": "import", "import_tariff_id": "de_tou"})
+
+
+# ── Review round 1 (FAIL) — each finding pinned before its fix ─────────────
+
+
+def _plain_objective(n_builder):
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig, run_simulation
+
+    n = n_builder()
+    PyPSAService.set_network(n)
+    run_simulation(SolverConfig(), n, PyPSAService.get_lock(), threading.Event(),
+                   queue.SimpleQueue(), state_update=lambda **kw: None)
+    return float(n.objective)
+
+
+def _solve_cfg(n, commercial):
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig, run_simulation
+
+    PyPSAService.set_network(n)
+    sink: dict = {}
+    status, condition = run_simulation(
+        SolverConfig(commercial=commercial), n, PyPSAService.get_lock(), threading.Event(),
+        queue.SimpleQueue(), state_update=lambda **kw: sink.update(kw))
+    return status, condition, sink
+
+
+@pytest.mark.live_solve
+def test_clearing_the_commercial_config_restores_the_plain_solve():
+    """#1: the materialised column must not outlive the config."""
+    n = _tariff_only_site()
+    assert _solve_cfg(n, _commercial(_tariff()))[0] in ("ok", "optimal")
+    assert _solve_cfg(n, None)[0] in ("ok", "optimal")
+    assert float(n.objective) == pytest.approx(_plain_objective(_tariff_only_site), rel=1e-9)
+    assert "import" not in n.links_t.marginal_cost.columns
+
+
+def test_repointing_poc_link_restores_the_old_link():
+    """#1: the previously priced Link goes back to its base cost."""
+    n = build_edge_15min()
+    n.add("Link", "import2", bus0="grid", bus1="poc", p_nom=80.0, carrier="AC")
+    L.materialise_poc_prices(n, _commercial(_tariff()))
+    L.materialise_poc_prices(n, {"poc_link": "import2",
+                                 "import_tariff": _tariff().model_dump(mode="json")})
+    assert "import" not in n.links_t.marginal_cost.columns
+    assert np.allclose(n.links_t.marginal_cost["import2"], _expected_eur_per_mwh(n.snapshots))
+
+
+def test_dropping_export_items_restores_the_export_link():
+    n = _with_export(build_edge_15min(), price=np.zeros(672))
+    credit = TariffItem(id="fee", kind="energy", unit="per_kwh", measured_on="export",
+                        periods=[TariffPeriod(name="all", rate=0.002)])
+    L.materialise_poc_prices(n, _commercial(_tariff(_tou(), credit), export_link="export"))
+    assert "export" in n.links_t.marginal_cost.columns
+    L.materialise_poc_prices(n, _commercial(_tariff(), export_link="export"))
+    assert "export" not in n.links_t.marginal_cost.columns
+
+
+def test_an_uploaded_price_series_on_the_poc_link_is_the_base():
+    """#2: an indexed price uploaded on the import Link is kept, the tariff added on top."""
+    n = build_edge_15min()
+    spot = np.linspace(10.0, 100.0, len(n.snapshots))
+    n.links_t.marginal_cost["import"] = spot
+    L.materialise_poc_prices(n, _commercial(_tariff()))
+    L.materialise_poc_prices(n, _commercial(_tariff()))  # idempotent on a dynamic base
+    assert np.allclose(n.links_t.marginal_cost["import"], spot + _expected_eur_per_mwh(n.snapshots))
+    L.materialise_poc_prices(n, None)
+    assert np.allclose(n.links_t.marginal_cost["import"], spot)
+
+
+def test_a_newly_uploaded_base_replaces_the_remembered_one():
+    """#2: `_reapply_ts` rewriting the column between solves is the new base."""
+    n = build_edge_15min()
+    L.materialise_poc_prices(n, _commercial(_tariff()))
+    new_spot = np.full(len(n.snapshots), 7.0)
+    n.links_t.marginal_cost["import"] = new_spot
+    L.materialise_poc_prices(n, _commercial(_tariff()))
+    assert np.allclose(n.links_t.marginal_cost["import"], 7.0 + _expected_eur_per_mwh(n.snapshots))
+
+
+@pytest.mark.parametrize("dynamic", [False, True])
+def test_a_two_way_poc_link_is_refused(dynamic):
+    """#3: reverse flow on the import Link would be paid the import tariff."""
+    n = build_edge_15min()
+    if dynamic:
+        n.links_t.p_min_pu["import"] = -0.5
+    else:
+        n.links.loc["import", "p_min_pu"] = -1.0
+    with pytest.raises(L.CommercialBindingError, match="p_min_pu"):
+        L.materialise_poc_prices(n, _commercial(_tariff()))
+
+
+def test_snapshots_where_export_pays_more_than_import_costs_are_flagged():
+    """#4: simultaneous import/export would lower cost; say so."""
+    n = _with_export(build_edge_15min(), price=np.full(672, 300.0))
+    terms = L.materialise_poc_prices(n, _commercial(_tariff(), export_link="export",
+                                                    export_price_ref=_REF))
+    # Export pays 300 €/MWh; import costs 50/200/400 — every snapshot outside
+    # the 400 €/MWh evening peak (4 h × 4 × 7 days = 112) is a circulation risk.
+    assert terms["simultaneous_flow_risk_snapshots"] == 672 - 112
+
+
+@pytest.mark.live_solve
+def test_simultaneous_import_and_export_is_flagged_in_the_rows():
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    n = _tariff_only_site()
+    _with_export(n, price=np.full(len(n.snapshots), 300.0))
+    commercial = _commercial(_tariff(), export_link="export", export_price_ref=_REF)
+    assert _solve_cfg(n, commercial)[0] in ("ok", "optimal")
+    rows = compute_cost_breakdown(n, SolverConfig(commercial=commercial))["commercial"]
+    assert "simultaneous_import_export" in rows["flags"]
+
+
+def test_align_averages_a_finer_series():
+    """#10: a 15-min price on hourly snapshots is the hour's mean, not its :00 sample."""
+    idx = pd.date_range("2030-01-01", periods=8, freq="15min")
+    s = pd.Series([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], index=idx)
+    out = L.align_to_snapshots(s, pd.date_range("2030-01-01", periods=2, freq="h"))
+    assert out.tolist() == [2.5, 6.5]
+
+
+def test_an_export_price_aligned_to_another_axis_is_refused():
+    """#10: resampling the snapshots invalidates the materialised price."""
+    n = _with_export(build_edge_15min())
+    L.write_export_price(n, "export", pd.Series(50.0, index=n.snapshots))
+    n.set_snapshots(n.snapshots[::4])  # resample to hourly points: no NaN appears
+    with pytest.raises(L.CommercialBindingError, match="re-apply"):
+        L.materialise_poc_prices(n, _commercial(export_link="export", export_price_ref=_REF))
+
+
+def test_rows_follow_the_links_the_last_solve_priced():
+    """#7: after re-pointing poc_link without a re-solve, rows are flagged, not relabelled."""
+    n = build_edge_15min()
+    n.add("Link", "import2", bus0="grid", bus1="poc", p_nom=80.0, carrier="AC")
+    L.materialise_poc_prices(n, _commercial(_tariff()))
+    n.links_t.p0 = pd.DataFrame({"import": 1.0, "import2": 0.0}, index=n.snapshots)
+    rows = L.energy_cost_rows(n, {"poc_link": "import2"})
+    assert rows["energy_import"] is not None  # still the solved Link's cost
+    assert "config_changed_since_solve" in rows["flags"]
+
+
+# ── route (review #3, #5, #6, #8, #9) ──────────────────────────────────────
+
+
+def _put_cfg(client, commercial):
+    return client.put("/api/simulation/solver_config", json={"commercial": commercial})
+
+
+def test_route_refuses_a_two_way_poc_link_with_a_code(client, install_network):
+    n = build_edge_15min()
+    n.links.loc["import", "p_min_pu"] = -1.0
+    install_network(n)
+    r = _put_cfg(client, {"poc_link": "import"})
+    assert r.status_code == 422
+    assert r.json()["detail"]["code"] == "commercial_binding_invalid"
+
+
+def test_route_refuses_an_export_item_without_an_export_link(client, install_network):
+    install_network(build_edge_15min())
+    credit = TariffItem(id="fee", kind="energy", unit="per_kwh", measured_on="export",
+                        periods=[TariffPeriod(name="all", rate=0.002)])
+    r = _put_cfg(client, _commercial(_tariff(_tou(), credit)))
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "commercial_binding_invalid"
+
+
+def test_route_refuses_periods_that_leave_snapshots_unrated(client, install_network):
+    install_network(build_edge_15min())
+    gappy = TariffItem(id="gappy", kind="energy", unit="per_kwh",
+                       periods=[TariffPeriod(name="night", rate=0.1, start_hour=0, end_hour=6)])
+    r = _put_cfg(client, _commercial(_tariff(gappy)))
+    assert r.status_code == 422
+
+
+def test_route_needs_a_timezone_for_a_zoned_series(client, install_network):
+    """#5: a tz-aware Library series on a site-clock axis with no zone is ambiguous."""
+    n = _with_export(build_edge_15min())
+    install_network(n)
+    idx = n.snapshots.tz_localize("Europe/Berlin")
+    ref = client.post("/api/library/series", json={
+        "name": "berlin", "timestamps": [t.isoformat() for t in idx],
+        "values": [1.0] * len(idx), "meta": {"source": "t"}}).json()
+    r = _put_cfg(client, {"poc_link": "import", "export_link": "export", "export_price_ref": ref})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "timezone_required"
+
+
+def test_route_aligns_a_zoned_series_on_utc_snapshots(client, install_network, session_ctx):
+    """#5: with `timezone` set, snapshots are UTC; a Berlin 12:00 price lands at 11:00."""
+    n = _with_export(build_edge_15min())
+    install_network(n)
+    local = pd.DatetimeIndex(n.snapshots).tz_localize("UTC").tz_convert("Europe/Berlin")
+    vals = [float(t.hour) for t in local]  # price = local hour
+    ref = client.post("/api/library/series", json={
+        "name": "berlin2", "timestamps": [t.isoformat() for t in local],
+        "values": vals, "meta": {"source": "t"}}).json()
+    r = _put_cfg(client, {"poc_link": "import", "export_link": "export",
+                          "export_price_ref": ref, "timezone": "Europe/Berlin"})
+    assert r.status_code == 200, r.text
+    got = session_ctx(client).network.links_t[L.EXPORT_PRICE_ATTR]["export"]
+    assert got.loc[pd.Timestamp("2030-01-07 11:00")] == 12.0
+
+
+def test_route_coverage_refusal_leaves_the_previous_price_intact(client, install_network,
+                                                                 session_ctx):
+    """#6: align first, write only when fully covered."""
+    n = _with_export(build_edge_15min())
+    install_network(n)
+    full = n.snapshots.tz_localize("UTC")
+    ok = client.post("/api/library/series", json={
+        "name": "full", "timestamps": [t.isoformat() for t in full],
+        "values": [5.0] * len(full), "meta": {"source": "t"}}).json()
+    assert _put_cfg(client, {"poc_link": "import", "export_link": "export",
+                             "export_price_ref": ok, "timezone": "UTC"}).status_code == 200
+    short = full[:10]
+    bad = client.post("/api/library/series", json={
+        "name": "short", "timestamps": [t.isoformat() for t in short],
+        "values": [9.0] * 10, "meta": {"source": "t"}}).json()
+    r = _put_cfg(client, {"poc_link": "import", "export_link": "export", "export_price_ref": bad,
+                          "timezone": "UTC"})
+    assert r.status_code == 422 and r.json()["detail"]["code"] == "export_price_coverage"
+    col = session_ctx(client).network.links_t[L.EXPORT_PRICE_ATTR]["export"]
+    assert not col.isna().any() and (col == 5.0).all()

@@ -336,6 +336,19 @@ materialised prices — needed for this WP's gap-0 invariant), `backend/tests/te
   - **Rows.** `cost_breakdown["commercial"] = {energy_import, energy_export, included_in_total: true}` from the
     persisted columns — a labelled split of the Links' statistics OPEX, so the gap stays 0 by construction.
   - Tests: `test_lp_bindings_poc_price.py` (21), `test_solver_config_parity.py`; `types.ts` mirrors the types.
+  - Review round 1 → **FAIL**, fixed: (1) a persisted base/written record per priced Link
+    (`links_t["ic_base_marginal_cost"]`, `links_t["ic_written_marginal_cost"]`) restores any Link a previous
+    config priced — the hook runs on EVERY LOPF, commercial or not; (2) the base is the user's time-varying
+    cost when present (a column that differs from what was written is a re-upload and becomes the new base);
+    (3) PoC/export Links with `p_min_pu < 0` are refused; (4) snapshots where export pays more than import
+    costs are counted (`simultaneous_flow_risk_snapshots`) and a solve that circulates is flagged in the rows;
+    (5) a zoned Library series needs `commercial.timezone` (`timezone_required`), and alignment uses it;
+    (6) the route refuses during a solve (`solver_in_flight`) and writes the price only when fully covered;
+    (7) rows read the Links the last solve priced (`n.meta["ic_poc_links"]`, persisted) and flag
+    `config_changed_since_solve` / `*_not_established` (ADR-0001); (8) the route dry-runs the adders
+    (export item without export Link, unrated snapshots → 422); (9) refusals are `{code, message}`
+    (`commercial_binding_invalid`, `library_org_unknown`); (10) a finer series is averaged per snapshot step and
+    a resampled axis is refused via `n.meta["ic_export_price_axis"]`.
 
 ### WP1.4a Connection agreement — firm, non-firm static, `available_from`
 Files: `backend/services/commercial/connection.py`, `backend/tests/test_connection_agreement.py`.
@@ -347,6 +360,17 @@ Files: `backend/services/commercial/connection.py`, `backend/tests/test_connecti
   mutated attribute (mirror `apply_archetype_pack_detailed().undo()`); **gap 0** (the fee appears as
   `network_capacity` via WP1.7's persisted-data path — implement that row here).
 - [ ] Green: implementation.
+- As implemented: `services/commercial/connection.py` — `apply_connection_agreement(n, agreement, poc_link=,
+  export_link=) -> Applied(facts, undo)`, validated before any mutation. The fee (`per_kw_year`, `per_kw_month`
+  ×12) is €/MW/yr scaled by the horizon in years on a single-period axis (PyPSA charges `capital_cost` once per
+  horizon) and used as is on a multi-period axis (period weightings count years). firm+fee → extendable in
+  [0, cap] with `capital_cost += fee`; firm without fee → `p_nom = cap`; `non_firm_static` → `p_max_pu =
+  cap / p_nom` (fixed physical p_nom required) and the fee on the contracted cap; `available_from` → `p_max_pu =
+  0` before the date, plus `build_year` on a multi-period axis; `non_firm_dynamic`/`fca` → refused until WP1.4b.
+  `run_simulation` applies it just before `_apply_modelling_assumptions` and chains the undo AFTER their
+  restore. `cost_breakdown["commercial"]["network_capacity"]` is recomputed from config + `p_nom_opt` and ADDED
+  to capex (the fee is not on the Link after the undo); gap 0 single- and multi-period. Tests:
+  `test_connection_agreement.py` (18, 6 live).
 
 ### WP1.4b Connection agreement — dynamic envelope and FCA
 - [ ] Design line first: `services/adequacy/stress.py` knows `VALID_KINDS=("parametric","profiles")`, and its

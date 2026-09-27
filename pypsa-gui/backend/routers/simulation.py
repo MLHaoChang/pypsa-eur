@@ -335,45 +335,58 @@ def _bind_commercial(commercial, user) -> dict:
     its Library export price onto the export Link (Edge Investment Case WP1.3).
 
     The price is resolved in the ACTIVE PROJECT's org (the caller's org for an
-    unsaved network) and written to `links_t["ic_export_price"]`, where it
-    persists with the network; `library_refs.json` pins the version (WP1.1c).
-    Returns the plain dict stored on `SolverConfig.commercial`.
+    unsaved network), aligned on the current snapshot axis and written to
+    `links_t["ic_export_price"]` only when every snapshot is covered; it then
+    persists with the network, and `library_refs.json` pins the version
+    (WP1.1c). Returns the plain dict stored on `SolverConfig.commercial`.
+    Refusals carry `{code, message}`.
     """
     from fastapi import HTTPException
 
     from services.commercial import lp_bindings
     from services.library import series_store
 
+    def refuse(status: int, code: str, message: str):
+        return HTTPException(status, {"code": code, "message": message})
+
+    ctx = PyPSAService.get_active_context()
+    if _solver_in_flight_ctx(ctx):
+        raise refuse(409, "solver_in_flight",
+                     "a solve is running on this project; change the commercial config "
+                     "after it finishes")
     n = PyPSAService.get_network()
     try:
         lp_bindings.validate_for_network(n, commercial)
     except lp_bindings.CommercialBindingError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        raise refuse(422, exc.code, str(exc)) from exc
     ref = commercial.export_price_ref
     if ref is not None:
         from db.models import User
         from db.session import SessionLocal
         from services import library_acl
 
-        org = PyPSAService.get_active_context().org_id
+        org = ctx.org_id
         with SessionLocal() as db:
             if org is None and isinstance(user, User):
                 org = library_acl.org_of(db, user)
             if org is None:
-                raise HTTPException(409, {"code": "library_ref_stale",
-                                          "message": "save the project first: a Library "
-                                                     "ref resolves in the project's org"})
+                raise refuse(409, "library_org_unknown",
+                             "save the project first: a Library ref resolves in the "
+                             "project's organization")
             try:
                 series = series_store.resolve(db, org, ref)
             except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
-                raise HTTPException(409, {"code": "library_ref_stale",
-                                          "message": str(exc)}) from exc
-        with PyPSAService.get_lock():
-            uncovered = lp_bindings.write_export_price(n, commercial.export_link, series)
+                raise refuse(409, "library_ref_stale", str(exc)) from exc
+        try:
+            with PyPSAService.get_lock():
+                uncovered = lp_bindings.write_export_price(
+                    n, commercial.export_link, series, commercial.timezone)
+        except lp_bindings.CommercialBindingError as exc:
+            raise refuse(422, exc.code, str(exc)) from exc
         if uncovered:
-            raise HTTPException(422, {"code": "export_price_coverage",
-                                      "message": f"Library series {ref.id!r} v{ref.version} "
-                                                 f"does not cover {uncovered} snapshot(s)"})
+            raise refuse(422, "export_price_coverage",
+                         f"Library series {ref.id!r} v{ref.version} does not cover "
+                         f"{uncovered} snapshot(s); nothing was written")
     return commercial.model_dump(mode="json")
 
 
