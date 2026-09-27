@@ -481,3 +481,17 @@ def test_a_non_finite_rate_is_refused_by_the_model(bad):
     with pytest.raises(ValidationError):
         _tariff({"id": "e", "kind": "energy", "unit": "per_kwh",
                  "periods": [{"name": "all", "rate": bad}]})
+
+
+@pytest.mark.live_solve
+def test_a_zero_weight_snapshot_does_not_zero_the_reported_peak():
+    """WP1.6/1.7 round 3: an interval weighing nothing has no mean; it must
+    not turn the reported actual peak into 0.0 (ADR-0001)."""
+    n = _site()
+    n.snapshot_weightings.iloc[5] = 0.0
+    _solve(n, _commercial(_tariff(_demand())))
+    (v,) = n.meta[L.META_DEMAND].values()
+    p0 = n.links_t.p0["import"]
+    expected = float(p0[n.snapshot_weightings.objective > 0].max())
+    assert v["peak_mw"] == pytest.approx(expected, abs=1e-6)
+    assert v["peak_mw"] > 0

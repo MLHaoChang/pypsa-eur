@@ -556,6 +556,8 @@ Files: `lp_bindings.py`, `backend/tests/test_group_contract.py` (fixture: two me
   `energy_tiers_not_established` / `config_changed_since_solve`; uncomputable shares flag
   `group_energy_share_not_established`; preflight warns `commercial.group_fee_bypass` when a capacity fee sits
   on `poc_link` and another member is extendable.
+- Round 3 → **PASS** (WP1.6 and WP1.7). Low closed in shared WP1.5a code: an interval whose weights sum to 0
+  is left out of the reported actual peak (it has no mean and no constraint) instead of turning it into 0.0.
 
 ### WP1.7 Reload-safe cost-breakdown rows and objective reconciliation (the P1 gate)
 Files: `backend/services/results/cost_breakdown.py`, `objective_decomposition.py`,

@@ -664,9 +664,18 @@ def _read_demand_solution(n, spec: dict) -> dict | None:
         b = float(billed.loc[k["key"]])
         pos, group = k["positions"], k["group"]
         f = flow[pos] - (exp[pos] if k["net"] and exp is not None else 0.0)
-        means = (np.bincount(group, weights=f * w_all[pos])
-                 / np.bincount(group, weights=w_all[pos]))
-        v = max(0.0, float(means.max())) if len(means) else float(sol.loc[k["key"]])
+        if group.max() + 1 == len(pos):
+            means = f  # one snapshot per interval: constrained as is, like the LP
+        else:
+            # An interval weighing nothing has no mean and no constraint
+            # (WP1.6/1.7 round 3): left out, never read as 0.
+            wsum = np.bincount(group, weights=w_all[pos])
+            ok = wsum > 0
+            means = np.bincount(group, weights=f * w_all[pos])[ok] / wsum[ok]
+        top = float(means.max()) if len(means) else float("nan")
+        if not np.isfinite(top):
+            top = float(sol.loc[k["key"]])  # nothing to read: the solved variable
+        v = max(0.0, top)
         # A floor is the month's running peak from earlier windows (P6 hook).
         v = max(v, float(spec.get("floors", {}).get(k["key"], 0.0)))
         if not (np.isfinite(v) and np.isfinite(b)):
