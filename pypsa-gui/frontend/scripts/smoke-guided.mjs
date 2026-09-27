@@ -347,6 +347,21 @@ async function phaseP229(browser) {
       `buses/links/generators equal after the sweep${afterSweep.diffs.length ? `: ${afterSweep.diffs.slice(0, 5).join('; ')}` : ''}`)
     const status = await api('GET', '/api/simulation/status')
     info(`simulation status after the sweep: dispatch=${status.dispatch} condition=${status.condition}`)
+    // Bug 2: the sweep's completion re-reads the status the greeting shows,
+    // so the dock must no longer say "Not solved yet." (nor claim "Solved —").
+    const solve = byId('chat-launch-solve')
+    await page.waitForFunction(() => {
+      const t = document.querySelector('[data-testid="chat-launch-solve"]')?.textContent ?? ''
+      return t !== '' && t !== 'Not solved yet.'
+    }, null, { timeout: 15_000 }).catch(() => {})
+    const greeting = ((await solve.textContent().catch(() => '')) ?? '').trim()
+    info(`dock greeting: "${greeting}"`)
+    check(greeting !== '' && greeting !== 'Not solved yet.', 'greeting is not "Not solved yet." after the sweep')
+    if (status.dispatch === 'fresh' && status.condition == null) {
+      check(greeting.startsWith('The network carries dispatch from a study re-solve'),
+        'greeting names the study re-solve (no foreground solve recorded)')
+    }
+    await shot(page, 'greeting-after-sweep')
 
     // Tagging tour (obstacle 3)
     step('"How to tag the network" → Properties on a bus, Edit, coach mark on eh-bus-fields')

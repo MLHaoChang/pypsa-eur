@@ -7,6 +7,7 @@ import type {
 } from '../../api/simulation'
 import { formatApiDetail } from '../../api/client'
 import { useUIStore } from '../../store/uiStore'
+import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
 import {
   activityChipText, basisSuffix, foldChipText, foldChipTitle,
@@ -382,6 +383,7 @@ export function McPanel() {
   })
   const payload = (data ?? null) as McStatus | null
   const running = payload?.status === 'running'
+  useStudyFinishedInvalidation(data === undefined ? undefined : payload?.status ?? null)
 
   // Same query keys LostLoadTab uses, so the comparison table reads the
   // cache the tab already populated rather than issuing its own round-trips.

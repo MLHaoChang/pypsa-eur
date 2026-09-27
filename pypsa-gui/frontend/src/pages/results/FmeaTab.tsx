@@ -10,6 +10,7 @@ import toast from 'react-hot-toast'
 import { Download, Plus, RefreshCw, Square, Trash2 } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
+import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
 import { downloadCSV, fmtCurrency } from './shared'
 import { blockerMessage } from './McPanel'
@@ -62,6 +63,9 @@ export default function FmeaTab() {
       (q.state.data as { sweep_status?: string } | null)?.sweep_status === 'running'
         ? 2000 : false,
   })
+  // The sweep's closing base re-solve leaves fresh dispatch: re-read status.
+  useStudyFinishedInvalidation(modes === undefined ? undefined
+    : (modes as { sweep_status?: string | null } | null)?.sweep_status ?? null)
   const sidecarKey = nk(currentProject, 'adequacy', 'worksheet')
   const { data: sidecar } = useQuery({
     queryKey: sidecarKey,

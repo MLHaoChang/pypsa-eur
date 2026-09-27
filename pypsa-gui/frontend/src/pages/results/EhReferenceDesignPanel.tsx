@@ -19,10 +19,11 @@ import {
   type EhStudyRequestBody,
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
+import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { useChatStore } from '../../store/chatStore'
 import { nk } from '../../utils/queryKeys'
 import { blockerMessage } from './McPanel'
-import { downloadCSV, downloadJSON, fmtCurrency, fmtEnergy } from './shared'
+import { downloadCSV, downloadJSON, fmtCurrency, fmtEnergy, fmtPower } from './shared'
 import { GuideButton, useGuide } from '../../components/GuidedTour'
 import { prepareTaggingTour } from './prepareTaggingTour'
 import { InfoTip } from '../../layout/properties/cardKit'
@@ -54,11 +55,13 @@ const cell = (v: unknown) =>
   v == null || v === '' ? '—' : String(v)
 
 /** A numeric table cell: MWh via fmtEnergy (scales to GWh/TWh), € via
- *  fmtCurrency; anything else (or a non-number) renders like `cell`. */
-export const cellNum = (v: unknown, kind: 'mwh' | 'eur' | 'plain'): string => {
+ *  fmtCurrency, MW via fmtPower; anything else (or a non-number) renders
+ *  like `cell`. */
+export const cellNum = (v: unknown, kind: 'mwh' | 'eur' | 'mw' | 'plain'): string => {
   if (typeof v !== 'number' || !Number.isFinite(v)) return cell(v)
   if (kind === 'mwh') return fmtEnergy(v, 2)
   if (kind === 'eur') return fmtCurrency(v, 2)
+  if (kind === 'mw') return fmtPower(v, 2)
   return String(v)
 }
 
@@ -693,6 +696,7 @@ export function EhReferenceDesignPanel() {
   })
   const study = (studyData ?? null) as EhStudyPayload | null
   const running = study?.status === 'running'
+  useStudyFinishedInvalidation(studyData === undefined ? undefined : study?.status ?? null)
 
   // Finished cue (click-through obstacles 1/4): the report lands below the
   // fold with nothing saying the run ended. Only a running → done transition
@@ -1368,7 +1372,7 @@ export function EhReferenceDesignPanel() {
                           <th className="text-right font-medium py-1 pr-3">Target ‱</th>
                           <th className="text-left font-medium py-1 pr-3">Status</th>
                           <th className="text-right font-medium py-1 pr-3">Cost</th>
-                          <th className="text-right font-medium py-1">ENS MWh</th>
+                          <th className="text-right font-medium py-1">ENS</th>
                         </tr>
                       </thead>
                       <tbody className="font-mono">
@@ -1393,8 +1397,7 @@ export function EhReferenceDesignPanel() {
                                   ? eur(p.point.total_system_cost_eur) : '—'}
                               </td>
                               <td className="py-0.5 text-right">
-                                {p.point?.achieved_ens_mwh != null
-                                  ? p.point.achieved_ens_mwh.toFixed(2) : '—'}
+                                {cellNum(p.point?.achieved_ens_mwh, 'mwh')}
                               </td>
                             </tr>
                           )
@@ -1432,7 +1435,7 @@ export function EhReferenceDesignPanel() {
                           <th className="text-left font-medium py-1 pr-3">Link</th>
                           <th className="text-right font-medium py-1 pr-3">Criticality €/yr</th>
                           <th className="text-right font-medium py-1 pr-3">Occ./yr</th>
-                          <th className="text-right font-medium py-1">ΔEUE MWh</th>
+                          <th className="text-right font-medium py-1">ΔEUE</th>
                         </tr>
                       </thead>
                       <tbody className="font-mono">
@@ -1447,7 +1450,7 @@ export function EhReferenceDesignPanel() {
                               {r.occurrence_per_year?.toFixed(2) ?? '—'}
                             </td>
                             <td className="py-0.5 text-right">
-                              {r.delta_eue_mwh != null ? r.delta_eue_mwh.toFixed(2) : '—'}
+                              {cellNum(r.delta_eue_mwh, 'mwh')}
                             </td>
                           </tr>
                         ))}
@@ -1483,7 +1486,7 @@ export function EhReferenceDesignPanel() {
                         <span key={carrier} data-testid={`eh-multi-energy-${carrier}`}>
                           <span className="text-muted">{carrier} </span>
                           <span className="text-text font-mono">
-                            {mwh.toFixed(2)} MWh
+                            {fmtEnergy(mwh, 2)}
                           </span>
                         </span>
                       ))}
@@ -1498,7 +1501,7 @@ export function EhReferenceDesignPanel() {
                         <span key={load} data-testid={`eh-multi-energy-load-${load}`}>
                           <span className="text-muted">{load} </span>
                           <span className="text-text font-mono">
-                            {mwh.toFixed(2)} MWh
+                            {fmtEnergy(mwh, 2)}
                           </span>
                         </span>
                       ))}
@@ -1553,7 +1556,7 @@ export function EhReferenceDesignPanel() {
                       <th className="text-left font-medium py-1 pr-3">Scenario</th>
                       <th className="text-left font-medium py-1 pr-3">Status</th>
                       <th className="text-right font-medium py-1 pr-3">Cost</th>
-                      <th className="text-right font-medium py-1 pr-3">ENS MWh</th>
+                      <th className="text-right font-medium py-1 pr-3">ENS</th>
                       <th className="text-left font-medium py-1">Meets</th>
                     </tr>
                   </thead>
@@ -1571,7 +1574,7 @@ export function EhReferenceDesignPanel() {
                           {o.cost_at_target_eur != null ? eur(o.cost_at_target_eur) : '—'}
                         </td>
                         <td className="py-0.5 pr-3 text-right">
-                          {cell(o.achieved_ens_mwh)}
+                          {cellNum(o.achieved_ens_mwh, 'mwh')}
                         </td>
                         <td className="py-0.5 font-sans">
                           {o.meets_target == null ? '—' : o.meets_target ? 'yes' : 'no'}
@@ -1751,7 +1754,7 @@ export function EhReferenceDesignPanel() {
                       <th className="text-left font-medium py-1 pr-3">Contingency</th>
                       <th className="text-left font-medium py-1 pr-3">Status</th>
                       <th className="text-right font-medium py-1 pr-3">Cost</th>
-                      <th className="text-right font-medium py-1">Built MW</th>
+                      <th className="text-right font-medium py-1">Built</th>
                     </tr>
                   </thead>
                   <tbody className="font-mono">
@@ -1767,7 +1770,7 @@ export function EhReferenceDesignPanel() {
                           {cellNum(c.cost_at_target_eur, 'eur')}
                         </td>
                         <td className="py-0.5 text-right">
-                          {cell(c.built_p_nom_mw)}
+                          {cellNum(c.built_p_nom_mw, 'mw')}
                         </td>
                       </tr>
                     ))}
