@@ -85,6 +85,54 @@ def _stage_estimate(stage: str, net, pack: ArchetypePack, ctx: dict) -> tuple[
     return 0, "exact", None
 
 
+_OUTAGE_CLASSES = (("Generator", "generators"), ("Link", "links"),
+                   ("StorageUnit", "storage_units"))
+_OUTAGE_MISSING_CAP = 20
+
+
+def _outage_units(net, import_links) -> dict[str, Any]:
+    """P24: units with usable outage data, per class, and the thermal-like
+    units without it. "Usable" is what the occurrence resolver yields
+    (``resolve_outage_params``: asset value, else carrier default) — a finite
+    rate AND a finite MTTR. Thermal-like := Generators whose carrier
+    ``_gen_category`` calls ``conventional``, plus the import Links."""
+    import math
+
+    from services.adequacy.occurrence import resolve_outage_params
+    from services.profile_shapes import _gen_category
+
+    def finite(v) -> bool:
+        try:
+            return math.isfinite(float(v))
+        except (TypeError, ValueError):
+            return False
+
+    by_class: dict[str, int] = {}
+    missing: list[dict[str, str]] = []
+    imports = set(import_links)
+    for cls, attr in _OUTAGE_CLASSES:
+        params = resolve_outage_params(net, attr)
+        df = getattr(net, attr)
+        count = 0
+        for name in params.index:
+            ok = (finite(params.at[name, "rate"])
+                  and finite(params.at[name, "mttr_hours"]))
+            count += int(ok)
+            if ok:
+                continue
+            if cls == "Generator":
+                thermal = _gen_category(
+                    str(df.at[name, "carrier"]) if "carrier" in df.columns
+                    else "") == "conventional"
+            else:
+                thermal = cls == "Link" and name in imports
+            if thermal:
+                missing.append({"class": cls, "name": str(name)})
+        by_class[cls] = count
+    return {"count": sum(by_class.values()), "by_class": by_class,
+            "missing": missing[:_OUTAGE_MISSING_CAP]}
+
+
 def eh_readiness(network, pack: ArchetypePack, *, budget_solves: int,
                  stages=None, voll: float | None = None,
                  dtc_attribution: str | None = None) -> dict[str, Any]:
@@ -224,4 +272,13 @@ def eh_readiness(network, pack: ArchetypePack, *, budget_solves: int,
         "estimated_solves": total,
         "stages": rows,
         "warnings": warnings,
+        # P24 (additive): the hub-design Site / Goal cards read these.
+        "pack_defaults": {
+            "target_lole_h": pack.availability.target_lole_h,
+            "ens_cap_permyriad": pack.availability.ens_cap_permyriad,
+            "certification_metric": pack.availability.certification_metric,
+        },
+        "outage_units": _outage_units(net, links),
+        "import_p_nom_mw": (float(net.links.loc[list(links), "p_nom"].sum())
+                            if links else None),
     }

@@ -352,6 +352,7 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         "/eh_study",
         "/eh_reference_design",
         "/eh_readiness",
+        "/eh_review",
         "/eh_redundancy",
         "/eh_levers",
         "/eh_dtc",

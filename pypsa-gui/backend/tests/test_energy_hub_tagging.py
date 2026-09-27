@@ -461,3 +461,153 @@ def test_readiness_route_computes_outside_the_network_lock(
     r = client.get("/api/results/eh_readiness", params={"archetype": "off_grid"})
     assert r.status_code == 200, r.text
     assert seen == {"free": True, "shared": False}
+
+
+# ── P24: additive readiness keys for the hub-design Site / Goal cards ───────
+
+_PRE_P24_READINESS_KEYS = {
+    "archetype", "pack_hash", "import", "critical_buses", "dtc", "scr",
+    "storage_units", "class_b", "mc_boundary", "budget_solves",
+    "estimated_solves", "stages", "warnings",
+}
+_P24_READINESS_KEYS = {"pack_defaults", "outage_units", "import_p_nom_mw"}
+
+
+def _datacenter_readiness(client, install_network, **over):
+    import json
+    import pathlib
+    import sys
+
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]
+                           / "project_templates"))
+    import eh_templates as TPL
+    n = TPL.build_eh_datacenter()
+    install_network(n)
+    meta = TPL.TEMPLATE_META["eh_datacenter"]
+    overrides = {**meta["pack_overrides"], **over}
+    r = client.get("/api/results/eh_readiness", params={
+        "archetype": meta["recommended_archetype"],
+        "pack_overrides": json.dumps(overrides)})
+    assert r.status_code == 200, r.text
+    return r.json(), TPL.build_eh_datacenter(), meta, overrides
+
+
+def test_readiness_p24_keys_are_additive(client, install_network):
+    body, _n, _meta, _ov = _datacenter_readiness(client, install_network)
+    assert set(body) == _PRE_P24_READINESS_KEYS | _P24_READINESS_KEYS
+    # the pre-existing keys keep their shape and values on the template
+    assert body["archetype"] == "weak_flexible"
+    assert body["import"]["links"] == ["grid_import"]
+    assert body["import"]["applied"] is True
+    assert set(body["import"]) == {"rule", "links", "applied"}
+    assert set(body["scr"]) == {"status", "note", "min_scr"}
+    assert set(body["class_b"]) == {"k", "closed_import_links", "error"}
+    assert sum(r["solves"] for r in body["stages"]) == body["estimated_solves"]
+
+
+def test_readiness_pack_defaults_follow_the_overridden_pack(
+        client, install_network):
+    from services.adequacy.eh_study_runner import (
+        _PACK_FACTORY,
+        apply_pack_overrides,
+    )
+    body, _n, meta, ov = _datacenter_readiness(client, install_network)
+    pack = apply_pack_overrides(
+        _PACK_FACTORY[meta["recommended_archetype"]](), ov)
+    av = pack.availability
+    assert body["pack_defaults"] == {
+        "target_lole_h": av.target_lole_h,
+        "ens_cap_permyriad": av.ens_cap_permyriad,
+        "certification_metric": av.certification_metric,
+    }
+    # an override is what the study would run, so it is what readiness shows
+    body2, *_ = _datacenter_readiness(client, install_network,
+                                      target_lole_h=7.5)
+    assert body2["pack_defaults"]["target_lole_h"] == 7.5
+    assert body2["pack_defaults"]["target_lole_h"] != av.target_lole_h
+
+
+def test_readiness_outage_units_count_via_resolve_outage_params(
+        client, install_network):
+    import json
+    import math
+
+    from services.adequacy.occurrence import resolve_outage_params
+    from services.profile_shapes import _gen_category
+
+    _body, n, _meta, _ov = _datacenter_readiness(client, install_network)
+    # a rate without a repair time (and no carrier default to lend one) is
+    # not usable outage data
+    n.add("Generator", "odd_unit", bus=n.buses.index[0], carrier="mystery",
+          p_nom=1.0)
+    n.generators.at["odd_unit", "outage_rate_value"] = 0.1
+    n.generators.at["odd_unit", "mttr_hours"] = float("nan")
+    install_network(n)
+    body = client.get("/api/results/eh_readiness", params={
+        "archetype": "weak_flexible",
+        "pack_overrides": json.dumps(_ov)}).json()
+    by_class = {}
+    for cls, attr in (("Generator", "generators"), ("Link", "links"),
+                      ("StorageUnit", "storage_units")):
+        p = resolve_outage_params(n, attr)
+        by_class[cls] = int(sum(
+            1 for name in p.index
+            if math.isfinite(float(p.at[name, "rate"]))
+            and math.isfinite(float(p.at[name, "mttr_hours"]))))
+    ou = body["outage_units"]
+    assert ou["by_class"] == by_class
+    assert ou["count"] == sum(by_class.values())
+    assert ou["count"] > 0
+    assert ou["missing"] == []          # the template rates every thermal unit
+
+    # untag a conventional generator's outage data: it is listed as missing
+    gens = n.generators
+    thermal = [g for g in gens.index
+               if _gen_category(str(gens.at[g, "carrier"])) == "conventional"]
+    assert thermal
+    victim = thermal[0]
+    n.generators.at[victim, "outage_rate_value"] = float("nan")
+    n.generators.at[victim, "carrier"] = "diesel_unrated"
+    install_network(n)
+    r = client.get("/api/results/eh_readiness", params={
+        "archetype": "weak_flexible",
+        "pack_overrides": json.dumps(_ov)})
+    ou2 = r.json()["outage_units"]
+    assert {"class": "Generator", "name": victim} in ou2["missing"]
+    assert ou2["count"] == ou["count"] - 1
+
+
+def test_readiness_import_p_nom_mw_sums_the_import_links(
+        client, install_network):
+    body, n, _meta, ov = _datacenter_readiness(client, install_network)
+    links = body["import"]["links"]
+    assert links
+    # the pack's import overlay (import_p_nom_mw = 40) is what would run
+    assert body["import_p_nom_mw"] == pytest.approx(ov["import_p_nom_mw"])
+    # ... also when it differs from the rating on the network itself
+    raw = float(n.links.loc[links, "p_nom"].sum())
+    capped, *_ = _datacenter_readiness(client, install_network,
+                                       import_p_nom_mw=25.0)
+    assert raw != 25.0
+    assert capped["import_p_nom_mw"] == pytest.approx(25.0)
+
+    from services.adequacy.eh_readiness import eh_readiness
+    from tests.test_energy_hub_frontier_fmea import _feeder_hub
+    from models.energy_hub import default_strong_grid_pack
+    fh = _feeder_hub()
+    ready = eh_readiness(fh, default_strong_grid_pack(), budget_solves=10)
+    assert ready["import_p_nom_mw"] == pytest.approx(
+        float(fh.links.loc[ready["import"]["links"], "p_nom"].sum()))
+    none = eh_readiness(_net_no_import(), default_strong_grid_pack(),
+                        budget_solves=10)
+    assert none["import"]["links"] == []
+    assert none["import_p_nom_mw"] is None
+
+
+def _net_no_import() -> pypsa.Network:
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=2, freq="h"))
+    n.add("Bus", "hub", carrier="AC")
+    n.add("Load", "l", bus="hub", p_set=10.0)
+    n.add("Generator", "g", bus="hub", carrier="gas", p_nom=20.0)
+    return n

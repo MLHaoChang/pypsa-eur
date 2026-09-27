@@ -1605,28 +1605,16 @@ def get_feature_guide(tour: str | None = None, field: str | None = None) -> dict
 
 def review_eh_study() -> dict:
     """Analyse the latest Energy Hub study (P22): findings with evidence,
-    recommendations and exact tool actions the user may choose to apply."""
+    recommendations and exact tool actions the user may choose to apply.
+    One source with ``GET /api/results/eh_review`` (P24):
+    ``eh_review.review_latest``."""
     from routers import results as R
-    from services.adequacy.eh_report import eh_reference_design_http_payload
-    from services.adequacy.eh_review import review_report
+    from services.adequacy.eh_review import review_latest
 
     record = R.get_eh_study()
-    record = record if isinstance(record, dict) else None
-    if record and record.get("status") == "running":
-        return {"status": "running",
-                "message": "the EH study is still running — poll "
-                           "get_adequacy_results('eh_study') first"}
-    body, status = eh_reference_design_http_payload(R._state)
-    source = "stored report"
-    if status == 204 or not isinstance(body, dict):
-        body = (record or {}).get("report")
-        source = "study record (the stored report was cleared by a later solve)"
-    if not isinstance(body, dict):
-        return {"status": "no_data",
-                "message": _ADEQUACY_NO_DATA_HINTS["eh_reference_design"]}
-    out = review_report(body, record)
-    out["source"] = source
-    return out
+    return review_latest(
+        R._state, record if isinstance(record, dict) else None,
+        no_data_message=_ADEQUACY_NO_DATA_HINTS["eh_reference_design"])
 
 
 def _campaign_gated(study: str, start, **estimate_kwargs):

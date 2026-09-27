@@ -5,7 +5,12 @@
  *
  *   cd pypsa-gui/frontend
  *   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs \
- *     --phase P22.9|P23 [--template eh_datacenter] [--out <dir>] [--keep]
+ *     --phase P22.9|P23|P24-BE [--template eh_datacenter] [--out <dir>] [--keep]
+ *
+ * P24-BE re-runs the P22.9 (Expert) path unchanged and, around its study,
+ * checks GET /api/results/eh_review with curl: 204 before, `running` while
+ * the study runs, `ok` with `stale:false` after (plan P24-BE gate row 5).
+ * The transcript goes to <out>/eh_review-curl.txt.
  *
  * It starts its own uvicorn (local mode, ANTHROPIC_API_KEY unset, app data
  * and projects under a scratch dir), Vite on 5173 and — after the send-gate
@@ -20,7 +25,7 @@
  * browser self-check, a busy port or a server that never came up).
  */
 import { createRequire } from 'node:module'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -47,7 +52,7 @@ const TEMPLATE_NAMES = {
   eh_h2_hub: 'Industrial Hydrogen Hub',
   eh_microgrid: 'Island Microgrid',
 }
-const PHASES = new Set(['P22.9', 'P23'])
+const PHASES = new Set(['P22.9', 'P23', 'P24-BE'])
 
 // ── args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -178,6 +183,25 @@ function tableDiffs(before, after) {
   return { diffs, nomOpt }
 }
 
+// ── P24-BE: GET /api/results/eh_review with curl (plan gate row 5) ─────────
+const reviewTranscript = []
+function curlReview() {
+  const url = `${API}/api/results/eh_review`
+  const out = execFileSync('curl', ['-sS', '-w', '\n%{http_code}', url], { encoding: 'utf8' })
+  const nl = out.lastIndexOf('\n')
+  const status = Number(out.slice(nl + 1))
+  const body = out.slice(0, nl)
+  reviewTranscript.push(`$ curl -sS -w '\\n%{http_code}' ${url}`,
+    body.length > 600 ? `${body.slice(0, 600)}… (${body.length} bytes)` : body, String(status), '')
+  return { status, json: body ? JSON.parse(body) : null }
+}
+function saveReviewTranscript() {
+  if (!reviewTranscript.length) return
+  const f = path.join(args.out, 'eh_review-curl.txt')
+  fs.writeFileSync(f, reviewTranscript.join('\n'))
+  info(`eh_review transcript ${f}`)
+}
+
 // ── the stub model (every phase, spec §8.4 step 2) ─────────────────────────
 async function activateStubProfile() {
   start('stub', PYTHON, [path.join(BACKEND, 'smoke', 'stub_openai_endpoint.py')], { cwd: BACKEND })
@@ -207,7 +231,7 @@ async function seedStorageOnce(context, entries) {
 }
 
 // ── the P22.9 path (spec §2.11) ─────────────────────────────────────────────
-async function phaseP229(browser) {
+async function phaseP229(browser, { reviewChecks = false } = {}) {
   const consoleLines = []
   const requests = []
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
@@ -291,6 +315,12 @@ async function phaseP229(browser) {
     const before = await snapshotTables()
     info(`live tables: ${TABLES.map(t => `${t}=${before[t].length}`).join(' ')}`)
 
+    if (reviewChecks) {
+      step('P24-BE: GET /api/results/eh_review before any study → 204')
+      const r0 = curlReview()
+      check(r0.status === 204 && r0.json === null, `eh_review ${r0.status} with an empty body`)
+    }
+
     // Results → Adequacy → Energy Hub reference design → Run (recommended)
     step('Results → Adequacy → "Energy Hub reference design" → Run')
     await resultsNav().click()
@@ -306,6 +336,16 @@ async function phaseP229(browser) {
     await byId('eh-readiness-paused').waitFor({ timeout: 30_000 })
     check(await byId('eh-template-banner').isVisible(), 'template banner stays while the study runs')
     await shot(page, 'study-running')
+    if (reviewChecks) {
+      step('P24-BE: GET /api/results/eh_review during the study → 200 running')
+      const rec = await api('GET', '/api/results/eh_study')
+      info(`eh_study status at this moment: ${rec?.status}`)
+      const r1 = curlReview()
+      check(r1.status === 200 && r1.json?.status === 'running',
+        `eh_review ${r1.status} status=${r1.json?.status}`)
+      check(typeof r1.json?.message === 'string' && r1.json.message.length > 0,
+        `running message: "${r1.json?.message}"`)
+    }
 
     step('study finishes → finished cue → report in view')
     const cue = byId('eh-study-finished-cue')
@@ -313,6 +353,16 @@ async function phaseP229(browser) {
     const study = await api('GET', '/api/results/eh_study')
     check(study?.status === 'done', `study status done (${study?.archetype})`)
     check((await cue.textContent()).trim() === 'Study finished — view report', 'cue text')
+    if (reviewChecks) {
+      step('P24-BE: GET /api/results/eh_review after the study → 200 ok, stale:false')
+      const r2 = curlReview()
+      check(r2.status === 200 && r2.json?.status === 'ok', `eh_review ${r2.status} status=${r2.json?.status}`)
+      check(r2.json?.stale === false, `stale=${r2.json?.stale} (source "${r2.json?.source}")`)
+      check(Array.isArray(r2.json?.findings) && r2.json?.summary
+        && r2.json.summary.archetype === study?.archetype,
+        `summary.archetype=${r2.json?.summary?.archetype}, ${r2.json?.findings?.length} findings, ` +
+        `verdict=${r2.json?.summary?.verdict}`)
+    }
     await shot(page, 'finished-cue')
     await cue.click()
     await sleep(1200)  // smooth scroll
@@ -424,6 +474,7 @@ async function phaseP229(browser) {
     info(`console log ${logFile}`)
     throw e
   } finally {
+    saveReviewTranscript()
     await context.close()
   }
 }
@@ -744,6 +795,7 @@ try {
 
   browser = await chromium.launch({ headless: true })
   if (args.phase === 'P22.9') await phaseP229(browser)
+  else if (args.phase === 'P24-BE') await phaseP229(browser, { reviewChecks: true })
   else if (args.phase === 'P23') await phaseP23(browser)
   console.log(`\nPASS — ${shots.length} screenshots in ${args.out}`)
 } catch (e) {

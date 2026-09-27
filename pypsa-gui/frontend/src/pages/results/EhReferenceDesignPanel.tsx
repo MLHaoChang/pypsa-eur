@@ -687,6 +687,9 @@ export function EhReferenceDesignPanel() {
   const levKey = nk(currentProject, 'results', 'eh_levers')
   const dtcKey = nk(currentProject, 'results', 'eh_dtc')
   const dtcPlanKey = nk(currentProject, 'results', 'eh_dtc_planning')
+  // P24: the hub-design cards' review (GET /results/eh_review) goes stale
+  // with the study, so it is invalidated with the panel's own set.
+  const reviewKey = nk(currentProject, 'results', 'eh_review')
 
   const { data: studyData } = useQuery({
     queryKey: studyKey,
@@ -784,7 +787,8 @@ export function EhReferenceDesignPanel() {
 
   const invalidateAll = () => {
     setExportError(null)
-    for (const key of [studyKey, reportKey, redKey, levKey, dtcKey, dtcPlanKey]) {
+    for (const key of [studyKey, reportKey, redKey, levKey, dtcKey, dtcPlanKey,
+      reviewKey]) {
       void qc.invalidateQueries({ queryKey: key })
     }
   }

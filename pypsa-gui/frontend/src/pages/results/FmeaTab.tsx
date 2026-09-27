@@ -11,6 +11,7 @@ import { Download, Plus, RefreshCw, Square, Trash2 } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
+import { useStartFmeaSweep } from '../../hooks/useStartFmeaSweep'
 import { nk } from '../../utils/queryKeys'
 import { downloadCSV, fmtCurrency } from './shared'
 import { blockerMessage } from './McPanel'
@@ -93,33 +94,9 @@ export default function FmeaTab() {
       queryKey: nk(currentProject, 'results', 'fmea_modes') }),
   })
 
-  const sweep = useMutation({
-    mutationFn: async () => {
-      // E2E review m4: an unreadable registry used to start a class-B-only
-      // sweep silently — the class C rows would just be missing.
-      let scenarios: Array<Record<string, unknown>> = []
-      if (currentProject) {
-        let reg: { scenarios?: Array<Record<string, unknown>>; error?: string | null }
-        try {
-          reg = await resultsApi.getStressScenarios(currentProject)
-        } catch (e) {
-          throw new Error(
-            `could not read this project's stress-scenario registry ` +
-            `(${blockerMessage(e)}) — sweep not started, class C would be missing`)
-        }
-        if (reg?.error) {
-          throw new Error(`${reg.error} — sweep not started, class C would be missing`)
-        }
-        scenarios = reg?.scenarios ?? []
-      }
-      return resultsApi.postFmeaSweep(scenarios)
-    },
-    onSuccess: () => { void refetchModes() },
-    // The backend's own sentence (a 409 names the study that blocks the
-    // sweep; a 422 names the missing VOLL), not axios' status-code line —
-    // the other panels already read it through `blockerMessage` (M11).
-    onError: (e: unknown) => toast.error(`Sweep failed to start: ${blockerMessage(e)}`),
-  })
+  // Shared with the hub-design Improve card (P24): registry first, an
+  // unreadable registry refuses, the backend's sentence on a refused start.
+  const sweep = useStartFmeaSweep({ onStarted: () => { void refetchModes() } })
   const sweepRunning =
     (modes as ModesPayload | null | undefined)?.sweep_status === 'running' ||
     sweep.isPending

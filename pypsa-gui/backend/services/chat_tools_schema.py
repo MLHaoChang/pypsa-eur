@@ -2320,7 +2320,7 @@ TOOL_ROUTES: dict[str, list] = {
     "put_stress_scenarios": [("PUT", "/api/projects/{name}/stress_scenarios")],
     "get_eh_template": [("GET", "/api/projects/{name}/eh_template")],
     "get_feature_guide": [("GET", "/api/guides/{topic}")],
-    "review_eh_study": _DERIVED,  # eh_reference_design + eh_study, analysed
+    "review_eh_study": [("GET", "/api/results/eh_review")],  # P24: one source
     "run_fmea_sweep": [("POST", "/api/results/fmea_sweep")],
     "run_frontier_study": [("POST", "/api/results/frontier")],
     "run_mc_study": [("POST", "/api/results/mc")],

@@ -94,3 +94,34 @@ def test_every_panel_hover_key_is_in_the_catalogue():
             "dtc_attribution", "levers", "stages", "archetype"} <= keys
     fields = G.load_guide("eh_fmea")["fields"]
     assert keys <= set(fields), keys - set(fields)
+
+
+# ── P24: plain-language terms for the hub-design step cards ────────────────
+
+HUB_FIELDS = (
+    "hub_start", "hub_site", "hub_goal", "hub_results", "hub_improve",
+    "site_type", "grid_connection", "critical_load", "grid_strength",
+    "outage_data", "shortfall_hours", "energy_strictness", "verdict",
+    "cost_at_target", "top_risks", "not_established", "stress_scenario",
+    "fmea_check", "template_provenance", "voll_plain",
+)
+
+
+def test_hub_fields_present():
+    fields = G.load_guide("eh_fmea")["fields"]
+    assert len(set(HUB_FIELDS)) == 20
+    missing = [k for k in HUB_FIELDS if not (fields.get(k) or "").strip()]
+    assert not missing, missing
+
+
+# Stage ids and engine names the Guided cards must not show (spec §4.3, §5.8).
+_JARGON = ("P19", "decision 6", "Class-B", "‱", "lp_proxy", "copt")
+
+
+@pytest.mark.parametrize("key", HUB_FIELDS)
+def test_field_text_is_plain(key):
+    text = G.load_guide("eh_fmea")["fields"].get(key) or ""
+    assert text, key
+    bad = [w for w in _JARGON if w.lower() in text.lower()]
+    assert not bad, (key, bad)
+    assert len(text.split()) <= 30, (key, len(text.split()))

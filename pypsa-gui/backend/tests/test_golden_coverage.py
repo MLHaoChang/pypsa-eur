@@ -164,6 +164,7 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     # same adequacy-style € derivation as get_adequacy / get_frontier above.
     ("routers/results.py", "get_eh_reference_design"):         frozenset(),
     ("routers/results.py", "get_eh_readiness"):                frozenset(),  # P14 preflight: no economics
+    ("routers/results.py", "get_eh_review"):                   frozenset(),  # P24 review of the stored report: quotes it, derives no €
     ("routers/results.py", "get_eh_redundancy"):               frozenset(),
     ("routers/results.py", "get_eh_levers"):                   frozenset(),
     ("routers/results.py", "get_eh_dtc"):                      frozenset(),

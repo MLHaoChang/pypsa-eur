@@ -749,7 +749,60 @@ export interface EhReadiness {
   stages: { stage: string; prediction: string; solves: number; basis: string;
             reason: string | null }[]
   warnings: string[]
+  // P24 (additive; the Expert panel ignores them): the pack the study would
+  // run after overrides, units with usable outage data, and the import rating.
+  pack_defaults?: {
+    target_lole_h: number | null
+    ens_cap_permyriad: number | null
+    certification_metric: string
+  }
+  outage_units?: {
+    count: number
+    by_class: { Generator: number; Link: number; StorageUnit: number }
+    missing: { class: string; name: string }[]
+  }
+  import_p_nom_mw?: number | null
 }
+
+export type EhReviewSeverity = 'high' | 'medium' | 'low' | 'info'
+
+/** One finding of GET /results/eh_review (same body as review_eh_study). */
+export interface EhReviewFinding {
+  id: string
+  severity: EhReviewSeverity
+  title: string
+  evidence: Record<string, unknown>
+  recommendation: string
+  actions: { tool: string; args: Record<string, unknown>; effect: string }[]
+}
+
+/** GET /results/eh_review (P24). 204 → null (no study, no stored report).
+ * ``stale`` is true when a later solve cleared the stored report and the
+ * study record's copy was reviewed — read the boolean, never ``source``. */
+export type EhReview =
+  | { status: 'running'; message: string }
+  | {
+      status: 'ok'
+      source: string
+      stale: boolean
+      summary: {
+        archetype?: EhArchetype | null
+        certified?: boolean | null
+        verdict?: string | null
+        mc_lole_h_per_year?: number | null
+        target_lole_h?: number | null
+        ens_cap_permyriad?: number | null
+        achieved_ens_permyriad?: number | null
+        cost_at_target_eur?: number | null
+        solves?: string | null
+        completeness?: Record<string, string>
+        template?: string
+        [extra: string]: unknown
+      }
+      findings: EhReviewFinding[]
+      next_steps: string[]
+      how_to_apply?: string
+    }
 
 /** Study lifecycle record from GET /results/eh_study. */
 export interface EhStudyPayload {
@@ -1308,6 +1361,10 @@ export const resultsApi = {
     }).then(r => r.data as EhReadiness),
   getEhReferenceDesign: () => client.get('/results/eh_reference_design')
     .then(r => (r.status === 204 ? null : r.data as EhReferenceDesignReport)),
+  // P24: the review_eh_study findings as a route (one source). 204 = no study
+  // and no stored report; a running study is 200 {status: 'running'}.
+  getEhReview: () => client.get('/results/eh_review')
+    .then(r => (r.status === 204 ? null : r.data as EhReview)),
   getEhRedundancy: () => client.get('/results/eh_redundancy')
     .then(r => (r.status === 204 ? null : r.data as EhRedundancyTable)),
   getEhLevers: () => client.get('/results/eh_levers')

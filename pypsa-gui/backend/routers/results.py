@@ -1513,6 +1513,27 @@ def get_eh_reference_design():
     return body
 
 
+@results_router.get("/eh_review")
+def get_eh_review():
+    """
+    Review of the latest Energy Hub study (P24): findings with evidence,
+    recommendations and exact tool actions — the same body the chat tool
+    ``review_eh_study`` returns (one source: ``eh_review.review_latest``).
+
+    200 with ``{"status": "running", ...}`` while the study runs, 200 with
+    ``status: "ok"`` (plus the boolean ``stale``) once a report exists, and
+    204 when there is neither a study record nor a stored report (same
+    convention as ``/eh_reference_design``).
+    """
+    from services.adequacy.eh_review import review_latest
+
+    record = get_eh_study()
+    out = review_latest(_state, record if isinstance(record, dict) else None)
+    if out.get("status") == "no_data":
+        return Response(status_code=204)
+    return out
+
+
 @results_router.get("/eh_redundancy")
 def get_eh_redundancy():
     """Last redundancy scenario comparison table (Phase 3a). 204 if none."""

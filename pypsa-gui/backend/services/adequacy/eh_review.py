@@ -427,3 +427,39 @@ def review_report(report: dict, record: dict | None = None,
             "Offer it; run it only if the user agrees — write and execution "
             "tools ask for confirmation."),
     }
+
+
+_STALE_SOURCE = "study record (the stored report was cleared by a later solve)"
+_RUNNING_MESSAGE = ("the EH study is still running — poll "
+                    "get_adequacy_results('eh_study') first")
+
+
+def review_latest(store: dict, record: dict | None, *,
+                  no_data_message: str = "no Energy Hub study has been run "
+                                         "in this session") -> dict[str, Any]:
+    """Review the latest EH study — the ONE source for the chat tool
+    ``review_eh_study`` and ``GET /api/results/eh_review`` (P24).
+
+    ``{'status': 'running'|'no_data'|'ok', ...}``: ``running`` while the
+    study record says so; otherwise the stored report (the export shape of
+    ``/eh_reference_design``), falling back to the study record's copy when
+    a later solve cleared the store — ``stale`` is then true (a boolean, so
+    no client parses the ``source`` prose); ``no_data`` when neither exists.
+    """
+    from services.adequacy.eh_report import eh_reference_design_http_payload
+
+    record = record if isinstance(record, dict) else None
+    if record and record.get("status") == "running":
+        return {"status": "running", "message": _RUNNING_MESSAGE}
+    body, status = eh_reference_design_http_payload(store)
+    source, stale = "stored report", False
+    if status == 204 or not isinstance(body, dict):
+        body = (record or {}).get("report")
+        source, stale = _STALE_SOURCE, True
+    if not isinstance(body, dict):
+        return {"status": "no_data", "message": no_data_message}
+    out = review_report(body, record)
+    out["source"] = source
+    out["stale"] = stale
+    out["status"] = "ok"
+    return out
