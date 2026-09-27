@@ -243,6 +243,9 @@ Files: `backend/routers/library.py` (series endpoints only in P1), `backend/main
   UTC) or all-naive (stored naive; naive + `timezone` → 422, the tariff engine's rule); mixed → 422. Names are
   stripped and refuse `/`, blanks and control characters (one path segment). `MAX_POINTS` = 1,000,000. A
   stale/missing payload → 409 `{code: "library_ref_stale"}`. `route_inventory_phase0.txt` regenerated.
+  Re-review → PASS WITH CONDITIONS, closed: the point cap is checked in the handler (a pydantic `max_length`
+  422 echoed the whole input, 29 MB); zone markers are case-insensitive and include `UTC`/`GMT`, and an index
+  pandas parsed as aware counts as aware; names also refuse `.`, `..`, `?`, `#` and unprintable characters.
 
 ### WP1.1c Bundle pins library versions
 - [ ] Red: a project bundle records `(id, version, hash)` of every series it references in a sidecar

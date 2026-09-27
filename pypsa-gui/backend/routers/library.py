@@ -32,8 +32,9 @@ router = APIRouter()
 # no upload guard in this repo (`upload_guard` covers UploadFile only).
 MAX_POINTS = 1_000_000
 
-# An offset at the end of an ISO time part: Z, +01, +0100, +01:00.
-_OFFSET_RE = r"(?:Z|[+-]\d{2}(?::?\d{2})?)$"
+# A zone marker at the end of an ISO time part: Z, UTC, GMT, +01, +0100,
+# +01:00 — case-insensitive (pandas reads `...t00:00z` as UTC too).
+_OFFSET_RE = r"(?i)(?:Z|UTC|GMT|[+-]\d{2}(?::?\d{2})?)$"
 
 
 class SeriesIn(BaseModel):
@@ -44,19 +45,24 @@ class SeriesIn(BaseModel):
     across DST)."""
 
     name: str = Field(min_length=1, max_length=128)
-    timestamps: list[str] = Field(min_length=1, max_length=MAX_POINTS)
-    values: list[float] = Field(min_length=1, max_length=MAX_POINTS)
+    # The cap is checked in `_series_from`, not with `max_length`: a pydantic
+    # length error echoes the whole input back (a 29 MB 422 at the cap).
+    timestamps: list[str] = Field(min_length=1)
+    values: list[float] = Field(min_length=1)
     timezone: str | None = None
     meta: dict = Field(default_factory=dict)
 
     @field_validator("name")
     @classmethod
     def _fetchable_name(cls, v: str) -> str:
-        # `GET /series/{name}` is one path segment: a "/" could never be
-        # fetched back, and control characters or a blank name are no name.
+        # `GET /series/{name}` is one path segment: "/", "?" and "#" would
+        # split the URL, "." and ".." are collapsed by HTTP clients, and a
+        # blank or unprintable name is no name.
         v = v.strip()
-        if not v or "/" in v or any(ord(ch) < 32 for ch in v):
-            raise ValueError("name must be non-blank, without '/' or control characters")
+        if (not v or v in {".", ".."} or any(ch in "/?#" for ch in v)
+                or not v.isprintable()):
+            raise ValueError("name must be printable, not '.' or '..', and "
+                             "contain no '/', '?' or '#'")
         return v
 
 
@@ -84,22 +90,25 @@ def _target_org(db: DBSession, user: User, org_id: UUID | None, *, write: bool) 
 
 
 def _series_from(body: SeriesIn) -> pd.Series:
+    if max(len(body.timestamps), len(body.values)) > MAX_POINTS:
+        raise HTTPException(422, f"at most {MAX_POINTS:,} points per series")
     if len(body.timestamps) != len(body.values):
         raise HTTPException(422, "timestamps and values must have the same length")
     raw = pd.Series(body.timestamps, dtype=str).str.strip()
-    time_part = raw.str.extract(r"[T ](.*)$")[0].fillna("")
+    time_part = raw.str.extract(r"[Tt ](.*)$")[0].fillna("")
     aware = time_part.str.contains(_OFFSET_RE, regex=True)
     if aware.any() and not aware.all():
         raise HTTPException(422, "timestamps mix offset-carrying and naive values; "
                                  "send every timestamp with an offset, or none")
-    if not aware.any() and body.timezone is not None:
-        raise HTTPException(422, "timestamps carry no UTC offset, so `timezone` is ambiguous "
-                                 "across DST; send ISO timestamps with an offset")
     try:
         idx = pd.DatetimeIndex(pd.to_datetime(list(raw), utc=bool(aware.all())))
     except (ValueError, TypeError) as exc:
         raise HTTPException(422, f"unparseable timestamp: {exc}") from exc
-    if aware.all():
+    # A zone pandas recognised that the regex did not still makes instants.
+    if idx.tz is None and body.timezone is not None:
+        raise HTTPException(422, "timestamps carry no UTC offset, so `timezone` is ambiguous "
+                                 "across DST; send ISO timestamps with an offset")
+    if idx.tz is not None:
         try:
             idx = idx.tz_convert(body.timezone or "UTC")
         except Exception as exc:  # noqa: BLE001 — bad zone name

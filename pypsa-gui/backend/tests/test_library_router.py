@@ -202,7 +202,8 @@ def test_mixed_naive_and_offset_timestamps_are_refused(client):
     assert client.post("/api/library/series", json=body).status_code == 422
 
 
-@pytest.mark.parametrize("name", ["a/b", "   ", "/lead", "tab\tname"])
+@pytest.mark.parametrize("name", ["a/b", "   ", "/lead", "tab\tname", ".", "..",
+                                  "del\x7fname", "a?b", "a#b"])
 def test_names_that_could_never_be_fetched_are_refused(client, name):
     body = _body(name=name.replace("\\t", "\t"))
     assert client.post("/api/library/series", json=body).status_code == 422
@@ -218,7 +219,10 @@ def test_point_count_is_capped(client):
 
     body = {"name": "big", "timestamps": ["2030-01-01T00:00+00:00"] * (MAX_POINTS + 1),
             "values": [0.0] * (MAX_POINTS + 1), "meta": {}}
-    assert client.post("/api/library/series", json=body).status_code == 422
+    r = client.post("/api/library/series", json=body)
+    assert r.status_code == 422
+    # The refusal must not echo the million-point input back (re-review #1).
+    assert len(r.content) < 2_000
 
 
 def test_a_missing_payload_file_is_409_library_ref_stale(client, seeded_identity):
@@ -240,3 +244,21 @@ def test_library_post_requires_the_csrf_token(client):
     del client.headers["X-CSRF-Token"]
     r = client.post("/api/library/series", json=_body())
     assert r.status_code == 403
+
+
+def test_a_lower_case_utc_marker_is_still_an_instant(client):
+    body = {"name": "lc", "timestamps": ["2030-01-01t00:00z", "2030-01-01t00:15z"],
+            "values": [1.0, 2.0], "meta": {}}
+    r = client.post("/api/library/series", json=body)
+    assert r.status_code == 200, r.text
+    assert client.get("/api/library/series/lc").json()["timezone"] == "UTC"
+
+
+def test_a_named_utc_suffix_counts_as_an_offset(client):
+    body = {"name": "named", "timestamps": ["2030-01-01 00:00:00 UTC", "2030-01-01 00:15:00 UTC"],
+            "values": [1.0, 2.0], "timezone": "Europe/Berlin", "meta": {}}
+    r = client.post("/api/library/series", json=body)
+    assert r.status_code == 200, r.text
+    got = client.get("/api/library/series/named").json()
+    assert got["timezone"] == "Europe/Berlin"
+    assert got["timestamps"][0].startswith("2030-01-01T01:00:00+01:00")
