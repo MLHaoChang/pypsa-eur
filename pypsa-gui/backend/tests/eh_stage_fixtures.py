@@ -179,3 +179,80 @@ def firm_vs_sampled_import_pair(*, islanded: bool = False,
         n.buses.at["hub", "eh_critical"] = True
         pair.append(n)
     return pair[0], pair[1]
+
+
+# ── 2026-09-28: the zonal open items, as HTTP-drivable networks ──────────
+
+def grid_battery_network(*, battery: bool = True) -> pypsa.Network:
+    """
+    The weak_flexible hub behind a grid that is SHORT of its own load when
+    its unit is out: 200 MW unit (q = 0.2) against a 150 MW grid load. With
+    ``battery`` a 200 MW / 8 h grid battery bridges the grid's own 150 MW
+    deficit first and has 50 MW of rating left to support the hub within the
+    Link headroom (plan 2026-09-28, WP1); without it the hub sees no surplus
+    in those hours. (A 150 MW battery would spend its whole rating on the
+    grid — the pinned grid-first policy — and help the hub not at all.)
+    """
+    n = certifiable_weak_network()
+    n.generators.at["grid_supply", "outage_rate_value"] = 0.2
+    n.add("Load", "grid_load", bus="grid", p_set=150.0)
+    if battery:
+        n.add("Carrier", "battery")
+        n.add("StorageUnit", "grid_bat", bus="grid", carrier="battery",
+              p_nom=200.0, max_hours=8.0, outage_rate_value=0.0,
+              outage_rate_basis="FOR", mttr_hours=24.0, marginal_cost=0.0)
+    return n
+
+
+def two_grid_network() -> pypsa.Network:
+    """
+    A hub fed by two PoC Links from two separate grids A and B (WP2), each
+    with its own occurrence-bearing unit; grid A carries its own load, so
+    its surplus binds. Local base + peaker keep the ENS-capped plan
+    feasible under the weak_flexible pack (25 MW per Link after apply).
+    """
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=HOURS, freq="h"))
+    n.snapshot_weightings.loc[:, :] = 8760.0 / HOURS
+    for c in ("gas", "AC"):
+        n.add("Carrier", c)
+    for b in ("grid_a", "grid_b", "hub"):
+        n.add("Bus", b, carrier="AC")
+    n.add("Load", "hub_load", bus="hub",
+          p_set=pd.Series([90.0, 100.0, 110.0, 120.0, 110.0, 100.0, 90.0, 80.0],
+                          index=n.snapshots))
+    n.add("Generator", "base", bus="hub", carrier="gas", p_nom=60.0,
+          marginal_cost=10.0, outage_rate_value=0.05,
+          outage_rate_basis="EFORd", mttr_hours=50.0)
+    n.add("Generator", "peaker", bus="hub", carrier="gas", p_nom=40.0,
+          marginal_cost=300.0, outage_rate_value=0.10,
+          outage_rate_basis="EFORd", mttr_hours=20.0)
+    n.add("Generator", "gen_a", bus="grid_a", carrier="gas", p_nom=200.0,
+          marginal_cost=5.0, outage_rate_value=0.05,
+          outage_rate_basis="EFORd", mttr_hours=50.0)
+    n.add("Load", "load_a", bus="grid_a", p_set=185.0)
+    n.add("Generator", "gen_b", bus="grid_b", carrier="gas", p_nom=60.0,
+          marginal_cost=6.0, outage_rate_value=0.1,
+          outage_rate_basis="EFORd", mttr_hours=30.0)
+    for name, g in (("poc_a", "grid_a"), ("poc_b", "grid_b")):
+        n.add("Link", name, bus0=g, bus1="hub", p_nom=100.0, efficiency=1.0,
+              carrier="AC", outage_rate_value=0.02, outage_rate_basis="FOR",
+              mttr_hours=24.0)
+    n.links["eh_role"] = "grid_import"
+    n.buses["eh_critical"] = False
+    n.buses.at["hub", "eh_critical"] = True
+    return n
+
+
+def common_mode_network(rate: float = 0.05, mttr_hours: float = 24.0
+                        ) -> pypsa.Network:
+    """
+    The weak_flexible hub whose PoC Link carries an opt-in common-mode
+    event: the Link AND the grid behind it down together (WP4).
+    """
+    n = certifiable_weak_network()
+    n.links["common_mode_rate"] = float("nan")
+    n.links["common_mode_mttr_hours"] = float("nan")
+    n.links.at["import_poc", "common_mode_rate"] = rate
+    n.links.at["import_poc", "common_mode_mttr_hours"] = mttr_hours
+    return n

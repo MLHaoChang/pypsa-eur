@@ -19,6 +19,9 @@ while the worker runs the whole default pipeline, then read the persisted
 * a TEA whose LCOH is ``null`` + ``lcoh_status`` on a network with no
   electrolyser, and finite on one with (WP4),
 * ``solves_consumed ≤ budget_solves`` (decision 17), and a JSON-clean body,
+* the zonal open items (plan 2026-09-28): a grid battery lowers the hub's
+  LOLE, a hub on two grids certifies with two areas, and a common-mode
+  event on the PoC raises LOLE and is ranked as its own class-A mode,
 * the import SAMPLED rather than counted firm (plan 2026-09-27): the
   weak_flexible certification samples the PoC Link and the grid behind it
   (``import_model == "zonal"``); on a firm-vs-sampled fixture pair a
@@ -44,8 +47,11 @@ from tests import qa_support          # noqa: E402
 from tests.eh_stage_fixtures import (  # noqa: E402
     VOLL,
     certifiable_weak_network,
+    common_mode_network,
     electrolyser_network,
     firm_vs_sampled_import_pair,
+    grid_battery_network,
+    two_grid_network,
 )
 
 PROJECT = "qa_eh_reference_design"
@@ -350,6 +356,85 @@ def section_3_import_outages() -> None:
     WEAK_EVIDENCE["off_grid_lole_h"] = (la, lb)
 
 
+def _fmea(network, archetype: str) -> dict:
+    """
+    The fmea_top payload of an ``apply_pack → ens_solve → fmea_top →
+    assemble`` run (class A needs no extra budget).
+    """
+    c = qa_support.client()
+    qa_support.install_network(network)
+    _configure(VOLL)
+    study = _run_study(archetype, stages=["apply_pack", "ens_solve",
+                                          "fmea_top", "assemble"])
+    if study.get("status") != "done":
+        return {}
+    r = c.get("/api/results/eh_reference_design")
+    rep = r.json() if r.status_code == 200 else {}
+    return ((rep.get("sections") or {}).get("fmea_top") or {}).get("payload") or {}
+
+
+def section_4_zonal_open_items() -> None:
+    print("\n[4] zonal open items — grid storage, two grids, common mode (2026-09-28)")
+    # WP1: a grid battery bridging the grid's own deficit supports the hub.
+    bat = _certify(grid_battery_network(), "weak_flexible")
+    nobat = _certify(grid_battery_network(battery=False), "weak_flexible")
+    areas = (bat.get("fleet_scope") or {}).get("grid_areas") or []
+    _step("the grid battery is disclosed as dispatched",
+          len(areas) == 1 and areas[0].get("storage") == ["grid_bat"]
+          and areas[0].get("storage_dispatched") is True, str(areas)[:200])
+    lb, ln = bat.get("_mc_lole_h"), nobat.get("_mc_lole_h")
+    _step("the grid battery lowers the hub's MC LOLE",
+          isinstance(lb, (int, float)) and isinstance(ln, (int, float))
+          and lb < ln, f"with={lb} without={ln}")
+    WEAK_EVIDENCE["grid_battery_lole_h"] = (lb, ln)
+
+    # WP2: two grids → two areas.
+    two = _certify(two_grid_network(), "weak_flexible")
+    scope = two.get("fleet_scope") or {}
+    ga = scope.get("grid_areas") or []
+    _step("a hub on two grids certifies zonal with two areas",
+          two.get("import_model") == "zonal"
+          and [a.get("links") for a in ga] == [["poc_a"], ["poc_b"]]
+          and all(a.get("sampled") for a in ga), str(ga)[:200])
+    _step("the two-grid certification is established",
+          two.get("_status") == "ok" and isinstance(two.get("_mc_lole_h"), (int, float)),
+          f"status={two.get('_status')} lole={two.get('_mc_lole_h')}")
+    WEAK_EVIDENCE["two_grid_lole_h"] = two.get("_mc_lole_h")
+
+    # WP4: a common-mode event on the PoC.
+    cm = _certify(common_mode_network(), "weak_flexible")
+    base = _certify(certifiable_weak_network(), "weak_flexible")
+    ev = (cm.get("fleet_scope") or {}).get("import_common_mode") or []
+    _step("the common-mode event is applied and disclosed",
+          len(ev) == 1 and ev[0].get("applied") is True
+          and ev[0].get("link") == "import_poc" and ev[0].get("area") == 0,
+          str(ev)[:200])
+    lc, l0 = cm.get("_mc_lole_h"), base.get("_mc_lole_h")
+    _step("the event raises the MC LOLE over the same hub without it",
+          isinstance(lc, (int, float)) and isinstance(l0, (int, float))
+          and lc > l0, f"with={lc} without={l0}")
+    WEAK_EVIDENCE["common_mode_lole_h"] = (lc, l0)
+
+    # WP3 + WP4: the screening mixes the event, ranks it, and carries the
+    # exact import metric.
+    fm = _fmea(common_mode_network(), "weak_flexible")
+    top = fm.get("top") or []
+    _step("fmea_top ranks the common-mode event as its own class-A mode",
+          any(m.get("component_class") == "CommonMode"
+              and m.get("failure_class") == "A" for m in top),
+          str([(m.get("failure_class"), m.get("name")) for m in top])[:200])
+    exact = ((fm.get("copt_metrics") or {}).get("import_exact") or {})
+    _step("the exact import metric is carried beside the screening",
+          isinstance(exact.get("lole_hours"), (int, float))
+          and (fm.get("fleet_scope") or {}).get("copt_import_model")
+          == "expected_surplus_profile"
+          and (fm.get("fleet_scope") or {}).get("copt_common_mode")
+          == "event_mixture", str(exact)[:200])
+    WEAK_EVIDENCE["common_mode_import_exact_lole_h"] = exact.get("lole_hours")
+    WEAK_EVIDENCE["common_mode_screening_lole_h"] = (
+        (fm.get("copt_metrics") or {}).get("lole_hours"))
+
+
 def main() -> int:
     print("=" * 60)
     print("QA: the Energy Hub reference design (wired stages)")
@@ -361,6 +446,7 @@ def main() -> int:
         section_1_weak_flexible()
         section_2_electrolyser_lcoh()
         section_3_import_outages()
+        section_4_zonal_open_items()
     except Exception as exc:                                     # noqa: BLE001
         crashed = True
         import traceback
