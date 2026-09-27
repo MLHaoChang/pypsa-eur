@@ -19,6 +19,7 @@ re-exports them — `routers/results.py`, `routers/compare.py`,
 economics fixtures all import from there, and none of them changed when this
 module appeared. `tests/test_solver_facade_surface.py` is what keeps that true.
 """
+import threading
 from collections.abc import Callable
 from contextlib import contextmanager
 
@@ -38,6 +39,82 @@ def _annuity(rate: float, lifetime: float) -> float:
         return 1.0 / lifetime
     factor = (1.0 + rate) ** lifetime
     return rate * factor / (factor - 1.0)
+
+
+HOURS_PER_YEAR = 8760.0
+
+# `id()` of every network whose `fom_cost` a fill currently has scaled to the
+# modelled horizon, so a nested fill (a report computed inside a solve, a
+# resolver called inside another `with` block) cannot scale it a second time.
+# Kept OFF the network on purpose: PyPSA exports a network's attributes to
+# netCDF, and a boolean flag there made every project save inside a fill fail
+# ("illegal data type for attribute network__pypsa_gui_fom_scaled"). An id is
+# stable for exactly as long as it matters — the fill holds a reference to the
+# network until its revert removes the entry.
+_FOM_SCALED_IDS: set[int] = set()
+_FOM_SCALED_LOCK = threading.Lock()
+
+
+def fom_horizon_factor(n) -> float:
+    """
+    Years the model represents per investment period — the factor that turns
+    an ANNUAL fixed O&M (EUR/MW/yr, what the GUI asks the user to type) into
+    the per-horizon figure PyPSA's LP adds to each asset's cost coefficient.
+
+    Why it is needed: `pypsa.costs.periodized_cost` scales an
+    overnight-priced investment by `nyears` but adds `fom_cost` UNSCALED —
+    PyPSA documents `fom_cost` as "per unit of capacity for the modeled
+    horizon". On a 24-snapshot model a typed annual FOM was therefore charged
+    as if one day were a whole year (365x too much). MEASURED 2026-09-27 on
+    the golden fixture: 12 000 EUR/MW/yr of FOM was charged 12 000 per
+    period instead of 12 000 x 24/8760 = 32.9.
+
+    This is PyPSA's own `n.nyears` (Σ objective snapshot weightings / 8760),
+    per period on a multi-period network. The LP coefficient is one static
+    number per asset, so it cannot differ by period: when periods represent
+    different spans (rare: unequal snapshot counts or weights) the mean is
+    used and a warning logged. PyPSA refuses `overnight_cost` outright in the
+    same situation; refusing FOM would block every solve that carries it.
+    Returns 1.0 when the horizon cannot be read.
+    """
+    import logging
+    import math
+
+    try:
+        ny = n.nyears
+    except Exception:  # noqa: BLE001 — no snapshots / older PyPSA
+        return 1.0
+    if isinstance(ny, pd.Series):
+        vals = [float(v) for v in ny.to_numpy() if math.isfinite(float(v))]
+        if not vals:
+            return 1.0
+        if max(vals) - min(vals) > 1e-12 * max(1.0, max(vals)):
+            logging.getLogger("pypsa_gui.solver").warning(
+                "investment periods represent different spans (%s years); "
+                "annual fom_cost is scaled by their mean — the LP applies one "
+                "FOM coefficient per asset across every period",
+                ", ".join(f"{v:.6g}" for v in vals),
+            )
+        factor = sum(vals) / len(vals)
+    else:
+        factor = float(ny)
+    return factor if math.isfinite(factor) and factor > 0 else 1.0
+
+
+def fom_is_scaled(n) -> bool:
+    """True while a fill has `fom_cost` on the per-horizon basis."""
+    with _FOM_SCALED_LOCK:
+        return id(n) in _FOM_SCALED_IDS
+
+
+def fom_per_horizon(n, fom: pd.Series) -> pd.Series:
+    """
+    `fom` (a raw `fom_cost` column, NaN read as 0) on the per-horizon basis
+    the LP charges. A no-op inside a fill, where the column is already
+    scaled — so callers can pass whatever column they are holding.
+    """
+    fom = fom.fillna(0.0)
+    return fom if fom_is_scaled(n) else fom * fom_horizon_factor(n)
 
 
 def fill_periodized_cost_defaults(
@@ -95,10 +172,41 @@ def fill_periodized_cost_defaults(
     (PyPSA's default `lifetime` is `inf`, not NaN, and `annuity(r, inf)` is
     `max(r, 0)` — so the common "user never typed a lifetime" case still
     back-calculates fine on the rate alone.)
+
+    It also puts `fom_cost` on PyPSA's per-horizon basis: the GUI treats the
+    column as ANNUAL (EUR/MW/yr — the unit its inputs show), PyPSA adds it
+    unscaled per modelled horizon, so the fill multiplies it by
+    `fom_horizon_factor(n)` for the duration of the block. Because the LP
+    solve and every report run inside this same fill, the objective and every
+    surface see the same scaled figure. The scaling is skipped when a fill is
+    already active on this network (`fom_is_scaled`), so nested fills never
+    compound it, and the revert restores the typed values exactly.
     """
     import numpy as np
 
     undo: list[tuple[str, str, pd.Index, pd.Series]] = []
+
+    # FOM: annual -> per modelled horizon. Separate pass because the loop
+    # below skips every class without `overnight_cost`.
+    fom_scaled_here = False
+    if not fom_is_scaled(n):
+        factor = fom_horizon_factor(n)
+        if abs(factor - 1.0) > 1e-15:
+            for comp_attr in ("generators", "storage_units", "stores", "links", "lines", "transformers"):
+                df = getattr(n, comp_attr, None)
+                if df is None or df.empty or "fom_cost" not in df.columns:
+                    continue
+                fom = df["fom_cost"]
+                mask = fom.notna() & (fom != 0)
+                if not mask.any():
+                    continue
+                idx = df.index[mask]
+                original = df.loc[idx, "fom_cost"].copy()
+                df.loc[idx, "fom_cost"] = original * factor
+                undo.append((comp_attr, "fom_cost", idx, original))
+        with _FOM_SCALED_LOCK:
+            _FOM_SCALED_IDS.add(id(n))
+        fom_scaled_here = True
     for comp_attr in ("generators", "storage_units", "stores", "links", "lines", "transformers"):
         df = getattr(n, comp_attr, None)
         if df is None or df.empty or "overnight_cost" not in df.columns:
@@ -144,6 +252,9 @@ def fill_periodized_cost_defaults(
             valid = [i for i in idx if i in df.index]
             if valid:
                 df.loc[valid, col] = original.loc[valid]
+        if fom_scaled_here:
+            with _FOM_SCALED_LOCK:
+                _FOM_SCALED_IDS.discard(id(n))
 
     return revert
 
@@ -275,8 +386,12 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
         `discount_rate` for the back-calculation population cannot move this
         value).
 
-      * ``fom_cost`` — the asset's fixed O&M column, EUR per unit of capacity
-        per year, NaN read as 0 (PyPSA's own rule in `periodized_cost`).
+      * ``fom_cost`` — fixed O&M per unit of capacity on the SAME basis as
+        ``capital_cost``: per modelled horizon (one investment period), i.e.
+        the typed annual figure × `fom_horizon_factor(n)`. NaN read as 0
+        (PyPSA's own rule in `periodized_cost`).
+
+      * ``fom_cost_annual`` — the fixed O&M as typed, EUR per unit per year.
 
       * ``fixed_cost`` — ``capital_cost + fom_cost``. This is PyPSA's
         `comp.periodized_cost`, the coefficient the LP objective multiplies
@@ -335,6 +450,9 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
     # `fill_periodized_cost_defaults`'s docstring for why that split matters.
     with with_periodized_cost_defaults(n, cfg, for_back_calculation=True):
         reference_year = _reference_build_year(n)
+        # `fom_cost` is scaled to the modelled horizon inside the fill; this
+        # recovers the annual figure the user typed for `fom_cost_annual`.
+        fom_factor = fom_horizon_factor(n)
         for comp_attr, comp_class in (
             ("generators", "Generator"),
             ("storage_units", "StorageUnit"),
@@ -431,6 +549,7 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
                 entry: dict[str, float | bool | None] = {
                     "capital_cost": v_ann,
                     "fom_cost": v_fom,
+                    "fom_cost_annual": v_fom / fom_factor if fom_factor else v_fom,
                     # The LP coefficient — see the docstring. Every surface
                     # that reports a fixed cost, CAPEX or LCOx reads THIS.
                     "fixed_cost": v_ann + v_fom,

@@ -33,7 +33,7 @@ def compute_lcoh(n, cfg, *, result_df):
     import math
 
     import pandas as _pd
-    from services.solver_service import with_periodized_cost_defaults
+    from services.solver_service import fom_per_horizon, with_periodized_cost_defaults
 
 
     links_df = n.links
@@ -84,8 +84,10 @@ def compute_lcoh(n, cfg, *, result_df):
     # + fom_cost` per MW, and so must the LCOH numerator, or an electrolyser
     # with FOM levelises too low against the objective and against
     # /results/asset_economics. Reported separately as `fom_eur_per_year` too.
+    # `fom_per_horizon`: the typed FOM is annual, the LP charged it per
+    # modelled horizon (see `services.solver.periodized_costs.fom_horizon_factor`).
     if "fom_cost" in links_df.columns:
-        fom_costs = links_df["fom_cost"].fillna(0.0)
+        fom_costs = fom_per_horizon(n, links_df["fom_cost"])
     else:
         fom_costs = _pd.Series(0.0, index=links_df.index)
 

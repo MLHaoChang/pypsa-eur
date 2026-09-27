@@ -161,8 +161,11 @@ export type AssetCostMap = Record<string, Record<string, {
   // Annuitised INVESTMENT per unit of capacity per year (PyPSA's
   // `capital_cost` accessor, no FOM).
   capital_cost: number
-  // Fixed O&M per unit of capacity per year (the asset's `fom_cost` column).
+  // Fixed O&M per unit of capacity on the SAME basis as capital_cost: the
+  // typed annual figure × the share of a year the model covers.
   fom_cost: number
+  // Fixed O&M as typed, per unit of capacity per year.
+  fom_cost_annual?: number
   // capital_cost + fom_cost — PyPSA's `periodized_cost`, the coefficient the
   // LP objective paid per unit of optimised capacity. This is the asset's
   // fixed cost; the "Annualised" cost mode reads it so the per-asset table

@@ -55,6 +55,10 @@ CAPITAL_DERIVED_TOTAL = (
 # nulling the whole row would be just as dishonest in the other direction.
 INDEPENDENT = ("revenue_eur", "vom_cost_eur", "energy_mwh")
 
+# `_flat_network`'s generator: fom_cost 20 EUR/MW/yr, 2 unit-weighted hourly
+# snapshots (2/8760 of a year modelled), p_nom_opt 100.
+FOM_EUR = 20.0 * 2 / 8760.0 * 100.0
+
 
 def _ae_module():
     """
@@ -86,10 +90,12 @@ def _flat_network() -> pypsa.Network:
         G: p = [50, 50]  marginal_cost 10  capital_cost 1000  fom_cost 20
            p_nom_opt 100
              energy  = 100 MWh      revenue = 4_000     vom = 1_000
-             fixed   = (1000 + 20) x 100 = 102_000      fom = 20 x 100 = 2_000
-             lcoe    = (102_000 + 1_000) / 100 = 1_030 EUR/MWh
+             fom     = 20/yr x (2/8760 yr modelled) x 100 = FOM_EUR
+             fixed   = 1000 x 100 + FOM_EUR
+             lcoe    = (fixed + 1_000) / 100
            (fixed cost is capital_cost + fom_cost — PyPSA's periodized_cost,
-           what the LP objective paid; see tests/test_fom_reconciliation.py)
+           what the LP objective paid, with the typed ANNUAL fom_cost scaled
+           to the modelled hours; see tests/test_fom_reconciliation.py)
         B: p = [-20, +20] (charge then discharge), capital_cost 500,
            p_nom_opt 50
     """
@@ -192,10 +198,10 @@ def test_the_happy_path_still_reports_the_flag_true_with_real_numbers(healthy):
     assert healthy["capital_costs_available"] is True
 
     gen = healthy["generators"][0]
-    assert gen["fixed_cost_eur"] == pytest.approx(102_000.0)
-    assert gen["fom_cost_eur"] == pytest.approx(2_000.0)
-    assert gen["net_profit_eur"] == pytest.approx(4_000.0 - 102_000.0 - 1_000.0)
-    assert gen["lcoe_eur_per_mwh"] == pytest.approx(1_030.0)
+    assert gen["fixed_cost_eur"] == pytest.approx(100_000.0 + FOM_EUR)
+    assert gen["fom_cost_eur"] == pytest.approx(FOM_EUR)
+    assert gen["net_profit_eur"] == pytest.approx(4_000.0 - 100_000.0 - FOM_EUR - 1_000.0)
+    assert gen["lcoe_eur_per_mwh"] == pytest.approx((100_000.0 + FOM_EUR + 1_000.0) / 100)
 
     su = healthy["storage_units"][0]
     assert su["fixed_cost_eur"] == pytest.approx(25_000.0)

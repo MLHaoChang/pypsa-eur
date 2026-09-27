@@ -439,9 +439,14 @@ def capex_annual(ctx: Ctx):
             "overnight_cost-priced asset): %s",
             ctx.component_class, ctx.name, exc,
         )
+        from services.solver_service import fom_horizon_factor
+
         raw = _static(ctx, "capital_cost")
         raw_fom = _static(ctx, "fom_cost")
-        cc = (float(raw) if raw is not None else 0.0) + (float(raw_fom) if raw_fom is not None else 0.0)
+        # The typed FOM is annual; the LP charged it per modelled horizon.
+        cc = (float(raw) if raw is not None else 0.0) + (
+            float(raw_fom) * fom_horizon_factor(ctx.n) if raw_fom is not None else 0.0
+        )
 
     return cc * opt
 

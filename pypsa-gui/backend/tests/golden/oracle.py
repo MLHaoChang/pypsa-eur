@@ -72,3 +72,16 @@ def fixed_cost_rate(annualised_investment: float, fom_cost: float) -> float:
     the sum, or it disagrees with the objective by `fom_cost x p_nom_opt`.
     """
     return annualised_investment + fom_cost
+
+
+def fom_per_horizon(annual_fom: float, snapshots_per_period: int) -> float:
+    """
+    An annual fixed O&M (EUR/MW/yr, what the GUI asks for) on the per-period
+    basis the LP charges: scaled by the share of a year one period models,
+    exactly like `annualised_capital_cost` scales an overnight investment.
+
+    PyPSA itself adds `fom_cost` UNSCALED (MEASURED 2026-09-27); the GUI's
+    periodized-cost fill applies this scaling around the solve and every
+    report so a typed annual FOM is not charged as if one day were a year.
+    """
+    return annual_fom * (snapshots_per_period / HOURS_PER_YEAR)

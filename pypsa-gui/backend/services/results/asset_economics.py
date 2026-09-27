@@ -19,7 +19,7 @@ from services.period_utils import (
     years_for_period,
 )
 from services.results.load_frames import corrected_marginal_prices
-from services.solver_service import periodized_capital_costs
+from services.solver_service import fom_per_horizon, periodized_capital_costs
 
 
 
@@ -304,7 +304,7 @@ def compute_asset_economics(n, cfg, *, result_df):
         else:
             p_nom = gens_df["p_nom"]
         mc_static = gens_df["marginal_cost"].fillna(0.0) if "marginal_cost" in gens_df.columns else _pd.Series(0.0, index=gens_df.index)
-        fom_static = gens_df["fom_cost"].fillna(0.0) if "fom_cost" in gens_df.columns else _pd.Series(0.0, index=gens_df.index)
+        fom_static = fom_per_horizon(n, gens_df["fom_cost"]) if "fom_cost" in gens_df.columns else _pd.Series(0.0, index=gens_df.index)
         # PyPSA also allows a time-varying marginal_cost — capture it when present.
         try:
             mc_t_df = n.get_switchable_as_dense("Generator", "marginal_cost")
@@ -434,7 +434,7 @@ def compute_asset_economics(n, cfg, *, result_df):
         else:
             p_nom_su = su_df["p_nom"]
         mc_static_su = su_df["marginal_cost"].fillna(0.0) if "marginal_cost" in su_df.columns else _pd.Series(0.0, index=su_df.index)
-        fom_static_su = su_df["fom_cost"].fillna(0.0) if "fom_cost" in su_df.columns else _pd.Series(0.0, index=su_df.index)
+        fom_static_su = fom_per_horizon(n, su_df["fom_cost"]) if "fom_cost" in su_df.columns else _pd.Series(0.0, index=su_df.index)
         max_hours_su = su_df["max_hours"].fillna(0.0) if "max_hours" in su_df.columns else _pd.Series(0.0, index=su_df.index)
 
         for s in su_p.columns:
@@ -585,7 +585,7 @@ def compute_asset_economics(n, cfg, *, result_df):
         else:
             e_nom = stores_df["e_nom"]
         mc_static_st = stores_df["marginal_cost"].fillna(0.0) if "marginal_cost" in stores_df.columns else _pd.Series(0.0, index=stores_df.index)
-        fom_static_st = stores_df["fom_cost"].fillna(0.0) if "fom_cost" in stores_df.columns else _pd.Series(0.0, index=stores_df.index)
+        fom_static_st = fom_per_horizon(n, stores_df["fom_cost"]) if "fom_cost" in stores_df.columns else _pd.Series(0.0, index=stores_df.index)
 
         for s in store_p.columns:
             if s not in stores_df.index:
@@ -723,7 +723,7 @@ def compute_asset_economics(n, cfg, *, result_df):
             else _pd.Series(0.0, index=links_df.index)
         )
         l_fom_static = (
-            links_df["fom_cost"].fillna(0.0) if "fom_cost" in links_df.columns
+            fom_per_horizon(n, links_df["fom_cost"]) if "fom_cost" in links_df.columns
             else _pd.Series(0.0, index=links_df.index)
         )
         try:

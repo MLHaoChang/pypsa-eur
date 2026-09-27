@@ -276,6 +276,10 @@ def get_objective_decomposition():
                                    either no scaling or rescale already reverted).
       • `cost_breakdown_total`   — computed live via the same path the GUI shows.
       • `gap_eur` and `gap_pct`  — difference between LP total and statistics total.
+      • bridge: `nonextendable_fixed_cost_eur` (fixed cost the LP never sees),
+        `period_weighting_adjustment_eur` (objective vs years period weights),
+        `lp_basis_total` and `residual_gap_eur` / `residual_gap_pct` — what is
+        left unexplained. ~0 on a plain solve.
 
     Intended use: one-shot diagnosis, not a routine endpoint. Safe on any state.
     """
@@ -287,7 +291,7 @@ def get_objective_decomposition():
         cb = get_cost_breakdown()
     except Exception:
         cb = None
-    return compute_objective_decomposition(n, cb)
+    return compute_objective_decomposition(n, cb, _state.get('solver_config'))
 
 
 @results_router.get("/economics_by_carrier")

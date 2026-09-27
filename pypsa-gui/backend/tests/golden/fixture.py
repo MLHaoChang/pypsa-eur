@@ -31,13 +31,13 @@ SNAPSHOTS_PER_PERIOD = 24
 # On `gas` because it is the asset whose capacity the LP actually sizes, so
 # the FOM term is exercised at a real, non-zero p_nom_opt.
 #
-# Units: PyPSA treats `fom_cost` like a raw `capital_cost` — per unit of
-# capacity FOR THE MODELLED HORIZON (one investment period), added UNSCALED
-# (`pypsa.costs.periodized_cost`), whereas an overnight-priced investment is
-# annuitised and scaled by `nyears` (here 24/8760). 50 keeps both terms
-# material: gas's investment share is ~211.6 EUR/MW per period, so FOM is
-# ~19% of its fixed cost and an error in either term moves the anchor.
-GOLDEN_GAS_FOM = 50.0  # EUR/MW per investment period
+# Units: ANNUAL, as the GUI asks for it (EUR/MW/yr; a typical CCGT figure).
+# PyPSA adds `fom_cost` unscaled per modelled horizon, so the GUI's periodized
+# fill scales it by `nyears` (24/8760 here) around the solve and every report —
+# the oracle mirrors that (`oracle.fom_per_horizon`). Per period that is
+# ~54.8 EUR/MW against gas's ~211.6 EUR/MW of annuitised investment, so both
+# terms move the anchor.
+GOLDEN_GAS_FOM = 20_000.0  # EUR/MW/yr
 
 _SOLVED: pypsa.Network | None = None
 

@@ -74,7 +74,8 @@ def _gas_expected_capex(n) -> float:
     )
     # `gas` carries fixed O&M (gf.GOLDEN_GAS_FOM): the fixed cost the LP paid
     # is investment + FOM, so every surface must report that sum.
-    rate = oracle.fixed_cost_rate(rate, float(n.generators.at["gas", "fom_cost"]))
+    rate = oracle.fixed_cost_rate(rate, oracle.fom_per_horizon(
+        float(n.generators.at["gas", "fom_cost"]), gf.SNAPSHOTS_PER_PERIOD))
     return oracle.horizon_capex(
         rate, float(n.generators.at["gas", "p_nom_opt"]), gf.GOLDEN_YEARS
     )
@@ -301,7 +302,8 @@ def test_compare_capacity_agrees_with_asset_economics(golden):
     )
     assert delta > 0.0  # guards against a silently-zero comparison
     expected_new_gas_eur = oracle.fixed_cost_rate(
-        annual_rate, float(n.generators.at["gas", "fom_cost"])) * delta
+        annual_rate, oracle.fom_per_horizon(
+            float(n.generators.at["gas", "fom_cost"]), gf.SNAPSHOTS_PER_PERIOD)) * delta
     new_gas_meur = summary.new_capex_meur_by_carrier["gas"].total
     assert new_gas_meur * 1e6 == pytest.approx(expected_new_gas_eur, rel=1e-6)
 

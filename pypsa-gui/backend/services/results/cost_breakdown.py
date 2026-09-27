@@ -179,11 +179,6 @@ def compute_cost_breakdown(n, cfg):
             # Fixed O&M per (component, carrier, period) — added to every
             # "Capital Expenditure" cell below. See the docstring.
             fom_lookup = statistics_fom_lookup(n)
-            exp_series = None
-            try:
-                exp_series = n.statistics.expanded_capex()
-            except Exception:  # noqa: BLE001 — older PyPSA versions
-                exp_series = None
             # Per-asset lifetime-weighted CAPEX. Build inside the same block
             # so that lifetime fills (from solver config) are in place.
             reference_year = _reference_build_year(n)
@@ -458,94 +453,71 @@ def compute_cost_breakdown(n, cfg):
         })
 
     # ── Expansion CAPEX (new investments only) ──────────────────────────────
-    # `n.statistics.expanded_capex()` returns a Series of capital_cost × Δp_nom
-    # (or s_nom/e_nom equivalents) summed per (component, carrier), i.e. the
-    # capex of capacity NEWLY built this run. Distinct from the "Capital
-    # Expenditure" column above, which is annualised cost of ALL installed
-    # capacity — the source of the user-confusing €3 B on networks with non-
-    # extendable lines that carry a capital_cost.
+    # Distinct from the "Capital Expenditure" column above, which is the
+    # annualised cost of ALL installed capacity — the source of the
+    # user-confusing €3 B on networks with non-extendable lines that carry a
+    # capital_cost.
+    #
+    # Fixed cost of capacity NEWLY built this run: Σ over periods of
+    # years[p] × Σ over assets ACTIVE in p of (capital_cost + fom_cost) ×
+    # max(0, nom_opt − nom). Same basis as `capex` above, which is
+    # `n.statistics()` (activity-masked per period by PyPSA) × years + FOM, so
+    # `capex − capex_expansion` is genuinely the cost of the existing fleet.
+    #
+    # This used to read `n.statistics.expanded_capex()` and iterate it as a
+    # Series. On a multi-period network PyPSA returns a DataFrame with one
+    # column per period, so the loop walked the COLUMNS, every "row" was a
+    # bare year, and all of it was skipped as period-only. The manual fallback
+    # below the old loop then fired with no years weighting and no activity
+    # check: measured on a two-period, 10-years-each network, new-capacity
+    # investment of EUR 3.8 M reported as 0.38 M. Computing it here directly
+    # covers flat and multi-period networks alike, and the vintage case the
+    # fallback existed for (vintage_service flips parents to non-extendable
+    # during the solve, so PyPSA's helper sees no expansion, while the
+    # parent's nom_opt already carries every vintage build).
+    #
+    # FOM rides along on the per-horizon basis the LP charged (`fom_cost` is
+    # scaled inside the fill), so new capacity's O&M is not silently booked
+    # as existing-fleet cost.
     capex_expansion_total = 0.0
-    if exp_series is not None:
-        exp_idx_is_multi = isinstance(exp_series.index, _pd.MultiIndex)
-        for idx, val in exp_series.items():
-            # Same period-stripping + years-scaling logic as the stats loop:
-            # expanded_capex returns ANNUALISED per-period values, so multiply
-            # by investment_period_weightings.years to get a horizon total.
-            row_period: Any = None
-            if exp_idx_is_multi and isinstance(idx, tuple) and len(idx) >= 1:
-                first = idx[0]
-                try:
-                    _p = int(first)
-                    if 1900 <= _p <= 2200:
-                        row_period = _p
-                except (TypeError, ValueError):
-                    pass
-            if isinstance(idx, tuple):
-                levels = idx[1:] if row_period is not None else idx
-                comp = levels[0] if len(levels) >= 1 else str(idx)
-            else:
-                comp = str(idx)
-            comp = str(comp)
-            if _is_period_only(comp):
-                continue
-            years_mul = _years_for_period(row_period) if row_period is not None else 1.0
-            v = _safe_float(val) * years_mul
-            capex_expansion_total += v
-            bucket = by_class.setdefault(comp, {"capex": 0.0, "opex": 0.0, "capex_expansion": 0.0})
-            bucket["capex_expansion"] += v
-
-    # Fallback when `expanded_capex` is unavailable OR returns 0 despite
-    # observable expansion on the parent rows. The latter happens on
-    # vintage-expanded networks: vintage_service flips the parent's
-    # *_extendable=False during solve, so PyPSA's helper sees no expansion
-    # at the parent level, while the parent's p_nom_opt already includes
-    # all vintage builds via post-solve aggregation. Compute manually
-    # as Σ (p_nom_opt - p_nom) × capital_cost when the helper underreports.
-    if capex_expansion_total < 1.0:  # < 1 € total → almost certainly wrong
-        manual_total = 0.0
+    try:
         with with_periodized_cost_defaults(n, cfg):
+            is_mp_exp = isinstance(n.snapshots, _pd.MultiIndex)
+            exp_periods = list(n.investment_periods) if is_mp_exp else [None]
             for comp_attr, comp_class, nom in NOM_PAIRS:
                 df = getattr(n, comp_attr, None)
-                if df is None or df.empty or f"{nom}_opt" not in df.columns:
+                if df is None or df.empty or f"{nom}_opt" not in df.columns or nom not in df.columns:
                     continue
                 try:
-                    cc_series = n.c[comp_class].capital_cost
+                    rate = n.c[comp_class].capital_cost.reindex(df.index).fillna(0.0)
                 except Exception:
                     continue
-                nom_col = df[nom].reindex(df.index).fillna(0.0)
-                opt_col = df[f"{nom}_opt"].reindex(df.index).fillna(nom_col)
+                if "fom_cost" in df.columns:
+                    rate = rate + df["fom_cost"].fillna(0.0)
+                nom_col = df[nom].fillna(0.0)
+                opt_col = df[f"{nom}_opt"].fillna(nom_col)
                 delta = (opt_col - nom_col).clip(lower=0)
-                comp_sum = float((cc_series.reindex(df.index) * delta).fillna(0).sum())
-                if not _math.isfinite(comp_sum) or comp_sum < 0:
-                    comp_sum = 0.0
-                if comp_sum > 0:
-                    manual_total += comp_sum
-                    bucket = by_class.setdefault(comp_class, {"capex": 0.0, "opex": 0.0, "capex_expansion": 0.0})
-                    bucket["capex_expansion"] = max(bucket.get("capex_expansion", 0.0), comp_sum)
-        if manual_total > capex_expansion_total:
-            capex_expansion_total = manual_total
-
-    # Fixed O&M on the NEW capacity. Both expansion paths above price only the
-    # investment share (`expanded_capex` and the manual fallback read
-    # `comp.capital_cost`), while `capex` above now carries FOM — without this
-    # `capex − capex_expansion` ("existing-capacity CAPEX" on the frontend
-    # waterfall) would silently absorb the new capacity's O&M. Σ years puts it
-    # on the same horizon basis as the per-period `expanded_capex` cells.
-    horizon_years = float(sum(period_years.values())) if period_years else 1.0
-    for comp_attr, comp_class, nom in NOM_PAIRS:
-        df = getattr(n, comp_attr, None)
-        if (df is None or df.empty or "fom_cost" not in df.columns
-                or f"{nom}_opt" not in df.columns or nom not in df.columns):
-            continue
-        nom_col = df[nom].fillna(0.0)
-        opt_col = df[f"{nom}_opt"].fillna(nom_col)
-        delta = (opt_col - nom_col).clip(lower=0)
-        fom_exp = float((df["fom_cost"].fillna(0.0) * delta).sum()) * horizon_years
-        if not _math.isfinite(fom_exp) or fom_exp <= 0:
-            continue
-        capex_expansion_total += fom_exp
-        bucket = by_class.setdefault(comp_class, {"capex": 0.0, "opex": 0.0, "fom": 0.0, "capex_expansion": 0.0})
-        bucket["capex_expansion"] = bucket.get("capex_expansion", 0.0) + fom_exp
+                per_unit = (rate * delta).fillna(0.0)
+                if not (per_unit != 0).any():
+                    continue
+                comp_sum = 0.0
+                for period in exp_periods:
+                    if period is None:
+                        comp_sum += float(per_unit.sum())
+                        continue
+                    active = (n.get_active_assets(comp_class, period)
+                              .reindex(df.index).fillna(False).astype(bool))
+                    comp_sum += float(per_unit[active].sum()) * _years_for_period(period)
+                if not _math.isfinite(comp_sum) or comp_sum <= 0:
+                    continue
+                capex_expansion_total += comp_sum
+                bucket = by_class.setdefault(comp_class, {"capex": 0.0, "opex": 0.0, "fom": 0.0, "capex_expansion": 0.0})
+                bucket["capex_expansion"] = bucket.get("capex_expansion", 0.0) + comp_sum
+    except Exception:
+        logger.exception(
+            "could not compute expansion CAPEX in /results/cost_breakdown; "
+            "capex_expansion is reported as 0.00",
+        )
 
     # Null-propagating totals. One unknown class makes the horizon figure
     # unknown — see `_sum_lifetime`. `capex_lifetime_available` is the summary

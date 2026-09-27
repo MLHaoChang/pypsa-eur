@@ -95,11 +95,12 @@ No API field was renamed. Fields were only added.
 
 Checked and left unchanged:
 
-- **`objective_decomposition`** needed no code change. It compares the LP
-  total with `cost_breakdown.total`, which now reconciles.
 - **Energy-Hub `compute_tea`** divides `cost_at_target_eur` by served energy.
   That cost is `n.objective − shed cost` (`adequacy/report.py`), which
   already includes FOM.
+
+`objective_decomposition` gained a reconciliation bridge in the follow-up
+below.
 
 ## Frontend
 
@@ -143,34 +144,130 @@ in pytest's summary, not a new skip.
 Existing tests updated to the new semantics:
 
 - `test_asset_economics_capital_costs.py`: the hand-built generator's fixed
-  cost is now `(1000 + 20) × 100`.
-- The golden fixture's `gas` generator now carries `fom_cost = 50`, so the
-  cross-surface agreement test covers FOM on every surface at once. The
-  oracle gains `fixed_cost_rate`, and the `asset_costs` adapter reads
-  `fixed_cost`.
+  cost now includes its FOM, scaled to the two modelled hours.
+- The golden fixture's `gas` generator carries an annual `fom_cost` of
+  20,000 EUR/MW/yr, so the cross-surface agreement test covers FOM on every
+  surface at once. The oracle gains `fixed_cost_rate` and `fom_per_horizon`,
+  and the `asset_costs` adapter reads `fixed_cost`.
 - `test_compare_cross_surface.py` reads `fixed_cost` for its expectation.
+- `test_solver_facade_surface.py` registers the three new facade names.
 
 Environment: Python 3.11 venv with pypsa 1.1.2, linopy 0.8.0, highspy 1.14.0,
 pandas 2.3.3 and xarray 2025.6.1. Pandas 3 broke multi-period solves in this
 venv, so pandas was pinned to the lock file's 2.3.3.
 
-## Deliberately left alone
+## Follow-up: the three items first left alone
 
-- **FOM units.** PyPSA adds `fom_cost` unscaled, as a per-horizon figure,
-  exactly like a raw `capital_cost`. Only an overnight-priced investment is
-  scaled by `nyears`. On a 24-snapshot model, a typed annual FOM is charged
-  as if one day were a full year. The GUI now reports what the LP paid. The
-  property tooltips still say "€/MW/yr" for `fom_cost`, which matches how
-  they already describe `capital_cost`. Changing that is a modelling-UX
-  decision, not a reconciliation fix.
-- **FOM on new capacity in `capex_expansion`** is multiplied by total
-  horizon years without checking per-period asset activity. That matches
-  `asset_economics`'s `total_years_factor`. An asset retired partway through
-  a multi-period horizon would be slightly over-counted there.
-- **The golden fixture's existing objective gap.** `cost_breakdown.total`
-  still exceeds the LP total on the golden network. The cause is the
-  non-extendable line's `capital_cost`, which `n.statistics()` counts and
-  the LP does not. That gap predates this change and is documented in
-  `services/cost_totals.py`.
+### FOM units
+
+PyPSA adds `fom_cost` unscaled, per modelled horizon, while an
+overnight-priced investment is scaled by `nyears`. The GUI asks for FOM in
+EUR/MW/yr, so on a 24-snapshot model a typed annual FOM was charged as if one
+day were a full year: 365 times too much.
+
+The periodized-cost fill that already wraps every GUI solve and every report
+now scales `fom_cost` by `n.nyears` for the duration of the block, and the
+revert restores the typed value exactly. Solve and reports therefore see the
+same figure.
+- A nesting guard stops a fill inside another fill from scaling twice. It is a
+  module-level registry keyed by network identity. A first version stored a
+  flag on the network, and PyPSA then tried to export that flag to netCDF on
+  the next project save.
+- A full-year model has `nyears = 1` and is untouched.
+- When investment periods represent different spans, the mean is used and a
+  warning logged. PyPSA refuses `overnight_cost` in the same situation;
+  refusing FOM would block every such solve.
+- `/simulation/asset_costs` reports `fom_cost` on the per-horizon basis, like
+  `capital_cost`, plus `fom_cost_annual` as typed.
+- The five FOM input tooltips now say the charge is scaled to the share of a
+  year the snapshots represent.
+
+Measured on a network whose four snapshots cover half a year: the raw PyPSA
+solve charges the full annual FOM, and the GUI solve charges half.
+
+### New-capacity FOM, and a bug it exposed
+
+The first fix added new capacity's FOM for every horizon year, active or not.
+It now counts only the periods in which the asset is active, weighted by
+that period's years. That is the same rule PyPSA's statistics apply to the
+installed figure.
+
+Testing that exposed an older, larger defect in `capex_expansion`. On a
+multi-period network PyPSA's `expanded_capex` returns a DataFrame with one
+column per period. The parser iterated it as a Series, walked the columns,
+skipped every value as a bare year, and fell back to a manual sum with no
+years weighting and no activity check. On a two-period network with 10 years
+per period, EUR 3.8 M of new-capacity investment was reported as 0.38 M. The
+Capacity Expansion waterfall shows existing CAPEX as `capex − capex_expansion`,
+so the difference was booked as existing-fleet cost.
+
+`capex_expansion` is now one calculation: per period, fixed cost (investment
+plus FOM) times capacity added, over active assets, times the period's years.
+The regression test checks it against PyPSA's own per-period `expanded_capex`
+times years, plus FOM. It covers the vintage case the old fallback existed
+for.
+
+### The golden fixture's objective gap
+
+The gap has two legitimate causes, not one.
+- **Non-extendable fixed cost.** Reporting counts it; the LP cannot size those
+  assets, so it never charges them. On the golden network that is mainly the
+  line's EUR 7.5 bn.
+- **Period weighting.** Reporting weights each period by
+  `investment_period_weightings.years`, the undiscounted money spent. The LP
+  weights it by `.objective`, which is 1.0 by default and PV times years
+  under auto-discount.
+
+Forcing the two totals equal would be wrong, so `objective_decomposition`
+now explains the gap instead:
+
+```
+gap_eur = −nonextendable_fixed_cost_eur
+          + period_weighting_adjustment_eur
+          + residual_gap_eur
+```
+
+`lp_basis_total` is the reported cost restated on the LP's basis, and
+`residual_gap_eur = lp_total − lp_basis_total`. On a plain solve the
+residual is zero. Anything left there is an LP term the reporting surfaces do
+not model, such as the curtailment-subsidy wrapper or VOLL slacks. Existing
+fields keep their meaning. The bridge is skipped under myopic foresight,
+where `n.objective` holds only the last period's LP.
+
+| Network | `gap_eur` | Residual after the bridge |
+|---|---:|---:|
+| Golden fixture | about −7.53 bn | under 1e-6 of the LP total |
+| Two-period test, objective weights 7 and 4, years 10 and 10 | several % of the LP total | under 1e-9 of the LP total |
+
+## Test evidence for the follow-up
+
+`test_fom_reconciliation.py` now has 23 tests, all passing:
+- the raw-PyPSA contract, which pins that FOM is added unscaled
+- the GUI solve charging `fom × nyears`
+- nested fills scaling once and reverting exactly
+- a full-year model left untouched
+- every surface against the objective at `nyears = 0.5`
+- new-capacity FOM counting only active periods
+- the multi-period and golden bridges closing to zero residual
+
+| Run | Result |
+|---|---|
+| Backend `-m "not slow"` | FOLLOWUP_BACKEND |
+| Frontend `npx vitest run` | 1940 passed; `tsc --noEmit` clean |
+| QA drivers | asset economics 26/26, overnight cost decomposition 10/10, objective scale 5/5, results-summary compare 53/53, safe capital cost exit 0 |
+
+## Still open
+
+- **Raw `capital_cost` has the same unit mismatch as FOM had.** PyPSA treats
+  a directly typed `capital_cost` as per modelled horizon, and the GUI labels
+  it €/MW/yr. On a short model a typed annualised cost is charged as if the
+  model covered a year. Scaling it the same way would change the objective of
+  every existing project priced through `capital_cost`, so it needs its own
+  decision.
+- **`asset_economics` fixed cost** still multiplies by all horizon years
+  without checking per-period activity. `cost_breakdown` now checks activity
+  for both installed and new capacity. An asset retired partway through a
+  multi-period horizon therefore shows more fixed cost on the Economics tab
+  than on Capacity Expansion.
 - **Upstream docstring.** PyPSA's `statistics.capex` docstring claims it
   includes FOM. It is not fixed here.
