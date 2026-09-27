@@ -194,7 +194,11 @@ def _edge_network():
 
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=8, freq="h"))
-    n.snapshot_weightings.loc[:, :] = 3.0
+    # objective ≠ generators ON PURPOSE (gate assessor P0 #2): cost sums must
+    # use `objective`, energy sums `generators`; equal columns let a swap pass.
+    n.snapshot_weightings["objective"] = 3.0
+    n.snapshot_weightings["stores"] = 3.0
+    n.snapshot_weightings["generators"] = 2.0
     for b in ("gas", "elec", "heat", "grid"):
         n.add("Bus", b)
     n.add("Generator", "gas_supply", bus="gas", p_nom=500.0, marginal_cost=30.0)
@@ -271,7 +275,7 @@ def test_edge_two_poc_links_are_gross_and_net(edge, reset_backend):
     pd.testing.assert_series_equal(poc["net_mw"], poc["import_mw"] - poc["export_mw"])
     w = pq["weights"]["energy"]
     assert poc["import_mwh"] == pytest.approx(float((poc["import_mw"] * w).sum()))
-    assert (w == 3.0).all()
+    assert (w == 2.0).all()                       # energy basis = generators
 
 
 def test_missing_p1_column_falls_back_to_p0_times_efficiency_per_link(edge, reset_backend):
@@ -305,3 +309,20 @@ def test_nan_snapshot_weight_counts_as_one(edge, reset_backend):
     pq = physical_quantities(m, cfg, result_df=_plain_result_df)
     assert pq["weights"]["energy"].iloc[0] == 1.0
     assert not pq["weights"]["energy"].isna().any()
+
+
+
+def test_energy_follows_generators_weighting_and_cost_follows_objective(edge, reset_backend):
+    from services.results.physical_quantities import physical_quantities
+
+    n, cfg = edge
+    pq = physical_quantities(n, cfg, result_df=_plain_result_df)
+    assert (pq["weights"]["energy"] == 2.0).all()
+    assert (pq["weights"]["cost"] == 3.0).all()
+    gens = pq["components"]["generators"]
+    for g in gens.index:
+        expect = float(n.generators_t.p[g].sum() * 2.0)
+        assert gens.at[g, "energy_mwh"] == pytest.approx(expect, rel=1e-12), g
+    # Fixed cost owes nothing to snapshot weights (flat network: × 1 year).
+    fixed = gens["capital_cost_annualised"] * gens["p_nom_opt"]
+    pd.testing.assert_series_equal(gens["fixed_cost_eur"], fixed.rename("fixed_cost_eur"))

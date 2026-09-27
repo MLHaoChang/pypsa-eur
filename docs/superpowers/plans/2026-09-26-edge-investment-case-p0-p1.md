@@ -173,7 +173,11 @@ Files: `backend/tests/test_investment_case_tripwires.py`.
 
 ### Phase 0 e2e QA gate
 - [ ] Full backend `not slow` suite green; frontend vitest green; `qa_save_load_roundtrip.py` green.
-- [ ] Findings note `docs/superpowers/findings/<date>-ic-p0-contracts.md`; assessor verdict recorded here.
+- [x] Findings note `docs/superpowers/findings/2026-09-27-ic-p0-contracts.md`.
+- [x] Assessor verdict (2026-09-27): GO WITH BINDING CONDITIONS — (1) tripwire must resolve relative
+  imports (closed); (2) seam test must separate objective vs generators weightings before WP1.0
+  (closed); (3) solver-facade file-list assertion lands with the first services/solver module (due in
+  P1); findings note counts corrected — see the findings note. **Phase 1 may start.**
 
 ---
 
@@ -326,6 +330,8 @@ Files: `lp_bindings.py`, `backend/tests/test_lp_bindings_peak_demand.py`.
 - [ ] Green: implementation.
 
 ### WP1.5b Ratchet
+- [ ] (Gate P0 condition 3) with `realistic_dispatch` or any other new `services/solver/` module, add
+  the assertion that `test_solver_facade_surface.py`'s glob covers it.
 - [ ] Red: `ratchet(lookback_months=11, share=0.9)` adds `ic_peak_import[m] ≥ 0.9·ic_peak_import[k]` for
   modelled k in the window and `≥ 0.9·meter_history_max` for months outside the horizon; missing history ⇒
   `ratchet_seed_missing` flag and no history constraint; billing on the solved dispatch equals LP demand cost;

@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 from datetime import date
 from typing import Any, Callable, Literal, Mapping
 
@@ -77,6 +78,11 @@ class JurisdictionPack:
     rules: Mapping[str, Rule] = field(default_factory=dict)
     valid_to: date | None = None
     notes: str | None = None
+
+    def __post_init__(self) -> None:
+        # Frozen dataclass + read-only mapping: a loaded pack cannot be edited
+        # in place (its hash would silently stop describing it).
+        object.__setattr__(self, "rules", MappingProxyType(dict(self.rules)))
 
     # -- lookups -----------------------------------------------------------
 

@@ -147,3 +147,10 @@ def test_packs_import_nothing_from_routers_or_solver_service():
         src = inspect.getsource(mod)
         assert "routers" not in src
         assert "solver_service" not in src
+
+
+
+def test_loaded_pack_rules_are_read_only():
+    pk = P.load_pack("eu_de", as_of=date(2026, 6, 1))
+    with pytest.raises(TypeError):
+        pk.rules["corporate_rate"] = P.Rule(value=0.3, source="x")  # type: ignore[index]

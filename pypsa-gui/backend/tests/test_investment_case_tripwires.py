@@ -37,16 +37,42 @@ IC_RESULTS_MODULES = ("physical_quantities",)
 FORBIDDEN_PREFIXES = ("routers", "services.solver_service", "services.solver.")
 
 
+_BACKEND = _SERVICES.parent
+
+
+def _package_of(path: pathlib.Path) -> list[str]:
+    """Dotted package of a module file, relative to the backend root."""
+    try:
+        rel = path.resolve().relative_to(_BACKEND)
+    except ValueError:
+        return []  # a probe file outside the tree: relative imports unresolved
+    parts = list(rel.with_suffix("").parts)
+    return parts[:-1]  # drop the module name (or `__init__`)
+
+
 def _imports(path: pathlib.Path) -> list[tuple[int, str]]:
     tree = ast.parse(path.read_text(), filename=str(path))
+    pkg = _package_of(path)
     out: list[tuple[int, str]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             out.extend((node.lineno, a.name) for a in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            out.append((node.lineno, node.module))
+        elif isinstance(node, ast.ImportFrom):
+            if node.level == 0:
+                base = node.module or ""
+            else:
+                # Resolve `from ..x import y` against the file's package, so a
+                # relative import cannot slip past (gate assessor, P0 #1).
+                up = pkg[: len(pkg) - (node.level - 1)] if node.level - 1 <= len(pkg) else []
+                base = ".".join(up + ([node.module] if node.module else []))
+            if not base:
+                # `from ... import routers` climbs to the top level: the
+                # imported NAMES are the modules.
+                out.extend((node.lineno, al.name) for al in node.names)
+                continue
+            out.append((node.lineno, base))
             # `from services import solver_service` names the module as an alias
-            out.extend((node.lineno, f"{node.module}.{a.name}") for a in node.names)
+            out.extend((node.lineno, f"{base}.{a.name}") for a in node.names)
     return out
 
 
@@ -134,3 +160,23 @@ def test_the_detector_catches_what_it_claims_to(tmp_path):
     assert "routers.results" in hits
     assert "services.solver_service" in hits
     assert not any(m.startswith("services.period_utils") for m in hits)
+
+
+
+def test_the_detector_resolves_relative_imports():
+    """Gate assessor P0 #1: `from ..solver_service import X` inside
+    services/finance/ must be flagged, not skipped as level != 0."""
+    probe = _SERVICES / "finance" / "_tripwire_probe_tmp.py"
+    probe.write_text(
+        "from ..solver_service import SolverConfig\n"
+        "from ... import routers\n"
+        "from . import report\n"
+    )
+    try:
+        mods = [m for _, m in _imports(probe)]
+        hits = [m for m in mods if _forbidden(m)]
+        assert "services.solver_service" in hits
+        assert "routers" in hits
+        assert "services.finance.report" in mods and not _forbidden("services.finance.report")
+    finally:
+        probe.unlink()

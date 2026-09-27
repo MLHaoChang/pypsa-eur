@@ -216,7 +216,7 @@ The contracts landed with unit-bearing names, per house style: `PpaContract.inde
 `ppa_changes_dispatch`); `CfdContract.reference_price`, `tenor_years`; `FinanceInputs` flattens
 `discounting` into `wacc_nominal`, `cost_of_equity`, `inflation` (all `None` until supplied — ADR-0001);
 `TaxPack.source`; `Provenance.seed`. `JurisdictionPack` carries `country` (ISO code, the join key to
-`Tariff.jurisdiction`) and `valid_to`, and registers dated versions per jurisdiction. Headline figures
+`Tariff.jurisdiction`) and `valid_to`, and registers dated versions per jurisdiction; its hash is the `pack_hash` property (not a free function) and its `rules` mapping is read-only after load. Headline figures
 (`project_irr_*`, `npv_at_wacc`, `min_dscr`, `flip_year`, …) are **hoisted to the report root** and
 `completeness` is a flat `dict[section, status]` beside `sections` (the EH house shape); §4.3 below is
 read with that in mind.
