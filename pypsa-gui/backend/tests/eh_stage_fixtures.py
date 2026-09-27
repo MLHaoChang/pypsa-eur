@@ -244,13 +244,24 @@ def two_grid_network() -> pypsa.Network:
     return n
 
 
-def common_mode_network(rate: float = 0.05, mttr_hours: float = 24.0
-                        ) -> pypsa.Network:
+def common_mode_network(rate: float = 0.05, mttr_hours: float = 24.0, *,
+                        event_only: bool = False) -> pypsa.Network:
     """
     The weak_flexible hub whose PoC Link carries an opt-in common-mode
     event: the Link AND the grid behind it down together (WP4).
+
+    ``event_only``: the Link has no outage data of its own and the grid no
+    sampled unit, so the event is the only random thing about the import
+    (``import_firmness == "common_mode_sampled"``).
     """
     n = certifiable_weak_network()
+    if event_only:
+        n.add("Carrier", "grid_mix")
+        n.generators.at["grid_supply", "carrier"] = "grid_mix"
+        for c in ("outage_rate_value", "mttr_hours"):
+            n.generators.at["grid_supply", c] = float("nan")
+            n.links[c] = float("nan")
+        n.links["outage_rate_basis"] = ""
     n.links["common_mode_rate"] = float("nan")
     n.links["common_mode_mttr_hours"] = float("nan")
     n.links.at["import_poc", "common_mode_rate"] = rate

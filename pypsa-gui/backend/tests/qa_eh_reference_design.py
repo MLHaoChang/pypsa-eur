@@ -370,6 +370,8 @@ def _fmea(network, archetype: str) -> dict:
         return {}
     r = c.get("/api/results/eh_reference_design")
     rep = r.json() if r.status_code == 200 else {}
+    _step(f"{archetype} (fmea_top): the report is JSON-clean",
+          bool(rep) and not _nonfinite(rep), str(_nonfinite(rep)[:5]))
     return ((rep.get("sections") or {}).get("fmea_top") or {}).get("payload") or {}
 
 
@@ -396,6 +398,10 @@ def section_4_zonal_open_items() -> None:
           two.get("import_model") == "zonal"
           and [a.get("links") for a in ga] == [["poc_a"], ["poc_b"]]
           and all(a.get("sampled") for a in ga), str(ga)[:200])
+    _step("each grid area carries its COPT surplus fraction",
+          len(ga) == 2 and all(isinstance(a.get("copt_surplus_fraction_min"),
+                                          (int, float)) for a in ga),
+          str([a.get("copt_surplus_fraction_min") for a in ga]))
     _step("the two-grid certification is established",
           two.get("_status") == "ok" and isinstance(two.get("_mc_lole_h"), (int, float)),
           f"status={two.get('_status')} lole={two.get('_mc_lole_h')}")
@@ -414,6 +420,26 @@ def section_4_zonal_open_items() -> None:
           isinstance(lc, (int, float)) and isinstance(l0, (int, float))
           and lc > l0, f"with={lc} without={l0}")
     WEAK_EVIDENCE["common_mode_lole_h"] = (lc, l0)
+
+    _step("an event on a sampled grid certifies through the zonal engine",
+          cm.get("import_model") == "zonal" and cm.get("engine") == "mc_zonal",
+          f"{cm.get('import_model')} / {cm.get('engine')}")
+    # WP4 event-only path: firm Link, unsampled grid, one event.
+    eo = _certify(common_mode_network(event_only=True), "weak_flexible")
+    eo0 = _certify(common_mode_network(rate=0.0, event_only=True),
+                   "weak_flexible")
+    _step("the event-only path is disclosed as common_mode_sampled",
+          eo.get("import_model") == "firm_block"
+          and eo.get("import_firmness") == "common_mode_sampled"
+          and eo.get("engine") == "mc_zonal",
+          f"{eo.get('import_model')} / {eo.get('import_firmness')} / "
+          f"{eo.get('engine')}")
+    le, le0 = eo.get("_mc_lole_h"), eo0.get("_mc_lole_h")
+    _step("the event alone raises LOLE over the firm block (q = 0 control)",
+          isinstance(le, (int, float)) and isinstance(le0, (int, float))
+          and le > le0 and eo0.get("import_firmness") == "planning_limit_only",
+          f"event={le} control={le0} ({eo0.get('import_firmness')})")
+    WEAK_EVIDENCE["event_only_lole_h"] = (le, le0)
 
     # WP3 + WP4: the screening mixes the event, ranks it, and carries the
     # exact import metric.

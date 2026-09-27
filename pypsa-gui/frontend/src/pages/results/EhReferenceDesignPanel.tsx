@@ -118,9 +118,15 @@ export function importModelLabel(payload: EhCertificationPayload | null): string
     ?? (scope?.mode === 'hub_side' ? 'firm_block' : null)
   const cap = scope?.import_cap_mw_max ?? scope?.import_firm_mw_max
   const capText = cap != null ? ` (cap ${Number(cap).toFixed(0)} MW)` : ''
+  const firmness = payload.import_firmness ?? scope?.import_firmness
+  if (firmness === 'common_mode_sampled') {
+    return `firm block; common-mode event sampled (Link and grid down together)${capText}`
+  }
   switch (model) {
     case 'zonal':
-      return `Link outages + grid-side surplus sampled (two-area MC)${capText}`
+      return firmness === 'grid_sampled'
+        ? `grid-side surplus sampled; Links firm at their planning cap (two-area MC)${capText}`
+        : `Link outages + grid-side surplus sampled (two-area MC)${capText}`
     case 'sampled_unit':
       return `Link outages sampled (two-state unit at its planning cap)${capText}`
     case 'mixed':
@@ -160,7 +166,9 @@ export function gridAreasSummary(scope: EhFleetScope | null | undefined): string
 /** One line per common-mode event (applied, or why not). */
 export function commonModeLines(scope: EhFleetScope | null | undefined): string[] {
   return (scope?.import_common_mode ?? []).map(e => (e.applied
-    ? `${e.link}: common-mode q=${e.rate} (${e.basis}), MTTR ${e.mttr_hours} h — Link and grid area down together`
+    ? (e.rate > 0
+      ? `${e.link}: common-mode q=${e.rate} (${e.basis}), MTTR ${e.mttr_hours} h — Link and grid area down together`
+      : `${e.link}: common-mode q=0 — no effect`)
     : `${e.link}: common-mode data not applied — ${e.reason ?? 'no reason given'}`))
 }
 
@@ -176,10 +184,16 @@ export function coptImportSummary(
     : model === 'two_state'
       ? 'COPT screening: import Link as a two-state unit'
       : 'COPT screening: import as a firm block at the planning limit'
-  const exact = coptMetrics?.import_exact?.lole_hours
-  return exact != null
-    ? `${label}; exact import LOLE ${Number(exact).toFixed(2)} h (analytic, no storage)`
+  const withEvents = scope?.copt_common_mode === 'event_mixture'
+    ? `${label}; common-mode events mixed exactly`
     : label
+  const exact = coptMetrics?.import_exact?.lole_hours
+  if (exact == null) return withEvents
+  const delta = coptMetrics?.import_exact?.delta_mw
+  const rounding = delta != null && delta > 1
+    ? `, import rounded down to ${Number(delta).toFixed(0)} MW levels`
+    : ''
+  return `${withEvents}; exact import LOLE ${Number(exact).toFixed(2)} h (analytic, no storage${rounding})`
 }
 
 /** True when there is a certification verdict or an honest reason to show. */
@@ -238,6 +252,16 @@ export function fmeaCoptImportSummary(report: EhReferenceDesignReport): string |
     copt_metrics?: { import_exact?: EhImportExact | null } | null
   } | undefined
   return coptImportSummary(payload?.fleet_scope, payload?.copt_metrics)
+}
+
+/** The COPT caveat and fidelity notes carried on the fmea_top payload. */
+export function fmeaCoptNotes(report: EhReferenceDesignReport): string[] {
+  const payload = report.sections?.fmea_top?.payload as {
+    fleet_scope?: EhFleetScope | null
+    copt_fidelity_note?: string | null
+  } | undefined
+  return [payload?.fleet_scope?.copt_import_note, payload?.copt_fidelity_note]
+    .filter((x): x is string => typeof x === 'string' && x.length > 0)
 }
 
 /** How a sampled import Link is ranked in fmea_top (once: B, else A). */
@@ -925,6 +949,11 @@ export function EhReferenceDesignPanel() {
                     <p className="text-[10px] text-muted" data-testid="eh-fmea-top-copt-import">
                       {fmeaCoptImportSummary(report)}
                     </p>
+                  )}
+                  {fmeaCoptNotes(report).length > 0 && (
+                    <div className="text-[10px] text-muted" data-testid="eh-fmea-top-copt-notes">
+                      {fmeaCoptNotes(report).map(line => <p key={line}>{line}</p>)}
+                    </div>
                   )}
                   {fmeaImportRankingNote(report) && (
                     <p className="text-[10px] text-muted" data-testid="eh-fmea-top-import-ranking">

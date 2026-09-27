@@ -656,7 +656,7 @@ export type EhImportModel =
 
 export type EhImportFirmness =
   | 'planning_limit_only' | 'outage_sampled' | 'partially_outage_sampled'
-  | 'grid_sampled' | 'outage_and_grid_sampled'
+  | 'grid_sampled' | 'outage_and_grid_sampled' | 'common_mode_sampled'
 
 /** One import Link in `fleet_scope.import_link_models`. */
 export interface EhImportLinkModel {
@@ -684,6 +684,8 @@ export interface EhGridArea {
   storage: string[]
   storage_dispatched: boolean
   copt_surplus_fraction_min?: number | null
+  /** Why the expected surplus could not be computed (screening fell back to v1). */
+  copt_note?: string | null
   note?: string | null
 }
 
@@ -716,6 +718,12 @@ export interface EhFleetScope {
   copt_import_note?: string | null
   /** Common-mode events from opt-in Link data (applied or with a reason). */
   import_common_mode?: EhCommonModeEvent[]
+  /** True when an applied event with a positive rate is sampled. */
+  import_common_mode_sampled?: boolean
+  /** How the screening holds common-mode events ('event_mixture' = exact). */
+  copt_common_mode?: 'event_mixture' | null
+  /** Unit name in the MC / COPT fleet → import Link name. */
+  import_units?: Record<string, string>
   note?: string
 }
 

@@ -21,6 +21,7 @@ import {
   gridAreasSummary,
   commonModeLines,
   coptImportSummary,
+  fmeaCoptNotes,
   importModelLabel,
   lcohChip,
   leverCsvRows,
@@ -929,5 +930,85 @@ describe('zonal open items: grid areas, COPT import, common mode (2026-09-28)', 
       .toMatch(/poc_a: common-mode q=0.05/)
     expect(screen.getByTestId('eh-fmea-top-copt-import').textContent)
       .toMatch(/exact import LOLE 576\.10 h/)
+  })
+})
+
+describe('review of WP5: labels that do not hide an event or a firm Link', () => {
+  it('labels a firm block under a sampled event and a firm Link behind a sampled grid', () => {
+    expect(importModelLabel({ metric: 'mc_lole', import_model: 'firm_block',
+      import_firmness: 'common_mode_sampled',
+      fleet_scope: { mode: 'hub_side', import_cap_mw_max: 50 } }))
+      .toMatch(/firm block; common-mode event sampled/)
+    expect(importModelLabel({ metric: 'mc_lole', import_model: 'zonal',
+      import_firmness: 'grid_sampled',
+      fleet_scope: { mode: 'hub_side', import_cap_mw_max: 50 } }))
+      .toMatch(/grid-side surplus sampled; Links firm/)
+  })
+
+  it('says the screening mixes events, and when the exact metric is rounded', () => {
+    expect(coptImportSummary({ mode: 'hub_side', copt_import_model: 'firm_block',
+      copt_common_mode: 'event_mixture' }, null))
+      .toMatch(/firm block.*common-mode events mixed exactly/)
+    expect(coptImportSummary(
+      { mode: 'hub_side', copt_import_model: 'expected_surplus_profile' },
+      { import_exact: { lole_hours: 10, delta_mw: 4 } }))
+      .toMatch(/import rounded down to 4 MW levels/)
+    expect(coptImportSummary(
+      { mode: 'hub_side', copt_import_model: 'expected_surplus_profile' },
+      { import_exact: { lole_hours: 10, delta_mw: 1 } })).not.toMatch(/rounded/)
+  })
+
+  it('shows the COPT caveat and fidelity notes, and nothing on an older report', () => {
+    const report = { ...REPORT, sections: { fmea_top: { status: 'ok' as const, note: null,
+      payload: { top: [], copt_fidelity_note: 'areas [6] held UP',
+        fleet_scope: { mode: 'hub_side' as const,
+          copt_import_note: 'may over- or under-state LOLE against the MC' } } } } }
+    expect(fmeaCoptNotes(report)).toEqual([
+      'may over- or under-state LOLE against the MC', 'areas [6] held UP'])
+    expect(fmeaCoptNotes(REPORT)).toEqual([])
+  })
+
+  it('does not call a zero-rate event an event, and keeps ignored entries', () => {
+    expect(commonModeLines({ mode: 'hub_side', import_common_mode: [
+      { link: 'p', rate: 0, mttr_hours: 24, basis: 'FOR', area: 0, applied: true, reason: null },
+      { link: 'x', rate: 0.1, mttr_hours: null, basis: 'FOR', area: null, applied: false,
+        reason: 'whole-network scope (no identified hub boundary) — common-mode data not modelled' },
+    ] })).toEqual([
+      'p: common-mode q=0 — no effect',
+      'x: common-mode data not applied — whole-network scope (no identified hub boundary) — common-mode data not modelled',
+    ])
+  })
+
+  it('does not list idle grid storage as dispatched', () => {
+    expect(gridAreasSummary({ mode: 'hub_side', grid_areas: [{
+      area: 0, links: ['a'], sampled: true, units: ['g'], n_units: 1, capacity_mw: 1,
+      demand_peak_mw: 1, storage: ['bat'], storage_dispatched: false }] }))
+      .not.toMatch(/dispatched/)
+  })
+
+  it('renders a CommonMode FMEA row and the COPT notes', async () => {
+    const report = {
+      ...REPORT,
+      completeness: { ...REPORT.completeness, fmea_top: 'ok' as const },
+      sections: {
+        fmea_top: { status: 'ok' as const, note: 'Link-primary',
+          payload: { top: [{ rank: 1, mode_id: 'common_mode:poc:forced_outage',
+            component_class: 'CommonMode', name: 'common_mode:poc', failure_class: 'A',
+            criticality_eur_per_year: 1200, delta_eue_mwh: 8 }],
+          fleet_scope: { mode: 'hub_side' as const, copt_import_model: 'two_state' as const,
+            copt_common_mode: 'event_mixture' as const,
+            copt_import_note: 'common-mode events are MIXED exactly' } } },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report,
+    } as never)
+    await openPanel()
+    expect((await screen.findByTestId('eh-fmea-top-row-1')).textContent)
+      .toMatch(/CommonMode/)
+    expect(screen.getByTestId('eh-fmea-top-copt-notes').textContent)
+      .toMatch(/MIXED exactly/)
+    expect(screen.getByTestId('eh-fmea-top-copt-import').textContent)
+      .toMatch(/common-mode events mixed exactly/)
   })
 })

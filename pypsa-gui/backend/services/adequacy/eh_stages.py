@@ -1057,6 +1057,9 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
         snap.mc_inputs = inputs
         snap.copt_error = ("COPT screening skipped: no sampled unit on the hub "
                            "side (the grid-side area is MC-only)")
+        # Review of WP5: no screening ran, so there is no screening model.
+        snap.scope["copt_import_model"] = None
+        snap.scope["copt_import_note"] = None
         return snap
     if not inputs.units:
         snap.mc_error = (
