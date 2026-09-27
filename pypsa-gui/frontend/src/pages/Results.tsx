@@ -721,7 +721,9 @@ export default function Results() {
                 <CompareView
                   embedded
                   onClose={() => setCompareRailOpen(false)}
-                  initialTab={RESULTS_TO_COMPARE_TAB[tab]}
+                  // Seeded from the tab on screen: in Guided a stored hidden
+                  // tab is displayed as adequacy, and the rail must match it.
+                  initialTab={RESULTS_TO_COMPARE_TAB[effectiveTab]}
                 />
               </ErrorBoundary>
             </div>

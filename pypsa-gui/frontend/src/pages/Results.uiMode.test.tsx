@@ -26,7 +26,10 @@ vi.mock('./results/AdequacyTab', () => stub('adequacy-stub'))
 vi.mock('./results/FmeaTab', () => stub('fmea-stub'))
 vi.mock('./results/StorageCycling', () => stub('storage-stub'))
 vi.mock('./results/asset/AssetDetail', () => stub('asset-stub'))
-vi.mock('./CompareView', () => ({ default: () => <div data-testid="compare-stub" /> }))
+// The rail's CompareView reports the tab Results seeded it with.
+vi.mock('./CompareView', () => ({
+  default: ({ initialTab }: { initialTab?: string }) => <div data-testid="compare-stub" data-initial-tab={initialTab} />,
+}))
 
 vi.mock('../api/simulation', () => ({
   simulationApi: { getStatus: vi.fn().mockResolvedValue({ running: false }) },
@@ -137,5 +140,26 @@ describe('Results in Expert mode', () => {
     localStorage.setItem('results:active-tab', 'dispatch')
     await renderResults()
     expect(screen.getByTestId('dispatch-stub')).toBeTruthy()
+  })
+})
+
+// The docked compare rail is seeded from the Results tab on screen
+// (RESULTS_TO_COMPARE_TAB). In Guided a stored hidden tab is displayed as
+// adequacy, so the rail must be seeded from what is displayed — adequacy's
+// compare tab (lost_load) — never from the hidden stored tab.
+describe('compare rail seeding', () => {
+  it('Guided with a stored hidden tab seeds from the displayed adequacy tab', async () => {
+    useUIStore.setState({ uiMode: 'guided', compareRailOpen: true })
+    localStorage.setItem('results:active-tab', 'prices')
+    await renderResults()
+    expect(screen.getByTestId('adequacy-stub')).toBeTruthy()
+    expect(screen.getByTestId('compare-stub').getAttribute('data-initial-tab')).toBe('lost_load')
+  })
+
+  it('Expert seeds from the stored tab as before', async () => {
+    useUIStore.setState({ uiMode: 'expert', compareRailOpen: true })
+    localStorage.setItem('results:active-tab', 'prices')
+    await renderResults()
+    expect(screen.getByTestId('compare-stub').getAttribute('data-initial-tab')).toBe('prices')
   })
 })

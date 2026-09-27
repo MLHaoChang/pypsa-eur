@@ -9,6 +9,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import NewProjectWizard, { type NewProjectTab } from './NewProjectWizard'
 import { projectsApi } from '../api/projects'
 import { ioApi } from '../api/io'
+import { gridspineApi } from '../api/gridspine'
 import { useUIStore, type NewProjectKind } from '../store/uiStore'
 
 vi.mock('../api/projects')
@@ -105,5 +106,45 @@ describe('NewProjectWizard — new-project rule', () => {
     useUIStore.setState({ uiMode: 'expert', uiModeExplicit: true })
     await drive('template')
     expect(useUIStore.getState().uiMode).toBe('expert')
+  })
+})
+
+// The Study tab (gridspine planning → dynamics study) is a project too — G4 is
+// literal (review B10), so it follows the same rule with kind 'study'. It does
+// not navigate; the mode call must precede setCurrentProject.
+describe('NewProjectWizard — Study tab follows the new-project rule', () => {
+  async function driveStudy() {
+    vi.mocked(gridspineApi.createStudy).mockResolvedValue({
+      id: 'new-id', name: 'Winter 2030', kind: 'planning_dynamics',
+      config: { hours: 168, k: 3, window: 168, overlap: 24, screen: true, n2_prune_threshold_pct: 0, from_dispatch: null },
+      status: { status: 'not started', resumable: false, error: null, selected_hours: [], converged_hours: [], bundles: {}, stages: {} as never },
+    } as never)
+    const realSet = useUIStore.getState().setCurrentProject
+    useUIStore.setState({
+      setCurrentProject: (n: string | null, id?: string | null) => { order.push(`set:${n}`); realSet(n, id) },
+    })
+    try {
+      renderAt('study')
+      await userEvent.type(screen.getByLabelText('Study name'), 'Winter 2030')
+      await userEvent.click(screen.getByRole('button', { name: /create study/i }))
+      await waitFor(() => expect(order).toContain('set:Winter 2030'))
+    } finally {
+      useUIStore.setState({ setCurrentProject: realSet })
+    }
+  }
+
+  it("calls noteNewProjectCreated('study') before setting the current project", async () => {
+    useUIStore.setState({ uiMode: 'expert', uiModeExplicit: true })
+    await driveStudy()
+    expect(note).toHaveBeenCalledTimes(1)
+    expect(note).toHaveBeenCalledWith('study')
+    expect(order.indexOf('note:study')).toBeLessThan(order.indexOf('set:Winter 2030'))
+    expect(useUIStore.getState().uiMode).toBe('expert')
+  })
+
+  it('an implicit Expert user lands the new study in Guided', async () => {
+    useUIStore.setState({ uiMode: 'expert', uiModeExplicit: false })
+    await driveStudy()
+    expect(useUIStore.getState().uiMode).toBe('guided')
   })
 })

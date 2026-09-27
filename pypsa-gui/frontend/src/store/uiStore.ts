@@ -56,7 +56,7 @@ export type Density = 'comfortable' | 'compact'
 // Expert is every panel and tab. See the guided-mode spec §3.
 export type UiMode = 'guided' | 'expert'
 // What created a new project (informational — logged, never branched on).
-export type NewProjectKind = 'blank' | 'template' | 'file' | 'clone'
+export type NewProjectKind = 'blank' | 'template' | 'file' | 'clone' | 'study'
 
 const SIDEBAR_MODE_KEY = 'network-diagram:sidebar-mode'
 const PROJECT_NAME_KEY = 'network-diagram:project-name'

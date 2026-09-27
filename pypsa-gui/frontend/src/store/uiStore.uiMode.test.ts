@@ -150,7 +150,7 @@ describe('setUiMode', () => {
 })
 
 describe('noteNewProjectCreated — G4 literal', () => {
-  for (const kind of ['blank', 'template', 'file', 'clone'] as const) {
+  for (const kind of ['blank', 'template', 'file', 'clone', 'study'] as const) {
     it(`${kind}: implicit expert → guided (persisted, still implicit)`, async () => {
       const s = await freshStore({ 'network-diagram:current-project': 'P' })
       expect(s.getState().uiMode).toBe('expert')

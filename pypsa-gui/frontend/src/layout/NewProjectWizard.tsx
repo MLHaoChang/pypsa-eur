@@ -714,6 +714,8 @@ function StudyTab({ existingProjects, onClose }: { existingProjects: ProjectInfo
       hours: Number(hours), k: Number(k), window: Number(window_), overlap: Number(overlap), screen,
     }),
     onSuccess: (res) => {
+      // G4 (guided-mode spec §3.4, literal): a study is a new project too.
+      useUIStore.getState().noteNewProjectCreated('study')
       qc.invalidateQueries({ queryKey: ['projects'] })
       setCurrentProject(res.name, res.id)
       setProjectName(res.name)
