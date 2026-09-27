@@ -25,15 +25,21 @@ Link unit(s) at their v1 positions, sampled with the SAME seed through
 paths generated and discarded as the contract requires), the Links from a
 second call in which every other unit is a zero-rate placeholder (which
 consumes no stream), so each Link draws from its own positional substream.
-When the grid never binds, the hub sees exactly the v1 capacity — the
-float32 sum is formed in the same order — and the per-draw LOLE / EUE are
-bit-identical to v1 (pinned by a test). The grid fleet samples from its own
-tagged substream, so adding the grid area moves no hub draw.
+When no grid binds, the hub sees the v1 capacity: each area's import is
+added to the hub's float32 sum in Link-position order, so with at most one
+sampled Link per area (and no firm-block Link) the per-draw LOLE / EUE are
+bit-identical to v1 (pinned by tests, one area and two). Several sampled
+Links into ONE area are summed within the area first, which can differ
+from v1's unit-by-unit float32 order by rounding only. Each grid area
+samples from its own tagged substream (``GRID_STREAM_KEY − k``), so adding
+an area moves no hub draw and no other area's draw.
 
-WHAT IT DOES NOT MODEL (disclosed on the payload): grid-side storage is not
-dispatched (conservative for the hub), the grid is one area (a grid side
-that is several disconnected components is refused upstream), and grid
-outages are independent of hub outages like every other unit (MC_WARNING_V1).
+Grid storage (plan 2026-09-28, WP1) follows a pinned non-anticipative
+policy (see ``simulate_zonal_blocks``); several disconnected grid
+components are several areas (WP2); an area with no sampled unit leaves
+its Links on v1. WHAT IT DOES NOT MODEL (disclosed on the payload): grid
+outages are independent of hub outages like every other unit
+(MC_WARNING_V1), and offered-but-unused power is not stored in grid stores.
 """
 from __future__ import annotations
 
@@ -298,6 +304,8 @@ def simulate_zonal_blocks(z: ZonalInputs, *, draws: int, seed,
         units, H, draws, _fresh(ss), exclude=all_imp, periods=hub.periods).T)
     areas = [_AreaState(a, hub, units, ss, H, draws, grid_storage_enabled,
                         initial_soc_frac) for a in z.areas]
+    add_order = sorted(range(len(z.areas)), key=lambda k: (
+        min(z.areas[k].import_idx) if z.areas[k].import_idx else len(units), k))
 
     # The v1 residual has the firm-block Links netted out; here they are
     # import capacity bounded by the grid like any other, so add them back.
@@ -323,13 +331,13 @@ def simulate_zonal_blocks(z: ZonalInputs, *, draws: int, seed,
             a.start_block(start, end)
         for h in range(start, end):
             offers = [a.offer(h) for a in areas]
-            imp_total = offers[0][1]
-            for _o, i in offers[1:]:
-                imp_total = imp_total + i
-            imp_h = imp_total.astype(np.float32)
-            # Same float32 accumulation order as sample_capacity's: the hub's
-            # units, then the Link(s) — so an unbound grid replays v1 exactly.
-            cap = (hub_t[h] + imp_h).astype(np.float64)
+            # float32 accumulation in Link-position order, like
+            # sample_capacity's: the hub's units, then each area's import —
+            # so unbound areas replay v1 (see the module docstring).
+            cap32 = hub_t[h]
+            for k in add_order:
+                cap32 = cap32 + offers[k][1].astype(np.float32)
+            cap = cap32.astype(np.float64)
             deficit = residual_raw[h] - cap
             if n_store:
                 order = (single_order if n_store == 1

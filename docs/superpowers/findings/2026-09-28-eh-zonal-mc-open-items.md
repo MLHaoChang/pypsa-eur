@@ -34,3 +34,28 @@ Each work package was built TDD (red → green), then reviewed by an independent
 | R1.7 | `storage_dispatched` was true for stores rated 0 MW in every period | nit | Now filtered on `p_nom_mw > 0` and a non-zero series. Test added. |
 
 All three reviewer mutants were re-run against the new tests and each fails at least one test.
+
+## WP2 — several grid areas
+
+**What changed.**
+- `hub_fleet_scope` records each live Link's grid component and its hub-side and grid-side series (`link_grid`, `grid_components`).
+- `eh_stages._grid_areas` builds one `GridArea` per grid component that a live import Link reaches, in the order the Links are listed:
+  - Each area has its own pruned snapshot, `import_idx`, firm-block series and delivery ratio.
+  - Area `k` samples from substream `GRID_STREAM_KEY − k`.
+  - An area with no sampled unit, or whose snapshot is refused, keeps `grid=None`. Its Links see an unbounded surplus (v1), and the reason is recorded.
+  - Zonal applies when at least one area is sampled.
+- `fleet_scope.grid_area` became `grid_areas: [...]` (`area`, `links`, `buses`, `sampled`, `reason`, `units`, `capacity_mw`, `demand_peak_mw`, `storage`, `storage_dispatched`, `note`). Values that cannot be resolved are `null`.
+- The 2026-09-27 "grid side is N separate components — v1 applies" refusal is gone.
+
+**TDD.** Red: `KeyError: 'grid_areas'`, `'sampled_unit' == 'zonal'`. Green: `test_energy_hub_zonal_areas.py`. Four earlier assertions were updated for the rename (`grid_area` → `grid_areas[0]`, and the no-grid note).
+
+**Review findings (independent reviewer, commit `bae42b1`) and resolution.**
+
+| # | Finding | Severity | Resolution |
+|---|---|---|---|
+| R2.1 | Area construction, per-area `import_idx` / firm / ratio, the kernel's union exclude and firm add-back, CRN separation, and the `zonal` ⇔ `zonal_inputs` coupling | no bug | — |
+| R2.2 | Several unbound areas were not bit-identical to v1. Imports were summed in float64 and cast once, so per-draw EUE was off by up to 0.008 MWh, which could flip LOLE near `SHORTFALL_TOL` | risk | Each area's import is now added to the hub's float32 sum in Link-position order. `test_two_unbound_areas_replay_v1_bit_for_bit` covers it (non-integer caps, 2000 draws), and the old float64-sum mutant fails it. The docstring now scopes the guarantee to at most one sampled Link per area; several Links into one area can differ from v1 by rounding only. |
+| R2.3 | Frontend type still declared `grid_area` | risk | `EhGridArea` + `grid_areas?: EhGridArea[]` in `api/simulation.ts`; `tsc` is clean. |
+| R2.4 | Stale module docstring (said grid storage is not dispatched and one area only) | nit | Rewritten. |
+| R2.5 | `demand_peak_mw` was `0.0` for an empty residual | nit | Now `null` (ADR-0001). |
+| R2.6 | Surviving mutants: stream index ignored; a `grid=None` area gives no import; firm series in the wrong area; delivery ratio pooled across areas; multi-Link areas and interleaved order untested; refused-snapshot branch never run | test gaps | Six tests added: identical fleets on the two areas draw different paths; an unsampled area replays v1 bit for bit; a firm Link lands in its own area; per-area ratios with efficiencies 0.9 / 0.5; interleaved `a, b, a2` groups as `[a, a2], [b]`; a refused snapshot is marked unsampled with its reason and `null` values. All five in-place mutants were re-run and each now fails at least one test. The stream test needed truly identical fleets (same MTTR) to bite. |

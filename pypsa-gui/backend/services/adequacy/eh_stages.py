@@ -574,7 +574,7 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
                 "n_units": len(grid.units),
                 "capacity_mw": float(sum(u.capacity_mw for u in grid.units)),
                 "demand_peak_mw": (float(np.max(grid.residual))
-                                   if grid.residual.size else 0.0),
+                                   if grid.residual.size else None),
                 "storage": stores,
                 "storage_dispatched": bool(stores),
                 "note": ("sampled as its own area: its fleet and demand "

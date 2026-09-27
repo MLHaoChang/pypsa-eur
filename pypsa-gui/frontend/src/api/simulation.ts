@@ -670,6 +670,23 @@ export interface EhImportLinkModel {
   reason?: string | null
 }
 
+/** One grid-side area in `fleet_scope.grid_areas` (null = not resolvable). */
+export interface EhGridArea {
+  area: number
+  links: string[]
+  buses?: string[]
+  sampled: boolean
+  reason?: string | null
+  units: string[]
+  n_units: number
+  capacity_mw: number | null
+  demand_peak_mw: number | null
+  storage: string[]
+  storage_dispatched: boolean
+  copt_surplus_fraction_min?: number | null
+  note?: string | null
+}
+
 /** Which fleet the MC / COPT saw (`fleet_scope` on certification / fmea_top). */
 export interface EhFleetScope {
   mode: 'hub_side' | 'whole_network'
@@ -681,14 +698,8 @@ export interface EhFleetScope {
   import_firm_mw_max?: number | null
   import_cap_mw_max?: number | null
   import_link_models?: EhImportLinkModel[]
-  grid_area?: {
-    units: string[]
-    n_units: number
-    capacity_mw: number
-    demand_peak_mw: number
-    storage_dispatched: boolean
-    note?: string
-  } | null
+  /** One entry per grid area behind the hub (zonal only; plan 2026-09-28). */
+  grid_areas?: EhGridArea[]
   note?: string
 }
 
