@@ -259,7 +259,7 @@ of 10 and 10.
 
 | Run | Result |
 |---|---|
-| Backend `-m "not slow"` | FOLLOWUP_BACKEND |
+| Backend `-m "not slow"` | 5599 passed, 29 failed, 107 errors, 32 skipped. The 136 failures and errors are the same test ids as on master, all desktop, GridSpine, shutdown and packaging tests; passed grew by 14, the 8 new FOM tests plus 6 facade-surface checks for the 3 new re-exports |
 | Frontend `npx vitest run` | 1940 passed; `tsc --noEmit` clean |
 | QA drivers | asset economics 26/26, overnight cost decomposition 10/10, objective scale 5/5, results-summary compare 53/53, safe capital cost exit 0 |
 
