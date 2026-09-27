@@ -396,7 +396,7 @@ both gaps in the hand-built Python 3.11 venv, not in the container:
 install into the 3.11 venv.
 
 A Python 3.12 venv with the same pins plus those four packages runs all 12
-affected files green: 241 passed, 0 failed. The full suite on that environment is recorded below once it finishes.
+affected files green: 241 passed, 0 failed. The full backend suite (`-m "not slow"`) on that environment: 5,748 passed, 31 skipped, 0 failed, 0 errors.
 
 None of these tests touch economics, and none showed a product defect: each
 failed only because a package was missing. `pixi run gui-tests` runs in the
