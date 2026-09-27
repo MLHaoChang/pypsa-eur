@@ -607,7 +607,7 @@ its reliability in none. The tools below close that gap.
 | `run_mc_study` | execution | Sequential Monte Carlo — LOLE / EUE, optional ELCC table |
 | `run_coupling_loop` | execution | Drive a plan to an LOLE target on the **energy** lever (ENS cap) |
 | `run_margin_loop` | execution | Same target, on the **firm-capacity** lever (reserve margin) |
-| `run_eh_study` | execution | Energy Hub archetype pack study → `ReferenceDesignReport` (ENS plan → frontier → MC LOLE certify on the hub side of the import Link — Link outages sampled, and the grid behind it as a second area, when occurrence data allows (`certification.import_model`: `zonal` / `sampled_unit` / `firm_block` / `islanded`) → FMEA top-N → redundancy / levers / DtC; every stage budget-charged, `skipped` / `not_established` with a reason rather than silently overrun) |
+| `run_eh_study` | execution | Energy Hub archetype pack study → `ReferenceDesignReport` (ENS plan → frontier → MC LOLE certify on the hub side of the import Link — Link outages sampled, and each grid behind it as its own area (grid storage dispatched grid-first; an opt-in `common_mode_rate` on the Link takes it and its grid down together), when occurrence data allows (`certification.import_model`: `zonal` / `sampled_unit` / `firm_block` / `islanded`; `fmea_top.copt_metrics.import_exact` is the analytic cross-check) → FMEA top-N → redundancy / levers / DtC; every stage budget-charged, `skipped` / `not_established` with a reason rather than silently overrun) |
 | `abort_adequacy_study` | destructive | Stop any of the six studies at its next boundary |
 
 Three properties are worth knowing before reading a transcript:

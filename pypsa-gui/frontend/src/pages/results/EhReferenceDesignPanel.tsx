@@ -5,6 +5,7 @@ import {
   resultsApi,
   type EhArchetype,
   type EhCertificationPayload,
+  type EhFleetScope,
   type EhCertificationVerdict,
   type EhDtcPlanningTable,
   type EhDtcStressTable,
@@ -133,6 +134,54 @@ export function importModelLabel(payload: EhCertificationPayload | null): string
   }
 }
 
+/** `copt_metrics.import_exact` — the analytic LOLE with the import mixed in. */
+export interface EhImportExact {
+  lole_hours?: number | null
+  eue_mwh?: number | null
+  delta_mw?: number
+  levels?: number
+  note?: string
+}
+
+/** One line on the grid area(s) behind the hub, or null when not zonal. */
+export function gridAreasSummary(scope: EhFleetScope | null | undefined): string | null {
+  const areas = scope?.grid_areas ?? []
+  if (areas.length === 0) return null
+  const sampled = areas.filter(a => a.sampled)
+  const parts = [`${areas.length} grid area${areas.length === 1 ? '' : 's'}, ${sampled.length} sampled`]
+  const stores = sampled.flatMap(a => (a.storage_dispatched ? a.storage : []))
+  if (stores.length > 0) parts.push(`grid storage dispatched: ${stores.join(', ')}`)
+  for (const a of areas.filter(x => !x.sampled)) {
+    parts.push(`${a.links.join(', ')}: unbounded (v1)${a.reason ? ` — ${a.reason}` : ''}`)
+  }
+  return parts.join('; ')
+}
+
+/** One line per common-mode event (applied, or why not). */
+export function commonModeLines(scope: EhFleetScope | null | undefined): string[] {
+  return (scope?.import_common_mode ?? []).map(e => (e.applied
+    ? `${e.link}: common-mode q=${e.rate} (${e.basis}), MTTR ${e.mttr_hours} h — Link and grid area down together`
+    : `${e.link}: common-mode data not applied — ${e.reason ?? 'no reason given'}`))
+}
+
+/** How the COPT screening holds the import, plus the exact import LOLE. */
+export function coptImportSummary(
+  scope: EhFleetScope | null | undefined,
+  coptMetrics: { import_exact?: EhImportExact | null } | null | undefined,
+): string | null {
+  const model = scope?.copt_import_model
+  if (!model) return null
+  const label = model === 'expected_surplus_profile'
+    ? 'COPT screening: import Link scaled by the expected grid surplus (ranking only)'
+    : model === 'two_state'
+      ? 'COPT screening: import Link as a two-state unit'
+      : 'COPT screening: import as a firm block at the planning limit'
+  const exact = coptMetrics?.import_exact?.lole_hours
+  return exact != null
+    ? `${label}; exact import LOLE ${Number(exact).toFixed(2)} h (analytic, no storage)`
+    : label
+}
+
 /** True when there is a certification verdict or an honest reason to show. */
 export function hasCertificationBlock(report: EhReferenceDesignReport): boolean {
   const section = report.sections?.certification
@@ -180,6 +229,15 @@ export function fmeaTopModes(report: EhReferenceDesignReport): EhFmeaTopMode[] {
       Boolean(m) && typeof m === 'object'
       && typeof (m as EhFmeaTopMode).mode_id === 'string',
   )
+}
+
+/** The fmea_top payload's COPT import line (see ``coptImportSummary``). */
+export function fmeaCoptImportSummary(report: EhReferenceDesignReport): string | null {
+  const payload = report.sections?.fmea_top?.payload as {
+    fleet_scope?: EhFleetScope | null
+    copt_metrics?: { import_exact?: EhImportExact | null } | null
+  } | undefined
+  return coptImportSummary(payload?.fleet_scope, payload?.copt_metrics)
 }
 
 /** How a sampled import Link is ranked in fmea_top (once: B, else A). */
@@ -693,6 +751,18 @@ export function EhReferenceDesignPanel() {
                       )}
                     </div>
                   )}
+                  {gridAreasSummary(certification?.fleet_scope) && (
+                    <p className="text-[10px] text-muted" data-testid="eh-certification-grid-areas">
+                      {gridAreasSummary(certification?.fleet_scope)}
+                    </p>
+                  )}
+                  {commonModeLines(certification?.fleet_scope).length > 0 && (
+                    <ul className="text-[10px] text-muted" data-testid="eh-certification-common-mode">
+                      {commonModeLines(certification?.fleet_scope).map(line => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  )}
                   {certification?.fleet_scope?.note && (
                     <p className="text-[10px] text-muted" data-testid="eh-certification-scope-note">
                       {certification.fleet_scope.note}
@@ -849,6 +919,11 @@ export function EhReferenceDesignPanel() {
                   {report.sections?.fmea_top?.note && (
                     <p className="text-[10px] text-muted" data-testid="eh-fmea-top-note">
                       {report.sections.fmea_top.note}
+                    </p>
+                  )}
+                  {fmeaCoptImportSummary(report) && (
+                    <p className="text-[10px] text-muted" data-testid="eh-fmea-top-copt-import">
+                      {fmeaCoptImportSummary(report)}
                     </p>
                   )}
                   {fmeaImportRankingNote(report) && (

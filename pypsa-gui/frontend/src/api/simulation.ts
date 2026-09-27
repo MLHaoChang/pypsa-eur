@@ -687,6 +687,17 @@ export interface EhGridArea {
   note?: string | null
 }
 
+/** One entry in `fleet_scope.import_common_mode`. */
+export interface EhCommonModeEvent {
+  link: string
+  rate: number
+  mttr_hours: number | null
+  basis: string
+  area: number | null
+  applied: boolean
+  reason: string | null
+}
+
 /** Which fleet the MC / COPT saw (`fleet_scope` on certification / fmea_top). */
 export interface EhFleetScope {
   mode: 'hub_side' | 'whole_network'
@@ -700,6 +711,11 @@ export interface EhFleetScope {
   import_link_models?: EhImportLinkModel[]
   /** One entry per grid area behind the hub (zonal only; plan 2026-09-28). */
   grid_areas?: EhGridArea[]
+  /** How the COPT screening (fmea_top class A) holds the import. */
+  copt_import_model?: 'expected_surplus_profile' | 'two_state' | 'firm_block' | null
+  copt_import_note?: string | null
+  /** Common-mode events from opt-in Link data (applied or with a reason). */
+  import_common_mode?: EhCommonModeEvent[]
   note?: string
 }
 

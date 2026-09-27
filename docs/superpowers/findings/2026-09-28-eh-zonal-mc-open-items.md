@@ -82,3 +82,28 @@ All three reviewer mutants were re-run against the new tests and each fails at l
 | R3.6 | `copt_import_model` said `expected_surplus_profile` even when every fraction failed | nit | Now based on `copt_fractions` being non-empty, otherwise `two_state`. Tests cover both the failure path (`copt_note` present) and the normal path (`copt_note` absent). |
 | R3.7 | Pre-existing crash, now more visible: a Link with an hourly `p_max_pu` gets an hourly `capacity_series`, and the per-period COPT failed with "not constant over the block" | bug (pre-existing) | `_screening_fleet` folds a non-block-constant Link series into the profile (UP = `cap_max × shape`, exact for a mixed unit). Tests pass in `auto` and `sampled_unit` modes. |
 | R3.8 | Surviving mutants: `f` applied from the wrong area; ratio wired as ones; snap removed; `r` clamped at 0; `periods` ignored | test gaps | Tests added: two areas with different fractions; end-to-end efficiency 0.5 (`f ≤ 0.4`); the snap test; negative grid residual (0.92); ratio 0 → 0; a per-period grid surface (`[10, 10, 50, 50]`). All five mutants were re-run and each now fails at least one test. |
+
+## WP4 — common-mode import outages (opt-in Link data)
+
+**What changed.**
+- Link attributes `common_mode_rate`, `common_mode_mttr_hours` and `common_mode_basis` (default `FOR`) on an identified import Link model one event that takes the Link and the grid area behind it down together. Nothing is defaulted.
+- The MC samples one two-state chain per event from its own substream (`CM_STREAM_KEY − j`, 2²⁰ below the grid keys). While a chain is down, its area's offered import and grid surplus are both 0: no import, no remote support, no charging.
+- Any event runs the two-area engine, even on a hub with no sampled grid area (that area is then unbounded).
+- `exact_import_metrics` adds each area's event as a point mass at 0.
+- Disclosed as `fleet_scope.import_common_mode` (link, rate, MTTR, basis, area, applied, reason), `import_common_mode_sampled` and `copt_common_mode`.
+
+**TDD.** Red: all 10 of `test_energy_hub_common_mode.py` failed (`KeyError: 'import_common_mode'`, …). Green after the implementation. A follow-up, found before review, added a test that a firm Link without its own event data, in an area that has an event, also loses its import.
+
+**Review findings (independent reviewer, commit `17ee034`) and resolution.**
+
+| # | Finding | Severity | Resolution |
+|---|---|---|---|
+| R4.1 | Bit-identity and stream separation, the exact float cast of the 1/0 chain, several chains per area (product), the point mass in `exact_import_metrics`, the q_eff formula, the firm add-back (no double derating), and parsing (blank / NaN / `[0, 1)` / missing MTTR / islanded) | no bug | — |
+| R4.2 | **B1:** with `import_model="sampled_unit"` or `"firm_block"` the payload said `applied: True` although neither engine modelled the event | bug | After the freeze, an applied entry with no area is flipped to `applied: False` with the reason "import_model=…: modelled only on the default 'auto' path". Tests cover both modes. |
+| R4.3 | **B2:** an implied MTTF under 1 h (rate 0.9, MTTR 1 h) passed the freeze and only failed at certify time | bug | `_common_mode_entry` calls `transition_probs` and refuses the pair at snapshot time, naming the Link. Test added. |
+| R4.4 | **R1:** the screening folded `q_cm` into each Link unit independently, so P(all of an area's Links down) came out as q_cm² instead of q_cm (985 h vs 1190 h exact) | risk | Replaced with an exact mixture (`_screen`). The screening runs once per combination of event states (at most 2⁶; beyond that, events are held up and the note says so). LOLE / EUE / by-period and every row's ΔEUE and € are probability-weighted. `lolp_max` is the maximum over states, flagged `lolp_max_is_upper_bound`. Each event gets its own class-A row (`common_mode:<links>`, `component_class: CommonMode`, ΔEUE = EUE − E[EUE \| event up]). The firm-to-unit conversion is gone, and Link units keep their own q. Pinned: with an unbound grid the screening LOLE equals `import_exact` to 1e-9 (two firm Links, one event); the old per-unit fold fails three tests. |
+| R4.5 | **R2:** the event-only path labelled a firm block `planning_limit_only` / `firm_block`, and `copt_import_note` was empty | risk | New `import_firmness` value `common_mode_sampled` for that case; `copt_common_mode: "event_mixture"`; the note describes the mixture. |
+| R4.6 | **R3:** common-mode data on a non-import Link, or under the whole-network scope, was dropped without a word | risk | Reported as not-applied entries with the reason. The per-unit relabel concern is moot now that the mixture adds its own event row. |
+| R4.7 | **R4:** grid storage keeps serving the area's own deficit during an event | risk (conservative) | Disclosed in the area note: the event cuts the export only. |
+| R4.8 | Nits: a q = 0 event still recorded a chain (switching a v1 hub to the two-area engine); the screening units carried the first chain's MTTR | nit | A q = 0 event records no chain (test added). The screening units were removed along with R4.4. |
+| R4.9 | Surviving mutants: surplus not zeroed during the event; all chains on one stream; the exact metric using only the first chain; no B1 / B2 / R1 fixes | test gaps | New tests: the grid charges strictly less during an event; two chains in one area give P(up) ≈ 0.49 over 20 000 draws; the exact metric matches the MC for two chains in one area and for events in two areas; plus the B1 / B2 / R1 pins above. All seven mutants were re-run and each now fails at least one test. |

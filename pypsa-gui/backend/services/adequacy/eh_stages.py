@@ -169,14 +169,16 @@ class FleetScope:
     # WP4: common-mode events from opt-in Link data — one entry per import
     # Link that carries ``common_mode_rate`` (applied or not, with the reason).
     common_mode: list = field(default_factory=list)
-    # WP4: firm-block Links in an area with an applied common-mode event
-    # are UNITS in the screening fleet (q = q_cm); their names join
-    # ``import_units``. Filled by ``_grid_areas``.
-    screen_link_units: list = field(default_factory=list)
 
     @property
     def zonal(self) -> bool:
         return any(a.get("sampled") for a in self.grid_areas)
+
+    @property
+    def common_mode_sampled(self) -> bool:
+        """An applied common-mode event with a positive rate (WP4)."""
+        return any(e.get("applied") and float(e.get("rate") or 0.0) > 0.0
+                   for e in self.common_mode)
 
     def base_import_model(self) -> str | None:
         if self.mode != "hub_side":
@@ -200,6 +202,10 @@ class FleetScope:
         sampled = base in ("sampled_unit", "mixed")
         if self.zonal:
             return "outage_and_grid_sampled" if sampled else "grid_sampled"
+        if base == "firm_block" and self.common_mode_sampled:
+            # Review of WP4 (R2): a firm block under a sampled common-mode
+            # event is not "planning_limit_only" any more.
+            return "common_mode_sampled"
         return {"sampled_unit": "outage_sampled",
                 "mixed": "partially_outage_sampled"}.get(
                     base, "planning_limit_only")
@@ -217,9 +223,10 @@ class FleetScope:
         return None
 
     def copt_import_note(self) -> str | None:
-        if not (self.zonal and self.copt_fractions):
-            return None
-        return ("COPT screening (class-A ranking): each sampled Link stays a "
+        parts = []
+        if self.zonal and self.copt_fractions:
+            parts.append(
+                "COPT screening (class-A ranking): each sampled Link stays a "
                 "two-state unit, but its UP capacity per hour is scaled by "
                 "the expected share of its AREA's total Link cap the grid can "
                 "back, E[min(cap, surplus)]/cap from the area's own COPT; "
@@ -230,6 +237,12 @@ class FleetScope:
                 "copt_metrics.import_exact carries the analytic LOLE / EUE "
                 "with the import distribution mixed in exactly (no storage); "
                 "the MC certifies. Grid storage is not in the COPT")
+        if self.common_mode_sampled:
+            parts.append(
+                "COPT screening: common-mode events are MIXED exactly (one "
+                "screening per event state, probability-weighted) and ranked "
+                "as their own class-A modes")
+        return "; ".join(parts) or None
 
     def as_payload(self) -> dict:
         firm = self.import_firm_mw
@@ -249,10 +262,12 @@ class FleetScope:
             "import_cap_mw_max": (float(np.max(cap)) if cap is not None
                                   and len(cap) else None),
             "import_link_models": [m.as_payload() for m in self.link_models],
-            "import_units": {
-                **{u.name: u.name.split(":", 1)[1] for u in self.import_units},
-                **{f"link:{lk}": lk for lk in self.screen_link_units}},
+            "import_units": {u.name: u.name.split(":", 1)[1]
+                             for u in self.import_units},
             "import_common_mode": [dict(e) for e in self.common_mode],
+            "import_common_mode_sampled": self.common_mode_sampled,
+            "copt_common_mode": ("event_mixture" if self.common_mode_sampled
+                                 else None),
             "grid_areas": list(self.grid_areas),
             "copt_import_model": self.copt_import_model(),
             "copt_import_note": self.copt_import_note(),
@@ -340,7 +355,8 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
 
     links = select_import_links(n, overlay)
     if not links:
-        return FleetScope(mode="whole_network", note=(
+        return FleetScope(mode="whole_network", common_mode=_ignored_common_mode(
+            getattr(n, "links", None), set(), "whole-network scope (no identified hub boundary) — common-mode data not modelled"), note=(
             "no import Link identified — the MC / COPT fleet is the whole "
             "network (single-area copper plate)"))
     ldf = n.links
@@ -355,7 +371,9 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
         if ("eh_role" in ldf.columns and str(ldf.at[lk, "eh_role"]) == "grid_import")
         or str(ldf.at[lk, "bus0"]) in poc or str(ldf.at[lk, "bus1"]) in poc]
     if len(identified) != len(links):
-        return FleetScope(mode="whole_network", import_links=list(links), note=(
+        return FleetScope(mode="whole_network", import_links=list(links),
+                          common_mode=_ignored_common_mode(ldf, set(), "whole-network scope (no identified hub boundary) — common-mode data not modelled"),
+                          note=(
             "import Link(s) matched only by the carrier fallback — hub and grid "
             "sides are not identifiable, so the MC / COPT fleet is the whole "
             "network (single-area copper plate); tag the PoC Link "
@@ -377,7 +395,9 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
         grid_comps.add(comp[g])
         hub_comps.add(comp[h])
     if grid_comps & hub_comps:
-        return FleetScope(mode="whole_network", import_links=list(links), note=(
+        return FleetScope(mode="whole_network", import_links=list(links),
+                          common_mode=_ignored_common_mode(ldf, set(), "whole-network scope (no identified hub boundary) — common-mode data not modelled"),
+                          note=(
             f"import Link(s) {', '.join(links)} do not separate the hub from "
             "the grid (another branch connects them) — the MC / COPT fleet is "
             "the whole network (single-area copper plate)"))
@@ -425,8 +445,9 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
         src = str(occ["source"])
         cm = _common_mode_entry(ldf, str(lk), islanded=cap_max <= 0.0)
         if cm is not None:
-            if cm.pop("_bad", False):
-                bad_cm.append(f"{lk} (common_mode_rate {cm['rate']:g})")
+            why = cm.pop("_bad", None)
+            if why:
+                bad_cm.append(f"{lk} ({why})")
             else:
                 common_mode.append(cm)
         if cap_max <= 0.0:
@@ -469,10 +490,11 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
             source=src, reason=reason))
     if bad_cm:
         raise OutageRateError(
-            f"common_mode_rate outside [0, 1) on import Link(s): "
-            f"{', '.join(bad_cm)}. A common-mode rate is a probability-like "
-            "unavailability; fix the value (or clear it) before certifying "
-            "the hub.")
+            f"common-mode data refused on import Link(s): "
+            f"{'; '.join(bad_cm)}. A common-mode rate is a probability-like "
+            "unavailability in [0, 1) and, with its MTTR, must imply an MTTF "
+            "of at least one hour; fix the values (or clear them) before "
+            "certifying the hub.")
     if bad:
         raise OutageRateError(
             f"outage rate outside [0, 1) on import Link(s): {', '.join(bad)}. "
@@ -489,7 +511,10 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
                        link_grid=link_grid,
                        grid_components={c: sorted(by_comp[c])
                                         for c in sorted(grid_comps)},
-                       common_mode=common_mode)
+                       common_mode=common_mode + _ignored_common_mode(
+                           ldf, {str(x) for x in links},
+                           "not an identified import Link — common-mode events "
+                           "are modelled on identified import Links only"))
     scope.note = _scope_note(scope)
     return scope
 
@@ -530,7 +555,7 @@ def _common_mode_entry(ldf, lk: str, *, islanded: bool) -> dict | None:
     entry = {"link": lk, "rate": rate, "mttr_hours": mttr, "basis": basis,
              "area": None, "applied": False, "reason": None}
     if not rate_is_usable(rate):
-        entry["_bad"] = True
+        entry["_bad"] = f"common_mode_rate {rate:g} outside [0, 1)"
         return entry
     if islanded:
         entry["reason"] = "Link islanded — no live import for the event to take down"
@@ -539,8 +564,39 @@ def _common_mode_entry(ldf, lk: str, *, islanded: bool) -> dict | None:
                            "common_mode_mttr_hours — not modelled (an MTTR is "
                            "never guessed)")
     else:
+        # Review of WP4 (B2): an inconsistent pair (implied MTTF < 1 h) is
+        # refused HERE, naming the Link, not at certify time.
+        from services.adequacy.mc import transition_probs
+
+        try:
+            transition_probs(rate, mttr, name=f"cm:{lk}")
+        except ValueError as exc:
+            entry["_bad"] = str(exc)
+            return entry
         entry["applied"] = True
     return entry
+
+
+def _ignored_common_mode(ldf, keep: set, reason: str) -> list[dict]:
+    """
+    Review of WP4 (R3): common-mode data on a Link that is not an
+    identified import Link is reported, never silently dropped.
+    """
+    out = []
+    if ldf is None or ldf.empty or "common_mode_rate" not in ldf.columns:
+        return out
+    for lk in ldf.index:
+        if str(lk) in keep:
+            continue
+        rate = _link_value(ldf, str(lk), "common_mode_rate")
+        if rate is None:
+            continue
+        out.append({"link": str(lk), "rate": rate,
+                    "mttr_hours": _link_value(ldf, str(lk),
+                                              "common_mode_mttr_hours"),
+                    "basis": "FOR", "area": None, "applied": False,
+                    "reason": reason})
+    return out
 
 
 def _scope_note(scope: FleetScope, extra: str | None = None) -> str:
@@ -675,15 +731,12 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
         for e in scope.common_mode:
             if e["applied"] and e["link"] in links:
                 e["area"] = k
+                if float(e["rate"]) <= 0.0:
+                    continue  # q = 0: no chain, no engine switch
                 area_cm.append(CommonMode(link=e["link"], q=float(e["rate"]),
                                           mttr_hours=float(e["mttr_hours"]),
                                           stream=len(cm_seen)))
                 cm_seen.append(e["link"])
-        if area_cm:
-            # The event takes the WHOLE area down: every firm-block Link in
-            # it becomes a screening unit at q_cm, own data or not.
-            scope.screen_link_units += [lk for lk in links
-                                        if lk not in sampled_links]
         areas.append(GridArea(
             common_mode=tuple(area_cm),
             grid=grid,
@@ -726,8 +779,12 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
                             "support bounded by the Link headroom, charging "
                             "only from surplus not offered to the hub (power "
                             "offered but not used by the hub is not stored — "
-                            "conservative)" if stores
-                            else "; no storage in this area")),
+                            "conservative)"
+                            + ("; during a common-mode event the area's own "
+                               "storage still serves the area's own deficit "
+                               "(the event cuts the export only)"
+                               if area_cm else "")
+                            if stores else "; no storage in this area")),
             })
         else:
             entry.update({"units": [], "n_units": 0, "capacity_mw": None,
@@ -749,7 +806,7 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
     return ZonalInputs(hub=hub_inputs, areas=tuple(areas)), None
 
 
-def _screening_fleet(inputs, zonal, scope: FleetScope):
+def _screening_fleet(inputs, zonal, scope: FleetScope, *, down=frozenset()):
     """
     The COPT screening's fleet and residual (plan 2026-09-28, WP3).
 
@@ -760,6 +817,10 @@ def _screening_fleet(inputs, zonal, scope: FleetScope):
     added back by ``(1 − f_h) × firm``. An area whose ``f`` is 1 every hour
     changes nothing, so an unbound grid screens exactly like v1. The MC keeps
     the unprofiled units: profiling them there would count the grid twice.
+
+    ``down`` (WP4): the areas whose common-mode event is DOWN in this
+    screening state — their Link units leave the fleet and their firm block
+    returns to the residual in full (``_screen`` mixes the states).
     """
     units = list(inputs.units)
     res = np.array(inputs.residual, dtype=np.float64, copy=True)
@@ -782,48 +843,152 @@ def _screening_fleet(inputs, zonal, scope: FleetScope):
                                        profile=base * shape)
     if zonal is None:
         return units, res
-    from services.adequacy.copt import CoptUnit
+    drop: set[int] = set()
+    for k, area in enumerate(zonal.areas):
+        firm = np.asarray(area.firm_import_mw, dtype=np.float64)
+        if k in down:
+            # WP4 event state "down": the area's Links AND grid are out —
+            # no Link unit, and the firm block netted out of the residual
+            # comes back in full.
+            drop.update(int(i) for i in area.import_idx)
+            res = res + firm
+            continue
+        f = scope.copt_fractions.get(k)
+        if f is None or bool(np.all(f >= 1.0)):
+            continue
+        for i in area.import_idx:
+            prev = units[i].profile
+            prof = np.asarray(f, dtype=np.float64).copy()
+            if prev is not None:
+                prof = prof * np.asarray(prev, dtype=np.float64)
+            units[i] = dataclasses.replace(units[i], profile=prof)
+        res = res + firm * (1.0 - f)
+    return [u for i, u in enumerate(units) if i not in drop], res
+
+
+#: The screening mixes the event states of at most this many areas that carry
+#: a common-mode event (2^n screenings); areas beyond it are screened with
+#: the event held up, and the payload says which.
+MAX_SCREENED_CM_AREAS = 6
+
+
+def _screen(inputs, zonal, scope: FleetScope, *, voll: float, index):
+    """
+    The class-A COPT screening → ``(analysis, screening_units, note)``.
+
+    Without common-mode events: one ``screening_analysis`` on
+    ``_screening_fleet``. With them (review of WP4, R1): a shared event is
+    NOT an independent per-unit rate — folding ``q_cm`` into each Link unit
+    gave P(both Links down) = q_cm² instead of q_cm (985 h vs 1190 h). COPT
+    expectations are linear in the scenario probabilities, so the screening
+    is run once per combination of the areas' event states and MIXED:
+    LOLE / EUE / by-period and every row's ΔEUE and € are probability-
+    weighted (a unit absent in a state contributes 0 there). Exact for the
+    event; ``lolp_max`` becomes the maximum over states (an upper bound).
+    Each event gets its own class-A row: ΔEUE = EUE − E[EUE | event up].
+    """
+    import itertools
+
+    import pandas as pd
+
+    from services.adequacy.copt import screening_analysis
     from services.adequacy.mc_zonal import _area_common_mode_q
 
-    for k, area in enumerate(zonal.areas):
-        f = scope.copt_fractions.get(k)
-        f_eff = None if f is None or bool(np.all(f >= 1.0)) else f
-        q_cm = _area_common_mode_q(area)
-        for i in area.import_idx:
-            u = units[i]
-            prof = u.profile
-            if f_eff is not None:
-                prof = (np.asarray(f_eff, dtype=np.float64).copy() if prof is None
-                        else np.asarray(prof, dtype=np.float64) * f_eff)
-            # WP4: two independent two-state events in one hour are one:
-            # q_eff = 1 − (1 − q_link)(1 − q_cm) — exact per hour.
-            q = u.q if q_cm <= 0.0 else 1.0 - (1.0 - u.q) * (1.0 - q_cm)
-            units[i] = dataclasses.replace(u, profile=prof, q=q)
-        firm = np.asarray(area.firm_import_mw, dtype=np.float64)
-        firm_links = [lk for lk in scope.screen_link_units
-                      if lk in (scope.grid_areas[k]["links"]
-                                if k < len(scope.grid_areas) else [])]
-        if q_cm > 0.0 and firm_links:
-            # WP4: a firm-block Link whose area carries a common-mode event
-            # is no longer firm — it becomes a screening unit at q_cm (the
-            # MC samples the same event as a chain on the firm block).
-            res = res + firm
-            cm0 = area.common_mode[0]
-            for lk in firm_links:
-                deliv = np.asarray(scope.link_grid[lk]["delivered"],
-                                   dtype=np.float64)
-                cap = float(deliv.max())
-                shape = deliv / cap if cap > 0 else np.zeros_like(deliv)
-                prof = shape if f_eff is None else shape * f_eff
-                if bool(np.all(prof == 1.0)):
-                    prof = None
-                units.append(CoptUnit(
-                    name=f"link:{lk}", capacity_mw=cap, q=q_cm,
-                    basis="FOR", mttr_hours=float(cm0.mttr_hours),
-                    source="common_mode", profile=prof))
-        elif f_eff is not None:
-            res = res + firm * (1.0 - f_eff)
-    return units, res
+    weights = pd.Series(inputs.weights, index=index)
+
+    def run(down):
+        units, res = _screening_fleet(inputs, zonal, scope, down=down)
+        return screening_analysis(units, pd.Series(res, index=index),
+                                  weights=weights, voll=voll,
+                                  delta_mw=1.0), units
+
+    cm_areas = ([k for k, a in enumerate(zonal.areas)
+                 if _area_common_mode_q(a) > 0.0] if zonal is not None else [])
+    if not cm_areas:
+        analysis, units = run(frozenset())
+        return analysis, units, None
+    note = None
+    if len(cm_areas) > MAX_SCREENED_CM_AREAS:
+        held = cm_areas[MAX_SCREENED_CM_AREAS:]
+        cm_areas = cm_areas[:MAX_SCREENED_CM_AREAS]
+        note = (f"common-mode events of areas {held} held UP in the class-A "
+                f"screening (more than {MAX_SCREENED_CM_AREAS} event areas); "
+                "the MC and import_exact include them")
+    qs = {k: _area_common_mode_q(zonal.areas[k]) for k in cm_areas}
+    states = []
+    for bits in itertools.product((0, 1), repeat=len(cm_areas)):
+        down = frozenset(k for k, b in zip(cm_areas, bits) if b)
+        p = 1.0
+        for k, b in zip(cm_areas, bits):
+            p *= qs[k] if b else 1.0 - qs[k]
+        if p <= 0.0:
+            continue
+        analysis, units = run(down)
+        states.append((p, down, analysis, units))
+    base_analysis, base_units = next(
+        (a, u) for _p, d, a, u in states if not d)
+    eues = [float(a["metrics"]["eue_mwh"]) for _p, _d, a, _u in states]
+    eue_mix = sum(st[0] * e for st, e in zip(states, eues))
+    lole = sum(p * float(a["metrics"]["lole_hours"]) for p, _d, a, _u in states)
+    by_period: dict = {}
+    for p, _d, a, _u in states:
+        for lab, v in (a["metrics"].get("by_period") or {}).items():
+            acc = by_period.setdefault(lab, {"lole_hours": 0.0, "eue_mwh": 0.0})
+            acc["lole_hours"] += p * float(v.get("lole_hours", 0.0))
+            acc["eue_mwh"] += p * float(v.get("eue_mwh", 0.0))
+    metrics = {
+        "lole_hours": float(lole), "eue_mwh": float(eue_mix),
+        "lolp_max": float(max(a["metrics"]["lolp_max"]
+                              for _p, _d, a, _u in states)),
+        "lolp_max_is_upper_bound": True,
+        "by_period": by_period,
+        "common_mode_states": len(states),
+    }
+    merged: dict[str, dict] = {}
+    for p, _d, a, _u in states:
+        for r in a["rows"]:
+            m = merged.get(r["name"])
+            if m is None:
+                m = {**r, "failure_mode": dict(r["failure_mode"]),
+                     "delta_eue_mwh": 0.0, "criticality_eur_per_year": 0.0}
+                merged[r["name"]] = m
+            m["delta_eue_mwh"] += p * float(r["delta_eue_mwh"])
+            m["criticality_eur_per_year"] += p * float(
+                r["criticality_eur_per_year"])
+    for k in cm_areas:
+        area = zonal.areas[k]
+        q = qs[k]
+        e_up = sum(st[0] * e for st, e in zip(states, eues) if k not in st[1])
+        e_up = e_up / (1.0 - q) if q < 1.0 else 0.0
+        delta = max(eue_mix - e_up, 0.0)
+        crit = delta * max(float(voll), 0.0)
+        occ = sum(8760.0 * float(c.q) / float(c.mttr_hours)
+                  for c in area.common_mode if float(c.mttr_hours) > 0)
+        name = "common_mode:" + ",".join(c.link for c in area.common_mode)
+        merged[name] = {
+            "name": name, "delta_eue_mwh": delta,
+            "criticality_eur_per_year": crit,
+            "failure_mode": {
+                "mode_id": f"{name}:forced_outage",
+                "component_class": "CommonMode", "name": name,
+                "failure_class": "A", "occurrence_per_year": occ,
+                "occurrence_basis": "FOR",
+                "severity_eur": 0.0, "criticality_eur_per_year": crit,
+                "in_metric_scope": True, "engine": "copt",
+                "fidelity": "analytic_convolution",
+                "rate_source": "common_mode",
+            },
+            "note": ("shared event: the area's import Link(s) and grid down "
+                     "together; ΔEUE = EUE − E[EUE | event up]"),
+        }
+    for m in merged.values():
+        fm = m["failure_mode"]
+        crit = m["criticality_eur_per_year"]
+        occ = float(fm.get("occurrence_per_year") or 0.0)
+        fm["criticality_eur_per_year"] = crit
+        fm["severity_eur"] = crit / occ if occ > 0 else 0.0
+    rows = sorted(merged.values(), key=lambda r: (-r["delta_eue_mwh"], r["name"]))
+    return {**base_analysis, "metrics": metrics, "rows": rows}, base_units, note
 
 
 def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
@@ -848,7 +1013,6 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
     ``"sampled_unit"`` stops at v1; ``"firm_block"`` is the pre-2026-09-27
     behaviour (every Link a firm block) — kept for comparisons and tests.
     """
-    from services.adequacy.copt import screening_analysis
     from services.adequacy.mc import snapshot_inputs
 
     if import_model not in ("auto", "sampled_unit", "firm_block"):
@@ -873,6 +1037,13 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
                     snap.zonal_inputs, why = _grid_areas(network, cfg, scope,
                                                          inputs)
                     scope.note = _scope_note(scope, why)
+                # Review of WP4 (B1): only the "auto" path builds the chains.
+                for e in scope.common_mode:
+                    if e["applied"] and e["area"] is None:
+                        e["applied"] = False
+                        e["reason"] = (
+                            f"import_model={import_model}: common-mode events "
+                            "are modelled only on the default 'auto' path")
             else:
                 inputs = snapshot_inputs(network, cfg=cfg)
         except Exception as exc:  # noqa: BLE001 — the reason is the payload
@@ -896,19 +1067,17 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
         return snap
     snap.mc_inputs = inputs
     try:
-        import pandas as pd
 
-        screen_units, screen_res = _screening_fleet(inputs, snap.zonal_inputs,
-                                                    scope)
-        residual = pd.Series(screen_res, index=network.snapshots)
-        weights = pd.Series(inputs.weights, index=network.snapshots)
+        analysis, screen_units, cm_note = _screen(
+            inputs, snap.zonal_inputs, scope, voll=snap.voll,
+            index=network.snapshots)
         snap.screening_units = list(screen_units)
-        analysis = screening_analysis(
-            screen_units, residual, weights=weights, voll=snap.voll,
-            delta_mw=1.0)
         snap.copt_rows = list(analysis.get("rows") or [])
         snap.copt_metrics = dict(analysis.get("metrics") or {})
         snap.copt_fidelity_note = analysis.get("fidelity_note")
+        if cm_note:
+            snap.copt_fidelity_note = "; ".join(
+                x for x in (snap.copt_fidelity_note, cm_note) if x)
         if snap.zonal_inputs is not None:
             from services.adequacy.mc_zonal import exact_import_metrics
             try:
