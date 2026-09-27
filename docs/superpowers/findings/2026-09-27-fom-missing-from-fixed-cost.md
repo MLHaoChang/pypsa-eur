@@ -123,7 +123,7 @@ upstream behaviour itself: the objective charges FOM while
 | Run | Master | This branch |
 |---|---|---|
 | `test_fom_reconciliation.py` | 14 failed, 1 passed | 15 passed |
-| Backend `-m "not slow"` | 5570 passed, 29 failed, 107 errors, 31 skipped | pending (run in progress) |
+| Backend `-m "not slow"` | 5570 passed, 29 failed, 107 errors, 31 skipped | 5585 passed, 29 failed, 107 errors, 31 skipped |
 | Frontend `npx vitest run` | 1940 passed | 1940 passed |
 | `qa_asset_economics.py` | not rerun | 26/26 pass |
 | `qa_cost_decomp_overnight.py` | not rerun | 10/10 pass |
@@ -133,7 +133,12 @@ upstream behaviour itself: the objective charges FOM while
 Every backend failure and error on both sides is in desktop, GridSpine,
 shutdown and packaging tests. Those need `pywebview` and GridSpine tooling
 that this container does not have. None touch economics, and the set is the
-same before and after.
+same before and after: the 136 failing and erroring test ids match exactly.
+Collection grew from 5737 to 5752, which is the 15 new tests, and all 15 pass.
+Both backend rows are counted from the progress marks, because the master run
+printed no summary line. The branch run's own summary reads 5585 passed,
+29 failed, 107 errors and 32 skipped; the extra skip is a counting difference
+in pytest's summary, not a new skip.
 
 Existing tests updated to the new semantics:
 
