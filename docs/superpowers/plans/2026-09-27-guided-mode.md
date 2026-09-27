@@ -134,14 +134,21 @@ Outside the twelve: `sweep.py` `_solve_once` / `_restore_base_guarded` (the FMEA
   - It needs an admin to switch the active profile away from a working one mid-session.
 - **Follow-up.** Expose the session's bound profile id to the client and compare against that.
 
-**P22.9-FE integration gate (spec §8):**
-- [ ] 1 full backend suite — zero new failures
-- [ ] 2 targeted EH set green
-- [ ] 3 `tsc` clean
-- [ ] 4 `vitest` — zero new failures (the three justified mock edits recorded above)
-- [ ] 5 browser smoke `--phase P22.9` (spec §2.11 order: send gate with no key → stub profile → template opens the workbench → study → cue → verdict next → buses/links equal → sweep → equal → tagging tour lands on `eh-bus-fields` in Edit), screenshots kept
-- [ ] 6 QA-gate review GO (`…-gate-P22.9-FE.md`)
-- [ ] 7 Expert-unchanged review signed (only the fixes above differ)
+**P22.9-FE integration gate (spec §8): GO on `28774ad`, 2026-09-27.** The first pass was NO-GO: the Send gate ignored the session's picked profile. That is fixed. Evidence:
+- Row 1: full backend suite `6049 passed, 31 skipped, 11 deselected in 2203.30s`, 0 failures. The run started at `9bd0590`. The only backend change since is one catalogue text line, and `test_guides.py` passes on it (6 passed).
+- Row 2: 400 passed.
+- Row 3: tsc exit 0.
+- Row 4: vitest 195 files / 2094 passed. The baseline was 2033, so 61 tests are new. Four existing test edits are justified above.
+- Row 5: smoke `--phase P22.9` PASS, 10 screenshots.
+- Rows 6–7: the independent gate file is `docs/superpowers/qa/2026-09-27-guided-mode-gate-P22.9-FE.md`, with 10 mutation checks plus the re-gate mutations.
+
+- [x] 1 full backend suite — zero new failures
+- [x] 2 targeted EH set green
+- [x] 3 `tsc` clean
+- [x] 4 `vitest` — zero new failures (the three justified mock edits recorded above)
+- [x] 5 browser smoke `--phase P22.9` (spec §2.11 order: send gate with no key → stub profile → template opens the workbench → study → cue → verdict next → buses/links equal → sweep → equal → tagging tour lands on `eh-bus-fields` in Edit), screenshots kept
+- [x] 6 QA-gate review GO (`…-gate-P22.9-FE.md`)
+- [x] 7 Expert-unchanged review signed (only the fixes above differ)
 
 ---
 
