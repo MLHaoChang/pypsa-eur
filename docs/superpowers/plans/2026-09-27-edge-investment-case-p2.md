@@ -113,6 +113,24 @@ convention), `backend/tests/test_physical_quantities_seam.py` (L117 test updated
   plain solves" measured on the merged tree and recorded (fixed or still open; WP2.3 does not depend on it —
   its gap compares per-item LP cost with the bill, not the objective).
 
+- **As implemented (c4bacde merge + 0a86b17):**
+  - Merged the branch tip ea384c3 (it had moved past 68c6661), with a merge commit and no conflicts.
+  - `physical_quantities` now charges fixed cost as (entry `fixed_cost`, else annuitised investment + FOM per horizon) × capacity × active years.
+  - The seam tests compare FOM on the same per-horizon basis; the old TODO is gone.
+  - Tenth reconciliation case `fom`. It is not red on its own, because gap 0 held under both conventions; the red evidence is the branch's `test_fom_reconciliation.py`, which failed 23 of 26 on the pre-merge code.
+  - `n.meta["ic_connection"]` records every committed agreement's hash.
+  - Flags are sorted.
+  - The hourly-assumption audit allow-lists `solver/periodized_costs.py` (3 unit sites; now 46 sites in 22 files).
+- **Verification on the merged tree:**
+  - full `not slow` suite: 6,317 passed, 31 skipped, 1 failure (the audit, fixed);
+  - all 23 QA drivers (including `qa_eh_reference_design`);
+  - vitest 1,956;
+  - `tsc` clean.
+- **Carried "discounting gap" item, measured:**
+  - two periods at a 7 % rate: raw `gap_pct` −43.4 %, fully explained by the merged `period_weighting_adjustment_eur` bridge; `residual_gap_pct` ≈ −1e-9;
+  - at a 0 % rate: gap −2.6e-9.
+  - Resolved by the merge. Consumers of the gap should read `residual_gap_pct`.
+
 ## WP2.1a-0 Demand windows keyed by period name
 
 A URDB demand period is one `TariffPeriod` per `[start, end)` fragment and per weekday/weekend set; P1 keys
