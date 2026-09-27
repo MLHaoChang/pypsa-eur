@@ -54,6 +54,11 @@ export function headline(review: OkReview, report: EhReferenceDesignReport | nul
   if (lole != null && target == null) {
     return `No reliability goal was set — the study reports ${lole.toFixed(1)} h/yr of shortfall. Set a goal to certify.`
   }
+  // No goal and no shortfall number (decided at P24-FE, spec §5.5): the
+  // engine's note ("no LOLE target …") would be jargon; ask for a goal.
+  if (lole == null && target == null) {
+    return 'No reliability goal is set for this site, so the study did not certify it — set an allowed shortfall in step 3 (Goal) to get a verdict.'
+  }
   const note = report?.sections?.certification?.note
   return `The study could not certify reliability: ${
     note ? String(note) : 'the reliability check was not part of this run.'}`

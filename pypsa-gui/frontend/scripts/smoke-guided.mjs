@@ -798,6 +798,9 @@ function expectedHeadline(review, report) {
   if (lole != null && target == null) {
     return `No reliability goal was set — the study reports ${lole.toFixed(1)} h/yr of shortfall. Set a goal to certify.`
   }
+  if (lole == null && target == null) {
+    return 'No reliability goal is set for this site, so the study did not certify it — set an allowed shortfall in step 3 (Goal) to get a verdict.'
+  }
   const note = report?.sections?.certification?.note
   return `The study could not certify reliability: ${note ? String(note) : 'the reliability check was not part of this run.'}`
 }
@@ -1049,6 +1052,8 @@ async function phaseP24(browser) {
     await checkSite('eh_h2_hub', 'strong_grid')
     await shot(page, 'p24-h2-site')
     await runStudy('h2', { expectLole: '' })
+    check(verdicts.h2.headline === 'No reliability goal is set for this site, so the study did not certify it — set an allowed shortfall in step 3 (Goal) to get a verdict.',
+      'H2 hub (no goal, no shortfall number): the decided §5.5 sentence')
 
     // ── off-grid wording: the island microgrid from the Start card ────────
     step('Start card → Island Microgrid (off-grid wording, its own verdict)')

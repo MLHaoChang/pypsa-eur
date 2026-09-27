@@ -440,6 +440,7 @@ Initial `step` on `resetFor(project)`: `no_project`→`start`; template project 
 - `pass`: `Certified: about {lole:.1f} h/yr of shortfall, under the {target:g} h/yr goal.`
 - no target: `No reliability goal was set — the study reports {lole:.1f} h/yr of shortfall. Set a goal to certify.`
 - MC not run / `not_established`: `The study could not certify reliability: {note}`.
+- no target **and** no shortfall number (e.g. the H₂ hub, where the MC does not run without a goal) — *decided at P24-FE*: `No reliability goal is set for this site, so the study did not certify it — set an allowed shortfall in step 3 (Goal) to get a verdict.` Checked before the `not_established` row, so the engine's note ("no LOLE target — …") is not shown.
 Numbers come from `review.findings[*].evidence` / `report.mc_lole_h` exactly as `review_report` reads them; never computed anew.
 
 ### 5.6 Auto-advance
