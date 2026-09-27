@@ -408,6 +408,12 @@ Files: `backend/services/commercial/connection.py`, `backend/tests/test_connecti
   invalid registry → 422 `stress_registry_invalid`, an unreadable registry is never overwritten → 409
   `stress_registry_unreadable`, and re-binding or clearing (`commercial: null`) removes this layer's FCA entry;
   a `links_p_max_pu` entry naming a missing Link fails closed (`link_missing`).
+- Round 3 → **FAIL**, fixed: the writers no longer re-align a series the route already aligned (MultiIndex crash);
+  class C gates a profiles entry naming a missing Link as a `profiles_incomplete` row (`note: link_missing`)
+  instead of aborting the sweep; a study's planning limit on the PoC Link (`_ic_link_limits`, set by the lever
+  study's `import_cap`) caps the agreement; the operational pin is `min(p_nom_opt, cap)` and discloses
+  `operational_design_mismatch`; `freeze_capacities` sets the operational flag last; a PUT carrying
+  `commercial: null` when none is stored does not re-bind.
 
 ### WP1.4b Connection agreement — dynamic envelope and FCA
 - [ ] Design line first: `services/adequacy/stress.py` knows `VALID_KINDS=("parametric","profiles")`, and its
@@ -485,6 +491,15 @@ Files: `lp_bindings.py`, `backend/tests/test_lp_bindings_peak_demand.py`.
   LP prices at the tier predicted from meter history (or tier 0 when absent, disclosed), engine bills exactly,
   and the bindings summary lists the flagged item; **gap 0** (tier terms persisted in `last_commercial_terms`).
 - [ ] Green: implementation.
+- As implemented: tiers apply to cumulative MONTHLY import volume on an energy item with ONE catch-all period
+  (tier rates replace the period rate); windowed tiers → `tiers_with_windows`, revenue/net/export tiers and demand
+  tiers are refused with a reason. Convex (rising): `ic_tier_q[item|period|month|k]` with `0 ≤ q ≤ width_k` (MWh),
+  `Σ_k q = Σ_t w_t·p_import[t]` for the month, objective `Σ w_obj·rate_k·q`; the volumes are committed to
+  `n.meta["ic_tier_volumes"]` on success and reported as `energy_tiers` rows (gap 0). Non-convex (falling):
+  priced at the first tier as a flat import adder, `notes: nonconvex_tier`, `nonconvex_tier_items` listed (no
+  volume history in P1). The engine bills tiers exactly per interval (chronological cumulative volume), so a
+  bill line is traceable; tiered items with windowed periods are `unsupported:tiers_with_windows`. A tiered
+  item under rolling/myopic is refused (P6). Tests: `test_tiers.py`.
 
 ### WP1.6 Energy-hub group contract
 Files: `lp_bindings.py`, `backend/tests/test_group_contract.py` (fixture: two members, two PoC Links, one group cap).

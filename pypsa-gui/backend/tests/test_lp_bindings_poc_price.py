@@ -146,7 +146,8 @@ def test_tiered_and_non_energy_items_are_left_to_later_bindings_and_reported():
     n = build_edge_15min()
     terms = L.materialise_poc_prices(n, _commercial(_tariff(_tou(), tiered, fixed))).facts
     assert terms["energy_items"] == ["energy"]
-    assert terms["not_in_lp"] == {"tiered": "tiers_WP1.5c", "standing": "fixed_not_in_lp"}
+    # `_tou` is windowed; tiers need one catch-all period (WP1.5c).
+    assert terms["not_in_lp"] == {"tiered": "tiers_with_windows", "standing": "fixed_not_in_lp"}
 
 
 def test_no_commercial_config_is_a_no_op():

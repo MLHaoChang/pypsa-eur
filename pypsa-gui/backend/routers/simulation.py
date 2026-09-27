@@ -465,10 +465,14 @@ def update_solver_config(cfg: SolverConfigSchema, user=Depends(optional_user)):
     # silently overwrite live state (e.g. "PUT run_ac_pf_after_lopf=true"
     # used to reset voll/discount_rate/sclopf back to defaults).
     submitted = cfg.model_dump(exclude_unset=True)
-    if "commercial" in submitted:
+    stored_commercial = getattr(_state["solver_config"], "commercial", None)
+    if "commercial" in submitted and (cfg.commercial is not None
+                                      or stored_commercial is not None):
         # A direct in-process call (chat tools) passes no user: the Depends
         # default is not a User, and `_bind_commercial` then uses the project org.
-        # An explicit null clears the layer (and its FCA stress entry).
+        # An explicit null clears the layer (and its FCA stress entry); a null
+        # when nothing is stored (a full-payload PUT from the settings form)
+        # touches nothing (WP1.4 round 3 #6).
         submitted["commercial"] = _bind_commercial(cfg.commercial, user)
     # Legacy mode 'lpf' was removed in v1.x — coerce to 'lopf' silently so
     # old saved configs and stale frontend caches don't 400 the user. Same

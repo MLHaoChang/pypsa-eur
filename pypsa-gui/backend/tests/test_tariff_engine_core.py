@@ -348,12 +348,12 @@ def test_unsupported_items_say_why():
          "periods": [{"name": "win", "rate": 5.0, "months": [1]}],
          "settlement": "15min", "measured_on": "import", "direction": "cost"}]})
     res = rate(_dispatch("2030-01-07 00:00", 4), t, step_hours=0.25, timezone="Europe/Berlin")
-    assert res.flags["tiered"] == ["unsupported:tiers_P1_WP1.5c"]
+    assert res.flags["tiered"] == []  # WP1.5c: tiers are billed (test_tiers.py)
     # WP1.5a: a single-rate demand item is rated now (tests: test_tariff_engine_demand.py).
     assert res.flags["demand"] == []
     assert res.flags["kw_energy"] == ["unsupported:unit_per_kw_year_for_energy"]
     assert res.flags["windowed_fixed"] == ["unsupported:fixed_with_windows"]
-    assert set(res.unsupported_items) == {"tiered", "kw_energy", "windowed_fixed"}
+    assert set(res.unsupported_items) == {"kw_energy", "windowed_fixed"}
 
 
 def test_a_month_outside_a_seasonal_period_falls_through_to_the_next():

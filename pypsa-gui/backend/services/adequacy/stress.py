@@ -549,6 +549,19 @@ def run_class_c_sweep(network, lock, cfg, scenarios: list[dict], *,
                     "meta": {**meta, "note": "series_length_ne_snapshots"},
                 })
                 continue
+            # Same binding condition for a Link the entry names that the
+            # network no longer has (a renamed PoC Link): an incomplete row,
+            # never a mutate raise that aborts the sweep (WP1.4 round 3 #2).
+            links_map = _profiles_payload(sc)[2]
+            gone = [k for k in (links_map or {})
+                    if getattr(network, "links", None) is None or k not in network.links.index]
+            if gone:
+                rows.append({
+                    "id": sid, "status": "profiles_incomplete",
+                    "delta_eue_mwh": None, "failure_mode": None,
+                    "meta": {**meta, "note": "link_missing", "links": gone},
+                })
+                continue
             contingencies.append({
                 "id": sid, "mutate": _profiles_mutate(sc), "meta": meta,
                 "occurrence_basis": "scenario:profiles",

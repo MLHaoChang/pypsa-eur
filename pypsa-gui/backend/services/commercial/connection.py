@@ -64,9 +64,9 @@ from models.commercial import CommercialConfig, ConnectionAgreement, TariffItem
 from services.commercial.lp_bindings import (
     Applied,
     CommercialBindingError,
+    _aligned_once,
     _axis_hash,
     _frame,
-    align_to_snapshots,
 )
 
 _HOURS_PER_YEAR = 8760.0
@@ -81,6 +81,9 @@ FEE_BUILT_ATTR = "_ic_fee_built"        # transient: set by the LP wrapper, read
 # is fixed). The agreement then pins the connection at its designed size and
 # adds no fee term, and nothing is committed (WP1.4 review round 2 #1).
 OPERATIONAL_ATTR = "_ic_operational"
+# Set by a study that imposes a planning limit on a Link ({link: MW}), e.g. the
+# lever study's `import_cap`: the agreement never lifts it (round 3 #3).
+LINK_LIMITS_ATTR = "_ic_link_limits"
 FCA_DISCLOSURE = "fca_synthetic_hours"
 
 __all__ = ["Applied", "CommercialBindingError", "ENVELOPE_ATTR", "apply_commercial_for_solve",
@@ -170,7 +173,7 @@ def write_envelope(n, link: str, series: pd.Series, timezone: str | None = None)
     """Put a resolved envelope (MW) on `link`'s `ic_envelope_mw` column. Same
     rules as `lp_bindings.write_export_price`: aligned first, written only when
     every snapshot is covered, axis recorded. Returns uncovered snapshots."""
-    aligned = align_to_snapshots(series, n.snapshots, timezone)
+    aligned = _aligned_once(n, series, timezone)
     uncovered = int(aligned.isna().sum())
     if uncovered:
         return uncovered
@@ -255,7 +258,11 @@ def apply_connection_agreement(n, agreement: ConnectionAgreement, *, poc_link: s
     fee = _validate(n, agreement, poc_link, export_link, solve_strategy, multi_period)
     applied = Applied()
     cap = float(agreement.import_cap_mw)
+    limit = (getattr(n, LINK_LIMITS_ATTR, None) or {}).get(poc_link)
+    if limit is not None:
+        cap = min(cap, float(limit))  # a study's planning limit is never lifted
     operational = bool(getattr(n, OPERATIONAL_ATTR, False))
+    design_mismatch = False
     fixed_fee_by_period: dict | None = None
     closed, first_open = _available_mask(n, agreement, timezone)
     try:
@@ -266,6 +273,9 @@ def apply_connection_agreement(n, agreement: ConnectionAgreement, *, poc_link: s
                 if "p_nom_opt" in n.links.columns else float("nan")
             if not np.isfinite(size):
                 size = float(n.links.at[poc_link, "p_nom"])
+            built = n.meta.get(META_FEE) or {}
+            design_mismatch = built.get("link") != poc_link or size > cap + 1e-9
+            size = min(max(size, 0.0), cap)  # never above the contract
             _set_static(n, applied, poc_link, "p_nom_extendable", True)
             _set_static(n, applied, poc_link, "p_nom_min", size)
             _set_static(n, applied, poc_link, "p_nom_max", size + 1e-6)
@@ -358,6 +368,9 @@ def apply_connection_agreement(n, agreement: ConnectionAgreement, *, poc_link: s
         "fee_eur_per_mw_year": fee,
         "fee_in_lp": agreement.kind == "firm" and fee is not None and not operational,
         "operational": operational,
+        # The pinned design was not solved with this agreement (stale p_nom_opt
+        # above the cap, or no committed fee for this Link): disclosed.
+        "operational_design_mismatch": design_mismatch,
         "fixed_fee_eur": (None if fixed_fee_by_period is None
                           else float(sum(fixed_fee_by_period.values()))),
         "available_from": agreement.available_from.isoformat(),

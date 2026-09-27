@@ -238,17 +238,39 @@ def _ratchet_prior(month: str, k: int, lookback: int, actual: dict,
     return (max(values) if values else None), missing
 
 
+def _tier_cost(tiers, volume_kwh: np.ndarray) -> np.ndarray:
+    """Cumulative cost of `volume_kwh` under `tiers` (each tier's rate applies
+    to the volume between its threshold and the next)."""
+    th = [t.threshold for t in tiers] + [np.inf]
+    out = np.zeros_like(volume_kwh, dtype=float)
+    for k, t in enumerate(tiers):
+        out += t.rate * np.clip(volume_kwh - th[k], 0.0, th[k + 1] - th[k])
+    return out
+
+
+def tiers_are_convex(tiers) -> bool:
+    """Rising marginal rates: convex in a cost minimisation."""
+    rates = [t.rate for t in tiers]
+    return all(b >= a for a, b in zip(rates, rates[1:]))
+
+
 def _unsupported_reason(item: TariffItem) -> str | None:
     if item.kind == "capacity":
         return "unsupported:capacity_via_connection_agreement"
     if _is_demand(item):
         if item.tiers:
-            return "unsupported:tiers_P1_WP1.5c"
+            return "unsupported:tiers_on_demand"
         if item.unit != "per_kw_month":
             return f"unsupported:unit_{item.unit}_for_demand"
         return None
     if item.tiers:
-        return "unsupported:tiers_P1_WP1.5c"
+        # WP1.5c: tiers on cumulative monthly volume, for a single catch-all
+        # energy period (tier rates replace the period rate).
+        p = item.periods[0]
+        if len(item.periods) != 1 or p.months or p.weekdays or p.start_hour is not None:
+            return "unsupported:tiers_with_windows"
+        if item.unit != "per_kwh":
+            return f"unsupported:unit_{item.unit}_for_tiers"
     if item.kind == "fixed":
         if item.unit != "per_month":
             return f"unsupported:unit_{item.unit}_for_fixed"
@@ -414,8 +436,21 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             continue
 
         q_kwh = _quantity_mw(item, imp, exp) * energy_h * _KWH_PER_MWH
-        r = _rates(item, local)
-        amount = sign * q_kwh * r
+        if item.tiers:
+            # Cumulative monthly volume, each interval priced at the tiers its
+            # kWh fall into (chronologically): exact and traceable per line.
+            amount = np.full(len(idx), np.nan)
+            for key in sorted(set(month_key)):
+                pos = np.flatnonzero(month_key == key)
+                cv = np.concatenate([[0.0], np.cumsum(q_kwh[pos])])
+                cost = _tier_cost(item.tiers, cv)
+                amount[pos] = sign * np.diff(cost)
+            with np.errstate(invalid="ignore", divide="ignore"):
+                r = np.where(q_kwh > 0, np.abs(amount) / q_kwh, np.nan)
+            r = np.where(np.isnan(r) & ~np.isnan(q_kwh), 0.0, r)
+        else:
+            r = _rates(item, local)
+            amount = sign * q_kwh * r
         interval_frames.append(pd.DataFrame({
             "interval": idx, "tariff_item": item.id, "quantity_kwh": q_kwh,
             "rate": r, "amount": amount}))

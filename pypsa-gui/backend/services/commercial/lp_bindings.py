@@ -65,7 +65,7 @@ import numpy as np
 import pandas as pd
 
 from models.commercial import CommercialConfig, TariffItem
-from services.commercial.tariff_engine import _is_demand, _period_index, _rates
+from services.commercial.tariff_engine import _is_demand, _period_index, _rates, tiers_are_convex
 
 EXPORT_PRICE_ATTR = "ic_export_price"
 ENERGY_PRICE_ATTR = "ic_energy_price"
@@ -74,6 +74,9 @@ META_PRICE_AXIS = "ic_export_price_axis"
 META_DEMAND = "ic_demand_peaks"
 DEMAND_SPEC_ATTR = "_ic_demand_spec"   # transient: set by apply, read by the LP wrapper
 DEMAND_BUILT_ATTR = "_ic_demand_built"  # transient: set by the LP wrapper
+META_TIERS = "ic_tier_volumes"
+TIER_SPEC_ATTR = "_ic_tier_spec"        # transient: set by apply, read by the LP wrapper
+TIER_BUILT_ATTR = "_ic_tier_built"
 _KWH_PER_MWH = 1000.0
 
 
@@ -144,7 +147,7 @@ def _lp_reason(item: TariffItem) -> str | None:
         return "fixed_not_in_lp"
     if _is_demand(item):
         if item.tiers:
-            return "tiers_WP1.5c"
+            return "tiers_on_demand_not_supported"
         if item.unit != "per_kw_month":
             return f"unit_{item.unit}_not_demand"
         if item.direction != "cost":
@@ -155,7 +158,14 @@ def _lp_reason(item: TariffItem) -> str | None:
     if item.kind == "capacity":
         return "capacity_WP1.4a"
     if item.tiers:
-        return "tiers_WP1.5c"
+        # WP1.5c: tiers on cumulative monthly import volume, one catch-all period.
+        p = item.periods[0]
+        if len(item.periods) != 1 or p.months or p.weekdays or p.start_hour is not None:
+            return "tiers_with_windows"
+        if item.direction != "cost":
+            return "tiers_on_revenue_not_supported"
+        if item.measured_on != "import":
+            return "tiers_on_import_only"
     if item.unit != "per_kwh":
         return f"unit_{item.unit}_not_energy"
     return None
@@ -216,6 +226,16 @@ def _adders(n, cfg: CommercialConfig) -> tuple[dict[str, np.ndarray], list[str],
             continue
         if _is_demand(item):
             continue  # a peak term, built by `_demand_spec`
+        if item.tiers:
+            if tiers_are_convex(item.tiers):
+                continue  # stacked volume terms, built by `_tier_spec`
+            # Falling marginal rates are non-convex (spec §5.3): priced at the
+            # first tier (no volume history in P1), flagged; billed exactly.
+            adders["import"] += float(item.tiers[0].rate) * _KWH_PER_MWH
+            energy_items.append(item.id)
+            if "nonconvex_tier" not in notes:
+                notes.append("nonconvex_tier")
+            continue
         side = _side(item)
         if side == "export" and cfg.export_link is None:
             raise CommercialBindingError(
@@ -317,12 +337,20 @@ def align_to_snapshots(series: pd.Series, snapshots: pd.Index,
     return pd.Series(vals, index=snapshots, name=series.name)
 
 
+def _aligned_once(n, series: pd.Series, timezone: str | None) -> pd.Series:
+    """A series already on the snapshot axis (the route aligns before it
+    writes) is used as is; anything else is aligned here."""
+    if series.index.equals(n.snapshots):
+        return series
+    return align_to_snapshots(series, n.snapshots, timezone)
+
+
 def write_export_price(n, link: str, series: pd.Series, timezone: str | None = None) -> int:
     """Put a resolved Library price series on `link`'s `ic_export_price` column.
     Aligns first and writes ONLY when every snapshot is covered; returns the
     number of uncovered snapshots (0 = written). Records the snapshot axis the
     column belongs to, so a later resample is caught at solve time."""
-    aligned = align_to_snapshots(series, n.snapshots, timezone)
+    aligned = _aligned_once(n, series, timezone)
     uncovered = int(aligned.isna().sum())
     if uncovered:
         return uncovered
@@ -489,6 +517,91 @@ def _read_demand_solution(n, spec: dict) -> dict | None:
     return out
 
 
+# ── convex tiers (WP1.5c) ──────────────────────────────────────────────────
+
+
+def _tier_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list[str]]:
+    """(spec, convex tiered item ids, non-convex tiered item ids). One key per
+    (item, investment period, local month) with snapshots; tier widths in MWh
+    and rates in €/MWh."""
+    items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
+             if i.tiers and not _is_demand(i) and _lp_reason(i) is None]
+    convex = [i for i in items if tiers_are_convex(i.tiers)]
+    nonconvex = [i.id for i in items if not tiers_are_convex(i.tiers)]
+    if not convex:
+        return None, [], nonconvex
+    local = _local_clock(n.snapshots, cfg.timezone)
+    months = np.asarray(local.strftime("%Y-%m"))
+    inv = (np.asarray(n.snapshots.get_level_values(0)) if isinstance(n.snapshots, pd.MultiIndex)
+           else np.full(len(n.snapshots), None, dtype=object))
+    keys: list[dict] = []
+    for item in convex:
+        th = [t.threshold / _KWH_PER_MWH for t in item.tiers] + [np.inf]
+        for p in pd.unique(inv):
+            for m in sorted(set(months[inv == p])):
+                pos = np.flatnonzero((inv == p) & (months == m))
+                keys.append({"key": f"{item.id}|{'' if p is None else p}|{m}", "item": item.id,
+                             "month": m, "inv_period": None if p is None else int(p),
+                             "positions": pos,
+                             "tiers": [{"k": k, "width_mwh": th[k + 1] - th[k],
+                                        "rate_eur_per_mwh": float(t.rate) * _KWH_PER_MWH}
+                                       for k, t in enumerate(item.tiers)]})
+    return {"import_link": cfg.poc_link, "keys": keys}, [i.id for i in convex], nonconvex
+
+
+def add_tier_terms(n) -> None:
+    """Σ_k ic_tier_q[key,k] = the month's import energy (Σ w_t · p_t, MWh),
+    0 ≤ ic_tier_q[key,k] ≤ width_k, objective += Σ w_obj · rate_k · ic_tier_q."""
+    import xarray as xr
+
+    spec = getattr(n, TIER_SPEC_ATTR, None)
+    if not spec or not spec["keys"]:
+        return
+    m = n.model
+    names, uppers, coefs = [], [], []
+    w_obj = (n.investment_period_weightings["objective"]
+             if isinstance(n.snapshots, pd.MultiIndex) else None)
+    for key in spec["keys"]:
+        wk = 1.0 if w_obj is None else float(w_obj.loc[key["inv_period"]])
+        for t in key["tiers"]:
+            names.append(f"{key['key']}|{t['k']}")
+            uppers.append(t["width_mwh"])
+            coefs.append(wk * t["rate_eur_per_mwh"])
+    idx = pd.Index(names, name="tier")
+    q = m.add_variables(lower=0, upper=xr.DataArray(uppers, coords={"tier": names}, dims="tier"),
+                        name="ic_tier_q", coords=[idx])
+    imp = m["Link-p"].sel(name=spec["import_link"])
+    w = n.snapshot_weightings.objective.to_numpy(dtype=float)
+    for i, key in enumerate(spec["keys"]):
+        pos = key["positions"]
+        energy = (imp.isel(snapshot=pos) * w[pos]).sum()
+        tiers = q.sel(tier=[f"{key['key']}|{t['k']}" for t in key["tiers"]]).sum()
+        m.add_constraints(tiers - energy == 0, name=f"ic_tier_volume_{i}")
+    m.objective += (q * xr.DataArray(coefs, coords={"tier": names}, dims="tier")).sum()
+    setattr(n, TIER_BUILT_ATTR, True)
+
+
+def _read_tier_solution(n, spec: dict) -> dict | None:
+    model = getattr(n, "model", None)
+    if not getattr(n, TIER_BUILT_ATTR, False) or model is None:
+        return None
+    try:
+        sol = model.variables["ic_tier_q"].solution.to_pandas()
+    except Exception:  # noqa: BLE001
+        return None
+    out = {}
+    for key in spec["keys"]:
+        for t in key["tiers"]:
+            name = f"{key['key']}|{t['k']}"
+            v = float(sol.loc[name])
+            if not np.isfinite(v):
+                return None
+            out[name] = {"item": key["item"], "month": key["month"],
+                         "inv_period": key["inv_period"], "tier": t["k"],
+                         "rate_eur_per_mwh": t["rate_eur_per_mwh"], "q_mwh": v}
+    return out
+
+
 # ── materialisation (transient, committed on success) ──────────────────────
 
 
@@ -512,6 +625,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
                 n.links_t[ENERGY_PRICE_ATTR] = pd.DataFrame(index=n.snapshots)
             n.meta.pop(META_LINKS, None)
             n.meta.pop(META_DEMAND, None)
+            n.meta.pop(META_TIERS, None)
 
         applied._commit.append(clear)
         return applied
@@ -521,6 +635,12 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
     adders, energy_items, not_in_lp, notes = _adders(n, cfg)
     demand, demand_items, demand_missing, demand_notes = _demand_spec(n, cfg)
     notes = notes + [x for x in demand_notes if x not in notes]
+    tier_spec, tiered_items, nonconvex_items = _tier_spec(n, cfg)
+    if tier_spec is not None and (solve_strategy == "rolling"
+                                  or (solve_strategy == "myopic" and multi_period)):
+        raise CommercialBindingError(
+            f"tiered rates with solve_strategy={solve_strategy!r} would restart the monthly "
+            "volume per window (P6); not supported in P1")
     if demand is not None and (solve_strategy == "rolling"
                                or (solve_strategy == "myopic" and multi_period)):
         raise CommercialBindingError(
@@ -568,7 +688,25 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
 
         applied._undo.append(undo_demand)
 
+    solved_tiers: dict = {}
+    if tier_spec is not None:
+        setattr(n, TIER_SPEC_ATTR, tier_spec)
+
+        def undo_tiers() -> None:
+            got = _read_tier_solution(n, tier_spec)
+            if got is not None:
+                solved_tiers["v"] = got
+            for attr in (TIER_SPEC_ATTR, TIER_BUILT_ATTR):
+                if hasattr(n, attr):
+                    delattr(n, attr)
+
+        applied._undo.append(undo_tiers)
+
     def commit() -> None:
+        if "v" in solved_tiers:
+            n.meta[META_TIERS] = solved_tiers["v"]
+        else:
+            n.meta.pop(META_TIERS, None)
         frame = pd.DataFrame({link: add for link, add in targets.items()}, index=n.snapshots)
         n.links_t[ENERGY_PRICE_ATTR] = frame
         n.meta[META_LINKS] = {"import": cfg.poc_link, "export": cfg.export_link,
@@ -595,6 +733,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
         "poc_link": cfg.poc_link, "export_link": cfg.export_link,
         "priced_links": sorted(targets), "energy_items": energy_items,
         "demand_items": demand_items, "demand_not_established_months": demand_missing,
+        "tiered_items": tiered_items, "nonconvex_tier_items": nonconvex_items,
         "not_in_lp": not_in_lp, "notes": notes, "timezone": cfg.timezone,
         "simultaneous_flow_risk_snapshots": risk,
         "export_price_ref": (cfg.export_price_ref.model_dump(mode="json")
@@ -621,6 +760,7 @@ def _wrap_with_commercial_bindings(network, user_fn, cfg, log_queue=None):
 
         connection.add_fee_term(n)
         add_demand_terms(n)
+        add_tier_terms(n)
 
     return fn
 

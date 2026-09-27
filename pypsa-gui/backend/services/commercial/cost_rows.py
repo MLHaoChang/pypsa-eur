@@ -91,6 +91,15 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
             total += amount
         block["demand_charge"] = weighted("demand_charge")
 
+    # Convex tiered energy (WP1.5c): Σ rate_k × q_k per month and period.
+    tiers = n.meta.get(_lp.META_TIERS)
+    if tiers:
+        for v in tiers.values():
+            amount = float(v["rate_eur_per_mwh"]) * float(v["q_mwh"])
+            if amount:
+                items.append(("energy_tiers", v.get("inv_period"), 0.0, amount))
+        block["energy_tiers"] = weighted("energy_tiers")
+
     # Connection capacity fee in the LP (WP1.4a).
     fee = n.meta.get(_conn.META_FEE)
     agreement = None

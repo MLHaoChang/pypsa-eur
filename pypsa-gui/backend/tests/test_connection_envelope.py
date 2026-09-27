@@ -229,3 +229,95 @@ def test_an_unreadable_registry_is_not_overwritten(client, install_network, proj
     r = client.put("/api/simulation/solver_config", json=_fca_body())
     assert r.status_code == 409 and r.json()["detail"]["code"] == "stress_registry_unreadable"
     assert path.read_text() == "{corrupt"
+
+
+# ── WP1.4 review round 3 ───────────────────────────────────────────────────
+
+
+def test_route_writes_an_envelope_on_a_multi_period_network(client, install_network, session_ctx):
+    """#1: the route aligned once and the writer aligned again (MultiIndex crash)."""
+    base = build_edge_15min()
+    n = base.copy()
+    n.set_snapshots(base.snapshots[:96])
+    n.snapshot_weightings.loc[:, :] = 0.25
+    n.loads_t.p_set = base.loads_t.p_set.iloc[:96]
+    n.generators_t.p_max_pu = base.generators_t.p_max_pu.iloc[:96]
+    n.set_investment_periods([2030, 2035])
+    install_network(n)
+    idx = base.snapshots[:96].tz_localize("UTC")
+    ref = client.post("/api/library/series", json={
+        "name": "env_mp", "timestamps": [t.isoformat() for t in idx],
+        "values": [50.0] * len(idx), "meta": {"source": "t"}}).json()
+    agreement = ConnectionAgreement(kind="non_firm_dynamic", import_cap_mw=40.0, envelope=ref,
+                                    available_from=date(2030, 1, 1))
+    r = client.put("/api/simulation/solver_config", json={"commercial": {
+        "poc_link": "import", "timezone": "UTC",
+        "connection": agreement.model_dump(mode="json")}})
+    assert r.status_code == 200, r.text
+    live = session_ctx(client).network
+    assert len(live.links_t[C.ENVELOPE_ATTR]["import"]) == 192
+    assert np.allclose(live.links_t[C.ENVELOPE_ATTR]["import"], 50.0)
+
+
+def test_a_lever_import_cap_is_respected_by_the_agreement():
+    """#3: a study's planning limit on the PoC Link wins over a larger contract."""
+    from services.adequacy.levers import apply_lever_scenario
+
+    n = build_edge_15min()
+    undo, _ = apply_lever_scenario(n, "import_cap", value=20.0)
+    applied = C.apply_connection_agreement(
+        n, ConnectionAgreement(kind="firm", import_cap_mw=60.0, available_from=date(2030, 1, 1)),
+        poc_link="import")
+    assert n.links.at["import", "p_nom"] == pytest.approx(20.0)
+    applied.undo()
+    undo()
+    assert not getattr(n, C.LINK_LIMITS_ATTR, None)
+
+
+def test_the_operational_pin_never_exceeds_the_contract_and_flags_a_stale_design():
+    """#4: a design solved without this agreement must not pin above the cap."""
+    n = build_edge_15min()
+    n.links.loc["import", "p_nom_opt"] = 80.0
+    setattr(n, C.OPERATIONAL_ATTR, True)
+    fee = {"id": "f", "kind": "capacity", "unit": "per_kw_year",
+           "periods": [{"name": "all", "rate": 50.0}]}
+    applied = C.apply_connection_agreement(
+        n, ConnectionAgreement(kind="firm", import_cap_mw=60.0, capacity_fee=fee,
+                               available_from=date(2030, 1, 1)), poc_link="import")
+    assert n.links.at["import", "p_nom_min"] == pytest.approx(60.0)
+    assert applied.facts["connection"]["operational_design_mismatch"] is True
+    applied.undo()
+
+
+def test_putting_a_null_commercial_block_when_none_is_stored_does_not_rebind(
+        client, install_network, monkeypatch):
+    """#6: a full-payload PUT from the settings form must not touch the registry."""
+    import routers.simulation as sim
+
+    install_network(build_edge_15min())
+    called = []
+    monkeypatch.setattr(sim, "_bind_commercial", lambda *a, **k: called.append(1))
+    assert client.put("/api/simulation/solver_config",
+                      json={"commercial": None, "voll": 0.0}).status_code == 200
+    assert called == []
+
+
+@pytest.mark.live_solve
+def test_a_missing_stress_link_is_an_incomplete_row_not_an_aborted_sweep():
+    """#2: fail closed per scenario; the rest of class C still runs."""
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig
+
+    n = build_edge_15min()
+    n.add("Generator", "backup", bus="site", p_nom=100.0, marginal_cost=500.0, carrier="grid")
+    PyPSAService.set_network(n)
+    good = {"id": "cold", "kind": "parametric", "frequency_per_year": 0.1,
+            "electrical_load_multiplier": 1.1}
+    gone = {"id": "fca_gone", "kind": "profiles", "frequency_per_year": 1.0,
+            "links_p_max_pu": {"ghost": [0.0] * len(n.snapshots)}}
+    rows, _restore = ST.run_class_c_sweep(n, PyPSAService.get_lock(), SolverConfig(voll=1000.0),
+                                          [good, gone], log_queue=queue.SimpleQueue())
+    by_id = {r["id"]: r for r in rows}
+    assert by_id["scenario:fca_gone"]["status"] == "profiles_incomplete"
+    assert by_id["scenario:fca_gone"]["meta"]["note"] == "link_missing"
+    assert by_id["scenario:cold"].get("status") != "profiles_incomplete"

@@ -106,8 +106,17 @@ def apply_lever_scenario(
                 n.links.at[name, "p_nom"] = cap
             if "p_nom_extendable" in n.links.columns:
                 n.links.at[name, "p_nom_extendable"] = False
+        # Edge Investment Case: a connection agreement re-applied inside the
+        # solve must not lift this planning limit (WP1.4 round 3 #3).
+        prior_limits = getattr(n, "_ic_link_limits", None)
+        n._ic_link_limits = {**(prior_limits or {}), **{name: cap for name in links}}
         def undo() -> None:
             n.links = snap
+            if prior_limits is None:
+                if hasattr(n, "_ic_link_limits"):
+                    del n._ic_link_limits
+            else:
+                n._ic_link_limits = prior_limits
         return undo, {
             "kind": kind,
             "value": cap,
