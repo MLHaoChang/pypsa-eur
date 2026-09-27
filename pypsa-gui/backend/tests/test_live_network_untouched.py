@@ -26,38 +26,45 @@ from tests.test_energy_hub_templates_e2e import _poll, _project_from_template
 TID = "eh_datacenter"
 
 
+_COMPONENTS = ("buses", "links", "generators")
+
+
 def _tables(client) -> dict:
     out = {}
-    for comp in ("buses", "links"):
+    for comp in _COMPONENTS:
         r = client.get(f"/api/network/{comp}")
         assert r.status_code == 200, r.text
         out[comp] = sorted(r.json(), key=lambda row: row["name"])
     return out
 
 
-# The one column the sweep's closing base re-solve is MEANT to write: it is
-# the user's own config solved (the same solve that leaves dispatch `fresh`,
-# see the bug-2 test below), so the Link rows carry that solve's `p_nom_opt`
-# exactly as a foreground solve would. It is an optimisation OUTPUT, not
-# something the user set, and it is pinned separately rather than skipped:
-# on a fixed link it must equal the link's own `p_nom`.
-_RESOLVE_OUTPUTS = {"links": {"p_nom_opt"}}
+# The columns the sweep's closing base re-solve is MEANT to write: it is the
+# user's own config solved (the same solve that leaves dispatch `fresh`, see
+# the bug-2 test below), so the rows carry that solve's `*_nom_opt` exactly as
+# a foreground solve would (accepted deviation, plan P22.9-BE phase note).
+# They are optimisation OUTPUTS, not something the user set, and they are
+# pinned separately rather than skipped: on a fixed asset `p_nom_opt` must
+# equal the asset's own `p_nom`.
+def _is_resolve_output(key: str) -> bool:
+    return key.endswith("_nom_opt")
 
 
 def _assert_tables_equal(after: dict, before: dict, *,
                          closing_resolve: bool = False) -> None:
-    for comp in ("buses", "links"):
+    for comp in _COMPONENTS:
         assert [r["name"] for r in after[comp]] == [
             r["name"] for r in before[comp]], comp
-        skip = _RESOLVE_OUTPUTS.get(comp, set()) if closing_resolve else set()
         for a, b in zip(after[comp], before[comp]):
             diff = {k: (b.get(k), a.get(k)) for k in set(a) | set(b)
-                    if k not in skip and a.get(k) != b.get(k)}
+                    if not (closing_resolve and _is_resolve_output(k))
+                    and a.get(k) != b.get(k)}
             assert not diff, f"{comp}/{a['name']} changed (before, after): {diff}"
     if closing_resolve:
-        for a in after["links"]:
-            if not a["p_nom_extendable"]:
-                assert a["p_nom_opt"] == pytest.approx(a["p_nom"]), a["name"]
+        for comp in ("links", "generators"):
+            for a in after[comp]:
+                if not a["p_nom_extendable"]:
+                    assert a["p_nom_opt"] == pytest.approx(a["p_nom"]), (
+                        comp, a["name"])
 
 
 def _start_sweep(client, name: str) -> None:
@@ -212,7 +219,7 @@ def test_frontier_sweep_restores_bus_topology():
 
 
 @pytest.mark.live_solve
-def test_coupling_loop_leaves_the_live_buses_equal(client, install_network):
+def test_coupling_loop_leaves_the_live_tables_equal(client, install_network):
     # The loop runners solve the LIVE network per iterate and in the closing
     # restore; the worker runs inside `preserve_bus_topology`.
     from tests.test_adequacy_coupling_endpoint import (
@@ -226,7 +233,24 @@ def test_coupling_loop_leaves_the_live_buses_equal(client, install_network):
     assert r.status_code == 200, r.text
     body = _poll_loop(client, timeout=600.0)
     assert body["base_restored"] is True, body
-    assert _tables(client)["buses"] == before["buses"]
+    _assert_tables_equal(_tables(client), before, closing_resolve=True)
+
+
+@pytest.mark.live_solve
+def test_margin_loop_leaves_the_live_tables_equal(client, install_network):
+    # Same wrapper pattern as the coupling loop (probe solve, iterates and the
+    # closing restore all solve the LIVE network).
+    from tests.test_adequacy_margin_loop import (
+        DRAWS, LOOP_URL, SEED, _poll as _poll_loop, _setup)
+
+    _setup(client, install_network)
+    before = _tables(client)
+    r = client.post(LOOP_URL, json={"target_lole_h": 4.0, "draws": DRAWS,
+                                    "seed": SEED, "max_solves": 2})
+    assert r.status_code == 200, r.text
+    body = _poll_loop(client, timeout=600.0)
+    assert body["base_restored"] is True, body
+    _assert_tables_equal(_tables(client), before, closing_resolve=True)
 
 
 def _branchy_network():

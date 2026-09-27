@@ -33,6 +33,10 @@ def _network() -> pypsa.Network:
     n.add("Load", "L_ts", bus="b",
           p_set=pd.Series([10.0, 80.0, 30.0, 20.0], index=n.snapshots))
     n.add("Load", "L_none", bus="b")
+    # A generation-like (negative) load: the peak is the largest MAGNITUDE,
+    # kept with its sign — `max` would report -5.
+    n.add("Load", "L_neg", bus="b",
+          p_set=pd.Series([-5.0, -60.0, 10.0, -20.0], index=n.snapshots))
     n.loads.loc["L_none", "p_set"] = math.nan
     return n
 
@@ -73,6 +77,11 @@ def test_load_without_p_set_has_null_peak(loads_routes):
     for rows in loads_routes:
         assert "p_set_peak" in rows["L_none"]
         assert rows["L_none"]["p_set_peak"] is None
+
+
+def test_negative_load_peak_is_the_largest_magnitude(loads_routes):
+    for rows in loads_routes:
+        assert rows["L_neg"]["p_set_peak"] == pytest.approx(-60.0)
 
 
 def test_both_routes_agree(loads_routes):

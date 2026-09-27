@@ -65,9 +65,11 @@ def _serialize_component(
 
 def _add_load_peak(n: Any, rows: list[dict]) -> None:
     """
-    Additive ``p_set_peak`` on Load rows (P22.9 bug 4): the largest value of
-    ``loads_t.p_set[name]`` when the load has a time series, else the static
-    ``p_set``, else ``None``. A load whose demand lives only in the series has
+    Additive ``p_set_peak`` on Load rows (P22.9 bug 4): the value of
+    ``loads_t.p_set[name]`` with the largest MAGNITUDE when the load has a
+    time series, else the static ``p_set``, else ``None``. The sign is kept
+    (a generation-like load's peak is its most negative value — plain ``max``
+    would report its smallest injection, and the panel sums magnitudes). A load whose demand lives only in the series has
     a static ``p_set`` of 0, so a panel summing the static column showed a
     loaded bus as "0 MW". Computed here so the shim and the path-scoped route
     serve the same number.
@@ -80,9 +82,9 @@ def _add_load_peak(n: Any, rows: list[dict]) -> None:
         name = row.get("name")
         peak = None
         if name in ts.columns:
-            v = ts[name].max()
-            if pd.notna(v):
-                peak = float(v)
+            series = ts[name].dropna()
+            if not series.empty:
+                peak = float(series.iloc[series.abs().to_numpy().argmax()])
         if peak is None:
             v = row.get("p_set")
             if isinstance(v, (int, float)) and math.isfinite(v):

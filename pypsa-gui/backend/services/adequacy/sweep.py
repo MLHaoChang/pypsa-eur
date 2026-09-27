@@ -60,21 +60,26 @@ _CAPACITY_ATTRS = (
 )
 
 
-_TOPOLOGY_BUS_COLS = ["control", "sub_network", "generator"]
+# Every column PyPSA's topology pass writes, on whichever component carries
+# it (PyPSA 1.1.2, checked against an optimize): `control` (Bus via
+# `find_bus_controls`, Generator via `find_slack_bus`; StorageUnit carries the
+# column too), `sub_network` (Bus and every passive branch — Line,
+# Transformer) and `generator` (Bus).
+_TOPOLOGY_COLS = ("control", "sub_network", "generator")
 
 
-def _passive_branch_tables(n) -> dict:
-    """``{class: static table}`` for every passive-branch class whose table
-    carries ``sub_network`` (Line and Transformer in PyPSA 1.1) — looked up
-    through PyPSA's own class set, not a hard-coded list."""
+def _topology_tables(n) -> dict:
+    """``{class: (static table, [topology columns it carries])}`` for every
+    component except ``SubNetwork`` itself — found through PyPSA's own
+    component registry, not a hard-coded list."""
     out = {}
-    for cls in sorted(getattr(n, "passive_branch_components", ()) or ()):
-        try:
-            df = n.components[cls].static
-        except (AttributeError, KeyError, TypeError):
+    for c in n.components:
+        if c.name == "SubNetwork":
             continue
-        if "sub_network" in df.columns:
-            out[cls] = df
+        df = c.static
+        cols = [col for col in _TOPOLOGY_COLS if col in df.columns]
+        if cols:
+            out[c.name] = (df, cols)
     return out
 
 
@@ -85,27 +90,28 @@ def preserve_bus_topology(n):
     bug 3). PyPSA's optimize post-processing runs
     ``determine_network_topology()`` when the network has no ``SubNetwork``,
     and that writes ``buses.control`` (one Slack per sub-network),
-    ``buses.sub_network``, ``buses.generator`` and ``sub_network`` on every
-    passive branch (Line, Transformer), and adds ``SubNetwork`` rows. A study
-    that solves the user's own network in place restored dispatch and
-    capacities afterwards, never these — so after an FMEA sweep every bus in
-    the Buses table had changed.
+    ``buses.sub_network``, ``buses.generator``, ``generators.control`` (the
+    sub-network's slack generator becomes Slack, extra ones PV) and
+    ``sub_network`` on every passive branch (Line, Transformer), and adds
+    ``SubNetwork`` rows. A study that solves the user's own network in place
+    restored dispatch and capacities afterwards, never these — so after an
+    FMEA sweep every bus in the Buses table had changed.
 
-    On exit — every path, exceptions and the stop event included — those
-    columns are written back and every ``SubNetwork`` row that was not there
-    before is removed. It must enclose the study's CLOSING re-solve too: that
-    solve is itself an optimize and would re-apply the columns. A mismatch
-    after the restore is logged, never raised; the study's own answer stands.
+    On exit — every path, exceptions and the stop event included — every
+    ``_TOPOLOGY_COLS`` column on every component that carries one is written
+    back and every ``SubNetwork`` row that was not there before is removed. It
+    must enclose the study's CLOSING re-solve too: that solve is itself an
+    optimize and would re-apply the columns. A mismatch after the restore is
+    logged, never raised; the study's own answer stands.
     """
     try:
-        cols = [c for c in _TOPOLOGY_BUS_COLS if c in n.buses.columns]
-        saved = n.buses[cols].copy()
+        saved = {cls: df[cols].copy()
+                 for cls, (df, cols) in _topology_tables(n).items()}
         saved_index = sorted(n.sub_networks.index)
-        saved_branch = {cls: df["sub_network"].copy()
-                        for cls, df in _passive_branch_tables(n).items()}
-    except AttributeError:
-        # Not a PyPSA network (a test double with no Bus table): there is no
-        # topology to protect, and the guard must never stop the study.
+    except (AttributeError, TypeError):
+        # Not a PyPSA network (a test double with no component registry):
+        # there is no topology to protect, and the guard must never stop the
+        # study.
         yield
         return
     try:
@@ -116,20 +122,20 @@ def preserve_bus_topology(n):
             added = [s for s in n.sub_networks.index if s not in before]
             if added:
                 n.remove("SubNetwork", added)
-            # Rows cannot change inside a study (mutations are undone), but
-            # align on the saved index so a surprise never becomes a crash.
-            idx = saved.index.intersection(n.buses.index)
-            n.buses.loc[idx, cols] = saved.loc[idx, cols]
-            same = n.buses[cols].equals(saved)
-            tables = _passive_branch_tables(n)
-            for cls, col in saved_branch.items():
-                df = tables.get(cls)
+            tables = _topology_tables(n)
+            same = True
+            for cls, old in saved.items():
+                df = tables.get(cls, (None, None))[0]
                 if df is None:
                     same = False
                     continue
-                bidx = col.index.intersection(df.index)
-                df.loc[bidx, "sub_network"] = col.loc[bidx]
-                same = same and df["sub_network"].equals(col)
+                cols = list(old.columns)
+                # Rows cannot change inside a study (mutations are undone),
+                # but align on the saved index so a surprise never becomes a
+                # crash.
+                idx = old.index.intersection(df.index)
+                df.loc[idx, cols] = old.loc[idx, cols]
+                same = same and df[cols].equals(old)
             if not (same and sorted(n.sub_networks.index) == saved_index):
                 logger.warning(
                     "preserve_bus_topology: the topology columns or the "
@@ -137,7 +143,7 @@ def preserve_bus_topology(n):
         except Exception:                                     # noqa: BLE001
             logger.exception(
                 "preserve_bus_topology: restoring the topology columns "
-                "FAILED — the Buses / branch tables may show solver-written "
+                "FAILED — the component tables may show solver-written "
                 "values")
 
 
