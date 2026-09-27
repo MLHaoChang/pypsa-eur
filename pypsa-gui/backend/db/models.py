@@ -62,7 +62,7 @@ class Project(Base):
         ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True
     )
     scenario_description: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    # Scenario category: 'baseline' | 'scenario' | 'stress', or NULL for a
+    # Scenario category: 'baseline' | 'scenario' | 'stress' | 'sensitivity', or NULL for a
     # project that has never been categorised.
     #
     # This used to be smuggled as a `[type]` prefix on `scenario_description`,

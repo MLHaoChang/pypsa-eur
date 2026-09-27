@@ -746,7 +746,7 @@ class ProjectInfo(BaseModel):
     # Free-form one-line label describing the scenario's purpose. Only
     # populated for scenarios (set at creation); root projects leave it None.
     scenario_description: str | None = None
-    # Scenario category: 'baseline' | 'scenario' | 'stress', or None when the
+    # Scenario category: 'baseline' | 'scenario' | 'stress' | 'sensitivity', or None when the
     # project has never been categorised. Was a `[type]` prefix on the
     # description until migration 0004; see `Project.scenario_type`.
     scenario_type: str | None = None

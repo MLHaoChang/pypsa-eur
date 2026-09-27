@@ -370,7 +370,7 @@ export interface ProjectInfo {
   // graph reconstructed by walking these pointers across the list.
   parent_project?: string | null
   scenario_description?: string | null
-  // Scenario category — 'baseline' | 'scenario' | 'stress', or null/absent
+  // Scenario category — 'baseline' | 'scenario' | 'stress' | 'sensitivity', or null/absent
   // when uncategorised. A real column since backend migration 0004; before
   // that it was a `[type]` prefix on the description, which every surface but
   // one rendered as prose. Typed as a bare string because the set is
