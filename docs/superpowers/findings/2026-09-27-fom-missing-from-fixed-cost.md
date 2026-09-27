@@ -234,10 +234,17 @@ not model, such as the curtailment-subsidy wrapper or VOLL slacks. Existing
 fields keep their meaning. The bridge is skipped under myopic foresight,
 where `n.objective` holds only the last period's LP.
 
-| Network | `gap_eur` | Residual after the bridge |
+| | Golden fixture | Two-period test |
 |---|---:|---:|
-| Golden fixture | about −7.53 bn | under 1e-6 of the LP total |
-| Two-period test, objective weights 7 and 4, years 10 and 10 | several % of the LP total | under 1e-9 of the LP total |
+| LP total | 431,622.96 | 25,682,000.00 |
+| `cost_breakdown.total` | 7,528,015,383.89 | 56,845,500.00 |
+| `gap_eur` | −7,527,583,760.93 | −31,163,500.00 |
+| Non-extendable fixed cost | 7,524,778,211.68 | 35,500.00 |
+| Period-weighting adjustment | −2,805,549.25 | −31,128,000.00 |
+| Residual | 0.00 | 0.00 |
+
+The two-period test network uses objective weights of 7 and 4 against years
+of 10 and 10.
 
 ## Test evidence for the follow-up
 
