@@ -721,3 +721,12 @@ A separate agent (not the implementer; Fable reviews the plan, an Opus-class rev
 | Bug 3 study path | Corrected by the review (B1): the study leaves the live tables equal; the study test is a guard, the sweep (and the other live-network studies) get the fix. |
 | Baseline location | `docs/superpowers/qa/2026-09-27-guided-mode-baseline.md`; the reviewer's 2026-09-27 pre-baseline observation (`tsc` exit 0; vitest 181 files / 2033 tests passed on `8e04e54`) is recorded there as an observation, not as the phase's baseline. |
 | Review suggestions (non-binding, 1–9) | **All nine adopted**: 1 foreground-solve note (§2.1 item 4); 2 both keys in `firstRunOrder` (§3.2, §3.9); 3 count via `resolve_outage_params` (§4.2); 4 JSON import path + `ROOTED` comment (§5.10); 5 boolean `stale` (§4.1, §5.4); 6 queue-only dedupe (§6.1); 7 gate row 2 without the new file at Baseline (§8.2); 8 pre-baseline observation (this table, plan Baseline); 9 `reveal` guard for the optional Link step (§2.7 item 5). None rejected. |
+
+### §10 addendum: P23 gate decisions (2026-09-27, orchestrator, within G1–G4)
+| Gap | Decision |
+|---|---|
+| G4 call sites (gate B1) | Every path that **creates** a project and opens it counts as a new project. That includes the project-tab "+" (`'blank'`), Sidebar "Open project → from file" (`importBundle`, `'file'`), `ImportZone` with no current project (`'file'`), and the wizard's StudyTab (`'study'`). Opening an **existing** project never changes the mode. |
+| Auto-open vs tours (gate B2) | A project counts as auto-opened as soon as any slide panel has been open for it in Guided. The auto-open also never fires while a guided tour is preparing or running. Rule: the tour always wins over the auto-open. |
+| Explicitly requested hidden tabs (gate B3) | In Guided, an **explicit** request for a hidden Results tab is honoured. That covers asset-detail buttons, canvas and bottom-panel menus, `ui_open_panel` with `results_tab`, and greeting chips. The tab renders, and the strip shows it as one extra temporary tab, marked as advanced, until the user picks another tab. Only a **stored** tab (from localStorage) falls back to Adequacy. This keeps the promise that hidden panels are "reachable through the assistant". |
+| Multi-tab explicit flag (gate note) | `noteNewProjectCreated` and the initial read re-read `ui-mode-explicit` from storage, not only from memory. |
+| Guided copy (gate note) | In Guided, the Results subtitle lists only the visible tabs. The greeting chips offer only Guided-visible destinations, plus "Hub design". |
