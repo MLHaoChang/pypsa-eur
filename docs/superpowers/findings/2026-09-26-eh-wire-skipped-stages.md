@@ -50,7 +50,7 @@ PYTHONPATH=<repo-root>:<backend> python tests/run_qa_drivers.py
 | Suite | Before (master `ec23302`) | After |
 |---|---|---|
 | `test_energy_hub_*.py` + `test_adequacy_sweep.py` | **167** passed | **204** passed (+37 new: certify 14, frontier 11, fmea_top 6, lcoh 6; 0 failed) |
-| full backend `-m "not slow"` | (not run on master in this container) | **__FULL_AFTER__** |
+| full backend `-m "not slow"` | (not run on master in this container) | 5775 collected: **5607 passed**, 32 skipped, 136 failed/errored — every one of the 136 is `No module named pandapower` (gridspine pipeline → 503) or `No module named webview` (desktop), packages pixi ships that the venv lacked; none in EH / adequacy / results / chat files. __RERUN__ |
 | `run_qa_drivers.py` | 21 drivers | **22 drivers passed** (`qa_eh_reference_design` auto-discovered) |
 
 ### Frontend
