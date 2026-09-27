@@ -223,3 +223,41 @@ describe('GoalCard study states (from the study record, N2)', () => {
     expect(screen.getByTestId('hub-goal-run').textContent).toBe('Run again')
   })
 })
+
+// P24-FE re-gate note 2 (P25 step 0): when only the template read failed the
+// card cannot know the template's recommended settings, so Run must not
+// silently start the default-site-type study. It is disabled with a plain
+// reason and a Retry that re-reads the template; once the read recovers Run
+// posts the template's body.
+describe('GoalCard when the template read failed', () => {
+  it('disables Run with a plain reason and a Retry that recovers', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockRejectedValueOnce(new Error('500'))
+    const user = mount()
+    const reason = await screen.findByTestId('hub-goal-template-error')
+    expect(reason.textContent).toMatch(/recommended settings could not be read/)
+    expect(reason.textContent).not.toMatch(/eh_template|500/)
+    expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(true)
+    await user.click(screen.getByTestId('hub-goal-run'))
+    expect(resultsApi.startEhStudy).not.toHaveBeenCalled()
+
+    await user.click(screen.getByTestId('hub-goal-template-retry'))
+    await waitFor(() => expect(screen.queryByTestId('hub-goal-template-error')).toBeNull())
+    await waitFor(() => expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement)
+      .disabled).toBe(false))
+    await user.click(screen.getByTestId('hub-goal-run'))
+    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledTimes(1))
+    const form = { ...formFromTemplate(DC_TEMPLATE),
+      loleTarget: useHubDesignStore.getState().loleTarget,
+      ensCap: useHubDesignStore.getState().ensCap }
+    expect(vi.mocked(resultsApi.startEhStudy).mock.calls[0][0])
+      .toEqual(buildEhStudyBody('weak_flexible', form).body)
+  })
+
+  it('an own network (template read → null) runs as before', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(null)
+    mount()
+    await waitFor(() => expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement)
+      .disabled).toBe(false))
+    expect(screen.queryByTestId('hub-goal-template-error')).toBeNull()
+  })
+})

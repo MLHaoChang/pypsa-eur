@@ -12,6 +12,7 @@
  * the on-disk chat.jsonl history is preserved separately.
  */
 import { create } from 'zustand'
+import { useUIStore } from './uiStore'
 
 export type ChatRole = 'user' | 'assistant' | 'tool' | 'system'
 
@@ -75,6 +76,14 @@ export interface ChatErrorState {
 // stale silently and cannot be caught by a test. The meter now shows token
 // counts, which are exact. Do not reintroduce a price table without a live
 // rate source.
+
+/** A request a panel (the hub-design cards) sends to the assistant
+ *  (guided-mode spec §6.1). ChatPanel dispatches it through the typed-message
+ *  path; nothing here talks to the backend. */
+export interface QueuedRequest { id: string; text: string; source?: string; queuedAt: number }
+
+/** Identical text within this window is a double click, not a new request. */
+export const REQUEST_DEDUPE_MS = 2000
 
 interface ChatState {
   // Identity
@@ -148,6 +157,19 @@ interface ChatState {
    * auto-sent: the user stays the one who sends. Consumed by ChatPanel. */
   composerSeed: string | null
   seedComposer: (text: string | null) => void
+  /** Guided-mode spec §6.1 — FIFO of requests a card SENDS ("Let the
+   * assistant do this": the user's own click). ChatPanel's effect takes one
+   * at a time, only while no turn streams and no confirmation card is
+   * pending, and sends it exactly as a typed message without attachments.
+   * Write tools still confirm. Not persisted; cleared on project switch. */
+  requestQueue: QueuedRequest[]
+  /** Dedupe memory (queue only): set on every accepted send and every take. */
+  lastRequest: { text: string; at: number } | null
+  /** Queue `text` and open the dock. Returns the id, or null when the text
+   * is blank or repeats the last request within REQUEST_DEDUPE_MS. */
+  sendRequest: (text: string, opts?: { source?: string }) => string | null
+  /** ChatPanel only: remove and return the oldest queued request. */
+  takeNextRequest: () => QueuedRequest | null
   setSessionId: (id: string | null) => void
   setProfileId: (id: string | null) => void
   appendMessage: (msg: Omit<ChatMessage, 'id' | 'ts'>) => void
@@ -278,6 +300,8 @@ function newMessageId() {
 export const useChatStore = create<ChatState>((set, get) => ({
   sessionId: null,
   composerSeed: null,
+  requestQueue: [],
+  lastRequest: null,
   profileId: null,
   suppressHydrationOnce: false,
   newChatSeq: 0,
@@ -301,6 +325,26 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setSessionId: (id) => set({ sessionId: id }),
   seedComposer: (text) => set({ composerSeed: text }),
+  sendRequest: (raw, opts) => {
+    const text = raw.trim()
+    if (!text) return null
+    const now = Date.now()
+    const last = get().lastRequest
+    if (last && last.text === text && now - last.at < REQUEST_DEDUPE_MS) return null
+    const id = globalThis.crypto?.randomUUID?.() ?? String(now + Math.random())
+    set((s) => ({
+      requestQueue: [...s.requestQueue, { id, text, source: opts?.source, queuedAt: now }],
+      lastRequest: { text, at: now },
+    }))
+    useUIStore.getState().setAssistantDockOpen(true)
+    return id
+  },
+  takeNextRequest: () => {
+    const [next, ...rest] = get().requestQueue
+    if (!next) return null
+    set({ requestQueue: rest, lastRequest: { text: next.text, at: Date.now() } })
+    return next
+  },
   setProfileId: (id) => set({ profileId: id }),
   appendMessage: (msg) => set((s) => ({
     messages: [...s.messages, { ...msg, id: newMessageId(), ts: Date.now() }],
@@ -458,6 +502,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       attachedFileIds: [],
       unseenExportCount: 0,
       uploadBatches: {},
+      requestQueue: [],
     })
   },
 

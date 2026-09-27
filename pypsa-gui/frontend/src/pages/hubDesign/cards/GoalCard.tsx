@@ -26,7 +26,8 @@ export function GoalCard() {
   const project = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
   const { study, running, isPending: studyPending } = useHubStudy()
-  const { template, isPending: templatePending } = useHubTemplate()
+  const { template, isPending: templatePending, isError: templateError,
+    refetch: refetchTemplate } = useHubTemplate()
   const { readiness } = useHubReadiness(template, running, !studyPending && !templatePending)
   const { data: solverConfig } = useHubSolverConfig()
   const archetype = useHubDesignStore(s => s.archetype)
@@ -76,6 +77,9 @@ export function GoalCard() {
     ? `Studying… ${pipeline.solves_consumed} of ${pipeline.budget_solves} calculation steps`
     : budget ? `Studying… (up to ${budget} calculation steps)` : 'Studying…'
   const problem = built.error ?? blocked
+  // P24-FE re-gate note 2: without the template the card would silently run
+  // the default site type's study instead of the template's recommended one.
+  const templateUnknown = templateError && !template
   const ensDefault = readiness?.pack_defaults?.ens_cap_permyriad
 
   return (
@@ -131,7 +135,8 @@ export function GoalCard() {
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" data-testid="hub-goal-run"
           onClick={() => run.mutate()}
-          disabled={running || run.isPending || built.error !== null || vollMissing || !project}
+          disabled={running || run.isPending || built.error !== null || vollMissing || !project
+            || templateUnknown}
           className="inline-flex items-center gap-1.5 rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white disabled:opacity-50">
           {running ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
           {running ? 'Studying…' : again ? 'Run again' : 'Run study'}
@@ -148,6 +153,17 @@ export function GoalCard() {
         )}
       </div>
 
+      {templateUnknown && (
+        <p data-testid="hub-goal-template-error" className="flex flex-wrap items-center gap-2 text-[12px] text-warn">
+          This project's recommended settings could not be read, so the study cannot start
+          with them yet.
+          <button type="button" data-testid="hub-goal-template-retry"
+            onClick={() => void refetchTemplate()}
+            className="rounded border border-warn/60 px-2 py-0.5 text-[11px] hover:bg-warn/10">
+            Retry
+          </button>
+        </p>
+      )}
       {problem && (
         <p data-testid="hub-goal-blocked" className="text-[12px] text-warn">{problem}</p>
       )}

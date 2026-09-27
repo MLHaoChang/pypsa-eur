@@ -2153,19 +2153,26 @@ export default function ChatPanel() {
   const [pendingSendText, setPendingSendText] = useState<string | null>(null)
   const [pendingSendAttachIds, setPendingSendAttachIds] = useState<string[]>([])
 
-  const dispatchSend = useCallback((text: string, attachIds: string[]) => {
+  // `fromCard` (guided-mode spec §6.1): a request a hub-design card queued.
+  // It is the same send, except that the composer is not the source — the
+  // user's draft (and its dictation flag) stays as it is, and the turn is a
+  // typed one.
+  const dispatchSend = useCallback((text: string, attachIds: string[],
+    opts?: { fromCard?: boolean }) => {
     // FIRST, before the composer reset four lines below clears `dictatedRef`.
     // Reading it later — say, next to the createChatStream call that consumes
     // `input_mode` — always yields false, and the bug is invisible: the
     // request still carries the right mode, because that expression is
     // evaluated before the reset too. Only the SPOKEN answer goes missing.
-    voiceTurnRef.current = dictatedRef.current
+    voiceTurnRef.current = opts?.fromCard ? false : dictatedRef.current
     appendMessage({
       role: 'user', content: text,
       attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
     })
-    setInput('')
-    dictatedRef.current = false
+    if (!opts?.fromCard) {
+      setInput('')
+      dictatedRef.current = false
+    }
     setStreaming(true)
     setError(null)
     const cleanup = createChatStream(
@@ -2239,6 +2246,24 @@ export default function ChatPanel() {
     setPendingSendText(null)
     setPendingSendAttachIds([])
   }, [])
+
+  // Guided-mode spec §6.1 — requests the hub-design cards SEND ("Let the
+  // assistant do this", the user's own click). One at a time, through the
+  // typed-message path, only when no turn is streaming, no confirmation card
+  // waits for an answer and the first-send modal is not open. Taking from the
+  // queue is what makes each request dispatch once, however often this
+  // re-renders. `attachIds = []`: card requests never carry the user's
+  // attached files (the button titles say so), so the attachment modal is
+  // never involved and `attachedFileIds` is left alone. Nothing here answers
+  // a confirmation card — writes still wait for the user.
+  const requestCount = useChatStore((s) => s.requestQueue.length)
+  const pendingCard = useChatStore((s) => s.pending)
+  useEffect(() => {
+    if (requestCount === 0 || streaming || pendingCard != null || pendingSendText != null) return
+    const req = useChatStore.getState().takeNextRequest()
+    if (!req) return
+    dispatchSend(req.text, [], { fromCard: true })
+  }, [requestCount, streaming, pendingCard, pendingSendText, dispatchSend])
 
   const onAbort = useCallback(async () => {
     // Stopping a turn has to stop the VOICE as well. A synthesiser that keeps
