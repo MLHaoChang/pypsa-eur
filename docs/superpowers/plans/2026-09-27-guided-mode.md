@@ -209,14 +209,26 @@ Spec §4 plus the Expert-side lifts from §5.9.
 | Lifted hooks (behaviour unchanged) | `FE/hooks/useCreateFromTemplate.ts` (keeps `noteNewProjectCreated('template')` + navigation), `FE/hooks/useStartFmeaSweep.ts`; `NewProjectWizard.tsx`, `FmeaTab.tsx` consume | hook tests; existing wizard / FMEA tests stay green |
 | Expert panel exports + `eh_review` invalidation | `EhReferenceDesignPanel.tsx` | existing panel tests |
 
-**P24-BE integration gate (spec §8):**
-- [ ] 1 full backend suite — zero new failures
-- [ ] 2 targeted EH set green (incl. `test_chat_tools_endpoint_map` with the one-row fixture diff)
-- [ ] 3 `tsc` clean
-- [ ] 4 `vitest` — zero new failures
-- [ ] 5 browser smoke `--phase P22.9` re-run (Expert path unchanged after the lifts) plus `curl` of `GET /api/results/eh_review` before / during / after a study (204 / running / ok with `stale:false`)
-- [ ] 6 QA-gate review GO (`…-gate-P24-BE.md`)
-- [ ] 7 Expert-unchanged review signed (lifted hooks byte-equivalent in behaviour)
+**P24-BE integration gate (spec §8): GO on `fcf88d8`, 2026-09-27.** Evidence:
+
+| Row | Result |
+|---|---|
+| 1 | full backend `6083 passed, 31 skipped, 11 deselected`, 0 failures |
+| 2 | 536 passed |
+| 3–4 | tsc exit 0; vitest 215 files / 2234 passed |
+| 5 | smokes P24-BE / P23 / P22.9 PASS; curl 204 → running → ok with `stale:false` |
+
+Mutation checks: 16 of 17 killed. The survivor is the addTab/navigate order: the code is unchanged, but the test does not pin that order. It is carried into P24-FE as N1.
+
+The gate file is `docs/superpowers/qa/2026-09-27-guided-mode-gate-P24-BE.md`. Notes N1–N8 are carried into P24-FE.
+
+- [x] 1 full backend suite — zero new failures
+- [x] 2 targeted EH set green (incl. `test_chat_tools_endpoint_map` with the one-row fixture diff)
+- [x] 3 `tsc` clean
+- [x] 4 `vitest` — zero new failures
+- [x] 5 browser smoke `--phase P22.9` re-run (Expert path unchanged after the lifts) plus `curl` of `GET /api/results/eh_review` before / during / after a study (204 / running / ok with `stale:false`)
+- [x] 6 QA-gate review GO (`…-gate-P24-BE.md`)
+- [x] 7 Expert-unchanged review signed (lifted hooks byte-equivalent in behaviour)
 
 ## P24-FE — The hub-design step cards
 
