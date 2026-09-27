@@ -50,9 +50,16 @@ else
     -r "${REPO}/pypsa-gui/backend/requirements.txt"
 fi
 
-# Frontend (npm install, not ci, so the cached container state is reused).
-if [ -f "${REPO}/pypsa-gui/frontend/package.json" ]; then
-  (cd "${REPO}/pypsa-gui/frontend" && npm install --no-audit --no-fund --loglevel=error)
+# Frontend. `npm ci` installs exactly the committed lockfile and never
+# rewrites it (`npm install` would, dirtying the tree every session); it is
+# skipped when node_modules is already at least as new as the lockfile, so
+# the cached container state is reused.
+FE="${REPO}/pypsa-gui/frontend"
+if [ -f "${FE}/package-lock.json" ]; then
+  if [ ! -f "${FE}/node_modules/.package-lock.json" ] \
+      || [ "${FE}/package-lock.json" -nt "${FE}/node_modules/.package-lock.json" ]; then
+    (cd "$FE" && npm ci --no-audit --no-fund --loglevel=error)
+  fi
 fi
 
 if [ -n "${CLAUDE_ENV_FILE:-}" ]; then
