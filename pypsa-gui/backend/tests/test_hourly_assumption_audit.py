@@ -1,0 +1,64 @@
+"""
+Where the backend assumes HOURLY data (Edge Investment Case P1 WP1.0).
+
+15-minute settlement makes an hourly assumption a silent 4× error. This test
+does not remove them — most are correct (8760 as HOURS PER YEAR is right at
+any resolution once snapshot weights are in hours) or are prose. It PINS them:
+every site is listed with a reason, and a new site fails the test until
+someone decides whether it is safe and says why.
+"""
+from __future__ import annotations
+
+import pathlib
+import re
+
+_SERVICES = pathlib.Path(__file__).resolve().parent.parent / "services"
+_PATTERN = re.compile(r'8760|freq="h"|Timedelta\(hours=1\)')
+
+# file (relative to services/) -> (count, reason)
+ALLOWED: dict[str, tuple[int, str]] = {
+    "adequacy/copt.py": (1, "8760 h/yr in the occurrence-rate formula — a unit, not a step"),
+    "adequacy/mc.py": (2, "prose about horizon length and accumulator size"),
+    "adequacy/metrics.py": (4, "HOURS_PER_YEAR constant + prose; weights are hours (WP1.0)"),
+    "adequacy/occurrence.py": (2, "8760 h/yr in events/yr = 8760·rate/MTTR — a unit"),
+    "adequacy/sweep.py": (3, "same occurrence formula as occurrence.py — a unit"),
+    "asset_results/compute.py": (2, "prose explaining why Σweights/8760 is avoided"),
+    "chat_service.py": (1, "prompt text about CSV row counts"),
+    "chat_tools.py": (2, "prose / output-budget guidance"),
+    "chat_tools_schema.py": (3, "tool descriptions (row counts, default hours)"),
+    "legacy_import.py": (1, "prose describing a legacy fixture"),
+    "profile_shapes.py": (2, "168 h week template used ONLY when there are no snapshots "
+                             "to follow; with snapshots the template follows the axis"),
+    "results/asset_economics.py": (1, "capacity factor = energy / (8760 × p_nom × years) — a unit"),
+    "serialization.py": (1, "prose about payload size"),
+    "solver/myopic.py": (1, "prose: nyears = Σ hours / 8760"),
+    "solver/objective.py": (2, "prose: PyPSA's nyears = Σ weights / 8760"),
+    "time_aggregation_service.py": (3, "tsam period rescale to a full year of HOURS — a unit"),
+    "timeseries_qa.py": (1, "prose example"),
+    "user_timeseries.py": (2, "annual HOURLY reference for representative-week sampling; the "
+                              "sampler refuses sub-hourly axes (not_supported_for_freq)"),
+    "validation_service.py": (4, "prose + the Σ weight × hours ≈ 8760 sanity message"),
+}
+
+
+def _scan() -> dict[str, int]:
+    out: dict[str, int] = {}
+    for p in sorted(_SERVICES.rglob("*.py")):
+        n = sum(1 for line in p.read_text().splitlines() if _PATTERN.search(line))
+        if n:
+            out[str(p.relative_to(_SERVICES))] = n
+    return out
+
+
+def test_every_hourly_assumption_site_is_listed_with_a_reason():
+    found = _scan()
+    new = {f: c for f, c in found.items() if f not in ALLOWED}
+    assert not new, f"new hourly-assumption sites — review and add with a reason: {new}"
+    grown = {f: (c, ALLOWED[f][0]) for f, c in found.items() if c > ALLOWED[f][0]}
+    assert not grown, f"more sites than allowed (found, allowed): {grown}"
+
+
+def test_the_initial_inventory_is_pinned_at_38_sites_in_19_files():
+    assert sum(c for c, _ in ALLOWED.values()) == 38
+    assert len(ALLOWED) == 19
+    assert all(reason for _, reason in ALLOWED.values())

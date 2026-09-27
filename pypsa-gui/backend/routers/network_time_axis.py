@@ -79,6 +79,8 @@ from services.profile_shapes import (  # noqa: F401
     _wind_cf_profile,
 )
 from services.snapshot_index import (  # noqa: F401
+    hours_per_step,
+    is_sub_hourly,
     _build_period_multiindex,
     _infer_snapshot_freq,
 )
@@ -202,8 +204,16 @@ def get_snapshots():
     # snapshot range to the data the user actually uploaded. `can_sample_weeks`
     # gates the representative-week sampler (needs a full-year hourly profile).
     ts_start, ts_end = _user_ts_extent()
-    can_sample_weeks = _annual_hourly_reference()[0] is not None
     freq = _infer_snapshot_freq(n)
+    # The sampler builds 168 HOURLY steps per week; on a sub-hourly axis it
+    # would silently swap the model's resolution for hourly (WP1.0). Refuse
+    # with a code the UI can explain.
+    if is_sub_hourly(freq):
+        can_sample_weeks, sample_weeks_reason = False, "not_supported_for_freq"
+    else:
+        _ref_idx, _ref_reason = _annual_hourly_reference()
+        can_sample_weeks = _ref_idx is not None
+        sample_weeks_reason = None if can_sample_weeks else _ref_reason
     if isinstance(sns, pd.MultiIndex):
         try:
             periods = [int(p) for p in sns.get_level_values(0)]
@@ -223,6 +233,7 @@ def get_snapshots():
             "ts_start": ts_start,
             "ts_end": ts_end,
             "can_sample_weeks": can_sample_weeks,
+            "sample_weeks_reason": sample_weeks_reason,
             "freq": freq,
         }
     snaps = [s.isoformat() if hasattr(s, "isoformat") else str(s) for s in sns]
@@ -231,6 +242,7 @@ def get_snapshots():
         "count": len(sns), "snapshots": snaps, "weightings": weightings,
         "ts_start": ts_start, "ts_end": ts_end,
         "can_sample_weeks": can_sample_weeks,
+        "sample_weeks_reason": sample_weeks_reason,
         "freq": freq,
     }
 @router.get("/snapshots/weightings.csv")
@@ -516,6 +528,13 @@ def set_snapshots(config: SnapshotConfig):
         kw: dict = {}
         if config.weightings is not None:
             kw["default_snapshot_weightings"] = config.weightings
+        else:
+            # Weights are HOURS (spec decision 18): a 15-minute step weighs
+            # 0.25, not PyPSA's default 1.0 — which counted every quarter-hour
+            # as a full hour and scaled energy and n.nyears 4×.
+            step_h = hours_per_step(config.freq)
+            if step_h is not None:
+                kw["default_snapshot_weightings"] = step_h
         # Demote any lingering MultiIndex (multi-period toggled off without
         # rebuilding n.snapshots, or a stale _t / weightings frame) to flat
         # FIRST. A direct set_snapshots(flat DatetimeIndex) on MultiIndex state
@@ -605,6 +624,13 @@ def set_multi_period_snapshots(body: dict):
         timestep_blocks = [base_idx for _ in periods_sorted]
 
     mi = _build_period_multiindex(periods_sorted, timestep_blocks)
+    # Step length per block, in hours (spec decision 18). None for a calendar
+    # frequency with no fixed length.
+    if per_period is not None:
+        block_hours = [hours_per_step(spec.get("freq", "h")) for spec in per_period]
+    else:
+        block_hours = [hours_per_step(freq)] * len(periods_sorted)
+    old_step_h = hours_per_step(_infer_snapshot_freq(n))
 
     # Preserve existing time series BEFORE reindex.
     _backup_network_ts_to_user_ts(n)
@@ -614,14 +640,29 @@ def set_multi_period_snapshots(body: dict):
     # CAPEX 50× on representative-week setups and producing renewable
     # over-build.
     captured_weights = _capture_snapshot_weights_per_timestep(n)
+    # Captured weights are only meaningful at the SAME resolution. Re-broadcast
+    # across a resolution change and an hourly axis's 1.0 lands on every :00
+    # quarter-hour of the new 15-minute axis (WP1.0) — so drop them then.
+    same_resolution = all(h is not None and h == old_step_h for h in block_hours)
+    if not same_resolution:
+        captured_weights = None
     with PyPSAService.get_lock():
         # n.set_snapshots is order-sensitive vs n.investment_periods: PyPSA's
         # multi-period machinery expects investment_periods to mirror the
         # MultiIndex's level-0 values. Set snapshots first, then sync periods.
         n.set_snapshots(mi)
         n.investment_periods = periods_sorted
-        # Re-broadcast the captured weights under each new period.
-        _reapply_snapshot_weights(n, captured_weights)
+        # Re-broadcast the captured weights under each new period — or, after
+        # a resolution change, set every row to its block's step length.
+        if captured_weights is not None:
+            _reapply_snapshot_weights(n, captured_weights)
+        elif any(h is not None for h in block_hours):
+            per_row = pd.Series(
+                np.concatenate([np.full(len(blk), h if h is not None else 1.0)
+                                for blk, h in zip(timestep_blocks, block_hours)]),
+                index=n.snapshots, dtype=float)
+            for col in n.snapshot_weightings.columns:
+                n.snapshot_weightings[col] = per_row.values
         # Re-apply user time series (handles MultiIndex via the level-1 path
         # added in _reapply_user_ts_to_network).
         _reapply_user_ts_to_network(n)
@@ -661,6 +702,15 @@ def sample_representative_weeks(config: SampleWeeksConfig):
 
     if config.n_weeks < 1 or config.n_weeks > 5:
         raise HTTPException(400, "n_weeks must be between 1 and 5.")
+
+    axis_freq = _infer_snapshot_freq(PyPSAService.get_network())
+    if is_sub_hourly(axis_freq):
+        raise HTTPException(400, detail={
+            "code": "not_supported_for_freq",
+            "detail": (f"Representative-week sampling builds 168 hourly steps per "
+                       f"week; the model axis is {axis_freq}. Sampling would silently "
+                       f"change the model's resolution, so it is refused."),
+        })
 
     idx, reason = _annual_hourly_reference()
     if idx is None:

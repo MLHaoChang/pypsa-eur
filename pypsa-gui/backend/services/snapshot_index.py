@@ -72,6 +72,36 @@ def _infer_snapshot_freq(n) -> str | None:
     return None
 
 
+def hours_per_step(freq) -> float | None:
+    """
+    Length of one snapshot step in HOURS for a fixed pandas frequency
+    ("15min" → 0.25, "h" → 1.0, "3h" → 3.0, "D" → 24.0).
+
+    Snapshot weightings are hours (Edge Investment Case spec decision 18):
+    that is what makes Σ p × w an energy in MWh at any resolution. Calendar
+    frequencies with no fixed length ("MS", "W-MON" …) return None, and the
+    caller keeps PyPSA's default rather than inventing a length.
+    """
+    if freq is None:
+        return None
+    try:
+        from pandas.tseries.frequencies import to_offset
+        from pandas.tseries.offsets import Tick
+
+        off = to_offset(freq)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(off, Tick):
+        return None
+    hours = off.nanos / 3_600_000_000_000
+    return hours if hours > 0 else None
+
+
+def is_sub_hourly(freq) -> bool:
+    h = hours_per_step(freq)
+    return h is not None and h < 1.0
+
+
 def _build_period_multiindex(periods, blocks) -> pd.MultiIndex:
     """
     Build the `(period, timestep)` snapshot MultiIndex from parallel `periods`
