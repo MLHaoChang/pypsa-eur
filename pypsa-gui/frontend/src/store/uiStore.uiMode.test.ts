@@ -205,3 +205,21 @@ describe('switching to guided prunes a hidden slide panel (§3.7)', () => {
     expect(s.getState().activeSlidePanel).toBeNull()
   })
 })
+
+// §10 addendum (gate note): another browser tab may have made the explicit
+// choice after this tab loaded. noteNewProjectCreated re-reads the flag from
+// storage, so it never overrides a choice made elsewhere.
+describe('noteNewProjectCreated re-reads the explicit flag from storage (multi-tab)', () => {
+  it('an explicit choice written by another tab blocks the flip', async () => {
+    const s = await freshStore({ 'network-diagram:current-project': 'P' })
+    expect(s.getState().uiModeExplicit).toBe(false)
+    // Tab A clicks Expert.
+    localStorage.setItem(MODE_KEY, 'expert')
+    localStorage.setItem(EXPLICIT_KEY, '1')
+    // Tab B (this store, loaded earlier, implicit) creates a project.
+    s.getState().noteNewProjectCreated('blank')
+    expect(s.getState().uiMode).toBe('expert')
+    expect(s.getState().uiModeExplicit).toBe(true)
+    expect(localStorage.getItem(MODE_KEY)).toBe('expert')
+  })
+})

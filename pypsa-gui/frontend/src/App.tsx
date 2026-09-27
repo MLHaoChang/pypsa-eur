@@ -177,24 +177,32 @@ export default function App() {
   const {
     activeSlidePanel, setSlidePanel, currentProject, canvasView,
     lastProjectId, lastSavedByProject, markProjectSaved, pruneRecents, recents, setLastProjectId,
-    theme, density, compareRailOpen, setCompareRailOpen, uiMode,
+    theme, density, compareRailOpen, setCompareRailOpen, uiMode, guidedTourHolds,
   } = useUIStore()
 
   // Results + Time Series take the whole main area (see FULL_SCREEN_TABS);
   // every other sidebar tab opens as a half-width panel beside the canvas.
   const fullScreenTab = activeSlidePanel != null && FULL_SCREEN_TABS.has(activeSlidePanel)
 
-  // Guided default-open (guided-mode spec §3.6): with a project open and no
-  // panel showing, Guided opens the hub-design flow — once per project per
-  // session, so closing it is respected. Expert never auto-opens anything.
+  // Guided default-open (guided-mode spec §3.6 + §10 addendum): with a
+  // project open and no panel showing, Guided opens the hub-design flow —
+  // once per project per session, so closing it is respected. A project
+  // counts as auto-opened as soon as ANY slide panel has been open for it in
+  // Guided (a panel reaching null afterwards is the user's or a tour's doing,
+  // not "nothing is open yet"), and while a guided tour is preparing or
+  // running the auto-open never fires — the tour always wins. Expert never
+  // auto-opens anything.
   const hubDesignAutoOpenedFor = useRef<string | null>(null)
   useEffect(() => {
-    if (uiMode === 'guided' && currentProject && activeSlidePanel == null
-        && hubDesignAutoOpenedFor.current !== currentProject) {
+    if (uiMode !== 'guided' || !currentProject) return
+    if (hubDesignAutoOpenedFor.current === currentProject) return
+    if (activeSlidePanel != null || guidedTourHolds > 0) {
       hubDesignAutoOpenedFor.current = currentProject
-      setSlidePanel('hubDesign')
+      return
     }
-  }, [uiMode, currentProject, activeSlidePanel, setSlidePanel])
+    hubDesignAutoOpenedFor.current = currentProject
+    setSlidePanel('hubDesign')
+  }, [uiMode, currentProject, activeSlidePanel, guidedTourHolds, setSlidePanel])
 
   // Apply theme + density to <html> so CSS-var overrides in index.css kick in.
   // Done on <html> (not <body>) because the @theme block lives at :root scope —

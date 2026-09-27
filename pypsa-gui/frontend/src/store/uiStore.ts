@@ -479,6 +479,12 @@ interface UIStore {
   // becomes Guided; an explicit choice is left alone.
   noteNewProjectCreated: (kind: NewProjectKind) => void
   readStoredUiMode: () => UiMode | null
+  // Guided tours in flight (a prepare step running, or a tour on screen).
+  // While > 0, Guided never auto-opens hubDesign — the tour always wins
+  // (guided-mode spec §10 addendum, gate P23 B2). In-memory only.
+  guidedTourHolds: number
+  holdGuidedTour: () => void
+  releaseGuidedTour: () => void
   setTheme: (t: Theme) => void
   setDensity: (d: Density) => void
   toggleTheme: () => void
@@ -632,15 +638,24 @@ export const useUIStore = create<UIStore>((set) => ({
     })
   },
   noteNewProjectCreated: (kind) => {
-    const { uiModeExplicit, uiMode, setUiMode } = useUIStore.getState()
-    if (uiModeExplicit) {
-      appLog('INFO', `New ${kind} project — keeping the chosen ${uiMode} mode`)
+    const { uiMode, setUiMode } = useUIStore.getState()
+    // Re-read the flag from storage, not only memory: another browser tab may
+    // have made the explicit choice after this one loaded (spec §10 addendum).
+    // Adopt that choice here rather than override it.
+    if (!useUIStore.getState().uiModeExplicit && readUiModeExplicit()) {
+      setUiMode(readUiMode() ?? uiMode, { explicit: true })
+    }
+    if (useUIStore.getState().uiModeExplicit) {
+      appLog('INFO', `New ${kind} project — keeping the chosen ${useUIStore.getState().uiMode} mode`)
       return
     }
     appLog('INFO', `New ${kind} project — starting in Guided mode`)
     setUiMode('guided')
   },
   readStoredUiMode: () => readUiMode(),
+  guidedTourHolds: 0,
+  holdGuidedTour: () => set(s => ({ guidedTourHolds: s.guidedTourHolds + 1 })),
+  releaseGuidedTour: () => set(s => ({ guidedTourHolds: Math.max(0, s.guidedTourHolds - 1) })),
   setTheme: (t) => {
     try { localStorage.setItem(THEME_KEY, t) } catch { /* noop */ }
     set({ theme: t })

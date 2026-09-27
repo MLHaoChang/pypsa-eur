@@ -113,6 +113,16 @@ export default function Results() {
     setTabState(t)
     try { localStorage.setItem(RESULTS_TAB_KEY, t) } catch { /* ignore */ }
   }
+  // The tab most recently asked for EXPLICITLY (asset detail, the
+  // assistant's results_tab, a greeting chip) — as opposed to restored from
+  // storage. Guided honours it even when the tab is hidden, showing it as a
+  // temporary "advanced" tab until the user picks another (guided-mode spec
+  // §10 addendum, gate P23 B3). Cleared by any click on the strip.
+  const [requestedTab, setRequestedTab] = useState<ResultsTab | null>(null)
+  const pickTab = (t: ResultsTab) => {
+    setRequestedTab(null)
+    setTab(t)
+  }
 
   // ── Docked comparison rail ─────────────────────────────────────────────
   // The A-vs-B CompareView coexists on the right; the live Results tabs stay
@@ -131,10 +141,14 @@ export default function Results() {
   const resultsTabRequest = useUIStore(s => s.resultsTabRequest)
   const clearResultsTabRequest = useUIStore(s => s.clearResultsTabRequest)
   const uiMode = useUIStore(s => s.uiMode)
-  // Guided (spec §3.7): a tab Guided does not show is displayed as adequacy.
-  // Display only — `tab` and `results:active-tab` keep the user's choice, so
-  // switching back to Expert restores it.
-  const effectiveTab: ResultsTab = (uiMode === 'guided' && !GUIDED_TABS.has(tab)) ? 'adequacy' : tab
+  // Guided (spec §3.7): a STORED tab Guided does not show is displayed as
+  // adequacy. Display only — `tab` and `results:active-tab` keep the user's
+  // choice, so switching back to Expert restores it. An explicitly requested
+  // hidden tab is shown (§10 addendum, B3) as `advancedTab`.
+  const advancedTab: ResultsTab | null =
+    (uiMode === 'guided' && requestedTab === tab && !GUIDED_TABS.has(tab)) ? tab : null
+  const effectiveTab: ResultsTab =
+    (uiMode === 'guided' && !GUIDED_TABS.has(tab) && advancedTab == null) ? 'adequacy' : tab
   const splitWrapRef = useRef<HTMLDivElement>(null)
   // `delta` is the pointer's travel, or null if it never moved. `startW` is
   // the on-screen width at mousedown (what the preview follows) and
@@ -158,6 +172,7 @@ export default function Results() {
     const allowed = new Set(TABS.map(x => x.id))
     if (allowed.has(resultsTabRequest as ResultsTab)) {
       setTab(resultsTabRequest as ResultsTab)
+      setRequestedTab(resultsTabRequest as ResultsTab)
     }
     clearResultsTabRequest()
   }, [resultsTabRequest, clearResultsTabRequest])
@@ -511,7 +526,9 @@ export default function Results() {
       <PageHeader
         eyebrow="SIMULATION · RESULTS"
         title="Optimization results"
-        subtitle="Capacity expansion, dispatch, load flow, prices, and emissions from the last solve."
+        subtitle={uiMode === 'guided'
+          ? 'Adequacy and failure-mode (FMEA) risk results for the hub design.'
+          : 'Capacity expansion, dispatch, load flow, prices, and emissions from the last solve.'}
         actions={
           status && (
             <span className="font-mono text-[11px] text-muted">
@@ -523,14 +540,16 @@ export default function Results() {
       />
       {/* ── Tab strip ──────────────────────────────────────────────── */}
       <div className="flex items-center shrink-0 border-b border-border bg-panel px-2 gap-0 overflow-x-auto">
-        {TABS.filter(t => (!t.multiOnly || uniquePeriods.length > 0) && (!t.expertOnly || uiMode === 'expert')).map(({ id, label, Icon, tip }) => {
+        {TABS.filter(t => (!t.multiOnly || uniquePeriods.length > 0) && (!t.expertOnly || uiMode === 'expert' || t.id === advancedTab)).map(({ id, label, Icon, tip }) => {
           const active = effectiveTab === id
+          const advanced = id === advancedTab
           return (
             <button
               key={id}
-              onClick={() => setTab(id)}
-              title={tip}
+              onClick={() => pickTab(id)}
+              title={advanced ? `${tip} — an advanced tab, shown because it was asked for; it leaves the strip when you pick another tab.` : tip}
               data-testid={`results-tab-${id}`}
+              data-advanced={advanced ? 'true' : undefined}
               className={`h-9 px-3 shrink-0 flex items-center gap-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors
                 ${active
                   ? 'border-accent text-accent'
@@ -538,6 +557,11 @@ export default function Results() {
             >
               <Icon size={13} />
               {label}
+              {advanced && (
+                <span className="ml-1 px-1 py-px rounded text-[9px] font-mono font-bold uppercase tracking-[0.08em] border border-accent/40">
+                  Advanced
+                </span>
+              )}
             </button>
           )
         })}

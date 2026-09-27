@@ -125,6 +125,9 @@ export function ImportZone({ onSuccess }: { onSuccess: (summary: ImportSummary, 
       // pointing where they already were.
       const name = importedNameRef.current
       if (name && name !== currentProject) {
+        // No project was open, so the bundle became a NEW project — G4
+        // applies (guided-mode spec §10 addendum).
+        useUIStore.getState().noteNewProjectCreated('file')
         setCurrentProject(name)
         setProjectName(name)
       } else if (!name && currentProject) {

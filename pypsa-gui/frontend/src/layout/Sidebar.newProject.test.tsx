@@ -17,7 +17,11 @@ vi.mock('../api/network', () => ({
 }))
 vi.mock('../api/io', () => ({ ioApi: {} }))
 vi.mock('../api/projects', () => ({
-  projectsApi: { list: vi.fn().mockResolvedValue([]), save: vi.fn().mockResolvedValue({ saved: 'Fresh' }) },
+  projectsApi: {
+    list: vi.fn().mockResolvedValue([]),
+    save: vi.fn().mockResolvedValue({ saved: 'Fresh' }),
+    importBundle: vi.fn().mockResolvedValue({ imported: 'Bundled', summary: {} }),
+  },
 }))
 vi.mock('../api/simulation', () => ({
   simulationApi: { preflight: vi.fn().mockResolvedValue({ errors: 0, warnings: 0 }) },
@@ -46,7 +50,7 @@ vi.mock('../utils/projectActions', async (importOriginal) => {
     saveProjectQuietly: vi.fn().mockResolvedValue(undefined),
     resetBackendNetwork: vi.fn().mockResolvedValue(undefined),
     downloadProjectBundle: vi.fn(),
-    abortRunningSim: vi.fn(),
+    abortRunningSim: vi.fn().mockResolvedValue(true),
     switchToProject: vi.fn(),
   }
 })
@@ -103,5 +107,51 @@ describe('Sidebar.newProjectMut — new-project rule', () => {
     useUIStore.setState({ uiMode: 'expert', uiModeExplicit: true })
     await createViaSidebar()
     expect(useUIStore.getState().uiMode).toBe('expert')
+  })
+})
+
+// §10 addendum (gate P23 B1): Sidebar "Open project → Browse for a project
+// file" imports the bundle as a FRESH project (importBundle with no target),
+// so it is a new project too — kind 'file'.
+async function openFromFileViaSidebar() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+  act(() => { window.dispatchEvent(new CustomEvent('chat:open-project-picker')) })
+  await screen.findByText('Browse for a project file (.pypsaproj.zip)')
+  const input = document.querySelector('input[accept=".pypsaproj.zip,.zip"]') as HTMLInputElement
+  fireEvent.change(input, { target: { files: [new File(['x'], 'b.pypsaproj.zip')] } })
+  await waitFor(() => expect(useUIStore.getState().currentProject).toBe('Bundled'))
+}
+
+describe('Sidebar "Open from file" — new-project rule', () => {
+  it("calls noteNewProjectCreated('file') before setting the current project", async () => {
+    useUIStore.setState({ uiMode: 'expert', uiModeExplicit: true })
+    const order: string[] = []
+    const realNote = useUIStore.getState().noteNewProjectCreated
+    const realSet = useUIStore.getState().setCurrentProject
+    useUIStore.setState({
+      noteNewProjectCreated: (k) => { order.push(`note:${k}`); realNote(k) },
+      setCurrentProject: (n, id) => { order.push(`set:${n}`); realSet(n, id) },
+    })
+    try {
+      await openFromFileViaSidebar()
+      expect(order.indexOf('note:file')).toBeGreaterThanOrEqual(0)
+      expect(order.indexOf('note:file')).toBeLessThan(order.indexOf('set:Bundled'))
+      expect(useUIStore.getState().uiMode).toBe('expert')
+    } finally {
+      useUIStore.setState({ noteNewProjectCreated: realNote, setCurrentProject: realSet })
+    }
+  })
+
+  it('an implicit Expert user lands the opened bundle in Guided', async () => {
+    useUIStore.setState({ uiMode: 'expert', uiModeExplicit: false })
+    await openFromFileViaSidebar()
+    expect(useUIStore.getState().uiMode).toBe('guided')
   })
 })

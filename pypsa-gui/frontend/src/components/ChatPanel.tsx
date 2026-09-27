@@ -54,7 +54,7 @@ import ChatLaunchGreeting from './ChatLaunchGreeting'
 import { buildUiContext } from '../utils/uiContext'
 import { postChatRewind } from '../api/chat'
 import * as speechOut from '../utils/speechOut'
-import { useUIStore } from '../store/uiStore'
+import { useUIStore, type UiMode } from '../store/uiStore'
 import { useIsCoarsePointer } from '../hooks/useIsCoarsePointer'
 import { useSpeechToText } from '../hooks/useSpeechToText'
 import { isNearBottom } from '../utils/chatUi'
@@ -1103,6 +1103,32 @@ const CHAT_STARTER_PROMPTS: { label: string; text: string }[] = [
   },
 ]
 
+/** Starter prompts in Guided mode: only destinations Guided shows, plus the
+ *  hub-design flow (guided-mode spec §10 addendum). */
+const CHAT_STARTER_PROMPTS_GUIDED: { label: string; text: string }[] = [
+  {
+    label: 'Open Hub design',
+    text: 'Open the Hub design panel',
+  },
+  {
+    label: 'Check adequacy',
+    text: 'Open the Results Adequacy tab',
+  },
+  {
+    label: 'Summarize this solve',
+    text: 'Summarize the key results of the current project',
+  },
+]
+
+/** The greeting chips for the current project and mode. */
+export function starterPromptsFor(
+  currentProject: string | null,
+  uiMode: UiMode,
+): { label: string; text: string }[] {
+  if (!currentProject) return CHAT_STARTER_PROMPTS_UNBOUND
+  return uiMode === 'guided' ? CHAT_STARTER_PROMPTS_GUIDED : CHAT_STARTER_PROMPTS
+}
+
 function ChatStarterChips({
   prompts,
   onPick,
@@ -1176,6 +1202,8 @@ function ReplayAttachmentChips({ fileIds }: { fileIds: string[] }) {
 
 
 export default function ChatPanel() {
+  // Guided swaps the greeting chips for Guided-visible destinations.
+  const uiMode = useUIStore(s => s.uiMode)
   const qc = useQueryClient()
   // tool_use_id → safety_tier, written at tool_request, consumed at
   // tool_result / tool_error. `tool_result` frames don't carry the tier, so
@@ -2759,7 +2787,7 @@ export default function ChatPanel() {
             navigate / summarize. Click fills the composer for edit-before-send. */}
         {messages.length === 0 && (
           <ChatStarterChips
-            prompts={currentProject ? CHAT_STARTER_PROMPTS : CHAT_STARTER_PROMPTS_UNBOUND}
+            prompts={starterPromptsFor(currentProject, uiMode)}
             disabled={streaming}
             onPick={(text) => {
               setInput(text)

@@ -180,3 +180,79 @@ describe('Expert never auto-opens', () => {
     expect(useUIStore.getState().activeSlidePanel).toBeNull()
   })
 })
+
+// ── §10 addendum (gate P23 B2): the tour always wins over the auto-open ────
+// The first case is the QA gate's repro verbatim (qa23/repro/App.qaTourRepro).
+import { prepareTaggingTour } from './pages/results/prepareTaggingTour'
+import { nk } from './utils/queryKeys'
+import { GuideButton } from './components/GuidedTour'
+describe('QA repro: tagging tour in Guided after an Expert->Guided switch on Results', () => {
+  it('the tour prepare step closes the panel so the Properties bus card can show', async () => {
+    useUIStore.setState({ uiMode: 'expert', activeSlidePanel: 'results' })
+    renderApp()
+    act(() => { useUIStore.getState().setUiMode('guided', { explicit: true }) })
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    const qc = new QueryClient()
+    qc.setQueryData(nk('Demo', 'buses'), [{ name: 'B1', eh_poc: true }])
+    await act(async () => { await prepareTaggingTour(qc, 'Demo', { waitMs: 50 }).catch(() => {}) })
+    // Expect the canvas + PropertiesPanel (tour target host) — not a full-screen panel.
+    expect(useUIStore.getState().activeSlidePanel).toBeNull()
+    expect(screen.queryByTestId('properties-stub')).toBeTruthy()
+  })
+})
+
+describe('a project counts as auto-opened once any panel was open for it in Guided', () => {
+  it('Results open in Guided, then closed → hubDesign does not appear', () => {
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: 'results' })
+    renderApp()
+    expect(useUIStore.getState().activeSlidePanel).toBe('results')
+    act(() => { useUIStore.getState().setSlidePanel(null) })
+    expect(useUIStore.getState().activeSlidePanel).toBeNull()
+  })
+
+  it('a panel open only in Expert does not count', () => {
+    useUIStore.setState({ uiMode: 'expert', activeSlidePanel: 'results' })
+    renderApp()
+    act(() => { useUIStore.getState().setSlidePanel(null) })
+    act(() => { useUIStore.getState().setUiMode('guided', { explicit: true }) })
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
+  })
+})
+
+describe('the auto-open never fires while a guided tour is preparing or running', () => {
+  it('a held tour blocks it, and releasing the hold does not open it afterwards', () => {
+    useUIStore.setState({ uiMode: 'guided', currentProject: 'Demo', activeSlidePanel: 'results' })
+    renderApp()
+    act(() => { useUIStore.getState().holdGuidedTour() })
+    act(() => { useUIStore.setState({ currentProject: 'Other', activeSlidePanel: null }) })
+    expect(useUIStore.getState().activeSlidePanel).toBeNull()
+    act(() => { useUIStore.getState().releaseGuidedTour() })
+    expect(useUIStore.getState().guidedTourHolds).toBe(0)
+    expect(useUIStore.getState().activeSlidePanel).toBeNull()
+  })
+
+  it('the tagging tour started from Results in Guided (real GuideButton) keeps the canvas and Properties', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    qc.setQueryData(nk('Fresh', 'buses'), [{ name: 'B1', eh_poc: true }])
+    // A project that has never had a panel in Guided: Results opens in Expert,
+    // the user switches to Guided on Results, then starts the tour there.
+    useUIStore.setState({ uiMode: 'expert', currentProject: 'Fresh', activeSlidePanel: 'results' })
+    render(
+      <QueryClientProvider client={qc}>
+        <App />
+        <GuideButton tourId="eh_tagging" testId="eh-tagging-guide-button"
+          prepare={() => prepareTaggingTour(qc, 'Fresh', { waitMs: 50 })} />
+      </QueryClientProvider>,
+    )
+    act(() => { useUIStore.getState().setUiMode('guided', { explicit: true }) })
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('eh-tagging-guide-button'))
+      await new Promise(r => setTimeout(r, 150))
+    })
+    expect(useUIStore.getState().activeSlidePanel).toBeNull()
+    expect(screen.queryByTestId('hub-design-panel')).toBeNull()
+    expect(screen.getByTestId('properties-stub')).toBeTruthy()
+    // The launched tour holds the auto-open off while it is on screen.
+    expect(useUIStore.getState().guidedTourHolds).toBeGreaterThan(0)
+  })
+})

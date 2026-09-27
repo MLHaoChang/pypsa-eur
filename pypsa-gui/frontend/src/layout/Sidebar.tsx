@@ -1045,6 +1045,9 @@ function ProjectSectionContent({
       // the filename) and registers it as a fresh project. Importing replaces
       // the in-memory network, so the prior auto-save above is essential.
       const res = await projectsApi.importBundle(file)
+      // A bundle opened from disk is registered as a FRESH project — G4
+      // applies (guided-mode spec §10 addendum).
+      useUIStore.getState().noteNewProjectCreated('file')
       invalidateNetworkQueries(qc, res.imported)
       qc.invalidateQueries({ queryKey: nk(res.imported, 'results') })
       qc.invalidateQueries({ queryKey: ['projects'] })

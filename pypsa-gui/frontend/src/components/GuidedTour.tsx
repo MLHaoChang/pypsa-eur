@@ -112,6 +112,12 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
 }) {
   const { data, isError } = useGuide(topic)
   const tour = data?.tours?.[tourId]
+  // While a tour is on screen Guided must not auto-open hubDesign over its
+  // targets (guided-mode spec §10 addendum, gate P23 B2).
+  useEffect(() => {
+    useUIStore.getState().holdGuidedTour()
+    return () => useUIStore.getState().releaseGuidedTour()
+  }, [])
   const [steps, setSteps] = useState<GuideStep[]>([])
   const [idx, setIdx] = useState(0)
   const [rect, setRect] = useState<Rect | null>(null)
@@ -298,13 +304,19 @@ export function GuideButton({ tourId, testId, label = 'Guide', prepare }: {
       setOpen(true)
       return
     }
+    // Held across the prepare step: prepare closes the full-screen panel on
+    // purpose, and Guided must not read that as "nothing open yet". The
+    // launched tour takes its own hold when it mounts.
+    useUIStore.getState().holdGuidedTour()
     try {
       await prepare()
     } catch (e) {
       console.warn(`Guide '${tourId}': prepare failed`, e)
+    } finally {
+      useLaunchedTour.setState(s => ({
+        tourId, seq: s.seq + 1, project: useUIStore.getState().currentProject }))
+      useUIStore.getState().releaseGuidedTour()
     }
-    useLaunchedTour.setState(s => ({
-      tourId, seq: s.seq + 1, project: useUIStore.getState().currentProject }))
   }
   return (
     <>
