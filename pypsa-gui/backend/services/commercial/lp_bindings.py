@@ -65,7 +65,13 @@ import numpy as np
 import pandas as pd
 
 from models.commercial import CommercialConfig, TariffItem
-from services.commercial.tariff_engine import _is_demand, _period_index, _rates, tiers_are_convex
+from services.commercial.tariff_engine import (
+    _is_demand,
+    _period_index,
+    _rates,
+    interval_key,
+    tiers_are_convex,
+)
 
 EXPORT_PRICE_ATTR = "ic_export_price"
 ENERGY_PRICE_ATTR = "ic_energy_price"
@@ -387,6 +393,15 @@ def _export_price(n, cfg: CommercialConfig) -> np.ndarray:
 # ── peak demand (WP1.5a) ───────────────────────────────────────────────────
 
 
+def _items_hash(items) -> str:
+    """Content hash of the demand items (periods, rates, settlement, ratchet)
+    — the rows compare it to tell a rate change after the solve (round 2 #5)."""
+    import json as _json
+
+    body = _json.dumps([i.model_dump(mode="json") for i in items], sort_keys=True)
+    return hashlib.sha256(body.encode()).hexdigest()[:16]
+
+
 def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list[str], list[str]]:
     """(spec for the LP wrapper, demand item ids, months not established).
 
@@ -408,20 +423,23 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
     for p in pd.unique(inv):
         sel = inv == p
         if abs(w[sel].sum() - 8760.0) <= 0.01 * 8760.0:
-            # The period's snapshots represent a whole year (representative
-            # weeks): every calendar month of that year is billed (review #2).
-            year = local[sel].min().year
+            # The period's snapshots represent a whole year: every calendar
+            # month of the year holding most of the weight is billed (review
+            # round 2 #2 — a UTC year read in Bogotá touches 5 h of the
+            # previous December, which must not pull the span to 2029).
+            years = pd.Series(w[sel]).groupby(np.asarray(local[sel].year)).sum()
+            year = int(years.idxmax())
             span = pd.period_range(f"{year}-01", f"{year}-12", freq="M").strftime("%Y-%m")
         else:
             span = pd.period_range(local[sel].min().strftime("%Y-%m"),
                                    local[sel].max().strftime("%Y-%m"),
                                    freq="M").strftime("%Y-%m")
-            # A full monthly charge against part of a month's operation (§5.2,
-            # decided: full month, as billed) is disclosed (review #4).
-            for m in sorted(set(months[sel])):
-                hours = pd.Period(m, freq="M").days_in_month * 24.0
-                if w[sel & (months == m)].sum() < hours - 1e-6:
-                    partial.append(m if p is None else f"{p}:{m}")
+        # A full monthly charge against part of a month's operation (§5.2,
+        # decided: full month, as billed) is disclosed, edge months included.
+        for m in sorted(set(months[sel])):
+            hours = pd.Period(m, freq="M").days_in_month * 24.0
+            if w[sel & (months == m)].sum() < hours - 1e-6:
+                partial.append(m if p is None else f"{p}:{m}")
         gone = sorted(set(span) - set(months[sel]))
         missing += [m if p is None else f"{p}:{m}" for m in gone]
     keys: list[dict] = []
@@ -429,8 +447,8 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
         pidx = _period_index(item, local)
         # Demand INTERVALS (`settlement`): the bound is on the interval mean,
         # as billed (review #5); singleton groups when snapshots are that fine.
-        interval = np.asarray(local.floor({"15min": "15min", "30min": "30min",
-                                           "h": "h"}[item.settlement]).asi8)
+        interval = interval_key(local, {"15min": "15min", "30min": "30min",
+                                        "h": "h"}[item.settlement])
         for k, per in enumerate(item.periods):
             if per.rate == 0:
                 continue
@@ -453,10 +471,15 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
     ratchets: list[dict] = []
     notes: list[str] = []
     item_by_id = {i.id: i for i in items}
+    first_period = None if not isinstance(n.snapshots, pd.MultiIndex) \
+        else int(min(n.investment_periods))
     for k in keys:
         r = item_by_id[k["item"]].ratchet
         if r is None:
             continue
+        # Meter history is the site's past: it seeds the FIRST period only; a
+        # later investment period's lookback is unknown (review round 2 #3).
+        history_ok = k["inv_period"] in (None, first_period)
         here = pd.Period(k["month"], freq="M")
         for back in range(1, r.lookback_months + 1):
             m = (here - back).strftime("%Y-%m")
@@ -465,7 +488,7 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
                 ratchets.append({"key": k["key"], "share": r.share, "of_key": other})
             elif (k["inv_period"], m) in modelled:
                 continue  # modelled month with no interval in this window: no demand
-            elif m in cfg.meter_history_peaks_kw:
+            elif history_ok and m in cfg.meter_history_peaks_kw:
                 ratchets.append({"key": k["key"], "share": r.share,
                                  "floor_mw": cfg.meter_history_peaks_kw[m] / _KWH_PER_MWH})
             elif "ratchet_seed_missing" not in notes:
@@ -475,7 +498,8 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
     spec = {"import_link": cfg.poc_link, "export_link": cfg.export_link, "keys": keys,
             "ratchets": ratchets, "floors": floors,
             "info": {"items": [i.id for i in items], "not_established": missing,
-                     "partial_months": partial}}
+                     "partial_months": partial, "notes": list(notes),
+                     "items_hash": _items_hash(items)}}
     return spec, [i.id for i in items], missing, notes
 
 

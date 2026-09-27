@@ -2439,11 +2439,24 @@ def validate_for_run(n, solver_config) -> list[Issue]:
         # margin left in the config cannot make an AC power flow wrong, and
         # blocking one on it would be a refusal with no standard behind it.
         issues += _check_reserve_margin(n, solver_config)
+        # Edge Investment Case commercial layer (P1 WP1.8): the solve's own
+        # binding refusals, stated at preflight, plus the warnings that bind
+        # but mislead (arbitrage loop, demand resolution / partial months,
+        # tariff validity).
+        issues += _check_commercial(n, solver_config)
     else:
         issues.append(_err("unknown_mode", "", "",
             f"Solver mode '{mode}' not recognised (expected lopf/pf)."))
 
     return issues
+
+
+def _check_commercial(n, solver_config) -> list[Issue]:
+    from services.commercial.preflight import commercial_findings
+
+    return [Issue(severity=sev, code=code, component_class=cls, name=name, message=msg)
+            for sev, code, cls, name, msg in commercial_findings(
+                n, getattr(solver_config, "commercial", None))]
 
 
 def has_errors(issues: list[Issue]) -> bool:

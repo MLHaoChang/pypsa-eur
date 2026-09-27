@@ -146,3 +146,16 @@ def test_a_nan_outside_every_window_does_not_unrate_the_month():
     res = rate(_dispatch(imp, start="2030-07-01 00:00"), _tariff(item), step_hours=1.0,
                timezone="America/Chicago")
     assert res.per_item["demand"] == pytest.approx(20.0 * 2500)
+
+
+# ── WP1.5a review round 2 ──────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("tz,day", [("America/New_York", "2030-11-03"),
+                                    ("Europe/Berlin", "2030-10-27")])
+def test_the_fall_back_hour_rates_without_crashing(tz, day):
+    """#1: flooring the repeated wall-clock hour must not re-localise it."""
+    idx = pd.date_range(f"{day} 00:00", periods=96, freq="15min", tz="UTC").tz_convert(tz)
+    df = pd.DataFrame({"import_mw": 1.0, "export_mw": 0.0}, index=idx)
+    res = rate(df, _tariff(_demand(settlement="h")), step_hours=0.25, timezone=tz)
+    assert res.per_item["demand"] == pytest.approx(10_000.0)

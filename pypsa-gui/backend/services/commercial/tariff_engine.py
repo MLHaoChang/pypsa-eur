@@ -187,6 +187,17 @@ def _is_demand(item: TariffItem) -> bool:
     return item.kind == "demand" or item.measured_on == "peak_import"
 
 
+def interval_key(local: pd.DatetimeIndex, freq: str) -> np.ndarray:
+    """The start instant (int ns) of each row's demand interval on the local
+    clock, WITHOUT re-localising a floored wall time: the repeated fall-back
+    hour stays two distinct intervals instead of raising AmbiguousTimeError
+    (WP1.5a review round 2 #1)."""
+    if local.tz is None:
+        return np.asarray(local.floor(freq).asi8)
+    wall = local.tz_localize(None)
+    return np.asarray(local.asi8 - (wall.asi8 - wall.floor(freq).asi8))
+
+
 def _period_index(item: TariffItem, local: pd.DatetimeIndex) -> np.ndarray:
     """Index of the first period matching each interval (-1: none) — the
     same first-match rule as `_rates`."""
@@ -370,7 +381,7 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             if item.measured_on == "peak_import":
                 q_kw = imp * _KWH_PER_MWH
             settle_freq = {"15min": "15min", "30min": "30min", "h": "h"}[item.settlement]
-            interval = np.asarray(local.floor(settle_freq).asi8)
+            interval = interval_key(local, settle_freq)
             grp = pd.DataFrame({"g": interval, "qd": q_kw * dur, "d": dur,
                                 "nan": np.isnan(q_kw)})
             agg = grp.groupby("g", sort=True).agg(qd=("qd", "sum"), d=("d", "sum"),

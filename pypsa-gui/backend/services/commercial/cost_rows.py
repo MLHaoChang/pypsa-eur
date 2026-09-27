@@ -85,12 +85,15 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
     peaks = n.meta.get(_lp.META_DEMAND)
     info = n.meta.get(_lp.META_DEMAND_INFO) or {}
     wanted: list[str] = []
+    wanted_hash = None
     if commercial:
         try:
             cfg_parsed = _lp._parse(commercial)
-            wanted = [i.id for i in (cfg_parsed.import_tariff.items
-                                     if cfg_parsed.import_tariff is not None else [])
-                      if _lp._is_demand(i) and _lp._lp_reason(i) is None]
+            wanted_items = [i for i in (cfg_parsed.import_tariff.items
+                                        if cfg_parsed.import_tariff is not None else [])
+                            if _lp._is_demand(i) and _lp._lp_reason(i) is None]
+            wanted = [i.id for i in wanted_items]
+            wanted_hash = _lp._items_hash(wanted_items) if wanted_items else None
         except Exception:  # noqa: BLE001
             wanted = []
     if peaks:
@@ -98,9 +101,15 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
             amount = float(v["eur_per_mw"]) * float(v.get("billed_mw", v["peak_mw"]))
             items.append(("demand_charge", v.get("inv_period"), 0.0, amount))
         block["demand_charge"] = weighted("demand_charge")
-        if sorted(info.get("items", [])) != sorted(wanted):
+        drift = sorted(info.get("items", [])) != sorted(wanted) or (
+            info.get("items_hash") is not None and info.get("items_hash") != wanted_hash)
+        if drift:
             flags.append("config_changed_since_solve" if commercial else
                          "config_cleared_since_solve")
+        if "ratchet_seed_missing" in (info.get("notes") or []):
+            # The billed demand is a LOWER BOUND: part of a ratchet's lookback
+            # is unknown (round 2 #4).
+            flags.append("ratchet_seed_missing")
         if info.get("not_established"):
             flags.append("demand_months_not_established")
             block["demand_months_not_established"] = list(info["not_established"])

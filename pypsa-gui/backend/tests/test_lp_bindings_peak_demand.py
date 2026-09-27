@@ -289,3 +289,80 @@ def test_an_hourly_demand_interval_is_bounded_on_hourly_means_and_matches_the_bi
                             index=n.snapshots)
     billed = engine_rate(dispatch, _tariff(item), step_hours=0.25, timezone=None)
     assert billed.per_item["demand"] == pytest.approx(lp, rel=1e-6)
+
+
+# ── WP1.5a review round 2 ──────────────────────────────────────────────────
+
+
+def _utc_year(freq="h"):
+    n = _site()
+    idx = pd.date_range("2030-01-01", "2030-12-31 23:00", freq=freq)
+    n.set_snapshots(idx)
+    n.snapshot_weightings.loc[:, :] = 1.0
+    n.loads_t.p_set = pd.DataFrame({"site_load": 30.0}, index=idx)
+    n.generators_t.p_max_pu = pd.DataFrame({"pv": 0.0}, index=idx)
+    return n
+
+
+@pytest.mark.parametrize("tz", ["America/New_York", "Europe/Berlin"])
+def test_a_full_year_across_the_fall_back_hour_binds(tz):
+    """#1: an hourly-settlement demand item on a full UTC year in a DST zone."""
+    n = _utc_year()
+    applied = L.materialise_poc_prices(n, {**_commercial(_tariff(_demand(settlement="h"))),
+                                           "timezone": tz})
+    assert applied.facts["demand_items"] == ["demand"]
+
+
+@pytest.mark.parametrize("tz,edge", [("America/Bogota", "2029-12"), ("Asia/Tokyo", "2031-01")])
+def test_a_full_utc_year_in_another_zone_bills_its_edges_as_partial(tz, edge):
+    """#2: no bogus not-established months; the edge month is disclosed partial."""
+    n = _utc_year()
+    applied = L.materialise_poc_prices(n, {**_commercial(_tariff(_demand())), "timezone": tz})
+    assert applied.facts["demand_not_established_months"] == []
+    assert edge in applied.facts["demand_partial_months"]
+
+
+def test_meter_history_seeds_only_the_first_investment_period():
+    """#3: a 2029 meter reading must not floor the 2040 period."""
+    n = _site()
+    n.set_investment_periods([2030, 2040])
+    item = _demand(ratchet={"lookback_months": 11, "share": 0.9})
+    applied = L.materialise_poc_prices(n, {**_commercial(_tariff(item)),
+                                           "meter_history_peaks_kw": {"2029-12": 60_000.0}})
+    spec = getattr(n, L.DEMAND_SPEC_ATTR)
+    seeded = {r["key"].split("|")[2] for r in spec["ratchets"] if "floor_mw" in r}
+    assert seeded == {"2030"}
+    assert "ratchet_seed_missing" in applied.facts["notes"]
+
+
+def test_the_ratchet_seed_gap_reaches_the_rows():
+    """#4: a lower-bound demand row says so, after a reload too."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _site()
+    item = _demand(ratchet={"lookback_months": 11, "share": 0.9})
+    commercial = _commercial(_tariff(item))
+    n.meta[L.META_DEMAND] = {"k": {"item": "demand", "period": "all", "month": "2030-01",
+                                   "inv_period": None, "eur_per_mw": 15000.0, "peak_mw": 1.0,
+                                   "billed_mw": 1.0}}
+    applied = L.materialise_poc_prices(n, commercial)
+    n.meta[L.META_DEMAND_INFO] = getattr(n, L.DEMAND_SPEC_ATTR)["info"]
+    applied.undo()
+    assert "ratchet_seed_missing" in commercial_cost_terms(n, commercial)["flags"]
+
+
+def test_a_rate_change_after_the_solve_is_config_drift():
+    """#5: the drift check compares the demand items' content, not only ids."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _site()
+    applied = L.materialise_poc_prices(n, _commercial(_tariff(_demand())))
+    n.meta[L.META_DEMAND] = {"k": {"item": "demand", "period": "all", "month": "2030-01",
+                                   "inv_period": None, "eur_per_mw": 15000.0, "peak_mw": 1.0,
+                                   "billed_mw": 1.0}}
+    n.meta[L.META_DEMAND_INFO] = getattr(n, L.DEMAND_SPEC_ATTR)["info"]
+    applied.undo()
+    assert "config_changed_since_solve" not in commercial_cost_terms(
+        n, _commercial(_tariff(_demand())))["flags"]
+    assert "config_changed_since_solve" in commercial_cost_terms(
+        n, _commercial(_tariff(_demand(rate=40.0))))["flags"]

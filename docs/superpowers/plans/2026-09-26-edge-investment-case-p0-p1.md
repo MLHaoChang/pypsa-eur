@@ -474,6 +474,13 @@ Files: `lp_bindings.py`, `backend/tests/test_lp_bindings_peak_demand.py`.
   partial months are charged in full and disclosed (spec §5.2 decision); rows flag `config_changed_since_solve`,
   `demand_charge_not_established`, `demand_months_not_established`, `demand_partial_months`; rolling is refused
   only when it would actually run (not with SCLOPF or multi-period, which fall back to full).
+- Round 2 → **FAIL**, fixed: demand-interval keys are computed from UTC instants (`tariff_engine.interval_key`),
+  so the autumn fall-back hour no longer raises in the engine or the LP; a year-representing period bills the
+  calendar year holding most of the weight and partial-month detection covers edge months (a UTC year read in
+  Bogotá/Tokyo); meter history seeds only the first investment period; the committed demand info carries the
+  notes (`ratchet_seed_missing` flagged in the rows) and a content hash of the demand items (a rate change after
+  the solve is `config_changed_since_solve`). Tracked (LOW): per-key constraint loop cost at year scale (~4 s for
+  72 keys + ratchets); the engine notes `demand_on_partial_month` on sampled months of a representative year.
 
 - [ ] (Gate P0 condition 3) with `realistic_dispatch` or any other new `services/solver/` module, add
   the assertion that `test_solver_facade_surface.py`'s glob covers it.
@@ -561,6 +568,14 @@ Files: `backend/services/validation_service.py`, `backend/tests/test_validation_
   the export price exceeds the import price in any interval (two PoC Links on one bus pair can otherwise cycle
   energy for profit).
 - [ ] Green: checks return structured `Issue`s with codes `commercial.*`.
+- As implemented: `services/commercial/preflight.commercial_findings` → `validation_service._check_commercial` (LOPF):
+  `commercial.binding_invalid` (error — every refusal the solve would make: missing/two-way PoC, export or group
+  Links, a bare Library tariff id, unrated snapshots, missing/stale export price or envelope, an invalid connection
+  agreement); `commercial.arbitrage_loop` (warning — snapshots where exporting pays more than importing costs);
+  `commercial.demand_resolution` (demand interval finer than the axis); `commercial.demand_partial_months`
+  (spec §5.2); `commercial.tariff_out_of_validity`. **Deviation:** the PPA/export-price and DR-contract/`dsr_buses`
+  double-count checks need P2's contracts (not in the P1 config) and move to P2 WP2.2. Tests:
+  `test_validation_commercial.py`.
 
 ### Phase 1 e2e QA gate
 - [ ] `backend/tests/qa_commercial_lp.py` (auto-discovered by `run_qa_drivers.py`): build the 15-min fixture
