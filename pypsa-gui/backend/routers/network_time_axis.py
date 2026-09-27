@@ -132,65 +132,8 @@ _ATTR_TO_CLASS: dict[str, str] = {
 }
 # Moved with its caller in the 2026-09-10 merge: this branch added it to
 # routers/network.py inside the range master had carved into this module.
-def _infer_snapshot_freq(n) -> str | None:
-    """
-    The snapshot index's resolution, as a pandas offset alias ("h", "3h", "D").
-
-    The Model Horizon page used to render its own form state here, which was
-    seeded to "h" at mount and never read back from the network — so a
-    3-hourly MultiIndex and a Daily flat index both reported "Hourly (h)".
-
-    MultiIndex networks are measured over the FIRST period's slice only: the
-    flattened timestep level contains a discontinuity at each period seam
-    (period P's last hour → period P+1's first), which would read as irregular.
-
-    `pd.infer_freq` is tried first because it names calendar frequencies ("D",
-    "MS", "W") that a raw timedelta cannot. It returns None for a
-    representative-week index — contiguous 168-hour blocks separated by gaps —
-    whose resolution is nevertheless hourly, so fall back to the modal
-    successive delta. Returns None when neither resolves; the UI renders that
-    as "irregular" rather than guessing.
-    """
-    sns = n.snapshots
-    try:
-        if isinstance(sns, pd.MultiIndex):
-            level0 = sns.get_level_values(0)
-            if len(level0) == 0:
-                return None
-            first = level0[0]
-            idx = pd.DatetimeIndex(sns[level0 == first].get_level_values(1))
-        else:
-            idx = pd.DatetimeIndex(sns)
-    except (ValueError, TypeError):
-        # `pd.DatetimeIndex(...)` raises (e.g. `DateParseError`, a `ValueError`
-        # subclass) on a non-parseable object index. No current GUI path
-        # produces one, but this helper runs unconditionally at the top of
-        # `get_snapshots` — degrade to "irregular" rather than 500ing the
-        # page's primary endpoint.
-        return None
-    if len(idx) < 2:
-        return None
-    try:
-        inferred = pd.infer_freq(idx)
-    except (ValueError, TypeError):
-        inferred = None
-    if inferred:
-        return inferred
-    deltas = idx.to_series().diff().dropna()
-    if deltas.empty:
-        return None
-    modal = deltas.mode()
-    if modal.empty:
-        return None
-    hours = modal.iloc[0].total_seconds() / 3600.0
-    if hours <= 0:
-        return None
-    if hours == 1.0:
-        return "h"
-    if float(hours).is_integer():
-        return f"{int(hours)}h"
-    return None
-
+# `_infer_snapshot_freq` lives in services/snapshot_index.py (imported above);
+# the router's former local copy shadowed it (WP1.0 review).
 
 @router.get("/snapshots")
 def get_snapshots():
@@ -542,6 +485,14 @@ def set_snapshots(config: SnapshotConfig):
         # No-op when the network is already flat.
         _flatten_snapshot_state(n)
         n.set_snapshots(sns, **kw)
+        # PyPSA's set_snapshots only fills NEW rows with the default: a row
+        # whose timestamp existed before keeps its old weight, so hourly→15-min
+        # over the same day left 1.0 on every :00 quarter-hour (WP1.0 review).
+        # The route defines ONE step, so every row gets it.
+        w_all = kw.get("default_snapshot_weightings")
+        if w_all is not None:
+            for col in n.snapshot_weightings.columns:
+                n.snapshot_weightings[col] = float(w_all)
         # Re-apply full profiles (from _user_ts) aligned to the new snapshot range.
         _reapply_user_ts_to_network(n)
     change_log_service.log(
@@ -654,13 +605,16 @@ def set_multi_period_snapshots(body: dict):
         n.investment_periods = periods_sorted
         # Re-broadcast the captured weights under each new period — or, after
         # a resolution change, set every row to its block's step length.
+        per_row = pd.Series(
+            np.concatenate([np.full(len(blk), h if h is not None else 1.0)
+                            for blk, h in zip(timestep_blocks, block_hours)]),
+            index=n.snapshots, dtype=float)
         if captured_weights is not None:
-            _reapply_snapshot_weights(n, captured_weights)
+            # Rows the capture does not cover get their block's step length,
+            # not 1.0 (WP1.0 review: a flat 15-min day extended to two days
+            # padded the new day with 1.0).
+            _reapply_snapshot_weights(n, captured_weights, fill=per_row)
         elif any(h is not None for h in block_hours):
-            per_row = pd.Series(
-                np.concatenate([np.full(len(blk), h if h is not None else 1.0)
-                                for blk, h in zip(timestep_blocks, block_hours)]),
-                index=n.snapshots, dtype=float)
             for col in n.snapshot_weightings.columns:
                 n.snapshot_weightings[col] = per_row.values
         # Re-apply user time series (handles MultiIndex via the level-1 path
@@ -707,7 +661,9 @@ def sample_representative_weeks(config: SampleWeeksConfig):
     if is_sub_hourly(axis_freq):
         raise HTTPException(400, detail={
             "code": "not_supported_for_freq",
-            "detail": (f"Representative-week sampling builds 168 hourly steps per "
+            # `message`, not `detail`: the frontend's formatApiDetail reads
+            # `message`/`msg` from an object detail (WP1.0 review #6).
+            "message": (f"Representative-week sampling builds 168 hourly steps per "
                        f"week; the model axis is {axis_freq}. Sampling would silently "
                        f"change the model's resolution, so it is refused."),
         })

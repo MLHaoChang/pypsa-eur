@@ -33,7 +33,9 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "serialization.py": (1, "prose about payload size"),
     "solver/myopic.py": (1, "prose: nyears = Σ hours / 8760"),
     "solver/objective.py": (2, "prose: PyPSA's nyears = Σ weights / 8760"),
-    "time_aggregation_service.py": (3, "tsam period rescale to a full year of HOURS — a unit"),
+    "time_aggregation_service.py": (3, "prose about tsam's 8760-hour year; the period length "
+                                       "is converted to STEPS via the axis step hours and weights "
+                                       "rescale to the period's original hours (WP1.0 review #8)"),
     "timeseries_qa.py": (1, "prose example"),
     "user_timeseries.py": (2, "annual HOURLY reference for representative-week sampling; the "
                               "sampler refuses sub-hourly axes (not_supported_for_freq)"),

@@ -493,6 +493,43 @@ def _ensure_snapshots_cover_user_ts(n=None) -> bool:
     return True
 
 
+def _hold_positions(src_index, target) -> "_np.ndarray":
+    """
+    Positions of `target` timestamps in `src_index`, holding a COARSER source
+    step across the finer target steps inside it.
+
+    Every time-varying input the GUI writes (p_set, p_max_pu, marginal_cost,
+    efficiency …) is an intensive quantity — MW, per-unit, €/MWh — so an
+    hourly value is the right value for each of its four quarter-hours. Exact
+    matches win; a target inside a source step (target − source < source step)
+    takes that step's value; anything else stays unmatched (-1). Without this,
+    an hourly upload on a 15-minute axis left 72 of 96 rows NaN — three
+    quarters of the demand silently missing (Edge Investment Case WP1.0 review).
+    """
+    import numpy as _np
+
+    try:
+        src = pd.DatetimeIndex(src_index)
+        tgt = pd.DatetimeIndex(target)
+    except (TypeError, ValueError):
+        return pd.Index(src_index).get_indexer(target)  # not a time axis: exact only
+    pos = src.get_indexer(tgt)
+    if (pos >= 0).all() or len(src) < 2 or not src.is_monotonic_increasing \
+            or src.has_duplicates:
+        return pos
+    src_step = pd.Series(src[1:] - src[:-1]).median()
+    if len(tgt) > 1:
+        tgt_step = pd.Series(pd.DatetimeIndex(sorted(set(tgt)))[1:]
+                             - pd.DatetimeIndex(sorted(set(tgt)))[:-1]).median()
+        if not (src_step > tgt_step):
+            return pos
+    held = src.get_indexer(tgt, method="ffill")
+    ok = held >= 0
+    within = _np.zeros(len(tgt), dtype=bool)
+    within[ok] = (tgt[ok] - src[held[ok]]) < src_step
+    return _np.where(pos >= 0, pos, _np.where(ok & within, held, -1))
+
+
 def _reapply_user_ts_to_network(n=None) -> None:
     """
     Re-apply _user_ts profiles to the network's _t tables, aligned to the
@@ -622,15 +659,20 @@ def _reapply_user_ts_to_network(n=None) -> None:
             )
             continue
         elif is_multi:
-            # Case 3 — DatetimeIndex series + MultiIndex snapshots: broadcast.
-            positions = series.index.get_indexer(target_lookup)
+            # Case 3 — DatetimeIndex series + MultiIndex snapshots: broadcast
+            # (holding a coarser series across finer steps — _hold_positions).
+            positions = _hold_positions(series.index, target_lookup)
             out = _np.full(len(target_lookup), _np.nan, dtype=float)
             mask = positions >= 0
             out[mask] = series.values[positions[mask]]
             aligned = pd.Series(out, index=n.snapshots)
         else:
-            # Case 4 — plain reindex.
-            aligned = series.reindex(n.snapshots)
+            # Case 4 — reindex, holding a coarser series across finer steps.
+            positions = _hold_positions(series.index, n.snapshots)
+            out = _np.full(len(n.snapshots), _np.nan, dtype=float)
+            mask = positions >= 0
+            out[mask] = series.values[positions[mask]]
+            aligned = pd.Series(out, index=n.snapshots)
         if aligned.isna().all() and not series.isna().all():
             _log.warning(
                 "_reapply: %s/%s/%s has no overlap with current snapshots "
@@ -737,7 +779,7 @@ def _capture_snapshot_weights_per_timestep(n):
     return sw
 
 
-def _reapply_snapshot_weights(n, captured) -> None:
+def _reapply_snapshot_weights(n, captured, fill=1.0) -> None:
     """
     Write captured weights back onto ``n.snapshot_weightings`` after
     ``set_snapshots`` has rebuilt the index. Must run AFTER the reshape. Holds
@@ -748,7 +790,8 @@ def _reapply_snapshot_weights(n, captured) -> None:
       2. genuinely new period → reindex the FIRST captured period's frame as a
          template, matching how ``set_investment_periods`` templates a new
          period's operational range from the first existing one
-      3. anything still unmatched → 1.0
+      3. anything still unmatched → ``fill`` (a float, or a Series aligned to
+         ``n.snapshots`` — the per-row step length in hours; default 1.0)
 
     Accepts either capture shape: ``{period: frame}`` from a MultiIndex source
     or a single frame from a flat one.
@@ -770,15 +813,25 @@ def _reapply_snapshot_weights(n, captured) -> None:
             mask = idx.get_level_values(0) == p
             ts_slice = idx[mask].get_level_values(1)
             source = captured.get(int(p), template)
-            aligned = source.reindex(ts_slice).fillna(1.0)
+            aligned = source.reindex(ts_slice)
             aligned.index = idx[mask]
             chunks.append(aligned)
         new_sw = pd.concat(chunks)
     else:
         # MultiIndex source demoted to flat: use the first captured period.
         flat_source = captured[sorted(captured)[0]] if isinstance(captured, dict) else captured
-        new_sw = flat_source.reindex(idx).fillna(1.0)
+        new_sw = flat_source.reindex(idx)
         new_sw.index = idx
+    if isinstance(fill, pd.Series):
+        fill_vals = fill.reindex(idx).fillna(1.0).to_numpy(dtype=float)
+        for col in new_sw.columns:
+            miss = new_sw[col].isna().to_numpy()
+            if miss.any():
+                vals = new_sw[col].to_numpy(dtype=float).copy()
+                vals[miss] = fill_vals[miss]
+                new_sw[col] = vals
+    else:
+        new_sw = new_sw.fillna(float(fill))
     # The setter validates df.index.equals(n.snapshots); we built new_sw against
     # n.snapshots so it passes. Assign per column in case a future PyPSA adds a
     # weight column we did not capture.

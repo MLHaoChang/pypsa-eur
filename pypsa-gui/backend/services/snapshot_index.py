@@ -69,6 +69,13 @@ def _infer_snapshot_freq(n) -> str | None:
         return "h"
     if float(hours).is_integer():
         return f"{int(hours)}h"
+    # Sub-hourly modal steps (a 15-minute axis with gaps, where infer_freq
+    # gives up): name them in minutes, so callers that gate on sub-hourly
+    # resolution (sample-weeks) cannot mistake a gappy 15-min axis for
+    # "irregular" (Edge Investment Case WP1.0 review).
+    minutes = hours * 60.0
+    if float(minutes).is_integer():
+        return f"{int(minutes)}min"
     return None
 
 
@@ -91,6 +98,12 @@ def hours_per_step(freq) -> float | None:
         off = to_offset(freq)
     except (ValueError, TypeError):
         return None
+    from pandas.tseries.offsets import Day
+
+    # pandas 3 makes `Day` a calendar offset rather than a Tick; a model day is
+    # still 24 hours (WP1.0 review).
+    if isinstance(off, Day):
+        return 24.0 * off.n if off.n > 0 else None
     if not isinstance(off, Tick):
         return None
     hours = off.nanos / 3_600_000_000_000

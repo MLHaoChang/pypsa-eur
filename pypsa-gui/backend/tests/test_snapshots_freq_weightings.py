@@ -123,3 +123,117 @@ def test_fixture_solves_fast_and_carrier_energy_is_power_times_quarter_hours():
     rows = compute_carrier_kpis(n, result_df=plain)["rows"]
     solar = next(r for r in rows if r.get("carrier") == "solar")
     assert solar["energy_mwh"] == pytest.approx(float(n.generators_t.p["pv"].sum() * 0.25), rel=1e-9)
+
+
+# ── WP1.0 review round 1 (FAIL) — regressions ────────────────────────────────
+
+
+def _weights(client):
+    return pd.DataFrame(client.get("/api/network/snapshots").json()["weightings"])
+
+
+def test_resampling_the_same_day_leaves_no_old_weight_behind(client, install_network):
+    """#1: PyPSA only fills NEW rows; overlapping :00 rows kept 1.0."""
+    install_network(build_network())
+    assert _set(client, "h").status_code == 200
+    assert _set(client, "15min").status_code == 200
+    w = _weights(client)
+    assert sorted(w["objective"].astype(float).unique()) == [0.25]
+    assert _set(client, "3h").status_code == 200
+    assert _set(client, "h").status_code == 200
+    assert sorted(_weights(client)["objective"].astype(float).unique()) == [1.0]
+
+
+def test_multi_period_extension_pads_with_the_step_not_one(client, install_network):
+    """#2: a flat 15-min day extended to a two-day 15-min multi-period axis."""
+    install_network(build_network())
+    assert _set(client, "15min").status_code == 200
+    r = client.post("/api/network/snapshots/multi_period", json={
+        "periods": [2030, 2035], "start": "2030-01-01 00:00",
+        "end": "2030-01-02 23:45", "freq": "15min"})
+    assert r.status_code == 200, r.text
+    w = _weights(client)
+    assert len(w) == 2 * 192
+    assert sorted(w["objective"].astype(float).unique()) == [0.25]
+
+
+def test_an_hourly_upload_is_held_across_a_15min_axis(client, install_network, session_ctx):
+    """#4: hourly p_set on a 15-min axis must not be 3/4 NaN."""
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2030-01-01 00:00", periods=24, freq="h"))
+    n.add("Bus", "B1")
+    n.add("Load", "L1", bus="B1",
+          p_set=pd.Series(np.arange(24, dtype=float) + 100.0, index=n.snapshots))
+    n.add("Generator", "gas", bus="B1", p_nom=500.0, marginal_cost=50.0)
+    install_network(n)
+    assert _set(client, "15min").status_code == 200
+    ps = session_ctx(client).network.loads_t.p_set["L1"]
+    assert len(ps) == 96 and not ps.isna().any()
+    assert (ps.iloc[0:4] == 100.0).all() and (ps.iloc[4:8] == 101.0).all()
+
+
+def test_a_gappy_15min_axis_is_still_refused_by_sample_weeks(client, install_network):
+    """#5: infer_freq gives up on gaps; the modal step must still read 15min."""
+    n = build_edge_15min()
+    keep = np.ones(len(n.snapshots), dtype=bool)
+    keep[[10, 50, 90, 200, 300, 400, 500, 510, 520, 530]] = False
+    n.set_snapshots(n.snapshots[keep])
+    install_network(n)
+    body = client.get("/api/network/snapshots").json()
+    assert body["freq"] == "15min"
+    assert body["can_sample_weeks"] is False
+    assert body["sample_weeks_reason"] == "not_supported_for_freq"
+
+
+def test_sample_weeks_refusal_detail_is_readable_by_the_frontend(client, install_network):
+    """#6: the frontend's formatApiDetail reads `message` from an object."""
+    install_network(build_edge_15min())
+    r = client.post("/api/network/snapshots/sample_weeks", json={"n_weeks": 1})
+    detail = r.json()["detail"]
+    assert detail["code"] == "not_supported_for_freq"
+    assert isinstance(detail["message"], str) and "15min" in detail["message"]
+
+
+def test_day_is_24_hours_whatever_pandas_calls_it():
+    """#10: pandas 3 makes Day a calendar offset, not a Tick."""
+    from services.snapshot_index import hours_per_step
+
+    assert hours_per_step("D") == 24.0
+    assert hours_per_step("2D") == 48.0
+    assert hours_per_step("MS") is None
+
+
+def test_limited_foresight_aggregation_counts_steps_not_hours_and_keeps_hours():
+    """#8: tsam periods of `lf_period_length_h` HOURS on a 15-min axis; weights
+    rescale to the period's original HOURS, and the no-aggregation fallback
+    returns the original weights, not 1.0."""
+    import types
+
+    from services import time_aggregation_service as T
+    from services.snapshot_index import _build_period_multiindex
+
+    T.clear_cache()
+    n = __import__("pypsa").Network()
+    ts = pd.date_range("2030-01-01", periods=4 * 7 * 96, freq="15min")  # 4 weeks
+    mi = _build_period_multiindex([2030, 2035], [ts, ts])
+    n.set_snapshots(mi)
+    n.investment_periods = [2030, 2035]
+    n.snapshot_weightings.loc[:, :] = 0.25
+    n.add("Bus", "b")
+    rng = np.random.default_rng(3)
+    n.add("Load", "l", bus="b", p_set=pd.Series(rng.uniform(10, 50, len(mi)), index=mi))
+    cfg = types.SimpleNamespace(lf_k_periods=2, lf_period_length_h=168,
+                                lf_cluster_method="hierarchical", lf_include_extreme=False)
+    res = T.aggregate_period_snapshots(n, 2035, cfg)
+    period_hours = 4 * 7 * 24.0
+    assert res.weights.sum() == pytest.approx(period_hours)
+    # Representative periods are whole WEEKS of 672 quarter-hours.
+    assert len(res.snapshots) % (7 * 96) == 0
+    # Fallback (k ≥ periods): original weights, not 1.0.
+    T.clear_cache()
+    cfg.lf_k_periods = 8
+    fb = T.aggregate_period_snapshots(n, 2035, cfg)
+    assert fb.weights.sum() == pytest.approx(period_hours)
+    assert set(fb.weights.round(9).unique()) == {0.25}

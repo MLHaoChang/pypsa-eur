@@ -157,6 +157,9 @@ export interface SnapshotInfo {
   // True when a flat uploaded profile spans all 12 months of one year at
   // hourly resolution — gates the representative-week sampler.
   can_sample_weeks?: boolean
+  /** Why sampling is unavailable: `not_supported_for_freq` on a sub-hourly axis,
+   *  otherwise the backend's reason text; null when sampling is available. */
+  sample_weeks_reason?: string | null
   // Snapshot resolution as a pandas offset alias ("h", "3h", "D"), measured
   // from the FIRST investment period on MultiIndex networks. null when the
   // backend could not infer one. The Resolution stat card renders this —

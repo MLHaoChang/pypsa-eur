@@ -110,6 +110,29 @@ def clear_cache() -> None:
         _cache.clear()
 
 
+def _original_weights(n, period_snapshots) -> pd.Series:
+    """The period's own objective weights (hours per snapshot) — the honest
+    'no aggregation' weights. Was a hard-coded 1.0, which is 4x too much on a
+    15-minute axis (Edge Investment Case WP1.0 review)."""
+    try:
+        return n.snapshot_weightings.loc[period_snapshots, "objective"].astype(float)
+    except Exception:
+        return pd.Series(1.0, index=period_snapshots)
+
+
+def _step_hours(period_snapshots) -> float:
+    """Modal snapshot step of the period, in hours (1.0 when unknowable)."""
+    try:
+        ts = pd.DatetimeIndex(period_snapshots.get_level_values(1))
+        if len(ts) < 2:
+            return 1.0
+        deltas = pd.Series(ts[1:] - ts[:-1]).dt.total_seconds() / 3600.0
+        mode = deltas[deltas > 0].mode()
+        return float(mode.iloc[0]) if not mode.empty else 1.0
+    except Exception:
+        return 1.0
+
+
 def aggregate_period_snapshots(
     n,
     period,
@@ -146,10 +169,14 @@ def aggregate_period_snapshots(
 
     k = int(getattr(cfg, "lf_k_periods", 8))
     hours_per_period = int(getattr(cfg, "lf_period_length_h", 168))
+    # A period is `hours_per_period` HOURS; on a sub-hourly axis that is more
+    # snapshots (Edge Investment Case WP1.0 review: this used to treat
+    # snapshots as hours, so a 15-min axis clustered 42-hour "weeks").
+    steps_per_period = max(1, int(round(hours_per_period / _step_hours(period_snapshots))))
     cluster_method = str(getattr(cfg, "lf_cluster_method", "hierarchical"))
     include_extreme = bool(getattr(cfg, "lf_include_extreme", True))
 
-    n_periods_in_data = len(period_snapshots) // hours_per_period
+    n_periods_in_data = len(period_snapshots) // steps_per_period
     # No-aggregation cases: too few periods to cluster, or k would represent
     # >= 100% of the data so there's no compression. Return the full slice
     # with unit weights so the caller can treat the result uniformly.
@@ -161,7 +188,7 @@ def aggregate_period_snapshots(
         )
         result = AggregationResult(
             snapshots=period_snapshots,
-            weights=pd.Series(1.0, index=period_snapshots),
+            weights=_original_weights(n, period_snapshots),
             typical_periods=n_periods_in_data,
         )
         return _store(cache_key, result)
@@ -172,7 +199,7 @@ def aggregate_period_snapshots(
         logger.warning("limited_foresight: tsam not available — falling back to full period.")
         result = AggregationResult(
             snapshots=period_snapshots,
-            weights=pd.Series(1.0, index=period_snapshots),
+            weights=_original_weights(n, period_snapshots),
             typical_periods=n_periods_in_data,
         )
         return _store(cache_key, result)
@@ -213,7 +240,7 @@ def aggregate_period_snapshots(
         )
         result = AggregationResult(
             snapshots=period_snapshots,
-            weights=pd.Series(1.0, index=period_snapshots),
+            weights=_original_weights(n, period_snapshots),
             typical_periods=n_periods_in_data,
         )
         return _store(cache_key, result)
@@ -232,12 +259,12 @@ def aggregate_period_snapshots(
     # Trim to whole periods — tsam rejects partial-period inputs. PyPSA's
     # snapshots are usually a clean year, but be defensive when the user
     # configured an irregular range.
-    usable_len = (len(features_ri) // hours_per_period) * hours_per_period
+    usable_len = (len(features_ri) // steps_per_period) * steps_per_period
     features_ri = features_ri.iloc[:usable_len]
     if usable_len == 0:
         result = AggregationResult(
             snapshots=period_snapshots,
-            weights=pd.Series(1.0, index=period_snapshots),
+            weights=_original_weights(n, period_snapshots),
             typical_periods=n_periods_in_data,
         )
         return _store(cache_key, result)
@@ -284,7 +311,7 @@ def aggregate_period_snapshots(
         )
         result = AggregationResult(
             snapshots=period_snapshots,
-            weights=pd.Series(1.0, index=period_snapshots),
+            weights=_original_weights(n, period_snapshots),
             typical_periods=n_periods_in_data,
         )
         return _store(cache_key, result)
@@ -299,8 +326,8 @@ def aggregate_period_snapshots(
     repr_positions: list[int] = []
     repr_weights: list[float] = []
     for cluster_id, period_idx in enumerate(center_indices):
-        start = int(period_idx) * hours_per_period
-        end = min(start + hours_per_period, usable_len)
+        start = int(period_idx) * steps_per_period
+        end = min(start + steps_per_period, usable_len)
         count = float(occur_dict.get(cluster_id, 1))
         for pos in range(start, end):
             repr_positions.append(pos)
@@ -310,7 +337,7 @@ def aggregate_period_snapshots(
         logger.warning("limited_foresight: tsam returned 0 representative hours; falling back.")
         result = AggregationResult(
             snapshots=period_snapshots,
-            weights=pd.Series(1.0, index=period_snapshots),
+            weights=_original_weights(n, period_snapshots),
             typical_periods=n_periods_in_data,
         )
         return _store(cache_key, result)
@@ -318,7 +345,12 @@ def aggregate_period_snapshots(
     # Map positional indices back into the original MultiIndex so the slice
     # composes with the un-aggregated current-period slice via append().
     repr_snapshots = period_snapshots[repr_positions]
-    weights_series = pd.Series(repr_weights, index=repr_snapshots)
+    # Each representative step stands for `count` steps of ITS OWN length, so
+    # its weight is count × that step's original weight (hours).
+    orig_w = _original_weights(n, period_snapshots)
+    weights_series = pd.Series(
+        [w * float(orig_w.iloc[pos]) for w, pos in zip(repr_weights, repr_positions)],
+        index=repr_snapshots)
     # Rescale so the per-period weight sum equals the period's ORIGINAL
     # snapshot count. tsam's clusterPeriodNoOccur sums to
     # `usable_len // hours_per_period`, which excludes any partial trailing
@@ -328,9 +360,11 @@ def aggregate_period_snapshots(
     # future periods (0.997) and PyPSA's `periodized_cost` rejects the
     # combination with "overnight_cost cannot be used when investment
     # periods have different durations".
+    # ... to the period's ORIGINAL total weight in HOURS (was: its snapshot
+    # count, which equals hours only on an hourly axis).
     weight_sum = float(weights_series.sum())
     if weight_sum > 0:
-        scale = float(len(period_snapshots)) / weight_sum
+        scale = float(orig_w.sum()) / weight_sum
         weights_series = weights_series * scale
     result = AggregationResult(
         snapshots=repr_snapshots,
