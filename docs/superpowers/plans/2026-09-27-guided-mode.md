@@ -47,10 +47,12 @@ Non-binding suggestions 1–9: all adopted (spec §10 last row); none rejected.
 
 ## Baseline (once, before P22.9-BE)
 
-- [ ] Full backend suite on `2b78c83` (spec §8.1 command, cwd `pypsa-gui/backend`, ~40 min), output kept in the scratchpad. Gate row 2 at this point runs **without** `tests/test_live_network_untouched.py` (it is created in P22.9-BE).
-- [ ] `npx vitest run` and `npx tsc --noEmit -p .` on `2b78c83` (cwd `pypsa-gui/frontend`).
-- [ ] Route-inventory catch-up (review B8): `PY tools/openapi_diff.py --phase0-fixture` from `pypsa-gui/backend`, a housekeeping change with no code change; the 49-line diff is pasted into the baseline note; `test_chat_tools_endpoint_map.py` stays green.
-- [ ] `docs/superpowers/qa/2026-09-27-guided-mode-baseline.md` lists every failing id with the summary line as evidence, plus the reviewer's 2026-09-27 pre-baseline observation (`tsc` exit 0; vitest 181 files / 2033 passed on `8e04e54`) marked as an observation, not the phase's baseline. Only ids in that file count as pre-existing.
+**Done 2026-09-27 on `09045a0`:** the backend has 6033 passed, 0 failed; tsc is clean; vitest has 2033/2033; the inventory went from 252 to 282 routes. See `docs/superpowers/qa/2026-09-27-guided-mode-baseline.md`.
+
+- [x] Full backend suite on `2b78c83` (spec §8.1 command, cwd `pypsa-gui/backend`, ~40 min), output kept in the scratchpad. Gate row 2 at this point runs **without** `tests/test_live_network_untouched.py` (it is created in P22.9-BE).
+- [x] `npx vitest run` and `npx tsc --noEmit -p .` on `2b78c83` (cwd `pypsa-gui/frontend`).
+- [x] Route-inventory catch-up (review B8): `PY tools/openapi_diff.py --phase0-fixture` from `pypsa-gui/backend`, a housekeeping change with no code change; the 49-line diff is pasted into the baseline note; `test_chat_tools_endpoint_map.py` stays green.
+- [x] `docs/superpowers/qa/2026-09-27-guided-mode-baseline.md` lists every failing id with the summary line as evidence, plus the reviewer's 2026-09-27 pre-baseline observation (`tsc` exit 0; vitest 181 files / 2033 passed on `8e04e54`) marked as an observation, not the phase's baseline. Only ids in that file count as pre-existing.
 
 ---
 
