@@ -85,3 +85,17 @@ def fom_per_horizon(annual_fom: float, snapshots_per_period: int) -> float:
     report so a typed annual FOM is not charged as if one day were a year.
     """
     return annual_fom * (snapshots_per_period / HOURS_PER_YEAR)
+
+
+def capital_cost_per_horizon(annual_capital_cost: float, snapshots_per_period: int) -> float:
+    """
+    A `capital_cost` typed directly (annualised EUR/MW/yr — the GUI's unit)
+    on the per-period basis the LP charges. Same share-of-a-year scaling as
+    `annualised_capital_cost` applies to an overnight investment and
+    `fom_per_horizon` to FOM.
+
+    PyPSA itself uses a directly typed `capital_cost` UNSCALED, per modelled
+    horizon (MEASURED 2026-09-27); the GUI's periodized-cost fill applies this
+    scaling around the solve and every report.
+    """
+    return annual_capital_cost * (snapshots_per_period / HOURS_PER_YEAR)

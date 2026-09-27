@@ -55,32 +55,32 @@
       "capacity_factor": 1.0,
       "revenue_eur": 1239829.2583538615,
       "vom_cost_eur": 0.0,
-      "fixed_cost_eur": 24750000.0,
+      "fixed_cost_eur": 67808.21917808219,
       "fom_cost_eur": 0.0,
-      "net_profit_eur": -23510170.741646137,
-      "lcoe_eur_per_mwh": 1145.8333333333333,
+      "net_profit_eur": 1172021.0391757793,
+      "lcoe_eur_per_mwh": 3.139269406392694,
       "avg_price_eur_per_mwh": 57.39950270156766,
       "by_period": [
         {
           "period": 2030,
           "energy_mwh": 7200.0,
           "revenue_eur": 519829.25835386146,
-          "fixed_cost_eur": 8250000.0,
+          "fixed_cost_eur": 22602.739726027397,
           "fom_cost_eur": 0.0,
           "vom_cost_eur": 0.0,
-          "net_profit_eur": -7730170.741646139,
-          "lcoe_eur_per_mwh": 1145.8333333333333,
+          "net_profit_eur": 497226.51862783404,
+          "lcoe_eur_per_mwh": 3.1392694063926943,
           "avg_price_eur_per_mwh": 72.19850810470298
         },
         {
           "period": 2035,
           "energy_mwh": 14400.0,
           "revenue_eur": 720000.0,
-          "fixed_cost_eur": 16500000.0,
+          "fixed_cost_eur": 45205.479452054795,
           "fom_cost_eur": 0.0,
           "vom_cost_eur": 0.0,
-          "net_profit_eur": -15780000.0,
-          "lcoe_eur_per_mwh": 1145.8333333333333,
+          "net_profit_eur": 674794.5205479452,
+          "lcoe_eur_per_mwh": 3.1392694063926943,
           "avg_price_eur_per_mwh": 50.0
         }
       ]
@@ -204,10 +204,10 @@
           "revenue_eur": 145118.89519756084,
           "gross_revenue_eur": 392656.637270828,
           "input_cost_eur": 247537.74207326717,
-          "fixed_cost_eur": 55416.59045592309,
+          "fixed_cost_eur": 55416.5904559231,
           "fom_cost_eur": 0.0,
           "vom_cost_eur": 34285.71428571428,
-          "net_profit_eur": 55416.59045592347,
+          "net_profit_eur": 55416.590455923455,
           "lcoe_eur_per_mwh": 140.5166861728769,
           "avg_price_eur_per_mwh": 163.60693219617835
         },
@@ -217,10 +217,10 @@
           "revenue_eur": 68571.42857142893,
           "gross_revenue_eur": 411428.5714285717,
           "input_cost_eur": 342857.1428571428,
-          "fixed_cost_eur": 110833.18091184618,
+          "fixed_cost_eur": 110833.1809118462,
           "fom_cost_eur": 0.0,
           "vom_cost_eur": 68571.42857142857,
-          "net_profit_eur": -110833.18091184582,
+          "net_profit_eur": -110833.18091184583,
           "lcoe_eur_per_mwh": 108.80453173758698,
           "avg_price_eur_per_mwh": 85.71428571428578
         }

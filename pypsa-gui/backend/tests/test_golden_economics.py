@@ -175,7 +175,8 @@ def test_line_capex_agrees_with_the_oracle_across_cost_breakdown_and_asset_costs
 
     n = golden
     expected = oracle.horizon_capex(
-        rate_per_mw=float(n.lines.at["L_ab", "capital_cost"]),
+        rate_per_mw=oracle.capital_cost_per_horizon(
+            float(n.lines.at["L_ab", "capital_cost"]), gf.SNAPSHOTS_PER_PERIOD),
         p_nom_opt=float(n.lines.at["L_ab", "s_nom_opt"]),
         years=gf.GOLDEN_YEARS,
     )
@@ -282,7 +283,8 @@ def test_compare_capacity_agrees_with_asset_economics(golden):
     )
 
     expected_solar_total_eur = oracle.horizon_capex(
-        rate_per_mw=float(n.generators.at["solar", "capital_cost"]),
+        rate_per_mw=oracle.capital_cost_per_horizon(
+            float(n.generators.at["solar", "capital_cost"]), gf.SNAPSHOTS_PER_PERIOD),
         p_nom_opt=float(n.generators.at["solar", "p_nom_opt"]),
         years=gf.GOLDEN_YEARS,
     )

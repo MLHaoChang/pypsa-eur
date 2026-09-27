@@ -84,8 +84,10 @@ def test_capacity_scalars_read_the_static_columns(ctx):
 
 
 def test_capex_annual_is_capital_cost_times_optimised_capacity(ctx):
+    # capital_cost is annual (EUR/MW/yr); the LP charges the share of a year
+    # the snapshots model — PyPSA's own `n.nyears`.
     assert C.gen_capex_annual(ctx) == pytest.approx(
-        100_000.0 * float(ctx.n.generators.at["gas", "p_nom_opt"]))
+        100_000.0 * float(ctx.n.nyears) * float(ctx.n.generators.at["gas", "p_nom_opt"]))
 
 
 def test_vintage_breakdown_is_none_on_a_flat_network(ctx):

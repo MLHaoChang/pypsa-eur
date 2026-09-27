@@ -444,9 +444,11 @@ def capex_annual(ctx: Ctx):
         raw = _static(ctx, "capital_cost")
         raw_fom = _static(ctx, "fom_cost")
         # The typed FOM is annual; the LP charged it per modelled horizon.
-        cc = (float(raw) if raw is not None else 0.0) + (
-            float(raw_fom) * fom_horizon_factor(ctx.n) if raw_fom is not None else 0.0
-        )
+        # Both typed figures are annual; the LP charged them per modelled
+        # horizon (overnight-priced assets read 0 here, as before).
+        factor = fom_horizon_factor(ctx.n)
+        cc = ((float(raw) if raw is not None else 0.0)
+              + (float(raw_fom) if raw_fom is not None else 0.0)) * factor
 
     return cc * opt
 
@@ -464,9 +466,10 @@ def horizon_years(ctx: Ctx) -> float:
     2 × the annual CAPEX — and a one-day window reported a 34.9 MEUR loss,
     one day of revenue minus a full year of CAPEX.
 
-    `/results/asset_economics` already carries this correction as
-    `total_years_factor` (= Σ investment_period_weightings.years, or 1.0 on a
-    flat network). This MUST reduce to exactly that when the whole horizon is
+    `/results/asset_economics` already carries this correction as the asset's
+    ACTIVE years (Σ investment_period_weightings.years over the periods the
+    asset is active in, or 1.0 on a flat network). This MUST reduce to exactly
+    that when the whole horizon is
     selected or the two surfaces disagree again — hence horizon-years scaled by
     the window's SHARE of the horizon, rather than a bare `Σweights / 8760`.
     That shortcut agrees on any full year but reads 24/8760 instead of 1.0 for
@@ -476,19 +479,44 @@ def horizon_years(ctx: Ctx) -> float:
     The share is taken on the cost basis (`objective`), matching `_cost_wsum` —
     the same weights the revenue it is subtracted from was summed with.
     """
-    from services.period_utils import period_years_map, snapshot_weights
+    from services.period_utils import active_period_years, period_years_map, snapshot_weights
 
     years_map = period_years_map(ctx.n)
     total = float(sum(years_map.values())) if years_map else 1.0
 
     try:
-        whole = float(snapshot_weights(ctx.n, "objective", None).sum())
+        whole_w = snapshot_weights(ctx.n, "objective", None)
+        whole = float(whole_w.sum())
     except Exception:
-        whole = 0.0
+        whole_w, whole = None, 0.0
     if whole <= 0.0:
         # No usable weighting basis — the full-horizon factor is still the
         # better answer than silently dropping CAPEX to zero.
         return total
+
+    # Multi-period: only the periods the asset is ACTIVE in carry fixed cost
+    # (`period_utils.active_period_years`, the rule `/results/asset_economics`,
+    # `cost_breakdown` and the LP share). Each period contributes its active
+    # years × the window's share of that period, so the whole horizon reduces
+    # to exactly the asset's active years — asset_economics's figure.
+    try:
+        table = active_period_years(ctx.n, ctx.component_class)
+    except Exception:
+        table = None
+    if table is not None and ctx.name in table.index:
+        window = cost_weights(ctx)
+        win_periods = window.index.get_level_values(0)
+        all_periods = whole_w.index.get_level_values(0)
+        charged = 0.0
+        for period, years in table.loc[ctx.name].items():
+            if years <= 0:
+                continue
+            period_whole = float(whole_w[all_periods == period].sum())
+            if period_whole <= 0:
+                continue
+            share = float(window[win_periods == period].sum()) / period_whole
+            charged += float(years) * share
+        return charged
     return total * (float(cost_weights(ctx).sum()) / whole)
 
 

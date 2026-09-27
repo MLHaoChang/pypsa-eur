@@ -55,9 +55,12 @@ CAPITAL_DERIVED_TOTAL = (
 # nulling the whole row would be just as dishonest in the other direction.
 INDEPENDENT = ("revenue_eur", "vom_cost_eur", "energy_mwh")
 
-# `_flat_network`'s generator: fom_cost 20 EUR/MW/yr, 2 unit-weighted hourly
-# snapshots (2/8760 of a year modelled), p_nom_opt 100.
-FOM_EUR = 20.0 * 2 / 8760.0 * 100.0
+# `_flat_network`'s generator: capital_cost 1000 and fom_cost 20 EUR/MW/yr,
+# 2 unit-weighted hourly snapshots (2/8760 of a year modelled), p_nom_opt 100.
+# Both typed figures are annual; the LP charges the modelled share of them.
+SHARE = 2 / 8760.0
+CAPEX_EUR = 1000.0 * SHARE * 100.0
+FOM_EUR = 20.0 * SHARE * 100.0
 
 
 def _ae_module():
@@ -91,7 +94,7 @@ def _flat_network() -> pypsa.Network:
            p_nom_opt 100
              energy  = 100 MWh      revenue = 4_000     vom = 1_000
              fom     = 20/yr x (2/8760 yr modelled) x 100 = FOM_EUR
-             fixed   = 1000 x 100 + FOM_EUR
+             fixed   = 1000/yr x (2/8760 yr) x 100 + FOM_EUR
              lcoe    = (fixed + 1_000) / 100
            (fixed cost is capital_cost + fom_cost — PyPSA's periodized_cost,
            what the LP objective paid, with the typed ANNUAL fom_cost scaled
@@ -198,13 +201,13 @@ def test_the_happy_path_still_reports_the_flag_true_with_real_numbers(healthy):
     assert healthy["capital_costs_available"] is True
 
     gen = healthy["generators"][0]
-    assert gen["fixed_cost_eur"] == pytest.approx(100_000.0 + FOM_EUR)
+    assert gen["fixed_cost_eur"] == pytest.approx(CAPEX_EUR + FOM_EUR)
     assert gen["fom_cost_eur"] == pytest.approx(FOM_EUR)
-    assert gen["net_profit_eur"] == pytest.approx(4_000.0 - 100_000.0 - FOM_EUR - 1_000.0)
-    assert gen["lcoe_eur_per_mwh"] == pytest.approx((100_000.0 + FOM_EUR + 1_000.0) / 100)
+    assert gen["net_profit_eur"] == pytest.approx(4_000.0 - CAPEX_EUR - FOM_EUR - 1_000.0)
+    assert gen["lcoe_eur_per_mwh"] == pytest.approx((CAPEX_EUR + FOM_EUR + 1_000.0) / 100)
 
     su = healthy["storage_units"][0]
-    assert su["fixed_cost_eur"] == pytest.approx(25_000.0)
+    assert su["fixed_cost_eur"] == pytest.approx(500.0 * SHARE * 50.0)
     assert su["lcos_eur_per_mwh"] is not None
 
 

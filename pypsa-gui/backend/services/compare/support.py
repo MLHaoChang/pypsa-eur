@@ -141,6 +141,44 @@ _CLS_TO_ATTR: dict[str, str] = {
 }
 
 
+def _active_years_lookup(n):
+    """
+    Build ``(row, comp_attr) -> {period: years}`` ONCE for this network: the
+    years an asset is charged fixed cost in each investment period —
+    ``years[p]`` where PyPSA considers it active, 0 where it does not
+    (`period_utils.active_period_years`). The same rule `cost_breakdown`, the
+    LP and `/results/asset_economics` use, so Compare does not charge a plant
+    retired partway through the horizon for periods it no longer exists in.
+
+    Returns ``None`` on a flat network (callers then charge once, as before)
+    or when the lookup fails — which keeps the old all-periods behaviour
+    rather than dropping CAPEX to zero, and is logged.
+    """
+    from services import period_utils
+
+    if not period_utils.is_multi_period(n):
+        return None
+    tables: dict = {}
+    try:
+        for cls, attr in _CLS_TO_ATTR.items():
+            tables[attr] = period_utils.active_period_years(n, cls)
+    except Exception:
+        logger.exception(
+            "activity lookup failed while building the Compare view; fixed "
+            "cost is charged for every period",
+        )
+        return None
+
+    def years_of(row, comp_attr: str) -> dict | None:
+        table = tables.get(comp_attr)
+        name = getattr(row, "name", None)
+        if table is None or name is None or name not in table.index:
+            return None
+        return {int(p): float(v) for p, v in table.loc[name].items()}
+
+    return years_of
+
+
 def _safe_capital_cost(row, pcc: dict, comp_attr: str) -> float:
     """
     LP-effective fixed cost, EUR/MW/yr, for one asset row: annuitised

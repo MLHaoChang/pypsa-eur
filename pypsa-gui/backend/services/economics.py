@@ -79,7 +79,7 @@ def co2_intensity_map(n) -> dict[str, float]:
 def annuitised_capex_by_carrier(
     generators, storage_units, stores, links, lines=None, transformers=None,
     *,
-    periods, is_multi, years_map, capital_cost_of,
+    periods, is_multi, years_map, capital_cost_of, active_years_of=None,
 ) -> dict:
     """
     Walk every cost-bearing component, accumulate ``p_nom_opt × cc_per_MW``
@@ -101,6 +101,12 @@ def annuitised_capex_by_carrier(
     ``solver_service.periodized_capital_costs``), so this module needs
     neither that plumbing nor any ``routers.*`` import, and a test can drive
     the walk with a two-line lambda.
+
+    ``active_years_of(row, comp_attr) -> {period: years}`` (optional) gives the
+    years an asset is charged in each period — ``years[p]`` where it is active,
+    0 where it is not (`period_utils.active_period_years`). Without it every
+    asset is charged in every period, which over-counts a plant retired partway
+    through the horizon against `cost_breakdown` and the LP.
     """
     out: dict = {}
 
@@ -133,13 +139,17 @@ def annuitised_capex_by_carrier(
             carrier = str(row.get("carrier", "unknown") or "unknown").lower()
             b = out.setdefault(carrier, {"total": 0.0, "by_period": {}})
             if is_multi and periods:
-                # Each period contributes annuitised_per_yr × ipw.years[P].
-                # We assume the asset is active in every period — which is
-                # what PyPSA's `n.statistics()` does for capex by default
-                # (period-aware costing happens at LP time, not at stats
-                # time). The horizon total is the sum across periods.
+                # Each period contributes annuitised_per_yr × ipw.years[P]
+                # for the periods the asset is ACTIVE in. PyPSA's
+                # `n.statistics()` masks inactive assets per period (measured
+                # 2026-09-27 — an earlier comment here said it did not), and
+                # so does the LP. The horizon total is the sum across periods.
+                active = active_years_of(row, comp_attr) if active_years_of else None
                 for p in periods:
-                    years = period_utils.years_for_period(years_map, p)
+                    if active is not None:
+                        years = float(active.get(p, active.get(str(p), 0.0)))
+                    else:
+                        years = period_utils.years_for_period(years_map, p)
                     contrib = per_year_meur * years
                     b["by_period"][str(p)] = b["by_period"].get(str(p), 0.0) + contrib
                 b["total"] = sum(b["by_period"].values())

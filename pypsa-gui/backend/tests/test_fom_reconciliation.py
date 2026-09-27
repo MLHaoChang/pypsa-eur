@@ -42,7 +42,7 @@ from services.solver_service import SolverConfig, with_periodized_cost_defaults
 REL = 1e-9
 
 # Generator: annuitised investment typed directly, plus annual fixed O&M.
-GAS_CC = 1000.0     # EUR/MW per modelled horizon (PyPSA's raw capital_cost)
+GAS_CC = 1000.0     # EUR/MW/yr — annualised investment, typed directly
 GAS_FOM = 200.0     # EUR/MW/yr — annual, as the GUI asks for it
 GAS_MC = 10.0       # EUR/MWh
 ELEC_LOAD = 100.0   # MW, flat
@@ -135,7 +135,7 @@ def _lp_fixed_term(n) -> float:
 
 
 def _gas_fixed(n) -> float:
-    return (GAS_CC + GAS_FOM * NYEARS) * float(n.generators.at["gas", "p_nom_opt"])
+    return (GAS_CC + GAS_FOM) * NYEARS * float(n.generators.at["gas", "p_nom_opt"])
 
 
 def _gas_fom(n) -> float:
@@ -143,7 +143,7 @@ def _gas_fom(n) -> float:
 
 
 def _el_fixed(n) -> float:
-    return (EL_CC + EL_FOM * NYEARS) * float(n.links.at["electrolyzer", "p_nom_opt"])
+    return (EL_CC + EL_FOM) * NYEARS * float(n.links.at["electrolyzer", "p_nom_opt"])
 
 
 def _el_fom(n) -> float:
@@ -184,9 +184,11 @@ def test_a_gui_solve_charges_annual_fom_for_the_modelled_share_of_a_year(solved)
 
 
 @pytest.mark.live_solve
-def test_the_fill_restores_the_typed_fom_after_the_solve(solved):
+def test_the_fill_restores_the_typed_costs_after_the_solve(solved):
     assert float(solved.generators.at["gas", "fom_cost"]) == GAS_FOM
     assert float(solved.links.at["electrolyzer", "fom_cost"]) == EL_FOM
+    assert float(solved.generators.at["gas", "capital_cost"]) == GAS_CC
+    assert float(solved.links.at["electrolyzer", "capital_cost"]) == EL_CC
 
 
 def test_nested_fills_scale_fom_once_and_revert_exactly():
@@ -198,13 +200,16 @@ def test_nested_fills_scale_fom_once_and_revert_exactly():
     with with_periodized_cost_defaults(n, cfg):
         assert fom_is_scaled(n)
         assert float(n.generators.at["gas", "fom_cost"]) == pytest.approx(GAS_FOM * NYEARS)
+        assert float(n.generators.at["gas", "capital_cost"]) == pytest.approx(GAS_CC * NYEARS)
         with with_periodized_cost_defaults(n, cfg, for_back_calculation=True):
             assert float(n.generators.at["gas", "fom_cost"]) == pytest.approx(GAS_FOM * NYEARS)
         # The inner fill must not un-scale the outer one on its way out.
         assert fom_is_scaled(n)
         assert float(n.generators.at["gas", "fom_cost"]) == pytest.approx(GAS_FOM * NYEARS)
+        assert float(n.generators.at["gas", "capital_cost"]) == pytest.approx(GAS_CC * NYEARS)
     assert not fom_is_scaled(n)
     assert float(n.generators.at["gas", "fom_cost"]) == GAS_FOM
+    assert float(n.generators.at["gas", "capital_cost"]) == GAS_CC
 
 
 def test_a_full_year_model_leaves_fom_untouched():
@@ -215,6 +220,7 @@ def test_a_full_year_model_leaves_fom_untouched():
     assert fom_horizon_factor(n) == pytest.approx(1.0)
     with with_periodized_cost_defaults(n, SolverConfig()):
         assert float(n.generators.at["gas", "fom_cost"]) == GAS_FOM
+        assert float(n.generators.at["gas", "capital_cost"]) == GAS_CC
 
 
 # ── /results/asset_economics ─────────────────────────────────────────────
@@ -329,12 +335,12 @@ def test_compare_capacity_capex_matches_the_fixed_cost(solved):
 def test_asset_costs_carry_the_lp_coefficient(solved):
     costs = sim_router.asset_costs()
     gas = costs["generators"]["gas"]
-    assert gas["capital_cost"] == pytest.approx(GAS_CC)
+    assert gas["capital_cost"] == pytest.approx(GAS_CC * NYEARS)
     assert gas["fom_cost"] == pytest.approx(GAS_FOM * NYEARS)
     assert gas["fom_cost_annual"] == pytest.approx(GAS_FOM)
-    assert gas["fixed_cost"] == pytest.approx(GAS_CC + GAS_FOM * NYEARS)
+    assert gas["fixed_cost"] == pytest.approx((GAS_CC + GAS_FOM) * NYEARS)
     el = costs["links"]["electrolyzer"]
-    assert el["fixed_cost"] == pytest.approx(EL_CC + EL_FOM * NYEARS)
+    assert el["fixed_cost"] == pytest.approx((EL_CC + EL_FOM) * NYEARS)
 
 
 @pytest.mark.live_solve
@@ -373,15 +379,19 @@ def test_statistics_surface_carries_fom_so_fixed_cost_can_be_reconciled(solved):
 # ── Hand-built networks: no solver, numbers written down ────────────────
 
 # Two unit-weighted hourly snapshots: the model covers 2/8760 of a year, so
-# an annual FOM of 20 EUR/MW/yr is charged 20 x 2/8760 per MW.
-FLAT_FOM_PER_HORIZON = 20.0 * 2 / 8760.0
+# an annual FOM of 20 EUR/MW/yr is charged 20 x 2/8760 per MW, and an
+# annualised capital_cost of 1000 EUR/MW/yr is charged 1000 x 2/8760.
+FLAT_SHARE = 2 / 8760.0
+FLAT_FOM_PER_HORIZON = 20.0 * FLAT_SHARE
+FLAT_CC_PER_HORIZON = 1000.0 * FLAT_SHARE
+FLAT_CAPEX = FLAT_CC_PER_HORIZON * 100
 
 
 def _flat_network() -> pypsa.Network:
     """
-    G: capital_cost 1000, fom_cost 20/yr, p_nom_opt 100, p = [50, 50] at 40 EUR.
+    G: capital_cost 1000/yr, fom_cost 20/yr, p_nom_opt 100, p = [50, 50] at 40 EUR.
         fom     = 20 x 2/8760 x 100
-        fixed   = 1000 x 100 + fom
+        fixed   = 1000 x 2/8760 x 100 + fom
         revenue = 4_000   vom = 1_000   energy = 100
     """
     n = pypsa.Network()
@@ -422,10 +432,10 @@ def test_compute_asset_economics_adds_fom_to_fixed_cost_on_a_flat_network():
     payload = compute_asset_economics(_flat_network(), SolverConfig(), result_df=_live)
     g = payload["generators"][0]
     fom = FLAT_FOM_PER_HORIZON * 100
-    assert g["fixed_cost_eur"] == pytest.approx(100_000.0 + fom)
+    assert g["fixed_cost_eur"] == pytest.approx(FLAT_CAPEX + fom)
     assert g["fom_cost_eur"] == pytest.approx(fom)
-    assert g["lcoe_eur_per_mwh"] == pytest.approx((100_000.0 + fom + 1_000.0) / 100)
-    assert g["net_profit_eur"] == pytest.approx(4_000.0 - 100_000.0 - fom - 1_000.0)
+    assert g["lcoe_eur_per_mwh"] == pytest.approx((FLAT_CAPEX + fom + 1_000.0) / 100)
+    assert g["net_profit_eur"] == pytest.approx(4_000.0 - FLAT_CAPEX - fom - 1_000.0)
 
 
 def test_compute_asset_economics_scales_fom_with_the_horizon_like_fixed_cost():
@@ -438,7 +448,7 @@ def test_compute_asset_economics_scales_fom_with_the_horizon_like_fixed_cost():
     payload = compute_asset_economics(_multi_period_network(), SolverConfig(), result_df=_live)
     g = payload["generators"][0]
     fom = FLAT_FOM_PER_HORIZON * 100
-    fixed = 100_000.0 + fom
+    fixed = FLAT_CAPEX + fom
     assert g["fixed_cost_eur"] == pytest.approx(fixed * 15)
     assert g["fom_cost_eur"] == pytest.approx(fom * 15)
     by_p = {e["period"]: e for e in g["by_period"]}
@@ -454,12 +464,13 @@ def test_periodized_capital_costs_reports_fom_and_the_lp_fixed_rate():
 
     n = _flat_network()
     entry = periodized_capital_costs(n, SolverConfig())["generators"]["G"]
-    assert entry["capital_cost"] == pytest.approx(1000.0)
+    assert entry["capital_cost"] == pytest.approx(FLAT_CC_PER_HORIZON)
     assert entry["fom_cost"] == pytest.approx(FLAT_FOM_PER_HORIZON)
     assert entry["fom_cost_annual"] == pytest.approx(20.0)
-    assert entry["fixed_cost"] == pytest.approx(1000.0 + FLAT_FOM_PER_HORIZON)
-    # The resolver's fill must not leave the column scaled.
+    assert entry["fixed_cost"] == pytest.approx(FLAT_CC_PER_HORIZON + FLAT_FOM_PER_HORIZON)
+    # The resolver's fill must not leave either column scaled.
     assert float(n.generators.at["G", "fom_cost"]) == 20.0
+    assert float(n.generators.at["G", "capital_cost"]) == 1000.0
 
 
 # ── Multi-period: periods, activity, and the objective bridge ────────────
@@ -600,9 +611,10 @@ def test_objective_decomposition_explains_the_whole_gap(reset_backend):
 @pytest.mark.live_solve
 def test_objective_decomposition_closes_the_golden_fixtures_gap(reset_backend):
     """
-    The golden network's reported total exceeds its LP total by ~EUR 7.5 bn,
-    almost all of it the non-extendable Line's capital_cost. The bridge must
-    explain it to within float noise.
+    The golden network's reported total exceeds its LP total by tens of
+    millions of EUR, almost all of it the non-extendable Line's capital_cost
+    (1 M EUR/MVA/yr × 500 MVA, charged for 24/8760 of a year per period). The
+    bridge must explain it to within float noise.
     """
     from services.results.cost_breakdown import compute_cost_breakdown
     from services.results.objective_decomposition import compute_objective_decomposition
@@ -613,7 +625,77 @@ def test_objective_decomposition_closes_the_golden_fixtures_gap(reset_backend):
                        investment_periods=list(gf.GOLDEN_PERIODS))
     cb = compute_cost_breakdown(n, cfg)
     d = compute_objective_decomposition(n, cb, cfg)
-    assert d["gap_eur"] < -1e9
-    line_fixed = 1_000_000.0 * 500.0 * sum(gf.GOLDEN_YEARS)
+    line_fixed = (1_000_000.0 * gf.SNAPSHOTS_PER_PERIOD / 8760.0) * 500.0 * sum(gf.GOLDEN_YEARS)
+    assert d["gap_eur"] < -0.9 * line_fixed
     assert d["nonextendable_fixed_cost_eur"] >= line_fixed
     assert abs(d["residual_gap_eur"]) <= 1e-6 * abs(d["lp_total"])
+
+
+# ── Activity: a retired asset stops paying fixed cost on EVERY surface ───
+
+@pytest.fixture()
+def solved_mp(reset_backend) -> pypsa.Network:
+    """The retirement network, installed for the router-backed surfaces."""
+    n = _solved_multi_period()
+    ctx = PyPSAService._ensure_active()
+    ctx.network = n
+    sim_router._state["solver_config"] = _mp_cfg()
+    return n
+
+
+def _mp_expected_fixed(n) -> dict[str, float]:
+    """Horizon fixed cost per generator: rate x capacity x ACTIVE years only."""
+    return {
+        # `old` and `nonext` retire after 2030; `new` only exists from 2040.
+        "old": (1000.0 + 100.0) * float(n.generators.at["old", "p_nom_opt"]) * MP_YEARS[0],
+        "nonext": (700.0 + 10.0) * float(n.generators.at["nonext", "p_nom_opt"]) * MP_YEARS[0],
+        "new": (3000.0 + 150.0) * float(n.generators.at["new", "p_nom_opt"]) * MP_YEARS[1],
+    }
+
+
+@pytest.mark.live_solve
+def test_asset_economics_charges_only_active_periods(solved_mp):
+    from services.results.asset_economics import compute_asset_economics
+    from services.results.cost_breakdown import compute_cost_breakdown
+
+    n = solved_mp
+    expected = _mp_expected_fixed(n)
+    payload = compute_asset_economics(n, _mp_cfg(), result_df=_live)
+    rows = {r["name"]: r for r in payload["generators"]}
+    for name, value in expected.items():
+        assert rows[name]["fixed_cost_eur"] == pytest.approx(value, rel=REL), name
+    old_by_p = {e["period"]: e for e in rows["old"]["by_period"]}
+    assert old_by_p[2040]["fixed_cost_eur"] == pytest.approx(0.0, abs=1e-9)
+    assert old_by_p[2030]["fixed_cost_eur"] == pytest.approx(expected["old"], rel=REL)
+    # ...and the per-asset figures now add up to Capacity Expansion's.
+    cb = compute_cost_breakdown(n, _mp_cfg())
+    assert sum(expected.values()) == pytest.approx(cb["capex"], rel=REL)
+
+
+@pytest.mark.live_solve
+def test_asset_detail_charges_only_active_periods(solved_mp):
+    import routers.asset_results as AR
+
+    n = solved_mp
+    detail = AR.get_asset_results(
+        component_class="Generator", name="old", category="economics",
+        source="lopf", from_=None, to=None, period=None,
+        mode="chronological", metrics="",
+    )
+    assert detail["scalars"]["fixed_cost_eur"] == pytest.approx(_mp_expected_fixed(n)["old"], rel=1e-6)
+
+
+@pytest.mark.live_solve
+def test_compare_capacity_and_economics_charge_only_active_periods(solved_mp):
+    from services.compare.capacity import _compute_capacity_summary
+    from services.compare.economics import _compute_economics_summary
+
+    n = solved_mp
+    total = sum(_mp_expected_fixed(n).values())
+    periods = list(MP_PERIODS)
+    cap = _compute_capacity_summary(n, periods, True, True, cfg=_mp_cfg())
+    assert sum(v.total for v in cap.capex_meur_by_carrier.values()) * 1e6 == pytest.approx(total, rel=1e-6)
+    econ = _compute_economics_summary(n, periods, True, True, cfg=_mp_cfg(), result_df=_live)
+    assert sum(v.capex_meur.total for v in econ.by_carrier.values()) * 1e6 == pytest.approx(total, rel=1e-6)
+    by_2040 = sum(v.capex_meur.by_period.get("2040", 0.0) for v in econ.by_carrier.values()) * 1e6
+    assert by_2040 == pytest.approx(_mp_expected_fixed(n)["new"], rel=1e-6)

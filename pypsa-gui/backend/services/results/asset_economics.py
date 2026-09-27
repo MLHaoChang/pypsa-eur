@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 
 from services.period_utils import (
+    active_period_years,
     period_years_map,
     years_for_period,
 )
@@ -150,6 +151,31 @@ def compute_asset_economics(n, cfg, *, result_df):
         float(sum(period_years_lookup.values()))
         if period_years_lookup else 1.0
     )
+
+    # Fixed cost is charged only for the periods an asset is ACTIVE in
+    # (`period_utils.active_period_years`), the same rule the LP and
+    # `cost_breakdown` apply. Charging `total_years_factor` to every asset
+    # made a plant retired after its first period pay for the whole horizon
+    # here while Capacity Expansion charged it for its life only.
+    _active_cache: dict = {}
+
+    def _asset_years(comp_class: str, name) -> tuple[float, dict]:
+        """(years charged over the horizon, {period: years charged in it})."""
+        if comp_class not in _active_cache:
+            try:
+                _active_cache[comp_class] = active_period_years(n, comp_class)
+            except Exception:
+                logger.exception(
+                    "activity lookup failed for %s in /results/asset_economics; "
+                    "charging fixed cost for the whole horizon", comp_class,
+                )
+                _active_cache[comp_class] = None
+        table = _active_cache[comp_class]
+        if table is None or name not in table.index:
+            per = {int(p): years_for_period(period_years_lookup, p) for p in period_years_lookup}
+            return total_years_factor, per
+        row = table.loc[name]
+        return float(row.sum()), {int(p): float(v) for p, v in row.items()}
 
     is_multi = isinstance(n.snapshots, _pd.MultiIndex)
     if is_multi:
@@ -347,8 +373,9 @@ def compute_asset_economics(n, cfg, *, result_df):
             # share OF fixed_cost, not a separate annual figure.
             fixed_rate, fom_rate = _fixed_rates("generators", g, fom_static)
             p_nom_g = float(p_nom.get(g, 0.0) or 0.0)
-            fixed_cost = fixed_rate * p_nom_g * total_years_factor
-            fom_cost = fom_rate * p_nom_g * total_years_factor
+            asset_years, asset_years_p = _asset_years("Generator", g)
+            fixed_cost = fixed_rate * p_nom_g * asset_years
+            fom_cost = fom_rate * p_nom_g * asset_years
 
             # LCOE — divide total horizon-scaled cost by total energy
             # dispatched. When energy is ~0 (e.g. a built-but-curtailed
@@ -374,15 +401,14 @@ def compute_asset_economics(n, cfg, *, result_df):
             # Per-period roll-up. Each period gets its own LCOE / avg-price.
             by_period_rows: list[dict] = []
             if is_multi and energy_per_p:
-                # Per-period fixed cost is fixed_cost × years[p] / Σ years —
-                # i.e. distribute the annualised CAPEX across periods in
-                # proportion to their years weight. This matches what PyPSA's
-                # statistics does: cost_per_period = capital_cost × p_nom × years.
-                total_years = sum(period_years_lookup.values()) or 1.0
+                # Per-period fixed cost is rate × capacity × years[p] where the
+                # asset is active in p, else 0 — what PyPSA's statistics and
+                # the LP do: cost_per_period = rate × p_nom × years × active.
                 for p_key in sorted(set(list(energy_per_p.keys()) + list(revenue_per_p.keys()))):
                     y = _years_for_period(p_key)
-                    fixed_p = fixed_cost * (y / total_years) if total_years > 0 else 0.0
-                    fom_p = fom_cost * (y / total_years) if total_years > 0 else 0.0
+                    y_active = asset_years_p.get(int(p_key), 0.0) if p_key is not None else y
+                    fixed_p = fixed_rate * p_nom_g * y_active
+                    fom_p = fom_rate * p_nom_g * y_active
                     vom_p = vom_per_p.get(p_key, 0.0)
                     rev_p = revenue_per_p.get(p_key, 0.0)
                     e_p = energy_per_p.get(p_key, 0.0)
@@ -478,8 +504,9 @@ def compute_asset_economics(n, cfg, *, result_df):
             # true 16.4 €/MWh).
             # `fixed_rate` = capital_cost + fom_cost, the LP coefficient.
             fixed_rate, fom_rate = _fixed_rates("storage_units", s, fom_static_su)
-            fixed_cost = fixed_rate * p_nom_s * total_years_factor
-            fom_cost = fom_rate * p_nom_s * total_years_factor
+            asset_years, asset_years_p = _asset_years("StorageUnit", s)
+            fixed_cost = fixed_rate * p_nom_s * asset_years
+            fom_cost = fom_rate * p_nom_s * asset_years
 
             net_profit = discharge_revenue_total - charge_cost_total - vom_total_su - fixed_cost
 
@@ -509,7 +536,6 @@ def compute_asset_economics(n, cfg, *, result_df):
 
             by_period_rows: list[dict] = []
             if is_multi and discharge_mwh_pp:
-                total_years = sum(period_years_lookup.values()) or 1.0
                 periods_set = sorted(set(
                     list(discharge_mwh_pp.keys())
                     + list(charge_mwh_pp.keys())
@@ -518,8 +544,9 @@ def compute_asset_economics(n, cfg, *, result_df):
                 ))
                 for p_key in periods_set:
                     y = _years_for_period(p_key)
-                    fixed_p = fixed_cost * (y / total_years) if total_years > 0 else 0.0
-                    fom_p = fom_cost * (y / total_years) if total_years > 0 else 0.0
+                    y_active = asset_years_p.get(int(p_key), 0.0) if p_key is not None else y
+                    fixed_p = fixed_rate * p_nom_s * y_active
+                    fom_p = fom_rate * p_nom_s * y_active
                     dm = discharge_mwh_pp.get(p_key, 0.0)
                     cm = charge_mwh_pp.get(p_key, 0.0)
                     dr = discharge_revenue_pp.get(p_key, 0.0)
@@ -620,8 +647,9 @@ def compute_asset_economics(n, cfg, *, result_df):
             # opex / discharge / charge_cost magnitudes used below.
             # `fixed_rate` = capital_cost + fom_cost, the LP coefficient.
             fixed_rate, fom_rate = _fixed_rates("stores", s, fom_static_st)
-            fixed_cost = fixed_rate * e_nom_s * total_years_factor
-            fom_cost = fom_rate * e_nom_s * total_years_factor
+            asset_years, asset_years_p = _asset_years("Store", s)
+            fixed_cost = fixed_rate * e_nom_s * asset_years
+            fom_cost = fom_rate * e_nom_s * asset_years
 
             net_profit = discharge_revenue_total - charge_cost_total - vom_total_st - fixed_cost
             if discharge_mwh > 1e-6:
@@ -636,7 +664,6 @@ def compute_asset_economics(n, cfg, *, result_df):
 
             by_period_rows: list[dict] = []
             if is_multi and discharge_mwh_pp:
-                total_years = sum(period_years_lookup.values()) or 1.0
                 periods_set = sorted(set(
                     list(discharge_mwh_pp.keys())
                     + list(charge_mwh_pp.keys())
@@ -645,8 +672,9 @@ def compute_asset_economics(n, cfg, *, result_df):
                 ))
                 for p_key in periods_set:
                     y = _years_for_period(p_key)
-                    fixed_p = fixed_cost * (y / total_years) if total_years > 0 else 0.0
-                    fom_p = fom_cost * (y / total_years) if total_years > 0 else 0.0
+                    y_active = asset_years_p.get(int(p_key), 0.0) if p_key is not None else y
+                    fixed_p = fixed_rate * e_nom_s * y_active
+                    fom_p = fom_rate * e_nom_s * y_active
                     dm = discharge_mwh_pp.get(p_key, 0.0)
                     cm = charge_mwh_pp.get(p_key, 0.0)
                     dr = discharge_revenue_pp.get(p_key, 0.0)
@@ -812,8 +840,9 @@ def compute_asset_economics(n, cfg, *, result_df):
             # `fixed_rate` = capital_cost + fom_cost, the LP coefficient.
             fixed_rate, fom_rate = _fixed_rates("links", ln, l_fom_static)
             p_nom_l = float(l_p_nom.get(ln, 0.0) or 0.0)
-            fixed_cost = fixed_rate * p_nom_l * total_years_factor
-            fom_cost = fom_rate * p_nom_l * total_years_factor
+            asset_years, asset_years_p = _asset_years("Link", ln)
+            fixed_cost = fixed_rate * p_nom_l * asset_years
+            fom_cost = fom_rate * p_nom_l * asset_years
 
             revenue_total = gross_revenue_total - input_cost_total
 
@@ -844,12 +873,12 @@ def compute_asset_economics(n, cfg, *, result_df):
 
             by_period_rows = []
             if is_multi and energy_per_p:
-                total_years = sum(period_years_lookup.values()) or 1.0
                 keys = set(energy_per_p) | set(gross_rev_per_p) | set(input_cost_per_p)
                 for p_key in sorted(keys):
                     y = _years_for_period(p_key)
-                    fixed_p = fixed_cost * (y / total_years) if total_years > 0 else 0.0
-                    fom_p = fom_cost * (y / total_years) if total_years > 0 else 0.0
+                    y_active = asset_years_p.get(int(p_key), 0.0) if p_key is not None else y
+                    fixed_p = fixed_rate * p_nom_l * y_active
+                    fom_p = fom_rate * p_nom_l * y_active
                     vom_p = vom_per_p.get(p_key, 0.0)
                     gross_p = gross_rev_per_p.get(p_key, 0.0)
                     in_p = input_cost_per_p.get(p_key, 0.0)

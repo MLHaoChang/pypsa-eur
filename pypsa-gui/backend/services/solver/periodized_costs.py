@@ -58,8 +58,10 @@ _FOM_SCALED_LOCK = threading.Lock()
 def fom_horizon_factor(n) -> float:
     """
     Years the model represents per investment period — the factor that turns
-    an ANNUAL fixed O&M (EUR/MW/yr, what the GUI asks the user to type) into
-    the per-horizon figure PyPSA's LP adds to each asset's cost coefficient.
+    an ANNUAL fixed O&M, or an annualised `capital_cost` typed directly
+    (EUR/MW/yr, what the GUI asks the user to type), into the per-horizon
+    figure PyPSA's LP adds to each asset's cost coefficient. (Named for FOM,
+    where the defect was found; the fill applies it to both.)
 
     Why it is needed: `pypsa.costs.periodized_cost` scales an
     overnight-priced investment by `nyears` but adds `fom_cost` UNSCALED —
@@ -157,8 +159,9 @@ def fill_periodized_cost_defaults(
       • `discount_rate` cannot move any existing number for this population.
         `pypsa.costs.periodized_cost` computes
         `base = annuitized.where(has_overnight, capital_cost)`, so an asset
-        with no `overnight_cost` keeps its raw `capital_cost` whatever the rate
-        says — `n.statistics()` and the LP objective are untouched.
+        with no `overnight_cost` keeps its `capital_cost` (horizon-scaled by
+        the pass below, never by the rate) whatever the rate says —
+        `n.statistics()` and the LP objective are untouched by the fill.
       • `lifetime` is NOT a cost input alone. On a multi-period network PyPSA
         derives asset ACTIVITY from `build_year + lifetime`, so substituting
         the config default retires assets. Measured on the golden fixture: a
@@ -173,9 +176,10 @@ def fill_periodized_cost_defaults(
     `max(r, 0)` — so the common "user never typed a lifetime" case still
     back-calculates fine on the rate alone.)
 
-    It also puts `fom_cost` on PyPSA's per-horizon basis: the GUI treats the
-    column as ANNUAL (EUR/MW/yr — the unit its inputs show), PyPSA adds it
-    unscaled per modelled horizon, so the fill multiplies it by
+    It also puts `fom_cost` — and `capital_cost` wherever `overnight_cost` is
+    unset — on PyPSA's per-horizon basis: the GUI treats both columns as
+    ANNUAL (EUR/MW/yr — the unit its inputs show), PyPSA uses them unscaled
+    per modelled horizon, so the fill multiplies them by
     `fom_horizon_factor(n)` for the duration of the block. Because the LP
     solve and every report run inside this same fill, the objective and every
     surface see the same scaled figure. The scaling is skipped when a fill is
@@ -186,8 +190,9 @@ def fill_periodized_cost_defaults(
 
     undo: list[tuple[str, str, pd.Index, pd.Series]] = []
 
-    # FOM: annual -> per modelled horizon. Separate pass because the loop
-    # below skips every class without `overnight_cost`.
+    # FOM and directly typed capital_cost: annual -> per modelled horizon.
+    # Separate pass because the loop below skips every class without
+    # `overnight_cost`.
     fom_scaled_here = False
     if not fom_is_scaled(n):
         factor = fom_horizon_factor(n)
@@ -204,6 +209,27 @@ def fill_periodized_cost_defaults(
                 original = df.loc[idx, "fom_cost"].copy()
                 df.loc[idx, "fom_cost"] = original * factor
                 undo.append((comp_attr, "fom_cost", idx, original))
+            # A directly typed `capital_cost` has the same mismatch: the GUI
+            # asks for an annualised EUR/MW/yr, PyPSA uses the column as-is
+            # per modelled horizon. Only where `overnight_cost` is unset —
+            # PyPSA ignores `capital_cost` for overnight-priced assets
+            # (`base = annuitized.where(has_overnight, capital_cost)`, with
+            # `has_overnight = overnight_cost.notna()`), and those are already
+            # scaled by `nyears` upstream.
+            for comp_attr in ("generators", "storage_units", "stores", "links", "lines", "transformers"):
+                df = getattr(n, comp_attr, None)
+                if df is None or df.empty or "capital_cost" not in df.columns:
+                    continue
+                cc = df["capital_cost"]
+                no_overnight = (df["overnight_cost"].isna() if "overnight_cost" in df.columns
+                                else pd.Series(True, index=df.index))
+                mask = no_overnight & cc.notna() & (cc != 0)
+                if not mask.any():
+                    continue
+                idx = df.index[mask]
+                original = df.loc[idx, "capital_cost"].copy()
+                df.loc[idx, "capital_cost"] = original * factor
+                undo.append((comp_attr, "capital_cost", idx, original))
         with _FOM_SCALED_LOCK:
             _FOM_SCALED_IDS.add(id(n))
         fom_scaled_here = True
@@ -378,8 +404,10 @@ def periodized_capital_costs(n, cfg: "SolverConfig") -> dict[str, dict[str, dict
 
       * ``capital_cost`` — PyPSA's annuitised INVESTMENT cost
         (`comp.capital_cost`), i.e. ``overnight × annuity × nyears`` for
-        assets parameterised via overnight_cost, or the raw `capital_cost`
-        column otherwise. Investment only: this accessor passes
+        assets parameterised via overnight_cost, or the typed (annualised)
+        `capital_cost` × the same `nyears` share otherwise — both on the
+        per-horizon basis the LP charges (see `fill_periodized_cost_defaults`).
+        Investment only: this accessor passes
         ``fom_cost=None`` to `pypsa.costs.periodized_cost`. Always a real,
         finite number — unaffected by whether the upfront cost below resolves
         (see `with_periodized_cost_defaults`'s docstring: filling

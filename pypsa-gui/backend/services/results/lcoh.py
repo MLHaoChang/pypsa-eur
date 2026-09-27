@@ -74,11 +74,19 @@ def compute_lcoh(n, cfg, *, result_df):
 
     try:
         with with_periodized_cost_defaults(n, cfg):
+            # `.copy()` is load-bearing: for an asset without overnight_cost
+            # PyPSA returns the `capital_cost` COLUMN itself, and the fill's
+            # revert restores the typed values into that same object on exit,
+            # so an uncopied read here would lose the horizon scaling.
             cap_costs = n.c["Link"].capital_cost
             if not isinstance(cap_costs, _pd.Series):
                 cap_costs = _pd.Series(cap_costs, index=links_df.index)
+            cap_costs = cap_costs.copy()
     except Exception:
-        cap_costs = links_df.get("capital_cost", _pd.Series(0.0, index=links_df.index))
+        # Typed annualised figure → the per-horizon basis the LP charged
+        # (`fom_per_horizon` applies exactly that scaling to any column).
+        cap_costs = fom_per_horizon(
+            n, links_df.get("capital_cost", _pd.Series(0.0, index=links_df.index)))
     # Fixed O&M. `n.c["Link"].capital_cost` is PyPSA's INVESTMENT-only accessor
     # (`fom_cost=None`); the LP objective paid `periodized_cost = capital_cost
     # + fom_cost` per MW, and so must the LCOH numerator, or an electrolyser

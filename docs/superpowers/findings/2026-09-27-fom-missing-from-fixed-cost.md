@@ -263,18 +263,103 @@ of 10 and 10.
 | Frontend `npx vitest run` | 1940 passed; `tsc --noEmit` clean |
 | QA drivers | asset economics 26/26, overnight cost decomposition 10/10, objective scale 5/5, results-summary compare 53/53, safe capital cost exit 0 |
 
-## Still open
+## Second follow-up: the items that were still open
 
-- **Raw `capital_cost` has the same unit mismatch as FOM had.** PyPSA treats
-  a directly typed `capital_cost` as per modelled horizon, and the GUI labels
-  it €/MW/yr. On a short model a typed annualised cost is charged as if the
-  model covered a year. Scaling it the same way would change the objective of
-  every existing project priced through `capital_cost`, so it needs its own
-  decision.
-- **`asset_economics` fixed cost** still multiplies by all horizon years
-  without checking per-period activity. `cost_breakdown` now checks activity
-  for both installed and new capacity. An asset retired partway through a
-  multi-period horizon therefore shows more fixed cost on the Economics tab
-  than on Capacity Expansion.
-- **Upstream docstring.** PyPSA's `statistics.capex` docstring claims it
-  includes FOM. It is not fixed here.
+### A directly typed `capital_cost` is annual too
+
+PyPSA uses a directly typed `capital_cost` unscaled, per modelled horizon, and
+the GUI labels it €/MW/yr, the same mismatch FOM had. The periodized-cost fill
+now scales `capital_cost` by `n.nyears` alongside `fom_cost`, only where
+`overnight_cost` is unset. PyPSA ignores `capital_cost` for overnight-priced
+assets, which it already scales.
+
+- **Existing projects change.** A project priced through `capital_cost` on a
+  model shorter than a year now pays the modelled share of its annual cost, in
+  the LP and in every report. A full-year model has a factor of 1 and is
+  unchanged. On the golden network the line's fixed cost drops from EUR
+  7.5 bn to EUR 20.5 M: 1 M EUR/MVA/yr × 500 MVA for 24 of 8,760 hours in each
+  of 15 years.
+- **Upfront costs back-calculated from `capital_cost` are now right.** PyPSA
+  divides by `annuity × nyears`, so an unscaled `capital_cost` on a one-day
+  model back-calculated an upfront cost 365 times too high. That feeds
+  Capacity Expansion's "Total over lifetime" view.
+- **A hazard found on the way.** For an asset without `overnight_cost`,
+  PyPSA's `capital_cost` accessor returns the column itself, not a copy. LCOH
+  read it inside the fill, and the revert then restored the typed values into
+  the object LCOH was holding. It now copies the series.
+- The five `capital_cost` input tooltips say the charge is scaled to the share
+  of a year the snapshots represent.
+
+### Fixed cost only in the periods an asset exists
+
+Four surfaces multiplied fixed cost by every horizon year, while
+`cost_breakdown` and the LP charge only periods where PyPSA considers the
+asset active. The four were asset economics, Asset Detail, Compare's
+per-carrier economics and Compare's capacity totals. An asset retired partway
+through the horizon was over-charged on those four.
+
+All five now share `period_utils.active_period_years`: `years[p]` where the
+asset is active, 0 where it is not.
+- **Asset economics:** per asset and per period.
+- **Asset Detail:** active years times the selected window's share of each
+  period. With the whole horizon selected this is exactly the asset-economics
+  figure.
+- **Compare:** both walks take the same per-row activity. An earlier comment
+  there claimed PyPSA's statistics do not mask activity. They do, measured, and
+  the comment is corrected.
+
+For a vintage parent the rule uses the parent row's activity, the same as
+`cost_breakdown`. So the earlier Compare case, where gating on each vintage's
+build year under-counted a battery, keeps its full-horizon figure.
+
+On the retirement test network, `old` and `nonext` stop paying after 2030 and
+`new` pays only from 2040. All four surfaces now report the same per-asset
+figures, and they sum to `cost_breakdown.capex`.
+
+### PyPSA's `statistics.capex` docstring
+
+That docstring lives in the upstream PyPSA repository, which this session
+cannot reach; only this fork is attached. The GUI no longer relies on it. The
+raw-PyPSA contract test pins the actual behaviour, so an upstream change
+fails loudly here. Ready to file upstream:
+
+> **`statistics.capex` "See Also" says it includes `fom_cost`; it does not**
+>
+> PyPSA 1.1.2, `pypsa/statistics/expressions.py`. The "See Also" blocks of
+> `overnight_cost` (line 991) and `fom` (line 1075) describe `capex` as
+> returning "total fixed costs (overnight_cost + fom_cost)" and "(investment
+> + fom_cost)". `capex` multiplies capacity by `comp.capital_cost`, which
+> calls `periodized_cost(..., fom_cost=None)`. So it is investment-only, while
+> the objective uses `comp.periodized_cost`, which adds `fom_cost`. A user
+> summing `statistics.capex()` and `statistics.opex()` to reconcile with
+> `n.objective` is short by `statistics.fom()`.
+>
+> Suggested fix: change both lines to "Returns annuitised investment costs
+> (excluding fom_cost; see `fom`)". Optionally add a `statistics.fixed_cost()`
+> that returns `capex + fom`, the quantity the objective charges.
+
+## Test evidence for the second follow-up
+
+`test_fom_reconciliation.py` now has 26 tests. The new checks are activity on
+asset economics, Asset Detail and both Compare paths, and `capital_cost`
+scaling and restoration. Run against the previous commit's service code, the
+five that test the new behaviour fail. On this branch they pass.
+
+Existing tests updated to annual `capital_cost`:
+- **Hand-built expectations** now use the modelled share of a year:
+  `test_asset_economics_capital_costs`, both Asset Detail compute tests and the
+  `qa_asset_economics` driver's scenarios 1 and 5.
+- **Fixed link fixture:** `test_asset_economics_links` types an annual cost
+  whose two-hour share is 1,000 EUR/MW, so every figure in it is unchanged.
+- **Capex-parity fixtures** for line, link and store are weighted to model one
+  full year, so the typed cost is charged in full.
+- **Totals contract:** `test_cost_totals_contract` reads its unweighted
+  baseline inside the same fill as the total it is compared with.
+- **Golden anchors:** the line and solar anchors use
+  `oracle.capital_cost_per_horizon`.
+
+| Run | Result |
+|---|---|
+| Backend `-m "not slow"` | SECOND_FOLLOWUP_BACKEND |
+| Frontend `npx vitest run` | SECOND_FOLLOWUP_FRONTEND |
+| QA drivers (`run_qa_drivers.py`) | all 21 pass |

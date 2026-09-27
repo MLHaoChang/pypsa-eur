@@ -53,7 +53,7 @@ export const PROPERTY_DOCS: Record<string, string> = {
   'line.b':
     'Shunt susceptance per km (S/km). UI multiplies by length on save; PyPSA stores absolute Siemens. Models charging current; usually negligible for short overhead lines and important for long underground/submarine cables.',
   'line.capital_cost':
-    'Annualised investment cost per added MVA of capacity (€/MVA). Only used when the line is extendable.',
+    'Annualised investment cost per added MVA of capacity (€/MVA). Only used when the line is extendable. The model charges it for the share of a year your snapshots represent, so a one-day model pays 1/365 of it.',
   'line.fom_cost':
     'Fixed O&M cost per installed MVA per year (€/MVA/yr). Paid on the full s_nom_opt, regardless of dispatch. The model charges it for the share of a year your snapshots represent (like an annualised overnight cost), so a one-day model pays 1/365 of it.',
   'line.overnight_cost':
@@ -83,7 +83,7 @@ export const PROPERTY_DOCS: Record<string, string> = {
   'generator.marginal_cost':
     'Variable cost per MWh dispatched (€/MWh). Includes fuel + variable O&M; used directly in the objective.',
   'generator.capital_cost':
-    'Annualised investment cost per MW of added capacity (€/MW/yr). Only paid on the extension above p_nom_min when extendable.',
+    'Annualised investment cost per MW of added capacity (€/MW/yr). Only paid on the extension above p_nom_min when extendable. The model charges it for the share of a year your snapshots represent, so a one-day model pays 1/365 of it.',
   'generator.fom_cost':
     'Fixed O&M cost per installed MW per year (€/MW/yr). Paid on the full p_nom_opt regardless of dispatch — covers labour, insurance, scheduled maintenance. The model charges it for the share of a year your snapshots represent (like an annualised overnight cost), so a one-day model pays 1/365 of it.',
   'generator.overnight_cost':
@@ -151,7 +151,7 @@ export const PROPERTY_DOCS: Record<string, string> = {
   'storage_unit.marginal_cost':
     'Variable cost per MWh dispatched (€/MWh). Often zero for storage; used to model wear-and-tear.',
   'storage_unit.capital_cost':
-    'Annualised investment cost per MW of added p_nom (€/MW/yr). Only used when extendable.',
+    'Annualised investment cost per MW of added p_nom (€/MW/yr). Only used when extendable. The model charges it for the share of a year your snapshots represent, so a one-day model pays 1/365 of it.',
   'storage_unit.fom_cost':
     'Fixed O&M cost per installed MW per year (€/MW/yr). Paid on the full p_nom_opt regardless of throughput. The model charges it for the share of a year your snapshots represent (like an annualised overnight cost), so a one-day model pays 1/365 of it.',
   'storage_unit.overnight_cost':
@@ -183,7 +183,7 @@ export const PROPERTY_DOCS: Record<string, string> = {
   'store.e_cyclic':
     'When true, the SoE at the last snapshot must equal the SoE at the first — eliminates "free fuel" at horizon boundaries.',
   'store.capital_cost':
-    'Annualised investment cost per MWh of added energy capacity (€/MWh/yr). Only used when extendable.',
+    'Annualised investment cost per MWh of added energy capacity (€/MWh/yr). Only used when extendable. The model charges it for the share of a year your snapshots represent, so a one-day model pays 1/365 of it.',
   'store.fom_cost':
     'Fixed O&M cost per installed MWh per year (€/MWh/yr). Paid on the full e_nom_opt regardless of cycling. The model charges it for the share of a year your snapshots represent (like an annualised overnight cost), so a one-day model pays 1/365 of it.',
   'store.overnight_cost':
@@ -233,7 +233,7 @@ export const PROPERTY_DOCS: Record<string, string> = {
   'link.marginal_cost':
     'Variable cost per MWh of input dispatched (€/MWh).',
   'link.capital_cost':
-    'Annualised investment cost per MW of added input capacity (€/MW/yr). Only paid on the extension when extendable.',
+    'Annualised investment cost per MW of added input capacity (€/MW/yr). Only paid on the extension when extendable. The model charges it for the share of a year your snapshots represent, so a one-day model pays 1/365 of it.',
   'link.fom_cost':
     'Fixed O&M cost per installed MW per year (€/MW/yr). Paid on the full p_nom_opt regardless of throughput. The model charges it for the share of a year your snapshots represent (like an annualised overnight cost), so a one-day model pays 1/365 of it.',
   'link.overnight_cost':
