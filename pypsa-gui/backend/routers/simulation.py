@@ -708,6 +708,11 @@ def run():
             eh_dtc_stress=None,
             eh_dtc_planning=None,
             eh_reference_design_report=None,
+            # Edge Investment Case: a new solve invalidates the case built on
+            # the previous one (spec §5.1 — the terms must match THIS solve).
+            investment_case_report=None,
+            billing_frames=None,
+            last_commercial_terms=None,
             lopf_results=None,
             ac_pf_results=None,
             ac_pf_convergence=None,

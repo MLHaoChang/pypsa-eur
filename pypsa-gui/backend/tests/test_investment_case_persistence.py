@@ -145,3 +145,124 @@ def test_a_reset_clears_the_three_keys(client, api_project, session_state):
     st = session_state(client)
     assert st["investment_case_report"] is None
     assert st["last_commercial_terms"] is None
+
+
+# ── review WP0.5 #1: local-time frames must survive the restricted unpickler ──
+#
+# The billing pass rates in LOCAL time (DST matters for TOU windows). A
+# tz-aware index pickles a pytz/zoneinfo object the allow-list refuses, and
+# one refused value drops EVERY side result on reload. So the store helpers
+# normalise to UTC and record the zone name as a plain string.
+
+
+def _berlin_dst_frame() -> pd.DataFrame:
+    # 2030-03-31 is the spring-forward day in Europe/Berlin: 92 quarter-hours.
+    idx = pd.date_range("2030-03-31 00:00", "2030-03-31 23:45", freq="15min",
+                        tz="Europe/Berlin")
+    return pd.DataFrame({"quantity": range(len(idx)), "amount": 0.5}, index=idx)
+
+
+def test_raw_tz_aware_frame_is_refused_by_the_unpickler():
+    """Documents WHY the helpers exist: this is the failure they prevent."""
+    import pickle as _p
+
+    from routers.projects import _safe_unpickle_results
+    with pytest.raises(_p.UnpicklingError):
+        _safe_unpickle_results(_p.dumps({"x": _berlin_dst_frame()}))
+
+
+def test_billing_frames_round_trip_local_time_through_the_unpickler():
+    import pickle as _p
+
+    from routers.projects import _safe_unpickle_results
+    from services.finance.report import load_billing_frames, store_billing_frames
+
+    frame = _berlin_dst_frame()
+    assert len(frame) == 92
+    store: dict = {}
+    store_billing_frames(store, {"energy_tou": frame})
+    raw = _safe_unpickle_results(_p.dumps(store))       # must not raise
+    back = load_billing_frames(raw)
+    pd.testing.assert_frame_equal(back["energy_tou"], frame, check_freq=False)
+    assert str(back["energy_tou"].index.tz) == "Europe/Berlin"
+
+
+def test_naive_billing_frames_stay_naive():
+    from services.finance.report import load_billing_frames, store_billing_frames
+
+    store: dict = {}
+    store_billing_frames(store, _billing_frames())
+    back = load_billing_frames(store)
+    pd.testing.assert_frame_equal(back["energy_tou"], _billing_frames()["energy_tou"])
+
+
+def test_commercial_terms_keys_and_values_become_plain_json():
+    import pickle as _p
+
+    from routers.projects import _safe_unpickle_results
+    from services.finance.report import store_commercial_terms
+
+    store: dict = {}
+    store_commercial_terms(store, {
+        "ic_peak_import": {pd.Period("2030-01", "M"): 42.5,
+                           pd.Timestamp("2030-02-01", tz="Europe/Berlin"): 40.0},
+        "flags": ("ratchet_seed_missing",),
+    })
+    terms = _safe_unpickle_results(_p.dumps(store))["last_commercial_terms"]
+    assert terms["ic_peak_import"] == {"2030-01": 42.5, "2030-02-01T00:00:00+01:00": 40.0}
+    assert terms["flags"] == ["ratchet_seed_missing"]
+
+
+# ── review WP0.5 #2: a new solve claim clears the per-solve IC keys ──────────
+
+
+def test_a_foreground_solve_clears_the_ic_keys(client, install_network, session_state):
+    from tests.conftest import build_network
+
+    install_network(build_network(), name="ic_claim")
+    st = session_state(client)
+    st["investment_case_report"] = _report().model_dump(mode="json")
+    st["billing_frames"] = _billing_frames()
+    st["last_commercial_terms"] = _terms()
+    resp = client.post("/api/simulation/run")
+    assert resp.status_code == 200, resp.text
+    t = session_state(client).get("thread")
+    t.join(timeout=120)
+    st = session_state(client)
+    for k in IC_KEYS:
+        assert st.get(k) is None, k
+
+
+def test_a_queued_solve_clears_the_ic_keys(client, install_network, tmp_projects_dir,
+                                            project_storage_dir, session_state):
+    import time
+    import uuid
+
+    from routers.projects import _safe_unpickle_results, _unwrap_results_state
+    from services.solve_queue import solve_queue
+    from tests.conftest import build_network
+
+    install_network(build_network(), name="ic_q")
+    st = session_state(client)
+    st["last_commercial_terms"] = _terms()
+    st["investment_case_report"] = _report().model_dump(mode="json")
+    assert client.post("/api/projects/ic_q", params={"force": True, "rebind": True}).status_code == 200
+    pkl = project_storage_dir("ic_q") / "results_state.pkl"
+    before = _unwrap_results_state(_safe_unpickle_results(pkl.read_bytes()))
+    assert before["last_commercial_terms"] == _terms()
+
+    r = client.post("/api/simulation/queue", json={"project_id": "ic_q"})
+    assert r.status_code == 200, r.text
+    job_id = uuid.UUID(str(r.json()["id"]))
+    deadline = time.time() + 90
+    while time.time() < deadline:
+        if (solve_queue.get_job(job_id) or {}).get("status") in ("completed", "failed", "aborted"):
+            break
+        time.sleep(0.2)
+    assert solve_queue.get_job(job_id)["status"] == "completed"
+    # The save after a queued solve DELETES the pickle when no side result is
+    # left (projects.py save path) — which is exactly "all cleared".
+    after = (_unwrap_results_state(_safe_unpickle_results(pkl.read_bytes()))
+             if pkl.exists() else {})
+    for k in IC_KEYS:
+        assert after.get(k) is None, k
