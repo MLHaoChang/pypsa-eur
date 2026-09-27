@@ -365,3 +365,79 @@ def zonal_mc_adequacy(z: ZonalInputs, *, draws: int = 500, seed=0,
     return mc_adequacy(z.hub, draws=draws, seed=seed, cov_target=cov_target,
                        batch=batch, stop_event=stop_event, blocks_fn=_blocks,
                        **kw, **sim_kwargs)
+
+
+# ── WP3: the grid surplus as the COPT screening sees it ──────────────────
+
+def _grid_expected_shortfall(units, x, periods) -> np.ndarray:
+    """
+    ``ES_h(x_h) = E[max(x_h − C_h, 0)]`` for the grid fleet ``units``,
+    per hour — the COPT surface's own recipe (``copt._screen_block``):
+    split the fleet, net the units beyond ``K_EXACT`` at expectation and
+    the rate-zero profiled ones at full availability, convolve the two-state
+    units, mix the profiled ones exactly. Units with a per-period capacity
+    series are evaluated block by block at their constant block capacity,
+    as ``screening_analysis`` does.
+    """
+    from services.adequacy.activity import block_capacity
+    from services.adequacy.copt import (
+        build_copt,
+        deterministic_output,
+        mixture_hourly,
+        netted_expectation,
+        split_fleet,
+    )
+
+    x = np.asarray(x, dtype=np.float64)
+    H = x.shape[0]
+    has_series = any(getattr(u, "capacity_series", None) is not None
+                     for u in units)
+    blocks = tuple(periods) if has_series else (("ALL", 0, H),)
+    out = np.zeros(H, dtype=np.float64)
+    for _label, start, end in blocks:
+        block_units = []
+        for u in units:
+            cs = getattr(u, "capacity_series", None)
+            cap = block_capacity(u.capacity_mw, cs, start, end)
+            if cap <= 0.0:
+                continue
+            prof = (None if u.profile is None
+                    else np.asarray(u.profile, dtype=np.float64)[start:end])
+            block_units.append(dataclasses.replace(
+                u, capacity_mw=cap, capacity_series=None, profile=prof))
+        xb = x[start:end]
+        hb = end - start
+        split = split_fleet(block_units)
+        xb = (xb - netted_expectation(split.netted, hb)
+              - deterministic_output(split.deterministic, hb))
+        dist = build_copt(list(split.table))
+        _lolp, es = mixture_hourly(dist, xb, split.mixed)
+        out[start:end] = es
+    return out
+
+
+def expected_surplus_fraction(grid_units, grid_residual, *, cap, ratio,
+                              periods) -> np.ndarray:
+    """
+    ``f_h = E[min(cap_h, S_h)] / cap_h`` with ``S_h = max(C_h − r_h, 0) ×
+    ratio_h`` — the share of a Link's hub-side cap the grid area can back,
+    in expectation over the area's own outages (plan 2026-09-28, WP3).
+
+    With ``c' = cap / ratio`` (the cap in grid-side MW) and ``ES`` the grid
+    fleet's expected shortfall, ``E[min(c', (C − r)⁺)] = c' + ES(r) −
+    ES(r + c')`` — exact on the COPT grid — so ``f = ratio × (c' + ES(r) −
+    ES(r + c')) / cap``, clipped to ``[0, 1]``. Hours with no cap return 1
+    (nothing to derate). Storage is not in the COPT (it never is).
+    """
+    cap = np.asarray(cap, dtype=np.float64)
+    ratio = np.asarray(ratio, dtype=np.float64)
+    r = np.asarray(grid_residual, dtype=np.float64)
+    live = (cap > 0.0) & (ratio > 0.0)
+    c_grid = np.where(live, cap / np.where(ratio > 0.0, ratio, 1.0), 0.0)
+    es_r = _grid_expected_shortfall(grid_units, r, periods)
+    es_rc = _grid_expected_shortfall(grid_units, r + c_grid, periods)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        f = np.where(live, ratio * (c_grid + es_r - es_rc) / np.where(
+            live, cap, 1.0), 1.0)
+    f = np.where(cap > 0.0, np.where(ratio > 0.0, f, 0.0), 1.0)
+    return np.clip(f, 0.0, 1.0)
