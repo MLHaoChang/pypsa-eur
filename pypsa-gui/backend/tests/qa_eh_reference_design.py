@@ -201,8 +201,9 @@ def section_1_weak_flexible() -> None:
           str(scope.get("import_link_models"))[:200])
     _step("the grid behind the Link is sampled as a second area",
           payload.get("import_model") == "zonal"
-          and (scope.get("grid_area") or {}).get("units") == ["grid_supply"],
-          str(scope.get("grid_area"))[:200])
+          and [a.get("units") for a in scope.get("grid_areas") or []]
+          == [["grid_supply"]],
+          str(scope.get("grid_areas"))[:200])
     WEAK_EVIDENCE["mc_lole_h"] = lole
     WEAK_EVIDENCE["import_model"] = payload.get("import_model")
 

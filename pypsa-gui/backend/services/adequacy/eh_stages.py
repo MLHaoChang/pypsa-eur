@@ -151,8 +151,18 @@ class FleetScope:
     # Per snapshot: MW delivered at the hub per MW withdrawn from the grid.
     delivery_ratio: Any = None
     n_grid_components: int = 0
-    # Set by freeze_fixed_plan when the zonal (two-area) path applies.
-    grid_area: dict | None = None
+    # Per live Link: its grid component and its hub-side / grid-side series —
+    # what the zonal builder groups into areas (plan 2026-09-28, WP2).
+    link_grid: dict = field(default_factory=dict)
+    # Grid component id → its buses (every component the Links reach).
+    grid_components: dict = field(default_factory=dict)
+    # Set by freeze_fixed_plan: one entry per grid area when the zonal path
+    # applies (at least one area sampled); empty otherwise.
+    grid_areas: list = field(default_factory=list)
+
+    @property
+    def zonal(self) -> bool:
+        return any(a.get("sampled") for a in self.grid_areas)
 
     def base_import_model(self) -> str | None:
         if self.mode != "hub_side":
@@ -167,14 +177,14 @@ class FleetScope:
         return "mixed"
 
     def import_model(self) -> str | None:
-        return "zonal" if self.grid_area is not None else self.base_import_model()
+        return "zonal" if self.zonal else self.base_import_model()
 
     def import_firmness(self) -> str | None:
         base = self.base_import_model()
         if base is None:
             return None
         sampled = base in ("sampled_unit", "mixed")
-        if self.grid_area is not None:
+        if self.zonal:
             return "outage_and_grid_sampled" if sampled else "grid_sampled"
         return {"sampled_unit": "outage_sampled",
                 "mixed": "partially_outage_sampled"}.get(
@@ -200,7 +210,7 @@ class FleetScope:
             "import_link_models": [m.as_payload() for m in self.link_models],
             "import_units": {u.name: u.name.split(":", 1)[1]
                              for u in self.import_units},
-            "grid_area": self.grid_area,
+            "grid_areas": list(self.grid_areas),
             "note": self.note,
         }
 
@@ -349,6 +359,7 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
     sending_total = np.zeros(H, dtype=float)
     models: list[ImportLinkModel] = []
     import_units: list = []
+    link_grid: dict = {}
     bad: list[str] = []
     for lk in links:
         g, h = orient[lk]
@@ -371,6 +382,8 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
             continue
         cap_total += delivered
         sending_total += sending
+        link_grid[str(lk)] = {"comp": comp[g], "delivered": delivered,
+                              "sending": sending}
         mttr = float(occ["mttr_hours"]) if src != "missing" else float("nan")
         if sample_links and src != "missing":
             if not rate_is_usable(occ["rate"]):
@@ -413,7 +426,10 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
                        import_firm_mw=firm, import_cap_mw=cap_total,
                        link_models=models, import_units=import_units,
                        delivery_ratio=ratio,
-                       n_grid_components=len(grid_comps))
+                       n_grid_components=len(grid_comps),
+                       link_grid=link_grid,
+                       grid_components={c: sorted(by_comp[c])
+                                        for c in sorted(grid_comps)})
     scope.note = _scope_note(scope)
     return scope
 
@@ -438,10 +454,11 @@ def _scope_note(scope: FleetScope, extra: str | None = None) -> str:
         f"area; import peak {peak:.4g} MW — " + "; ".join(parts)
         + f" (import_model={scope.import_model()}, "
         f"import_firmness={scope.import_firmness()})")
-    if scope.grid_area is not None:
-        note += (f"; grid side sampled as a second area "
-                 f"({len(scope.grid_area['units'])} unit(s)): the hub receives "
-                 "min(Link availability, grid surplus) each hour")
+    if scope.zonal:
+        sampled = [a for a in scope.grid_areas if a["sampled"]]
+        note += (f"; {len(sampled)} of {len(scope.grid_areas)} grid area(s) "
+                 f"sampled ({sum(a['n_units'] for a in sampled)} unit(s)): the "
+                 "hub receives Σ min(Link availability, area surplus) each hour")
     if extra:
         note += f"; {extra}"
     return note
@@ -480,14 +497,18 @@ def _hub_side_copy(network, excluded_buses: list[str]):
     return nn
 
 
-def _grid_area(network, cfg, scope: FleetScope, hub_inputs):
+def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
     """
-    The zonal (v2) grid area → ``(ZonalInputs | None, reason | None)``.
+    The zonal grid areas → ``(ZonalInputs | None, reason | None)``.
 
-    Eligible when at least one import Link is live, the grid side is ONE
-    connected component (surplus in one grid cannot reach another except
-    through the hub) and its snapshot has a non-empty sampled fleet. Any
-    other outcome is a reason and the certification stays on v1.
+    One area per grid-side connected component that a LIVE import Link
+    reaches (surplus in one grid cannot reach another except through the
+    hub), in the order the Links are listed; area ``k`` samples from
+    substream ``GRID_STREAM_KEY − k``. An area whose snapshot has no sampled
+    unit (or refuses) keeps ``grid=None``: its Links see an unbounded
+    surplus, i.e. v1 for those Links, and the payload says why. Zonal
+    applies when at least one area is sampled; otherwise the certification
+    stays on v1 and the reasons go into the note.
     """
     from services.adequacy.mc import snapshot_inputs
     from services.adequacy.mc_zonal import GridArea, ZonalInputs
@@ -495,51 +516,87 @@ def _grid_area(network, cfg, scope: FleetScope, hub_inputs):
     live = [m for m in scope.link_models if m.model != "islanded"]
     if not live:
         return None, None
-    if scope.n_grid_components != 1:
-        return None, (f"grid side is {scope.n_grid_components} separate "
-                      "components — zonal grid area not modelled, v1 applies")
-    hub_buses = [str(b) for b in network.buses.index
-                 if str(b) not in set(scope.excluded_buses)]
-    try:
-        grid = snapshot_inputs(_hub_side_copy(network, hub_buses), cfg=cfg)
-    except Exception as exc:  # noqa: BLE001 — the reason is the note
-        return None, (f"grid-side snapshot refused ({exc}) — zonal grid area "
-                      "not modelled, v1 applies")
-    if not grid.units:
-        return None, ("grid side has no occurrence data (no grid-side unit "
-                      "carries a resolvable outage rate) — the grid behind the "
-                      "Link is assumed to have surplus, v1 applies")
-    n_hub = len(hub_inputs.units) - len(scope.import_units)
-    area = GridArea(
-        grid=grid,
-        import_idx=tuple(range(n_hub, len(hub_inputs.units))),
-        firm_import_mw=np.ascontiguousarray(
-            np.asarray(scope.import_firm_mw, dtype=np.float64)),
-        delivery_ratio=np.ascontiguousarray(
-            np.asarray(scope.delivery_ratio, dtype=np.float64)),
-        stream=0)
-    z = ZonalInputs(hub=hub_inputs, areas=(area,))
-    peak = float(np.max(grid.residual)) if grid.residual.size else 0.0
-    # A store rated 0 MW in every period dispatches nothing — not "dispatched".
-    stores = [s.name for s in grid.storage
-              if s.p_nom_mw > 0 and (s.capacity_series is None
-                                     or float(np.max(s.capacity_series)) > 0)]
-    scope.grid_area = {
-        "units": [u.name for u in grid.units],
-        "n_units": len(grid.units),
-        "capacity_mw": float(sum(u.capacity_mw for u in grid.units)),
-        "demand_peak_mw": peak,
-        "storage": stores,
-        "storage_dispatched": bool(stores),
-        "note": ("grid side sampled as a second area: its own fleet and "
-                 "demand (residual after its must-take)"
-                 + ("; grid storage dispatched grid-first, then as remote "
-                    "support bounded by the Link headroom, charging only "
-                    "from surplus not offered to the hub (power offered but "
-                    "not used by the hub is not stored — conservative)"
-                    if stores else "; no grid-side storage")),
-    }
-    return z, None
+    unit_pos = {u.name: i for i, u in enumerate(hub_inputs.units)}
+    sampled_links = {m.name for m in scope.link_models
+                     if m.model == "sampled_unit"}
+    comps: list[int] = []
+    for m in live:
+        c = scope.link_grid[m.name]["comp"]
+        if c not in comps:
+            comps.append(c)
+    H = len(hub_inputs.residual)
+    all_buses = [str(b) for b in network.buses.index]
+    areas: list = []
+    payload: list[dict] = []
+    reasons: list[str] = []
+    for k, c in enumerate(comps):
+        links = [m.name for m in live if scope.link_grid[m.name]["comp"] == c]
+        firm = np.zeros(H, dtype=np.float64)
+        deliv = np.zeros(H, dtype=np.float64)
+        send = np.zeros(H, dtype=np.float64)
+        for lk in links:
+            info = scope.link_grid[lk]
+            deliv += info["delivered"]
+            send += info["sending"]
+            if lk not in sampled_links:
+                firm += info["delivered"]
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.where(send > 0, deliv / send, 1.0)
+        keep = set(scope.grid_components[c])
+        grid, why = None, None
+        try:
+            g = snapshot_inputs(_hub_side_copy(
+                network, [b for b in all_buses if b not in keep]), cfg=cfg)
+            if g.units:
+                grid = g
+            else:
+                why = ("no occurrence data (no unit in this grid area carries "
+                       "a resolvable outage rate) — its Links see an "
+                       "unbounded surplus (v1)")
+        except Exception as exc:  # noqa: BLE001 — the reason is the payload
+            why = (f"grid-side snapshot refused ({exc}) — its Links see an "
+                   "unbounded surplus (v1)")
+        areas.append(GridArea(
+            grid=grid,
+            import_idx=tuple(unit_pos[f"link:{lk}"] for lk in links
+                             if lk in sampled_links),
+            firm_import_mw=np.ascontiguousarray(firm),
+            delivery_ratio=np.ascontiguousarray(ratio),
+            stream=k))
+        entry = {"area": k, "links": links, "buses": sorted(keep),
+                 "sampled": grid is not None, "reason": why}
+        if grid is not None:
+            stores = [s.name for s in grid.storage
+                      if s.p_nom_mw > 0 and (s.capacity_series is None
+                                             or float(np.max(s.capacity_series)) > 0)]
+            entry.update({
+                "units": [u.name for u in grid.units],
+                "n_units": len(grid.units),
+                "capacity_mw": float(sum(u.capacity_mw for u in grid.units)),
+                "demand_peak_mw": (float(np.max(grid.residual))
+                                   if grid.residual.size else 0.0),
+                "storage": stores,
+                "storage_dispatched": bool(stores),
+                "note": ("sampled as its own area: its fleet and demand "
+                         "(residual after its must-take)"
+                         + ("; storage dispatched grid-first, then as remote "
+                            "support bounded by the Link headroom, charging "
+                            "only from surplus not offered to the hub (power "
+                            "offered but not used by the hub is not stored — "
+                            "conservative)" if stores
+                            else "; no storage in this area")),
+            })
+        else:
+            entry.update({"units": [], "n_units": 0, "capacity_mw": None,
+                          "demand_peak_mw": None, "storage": [],
+                          "storage_dispatched": False, "note": why})
+            reasons.append(f"area {k} ({', '.join(links)}): {why}")
+        payload.append(entry)
+    if not any(a.grid is not None for a in areas):
+        return None, ("no grid area is sampled — " + "; ".join(reasons)
+                      + "; v1 applies")
+    scope.grid_areas = payload
+    return ZonalInputs(hub=hub_inputs, areas=tuple(areas)), None
 
 
 def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
@@ -586,8 +643,8 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
                     units=tuple(inputs.units) + tuple(scope.import_units),
                     residual=np.ascontiguousarray(inputs.residual - firm))
                 if import_model == "auto":
-                    snap.zonal_inputs, why = _grid_area(network, cfg, scope,
-                                                        inputs)
+                    snap.zonal_inputs, why = _grid_areas(network, cfg, scope,
+                                                         inputs)
                     scope.note = _scope_note(scope, why)
             else:
                 inputs = snapshot_inputs(network, cfg=cfg)

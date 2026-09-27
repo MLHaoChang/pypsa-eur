@@ -64,8 +64,8 @@ def test_auto_goes_zonal_when_the_grid_side_carries_occurrence_data():
     scope = frozen.scope
     assert scope["import_model"] == "zonal"
     assert scope["import_firmness"] == "outage_and_grid_sampled"
-    assert scope["grid_area"]["units"] == ["grid_supply"]
-    assert scope["grid_area"]["storage_dispatched"] is False
+    assert scope["grid_areas"][0]["units"] == ["grid_supply"]
+    assert scope["grid_areas"][0]["storage_dispatched"] is False
     assert frozen.zonal_inputs is not None
     # The hub half of the zonal inputs IS the v1 snapshot (same units, same
     # positions) — the COPT screens that one.
@@ -95,7 +95,7 @@ def test_a_grid_whose_own_load_eats_its_supply_raises_lole_over_v1():
     # 200 MW grid unit, 180 MW grid load: at most 20 MW left for the hub.
     frozen = _freeze(_weak(grid_load=180.0))
     assert frozen.scope["import_model"] == "zonal"
-    assert frozen.scope["grid_area"]["demand_peak_mw"] == pytest.approx(180.0)
+    assert frozen.scope["grid_areas"][0]["demand_peak_mw"] == pytest.approx(180.0)
     assert _lole(_zonal(frozen)) > _lole(_v1(frozen))
 
 
@@ -113,8 +113,8 @@ def test_grid_side_without_occurrence_data_falls_back_to_v1_and_says_so():
     frozen = _freeze(n)
     assert frozen.zonal_inputs is None
     assert frozen.scope["import_model"] == "sampled_unit"
-    assert frozen.scope["grid_area"] is None
-    assert "grid side has no occurrence data" in frozen.scope["note"]
+    assert frozen.scope["grid_areas"] == []
+    assert "no grid area is sampled" in frozen.scope["note"]
 
 
 def test_sampled_unit_mode_never_builds_the_grid_area():

@@ -91,8 +91,7 @@ def test_a_grid_battery_supports_the_hub_and_lowers_lole():
     without = _blocks(z, grid_storage_enabled=False)
     assert _total(with_s, 1).mean() < _total(without, 1).mean()   # EUE
     assert _total(with_s, 0).mean() <= _total(without, 0).mean()  # LOLE
-    area = frozen.scope["grid_areas"][0] if "grid_areas" in frozen.scope \
-        else frozen.scope["grid_area"]
+    area = frozen.scope["grid_areas"][0]
     assert area["storage_dispatched"] is True
     assert area["storage"] == ["grid_bat"]
 
@@ -207,7 +206,7 @@ def test_charging_respects_the_remaining_rating_and_energy_headroom():
 
 def test_a_zero_rated_grid_store_is_not_reported_as_dispatched():
     frozen = _freeze(_weak(grid_battery=(0.0, 4.0)))
-    area = frozen.scope["grid_area"]
+    area = frozen.scope["grid_areas"][0]
     assert area["storage"] == [] and area["storage_dispatched"] is False
 
 
