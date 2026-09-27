@@ -35,18 +35,20 @@ from typing import Any
 
 import numpy as np
 
-from models.energy_hub import CertificationVerdict
+from models.energy_hub import (
+    DEFAULT_EH_FMEA_TOP_N,
+    DEFAULT_EH_FRONTIER_LADDER,
+    CertificationVerdict,
+)
 
 logger = logging.getLogger("pypsa_gui.eh_stages")
 
-# Frontier ladder around the pack's target: factors on ``ens_cap_permyriad``,
-# loosest first (the engine sorts anyway). ×1 is the report's own point, so
-# the curve passes through ``cost_at_target_eur``.
-EH_FRONTIER_LADDER: tuple[float, ...] = (4.0, 2.0, 1.0, 0.5, 0.25)
+# Defaults for the pack fields ``frontier_ladder`` / ``fmea_top_n`` (owned by
+# ``models.energy_hub``; the names are kept for callers and tests).
+EH_FRONTIER_LADDER: tuple[float, ...] = DEFAULT_EH_FRONTIER_LADDER
+FMEA_TOP_N = DEFAULT_EH_FMEA_TOP_N
 #: Fewer points than this is not a curve; the stage skips rather than run two.
 MIN_EH_FRONTIER_POINTS = 3
-#: Ranked residual failure modes kept in the report.
-FMEA_TOP_N = 10
 
 # Spec decision 14 / P2: FMEA top-N from the EH study is Link-primary Class-B
 # residual risk. AC Line/Transformer N-1 stays on SCLOPF and is omitted from
@@ -455,7 +457,9 @@ def run_mc_certify_stage(
 # ── WP2: frontier ─────────────────────────────────────────────────────────
 
 def frontier_targets_for(ens_cap_permyriad: float | None,
-                         remaining_solves: int) -> tuple[list[float], str | None]:
+                         remaining_solves: int, *,
+                         ladder: tuple[float, ...] = EH_FRONTIER_LADDER,
+                         ) -> tuple[list[float], str | None]:
     """
     The ladder that fits: ``(targets, skip_reason)``. Empty targets + a
     reason when the stage should be skipped.
@@ -468,11 +472,16 @@ def frontier_targets_for(ens_cap_permyriad: float | None,
         return [], (
             f"budget: {remaining_solves} solve(s) left, frontier needs at least "
             f"{MIN_EH_FRONTIER_POINTS} points + 1 closing restore")
-    factors = list(EH_FRONTIER_LADDER)
+    factors = sorted({float(f) for f in ladder}, reverse=True)
+    if len(factors) < MIN_EH_FRONTIER_POINTS:
+        return [], (
+            f"frontier_ladder has {len(factors)} factor(s); a curve needs at "
+            f"least {MIN_EH_FRONTIER_POINTS}")
     if affordable < len(factors):
-        # Keep the report's own point (×1) and trim from the outside in.
-        keep = [1.0] + [f for f in factors if f != 1.0]
-        factors = sorted(keep[:affordable], reverse=True)
+        # Trim from the outside in: keep the factors nearest ×1 (the report's
+        # own target) on a log scale, ties broken towards the looser side.
+        nearest = sorted(factors, key=lambda f: (abs(math.log(f)), -f))
+        factors = sorted(nearest[:affordable], reverse=True)
     return [float(ens_cap_permyriad) * f for f in factors], None
 
 
@@ -483,6 +492,7 @@ def run_frontier_stage(
     stop_event,
     log_queue,
     final_state_update,
+    ladder: tuple[float, ...] = EH_FRONTIER_LADDER,
 ) -> tuple[str, dict | None, str | None, int]:
     """
     ε-constraint frontier around the target → ``(status, payload, note,
@@ -496,7 +506,8 @@ def run_frontier_stage(
         run_frontier_sweep,
     )
 
-    targets, why = frontier_targets_for(ens_cap_permyriad, remaining_solves)
+    targets, why = frontier_targets_for(ens_cap_permyriad, remaining_solves,
+                                        ladder=ladder)
     if not targets:
         return "skipped", None, why, 0
     voll = float(getattr(cfg, "voll", 0.0) or 0.0)

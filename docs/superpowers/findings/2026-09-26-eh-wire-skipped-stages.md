@@ -93,9 +93,12 @@ Reviewing the shipped stages turned up an optimistic verdict. The MC and the COP
 
 Tests: `test_energy_hub_certify_scope.py` (6: off_grid verdict flips to `failed`, weak_flexible counts 50 MW not 200 MW and screens only hub units, carrier-only and non-separating fallbacks, bus0 orientation and its critical-side flip).
 
+## Cleanups in the same PR
+
+- **Legacy `gates` fallback retired.** A required-but-unrequested `mc_certify` used to set `gates` to `not_established` ("mc_certify required by pack but not requested"). The `certification` section now carries that reason, so `gates` is the dynamics field only: `weak_flexible` runs the SCR gate, the other archetypes get `skipped`. The P1.5 test that pinned the fallback now asserts `certification == not_established` and `gates == skipped`. No frontend change was needed.
+- **Frontier ladder and FMEA top-N are pack fields.** `ArchetypePack.frontier_ladder` (default ×4, ×2, ×1, ×½, ×¼; distinct positive finite factors, at most the frontier engine's 12 points) and `ArchetypePack.fmea_top_n` (default 10, 1–50). Budget trimming now keeps the factors nearest ×1 on a log scale, so a 3-point budget sweeps ×2, ×1, ×½ rather than dropping the whole tight end.
+
 ## Still open / deliberately not done
 
 - **The import is firm up to its cap.** The hub-side scope treats the PoC Link as a firm block (planning limit), not as a unit with its own outage chain; a zonal MC that samples the Link and the grid behind it is a separate engine change. The carrier-fallback case still certifies on the whole copper plate and says so.
-- The legacy `gates` fallback ("mc_certify required by pack but not requested") is kept for the pinned P1.5 test; with the `certification` section in place it is redundant and can be retired with a frontend change.
 - `fmea_top` Class B is Link-primary only (decision 14); SCLOPF Line/Transformer rows remain omitted and the note says so.
-- Pack-level frontier ladder / top-N are module constants (`EH_FRONTIER_LADDER`, `FMEA_TOP_N`), not pack fields — promote when a pack needs a different curve.

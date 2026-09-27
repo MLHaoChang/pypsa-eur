@@ -143,3 +143,14 @@ def test_fmea_top_skipped_note_keeps_link_primary_wording():
     assert report.completeness["fmea_top"] == "skipped"
     note = report.sections["fmea_top"].note or ""
     assert "Link-primary" in note and "SCLOPF" in note and "not requested" in note
+
+
+@pytest.mark.live_solve
+def test_the_pack_top_n_bounds_the_ranking():
+    n = certifiable_weak_network()
+    pack = _pack(10.0).model_copy(update={"fmea_top_n": 1})
+    report = _run(n, pack, stages=("apply_pack", "ens_solve", "fmea_top", "assemble"))
+    payload = report.sections["fmea_top"].payload
+    assert payload["top_n"] == 1
+    assert len(payload["top"]) == 1
+    assert payload["n_total_modes"] > 1

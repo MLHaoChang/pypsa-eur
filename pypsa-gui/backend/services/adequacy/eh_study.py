@@ -314,6 +314,7 @@ def run_eh_study(
                         stop_event=stop_event,
                         log_queue=log_queue,
                         final_state_update=state_update,
+                        ladder=tuple(pack.frontier_ladder),
                     ))
                 solves += fr_solves
                 section_payloads["frontier"] = (fr_status, fr_payload, fr_note)
@@ -370,6 +371,7 @@ def run_eh_study(
                         stop_event=stop_event,
                         log_queue=log_queue,
                         final_state_update=state_update,
+                        top_n=int(pack.fmea_top_n),
                     ))
                 solves += f_solves
                 section_payloads["fmea_top"] = (f_status, f_payload, f_note)
@@ -690,12 +692,10 @@ def run_eh_study(
             section_payloads["gates"] = (gate_status, gate_payload, gate_note)
             if gate_block is not None:
                 gates_obj = gate_block
-        elif pack.mc_certify_required and "mc_certify" not in requested:
-            section_payloads["gates"] = (
-                "not_established", None,
-                "mc_certify required by pack but not requested",
-            )
         else:
+            # A required-but-unrequested mc_certify is reported on the
+            # ``certification`` section (and the pipeline stage), not here —
+            # gates is the dynamics product field only (P9).
             section_payloads.setdefault(
                 "gates", (
                     "skipped", None,

@@ -127,3 +127,66 @@ def test_stage_order_is_still_decision_18():
     assert order.index("ens_solve") < order.index("frontier") \
         < order.index("mc_certify") < order.index("fmea_top") \
         < order.index("redundancy")
+
+
+# ── pack-level ladder / top-N (cleanup after WP2/WP3) ────────────────────
+
+def test_pack_defaults_match_stage_constants_and_engine_cap():
+    from models.energy_hub import (
+        DEFAULT_EH_FMEA_TOP_N,
+        DEFAULT_EH_FRONTIER_LADDER,
+        MAX_EH_FRONTIER_POINTS,
+        default_weak_flexible_pack,
+    )
+    from services.adequacy.frontier import MAX_FRONTIER_POINTS
+
+    assert MAX_EH_FRONTIER_POINTS == MAX_FRONTIER_POINTS
+    assert ST.EH_FRONTIER_LADDER == DEFAULT_EH_FRONTIER_LADDER
+    assert ST.FMEA_TOP_N == DEFAULT_EH_FMEA_TOP_N
+    pack = default_weak_flexible_pack()
+    assert pack.frontier_ladder == DEFAULT_EH_FRONTIER_LADDER
+    assert pack.fmea_top_n == DEFAULT_EH_FMEA_TOP_N
+
+
+@pytest.mark.parametrize("ladder", [(), (1.0, 1.0, 2.0), (1.0, -2.0, 4.0),
+                                    (1.0, float("inf"), 2.0),
+                                    tuple(float(i + 1) for i in range(13))])
+def test_pack_refuses_an_unusable_frontier_ladder(ladder):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        default_strong_grid_pack().model_validate({
+            **default_strong_grid_pack().model_dump(), "frontier_ladder": ladder})
+
+
+def test_pack_refuses_an_out_of_range_top_n():
+    from pydantic import ValidationError
+
+    for bad in (0, 51):
+        with pytest.raises(ValidationError):
+            default_strong_grid_pack().model_validate({
+                **default_strong_grid_pack().model_dump(), "fmea_top_n": bad})
+
+
+def test_trim_keeps_the_points_nearest_the_target_on_both_sides():
+    targets, why = ST.frontier_targets_for(10.0, remaining_solves=4)
+    assert why is None
+    assert targets == [20.0, 10.0, 5.0]
+
+
+def test_a_custom_ladder_is_used_and_needs_three_factors():
+    targets, _ = ST.frontier_targets_for(10.0, 29, ladder=(3.0, 1.0, 0.3))
+    assert targets == pytest.approx([30.0, 10.0, 3.0])
+    targets, why = ST.frontier_targets_for(10.0, 29, ladder=(2.0, 1.0))
+    assert targets == [] and "at least" in why
+
+
+@pytest.mark.live_solve
+def test_the_pack_ladder_drives_the_study_frontier():
+    n = certifiable_weak_network()
+    pack = _pack(10.0).model_copy(update={"frontier_ladder": (3.0, 1.0, 0.5)})
+    report = _run(n, pack, stages=("apply_pack", "ens_solve", "frontier", "assemble"))
+    payload = report.sections["frontier"].payload
+    assert payload["targets_permyriad"] == pytest.approx([30.0, 10.0, 5.0])
+    rec = next(s for s in report.pipeline.stages if s.stage == "frontier")
+    assert rec.solves_charged == 3 + 1

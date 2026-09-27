@@ -103,7 +103,11 @@ def test_run_marks_not_established_when_required_mc_missing():
     mc_rec = next(s for s in report.pipeline.stages if s.stage == "mc_certify")
     assert mc_rec.status == "skipped"
     assert mc_rec.note and "required" in mc_rec.note
-    assert report.completeness["gates"] == "not_established"
+    # 2026-09-26: the missing certification is reported on its own section;
+    # gates is the dynamics field only (the legacy fallback there is retired).
+    assert report.completeness["certification"] == "not_established"
+    assert "required" in (report.sections["certification"].note or "")
+    assert report.completeness["gates"] == "skipped"
 
 
 def test_default_stages_never_leave_unimplemented_pending():
