@@ -520,7 +520,10 @@ def _grid_area(network, cfg, scope: FleetScope, hub_inputs):
         stream=0)
     z = ZonalInputs(hub=hub_inputs, areas=(area,))
     peak = float(np.max(grid.residual)) if grid.residual.size else 0.0
-    stores = [s.name for s in grid.storage]
+    # A store rated 0 MW in every period dispatches nothing — not "dispatched".
+    stores = [s.name for s in grid.storage
+              if s.p_nom_mw > 0 and (s.capacity_series is None
+                                     or float(np.max(s.capacity_series)) > 0)]
     scope.grid_area = {
         "units": [u.name for u in grid.units],
         "n_units": len(grid.units),
@@ -532,8 +535,9 @@ def _grid_area(network, cfg, scope: FleetScope, hub_inputs):
                  "demand (residual after its must-take)"
                  + ("; grid storage dispatched grid-first, then as remote "
                     "support bounded by the Link headroom, charging only "
-                    "from surplus not offered to the hub" if stores
-                    else "; no grid-side storage")),
+                    "from surplus not offered to the hub (power offered but "
+                    "not used by the hub is not stored — conservative)"
+                    if stores else "; no grid-side storage")),
     }
     return z, None
 

@@ -174,10 +174,17 @@ class _AreaState:
         self.firm = np.asarray(area.firm_import_mw, dtype=np.float64)
         self.ratio = np.asarray(area.delivery_ratio, dtype=np.float64)
         g = area.grid
+        self.own_mwh = self.support_mwh = self.charge_mwh = 0.0
         if g is None:
             self.grid_t = None
             self.stores = ()
         else:
+            if g.residual.size != H or tuple(g.periods) != tuple(hub.periods):
+                raise ValueError(
+                    "grid area and hub disagree on the horizon (residual "
+                    f"{g.residual.size} vs {H} hours, periods "
+                    f"{len(g.periods)} vs {len(hub.periods)}) — both must come "
+                    "from the same network snapshot")
             key = GRID_STREAM_KEY - int(area.stream)
             self.grid_t = np.ascontiguousarray(sample_capacity(
                 g.units, H, draws, _fresh(ss, (key,)), periods=g.periods).T)
@@ -212,8 +219,9 @@ class _AreaState:
             self.p_rem = np.repeat(self.p_nom[:, None], self.draws, axis=1)
             short = np.maximum(g_def, 0.0)
             if short.any():
-                unmet, _ = _discharge_only(short, self.soc, self.p_rem,
-                                           self.e_nom, self.eff_s, self.eff_d)
+                unmet, given = _discharge_only(short, self.soc, self.p_rem,
+                                               self.e_nom, self.eff_s, self.eff_d)
+                self.own_mwh += float(given.sum())
                 g_def = np.where(g_def > 0.0, unmet, g_def)
         self.surplus_g = np.maximum(-g_def, 0.0)
         return offered, np.minimum(offered, self.surplus_g * self.ratio[h])
@@ -234,6 +242,7 @@ class _AreaState:
             return deficit
         _, given = _discharge_only(need_h / r, self.soc, self.p_rem,
                                    self.e_nom, self.eff_s, self.eff_d)
+        self.support_mwh += float(given.sum())
         return deficit - given * r
 
     def charge(self, h, imp):
@@ -244,14 +253,17 @@ class _AreaState:
         reserved = imp / r if r > 0.0 else 0.0
         left = np.maximum(self.surplus_g - reserved, 0.0)
         if left.any():
+            before = self.soc.sum()
             _charge_only(left, self.soc, self.p_rem, self.e_nom, self.eff_s,
                          self.eff_d)
+            self.charge_mwh += float(self.soc.sum() - before)
 
 
 def simulate_zonal_blocks(z: ZonalInputs, *, draws: int, seed,
                           storage_enabled: bool = True,
                           grid_storage_enabled: bool = True,
-                          initial_soc_frac: float = 1.0) -> dict:
+                          initial_soc_frac: float = 1.0,
+                          trace: dict | None = None) -> dict:
     """
     Per-period per-draw ``(lole_h, eue_mwh)`` — ``_simulate_blocks``'s shape,
     for the hub, with each area's import bounded by that area's surplus.
@@ -267,6 +279,11 @@ def simulate_zonal_blocks(z: ZonalInputs, *, draws: int, seed,
     ``grid_storage_enabled=False``) steps 1, 4 and 5 are no-ops and the
     arithmetic is exactly the 2026-09-27 kernel's (pinned by
     ``tests/zonal_oracle.py``).
+
+    ``trace`` (tests / diagnostics): when a dict is passed, it receives one
+    entry per area, ``{"own_mwh", "support_mwh", "charge_mwh"}`` — grid-side
+    MWh summed over draws and MODELLED hours (unweighted) for step 1, step 4
+    and step 5 (charge = SoC gained). It never changes the result.
     """
     hub = z.hub
     residual = hub.residual
@@ -327,6 +344,9 @@ def simulate_zonal_blocks(z: ZonalInputs, *, draws: int, seed,
             lole += w_h * (deficit > SHORTFALL_TOL)
             eue += w_h * np.maximum(deficit, 0.0)
         out[label] = (lole, eue)
+    if trace is not None:
+        trace["areas"] = [{"own_mwh": a.own_mwh, "support_mwh": a.support_mwh,
+                           "charge_mwh": a.charge_mwh} for a in areas]
     return out
 
 
