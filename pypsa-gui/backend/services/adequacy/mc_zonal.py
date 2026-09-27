@@ -59,16 +59,39 @@ GRID_STREAM_KEY = 2**32 - 1
 
 
 @dataclass(frozen=True)
-class ZonalInputs:
-    """Both areas, frozen as plain arrays (the ``MCInputs`` rule)."""
+class GridArea:
+    """
+    One grid-side area behind one or more import Links (plan 2026-09-28).
 
-    hub: MCInputs                 # v1 inputs: hub units + import Link unit(s)
-    grid: MCInputs                # grid-side units / residual (storage unused)
-    import_idx: tuple             # positions of the Link unit(s) in hub.units
-    firm_import_mw: np.ndarray    # (H,) firm-block Links, already netted
-    #                               out of hub.residual in the v1 snapshot
+    ``grid`` is the area's own snapshot — units, residual (its demand net of
+    its must-take) and storage. ``None`` means the area has no sampled unit:
+    its Links then see an unbounded surplus (v1 for those Links), which is
+    how an unsampled grid coexists with a sampled one (WP2) and how a
+    common-mode event reaches a v1 hub (WP4).
+    """
+
+    grid: MCInputs | None
+    import_idx: tuple             # positions of this area's Link units in hub.units
+    firm_import_mw: np.ndarray    # (H,) this area's firm-block Links, already
+    #                               netted out of hub.residual in the v1 snapshot
     delivery_ratio: np.ndarray    # (H,) MW delivered at the hub per MW
     #                               withdrawn from the grid (Link efficiency)
+    stream: int = 0               # the area's index k → substream GRID_STREAM_KEY − k
+
+
+@dataclass(frozen=True)
+class ZonalInputs:
+    """The hub and its grid area(s), frozen as plain arrays (the ``MCInputs`` rule)."""
+
+    hub: MCInputs                 # v1 inputs: hub units + import Link unit(s)
+    areas: tuple                  # (GridArea, ...)
+
+
+def single_area(z: ZonalInputs) -> GridArea:
+    """The one area of a single-grid hub (tests and the scope builder)."""
+    if len(z.areas) != 1:
+        raise ValueError(f"expected one grid area, got {len(z.areas)}")
+    return z.areas[0]
 
 
 def _seed_sequence(seed) -> np.random.SeedSequence:
@@ -89,12 +112,161 @@ def _fresh(ss: np.random.SeedSequence, extra_key: tuple = ()) -> np.random.SeedS
                                   pool_size=ss.pool_size)
 
 
+def _discharge_only(need, soc, p_rem, e_nom, eff_s, eff_d):
+    """
+    Discharge ``need`` (≥ 0, grid-side MW) from the grid stores this hour.
+
+    ``mc._dispatch``'s discharge pass, with ONE difference: the power bound
+    is ``p_rem`` (S, draws), the power each store still has this hour —
+    grid stores may discharge twice in an hour (their own deficit, then
+    remote support) and must not exceed their rating across the two. Same
+    pinned order: descending remaining energy. Returns ``(unmet, given)``;
+    ``soc`` and ``p_rem`` are updated in place.
+    """
+    n_store, n_draw = soc.shape
+    cols = np.arange(n_draw)
+    order = np.argsort(soc, axis=0, kind="stable")
+    left = need.copy()
+    for r in range(n_store - 1, -1, -1):
+        si = order[r]
+        cur = soc[si, cols]
+        ed = eff_d[si]
+        give = np.minimum(np.minimum(p_rem[si, cols], cur * ed), left)
+        soc[si, cols] = cur - give / ed
+        p_rem[si, cols] -= give
+        left -= give
+    return left, need - left
+
+
+def _charge_only(surplus, soc, p_rem, e_nom, eff_s, eff_d):
+    """
+    Charge from ``surplus`` (≥ 0, grid-side MW), ascending remaining
+    energy — ``mc._dispatch``'s charge pass with the ``p_rem`` bound.
+    """
+    n_store, n_draw = soc.shape
+    cols = np.arange(n_draw)
+    order = np.argsort(soc, axis=0, kind="stable")
+    left = surplus.copy()
+    for r in range(n_store):
+        si = order[r]
+        cur = soc[si, cols]
+        es = eff_s[si]
+        headroom = np.maximum(e_nom[si] - cur, 0.0) / es
+        take = np.minimum(np.minimum(p_rem[si, cols], headroom), left)
+        soc[si, cols] = cur + take * es
+        p_rem[si, cols] -= take
+        left -= take
+
+
+class _AreaState:
+    """Per-area arrays for one simulation call."""
+
+    def __init__(self, area: GridArea, hub, units, ss, H, draws,
+                 grid_storage_enabled, initial_soc_frac):
+        self.area = area
+        imp = frozenset(int(i) for i in area.import_idx)
+        link_only = tuple(u if i in imp else dataclasses.replace(u, q=0.0)
+                          for i, u in enumerate(units))
+        self.link_t = np.ascontiguousarray(sample_capacity(
+            link_only, H, draws, _fresh(ss),
+            exclude=frozenset(range(len(units))) - imp,
+            periods=hub.periods).T)
+        self.firm = np.asarray(area.firm_import_mw, dtype=np.float64)
+        self.ratio = np.asarray(area.delivery_ratio, dtype=np.float64)
+        g = area.grid
+        if g is None:
+            self.grid_t = None
+            self.stores = ()
+        else:
+            key = GRID_STREAM_KEY - int(area.stream)
+            self.grid_t = np.ascontiguousarray(sample_capacity(
+                g.units, H, draws, _fresh(ss, (key,)), periods=g.periods).T)
+            self.stores = (_active_storage(g, True, ())
+                           if grid_storage_enabled else ())
+        self.any_series = any(getattr(s, "capacity_series", None) is not None
+                              for s in self.stores)
+        self.soc_frac = float(initial_soc_frac)
+        self.draws = draws
+
+    def start_block(self, start, end):
+        (self.n_s, self.p_nom, self.e_nom, self.eff_s,
+         self.eff_d) = block_store_arrays(self.stores, start, end,
+                                          any_series=self.any_series)
+        self.soc = (np.repeat((self.e_nom * self.soc_frac)[:, None],
+                              self.draws, axis=1)
+                    if self.n_s else np.zeros((0, self.draws)))
+
+    def offer(self, h):
+        """
+        Grid-first → ``(offered, imp)`` in hub-side MW for hour ``h``;
+        also leaves the hour's grid state for ``support`` / ``charge``.
+        """
+        offered = self.link_t[h].astype(np.float64) + self.firm[h]
+        if self.grid_t is None:
+            self.p_rem = None
+            self.surplus_g = None
+            return offered, offered
+        g_def = self.grid_t[h].astype(np.float64)
+        g_def = self.area.grid.residual[h] - g_def
+        if self.n_s:
+            self.p_rem = np.repeat(self.p_nom[:, None], self.draws, axis=1)
+            short = np.maximum(g_def, 0.0)
+            if short.any():
+                unmet, _ = _discharge_only(short, self.soc, self.p_rem,
+                                           self.e_nom, self.eff_s, self.eff_d)
+                g_def = np.where(g_def > 0.0, unmet, g_def)
+        self.surplus_g = np.maximum(-g_def, 0.0)
+        return offered, np.minimum(offered, self.surplus_g * self.ratio[h])
+
+    def support(self, h, deficit, offered, imp):
+        """
+        Remote support: grid storage covers what the hub still lacks,
+        bounded by the Link headroom ``offered − imp``.
+        """
+        if not self.n_s or self.grid_t is None:
+            return deficit
+        r = self.ratio[h]
+        if r <= 0.0:
+            return deficit
+        need_h = np.minimum(np.maximum(deficit, 0.0),
+                            np.maximum(offered - imp, 0.0))
+        if not need_h.any():
+            return deficit
+        _, given = _discharge_only(need_h / r, self.soc, self.p_rem,
+                                   self.e_nom, self.eff_s, self.eff_d)
+        return deficit - given * r
+
+    def charge(self, h, imp):
+        """Charge only from the surplus NOT offered to the hub."""
+        if not self.n_s or self.grid_t is None:
+            return
+        r = self.ratio[h]
+        reserved = imp / r if r > 0.0 else 0.0
+        left = np.maximum(self.surplus_g - reserved, 0.0)
+        if left.any():
+            _charge_only(left, self.soc, self.p_rem, self.e_nom, self.eff_s,
+                         self.eff_d)
+
+
 def simulate_zonal_blocks(z: ZonalInputs, *, draws: int, seed,
                           storage_enabled: bool = True,
+                          grid_storage_enabled: bool = True,
                           initial_soc_frac: float = 1.0) -> dict:
     """
-    Per-period per-draw ``(lole_h, eue_mwh)`` — ``_simulate_blocks``'s
-    shape, for the hub, with the import bounded by the grid's surplus.
+    Per-period per-draw ``(lole_h, eue_mwh)`` — ``_simulate_blocks``'s shape,
+    for the hub, with each area's import bounded by that area's surplus.
+
+    Grid storage follows the pinned non-anticipative policy (plan
+    2026-09-28, WP1), per hour and per draw: (1) grid stores discharge
+    against the grid's OWN deficit first; (2) the remaining grid surplus is
+    offered through the Link, ``min(link_avail, surplus × delivery)``; (3)
+    the hub's own stores dispatch against what is left; (4) grid stores
+    then discharge to the hub, bounded by the Link headroom
+    ``link_avail − offered``; (5) grid stores charge only from surplus that
+    was NOT offered to the hub. With no grid storage (or
+    ``grid_storage_enabled=False``) steps 1, 4 and 5 are no-ops and the
+    arithmetic is exactly the 2026-09-27 kernel's (pinned by
+    ``tests/zonal_oracle.py``).
     """
     hub = z.hub
     residual = hub.residual
@@ -103,28 +275,19 @@ def simulate_zonal_blocks(z: ZonalInputs, *, draws: int, seed,
     draws = int(draws)
     ss = _seed_sequence(seed)
     units = tuple(hub.units)
-    imp = frozenset(int(i) for i in z.import_idx)
+    all_imp = frozenset(int(i) for a in z.areas for i in a.import_idx)
 
-    hub_cap = sample_capacity(units, H, draws, _fresh(ss), exclude=imp,
-                              periods=hub.periods)
-    link_only = tuple(u if i in imp else dataclasses.replace(u, q=0.0)
-                      for i, u in enumerate(units))
-    link_cap = sample_capacity(link_only, H, draws, _fresh(ss),
-                               exclude=frozenset(range(len(units))) - imp,
-                               periods=hub.periods)
-    grid_cap = sample_capacity(z.grid.units, H, draws,
-                               _fresh(ss, (GRID_STREAM_KEY,)),
-                               periods=z.grid.periods)
-    hub_t = np.ascontiguousarray(hub_cap.T)
-    link_t = np.ascontiguousarray(link_cap.T)
-    grid_t = np.ascontiguousarray(grid_cap.T)
+    hub_t = np.ascontiguousarray(sample_capacity(
+        units, H, draws, _fresh(ss), exclude=all_imp, periods=hub.periods).T)
+    areas = [_AreaState(a, hub, units, ss, H, draws, grid_storage_enabled,
+                        initial_soc_frac) for a in z.areas]
 
-    firm = np.asarray(z.firm_import_mw, dtype=np.float64)
     # The v1 residual has the firm-block Links netted out; here they are
     # import capacity bounded by the grid like any other, so add them back.
-    residual_raw = residual + firm
-    grid_res = z.grid.residual
-    ratio = np.asarray(z.delivery_ratio, dtype=np.float64)
+    firm_total = np.zeros(H, dtype=np.float64)
+    for a in areas:
+        firm_total = firm_total + a.firm
+    residual_raw = residual + firm_total
 
     all_stores = _active_storage(hub, storage_enabled, ())
     any_series = any(getattr(s, "capacity_series", None) is not None
@@ -139,11 +302,14 @@ def simulate_zonal_blocks(z: ZonalInputs, *, draws: int, seed,
         eue = np.zeros(draws, dtype=np.float64)
         soc = np.repeat((e_nom * float(initial_soc_frac))[:, None], draws,
                         axis=1) if n_store else np.zeros((0, draws))
+        for a in areas:
+            a.start_block(start, end)
         for h in range(start, end):
-            surplus = np.maximum(
-                grid_t[h].astype(np.float64) - grid_res[h], 0.0) * ratio[h]
-            offered = link_t[h].astype(np.float64) + firm[h]
-            imp_h = np.minimum(offered, surplus).astype(np.float32)
+            offers = [a.offer(h) for a in areas]
+            imp_total = offers[0][1]
+            for _o, i in offers[1:]:
+                imp_total = imp_total + i
+            imp_h = imp_total.astype(np.float32)
             # Same float32 accumulation order as sample_capacity's: the hub's
             # units, then the Link(s) — so an unbound grid replays v1 exactly.
             cap = (hub_t[h] + imp_h).astype(np.float64)
@@ -153,6 +319,10 @@ def simulate_zonal_blocks(z: ZonalInputs, *, draws: int, seed,
                          else np.argsort(soc, axis=0, kind="stable"))
                 deficit = _dispatch(deficit, soc, p_nom, e_nom, eff_s, eff_d,
                                     order)
+            for a, (o, i) in zip(areas, offers):
+                deficit = a.support(h, deficit, o, i)
+            for a, (_o, i) in zip(areas, offers):
+                a.charge(h, i)
             w_h = weights[h]
             lole += w_h * (deficit > SHORTFALL_TOL)
             eue += w_h * np.maximum(deficit, 0.0)

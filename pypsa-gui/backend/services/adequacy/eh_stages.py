@@ -490,7 +490,7 @@ def _grid_area(network, cfg, scope: FleetScope, hub_inputs):
     other outcome is a reason and the certification stays on v1.
     """
     from services.adequacy.mc import snapshot_inputs
-    from services.adequacy.mc_zonal import ZonalInputs
+    from services.adequacy.mc_zonal import GridArea, ZonalInputs
 
     live = [m for m in scope.link_models if m.model != "islanded"]
     if not live:
@@ -510,23 +510,30 @@ def _grid_area(network, cfg, scope: FleetScope, hub_inputs):
                       "carries a resolvable outage rate) — the grid behind the "
                       "Link is assumed to have surplus, v1 applies")
     n_hub = len(hub_inputs.units) - len(scope.import_units)
-    z = ZonalInputs(
-        hub=hub_inputs, grid=grid,
+    area = GridArea(
+        grid=grid,
         import_idx=tuple(range(n_hub, len(hub_inputs.units))),
         firm_import_mw=np.ascontiguousarray(
             np.asarray(scope.import_firm_mw, dtype=np.float64)),
         delivery_ratio=np.ascontiguousarray(
-            np.asarray(scope.delivery_ratio, dtype=np.float64)))
+            np.asarray(scope.delivery_ratio, dtype=np.float64)),
+        stream=0)
+    z = ZonalInputs(hub=hub_inputs, areas=(area,))
     peak = float(np.max(grid.residual)) if grid.residual.size else 0.0
+    stores = [s.name for s in grid.storage]
     scope.grid_area = {
         "units": [u.name for u in grid.units],
         "n_units": len(grid.units),
         "capacity_mw": float(sum(u.capacity_mw for u in grid.units)),
         "demand_peak_mw": peak,
-        "storage_dispatched": False,
+        "storage": stores,
+        "storage_dispatched": bool(stores),
         "note": ("grid side sampled as a second area: its own fleet and "
-                 "demand (residual after its must-take); grid-side storage "
-                 "is not dispatched (conservative for the hub)"),
+                 "demand (residual after its must-take)"
+                 + ("; grid storage dispatched grid-first, then as remote "
+                    "support bounded by the Link headroom, charging only "
+                    "from surplus not offered to the hub" if stores
+                    else "; no grid-side storage")),
     }
     return z, None
 

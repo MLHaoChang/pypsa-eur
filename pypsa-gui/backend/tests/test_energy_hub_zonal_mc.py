@@ -70,7 +70,7 @@ def test_auto_goes_zonal_when_the_grid_side_carries_occurrence_data():
     # The hub half of the zonal inputs IS the v1 snapshot (same units, same
     # positions) — the COPT screens that one.
     assert frozen.zonal_inputs.hub is frozen.mc_inputs
-    assert frozen.zonal_inputs.import_idx == (2,)
+    assert Z.single_area(frozen.zonal_inputs).import_idx == (2,)
 
 
 def test_grid_with_surplus_above_the_cap_every_hour_reproduces_v1_exactly():
