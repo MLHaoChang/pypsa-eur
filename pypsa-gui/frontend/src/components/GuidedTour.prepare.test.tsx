@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   GuideButton, GuidedTour, GuidedTourHost, guidesApi, type GuideCatalogue,
 } from './GuidedTour'
+import { useUIStore } from '../store/uiStore'
 
 const CATALOGUE: GuideCatalogue = {
   version: 1,
@@ -113,5 +114,51 @@ describe('reveal guard', () => {
     expect((await screen.findByTestId('guide-step-title')).textContent).toBe('Lonely')
     expect(screen.getByTestId('guide-step-missing')).toBeTruthy()
     expect(click).not.toHaveBeenCalled()
+  })
+})
+
+// QA gate note 1 (P22.9-FE): the app-level tour outlived a project switch
+// (its step then said "not on screen"), and the Bus card's own Guide button
+// stacked a second identical overlay on top of the host's tour.
+describe('GuidedTourHost lifecycle', () => {
+  it('closes the host tour when the project switches', async () => {
+    const user = userEvent.setup()
+    useUIStore.setState({ currentProject: 'A' })
+    renderWith(
+      <div>
+        <div data-testid="fields" />
+        <GuideButton tourId="tag" testId="tag-start" prepare={() => {}} />
+        <GuidedTourHost />
+      </div>,
+    )
+    await user.click(screen.getByTestId('tag-start'))
+    expect(await screen.findByTestId('guide-tour')).toBeTruthy()
+    act(() => { useUIStore.setState({ currentProject: 'B' }) })
+    expect(screen.queryByTestId('guide-tour')).toBeNull()
+    // …and does not come back when switching back.
+    act(() => { useUIStore.setState({ currentProject: 'A' }) })
+    expect(screen.queryByTestId('guide-tour')).toBeNull()
+  })
+
+  it('a host-less Guide button does not open a second copy of the running tour', async () => {
+    const user = userEvent.setup()
+    useUIStore.setState({ currentProject: 'A' })
+    renderWith(
+      <div>
+        <div data-testid="fields" />
+        <GuideButton tourId="tag" testId="tag-start" prepare={() => {}} />
+        <GuideButton tourId="tag" testId="bus-guide" />
+        <GuidedTourHost />
+      </div>,
+    )
+    await user.click(screen.getByTestId('tag-start'))
+    await screen.findByTestId('guide-tour')
+    await user.click(screen.getByTestId('bus-guide'))
+    expect(screen.getAllByTestId('guide-tour')).toHaveLength(1)
+    // Once the host tour closes, the button opens its own again.
+    await user.click(screen.getByTestId('guide-skip'))
+    expect(screen.queryByTestId('guide-tour')).toBeNull()
+    await user.click(screen.getByTestId('bus-guide'))
+    expect(screen.getAllByTestId('guide-tour')).toHaveLength(1)
   })
 })

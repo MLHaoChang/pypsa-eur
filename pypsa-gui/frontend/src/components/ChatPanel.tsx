@@ -1204,6 +1204,14 @@ export default function ChatPanel() {
   // re-reads it. Only an explicit `chat_ready: false` gates; unknown (probe
   // failed, older backend without the field) stays open — a probe outage
   // must not lock the assistant.
+  //
+  // `chat_ready` describes the instance's ACTIVE profile only. A turn runs on
+  // the session's pick when it names one (`profile_id` in the request, which
+  // routers/chat.py binds); a `null` pick follows the active profile — the
+  // same rule the model dropdown displays (`profileId ?? active`). So the
+  // gate applies only while the pick IS the active profile (QA gate B1: a
+  // user with no Anthropic key who picked a working local profile was
+  // locked out).
   const { data: chatHealth } = useQuery<ChatHealth>({
     queryKey: ['chat', 'health'],
     queryFn: getChatHealth,
@@ -1211,6 +1219,7 @@ export default function ChatPanel() {
     retry: false,
   })
   const notReady = chatHealth?.chat_ready === false
+    && (profileId == null || profileId === chatHealth.active_profile?.id)
 
   const currentProject = useUIStore((s) => s.currentProject)
   // Read only for the autoscroll effect below — see the dependency-array

@@ -13,6 +13,7 @@ import { useQuery } from '@tanstack/react-query'
 import { HelpCircle } from 'lucide-react'
 import { create } from 'zustand'
 import client from '../api/client'
+import { useUIStore } from '../store/uiStore'
 
 export interface GuideStep {
   target: string
@@ -254,15 +255,24 @@ export function GuidedTour({ tourId, topic = GUIDE_TOPIC, onClose }: {
 // A tour launched after a `prepare` step. `prepare` may unmount the button
 // that started it (the tagging tour closes the Results panel the button sits
 // in), so such a tour is rendered by the app-level GuidedTourHost instead of
-// by the button. `seq` remounts the tour when the same one is relaunched.
-const useLaunchedTour = create<{ tourId: string | null; seq: number }>(() => ({
-  tourId: null, seq: 0,
-}))
+// by the button. `seq` remounts the tour when the same one is relaunched;
+// `project` is the project it was launched in — a switch closes it (its
+// targets belong to the old project's network).
+const useLaunchedTour = create<{ tourId: string | null; seq: number; project: string | null }>(
+  () => ({ tourId: null, seq: 0, project: null }))
 
 /** Renders the tour a prepared GuideButton launched (mounted once in App). */
 export function GuidedTourHost() {
-  const { tourId, seq } = useLaunchedTour()
-  if (!tourId) return null
+  const { tourId, seq, project } = useLaunchedTour()
+  const currentProject = useUIStore(s => s.currentProject)
+  const stale = tourId !== null && project !== currentProject
+  useEffect(() => {
+    if (stale) useLaunchedTour.setState({ tourId: null })
+  }, [stale])
+  // No host, no tour: a slot left set would make every button think its
+  // tour is already showing.
+  useEffect(() => () => useLaunchedTour.setState({ tourId: null }), [])
+  if (!tourId || stale) return null
   return (
     <GuidedTour key={seq} tourId={tourId}
       onClose={() => useLaunchedTour.setState({ tourId: null })} />
@@ -281,6 +291,9 @@ export function GuideButton({ tourId, testId, label = 'Guide', prepare }: {
   const [open, setOpen] = useState(false)
   const [seen, setSeen] = useState(() => tourSeen(tourId))
   const start = async () => {
+    // The host already shows this tour (e.g. launched from Results, then the
+    // Bus card's own button): don't stack a second identical overlay.
+    if (useLaunchedTour.getState().tourId === tourId) return
     if (!prepare) {
       setOpen(true)
       return
@@ -290,7 +303,8 @@ export function GuideButton({ tourId, testId, label = 'Guide', prepare }: {
     } catch (e) {
       console.warn(`Guide '${tourId}': prepare failed`, e)
     }
-    useLaunchedTour.setState(s => ({ tourId, seq: s.seq + 1 }))
+    useLaunchedTour.setState(s => ({
+      tourId, seq: s.seq + 1, project: useUIStore.getState().currentProject }))
   }
   return (
     <>

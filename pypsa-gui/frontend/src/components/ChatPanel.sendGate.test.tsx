@@ -12,6 +12,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
 import { createChatStream, getChatHealth, putApiKeySettings } from '../api/chat'
+import { getChatProfiles } from '../api/llmSettings'
 import ChatPanel from './ChatPanel'
 
 vi.mock('../api/chat', async (importOriginal) => {
@@ -33,6 +34,7 @@ vi.mock('../api/chat', async (importOriginal) => {
     getChatHealth: vi.fn(),
   }
 })
+vi.mock('../api/llmSettings', () => ({ getChatProfiles: vi.fn() }))
 vi.mock('../api/uploads', () => ({
   deleteUpload: vi.fn(),
   getUploadBlobUrl: vi.fn(),
@@ -64,8 +66,15 @@ beforeEach(() => {
   })
   vi.mocked(createChatStream).mockClear()
   vi.mocked(getChatHealth).mockReset()
+  vi.mocked(getChatProfiles).mockReset().mockResolvedValue({
+    active_profile_id: 'anthropic-sonnet',
+    profiles: [
+      { id: 'anthropic-sonnet', label: 'Default', wire: 'anthropic' },
+      { id: 'local-llm', label: 'Local LLM (auth none)', wire: 'openai' },
+    ],
+  } as never)
 })
-afterEach(() => cleanup())
+afterEach(() => { cleanup(); useChatStore.setState({ profileId: null }) })
 
 async function typeHello() {
   const user = userEvent.setup()
@@ -138,5 +147,38 @@ describe('Send gate (obstacle 9)', () => {
     await user.click(screen.getByTestId('chat-api-key-save'))
     await waitFor(() => expect(putApiKeySettings).toHaveBeenCalled())
     await waitFor(() => expect(send.disabled).toBe(false))
+  })
+})
+
+// QA gate B1 (P22.9-FE): `chat_ready` describes the instance's ACTIVE profile,
+// but a turn runs on the session's picked `profile_id` when one is named
+// (routers/chat.py binds `body.profile_id`; only an unnamed pick follows the
+// active profile). A user without an Anthropic key who picked a working local
+// profile must not be locked out.
+describe('Send gate follows the session profile (gate B1)', () => {
+  it("picked a ready non-active profile → Send stays enabled (the reviewer's repro)", async () => {
+    useChatStore.setState({ profileId: 'local-llm' })
+    vi.mocked(getChatHealth).mockResolvedValue(health(false))
+    renderPanel()
+    await waitFor(() => expect(getChatHealth).toHaveBeenCalled())
+    await waitFor(() => expect(
+      (screen.getByTestId('chat-model-select') as HTMLSelectElement).value).toBe('local-llm'))
+    const user = await typeHello()
+    await new Promise(r => setTimeout(r, 100))
+    const send = screen.getByTestId('chat-send') as HTMLButtonElement
+    expect(send.disabled).toBe(false)
+    expect(screen.queryByTestId('chat-send-gate')).toBeNull()
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(createChatStream).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(createChatStream).mock.calls[0][0]).toMatchObject({ profile_id: 'local-llm' })
+  })
+
+  it('explicitly picked the active (not ready) profile → still gated', async () => {
+    useChatStore.setState({ profileId: 'anthropic-sonnet' })
+    vi.mocked(getChatHealth).mockResolvedValue(health(false))
+    renderPanel()
+    await typeHello()
+    await waitFor(() => expect((screen.getByTestId('chat-send') as HTMLButtonElement).disabled).toBe(true))
+    expect(screen.getByTestId('chat-send-gate')).toBeTruthy()
   })
 })

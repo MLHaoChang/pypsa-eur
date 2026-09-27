@@ -339,7 +339,16 @@ async function phaseP229(browser) {
       await sleep(1000)
     }
     check(sweep?.status === 'done', `sweep status done (base_restored=${sweep?.base_restored})`)
-    await byId('fmea-table').waitFor({ timeout: 30_000 })
+    // The API says done; wait until the tab's own 2 s poll has caught up
+    // (button back to "Run B/C sweep" and class-B rows in the table) before
+    // the screenshot — `fmea-table` alone already existed before the sweep.
+    await page.waitForFunction(() => {
+      const btn = document.querySelector('[data-testid="fmea-sweep"]')
+      const classB = [...document.querySelectorAll('[data-testid="fmea-table"] tbody tr')]
+        .some(tr => tr.querySelectorAll('td')[1]?.textContent?.trim() === 'B')
+      return btn && !btn.disabled && btn.textContent.includes('Run B/C sweep') && classB
+    }, null, { timeout: 30_000 })
+    ok('FMEA tab shows the finished sweep (button re-enabled, class-B rows)')
     await shot(page, 'fmea-after-sweep')
     const afterSweep = tableDiffs(before, await snapshotTables())
     info(`*_nom_opt changes: ${afterSweep.nomOpt}`)
