@@ -6,17 +6,25 @@ import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import {
   COMPLETENESS_ORDER,
+  certificationPayload,
   completenessRows,
   dtcPlanningCsvRows,
   dtcStressCsvRows,
   EhReferenceDesignPanel,
+  fmeaTopCsvRows,
+  fmeaTopModes,
+  frontierCsvRows,
+  frontierPoints,
+  hasCertificationBlock,
   hasMultiEnergyBlock,
+  lcohChip,
   leverCsvRows,
   multiEnergyCarrierEntries,
   multiEnergyLoadEntries,
   redundancyCsvRows,
   scrTone,
   statusTone,
+  verdictTone,
 } from './EhReferenceDesignPanel'
 import { downloadCSV } from './shared'
 
@@ -53,6 +61,7 @@ const REPORT = {
   excludes_shed_cost: true,
   completeness: {
     target: 'ok' as const,
+    certification: 'skipped' as const,
     cost: 'ok' as const,
     frontier: 'skipped' as const,
     sizing: 'ok' as const,
@@ -547,5 +556,220 @@ describe('P6b per-Load multi-energy disclosure', () => {
     expect(screen.getByTestId('eh-multi-energy-load-l_h2').textContent).toMatch(/40/)
     expect(screen.getByTestId('eh-multi-energy-attribution').textContent)
       .toMatch(/per_load_slack/)
+  })
+})
+
+
+describe('wired stages — certification / frontier / fmea_top / LCOH (2026-09-26)', () => {
+  const CERT = {
+    metric: 'mc_lole', target_lole_h: 3, mc_lole_h: 1.25, lole_ci: [0.9, 1.6],
+    eue_mwh: 12.5, n_samples: 200, draws_requested: 200, converged: true,
+    ens_met: true, verdict: 'certified' as const,
+    warning: 'Sequential MC results rest on ONE weather realisation',
+  }
+  const FRONTIER = {
+    targets_permyriad: [40, 20, 10, 5, 2.5],
+    points: [
+      { target_permyriad: 40, status: 'ok', excludes_shed_cost: true, period_basis: 'single_period',
+        binding: 'system_cap', point: { total_system_cost_eur: 900000, achieved_ens_mwh: 40, achieved_shed_hours: 3 } },
+      { target_permyriad: 20, status: 'ok', excludes_shed_cost: true, period_basis: 'single_period',
+        binding: 'system_cap', point: { total_system_cost_eur: 950000, achieved_ens_mwh: 20, achieved_shed_hours: 2 } },
+      { target_permyriad: 10, status: 'ok', excludes_shed_cost: true, period_basis: 'single_period',
+        binding: 'system_cap', point: { total_system_cost_eur: 1250000, achieved_ens_mwh: 10, achieved_shed_hours: 1 } },
+      { target_permyriad: 5, status: 'infeasible', excludes_shed_cost: true, point: null },
+    ],
+    knee_index: 1,
+    period_basis: 'single_period',
+    excludes_shed_cost: true,
+    warning: null,
+    base_restored: true,
+  }
+  const FMEA = {
+    top: [
+      { rank: 1, mode_id: 'link:import_poc:forced_outage', component_class: 'Link',
+        name: 'import_poc', failure_class: 'B', criticality_eur_per_year: 52000,
+        delta_eue_mwh: 120, occurrence_per_year: 5.5, severity_eur: 9454, engine: 'lp_proxy' },
+      { rank: 2, mode_id: 'generator:base:forced_outage', component_class: 'Generator',
+        name: 'base', failure_class: 'A', criticality_eur_per_year: 31000,
+        delta_eue_mwh: 80, occurrence_per_year: 8.7, severity_eur: 3563, engine: 'copt' },
+    ],
+    top_n: 10, n_total_modes: 3, classes_included: ['A', 'B'],
+    class_b: { status: 'run', rows: 1, base_restored: true },
+    note: 'Link-primary residual risk (Class-B Link sweep); AC Line/Transformer N-1 remains on SCLOPF and is omitted from FMEA ranking',
+  }
+  const FULL = {
+    ...REPORT,
+    archetype: 'weak_flexible' as const,
+    mc_lole_h: 1.25,
+    completeness: {
+      ...REPORT.completeness, certification: 'ok' as const, frontier: 'ok' as const,
+      fmea_top: 'ok' as const,
+    },
+    sections: {
+      certification: { status: 'ok' as const, payload: CERT,
+        note: 'MC LOLE 1.25 h ≤ target 3 h — certified' },
+      frontier: { status: 'ok' as const, payload: FRONTIER, note: '3 points around 10‱' },
+      fmea_top: { status: 'ok' as const, payload: FMEA,
+        note: 'Link-primary residual risk (Class-B Link sweep); AC Line/Transformer N-1 remains on SCLOPF and is omitted from FMEA ranking; top 2 of 3 modes, classes A+B' },
+    },
+    tea: { lcoe_eur_per_mwh: 42, lcoh_eur_per_kg: 4.87, notes: null,
+      lcoh_status: 'ok' as const, lcoh_note: 'LCOH = fleet cost / H₂ produced' },
+  }
+
+  it('orders certification right after target in the completeness chips', () => {
+    expect(COMPLETENESS_ORDER[1]).toBe('certification')
+    const rows = completenessRows({ cost: 'ok', certification: 'ok', target: 'ok' })
+    expect(rows.map(r => r.name)).toEqual(['target', 'certification', 'cost'])
+  })
+
+  it('tones verdicts: certified accent, failed danger, no_target muted, else warn', () => {
+    expect(verdictTone('certified')).toContain('accent')
+    expect(verdictTone('failed')).toContain('danger')
+    expect(verdictTone('no_target')).toContain('muted')
+    expect(verdictTone('not_established')).toContain('warn')
+    expect(verdictTone(undefined)).toContain('warn')
+  })
+
+  it('extracts payloads and maps CSV rows', () => {
+    expect(certificationPayload(FULL)?.verdict).toBe('certified')
+    expect(certificationPayload(REPORT)).toBeNull()
+    expect(frontierPoints(FULL)).toHaveLength(4)
+    expect(frontierPoints(REPORT)).toEqual([])
+    expect(frontierCsvRows(frontierPoints(FULL))[0]).toEqual(
+      [40, 'ok', 900000, 40, 3, 'system_cap', 'single_period', 'yes'])
+    expect(frontierCsvRows(frontierPoints(FULL))[3][2]).toBe('')
+    expect(fmeaTopModes(FULL).map(m => m.rank)).toEqual([1, 2])
+    expect(fmeaTopCsvRows(fmeaTopModes(FULL))[0].slice(0, 4))
+      .toEqual([1, 'B', 'Link', 'import_poc'])
+    expect(lcohChip(FULL)).toEqual({ value: 4.87, status: 'ok', note: 'LCOH = fleet cost / H₂ produced' })
+    expect(lcohChip({ ...REPORT, tea: { lcoe_eur_per_mwh: 1, lcoh_eur_per_kg: null,
+      lcoh_status: 'skipped', lcoh_note: 'no electrolyser Links' } }))
+      .toEqual({ value: null, status: 'skipped', note: 'no electrolyser Links' })
+    expect(lcohChip(REPORT)).toBeNull()  // pre-flag report: nothing invented
+  })
+
+  it('hides the certification block when the section is skipped', () => {
+    expect(hasCertificationBlock({
+      ...REPORT,
+      sections: { certification: { status: 'skipped', payload: null, note: 'mc_certify not requested' } },
+    })).toBe(false)
+    expect(hasCertificationBlock(FULL)).toBe(true)
+  })
+
+  it('renders MC LOLE, the verdict, LCOH, the frontier and the FMEA top-N', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report: FULL,
+    } as never)
+    const user = await openPanel()
+    expect(await screen.findByTestId('eh-report')).toBeTruthy()
+    expect(screen.getByTestId('eh-report-mc-lole').textContent).toMatch(/1\.25 h/)
+    expect(screen.getByTestId('eh-report-mc-lole').textContent).toMatch(/target 3 h/)
+    const verdict = screen.getByTestId('eh-report-verdict')
+    expect(verdict.getAttribute('data-verdict')).toBe('certified')
+    expect(verdict.className).toContain('accent')
+    expect(screen.getByTestId('eh-report-lcoh').textContent).toMatch(/€4\.87\/kg/)
+    expect(screen.queryByTestId('eh-report-lcoh-flag')).toBeNull()
+    expect(screen.getByTestId('eh-section-certification').getAttribute('data-status')).toBe('ok')
+
+    expect(screen.getByTestId('eh-certification')).toBeTruthy()
+    expect(screen.getByTestId('eh-certification-lole').textContent).toMatch(/\[0\.90, 1\.60\]/)
+    expect(screen.getByTestId('eh-certification-ens').textContent).toMatch(/met/)
+    expect(screen.getByTestId('eh-certification-warning').textContent).toMatch(/ONE weather/)
+
+    expect(screen.getByTestId('eh-frontier')).toBeTruthy()
+    expect(screen.getByTestId('eh-frontier-basis').textContent).toMatch(/excl\. shed/)
+    expect(screen.getByTestId('eh-frontier-basis').textContent).toMatch(/single_period/)
+    expect(screen.getByTestId('eh-frontier-row-1').getAttribute('data-knee')).toBe('true')
+    expect(screen.getByTestId('eh-frontier-row-0').getAttribute('data-knee')).toBe('false')
+    expect(screen.getByTestId('eh-frontier-row-3').textContent).toMatch(/infeasible/)
+    expect(screen.getByTestId('eh-frontier-row-3').textContent).toMatch(/—/)
+
+    expect(screen.getByTestId('eh-fmea-top')).toBeTruthy()
+    expect(screen.getByTestId('eh-fmea-top-row-1').getAttribute('data-class')).toBe('B')
+    expect(screen.getByTestId('eh-fmea-top-row-1').textContent).toMatch(/import_poc/)
+    expect(screen.getByTestId('eh-fmea-top-row-2').getAttribute('data-class')).toBe('A')
+    expect(screen.getByTestId('eh-fmea-top-note').textContent).toMatch(/Link-primary/)
+    expect(screen.getByTestId('eh-fmea-top-note').textContent).toMatch(/SCLOPF/)
+
+    await user.click(screen.getByTestId('eh-frontier-csv'))
+    await user.click(screen.getByTestId('eh-fmea-top-csv'))
+    expect(vi.mocked(downloadCSV).mock.calls.map(c => c[0]))
+      .toEqual(['eh-frontier.csv', 'eh-fmea-top.csv'])
+  })
+
+  it('shows a failed verdict in danger tone with the decision-2 note', async () => {
+    const report = {
+      ...FULL,
+      mc_lole_h: 412.5,
+      sections: {
+        ...FULL.sections,
+        certification: {
+          status: 'ok' as const,
+          payload: { ...CERT, mc_lole_h: 412.5, verdict: 'failed' as const },
+          note: 'MC LOLE 412 h > target 3 h — certification FAILED although the ENS target is met (spec decision 2)',
+        },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'off_grid', report,
+    } as never)
+    await openPanel()
+    const verdict = await screen.findByTestId('eh-report-verdict')
+    expect(verdict.getAttribute('data-verdict')).toBe('failed')
+    expect(verdict.className).toContain('danger')
+    expect(screen.getByTestId('eh-certification-note').textContent).toMatch(/decision 2/)
+  })
+
+  it('shows the LCOH flag, not a zero, when there is no electrolyser', async () => {
+    const report = {
+      ...REPORT,
+      tea: { lcoe_eur_per_mwh: 42, lcoh_eur_per_kg: null, notes: null,
+        lcoh_status: 'skipped' as const, lcoh_note: 'LCOH skipped: the network has no electrolyser Links' },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report,
+    } as never)
+    await openPanel()
+    await screen.findByTestId('eh-report')
+    expect(screen.queryByTestId('eh-report-lcoh')).toBeNull()
+    const flag = screen.getByTestId('eh-report-lcoh-flag')
+    expect(flag.getAttribute('data-status')).toBe('skipped')
+    expect(flag.textContent).toMatch(/no electrolyser/)
+    expect(flag.textContent).not.toMatch(/0\.00/)
+  })
+
+  it('shows the not_established certification reason without inventing a LOLE', async () => {
+    const report = {
+      ...REPORT,
+      completeness: { ...REPORT.completeness, certification: 'not_established' as const },
+      sections: {
+        certification: {
+          status: 'not_established' as const, payload: null,
+          note: 'nothing to sample: no electrical generator carries resolvable occurrence data',
+        },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report,
+    } as never)
+    await openPanel()
+    expect(await screen.findByTestId('eh-certification')).toBeTruthy()
+    expect(screen.queryByTestId('eh-report-mc-lole')).toBeNull()
+    expect(screen.queryByTestId('eh-certification-lole')).toBeNull()
+    expect(screen.getByTestId('eh-certification-note').textContent).toMatch(/occurrence/)
+  })
+
+  it('renders none of the new blocks on a pre-wiring report', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report: REPORT,
+    } as never)
+    await openPanel()
+    await screen.findByTestId('eh-report')
+    expect(screen.queryByTestId('eh-certification')).toBeNull()
+    expect(screen.queryByTestId('eh-frontier')).toBeNull()
+    expect(screen.queryByTestId('eh-fmea-top')).toBeNull()
+    expect(screen.queryByTestId('eh-report-mc-lole')).toBeNull()
+    expect(screen.queryByTestId('eh-report-lcoh')).toBeNull()
+    expect(screen.queryByTestId('eh-report-lcoh-flag')).toBeNull()
   })
 })
