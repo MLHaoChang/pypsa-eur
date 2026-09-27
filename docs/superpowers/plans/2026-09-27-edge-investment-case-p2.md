@@ -149,6 +149,19 @@ Files: `tariff_engine.py`, `lp_bindings.py`, `test_tariff_engine_demand.py`, `te
 - Acceptance: the committed `ic_demand_peaks` key uses the name; P1 records (position keys) still produce rows
   (read-compat test).
 
+- **As implemented:**
+  - `tariff_engine.demand_windows(item, local)` maps each interval to its NAMED window (plus the fragment index). `window_rate` takes a month's window rate from the matched fragments. The engine and `lp_bindings._demand_spec` both use them.
+  - LP keys are `item|name|period|month`.
+  - A `TariffItem` validator refuses same-name demand fragments with overlapping months and different rates.
+  - `ic_demand_info.hash_version = 1` (`DEMAND_HASH_VERSION`).
+  - Tests in `test_lp_bindings_peak_demand.py` (WP2.1a-0 section):
+    - split peak billed once (engine) and equal in the LP;
+    - validator;
+    - disjoint-month rates;
+    - name in keys;
+    - rename is drift;
+    - P1 position-keyed records still produce rows.
+
 ## WP2.1a-i Engine: per-day fixed, tariff capacity items, demand tiers
 
 Model delta (all optional, old JSON unchanged): `TariffItem.unit += "per_day"`; `Tier` allowed on demand

@@ -68,10 +68,11 @@ import pandas as pd
 from models.commercial import CommercialConfig, TariffItem
 from services.commercial.tariff_engine import (
     _is_demand,
-    _period_index,
     _rates,
+    demand_windows,
     interval_key,
     tiers_are_convex,
+    window_rate,
 )
 
 EXPORT_PRICE_ATTR = "ic_export_price"
@@ -514,24 +515,27 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
         missing += [m if p is None else f"{p}:{m}" for m in gone]
     keys: list[dict] = []
     for item in items:
-        pidx = _period_index(item, local)
+        # Windows are the item's period NAMES (fragments of one URDB period are
+        # one window with one monthly peak; IC P2 WP2.1a-0), as in the engine.
+        window, names, frag = demand_windows(item, local)
         # Demand INTERVALS (`settlement`): the bound is on the interval mean,
         # as billed (review #5); singleton groups when snapshots are that fine.
         interval = interval_key(local, {"15min": "15min", "30min": "30min",
                                         "h": "h"}[item.settlement])
-        for k, per in enumerate(item.periods):
-            if per.rate == 0:
-                continue
+        for k, name in enumerate(names):
             for p in pd.unique(inv):
-                for m in sorted(set(months[(inv == p) & (pidx == k)])):
-                    pos = np.flatnonzero((inv == p) & (pidx == k) & (months == m))
+                for m in sorted(set(months[(inv == p) & (window == k)])):
+                    pos = np.flatnonzero((inv == p) & (window == k) & (months == m))
+                    rate = window_rate(item, frag[pos])
+                    if rate == 0:
+                        continue
                     _, group = np.unique(interval[pos], return_inverse=True)
                     keys.append({
                         "group": group,
-                        "key": f"{item.id}|{k}|{'' if p is None else p}|{m}",
-                        "item": item.id, "period": per.name, "month": m,
+                        "key": f"{item.id}|{name}|{'' if p is None else p}|{m}",
+                        "item": item.id, "period": name, "month": m,
                         "inv_period": None if p is None else int(p),
-                        "eur_per_mw": float(per.rate) * _KWH_PER_MWH,
+                        "eur_per_mw": rate * _KWH_PER_MWH,
                         "net": item.measured_on == "net", "positions": pos})
     # Ratchets (WP1.5b): billed[key] ≥ ρ · actual[key'] for each lookback
     # month modelled in the SAME investment period, ≥ ρ · metered history for
@@ -571,7 +575,11 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
             "ratchets": ratchets, "floors": floors,
             "info": {"items": [i.id for i in items], "not_established": missing,
                      "partial_months": partial, "notes": list(notes),
-                     "items_hash": demand_hash(n, cfg, items)}}
+                     "items_hash": demand_hash(n, cfg, items),
+                     # Recipe version of items_hash (P2 WP2.1a-0): a future recipe
+                     # change compares a P1 record (no version) with the P1 recipe
+                     # instead of flagging every solved project as drift.
+                     "hash_version": DEMAND_HASH_VERSION}}
     return spec, [i.id for i in items], missing, notes
 
 
@@ -590,6 +598,9 @@ def energy_hash(n, cfg: CommercialConfig) -> str:
                       "export": cfg.export_link, "axis": _axis_hash(n.snapshots)},
                      sort_keys=True)
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+DEMAND_HASH_VERSION = 1  # the P1 recipe; records without a version were made by it
 
 
 def demand_hash(n, cfg: CommercialConfig, items) -> str:

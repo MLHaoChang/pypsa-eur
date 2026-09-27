@@ -495,3 +495,90 @@ def test_a_zero_weight_snapshot_does_not_zero_the_reported_peak():
     expected = float(p0[n.snapshot_weightings.objective > 0].max())
     assert v["peak_mw"] == pytest.approx(expected, abs=1e-6)
     assert v["peak_mw"] > 0
+
+
+# ── P2 WP2.1a-0: demand windows keyed by period NAME ───────────────────────
+# A URDB demand period becomes one TariffPeriod per [start, end) fragment; the
+# fragments of one name are ONE demand window, billed on one monthly peak.
+
+def _split_peak(rate=RATE, *, evening_rate=None):
+    return _demand(periods=[
+        {"name": "peak", "rate": rate, "start_hour": 12, "end_hour": 14},
+        {"name": "peak", "rate": rate if evening_rate is None else evening_rate,
+         "start_hour": 17, "end_hour": 19},
+        {"name": "off", "rate": 0.0}])
+
+
+def test_engine_bills_one_peak_for_a_split_peak_window():
+    idx = pd.date_range("2030-01-07", periods=24, freq="h")
+    load = np.full(24, 5.0)
+    load[13], load[18] = 20.0, 30.0            # both fragments of "peak"
+    df = pd.DataFrame({"import_mw": load, "export_mw": 0.0}, index=idx)
+    res = engine_rate(df, _tariff({**_split_peak(), "settlement": "h"}), step_hours=1.0,
+                      timezone=None)
+    lines = res.demand_lines[res.demand_lines["period"] == "peak"]
+    assert len(lines) == 1                     # one window, not one per fragment
+    assert lines["peak_kw"].iloc[0] == pytest.approx(30_000.0)
+    assert res.per_item["demand"] == pytest.approx(RATE * 30_000.0)
+
+
+def test_same_name_fragments_with_different_rates_in_one_month_are_refused():
+    with pytest.raises(ValueError, match="peak"):
+        _tariff(_split_peak(evening_rate=RATE * 2))
+
+
+def test_same_name_windows_in_disjoint_months_may_differ_in_rate():
+    """A summer "peak" and a winter "peak" at different rates stay valid."""
+    item = _demand(periods=[
+        {"name": "peak", "rate": 20.0, "months": [6, 7, 8], "start_hour": 17, "end_hour": 21},
+        {"name": "peak", "rate": 12.0, "months": [1, 2, 12], "start_hour": 17, "end_hour": 21},
+        {"name": "off", "rate": 0.0}])
+    _tariff(item)  # validates
+
+
+def test_lp_keys_one_window_per_name_and_uses_the_name():
+    n = _site()
+    L.materialise_poc_prices(n, _commercial(_tariff({**_split_peak(), "settlement": "h"})))
+    keys = [k for k in getattr(n, L.DEMAND_SPEC_ATTR)["keys"] if k["period"] == "peak"]
+    months = {k["month"] for k in keys}
+    assert len(keys) == len(months)            # one key per month for the named window
+    assert all("|peak|" in k["key"] for k in keys)
+
+
+@pytest.mark.live_solve
+def test_lp_split_peak_charge_equals_the_engine():
+    n = _site()
+    tariff = _tariff({**_split_peak(), "settlement": "h"})
+    _solve(n, _commercial(tariff))
+    lp = sum(v["eur_per_mw"] * v["billed_mw"] for v in n.meta[L.META_DEMAND].values())
+    dispatch = pd.DataFrame({"import_mw": n.links_t.p0["import"].to_numpy(), "export_mw": 0.0},
+                            index=n.snapshots)
+    assert lp == pytest.approx(engine_rate(dispatch, tariff, step_hours=0.25,
+                                           timezone=None).per_item["demand"], rel=1e-6)
+
+
+def test_renaming_a_fragment_is_demand_drift():
+    """The windows follow the names, so the items hash covers them."""
+    n = _site()
+    a = L.demand_hash(n, L._parse(_commercial(_tariff(_split_peak()))),
+                      _tariff(_split_peak()).items)
+    renamed = _split_peak()
+    renamed["periods"][1]["name"] = "evening"
+    b = L.demand_hash(n, L._parse(_commercial(_tariff(renamed))), _tariff(renamed).items)
+    assert a != b
+
+
+def test_p1_position_keyed_records_still_produce_rows():
+    """Upgrade path: rows read eur_per_mw and billed_mw, never the key format."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _site()
+    commercial = _commercial(_tariff(_demand()))
+    applied = L.materialise_poc_prices(n, commercial)
+    n.meta[L.META_DEMAND] = {"demand|0||2030-01": {
+        "item": "demand", "period": "all", "month": "2030-01", "inv_period": None,
+        "eur_per_mw": 15000.0, "peak_mw": 2.0, "billed_mw": 2.0}}
+    n.meta[L.META_DEMAND_INFO] = getattr(n, L.DEMAND_SPEC_ATTR)["info"]
+    applied.undo()
+    block = commercial_cost_terms(n, commercial)["block"]
+    assert block["demand_charge"] == pytest.approx(30_000.0)

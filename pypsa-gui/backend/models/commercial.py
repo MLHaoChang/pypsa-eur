@@ -152,6 +152,21 @@ class TariffItem(BaseModel):
                 raise ValueError("tier thresholds must be strictly increasing")
         if self.ratchet is not None and self.kind != "demand":
             raise ValueError("ratchet only applies to demand items")
+        if self.kind == "demand":
+            # A demand WINDOW is the set of periods sharing a name (a URDB
+            # period is several [start, end) fragments; IC P2 WP2.1a-0). One
+            # window has one rate in any month: fragments of one name whose
+            # months overlap must agree (summer/winter "peak" may differ).
+            all_months = set(range(1, 13))
+            for i, a in enumerate(self.periods):
+                for b in self.periods[i + 1:]:
+                    if a.name != b.name or a.rate == b.rate:
+                        continue
+                    if (set(a.months) or all_months) & (set(b.months) or all_months):
+                        raise ValueError(
+                            f"demand item {self.id!r}: periods named {a.name!r} apply in the same "
+                            f"month with different rates ({a.rate} vs {b.rate}); one demand "
+                            "window has one rate per month")
         return self
 
 

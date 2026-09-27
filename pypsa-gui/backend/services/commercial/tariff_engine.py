@@ -218,6 +218,28 @@ def _period_index(item: TariffItem, local: pd.DatetimeIndex) -> np.ndarray:
     return out
 
 
+def demand_windows(item: TariffItem, local: pd.DatetimeIndex) -> tuple[np.ndarray, list[str],
+                                                                       np.ndarray]:
+    """(window index per interval (-1: none), window names, fragment index).
+
+    A demand WINDOW is the set of the item's periods sharing a name: a URDB
+    demand period is several `[start, end)` fragments, billed on ONE monthly
+    peak (IC P2 WP2.1a-0). Unique names reproduce the P1 behaviour. Shared by
+    the engine and the LP so both key peaks the same way."""
+    frag = _period_index(item, local)
+    names = list(dict.fromkeys(p.name for p in item.periods))
+    to_window = np.array([names.index(p.name) for p in item.periods])
+    window = np.where(frag >= 0, to_window[np.clip(frag, 0, None)], -1)
+    return window, names, frag
+
+
+def window_rate(item: TariffItem, frag_rows: np.ndarray) -> float:
+    """The window's rate for a set of its intervals (one month): the rate of
+    the fragments that matched them — one value, by the `TariffItem`
+    validator (fragments of one name agree within a month)."""
+    return float(item.periods[int(frag_rows[0])].rate)
+
+
 def _history_kw(meter_history) -> dict[str, float]:
     """`meter_history` as {"YYYY-MM": metered peak kW} (a mapping or Series)."""
     if meter_history is None:
@@ -399,7 +421,9 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             if item.measured_on == "net":
                 q_int = np.clip(q_int, 0.0, None)  # NaN stays NaN
             g_month = month_key[first.to_numpy()]
-            g_pidx = _period_index(item, local)[first.to_numpy()]
+            window, names, frag = demand_windows(item, local)
+            g_win = window[first.to_numpy()]
+            g_frag = frag[first.to_numpy()]
             flags[item.id] = []
             months_sorted = sorted(set(month_key))
             # Months the bill covers but the dispatch does not (spec §5.2):
@@ -419,12 +443,14 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             # Actual peak per (month, window) first: a ratchet reads ACTUAL
             # peaks of earlier months, never billed ones (WP1.5b).
             actual: dict[tuple[str, int], float] = {}
+            rate_of: dict[tuple[str, int], float] = {}
             nan_windows = 0
             for key in months_sorted:
-                for k in range(len(item.periods)):
-                    sel = (g_month == key) & (g_pidx == k)
+                for k in range(len(names)):
+                    sel = (g_month == key) & (g_win == k)
                     if not sel.any():
                         continue
+                    rate_of[(key, k)] = window_rate(item, g_frag[sel])
                     if np.isnan(q_int[sel]).any():
                         nan_windows += 1  # only the window's own intervals matter
                         actual[(key, k)] = float("nan")
@@ -435,13 +461,14 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             by_month: dict[str, float] = {}
             for key in months_sorted:
                 amt = 0.0
-                for k, per in enumerate(item.periods):
+                for k, name in enumerate(names):
                     if (key, k) not in actual:
                         continue
                     peak = actual[(key, k)]
+                    rate_k = rate_of[(key, k)]
                     billed = peak
                     # A free window bills nothing: no ratchet, no seed gap.
-                    if item.ratchet is not None and np.isfinite(peak) and per.rate != 0:
+                    if item.ratchet is not None and np.isfinite(peak) and rate_k != 0:
                         prior, missing = _ratchet_prior(key, k, item.ratchet.lookback_months,
                                                         actual, meter_history,
                                                         set(months_sorted))
@@ -451,9 +478,9 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                             note = notes.setdefault(item.id, [])
                             if "ratchet_seed_missing" not in note:
                                 note.append("ratchet_seed_missing")
-                    line = sign * per.rate * billed
-                    demand_rows.append({"month": key, "tariff_item": item.id, "period": per.name,
-                                        "peak_kw": peak, "billed_kw": billed, "rate": per.rate,
+                    line = sign * rate_k * billed
+                    demand_rows.append({"month": key, "tariff_item": item.id, "period": name,
+                                        "peak_kw": peak, "billed_kw": billed, "rate": rate_k,
                                         "amount": line})
                     amt += line
                 by_month[key] = amt
