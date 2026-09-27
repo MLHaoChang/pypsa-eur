@@ -10,9 +10,15 @@ Input contract (violations raise ``ValueError`` / ``TypeError``)
 * ``dispatch`` has columns ``import_mw`` and ``export_mw`` (MW, ≥ 0; NaN is
   allowed but flagged) on a DatetimeIndex whose INSTANTS are strictly
   increasing (duplicates would double-bill).
-* ``step_hours`` is REQUIRED: a float, or a per-row Series of hours for
-  time-segmented snapshots. Rows may not overlap (row start + duration must
-  not pass the next row's start). Gaps are allowed (representative weeks).
+* ``step_hours`` is REQUIRED: a float, a per-row Series of hours, or a 1-D
+  array of the dispatch's length (time-segmented snapshots). Rows may not
+  overlap (row start + duration must not pass the next row's start). Gaps are
+  allowed (representative weeks).
+* ``represents_hours`` (optional, same shapes): the real-year hours each row
+  STANDS FOR — the snapshot weightings of a representative-period model. When
+  given, energy is MW × represents_hours; when omitted it is MW × step_hours.
+* ``billing_period=(start, end)`` is half-open ``[start, end)`` on the local
+  clock; it bills fixed items for the months it spans.
 * ``timezone``: required when the index is tz-aware (TOU windows and billing
   months are LOCAL); refused when the index is naive, because a naive local
   index cannot represent the repeated fall-back hour. A naive index with no
@@ -34,6 +40,10 @@ Semantics
   no ``billing_period``, the item carries the note
   ``fixed_prorated_on_partial_coverage``; ``billing_period=(start, end)`` bills
   the months it spans instead (representative weeks standing for a year).
+  With a ``billing_period`` over gappy data and NO ``represents_hours``, energy
+  items cover only the sampled rows: they carry ``energy_on_partial_coverage``
+  and ``total`` is None — 12 months of fixed charges plus 4 weeks of energy is
+  not a bill.
 * A dispatch step different from the item's ``settlement`` is DISCLOSED in
   ``notes`` (``resolution:dispatch_Xh_settlement_Yh``); it does not make the
   result incomplete.
@@ -72,7 +82,8 @@ class RatingResult:
 
     @property
     def complete(self) -> bool:
-        return not self.unsupported_items and not any(self.flags.values())
+        partial = any("energy_on_partial_coverage" in v for v in self.notes.values())
+        return not self.unsupported_items and not any(self.flags.values()) and not partial
 
 
 # ── input validation ──────────────────────────────────────────────────────────
@@ -95,21 +106,35 @@ def _validate(dispatch: pd.DataFrame, timezone: str | None) -> pd.DatetimeIndex:
     instants = idx.asi8
     if len(instants) > 1 and not (np.diff(instants) > 0).all():
         raise ValueError("dispatch instants must be strictly increasing (no duplicates)")
+    if len(idx) == 0:
+        raise ValueError("dispatch is empty")
     vals = dispatch[list(_REQUIRED)].to_numpy(dtype=float)
-    if (vals[~np.isnan(vals)] < 0).any():
+    present = vals[~np.isnan(vals)]
+    if not np.isfinite(present).all():
+        raise ValueError("import_mw / export_mw must be finite (NaN is flagged, inf is refused)")
+    if (present < 0).any():
         raise ValueError("import_mw / export_mw must not be negative")
     return idx
 
 
-def _durations(idx: pd.DatetimeIndex, step_hours) -> np.ndarray:
-    if isinstance(step_hours, pd.Series):
-        dur = step_hours.reindex(idx).to_numpy(dtype=float)
-        if np.isnan(dur).any():
-            raise ValueError("step_hours Series must cover every dispatch row")
+def _per_row(idx: pd.DatetimeIndex, value, what: str) -> np.ndarray:
+    if isinstance(value, pd.Series):
+        arr = value.reindex(idx).to_numpy(dtype=float)
+        if np.isnan(arr).any():
+            raise ValueError(f"{what} Series must cover every dispatch row")
+    elif isinstance(value, (np.ndarray, list, tuple)):
+        arr = np.asarray(value, dtype=float)
+        if arr.ndim != 1 or len(arr) != len(idx):
+            raise ValueError(f"{what} array length {arr.shape} must match the dispatch length {len(idx)}")
     else:
-        dur = np.full(len(idx), float(step_hours))
-    if (dur <= 0).any():
-        raise ValueError("step_hours must be positive")
+        arr = np.full(len(idx), float(value))
+    if not np.isfinite(arr).all() or (arr <= 0).any():
+        raise ValueError(f"{what} must be positive finite hours")
+    return arr
+
+
+def _durations(idx: pd.DatetimeIndex, step_hours) -> np.ndarray:
+    dur = _per_row(idx, step_hours, "step_hours")
     if len(idx) > 1:
         gap_h = np.diff(idx.asi8) / 3.6e12
         if (dur[:-1] > gap_h + 1e-9).any():
@@ -207,12 +232,13 @@ def _hours_by_month_in_period(start, end, tz: str | None) -> dict[str, float]:
 
 
 def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | None,
-         billing_period: tuple | None = None,
+         billing_period: tuple | None = None, represents_hours=None,
          meter_history: pd.DataFrame | None = None) -> RatingResult:
     """Rate ``dispatch`` against ``tariff`` (see module docstring).
     ``meter_history`` is accepted for the P2 demand/ratchet items and unused here."""
     idx = _validate(dispatch, timezone)
     dur = _durations(idx, step_hours)
+    energy_h = dur if represents_hours is None else _per_row(idx, represents_hours, "represents_hours")
     local = idx.tz_convert(timezone) if idx.tz is not None else idx
     imp = dispatch["import_mw"].to_numpy(dtype=float)
     exp = dispatch["export_mw"].to_numpy(dtype=float)
@@ -256,7 +282,7 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             monthly_parts[item.id] = pd.Series(by_month, dtype=float)
             continue
 
-        q_kwh = _quantity_mw(item, imp, exp) * dur * _KWH_PER_MWH
+        q_kwh = _quantity_mw(item, imp, exp) * energy_h * _KWH_PER_MWH
         r = _rates(item, local)
         amount = sign * q_kwh * r
         interval_frames.append(pd.DataFrame({
@@ -271,6 +297,8 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             item_flags.append(f"nan_quantity:{n_nan_q}")
         flags[item.id] = item_flags
         per_item[item.id] = None if item_flags else float(amount.sum())
+        if billing_period is not None and has_gaps and represents_hours is None:
+            notes.setdefault(item.id, []).append("energy_on_partial_coverage")
         monthly_parts[item.id] = _nan_aware_sum(pd.Series(amount), month_key)
         settle_h = _SETTLEMENT_HOURS[item.settlement]
         uniq = np.unique(dur)
@@ -282,15 +310,22 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
              pd.DataFrame(columns=["interval", "tariff_item", "quantity_kwh", "rate", "amount"]))
     fixed_lines = pd.DataFrame(fixed_rows, columns=["month", "tariff_item", "hours_covered",
                                                     "hours_in_month", "amount"])
+    # Annual per item from ITS OWN months: after the join below, a month where
+    # an item has no rows would read as NaN ("unrated") — it is not (C1).
+    annual_parts = {}
+    for c, ser in monthly_parts.items():
+        ser = ser.copy()
+        ser.index = ser.index.astype(str)
+        annual_parts[c] = _nan_aware_sum(ser, np.asarray([m[:4] for m in ser.index]))
     monthly = pd.DataFrame(monthly_parts).sort_index()
     monthly.index = monthly.index.astype(str)
     monthly.index.name = "month"
-    year_key = np.asarray([m[:4] for m in monthly.index])
-    annual = pd.DataFrame({c: _nan_aware_sum(monthly[c], year_key) for c in monthly.columns})
+    annual = pd.DataFrame(annual_parts).sort_index()
     annual.index.name = "year"
     totals = list(per_item.values())
     total_supported = None if any(v is None for v in totals) else float(sum(totals))
-    total = None if unsupported else total_supported
+    partial_energy = any("energy_on_partial_coverage" in v for v in notes.values())
+    total = None if (unsupported or partial_energy) else total_supported
     return RatingResult(lines=lines, fixed_lines=fixed_lines, monthly=monthly, annual=annual,
                         per_item=per_item, total=total, total_supported=total_supported,
                         flags=flags, notes=notes, unsupported_items=unsupported)

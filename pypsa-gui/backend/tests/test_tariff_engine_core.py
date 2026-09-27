@@ -410,3 +410,75 @@ def test_a_dispatch_step_different_from_settlement_is_disclosed():
     res = rate(df, _flat_tariff(), step_hours=1.0, timezone="Europe/Berlin")
     assert res.notes["flat"] == ["resolution:dispatch_1h_settlement_0.25h"]
     assert res.complete is True     # disclosed, not incomplete
+
+
+# ── re-review WP1.2 conditions ────────────────────────────────────────────────
+
+
+def _mixed_tariff():
+    return Tariff.model_validate({"id": "t", "name": "t", "jurisdiction": "DE",
+                                  "valid_from": "2030-01-01", "items": [
+        {"id": "meter", "kind": "fixed", "unit": "per_month",
+         "periods": [{"name": "all", "rate": 310.0}],
+         "settlement": "15min", "measured_on": "import", "direction": "cost"},
+        {"id": "energy", "kind": "energy", "unit": "per_kwh",
+         "periods": [{"name": "all", "rate": 0.2}],
+         "settlement": "15min", "measured_on": "import", "direction": "cost"}]})
+
+
+def _rep_weeks():
+    return pd.concat([_dispatch(f"2030-{m:02d}-07 00:00", 7 * 96) for m in (1, 4, 7, 10)])
+
+
+def test_billing_period_with_gappy_energy_is_partial_not_a_confident_total():
+    """C1: 12 months of fixed charges + 4 weeks of energy is not a bill."""
+    from services.commercial.tariff_engine import rate
+
+    res = rate(_rep_weeks(), _mixed_tariff(), step_hours=0.25, timezone="Europe/Berlin",
+               billing_period=("2030-01-01", "2031-01-01"))
+    assert "energy_on_partial_coverage" in res.notes["energy"]
+    assert res.total is None and res.complete is False
+    assert res.per_item["meter"] == pytest.approx(12 * 310.0)
+    # Annual per item is computed from its OWN months: a month with no rows is
+    # not "unrated", so neither item's year is NaN.
+    assert not np.isnan(res.annual.loc["2030", "meter"])
+    assert not np.isnan(res.annual.loc["2030", "energy"])
+
+
+def test_represents_hours_scales_representative_weeks_to_the_year():
+    """With per-row represented hours (the snapshot weightings), 4 weeks of
+    1 MW stand for 8760 MWh and the bill is complete."""
+    from services.commercial.tariff_engine import rate
+
+    df = _rep_weeks()
+    represents = pd.Series(8760.0 / len(df), index=df.index)
+    res = rate(df, _mixed_tariff(), step_hours=0.25, timezone="Europe/Berlin",
+               billing_period=("2030-01-01", "2031-01-01"), represents_hours=represents)
+    assert res.per_item["energy"] == pytest.approx(8760 * 1000 * 0.2)
+    assert "energy_on_partial_coverage" not in res.notes.get("energy", [])
+    assert res.total == pytest.approx(12 * 310.0 + 8760 * 1000 * 0.2)
+    assert res.complete is True
+
+
+@pytest.mark.parametrize("bad,match", [
+    (lambda d: d.assign(import_mw=np.inf), "finite"),
+    (lambda d: d.iloc[0:0], "empty"),
+])
+def test_infinite_and_empty_dispatch_are_refused(bad, match):
+    from services.commercial.tariff_engine import rate
+
+    with pytest.raises(ValueError, match=match):
+        rate(bad(_dispatch("2030-03-04 12:00", 4)), _flat_tariff(), step_hours=0.25,
+             timezone="Europe/Berlin")
+
+
+def test_nan_step_hours_is_refused_and_arrays_are_accepted():
+    from services.commercial.tariff_engine import rate
+
+    df = _dispatch("2030-03-04 12:00", 4)
+    with pytest.raises(ValueError, match="step_hours"):
+        rate(df, _flat_tariff(), step_hours=float("nan"), timezone="Europe/Berlin")
+    res = rate(df, _flat_tariff(), step_hours=np.full(4, 0.25), timezone="Europe/Berlin")
+    assert res.total == pytest.approx(4 * 50.0)
+    with pytest.raises(ValueError, match="length"):
+        rate(df, _flat_tariff(), step_hours=np.full(3, 0.25), timezone="Europe/Berlin")
