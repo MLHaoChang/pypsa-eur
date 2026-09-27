@@ -372,6 +372,6 @@ Existing tests updated to annual `capital_cost`:
 
 | Run | Result |
 |---|---|
-| Backend `-m "not slow"` | SECOND_FOLLOWUP_BACKEND |
-| Frontend `npx vitest run` | SECOND_FOLLOWUP_FRONTEND |
+| Backend `-m "not slow"` | 5602 passed, 29 failed, 107 errors, 32 skipped; the 136 failures and errors are the same test ids as on master |
+| Frontend `npx vitest run` | 1940 passed; `tsc --noEmit` clean |
 | QA drivers (`run_qa_drivers.py`) | all 21 pass |
