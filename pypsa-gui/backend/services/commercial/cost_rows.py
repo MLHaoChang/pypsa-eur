@@ -95,7 +95,8 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
                                         if cfg_parsed.import_tariff is not None else [])
                             if _lp._is_demand(i) and _lp._lp_reason(i) is None]
             wanted = [i.id for i in wanted_items]
-            wanted_hash = _lp._items_hash(wanted_items) if wanted_items else None
+            wanted_hash = (_lp.demand_hash(n, cfg_parsed, wanted_items) if wanted_items
+                           else None)
         except Exception:  # noqa: BLE001
             wanted = []
     if peaks:
@@ -145,15 +146,29 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
         wanted_tiers = _lp.tier_items_hash(cfg_now) if cfg_now is not None else None
         if solved_hash is not None and solved_hash != wanted_tiers:
             drifted()
+    elif cfg_now is not None and _lp.tier_items_hash(cfg_now) is not None:
+        # Tiers the config names but the solve did not bind (ADR-0001).
+        block["energy_tiers"] = None
+        flags.append("energy_tiers_not_established")
 
     # Energy-hub group contract (WP1.6): no money of its own; the members'
     # shares of the group's import energy are reported (allocation is P3).
+    def comparable(spec: dict | None) -> dict | None:
+        return None if not spec else {"name": spec.get("name"),
+                                      "members": sorted(spec.get("members") or []),
+                                      "cap_mw": spec.get("cap_mw")}
+
     group = n.meta.get(_lp.META_GROUP)
+    wanted_group = _lp.group_spec(cfg_now) if cfg_now is not None else None
     if group:
         block["group"] = {k: group.get(k) for k in ("name", "members", "cap_mw", "energy_share")}
-        wanted_group = _lp.group_spec(cfg_now) if cfg_now is not None else None
-        if wanted_group != {k: group.get(k) for k in ("name", "members", "cap_mw")}:
+        if comparable(wanted_group) != comparable(group):
             drifted()
+        shares = group.get("energy_share")
+        if shares is None or any(v is None for v in shares.values()):
+            flags.append("group_energy_share_not_established")
+    elif wanted_group is not None and n.meta.get(_lp.META_LINKS):
+        drifted()  # a group the solve did not bind
 
     # Connection capacity fee in the LP (WP1.4a).
     fee = n.meta.get(_conn.META_FEE)

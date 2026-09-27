@@ -366,3 +366,105 @@ def test_a_rate_change_after_the_solve_is_config_drift():
         n, _commercial(_tariff(_demand())))["flags"]
     assert "config_changed_since_solve" in commercial_cost_terms(
         n, _commercial(_tariff(_demand(rate=40.0))))["flags"]
+
+
+# ── WP1.5a review round 3 ──────────────────────────────────────────────────
+
+
+def test_engine_nets_within_the_interval_before_clipping():
+    """#1: a net interval meter reads the interval's net energy, so an export
+    quarter offsets the importing quarters of the same hour."""
+    idx = pd.date_range("2030-01-07 18:00", periods=4, freq="15min")
+    df = pd.DataFrame({"import_mw": [20.0, 20.0, 20.0, 0.0],
+                       "export_mw": [0.0, 0.0, 0.0, 20.0]}, index=idx)
+    t = _tariff({**_demand(measured_on="net"), "settlement": "h"})
+    res = engine_rate(df, t, step_hours=0.25, timezone=None)
+    assert res.per_item["demand"] == pytest.approx(RATE * 10_000.0)  # mean net 10 MW
+
+
+@pytest.mark.live_solve
+def test_net_demand_on_hourly_settlement_matches_the_engine():
+    """#1 end to end: 15-min steps, hourly net settlement, an export Link."""
+    n = _site()
+    n.generators.loc["pv", "p_nom"] = 90.0
+    n.add("Link", "export", bus0="poc", bus1="grid", p_nom=80.0, carrier="AC", marginal_cost=0.5)
+    n.generators.loc["grid_supply", "p_min_pu"] = -1.0
+    item = {**_demand(measured_on="net"), "settlement": "h"}
+    commercial = {**_commercial(_tariff(item)), "export_link": "export"}
+    _solve(n, commercial)
+    lp = sum(v["eur_per_mw"] * v["billed_mw"] for v in n.meta[L.META_DEMAND].values())
+    dispatch = pd.DataFrame({"import_mw": n.links_t.p0["import"].to_numpy(),
+                             "export_mw": n.links_t.p0["export"].to_numpy()}, index=n.snapshots)
+    billed = engine_rate(dispatch, _tariff(item), step_hours=0.25, timezone=None)
+    assert lp == pytest.approx(billed.per_item["demand"], rel=1e-6)
+
+
+def _seasonal():
+    """June priced, a free catch-all window; a May-June axis."""
+    return _demand(periods=[{"name": "summer", "rate": 10.0, "months": [6]},
+                            {"name": "off", "rate": 0.0}],
+                   ratchet={"lookback_months": 1, "share": 0.9})
+
+
+def test_a_month_in_the_dispatch_is_modelled_whatever_its_window_rates():
+    """#2: May is in the dispatch (its only window is free), so June's
+    lookback does NOT reach for May's meter history, in the LP and the engine."""
+    n = _site(start="2030-05-28 00:00")
+    history = {"2030-05": 60_000.0, "2030-04": 60_000.0}
+    applied = L.materialise_poc_prices(n, {**_commercial(_tariff(_seasonal())),
+                                           "meter_history_peaks_kw": history})
+    assert getattr(n, L.DEMAND_SPEC_ATTR)["ratchets"] == []
+    assert "ratchet_seed_missing" not in applied.facts["notes"]
+    dispatch = pd.DataFrame({"import_mw": np.full(len(n.snapshots), 30.0), "export_mw": 0.0},
+                            index=n.snapshots)
+    res = engine_rate(dispatch, _tariff(_seasonal()), step_hours=0.25, timezone=None,
+                      meter_history=history)
+    june = res.demand_lines[res.demand_lines["month"] == "2030-06"]
+    assert (june["billed_kw"] == june["peak_kw"]).all()
+    assert "ratchet_seed_missing" not in (res.notes.get("demand") or [])
+
+
+def test_a_free_window_needs_no_ratchet_seed_in_the_engine():
+    """#2: a zero-rate window bills nothing, so its unknown lookback is no gap."""
+    n = _site(start="2030-05-28 00:00")
+    dispatch = pd.DataFrame({"import_mw": np.full(len(n.snapshots), 30.0), "export_mw": 0.0},
+                            index=n.snapshots)
+    res = engine_rate(dispatch, _tariff(_seasonal()), step_hours=0.25, timezone=None)
+    assert "ratchet_seed_missing" not in (res.notes.get("demand") or [])
+
+
+@pytest.mark.live_solve
+def test_the_reported_peak_is_the_actual_peak_when_a_ratchet_binds():
+    """#3: `peak` is free between the actual peak and the billed demand when
+    the ratchet binds; the report reads the dispatch, not the free variable."""
+    n = _site()
+    item = _demand(ratchet={"lookback_months": 1, "share": 1.0})
+    _solve(n, {**_commercial(_tariff(item)), "meter_history_peaks_kw": {"2029-12": 200_000.0}})
+    (v,) = n.meta[L.META_DEMAND].values()
+    assert v["billed_mw"] == pytest.approx(200.0)
+    assert v["peak_mw"] == pytest.approx(float(n.links_t.p0["import"].max()), abs=1e-6)
+
+
+@pytest.mark.parametrize("change", [{"timezone": "Europe/Berlin"},
+                                    {"meter_history_peaks_kw": {"2029-12": 1.0}},
+                                    {"initial_peak_lower_bound": {"2030-01": 5.0}}])
+def test_a_metering_change_after_the_solve_is_config_drift(change):
+    """#4: timezone, meter history and peak floors change what is billed."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _site()
+    base = _commercial(_tariff(_demand()))
+    applied = L.materialise_poc_prices(n, base)
+    n.meta[L.META_DEMAND] = {"k": {"item": "demand", "period": "all", "month": "2030-01",
+                                   "inv_period": None, "eur_per_mw": 15000.0, "peak_mw": 1.0,
+                                   "billed_mw": 1.0}}
+    n.meta[L.META_DEMAND_INFO] = getattr(n, L.DEMAND_SPEC_ATTR)["info"]
+    applied.undo()
+    assert "config_changed_since_solve" not in commercial_cost_terms(n, base)["flags"]
+    assert "config_changed_since_solve" in commercial_cost_terms(n, {**base, **change})["flags"]
+
+
+def test_a_negative_demand_rate_is_refused():
+    """#5: it would make the LP unbounded."""
+    with pytest.raises(L.CommercialBindingError, match="negative"):
+        L.materialise_poc_prices(_site(), _commercial(_tariff(_demand(rate=-5.0))))

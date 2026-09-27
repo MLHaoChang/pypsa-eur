@@ -60,6 +60,7 @@ Pure service: imports neither routers nor `solver_service`.
 from __future__ import annotations
 
 import hashlib
+import json
 
 import numpy as np
 import pandas as pd
@@ -256,6 +257,13 @@ def _adders(n, cfg: CommercialConfig) -> tuple[dict[str, np.ndarray], list[str],
             not_in_lp[item.id] = reason
             continue
         if _is_demand(item):
+            neg = [p.name for p in item.periods if p.rate < 0]
+            if neg:
+                # A negative €/kW would pay the LP to raise its peak without
+                # bound (review round 3 #5).
+                raise CommercialBindingError(
+                    f"demand item {item.id!r} has a negative rate in period(s) {neg}; a "
+                    "demand credit is not a peak charge")
             continue  # a peak term, built by `_demand_spec`
         if item.tiers:
             if tiers_are_convex(item.tiers):
@@ -292,6 +300,15 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
     cfg = _parse(cfg)
     _require_link(n, cfg.poc_link, "poc_link")
     _require_one_way(n, cfg.poc_link, "poc_link")
+    if cfg.import_tariff is not None:
+        ts = (n.snapshots.get_level_values(-1) if isinstance(n.snapshots, pd.MultiIndex)
+              else n.snapshots)
+        if not isinstance(ts, pd.DatetimeIndex):
+            # A tariff's windows, months and validity are dates; an integer or
+            # 'now' axis would be rated on 1970 or today (WP1.8 review #6).
+            raise CommercialBindingError(
+                "a tariff needs datetime snapshots; this network's snapshot axis is not "
+                "datetime")
     if cfg.export_link is not None:
         _require_link(n, cfg.export_link, "export_link")
         _require_one_way(n, cfg.export_link, "export_link")
@@ -301,12 +318,12 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
             "carry the tariff inline as import_tariff")
     bounds = (n.meta.get("vintage_bounds") or {}).get("Link") if hasattr(n, "meta") else None
     if isinstance(bounds, dict):
-        clash = [l for l in (cfg.poc_link, cfg.export_link) if l and l in bounds]
+        clash = sorted(l for l in {*import_links(cfg), cfg.export_link} if l and l in bounds)
         if clash:
             raise CommercialBindingError(
-                f"per-period vintage bounds on the PoC Link(s) {clash} are not supported with "
-                "the commercial layer in P1 (the vintage clones would carry dispatch the "
-                "commercial rows do not read)")
+                f"per-period vintage bounds on the PoC / group Link(s) {clash} are not supported "
+                "with the commercial layer in P1 (the vintage clones would carry dispatch the "
+                "group cap, the meters and the commercial rows do not read)")
     if cfg.group_members:
         # One customer under one tariff: every member is an import connection
         # on the PoC's grid side, and the tariffed PoC is one of them.
@@ -315,6 +332,15 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
                 f"group_members must include poc_link {cfg.poc_link!r}: the group's tariff "
                 "is the PoC's")
         grid_bus = n.links.at[cfg.poc_link, "bus0"]
+        net = [i.id for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
+               if i.measured_on == "net" and not _is_demand(i)]
+        if net and cfg.export_link is not None and len(cfg.group_members) > 1:
+            # The bill nets the group's import against its export on the group
+            # meter; per-member adders charge each member's gross import.
+            raise CommercialBindingError(
+                f"energy items measured on net ({net}) on a multi-member group with an export "
+                "Link would charge gross member import the group meter nets out; not supported "
+                "in P1 (price them on import and export separately)")
         for member in cfg.group_members:
             _require_link(n, member, "group_members")
             _require_one_way(n, member, "group_members")
@@ -505,7 +531,9 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
     # month modelled in the SAME investment period, ≥ ρ · metered history for
     # one before the horizon; unknown months are disclosed, not constrained.
     by_ident = {(k["item"], k["period"], k["inv_period"], k["month"]): k["key"] for k in keys}
-    modelled = {(k["inv_period"], k["month"]) for k in keys}
+    # Every month of the dispatch is modelled, whatever the item's windows or
+    # rates, as in the engine (review round 3 #2).
+    modelled = {(None if p is None else int(p), m) for p, m in zip(inv, months)}
     ratchets: list[dict] = []
     notes: list[str] = []
     item_by_id = {i.id: i for i in items}
@@ -537,8 +565,18 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
             "ratchets": ratchets, "floors": floors,
             "info": {"items": [i.id for i in items], "not_established": missing,
                      "partial_months": partial, "notes": list(notes),
-                     "items_hash": _items_hash(items)}}
+                     "items_hash": demand_hash(n, cfg, items)}}
     return spec, [i.id for i in items], missing, notes
+
+
+def demand_hash(n, cfg: CommercialConfig, items) -> str:
+    """What decides the billed demand besides the items: the site clock, the
+    meter history, the peak floors and the snapshot axis (review round 3 #4)."""
+    raw = json.dumps({"items": _items_hash(items), "timezone": cfg.timezone,
+                      "history": sorted(cfg.meter_history_peaks_kw.items()),
+                      "floors": sorted(cfg.initial_peak_lower_bound.items()),
+                      "axis": _axis_hash(n.snapshots)}, sort_keys=True)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
 def add_demand_terms(n) -> None:
@@ -611,9 +649,26 @@ def _read_demand_solution(n, spec: dict) -> dict | None:
         billed = model.variables["ic_billed_demand"].solution.to_pandas()
     except Exception:  # noqa: BLE001 — unsolved / infeasible: nothing to commit
         return None
+    # The ACTUAL peak comes from the solved dispatch: the `peak` variable is
+    # free between it and the billed demand when a ratchet binds (review
+    # round 3 #3). Interval means as billed, floored at 0 like the variable.
+    try:
+        link_p = model.variables["Link-p"].solution
+        flow = link_p.sel(name=spec["import_links"]).sum("name").values
+        exp = (link_p.sel(name=spec["export_link"]).values if spec["export_link"] else None)
+    except Exception:  # noqa: BLE001
+        return None
+    w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
     out = {}
     for k in spec["keys"]:
-        v, b = float(sol.loc[k["key"]]), float(billed.loc[k["key"]])
+        b = float(billed.loc[k["key"]])
+        pos, group = k["positions"], k["group"]
+        f = flow[pos] - (exp[pos] if k["net"] and exp is not None else 0.0)
+        means = (np.bincount(group, weights=f * w_all[pos])
+                 / np.bincount(group, weights=w_all[pos]))
+        v = max(0.0, float(means.max())) if len(means) else float(sol.loc[k["key"]])
+        # A floor is the month's running peak from earlier windows (P6 hook).
+        v = max(v, float(spec.get("floors", {}).get(k["key"], 0.0)))
         if not (np.isfinite(v) and np.isfinite(b)):
             return None
         out[k["key"]] = {"item": k["item"], "period": k["period"], "month": k["month"],
@@ -738,6 +793,68 @@ def _group_shares(n, spec: dict) -> dict | None:
     return {m: e / total for m, e in energy.items()}
 
 
+# ── solve-strategy guard and circulation risk (shared with preflight) ──────
+
+
+def effective_strategy(solve_strategy: str | None, *, sclopf: bool = False,
+                       multi_period: bool = False) -> str:
+    """The strategy that will actually RUN: rolling falls back to full with
+    SCLOPF or multi-period (WP1.5a review #7)."""
+    strategy = solve_strategy or "full"
+    if strategy == "rolling" and (sclopf or multi_period):
+        return "full"
+    return strategy
+
+
+def refuse_windowed_terms(demand: dict | None, tier_spec: dict | None,
+                          solve_strategy: str, multi_period: bool) -> None:
+    """Monthly demand peaks and tier volumes cannot be carried across the
+    windows of a rolling or multi-period myopic solve (P6)."""
+    windowed = solve_strategy == "rolling" or (solve_strategy == "myopic" and multi_period)
+    if not windowed:
+        return
+    if tier_spec is not None:
+        raise CommercialBindingError(
+            f"tiered rates with solve_strategy={solve_strategy!r} would restart the monthly "
+            "volume per window (P6); not supported in P1")
+    if demand is not None:
+        raise CommercialBindingError(
+            f"demand charges with solve_strategy={solve_strategy!r} would be re-created per "
+            "window without the month's running peak (spec §5.2, P6); not supported in P1")
+
+
+def tier_floor_eur_per_mwh(cfg: CommercialConfig) -> float:
+    """The cheapest marginal import rate the convex tiers can charge (their
+    first tier), summed over tiered items: tiers are LP terms, not adders."""
+    items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
+             if i.tiers and not _is_demand(i) and _lp_reason(i) is None
+             and tiers_are_convex(i.tiers)]
+    return float(sum(float(i.tiers[0].rate) * _KWH_PER_MWH for i in items))
+
+
+def circulation_risk_snapshots(n, cfg: CommercialConfig, adders: dict[str, np.ndarray],
+                               export_price: np.ndarray | None) -> int:
+    """Snapshots where exporting pays more than importing through the
+    cheapest charged import Link costs (base cost + adders + the first tier),
+    so the LP could circulate power through the grid. Link efficiencies are
+    not considered. `adders` are the unapplied per-side adders."""
+    if cfg.export_link is None:
+        return 0
+
+    def base(link: str) -> np.ndarray:
+        mc = n.links_t.marginal_cost
+        if link in mc.columns:
+            return mc[link].to_numpy(dtype=float)
+        return np.full(len(n.snapshots), float(n.links.at[link, "marginal_cost"]))
+
+    floor = tier_floor_eur_per_mwh(cfg)
+    imp = np.min([base(link) for link in import_links(cfg)], axis=0) + adders["import"] + floor
+    exp = base(cfg.export_link) + adders["export"]
+    if export_price is not None:
+        exp = exp - export_price
+    return int(((imp + exp) < -1e-9).sum())
+
+
 # ── materialisation (transient, committed on success) ──────────────────────
 
 
@@ -774,19 +891,12 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
     demand, demand_items, demand_missing, demand_notes = _demand_spec(n, cfg)
     notes = notes + [x for x in demand_notes if x not in notes]
     tier_spec, tiered_items, nonconvex_items = _tier_spec(n, cfg)
-    if tier_spec is not None and (solve_strategy == "rolling"
-                                  or (solve_strategy == "myopic" and multi_period)):
-        raise CommercialBindingError(
-            f"tiered rates with solve_strategy={solve_strategy!r} would restart the monthly "
-            "volume per window (P6); not supported in P1")
-    if demand is not None and (solve_strategy == "rolling"
-                               or (solve_strategy == "myopic" and multi_period)):
-        raise CommercialBindingError(
-            f"demand charges with solve_strategy={solve_strategy!r} would be re-created per "
-            "window without the month's running peak (spec §5.2, P6); not supported in P1")
+    refuse_windowed_terms(demand, tier_spec, solve_strategy, multi_period)
     has_price = cfg.export_price_ref is not None
+    price = _export_price(n, cfg) if has_price else None
+    risk = circulation_risk_snapshots(n, cfg, adders, price)
     if has_price:
-        adders["export"] = adders["export"] - _export_price(n, cfg)
+        adders["export"] = adders["export"] - price
 
     targets: dict[str, np.ndarray] = {}
     if adders["import"].any():
@@ -874,12 +984,6 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
 
     applied._commit.append(commit)
 
-    risk = 0
-    if cfg.export_link is not None:
-        def cost(link):
-            return (mc[link].to_numpy(dtype=float) if link in mc.columns
-                    else np.full(len(n.snapshots), float(n.links.at[link, "marginal_cost"])))
-        risk = int(((cost(cfg.poc_link) + cost(cfg.export_link)) < -1e-9).sum())
     if log is not None:
         log(f"[COMMERCIAL] PoC prices applied on {sorted(targets)} "
             f"({len(energy_items)} energy item(s); {len(not_in_lp)} left to later bindings"
@@ -962,7 +1066,7 @@ def energy_cost_rows(n, commercial: dict | None) -> dict | None:
                 "flags": flags}
     if cfg is not None and (cfg.poc_link != solved.get("import")
                             or cfg.export_link != solved.get("export")
-                            or import_links(cfg) != solved_import_links(solved)):
+                            or sorted(import_links(cfg)) != sorted(solved_import_links(solved))):
         flags.append("config_changed_since_solve")
     if not commercial:
         flags.append("config_cleared_since_solve")

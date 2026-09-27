@@ -481,6 +481,14 @@ Files: `lp_bindings.py`, `backend/tests/test_lp_bindings_peak_demand.py`.
   notes (`ratchet_seed_missing` flagged in the rows) and a content hash of the demand items (a rate change after
   the solve is `config_changed_since_solve`). Tracked (LOW): per-key constraint loop cost at year scale (~4 s for
   72 keys + ratchets); the engine notes `demand_on_partial_month` on sampled months of a representative year.
+- Round 3 → PASS WITH CONDITIONS, closed: a net demand meter reads the interval's net energy (the engine
+  averages signed import − export per interval, then clips at 0, as the LP does); a month of the dispatch is
+  "modelled" for a ratchet lookback whatever the item's windows or rates (LP and engine), and a zero-rate
+  window carries no ratchet and no seed gap; the reported `peak_mw` is the solved dispatch's interval-mean peak
+  (floored by `initial_peak_lower_bound`), not the free `ic_peak_import` variable; the drift hash covers the
+  items, timezone, meter history, peak floors and the snapshot axis; a negative demand rate is refused (it
+  would make the LP unbounded). Not changed: with unsampled months the rows sum the sampled months plus a
+  flag while the engine withholds `per_item` (both disclosed; different conventions).
 
 - [ ] (Gate P0 condition 3) with `realistic_dispatch` or any other new `services/solver/` module, add
   the assertion that `test_solver_facade_surface.py`'s glob covers it.
@@ -539,6 +547,13 @@ Files: `lp_bindings.py`, `backend/tests/test_group_contract.py` (fixture: two me
   investment periods. The cost block carries `group` (name, members, cap, energy shares), and a changed group or
   changed tiers after the solve raise `config_changed_since_solve`. The connection agreement (fee, envelope) stays
   on `poc_link`.
+- Round 2 → PASS WITH CONDITIONS, closed: vintage bounds on any group member (not only the PoC / export) are
+  refused (clones would sit outside the cap and the meters); `measured_on: "net"` energy items on a
+  multi-member group with an export Link are refused in P1 (the group meter nets what per-member adders
+  cannot); member order is not drift; tiers or a group the config names but the solve did not bind flag
+  `energy_tiers_not_established` / `config_changed_since_solve`; uncomputable shares flag
+  `group_energy_share_not_established`; preflight warns `commercial.group_fee_bypass` when a capacity fee sits
+  on `poc_link` and another member is extendable.
 
 ### WP1.7 Reload-safe cost-breakdown rows and objective reconciliation (the P1 gate)
 Files: `backend/services/results/cost_breakdown.py`, `objective_decomposition.py`,
@@ -588,6 +603,16 @@ Files: `backend/services/validation_service.py`, `backend/tests/test_validation_
   (spec §5.2); `commercial.tariff_out_of_validity`. **Deviation:** the PPA/export-price and DR-contract/`dsr_buses`
   double-count checks need P2's contracts (not in the P1 config) and move to P2 WP2.2. Tests:
   `test_validation_commercial.py`.
+- Review round 1 → **FAIL**, fixed: preflight evaluates the strategy that will RUN
+  (`lp_bindings.effective_strategy`, shared with the solve) and the same windowed-terms guard
+  (`refuse_windowed_terms`) and connection validation, so demand, tiers or a capacity fee with a rolling or
+  multi-period myopic solve are errors before the run (the run then stops at `validation_failed`); the
+  arbitrage check and the solve's `simultaneous_flow_risk_snapshots` share `circulation_risk_snapshots`, which
+  reads the cheapest charged member and counts convex tiers at their first rate (no false warning on tiered
+  tariffs; efficiencies not considered, said in the message); a tariff on a non-datetime axis is refused;
+  `demand_resolution` uses the coarsest in-period step (gaps > 24 h excluded); a crash after binding is
+  `commercial.preflight_incomplete` (warning), never a 500; a later investment period past `valid_to` warns;
+  `binding_invalid` no longer points at the PoC for a non-Link fault. Tests per refusal class added.
 
 ### Phase 1 e2e QA gate
 - [ ] `backend/tests/qa_commercial_lp.py` (auto-discovered by `run_qa_drivers.py`): build the 15-min fixture

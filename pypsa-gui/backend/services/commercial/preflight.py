@@ -10,7 +10,9 @@ stated before any solver time is spent.
   * `commercial.binding_invalid` (error): the config cannot bind: a PoC, export
     or group Link that is missing or two-way, a bare Library tariff id, an
     export item with no export Link, an unrated snapshot, a missing or stale
-    export price or envelope.
+    export price or envelope, a tariff on a non-datetime axis, and the
+    refusals that depend on the strategy that will run (demand, tiers or a
+    capacity fee with a rolling or multi-period myopic solve).
   * `commercial.arbitrage_loop` (warning): in some snapshots exporting pays
     more than importing costs, so the LP can lower its cost by circulating
     power through the grid (both PoC Links at once).
@@ -19,8 +21,12 @@ stated before any solver time is spent.
     cannot resolve (spec §5.5 gap cause `resolution`).
   * `commercial.demand_partial_months` (warning): months charged a full
     demand charge against part of a month's operation (spec §5.2).
-  * `commercial.tariff_out_of_validity` (warning): modelled dates outside the
-    tariff's `valid_from` / `valid_to`.
+  * `commercial.tariff_out_of_validity` (warning): modelled dates (or a later
+    investment period's year) outside the tariff's `valid_from` / `valid_to`.
+  * `commercial.group_fee_bypass` (warning): a capacity fee on `poc_link`
+    while another group member is extendable (it takes capacity fee-free).
+  * `commercial.preflight_incomplete` (warning): a check after binding raised;
+    validation still returns, the solve applies its own checks.
 
 The PPA and DR-contract double-count checks need P2's contracts (plan WP1.8
 deviation).
@@ -35,61 +41,92 @@ import pandas as pd
 from services.commercial import lp_bindings as _lp
 
 _SETTLE_H = {"15min": 0.25, "30min": 0.5, "h": 1.0}
+# Steps longer than this are gaps between sampled stretches (representative
+# weeks), not the axis resolution.
+_GAP_H = 24.0
 
 
-def _link_cost(n, link: str) -> np.ndarray:
-    mc = n.links_t.marginal_cost
-    if link in mc.columns:
-        return mc[link].to_numpy(dtype=float)
-    return np.full(len(n.snapshots), float(n.links.at[link, "marginal_cost"]))
+def _max_step_h(snapshots: pd.Index) -> float | None:
+    """The coarsest in-period step, gaps excluded (review #5: a median hides a
+    coarse stretch of a mixed axis)."""
+    if isinstance(snapshots, pd.MultiIndex):
+        groups = [pd.DatetimeIndex(snapshots[snapshots.get_level_values(0) == p]
+                                   .get_level_values(-1))
+                  for p in snapshots.get_level_values(0).unique()]
+    else:
+        groups = [pd.DatetimeIndex(snapshots)]
+    steps = []
+    for ts in groups:
+        if len(ts) > 1:
+            d = np.diff(ts.asi8) / 3.6e12
+            steps.extend(d[(d > 0) & (d <= _GAP_H)].tolist())
+    return max(steps) if steps else None
 
 
-def commercial_findings(n, commercial) -> list[tuple[str, str, str, str, str]]:
+def commercial_findings(n, commercial, *, solve_strategy: str = "full",
+                        multi_period: bool = False
+                        ) -> list[tuple[str, str, str, str, str]]:
+    """`solve_strategy` is the strategy that will RUN
+    (`lp_bindings.effective_strategy`), so a refusal that depends on it is
+    stated here too (review #1)."""
     if not commercial:
         return []
-    out: list[tuple[str, str, str, str, str]] = []
     try:
         cfg = _lp._parse(commercial)
         _lp.validate_for_network(n, cfg)
         adders, _items, _nil, _notes = _lp._adders(n, cfg)
         price = _lp._export_price(n, cfg) if cfg.export_price_ref is not None else None
+        demand, _ids, _missing, _dnotes = _lp._demand_spec(n, cfg)
+        tier_spec, _tiered, _nonconvex = _lp._tier_spec(n, cfg)
+        _lp.refuse_windowed_terms(demand, tier_spec, solve_strategy, multi_period)
         if cfg.connection is not None:
             from services.commercial import connection as conn
 
-            conn._validate(n, cfg.connection, cfg.poc_link, cfg.export_link, "full", False)
+            conn._validate(n, cfg.connection, cfg.poc_link, cfg.export_link, solve_strategy,
+                           multi_period)
     except Exception as exc:  # noqa: BLE001 — every refusal the solve would make
-        return [("error", "commercial.binding_invalid", "Link",
-                 getattr(commercial, "poc_link", None) or (commercial or {}).get("poc_link", ""),
+        return [("error", "commercial.binding_invalid", "", "",
                  f"The commercial config cannot bind to this network: {exc}")]
+    try:
+        return _warnings(n, cfg, adders, price, demand)
+    except Exception as exc:  # noqa: BLE001 — preflight never takes validation down
+        return [("warning", "commercial.preflight_incomplete", "", "",
+                 f"Some commercial preflight checks could not run ({type(exc).__name__}: "
+                 f"{exc}); the solve applies its own checks.")]
 
-    if cfg.export_link is not None:
-        imp = _link_cost(n, cfg.poc_link) + adders["import"]
-        exp = _link_cost(n, cfg.export_link) + adders["export"]
-        if price is not None:
-            exp = exp - price
-        loops = int(((imp + exp) < -1e-9).sum())
-        if loops:
-            out.append(("warning", "commercial.arbitrage_loop", "Link", cfg.export_link,
-                        f"In {loops} snapshot(s) exporting through {cfg.export_link!r} pays more "
-                        f"than importing through {cfg.poc_link!r} costs: the LP can lower its "
-                        "cost by importing and exporting at once. Check the export price and "
-                        "the import tariff, or add a cost on the export Link."))
 
-    step_h = None
-    ts = n.snapshots.get_level_values(-1) if isinstance(n.snapshots, pd.MultiIndex) else n.snapshots
-    if len(ts) > 1:
-        step_h = float(pd.Series(pd.DatetimeIndex(ts)[1:] - pd.DatetimeIndex(ts)[:-1])
-                       .median() / pd.Timedelta(hours=1))
+def _warnings(n, cfg, adders, price, demand) -> list[tuple[str, str, str, str, str]]:
+    out: list[tuple[str, str, str, str, str]] = []
+    loops = _lp.circulation_risk_snapshots(n, cfg, adders, price)
+    if loops:
+        members = _lp.import_links(cfg)
+        out.append(("warning", "commercial.arbitrage_loop", "Link", cfg.export_link,
+                    f"In {loops} snapshot(s) exporting through {cfg.export_link!r} pays more "
+                    f"than importing through {members[0] if len(members) == 1 else members} "
+                    "costs: the LP can lower its cost by importing and exporting at once. "
+                    "Check the export price and the import tariff, or add a cost on the export "
+                    "Link. (Link efficiencies are not considered in this check.)"))
+
+    fee = cfg.connection.capacity_fee if cfg.connection is not None else None
+    if fee is not None and cfg.group_members:
+        free = [m for m in cfg.group_members
+                if m != cfg.poc_link and bool(n.links.at[m, "p_nom_extendable"])]
+        if free:
+            out.append(("warning", "commercial.group_fee_bypass", "Link", free[0],
+                        f"The connection capacity fee is charged on {cfg.poc_link!r} only; "
+                        f"extendable group member(s) {free} can take capacity without it. "
+                        "Fix their capacity or model their fee on the Link's capital_cost."))
+
+    step_h = _max_step_h(n.snapshots)
     items = cfg.import_tariff.items if cfg.import_tariff is not None else []
     for item in items:
         if _lp._is_demand(item) and step_h is not None and \
                 step_h > _SETTLE_H[item.settlement] + 1e-9:
             out.append(("warning", "commercial.demand_resolution", "", item.id,
                         f"Demand item {item.id!r} is measured on {item.settlement} intervals but "
-                        f"the snapshots are {step_h:g} h apart: the peak within an interval is "
+                        f"part of the axis is {step_h:g} h apart: the peak within an interval is "
                         "not resolved, so the modelled demand charge can understate the bill."))
-    spec, _ids, _missing, _dnotes = _lp._demand_spec(n, cfg)
-    partial = (spec or {}).get("info", {}).get("partial_months", [])
+    partial = (demand or {}).get("info", {}).get("partial_months", [])
     if partial:
         out.append(("warning", "commercial.demand_partial_months", "", "",
                     f"Months {', '.join(partial)} are charged a full monthly demand charge "
@@ -97,11 +134,22 @@ def commercial_findings(n, commercial) -> list[tuple[str, str, str, str, str]]:
                     "peak shaving against energy. Model whole months to avoid it."))
 
     tariff = cfg.import_tariff
-    if tariff is not None and len(ts):
+    if tariff is not None and len(n.snapshots):
         local = _lp._local_clock(n.snapshots, cfg.timezone)
         first, last = local.min().date(), local.max().date()
-        if first < tariff.valid_from or (tariff.valid_to is not None and last > tariff.valid_to):
+        outside = first < tariff.valid_from or (tariff.valid_to is not None
+                                                and last > tariff.valid_to)
+        # Later investment periods usually reuse the first period's timestamps
+        # and are rated on them; the period year is still outside a tariff
+        # that has expired by then (review #7).
+        late = []
+        if isinstance(n.snapshots, pd.MultiIndex) and tariff.valid_to is not None:
+            late = [int(p) for p in n.snapshots.get_level_values(0).unique()
+                    if int(p) > tariff.valid_to.year]
+        if outside or late:
+            where = f"The modelled dates {first}..{last}" + (
+                f" and investment period(s) {', '.join(map(str, late))}" if late else "")
             out.append(("warning", "commercial.tariff_out_of_validity", "", tariff.id,
-                        f"The modelled dates {first}..{last} fall outside tariff {tariff.id!r}'s "
-                        f"validity {tariff.valid_from}..{tariff.valid_to or 'open'}."))
+                        f"{where} fall outside tariff {tariff.id!r}'s validity "
+                        f"{tariff.valid_from}..{tariff.valid_to or 'open'}."))
     return out

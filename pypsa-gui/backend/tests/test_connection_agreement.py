@@ -357,10 +357,15 @@ def test_a_fee_reconciles_when_the_poc_link_carries_an_overnight_cost():
 @pytest.mark.live_solve
 @pytest.mark.parametrize("strategy", ["rolling"])
 def test_a_fee_with_windowed_dispatch_is_refused(strategy):
-    """#5/#6: myopic/rolling charge per window; refused in P1 (P6 scope)."""
+    """#5/#6: myopic/rolling charge per window; refused in P1 (P6 scope). Since
+    WP1.8 round 2 the preflight states the refusal, so the run stops at
+    validation before any binding; the binding itself still refuses."""
     n = build_edge_15min()
     status, condition, _ = _run(n, _conn(_agreement(fee=_fee(80.0))), solve_strategy=strategy)
-    assert (status, condition) == ("error", "commercial_binding_failed")
+    assert (status, condition) == ("error", "validation_failed")
+    with pytest.raises(C.CommercialBindingError, match=strategy):
+        C.apply_commercial_for_solve(build_edge_15min(), _conn(_agreement(fee=_fee(80.0))),
+                                     solve_strategy=strategy)
 
 
 def test_a_fee_with_myopic_foresight_is_refused():

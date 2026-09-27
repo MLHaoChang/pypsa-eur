@@ -96,6 +96,7 @@ from services.solver.adequacy import (  # noqa: F401
 from services.commercial.lp_bindings import (  # noqa: F401
     META_DEMAND as _IC_META_DEMAND,
     META_GROUP as _IC_META_GROUP,
+    effective_strategy as _ic_effective_strategy,
     CommercialBindingError,
     _wrap_with_commercial_bindings,
     materialise_poc_prices,
@@ -741,10 +742,9 @@ def run_simulation(
                 try:
                     # The strategy that will actually RUN (rolling falls back to
                     # full with SCLOPF or multi-period; WP1.5a review #7).
-                    _ic_strategy = getattr(config, "solve_strategy", "full")
-                    if _ic_strategy == "rolling" and (
-                            use_sclopf or config.multi_investment_periods):
-                        _ic_strategy = "full"
+                    _ic_strategy = _ic_effective_strategy(
+                        getattr(config, "solve_strategy", "full"), sclopf=use_sclopf,
+                        multi_period=bool(config.multi_investment_periods))
                     _ic_conn = apply_commercial_for_solve(
                         network, getattr(config, "commercial", None),
                         log=lambda m: _safe_log(log_queue, m),

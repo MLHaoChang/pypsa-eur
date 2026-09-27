@@ -191,3 +191,78 @@ def test_a_changed_group_is_flagged_as_drift():
     assert "config_changed_since_solve" in cb["commercial"]["flags"]
     cb = compute_cost_breakdown(n, SolverConfig(commercial=_commercial(cap=60.0)))
     assert "config_changed_since_solve" not in (cb["commercial"] or {}).get("flags", [])
+
+
+# ── review round 2 ─────────────────────────────────────────────────────────
+
+
+def test_a_member_with_vintage_bounds_is_refused():
+    """#1: vintage clones of a member would sit outside the cap sum and the
+    group meter."""
+    n = _two_members()
+    n.meta["vintage_bounds"] = {"Link": {"import_b": {"2030": 50.0}}}
+    with pytest.raises(L.CommercialBindingError, match="import_b"):
+        L.materialise_poc_prices(n, _commercial())
+
+
+def test_a_net_energy_item_on_a_group_with_export_is_refused():
+    """#2: the bill nets a group's import against its export on the group
+    meter; per-member adders cannot, so P1 refuses rather than overcharge."""
+    n = _two_members()
+    n.add("Link", "export", bus0="poc", bus1="grid", p_nom=80.0, carrier="AC")
+    net = {**TOU, "measured_on": "net"}
+    with pytest.raises(L.CommercialBindingError, match="net"):
+        L.materialise_poc_prices(n, {**_commercial(), "export_link": "export",
+                                     "import_tariff": _tariff(net)})
+
+
+def test_reordered_members_are_not_drift():
+    """#4: the same group in another order binds the same terms."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _two_members()
+    applied = L.materialise_poc_prices(n, {**_commercial(), "import_tariff": _tariff(TOU)})
+    applied.undo()
+    applied.commit()
+    swapped = {**_commercial(members=("import_b", "import")), "import_tariff": _tariff(TOU)}
+    assert "config_changed_since_solve" not in commercial_cost_terms(n, swapped)["flags"]
+
+
+def test_a_group_added_after_the_solve_is_flagged():
+    """#3: a group the solve did not bind is not reported silently."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _two_members()
+    plain = {"poc_link": "import", "import_tariff": _tariff(TOU)}
+    applied = L.materialise_poc_prices(n, plain)
+    applied.undo()
+    applied.commit()
+    grouped = {**_commercial(members=("import",)), "import_tariff": _tariff(TOU)}
+    assert "config_changed_since_solve" in commercial_cost_terms(n, grouped)["flags"]
+
+
+def test_shares_that_cannot_be_computed_are_flagged():
+    """#5: a None share says why (ADR-0001)."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _two_members()
+    n.meta[L.META_GROUP] = {"name": "hub", "members": ["import", "import_b"], "cap_mw": 60.0,
+                            "energy_share": {"import": None, "import_b": None}}
+    flags = commercial_cost_terms(n, _commercial())["flags"]
+    assert "group_energy_share_not_established" in flags
+
+
+def test_a_fee_the_other_members_can_bypass_warns():
+    """#6: the capacity fee sits on poc_link; an extendable member takes
+    capacity without it."""
+    from services.solver_service import SolverConfig
+    from services.validation_service import validate_for_run
+
+    n = _two_members()
+    n.links.loc["import_b", "p_nom_extendable"] = True
+    fee = {"kind": "firm", "import_cap_mw": 70.0, "available_from": "2030-01-01",
+           "capacity_fee": {"id": "fee", "kind": "capacity", "unit": "per_kw_year",
+                            "periods": [{"name": "all", "rate": 60.0}]}}
+    issues = validate_for_run(n, SolverConfig(commercial={**_commercial(), "connection": fee}))
+    codes = {i.code for i in issues}
+    assert "commercial.group_fee_bypass" in codes

@@ -227,13 +227,14 @@ def _history_kw(meter_history) -> dict[str, float]:
 
 
 def _ratchet_prior(month: str, k: int, lookback: int, actual: dict,
-                   meter_history) -> tuple[float | None, bool]:
+                   meter_history, in_dispatch: set[str]) -> tuple[float | None, bool]:
     """(max ACTUAL peak kW over the `lookback` months before `month` for window
     `k`, whether any of those months is unknown). A month inside the dispatch
-    uses its actual peak; one before it uses the metered history."""
+    uses its actual peak (none when window `k` has no interval in it); one
+    before it uses the metered history. `in_dispatch` is every month of the
+    dispatch, whatever the item's windows (WP1.5a review round 3 #2)."""
     hist = _history_kw(meter_history)
     here = pd.Period(month, freq="M")
-    in_dispatch = {m for (m, _) in actual}
     values: list[float] = []
     missing = False
     for back in range(1, lookback + 1):
@@ -377,7 +378,13 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             # the item's demand INTERVALS (`settlement`): finer dispatch is
             # averaged to the interval first. A window list without a
             # catch-all measures only inside its windows.
-            q_kw = _quantity_mw(item, imp, exp) * _KWH_PER_MWH
+            if item.measured_on == "net":
+                # A net interval meter reads the interval's NET energy: signed
+                # here, clipped after the interval mean (review round 3 #1).
+                net = imp - exp
+                q_kw = (net if item.direction == "cost" else -net) * _KWH_PER_MWH
+            else:
+                q_kw = _quantity_mw(item, imp, exp) * _KWH_PER_MWH
             if item.measured_on == "peak_import":
                 q_kw = imp * _KWH_PER_MWH
             settle_freq = {"15min": "15min", "30min": "30min", "h": "h"}[item.settlement]
@@ -389,6 +396,8 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             first = pd.Series(np.arange(len(interval))).groupby(interval).first()
             q_int = np.where(agg["nan"].to_numpy(), np.nan,
                              agg["qd"].to_numpy() / agg["d"].to_numpy())
+            if item.measured_on == "net":
+                q_int = np.clip(q_int, 0.0, None)  # NaN stays NaN
             g_month = month_key[first.to_numpy()]
             g_pidx = _period_index(item, local)[first.to_numpy()]
             flags[item.id] = []
@@ -431,9 +440,11 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                         continue
                     peak = actual[(key, k)]
                     billed = peak
-                    if item.ratchet is not None and np.isfinite(peak):
+                    # A free window bills nothing: no ratchet, no seed gap.
+                    if item.ratchet is not None and np.isfinite(peak) and per.rate != 0:
                         prior, missing = _ratchet_prior(key, k, item.ratchet.lookback_months,
-                                                        actual, meter_history)
+                                                        actual, meter_history,
+                                                        set(months_sorted))
                         if prior is not None and np.isfinite(prior):
                             billed = max(peak, item.ratchet.share * prior)
                         if missing:

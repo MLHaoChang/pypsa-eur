@@ -2454,9 +2454,16 @@ def validate_for_run(n, solver_config) -> list[Issue]:
 def _check_commercial(n, solver_config) -> list[Issue]:
     from services.commercial.preflight import commercial_findings
 
+    from services.commercial.lp_bindings import effective_strategy
+
+    multi = bool(getattr(solver_config, "multi_investment_periods", False))
+    strategy = effective_strategy(getattr(solver_config, "solve_strategy", "full"),
+                                  sclopf=bool(getattr(solver_config, "sclopf", False)),
+                                  multi_period=multi)
     return [Issue(severity=sev, code=code, component_class=cls, name=name, message=msg)
             for sev, code, cls, name, msg in commercial_findings(
-                n, getattr(solver_config, "commercial", None))]
+                n, getattr(solver_config, "commercial", None), solve_strategy=strategy,
+                multi_period=multi)]
 
 
 def has_errors(issues: list[Issue]) -> bool:

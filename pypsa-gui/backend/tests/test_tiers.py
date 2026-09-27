@@ -158,3 +158,20 @@ def test_changed_tiers_after_the_solve_are_flagged_as_drift():
     edited = SolverConfig(commercial={"poc_link": "import", "import_tariff":
                                       _tariff(_tiered(steeper)).model_dump(mode="json")})
     assert "config_changed_since_solve" in compute_cost_breakdown(n, edited)["commercial"]["flags"]
+
+
+@pytest.mark.live_solve
+def test_tiers_added_after_the_solve_are_not_established():
+    """WP1.6/1.7 round 2 #3: the mirror of the demand branch (ADR-0001)."""
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    n = _site()
+    flat = {"id": "e", "kind": "energy", "unit": "per_kwh", "periods": [{"name": "all",
+                                                                         "rate": 0.1}]}
+    _solve(n, _tariff(flat))
+    edited = SolverConfig(commercial={"poc_link": "import", "import_tariff":
+                                      _tariff(flat, _tiered(RISING)).model_dump(mode="json")})
+    block = compute_cost_breakdown(n, edited)["commercial"]
+    assert block["energy_tiers"] is None
+    assert "energy_tiers_not_established" in block["flags"]
