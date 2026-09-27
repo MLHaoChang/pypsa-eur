@@ -4,6 +4,10 @@
 import { SECTION_LABEL } from './sectionLabels'
 
 const RULES: [RegExp, string][] = [
+  // Whole review phrasings first (eh_review.py: fmea_dominant_mode).
+  [/\bcarries (\d+(?:\.\d+)?%) of ranked Link risk\b/g, 'accounts for $1 of the outage risk'],
+  [/\bprice generic N\s*\/\s*N\+1\s*\/\s*storage scenarios \(indicative\)/g,
+    'compare the cost with and without a spare unit or extra storage (rough estimate)'],
   [/\bLOLE\b/g, 'expected shortfall'],
   [/\bENS target\b/g, 'energy target'],
   [/\bENS\b/g, 'unserved energy'],

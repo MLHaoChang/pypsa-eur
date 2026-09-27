@@ -15,9 +15,18 @@ import { STUDY_RUNNING_SWITCH } from '../../../hooks/useCreateFromTemplate'
 
 const HUB_TEMPLATES = TEMPLATES.filter(t => t.id.startsWith('eh_'))
 
-/** One line of purpose: the description's first sentence (the rest names
- *  the engine's archetype pack). */
-export function purpose(description: string): string {
+/** One plain line of purpose per example site. The wizard's own blurbs
+ *  (Expert) name equipment a first-time user may not know. */
+const PURPOSE: Record<string, string> = {
+  eh_datacenter: 'A data center that must keep running through grid outages.',
+  eh_h2_hub: 'An industrial site that makes hydrogen from wind and solar power, with a grid connection.',
+  eh_microgrid: 'An island that must keep its hospital running without its link to the mainland.',
+}
+
+/** The Start card's purpose line; a template without one falls back to the
+ *  first sentence of the wizard's description. */
+export function purpose(id: string, description: string): string {
+  if (PURPOSE[id]) return PURPOSE[id]
   const i = description.indexOf('. ')
   return i < 0 ? description : description.slice(0, i + 1)
 }
@@ -69,7 +78,7 @@ export function StartCard() {
                   <Hexagon size={12} className="text-accent" /> {t.name}
                   {creating && <span className="text-[10px] font-normal text-accent animate-pulse">creating…</span>}
                 </span>
-                <span className="text-[11px] leading-relaxed text-muted">{purpose(t.description)}</span>
+                <span className="text-[11px] leading-relaxed text-muted">{purpose(t.id, t.description)}</span>
               </button>
             )
           })}

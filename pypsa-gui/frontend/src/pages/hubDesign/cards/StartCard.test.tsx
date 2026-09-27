@@ -54,6 +54,19 @@ describe('StartCard', () => {
     }
   })
 
+  it('each template has its own plain one-line purpose (not the wizard blurb)', () => {
+    mount()
+    expect(screen.getByTestId('hub-start-template-eh_datacenter').textContent)
+      .toContain('A data center that must keep running through grid outages.')
+    for (const t of TEMPLATES.filter(t => t.id.startsWith('eh_'))) {
+      const text = screen.getByTestId(`hub-start-template-${t.id}`).textContent ?? ''
+      expect(text).not.toContain(t.description.slice(0, 30))
+      for (const w of ['UPS', 'genset', 'PV', 'H2', 'offtake', 'subsea', 'MW', 'feeder']) {
+        expect({ id: t.id, w, found: text.includes(w) }).toEqual({ id: t.id, w, found: false })
+      }
+    }
+  })
+
   it('creating calls the lifted wizard hook with the template id', async () => {
     const user = mount()
     await user.click(screen.getByTestId('hub-start-template-eh_microgrid'))

@@ -126,7 +126,8 @@ describe('ImproveCard', () => {
     { id: 'ens_target_missed', severity: 'high' as const, title: 'ENS target missed: 12 ‱ vs 10 ‱',
       evidence: {}, recommendation: 'Raise p_nom_max.', actions: [] },
   ]
-  const FORBIDDEN = ['‱', 'dtc_', 'p_nom', 'stage', 'LOLE', 'ENS', 'N+1']
+  const FORBIDDEN = ['‱', 'dtc_', 'p_nom', 'stage', 'LOLE', 'ENS', 'N+1',
+    'ranked', 'Link risk', 'generic', 'indicative', 'scenarios']
 
   function outsideEvidence(): string {
     const card = screen.getByTestId('hub-card-improve').cloneNode(true) as HTMLElement
@@ -146,6 +147,10 @@ describe('ImproveCard', () => {
       .toContain('Not certified: expected shortfall 12.38 h/yr exceeds the 3 h/yr target')
     expect(screen.getByTestId('hub-improve-not_established_frontier').textContent)
       .toContain('Cost versus reliability could not be worked out')
+    expect(screen.getByTestId('hub-improve-fmea_dominant_mode').textContent)
+      .toContain('site_transformer accounts for 93% of the outage risk')
+    expect(screen.getByTestId('hub-improve-fmea_dominant_mode').textContent)
+      .toContain('The assistant would compare the cost with and without a spare unit or extra storage (rough estimate).')
     // the engine prose moved into Why, verbatim
     const ev = screen.getByTestId('hub-improve-evidence-certification_fail').textContent ?? ''
     expect(ev).toContain(ENGINE[0].recommendation)
