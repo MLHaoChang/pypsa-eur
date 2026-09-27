@@ -106,7 +106,9 @@ def _validate(name: str, series: pd.Series) -> None:
         raise ValueError("series values must all be finite numbers")
     if not series.index.is_monotonic_increasing or series.index.has_duplicates:
         raise ValueError("series index must be strictly increasing")
-    if (series.index.asi8 % 1_000_000_000 != 0).any():
+    # as_unit("ns"): asi8 is in the index's OWN unit, so a whole-second index
+    # stored as datetime64[s|ms|us] must not be read as sub-second.
+    if (series.index.as_unit("ns").asi8 % 1_000_000_000 != 0).any():
         raise ValueError("series timestamps must be whole seconds (sub-second steps "
                          "would collapse in the canonical form)")
 
@@ -156,6 +158,8 @@ def put_series(db: DBSession, org_id: UUID, name: str, series: pd.Series, meta: 
     Concurrency: the (org, kind, name, version) unique constraint is the
     arbiter. A writer that loses the race re-reads: identical content returns
     the winner's version, different content retries with the next version.
+    The retry ROLLS BACK `db`, so a caller must not hold other unsaved work in
+    the same session when calling this.
     """
     _validate(name, series)
     try:
@@ -195,6 +199,14 @@ def _row_for(db: DBSession, org_id: UUID, ref: PriceSeriesRef) -> LibraryItem:
     if row is None:
         raise LibraryRefNotFound(f"no series {ref.id!r} v{ref.version} in this org")
     return row
+
+
+def ref_for(db: DBSession, org_id: UUID, name: str, version: int) -> PriceSeriesRef | None:
+    """The ref of one specific version, or None."""
+    row = db.scalars(select(LibraryItem).where(
+        LibraryItem.org_id == org_id, LibraryItem.kind == KIND,
+        LibraryItem.name == name, LibraryItem.version == version)).first()
+    return None if row is None else _ref(row)
 
 
 def resolve(db: DBSession, org_id: UUID, ref: PriceSeriesRef, *, root: Path | None = None) -> pd.Series:

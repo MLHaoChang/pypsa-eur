@@ -323,3 +323,13 @@ def test_library_dir_lives_in_storage_paths():
     from services.library import series_store as S
 
     assert S.library_dir is storage_paths.library_dir
+
+
+
+@pytest.mark.parametrize("unit", ["s", "ms", "us", "ns"])
+def test_whole_second_indexes_are_accepted_in_every_datetime_unit(unit):
+    """Re-review #4: asi8 is in the index's own unit."""
+    from services.library import series_store as S
+
+    idx = pd.date_range("2030-01-01", periods=8, freq="15min", tz="UTC").as_unit(unit)
+    S._validate("units", pd.Series(np.arange(8, dtype=float), index=idx))
