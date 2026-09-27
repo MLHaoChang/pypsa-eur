@@ -143,22 +143,21 @@ def test_all_zero_dispatch_bills_only_fixed_items():
     assert round(res.total, 2) == 155.17
 
 
-def test_demand_and_capacity_items_are_reported_unsupported_not_priced():
+def test_a_ratcheted_demand_charge_without_history_withholds_the_total():
+    """WP1.5b: the US fixture's ratcheted demand item is rated; with no meter
+    history its lookback is unknown, so the bill is a disclosed lower bound
+    (total withheld, total_supported given)."""
     from services.commercial.tariff_engine import rate
 
-    import json as _j
     us = Tariff.model_validate_json((BILLS.parent / "us_tariff_demand_charge.json").read_text())
     idx = pd.date_range("2030-07-01", periods=8, freq="15min", tz="America/Chicago")
     df = pd.DataFrame({"import_mw": 1.0, "export_mw": 0.0}, index=idx)
     res = rate(df, us, step_hours=0.25, timezone="America/Chicago")
-    assert "demand_monthly" in res.unsupported_items
-    assert "demand_monthly" not in res.per_item
-    assert res.complete is False
-    # A bill missing its demand charge is not a total; the partial is labelled.
-    assert res.total is None
-    assert res.total_supported == pytest.approx(
-        res.per_item["energy_tou"] + res.per_item["customer_charge"])
-    assert "energy_tou" in res.per_item and "customer_charge" in res.per_item
+    assert res.unsupported_items == []
+    assert res.per_item["demand_monthly"] == pytest.approx(18.5 * 1000.0)
+    assert "ratchet_seed_missing" in res.notes["demand_monthly"]
+    assert res.complete is False and res.total is None
+    assert res.total_supported == pytest.approx(sum(res.per_item.values()))
 
 
 def test_step_hours_is_required():

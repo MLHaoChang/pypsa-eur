@@ -319,9 +319,22 @@ class CommercialConfig(BaseModel):
     connection: ConnectionAgreement | None = None
     group_contract: str | None = None
     demand_items: list[str] = Field(default_factory=list)
+    # Metered monthly import peaks before the horizon, {"YYYY-MM": kW} on the
+    # site clock: the seed a ratchet's lookback needs (WP1.5b).
+    meter_history_peaks_kw: dict[str, float] = Field(default_factory=dict)
+    # P6 hook (windowed dispatch): a floor on a month's modelled peak, {"YYYY-MM": MW}.
+    initial_peak_lower_bound: dict[str, float] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _tariff_and_links(self) -> "CommercialConfig":
+        import re as _re
+
+        for name in ("meter_history_peaks_kw", "initial_peak_lower_bound"):
+            for k, v in getattr(self, name).items():
+                if not _re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", k):
+                    raise ValueError(f"{name}: month keys are YYYY-MM, got {k!r}")
+                if not (v >= 0):
+                    raise ValueError(f"{name}: {k} must be a non-negative number")
         # An id with no inline tariff is valid data (a Library tariff, P2
         # WP2.4); the P1 binding refuses it (`lp_bindings.validate_for_network`).
         if (self.import_tariff_id is not None and self.import_tariff is not None

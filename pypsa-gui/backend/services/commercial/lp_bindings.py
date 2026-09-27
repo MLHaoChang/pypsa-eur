@@ -143,8 +143,6 @@ def _lp_reason(item: TariffItem) -> str | None:
     if item.kind == "fixed":
         return "fixed_not_in_lp"
     if _is_demand(item):
-        if item.ratchet is not None:
-            return "ratchet_WP1.5b"
         if item.tiers:
             return "tiers_WP1.5c"
         if item.unit != "per_kw_month":
@@ -355,7 +353,7 @@ def _export_price(n, cfg: CommercialConfig) -> np.ndarray:
 # ── peak demand (WP1.5a) ───────────────────────────────────────────────────
 
 
-def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list[str]]:
+def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list[str], list[str]]:
     """(spec for the LP wrapper, demand item ids, months not established).
 
     One key per (item, period window, investment period, local month) with at
@@ -365,7 +363,7 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
     items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
              if _is_demand(i) and _lp_reason(i) is None]
     if not items:
-        return None, [], []
+        return None, [], [], []
     local = _local_clock(n.snapshots, cfg.timezone)
     months = np.asarray(local.strftime("%Y-%m"))
     inv = (np.asarray(n.snapshots.get_level_values(0)) if isinstance(n.snapshots, pd.MultiIndex)
@@ -392,8 +390,36 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
                         "inv_period": None if p is None else int(p),
                         "eur_per_mw": float(per.rate) * _KWH_PER_MWH,
                         "net": item.measured_on == "net", "positions": pos})
-    spec = {"import_link": cfg.poc_link, "export_link": cfg.export_link, "keys": keys}
-    return spec, [i.id for i in items], missing
+    # Ratchets (WP1.5b): billed[key] ≥ ρ · actual[key'] for each lookback
+    # month modelled in the SAME investment period, ≥ ρ · metered history for
+    # one before the horizon; unknown months are disclosed, not constrained.
+    by_ident = {(k["item"], k["period"], k["inv_period"], k["month"]): k["key"] for k in keys}
+    modelled = {(k["inv_period"], k["month"]) for k in keys}
+    ratchets: list[dict] = []
+    notes: list[str] = []
+    item_by_id = {i.id: i for i in items}
+    for k in keys:
+        r = item_by_id[k["item"]].ratchet
+        if r is None:
+            continue
+        here = pd.Period(k["month"], freq="M")
+        for back in range(1, r.lookback_months + 1):
+            m = (here - back).strftime("%Y-%m")
+            other = by_ident.get((k["item"], k["period"], k["inv_period"], m))
+            if other is not None:
+                ratchets.append({"key": k["key"], "share": r.share, "of_key": other})
+            elif (k["inv_period"], m) in modelled:
+                continue  # modelled month with no interval in this window: no demand
+            elif m in cfg.meter_history_peaks_kw:
+                ratchets.append({"key": k["key"], "share": r.share,
+                                 "floor_mw": cfg.meter_history_peaks_kw[m] / _KWH_PER_MWH})
+            elif "ratchet_seed_missing" not in notes:
+                notes.append("ratchet_seed_missing")
+    floors = {k["key"]: cfg.initial_peak_lower_bound[k["month"]] for k in keys
+              if k["month"] in cfg.initial_peak_lower_bound}
+    spec = {"import_link": cfg.poc_link, "export_link": cfg.export_link, "keys": keys,
+            "ratchets": ratchets, "floors": floors}
+    return spec, [i.id for i in items], missing, notes
 
 
 def add_demand_terms(n) -> None:
@@ -409,6 +435,20 @@ def add_demand_terms(n) -> None:
     names = [k["key"] for k in spec["keys"]]
     peak = m.add_variables(lower=0, name="ic_peak_import",
                            coords=[pd.Index(names, name="key")])
+    # The BILLED demand (WP1.5b): ≥ the month's actual peak, ≥ each ratchet
+    # term. Without a ratchet it equals the actual peak at the optimum.
+    billed = m.add_variables(lower=0, name="ic_billed_demand",
+                             coords=[pd.Index(names, name="key")])
+    m.add_constraints(billed - peak >= 0, name="ic_billed_demand_def")
+    for i, r in enumerate(spec.get("ratchets", [])):
+        if "of_key" in r:
+            m.add_constraints(billed.sel(key=r["key"]) - r["share"] * peak.sel(key=r["of_key"])
+                              >= 0, name=f"ic_ratchet_{i}")
+        else:
+            m.add_constraints(billed.sel(key=r["key"]) >= r["share"] * r["floor_mw"],
+                              name=f"ic_ratchet_{i}")
+    for i, (key, floor) in enumerate(spec.get("floors", {}).items()):
+        m.add_constraints(peak.sel(key=key) >= float(floor), name=f"ic_peak_floor_{i}")
     link_p = m["Link-p"]
     imp = link_p.sel(name=spec["import_link"])
     exp = link_p.sel(name=spec["export_link"]) if spec["export_link"] else None
@@ -424,7 +464,7 @@ def add_demand_terms(n) -> None:
         weight = [1.0] * len(names)
     coef = xr.DataArray([w * k["eur_per_mw"] for w, k in zip(weight, spec["keys"])],
                         coords={"key": names}, dims="key")
-    m.objective += (peak * coef).sum()
+    m.objective += (billed * coef).sum()
     setattr(n, DEMAND_BUILT_ATTR, True)
 
 
@@ -435,16 +475,17 @@ def _read_demand_solution(n, spec: dict) -> dict | None:
         return None
     try:
         sol = model.variables["ic_peak_import"].solution.to_pandas()
+        billed = model.variables["ic_billed_demand"].solution.to_pandas()
     except Exception:  # noqa: BLE001 — unsolved / infeasible: nothing to commit
         return None
     out = {}
     for k in spec["keys"]:
-        v = float(sol.loc[k["key"]])
-        if not np.isfinite(v):
+        v, b = float(sol.loc[k["key"]]), float(billed.loc[k["key"]])
+        if not (np.isfinite(v) and np.isfinite(b)):
             return None
         out[k["key"]] = {"item": k["item"], "period": k["period"], "month": k["month"],
                          "inv_period": k["inv_period"], "eur_per_mw": k["eur_per_mw"],
-                         "peak_mw": v}
+                         "peak_mw": v, "billed_mw": b}
     return out
 
 
@@ -478,7 +519,8 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
     cfg = _parse(commercial)
     validate_for_network(n, cfg)
     adders, energy_items, not_in_lp, notes = _adders(n, cfg)
-    demand, demand_items, demand_missing = _demand_spec(n, cfg)
+    demand, demand_items, demand_missing, demand_notes = _demand_spec(n, cfg)
+    notes = notes + [x for x in demand_notes if x not in notes]
     if demand is not None and (solve_strategy == "rolling"
                                or (solve_strategy == "myopic" and multi_period)):
         raise CommercialBindingError(

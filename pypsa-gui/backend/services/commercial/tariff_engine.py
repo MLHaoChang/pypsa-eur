@@ -86,11 +86,12 @@ class RatingResult:
     # One row per (month, demand item, period window): the peak and its bill
     # (WP1.5a). Empty when the tariff has no demand items.
     demand_lines: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(
-        columns=["month", "tariff_item", "period", "peak_kw", "rate", "amount"]))
+        columns=["month", "tariff_item", "period", "peak_kw", "billed_kw", "rate", "amount"]))
 
     @property
     def complete(self) -> bool:
-        partial = any("energy_on_partial_coverage" in v for v in self.notes.values())
+        partial = any(("energy_on_partial_coverage" in v) or ("ratchet_seed_missing" in v)
+                      for v in self.notes.values())
         return not self.unsupported_items and not any(self.flags.values()) and not partial
 
 
@@ -206,12 +207,41 @@ def _period_index(item: TariffItem, local: pd.DatetimeIndex) -> np.ndarray:
     return out
 
 
+def _history_kw(meter_history) -> dict[str, float]:
+    """`meter_history` as {"YYYY-MM": metered peak kW} (a mapping or Series)."""
+    if meter_history is None:
+        return {}
+    items = meter_history.items() if hasattr(meter_history, "items") else meter_history
+    return {str(k): float(v) for k, v in items}
+
+
+def _ratchet_prior(month: str, k: int, lookback: int, actual: dict,
+                   meter_history) -> tuple[float | None, bool]:
+    """(max ACTUAL peak kW over the `lookback` months before `month` for window
+    `k`, whether any of those months is unknown). A month inside the dispatch
+    uses its actual peak; one before it uses the metered history."""
+    hist = _history_kw(meter_history)
+    here = pd.Period(month, freq="M")
+    in_dispatch = {m for (m, _) in actual}
+    values: list[float] = []
+    missing = False
+    for back in range(1, lookback + 1):
+        m = (here - back).strftime("%Y-%m")
+        if (m, k) in actual:
+            values.append(actual[(m, k)])
+        elif m in in_dispatch:
+            continue  # modelled month with no interval in this window: no demand
+        elif m in hist:
+            values.append(hist[m])
+        else:
+            missing = True
+    return (max(values) if values else None), missing
+
+
 def _unsupported_reason(item: TariffItem) -> str | None:
     if item.kind == "capacity":
         return "unsupported:capacity_via_connection_agreement"
     if _is_demand(item):
-        if item.ratchet is not None:
-            return "unsupported:ratchet_P1_WP1.5b"
         if item.tiers:
             return "unsupported:tiers_P1_WP1.5c"
         if item.unit != "per_kw_month":
@@ -318,21 +348,41 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             pidx = _period_index(item, local)
             n_nan = int(np.isnan(q_kw).sum())
             flags[item.id] = [f"nan_quantity:{n_nan}"] if n_nan else []
+            months_sorted = sorted(set(month_key))
+            # Actual peak per (month, window) first: a ratchet reads ACTUAL
+            # peaks of earlier months, never billed ones (WP1.5b).
+            actual: dict[tuple[str, int], float] = {}
+            for key in months_sorted:
+                in_month = month_key == key
+                for k in range(len(item.periods)):
+                    sel = in_month & (pidx == k)
+                    if sel.any():
+                        actual[(key, k)] = float(q_kw[sel].max())
             by_month: dict[str, float] = {}
-            for key in sorted(set(month_key)):
+            for key in months_sorted:
                 in_month = month_key == key
                 if np.isnan(q_kw[in_month]).any():
                     by_month[key] = float("nan")
                     continue
                 amt = 0.0
                 for k, per in enumerate(item.periods):
-                    sel = in_month & (pidx == k)
-                    if not sel.any():
+                    if (key, k) not in actual:
                         continue
-                    peak = float(q_kw[sel].max())
-                    line = sign * per.rate * peak
+                    peak = actual[(key, k)]
+                    billed = peak
+                    if item.ratchet is not None:
+                        prior, missing = _ratchet_prior(key, k, item.ratchet.lookback_months,
+                                                        actual, meter_history)
+                        if prior is not None:
+                            billed = max(peak, item.ratchet.share * prior)
+                        if missing:
+                            note = notes.setdefault(item.id, [])
+                            if "ratchet_seed_missing" not in note:
+                                note.append("ratchet_seed_missing")
+                    line = sign * per.rate * billed
                     demand_rows.append({"month": key, "tariff_item": item.id, "period": per.name,
-                                        "peak_kw": peak, "rate": per.rate, "amount": line})
+                                        "peak_kw": peak, "billed_kw": billed, "rate": per.rate,
+                                        "amount": line})
                     amt += line
                 by_month[key] = amt
                 covered = float(dur[in_month].sum())
@@ -410,9 +460,11 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
     totals = list(per_item.values())
     total_supported = None if any(v is None for v in totals) else float(sum(totals))
     partial_energy = any("energy_on_partial_coverage" in v for v in notes.values())
-    total = None if (unsupported or partial_energy) else total_supported
+    # A ratchet whose lookback reaches unknown months bills a lower bound.
+    seed_missing = any("ratchet_seed_missing" in v for v in notes.values())
+    total = None if (unsupported or partial_energy or seed_missing) else total_supported
     demand_lines = pd.DataFrame(demand_rows, columns=["month", "tariff_item", "period",
-                                                      "peak_kw", "rate", "amount"])
+                                                      "peak_kw", "billed_kw", "rate", "amount"])
     return RatingResult(lines=lines, fixed_lines=fixed_lines, monthly=monthly, annual=annual,
                         per_item=per_item, total=total, total_supported=total_supported,
                         flags=flags, notes=notes, unsupported_items=unsupported,

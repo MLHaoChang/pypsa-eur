@@ -356,6 +356,10 @@ export interface CommercialConfig {
   connection?: ConnectionAgreement | null
   group_contract?: string | null
   demand_items?: string[]
+  /** Metered monthly import peaks before the horizon, {"YYYY-MM": kW} (ratchet seed). */
+  meter_history_peaks_kw?: Record<string, number>
+  /** P6 hook: a floor on a month's modelled peak, {"YYYY-MM": MW}. */
+  initial_peak_lower_bound?: Record<string, number>
 }
 /**
  * Actionable failure card for a finished solve. Produced by the backend's

@@ -467,6 +467,17 @@ Files: `lp_bindings.py`, `backend/tests/test_lp_bindings_peak_demand.py`.
   **gap 0**.
 - [ ] Green: implementation; the running-max carry for windowed dispatch is **P6** (spec §13 amended to say so);
   only the hook `initial_peak_lower_bound: dict[month, MW]` is added here.
+- As implemented (**deviation**: the plan's `ic_peak_import[m] ≥ ρ·ic_peak_import[k]` would ratchet on
+  ratcheted values and decay as ρ² — real ratchets use prior ACTUAL peaks): a second variable
+  `ic_billed_demand[key] ≥ ic_peak_import[key]`, `≥ ρ·ic_peak_import[key']` for each lookback month modelled in
+  the same investment period, `≥ ρ·history/1000` for a month before the horizon with
+  `CommercialConfig.meter_history_peaks_kw` ("YYYY-MM" → kW); an unknown lookback month adds no constraint and
+  the terms carry `ratchet_seed_missing`. The objective and the rows use the billed demand (`billed_mw`). The
+  engine bills the same rule (`demand_lines.billed_kw`) with `meter_history` as {"YYYY-MM": kW}; a missing
+  seed is a note, the bill is a lower bound, so `total` is withheld (`total_supported` given) and `complete`
+  is False. `initial_peak_lower_bound` ({"YYYY-MM": MW}) floors a month's modelled peak (P6 hook).
+  Gate P0 condition 3 stays open: no new `services/solver/` module has landed (the commercial layer lives in
+  `services/commercial/`). Tests: `test_ratchet.py`.
 
 ### WP1.5c Tiers
 - [ ] Red: increasing marginal rates ⇒ stacked variables `ic_tier_q[k] ≤ width_k`, cost `Σ rate_k q_k`, LP

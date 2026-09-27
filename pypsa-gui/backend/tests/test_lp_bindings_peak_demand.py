@@ -87,12 +87,13 @@ def test_a_month_without_snapshots_is_not_established():
         "2030-01", "2030-03"]
 
 
-def test_a_ratchet_is_left_to_wp1_5b():
+def test_a_ratcheted_item_is_a_demand_item_since_wp1_5b():
     n = _site()
     item = _demand(ratchet={"lookback_months": 11, "share": 0.8})
     applied = L.materialise_poc_prices(n, _commercial(_tariff(item)))
-    assert applied.facts["not_in_lp"] == {"demand": "ratchet_WP1.5b"}
-    assert not hasattr(n, L.DEMAND_SPEC_ATTR)
+    assert applied.facts["not_in_lp"] == {}
+    assert applied.facts["demand_items"] == ["demand"]
+    assert getattr(n, L.DEMAND_SPEC_ATTR)["keys"]
 
 
 def test_demand_with_windowed_dispatch_is_refused():

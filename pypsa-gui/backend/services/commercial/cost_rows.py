@@ -86,7 +86,7 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
     if peaks:
         total = 0.0
         for v in peaks.values():
-            amount = float(v["eur_per_mw"]) * float(v["peak_mw"])
+            amount = float(v["eur_per_mw"]) * float(v.get("billed_mw", v["peak_mw"]))
             items.append(("demand_charge", v.get("inv_period"), 0.0, amount))
             total += amount
         block["demand_charge"] = weighted("demand_charge")

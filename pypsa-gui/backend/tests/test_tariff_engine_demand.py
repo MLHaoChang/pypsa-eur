@@ -94,11 +94,14 @@ def test_nan_import_makes_the_month_unrated():
     assert res.flags["demand"] == ["nan_quantity:1"]
 
 
-def test_a_ratchet_is_still_unsupported_until_wp1_5b():
+def test_a_ratchet_without_history_bills_a_disclosed_lower_bound():
+    # WP1.5b: ratchets are rated; unknown lookback months are disclosed and
+    # the total is withheld (it is a lower bound).
     item = _demand(ratchet={"lookback_months": 11, "share": 0.8})
     res = rate(_dispatch([1.0, 2.0]), _tariff(item), step_hours=1.0, timezone="America/Chicago")
-    assert res.flags["demand"] == ["unsupported:ratchet_P1_WP1.5b"]
-    assert "demand" in res.unsupported_items
+    assert res.flags["demand"] == []
+    assert "ratchet_seed_missing" in res.notes["demand"]
+    assert res.total is None and res.total_supported is not None
 
 
 def test_a_full_month_is_not_flagged_partial():
