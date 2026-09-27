@@ -8,15 +8,16 @@ network:
 
   A. DE-style tariff: TOU energy (15-min) + a firm connection with an annual
      capacity fee + an export price from the Library on a `poc→grid` Link.
-  B. US-style tariff: TOU energy + a monthly demand charge with a ratchet seeded
-     from meter history.
+  B. US tariff on the America/New_York clock, set through the solver-config
+     route: TOU energy + a monthly demand charge whose ratchet, seeded from
+     meter history, BINDS (billed demand above the month's actual peak).
 
 Asserted for each: the LP energy/demand cost equals the billing engine's rating
 of the same dispatch, per item; the objective gap is 0; the user's PoC Links are
-untouched after the solve (the transforms were undone); the evening peak import
-is shaved against a plain solve (B); the rows and the gap are identical after a
-project save → load; a bundle round-trip keeps the commercial config and its
-Library pins (no `library_issues`).
+untouched after the solve (the transforms were undone); the month's peak import
+is shaved against a plain solve (B0) and a seeded ratchet binds (B); the rows
+and the gap are identical after a project save → load; a bundle round-trip
+keeps the commercial config and its Library pins (no `library_issues`).
 
 Run: python tests/qa_commercial_lp.py   (from pypsa-gui/backend; also run by
 tests/run_qa_drivers.py).
@@ -63,7 +64,9 @@ DEMAND = {"id": "demand", "kind": "demand", "unit": "per_kw_month",
 FEE = {"kind": "firm", "import_cap_mw": 70.0, "available_from": "2030-01-01",
        "capacity_fee": {"id": "cap_fee", "kind": "capacity", "unit": "per_kw_year",
                         "periods": [{"name": "all", "rate": 45.0}]}}
-HISTORY = {f"2029-{m:02d}": 25_000.0 for m in range(2, 13)}
+# 60 MW × 0.8 = 48 MW: above the fixture's actual peak, so the ratchet binds.
+HISTORY = {f"2029-{m:02d}": 60_000.0 for m in range(2, 13)}
+US_TZ = "America/New_York"
 
 
 def _step(label: str, ok: bool, msg: str = "") -> None:
@@ -79,8 +82,8 @@ def _approx(a, b, rel=1e-6) -> bool:
     return a is not None and b is not None and abs(a - b) <= rel * max(abs(b), 1.0)
 
 
-def _tariff(*items) -> dict:
-    return {"id": "t", "name": "t", "jurisdiction": "DE", "valid_from": "2029-01-01",
+def _tariff(*items, jurisdiction: str = "DE") -> dict:
+    return {"id": "t", "name": "t", "jurisdiction": jurisdiction, "valid_from": "2029-01-01",
             "items": list(items)}
 
 
@@ -124,11 +127,6 @@ def _dispatch(n, utc: bool = False):
     idx = n.snapshots.tz_localize("UTC") if utc else n.snapshots
     return pd.DataFrame({"import_mw": n.links_t.p0["import"].to_numpy(), "export_mw": exp},
                         index=idx)
-
-
-def _evening_peak(n) -> float:
-    hour = pd.DatetimeIndex(n.snapshots).hour
-    return float(n.links_t.p0["import"][(hour >= 17) & (hour < 21)].max())
 
 
 def _reload_and_compare(name, cfg, cb_before, label):
@@ -199,25 +197,44 @@ def scenario_de() -> None:
 
 
 def scenario_us() -> None:
-    print("\n[B] US: TOU energy + ratcheted monthly demand charge")
+    print("\n[B] US (America/New_York): TOU energy + a BINDING ratcheted demand charge")
+    client = qa_support.client()
     plain = _site(with_export=False)
     qa_support.install_network(plain, name=PROJECTS[1])
     qa_support.save_project(PROJECTS[1])
     n_plain, _ = _solve(SolverConfig(), "B-plain")
-    plain_peak = _evening_peak(n_plain)
-    commercial = {"poc_link": "import", "import_tariff": _tariff(TOU, DEMAND),
+    plain_peak = float(n_plain.links_t.p0["import"].max())
+    # B0: a demand charge (no binding ratchet) shaves the month's peak import,
+    # which is what it bills; on this fixture it falls at New York midday.
+    flat = {k: v for k, v in DEMAND.items() if k != "ratchet"}
+    n0, _ = _solve(SolverConfig(commercial={
+        "poc_link": "import", "timezone": US_TZ,
+        "import_tariff": _tariff(TOU, flat, jurisdiction="US")}), "B0")
+    peak0 = float(n0.links_t.p0["import"].max())
+    _step("B0: monthly peak import shaved by the demand charge", peak0 < 0.99 * plain_peak,
+          f"{peak0:.2f} vs {plain_peak:.2f} MW")
+    tariff = _tariff(TOU, DEMAND, jurisdiction="US")
+    commercial = {"poc_link": "import", "import_tariff": tariff, "timezone": US_TZ,
                   "meter_history_peaks_kw": HISTORY}
-    cfg = SolverConfig(commercial=commercial)
+    r = client.put("/api/simulation/solver_config", json={"commercial": commercial})
+    _step("B: config route accepts the US tariff", r.status_code == 200, r.text[:200])
+    cfg = qa_support.session_context().solver_state["solver_config"]
     n, sink = _solve(cfg, "B")
-    _step("B: evening peak shaved", _evening_peak(n) < 0.99 * plain_peak,
-          f"{_evening_peak(n):.2f} vs {plain_peak:.2f} MW")
-    billed = rate(_dispatch(n), Tariff.model_validate(_tariff(TOU, DEMAND)), step_hours=0.25,
-                  timezone=None, meter_history=HISTORY)
+    billed = rate(_dispatch(n, utc=True), Tariff.model_validate(tariff), step_hours=0.25,
+                  timezone=US_TZ, meter_history=HISTORY)
     peaks = n.meta[L.META_DEMAND]
+    binding = [v for v in peaks.values() if v["billed_mw"] > v["peak_mw"] + 1e-6]
+    _step("B: the ratchet binds (billed above the actual peak)", bool(binding),
+          ", ".join(f"{v['month']} {v['billed_mw']:.2f} > {v['peak_mw']:.2f} MW" for v in binding))
     lp_demand = sum(v["eur_per_mw"] * v["billed_mw"] for v in peaks.values())
     _step("B: LP demand charge == billing engine (ratcheted)",
           _approx(lp_demand, billed.per_item["demand"]),
-          f"{lp_demand:.2f} vs {billed.per_item['demand']:.2f}")
+          f"{lp_demand:.2f} vs {billed.per_item['demand']}")
+    w = n.snapshot_weightings.objective
+    lp_energy = float((w * n.links_t.p0["import"] * n.links_t[L.ENERGY_PRICE_ATTR]["import"]).sum())
+    _step("B: LP TOU energy == billing engine on the New York clock",
+          _approx(lp_energy, billed.per_item["energy_tou"]),
+          f"{lp_energy:.2f} vs {billed.per_item['energy_tou']:.2f}")
     gap, cb = _gap(n, cfg)
     _step("B: objective gap 0", gap is not None and abs(gap) < 1e-6, f"{gap}")
     _step("B: demand peaks in the published terms",

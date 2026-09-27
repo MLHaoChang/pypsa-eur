@@ -284,3 +284,11 @@ def test_a_connection_on_a_non_datetime_axis_is_refused():
     codes = _codes(n, {"poc_link": "import", "connection": {
         "kind": "firm", "import_cap_mw": 70.0, "available_from": "2030-01-01"}})
     assert "datetime" in codes["commercial.binding_invalid"].message
+
+
+def test_demand_items_selection_is_refused_not_ignored():
+    """Gate finding #4: a selection the binding does not implement would
+    charge every demand item while the user believes some are excluded."""
+    codes = _codes(build_edge_15min(), {"poc_link": "import", "import_tariff": _tariff(ENERGY),
+                                        "demand_items": ["d"]})
+    assert "demand_items" in codes["commercial.binding_invalid"].message

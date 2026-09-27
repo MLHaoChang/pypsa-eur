@@ -339,12 +339,13 @@ def apply_connection_agreement(n, agreement: ConnectionAgreement, *, poc_link: s
     def commit() -> None:
         built = getattr(n, FEE_BUILT_ATTR, None)
         if built is not None:
-            n.meta[META_FEE] = built
+            n.meta[META_FEE] = {**built, "agreement_hash": agreement_hash(agreement)}
         else:
             n.meta.pop(META_FEE, None)
         if fixed_fee_by_period is not None:
             n.meta[META_FIXED_FEE] = {"eur_by_period": fixed_fee_by_period,
-                                      "kind": agreement.kind, "link": poc_link}
+                                      "kind": agreement.kind, "link": poc_link,
+                                      "agreement_hash": agreement_hash(agreement)}
         else:
             n.meta.pop(META_FIXED_FEE, None)
 
@@ -394,6 +395,18 @@ def apply_for_config(n, commercial: dict | None, *, solve_strategy: str = "full"
     return apply_connection_agreement(n, cfg.connection, poc_link=cfg.poc_link,
                                       export_link=cfg.export_link, timezone=cfg.timezone,
                                       solve_strategy=solve_strategy, multi_period=multi_period)
+
+
+def agreement_hash(agreement) -> str | None:
+    """Content hash of a connection agreement: the committed fee records carry
+    it so an edit without a re-solve is disclosed (Phase 1 gate condition 2)."""
+    import hashlib
+    import json
+
+    if agreement is None:
+        return None
+    raw = json.dumps(agreement.model_dump(mode="json"), sort_keys=True)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
 def apply_commercial_for_solve(n, commercial: dict | None, *, log=None,

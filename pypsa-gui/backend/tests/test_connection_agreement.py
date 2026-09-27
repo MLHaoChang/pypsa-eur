@@ -510,3 +510,27 @@ def test_the_fixed_fee_counts_only_open_time():
     open_h = float(n.snapshot_weightings.objective[n.snapshots >= pd.Timestamp("2030-01-10")].sum())
     assert applied.facts["connection"]["fixed_fee_eur"] == pytest.approx(
         80_000.0 * 30.0 * open_h / 8760)
+
+
+# ── Phase 1 gate binding condition 2 ───────────────────────────────────────
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("changed", [
+    lambda: _agreement(fee=_fee(120.0)),              # the fee rate
+    lambda: _agreement(cap=50.0, fee=_fee(60.0)),     # the import cap
+    lambda: _agreement(fee=_fee(60.0), available_from=date(2030, 1, 3)),
+])
+def test_a_changed_connection_agreement_after_the_solve_is_drift(changed):
+    """The fee row is the SOLVED agreement's; an edit without a re-solve is
+    disclosed like a demand or tier change (gate finding #1)."""
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from services.solver_service import SolverConfig
+
+    n = build_edge_15min()
+    status, _, cfg = _run(n, _conn(_agreement(fee=_fee(60.0))))
+    assert status in ("ok", "optimal")
+    same = compute_cost_breakdown(n, cfg)["commercial"]["flags"]
+    assert "config_changed_since_solve" not in same
+    edited = SolverConfig(commercial=_conn(changed()))
+    assert "config_changed_since_solve" in compute_cost_breakdown(n, edited)["commercial"]["flags"]

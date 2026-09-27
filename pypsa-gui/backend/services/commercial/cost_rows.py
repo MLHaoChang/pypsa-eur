@@ -194,7 +194,9 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
         else:
             block["network_capacity"] = None
             flags.append("network_capacity_not_established")
-        if not wants_fee:
+        stale = (fee.get("agreement_hash") is not None
+                 and fee["agreement_hash"] != _conn.agreement_hash(agreement))
+        if not wants_fee or stale:
             flags.append("config_changed_since_solve" if commercial else
                          "config_cleared_since_solve")
     elif wants_fee:
@@ -206,6 +208,10 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
     if fixed:
         by_p = fixed.get("eur_by_period") or {"_": fixed.get("eur", 0.0)}
         eur = sum(float(v) * (yrs(int(k)) if k != "_" else 1.0) for k, v in by_p.items())
+        if fixed.get("agreement_hash") is not None and \
+                fixed["agreement_hash"] != _conn.agreement_hash(agreement):
+            flags.append("config_changed_since_solve" if commercial else
+                         "config_cleared_since_solve")
         block["network_capacity_fixed"] = {
             "eur": float(eur), "kind": fixed.get("kind"),
             "included_in_total": False, "flags": ["fixed_charge_not_in_lp"]}

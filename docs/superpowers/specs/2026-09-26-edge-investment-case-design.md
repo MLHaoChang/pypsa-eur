@@ -249,15 +249,15 @@ The LP sees a **dispatch-grade** convex approximation; the billing pass (§5.5) 
 
 | Construct | Dispatch-grade LP expression | Notes |
 |---|---|---|
-| Energy import tariff (TOU/indexed) | time-varying `marginal_cost` on the PoC import Link (or on a `grid` Generator behind the PoC bus) | 15-min snapshots when tariff settlement is 15-min; else hourly with `snapshot_weightings` |
-| Export price / price-taker sales | export Link to a grid sink with negative `marginal_cost` = −price | price series from MarketPack |
-| Connection capacity fee €/MW/yr | `capital_cost` on the PoC Link `p_nom`, extendable within `[0, import_cap]` | the optimiser sizes the connection |
-| Monthly peak demand charge | new variables `P_peak[m]` per billing period; constraints `p_import[t] ≤ P_peak[m(t)]`; objective `+ Σ rate_m · P_peak[m]` | `extra_functionality` wrapper in `lp_bindings.py`; convex |
-| Ratchet (share ρ of max over lookback L) | `P_peak[m] ≥ ρ · P_peak[k]` for k in lookback window; if the window predates the horizon, seed from meter data | linear |
-| Tiered rates | convex when rates increase with volume: piecewise-linear via stacked variables; otherwise **flag** `nonconvex_tariff` and bill exactly in the billing pass only | disclosed |
+| Energy import tariff (TOU/indexed) | time-varying `marginal_cost` adder on the PoC import Link — on **every** charged import Link of a group contract — applied transiently for the solve (§5.1) | 15-min snapshots when tariff settlement is 15-min; else hourly with `snapshot_weightings` |
+| Export price / price-taker sales | a second, one-way `poc→grid` export Link with `marginal_cost` adder = −price (transient) | price series pinned from the Library (P1) / MarketPack |
+| Connection capacity fee €/MW/yr | **explicit objective term** `fee · p_nom` on the PoC Link (not `capital_cost`), scaled to the operating time the snapshots represent; `p_nom` extendable within `[0, import_cap]` | the optimiser sizes the connection; binds `poc_link` only (a group's other extendable members warn `group_fee_bypass`) |
+| Monthly peak demand charge | variables `ic_peak_import[key]` per (item, window, investment period, local month); the settlement-interval mean of the metered flow ≤ peak (net meters: import − export, floored at 0); objective `+ Σ w_obj · rate · ic_billed_demand[key]` | `extra_functionality` wrapper in `lp_bindings.py`; convex; a group is metered on its members' combined import |
+| Ratchet (share ρ of max over lookback L) | a billed variable `ic_billed_demand[m] ≥ ic_peak_import[m]` and `≥ ρ · ic_peak_import[k]` (prior ACTUAL peaks, never billed ones) for each lookback month in the dispatch; a month before the horizon is seeded from meter history (first investment period only) | linear; an unknown lookback month adds no constraint and is disclosed `ratchet_seed_missing` |
+| Tiered rates | convex when rates increase with volume: stacked volume variables `ic_tier_q` per month; otherwise **flag** `nonconvex_tier`, price in the LP at a single tier (the first tier in P1, §5.3) and bill exactly in the billing pass | disclosed |
 | Non-firm static cap | `p_max_pu` on the PoC Link = cap/ p_nom | |
 | Dynamic operating envelope / FCA | time-varying `p_max_pu` from envelope series; curtailment hours as a stress-class entry; compensation in Contracts | |
-| Energy-hub group contract | `GlobalConstraint`-style sum over member PoC Links ≤ group cap per snapshot | implemented in `lp_bindings.py` |
+| Energy-hub group contract | one customer under one tariff: `Σ members p_import[t] ≤ group cap` per snapshot (`ic_group_cap`); every member carries the energy adders; demand and tiers on the group meter | `lp_bindings.py`; members are one-way import Links on the PoC's grid bus, `poc_link` among them; net energy items with export are refused in P1 |
 | Grid arriving in year N | PoC Link vintage with `p_nom_max = 0` before N (existing per-vintage bounds) | speed-to-power |
 | Curtailment obligation (SB6-style, Irish CRU) | mandatory load reduction in named hours: time-varying `p_set` scaler on the curtailable load share | |
 | DR contract | DSR resource (existing) with activation cost; availability payment in Contracts | no double count (FMEA §4.4) |
@@ -277,8 +277,20 @@ the rows need is committed after a successful solve only (`links_t["ic_energy_pr
 `n.meta["ic_connection_fee"]`), and `services/commercial/cost_rows` folds the rows into `cost_breakdown` as the
 component "Commercial" and into `cost_totals.horizon_system_cost`. The connection fee is an explicit objective
 term on the PoC Link's `p_nom`, not `capital_cost`. New linopy variables added by the bindings are **dash-less with an
-`ic_` prefix** (`ic_peak_import`, `ic_tier_q`), because PyPSA's `assign_solution` parses `Component-attr`
-names and skips dash-less ones cleanly.
+`ic_` prefix** (`ic_peak_import`, `ic_billed_demand`, `ic_tier_q`, constraint `ic_group_cap`), because
+PyPSA's `assign_solution` parses `Component-attr` names and skips dash-less ones cleanly.
+
+The committed records (all ride `network.nc`): `links_t["ic_energy_price"]` (the €/MWh added per charged Link);
+`n.meta["ic_poc_links"]` (import, export, `import_members`, priced Links, `energy_hash`);
+`n.meta["ic_connection_fee"]` / `["ic_connection_fixed_fee"]` (with `agreement_hash`);
+`n.meta["ic_demand_peaks"]` (per key: actual peak read from the solved dispatch, billed demand, rate) and
+`["ic_demand_info"]` (items, months not established, partial months, notes, a hash of the items, clock, meter
+history, floors and axis); `n.meta["ic_tier_volumes"]` (with the items hash); `n.meta["ic_group"]` (members,
+cap, energy shares). The rows compare each hash with the current config: an edit without a re-solve is
+`config_changed_since_solve`; a term the config names but the solve did not bind is None plus a
+`*_not_established` flag (ADR-0001). The dispatch strategy that will run decides the refusals: demand, tiers
+and a capacity fee are refused with rolling or multi-period myopic dispatch in P1 (P6 carries the running
+peak), and the preflight states the same refusals before any solver time.
 
 ### 5.2 Peak variables under partial coverage
 - **Representative periods**: a billing month with no sampled snapshots gets no `P_peak[m]`; its demand
@@ -297,7 +309,8 @@ names and skips dash-less ones cleanly.
 Decreasing marginal rates (the common NL Energiebelasting and C&I volume case) are non-convex in a
 minimisation. Such items are flagged `nonconvex_tier`; the LP prices them at the rate of the tier the meter
 history (or the previous iteration) predicts the month will land in, disclosed in the report; the billing
-pass bills them exactly.
+pass bills them exactly. **As implemented in P1:** the LP prices them at the FIRST tier (no volume history
+is modelled yet); the history-predicted tier is P2 WP2.1 / WP2.3.
 
 ### 5.5 Billing pass (`tariff_engine.py`)
 

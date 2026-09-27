@@ -312,6 +312,12 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
     if cfg.export_link is not None:
         _require_link(n, cfg.export_link, "export_link")
         _require_one_way(n, cfg.export_link, "export_link")
+    if cfg.demand_items:
+        # Not implemented in P1: every demand item of the tariff is charged, so
+        # a selection would be silently ignored (Phase 1 gate finding #4).
+        raise CommercialBindingError(
+            "commercial.demand_items (a selection of demand items) is not supported in P1; "
+            "every demand item of the tariff is charged — remove the unwanted items instead")
     if cfg.import_tariff_id is not None and cfg.import_tariff is None:
         raise CommercialBindingError(
             "import_tariff_id names a Library tariff, which arrives in P2 (WP2.4); "
@@ -567,6 +573,23 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
                      "partial_months": partial, "notes": list(notes),
                      "items_hash": demand_hash(n, cfg, items)}}
     return spec, [i.id for i in items], missing, notes
+
+
+def energy_hash(n, cfg: CommercialConfig) -> str:
+    """What decides the energy rows besides the dispatch: the per-interval
+    energy items (incl. non-convex tiers priced at their first tier), the
+    export price version, the site clock, the charged Links and the axis
+    (Phase 1 gate binding condition 2)."""
+    items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
+             if not _is_demand(i) and _lp_reason(i) is None
+             and not (i.tiers and tiers_are_convex(i.tiers))]
+    raw = json.dumps({"items": [i.model_dump(mode="json") for i in items],
+                      "export_price_ref": (cfg.export_price_ref.model_dump(mode="json")
+                                           if cfg.export_price_ref is not None else None),
+                      "timezone": cfg.timezone, "import": sorted(import_links(cfg)),
+                      "export": cfg.export_link, "axis": _axis_hash(n.snapshots)},
+                     sort_keys=True)
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
 def demand_hash(n, cfg: CommercialConfig, items) -> str:
@@ -983,7 +1006,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
         n.links_t[ENERGY_PRICE_ATTR] = frame
         n.meta[META_LINKS] = {"import": cfg.poc_link, "export": cfg.export_link,
                               "import_members": import_links(cfg),
-                              "priced": sorted(targets)}
+                              "priced": sorted(targets), "energy_hash": energy_hash(n, cfg)}
         if "v" in solved_peaks:
             n.meta[META_DEMAND] = solved_peaks["v"]
             n.meta[META_DEMAND_INFO] = demand["info"]
@@ -1075,7 +1098,9 @@ def energy_cost_rows(n, commercial: dict | None) -> dict | None:
                 "flags": flags}
     if cfg is not None and (cfg.poc_link != solved.get("import")
                             or cfg.export_link != solved.get("export")
-                            or sorted(import_links(cfg)) != sorted(solved_import_links(solved))):
+                            or sorted(import_links(cfg)) != sorted(solved_import_links(solved))
+                            or (solved.get("energy_hash") is not None
+                                and solved["energy_hash"] != energy_hash(n, cfg))):
         flags.append("config_changed_since_solve")
     if not commercial:
         flags.append("config_cleared_since_solve")

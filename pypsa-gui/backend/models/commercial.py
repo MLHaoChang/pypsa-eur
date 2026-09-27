@@ -322,6 +322,7 @@ class CommercialConfig(BaseModel):
     # import is capped at `group_cap_mw` in every snapshot.
     group_members: list[str] = Field(default_factory=list)
     group_cap_mw: float | None = Field(default=None, ge=0)
+    # Reserved: a selection is refused at binding in P1 (every demand item is charged).
     demand_items: list[str] = Field(default_factory=list)
     # Metered monthly import peaks before the horizon, {"YYYY-MM": kW} on the
     # site clock: the seed a ratchet's lookback needs (WP1.5b).

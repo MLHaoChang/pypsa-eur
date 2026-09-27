@@ -414,6 +414,12 @@ Files: `backend/services/commercial/connection.py`, `backend/tests/test_connecti
   study's `import_cap`) caps the agreement; the operational pin is `min(p_nom_opt, cap)` and discloses
   `operational_design_mismatch`; `freeze_capacities` sets the operational flag last; a PUT carrying
   `commercial: null` when none is stored does not re-bind.
+- Round 4 → PASS WITH CONDITIONS, closed in c567334: the lever study's import cap also clamps non-firm contracts,
+  and an operational design mismatch reaches the sweep result (not only the facts).
+- Phase 1 gate binding condition 2 (closed): the committed fee records carry a content hash of the agreement
+  (`connection.agreement_hash`), so a changed fee, cap or `available_from` without a re-solve flags
+  `config_changed_since_solve`; energy rows carry `energy_hash` (energy items, export price version, clock,
+  charged Links, axis) likewise.
 
 ### WP1.4b Connection agreement — dynamic envelope and FCA
 - [ ] Design line first: `services/adequacy/stress.py` knows `VALID_KINDS=("parametric","profiles")`, and its
@@ -491,6 +497,11 @@ Files: `lp_bindings.py`, `backend/tests/test_lp_bindings_peak_demand.py`.
   flag while the engine withholds `per_item` (both disclosed; different conventions).
 - Round 4 → **PASS**. Minor closed: tariff rates and tier thresholds refuse NaN/inf in the model
   (`allow_inf_nan=False`), so a NaN rate can no longer produce a NaN row.
+  Reviewer probe matrix (throwaway, not committed): 48 DST cases — Europe/Berlin and America/New_York
+  fall-back and spring-forward, Australia/Lord_Howe, Asia/Kolkata × 15-min/hourly steps × 15-min/hourly
+  settlement × import and net metering, a two-window item with a history-seeded ratchet — LP and engine agree
+  per (month, window) on actual and billed kW, gap ≤ 1.2e-9; representative weeks and two periods agree per
+  (period, month, window).
 
 - [ ] (Gate P0 condition 3) with `realistic_dispatch` or any other new `services/solver/` module, add
   the assertion that `test_solver_facade_surface.py`'s glob covers it.
@@ -630,6 +641,22 @@ Files: `backend/services/validation_service.py`, `backend/tests/test_validation_
   bundle keeps the bindings and library refs.
 - [ ] Full backend `not slow` suite, QA drivers, frontend vitest all green; findings note
   `docs/superpowers/findings/<date>-ic-p1-commercial-layer.md`; assessor verdict recorded here.
+- **Gate run (2026-09-27):** full suite 6,215 passed / 31 skipped / 0 failed (tree 3ca8234; later commits
+  covered by re-running every touched file); QA drivers 22/22; vitest 1,947; `tsc` clean. Findings note:
+  `docs/superpowers/findings/2026-09-27-ic-p1-commercial-layer.md`.
+- **Assessor verdict: GO WITH BINDING CONDITIONS.** The assessor re-ran the driver, the reconciliation gate,
+  16 WP files (365), house-rule/seam files (158) and a new US probe through the real routes (TOU + tiers +
+  binding-ratchet facility demand + windowed demand + fixed + firm fee + Library export price on
+  America/New_York across the DST change; save → load → bundle): LP == engine per item, gap 3.5e-11
+  throughout. Conditions:
+  1. (before P2) correct the findings note and record WP1.4 round 4 and this verdict — **closed**;
+  2. (before P2) drift detection for energy items, export price ref and the connection agreement — **closed**;
+  3. (before P2) QA scenario B with a binding ratchet, US jurisdiction, timezone, through the PUT route —
+     **closed** (`qa_commercial_lp.py` 30/30);
+  4. (alongside P2, by WP2.4) move `_bind_commercial` and `_series_from` logic into services; `demand_items`
+     is now refused at binding (implemented selection is P2);
+  5. (alongside P2, before WP2.3) merge or resolve the FOM branch (plain-solve gap must be 0);
+  6. (alongside P2) bring spec §5 table and §5.1 "As implemented" up to date — **closed** with this gate.
 
 ---
 

@@ -186,8 +186,10 @@ def test_after_a_solve_the_poc_price_is_persisted_and_the_users_cost_untouched()
     sink = _solve(n, _commercial(_tariff()))
     assert np.allclose(n.links_t[L.ENERGY_PRICE_ATTR]["import"], _expected_eur_per_mwh(n.snapshots))
     assert "import" not in n.links_t.marginal_cost.columns  # applied for the solve, undone
-    assert n.meta[L.META_LINKS] == {"import": "import", "export": None,
-                                    "import_members": ["import"], "priced": ["import"]}
+    record = dict(n.meta[L.META_LINKS])
+    assert record.pop("energy_hash")  # the drift check's content hash
+    assert record == {"import": "import", "export": None,
+                      "import_members": ["import"], "priced": ["import"]}
     assert sink["last_commercial_terms"]["poc_link"] == "import"
 
 
@@ -654,3 +656,49 @@ def test_vintage_bounds_on_the_poc_link_are_refused():
     n.meta["vintage_bounds"] = {"Link": {"import": {"2030": {"p_nom_max": 50.0}}}}
     with pytest.raises(L.CommercialBindingError, match="vintage"):
         L.materialise_poc_prices(n, _commercial(_tariff()))
+
+
+# ── Phase 1 gate binding condition 2 ───────────────────────────────────────
+
+
+def _committed(n, commercial):
+    applied = L.materialise_poc_prices(n, commercial)
+    applied.undo()
+    applied.commit()
+
+
+def _drift_flags(n, commercial):
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    return commercial_cost_terms(n, commercial)["flags"]
+
+
+def _tou_tariff(rate_night=0.07):
+    return {"id": "t", "name": "t", "jurisdiction": "DE", "valid_from": "2030-01-01",
+            "items": [{"id": "e", "kind": "energy", "unit": "per_kwh", "periods": [
+                {"name": "night", "rate": rate_night, "start_hour": 0, "end_hour": 6},
+                {"name": "day", "rate": 0.2}]}]}
+
+
+def test_a_changed_energy_rate_after_the_solve_is_drift():
+    """Gate finding #1: energy rates are hashed like demand and tier items."""
+    n = build_edge_15min()
+    base = {"poc_link": "import", "import_tariff": _tou_tariff()}
+    _committed(n, base)
+    assert "config_changed_since_solve" not in _drift_flags(n, base)
+    assert "config_changed_since_solve" in _drift_flags(n, {**base, "import_tariff": _tou_tariff(0.09)})
+    assert "config_changed_since_solve" in _drift_flags(n, {**base, "timezone": "Europe/Berlin"})
+
+
+def test_a_changed_export_price_ref_after_the_solve_is_drift():
+    n = build_edge_15min()
+    n.add("Link", "export", bus0="poc", bus1="grid", p_nom=80.0, carrier="AC")
+    n.links_t[L.EXPORT_PRICE_ATTR] = pd.DataFrame({"export": np.full(len(n.snapshots), 40.0)},
+                                                  index=n.snapshots)
+    ref = {"id": "px", "version": 1, "hash": "a" * 64, "source": "t"}
+    base = {"poc_link": "import", "export_link": "export", "export_price_ref": ref,
+            "import_tariff": _tou_tariff()}
+    _committed(n, base)
+    assert "config_changed_since_solve" not in _drift_flags(n, base)
+    newer = {**base, "export_price_ref": {**ref, "version": 2, "hash": "b" * 64}}
+    assert "config_changed_since_solve" in _drift_flags(n, newer)
