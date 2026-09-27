@@ -300,15 +300,15 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
     cfg = _parse(cfg)
     _require_link(n, cfg.poc_link, "poc_link")
     _require_one_way(n, cfg.poc_link, "poc_link")
-    if cfg.import_tariff is not None:
+    if cfg.import_tariff is not None or cfg.connection is not None:
         ts = (n.snapshots.get_level_values(-1) if isinstance(n.snapshots, pd.MultiIndex)
               else n.snapshots)
         if not isinstance(ts, pd.DatetimeIndex):
             # A tariff's windows, months and validity are dates; an integer or
             # 'now' axis would be rated on 1970 or today (WP1.8 review #6).
             raise CommercialBindingError(
-                "a tariff needs datetime snapshots; this network's snapshot axis is not "
-                "datetime")
+                "a tariff or connection agreement needs datetime snapshots; this network's "
+                "snapshot axis is not datetime")
     if cfg.export_link is not None:
         _require_link(n, cfg.export_link, "export_link")
         _require_one_way(n, cfg.export_link, "export_link")

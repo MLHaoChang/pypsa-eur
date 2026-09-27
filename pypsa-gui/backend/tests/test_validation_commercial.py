@@ -247,3 +247,40 @@ def test_a_binding_error_names_no_link_it_did_not_find():
     """#8: the issue does not point at the PoC for a tariff-level fault."""
     codes = _codes(build_edge_15min(), {"poc_link": "import", "import_tariff_id": "lib"})
     assert codes["commercial.binding_invalid"].component_class == ""
+
+
+# ── review round 2 ─────────────────────────────────────────────────────────
+
+
+def test_weather_year_timestamps_under_later_periods_are_not_out_of_validity():
+    """B: PyPSA-Eur's layout (2013 weather timestamps, periods 2030/2040); the
+    periods decide which tariff years are modelled."""
+    n = build_edge_15min()
+    n.set_snapshots(pd.date_range("2013-01-07", periods=672, freq="15min"))
+    n.set_investment_periods([2030, 2040])
+    codes = _codes(n, {"poc_link": "import", "import_tariff": _tariff(ENERGY)},
+                   multi_investment_periods=True)
+    assert "commercial.tariff_out_of_validity" not in codes
+    early = _codes(n, {"poc_link": "import",
+                       "import_tariff": _tariff(ENERGY, valid_from="2035-01-01")},
+                   multi_investment_periods=True)
+    assert "2030" in early["commercial.tariff_out_of_validity"].message
+
+
+def test_a_very_coarse_axis_still_warns_on_resolution():
+    """C: every step above the gap bound is the resolution, not a gap."""
+    n = build_edge_15min()
+    n.set_snapshots(pd.date_range("2030-01-01", periods=30, freq="2D"))
+    codes = _codes(n, {"poc_link": "import", "import_tariff": _tariff(
+        {"id": "d", "kind": "demand", "unit": "per_kw_month",
+         "periods": [{"name": "all", "rate": 10.0}]})})
+    assert "commercial.demand_resolution" in codes
+
+
+def test_a_connection_on_a_non_datetime_axis_is_refused():
+    """D: `available_from` on an integer axis would close the PoC for good."""
+    n = build_edge_15min()
+    n.set_snapshots(pd.RangeIndex(96))
+    codes = _codes(n, {"poc_link": "import", "connection": {
+        "kind": "firm", "import_cap_mw": 70.0, "available_from": "2030-01-01"}})
+    assert "datetime" in codes["commercial.binding_invalid"].message

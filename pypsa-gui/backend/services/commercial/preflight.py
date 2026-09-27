@@ -55,12 +55,16 @@ def _max_step_h(snapshots: pd.Index) -> float | None:
                   for p in snapshots.get_level_values(0).unique()]
     else:
         groups = [pd.DatetimeIndex(snapshots)]
-    steps = []
+    steps: list[float] = []
     for ts in groups:
         if len(ts) > 1:
-            d = np.diff(ts.asi8) / 3.6e12
-            steps.extend(d[(d > 0) & (d <= _GAP_H)].tolist())
-    return max(steps) if steps else None
+            steps.extend(np.diff(ts.asi8) / 3.6e12)  # ns → h: a unit, not a step
+    positive = [d for d in steps if d > 0]
+    within = [d for d in positive if d <= _GAP_H]
+    if within:
+        return max(within)
+    # Every step is longer than the gap bound: that IS the axis (round 2 C).
+    return min(positive) if positive else None
 
 
 def commercial_findings(n, commercial, *, solve_strategy: str = "full",
@@ -137,18 +141,18 @@ def _warnings(n, cfg, adders, price, demand) -> list[tuple[str, str, str, str, s
     if tariff is not None and len(n.snapshots):
         local = _lp._local_clock(n.snapshots, cfg.timezone)
         first, last = local.min().date(), local.max().date()
-        outside = first < tariff.valid_from or (tariff.valid_to is not None
-                                                and last > tariff.valid_to)
-        # Later investment periods usually reuse the first period's timestamps
-        # and are rated on them; the period year is still outside a tariff
-        # that has expired by then (review #7).
-        late = []
-        if isinstance(n.snapshots, pd.MultiIndex) and tariff.valid_to is not None:
-            late = [int(p) for p in n.snapshots.get_level_values(0).unique()
-                    if int(p) > tariff.valid_to.year]
-        if outside or late:
-            where = f"The modelled dates {first}..{last}" + (
-                f" and investment period(s) {', '.join(map(str, late))}" if late else "")
+        if isinstance(n.snapshots, pd.MultiIndex):
+            # The periods decide which tariff years are modelled; their
+            # timestamps are often a weather year (review #7, round 2 B).
+            off = [int(p) for p in n.snapshots.get_level_values(0).unique()
+                   if int(p) < tariff.valid_from.year
+                   or (tariff.valid_to is not None and int(p) > tariff.valid_to.year)]
+            where = f"Investment period(s) {', '.join(map(str, off))}" if off else None
+        else:
+            outside = first < tariff.valid_from or (tariff.valid_to is not None
+                                                    and last > tariff.valid_to)
+            where = f"The modelled dates {first}..{last}" if outside else None
+        if where:
             out.append(("warning", "commercial.tariff_out_of_validity", "", tariff.id,
                         f"{where} fall outside tariff {tariff.id!r}'s validity "
                         f"{tariff.valid_from}..{tariff.valid_to or 'open'}."))

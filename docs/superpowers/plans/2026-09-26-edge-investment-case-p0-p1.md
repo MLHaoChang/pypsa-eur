@@ -613,6 +613,10 @@ Files: `backend/services/validation_service.py`, `backend/tests/test_validation_
   `demand_resolution` uses the coarsest in-period step (gaps > 24 h excluded); a crash after binding is
   `commercial.preflight_incomplete` (warning), never a 500; a later investment period past `valid_to` warns;
   `binding_invalid` no longer points at the PoC for a non-Link fault. Tests per refusal class added.
+- Round 2 → PASS WITH CONDITIONS, closed: on a multi-period axis validity is judged by the investment-period
+  years (weather-year timestamps no longer warn); an axis whose every step exceeds the gap bound uses its
+  smallest step for `demand_resolution`; a connection agreement on a non-datetime axis is refused too; the
+  stale `preflight.py` hourly-audit allowance is removed (43 sites in 21 files).
 
 ### Phase 1 e2e QA gate
 - [ ] `backend/tests/qa_commercial_lp.py` (auto-discovered by `run_qa_drivers.py`): build the 15-min fixture

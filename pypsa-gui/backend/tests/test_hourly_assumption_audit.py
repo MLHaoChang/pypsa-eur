@@ -24,9 +24,6 @@ ALLOWED: dict[str, tuple[int, str]] = {
     "adequacy/sweep.py": (3, "same occurrence formula as occurrence.py — a unit"),
     "asset_results/compute.py": (2, "prose explaining why Σweights/8760 is avoided"),
     "chat_service.py": (1, "prompt text about CSV row counts"),
-    "commercial/preflight.py": (1, "Timedelta(hours=1) converts the MEASURED snapshot step to "
-                                   "hours to compare with a demand interval — a unit, not an "
-                                   "assumed step (IC WP1.8)"),
     "commercial/lp_bindings.py": (1, "Σ weights ≈ 8760 h tells whether a period's snapshots "
                                      "REPRESENT a whole year (then every month is billed) — a "
                                      "unit test, not a step (IC WP1.5a review #2)"),
@@ -70,6 +67,6 @@ def test_every_hourly_assumption_site_is_listed_with_a_reason():
 
 
 def test_the_initial_inventory_is_pinned_at_38_sites_in_19_files():
-    assert sum(c for c, _ in ALLOWED.values()) == 44
-    assert len(ALLOWED) == 22
+    assert sum(c for c, _ in ALLOWED.values()) == 43
+    assert len(ALLOWED) == 21
     assert all(reason for _, reason in ALLOWED.values())
