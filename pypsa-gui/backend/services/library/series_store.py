@@ -22,18 +22,23 @@ import gzip
 import hashlib
 import io
 import json
+import os
 import re
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
 import numpy as np
 import pandas as pd
+from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DBSession
 
 from db.models import LibraryItem
 from models.commercial import PriceSeriesRef
+from services.storage_paths import library_dir  # noqa: F401  (re-exported for callers)
 
 KIND = "series"
 _NAME_MAX = 128
@@ -47,8 +52,19 @@ class LibraryRefStale(ValueError):
     """The ref's hash, or the file's content, no longer matches the row."""
 
 
-def library_dir(root: Path, org_id: UUID) -> Path:
-    return Path(root) / ".library" / str(org_id)
+class SeriesMeta(BaseModel):
+    """What a caller may attach to a series. Validated BEFORE anything is
+    written: a meta that cannot build a ref would otherwise commit a row that
+    breaks `list_series` for the whole org (review WP1.1a #1)."""
+
+    model_config = ConfigDict(extra="forbid")
+    source: str = "user"
+    vintage_year: int | None = None
+    provider: str | None = None
+    description: str | None = None
+
+
+_PUT_RETRIES = 5
 
 
 def _default_root() -> Path:
@@ -62,13 +78,18 @@ def _slug(name: str) -> str:
 
 
 def _canonical(series: pd.Series) -> tuple[bytes, str | None]:
+    """Canonical bytes. The first line records the timezone, so the same
+    instants in another zone are a different item (resolve returns exactly
+    what was put). Values keep 10 significant digits (`%.10g`, the STORED
+    precision) and `-0.0` is normalised to `0`."""
     idx = series.index
     tz = str(idx.tz) if idx.tz is not None else None
     ts = idx.tz_convert("UTC") if tz else idx
     stamps = ts.strftime("%Y-%m-%dT%H:%M:%S") + ("Z" if tz else "")
     buf = io.StringIO()
+    buf.write(f"# tz={tz or 'naive'}\n")
     buf.write("timestamp_utc,value\n")
-    for t, v in zip(stamps, series.to_numpy(dtype=float)):
+    for t, v in zip(stamps, series.to_numpy(dtype=float) + 0.0):
         buf.write(f"{t},{v:.10g}\n")
     return buf.getvalue().encode("utf-8"), tz
 
@@ -85,6 +106,9 @@ def _validate(name: str, series: pd.Series) -> None:
         raise ValueError("series values must all be finite numbers")
     if not series.index.is_monotonic_increasing or series.index.has_duplicates:
         raise ValueError("series index must be strictly increasing")
+    if (series.index.asi8 % 1_000_000_000 != 0).any():
+        raise ValueError("series timestamps must be whole seconds (sub-second steps "
+                         "would collapse in the canonical form)")
 
 
 def _ref(row: LibraryItem) -> PriceSeriesRef:
@@ -95,37 +119,73 @@ def _ref(row: LibraryItem) -> PriceSeriesRef:
                           provider=meta.get("provider"))
 
 
-def put_series(db: DBSession, org_id: UUID, name: str, series: pd.Series, meta: dict,
-               *, created_by: UUID | None = None, root: Path | None = None) -> PriceSeriesRef:
-    """Store `series` as `name` in the org's Library; idempotent on content."""
-    _validate(name, series)
-    data, tz = _canonical(series)
-    digest = hashlib.sha256(data).hexdigest()
-    latest = db.scalars(
+def _latest_row(db: DBSession, org_id: UUID, name: str) -> LibraryItem | None:
+    return db.scalars(
         select(LibraryItem)
         .where(LibraryItem.org_id == org_id, LibraryItem.kind == KIND, LibraryItem.name == name)
         .order_by(LibraryItem.version.desc())
         .limit(1)
     ).first()
-    if latest is not None and latest.hash == digest:
-        return _ref(latest)
-    version = 1 if latest is None else latest.version + 1
-    rel = Path("series") / f"{_slug(name)}-{digest[:16]}.csv.gz"
-    target = library_dir(root or _default_root(), org_id) / rel
+
+
+def _write_payload(target: Path, data: bytes, digest: str) -> None:
+    """Content-addressed write. A unique temp file per writer + os.replace, so
+    concurrent writers of the same content never truncate each other; an
+    existing file whose content does not hash to `digest` is rewritten."""
     target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.exists():
-        tmp = target.with_suffix(".tmp")
-        tmp.write_bytes(gzip.compress(data, mtime=0))
-        tmp.replace(target)
-    row = LibraryItem(
-        org_id=org_id, kind=KIND, name=name, version=version, hash=digest,
-        path=rel.as_posix(),
-        meta_json=json.dumps({**{k: v for k, v in meta.items() if k != "tz"}, "tz": tz},
-                             sort_keys=True, default=str),
-        created_by=created_by, created_at=datetime.now(timezone.utc))
-    db.add(row)
-    db.commit()
-    return _ref(row)
+    if target.exists():
+        try:
+            if hashlib.sha256(gzip.decompress(target.read_bytes())).hexdigest() == digest:
+                return
+        except (OSError, EOFError, gzip.BadGzipFile):
+            pass
+    fd, tmp = tempfile.mkstemp(dir=target.parent, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(gzip.compress(data, mtime=0))
+        os.replace(tmp, target)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def put_series(db: DBSession, org_id: UUID, name: str, series: pd.Series, meta: dict,
+               *, created_by: UUID | None = None, root: Path | None = None) -> PriceSeriesRef:
+    """Store `series` as `name` in the org's Library; idempotent on content.
+
+    Concurrency: the (org, kind, name, version) unique constraint is the
+    arbiter. A writer that loses the race re-reads: identical content returns
+    the winner's version, different content retries with the next version.
+    """
+    _validate(name, series)
+    try:
+        meta_ok = SeriesMeta.model_validate(meta or {})
+    except ValidationError as exc:
+        raise ValueError(f"invalid series meta: {exc.errors()[0]['msg']}") from exc
+    data, tz = _canonical(series)
+    digest = hashlib.sha256(data).hexdigest()
+    rel = Path("series") / f"{_slug(name)}-{digest[:16]}.csv.gz"
+    _write_payload(library_dir(root or _default_root(), org_id) / rel, data, digest)
+    meta_json = json.dumps({**meta_ok.model_dump(), "tz": tz}, sort_keys=True)
+
+    for _ in range(_PUT_RETRIES):
+        latest = _latest_row(db, org_id, name)
+        if latest is not None and latest.hash == digest:
+            return _ref(latest)
+        row = LibraryItem(
+            org_id=org_id, kind=KIND, name=name,
+            version=1 if latest is None else latest.version + 1,
+            hash=digest, path=rel.as_posix(), meta_json=meta_json,
+            created_by=created_by, created_at=datetime.now(timezone.utc))
+        ref = _ref(row)  # built BEFORE the commit: a bad row can never land
+        db.add(row)
+        try:
+            db.commit()
+            return ref
+        except IntegrityError:
+            db.rollback()  # another writer took this version: re-read and retry
+            continue
+    raise RuntimeError(f"could not store series {name!r} after {_PUT_RETRIES} attempts")
 
 
 def _row_for(db: DBSession, org_id: UUID, ref: PriceSeriesRef) -> LibraryItem:
@@ -142,7 +202,11 @@ def resolve(db: DBSession, org_id: UUID, ref: PriceSeriesRef, *, root: Path | No
     row = _row_for(db, org_id, ref)
     if ref.hash != row.hash:
         raise LibraryRefStale(f"ref hash for {ref.id!r} v{ref.version} does not match the Library")
-    path = library_dir(root or _default_root(), org_id) / row.path
+    base = library_dir(root or _default_root(), org_id).resolve()
+    path = (base / row.path).resolve()
+    if not path.is_relative_to(base):
+        raise LibraryRefStale(f"Library path for {ref.id!r} v{ref.version} points outside "
+                              "the org's Library directory")
     try:
         data = gzip.decompress(path.read_bytes())
     except FileNotFoundError as exc:
@@ -151,7 +215,7 @@ def resolve(db: DBSession, org_id: UUID, ref: PriceSeriesRef, *, root: Path | No
         raise LibraryRefStale(f"Library file for {ref.id!r} v{ref.version} was modified")
     meta = json.loads(row.meta_json or "{}")
     tz = meta.get("tz")
-    frame = pd.read_csv(io.BytesIO(data), dtype={"value": float})
+    frame = pd.read_csv(io.BytesIO(data), dtype={"value": float}, comment="#")
     if tz:
         idx = pd.DatetimeIndex(pd.to_datetime(frame["timestamp_utc"], utc=True)).tz_convert(tz)
     else:

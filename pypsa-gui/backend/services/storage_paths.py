@@ -166,3 +166,18 @@ def taken_names(db: DBSession, org_id: uuid.UUID, org_segment: bool) -> set[str]
     if root.is_dir():
         taken |= {entry.name for entry in root.iterdir() if entry.is_dir()}
     return taken
+
+
+
+def library_dir(root: Path, org_id: uuid.UUID) -> Path:
+    """
+    The org's Library directory (Edge Investment Case WP1.1a):
+    `<projects_root>/.library/<org_id>/`, whatever the project layout.
+
+    HIDDEN on purpose: `legacy_migrate._scan_root` and
+    `storage_reconcile._candidate_dirs` skip dot-directories, while any other
+    non-UUID directory under the projects root is offered as a claimable
+    leftover that the legacy import may MOVE. The org id is always present, so
+    two orgs can never share a Library directory even in local mode.
+    """
+    return Path(root) / ".library" / str(org_id)
