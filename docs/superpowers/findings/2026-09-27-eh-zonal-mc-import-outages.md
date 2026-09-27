@@ -45,8 +45,8 @@ Environment: the SessionStart venv (`~/.venv-pypsa-gui`, Python 3.12, pandas 2.3
 |---|---|---|
 | `test_energy_hub_*.py` + `test_adequacy_sweep.py` | **221** | **243** (+22: `test_energy_hub_import_outages.py` 12, `test_energy_hub_zonal_mc.py` 10; 0 failed) |
 | EH + sweep + `test_adequacy_mc*.py` + `test_*elcc*.py` | — | 308 passed (single-area MC / ELCC suites unchanged by the `blocks_fn` hook) |
-| full backend `-m "not slow"` | 5770 passed, 31 skipped | FULL_BACKEND |
-| `run_qa_drivers.py` | 22 drivers | QA_DRIVERS |
+| full backend `-m "not slow"` | 5770 passed, 31 skipped | **5792 passed, 31 skipped, 0 failed** (+22) |
+| `run_qa_drivers.py` | 22 drivers | **22 drivers passed** |
 | `qa_eh_reference_design.py` | 39/39 steps | **64/64** steps |
 | frontend `npx vitest run` | 1949 passed | **1952** passed (177 files; `EhReferenceDesignPanel.test.tsx` 32 → 35); `tsc --noEmit` clean |
 | `ruff check` (changed files) | — | clean. `mc.py` carries 19 pre-existing docstring-style hits, the same count as on master; none are new |
