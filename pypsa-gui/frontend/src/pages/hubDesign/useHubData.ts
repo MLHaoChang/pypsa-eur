@@ -1,6 +1,11 @@
 // The hub-design cards' reads (guided-mode spec §5.3). Every query uses the
 // Expert panel's key and options, so the two views share one cache: a study
 // started in one is polled — and its report read — by the other.
+//
+// Each hook returns NAMED fields, never `{ ...query }`: spreading a
+// react-query result reads its `promise` getter, which rejects the observer's
+// pending thenable and — for a disabled query — sent HubDesignPanel into an
+// intermittent endless re-render (useHubData.test).
 import { useQuery } from '@tanstack/react-query'
 import {
   resultsApi, simulationApi, type EhReferenceDesignReport, type EhReview,
@@ -24,7 +29,7 @@ export function useHubStudy() {
     enabled: !!project,
   })
   const study = (q.data ?? null) as EhStudyPayload | null
-  return { ...q, study, running: study?.status === 'running' }
+  return { data: q.data, isPending: q.isPending, study, running: study?.status === 'running' }
 }
 
 /** The template the project was created from (null for an own network). */
@@ -36,7 +41,7 @@ export function useHubTemplate() {
     enabled: !!project,
     staleTime: Infinity,
   })
-  return { ...q, template: (q.data ?? null) as EhTemplateMeta | null }
+  return { isPending: q.isPending, template: (q.data ?? null) as EhTemplateMeta | null }
 }
 
 /** GET /results/eh_review — read only once the study has results. */
@@ -49,7 +54,7 @@ export function useHubReview(enabled: boolean) {
   })
   const review = (q.data ?? null) as EhReview | null
   // A running body is chat-tool prose (gate note N3): the cards never show it.
-  return { ...q, review: review?.status === 'ok' ? review : null }
+  return { review: review?.status === 'ok' ? review : null }
 }
 
 /** The report the Expert panel shows: the study record's copy, else the
@@ -88,15 +93,16 @@ export function useHubReadiness(template: EhTemplateMeta | null, running: boolea
       { stages: undefined, pack_overrides: overrides }),
     enabled: !!project && ready && !running,
   })
-  return { ...q, readiness: q.data ?? null }
+  return { isError: q.isError, readiness: q.data ?? null }
 }
 
 /** VOLL from the solver settings (same key as the Solver settings page). */
 export function useHubSolverConfig() {
   const project = useUIStore(s => s.currentProject)
-  return useQuery({
+  const q = useQuery({
     queryKey: nk(project, 'solverConfig'),
     queryFn: simulationApi.getSolverConfig,
     enabled: !!project,
   })
+  return { data: q.data }
 }
