@@ -237,3 +237,55 @@ def test_limited_foresight_aggregation_counts_steps_not_hours_and_keeps_hours():
     fb = T.aggregate_period_snapshots(n, 2035, cfg)
     assert fb.weights.sum() == pytest.approx(period_hours)
     assert set(fb.weights.round(9).unique()) == {0.25}
+
+
+def test_aggregation_cache_sees_a_weight_edit():
+    """Re-review C1: the cache key must change when the period's objective
+    weights do — `run_simulation` solves the live network, so an edit
+    followed by a re-solve otherwise reused the old weights."""
+    import types
+
+    from services import time_aggregation_service as T
+    from services.snapshot_index import _build_period_multiindex
+
+    T.clear_cache()
+    n = __import__("pypsa").Network()
+    ts = pd.date_range("2030-01-01", periods=4 * 7 * 24, freq="h")
+    mi = _build_period_multiindex([2030, 2035], [ts, ts])
+    n.set_snapshots(mi)
+    n.investment_periods = [2030, 2035]
+    n.snapshot_weightings.loc[:, :] = 2.0
+    n.add("Bus", "b")
+    rng = np.random.default_rng(4)
+    n.add("Load", "l", bus="b", p_set=pd.Series(rng.uniform(10, 50, len(mi)), index=mi))
+    cfg = types.SimpleNamespace(lf_k_periods=2, lf_period_length_h=168,
+                                lf_cluster_method="hierarchical", lf_include_extreme=False)
+    first = T.aggregate_period_snapshots(n, 2035, cfg)
+    assert first.weights.sum() == pytest.approx(2.0 * 4 * 7 * 24)
+    n.snapshot_weightings.loc[:, :] = 1.0
+    second = T.aggregate_period_snapshots(n, 2035, cfg)
+    assert second.weights.sum() == pytest.approx(4 * 7 * 24)
+
+
+def test_hold_positions_tolerates_a_tz_aware_source_on_a_naive_axis():
+    """Re-review C2: a tz-aware coarse source against a naive finer target
+    must fall back to exact matching, not raise TypeError."""
+    from services.user_timeseries import _hold_positions
+
+    src = pd.date_range("2030-01-01", periods=24, freq="h", tz="UTC")
+    tgt = pd.date_range("2030-01-01", periods=96, freq="15min")
+    pos = _hold_positions(src, tgt)
+    assert len(pos) == 96  # no raise; unmatched rows are -1
+
+
+def test_a_calendar_frequency_leaves_no_old_weight_behind(client, install_network):
+    """Re-review C3: `W`/`MS` has no fixed step; overlapping rows must not
+    keep a previously-set weight while new rows get PyPSA's 1.0."""
+    install_network(build_network())
+    body = {"start": "2030-01-01 00:00", "end": "2030-03-31 00:00", "freq": "h",
+            "weightings": 52.14}
+    assert client.post("/api/network/snapshots", json=body).status_code == 200
+    body = {"start": "2030-01-01 00:00", "end": "2030-12-31 00:00", "freq": "MS"}
+    assert client.post("/api/network/snapshots", json=body).status_code == 200
+    w = _weights(client)
+    assert sorted(w["objective"].astype(float).unique()) == [1.0]

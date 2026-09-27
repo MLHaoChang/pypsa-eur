@@ -93,6 +93,18 @@ def _cfg_fingerprint(cfg) -> tuple:
     )
 
 
+def _weights_fingerprint(n, period) -> tuple:
+    """(length, sum, digest) of `period`'s objective weights."""
+    import hashlib
+
+    try:
+        mask = n.snapshots.get_level_values(0) == period
+        w = n.snapshot_weightings.loc[n.snapshots[mask], "objective"].to_numpy(dtype=float)
+    except Exception:
+        return ()
+    return (len(w), round(float(w.sum()), 9), hashlib.sha1(w.tobytes()).hexdigest())
+
+
 def _store(cache_key: tuple, result: AggregationResult) -> AggregationResult:
     """Cache the result under `_cache_lock` and return it, for tail-return use."""
     with _cache_lock:
@@ -150,7 +162,10 @@ def aggregate_period_snapshots(
     """
     # Network-identity in the key so concurrent solves on different network
     # objects (background vs foreground) never collide on a shared (period, cfg).
-    cache_key = (id(n), period, _cfg_fingerprint(cfg))
+    # The period's objective weights are an input too: `run_simulation` solves
+    # the live network, so a weight edit between two solves must miss the
+    # cache (WP1.0 re-review C1).
+    cache_key = (id(n), period, _cfg_fingerprint(cfg), _weights_fingerprint(n, period))
     with _cache_lock:
         cached = _cache.get(cache_key)
     if cached is not None:

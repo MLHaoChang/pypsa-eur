@@ -489,10 +489,12 @@ def set_snapshots(config: SnapshotConfig):
         # whose timestamp existed before keeps its old weight, so hourly→15-min
         # over the same day left 1.0 on every :00 quarter-hour (WP1.0 review).
         # The route defines ONE step, so every row gets it.
-        w_all = kw.get("default_snapshot_weightings")
-        if w_all is not None:
-            for col in n.snapshot_weightings.columns:
-                n.snapshot_weightings[col] = float(w_all)
+        # A calendar frequency (W, MS, …) has no fixed step: every row gets
+        # PyPSA's 1.0, the value its new rows already take, so no overlapping
+        # row keeps a weight from the previous axis (WP1.0 re-review C3).
+        w_all = kw.get("default_snapshot_weightings", 1.0)
+        for col in n.snapshot_weightings.columns:
+            n.snapshot_weightings[col] = float(w_all)
         # Re-apply full profiles (from _user_ts) aligned to the new snapshot range.
         _reapply_user_ts_to_network(n)
     change_log_service.log(

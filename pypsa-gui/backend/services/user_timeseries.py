@@ -523,7 +523,10 @@ def _hold_positions(src_index, target) -> "_np.ndarray":
                              - pd.DatetimeIndex(sorted(set(tgt)))[:-1]).median()
         if not (src_step > tgt_step):
             return pos
-    held = src.get_indexer(tgt, method="ffill")
+    try:
+        held = src.get_indexer(tgt, method="ffill")
+    except TypeError:  # tz-aware vs naive: exact matches only (re-review C2)
+        return pos
     ok = held >= 0
     within = _np.zeros(len(tgt), dtype=bool)
     within[ok] = (tgt[ok] - src[held[ok]]) < src_step
