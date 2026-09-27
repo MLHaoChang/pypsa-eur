@@ -18,7 +18,11 @@ Input contract (violations raise ``ValueError`` / ``TypeError``)
   STANDS FOR — the snapshot weightings of a representative-period model. When
   given, energy is MW × represents_hours; when omitted it is MW × step_hours.
 * ``billing_period=(start, end)`` is half-open ``[start, end)`` on the local
-  clock; it bills fixed items for the months it spans.
+  clock; it bills fixed items for the months it spans. It is REQUIRED with
+  ``represents_hours`` on a dispatch with gaps, so energy and fixed charges
+  describe the same period. Under ``represents_hours`` the ``monthly`` frame puts
+  each sampled row's represented energy in its own month — it is not a
+  calendar bill (note ``monthly_shows_sampled_months_only``).
 * ``timezone``: required when the index is tz-aware (TOU windows and billing
   months are LOCAL); refused when the index is naive, because a naive local
   index cannot represent the repeated fall-back hour. A naive index with no
@@ -246,6 +250,12 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
     sign_of = {"cost": 1.0, "revenue": -1.0}
     covered_span_h = ((idx.asi8[-1] - idx.asi8[0]) / 3.6e12 + dur[-1]) if len(idx) else 0.0
     has_gaps = len(idx) > 0 and dur.sum() < covered_span_h - 1e-9
+    if represents_hours is not None and has_gaps and billing_period is None:
+        # Energy would be scaled to the represented period while fixed items
+        # bill only the sampled weeks (review C4): the two must describe the
+        # same period, so the caller states it.
+        raise ValueError("represents_hours over a dispatch with gaps needs a billing_period "
+                         "stating the period the rows represent")
 
     interval_frames: list[pd.DataFrame] = []
     fixed_rows: list[dict] = []
@@ -299,6 +309,10 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
         per_item[item.id] = None if item_flags else float(amount.sum())
         if billing_period is not None and has_gaps and represents_hours is None:
             notes.setdefault(item.id, []).append("energy_on_partial_coverage")
+        if represents_hours is not None and has_gaps:
+            # Each sampled row's represented energy lands in its OWN month; the
+            # monthly frame is not a calendar bill (NaN months = no rows).
+            notes.setdefault(item.id, []).append("monthly_shows_sampled_months_only")
         monthly_parts[item.id] = _nan_aware_sum(pd.Series(amount), month_key)
         settle_h = _SETTLEMENT_HOURS[item.settlement]
         uniq = np.unique(dur)

@@ -482,3 +482,17 @@ def test_nan_step_hours_is_refused_and_arrays_are_accepted():
     assert res.total == pytest.approx(4 * 50.0)
     with pytest.raises(ValueError, match="length"):
         rate(df, _flat_tariff(), step_hours=np.full(3, 0.25), timezone="Europe/Berlin")
+
+
+def test_represents_hours_on_gappy_data_requires_a_billing_period():
+    """C4: energy scaled to a year with fixed charges on 4 weeks is refused."""
+    from services.commercial.tariff_engine import rate
+
+    df = _rep_weeks()
+    represents = pd.Series(8760.0 / len(df), index=df.index)
+    with pytest.raises(ValueError, match="billing_period"):
+        rate(df, _mixed_tariff(), step_hours=0.25, timezone="Europe/Berlin",
+             represents_hours=represents)
+    res = rate(df, _mixed_tariff(), step_hours=0.25, timezone="Europe/Berlin",
+               billing_period=("2030-01-01", "2031-01-01"), represents_hours=represents)
+    assert "monthly_shows_sampled_months_only" in res.notes["energy"]
