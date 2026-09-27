@@ -12,8 +12,8 @@
 > **Spec:** `docs/superpowers/specs/2026-09-26-edge-investment-case-design.md` (§4.1, §5.3, §5.5, §11, §12,
 > §13 P2 row, §15). **P1 findings:** `docs/superpowers/findings/2026-09-27-ic-p1-commercial-layer.md`.
 >
-> **Plan status:** v0.2 — round-1 plan review `FAIL` (22 findings), all addressed in this text (§ Plan
-> review). Round 2 pending.
+> **Plan status:** v0.3 — round 1 `FAIL` (22 findings) → v0.2; round 2 `PASS WITH CONDITIONS` (C1–C7 +
+> 9 LOW) → all closed in this text (§ Plan review). Implementation may start at WP2.0.
 
 **Goal of P2.** Every tariff item a US or EU site is billed is rated **exactly** on the solved dispatch (the
 billing pass), including the URDB constructs P1 left out; every contract is settled into attributable lines;
@@ -46,10 +46,10 @@ P2 billing pass & contracts
  ├─ WP2.1c LP: convex demand tiers, windowed tiers, new ratchets, predicted non-convex tier
  ├─ WP2.4b-0 condition 4 refactor: services/commercial/binding.py (router keeps a wrapper)
  ├─ WP2.4a Library items (tariff / contract / connection agreement) + import_tariff_ref + pins v2
- ├─ WP2.2-0 settlement inputs: seam interval frames, DSR commit, config-time reference series
+ ├─ WP2.2-0 settlement inputs: contracts config field, seam interval frames, DSR commit, config-time series
  ├─ WP2.2a contracts: PPA ×4 + CfD
  ├─ WP2.2b contracts: DR, lease, EaaS, retail (retail needs WP2.4a)
- ├─ WP2.2c contracts on the config + double-count preflight
+ ├─ WP2.2c contracts round trip + double-count preflight
  ├─ WP2.2d `changes_dispatch` PPA in the LP (buyer case)
  ├─ WP2.3 billing_vs_lp_gap per item kind, causes, warn gate
  ├─ WP2.4b-i URDB importer   ├─ WP2.4b-ii series / meter-data import   ├─ WP2.4c chat tools
@@ -78,7 +78,7 @@ produces exactly these JSONs).
 | R1 | `scenarios/leap_year.json` (verbatim; schedules are JSON **strings** in the file) + runtests.jl L4143–4210 | 8,760 naive hours from Jan 1, `timezone=None`, no DST; in 2024 the axis ends Dec 30 (REopt truncation, `utils.jl` L569–570), so December is a partial month; December load is 0 | weekday/weekend TOU energy in 2023 vs leap 2024; facility + TOU demand; the Feb-28/29 facility case | energy = rate × 10 kWh, demand = (flat [+ TOU]) × 10 kW, per the testset branches. The per-day fixed charge is **not** pinned by R1 (REopt converts `$/day` × 30.4375; a documented deviation — the engine pro-rates by covered days; per-day is pinned in H3) |
 | R2 | `scenarios/tiered_tou_demand.json` (verbatim) + L2025–2037 | 8,760 flat hours at 1e6/8760 kW | tiered demand (0 $/kW to 50 kW, then 12 $/kW), 2 tiers | `12 × (tier1_max × r1 + (peak − tier1_max) × r2)` |
 | R3 | "Lookback Demand Charges" cases 2 and 3, runtests.jl L1911–1956 (**derived**) | 8,760 hours, 2022 | designated months `[1,4,12]` at 75 % (year-wide); range 6 at 75 % (cyclic) | the testset's `monthly_peaks` × `monthly_demand_rates` |
-| R3′ | case 1 (L1893–1909): URDB label `539f6a23…` is not in the repo; a URDB-shaped response **self-authored** from the testset comment (35 % lookback all months, 5 cold months 10.5 $/kW, 6 warm 11.5 $/kW) | 8,760 hours, 2022 | URDB lookback fields through the importer; cyclic year | `100 × (10.5 + 0.35·10.5·5 + 0.35·11.5·6)` |
+| R3′ | case 1 (L1893–1909): URDB label `539f6a23…` is not in the repo; a URDB-shaped response **self-authored** from the testset comment (35 % lookback all months, 5 cold months 10.5 $/kW, 6 warm 11.5 $/kW) | 8,760 hours, 2022 | URDB lookback fields through the importer, authored in **range** mode (`lookbackrange = 11`), imported with `cyclic_year=True` | `100 × (10.5 + 0.35·10.5·5 + 0.35·11.5·6)` |
 | R4a | "Blended tariff", `scenarios/no_techs.json` (verbatim) L384–391 | flat 10,000 kWh/yr hourly | blended energy and demand | energy `0.10 × 10000 = 1000.00`; demand `12 × 10 × 10000/8760 = 136.9863…` (the formula, not the rounded 136.99) |
 | R4b | "Fifteen minute load" L537–545 (**derived**: REopt asserts only annual kWh; the bill is formula-derived) | 35,040 × 1 kW, 2017, 15-min | 15-min rating | energy `0.10 × 8760 = 876.00`; demand `12 × 10 × 1 = 120.00` |
 | H1–H3 | self-authored hand-rated bills with the working in the fixture: DE (Arbeitspreis / Leistungspreis on annual peak, §19 StromNEV as a documented non-support), NL (energy-tax bands as tiers, fixed per day), US C&I (TOU + windowed demand with a **split-peak** period + ratchet + per-day fixed + a 3-tier windowed energy tariff) | 15-min | every item kind | the fixture's arithmetic, to the cent |
@@ -122,9 +122,12 @@ likewise), so a split-peak period is billed as two peaks.
 Files: `tariff_engine.py`, `lp_bindings.py`, `test_tariff_engine_demand.py`, `test_lp_bindings_peak_demand.py`.
 
 - [ ] Red: a split-peak demand period (two fragments, one name) bills ONE peak per month in the engine and the
-  LP (gap 0); ratchets read the named window; the demand drift hash covers the name mapping; a tariff whose
-  fragments of one name carry different rates is refused (`TariffItem` validator); all P1 tests unchanged
-  (unique names = old behaviour).
+  LP (gap 0); ratchets read the named window; the demand drift hash covers the name mapping; windows are keyed
+  by **(month, name)**, so a summer "peak" and a winter "peak" at different rates (disjoint months) stay valid —
+  only fragments of one name that apply in the **same month** with different rates are refused (`TariffItem`
+  validator, demand items only); all P1 tests unchanged (unique names = old behaviour). The demand hash recipe
+  is **versioned** (`info.hash_version`; P1 records have none and are compared with the P1 recipe), so
+  P1-solved projects do not flip to `config_changed_since_solve` on upgrade.
 - Acceptance: the committed `ic_demand_peaks` key uses the name; P1 records (position keys) still produce rows
   (read-compat test).
 
@@ -147,13 +150,16 @@ items; `CommercialConfig.power_factor: float | None` (for `per_kva_year`).
 ## WP2.1a-ii Engine: tiers inside TOU windows
 
 Model delta: `TariffPeriod.tier_rates: list[float] | None` aligned with the **item's** `tiers` thresholds (one
-threshold list per item; each period carries its own rates). URDB semantics: the tier position is the
+threshold list per item; each period carries its own rates). **Single-period tiered items keep P1 semantics**
+(rates on `Tier.rate`, `tier_rates` absent). A tiered item with **more than one period** must carry
+`tier_rates` on every period, and then every `Tier.rate` must be 0 (refused otherwise — one source of rates). URDB semantics: the tier position is the
 month's **total** energy across periods (URDB `max` is cumulative); each period's energy is split into tiers in
 proportion to the month's total (standard bill practice; REopt allocates optimally — a documented deviation,
 gap cause `tier_allocation` in WP2.3).
 
-- [ ] Red: H3's 3-tier windowed fixture to the cent; proportional split verified by hand; a period without
-  `tier_rates` in a tiered item is refused.
+- [ ] Red: H3's 3-tier windowed fixture to the cent; proportional split verified by hand; a multi-period tiered
+  item with a period lacking `tier_rates`, or with a non-zero `Tier.rate`, is refused; every P1 tier test
+  unchanged.
 
 ## WP2.1a-iii Engine: designated-month and cyclic ratchets
 
@@ -167,9 +173,13 @@ None` (designated months, URDB `lookbackMonths`) and `Ratchet.cyclic_year: bool 
 - **Months mode** (`months = [..]`): **year-wide**: every month of the rate year is billed at least `share ×`
   the maximum actual peak over the designated months of that rate year (REopt
   `electric_utility_constraints.jl` L424–436: January is billed from April).
-- A lookback month that is neither modelled nor in the meter history (e.g. representative weeks without the
-  designated month) is unknown ⇒ `ratchet_seed_missing` (the bill a lower bound, `total` withheld) —
-  including cyclic mode; never inferred.
+- `cyclic_year` applies to range mode only (a validator refuses it with `months`; months mode is year-wide by
+  definition).
+- **Unmodelled lookback months.** Range mode, non-cyclic: a month before the horizon reads meter history under
+  its own key (P1). Cyclic range mode and months mode: a lookback month of the rate year Y that is not modelled
+  (e.g. representative weeks) reads meter history under its **same-rate-year key** `f"{Y}-{mm}"`; if absent it
+  is unknown ⇒ `ratchet_seed_missing` (the bill a lower bound, `total` withheld); never inferred from other
+  months.
 - Ratchets apply to the demand item they sit on; the URDB importer (WP2.4b-i) attaches the URDB lookback to
   the **facility** (flat) demand item only (REopt behaviour).
 
@@ -211,17 +221,27 @@ Files: `lp_bindings.py`, `cost_rows.py`, `test_ratchet.py`, `test_tiers.py`, rec
 
 - **Convex demand tiers** (rising rates): stacked variables on `ic_billed_demand` per key (`ic_demand_tier_q`),
   cost Σ w_obj · rate_k · q_k; falling ⇒ `not_in_lp` with reason (billed exactly, gap cause).
-- **Convex windowed energy tiers**: stacked monthly volume variables per (item, month), each period's volume
-  allocated to tiers **optimally** (REopt-style, linear); the engine's proportional bill differs — WP2.3 cause
-  `tier_allocation` computed as engine − LP on the same dispatch. Falling ⇒ first-tier price as P1.
+- **Convex windowed energy tiers**: variables `ic_tier_q[item, month, period name, k] ≥ 0` with, per (item,
+  month): Σ_k q[p,k] = the period's volume (Σ w·p over the period's snapshots) for every period p, and Σ_p q[p,k]
+  ≤ width_k for every tier k; cost Σ w_obj · tier_rates[p][k] · q[p,k]. Convex iff the rates rise in k for
+  **every** period; any other shape ⇒ each period priced at its first tier, flagged `nonconvex_tier`. The
+  committed `ic_tier_volumes` carries the per-period allocation (with the items hash) so rows reconcile after a
+  reload. The engine's proportional bill is ≥ the LP optimum on the same dispatch, so WP2.3's `tier_allocation`
+  (engine − LP) is ≥ 0.
 - **Designated-month and cyclic ratchets**: linear on `ic_billed_demand` (months mode: billed[m] ≥ ρ·peak[k]
   for every designated k of the rate year).
 - **Predicted non-convex tier** (spec §5.3): with `CommercialConfig.meter_history_energy_kwh` ({"YYYY-MM":
-  kWh}), month m is priced at the tier its **same month one year earlier** (m−12) predicts; absent ⇒ first tier
-  (P1). Flag `nonconvex_tier` carries the predicted tier.
-- LP coverage after P2 (stated in the module docstring): everything the engine bills is in the LP except
-  fixed items, falling demand tiers, capacity items when a connection fee exists (refused double count), and
-  per-day/kVA items (`not_in_lp` with reasons).
+  kWh}), month m is priced at the **marginal rate** of the tier its **same month one year earlier** (m−12)
+  lands in; absent ⇒ first tier (P1). Flag `nonconvex_tier` carries the predicted tier.
+- **Tariff capacity items** (`per_kw_year`, no connection fee on the PoC — the combination is a preflight
+  error): an explicit `p_nom` term reusing `connection.add_fee_term` (extendable PoC); fixed `p_nom` ⇒ reported
+  as `network_capacity_fixed`, outside the LP, as P1 does for a fixed connection fee. Reconciliation case
+  `tariff_capacity`.
+- **Falling demand tiers** are priced at the first tier (as P1 does for falling energy tiers), flagged
+  `nonconvex_tier`.
+- LP coverage after P2 (stated in the module docstring): everything the engine bills is in the LP except fixed
+  and per-day items, `per_kva_year` items, and contract settlements other than WP2.2d (`not_in_lp` /
+  `settlement_only` with reasons).
 
 - [ ] Red: each construct = engine on the same dispatch, gap 0; reconciliation cases `demand_tiers`,
   `windowed_tiers`, `ratchet_designated`, `ratchet_cyclic` before and after save → load; drift hashes cover the
@@ -261,22 +281,32 @@ Files: `backend/services/library/items.py` (new; JSON payload written as a file 
 
 ## WP2.2-0 Settlement inputs
 
-Files: `services/results/physical_quantities.py` (extension), `services/solver/assumptions.py` (DSR commit),
-`services/commercial/binding.py`, `models/commercial.py`, tests.
+Files: `services/results/physical_quantities.py` (extension), `services/solver/assumptions.py` (DSR capture
+hand-off, no refactor), `services/solver_service.py` (the DSR commit site, no drive-by refactor),
+`services/commercial/binding.py`, `models/commercial.py` (`CommercialConfig.contracts: list[Contract]` lands
+**here**, discriminated by `type` — see WP2.2a on the discriminator), `routers/network_time_axis.py` (guards),
+tests.
 
 - **Interval quantities.** `physical_quantities` additionally returns interval frames per asset (Generator
   `p`, StorageUnit `p` split into charge/discharge, Store, Link `p0`/`p1`) and per **load**, plus the PoC
   flows **on the commercial meter** (`import_links` sum, export Link) — the WP0.3 agreement test stays green.
   The caller of settlement is `services/results/billing.py` (it may import the seam); `settle` stays pure.
-- **DSR dispatch commit.** The transient per-bus DSR slack's dispatch (`dsr_t`, today captured and discarded)
-  is committed on a successful solve as `buses_t["ic_dsr_p"]` (axis-hashed); DR activation reads it; absent ⇒
-  activation `None` + `dr_activation_not_established`.
+- **DSR dispatch commit.** The per-bus DSR slack's dispatch (`dsr_t`, captured in the undo of
+  `_apply_modelling_assumptions`, which also runs on failed and sweep solves) is handed to `run_simulation`,
+  which commits it **only after a successful, non-operational solve** (the P1 `_ic_operational` rule) as
+  `buses_t["ic_dsr_p"]` and clears it after a successful solve without DSR; its axis hash is part of the
+  settlement record's drift check. DR activation reads it; absent ⇒ `None` + `dr_activation_not_established`.
 - **Reference series at config time.** Contract reference prices and `grid_cfe_share` are Library series
   resolved by `binding.py` at `PUT /solver_config` (same path as P1's export price) and written as
-  `buses_t["ic_ref_price"]` (column = contract id) and `buses_t["ic_grid_cfe_share"]` (column `grid`) with an
-  axis hash; only fully covered series are written; a missing or stale frame ⇒ `reference_price_missing` /
-  `grid_cfe_share_missing`. New config field `CommercialConfig.grid_cfe_share_ref: TimeSeriesRef | None`.
-  A netCDF round-trip test proves non-component column names survive (fallback: `n.meta` JSON if not).
+  `buses_t["ic_ref_price"]` (columns **`ic:contract:<id>`**) and `buses_t["ic_grid_cfe_share"]` (column
+  **`ic:cfe:grid`**) with an axis hash; only fully covered series are written; a missing or stale frame ⇒
+  `reference_price_missing` / `grid_cfe_share_missing`. New config field `CommercialConfig.grid_cfe_share_ref:
+  TimeSeriesRef | None`. **Namespacing and lifecycle:** the `ic:` prefix cannot collide with a bus name (the
+  network routes refuse bus names starting `ic:`); PyPSA's load warning "Components … of Bus are not in main
+  components dataframe" for these frames is filtered in the project load path (documented); tests: netCDF round
+  trip and `copy()` (probe: they survive), bus remove and bus rename leave the frames intact, a snapshot-axis
+  change leaves NaN rows ⇒ `*_not_established`, never a refusal to solve; the `ic_*` time-series guards of
+  `routers/network_time_axis.py` (L1025–1187) are extended to `buses_t`.
 
 - [ ] Red: interval frames sum to the seam's period totals; DSR commit survives save → load; a reference series
   survives reload and is re-hashed; a changed ref version is drift.
@@ -289,33 +319,46 @@ Files: `models/commercial.py`, `backend/services/commercial/contracts.py` (new, 
 
 | Model | New fields |
 |---|---|
-| all contracts | `type: Literal[...]` discriminator (defaulted per class), `base_year: int \| None`, `library_ref: LibraryItemRef \| None` |
-| `PpaContract` | `pricing: Literal["fixed","market_plus_premium"] = "fixed"`, `baseload_mw: float \| None`, `sleeving_fee_eur_per_mwh: float \| None`, `sleeving_party: str \| None` |
-| `CfdContract` | `generator_owner: str`, `counterparty: str`, `reference: Literal["interval","monthly_capture"] = "interval"`, `suspend_on_negative_price: bool = False` |
+| all contracts | `type: Literal[...]` discriminator, `base_year: int \| None`, `library_ref: LibraryItemRef \| None` |
+| `PpaContract` | `pricing: Literal["fixed","market_plus_premium"] = "fixed"`, `premium_eur_per_mwh: float \| None` (any sign; `price` stays `ge=0` for fixed pricing), `baseload_mw: float \| None`, `sleeving_fee_eur_per_mwh: float \| None`, `sleeving_party: str \| None` |
+| `CfdContract` | `generator_owner: str \| None`, `counterparty: str \| None`, `indexation_pct_per_year: float = 0.0`, `reference: Literal["interval","monthly_capture"] = "interval"`, `suspend_on_negative_price: bool = False` |
+
+Every new field is Optional or defaulted, so the P0 fixtures and `tests/test_investment_case_contracts.py`
+(L310–312, L388) validate unchanged; an absent party ⇒ the line's payer/payee `None` + `party_not_established`.
+**Discriminator:** a pydantic discriminated union refuses a dict without the tag (`union_tag_not_found`) even
+when the field has a default, so `CommercialConfig.contracts` uses a `model_validator(mode="before")` that
+fills `type` from the dict's shape for untagged P0-era payloads (`strike` ⇒ `cfd`, `availability_eur_per_mw_year`
+⇒ `dr`, `annual_payment` ⇒ `lease`, `fee_eur_per_*` ⇒ `eaas`, `tariff_id` ⇒ `retail`, else `ppa`) before the
+union validates; a test feeds untagged P0 JSON. **Allowed combinations:** `market_plus_premium` with
+`pay_as_produced`, `as_consumed_btm`, `sleeved` (requires `premium_eur_per_mwh` and a reference price);
+`baseload` uses `price` against the reference (financial) and refuses `market_plus_premium`. **Assets:**
+contracted `asset_ids` must be Generators (other component classes refused in P2).
 
 **Indexation:** P2 indexes a price to the **modelled** year y (investment period, else the snapshots' majority
 year): `price_y = price × (1 + indexation_pct_per_year/100)^(y − base_year)`; `base_year` absent ⇒ y. P4
 escalates from the modelled year onward — never both.
 
-**Output line**: `(period, contract_id, payer, payee, value_stream, quantity_mwh, amount, flags)`, amounts per
-**representative year of the period** (unweighted); P4 applies period years.
+**Output line**: `(period, contract_id, payer, payee, value_stream, quantity_mwh, amount, flags)`, amounts for
+the **represented hours (Σ objective weights) of one period-year** (unweighted by period years); P4 applies
+period years.
 
 | Kind | Formula (interval t, gen = the contracted assets' output) |
 |---|---|
 | PPA `pay_as_produced`, fixed | buyer → seller `price_y × gen_t`; volume cap: chronological within the settlement year, cap pro-rated by represented hours / hours in the year; volume above the cap is not settled under the PPA (line `ppa_excess_mwh`, flag) |
-| PPA `market_plus_premium` | effective price `clamp(ref_t + price_y, floor, cap)` × gen_t (`price` is the premium); ref required, else `None` + `reference_price_missing` |
+| PPA `market_plus_premium` | effective price `clamp(ref_t + premium_y, floor, cap)` × gen_t (`premium_eur_per_mwh` indexed like `price`); ref required, else `None` + `reference_price_missing` |
 | PPA `baseload` | **financial** (virtual) shape: buyer → seller `(price_y − ref_t) × baseload_mw × Δt` (negative ⇒ seller pays); no physical volumes, so no overlap with PoC export revenue; ref required |
 | PPA `as_consumed_btm` | consumed = `gen_t − export_attr_t`, where PoC export is attributed to the contracted generators pro rata to their share of total on-site generation in t (capped at gen_t); BESS charging from PV counts as consumed; buyer → seller `price_y × consumed`; the export revenue of the attributed share stays with the PoC owner (the tariff/export price, P3 attributes it) |
 | PPA `sleeved` | buyer → seller `price_y × gen_t`; buyer → `sleeving_party` `sleeving_fee × gen_t`; the import tariff still rates PoC import (network, levies); if the import tariff has any energy item, preflight warns `commercial.sleeved_commodity_double_count` (the user removes the commodity item) |
-| CfD | generator_owner ← counterparty `(strike_y − ref) × gen_t`, negative when ref > strike; `reference="interval"`: ref_t; `"monthly_capture"`: the month's generation-weighted ref; `suspend_on_negative_price`: intervals with ref_t < 0 settle 0 (German §51 EEG style) |
+| CfD | generator_owner ← counterparty `(strike_y − ref) × gen_t` (`strike_y` indexed by the CfD's `indexation_pct_per_year` from `base_year`), negative when ref > strike; `reference="interval"`: ref_t; `"monthly_capture"`: the month's generation-weighted ref; `suspend_on_negative_price`: intervals with ref_t < 0 settle 0 (German §51 EEG style) |
 
 - [ ] Red: C1 PPA/CfD lines to the cent (C1 has BESS charging from PV and exporting intervals); missing ref ⇒
   `None` + flag; asset id not in the network ⇒ refusal; multi-period settles per period.
 
 ## WP2.2b Contracts: DR, lease, EaaS, retail
 
-**Model delta:** `DrContract.counterparty: str`, `DrContract.contracted_mw: float`; `asset_ids` on DR refused
-in P2 (activation of a BESS or generator is a P5 archetype matter) — DR targets `load_ids`.
+**Model delta:** `DrContract.counterparty: str | None`, `DrContract.contracted_mw: float | None` (absent ⇒
+availability `None` + `contracted_mw_not_established`); `asset_ids` on DR refused in P2 (activation of a BESS
+or generator is a P5 archetype matter) — DR targets `load_ids`.
 
 | Kind | Formula |
 |---|---|
@@ -323,7 +366,7 @@ in P2 (activation of a BESS or generator is a P5 archetype matter) — DR target
 | DR activation | activated MWh = `ic_dsr_p` on the named loads' buses, attributed pro rata to the named loads' share of the bus load; counterparty → site `activation_eur_per_mwh × MWh`; an **event** = a maximal run of consecutive intervals with activation > 0; `max_events` / `max_duration_h` checked and violations flagged (enforcement is P5/P6) |
 | Lease | lessee → lessor `annual_payment_y × represented_hours / hours_in_calendar_year` |
 | EaaS | customer → provider `fee_eur_per_mwh × delivered + fee_eur_per_year × fraction`; delivered = Generator `p>0`, StorageUnit discharge, Link `p1` delivered at bus1 of the named assets |
-| Retail | the retail bill **is** the import tariff's bill (WP2.1b): the contract only names payer (customer) and payee (retailer) of those lines — no extra lines; `tariff_id` must equal the import tariff's id (inline or ref), else refused |
+| Retail | the retail bill **is** the import tariff's bill (WP2.1b): the contract only names payer (customer) and payee (retailer) of those lines — no extra lines; `tariff_id` is compared with the payload's **`Tariff.id`** (of the inline or ref-resolved import tariff), else refused |
 
 - [ ] Red: C1 DR/lease/EaaS/retail to the cent; DR on representative weeks and a leap year; event counting on a
   hand series; `asset_ids` on DR refused.
@@ -333,9 +376,10 @@ in P2 (activation of a BESS or generator is a P5 archetype matter) — DR target
 Files: `models/commercial.py` (`CommercialConfig.contracts: list[Contract]` discriminated by `type`),
 `types.ts`, `services/commercial/preflight.py`, tests.
 
-- [ ] Red: contracts round-trip through `PUT /solver_config`, save → load, bundle export → import (reference
-  pins); preflight: `commercial.ppa_export_double_count` (PPA without `changes_dispatch` on an asset whose
-  output also earns the export price — warning), **`commercial.dr_double_count`** (new check: a DR contract
+- [ ] Red (the config field itself lands in WP2.2-0): contracts round-trip through `PUT /solver_config`, save → load, bundle export → import (reference
+  pins); preflight: `commercial.ppa_export_double_count` (only when the site is the **seller**
+  — `seller == site_party` — of a PPA without `changes_dispatch` on an asset whose output also earns the export
+  price; in the buyer case exporting surplus is correct — warning), **`commercial.dr_double_count`** (new check: a DR contract
   whose `load_ids` sit on a bus in the DSR configuration — the P1 `dsr_double_count_warnings` checks storage on
   DSR buses, a different thing), `commercial.contract_asset_missing` (error),
   `commercial.sleeved_commodity_double_count`, `commercial.capacity_double_count`; a changed contract after the
@@ -364,7 +408,11 @@ Files: `backend/services/commercial/gap.py` (new, pure), `test_billing_gap.py`.
 `fixed`, `contracts`): `lp`, `billed`, `gap_pct`, `causes: [{cause, amount}]`, `unattributed_pct`. LP cost per
 item is recomputed from the committed records on the same dispatch (energy per item from the item's rates).
 
-Causes, each with a **computed** amount: `fixed` (not in the LP: its billed amount); `not_in_lp` (billed amount
+**Basis:** per investment period, on the **unweighted** period-year amounts (the `cost_rows` items per
+period, before `years` weighting; bill and settlement lines as produced) — never the years-weighted block.
+
+Causes, each with a **computed** amount: `settlement_only` (a contract with no LP term: its settled amount);
+`fixed` (not in the LP: its billed amount); `not_in_lp` (billed amount
 of each left-out item, with its reason); `nonconvex_tier` (billed − LP for the item); `tier_allocation`
 (windowed tiers: engine proportional − LP optimal); `ratchet_seed` (the history-seeded lower bound's unknown
 share, reported as `None` amount + flag); `months_not_established` and `partial_months` (convention of
@@ -372,8 +420,8 @@ WP2.1b); `config_changed_since_solve` (rating an edited tariff on an old dispatc
 **`resolution` is a disclosed risk, not a computed cause:** the LP and the bill read the same dispatch at the
 same resolution (P1 measures demand on settlement-interval means in both), so a finer real load cannot show as
 a gap; when the LP step is coarser than an item's settlement the payload carries `resolution_risk` with the
-preflight's warning. Spec §15's "billed ≥ LP − tol" is replaced by this model (spec amendment recorded in
-WP2.3's commit).
+preflight's warning. Spec §15's "billed ≥ LP − tol on convex tariffs" is replaced by this model: WP2.3 edits
+the spec text of §15 (and §5.5's cause list) in the same commit.
 
 `unattributed_pct > 5 %` (configurable) raises the `billing_gap_unexplained` warn gate.
 
@@ -385,20 +433,29 @@ WP2.3's commit).
 
 Files: `backend/services/library/urdb.py` (new), `test_urdb_import.py`.
 
-`urdb_to_tariff(urdb_response, *, name) -> (Tariff, refusals)`. Mapped: `energyratestructure` +
+`urdb_to_tariff(urdb_response, *, name, cyclic_year: bool = False) -> (Tariff, refusals)`; `cyclic_year`
+(URDB has no such field) is set on the imported ratchet in range mode and disclosed in the Library item's meta.
+Route: `POST /api/library/items/tariff/import_urdb` (body: an upload id, `name`, `cyclic_year`,
+`accept_partial`), thin, calling the service. **Non-empty refusals ⇒ 422** listing them, unless
+`accept_partial=true`; a partial import stores the refused field names in `Tariff.unsupported_fields` (new
+field, default `[]`) and the engine then flags `tariff_incomplete` with `total = None` (ADR-0001). Mapped: `energyratestructure` +
 `energyweekdayschedule` / `energyweekendschedule` (12×24, JSON arrays **or** JSON strings), tiers with `max`
 (cumulative), `rate + adj` (REopt adds `adj`, `urdb.jl` L305/L413/L443); `demandratestructure` + demand
 schedules (TOU demand, tiers); `flatdemandstructure` + `flatdemandmonths` (facility demand); fixed charges:
-`fixedmonthlycharge` first, else `fixedchargefirstmeter` with `fixedchargeunits` `$/month` or `$/day`;
-`lookbackpercent` with `lookbackrange` (range mode) or `lookbackmonths` (months mode), attached to the facility
-item; both set ⇒ refused (REopt throws, `urdb.jl` L559–560); `demandwindow` 15/30/60 ⇒ settlement, absent ⇒
+`fixedmonthlycharge` first, else `fixedchargefirstmeter` with `fixedchargeunits` `$/month`, `$/day` (per-day
+item) or `$/year` (a monthly fixed item of 1/12, as REopt); `lookbackpercent` with `lookbackrange` (range mode)
+or `lookbackmonths` (months mode), attached to the facility item; `lookbackpercent == 0` ⇒ no ratchet; "both
+set" = `lookbackrange ≠ 0` **and** any `lookbackmonths` entry true (12 zeros are common and mean months mode is
+off) ⇒ refused; `demandwindow` 15/30/60 ⇒ settlement, absent ⇒
 `"15min"` with note `demandwindow_absent_assumed_15min` (REopt ignores the field); periods of one URDB period
 become fragments with one **name** (WP2.1a-0); energy tiers whose `max` differ across periods ⇒ refused.
 Refused with the field name (never dropped): `mincharge` / `minchargeunits` / `annualmincharge`,
 `coincidentrate*`, `demandunits` other than kW, energy units other than kWh, `sell` tiers, `demandwindow`
 values other than 15/30/60.
 
-- [ ] Red: importer output equals the hand-translated JSON of R1, R2, R3′ exactly; each refused field listed.
+- [ ] Red: importer output equals the hand-translated JSON of R1, R2, R3′ (with `cyclic_year=True`) exactly;
+  each refused field listed; 422 without `accept_partial`; a partial tariff bills with `tariff_incomplete` and
+  `total = None`.
 
 ## WP2.4b-ii Series and meter-data import
 
@@ -439,7 +496,9 @@ Files: `services/results/billing.py`, `services/results/cfe_score.py`, `routers/
   overridable) **consumed on site** (minus the PoC export attributed to it, WP2.2a rule) + **off-site** PPA
   volume of clean assets (on-site PPA assets are already in on-site generation) + grid import ×
   `ic_grid_cfe_share` (absent ⇒ grid counted 0 **and** `grid_cfe_share_missing`); 15-min aggregated to hours by
-  energy.
+  energy. "On-site" = behind the PoC (buses downstream of the import Links). Disclosed limitation:
+  storage-shifted clean energy is not credited (charging counts as consumption of what charged it; discharge is
+  not clean supply).
 
 - [ ] Red: seam cases; facade test with the two new names (existing entries unchanged); CFE hand fixture (PV +
   load + export, one day) to 1e-9; `get_results(result_kind="billing")` returns the payload.
@@ -491,3 +550,23 @@ WP2.1a, `per_item_sampled` in WP2.1b, WP2.4a before retail, refactor first with 
 (#16); chat tools via handlers, enums, inventory, ADR-0002, upload id (#17); `demand_items`, new DR check,
 m−12, meter-data settlement (#18); CFE definitions (#19); §15 amendment in WP2.3 (#20); UI to P3 outline (#21);
 timing in the QA driver, NOTICE and derived marks, `types.ts` (#22).
+
+**Round 2 (PASS WITH CONDITIONS) → v0.3, all closed in text.**
+- C1: R3′ authored in range mode; `urdb_to_tariff(cyclic_year=)` is disclosed in meta; `cyclic_year` refused in months mode; unmodelled lookback months read the same-rate-year history key.
+- C2: `ic:`-prefixed columns, bus names starting `ic:` refused, load warning filtered, tests for bus remove/rename and axis change, guards extended to `buses_t`.
+- C3: DSR commit only after a successful non-operational solve in `run_simulation`; cleared without DSR; hashed.
+- C4: new contract fields Optional; untagged P0 payloads get their tag from a before-validator; same-name windows keyed by (month, name); P1 single-period tiers unchanged; versioned demand hash.
+- C5: tariff capacity items in the LP via `add_fee_term`, reconciliation case `tariff_capacity`; falling demand tiers at the first tier.
+- C6: 422 unless `accept_partial`; `Tariff.unsupported_fields` ⇒ `tariff_incomplete`, `total = None`; `$/year` fixed charge; the "both lookbacks set" rule; `lookbackpercent == 0`.
+- C7: `settlement_only` cause; unweighted per-period basis.
+- LOW:
+  - the contracts config field moved to WP2.2-0;
+  - a URDB import route;
+  - the windowed-tier LP formulation spelled out;
+  - `premium_eur_per_mwh` added, CfD indexation, allowed pricing combinations, Generators only;
+  - the PPA/export double-count check restricted to the seller case;
+  - the represented-hours wording;
+  - m−12 uses the marginal rate;
+  - CFE: "on-site" defined, storage limitation disclosed;
+  - the §15 amendment goes into the spec text;
+  - `RetailContract.tariff_id` compares against `Tariff.id`.
