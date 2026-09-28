@@ -757,7 +757,14 @@ def run():
         elapsed = _time.time() - t0
         # Total system cost (variable objective + objective_constant, summed
         # across per-period LPs in myopic mode) — see _compute_run_objective.
-        obj = _compute_run_objective(n)
+        # Only for a solve that actually produced one. PyPSA assigns `n._objective` only on a SUCCESSFUL solve
+        # (`assign_solution`) and it is persisted in the netcdf, so it is still
+        # the PREVIOUS run's number after a failure or an abort — the comment
+        # above says as much ("an aborted or failed solve leaves the network as
+        # it was"). Publishing it unconditionally therefore reported a cost for
+        # a solve that produced none, in the status bar and on the queue row.
+        obj = (_compute_run_objective(n)
+               if status in ("ok", "optimal") else None)
         # If the user force-reset us, _state["thread"] has been swapped to
         # another worker (or cleared). Skip the final state write so we
         # don't clobber the new run's status.
@@ -816,6 +823,8 @@ def run():
         # doesn't surface stale objective / lost-load / Stage-2 state. The
         # thread handle is registered in the SAME apply so there's no window
         # where status="running" but thread is unset.
+        from services.project_context import cleared_result_state
+
         _state_update(
             status="running",
             condition=None,
@@ -824,22 +833,8 @@ def run():
             last_failure=None,
             stop_event=stop_event,
             log_queue=log_queue,
-            last_lost_load=None,
-            adequacy_report=None,
-            last_reserve_margin=None,
-            eh_redundancy_comparison=None,
-            eh_lever_comparison=None,
-            eh_dtc_stress=None,
-            eh_dtc_planning=None,
-            eh_reference_design_report=None,
-            lopf_results=None,
-            ac_pf_results=None,
-            ac_pf_convergence=None,
-            ac_pf_convergence_list=None,
-            ac_pf_slack_bus_used=None,
-            ac_pf_stripped_voll_slacks=None,
-            ac_pf_converged_count=None,
-            ac_pf_total_snapshots=None,
+            # Every per-solve result, DERIVED — see `cleared_result_state`.
+            **cleared_result_state(),
             thread=t,
             # Which KIND of worker owns `thread`. AC PF and the LP solve share
             # this key with identical status and condition, so without it a

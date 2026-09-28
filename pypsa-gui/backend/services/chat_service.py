@@ -4941,6 +4941,53 @@ def _error_result_content(detail: Any, exc: BaseException, error_kind: str) -> s
     return f"{error_kind}\n{_UNTRUSTED_OPEN}\n{free_text}\n{_UNTRUSTED_CLOSE}"
 
 
+# Result members that identify a PERSON. Scrubbed from every model-facing
+# tool result — see `_scrub_identities`.
+_IDENTIFYING_RESULT_KEYS: frozenset[str] = frozenset({"holder_email"})
+
+
+def _scrub_identities(value: Any) -> Any:
+    """Drop person-identifying members from a tool result, recursively.
+
+    `docs/superpowers/findings/2026-08-27-lock-holder-email-reaches-the-model.md`
+    was closed on the `is_error` path only, by `_error_result_content`. The
+    SUCCESS path had no filter at all, and two routes carry the same member on
+    success: `activate_project` returns `{"activated", "evicted", "lock"}` and
+    `load_project` returns `{**summary, "lock"}`, where
+    `project_locks.serialize_lock` puts the HOLDER'S EMAIL in that member. So a
+    non-holder asking chat to open a project someone else is editing sent a
+    colleague's address to the third-party provider, kept it in
+    `session.messages` to be replayed on every later turn, and let the model
+    paraphrase it into a reply persisted to `chat.jsonl`.
+
+    The sibling `yours` is KEPT: whether the project is held against this
+    caller is something the model should know, and it identifies nobody. Only
+    the name goes.
+
+    Recursive, because the member travels inside `detail` and inside lists on
+    some payloads — a top-level key check would miss exactly the shapes that
+    matter.
+
+    Deliberately NOT part of `_redact_secrets_in_str`. That redactor is
+    secrets-only by design and says so: bare addresses are intentionally left
+    alone there because the pattern over-redacts legitimate project and
+    component names. This drops a known key, not a guessed pattern.
+
+    The browser's own SSE frames are unaffected — the frontend reads the lock
+    holder from `tool_error`/`project_locked`, which is the product's intent
+    and stays within the user's own organisation.
+    """
+    if isinstance(value, dict):
+        return {
+            k: _scrub_identities(v)
+            for k, v in value.items()
+            if k not in _IDENTIFYING_RESULT_KEYS
+        }
+    if isinstance(value, (list, tuple)):
+        return [_scrub_identities(v) for v in value]
+    return value
+
+
 def _result_to_anthropic_content(result: Any) -> Any:
     """
     Convert a Python tool result into the Anthropic tool_result content
@@ -4976,6 +5023,9 @@ def _result_to_anthropic_content(result: Any) -> Any:
     is_error sites pass a typed constant and need no fence, and the fourth
     passes exception text, which does.
     """
+    # Person-identifying members go before anything else touches the payload,
+    # so every branch below (and any future one) is covered by one call.
+    result = _scrub_identities(result)
     if isinstance(result, str):
         # Capped like the json branch. Previously only the `else` applied
         # `_RESULT_CONTENT_CAP`, leaving a second uncapped entry into the

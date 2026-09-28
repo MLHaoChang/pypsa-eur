@@ -613,6 +613,13 @@ class SolveQueue:
         the table (usually the same ids, since a normal solve mirrors its
         terminal status to both — but not always, e.g. a job whose row lagged
         behind a status forced directly in memory).
+
+        "Actually" is enforced, not assumed. `delete_jobs` swallows database
+        errors, and this used to return the union whether or not the delete
+        landed — so on a failure the super-admin was told the table had been
+        cleared while the rows survived and the next poll pulled them back.
+        A failed delete now reports only what left MEMORY, which is the part
+        that is true.
         """
         with self._lock:
             removed = [jid for jid in self._order
@@ -631,9 +638,16 @@ class SolveQueue:
 
             to_delete |= {row["id"] for row in solve_job_store.load_by_status(_TERMINAL)}
             if to_delete:
-                solve_job_store.delete_jobs(to_delete)
+                deleted = solve_job_store.delete_jobs(to_delete)
+                if deleted is None:
+                    # The rows are still there and the next listing will pull
+                    # them back, so report only what LEFT MEMORY. Reporting
+                    # `len(to_delete)` here told a super-admin the table had
+                    # been cleared when it had not.
+                    return len(removed)
         except Exception:  # noqa: BLE001 — bookkeeping must not fail the clear
             logger.exception("solve_queue: could not delete persisted jobs %s", to_delete)
+            return len(removed)
         return len(to_delete)
 
     def dismiss(self, job_id, user_id) -> bool:
@@ -1200,6 +1214,7 @@ class SolveQueue:
             # cannot slip between the check and the claim.
             from services.project_context import (
                 STUDY_LABELS as _STUDY_LABELS,
+                cleared_result_state,
                 running_study_key as _running_study_key,
             )
             with ctx.solver_state_lock:
@@ -1228,16 +1243,13 @@ class SolveQueue:
                 # — it is not; only `solve_queue.abort` can stop it — and it
                 # would be counted a second time by `solves_in_flight()`.
                 kind="queue",
-                # Merged 2026-09-10: `adequacy_report` / `last_reserve_margin`
-                # arrive with the FMEA work on master and must be cleared on a
-                # new claim like every other per-solve result, or a queued run
-                # inherits the previous project's adequacy verdict.
-                last_lost_load=None, adequacy_report=None,
-                last_reserve_margin=None,
-                lopf_results=None, ac_pf_results=None,
-                ac_pf_convergence=None, ac_pf_convergence_list=None,
-                ac_pf_slack_bus_used=None, ac_pf_stripped_voll_slacks=None,
-                ac_pf_converged_count=None, ac_pf_total_snapshots=None,
+                # Every per-solve result, DERIVED — see `cleared_result_state`.
+                # This list was typed out here and drifted from `/run`'s: it was
+                # missing all five `eh_*` keys, so a queued re-solve kept the
+                # previous plan's energy-hub tables and persisted them beside
+                # the new dispatch. The comment this replaces stated the very
+                # invariant the omission broke.
+                **cleared_result_state(),
                 ))
 
             # 3. Solve (synchronous; honours stop_event). Writes LOPF dispatch
@@ -1254,7 +1266,13 @@ class SolveQueue:
             # Price with THIS job's config, not the foreground's — the myopic
             # branch reads capital_cost defaults (overnight_cost / discount_rate
             # fills) off it, and this runs outside `solving_context(ctx)`.
-            objective = sim._compute_run_objective(n, config)
+            # Only for a solve that actually produced one. PyPSA assigns
+            # `n._objective` on a SUCCESSFUL solve alone and it survives in the
+            # netcdf, so after a failure or an abort it still holds the
+            # PREVIOUS run's value — which the queue was publishing onto the
+            # job row and the context, showing a cost for an infeasible run.
+            objective = (sim._compute_run_objective(n, config)
+                         if status in ("ok", "optimal") else None)
             if status == "aborted":
                 final_status = "aborted"
             elif status in ("ok", "optimal"):

@@ -148,3 +148,44 @@ def test_an_unlocked_project_is_writable_and_stays_unlocked(client, api_project,
     assert client.post(f"/api/projects/{name}/lock").status_code == 200, (
         "the sidecar write acquired the lock instead of only checking it"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# `asset_health` — missed by the same sweep, a second time
+# ─────────────────────────────────────────────────────────────────────────
+
+
+def test_asset_health_put_is_refused_under_a_foreign_lock(
+    client, api_project, same_org_other_user,
+):
+    """
+    The sweep that added the two checks above stopped one handler short.
+    `PUT .../asset_health` sits beside them, replaces its sidecar the same
+    way, and took `ProjectAccessDep` alone — it did not even accept `db` /
+    `user`, so it could not have checked.
+
+    `asset_health.json` is the outage-rate PROVENANCE ledger. It is in
+    `routers/projects._BUNDLE_FILES` for the reason recorded there: without
+    it `study_report._evidence_gaps` reports every asset-level rate as
+    `unsourced`, so a clean study grows a provenance gap it does not have.
+    A non-holder overwriting it therefore does not just lose the holder's
+    entries — it propagates into every later bundle and snapshot and changes
+    what the study reports about its own evidence.
+    """
+    name = api_project("wslock-ah")
+    assert client.post(f"/api/projects/{name}/lock").status_code == 200
+
+    r = same_org_other_user.put(
+        f"/api/projects/{name}/asset_health", json={"entries": []},
+    )
+    assert _is_lock_refusal(r), (
+        f"a non-holder replaced the asset-health ledger: "
+        f"{r.status_code} {r.text[:200]}"
+    )
+
+
+def test_the_holder_can_still_write_asset_health(client, api_project):
+    name = api_project("wslock-ah-holder")
+    assert client.post(f"/api/projects/{name}/lock").status_code == 200
+    r = client.put(f"/api/projects/{name}/asset_health", json={"entries": []})
+    assert r.status_code == 200, f"holder refused on asset_health: {r.text[:200]}"

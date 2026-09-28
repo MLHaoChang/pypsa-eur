@@ -321,6 +321,21 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
     old_dir = project_dir(project)
     old_name, old_rel = project.name, project.storage_path
 
+    # BEFORE the branch, so WEB mode reaches it too. `SolveJob.storage_dir`
+    # and the job's project name are captured at enqueue and never revisited,
+    # and the queue saves with `expect=` that enqueue-time name — so a rename
+    # under a live job loses the solve whether or not the directory moves.
+    # This check used to sit below the early return, which meant only the
+    # local-mode move branch ever ran it.
+    if _queued_job_blocks_rename(project):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This project has a solve queued or running. Renaming it now "
+                "would lose that solve. Wait for it to finish, then rename."
+            ),
+        )
+
     if not _may_move_directory(project, old_dir):
         # Rename the ROW only. The directory keeps the name it was created
         # with, which is stale but readable, resolvable and safe.
@@ -343,16 +358,6 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
         _rebind_resident_contexts(project)
         db.refresh(project)
         return project
-
-    if _queued_job_blocks_rename(project):
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "This project has a solve queued or running. Renaming would "
-                "move its directory out from under the solver. Wait for it to "
-                "finish, then rename."
-            ),
-        )
 
     segment = use_org_segment()
     new_rel = allocate_storage_path(

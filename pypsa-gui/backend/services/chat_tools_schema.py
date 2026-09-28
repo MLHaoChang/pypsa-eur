@@ -430,8 +430,11 @@ TOOLS: list[dict[str, Any]] = [
     _t(
         "bulk_update_components",
         "Atomic bulk attribute set on N components of one class (PATCH "
-        "/api/network/_bulk). Single lock acquisition, single audit entry, "
-        "single undo snapshot. Backend coerces values against df[col].dtype; "
+        "/api/network/_bulk). Single lock acquisition, single audit entry. "
+        "NOT undoable from chat: undo snapshots are taken by the HTTP "
+        "middleware, which a chat tool call does not pass through — do not "
+        "tell the user this can be undone. Backend coerces values against "
+        "df[col].dtype; "
         "all-or-nothing on unknown names. Safety: write.",
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
@@ -1481,7 +1484,13 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _empty(
         "undo_last",
-        "Roll back the most recent mutation (pops the per-project undo stack). "
+        "Roll back the most recent mutation ON THE UNDO STACK (pops the "
+        "per-project stack). The stack is fed by the user's CANVAS edits, not "
+        "by your own tool calls: undo snapshots are taken by the HTTP "
+        "middleware, which a tool call does not pass through. So this does NOT "
+        "undo an edit you just made — it undoes whatever the user last did in "
+        "the UI, or refuses if the stack is empty. Do not offer it as a way to "
+        "reverse your own change; reverse that with an explicit inverse edit. "
         "Returns {undone: bool, remaining: int} (remaining = undo-stack depth "
         "after the pop). Safety: destructive.",
     ),

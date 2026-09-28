@@ -766,3 +766,61 @@ def test_rename_rebinds_a_resident_context_in_web_mode_too(
         )
     finally:
         PyPSAService.drop(key)
+
+
+def test_rename_is_refused_during_a_queued_job_in_web_mode_too(
+    db_session, projects_root, monkeypatch
+):
+    """
+    SL-6. `_queued_job_blocks_rename` exists because `SolveJob.storage_dir`
+    and `job.project_id` are captured at enqueue and never revisited, so a
+    rename under a live job loses the solve at best. The check sat BELOW the
+    `_may_move_directory` early return, so only the local-mode move branch
+    ever reached it — web mode, the deployed mode, renamed freely.
+
+    That became consequential when the web branch started rebinding resident
+    contexts (it must: without the rebind every rename left the context on
+    the old name and the next save 409'd). The queue saves with
+    `_save_context(ctx, project_id, expect=project_id)` using the
+    ENQUEUE-TIME name, so a rename mid-solve now trips that identity guard
+    and the finished solve is discarded. The repair is to reach the guard
+    that already exists, not to give up the rebind.
+    """
+    monkeypatch.delenv("PYPSAGUI_LOCAL_MODE", raising=False)
+    project = _seed_project(
+        db_session, name="Old Name", storage_path=f"{_ORG}/Old Name"
+    )
+    (projects_root / str(_ORG) / "Old Name").mkdir(parents=True)
+
+    key = project_registry.registry_key(project)
+    from services import solve_queue as _sq
+
+    monkeypatch.setattr(
+        _sq.solve_queue, "list_jobs",
+        lambda: [{"status": "running", "project_key": key}],
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        project_registry.rename_project(db_session, project, "New Name")
+    assert exc.value.status_code == 409
+    assert "solve" in str(exc.value.detail).lower()
+    # And the row is untouched — a refusal is a refusal.
+    db_session.refresh(project)
+    assert project.name == "Old Name"
+
+
+def test_rename_is_allowed_in_web_mode_when_no_job_holds_the_project(
+    db_session, projects_root, monkeypatch
+):
+    """The control: the new check must not block an ordinary web rename."""
+    monkeypatch.delenv("PYPSAGUI_LOCAL_MODE", raising=False)
+    project = _seed_project(
+        db_session, name="Old Name", storage_path=f"{_ORG}/Old Name"
+    )
+    (projects_root / str(_ORG) / "Old Name").mkdir(parents=True)
+
+    from services import solve_queue as _sq
+
+    monkeypatch.setattr(_sq.solve_queue, "list_jobs", lambda: [])
+    project_registry.rename_project(db_session, project, "New Name")
+    assert project.name == "New Name"

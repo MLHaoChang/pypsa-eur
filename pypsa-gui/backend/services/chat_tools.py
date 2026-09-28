@@ -12,9 +12,18 @@ SSE generator). All call sites that touch an async handler funnel through
 
 Every tool function here calls the underlying FastAPI route handler or service
 helper **directly** (NOT via HTTP). Tools inherit the existing lock policy,
-audit log, undo registration, _user_ts cleanup, and vintage-bounds cleanup
-because they go through the same _create/_update/_delete_component generic
-helpers (and dedicated wrappers for Bus rename / Transformer / GlobalConstraint).
+audit log, _user_ts cleanup, and vintage-bounds cleanup because they go through
+the same _create/_update/_delete_component generic helpers (and dedicated
+wrappers for Bus rename / Transformer / GlobalConstraint).
+
+They do NOT inherit UNDO. That is the one item calling handlers directly costs
+us: `push_undo_snapshot` is driven by the HTTP middleware in `main.py`, which
+an in-process call never passes through. So a chat edit pushes no snapshot,
+and a later `undo_last` either refuses ("nothing to undo") or reverts an
+OLDER canvas edit while reporting `{"undone": true}` — the destructive tool
+reporting success for something the user did not ask to undo. This sentence
+used to list undo alongside the other four; it was the only one of the five
+that was not true.
 
 Phase 1 invariants enforced here:
   * F1 — update_component dispatches Bus rename to rename_bus (preserves
