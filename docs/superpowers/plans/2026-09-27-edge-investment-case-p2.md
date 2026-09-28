@@ -538,6 +538,15 @@ FCA planning, writes), `backend/services/library/series_io.py` (new: the timesta
   wrapper calling the service (`tests/test_connection_envelope.py:299` monkeypatches it); line counts of both
   routers recorded.
 
+- **As implemented:**
+  - **`services/commercial/binding.py`.** `bind_commercial(n, commercial, *, project_dir, resolve_ref, lock)` performs every check and the FCA planning before any write. `BindingRefusal(status, code, message)` is mapped to HTTP by the route. The Library resolver is INJECTED, so the service never touches the database or the org rules.
+  - **`services/library/series_io.py`.** It holds `series_from(timestamps, values, timezone, *, max_points)`, `MAX_POINTS`, `OFFSET_RE`, and `SeriesInputError(ValueError)`, which keeps the 422 messages word for word.
+  - **`routers/simulation._bind_commercial`** stays the monkeypatch seam (`test_connection_envelope.py:299`). It is now a thin wrapper: the in-flight guard, the project dir, the resolver (org of the ACTIVE project, else the caller's org), and error mapping.
+  - **`routers/library._series_from`** maps `SeriesInputError` to 422, and `routers.library.MAX_POINTS` is kept.
+  - **Line counts:** `routers/simulation.py` 1288 → 1213; `routers/library.py` 152 → 128.
+  - The tripwires cover the new service (`services.commercial` imports neither routers nor the solver).
+  - **This closes P1 binding condition 4.**
+
 ## WP2.4a Library items: tariffs, contracts, connection agreements
 
 Files: `backend/services/library/items.py` (new; JSON payload written as a file under the org library dir —

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from uuid import UUID
 
-import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -24,17 +23,13 @@ from db.session import get_db
 from deps import require_user
 from models.commercial import PriceSeriesRef
 from services import library_acl
+from services.library import series_io
 from services.library import series_store as S
 
 router = APIRouter()
 
-# A 15-minute year is 35,040 points; this admits ~28 of them. JSON bodies have
-# no upload guard in this repo (`upload_guard` covers UploadFile only).
-MAX_POINTS = 1_000_000
-
-# A zone marker at the end of an ISO time part: Z, UTC, GMT, +01, +0100,
-# +01:00 — case-insensitive (pandas reads `...t00:00z` as UTC too).
-_OFFSET_RE = r"(?i)(?:Z|UTC|GMT|[+-]\d{2}(?::?\d{2})?)$"
+# The upload rules live in `services/library/series_io.py` (P2 WP2.4b-0).
+MAX_POINTS = series_io.MAX_POINTS
 
 
 class SeriesIn(BaseModel):
@@ -45,7 +40,7 @@ class SeriesIn(BaseModel):
     across DST)."""
 
     name: str = Field(min_length=1, max_length=128)
-    # The cap is checked in `_series_from`, not with `max_length`: a pydantic
+    # The cap is checked in `series_io`, not with `max_length`: a pydantic
     # length error echoes the whole input back (a 29 MB 422 at the cap).
     timestamps: list[str] = Field(min_length=1)
     values: list[float] = Field(min_length=1)
@@ -90,30 +85,11 @@ def _target_org(db: DBSession, user: User, org_id: UUID | None, *, write: bool) 
 
 
 def _series_from(body: SeriesIn) -> pd.Series:
-    if max(len(body.timestamps), len(body.values)) > MAX_POINTS:
-        raise HTTPException(422, f"at most {MAX_POINTS:,} points per series")
-    if len(body.timestamps) != len(body.values):
-        raise HTTPException(422, "timestamps and values must have the same length")
-    raw = pd.Series(body.timestamps, dtype=str).str.strip()
-    time_part = raw.str.extract(r"[Tt ](.*)$")[0].fillna("")
-    aware = time_part.str.contains(_OFFSET_RE, regex=True)
-    if aware.any() and not aware.all():
-        raise HTTPException(422, "timestamps mix offset-carrying and naive values; "
-                                 "send every timestamp with an offset, or none")
     try:
-        idx = pd.DatetimeIndex(pd.to_datetime(list(raw), utc=bool(aware.all())))
-    except (ValueError, TypeError) as exc:
-        raise HTTPException(422, f"unparseable timestamp: {exc}") from exc
-    # A zone pandas recognised that the regex did not still makes instants.
-    if idx.tz is None and body.timezone is not None:
-        raise HTTPException(422, "timestamps carry no UTC offset, so `timezone` is ambiguous "
-                                 "across DST; send ISO timestamps with an offset")
-    if idx.tz is not None:
-        try:
-            idx = idx.tz_convert(body.timezone or "UTC")
-        except Exception as exc:  # noqa: BLE001 — bad zone name
-            raise HTTPException(422, f"unknown timezone {body.timezone!r}") from exc
-    return pd.Series(np.asarray(body.values, dtype=float), index=idx)
+        return series_io.series_from(body.timestamps, body.values, body.timezone,
+                                     max_points=MAX_POINTS)
+    except series_io.SeriesInputError as exc:
+        raise HTTPException(422, str(exc)) from exc
 
 
 @router.get("/series", response_model=list[PriceSeriesRef])

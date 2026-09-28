@@ -331,59 +331,27 @@ def get_solver_config():
 
 def _bind_commercial(commercial, user) -> dict | None:
     """
-    Check a submitted commercial block against the live network, resolve its
-    Library series (export price, connection envelope) and keep the project's
-    FCA stress entry in step (Edge Investment Case WP1.3 / WP1.4).
-
-    Every refusal happens BEFORE any write: the series are resolved and aligned
-    and the stress registry is planned and validated first; only then are the
-    network columns written and the registry saved. Series resolve in the
-    ACTIVE PROJECT's org (the caller's org for an unsaved network). Refusals
-    carry `{code, message}`. `commercial=None` (clearing) only removes the FCA
-    entry this layer owns. Returns the plain dict stored on
-    `SolverConfig.commercial`.
+    Bind a submitted commercial block to the ACTIVE network: a thin wrapper on
+    `services.commercial.binding.bind_commercial` (P2 WP2.4b-0), which checks
+    everything before any write. The route supplies the in-flight guard, the
+    project directory and the Library resolver: series resolve in the ACTIVE
+    PROJECT's org (the caller's org for an unsaved network). Refusals carry
+    `{code, message}`. Returns the plain dict stored on `SolverConfig.commercial`.
     """
     import pathlib
     from uuid import UUID
 
     from fastapi import HTTPException
 
-    from services.adequacy.stress import StressValidationError
-    from services.commercial import connection as conn
-    from services.commercial import lp_bindings
+    from services.commercial import binding
     from services.library import series_store
-
-    def refuse(status: int, code: str, message: str):
-        return HTTPException(status, {"code": code, "message": message})
 
     ctx = PyPSAService.get_active_context()
     if _solver_in_flight_ctx(ctx):
-        raise refuse(409, "solver_in_flight",
-                     "a solve is running on this project; change the commercial config "
-                     "after it finishes")
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project; change the "
+                                             "commercial config after it finishes"})
     project_dir = pathlib.Path(ctx.storage_dir) if ctx.storage_dir else None
-    n = PyPSAService.get_network()
-
-    def plan_registry(entry):
-        try:
-            return conn.plan_fca_registry(project_dir, entry)
-        except conn.StressRegistryUnreadable as exc:
-            raise refuse(409, exc.code, str(exc)) from exc
-        except StressValidationError as exc:
-            raise refuse(422, "stress_registry_invalid", str(exc)) from exc
-
-    if commercial is None:
-        if project_dir is not None:
-            try:
-                conn.register_fca_entry(project_dir, None)
-            except (conn.StressRegistryUnreadable, StressValidationError):
-                pass  # clearing never fails on an unreadable registry; nothing written
-        return None
-
-    try:
-        lp_bindings.validate_for_network(n, commercial)
-    except lp_bindings.CommercialBindingError as exc:
-        raise refuse(422, exc.code, str(exc)) from exc
 
     def resolve(ref):
         from db.models import User
@@ -396,64 +364,21 @@ def _bind_commercial(commercial, user) -> dict | None:
             if org is None and isinstance(user, User):
                 org = library_acl.org_of(db, user)
             if org is None:
-                raise refuse(409, "library_org_unknown",
-                             "save the project first: a Library ref resolves in the "
-                             "project's organization")
+                raise binding.BindingRefusal(
+                    409, "library_org_unknown",
+                    "save the project first: a Library ref resolves in the project's "
+                    "organization")
             try:
                 return series_store.resolve(db, org, ref)
             except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
-                raise refuse(409, "library_ref_stale", str(exc)) from exc
+                raise binding.BindingRefusal(409, "library_ref_stale", str(exc)) from exc
 
-    def aligned(ref, code):
-        try:
-            values = lp_bindings.align_to_snapshots(resolve(ref), n.snapshots,
-                                                    commercial.timezone)
-        except lp_bindings.CommercialBindingError as exc:
-            raise refuse(422, exc.code, str(exc)) from exc
-        if values.isna().any():
-            raise refuse(422, code,
-                         f"Library series {ref.id!r} v{ref.version} does not cover "
-                         f"{int(values.isna().sum())} snapshot(s); nothing was written")
-        return values
-
-    # 1. Resolve + check everything (no writes yet).
-    price = (aligned(commercial.export_price_ref, "export_price_coverage")
-             if commercial.export_price_ref is not None else None)
-    agreement = commercial.connection
-    envelope = (aligned(agreement.envelope, "envelope_coverage")
-                if agreement is not None and agreement.envelope is not None else None)
-    fca = agreement is not None and agreement.kind == "fca" \
-        and agreement.curtailment_hours_per_year is not None
-    planned = None
-    if fca:
-        if project_dir is None:
-            raise refuse(409, "fca_needs_saved_project",
-                         "save the project first: an FCA agreement registers its curtailment "
-                         "hours as a stress scenario in the project")
-        try:
-            entry = conn.fca_stress_entry(
-                n, agreement, poc_link=commercial.poc_link, timezone=commercial.timezone,
-                envelope_mw=None if envelope is None else envelope.to_numpy(dtype=float))
-        except lp_bindings.CommercialBindingError as exc:
-            raise refuse(422, exc.code, str(exc)) from exc
-        planned = plan_registry(entry)
-    elif project_dir is not None:
-        try:
-            planned = conn.plan_fca_registry(project_dir, None)  # drop a stale FCA entry
-        except (conn.StressRegistryUnreadable, StressValidationError):
-            planned = None  # nothing of ours to drop from an unreadable registry
-
-    # 2. Write.
-    with PyPSAService.get_lock():
-        if price is not None:
-            lp_bindings.write_export_price(n, commercial.export_link, price, None)
-        if envelope is not None:
-            conn.write_envelope(n, commercial.poc_link, envelope, None)
-    if planned is not None:
-        from services.adequacy import stress
-
-        stress.save_scenarios(project_dir, planned)
-    return commercial.model_dump(mode="json")
+    try:
+        return binding.bind_commercial(PyPSAService.get_network(), commercial,
+                                       project_dir=project_dir, resolve_ref=resolve,
+                                       lock=PyPSAService.get_lock())
+    except binding.BindingRefusal as exc:
+        raise HTTPException(exc.status, {"code": exc.code, "message": exc.message}) from exc
 
 
 @router.put("/solver_config")
