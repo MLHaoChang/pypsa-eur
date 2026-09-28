@@ -141,11 +141,23 @@ def _read(ref: str | None, path: str, cwd: str | None = None) -> str | None:
 
 
 def _python_files(ref: str | None, pathspec: str, cwd: str | None = None) -> list[str]:
+    """
+    Every `.py` under `pathspec`, at `ref` or in the working tree.
+
+    The two branches MUST agree on what `pathspec` means. They did not when it
+    named a file rather than a directory: `git ls-tree` happily lists the file,
+    while `Path.rglob("*.py")` on a file yields nothing. The asymmetry then
+    manufactured findings in one direction ("defined on ours, absent from the
+    merge" for every definition in it) and false cleans in the other.
+    """
     if ref is None:
         root = pathlib.Path(cwd or ".")
+        target = root / pathspec
+        if target.is_file():
+            return [str(target.relative_to(root))] if target.suffix == ".py" else []
         return sorted(
             str(p.relative_to(root))
-            for p in (root / pathspec).rglob("*.py")
+            for p in target.rglob("*.py")
             if ".pixi" not in p.parts and "__pycache__" not in p.parts
         )
     listing = _git("ls-tree", "-r", "--name-only", ref, "--", pathspec, cwd=cwd)
@@ -246,7 +258,20 @@ def _top_level_names(src: str | None) -> list[str]:
         elif isinstance(n, ast.ImportFrom):
             # `from x import y` and `... as z` — this codebase re-exports that
             # way, so those names ARE part of the module's surface.
-            names.extend(a.asname or a.name.split(".")[0] for a in n.names)
+            #
+            # BOTH names, not just the alias. The docstring's own example is
+            # `redact_secrets_in_str as _redact_secrets_in_str`, and recording
+            # only `a.asname` meant the ORIGINAL name looked absent — the exact
+            # case the clause was added for. It happened to come out right
+            # anyway, because the bare-name relocation allowance in
+            # `check_vocabulary` rescued it from somewhere else entirely; that
+            # is luck, not coverage, and it evaporates the moment the target
+            # moves outside `--path`.
+            for a in n.names:
+                original = a.name.split(".")[0]
+                names.append(original)
+                if a.asname:
+                    names.append(a.asname)
         elif isinstance(n, ast.Import):
             # Plain `import itertools` is a DEPENDENCY, not a symbol the module
             # offers. Counting it reported `itertools` and `_re` as "absent
@@ -297,12 +322,22 @@ def scan_health(merged, pathspec, cwd=None) -> dict:
 
 # ── the three checks ────────────────────────────────────────────────────────
 
-def _merged_index(merged, pathspec, cwd=None) -> dict[str, set[str]]:
-    """{definition name: files defining it} across the whole merged tree."""
-    index: dict[str, set[str]] = collections.defaultdict(set)
+def _merged_index(merged, pathspec, cwd=None) -> dict[str, dict[str, str]]:
+    """
+    {definition name: {file: normalised source}} across the whole merged tree.
+
+    Carries the SOURCE, not just the file set. The relocation allowance exists
+    because a decomposition legitimately moves a body out of a router into a
+    service, and reporting that as a loss was the first version's largest
+    source of noise. But "the name exists somewhere else" is a weak reason to
+    downgrade a finding when the copy somewhere else can be inspected: if every
+    other copy holds the merge-base text, our edit did not move with it, it is
+    gone, and calling that "confirm" buries it in the benign bucket.
+    """
+    index: dict[str, dict[str, str]] = collections.defaultdict(dict)
     for path in _python_files(merged, pathspec, cwd):
-        for name in _defs(_read(merged, path, cwd)):
-            index[name].add(path)
+        for name, src in _defs(_read(merged, path, cwd)).items():
+            index[name][path] = src
     return index
 
 
@@ -337,28 +372,118 @@ def check_lost_edits(base, ours, merged, pathspec, cwd=None):
             continue
         m = _defs(_read(merged, path, cwd))
         for name in sorted(changed):
-            elsewhere = sorted(index.get(name, set()) - {path})
+            others = {p: src for p, src in index.get(name, {}).items() if p != path}
+            elsewhere = sorted(others)
+            # A copy elsewhere only rescues the finding if it is not itself the
+            # merge-base text. When every other copy IS the base copy, the
+            # relocation carried the OLD body and our edit is gone — a hard
+            # finding, for free, from data already in hand.
+            carried = bool(others) and any(src != b[name] for src in others.values())
             if name not in m:
-                if elsewhere:
+                if carried:
                     moved.append(
                         f"{path}::{name} — not here any more; also defined in "
                         f"{', '.join(elsewhere)}. Confirm our edit moved with it."
+                    )
+                elif elsewhere:
+                    gone.append(
+                        f"{path}::{name} — not here any more, and every other copy "
+                        f"({', '.join(elsewhere)}) holds the MERGE-BASE text; the "
+                        f"move did not carry our edit"
                     )
                 else:
                     gone.append(
                         f"{path}::{name} — changed on our side, ABSENT from the merge"
                     )
             elif m[name] == b[name]:
-                if elsewhere:
+                if carried:
                     moved.append(
                         f"{path}::{name} — reverted to the base copy HERE, but also "
                         f"defined in {', '.join(elsewhere)}. Likely relocated; confirm."
+                    )
+                elif elsewhere:
+                    gone.append(
+                        f"{path}::{name} — reverted to the base copy here, and every "
+                        f"other copy ({', '.join(elsewhere)}) is the base copy too"
                     )
                 else:
                     gone.append(
                         f"{path}::{name} — merge holds the MERGE-BASE copy; our edit is gone"
                     )
     return gone, moved
+
+
+def _top_level_constants(src: str | None) -> dict[str, str]:
+    """
+    {name: normalised source of the value} for module-level assignments.
+
+    THE VALUE, which nothing else here looks at. `_top_level_names` records
+    that `REQUEST_TIMEOUT` is bound and stops; a merge that rewound it from
+    `300` to `30` left the name in place and every check silent. A reverted
+    constant is a merge loss of exactly the kind this tool exists for — the
+    tree is internally consistent, the suite passes, and a number the branch
+    deliberately changed is back to what it was.
+
+    Annotated assignments (`X: int = 3`) count. Augmented ones (`X += 1`) do
+    not: they are statements about a value, not a definition of it, and they do
+    not appear at module level in this codebase. Multiple targets
+    (`A = B = ...`) record both names against the one value.
+    """
+    if src is None:
+        return {}
+    try:
+        tree = ast.parse(src)
+    except (SyntaxError, ValueError):
+        return {}
+    out: dict[str, str] = {}
+    for n in tree.body:
+        if isinstance(n, ast.Assign):
+            targets = [t.id for t in n.targets if isinstance(t, ast.Name)]
+        elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
+            targets = [n.target.id] if n.value is not None else []
+        else:
+            continue
+        if not targets:
+            continue
+        value = ast.get_source_segment(src, n.value) if n.value is not None else None
+        if value is None:
+            continue
+        for name in targets:
+            out[name] = " ".join(value.split())
+    return out
+
+
+def check_reverted_constants(base, ours, merged, pathspec, cwd=None) -> list[str]:
+    """
+    A module-level constant OURS changed that the merge left holding BASE's
+    value.
+
+    Same shape as `check_lost_edits`, one level down, and with the same narrow
+    trigger: only an exact rewind to the base value is reported. A merge that
+    produced a THIRD value is silent here too — see the module docstring.
+
+    No relocation allowance. A constant that genuinely moved modules shows up
+    as a finding to dismiss, which is cheap; inferring "it moved" from a bare
+    name match would resurrect the noise the content check above just removed.
+    """
+    findings = []
+    files = set(_python_files(ours, pathspec, cwd)) | set(
+        _python_files(base, pathspec, cwd)
+    )
+    for path in sorted(files):
+        b = _top_level_constants(_read(base, path, cwd))
+        o = _top_level_constants(_read(ours, path, cwd))
+        changed = {k for k in o if k in b and b[k] != o[k]}
+        if not changed:
+            continue
+        m = _top_level_constants(_read(merged, path, cwd))
+        for name in sorted(changed):
+            if name in m and m[name] == b[name]:
+                findings.append(
+                    f"{path}::{name} — value reverted to the merge-base "
+                    f"{b[name]!r}; ours was {o[name]!r}"
+                )
+    return findings
 
 
 def _top_level_definitions(src: str | None) -> list[str]:
@@ -436,9 +561,11 @@ def check_vocabulary(base, ours, theirs, merged, pathspec, patterns, cwd=None) -
 # ── self-test: every check must be able to FAIL ─────────────────────────────
 
 _SELF_TEST_CASES = (
-    "17 cases: lost edits (method, async, decorator, absent, second directory), "
-    "both parents audited, duplicates, re-exports, imports-are-not-defs, "
-    "reindentation is not a change, conflict markers, unparseable files"
+    "lost edits (method, async, decorator, absent, second directory), both "
+    "parents audited, relocation judged by CONTENT, reverted constants, "
+    "duplicates, re-exports, imports-are-not-defs, reindentation is not a "
+    "change, --path as a file, conflict markers, unparseable files, exit 2 on "
+    "an empty pathspec"
 )
 
 
@@ -476,7 +603,12 @@ _BASE = {
         "\n\n"
         "class Beta:\n    def run(self):\n        return 'beta-base'\n"
     ),
-    "pkg/helpers.py": "def shared():\n    return 'shared'\n",
+    "pkg/helpers.py": (
+        "REQUEST_TIMEOUT = 30\n"
+        "RETRIES: int = 1\n"
+        "\n\n"
+        "def shared():\n    return 'shared'\n"
+    ),
     "other/n.py": "def only_in_other():\n    return 'other-base'\n",
 }
 
@@ -489,6 +621,11 @@ _OURS["pkg/m.py"] = (
     .replace("return 'alpha-base'", "return 'alpha-OURS'")
 )
 _OURS["other/n.py"] = "def only_in_other():\n    return 'other-OURS'\n"
+_OURS["pkg/helpers.py"] = (
+    _BASE["pkg/helpers.py"]
+    .replace("REQUEST_TIMEOUT = 30", "REQUEST_TIMEOUT = 300")
+    .replace("RETRIES: int = 1", "RETRIES: int = 5")
+)
 _OURS["pkg/ours_only.py"] = "def ours_only_symbol():\n    return 1\n"
 
 _THEIRS = dict(_BASE)
@@ -509,8 +646,14 @@ def self_test() -> int:
     mutation it is there to kill.
     """
     failures = []
+    checked = 0
 
     def want(cond, msg):
+        # Counted rather than hard-coded: an earlier version announced a case
+        # count in its pass message and drifted from it the first time a case
+        # was added.
+        nonlocal checked
+        checked += 1
         if not cond:
             failures.append(msg)
 
@@ -663,6 +806,64 @@ def self_test() -> int:
         want(code == 1, "a master-side loss did not reach the report (exit "
                         f"{code}, expected 1)")
 
+        # 10b. A module CONSTANT rewound to the base value. The name is still
+        #      bound, so every other check is silent; only the value says so.
+        m = dict(good)
+        m["pkg/helpers.py"] = good["pkg/helpers.py"].replace(
+            "REQUEST_TIMEOUT = 300", "REQUEST_TIMEOUT = 30")
+        lay(m)
+        want(any("REQUEST_TIMEOUT" in f for f in
+                 check_reverted_constants(base, ours, None, ".", r)),
+             "a constant rewound to the base VALUE was not caught")
+        #      …including the annotated form, which is a different AST node.
+        m["pkg/helpers.py"] = good["pkg/helpers.py"].replace(
+            "RETRIES: int = 5", "RETRIES: int = 1")
+        lay(m)
+        want(any("RETRIES" in f for f in
+                 check_reverted_constants(base, ours, None, ".", r)),
+             "an ANNOTATED constant rewound to the base value was not caught")
+        #      …and a correct merge reports none, so the check is not vacuous.
+        lay(good)
+        want(not check_reverted_constants(base, ours, None, ".", r),
+             "the constant check fired on a correct merge")
+
+        # 10c. A relocation that carried the BASE body is a LOSS, not a move.
+        #      The name exists elsewhere, so the bare-name allowance would
+        #      downgrade it; only comparing the content elsewhere catches it.
+        m = dict(good)
+        m["pkg/m.py"] = good["pkg/m.py"].replace(
+            "class Alpha:\n    def run(self):\n        return 'alpha-OURS'\n", "")
+        m["pkg/relocated.py"] = (
+            "class Alpha:\n    def run(self):\n        return 'alpha-base'\n")
+        lay(m)
+        gone, moved = lost()
+        want(any("Alpha.run" in f for f in gone),
+             "a move that carried the BASE body was downgraded to 'moved'")
+        want(not any("Alpha.run" in f for f in moved),
+             "a move that carried the base body was ALSO reported as moved")
+        #      …while a move that carried OUR body stays in the benign bucket.
+        m["pkg/relocated.py"] = (
+            "class Alpha:\n    def run(self):\n        return 'alpha-OURS'\n")
+        lay(m)
+        gone, moved = lost()
+        want(any("Alpha.run" in f for f in moved) and
+             not any("Alpha.run" in f for f in gone),
+             "a genuine relocation was reported as a hard loss")
+
+        # 10d. `--path` naming a FILE must agree between the git and
+        #      working-tree listers, or it manufactures findings.
+        lay(good)
+        from_ref = _python_files(ours, "pkg/m.py", r)
+        from_tree = _python_files(None, "pkg/m.py", r)
+        want(from_ref == from_tree == ["pkg/m.py"],
+             f"--path naming a file disagrees: ref={from_ref} tree={from_tree}")
+
+        # 10e. A re-export must contribute the ORIGINAL name too, not only the
+        #      alias — that is the case the clause was added for.
+        names = _top_level_names(_BASE["pkg/m.py"])
+        want("shared" in names and "_shared" in names,
+             f"a re-export did not contribute both names: {names}")
+
         # 11. DUPLICATE definition.
         m = dict(good)
         m["pkg/m.py"] = good["pkg/m.py"] + "\n\ndef h():\n    return 'shadow'\n"
@@ -730,7 +931,7 @@ def self_test() -> int:
         print(f"SELF-TEST FAILED: {f}")
     if failures:
         return 1
-    print(f"self-test passed — {_SELF_TEST_CASES}")
+    print(f"self-test passed — {checked} assertions: {_SELF_TEST_CASES}")
     return 0
 
 
@@ -787,6 +988,8 @@ def _run(args) -> int:
         groups.append((f"edits {label} made that the merge reverted or dropped", gone))
         groups.append((f"...and the same on {label}, where the name also exists "
                        f"elsewhere (likely a move)", moved))
+    groups.append(("module constants whose VALUE the merge rewound to the base",
+                   check_reverted_constants(base, args.ours, args.merged, args.path)))
     groups.append(("top-level definitions shadowed by a duplicate",
                    check_duplicate_definitions(args.merged, args.path)))
     groups.append(("definitions or literals a parent had and the merge does not",

@@ -95,12 +95,14 @@ So: **a handful of places to look on a large merge, roughly half of them real.**
 It is not a gate, and it must not become one.
 
 **Re-measured after the QA fixes** (qualified names, decorators inside the
-compared source, master's side audited too). `1c7b86d8` now reports **17**:
+compared source, master's side audited too, relocation judged by CONTENT rather
+than by a bare name match, and a new check on module-constant VALUES). `1c7b86d8` now reports **17**:
 the same 4 plus 3 master-side losses in `test_chat_stream_attempt_seam.py` and
 9 vocabulary entries, which are the same seam file plus test functions dropped
-on one side — all genuine places to look on a 23-file conflict. The clean merge
-`2b1c95a1` still reports **0**, so the widening did not simply raise the noise
-floor. Budget **~3 minutes**, not thirty seconds: 490 files × several refs is a
+on one side — all genuine places to look on a 23-file conflict. The constant
+check reports **0** there, i.e. it added no false positives. The clean merge
+`2b1c95a1` still reports **0** across every group, so the widening did not
+simply raise the noise floor. Budget **~3 minutes**, not thirty seconds: 490 files × several refs is a
 few thousand `git show` calls even with the ref cache.
 
 Three limitations to keep in mind:
