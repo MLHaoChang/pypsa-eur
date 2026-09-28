@@ -293,3 +293,49 @@ def test_re_clustering_a_network_keeps_that_projects_uploaded_profiles():
         )
     finally:
         PyPSAService.reset_request_context(token)
+
+
+# ── 6. the save reads the store of the context it is saving ──────────────────
+
+def test_a_save_persists_the_saved_contexts_series_not_the_active_ones(
+    tmp_projects_dir,
+):
+    """
+    ``_save_context`` serialises ``ctx.user_ts`` — the project it is saving — and
+    not whatever store the calling thread happens to resolve.
+
+    Test 2 above shows the property holding over HTTP, where the context being
+    saved IS the active one, so it would pass equally if the save read the active
+    store by luck. This drives the case the gate used to exist for: a save of a
+    NON-active context, with a different context bound on the calling thread and
+    a different series in it. Without the explicit pairing, the file under `BG/`
+    fills with `FG`'s numbers.
+    """
+    from routers.projects import _save_context
+
+    key = ("loads", "p_set", "L1")
+    series = pd.Series([UPLOADED_P_SET] * len(SNAPS), index=SNAPS)
+    other = pd.Series([555.0] * len(SNAPS), index=SNAPS)
+
+    background = ProjectContext(network=_net_with_one_load())
+    background.loaded_project = "BG"
+    background.user_ts[key] = series
+
+    foreground = ProjectContext(network=_net_with_one_load())
+    foreground.loaded_project = "FG"
+    foreground.user_ts[key] = other
+
+    token = PyPSAService.bind_request_context(foreground)
+    try:
+        _save_context(background, "BG", expect="BG")
+    finally:
+        PyPSAService.reset_request_context(token)
+
+    saved = json.loads((tmp_projects_dir / "BG" / "user_ts.json").read_text())
+    values = saved["loads"]["p_set"]["L1"]["values"]
+    assert values == [UPLOADED_P_SET] * len(SNAPS), (
+        f"the save wrote the ACTIVE context's series into BG's project "
+        f"directory instead of BG's own (got {values!r})"
+    )
+    # …and the active context's own store was not ingested into either.
+    assert foreground.user_ts[key].tolist() == other.tolist()

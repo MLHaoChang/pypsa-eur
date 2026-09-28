@@ -277,9 +277,15 @@ def _annual_hourly_reference():
     return idx, None
 
 
-def _serialize_user_ts() -> dict:
+def _serialize_user_ts(store: dict | None = None) -> dict:
     """
-    Return _user_ts as a JSON-serialisable nested dict.
+    Return a user time-series store as a JSON-serialisable nested dict.
+
+    ``store`` names WHICH context's store to read; ``None`` means the active
+    one (`_user_ts`), which is what every route wants. A caller holding a
+    ProjectContext passes `ctx.user_ts` instead, so a save writes the profiles
+    of the project it is saving rather than the profiles of whichever project
+    happens to be active on the calling thread — see `_save_context`.
 
     Format: ``{component: {attribute: {column: {index: [...], values: [...]}}}}``
     The index entries are:
@@ -296,8 +302,10 @@ def _serialize_user_ts() -> dict:
     # `dictionary changed size during iteration`. Snapshot keys first so a
     # writer waiting on the lock isn't blocked for the JSON-serialisation
     # cost (just the dict-snapshot cost).
+    if store is None:
+        store = _user_ts
     with _user_ts_lock:
-        items = list(_user_ts.items())
+        items = list(store.items())
     for (comp, attr, col), series in items:
         if isinstance(series.index, pd.MultiIndex):
             idx = [
@@ -314,9 +322,14 @@ def _serialize_user_ts() -> dict:
     return result
 
 
-def _restore_user_ts(data: dict) -> None:
+def _restore_user_ts(data: dict, store: dict | None = None) -> None:
     """
-    Restore _user_ts from the format produced by _serialize_user_ts.
+    Restore a user time-series store from the format `_serialize_user_ts` writes.
+
+    ``store`` names WHICH context's store to replace; ``None`` means the active
+    one. This REPLACES the store wholesale, which is why the parameter matters:
+    aimed at the wrong dict it discards a project's profiles rather than merely
+    reading the wrong ones.
     Supports both the current nested format and the legacy pipe-separated format
     for backwards compatibility with old user_ts.json files.
     All-NaN series are silently skipped — they represent corrupt/empty data.
@@ -373,9 +386,10 @@ def _restore_user_ts(data: dict) -> None:
 
     # Replace the store atomically under the lock — readers in
     # _serialize_user_ts / _user_ts.items() never see a half-populated state.
+    target = _user_ts if store is None else store
     with _user_ts_lock:
-        _user_ts.clear()
-        _user_ts.update(new_store)
+        target.clear()
+        target.update(new_store)
 
 
 # Components whose `_t` tables we walk for time-series backup. Every non-empty
@@ -395,9 +409,15 @@ _TS_COMPONENTS: list[str] = [
 ]
 
 
-def _backup_network_ts_to_user_ts(n=None) -> None:
+def _backup_network_ts_to_user_ts(n=None, store: dict | None = None) -> None:
     """
-    Copy time series from the network's _t tables into _user_ts.
+    Copy time series from the network's _t tables into a user time-series store.
+
+    ``n`` and ``store`` are a PAIR and must describe the same project: this
+    reads one and writes the other. Both default to the active context's, which
+    is right for every route; a caller that passes a non-active ``n`` (a save of
+    a background context) must pass that context's ``store`` with it, or it
+    ingests one project's profiles into another project's store.
 
     Walks every non-empty (component, attribute) pair. Only copies a column when:
       - it is not already in _user_ts, OR
@@ -419,6 +439,8 @@ def _backup_network_ts_to_user_ts(n=None) -> None:
     """
     if n is None:
         n = PyPSAService.get_network()
+    if store is None:
+        store = _user_ts
     for comp in _TS_COMPONENTS:
         ts_store = getattr(n, f"{comp}_t", None)
         if ts_store is None:
@@ -464,9 +486,9 @@ def _backup_network_ts_to_user_ts(n=None) -> None:
                 # for the per-key get-or-insert keeps `_serialize_user_ts`'s
                 # snapshot-then-iterate path safe.
                 with _user_ts_lock:
-                    existing = _user_ts.get(key)
+                    existing = store.get(key)
                     if existing is None or existing.isna().all():
-                        _user_ts[key] = series.copy()
+                        store[key] = series.copy()
 
 
 def _rebase_flat_user_ts(new_idx: pd.DatetimeIndex) -> int:
@@ -642,11 +664,20 @@ def _hold_positions(src_index, target) -> "_np.ndarray":
     return _np.where(pos >= 0, pos, _np.where(ok & within, held, -1))
 
 
-def _reapply_user_ts_to_network(n=None) -> None:
+def _reapply_user_ts_to_network(n=None, store: dict | None = None) -> None:
     """
-    Re-apply _user_ts profiles to the network's _t tables, aligned to the
-    current snapshot index.  Call this after n.set_snapshots() or after a
-    project load so that the network uses the correct time series for simulation.
+    Re-apply a store's profiles to the network's _t tables, aligned to the
+    current snapshot index.
+
+    ``n`` and ``store`` are a PAIR and must describe the same project — this
+    writes the store's series onto that network. Both default to the active
+    context's. Passing a non-active ``n`` without its own ``store`` overlays one
+    project's uploaded profiles onto another project's network wherever an asset
+    name collides, which corrupts its LP and its exported netCDF; that is the
+    mismatch `_save_context` and `solver_service` used to have to gate around.
+
+    Call this after n.set_snapshots() or after a project load so that the network
+    uses the correct time series for simulation.
 
     If a stored series has zero overlap with the current snapshots (e.g. the
     user uploaded 2024 hourly data but the network still uses 2013 daily
@@ -667,6 +698,8 @@ def _reapply_user_ts_to_network(n=None) -> None:
     _log = _logging.getLogger(__name__)
     if n is None:
         n = PyPSAService.get_network()
+    if store is None:
+        store = _user_ts
 
     # Three cases for aligning a stored _user_ts series with n.snapshots:
     #   1) series.index is MultiIndex (per-period upload) AND n.snapshots is
@@ -746,7 +779,7 @@ def _reapply_user_ts_to_network(n=None) -> None:
         return cached is None or attr_name in cached
 
     grouped: dict[tuple[str, str], dict[str, pd.Series]] = defaultdict(dict)
-    for (comp, attr, col), series in _user_ts.items():
+    for (comp, attr, col), series in store.items():
         ts_store = getattr(n, f"{comp}_t", None)
         if ts_store is None:
             continue

@@ -270,10 +270,19 @@ def flush_all(
     """
     Persist every resident context. Returns the ones that could NOT be saved.
 
-    `persist_user_ts` is `ctx is active`, and the asymmetry is required:
-    `_serialize_user_ts` reads a process-global store belonging to the
-    foreground. True for everything stamps the foreground's series onto every
-    project; False for everything loses the active project's.
+    `persist_user_ts` is `ctx is active`, and the asymmetry is NO LONGER
+    required — kept here unchanged because removing it is a separate change with
+    its own tests to update. The reason it existed was that
+    `_serialize_user_ts` read a process-global store belonging to the foreground,
+    so True for everything stamped the foreground's series onto every project.
+    The store is per-`ProjectContext` now and `_save_context` serialises the
+    context it is saving, so True for everything would write each project's own
+    series. Meanwhile the `False` half still has the cost it always had — it
+    loses the open project's unsaved profile edits — and after Step 0b `active`
+    (`PyPSAService._active`, read directly by `desktop/gui.py`) is None once a
+    session has adopted the foreground, so EVERY context takes the False branch.
+    Recorded in `docs/superpowers/findings/2026-09-28-every-shutdown-flush-saves-with-persist-user-ts-false.md`
+    and `docs/superpowers/OPEN-ITEMS.md`.
 
     `safe=False` means the abort did not finish, so a 409 is expected rather
     than surprising — it is still reported, because the point is to tell the

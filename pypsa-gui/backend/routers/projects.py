@@ -1950,21 +1950,30 @@ def _save_context(
             nc_path=nc_path, dest=dest,
         )
 
-        # Ensure time series round-trip correctly — FOREGROUND only (gated on
-        # persist_user_ts). For a BACKGROUND ctx these two would corrupt state:
-        # (1) `_backup_network_ts_to_user_ts` writes THIS project's `_t` profiles
-        # into the module-global `_user_ts`, which belongs to the FOREGROUND
-        # project; (2) `_reapply_user_ts_to_network` overwrites THIS network's own
-        # baked profiles with the foreground's `_user_ts`. The background network
-        # already carries solve-ready baked profiles (from
-        # `_hydrate_context_from_disk`), so export it as-is and never touch the
-        # foreground's `_user_ts`. Steps when foreground:
-        # 1. Backup any imported-network ts into _user_ts (skips all-NaN/existing)
-        # 2. Reapply _user_ts so the .nc captures current profiles
+        # Ensure time series round-trip correctly:
+        # 1. Backup any imported-network ts into the store (skips all-NaN/existing)
+        # 2. Reapply the store so the .nc captures current profiles
         # 3. THEN export — the .nc now contains correct data
+        #
+        # `store=ctx.user_ts` names the store EXPLICITLY, and it is `ctx`'s own —
+        # the project being saved. Both helpers pair a network with a store, and
+        # feeding them a network from one project and a store from another is what
+        # (1) ingested this project's `_t` profiles into someone else's store and
+        # (2) overwrote this network's baked profiles with someone else's uploads.
+        # Passing the pair removes the mismatch instead of gating around it: for a
+        # foreground save `ctx.user_ts` IS what the bare `_user_ts` view resolves
+        # to, so this is the same call it always made, and for a background ctx it
+        # is now the right store rather than a reason to skip.
+        #
+        # `persist_user_ts` is therefore no longer what PREVENTS a cross-project
+        # clobber — it is now only a caller's choice about whether this save
+        # rewrites `user_ts.json` at all. Its remaining `False` callers
+        # (`solve_queue`, the desktop shutdown flush, eviction) predate the
+        # per-context store and are tracked in `docs/superpowers/OPEN-ITEMS.md`;
+        # their values are deliberately unchanged here.
         if persist_user_ts:
-            _backup_network_ts_to_user_ts(n)
-            _reapply_user_ts_to_network(n)
+            _backup_network_ts_to_user_ts(n, store=ctx.user_ts)
+            _reapply_user_ts_to_network(n, store=ctx.user_ts)
 
         # Atomic replace so a crash mid-save leaves the previous file intact.
         with PyPSAService.get_netcdf_io_lock():
@@ -2044,21 +2053,20 @@ def _save_context(
             pass
 
     # Save all time series (user-uploaded + captured from network) alongside the
-    # network. GATED on `persist_user_ts`: `_serialize_user_ts()` reads the
-    # module-global `_user_ts`, which belongs to the FOREGROUND project. For a
-    # foreground save (the `save_project` wrapper, or the dispatcher solving the
-    # resident foreground in-place) that's correct. For a BACKGROUND ctx save
-    # (dispatcher solving a non-foreground project) it would clobber that
-    # project's own `user_ts.json` with the foreground's profiles — so we skip
-    # it and leave the background project's on-disk profiles intact (the netcdf
-    # already carries baked, solve-ready profiles; `_user_ts` is per-project only
-    # after a later phase wires it onto the context).
+    # network, reading THIS ctx's own store — never "whatever is active on the
+    # calling thread", which is how a background save used to be able to write
+    # the foreground's profiles into another project's `user_ts.json`.
+    #
+    # Still gated on `persist_user_ts`, but the gate now means only "does this
+    # caller want `user_ts.json` rewritten"; it is no longer the thing that keeps
+    # one project's profiles out of another's directory (`store=` is). See the
+    # note beside the backup/reapply pair above.
     # `user_ts_data` is read below by the metadata build (`user_ts_count`,
     # `ts_columns_saved`) REGARDLESS of persist_user_ts, so it must always be
-    # bound — default to {} (a background save reports 0 ts columns, correct).
+    # bound — default to {} (a skipped save reports 0 ts columns, correct).
     user_ts_data: dict = {}
     if persist_user_ts:
-        user_ts_data = _serialize_user_ts()
+        user_ts_data = _serialize_user_ts(store=ctx.user_ts)
         user_ts_path = dest / "user_ts.json"
         if user_ts_data:
             _atomic_write_text(user_ts_path, json.dumps(user_ts_data, indent=2))
