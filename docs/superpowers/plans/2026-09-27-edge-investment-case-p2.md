@@ -331,6 +331,12 @@ None` (designated months, URDB `lookbackMonths`) and `Ratchet.cyclic_year: bool 
   - R3 cases 2 and 3 match REopt's `monthly_peaks` per month to the cent. R3′ matches in cyclic range mode.
   - `types.ts` mirrored.
 
+- **Review round 1 → PASS WITH CONDITIONS, closed:**
+  - Both ratchet-prior functions are NaN-aware. A NaN lookback peak makes the dependent (month, window) billed demand NaN, flagged `ratchet_prior_unknown:<month>`, so `monthly`/`annual` never carry a floor that appears or vanishes with the NaN's position.
+  - The engine docstring states the same-rate-year history consequence: it resolves only for a metered year; for a future year use non-cyclic range with history, or `cyclic_year`. **Carried to WP2.4b-ii:** the same sentence goes in the Library meter-data help.
+  - A representative-weeks months-mode test is pinned.
+  - **Recorded:** a new-mode ratchet takes the WHOLE demand item out of the LP (`not_in_lp`) until WP2.1c, not only its ratchet. The LP does no peak shaving for that item until then; the engine bills it exactly.
+
 ## WP2.1b Site billing adapter, compact billing frames, `per_item_sampled`
 
 Files: `backend/services/commercial/billing.py` (new, pure), `services/finance/report.py`

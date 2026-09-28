@@ -274,6 +274,8 @@ def _ratchet_prior(month: str, k: int, lookback: int, actual: dict,
             values.append(hist[m])
         else:
             missing = True
+    if any(not np.isfinite(v) for v in values):
+        return float("nan"), missing  # an unknown lookback peak: unknown floor (never order-dependent)
     return (max(values) if values else None), missing
 
 
@@ -289,7 +291,11 @@ def _ratchet_floor_prior(ratchet, month: str, k: int, actual: dict, meter_histor
     * months — year-wide: the designated months of the rate year.
 
     Cyclic and months mode read an unmodelled month's meter history under its
-    SAME-rate-year key; absent ⇒ unknown (never inferred from other months)."""
+    SAME-rate-year key; absent ⇒ unknown (never inferred from other months).
+    That key resolves only when the modelled rate year is a METERED year: for a
+    future year use non-cyclic range mode with meter history (or `cyclic_year`,
+    which reads the modelled months themselves). A NaN lookback peak returns a
+    NaN prior — the dependent month is unknown, never floored at random."""
     if ratchet.months is None and not ratchet.cyclic_year:
         return _ratchet_prior(month, k, ratchet.lookback_months, actual, meter_history,
                               in_dispatch)
@@ -311,6 +317,8 @@ def _ratchet_floor_prior(ratchet, month: str, k: int, actual: dict, meter_histor
             values.append(hist[m])
         else:
             missing = True
+    if any(not np.isfinite(v) for v in values):
+        return float("nan"), missing  # an unknown lookback peak: unknown floor (never order-dependent)
     return (max(values) if values else None), missing
 
 
@@ -676,6 +684,10 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                                                               meter_history, set(months_sorted))
                         if prior is not None and np.isfinite(prior):
                             billed = max(peak, item.ratchet.share * prior)
+                        elif prior is not None:
+                            # A NaN among the lookback peaks (WP2.1a-iii review #1).
+                            billed = float("nan")
+                            flags[item.id].append(f"ratchet_prior_unknown:{key}")
                         if missing:
                             note = notes.setdefault(item.id, [])
                             if "ratchet_seed_missing" not in note:

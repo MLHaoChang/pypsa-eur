@@ -537,3 +537,32 @@ def test_new_ratchet_fields_are_registered_for_hash_recipe_1():
 
     assert FIELDS_AFTER_V1[("Ratchet", "months")] is None
     assert FIELDS_AFTER_V1[("Ratchet", "cyclic_year")] is False
+
+
+# ── WP2.1a-iii review round 1 ──────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("nan_hour", [24, 8300])            # January 2, then December
+def test_a_nan_lookback_month_makes_the_dependent_months_unknown(nan_hour):
+    """#1: a NaN among the lookback peaks is unknown for every month that reads
+    it — never a floor that appears or vanishes with the NaN's position."""
+    d = _r3_load()
+    d.iloc[nan_hour, 0] = np.nan
+    res = rate(d, _load("r3_case2.tariff.json"), step_hours=1.0, timezone=None)
+    assert res.per_item["demand"] is None
+    nan_month = str(d.index[nan_hour])[:7]
+    others = [m for m in res.monthly.index if m != nan_month]
+    assert res.monthly.loc[others, "demand"].isna().all()
+    assert any(f.startswith("ratchet_prior_unknown:") for f in res.flags["demand"])
+
+
+def test_months_mode_on_representative_weeks_missing_a_designated_month():
+    """#3: the spec's case — sampled weeks standing for the year, the designated
+    January not sampled and not metered ⇒ a lower bound."""
+    parts = [pd.date_range(f"2022-{m:02d}-07", periods=24 * 7, freq="h") for m in (4, 7, 10)]
+    idx = parts[0].append(parts[1]).append(parts[2])
+    d = pd.DataFrame({"import_mw": 0.3, "export_mw": 0.0}, index=idx)
+    res = rate(d, _load("r3_case2.tariff.json"), step_hours=1.0, timezone=None,
+               represents_hours=8760 / len(idx), billing_period=("2022-01-01", "2023-01-01"))
+    assert "ratchet_seed_missing" in res.notes["demand"]
+    assert res.total is None
