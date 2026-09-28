@@ -163,14 +163,21 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
         block["energy_tiers"] = weighted("energy_tiers")
         first_tier = next(iter(tiers.values()))
         solved_hash = first_tier.get("items_hash")
-        wanted_tiers = (_lp.tier_items_hash(cfg_now, _H.version_of(first_tier))
+        recipe = _lp.energy_recipe_of(n.meta.get(_lp.META_LINKS))
+        wanted_tiers = (_lp.tier_items_hash(cfg_now, _H.version_of(first_tier), recipe=recipe)
                         if cfg_now is not None else None)
         if solved_hash is not None and solved_hash != wanted_tiers:
             drifted()
+        elif cfg_now is not None and _lp.energy_record_state(
+                n, cfg_now, n.meta.get(_lp.META_LINKS)) == "recipe":
+            flags.append("energy_recipe_changed")
     elif cfg_now is not None and _lp.tier_items_hash(cfg_now) is not None:
         # Tiers the config names but the solve did not bind (ADR-0001).
         block["energy_tiers"] = None
         flags.append("energy_tiers_not_established")
+        if _lp.energy_record_state(n, cfg_now, n.meta.get(_lp.META_LINKS)) == "recipe":
+            # …because the solve's recipe left windowed tiers out (WP2.1c-ii).
+            flags.append("energy_recipe_changed")
 
     # Energy-hub group contract (WP1.6): no money of its own; the members'
     # shares of the group's import energy are reported (allocation is P3).

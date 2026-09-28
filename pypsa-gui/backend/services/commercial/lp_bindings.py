@@ -60,6 +60,20 @@ record carries the segments (`tiers`, open top width None) and
 `demand_amount(rec)` prices it; the demand info records `lp_recipe` so a record
 from before this recipe is told apart (`demand_only_newly_bound`).
 
+Energy tiers (P2 WP2.1c-ii): plain and windowed (`tier_rates`) tiers share one
+LP form — per (item, period, month) key, `q[period, segment] ≥ 0` with Σ_seg
+q = the period's volume and Σ_period q ≤ the segment's width; a first
+threshold above 0 adds a free segment (the engine bills that volume at 0; P1
+charged it at the first rate). Rates rising in EVERY period are convex; the
+engine's proportional URDB split is feasible for this LP, so the LP optimum is
+≤ the bill (WP2.3 `tier_allocation` ≥ 0). Any other shape is an adder at one
+tier per period: the tier the same month a year earlier landed in
+(`meter_history_energy_kwh`, first period only), else the first; a free tier
+falls back to the period's first charged rate. `ic_poc_links.lp_recipe`
+(`LP_RECIPE`) dates a solve, so one made before a recipe bound more of an
+unchanged config reads `energy_recipe_changed` / `demand_recipe_changed`, not
+a drift.
+
 `_wrap_with_commercial_bindings` is the `extra_functionality` hook for the
 LP-level terms (peaks, ratchets, tiers, group caps) that later work packages
 add. In WP1.3 it only chains.
@@ -81,8 +95,8 @@ from services.commercial.tariff_engine import (
     _rates,
     demand_windows,
     interval_key,
+    _period_index,
     is_windowed_tiered,
-    tiers_are_convex,
     window_rate,
 )
 
@@ -182,14 +196,14 @@ def _lp_reason(item: TariffItem) -> str | None:
         if item.measured_on == "export":
             return "export_demand_not_supported"
         return None
-    if item.tiers and item.periods[0].tier_rates is not None:
-        # Per-period tier rates (WP2.1a-ii) — its `Tier.rate` are 0 by rule, so
-        # the P1 tier terms would price it at 0; the LP carries them in WP2.1c.
-        return "tiers_with_windows"
     if item.tiers:
-        # WP1.5c: tiers on cumulative monthly import volume, one catch-all period.
+        # WP1.5c: tiers on cumulative monthly import volume; per-period tier
+        # rates (`tier_rates`, WP2.1a-ii) are LP terms since WP2.1c-ii. Tiers in
+        # windows WITHOUT per-period rates cannot occur after the P1 migration
+        # (`TariffItem._migrate_p1_windowed_tiers`) and stay refused.
         p = item.periods[0]
-        if len(item.periods) != 1 or p.months or p.weekdays or p.start_hour is not None:
+        if not is_windowed_tiered(item) and (len(item.periods) != 1 or p.months
+                                             or p.weekdays or p.start_hour is not None):
             return "tiers_with_windows"
         if item.direction != "cost":
             return "tiers_on_revenue_not_supported"
@@ -208,11 +222,44 @@ def _side(item: TariffItem) -> str:
     return "import" if item.direction == "cost" else "export"  # net
 
 
-def tier_items_hash(cfg: CommercialConfig, version: int = _H.HASH_VERSION) -> str | None:
-    """The hash of the convex tiered items a solve would bind (drift check)."""
+# The LP recipe of a solve, recorded in `ic_poc_links` (absent ⇒ 1):
+#   2 — demand tiers and every ratchet mode bound (WP2.1c-i);
+#   3 — windowed energy tiers bound (convex: LP terms; non-convex: adders at
+#       the predicted tier), the energy history prices non-convex tiers
+#       (WP2.1c-ii).
+LP_RECIPE = 3
+WINDOWED_TIERS_RECIPE = 3
+
+
+def energy_recipe_of(rec: dict | None) -> int:
+    return int((rec or {}).get("lp_recipe") or 1)
+
+
+def item_tier_rates(item: TariffItem) -> list[list[float]]:
+    """The tier rates per period index: each period's `tier_rates` for a
+    windowed item, else one set (the item's single catch-all period)."""
+    if is_windowed_tiered(item):
+        return [list(p.tier_rates) for p in item.periods]
+    return [[float(t.rate) for t in item.tiers]]
+
+
+def item_tiers_convex(item: TariffItem) -> bool:
+    """Rising marginal rates in EVERY period (WP2.1c-ii)."""
+    return all(all(b >= a for a, b in zip(r, r[1:])) for r in item_tier_rates(item))
+
+
+def _energy_tiered(cfg: CommercialConfig, recipe: int = LP_RECIPE) -> list:
+    """The tiered energy items the LP binds under `recipe`."""
     items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
-             if i.tiers and not _is_demand(i) and _lp_reason(i) is None
-             and tiers_are_convex(i.tiers)]
+             if i.tiers and not _is_demand(i) and _lp_reason(i) is None]
+    return (items if recipe >= WINDOWED_TIERS_RECIPE
+            else [i for i in items if not is_windowed_tiered(i)])
+
+
+def tier_items_hash(cfg: CommercialConfig, version: int = _H.HASH_VERSION,
+                    recipe: int = LP_RECIPE) -> str | None:
+    """The hash of the convex tiered items a solve would bind (drift check)."""
+    items = [i for i in _energy_tiered(cfg, recipe) if item_tiers_convex(i)]
     return _items_hash(items, version) if items else None
 
 
@@ -288,11 +335,13 @@ def _adders(n, cfg: CommercialConfig) -> tuple[dict[str, np.ndarray], list[str],
                     "demand credit is not a peak charge")
             continue  # a peak term, built by `_demand_spec`
         if item.tiers:
-            if tiers_are_convex(item.tiers):
+            if item_tiers_convex(item):
                 continue  # stacked volume terms, built by `_tier_spec`
-            # Falling marginal rates are non-convex (spec §5.3): priced at the
-            # first tier (no volume history in P1), flagged; billed exactly.
-            adders["import"] += float(item.tiers[0].rate) * _KWH_PER_MWH
+            # Non-convex (spec §5.3): each snapshot priced at ONE tier of its
+            # period — the tier the same month a year earlier landed in
+            # (`meter_history_energy_kwh`), else the first; billed exactly.
+            price, _got = _predicted_tier_price(n, cfg, item, local)
+            adders["import"] += price
             energy_items.append(item.id)
             if "nonconvex_tier" not in notes:
                 notes.append("nonconvex_tier")
@@ -312,6 +361,66 @@ def _adders(n, cfg: CommercialConfig) -> tuple[dict[str, np.ndarray], list[str],
         if item.measured_on == "net" and "net_split_by_direction" not in notes:
             notes.append("net_split_by_direction")
     return adders, energy_items, not_in_lp, notes
+
+
+def predicted_tiers(n, cfg: CommercialConfig) -> dict[str, dict[str, int]]:
+    """{item: {month: tier}} for the non-convex tiered items priced from the
+    energy history (the facts' `nonconvex_tier_predicted`)."""
+    local = _local_clock(n.snapshots, cfg.timezone)
+    out = {}
+    for item in _energy_tiered(cfg):
+        if not item_tiers_convex(item):
+            _price, got = _predicted_tier_price(n, cfg, item, local)
+            if got:
+                out[item.id] = got
+    return out
+
+
+def _tier_position(thresholds_kwh: list[float], volume_kwh: float) -> int:
+    """The tier `volume_kwh` lands in (−1: below the first threshold, free)."""
+    k = -1
+    for j, th in enumerate(thresholds_kwh):
+        if volume_kwh >= th:
+            k = j
+    return k
+
+
+def _predicted_tier_price(n, cfg: CommercialConfig, item: TariffItem,
+                          local: pd.DatetimeIndex) -> tuple[np.ndarray, dict[str, int]]:
+    """€/MWh per snapshot for a non-convex tiered item, and {month: tier} for
+    the months priced from history. History is the site's past: it seeds the
+    FIRST investment period only (as the ratchet's), later periods take the
+    first tier."""
+    months = np.asarray(local.strftime("%Y-%m"))
+    frag = (_period_index(item, local) if is_windowed_tiered(item)
+            else np.zeros(len(local), dtype=int))
+    if (frag < 0).any():
+        raise CommercialBindingError(
+            f"tariff item {item.id!r} has no period covering {int((frag < 0).sum())} "
+            "snapshot(s); add a catch-all period")
+    rates = item_tier_rates(item)
+    thresholds = [float(t.threshold) for t in item.tiers]
+    inv = (np.asarray(n.snapshots.get_level_values(0)) if isinstance(n.snapshots, pd.MultiIndex)
+           else np.full(len(n.snapshots), None, dtype=object))
+    first = None if not isinstance(n.snapshots, pd.MultiIndex) else min(n.investment_periods)
+    hist = cfg.meter_history_energy_kwh
+    tier = np.zeros(len(local), dtype=int)
+    got: dict[str, int] = {}
+    for m in sorted(set(months[inv == first] if first is not None else months)):
+        before = (pd.Period(m, freq="M") - 12).strftime("%Y-%m")
+        if before not in hist:
+            continue
+        k = _tier_position(thresholds, float(hist[before]))
+        tier[(months == m) & ((inv == first) if first is not None else True)] = k
+        got[m] = k
+    table = np.array([[0.0] + list(r) for r in rates])  # column 0: below the first threshold
+    price = table[frag, tier + 1]
+    # A free tier (predicted, or the first) would take the item out of the LP:
+    # the period's first CHARGED rate instead, as a non-convex demand key
+    # (WP2.1c-i review #1; a deviation from "first tier" only when it is free).
+    first_charged = np.array([next((x for x in r if x != 0), 0.0) for r in rates])
+    price = np.where(price == 0, first_charged[frag], price)
+    return price * _KWH_PER_MWH, got
 
 
 def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
@@ -696,26 +805,55 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
     return spec, [i.id for i in items], missing, notes
 
 
-def energy_hash(n, cfg: CommercialConfig, version: int = _H.HASH_VERSION) -> str:
+def _energy_priced(cfg: CommercialConfig, recipe: int = LP_RECIPE) -> list:
+    """The items priced per interval (adders) under `recipe`: energy items and
+    non-convex tiers."""
+    tiered = {i.id for i in _energy_tiered(cfg, recipe)}
+    return [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
+            if not _is_demand(i) and _lp_reason(i) is None
+            and (not i.tiers or (i.id in tiered and not item_tiers_convex(i)))]
+
+
+def energy_hash(n, cfg: CommercialConfig, version: int = _H.HASH_VERSION,
+                recipe: int = LP_RECIPE) -> str:
     """What decides the energy rows besides the dispatch: the per-interval
-    energy items (incl. non-convex tiers priced at their first tier), the
-    export price version, the site clock, the charged Links and the axis
-    (Phase 1 gate binding condition 2)."""
-    items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
-             if not _is_demand(i) and _lp_reason(i) is None
-             and not (i.tiers and tiers_are_convex(i.tiers))]
-    raw = json.dumps({"items": _H.canonical(items, version=version),
-                      "export_price_ref": (_H.canonical(cfg.export_price_ref, version=version)
-                                           if cfg.export_price_ref is not None else None),
-                      "timezone": cfg.timezone, "import": sorted(import_links(cfg)),
-                      "export": cfg.export_link, "axis": _axis_hash(n.snapshots)},
-                     sort_keys=True)
+    energy items (incl. non-convex tiers priced at one tier), the export price
+    version, the site clock, the charged Links and the axis (Phase 1 gate
+    binding condition 2); with `recipe` the item set a solve under that recipe
+    priced. The energy history enters only when it prices a non-convex tier,
+    so a config without one hashes as before (WP2.1c-ii)."""
+    items = _energy_priced(cfg, recipe)
+    payload = {"items": _H.canonical(items, version=version),
+               "export_price_ref": (_H.canonical(cfg.export_price_ref, version=version)
+                                    if cfg.export_price_ref is not None else None),
+               "timezone": cfg.timezone, "import": sorted(import_links(cfg)),
+               "export": cfg.export_link, "axis": _axis_hash(n.snapshots)}
+    if (recipe >= WINDOWED_TIERS_RECIPE and cfg.meter_history_energy_kwh
+            and any(i.tiers for i in items)):
+        payload["energy_history"] = sorted(cfg.meter_history_energy_kwh.items())
+    raw = json.dumps(payload, sort_keys=True)
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def energy_record_state(n, cfg: CommercialConfig, rec: dict | None) -> str | None:
+    """How the current config relates to the solve's `ic_poc_links` record:
+    None — unchanged; "config" — the energy terms changed; "recipe" — unchanged,
+    but this recipe binds more of it than the one the record was solved with
+    (a windowed tier item before WP2.1c-ii): re-solve, not a drift."""
+    if not rec or rec.get("energy_hash") is None:
+        return None
+    r, v = energy_recipe_of(rec), _H.version_of(rec)
+    if rec["energy_hash"] != energy_hash(n, cfg, v, recipe=r):
+        return "config"
+    if r < WINDOWED_TIERS_RECIPE and (
+            [i.id for i in _energy_priced(cfg, r)] != [i.id for i in _energy_priced(cfg)]
+            or [i.id for i in _energy_tiered(cfg, r)] != [i.id for i in _energy_tiered(cfg)]):
+        return "recipe"
+    return None
 
 
 DEMAND_HASH_VERSION = _H.HASH_VERSION  # recorded in the demand info (recipe of items_hash)
 DEMAND_LP_RECIPE = 2  # recorded in the demand info: 2 = WP2.1c-i (tiers, all ratchet modes)
-LP_RECIPE = 2  # recorded in `ic_poc_links`: the LP recipe of the solve (absent ⇒ 1)
 
 
 def demand_hash(n, cfg: CommercialConfig, items, version: int = _H.HASH_VERSION) -> str:
@@ -915,12 +1053,15 @@ def _read_demand_solution(n, spec: dict) -> dict | None:
 
 def _tier_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list[str]]:
     """(spec, convex tiered item ids, non-convex tiered item ids). One key per
-    (item, investment period, local month) with snapshots; tier widths in MWh
-    and rates in €/MWh."""
-    items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
-             if i.tiers and not _is_demand(i) and _lp_reason(i) is None]
-    convex = [i for i in items if tiers_are_convex(i.tiers)]
-    nonconvex = [i.id for i in items if not tiers_are_convex(i.tiers)]
+    (item, investment period, local month) with snapshots. Each key lists the
+    item's PERIODS present in it (one for a plain tiered item; the matched
+    `tier_rates` period for a windowed one, WP2.1c-ii) with their positions and
+    €/MWh per segment, and the SEGMENTS (MWh widths) the periods share: a free
+    one below a first threshold above 0 (the engine bills that volume at 0),
+    then one per tier."""
+    items = _energy_tiered(cfg)
+    convex = [i for i in items if item_tiers_convex(i)]
+    nonconvex = [i.id for i in items if not item_tiers_convex(i)]
     if not convex:
         return None, [], nonconvex
     local = _local_clock(n.snapshots, cfg.timezone)
@@ -929,24 +1070,47 @@ def _tier_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list[s
            else np.full(len(n.snapshots), None, dtype=object))
     keys: list[dict] = []
     for item in convex:
+        windowed = is_windowed_tiered(item)
+        frag = _period_index(item, local) if windowed else np.zeros(len(local), dtype=int)
+        if (frag < 0).any():
+            raise CommercialBindingError(
+                f"tariff item {item.id!r} has no period covering {int((frag < 0).sum())} "
+                "snapshot(s); add a catch-all period")
         th = [t.threshold / _KWH_PER_MWH for t in item.tiers] + [np.inf]
+        free = th[0] > 0
+        segments = ([{"k": -1, "width_mwh": th[0]}] if free else []) + \
+            [{"k": k, "width_mwh": th[k + 1] - th[k]} for k in range(len(item.tiers))]
+        rates = item_tier_rates(item)
         for p in pd.unique(inv):
             for m in sorted(set(months[inv == p])):
-                pos = np.flatnonzero((inv == p) & (months == m))
+                sel = (inv == p) & (months == m)
+                periods = []
+                for f in sorted(set(frag[sel])):
+                    periods.append({
+                        "frag": int(f), "name": item.periods[int(f)].name,
+                        "positions": np.flatnonzero(sel & (frag == f)),
+                        "rates_eur_per_mwh": ([0.0] if free else [])
+                        + [float(r) * _KWH_PER_MWH for r in rates[int(f)]]})
                 keys.append({"key": f"{item.id}|{'' if p is None else p}|{m}", "item": item.id,
                              "month": m, "inv_period": None if p is None else int(p),
-                             "positions": pos,
-                             "tiers": [{"k": k, "width_mwh": th[k + 1] - th[k],
-                                        "rate_eur_per_mwh": float(t.rate) * _KWH_PER_MWH}
-                                       for k, t in enumerate(item.tiers)]})
+                             "windowed": windowed, "periods": periods, "segments": segments})
     return ({"import_links": import_links(cfg), "keys": keys, "items_hash": _items_hash(convex),
              "hash_version": _H.HASH_VERSION},
             [i.id for i in convex], nonconvex)
 
 
+def _tier_var(key: dict, period: dict, seg: dict) -> str:
+    """`ic_tier_q` coordinate. A plain item keeps the P1 names (`key|k`)."""
+    k = "free" if seg["k"] < 0 else str(seg["k"])
+    if not key.get("windowed"):
+        return f"{key['key']}|{k}"
+    return f"{key['key']}|{period['name']}#{period['frag']}|{k}"
+
+
 def add_tier_terms(n) -> None:
-    """Σ_k ic_tier_q[key,k] = the month's import energy (Σ w_t · p_t, MWh),
-    0 ≤ ic_tier_q[key,k] ≤ width_k, objective += Σ w_obj · rate_k · ic_tier_q."""
+    """Per key: Σ_k q[p, k] = period p's import energy (Σ w_t · p_t, MWh) for
+    each period p, Σ_p q[p, k] ≤ width_k for each segment k (one period: the
+    variable bound), 0 ≤ q ≤ width_k; objective += Σ w_obj · rate[p][k] · q."""
     import xarray as xr
 
     spec = getattr(n, TIER_SPEC_ATTR, None)
@@ -958,25 +1122,38 @@ def add_tier_terms(n) -> None:
              if isinstance(n.snapshots, pd.MultiIndex) else None)
     for key in spec["keys"]:
         wk = 1.0 if w_obj is None else float(w_obj.loc[key["inv_period"]])
-        for t in key["tiers"]:
-            names.append(f"{key['key']}|{t['k']}")
-            uppers.append(t["width_mwh"])
-            coefs.append(wk * t["rate_eur_per_mwh"])
+        for per in key["periods"]:
+            for seg, r in zip(key["segments"], per["rates_eur_per_mwh"]):
+                names.append(_tier_var(key, per, seg))
+                uppers.append(seg["width_mwh"])
+                coefs.append(wk * r)
     idx = pd.Index(names, name="tier")
     q = m.add_variables(lower=0, upper=xr.DataArray(uppers, coords={"tier": names}, dims="tier"),
                         name="ic_tier_q", coords=[idx])
     imp = m["Link-p"].sel(name=spec["import_links"]).sum("name")
     w = n.snapshot_weightings.objective.to_numpy(dtype=float)
-    for i, key in enumerate(spec["keys"]):
-        pos = key["positions"]
-        energy = (imp.isel(snapshot=pos) * w[pos]).sum()
-        tiers = q.sel(tier=[f"{key['key']}|{t['k']}" for t in key["tiers"]]).sum()
-        m.add_constraints(tiers - energy == 0, name=f"ic_tier_volume_{i}")
+    c = 0
+    for key in spec["keys"]:
+        for per in key["periods"]:
+            pos = per["positions"]
+            energy = (imp.isel(snapshot=pos) * w[pos]).sum()
+            mine = q.sel(tier=[_tier_var(key, per, seg) for seg in key["segments"]]).sum()
+            m.add_constraints(mine - energy == 0, name=f"ic_tier_volume_{c}")
+            c += 1
+        if len(key["periods"]) > 1:
+            for seg in key["segments"]:
+                if not np.isfinite(seg["width_mwh"]):
+                    continue
+                shared = q.sel(tier=[_tier_var(key, per, seg) for per in key["periods"]]).sum()
+                m.add_constraints(shared <= seg["width_mwh"], name=f"ic_tier_width_{c}")
+                c += 1
     m.objective += (q * xr.DataArray(coefs, coords={"tier": names}, dims="tier")).sum()
     setattr(n, TIER_BUILT_ATTR, True)
 
 
 def _read_tier_solution(n, spec: dict) -> dict | None:
+    """The solved allocation per (key, period, segment) — what the rows price
+    after a reload (`ic_tier_volumes`)."""
     model = getattr(n, "model", None)
     if not getattr(n, TIER_BUILT_ATTR, False) or model is None:
         return None
@@ -986,16 +1163,17 @@ def _read_tier_solution(n, spec: dict) -> dict | None:
         return None
     out = {}
     for key in spec["keys"]:
-        for t in key["tiers"]:
-            name = f"{key['key']}|{t['k']}"
-            v = float(sol.loc[name])
-            if not np.isfinite(v):
-                return None
-            out[name] = {"item": key["item"], "month": key["month"],
-                         "inv_period": key["inv_period"], "tier": t["k"],
-                         "rate_eur_per_mwh": t["rate_eur_per_mwh"], "q_mwh": v,
-                         "items_hash": spec.get("items_hash"),
-                         "hash_version": spec.get("hash_version")}
+        for per in key["periods"]:
+            for seg, r in zip(key["segments"], per["rates_eur_per_mwh"]):
+                name = _tier_var(key, per, seg)
+                v = float(sol.loc[name])
+                if not np.isfinite(v):
+                    return None
+                out[name] = {"item": key["item"], "month": key["month"],
+                             "inv_period": key["inv_period"], "tier": seg["k"],
+                             "period": per["name"], "rate_eur_per_mwh": r, "q_mwh": v,
+                             "items_hash": spec.get("items_hash"),
+                             "hash_version": spec.get("hash_version")}
     return out
 
 
@@ -1061,10 +1239,15 @@ def refuse_windowed_terms(demand: dict | None, tier_spec: dict | None,
 def tier_floor_eur_per_mwh(cfg: CommercialConfig) -> float:
     """The cheapest marginal import rate the convex tiers can charge (their
     first tier), summed over tiered items: tiers are LP terms, not adders."""
-    items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
-             if i.tiers and not _is_demand(i) and _lp_reason(i) is None
-             and tiers_are_convex(i.tiers)]
-    return float(sum(float(i.tiers[0].rate) * _KWH_PER_MWH for i in items))
+    total = 0.0
+    for i in _energy_tiered(cfg):
+        if not item_tiers_convex(i):
+            continue
+        if i.tiers[0].threshold > 0:
+            continue  # the volume below the first threshold is free
+        # A windowed item: the cheapest period's first rate (conservative).
+        total += min(r[0] for r in item_tier_rates(i)) * _KWH_PER_MWH
+    return float(total)
 
 
 def circulation_risk_snapshots(n, cfg: CommercialConfig, adders: dict[str, np.ndarray],
@@ -1214,9 +1397,8 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
                               # This solve records its connection agreement in
                               # `ic_connection` (P2 WP2.0); a P1 solve did not.
                               "agreement_recorded": True,
-                              # The LP recipe of this solve (absent ⇒ 1): 2 —
-                              # demand tiers and every ratchet mode bound
-                              # (WP2.1c-i). Dates a solve with no demand record.
+                              # The LP recipe of this solve (see `LP_RECIPE`):
+                              # dates a solve with no demand or tier record.
                               "lp_recipe": LP_RECIPE}
         if "v" in solved_peaks:
             n.meta[META_DEMAND] = solved_peaks["v"]
@@ -1238,6 +1420,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
         "demand_items": demand_items, "demand_not_established_months": demand_missing,
         "demand_partial_months": (demand or {}).get("info", {}).get("partial_months", []),
         "tiered_items": tiered_items, "nonconvex_tier_items": nonconvex_items,
+        "nonconvex_tier_predicted": predicted_tiers(n, cfg),
         "not_in_lp": not_in_lp, "notes": notes, "timezone": cfg.timezone,
         "simultaneous_flow_risk_snapshots": risk,
         "export_price_ref": (cfg.export_price_ref.model_dump(mode="json")
@@ -1310,10 +1493,12 @@ def energy_cost_rows(n, commercial: dict | None) -> dict | None:
     if cfg is not None and (cfg.poc_link != solved.get("import")
                             or cfg.export_link != solved.get("export")
                             or sorted(import_links(cfg)) != sorted(solved_import_links(solved))
-                            or (solved.get("energy_hash") is not None
-                                and solved["energy_hash"] != energy_hash(
-                                    n, cfg, _H.version_of(solved)))):
+                            or energy_record_state(n, cfg, solved) == "config"):
         flags.append("config_changed_since_solve")
+    elif cfg is not None and energy_record_state(n, cfg, solved) == "recipe":
+        # The config is unchanged; this recipe binds more of it (windowed
+        # energy tiers, WP2.1c-ii): re-solve.
+        flags.append("energy_recipe_changed")
     if not commercial:
         flags.append("config_cleared_since_solve")
     w = n.snapshot_weightings.objective

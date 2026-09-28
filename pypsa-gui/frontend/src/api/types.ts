@@ -368,6 +368,8 @@ export interface CommercialConfig {
   demand_items?: string[]
   /** Metered monthly import peaks before the horizon, {"YYYY-MM": kW} (ratchet seed). */
   meter_history_peaks_kw?: Record<string, number>
+  /** Metered import energy per month, {"YYYY-MM": kWh}: prices a non-convex tier in the LP (P2 WP2.1c-ii). */
+  meter_history_energy_kwh?: Record<string, number>
   /** P6 hook: a floor on a month's modelled peak, {"YYYY-MM": MW}. */
   initial_peak_lower_bound?: Record<string, number>
   /** Site power factor for per-kVA tariff items (IC P2 WP2.1a-i). */

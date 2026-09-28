@@ -129,9 +129,11 @@ def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
     solve = {"energy_hash": rec.get("energy_hash"), "energy_hash_version": _H.version_of(rec),
              "demand_hash": info.get("items_hash"), "demand_hash_version": _H.version_of(info)}
     changed = False
-    if rec.get("energy_hash") is not None and \
-            rec["energy_hash"] != _lp.energy_hash(n, cfg, _H.version_of(rec)):
+    state = _lp.energy_record_state(n, cfg, rec)
+    if state == "config":
         changed = True
+    elif state == "recipe":
+        flags.append("energy_recipe_changed")  # re-solve: windowed tiers bound since
     items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
              if _lp._is_demand(i) and _lp._lp_reason(i) is None]
     if info:
@@ -152,11 +154,12 @@ def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
     tier_rec = next(iter(tiers.values()), None)
     solve["tier_hash"] = (tier_rec or {}).get("items_hash")
     solve["tier_hash_version"] = _H.version_of(tier_rec)
+    recipe = _lp.energy_recipe_of(rec)
     if tier_rec is not None:
-        if tier_rec.get("items_hash") is not None and \
-                tier_rec["items_hash"] != _lp.tier_items_hash(cfg, _H.version_of(tier_rec)):
+        if tier_rec.get("items_hash") is not None and tier_rec["items_hash"] != \
+                _lp.tier_items_hash(cfg, _H.version_of(tier_rec), recipe=recipe):
             changed = True
-    elif _lp.tier_items_hash(cfg) is not None:
+    elif _lp.tier_items_hash(cfg, recipe=recipe) is not None:
         changed = True  # convex tiers added after the solve
     if not rec:
         flags.append("solve_provenance_unknown")

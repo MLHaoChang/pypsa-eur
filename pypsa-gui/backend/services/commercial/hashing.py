@@ -39,6 +39,7 @@ FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {
     ("TariffPeriod", "tier_rates"): None,                # WP2.1a-ii
     ("Ratchet", "months"): None,                         # WP2.1a-iii
     ("Ratchet", "cyclic_year"): False,                   # WP2.1a-iii
+    ("CommercialConfig", "meter_history_energy_kwh"): {},  # WP2.1c-ii
 }
 
 

@@ -469,6 +469,40 @@ Files: `lp_bindings.py`, `cost_rows.py`, `test_ratchet.py`, `test_tiers.py`, rec
 
 - **WP2.1c-i round 2 → PASS WITH CONDITIONS; residue fixed:** a metered peak inside the free tier predicted a rate of 0, and the LP again did no shaving. A predicted rate of 0 now falls back to the first charged rate. The live test is parametrised with history in the free tier.
 
+- WP2.1c-i round 3 → **PASS** (no residue). A live probe with history in the free tier prices the key at 12,000 €/MW and shaves the peak; gap −3e-11.
+
+- **As implemented, WP2.1c-ii:**
+  - **One tier LP for plain and windowed items.** `_tier_spec` keys are per (item, period, month). They carry the item's periods present in that month (positions and €/MWh per segment) and the shared segments, including a free one below a first threshold above 0.
+    - This fixes a P1 defect: P1 charged that volume at the first rate, while the engine bills it free.
+  - **LP terms.** `add_tier_terms` adds Σ_seg q = the period's volume, and Σ_period q ≤ width for finite segments when there is more than one period. Plain items keep the P1 variable names.
+  - **Records.** `ic_tier_volumes` records carry `period` and `tier` (−1 for the free segment), so the rows reconcile after a reload.
+  - **Convexity and eligibility.** `item_tiers_convex` requires rising rates in every period, and `item_tier_rates` gives the per-period rates. `_lp_reason` admits `tier_rates` items (cost, import).
+  - **Non-convex items.** `_predicted_tier_price` gives an adder per snapshot:
+    - the tier that `meter_history_energy_kwh[m−12]` lands in, in the first period only;
+    - otherwise the first tier;
+    - a free tier falls back to the period's first CHARGED rate. This deviates from "first tier" only when that tier is free, the energy twin of the WP2.1c-i review finding.
+    - `facts.nonconvex_tier_predicted` is {item: {month: tier}}.
+  - **`CommercialConfig.meter_history_energy_kwh`.** Keys are YYYY-MM and values ≥ 0. It is registered in `FIELDS_AFTER_V1` (default {}) and mirrored in `types.ts`.
+  - **`energy_hash` includes the energy history** only when a non-convex tier item is priced and the recipe is 3 or later. A config without one hashes as before.
+  - **Recipe.**
+    - `LP_RECIPE = 3` in `ic_poc_links`: 2 is WP2.1c-i, and 3 binds windowed energy tiers.
+    - `energy_record_state` compares a record with its own recipe's item set and reports "recipe" when the current recipe binds more. `energy_cost_rows`, `cost_rows` and `billing` then flag `energy_recipe_changed`, not a drift.
+  - `tier_floor_eur_per_mwh` takes the cheapest period's first rate, and 0 behind a free segment.
+  - **Tests:** `tests/test_lp_windowed_tiers.py` has 11 tests:
+    - spec shape;
+    - a non-convex period priced per period;
+    - the predicted tier;
+    - model validation and registration;
+    - the energy history in the hash only where it prices something;
+    - live: convex windowed with gap 0, the LP ≤ the bill, and the cheap tier going to peak;
+    - a one-period windowed item = the bill;
+    - the first threshold above 0 = the bill;
+    - predicted-tier rows;
+    - the recipe change in the rows and on the bill;
+    - the free-tier fallback.
+
+    The reconciliation gate has 15 cases (+ `windowed_tiers`). The P1/P2 tests that pinned "windowed tiers stay out of the LP" now pin the new contract.
+
 ## WP2.4b-0 Condition 4 refactor (lands before the Library work)
 
 Files: `backend/services/commercial/binding.py` (new: org resolution by an injected resolver, alignment,

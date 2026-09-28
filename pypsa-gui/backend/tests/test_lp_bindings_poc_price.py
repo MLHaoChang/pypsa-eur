@@ -152,8 +152,9 @@ def test_tiered_and_non_energy_items_are_left_to_later_bindings_and_reported():
     n = build_edge_15min()
     terms = L.materialise_poc_prices(n, _commercial(_tariff(_tou(), tiered, fixed))).facts
     assert terms["energy_items"] == ["energy"]
-    # Windowed tiers are billed exactly and enter the LP in WP2.1c.
-    assert terms["not_in_lp"] == {"tiered": "tiers_with_windows", "standing": "fixed_not_in_lp"}
+    # Windowed tiers are LP terms since WP2.1c-ii; fixed items never are.
+    assert terms["tiered_items"] == ["tiered"]
+    assert terms["not_in_lp"] == {"standing": "fixed_not_in_lp"}
 
 
 def test_no_commercial_config_is_a_no_op():

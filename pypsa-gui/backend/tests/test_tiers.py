@@ -140,8 +140,9 @@ def test_falling_tiers_are_flagged_and_priced_at_the_first_tier():
     assert billed < lp
 
 
-def test_windowed_tiers_are_left_out_of_the_lp_with_a_reason():
-    """Until P2 WP2.1c the LP leaves windowed tiers out (billed exactly)."""
+def test_windowed_tiers_are_lp_terms_since_wp2_1c():
+    """P1 and P2 up to WP2.1c-i left windowed tiers out; WP2.1c-ii binds them
+    (`tests/test_lp_windowed_tiers.py`)."""
     n = _site()
     thresholds = [{"threshold": t["threshold"], "rate": 0.0} for t in RISING]
     item = _tiered(thresholds, periods=[
@@ -150,7 +151,9 @@ def test_windowed_tiers_are_left_out_of_the_lp_with_a_reason():
         {"name": "rest", "rate": 0.0, "tier_rates": [t["rate"] for t in RISING]}])
     applied = L.materialise_poc_prices(
         n, {"poc_link": "import", "import_tariff": _tariff(item).model_dump(mode="json")})
-    assert applied.facts["not_in_lp"] == {"tiered": "tiers_with_windows"}
+    assert applied.facts["not_in_lp"] == {}
+    assert applied.facts["tiered_items"] == ["tiered"]
+    applied.undo()
 
 
 @pytest.mark.live_solve

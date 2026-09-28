@@ -456,6 +456,10 @@ class CommercialConfig(BaseModel):
     # Metered monthly import peaks before the horizon, {"YYYY-MM": kW} on the
     # site clock: the seed a ratchet's lookback needs (WP1.5b).
     meter_history_peaks_kw: dict[str, float] = Field(default_factory=dict)
+    # Metered import ENERGY per month, {"YYYY-MM": kWh} (P2 WP2.1c-ii): a
+    # non-convex tier is priced in the LP at the tier the same month a year
+    # earlier landed in (spec §5.3); absent ⇒ its first tier.
+    meter_history_energy_kwh: dict[str, float] = Field(default_factory=dict)
     # P6 hook (windowed dispatch): a floor on a month's modelled peak, {"YYYY-MM": MW}.
     initial_peak_lower_bound: dict[str, float] = Field(default_factory=dict)
     # The site's power factor for tariff items billed per kVA (P2 WP2.1a-i);
@@ -475,7 +479,8 @@ class CommercialConfig(BaseModel):
         if len(set(self.group_members)) != len(self.group_members):
             raise ValueError("group_members must be unique")
 
-        for name in ("meter_history_peaks_kw", "initial_peak_lower_bound"):
+        for name in ("meter_history_peaks_kw", "initial_peak_lower_bound",
+                     "meter_history_energy_kwh"):
             for k, v in getattr(self, name).items():
                 if not _re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", k):
                     raise ValueError(f"{name}: month keys are YYYY-MM, got {k!r}")

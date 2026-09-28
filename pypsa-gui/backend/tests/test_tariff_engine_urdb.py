@@ -373,20 +373,20 @@ def test_tier_rates_is_registered_for_hash_recipe_1():
     assert FIELDS_AFTER_V1[("TariffPeriod", "tier_rates")] is None
 
 
-def test_windowed_tiers_stay_out_of_the_lp_until_wp2_1c():
+def test_windowed_tiers_are_lp_terms_since_wp2_1c():
     from services.commercial import lp_bindings as L
 
-    assert L._lp_reason(_tariff(_windowed_energy()).items[0]) == "tiers_with_windows"
+    assert L._lp_reason(_tariff(_windowed_energy()).items[0]) is None
 
 
 def test_a_single_period_item_with_tier_rates_is_not_priced_at_zero_in_the_lp():
-    """Its `Tier.rate` are 0 by rule; the LP must not read them as the P1 rates."""
+    """Its `Tier.rate` are 0 by rule; the LP reads its `tier_rates` (WP2.1c-ii)."""
     from services.commercial import lp_bindings as L
 
     item = {"id": "e", "kind": "energy", "unit": "per_kwh",
             "tiers": [{"threshold": 0, "rate": 0.0}, {"threshold": 1000, "rate": 0.0}],
             "periods": [{"name": "all", "rate": 0.0, "tier_rates": [0.1, 0.2]}]}
-    assert L._lp_reason(_tariff(item).items[0]) == "tiers_with_windows"
+    assert L.item_tier_rates(_tariff(item).items[0]) == [[0.1, 0.2]]
 
 
 # ── WP2.1a-ii review round 1 ───────────────────────────────────────────────

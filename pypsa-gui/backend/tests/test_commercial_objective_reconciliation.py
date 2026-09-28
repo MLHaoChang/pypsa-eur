@@ -10,10 +10,11 @@ recomputes the rows after a reload with no solver state at all, and
 `_HANDLER_PARAMS` is unchanged (no new route argument; plan deviation from the
 `commercial_terms=` keyword, recorded in the plan).
 
-Fourteen cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
+Fifteen cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
 tiers; + group cap; a representative-weeks axis; two investment periods (TOU +
 demand + fee); a two-period group whose demand is metered on the group; annual FOM on the extendable assets; capex and FOM on a fee-bearing PoC Link (WP2.0);
-rising demand tiers, a designated-month and a cyclic ratchet (WP2.1c-i).
+rising demand tiers, a designated-month and a cyclic ratchet (WP2.1c-i); convex
+windowed energy tiers (WP2.1c-ii).
 After the reload the gap must still be computed (never None), and the flags,
 the not-established months and the group record must be the same.
 """
@@ -45,6 +46,12 @@ HISTORY = {f"2029-{m:02d}": 30_000.0 for m in range(2, 13)}
 # WP2.1c-i: rising demand tiers, designated-month and cyclic ratchets.
 DEMAND_TIERS = {**DEMAND, "periods": [{"name": "all", "rate": 0.0}],
                 "tiers": [{"threshold": 0, "rate": 5.0}, {"threshold": 30_000, "rate": 20.0}]}
+# WP2.1c-ii: convex windowed energy tiers (per-period rates on shared thresholds).
+WINDOWED_TIERS = {"id": "wtiers", "kind": "energy", "unit": "per_kwh", "measured_on": "import",
+                  "tiers": [{"threshold": 0, "rate": 0.0}, {"threshold": 300_000, "rate": 0.0}],
+                  "periods": [{"name": "peak", "rate": 0.0, "start_hour": 17, "end_hour": 21,
+                               "tier_rates": [0.30, 0.40]},
+                              {"name": "off", "rate": 0.0, "tier_rates": [0.10, 0.15]}]}
 RATCHET_MONTHS = {**DEMAND, "ratchet": {"months": [1], "share": 0.95}}
 RATCHET_CYCLIC = {**DEMAND, "ratchet": {"lookback_months": 1, "share": 0.9,
                                         "cyclic_year": True}}
@@ -143,6 +150,7 @@ CASES = {
     "fom": (_with_fom, {"import_tariff": _tariff(TOU)}),
     "poc_capex_fee": (_poc_capex, {"import_tariff": _tariff(TOU), "connection": FEE}),
     "demand_tiers": (_edge, {"import_tariff": _tariff(TOU, DEMAND_TIERS)}),
+    "windowed_tiers": (_edge, {"import_tariff": _tariff(WINDOWED_TIERS)}),
     "ratchet_designated": (_jan_feb, {"import_tariff": _tariff(TOU, RATCHET_MONTHS)}),
     "ratchet_cyclic": (_jan_feb, {"import_tariff": _tariff(TOU, RATCHET_CYCLIC),
                                   "meter_history_peaks_kw": {"2030-12": 60_000.0}}),
