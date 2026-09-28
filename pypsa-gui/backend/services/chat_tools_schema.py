@@ -1750,6 +1750,149 @@ TOOLS: list[dict[str, Any]] = [
         [],
     ),
 
+    # ── Reports (9) — WP6: the generated study report ───────────────────────
+    # The routes are WP1/WP3/WP5's (`routers/reports.py`,
+    # `routers/report_jobs.py`); each tool calls its handler in-process for
+    # the ACTIVE project. Tables and figures are the software's, never the
+    # model's; prose is written per section by the active LLM profile and
+    # every number in it is audited against the evidence.
+    _t(
+        "generate_report",
+        "Start writing the client report of the active project from "
+        "everything this session established (the Energy Hub reference "
+        "design, the adequacy surfaces, the FMEA worksheet) on the ACTIVE LLM "
+        "profile: one section at a time, prose between the software's own "
+        "tables and figures, every number audited against the evidence. "
+        "Takes minutes and spends model tokens; ONE job at a time — 409 "
+        "report_job_in_flight while another runs (abort_report_generation "
+        "stops it). `sections` (optional) names the section ids to write; "
+        "omit it for the executive summary plus every section the evidence "
+        "established. `language` defaults to 'en'; `instruction` is free text "
+        "the writer follows. 400 no_evidence when the session has nothing to "
+        "report on (run a study first). Returns {status:'running', "
+        "report_id} — poll get_report_status until done/aborted/failed, "
+        "then read it with get_report. Only call this when the user asks for "
+        "a report or a document; build_study_report is the in-chat summary. "
+        "Safety: execution.",
+        {
+            "title": {"type": "string"},
+            "language": {"type": "string"},
+            "sections": {"type": "array", "items": {"type": "string"}},
+            "instruction": {"type": "string"},
+        },
+        [],
+    ),
+    _t(
+        "get_report_status",
+        "The report generation job of this session: {status: running|done|"
+        "aborted|failed, report_id, version, mode, section, progress{done, "
+        "total, current}, repairs, prose_failures, error, profile_id, model, "
+        "started_at, finished_at}. `prose_failures` names the sections the "
+        "model could not write (they keep their tables, stated as 'prose not "
+        "established'). {status:'no_data'} when no generation has run yet. "
+        "Safety: read.",
+        {},
+    ),
+    _t(
+        "abort_report_generation",
+        "Stop the running report job after its current section. The sections "
+        "already written are kept and the partial report is saved as a "
+        "version (status 'aborted'); the rest stay code-only. IDEMPOTENT and "
+        "200 after the job finished; 404 report_job_not_found when no "
+        "generation ever ran in this session. Safety: destructive.",
+        {},
+    ),
+    _t(
+        "list_reports",
+        "Every study report of the active project, newest first: [{report_id, "
+        "title, created_at, updated_at, latest_version, mode "
+        "(evidence_only|generated), evidence_hash, profile_id, model, "
+        "generation}]. Safety: read.",
+        {},
+    ),
+    _t(
+        "get_report",
+        "Read one study report of the active project (the newest when "
+        "`report_id` is omitted; the latest version unless `version` is "
+        "given). Sections come back with their paragraphs, bullets and "
+        "callouts (disclosures, gaps, not-established statements) intact, "
+        "each table as {table_id, columns, n_rows, caption} — rows through "
+        "get_report_table — and each figure as its id and caption. Every "
+        "section carries `audit`: `unverified` are numbers the prose states "
+        "that the evidence does not contain (relay them as numbers to "
+        "check), `verified` the ones it does. A report whose prose would not "
+        "fit one result comes back as an outline (`outline: true`, one row "
+        "per section with counts) — pass `section_id` to read one section in "
+        "full. 404 report_not_found when the project has no report yet "
+        "(generate_report writes one). Never re-type a report's numbers into "
+        "chat as new findings; the document is the deliverable. "
+        "Safety: read.",
+        {
+            "report_id": {"type": "string"},
+            "version": {"type": "integer"},
+            "section_id": {"type": "string"},
+        },
+        [],
+    ),
+    _t(
+        "get_report_table",
+        "The rows of one table of a report version, paginated: {table_id, "
+        "columns, caption, source_path, items (rows as lists in `columns` "
+        "order), total_count, offset, returned, has_more}. `table_id` is one "
+        "the document's table blocks named. 404 report_table_not_found "
+        "lists the ids the report has. Safety: read.",
+        {
+            "report_id": {"type": "string"},
+            "table_id": {"type": "string"},
+            "version": {"type": "integer"},
+            "offset": {"type": "integer"},
+            "limit": {"type": "integer"},
+        },
+        ["report_id", "table_id"],
+    ),
+    _t(
+        "regenerate_report_section",
+        "Write ONE section of a report again on the active LLM profile, "
+        "optionally under an `instruction` ('one paragraph', 'stress the "
+        "import dependency'), from the report's latest version; the result "
+        "is saved as the next version with every other section unchanged. "
+        "Same job slot as generate_report (409 report_job_in_flight while a "
+        "job runs); poll get_report_status. 404 report_section_not_found for "
+        "an id the report does not have. Safety: execution.",
+        {
+            "report_id": {"type": "string"},
+            "section_id": {"type": "string"},
+            "instruction": {"type": "string"},
+            "language": {"type": "string"},
+        },
+        ["report_id", "section_id"],
+    ),
+    _t(
+        "export_report_docx",
+        "Render one report version (the newest report, latest version, when "
+        "omitted) as a Word .docx in the active project's uploads/ dir: an "
+        "`agent_export` chip in the chat panel's file strip with a download "
+        "button. Every table and figure is the software's; the prose is the "
+        "report's; unverified numbers are listed in a 'Numbers to check' "
+        "appendix. `filename` (optional) overrides "
+        "report_<id>_v<N>.docx. 404 report_not_found when there is no report "
+        "yet. Safety: write.",
+        {
+            "report_id": {"type": "string"},
+            "version": {"type": "integer"},
+            "filename": {"type": "string"},
+        },
+        [],
+    ),
+    _t(
+        "delete_report",
+        "Remove one study report of the active project with EVERY version "
+        "and figure of it. Refused while someone else holds the project's "
+        "edit lock. Returns {deleted: true, report_id}. Safety: destructive.",
+        {"report_id": {"type": "string"}},
+        ["report_id"],
+    ),
+
     # ── LLM provider switching (1) — Task 10 ────────────────────────────────
     _t(
         "set_active_profile",
@@ -2264,6 +2407,20 @@ TOOL_ROUTES: dict[str, list] = {
     "export_chat_summary": _SERVICE_CALL,
     # reports (1) — WP0 spike: in-process render + agent-export save
     "export_eh_report_docx": _SERVICE_CALL,
+    # reports (9) — WP6: the WP1/WP3/WP5 routes, called in-process for the
+    # active project. `get_report_table` reads the same document GET and
+    # pages one of its tables; the rest are one route each.
+    "generate_report": [("POST", "/api/projects/{name}/reports/generate")],
+    "get_report_status": [("GET", "/api/projects/{name}/reports/generate/status")],
+    "abort_report_generation": [("POST", "/api/projects/{name}/reports/generate/abort")],
+    "list_reports": [("GET", "/api/projects/{name}/reports")],
+    "get_report": [("GET", "/api/projects/{name}/reports/{report_id}")],
+    "get_report_table": [("GET", "/api/projects/{name}/reports/{report_id}")],
+    "regenerate_report_section": [
+        ("POST", "/api/projects/{name}/reports/{report_id}/sections/{section_id}/regenerate"),
+    ],
+    "export_report_docx": [("POST", "/api/projects/{name}/reports/{report_id}/export")],
+    "delete_report": [("DELETE", "/api/projects/{name}/reports/{report_id}")],
     "clear_uploads": _SERVICE_CALL,
     # asset_results (3) — Task 14. Real HTTP routes DO exist
     # (routers/asset_results.py, mounted at /api/results/asset in main.py)
