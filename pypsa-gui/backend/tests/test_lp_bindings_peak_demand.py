@@ -582,3 +582,109 @@ def test_p1_position_keyed_records_still_produce_rows():
     applied.undo()
     block = commercial_cost_terms(n, commercial)["block"]
     assert block["demand_charge"] == pytest.approx(30_000.0)
+
+
+# ── WP2.1a-0 review round 1: LP == engine on the named-window cases ────────
+
+def _summer_winter(ratchet=None):
+    return _demand(periods=[
+        {"name": "peak", "rate": 20.0, "months": [6, 7, 8], "start_hour": 17, "end_hour": 21},
+        {"name": "peak", "rate": 12.0, "start_hour": 17, "end_hour": 21},
+        {"name": "off", "rate": 0.0}], **({"ratchet": ratchet} if ratchet else {}))
+
+
+def _free_winter(ratchet=None):
+    return _demand(periods=[
+        {"name": "peak", "rate": 15.0, "months": [6, 7, 8], "start_hour": 17, "end_hour": 21},
+        {"name": "peak", "rate": 0.0, "start_hour": 17, "end_hour": 21},
+        {"name": "off", "rate": 0.0}], **({"ratchet": ratchet} if ratchet else {}))
+
+
+RATCHET_1 = {"lookback_months": 1, "share": 0.9}
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("case", ["split_ratchet", "summer_winter", "summer_winter_ratchet",
+                                  "free_winter_ratchet", "net_hourly", "two_periods"])
+def test_lp_equals_the_engine_on_named_windows(case):
+    start = "2030-05-28 00:00" if "winter" in case else F.START
+    n = _site(start=start)
+    item = {"split_ratchet": {**_split_peak(), "ratchet": RATCHET_1},
+            "summer_winter": _summer_winter(),
+            "summer_winter_ratchet": _summer_winter(RATCHET_1),
+            "free_winter_ratchet": _free_winter(RATCHET_1),
+            "net_hourly": {**_split_peak(), "measured_on": "net", "settlement": "h"},
+            "two_periods": _split_peak()}[case]
+    commercial = _commercial(_tariff(item))
+    history = {"2029-12": 0.0, "2030-04": 0.0, "2030-05": 0.0}
+    if "ratchet" in case:
+        commercial["meter_history_peaks_kw"] = history
+    if case == "net_hourly":
+        n.generators.loc["pv", "p_nom"] = 90.0
+        n.add("Link", "export", bus0="poc", bus1="grid", p_nom=80.0, carrier="AC",
+              marginal_cost=0.5)
+        n.generators.loc["grid_supply", "p_min_pu"] = -1.0
+        commercial["export_link"] = "export"
+    if case == "two_periods":
+        n.set_investment_periods([2030, 2040])
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig, run_simulation
+
+    PyPSAService.set_network(n)
+    cfg = SolverConfig(commercial=commercial, multi_investment_periods=case == "two_periods")
+    status, cond = run_simulation(cfg, n, PyPSAService.get_lock(), threading.Event(),
+                                  queue.SimpleQueue(), state_update=lambda **kw: None)
+    assert status in ("ok", "optimal"), (status, cond)
+    peaks = n.meta[L.META_DEMAND]
+    exp = n.links_t.p0["export"].to_numpy() if "export" in n.links_t.p0 else 0.0
+    ts = n.snapshots.get_level_values(-1) if case == "two_periods" else n.snapshots
+    total = 0.0
+    periods = [None] if case != "two_periods" else [2030, 2040]
+    for p in periods:
+        sel = slice(None) if p is None else (n.snapshots.get_level_values(0) == p)
+        idx = pd.DatetimeIndex(ts[sel])
+        disp = pd.DataFrame({"import_mw": n.links_t.p0["import"].to_numpy()[sel],
+                             "export_mw": (exp[sel] if not np.isscalar(exp) else exp)}, index=idx)
+        billed = engine_rate(disp, _tariff(item), step_hours=0.25, timezone=None,
+                             meter_history=history if "ratchet" in case else None)
+        lp = sum(v["eur_per_mw"] * v["billed_mw"] for v in peaks.values()
+                 if v.get("inv_period") == p)
+        assert lp == pytest.approx(billed.per_item["demand"], rel=1e-6), (case, p)
+        total += lp
+    assert total > 0
+
+
+def test_a_p1_split_peak_record_is_flagged_as_a_recipe_change():
+    """#4: a P1 record (no hash_version) holding two peaks for one named window
+    and month was billed on the P1 recipe; say so instead of showing it."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _site()
+    commercial = _commercial(_tariff(_split_peak()))
+    applied = L.materialise_poc_prices(n, commercial)
+    info = {k: v for k, v in getattr(n, L.DEMAND_SPEC_ATTR)["info"].items()
+            if k != "hash_version"}                       # as P1 wrote it
+    applied.undo()
+    row = {"item": "demand", "period": "peak", "month": "2030-01", "inv_period": None,
+           "eur_per_mw": 15000.0}
+    n.meta[L.META_DEMAND] = {"demand|0||2030-01": {**row, "peak_mw": 30.0, "billed_mw": 30.0},
+                             "demand|1||2030-01": {**row, "peak_mw": 45.0, "billed_mw": 45.0}}
+    n.meta[L.META_DEMAND_INFO] = info
+    assert "demand_recipe_changed" in commercial_cost_terms(n, commercial)["flags"]
+
+
+def test_a_p1_unique_name_record_is_not_a_recipe_change():
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _site()
+    commercial = _commercial(_tariff(_demand()))
+    applied = L.materialise_poc_prices(n, commercial)
+    info = {k: v for k, v in getattr(n, L.DEMAND_SPEC_ATTR)["info"].items()
+            if k != "hash_version"}
+    applied.undo()
+    n.meta[L.META_DEMAND] = {"demand|0||2030-01": {
+        "item": "demand", "period": "all", "month": "2030-01", "inv_period": None,
+        "eur_per_mw": 15000.0, "peak_mw": 2.0, "billed_mw": 2.0}}
+    n.meta[L.META_DEMAND_INFO] = info
+    flags = commercial_cost_terms(n, commercial)["flags"]
+    assert "demand_recipe_changed" not in flags and "config_changed_since_solve" not in flags

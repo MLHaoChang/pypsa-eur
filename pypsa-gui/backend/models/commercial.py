@@ -152,21 +152,36 @@ class TariffItem(BaseModel):
                 raise ValueError("tier thresholds must be strictly increasing")
         if self.ratchet is not None and self.kind != "demand":
             raise ValueError("ratchet only applies to demand items")
-        if self.kind == "demand":
-            # A demand WINDOW is the set of periods sharing a name (a URDB
-            # period is several [start, end) fragments; IC P2 WP2.1a-0). One
-            # window has one rate in any month: fragments of one name whose
-            # months overlap must agree (summer/winter "peak" may differ).
-            all_months = set(range(1, 13))
-            for i, a in enumerate(self.periods):
-                for b in self.periods[i + 1:]:
-                    if a.name != b.name or a.rate == b.rate:
-                        continue
-                    if (set(a.months) or all_months) & (set(b.months) or all_months):
-                        raise ValueError(
-                            f"demand item {self.id!r}: periods named {a.name!r} apply in the same "
-                            f"month with different rates ({a.rate} vs {b.rate}); one demand "
-                            "window has one rate per month")
+        if self.kind == "demand" or self.measured_on == "peak_import":
+            # Billed as demand (the engine's and LP's `_is_demand`). A demand
+            # WINDOW is the set of periods sharing a name (a URDB period is
+            # several [start, end) fragments; IC P2 WP2.1a-0), and it has ONE
+            # rate in any month. Checked on the EFFECTIVE first match, exactly:
+            # matching depends only on month, weekday and whole hour, so the
+            # 12 × 7 × 24 grid covers every case — a shadowed same-name default
+            # stays valid, weekday/weekend variants at two rates do not.
+            if "|" in self.id or any("|" in per.name for per in self.periods):
+                raise ValueError(f"demand item {self.id!r}: '|' is reserved (it joins the LP "
+                                 "peak keys) and may not appear in the item id or period names")
+            seen: dict[tuple[int, str], float] = {}
+            for month in range(1, 13):
+                for weekday in range(7):
+                    for hour in range(24):
+                        for per in self.periods:
+                            if per.months and month not in per.months:
+                                continue
+                            if per.weekdays and weekday not in per.weekdays:
+                                continue
+                            if per.start_hour is not None and not (
+                                    per.start_hour <= hour < per.end_hour):
+                                continue
+                            prev = seen.setdefault((month, per.name), per.rate)
+                            if prev != per.rate:
+                                raise ValueError(
+                                    f"demand item {self.id!r}: the window {per.name!r} has two "
+                                    f"rates ({prev} and {per.rate}) in month {month}; one demand "
+                                    "window has one rate per month")
+                            break
         return self
 
 

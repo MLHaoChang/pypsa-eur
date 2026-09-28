@@ -236,8 +236,11 @@ def demand_windows(item: TariffItem, local: pd.DatetimeIndex) -> tuple[np.ndarra
 def window_rate(item: TariffItem, frag_rows: np.ndarray) -> float:
     """The window's rate for a set of its intervals (one month): the rate of
     the fragments that matched them — one value, by the `TariffItem`
-    validator (fragments of one name agree within a month)."""
-    return float(item.periods[int(frag_rows[0])].rate)
+    validator (one effective rate per window and month). Raises if not."""
+    rates = {float(item.periods[int(k)].rate) for k in np.unique(frag_rows)}
+    if len(rates) != 1:
+        raise ValueError(f"demand item {item.id!r}: one window matched several rates {sorted(rates)}")
+    return rates.pop()
 
 
 def _history_kw(meter_history) -> dict[str, float]:
@@ -469,8 +472,12 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                     billed = peak
                     # A free window bills nothing: no ratchet, no seed gap.
                     if item.ratchet is not None and np.isfinite(peak) and rate_k != 0:
+                        # A free (month, window) bills nothing, so it sets no
+                        # ratchet either — the LP has no peak for it (WP2.1a-0
+                        # review #1); its month still counts as modelled.
+                        charged = {mk: v for mk, v in actual.items() if rate_of[mk] != 0}
                         prior, missing = _ratchet_prior(key, k, item.ratchet.lookback_months,
-                                                        actual, meter_history,
+                                                        charged, meter_history,
                                                         set(months_sorted))
                         if prior is not None and np.isfinite(prior):
                             billed = max(peak, item.ratchet.share * prior)

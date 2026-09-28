@@ -159,3 +159,61 @@ def test_the_fall_back_hour_rates_without_crashing(tz, day):
     df = pd.DataFrame({"import_mw": 1.0, "export_mw": 0.0}, index=idx)
     res = rate(df, _tariff(_demand(settlement="h")), step_hours=0.25, timezone=tz)
     assert res.per_item["demand"] == pytest.approx(10_000.0)
+
+
+# ── P2 WP2.1a-0 review round 1 ─────────────────────────────────────────────
+
+
+def test_a_free_month_of_a_window_does_not_feed_a_ratchet():
+    """#1: 'peak' is charged in summer only; May's free peak must not ratchet
+    June (a free window bills nothing — no ratchet from it, as in the LP)."""
+    import numpy as np
+
+    item = _demand(periods=[
+        {"name": "peak", "rate": 15.0, "months": [6, 7, 8], "start_hour": 17, "end_hour": 21},
+        {"name": "peak", "rate": 0.0, "start_hour": 17, "end_hour": 21},
+        {"name": "off", "rate": 0.0}],
+        ratchet={"lookback_months": 1, "share": 0.9})
+    idx = pd.date_range("2030-05-28", "2030-06-03 23:00", freq="h")
+    load = np.where(idx.month == 5, 45.0, 35.5)
+    res = rate(pd.DataFrame({"import_mw": load, "export_mw": 0.0}, index=idx), _tariff(item),
+               step_hours=1.0, timezone=None)
+    june = res.demand_lines[(res.demand_lines["month"] == "2030-06")
+                            & (res.demand_lines["period"] == "peak")]
+    assert june["billed_kw"].iloc[0] == pytest.approx(35_500.0)
+    assert "ratchet_seed_missing" not in (res.notes.get("demand") or [])
+
+
+def test_a_peak_import_item_is_validated_like_a_demand_item():
+    """#2: `measured_on="peak_import"` is billed as demand; one rate per window."""
+    with pytest.raises(ValueError, match="peak"):
+        _tariff({"id": "d", "kind": "energy", "unit": "per_kw_month", "measured_on": "peak_import",
+                 "periods": [{"name": "peak", "rate": 20.0, "start_hour": 0, "end_hour": 12},
+                             {"name": "peak", "rate": 5.0, "start_hour": 12, "end_hour": 24}]})
+
+
+def test_a_shadowed_default_of_the_same_name_is_valid():
+    """#3: the P1 override pattern — summer 'peak' first, an all-year 'peak'
+    after it — has ONE effective rate per month (the default never wins in
+    summer)."""
+    _tariff(_demand(periods=[
+        {"name": "peak", "rate": 20.0, "months": [6, 7, 8], "start_hour": 17, "end_hour": 21},
+        {"name": "peak", "rate": 9.0, "start_hour": 17, "end_hour": 21},
+        {"name": "off", "rate": 0.0}]))
+
+
+def test_weekday_and_weekend_variants_of_one_name_at_different_rates_are_refused():
+    with pytest.raises(ValueError, match="peak"):
+        _tariff(_demand(periods=[
+            {"name": "peak", "rate": 20.0, "weekdays": [0, 1, 2, 3, 4], "start_hour": 17,
+             "end_hour": 21},
+            {"name": "peak", "rate": 9.0, "weekdays": [5, 6], "start_hour": 17, "end_hour": 21},
+            {"name": "off", "rate": 0.0}]))
+
+
+@pytest.mark.parametrize("bad", [{"id": "a|b"}, {"period_name": "x|y"}])
+def test_the_key_separator_is_refused_in_demand_ids_and_names(bad):
+    """#5: `|` joins the LP peak keys; it may not appear in their parts."""
+    periods = [{"name": bad.get("period_name", "all"), "rate": 10.0}]
+    with pytest.raises(ValueError, match=r"\|"):
+        _tariff(_demand(item_id=bad.get("id", "demand"), periods=periods))

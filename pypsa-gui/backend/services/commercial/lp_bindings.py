@@ -537,6 +537,8 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
                         "inv_period": None if p is None else int(p),
                         "eur_per_mw": rate * _KWH_PER_MWH,
                         "net": item.measured_on == "net", "positions": pos})
+    if len({k["key"] for k in keys}) != len(keys):  # '|' is refused in ids and names
+        raise CommercialBindingError("demand peak keys are not unique")
     # Ratchets (WP1.5b): billed[key] ≥ ρ · actual[key'] for each lookback
     # month modelled in the SAME investment period, ≥ ρ · metered history for
     # one before the horizon; unknown months are disclosed, not constrained.

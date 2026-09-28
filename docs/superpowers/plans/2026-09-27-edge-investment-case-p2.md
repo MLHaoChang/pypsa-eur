@@ -162,6 +162,15 @@ Files: `tariff_engine.py`, `lp_bindings.py`, `test_tariff_engine_demand.py`, `te
     - rename is drift;
     - P1 position-keyed records still produce rows.
 
+- **Review round 1 → FAIL, fixed:**
+  - A free (rate-0) month of a window sets no ratchet in the engine, as in the LP; the month still counts as modelled.
+  - The validator covers every item billed as demand (`peak_import` too). It checks the EFFECTIVE first-match rate per (month, name) on the exact 12 × 7 × 24 grid: a shadowed same-name default (the P1 override pattern) is valid, and weekday/weekend variants at two rates are refused.
+  - `window_rate` raises when the matched fragments disagree.
+  - `|` is refused in demand item ids and period names, and peak keys are asserted unique.
+  - A P1 record without `hash_version` holding two peaks for one (item, window, month) flags `demand_recipe_changed`; unique-name P1 records are unflagged.
+  - New live LP = engine tests: ratchet on a split peak; summer/winter windows with and without a ratchet; a free winter with a ratchet; net hourly; two periods. Engine tests are in `test_tariff_engine_demand.py`.
+  - **Upgrade note:** saved P1 tariffs whose same-name demand fragments have two effective rates in one month no longer validate. The project still loads, and rows are shown with `commercial_config_invalid`; a re-solve needs the tariff fixed (rename one fragment).
+
 ## WP2.1a-i Engine: per-day fixed, tariff capacity items, demand tiers
 
 Model delta (all optional, old JSON unchanged): `TariffItem.unit += "per_day"`; `Tier` allowed on demand

@@ -109,6 +109,15 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
         if drift:
             flags.append("config_changed_since_solve" if commercial else
                          "config_cleared_since_solve")
+        if info.get("hash_version") is None:
+            # A P1 record keyed peaks by period POSITION: two peaks for one
+            # (item, window name, month) mean a split window billed twice,
+            # which the P2 recipe bills once (WP2.1a-0 review #4). Unique-name
+            # P1 records bill the same under both and are not flagged.
+            idents = [(v.get("item"), v.get("period"), v.get("month"), v.get("inv_period"))
+                      for v in peaks.values()]
+            if len(idents) != len(set(idents)):
+                flags.append("demand_recipe_changed")
         if "ratchet_seed_missing" in (info.get("notes") or []):
             # The billed demand is a LOWER BOUND: part of a ratchet's lookback
             # is unknown (round 2 #4).
