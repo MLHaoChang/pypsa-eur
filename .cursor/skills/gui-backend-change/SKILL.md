@@ -38,6 +38,49 @@ Two rules hold this together:
   `assumptions`/`diagnostics`/`objective` → `myopic`). If new code seems to need
   a back-import, it is in the wrong module. The same test enforces this.
 
+## Where planning-loop / study controllers go
+`POST /results/coupling_loop`, `POST /results/margin_loop`,
+`POST /results/mc`, `POST /results/frontier`, `POST /results/fmea_sweep`,
+and `POST /results/eh_study`
+stay as thin handlers in `routers/results.py` (mesh refuse + FastAPI
+decorator). The validation, bindings, study record and worker live in:
+
+| module | owns |
+|---|---|
+| `services/adequacy/coupling_loop_runner.py` | `start_coupling_loop`, coupling-loop constants + `CouplingLoopRequest` |
+| `services/adequacy/margin_loop_runner.py` | `start_margin_loop`, margin-loop constants + `MarginLoopRequest` |
+| `services/adequacy/mc_loop_runner.py` | `start_mc`, `McRequest` + `McElccAsset` |
+| `services/adequacy/frontier_loop_runner.py` | `start_frontier`, `FrontierRequest` |
+| `services/adequacy/fmea_sweep_runner.py` | `start_fmea_sweep`, `FmeaSweepRequest` |
+| `services/adequacy/eh_study_runner.py` | `start_eh_study`, `EhStudyRequest` |
+
+Inject `solver_state=`, `state_update=` (loops / frontier / sweep — anything
+that restores via `_state_update`), `publish_study=` — never import
+`routers.*` from the runners. The pure controllers stay in
+`services/adequacy/coupling.py` / `mc.py` / `elcc.py` / `frontier.py` /
+`sweep.py`. Constants/models are re-exported from the router so `chat_tools`
+and existing tests keep importing from `routers.results`. Specs:
+`docs/superpowers/specs/2026-09-13-planning-loop-router-lift-design.md`,
+`docs/superpowers/specs/2026-09-13-mc-study-router-lift-design.md`.
+
+Study abort POSTs share `_abort_study(key, never_run_msg)` in `routers/results.py` — keep the per-route docstring and 404 copy; do not fold them into `/simulation/abort`.
+
+## Where COPT / FMEA-modes payloads go
+`GET /results/copt` and `GET /results/fmea_modes` stay as thin handlers in
+`routers/results.py` (network + state + HTTP map). Payload assembly lives in
+`services/adequacy/copt_endpoint.py` (`build_copt_payload`,
+`build_fmea_modes_payload`). Inject `get_lock=` / `sweep_record=` — never
+import `routers.*` from the endpoint module. Pure engines stay in
+`services/adequacy/copt.py`. Spec:
+`docs/superpowers/specs/2026-09-13-copt-modes-router-lift-design.md`.
+
+## Where lost-load payload assembly goes
+`GET /results/lost_load` stays a thin handler in `routers/results.py`
+(capture lookup + HTTP map). Arithmetic lives in
+`services/results/lost_load.py::compute_lost_load`. Inject the capture
+dict — never import `routers.*`. Spec:
+`docs/superpowers/specs/2026-09-13-lost-load-router-lift-design.md`.
+
 ## Where results arithmetic goes
 The `/results/*` handlers in `routers/results.py` are thin: network lookup,
 `_dispatch_ready` gate, `_state` reads, then a call into
@@ -64,9 +107,9 @@ fails if a name or a positional parameter list changes, and
 Nothing under `services/compare/` imports a router.
 
 ## Where network helpers go
-`routers/network.py` keeps its ~80 CRUD routes, the generic CRUD factory and
-`_xlsx_response`. The pure helpers live in services and are re-exported from
-the router, so existing imports are unchanged:
+`routers/network.py` keeps its ~80 thin CRUD routes and the undo stack; the
+generic CRUD factory lives in `services/network_crud.py` (re-exported). Pure helpers live in services and are re-exported from the
+router; two sibling routers hold deep route clusters:
 
 | module | owns |
 |---|---|
@@ -75,13 +118,34 @@ the router, so existing imports are unchanged:
 | `services/network_geometry.py` | haversine, bus coordinates, impedance preview, length recompute |
 | `services/transformer_rules.py` | transformer voltage validation / enrichment / type sanitisation |
 | `services/snapshot_index.py` | `_build_period_multiindex` |
+| `services/network_bulk.py` | `PATCH /_bulk` coerce rules + `apply_bulk_update`; thin `bulk_update` stays on the router |
+| `services/network_buses.py` | bus specials (`apply_update_bus`, cascade delete, rename); inject `_update_component` — never import `routers.*` |
+| `services/network_lines.py` | line specials (`apply_recalculate_line_lengths`, `apply_rescale_impedances`); geometry stays in `network_geometry` |
+| `services/network_global_constraints.py` | global-constraint create/update/delete; inject `_merge_partial_update` on update — never import `routers.*` |
+| `services/network_crud.py` | generic CRUD factory (`_create`/`_update`/`_delete`/`_merge_partial_update` + series/rename helpers); router re-exports |
+| `routers/network_time_axis.py` | snapshots / investment periods / timeseries routes (Phase 5) |
+| `routers/network_profiles.py` | load / generator / link profile list + template + upload; `_xlsx_response`, `_apply_profile_upload` |
+| `services/network_undo.py` | undo capture/restore (`push_undo_snapshot`, `get_undo_info`, `apply_undo`); thin `/undo` handlers stay on the router |
 
 **Never rebind `_user_ts` or `_user_ts_lock`.** `services/chat_tools.py` imports
 them by value inside a function and mutates in place; reassigning either would
 leave the router and every importer holding different objects, with writes
 going to different stores. `tests/test_network_facade_surface.py` fails on any
-rebinding, and also fails if a CRUD helper is moved out — this phase's scope is
-pinned, not conventional.
+rebinding, and fails if a moved helper stops being the identical re-export. Bulk lift:
+`docs/superpowers/specs/2026-09-13-network-bulk-router-lift-design.md`.
+Profiles sibling:
+`docs/superpowers/specs/2026-09-13-network-profiles-router-lift-design.md`.
+Undo lift: `docs/superpowers/specs/2026-09-13-network-undo-router-lift-design.md`.
+Bus specials: `docs/superpowers/specs/2026-09-13-network-bus-specials-lift-design.md`.
+Line specials: `docs/superpowers/specs/2026-09-13-network-line-specials-lift-design.md`.
+Global constraints: `docs/superpowers/specs/2026-09-13-network-global-constraints-lift-design.md`.
+CRUD factory: `docs/superpowers/specs/2026-09-13-network-crud-factory-lift-design.md`.
+
+Inject state into `apply_bulk_update` only via its arguments / `PyPSAService` —
+never import `routers.*` from `services/network_bulk.py`. Do not fold the
+inlined coerce loop in `apply_bulk_update` into `_coerce_bulk_value` without a
+dedicated change (MERGE NOTE documents both shapes). Sibling profile routers
+must not import `routers.network` (cycle).
 
 ## Weighting (multi-period)
 - Use `snapshot_weights(n, column, sns=None)`, `period_years_map`, `years_for_period`.

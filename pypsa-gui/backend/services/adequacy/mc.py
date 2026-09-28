@@ -113,6 +113,8 @@ class StorageSpec:
     q: float = 0.0
     basis: str = ""
     source: str = "missing"
+    # P7: citation when ``source == "carrier_default"``.
+    library_citation: str = ""
 
 
 @dataclass(frozen=True)
@@ -243,11 +245,16 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
                 max_hours = 0.0
             occ = sparams.loc[s]
             q_s = 0.0
+            cite = ""
             if str(occ["source"]) != "missing":
                 if not rate_is_usable(occ["rate"]):
                     bad_rates.append(f"{s} (rate {float(occ['rate']):g})")
                     continue
                 q_s = float(occ["rate"])
+            if str(occ["source"]) == "carrier_default":
+                from services.adequacy.occurrence import library_citation as _lib_cite
+                carrier = str(row.get("carrier") or "").strip().lower()
+                cite = _lib_cite(carrier) or ""
             storage.append(StorageSpec(
                 name=str(s),
                 p_nom_mw=p_nom,
@@ -258,6 +265,7 @@ def snapshot_inputs(n, *, vre_assets=(), keep_zero_capacity=False, cfg=None,
                 q=q_s,
                 basis=str(occ["basis"] or ""),
                 source=str(occ["source"]),
+                library_citation=cite,
             ))
         if bad_rates:
             raise OutageRateError(
@@ -574,6 +582,17 @@ def block_store_arrays(stores, start: int, end: int, *, any_series: bool):
     # M6: the store's outage rate as an expected-value derate of BOTH power
     # and energy — a forced outage takes the whole unit out — the rule the
     # reserve margin already credits it by.
+    #
+    # The `else 1.0` is UNREACHABLE from `snapshot_inputs` and stays anyway
+    # (whole-branch review, B2 — reviewed and kept, not overlooked). That
+    # path sets `q = 0.0` for a store with no resolvable rate and REFUSES
+    # the study outright (`OutageRateError`) for one whose rate is not in
+    # [0, 1), so every `q` arriving here is already finite and in range.
+    # This function is module-level and hand-built `StorageSpec`s reach it
+    # from the tests and from any future caller, where "no usable rate" must
+    # mean "no derate" rather than a NaN silently eating the whole fleet's
+    # capacity — a wrong number with no error. Credit at 1.0 is the same
+    # answer the margin gives an unpriceable asset.
     def _avail(s) -> float:
         q = float(getattr(s, "q", 0.0) or 0.0)
         return 1.0 - q if math.isfinite(q) and 0.0 <= q < 1.0 else 1.0

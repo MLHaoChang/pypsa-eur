@@ -228,6 +228,11 @@ RESULT_STATE_KEYS = (
     "lopf_results", "ac_pf_results",
     "last_lost_load",
     "adequacy_report",
+    "eh_reference_design_report",
+    "eh_redundancy_comparison",
+    "eh_lever_comparison",
+    "eh_dtc_stress",
+    "eh_dtc_planning",
     "last_reserve_margin",
     "ac_pf_convergence", "ac_pf_convergence_list",
     "ac_pf_slack_bus_used", "ac_pf_stripped_voll_slacks",
@@ -248,7 +253,8 @@ RESULT_STATE_KEYS = (
 # And it keeps the import graph acyclic — `study_state` imports PyPSAService,
 # so `pypsa_service` cannot import `study_state`, but it already imports this
 # module.
-STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop")
+STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
+             "eh_study")
 
 # What each study is called in a refusal. A user who is told "a study is
 # running" cannot act; one who is told WHICH can go and deal with it.
@@ -258,6 +264,7 @@ STUDY_LABELS = {
     "mc": "a sequential-MC study",
     "coupling_loop": "a coupling-loop study",
     "margin_loop": "a margin-loop study",
+    "eh_study": "an Energy Hub study",
 }
 
 # The studies a user can actually STOP.
@@ -273,7 +280,7 @@ STUDY_LABELS = {
 # Pinned by a test against the routes that actually exist, so this cannot
 # drift the day someone REMOVES an abort.
 ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
-                     "fmea_sweep")
+                     "fmea_sweep", "eh_study")
 
 
 def record_is_running(record) -> bool:
@@ -403,6 +410,11 @@ class ProjectSolverState:
     # Result-state (persisted to results_state.pkl)
     last_lost_load: Any = None
     adequacy_report: Any = None   # minimal AdequacyReport dict (target solves)
+    eh_reference_design_report: Any = None  # ReferenceDesignReport dict (EH study)
+    eh_redundancy_comparison: Any = None
+    eh_lever_comparison: Any = None  # Phase 3c import/storage lever table
+    eh_dtc_stress: Any = None  # Phase 4a DtC stress table
+    eh_dtc_planning: Any = None  # Phase 4b DtC planning table
     # The firm-capacity (reserve-margin) result of the last solve that
     # enforced one — the PERSISTED solve-time stash `/results/reserve_margin`
     # serves. Reset with the rest each solve, so a margin can never outlive
@@ -438,6 +450,7 @@ class ProjectSolverState:
     mc: Any = None
     coupling_loop: Any = None
     margin_loop: Any = None
+    eh_study: Any = None
 
     def as_dict(self) -> dict[str, Any]:
         """A plain dict with the same keys/values — the legacy `_state` shape."""

@@ -1248,3 +1248,49 @@ def test_a_clamped_iterate_reports_the_margin_it_SOLVED(
     assert float(stubs.restore_cfgs[-1].reserve_margin) == pytest.approx(ceiling)
     cfg = client.get("/api/simulation/solver_config").json()
     assert float(cfg["reserve_margin"]) == pytest.approx(ceiling)
+
+
+# ── ★ B1 — the clamped iterate the search must not pay for twice ──────────
+
+def test_the_clamped_midpoint_is_never_solved_twice(
+        client, install_network, monkeypatch):
+    """★ B1 (IEEE 39-bus review, F5), the same repro as the F1 acceptance test
+    above and the other half of its finding: when the search clamps at the
+    fleet ceiling and that iterate MEETS, the refinement bisection asks for a
+    fresh coordinate that maps to the SAME ceiling margin. Before the fix the
+    loop solved it — a full capacity expansion plus its MC — and stopped one
+    iterate later on the plan hash, leaving two rows in the record with
+    identical margin, identical cost and identical LOLE.
+
+    `solve_at.solved_value` (routers/results.py) tells the controller what a
+    coordinate would actually solve, so the stop happens before the solve.
+
+    Bite: drop the `_would_re_solve` test in `coupling.py`'s refinement loop —
+    `stubs.margins` grows a second entry at the ceiling and `solves_used`
+    becomes 3.
+    """
+    stubs = _Stubs(firm_base=130.0)
+    _install_stubs(monkeypatch, stubs)
+    _setup(client, install_network, reserve_margin=0.10)
+
+    _start(client, max_solves=6)
+    body = _poll(client)
+
+    assert body["status"] == "met", body
+    ceiling = float(body["margin_ceiling"])
+    at_ceiling = [m for m in stubs.margins if m == pytest.approx(ceiling)]
+    # The clamp fired — without that this test cannot see its defect…
+    assert len(at_ceiling) >= 1, (stubs.margins, ceiling)
+    # …and the ceiling was SOLVED once, not once per coordinate that maps to
+    # it. This is the assertion that counts solves.
+    assert len(at_ceiling) == 1, (
+        f"the ceiling margin {ceiling!r} was solved {len(at_ceiling)} times: "
+        f"{stubs.margins!r}")
+    assert body["solves_used"] == 2, body["iterations"]
+
+    # The record says the same thing: no two iterates report one margin.
+    values = [round(float(r["lever_value"]), 12) for r in body["iterations"]]
+    assert len(values) == len(set(values)), values
+    # …and the answer is unchanged — the skipped coordinate stood for the
+    # ceiling, which is what the verdict names.
+    assert float(body["lever_star"]) == pytest.approx(ceiling)

@@ -270,6 +270,44 @@ def test_super_admin_creates_organization(super_admin_client, auth_session_local
     assert created_org is not None
 
 
+def test_a_super_admin_claiming_into_an_unknown_org_is_refused(
+    super_admin_client,
+) -> None:
+    """
+    `org_id` is resolved to the Organization ROW, so an id that names nothing
+    is a 404 before any work happens.
+
+    It used to be returned as given. Nothing checked the org existed, and the
+    value goes on to become a path segment — `storage_paths.taken_names` builds
+    `projects_root/<org_id>/` — so a typo'd uuid quietly created a directory
+    belonging to no organization. The UUID type makes it harmless as a
+    traversal (CodeQL flags the flow, `py/path-injection`, and cannot see
+    that); this is about the claim landing somewhere real.
+    """
+    legacy_root = get_settings().legacy_root
+    (legacy_root / "Orphan").mkdir(parents=True)
+    (legacy_root / "Orphan" / "metadata.json").write_text(
+        json.dumps({"name": "Orphan", "parent_project": None}), encoding="utf-8",
+    )
+    (legacy_root / "Orphan" / "network.nc").write_text("x", encoding="utf-8")
+
+    response = super_admin_client.post(
+        "/api/admin/legacy-projects/Orphan/claim",
+        json={
+            "owner_id": str(uuid.uuid4()),
+            "org_id": "00000000-0000-4000-8000-000000000000",
+            "member_ids": [],
+            "include_descendants": False,
+        },
+    )
+
+    assert response.status_code == 404, response.text
+    assert "organization" in response.text.lower()
+    # And nothing was created for it.
+    root = get_settings().projects_root
+    assert not (root / "00000000-0000-4000-8000-000000000000").exists()
+
+
 def test_admin_lists_and_claims_legacy_project_tree(
     admin_client,
     auth_session_local,

@@ -1218,6 +1218,55 @@ class _DistAssets(StaticFiles):
         return super().lookup_path(path)
 
 
+def _entry_under(root: Path, relative: str) -> Path | None:
+    """
+    The file `relative` names under `root`, walked one segment at a time and
+    matched against the entries that are actually there — or None.
+
+    WHY NOT `(root / relative).resolve()` plus `is_relative_to`. That is what
+    this replaces and it was correct, but the path it produced was BUILT from
+    the request, so its safety rested on the containment check being right, and
+    CodeQL's `py/path-injection` — which does not model `is_relative_to` as a
+    barrier — reported the value tainted all the way to `FileResponse`.
+
+    Every component here comes out of `iterdir()`, so the result is a file that
+    demonstrably already exists under `root`. Traversal is not rejected; it is
+    unrepresentable: `iterdir()` never yields an entry named `.` or `..`, and a
+    segment naming neither an existing child nor a file is a miss. Same idiom
+    as `routers/snapshots._existing_snapshot_dir` and
+    `gridspine_service._authorized_dispatch_dir`.
+
+    The per-segment `iterdir()` is affordable HERE specifically: `/assets/*` —
+    the hashed bundles, and the bulk of static traffic — is served by the
+    `_DistAssets` mount above, so this path handles only the shallow root files
+    (`favicon.ico`, `manifest.json`, and friends).
+
+    A symlink inside `dist` is followed, exactly as before: the old check
+    called `resolve()` on both sides, so a link pointing outside `dist` failed
+    `is_relative_to` and 404'd. Here it never matches an entry name in the
+    first place unless it IS a real child, and following a child of the build
+    output is the intended behaviour for a build output.
+    """
+    current = root
+    segments = [seg for seg in relative.split("/") if seg]
+    if not segments:
+        return None
+    for segment in segments:
+        try:
+            match = next(
+                (child for child in current.iterdir() if child.name == segment),
+                None,
+            )
+        except OSError:
+            # `current` is a file, or unreadable: either way the remaining
+            # segments name nothing.
+            return None
+        if match is None:
+            return None
+        current = match
+    return current if current.is_file() else None
+
+
 app.mount("/assets", _DistAssets(check_dir=False), name="assets")
 
 
@@ -1229,8 +1278,8 @@ def serve_spa(full_path: str, request: Request):
 
     path = "/" + full_path
     if static_gate.is_static_asset(path):
-        candidate = (dist / full_path).resolve()
-        if not candidate.is_relative_to(dist.resolve()) or not candidate.is_file():
+        candidate = _entry_under(dist, full_path)
+        if candidate is None:
             raise HTTPException(status_code=404, detail="Not found")
         return FileResponse(candidate)
 

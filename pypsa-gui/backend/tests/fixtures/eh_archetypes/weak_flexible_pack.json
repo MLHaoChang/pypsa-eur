@@ -1,0 +1,29 @@
+{
+  "archetype": "weak_flexible",
+  "availability": {
+    "ens_cap_permyriad": 10.0,
+    "target_lole_h": 3.0,
+    "planning_metric": "ens",
+    "certification_metric": "mc_lole"
+  },
+  "levers": {
+    "sizing": true,
+    "redundancy": false,
+    "import_cap": true,
+    "storage_duration": true
+  },
+  "import_overlay": {
+    "import_carriers": [
+      "AC",
+      "DC",
+      "electricity"
+    ],
+    "import_p_nom_mw": 50.0,
+    "import_energy_mwh_per_year": null,
+    "import_firmness": "planning_limit_only"
+  },
+  "mc_certify_required": true,
+  "dtc_stress_default": true,
+  "dsr_opt_in": true,
+  "dtc_planning_default": false
+}

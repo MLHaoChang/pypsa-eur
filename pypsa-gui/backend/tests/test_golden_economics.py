@@ -72,6 +72,10 @@ def _gas_expected_capex(n) -> float:
         lifetime=float(n.generators.at["gas", "lifetime"]),
         snapshots_per_period=gf.SNAPSHOTS_PER_PERIOD,
     )
+    # `gas` carries fixed O&M (gf.GOLDEN_GAS_FOM): the fixed cost the LP paid
+    # is investment + FOM, so every surface must report that sum.
+    rate = oracle.fixed_cost_rate(rate, oracle.fom_per_horizon(
+        float(n.generators.at["gas", "fom_cost"]), gf.SNAPSHOTS_PER_PERIOD))
     return oracle.horizon_capex(
         rate, float(n.generators.at["gas", "p_nom_opt"]), gf.GOLDEN_YEARS
     )
@@ -171,7 +175,8 @@ def test_line_capex_agrees_with_the_oracle_across_cost_breakdown_and_asset_costs
 
     n = golden
     expected = oracle.horizon_capex(
-        rate_per_mw=float(n.lines.at["L_ab", "capital_cost"]),
+        rate_per_mw=oracle.capital_cost_per_horizon(
+            float(n.lines.at["L_ab", "capital_cost"]), gf.SNAPSHOTS_PER_PERIOD),
         p_nom_opt=float(n.lines.at["L_ab", "s_nom_opt"]),
         years=gf.GOLDEN_YEARS,
     )
@@ -278,7 +283,8 @@ def test_compare_capacity_agrees_with_asset_economics(golden):
     )
 
     expected_solar_total_eur = oracle.horizon_capex(
-        rate_per_mw=float(n.generators.at["solar", "capital_cost"]),
+        rate_per_mw=oracle.capital_cost_per_horizon(
+            float(n.generators.at["solar", "capital_cost"]), gf.SNAPSHOTS_PER_PERIOD),
         p_nom_opt=float(n.generators.at["solar", "p_nom_opt"]),
         years=gf.GOLDEN_YEARS,
     )
@@ -297,7 +303,9 @@ def test_compare_capacity_agrees_with_asset_economics(golden):
         - float(n.generators.at["gas", "p_nom"])
     )
     assert delta > 0.0  # guards against a silently-zero comparison
-    expected_new_gas_eur = annual_rate * delta
+    expected_new_gas_eur = oracle.fixed_cost_rate(
+        annual_rate, oracle.fom_per_horizon(
+            float(n.generators.at["gas", "fom_cost"]), gf.SNAPSHOTS_PER_PERIOD)) * delta
     new_gas_meur = summary.new_capex_meur_by_carrier["gas"].total
     assert new_gas_meur * 1e6 == pytest.approx(expected_new_gas_eur, rel=1e-6)
 
@@ -437,10 +445,12 @@ def _from_asset_costs(n) -> dict[tuple[str, str], float]:
 
     Genuinely per-asset for every class it returns — unlike cost_breakdown /
     statistics / economics_by_carrier, this payload is keyed by asset NAME,
-    not by carrier or class alone. `capital_cost` is the annualised
-    €/MW(or /MWh)/yr rate (correctly resolved through the same
-    with_periodized_cost_defaults wrapper asset_economics uses); multiply by
-    the network's own p_nom_opt/s_nom_opt and the horizon years.
+    not by carrier or class alone. `fixed_cost` is the annualised
+    €/MW(or /MWh)/yr rate the LP objective paid — annuitised investment
+    (`capital_cost`, correctly resolved through the same
+    with_periodized_cost_defaults wrapper asset_economics uses) plus fixed
+    O&M (`fom_cost`); multiply by the network's own p_nom_opt/s_nom_opt and
+    the horizon years.
     """
     import routers.simulation as sim
 
@@ -453,7 +463,7 @@ def _from_asset_costs(n) -> dict[tuple[str, str], float]:
             if df is None or name not in df.index:
                 continue
             opt = float(df.at[name, opt_col])
-            out[(cls, name)] = float(entry["capital_cost"]) * opt * years
+            out[(cls, name)] = float(entry["fixed_cost"]) * opt * years
     return out
 
 
