@@ -158,3 +158,71 @@ Run on scratch copies of `src` (`qa26/mut`, `qa26/mutate.sh`). The real tree is 
   - The screenshots were read as a first-time user.
 - **Probes:** `qa26/qa2.mjs`, `qa3.mjs`, `qa4.mjs` and `qa5.mjs`, with logs and screenshots in `qa26/qa*out`.
 - **Repo state:** `git status` clean.
+
+---
+
+# Re-gate (after `0f582f792`, diff `b4a94d7..HEAD`)
+
+## Verdict: GO
+
+Both blockers are fixed and verified on the live app. No new blocker. No source or test file was edited; `git status` is clean and no processes are left running.
+
+## Blocker re-checks
+
+- **B1: fixed.**
+  - The same probe as before (`qa26/qa4.mjs`): run the study, close the hub panel, wait for the API to say `done`.
+  - The greeting now reads "A study has run on this network — its results are in Hub design." at +6 s and at +16 s. It no longer says "running" (`qa26/qa4_re.log`).
+  - The greeting query uses the shared `ehStudyRefetchInterval` (now in `ehStudyPoll.ts`, same key and option as the hub), so it is not a second poll.
+  - A failed or aborted study now reads "The last hub study did not finish — see Hub design."
+- **B2: fixed.**
+  - Live probe (`qa26/qa5_re.log`):
+    - `delete_component` reads "Delete genset_1 from the network", with the Details open and the JSON visible.
+    - `import_network_nc` reads "Replace the whole network with an imported file", with the Details open showing `"path": "/tmp/x.nc"`.
+    - Write-tier cards are unchanged: "Change the settings of genset_1" and the €5,000 price line.
+    - Screenshot `qa26/rerun/P26/09-p26-dc-07c-delete-card.png`.
+  - Coverage: I cross-checked `GUIDED_CARD_SUMMARY` against `safety_tier_for()` in the backend. There are 42 destructive, execution and execution-long-running tools, and all 42 have their own summary. The fallback names the first identifying argument.
+
+## Rows
+
+- **Row 2**, 14 files: 613 passed in 473 s (`qa26/row2_re.txt`).
+- **Row 3:** `tsc` exit 0. Full vitest 233 files, 2561 tests passed (`qa26/vitest_re.txt`).
+- **Row 4:** stress ×10 passed 10 of 10, 36 files and 565 tests each time (`qa26/stress_re.txt`).
+- **Row 5:** P26 (38 screenshots), P25, P24, P23 and P22.9 all PASS.
+  - P24-BE hit my own 590 s wall-clock timeout (exit 124) because the run overlapped with mutation runs and the orchestrator's backend suite. Re-run alone it passes in 64 s (10 screenshots).
+  - P26 verdicts: data center `fail`, H₂ hub none (no goal), microgrid `inconclusive`.
+  - FMEA rows are now asserted after settling: 8 / 4 / 6.
+
+## Mutations on the fixes (scratch copies)
+
+| # | Change mutated | Result |
+|---|---|---|
+| R1 | greeting `refetchInterval` removed | killed (1) |
+| R1b | "aborted" no longer handled | killed (1) |
+| R2 | fallback no longer names a target | killed (5) |
+| R2b | `delete_component` summary loses the name | killed (2) |
+| R2c | import summary loses the filename | killed (1) |
+| R2d | destructive Details no longer open | killed (1) |
+| R2e | a summary entry removed (`cascade_delete_bus`) | killed (2) |
+| R2f | `IDENTIFYING_ARGS` narrowed | killed (5) |
+
+All 8 were killed.
+
+## Screenshots read (new P26 set)
+
+- **Improve:** the copy now matches the action. "The assistant would run the reliability study again. Aim: …" sits next to the "Run the reliability study" card. "Caused by equipment outages" replaces "outage-driven".
+- **H₂ hub Results:** it has a "Set a goal" button under the no-goal headline.
+- **Greeting chips:** "Open Hub design", "Explain my results" and "What should I improve?" are plain.
+
+## Close-out note
+
+It is now accurate:
+- It carries explicit corrections for B1 and B2.
+- Its counts match my runs: 2561 tests, stress 565 ×10, smokes 38 / 12 / 10 screenshots.
+- Its open list matches what I found: the transient FMEA tab, study staleness, the engine words in the greeting before a study, the raw tool progress lines, the Expert-styled FMEA tab, and Bug 5.
+
+## Remaining non-blocking nits
+
+- The import summary reads the argument `filename`, but the tool's argument is `path`. The card says "an imported file" without the name; the name is visible only in the open Details.
+- The greeting words "Not solved yet." before a first study, and the toast covering Send, are unchanged and recorded as open.
+
+**Verdict: GO.** Row 1, the full backend suite, is the orchestrator's.
