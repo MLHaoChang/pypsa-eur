@@ -167,10 +167,12 @@ def section_2_real_study_to_docx() -> None:
           f"name={top[0].get('name') if top else None}")
     _step("it carries the ranking's criticality as a grouped number",
           f"{float(top[0]['criticality_eur_per_year']):,.0f}" in text if top else False)
+    # WP5: the chat tool now renders through the one writer, so a skipped
+    # stage is the section's `not_established` callout — a "Not established:"
+    # sentence rather than WP0's "This section was …" line.
     _step("the skipped stages are stated, not omitted",
-          all(f"This section was" in text for _ in [0])
-          and text.count("This section was") >= 3,
-          f"statements={text.count('This section was')}")
+          text.count("Not established:") >= 3,
+          f"statements={text.count('Not established:')}")
     _step("the Link-primary disclosure is present", "Link-primary" in text)
     _step("the criticality figure is embedded", pictures == 1, f"pictures={pictures}")
     # ADR-0001 at the document level: the study skipped mc_certify, so the

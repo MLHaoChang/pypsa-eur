@@ -324,3 +324,171 @@ def test_bundle_export_carries_reports_and_import_restores_them(
     assert got.json()["version"] == 2
     fig = client.get(f"/api/projects/{imported}/reports/{rid}/figures/fig")
     assert fig.status_code == 200 and fig.content == _PNG
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# WP5 — POST /{name}/reports (evidence_only) and POST …/export
+# ═════════════════════════════════════════════════════════════════════════
+
+from models.energy_hub import (  # noqa: E402
+    REPORT_SECTIONS,
+    ReferenceDesignReport,
+    SectionState,
+    empty_section_map,
+)
+from services.adequacy import eh_report as R  # noqa: E402
+from services.reports.docx_writer import DOCX_MIME  # noqa: E402
+
+
+def _store_eh_report(state: dict) -> None:
+    """The same hand-built report `test_chat_report_export_tools._store_report` uses."""
+    sections = empty_section_map(default="skipped")
+    sections["fmea_top"] = SectionState(status="ok", payload={
+        "top": [{"rank": 1, "mode_id": "gen:g:forced_outage",
+                 "component_class": "Generator", "name": "g",
+                 "failure_class": "A", "occurrence_per_year": 1.0,
+                 "occurrence_basis": "FOR", "severity_eur": 10.0,
+                 "criticality_eur_per_year": 10.0, "delta_eue_mwh": 0.5,
+                 "engine": "copt", "fidelity": "analytic_convolution"}],
+        "classes_included": ["A"], "note": "Link-primary residual risk",
+    })
+    report = ReferenceDesignReport(
+        archetype="strong_grid", pack_hash="p", assumptions_hash="a",
+        sections=sections, ens_cap_permyriad=10.0,
+    )
+    R.store_eh_report(state, report)
+
+
+def test_post_evidence_only_builds_v1_and_the_figure_files(
+        client, api_project, project_storage_dir, session_state):
+    name = api_project("rep-post")
+    _store_eh_report(session_state(client))
+
+    r = client.post(f"/api/projects/{name}/reports",
+                    json={"mode": "evidence_only", "title": "Client report"})
+    assert r.status_code == 200, r.text[:400]
+    body = r.json()
+    rid = body["report_id"]
+    assert body["mode"] == "evidence_only"
+    assert body["title"] == "Client report"
+    assert body["latest_version"] == 1
+    doc = body["document"]
+    assert doc["version"] == 1 and doc["mode"] == "evidence_only"
+    assert doc["evidence_hash"] == body["evidence_hash"]
+
+    by_id = {s["section_id"]: s for s in doc["sections"]}
+    for section in REPORT_SECTIONS:
+        assert section in by_id, section
+    fmea = by_id["fmea_top"]
+    assert fmea["status"] == "ok"
+    assert any(b["type"] == "table_ref" and b["table_id"] == "fmea_top"
+               for b in fmea["blocks"])
+    assert any(b["type"] == "figure_ref" and b["figure_id"] == "fmea_pareto"
+               for b in fmea["blocks"])
+    assert by_id["certification"]["status"] == "skipped"
+    assert any(b["type"] == "callout" and b["kind"] == "not_established"
+               for b in by_id["certification"]["blocks"])
+    # ADR-0001 through the wire: the headline MC LOLE is null → not established.
+    headline = doc["tables"]["headline"]
+    lole = next(row for row in headline["rows"] if row[0].startswith("MC LOLE"))
+    assert lole[1] == "not established"
+
+    d = project_storage_dir(name)
+    assert (d / "reports" / rid / "v1.json").is_file()
+    assert (d / "reports" / rid / "meta.json").is_file()
+    assert (d / "reports" / rid / "figures" / "fmea_pareto.png").is_file()
+    assert doc["figures"]["fmea_pareto"]["png_file"] == "figures/fmea_pareto.png"
+    fig = client.get(f"/api/projects/{name}/reports/{rid}/figures/fmea_pareto")
+    assert fig.status_code == 200 and fig.content[:8] == b"\x89PNG\r\n\x1a\n"
+    listed = client.get(f"/api/projects/{name}/reports").json()
+    assert [m["report_id"] for m in listed] == [rid]
+    assert client.get(f"/api/projects/{name}/reports/{rid}").json()["version"] == 1
+
+
+def test_post_evidence_only_without_any_study_states_every_section(
+        client, api_project):
+    name = api_project("rep-post-empty")
+    r = client.post(f"/api/projects/{name}/reports", json={"mode": "evidence_only"})
+    assert r.status_code == 200, r.text[:400]
+    doc = r.json()["document"]
+    by_id = {s["section_id"]: s for s in doc["sections"]}
+    for section in REPORT_SECTIONS:
+        assert by_id[section]["status"] == "not_established"
+        assert any(b["type"] == "callout" and b["kind"] == "not_established"
+                   for b in by_id[section]["blocks"])
+    assert doc["figures"] == {}
+    assert r.json()["title"], "a default title is given when none is sent"
+
+
+def test_post_with_another_mode_is_400_report_mode_not_supported(client, api_project):
+    name = api_project("rep-post-mode")
+    r = client.post(f"/api/projects/{name}/reports", json={"mode": "generated"})
+    assert r.status_code == 400, r.text[:200]
+    assert r.json()["detail"]["error_kind"] == "report_mode_not_supported"
+    assert "phase 2" in r.json()["detail"]["message"]
+    assert client.get(f"/api/projects/{name}/reports").json() == []
+
+
+def test_post_is_refused_under_a_foreign_lock(
+        client, api_project, same_org_other_user):
+    name = api_project("rep-post-lock")
+    assert client.post(f"/api/projects/{name}/lock").status_code == 200
+    r = same_org_other_user.post(f"/api/projects/{name}/reports",
+                                 json={"mode": "evidence_only"})
+    assert r.status_code == 409, r.text[:200]
+    assert r.json()["detail"]["error_kind"] == "project_locked"
+    assert client.get(f"/api/projects/{name}/reports").json() == []
+
+
+def test_export_saves_an_agent_export_chip_the_blob_route_serves(
+        client, api_project, project_storage_dir, session_state):
+    name = api_project("rep-export")
+    _store_eh_report(session_state(client))
+    rid = client.post(f"/api/projects/{name}/reports",
+                      json={"mode": "evidence_only"}).json()["report_id"]
+
+    r = client.post(f"/api/projects/{name}/reports/{rid}/export",
+                    json={"filename": "client-report"})
+    assert r.status_code == 200, r.text[:400]
+    meta = r.json()
+    assert meta["kind"] == "agent_export"
+    assert meta["mime"] == DOCX_MIME
+    assert meta["filename"] == "client-report.docx"
+    assert (project_storage_dir(name) / "uploads" / meta["file_id"] / "blob").is_file()
+
+    blob = client.get(f"/api/projects/{name}/uploads/{meta['file_id']}/blob")
+    assert blob.status_code == 200
+    assert blob.headers["content-type"].startswith(DOCX_MIME)
+    from docx import Document
+    doc = Document(io.BytesIO(blob.content))
+    text = "\n".join(p.text for p in doc.paragraphs)
+    cells = [c.text for t in doc.tables for row in t.rows for c in row.cells]
+    assert "Residual failure modes" in text
+    assert "Link-primary residual risk" in text
+    assert "g" in cells and "not established" in cells
+    assert len(doc.inline_shapes) == 1
+    from docx.oxml.ns import qn
+    marks = [el.get(qn("w:name")) for el in doc.element.body.iter(qn("w:bookmarkStart"))]
+    assert "sec:fmea_top" in marks
+    # A default filename is derived when none is given, and it is a .docx.
+    r2 = client.post(f"/api/projects/{name}/reports/{rid}/export", json={})
+    assert r2.status_code == 200, r2.text[:200]
+    assert r2.json()["filename"].endswith(".docx")
+    kinds = {u["file_id"]: u["kind"]
+             for u in client.get(f"/api/projects/{name}/uploads").json()}
+    assert kinds.get(meta["file_id"]) == "agent_export"
+
+
+def test_export_of_an_unknown_report_or_version_is_404(client, api_project):
+    name = api_project("rep-export-404")
+    r = client.post(f"/api/projects/{name}/reports/ffffffffffffffff/export", json={})
+    assert r.status_code == 404, r.text[:200]
+    assert r.json()["detail"]["error_kind"] == "report_not_found"
+    rid = client.post(f"/api/projects/{name}/reports",
+                      json={"mode": "evidence_only"}).json()["report_id"]
+    r = client.post(f"/api/projects/{name}/reports/{rid}/export", json={"version": 9})
+    assert r.status_code == 404
+    assert r.json()["detail"]["error_kind"] == "report_not_found"
+    bad = client.post(f"/api/projects/{name}/reports/not-an-id/export", json={})
+    assert bad.status_code == 400
+    assert bad.json()["detail"]["error_kind"] == "invalid_report_id"
