@@ -158,9 +158,12 @@ def physical_quantities(n, cfg, *, result_df: Callable[..., Any]) -> dict[str, A
                              dtype="float64").reindex(out.index).fillna(fom_h)
         fixed_rate = pd.Series({str(k): v.get("fixed_cost") for k, v in facts.items()},
                                dtype="float64").reindex(out.index)
-        fixed_rate = fixed_rate.fillna(out["capital_cost_annualised"] + fom_rate)
+        # No resolver entry ⇒ capital cost 0 + FOM (asset_economics'
+        # `_fixed_rates`); a failed resolve ⇒ both unknown (ADR-0001).
+        fixed_rate = fixed_rate.fillna(out["capital_cost_annualised"].fillna(0.0) + fom_rate)
         if not capital_costs_available:
             fixed_rate[:] = np.nan
+            fom_rate[:] = np.nan
         try:
             active = active_period_years(n, _COMPONENT[frame_attr])
         except Exception:
@@ -174,7 +177,11 @@ def physical_quantities(n, cfg, *, result_df: Callable[..., Any]) -> dict[str, A
             years.index = years.index.astype(str)
             years = years.reindex(out.index).fillna(total_years_factor)
         out["fixed_cost_eur"] = (fixed_rate * out["p_nom_opt"] * years).values
-        out["fom_cost_eur_annual"] = (out["fom_cost_per_unit"] * out["p_nom_opt"]).values
+        # The TYPED annual FOM: the resolver's `fom_cost_annual` (the column is
+        # rescaled to the horizon inside a periodized-cost fill), else the column.
+        fom_annual = pd.Series({str(k): v.get("fom_cost_annual") for k, v in facts.items()},
+                               dtype="float64").reindex(out.index).fillna(out["fom_cost_per_unit"])
+        out["fom_cost_eur_annual"] = (fom_annual * out["p_nom_opt"]).values
         out["fom_cost_eur"] = (fom_rate * out["p_nom_opt"] * years).values
 
         # ── dispatch → energy ────────────────────────────────────────────

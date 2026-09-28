@@ -66,6 +66,7 @@ import numpy as np
 import pandas as pd
 
 from models.commercial import CommercialConfig, TariffItem
+from services.commercial import hashing as _H
 from services.commercial.tariff_engine import (
     _is_demand,
     _rates,
@@ -190,12 +191,12 @@ def _side(item: TariffItem) -> str:
     return "import" if item.direction == "cost" else "export"  # net
 
 
-def tier_items_hash(cfg: CommercialConfig) -> str | None:
+def tier_items_hash(cfg: CommercialConfig, version: int = _H.HASH_VERSION) -> str | None:
     """The hash of the convex tiered items a solve would bind (drift check)."""
     items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
              if i.tiers and not _is_demand(i) and _lp_reason(i) is None
              and tiers_are_convex(i.tiers)]
-    return _items_hash(items) if items else None
+    return _items_hash(items, version) if items else None
 
 
 def group_spec(cfg: CommercialConfig) -> dict | None:
@@ -464,13 +465,11 @@ def _export_price(n, cfg: CommercialConfig) -> np.ndarray:
 # ── peak demand (WP1.5a) ───────────────────────────────────────────────────
 
 
-def _items_hash(items) -> str:
-    """Content hash of the demand items (periods, rates, settlement, ratchet)
-    — the rows compare it to tell a rate change after the solve (round 2 #5)."""
-    import json as _json
-
-    body = _json.dumps([i.model_dump(mode="json") for i in items], sort_keys=True)
-    return hashlib.sha256(body.encode()).hexdigest()[:16]
+def _items_hash(items, version: int = _H.HASH_VERSION) -> str:
+    """Content hash of the items (periods, rates, settlement, ratchet, tiers)
+    — the rows compare it to tell a rate change after the solve (round 2 #5).
+    Versioned recipe: `services/commercial/hashing.py`."""
+    return _H.digest(list(items), version=version)
 
 
 def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list[str], list[str]]:
@@ -585,7 +584,7 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
     return spec, [i.id for i in items], missing, notes
 
 
-def energy_hash(n, cfg: CommercialConfig) -> str:
+def energy_hash(n, cfg: CommercialConfig, version: int = _H.HASH_VERSION) -> str:
     """What decides the energy rows besides the dispatch: the per-interval
     energy items (incl. non-convex tiers priced at their first tier), the
     export price version, the site clock, the charged Links and the axis
@@ -593,8 +592,8 @@ def energy_hash(n, cfg: CommercialConfig) -> str:
     items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
              if not _is_demand(i) and _lp_reason(i) is None
              and not (i.tiers and tiers_are_convex(i.tiers))]
-    raw = json.dumps({"items": [i.model_dump(mode="json") for i in items],
-                      "export_price_ref": (cfg.export_price_ref.model_dump(mode="json")
+    raw = json.dumps({"items": _H.canonical(items, version=version),
+                      "export_price_ref": (_H.canonical(cfg.export_price_ref, version=version)
                                            if cfg.export_price_ref is not None else None),
                       "timezone": cfg.timezone, "import": sorted(import_links(cfg)),
                       "export": cfg.export_link, "axis": _axis_hash(n.snapshots)},
@@ -602,13 +601,13 @@ def energy_hash(n, cfg: CommercialConfig) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
-DEMAND_HASH_VERSION = 1  # the P1 recipe; records without a version were made by it
+DEMAND_HASH_VERSION = _H.HASH_VERSION  # recorded in the demand info (recipe of items_hash)
 
 
-def demand_hash(n, cfg: CommercialConfig, items) -> str:
+def demand_hash(n, cfg: CommercialConfig, items, version: int = _H.HASH_VERSION) -> str:
     """What decides the billed demand besides the items: the site clock, the
     meter history, the peak floors and the snapshot axis (review round 3 #4)."""
-    raw = json.dumps({"items": _items_hash(items), "timezone": cfg.timezone,
+    raw = json.dumps({"items": _items_hash(items, version), "timezone": cfg.timezone,
                       "history": sorted(cfg.meter_history_peaks_kw.items()),
                       "floors": sorted(cfg.initial_peak_lower_bound.items()),
                       "axis": _axis_hash(n.snapshots)}, sort_keys=True)
@@ -751,7 +750,8 @@ def _tier_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list[s
                              "tiers": [{"k": k, "width_mwh": th[k + 1] - th[k],
                                         "rate_eur_per_mwh": float(t.rate) * _KWH_PER_MWH}
                                        for k, t in enumerate(item.tiers)]})
-    return ({"import_links": import_links(cfg), "keys": keys, "items_hash": _items_hash(convex)},
+    return ({"import_links": import_links(cfg), "keys": keys, "items_hash": _items_hash(convex),
+             "hash_version": _H.HASH_VERSION},
             [i.id for i in convex], nonconvex)
 
 
@@ -805,7 +805,8 @@ def _read_tier_solution(n, spec: dict) -> dict | None:
             out[name] = {"item": key["item"], "month": key["month"],
                          "inv_period": key["inv_period"], "tier": t["k"],
                          "rate_eur_per_mwh": t["rate_eur_per_mwh"], "q_mwh": v,
-                         "items_hash": spec.get("items_hash")}
+                         "items_hash": spec.get("items_hash"),
+                         "hash_version": spec.get("hash_version")}
     return out
 
 
@@ -1020,6 +1021,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
         n.meta[META_LINKS] = {"import": cfg.poc_link, "export": cfg.export_link,
                               "import_members": import_links(cfg),
                               "priced": sorted(targets), "energy_hash": energy_hash(n, cfg),
+                              "hash_version": _H.HASH_VERSION,
                               # This solve records its connection agreement in
                               # `ic_connection` (P2 WP2.0); a P1 solve did not.
                               "agreement_recorded": True}
@@ -1116,7 +1118,8 @@ def energy_cost_rows(n, commercial: dict | None) -> dict | None:
                             or cfg.export_link != solved.get("export")
                             or sorted(import_links(cfg)) != sorted(solved_import_links(solved))
                             or (solved.get("energy_hash") is not None
-                                and solved["energy_hash"] != energy_hash(n, cfg))):
+                                and solved["energy_hash"] != energy_hash(
+                                    n, cfg, _H.version_of(solved)))):
         flags.append("config_changed_since_solve")
     if not commercial:
         flags.append("config_cleared_since_solve")

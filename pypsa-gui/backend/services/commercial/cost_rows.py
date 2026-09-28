@@ -29,6 +29,7 @@ from __future__ import annotations
 import pandas as pd
 
 from services.commercial import connection as _conn
+from services.commercial import hashing as _H
 from services.commercial import lp_bindings as _lp
 
 
@@ -95,8 +96,8 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
                                         if cfg_parsed.import_tariff is not None else [])
                             if _lp._is_demand(i) and _lp._lp_reason(i) is None]
             wanted = [i.id for i in wanted_items]
-            wanted_hash = (_lp.demand_hash(n, cfg_parsed, wanted_items) if wanted_items
-                           else None)
+            wanted_hash = (_lp.demand_hash(n, cfg_parsed, wanted_items, _H.version_of(info))
+                           if wanted_items else None)
         except Exception:  # noqa: BLE001
             wanted = []
     if peaks:
@@ -151,8 +152,10 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
             if amount:
                 items.append(("energy_tiers", v.get("inv_period"), 0.0, amount))
         block["energy_tiers"] = weighted("energy_tiers")
-        solved_hash = next(iter(tiers.values())).get("items_hash")
-        wanted_tiers = _lp.tier_items_hash(cfg_now) if cfg_now is not None else None
+        first_tier = next(iter(tiers.values()))
+        solved_hash = first_tier.get("items_hash")
+        wanted_tiers = (_lp.tier_items_hash(cfg_now, _H.version_of(first_tier))
+                        if cfg_now is not None else None)
         if solved_hash is not None and solved_hash != wanted_tiers:
             drifted()
     elif cfg_now is not None and _lp.tier_items_hash(cfg_now) is not None:
@@ -204,7 +207,8 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
             block["network_capacity"] = None
             flags.append("network_capacity_not_established")
         stale = (fee.get("agreement_hash") is not None
-                 and fee["agreement_hash"] != _conn.agreement_hash(agreement))
+                 and fee["agreement_hash"] != _conn.agreement_hash(agreement,
+                                                                   _H.version_of(fee)))
         if not wants_fee or stale:
             flags.append("config_changed_since_solve" if commercial else
                          "config_cleared_since_solve")
@@ -216,7 +220,7 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
     # dispatch, so an edit without a re-solve is drift (P2 WP2.0).
     solved_agreement = n.meta.get(_conn.META_AGREEMENT)
     if solved_agreement and solved_agreement.get("agreement_hash") != \
-            _conn.agreement_hash(agreement):
+            _conn.agreement_hash(agreement, _H.version_of(solved_agreement)):
         flags.append("config_changed_since_solve" if commercial else
                      "config_cleared_since_solve")
     elif not solved_agreement and agreement is not None and \
@@ -231,7 +235,8 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
         by_p = fixed.get("eur_by_period") or {"_": fixed.get("eur", 0.0)}
         eur = sum(float(v) * (yrs(int(k)) if k != "_" else 1.0) for k, v in by_p.items())
         if fixed.get("agreement_hash") is not None and \
-                fixed["agreement_hash"] != _conn.agreement_hash(agreement):
+                fixed["agreement_hash"] != _conn.agreement_hash(agreement,
+                                                                _H.version_of(fixed)):
             flags.append("config_changed_since_solve" if commercial else
                          "config_cleared_since_solve")
         block["network_capacity_fixed"] = {

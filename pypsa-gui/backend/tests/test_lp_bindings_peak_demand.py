@@ -681,6 +681,8 @@ def test_a_p1_unique_name_record_is_not_a_recipe_change():
     applied = L.materialise_poc_prices(n, commercial)
     info = {k: v for k, v in getattr(n, L.DEMAND_SPEC_ATTR)["info"].items()
             if k != "hash_version"}
+    # As P1 wrote it: no version, the items hashed with recipe 1.
+    info["items_hash"] = L.demand_hash(n, L._parse(commercial), _tariff(_demand()).items, 1)
     applied.undo()
     n.meta[L.META_DEMAND] = {"demand|0||2030-01": {
         "item": "demand", "period": "all", "month": "2030-01", "inv_period": None,

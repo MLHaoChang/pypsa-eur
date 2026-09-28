@@ -129,7 +129,24 @@ convention), `backend/tests/test_physical_quantities_seam.py` (L117 test updated
 - **Carried "discounting gap" item, measured:**
   - two periods at a 7 % rate: raw `gap_pct` −43.4 %, fully explained by the merged `period_weighting_adjustment_eur` bridge; `residual_gap_pct` ≈ −1e-9;
   - at a 0 % rate: gap −2.6e-9.
-  - Resolved by the merge. Consumers of the gap should read `residual_gap_pct`.
+  - Resolved by the merge. **Which figure to read:** `gap_pct` on commercial solves (the bridge does not know the
+  commercial LP terms, so `residual_gap_pct` is non-zero there by construction — measured 27.7 % flat with a fee);
+  `residual_gap_pct` on plain multi-period solves with discounting.
+
+- **Review round 1 (PASS WITH CONDITIONS) → closed:**
+  - **Versioned drift hashes.** `services/commercial/hashing.py` has two recipes:
+    - recipe 2 is `exclude_defaults`, so a new optional field never changes a hash;
+    - recipe 1 is the full dump; legacy records are compared with it, minus the later fields listed in `FIELDS_AFTER_V1`.
+    
+    Every record carries `hash_version`, and comparisons use the record's recipe. A P1 hash is pinned in `test_commercial_hash_versions.py`.
+  - **Seam degraded paths.**
+    - A failed cost resolve nulls both FOM and fixed cost.
+    - A class missing from the resolver is charged FOM only, like `_fixed_rates`.
+    - `fom_cost_eur_annual` reads the resolver's typed `fom_cost_annual`.
+  - **Reconciliation gate.**
+    - Two-period cases are solved with `multi_investment_periods=True`.
+    - An 11th case, `poc_capex_fee`.
+  - **Gap-figure note** amended.
 
 ## WP2.1a-0 Demand windows keyed by period name
 

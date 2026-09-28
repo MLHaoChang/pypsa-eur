@@ -10,9 +10,9 @@ recomputes the rows after a reload with no solver state at all, and
 `_HANDLER_PARAMS` is unchanged (no new route argument; plan deviation from the
 `commercial_terms=` keyword, recorded in the plan).
 
-Ten cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
+Eleven cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
 tiers; + group cap; a representative-weeks axis; two investment periods (TOU +
-demand + fee); a two-period group whose demand is metered on the group; annual FOM on the extendable assets (WP2.0).
+demand + fee); a two-period group whose demand is metered on the group; annual FOM on the extendable assets; capex and FOM on a fee-bearing PoC Link (WP2.0).
 After the reload the gap must still be computed (never None), and the flags,
 the not-established months and the group record must be the same.
 """
@@ -85,6 +85,15 @@ def _with_fom():
     return n
 
 
+def _poc_capex():
+    """WP2.0 review: capital cost and FOM on the PoC Link that also carries a
+    capacity fee — the fee (× Σw/8760) and the scaled capex/FOM are separate
+    terms, never double-scaled."""
+    n = _edge()
+    n.links.loc["import", ["capital_cost", "fom_cost"]] = [15_000.0, 2_500.0]
+    return n
+
+
 def _rep_weeks():
     n = _edge()
     parts = [pd.date_range(f"2030-{m:02d}-07", periods=96 * 7, freq="15min") for m in (1, 7)]
@@ -110,6 +119,7 @@ CASES = {
     "multi_period": (_two_periods(_edge), {"import_tariff": _tariff(TOU, DEMAND),
                                            "connection": FEE}),
     "fom": (_with_fom, {"import_tariff": _tariff(TOU)}),
+    "poc_capex_fee": (_poc_capex, {"import_tariff": _tariff(TOU), "connection": FEE}),
     "group_multi_period": (_two_periods(_two_members),
                            {"import_tariff": _tariff(TOU, DEMAND), "group_contract": "hub",
                             "group_members": ["import", "import_b"], "group_cap_mw": 60.0}),
@@ -133,11 +143,17 @@ def test_rows_reconcile_before_and_after_a_save_and_load(case, client, install_n
 
     build, extra = CASES[case]
     name = f"recon_{case}"
-    install_network(build(), name=name)
+    net = build()
+    multi = isinstance(net.snapshots, pd.MultiIndex)
+    install_network(net, name=name)
     assert client.post(f"/api/projects/{name}",
                        params={"force": True, "rebind": True}).status_code == 200
     ctx = session_ctx(client)
-    cfg = SolverConfig(commercial={"poc_link": "import", **extra})
+    # A two-period network is solved as one: PyPSA's multi-period objective
+    # (capex per active period) is what the rows must reconcile with
+    # (WP2.0 review #4 — without the flag the solve was single-period).
+    cfg = SolverConfig(commercial={"poc_link": "import", **extra},
+                       multi_investment_periods=multi)
     ctx.solver_state["solver_config"] = cfg
     n = ctx.network
     status, condition = run_simulation(cfg, n, ctx.mutation_lock, threading.Event(),

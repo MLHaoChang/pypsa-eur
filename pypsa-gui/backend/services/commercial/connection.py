@@ -78,6 +78,7 @@ META_FIXED_FEE = "ic_connection_fixed_fee"
 # Every committed agreement, fee or not: its content hash (P2 WP2.0 — a cap edit on
 # a fee-less agreement without a re-solve is drift).
 META_AGREEMENT = "ic_connection"
+from services.commercial.hashing import HASH_VERSION as _HASH_VERSION  # noqa: E402
 FEE_SPEC_ATTR = "_ic_fee_spec"          # transient: set by apply, read by the LP wrapper
 FEE_BUILT_ATTR = "_ic_fee_built"        # transient: set by the LP wrapper, read by commit
 # Set by `adequacy.sweep.freeze_capacities`: the solve is OPERATIONAL (the design
@@ -341,16 +342,19 @@ def apply_connection_agreement(n, agreement: ConnectionAgreement, *, poc_link: s
 
     def commit() -> None:
         n.meta[META_AGREEMENT] = {"kind": agreement.kind, "link": poc_link,
-                                  "agreement_hash": agreement_hash(agreement)}
+                                  "agreement_hash": agreement_hash(agreement),
+                                  "hash_version": _HASH_VERSION}
         built = getattr(n, FEE_BUILT_ATTR, None)
         if built is not None:
-            n.meta[META_FEE] = {**built, "agreement_hash": agreement_hash(agreement)}
+            n.meta[META_FEE] = {**built, "agreement_hash": agreement_hash(agreement),
+                                "hash_version": _HASH_VERSION}
         else:
             n.meta.pop(META_FEE, None)
         if fixed_fee_by_period is not None:
             n.meta[META_FIXED_FEE] = {"eur_by_period": fixed_fee_by_period,
                                       "kind": agreement.kind, "link": poc_link,
-                                      "agreement_hash": agreement_hash(agreement)}
+                                      "agreement_hash": agreement_hash(agreement),
+                                      "hash_version": _HASH_VERSION}
         else:
             n.meta.pop(META_FIXED_FEE, None)
 
@@ -402,16 +406,15 @@ def apply_for_config(n, commercial: dict | None, *, solve_strategy: str = "full"
                                       solve_strategy=solve_strategy, multi_period=multi_period)
 
 
-def agreement_hash(agreement) -> str | None:
-    """Content hash of a connection agreement: the committed fee records carry
-    it so an edit without a re-solve is disclosed (Phase 1 gate condition 2)."""
-    import hashlib
-    import json
+def agreement_hash(agreement, version: int | None = None) -> str | None:
+    """Content hash of a connection agreement: the committed fee and agreement
+    records carry it (with `hash_version`) so an edit without a re-solve is
+    disclosed (Phase 1 gate condition 2). Recipe: `services/commercial/hashing.py`."""
+    from services.commercial import hashing as _H
 
     if agreement is None:
         return None
-    raw = json.dumps(agreement.model_dump(mode="json"), sort_keys=True)
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+    return _H.digest(agreement, version=_H.HASH_VERSION if version is None else version)
 
 
 def apply_commercial_for_solve(n, commercial: dict | None, *, log=None,

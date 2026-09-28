@@ -333,3 +333,52 @@ def test_energy_follows_generators_weighting_and_cost_follows_objective(edge, re
     # Fixed cost owes nothing to snapshot weights (flat network: × 1 year).
     fixed = gens["capital_cost_annualised"] * gens["p_nom_opt"]
     pd.testing.assert_series_equal(gens["fixed_cost_eur"], fixed.rename("fixed_cost_eur"))
+
+
+# ── P2 WP2.0 review: degraded paths agree with asset_economics ─────────────
+
+
+def test_a_failed_cost_resolve_nulls_fom_like_fixed_cost(golden, monkeypatch):
+    import services.results.physical_quantities as PQ
+    from services.results.physical_quantities import physical_quantities
+
+    def boom(*a, **k):
+        raise RuntimeError("resolver down")
+
+    monkeypatch.setattr(PQ, "periodized_capital_costs", boom)
+    gens = physical_quantities(golden, _cfg(), result_df=_plain_result_df)["components"]["generators"]
+    assert gens["fixed_cost_eur"].isna().all()
+    assert gens["fom_cost_eur"].isna().all()
+
+
+def test_a_class_missing_from_the_resolver_is_charged_fom_only(golden, monkeypatch):
+    """asset_economics' `_fixed_rates`: no entry ⇒ capital cost 0 + FOM."""
+    import services.results.physical_quantities as PQ
+    from services.results.physical_quantities import physical_quantities
+
+    real = PQ.periodized_capital_costs
+
+    def without_generators(n, cfg):
+        out = dict(real(n, cfg))
+        out.pop("generators", None)
+        return out
+
+    monkeypatch.setattr(PQ, "periodized_capital_costs", without_generators)
+    pq = physical_quantities(golden, _cfg(), result_df=_plain_result_df)
+    gens = pq["components"]["generators"]
+    assert gens["fixed_cost_eur"].notna().all()
+    pd.testing.assert_series_equal(gens["fixed_cost_eur"], gens["fom_cost_eur"],
+                                   check_names=False)
+
+
+def test_annual_fom_is_the_typed_figure_inside_a_fill(golden):
+    """`fom_cost_eur_annual` is typed FOM × capacity, also when the cost fill
+    has rescaled the column to the horizon basis."""
+    from services.results.physical_quantities import physical_quantities
+    from services.solver_service import with_periodized_cost_defaults
+
+    outside = physical_quantities(golden, _cfg(), result_df=_plain_result_df)
+    with with_periodized_cost_defaults(golden, _cfg()):
+        inside = physical_quantities(golden, _cfg(), result_df=_plain_result_df)
+    pd.testing.assert_series_equal(inside["components"]["generators"]["fom_cost_eur_annual"],
+                                   outside["components"]["generators"]["fom_cost_eur_annual"])
