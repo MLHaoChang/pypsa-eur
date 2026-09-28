@@ -58,6 +58,10 @@
   `fmea_top` screens the Link at the grid's expected surplus, reports an exact analytic cross-check (`copt_metrics.import_exact`), and ranks common-mode events as their own class-A modes.
   The report discloses the import model in `fleet_scope` (`import_model`, `import_firmness`, `grid_areas`, `import_common_mode`), and the panel and chat tools show it.
 
+* Fix(pypsa-gui): The `diagnose_network` chat tool now reads islands from `services/topology_analyzer.py` instead of walking the bus graph itself, so the chat, the preflight and the study report share one walk.
+  Its `peak_load_mw` is now the simultaneous peak (loads summed per snapshot, then maxed); before, loads peaking in different hours were added together.
+  The analyser follows every multi-port link `busN`, not only `bus2..bus4`, and reports `has_supply_asset` per island.
+
 ## PyPSA-Eur v2026.02.0 (18th February 2026)
 
 **Features**
