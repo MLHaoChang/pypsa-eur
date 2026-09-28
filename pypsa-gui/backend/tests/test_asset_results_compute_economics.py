@@ -33,8 +33,10 @@ def test_vom_is_absolute_dispatch_times_marginal_cost(ctx):
 
 
 def test_fixed_cost_is_capital_cost_times_optimised_capacity(ctx):
+    # capital_cost is annual (EUR/MW/yr); the LP charges the share of a year
+    # the snapshots model — PyPSA's own `n.nyears`.
     assert C.gen_fixed_cost(ctx) == pytest.approx(
-        100_000.0 * float(ctx.n.generators.at["gas", "p_nom_opt"]))
+        100_000.0 * float(ctx.n.nyears) * float(ctx.n.generators.at["gas", "p_nom_opt"]))
 
 
 def test_net_profit_is_revenue_minus_fixed_and_variable(ctx):

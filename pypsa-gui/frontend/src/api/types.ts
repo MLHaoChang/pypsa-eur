@@ -201,9 +201,16 @@ export interface SolverConfig {
   // BACKEND-ONLY: no frontend reader writes or reads this field any more
   // (the Model Horizon page's period list is authoritative and lives on the
   // network via GET/POST /api/network/investment_periods instead). Still
-  // consumed transiently by solver_service.py (~:4329) as a cfg-only,
-  // solve-time-only period override. Do not wire a control back to it —
-  // route new UI through the network endpoints.
+  // consumed transiently by `solver/assumptions.py`'s
+  // `_apply_modelling_assumptions`, block "4) Investment periods", as a
+  // cfg-only, solve-time-only override that is snapshotted and restored on
+  // exit. Do not wire a control back to it — route new UI through the network
+  // endpoints.
+  //
+  // Named by FUNCTION, not by line. This used to read `solver_service.py
+  // (~:4329)`; the backend decomposition moved the block out and left
+  // solver_service.py 1,490 lines long, so the citation pointed at nothing
+  // for as long as it took someone to check.
   investment_periods: number[]       // list of years; honoured iff multi_investment_periods
   // Per-investment-period load multiplier, keyed by period year (string).
   // 1.0 = unchanged; 1.05 = +5% load growth. Applied transiently at solve

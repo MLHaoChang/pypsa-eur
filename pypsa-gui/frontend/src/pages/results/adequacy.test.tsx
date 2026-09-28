@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
-import { AdequacyChips, basisSuffix, CoptChips, ensTargetWarning, type AdequacyReportPayload, type CoptPayload } from './adequacy'
+import { AdequacyChips, basisSuffix, CoptChips, ensTargetWarning, ramChipText, ramChipTitle, type AdequacyReportPayload, type CoptPayload } from './adequacy'
 
 afterEach(() => cleanup())
 
@@ -284,5 +284,55 @@ describe('CoptChips time basis', () => {
       time_basis: 'hours_per_year', horizon_years: 1,
     })} proxyEnsMwh={null} />)
     expect(screen.getByText(/4216\.1 h\/yr/)).toBeTruthy()
+  })
+})
+
+describe('CoptChips — P7 RAM provenance', () => {
+  it('names library vs asset rate sources and carries ram_note in the title', () => {
+    render(<CoptChips copt={coptPayload({
+      ram_note: 'Rate library + provenance only — not full RAM/CMMS; planned-outage calendars deferred.',
+      fleet: {
+        units: 2, must_take: 0, delta_mw: 1,
+        units_provenance: [
+          { name: 'lib_gas', rate_source: 'carrier_default',
+            library_citation: 'NERC GADS (illustrative)' },
+          { name: 'typed_gas', rate_source: 'asset' },
+        ],
+      },
+    })} proxyEnsMwh={null} />)
+    const chip = screen.getByTestId('copt-ram-note')
+    expect(chip.textContent).toBe('1 library · 1 asset')
+    expect(chip.getAttribute('title')).toMatch(/lib_gas: carrier_default/)
+    expect(chip.getAttribute('title')).toMatch(/NERC/)
+    expect(chip.getAttribute('title')).toMatch(/typed_gas: asset/)
+    expect(chip.getAttribute('title')).toMatch(/not full RAM\/CMMS/)
+  })
+
+  it('shows no RAM chip on a pre-P7 payload', () => {
+    render(<CoptChips copt={coptPayload()} proxyEnsMwh={null} />)
+    expect(screen.queryByTestId('copt-ram-note')).toBeNull()
+  })
+})
+
+describe('ramChipText / ramChipTitle', () => {
+  it('counts storage provenance separately', () => {
+    const p = {
+      units_provenance: [
+        { name: 'g', rate_source: 'carrier_default', library_citation: 'NERC' },
+      ],
+      storage_provenance: [
+        { name: 'bat', rate_source: 'carrier_default', library_citation: 'NERC' },
+        { name: 'bat2', rate_source: 'asset' },
+      ],
+    }
+    expect(ramChipText(p)).toBe('1 library · storage 1 library · 1 asset')
+    expect(ramChipTitle(p, 'not full RAM/CMMS')).toMatch(/Storage rate provenance/)
+    expect(ramChipTitle(p, 'not full RAM/CMMS')).toMatch(/not full RAM\/CMMS/)
+  })
+
+  it('is empty without provenance lists', () => {
+    expect(ramChipText(null)).toBe('')
+    expect(ramChipText({})).toBe('')
+    expect(ramChipText({ units_provenance: [], storage_provenance: [] })).toBe('')
   })
 })

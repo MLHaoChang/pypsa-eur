@@ -16,6 +16,7 @@ from models.schemas import (
     CapacityComparison,
 )
 from services.compare.support import (
+    _active_years_lookup,
     _CLS_TO_ATTR,
     _bucket_add,
     _bucket_replicate_per_period,
@@ -327,4 +328,5 @@ def _compute_total_annuitised_capex(
         n.generators, n.storage_units, n.stores, n.links, n.lines, n.transformers,
         periods=periods, is_multi=is_multi, years_map=years_map,
         capital_cost_of=lambda row, comp_attr: _safe_capital_cost(row, pcc, comp_attr),
+        active_years_of=_active_years_lookup(n),
     )

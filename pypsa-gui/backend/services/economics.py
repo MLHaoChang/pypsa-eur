@@ -79,7 +79,7 @@ def co2_intensity_map(n) -> dict[str, float]:
 def annuitised_capex_by_carrier(
     generators, storage_units, stores, links, lines=None, transformers=None,
     *,
-    periods, is_multi, years_map, capital_cost_of,
+    periods, is_multi, years_map, capital_cost_of, active_years_of=None,
 ) -> dict:
     """
     Walk every cost-bearing component, accumulate ``p_nom_opt × cc_per_MW``
@@ -101,6 +101,12 @@ def annuitised_capex_by_carrier(
     ``solver_service.periodized_capital_costs``), so this module needs
     neither that plumbing nor any ``routers.*`` import, and a test can drive
     the walk with a two-line lambda.
+
+    ``active_years_of(row, comp_attr) -> {period: years}`` (optional) gives the
+    years an asset is charged in each period — ``years[p]`` where it is active,
+    0 where it is not (`period_utils.active_period_years`). Without it every
+    asset is charged in every period, which over-counts a plant retired partway
+    through the horizon against `cost_breakdown` and the LP.
     """
     out: dict = {}
 
@@ -133,13 +139,17 @@ def annuitised_capex_by_carrier(
             carrier = str(row.get("carrier", "unknown") or "unknown").lower()
             b = out.setdefault(carrier, {"total": 0.0, "by_period": {}})
             if is_multi and periods:
-                # Each period contributes annuitised_per_yr × ipw.years[P].
-                # We assume the asset is active in every period — which is
-                # what PyPSA's `n.statistics()` does for capex by default
-                # (period-aware costing happens at LP time, not at stats
-                # time). The horizon total is the sum across periods.
+                # Each period contributes annuitised_per_yr × ipw.years[P]
+                # for the periods the asset is ACTIVE in. PyPSA's
+                # `n.statistics()` masks inactive assets per period (measured
+                # 2026-09-27 — an earlier comment here said it did not), and
+                # so does the LP. The horizon total is the sum across periods.
+                active = active_years_of(row, comp_attr) if active_years_of else None
                 for p in periods:
-                    years = period_utils.years_for_period(years_map, p)
+                    if active is not None:
+                        years = float(active.get(p, active.get(str(p), 0.0)))
+                    else:
+                        years = period_utils.years_for_period(years_map, p)
                     contrib = per_year_meur * years
                     b["by_period"][str(p)] = b["by_period"].get(str(p), 0.0) + contrib
                 b["total"] = sum(b["by_period"].values())
@@ -191,4 +201,68 @@ def annuitised_capex_by_carrier(
     # Passive branches are sized on `s_nom` (apparent power), not `p_nom`.
     _walk(lines,         "s_nom", "lines")
     _walk(transformers,  "s_nom", "transformers")
+    return out
+
+
+def statistics_fom_lookup(n) -> dict[tuple[str, str, int | None], float]:
+    """
+    Fixed O&M per ``(component, carrier, period)`` from ``n.statistics.fom()``,
+    keyed the way the rows and period columns of ``n.statistics()`` are.
+
+    Why this exists: PyPSA 1.1.2's LP objective charges
+    ``periodized_cost = capital_cost + fom_cost`` per unit of capacity, but its
+    ``statistics.capex()`` multiplies capacity by ``comp.capital_cost`` — the
+    investment-only accessor — and reports FOM through a separate
+    ``statistics.fom()`` (the ``capex`` docstring's "investment + fom_cost" is
+    not what the code does; measured 2026-09-26, see
+    tests/test_fom_reconciliation.py). Every surface that sums
+    ``n.statistics()``'s "Capital Expenditure" into a system cost therefore
+    reconciles to the objective only after adding this table back.
+
+    ``period`` is ``None`` for a flat network; an ``int`` year otherwise.
+    Missing entries and NaN are simply absent (zero FOM). Returns ``{}`` when
+    the accessor is unavailable (older PyPSA) or raises — a caller then adds
+    nothing, which is exactly today's behaviour.
+    """
+    import pandas as pd
+
+    try:
+        fom = n.statistics.fom()
+    except Exception:  # noqa: BLE001 — the accessor is optional upstream
+        return {}
+    out: dict[tuple[str, str, int | None], float] = {}
+
+    def _period(p):
+        try:
+            return int(p)
+        except (TypeError, ValueError):
+            return p
+
+    def _put(comp, carrier, period, value) -> None:
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(v) or v == 0.0:
+            return
+        key = (str(comp), str(carrier), period)
+        out[key] = out.get(key, 0.0) + v
+
+    if isinstance(fom, pd.DataFrame):
+        # Multi-period: rows (component, carrier), one column per period.
+        for idx, row in fom.iterrows():
+            if not isinstance(idx, tuple) or len(idx) < 2:
+                continue
+            for col, val in row.items():
+                _put(idx[0], idx[1], _period(col), val)
+        return out
+    if isinstance(fom, pd.Series):
+        for idx, val in fom.items():
+            if not isinstance(idx, tuple):
+                continue
+            if len(idx) >= 3:
+                # (period, component, carrier) — the row-indexed period shape.
+                _put(idx[1], idx[2], _period(idx[0]), val)
+            elif len(idx) == 2:
+                _put(idx[0], idx[1], None, val)
     return out

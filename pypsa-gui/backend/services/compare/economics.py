@@ -19,6 +19,7 @@ from models.schemas import (
     EconomicsComparison,
 )
 from services.compare.support import (
+    _active_years_lookup,
     _CLS_TO_ATTR,
     _build_snapshot_weights,
     _per_period_groupby,
@@ -100,6 +101,9 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
     # `periodized_capital_costs` path `asset_economics` / `cost_breakdown` /
     # `asset_costs` use — see `_periodized_lookup`'s docstring.
     pcc = _periodized_lookup(n, cfg=cfg)
+    # Years each asset is charged fixed cost per period (0 where inactive);
+    # None on a flat network. Same rule as cost_breakdown / asset_economics.
+    _active_of = _active_years_lookup(n)
 
     # Investment-period weightings — years × period. Default 1.0 each. Used
     # to scale annuitised CAPEX commitment from a single-year cost to the
@@ -145,7 +149,8 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
             bucket["by_period"][p] = bucket["by_period"].get(p, 0.0) + v
 
     def _capex_commitment(cc_per_mw_yr: float, p_nom: float,
-                          build_year, lifetime) -> tuple[float, dict[str, float]]:
+                          build_year, lifetime, active: dict | None = None,
+                          ) -> tuple[float, dict[str, float]]:
         """
         Annuitised CAPEX commitment across the horizon — FULL-HORIZON basis.
 
@@ -167,6 +172,15 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
         ``build_year`` / ``lifetime`` are kept as parameters (the vintage walk
         passes them) but no longer reduce the commitment.
 
+        What DOES reduce it now is ``active``: the asset ROW's own activity
+        per period (`period_utils.active_period_years` — PyPSA's
+        `get_active_assets` on the static row, the rule `cost_breakdown`'s
+        statistics and the LP apply). For a vintage parent that is the
+        parent's activity, not each vintage's build year, so the battery case
+        above still reads its full-horizon figure; what changes is that an
+        asset whose own lifetime ends inside the horizon stops being charged
+        for the periods after it retires.
+
         Flat (single-period) networks short-circuit to one annual cost on
         the total bucket; ``by_period`` is empty (matches every other
         per-period field's flat-network behaviour).
@@ -179,11 +193,23 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
         total = 0.0
         pp: dict[str, float] = {}
         for P in periods:
-            years_in_P = period_utils.years_for_period(ipw_years, P)
+            # `active` (period -> years charged, 0 where the asset is not
+            # active) is the asset's own activity; without it every period
+            # is charged, the old full-horizon behaviour.
+            if active is not None:
+                years_in_P = float(active.get(int(P), 0.0))
+            else:
+                years_in_P = period_utils.years_for_period(ipw_years, P)
             commitment = annual * years_in_P
             pp[str(P)] = commitment
             total += commitment
         return total, pp
+
+    def _row_active(row, cls_name: str) -> dict | None:
+        """Per-period years charged for this asset row (None → all periods)."""
+        if _active_of is None:
+            return None
+        return _active_of(row, _CLS_TO_ATTR[cls_name])
 
     def _walk_capex_vintage(cls_name: str, df) -> None:
         """
@@ -212,7 +238,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
             except (TypeError, ValueError):
                 ini = 0.0
             if _math.isfinite(ini) and ini > 0:
-                total, pp = _capex_commitment(cc, ini, row.get("build_year"), lt)
+                total, pp = _capex_commitment(cc, ini, row.get("build_year"), lt, _row_active(row, cls_name))
                 _accum(_bucket(carrier)["capex_eur"], total, pp)
             for entry in payload.get("periods") or []:
                 try:
@@ -221,7 +247,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                     continue
                 if not _math.isfinite(opt) or opt <= 1e-9:
                     continue
-                total, pp = _capex_commitment(cc, opt, entry.get("build_year"), lt)
+                total, pp = _capex_commitment(cc, opt, entry.get("build_year"), lt, _row_active(row, cls_name))
                 _accum(_bucket(carrier)["capex_eur"], total, pp)
 
     def _walk_capex_plain(cls_name: str, df, nom: str) -> None:
@@ -251,7 +277,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
             if not _math.isfinite(opt) or opt <= 1e-9:
                 continue
             lt = row.get("lifetime") if "lifetime" in df.columns else None
-            total, pp = _capex_commitment(cc, opt, row.get("build_year"), lt)
+            total, pp = _capex_commitment(cc, opt, row.get("build_year"), lt, _row_active(row, cls_name))
             _accum(_bucket(carrier)["capex_eur"], total, pp)
 
     def _walk_dispatch_side(df, t_p_df) -> None:
@@ -617,7 +643,7 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                     except (TypeError, ValueError):
                         ini = 0.0
                     if _math.isfinite(ini) and ini > 0:
-                        t, pp = _capex_commitment(cc, ini, row.get("build_year"), lt_val)
+                        t, pp = _capex_commitment(cc, ini, row.get("build_year"), lt_val, _row_active(row, "Link"))
                         capex_eur_total += t
                         for k, v in pp.items():
                             capex_eur_pp[k] = capex_eur_pp.get(k, 0.0) + v
@@ -628,12 +654,12 @@ def _compute_economics_summary(n, periods, is_multi, has_solve, prices_from_stat
                             continue
                         if not _math.isfinite(opt) or opt <= 1e-9:
                             continue
-                        t, pp = _capex_commitment(cc, opt, entry.get("build_year"), lt_val)
+                        t, pp = _capex_commitment(cc, opt, entry.get("build_year"), lt_val, _row_active(row, "Link"))
                         capex_eur_total += t
                         for k, v in pp.items():
                             capex_eur_pp[k] = capex_eur_pp.get(k, 0.0) + v
                 elif cc > 0:
-                    t, pp = _capex_commitment(cc, p_nom_opt, row.get("build_year"), lt_val)
+                    t, pp = _capex_commitment(cc, p_nom_opt, row.get("build_year"), lt_val, _row_active(row, "Link"))
                     capex_eur_total = t
                     capex_eur_pp = pp
 

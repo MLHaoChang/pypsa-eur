@@ -152,33 +152,40 @@ def scenario_generator_lcoe() -> None:
     rows = {r["name"]: r for r in payload["generators"]}
 
     # ── Hand calculations ────────────────────────────────────────────────
+    # capital_cost is ANNUAL (€/MW/yr, the GUI's unit). 24 one-hour snapshots
+    # model 24/8760 of a year, so that share of it is what the LP charges and
+    # what fixed cost reports (services/solver/periodized_costs.py scales a
+    # typed capital_cost by `nyears`, exactly as PyPSA scales an overnight one).
+    share = 24 / 8760
     # Solar:  energy = 0.6 × 50 × 24h    = 720 MWh
     #         revenue = 720 × 50         = 36,000 €
     #         vom    = 720 × 0           = 0
-    #         fixed  = 60,000 × 50       = 3,000,000 €
-    #         net   = 36,000 - 3,000,000 = -2,964,000 €
-    #         LCOE  = (3,000,000 + 0) / 720 = 4,166.67 €/MWh
+    #         fixed  = 60,000 × 50 × 24/8760 = 8,219.18 €
+    #         net   = 36,000 − 8,219.18  = 27,780.82 €
+    #         LCOE  = 8,219.18 / 720     = 11.42 €/MWh
+    solar_fixed = 60_000.0 * 50.0 * share
     solar = rows["solar"]
     assert_close("solar energy MWh", solar["energy_mwh"], 720.0, abs_eps=0.5)
     assert_close("solar revenue €",  solar["revenue_eur"], 36_000.0, abs_eps=50.0)
     assert_close("solar vom €",      solar["vom_cost_eur"], 0.0, abs_eps=1.0)
-    assert_close("solar fixed €",    solar["fixed_cost_eur"], 3_000_000.0, abs_eps=1.0)
-    assert_close("solar net profit €", solar["net_profit_eur"], -2_964_000.0, abs_eps=100.0)
-    assert_close("solar LCOE €/MWh", solar["lcoe_eur_per_mwh"], 4_166.67, rel=0.01)
+    assert_close("solar fixed €",    solar["fixed_cost_eur"], solar_fixed, abs_eps=1.0)
+    assert_close("solar net profit €", solar["net_profit_eur"], 36_000.0 - solar_fixed, abs_eps=100.0)
+    assert_close("solar LCOE €/MWh", solar["lcoe_eur_per_mwh"], solar_fixed / 720.0, rel=0.01)
 
     # Thermal: energy = 70 × 24          = 1,680 MWh
     #          revenue = 1,680 × 50      = 84,000 €
     #          vom    = 1,680 × 50       = 84,000 €
-    #          fixed  = 100,000 × 200    = 20,000,000 €
-    #          net   = 84k - 84k - 20M   = -20,000,000 €
-    #          LCOE  = (20,000,000 + 84,000) / 1,680 = 11,955 €/MWh
+    #          fixed  = 100,000 × 200 × 24/8760 = 54,794.52 €
+    #          net   = 84k − 84k − fixed = −54,794.52 €
+    #          LCOE  = (54,794.52 + 84,000) / 1,680 = 82.62 €/MWh
+    therm_fixed = 100_000.0 * 200.0 * share
     therm = rows["thermal"]
     assert_close("thermal energy MWh",     therm["energy_mwh"], 1_680.0, abs_eps=2.0)
     assert_close("thermal revenue €",      therm["revenue_eur"], 84_000.0, abs_eps=200.0)
     assert_close("thermal vom €",          therm["vom_cost_eur"], 84_000.0, abs_eps=200.0)
-    assert_close("thermal fixed €",        therm["fixed_cost_eur"], 20_000_000.0, abs_eps=1.0)
-    assert_close("thermal net profit €",   therm["net_profit_eur"], -20_000_000.0, abs_eps=400.0)
-    assert_close("thermal LCOE €/MWh",     therm["lcoe_eur_per_mwh"], 11_955.0, rel=0.01)
+    assert_close("thermal fixed €",        therm["fixed_cost_eur"], therm_fixed, abs_eps=1.0)
+    assert_close("thermal net profit €",   therm["net_profit_eur"], -therm_fixed, abs_eps=400.0)
+    assert_close("thermal LCOE €/MWh",     therm["lcoe_eur_per_mwh"], (therm_fixed + 84_000.0) / 1_680.0, rel=0.01)
     assert_close("thermal avg price €/MWh", therm["avg_price_eur_per_mwh"], 50.0, abs_eps=0.5)
 
 
@@ -522,7 +529,11 @@ def scenario_multi_period_distribution() -> None:
     # assertion and the crash was not counted as a failure. Both branches of the
     # 2026-09-04 decomposition produce these same numbers, so this is a stale
     # expectation, not a regression.
-    assert_close("multi-period fixed total €", therm["fixed_cost_eur"], 7_000_000.0, abs_eps=1.0)
+    # capital_cost is annual; each period's 12 one-hour snapshots model
+    # 12/8760 of a year, so the per-period charge is that share of it
+    # (services/solver/periodized_costs.py, `nyears` scaling).
+    annual = 1_000_000.0 * 12 / 8760
+    assert_close("multi-period fixed total €", therm["fixed_cost_eur"], annual * 7, abs_eps=1.0)
     if not therm["by_period"]:
         global FAIL_COUNT
         FAIL_COUNT += 1
@@ -531,8 +542,8 @@ def scenario_multi_period_distribution() -> None:
     by_p = {row["period"]: row for row in therm["by_period"]}
     # Per period: the annual cost times THAT period's years, summing to the
     # horizon total above — not the total sliced into proportional shares.
-    assert_close("by_period[2025].fixed €", by_p[2025]["fixed_cost_eur"], 1_000_000.0 * 2, abs_eps=200.0)
-    assert_close("by_period[2030].fixed €", by_p[2030]["fixed_cost_eur"], 1_000_000.0 * 5, abs_eps=200.0)
+    assert_close("by_period[2025].fixed €", by_p[2025]["fixed_cost_eur"], annual * 2, abs_eps=1.0)
+    assert_close("by_period[2030].fixed €", by_p[2030]["fixed_cost_eur"], annual * 5, abs_eps=1.0)
 
 
 # ── Driver ────────────────────────────────────────────────────────────────

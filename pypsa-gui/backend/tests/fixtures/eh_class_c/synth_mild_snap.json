@@ -1,0 +1,9 @@
+{
+  "id": "synth_mild_snap",
+  "name": "Synthetic mild cold snap (2h)",
+  "kind": "profiles",
+  "frequency_per_year": 0.2,
+  "loads_p_set": {"l": [110.0, 110.0]},
+  "generators_p_max_pu": {"wind1": [0.8, 0.8]},
+  "provenance": "synthetic_fixture_v1"
+}
