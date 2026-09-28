@@ -503,6 +503,31 @@ Files: `lp_bindings.py`, `cost_rows.py`, `test_ratchet.py`, `test_tiers.py`, rec
 
     The reconciliation gate has 15 cases (+ `windowed_tiers`). The P1/P2 tests that pinned "windowed tiers stay out of the LP" now pin the new contract.
 
+- **As implemented, WP2.1c-iii (tariff capacity items):**
+  - **`_lp_reason` for capacity items.** `per_kw_year` items with one catch-all period, direction cost, and measured on import or `peak_import` are LP terms. The rest stay out with a reason: `per_kva_year_not_in_lp` (the plan's coverage), `unit_*_not_capacity`, `capacity_revenue_not_supported`, `tiers_on_capacity_not_supported`, `capacity_with_windows`.
+  - **Capacity never enters the energy or demand filters.** `_adders` skips it, and `_energy_tiered` / `_energy_priced` exclude it, so adding a capacity item leaves the energy hash unchanged. `demand_lp_items` excludes `peak_import` capacity items, so they are never demand keys. `cost_rows` and `billing` use `demand_lp_items`.
+  - **`_capacity_spec` and `add_capacity_terms`, decided at LP build time (after the connection agreement):**
+    - **Contracted, on an extendable PoC:** objective += coef × `p_nom`, via `connection.capacity_fee_coefficient`. That coefficient is factored out of `add_fee_term`: fee × nyears per active period, × w_obj.
+    - **Contracted, on a fixed PoC:** a constant, recorded as `fixed` and reported as `tariff_capacity_fixed` (`included_in_total: False`, flags `network_capacity_fixed`, `fixed_charge_not_in_lp`).
+    - **Measured `peak_import`:** `ic_capacity_peak` per (period, LOCAL year) ≥ each settlement-interval mean. Its cost is €/MW × the year's Σ w / a year's hours × w_obj, the engine's rule.
+  - **`ic_tariff_capacity` record.** It holds `contracted` (€/MW per active period), `fixed`, `peaks` (read from the solved dispatch), `items_hash` and `hash_version`.
+  - **Rows.** `tariff_capacity` is contracted × `p_nom_opt` (capex slot) plus peaks (opex slot).
+  - **Drift.** An items-hash mismatch is `config_changed_since_solve`. A missing record with capacity items wanted is `tariff_capacity_not_established`, plus `capacity_recipe_changed` when the solve's `lp_recipe` < 4 (`LP_RECIPE` is now 4). The bill's `_drift_flags` does the same and records `capacity_hash`.
+  - **Refusals.** A rolling or multi-period myopic solve is refused with capacity items (paid, or the peak restarted, per window). Preflight passes the capacity spec. The existing `capacity_double_count` refusal stays.
+  - **Validation.** `link_no_capital_cost` is waived for the PoC only when a contracted capacity item with a rate above 0 prices its size (`_capacity_priced_poc`). A measured-peak item does not waive it, and every other Link still needs a capital cost.
+  - **Docstring.** The module docstring states the LP coverage after P2.
+  - **Tests:** `tests/test_lp_tariff_capacity.py` has 9 tests:
+    - reasons;
+    - capacity is neither energy nor demand, and the energy hash is unchanged;
+    - contracted on an extendable PoC: gap 0, rows = bill, and the LP sizes the PoC down;
+    - a fixed PoC reported outside the total;
+    - the measured peak: gap 0, rows = bill, and the peak is shaved;
+    - two periods with the PoC retired: bill per period = record, and 0 in 2040;
+    - drift and the recipe change, in the rows and on the bill;
+    - validation.
+
+    The reconciliation gate has 17 cases (+ `tariff_capacity`, `tariff_capacity_peak`, compared across the reload too).
+
 ## WP2.4b-0 Condition 4 refactor (lands before the Library work)
 
 Files: `backend/services/commercial/binding.py` (new: org resolution by an injected resolver, alignment,

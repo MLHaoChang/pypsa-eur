@@ -119,7 +119,7 @@ def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
     LP-carried term (demand, convex tiers) was ADDED after the solve, since the
     dispatch never saw it (round 2 #1).
 
-    Items the LP does not carry (fixed, per-day, capacity until WP2.1c, …) do
+    Items the LP does not carry (fixed, per-day, per-kVA capacity, …) do
     not shape the dispatch: editing them changes the bill but not what it
     rates, so it is not flagged here; the bill uses their current values."""
     flags: list[str] = []
@@ -134,8 +134,7 @@ def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
         changed = True
     elif state == "recipe":
         flags.append("energy_recipe_changed")  # re-solve: windowed tiers bound since
-    items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
-             if _lp._is_demand(i) and _lp._lp_reason(i) is None]
+    items = _lp.demand_lp_items(cfg)
     if info:
         if sorted(info.get("items", [])) != sorted(i.id for i in items) or (
                 info.get("items_hash") is not None and items
@@ -161,6 +160,18 @@ def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
             changed = True
     elif _lp.tier_items_hash(cfg, recipe=recipe) is not None:
         changed = True  # convex tiers added after the solve
+    # Tariff capacity items (WP2.1c-iii) size the PoC / shave the annual peak.
+    cap_rec = n.meta.get(_lp.META_CAPACITY)
+    solve["capacity_hash"] = (cap_rec or {}).get("items_hash")
+    solve["capacity_hash_version"] = _H.version_of(cap_rec)
+    if cap_rec is not None:
+        if cap_rec.get("items_hash") != _lp.capacity_items_hash(cfg, _H.version_of(cap_rec)):
+            changed = True
+    elif _lp.capacity_items_hash(cfg) is not None:
+        if _lp.capacity_all_newly_bound(rec):
+            flags.append("capacity_recipe_changed")  # the old recipe bound none
+        else:
+            changed = True  # capacity items added after the solve
     if not rec:
         flags.append("solve_provenance_unknown")
     if changed:

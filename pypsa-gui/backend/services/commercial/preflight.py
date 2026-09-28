@@ -82,7 +82,8 @@ def commercial_findings(n, commercial, *, solve_strategy: str = "full",
         price = _lp._export_price(n, cfg) if cfg.export_price_ref is not None else None
         demand, _ids, _missing, _dnotes = _lp._demand_spec(n, cfg)
         tier_spec, _tiered, _nonconvex = _lp._tier_spec(n, cfg)
-        _lp.refuse_windowed_terms(demand, tier_spec, solve_strategy, multi_period)
+        _lp.refuse_windowed_terms(demand, tier_spec, solve_strategy, multi_period,
+                                  _lp._capacity_spec(n, cfg))
         if cfg.connection is not None:
             from services.commercial import connection as conn
 

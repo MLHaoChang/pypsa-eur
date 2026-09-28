@@ -26,6 +26,7 @@ Pure service: imports neither routers nor `solver_service`.
 """
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from services.commercial import connection as _conn
@@ -94,9 +95,7 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
     if commercial:
         try:
             cfg_parsed = _lp._parse(commercial)
-            wanted_items = [i for i in (cfg_parsed.import_tariff.items
-                                        if cfg_parsed.import_tariff is not None else [])
-                            if _lp._is_demand(i) and _lp._lp_reason(i) is None]
+            wanted_items = _lp.demand_lp_items(cfg_parsed)
             wanted = [i.id for i in wanted_items]
             wanted_hash = (_lp.demand_hash(n, cfg_parsed, wanted_items, _H.version_of(info))
                            if wanted_items else None)
@@ -178,6 +177,45 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
         if _lp.energy_record_state(n, cfg_now, n.meta.get(_lp.META_LINKS)) == "recipe":
             # …because the solve's recipe left windowed tiers out (WP2.1c-ii).
             flags.append("energy_recipe_changed")
+
+    # Tariff capacity items (P2 WP2.1c-iii): contracted €/MW × p_nom_opt per
+    # active period (a capex-like term, as the connection fee), and each
+    # annual measured peak × its €/MW; a fixed PoC's charge is reported
+    # OUTSIDE the reconciled total (the LP cannot change it).
+    cap = n.meta.get(_lp.META_CAPACITY)
+    wanted_cap = _lp.capacity_items_hash(cfg_now) if cfg_now is not None else None
+    if cap:
+        for item_id, c in (cap.get("contracted") or {}).items():
+            link = c.get("link")
+            if link in n.links.index and "p_nom_opt" in n.links.columns and \
+                    np.isfinite(float(n.links.at[link, "p_nom_opt"])):
+                size = float(n.links.at[link, "p_nom_opt"])
+                for key, eur_per_mw in c.get("eur_per_mw_by_period", {}).items():
+                    items.append(("tariff_capacity", None if key == "_" else int(key),
+                                  float(eur_per_mw) * size, 0.0))
+            else:
+                flags.append("tariff_capacity_not_established")
+        for v in (cap.get("peaks") or {}).values():
+            items.append(("tariff_capacity", v.get("inv_period"), 0.0,
+                          float(v["eur_per_mw"]) * float(v["peak_mw"])))
+        if cap.get("contracted") or cap.get("peaks"):
+            block["tariff_capacity"] = (None if "tariff_capacity_not_established" in flags
+                                        else weighted("tariff_capacity"))
+        if cap.get("fixed"):
+            eur = sum(float(v) * (yrs(int(k)) if k != "_" else 1.0)
+                      for c in cap["fixed"].values()
+                      for k, v in (c.get("eur_by_period") or {}).items())
+            block["tariff_capacity_fixed"] = {
+                "eur": float(eur), "included_in_total": False,
+                "flags": ["network_capacity_fixed", "fixed_charge_not_in_lp"]}
+        if cap.get("items_hash") != (_lp.capacity_items_hash(cfg_now, _H.version_of(cap))
+                                     if cfg_now is not None else None):
+            drifted()
+    elif wanted_cap is not None:
+        block["tariff_capacity"] = None
+        flags.append("tariff_capacity_not_established")
+        if _lp.capacity_all_newly_bound(n.meta.get(_lp.META_LINKS)):
+            flags.append("capacity_recipe_changed")  # the solve's recipe bound none
 
     # Energy-hub group contract (WP1.6): no money of its own; the members'
     # shares of the group's import energy are reported (allocation is P3).

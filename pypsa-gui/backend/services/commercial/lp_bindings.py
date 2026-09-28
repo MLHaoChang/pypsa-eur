@@ -51,6 +51,17 @@ Items the LP does not carry here are listed in `not_in_lp` with a reason: fixed
 items (never in the LP, §5.5), tiers (WP1.5c), demand (WP1.5a), capacity (the
 connection agreement, WP1.4a).
 
+**LP coverage (after P2 WP2.1c):** everything the engine bills is an LP term
+except fixed and per-day items (§5.5), `per_kva_year` capacity items, and
+contract settlements other than WP2.2d (`not_in_lp` / `settlement_only`, each
+with a reason). Tariff capacity items (WP2.1c-iii): on the CONTRACTED capacity,
+a term on the PoC's `p_nom` when it is extendable
+(`connection.capacity_fee_coefficient`, the connection fee's rule), else a
+constant reported as `tariff_capacity_fixed` outside the reconciled total; on
+`peak_import`, an annual peak per (period, local year) over settlement-interval
+means. A tariff capacity item AND a connection capacity fee on one PoC is
+refused (`commercial.capacity_double_count`).
+
 Demand (P2 WP2.1c-i): every ratchet mode (range, cyclic range, designated
 months — `_ratchet_months`, the engine's rule) is a linear row on
 `ic_billed_demand`; demand tiers are stacked `ic_demand_tier_q` segments summing
@@ -95,6 +106,7 @@ from services.commercial.tariff_engine import (
     _rates,
     demand_windows,
     interval_key,
+    _HOURS_PER_YEAR,
     _period_index,
     is_windowed_tiered,
     window_rate,
@@ -110,6 +122,9 @@ DEMAND_SPEC_ATTR = "_ic_demand_spec"   # transient: set by apply, read by the LP
 DEMAND_BUILT_ATTR = "_ic_demand_built"  # transient: set by the LP wrapper
 META_TIERS = "ic_tier_volumes"
 META_GROUP = "ic_group"
+META_CAPACITY = "ic_tariff_capacity"
+CAPACITY_SPEC_ATTR = "_ic_capacity_spec"   # transient: set by apply, read by the LP wrapper
+CAPACITY_BUILT_ATTR = "_ic_capacity_built"  # transient: set by the LP wrapper
 GROUP_SPEC_ATTR = "_ic_group_spec"      # transient: set by apply, read by the LP wrapper
 TIER_SPEC_ATTR = "_ic_tier_spec"        # transient: set by apply, read by the LP wrapper
 TIER_BUILT_ATTR = "_ic_tier_built"
@@ -183,9 +198,23 @@ def _lp_reason(item: TariffItem) -> str | None:
         return "fixed_not_in_lp"
     if item.kind == "capacity":
         # Before the demand check: a capacity item measured on peak_import (the
-        # DE Leistungspreis) is a capacity charge, not a demand one. Tariff
-        # capacity items enter the LP in P2 WP2.1c.
-        return "capacity_not_in_lp_until_WP2.1c"
+        # DE Leistungspreis) is a capacity charge, not a demand one. LP terms
+        # since P2 WP2.1c-iii (`_capacity_spec`); per kVA stays out (the plan's
+        # LP coverage), as do the shapes the engine does not bill.
+        if item.unit == "per_kva_year":
+            return "per_kva_year_not_in_lp"
+        if item.unit != "per_kw_year":
+            return f"unit_{item.unit}_not_capacity"
+        if item.direction != "cost":
+            return "capacity_revenue_not_supported"
+        if item.tiers:
+            return "tiers_on_capacity_not_supported"
+        p = item.periods[0]
+        if len(item.periods) != 1 or p.months or p.weekdays or p.start_hour is not None:
+            return "capacity_with_windows"
+        if item.measured_on not in ("import", "peak_import"):
+            return f"capacity_measured_on_{item.measured_on}"
+        return None
     if _is_demand(item):
         # Demand tiers (stacked on the billed demand) and every ratchet mode are
         # LP terms since P2 WP2.1c-i.
@@ -227,8 +256,10 @@ def _side(item: TariffItem) -> str:
 #   3 — windowed energy tiers bound (convex: LP terms; non-convex: adders at
 #       the predicted tier), the energy history prices non-convex tiers
 #       (WP2.1c-ii).
-LP_RECIPE = 3
+#   4 — tariff capacity items bound (WP2.1c-iii).
+LP_RECIPE = 4
 WINDOWED_TIERS_RECIPE = 3
+CAPACITY_RECIPE = 4
 
 
 def energy_recipe_of(rec: dict | None) -> int:
@@ -251,7 +282,8 @@ def item_tiers_convex(item: TariffItem) -> bool:
 def _energy_tiered(cfg: CommercialConfig, recipe: int = LP_RECIPE) -> list:
     """The tiered energy items the LP binds under `recipe`."""
     items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
-             if i.tiers and not _is_demand(i) and _lp_reason(i) is None]
+             if i.tiers and not _is_demand(i) and i.kind != "capacity"
+             and _lp_reason(i) is None]
     return (items if recipe >= WINDOWED_TIERS_RECIPE
             else [i for i in items if not is_windowed_tiered(i)])
 
@@ -322,6 +354,8 @@ def _adders(n, cfg: CommercialConfig) -> tuple[dict[str, np.ndarray], list[str],
         if reason is not None:
             not_in_lp[item.id] = reason
             continue
+        if item.kind == "capacity":
+            continue  # a p_nom or annual-peak term, built by `_capacity_spec`
         if _is_demand(item):
             neg = [p.name for p in item.periods if p.rate < 0
                    or any(r < 0 for r in (p.tier_rates or []))]
@@ -672,6 +706,13 @@ def demand_amount(rec: dict) -> float:
     return out
 
 
+def demand_lp_items(cfg: CommercialConfig) -> list:
+    """The demand items the LP carries as peak terms (a `peak_import`
+    capacity item is a capacity charge, never a demand key)."""
+    return [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
+            if _is_demand(i) and i.kind != "capacity" and _lp_reason(i) is None]
+
+
 def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list[str], list[str]]:
     """(spec for the LP wrapper, demand item ids, months not established).
 
@@ -679,8 +720,7 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
     least one snapshot; the months between the first and last snapshot that
     have none are listed as not established (spec §5.2), and never weighted
     from their neighbours."""
-    items = [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
-             if _is_demand(i) and _lp_reason(i) is None]
+    items = demand_lp_items(cfg)
     if not items:
         return None, [], [], []
     local = _local_clock(n.snapshots, cfg.timezone)
@@ -810,7 +850,7 @@ def _energy_priced(cfg: CommercialConfig, recipe: int = LP_RECIPE) -> list:
     non-convex tiers."""
     tiered = {i.id for i in _energy_tiered(cfg, recipe)}
     return [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
-            if not _is_demand(i) and _lp_reason(i) is None
+            if not _is_demand(i) and i.kind != "capacity" and _lp_reason(i) is None
             and (not i.tiers or (i.id in tiered and not item_tiers_convex(i)))]
 
 
@@ -1177,6 +1217,150 @@ def _read_tier_solution(n, spec: dict) -> dict | None:
     return out
 
 
+# ── tariff capacity items (P2 WP2.1c-iii) ──────────────────────────────────
+
+
+def capacity_lp_items(cfg: CommercialConfig) -> list:
+    return [i for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
+            if i.kind == "capacity" and _lp_reason(i) is None]
+
+
+def capacity_items_hash(cfg: CommercialConfig, version: int = _H.HASH_VERSION) -> str | None:
+    items = capacity_lp_items(cfg)
+    return _items_hash(items, version) if items else None
+
+
+def _capacity_spec(n, cfg: CommercialConfig) -> dict | None:
+    """Contracted-capacity items (a term on the PoC's p_nom, decided at LP
+    build time: extendable ⇒ LP term, fixed ⇒ a constant reported outside the
+    total) and measured-peak items (one annual peak per investment period and
+    LOCAL calendar year, over settlement-interval means, at €/MW × the year's
+    represented hours / a year's hours — the engine's rule)."""
+    items = capacity_lp_items(cfg)
+    if not items:
+        return None
+    local = _local_clock(n.snapshots, cfg.timezone)
+    years = np.asarray(local.strftime("%Y"))
+    inv = (np.asarray(n.snapshots.get_level_values(0)) if isinstance(n.snapshots, pd.MultiIndex)
+           else np.full(len(n.snapshots), None, dtype=object))
+    w = n.snapshot_weightings.objective.to_numpy(dtype=float)
+    contracted, peaks = [], []
+    for item in items:
+        eur_per_mw_year = float(item.periods[0].rate) * _KWH_PER_MWH
+        if item.measured_on != "peak_import":
+            contracted.append({"item": item.id, "eur_per_mw_year": eur_per_mw_year})
+            continue
+        interval = interval_key(local, {"15min": "15min", "30min": "30min",
+                                        "h": "h"}[item.settlement])
+        for p in pd.unique(inv):
+            for y in sorted(set(years[inv == p])):
+                pos = np.flatnonzero((inv == p) & (years == y))
+                _, group = np.unique(interval[pos], return_inverse=True)
+                peaks.append({"key": f"{item.id}|{'' if p is None else p}|{y}", "item": item.id,
+                              "inv_period": None if p is None else int(p), "year": y,
+                              "eur_per_mw": eur_per_mw_year * float(w[pos].sum()) / _HOURS_PER_YEAR,
+                              "positions": pos, "group": group})
+    return {"link": cfg.poc_link, "import_links": import_links(cfg),
+            "contracted": contracted, "peaks": peaks,
+            "items_hash": _items_hash(items), "hash_version": _H.HASH_VERSION}
+
+
+def add_capacity_terms(n) -> None:
+    """objective += Σ contracted coef · p_nom[PoC] (extendable PoC) and
+    Σ w_obj · €/MW · ic_capacity_peak[key], ic_capacity_peak ≥ each interval's
+    mean import. Called from the LP wrapper."""
+    import xarray as xr
+
+    from services.commercial import connection  # lazy: connection imports this module
+
+    spec = getattr(n, CAPACITY_SPEC_ATTR, None)
+    if not spec:
+        return
+    m = n.model
+    link = spec["link"]
+    built = {"contracted": {}, "fixed": {}, "peaks": bool(spec["peaks"])}
+    extendable = bool(n.links.at[link, "p_nom_extendable"])
+    for c in spec["contracted"]:
+        coef, by_period = connection.capacity_fee_coefficient(n, link, c["eur_per_mw_year"])
+        if extendable:
+            m.objective += coef * m["Link-p_nom"].sel(name=link)
+            built["contracted"][c["item"]] = {"link": link, "eur_per_mw_by_period": by_period}
+        else:
+            # A fixed PoC: the charge is a constant the LP cannot change —
+            # reported outside the reconciled total (as a fixed connection fee).
+            p_nom = float(n.links.at[link, "p_nom"])
+            built["fixed"][c["item"]] = {"link": link, "p_nom_mw": p_nom,
+                                         "eur_by_period": {k: v * p_nom
+                                                           for k, v in by_period.items()}}
+    if spec["peaks"]:
+        names = [k["key"] for k in spec["peaks"]]
+        peak = m.add_variables(lower=0, name="ic_capacity_peak",
+                               coords=[pd.Index(names, name="key")])
+        imp = m["Link-p"].sel(name=spec["import_links"]).sum("name")
+        w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
+        for i, k in enumerate(spec["peaks"]):
+            pos, group = k["positions"], k["group"]
+            flow = imp.isel(snapshot=pos)
+            if group.max() + 1 == len(pos):
+                m.add_constraints(flow - peak.sel(key=k["key"]) <= 0,
+                                  name=f"ic_capacity_peak_def_{i}")
+                continue
+            gda = xr.DataArray(group, coords={"snapshot": flow.indexes["snapshot"]},
+                               dims="snapshot", name="interval")
+            weighted = (flow * w_all[pos]).groupby(gda).sum()
+            wsum = np.bincount(group, weights=w_all[pos])
+            wda = xr.DataArray(wsum, coords={"interval": np.arange(len(wsum))}, dims="interval")
+            m.add_constraints(weighted - wda * peak.sel(key=k["key"]) <= 0,
+                              name=f"ic_capacity_peak_def_{i}")
+        if isinstance(n.snapshots, pd.MultiIndex):
+            w_obj = n.investment_period_weightings["objective"]
+            weight = [float(w_obj.loc[k["inv_period"]]) for k in spec["peaks"]]
+        else:
+            weight = [1.0] * len(names)
+        coef = xr.DataArray([w * k["eur_per_mw"] for w, k in zip(weight, spec["peaks"])],
+                            coords={"key": names}, dims="key")
+        m.objective += (peak * coef).sum()
+    setattr(n, CAPACITY_BUILT_ATTR, built)
+
+
+def _read_capacity_solution(n, spec: dict) -> dict | None:
+    """The committed record: contracted €/MW per period (rows × p_nom_opt),
+    fixed-PoC charges, and each annual peak read from the solved dispatch
+    (interval means, as billed)."""
+    built = getattr(n, CAPACITY_BUILT_ATTR, None)
+    model = getattr(n, "model", None)
+    if built is None or model is None:
+        return None
+    out = {"contracted": built["contracted"], "fixed": built["fixed"], "peaks": {},
+           "items_hash": spec["items_hash"], "hash_version": spec["hash_version"]}
+    if spec["peaks"]:
+        try:
+            flow = model.variables["Link-p"].solution.sel(
+                name=spec["import_links"]).sum("name").values
+        except Exception:  # noqa: BLE001 — unsolved: nothing to commit
+            return None
+        w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
+        for k in spec["peaks"]:
+            pos, group = k["positions"], k["group"]
+            f = flow[pos]
+            wsum = np.bincount(group, weights=w_all[pos])
+            ok = wsum > 0
+            means = (f if group.max() + 1 == len(pos)
+                     else np.bincount(group, weights=f * w_all[pos])[ok] / wsum[ok])
+            v = max(0.0, float(means.max())) if len(means) else float("nan")
+            if not np.isfinite(v):
+                return None
+            out["peaks"][k["key"]] = {"item": k["item"], "inv_period": k["inv_period"],
+                                      "year": k["year"], "eur_per_mw": k["eur_per_mw"],
+                                      "peak_mw": v}
+    return out
+
+
+def capacity_all_newly_bound(links_rec: dict | None) -> bool:
+    """A solve made before WP2.1c-iii bound no capacity item (no record)."""
+    return bool(links_rec) and int(links_rec.get("lp_recipe") or 1) < CAPACITY_RECIPE
+
+
 # ── energy-hub group contract (WP1.6) ──────────────────────────────────────
 
 
@@ -1220,12 +1404,20 @@ def effective_strategy(solve_strategy: str | None, *, sclopf: bool = False,
 
 
 def refuse_windowed_terms(demand: dict | None, tier_spec: dict | None,
-                          solve_strategy: str, multi_period: bool) -> None:
+                          solve_strategy: str, multi_period: bool,
+                          capacity: dict | None = None) -> None:
     """Monthly demand peaks and tier volumes cannot be carried across the
-    windows of a rolling or multi-period myopic solve (P6)."""
+    windows of a rolling or multi-period myopic solve (P6); a capacity item
+    would be sized and paid (contracted) or its annual peak restarted
+    (measured) per window, as a connection fee would (WP2.1c-iii)."""
     windowed = solve_strategy == "rolling" or (solve_strategy == "myopic" and multi_period)
     if not windowed:
         return
+    if capacity is not None:
+        raise CommercialBindingError(
+            f"tariff capacity items with solve_strategy={solve_strategy!r} would be paid (or "
+            "their annual peak restarted) per window; not supported until P6 — solve the "
+            "full horizon")
     if tier_spec is not None:
         raise CommercialBindingError(
             f"tiered rates with solve_strategy={solve_strategy!r} would restart the monthly "
@@ -1299,6 +1491,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
             n.meta.pop(META_DEMAND_INFO, None)
             n.meta.pop(META_TIERS, None)
             n.meta.pop(META_GROUP, None)
+            n.meta.pop(META_CAPACITY, None)
 
         applied._commit.append(clear)
         return applied
@@ -1309,7 +1502,8 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
     demand, demand_items, demand_missing, demand_notes = _demand_spec(n, cfg)
     notes = notes + [x for x in demand_notes if x not in notes]
     tier_spec, tiered_items, nonconvex_items = _tier_spec(n, cfg)
-    refuse_windowed_terms(demand, tier_spec, solve_strategy, multi_period)
+    capacity = _capacity_spec(n, cfg)
+    refuse_windowed_terms(demand, tier_spec, solve_strategy, multi_period, capacity)
     has_price = cfg.export_price_ref is not None
     price = _export_price(n, cfg) if has_price else None
     risk = circulation_risk_snapshots(n, cfg, adders, price)
@@ -1365,6 +1559,20 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
 
         applied._undo.append(undo_group)
 
+    solved_capacity: dict = {}
+    if capacity is not None:
+        setattr(n, CAPACITY_SPEC_ATTR, capacity)
+
+        def undo_capacity() -> None:
+            got = _read_capacity_solution(n, capacity)
+            if got is not None:
+                solved_capacity["v"] = got
+            for attr in (CAPACITY_SPEC_ATTR, CAPACITY_BUILT_ATTR):
+                if hasattr(n, attr):
+                    delattr(n, attr)
+
+        applied._undo.append(undo_capacity)
+
     solved_tiers: dict = {}
     if tier_spec is not None:
         setattr(n, TIER_SPEC_ATTR, tier_spec)
@@ -1388,6 +1596,10 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
             n.meta[META_TIERS] = solved_tiers["v"]
         else:
             n.meta.pop(META_TIERS, None)
+        if "v" in solved_capacity:
+            n.meta[META_CAPACITY] = solved_capacity["v"]
+        else:
+            n.meta.pop(META_CAPACITY, None)
         frame = pd.DataFrame({link: add for link, add in targets.items()}, index=n.snapshots)
         n.links_t[ENERGY_PRICE_ATTR] = frame
         n.meta[META_LINKS] = {"import": cfg.poc_link, "export": cfg.export_link,
@@ -1421,6 +1633,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
         "demand_partial_months": (demand or {}).get("info", {}).get("partial_months", []),
         "tiered_items": tiered_items, "nonconvex_tier_items": nonconvex_items,
         "nonconvex_tier_predicted": predicted_tiers(n, cfg),
+        "capacity_items": [i.id for i in capacity_lp_items(cfg)],
         "not_in_lp": not_in_lp, "notes": notes, "timezone": cfg.timezone,
         "simultaneous_flow_risk_snapshots": risk,
         "export_price_ref": (cfg.export_price_ref.model_dump(mode="json")
@@ -1446,6 +1659,7 @@ def _wrap_with_commercial_bindings(network, user_fn, cfg, log_queue=None):
         from services.commercial import connection  # lazy: connection imports this module
 
         connection.add_fee_term(n)
+        add_capacity_terms(n)
         add_demand_terms(n)
         add_tier_terms(n)
         add_group_terms(n)

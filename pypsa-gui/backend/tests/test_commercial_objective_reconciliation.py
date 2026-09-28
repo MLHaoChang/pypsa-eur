@@ -10,11 +10,12 @@ recomputes the rows after a reload with no solver state at all, and
 `_HANDLER_PARAMS` is unchanged (no new route argument; plan deviation from the
 `commercial_terms=` keyword, recorded in the plan).
 
-Fifteen cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
+Seventeen cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
 tiers; + group cap; a representative-weeks axis; two investment periods (TOU +
 demand + fee); a two-period group whose demand is metered on the group; annual FOM on the extendable assets; capex and FOM on a fee-bearing PoC Link (WP2.0);
 rising demand tiers, a designated-month and a cyclic ratchet (WP2.1c-i); convex
-windowed energy tiers (WP2.1c-ii).
+windowed energy tiers (WP2.1c-ii); tariff capacity, contracted and measured-peak
+(WP2.1c-iii).
 After the reload the gap must still be computed (never None), and the flags,
 the not-established months and the group record must be the same.
 """
@@ -52,6 +53,11 @@ WINDOWED_TIERS = {"id": "wtiers", "kind": "energy", "unit": "per_kwh", "measured
                   "periods": [{"name": "peak", "rate": 0.0, "start_hour": 17, "end_hour": 21,
                                "tier_rates": [0.30, 0.40]},
                               {"name": "off", "rate": 0.0, "tier_rates": [0.10, 0.15]}]}
+# WP2.1c-iii: tariff capacity items — contracted (on an extendable PoC) and
+# measured on the annual import peak (the DE Leistungspreis).
+TARIFF_CAP = {"id": "cap", "kind": "capacity", "unit": "per_kw_year",
+              "periods": [{"name": "all", "rate": 400.0}]}
+LEISTUNG = {**TARIFF_CAP, "id": "lp", "measured_on": "peak_import"}
 RATCHET_MONTHS = {**DEMAND, "ratchet": {"months": [1], "share": 0.95}}
 RATCHET_CYCLIC = {**DEMAND, "ratchet": {"lookback_months": 1, "share": 0.9,
                                         "cyclic_year": True}}
@@ -77,6 +83,12 @@ def _two_members():
     n.add("Load", "site_b_load", bus="site_b", p_set=n.loads_t.p_set["site_load"] * 0.8)
     n.add("Generator", "backup_b", bus="site_b", p_nom=100.0, marginal_cost=500.0, carrier="grid")
     n.add("Generator", "backup", bus="site", p_nom=100.0, marginal_cost=500.0, carrier="grid")
+    return n
+
+
+def _extendable_poc():
+    n = _edge()
+    n.links.loc["import", ["p_nom_extendable", "p_nom_max", "capital_cost"]] = [True, 120.0, 0.0]
     return n
 
 
@@ -151,6 +163,8 @@ CASES = {
     "poc_capex_fee": (_poc_capex, {"import_tariff": _tariff(TOU), "connection": FEE}),
     "demand_tiers": (_edge, {"import_tariff": _tariff(TOU, DEMAND_TIERS)}),
     "windowed_tiers": (_edge, {"import_tariff": _tariff(WINDOWED_TIERS)}),
+    "tariff_capacity": (_extendable_poc, {"import_tariff": _tariff(TOU, TARIFF_CAP)}),
+    "tariff_capacity_peak": (_edge, {"import_tariff": _tariff(TOU, LEISTUNG)}),
     "ratchet_designated": (_jan_feb, {"import_tariff": _tariff(TOU, RATCHET_MONTHS)}),
     "ratchet_cyclic": (_jan_feb, {"import_tariff": _tariff(TOU, RATCHET_CYCLIC),
                                   "meter_history_peaks_kw": {"2030-12": 60_000.0}}),
@@ -213,7 +227,7 @@ def test_rows_reconcile_before_and_after_a_save_and_load(case, client, install_n
     dec2, cb2 = _gap_and_rows(reloaded.network, cfg2)
     after = cb2["commercial"]
     for key in ("energy_import", "energy_export", "demand_charge", "energy_tiers",
-                "network_capacity"):
+                "network_capacity", "tariff_capacity"):
         if before.get(key) is None:
             continue
         assert after.get(key) == pytest.approx(before[key], rel=1e-9), (case, key)

@@ -268,7 +268,9 @@ def test_a_peak_import_capacity_item_is_out_of_the_lp_as_capacity():
     """#7: the LP's reason names capacity, not demand."""
     from services.commercial import lp_bindings as L
 
-    assert L._lp_reason(_tariff(_LP).items[0]) == "capacity_not_in_lp_until_WP2.1c"
+    assert L._lp_reason(_tariff(_LP).items[0]) is None            # an LP term (WP2.1c-iii)
+    assert L.demand_lp_items(L._parse({"poc_link": "import",
+                                       "import_tariff": _tariff(_LP)})) == []   # never demand
 
 
 # ── WP2.1a-i review round 2 ────────────────────────────────────────────────

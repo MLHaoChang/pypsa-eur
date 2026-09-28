@@ -467,6 +467,20 @@ def add_fee_term(n) -> None:
     if not spec:
         return
     link, fee = spec["link"], float(spec["fee_eur_per_mw_year"])
+    coef, by_period = capacity_fee_coefficient(n, link, fee)
+    p_nom = n.model["Link-p_nom"].sel(name=link)
+    n.model.objective += coef * p_nom
+    setattr(n, FEE_BUILT_ATTR, {
+        "link": link, "fee_eur_per_mw_year": fee, "eur_per_mw_by_period": by_period})
+
+
+def capacity_fee_coefficient(n, link: str, fee_eur_per_mw_year: float) -> tuple[float, dict]:
+    """(objective coefficient on the Link's p_nom, {period key: €/MW}) for a
+    €/MW-year charge on `link`'s capacity: fee × the operating years each
+    ACTIVE period represents (`nyears_by_period`), × w_obj(period) in the coefficient
+    only (`cost_breakdown` weights the rows as it does every capex). Shared by
+    the connection fee (WP1.4a) and tariff capacity items (P2 WP2.1c-iii)."""
+    fee = float(fee_eur_per_mw_year)
     ny = nyears_by_period(n)
     periods = active_periods(n, link)
     if isinstance(n.snapshots, pd.MultiIndex):
@@ -474,11 +488,7 @@ def add_fee_term(n) -> None:
         coef = sum(float(w_obj.loc[p]) * fee * ny[p] for p in periods)
     else:
         coef = fee * ny[None]
-    p_nom = n.model["Link-p_nom"].sel(name=link)
-    n.model.objective += coef * p_nom
-    setattr(n, FEE_BUILT_ATTR, {
-        "link": link, "fee_eur_per_mw_year": fee,
-        "eur_per_mw_by_period": {("_" if p is None else str(p)): fee * ny[p] for p in periods}})
+    return coef, {("_" if p is None else str(p)): fee * ny[p] for p in periods}
 
 
 # ── FCA stress entry (WP1.4b) ──────────────────────────────────────────────
