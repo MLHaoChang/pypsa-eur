@@ -32,7 +32,29 @@ cannot load any `.docx`, a plain python-docx control file fails identically).
 
 ## §1 — Foundation (WP1, WP2, WP4, WP5)
 
-_(pending)_
+**Merged so far (2026-09-28):** WP4 `2fa85a6`, WP2 `6406427`, WP1 `6703060`,
+phase-0 gate `3492795`. WP5 (writer from `ReportDocument`, evidence-only
+report, `qa_reports_phase1.py`) in progress.
+
+| Tier | Command | Result |
+|---|---|---|
+| Unit | `tests/test_report_model.py` 8, `test_report_store.py` 33, `test_report_routes.py` 22, `test_report_evidence.py` 18, `test_report_figures.py` 14, `test_report_docx_writer.py` 14, `test_chat_report_export_tools.py` 5 | 114 passed |
+| Regression | chunk 1 (`tests/test_chat_*.py` + manifest + packaging) | exit 0 |
+| Regression | chunk 2 (`tests/test_upload*.py tests/test_desktop*.py tests/test_project*.py tests/test_energy_hub_*.py tests/test_adequacy_*.py`) | exit 0 |
+| Regression | remainder, 180 files in four groups of 43–47 run in parallel (`--durations=15`; slowest single test 18.7 s, `test_solve_queue.py::test_abort_running_solve_is_fast_and_next_job_starts`) | exit 0 ×4 |
+| Integration | `test_report_routes.py` (TestClient: list/get/versions/figures/delete, `%2e%2e` ids, other-org 404, lock refusal, save-as / copy / scenario / snapshot / bundle carry `reports/`) | 22 passed (counted above) |
+| End-to-end QA | `tests/qa_reports_phase0.py` | 18/18 PASS |
+| End-to-end QA | `tests/qa_reports_phase1.py` | _(with WP5)_ |
+
+**Recorded corrections.** The whole backend suite cannot finish inside the
+cloud container's 10-minute per-command ceiling and the "everything else"
+chunk cannot either at half size; four groups of ≤47 files each finish in
+well under it and together are the suite minus `slow`. The plan's chunk
+recipe now says so. Agent worktrees are created from `master`, not the
+plan branch: WP1 and WP4 fast-forwarded first; WP2 could not (its
+`reset`/`ff-merge` were refused by the permission classifier) and shipped a
+two-file branch on `master`'s base that merged cleanly — later agents are
+told to fast-forward first.
 
 ## §2 — Generation (WP3, WP6)
 

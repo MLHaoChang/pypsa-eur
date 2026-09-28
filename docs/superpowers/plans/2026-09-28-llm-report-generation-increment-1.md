@@ -53,7 +53,10 @@ cd pypsa-gui/backend
 python -m pytest tests/test_chat_*.py tests/test_tool_error_kind_manifest.py tests/test_packaging_requirements.py -m "not slow" -q
 python -m pytest tests/test_energy_hub_*.py tests/test_report_*.py tests/test_study_report.py tests/test_adequacy_*.py -m "not slow" -q
 python -m pytest tests/test_upload*.py tests/test_desktop*.py tests/test_project*.py -m "not slow" -q
-python -m pytest tests -m "not slow" -q --ignore-glob='tests/test_chat_*.py' --ignore-glob='tests/test_energy_hub_*.py' --ignore-glob='tests/test_report_*.py' --ignore-glob='tests/test_upload*.py' --ignore-glob='tests/test_desktop*.py' --ignore-glob='tests/test_project*.py'
+# the remainder (~180 files) does NOT fit one run: list it and split into groups of ≤45 files
+ls tests/test_*.py | grep -v -E 'tests/test_(chat_|energy_hub_|report_|upload|desktop|project|adequacy_)' > /tmp/rest.txt
+split -n l/4 /tmp/rest.txt /tmp/rest_   # then one run per group, in parallel on a 4-core box:
+python -m pytest $(cat /tmp/rest_aa) -m "not slow" -q --durations=15
 ```
 
 | Phase | Work packages | Deliverable the e2e driver proves | Findings file |
