@@ -66,6 +66,20 @@ from smoke.isolation import require_isolated_environment  # noqa: E402
 
 require_isolated_environment()
 
+# The two throwaway roots. Read back from the environment AFTER the guard, so
+# they are known set and non-blank.
+#
+# THESE BINDINGS WENT MISSING and nothing noticed. The comment above records
+# that the per-harness checks moved into `smoke/isolation.py`; the assignments
+# that fed them moved too, while the four later uses of `_appdata`/`_projects`
+# (the assertion block below, and `inventory()` before and after the run) stayed
+# behind. So this harness raised `NameError: name '_appdata' is not defined` on
+# the exact invocation its own usage block documents — and read as healthy,
+# because the unset case still refused correctly from inside
+# `require_isolated_environment()`, several lines earlier.
+_appdata = os.environ["PYPSAGUI_APP_DATA_DIR"]
+_projects = os.environ["PYPSAGUI_PROJECTS_ROOT"]
+
 
 def _is_inside(child: Path, parent: Path) -> bool:
     """
