@@ -84,6 +84,7 @@ from routers import (
     network,
     project_network,
     projects,
+    report_jobs,
     reports,
     results,
     simulation,
@@ -1152,6 +1153,12 @@ app.include_router(
 # `projects._BUNDLE_DIRS`, so it travels with save-as, copy and snapshots.
 app.include_router(
     reports.router, prefix="/api/projects", tags=["reports"],
+    dependencies=_projects_router_guard,
+)
+# Report generation (WP3): `/{name}/reports/generate…` and the per-section
+# regenerate — the LLM job over the same evidence, same guard, same lock check.
+app.include_router(
+    report_jobs.router, prefix="/api/projects", tags=["reports"],
     dependencies=_projects_router_guard,
 )
 app.include_router(
