@@ -85,7 +85,7 @@ Every phase follows this loop. **Do not start phase N+1 until phase N's gate is 
 
 **TDD evidence to record.** Red for the badge (`expected "€/MW/yr"`), red for `reading_notes` (`KeyError`), red for the placeholder (`found "max_solves"`).
 
-- [ ] Gate S0
+- [x] Gate S0 — **GO** (2026-09-28; first pass NO-GO on two blockers, fixed in `b9288f8`; `docs/superpowers/notes/2026-09-28-mvp1-s0-gate.md`, findings `2026-09-28-s0-pre-fixes-investment-reading.md`). Follow-ups outside S0's files, not blocking: `GenerationStack`, `CapacityExpansion` and `propertyDocs` still label capital cost without `/yr`; the quick-add label and edit-mode badges are correct but untested.
 
 ## S1. Contracts, persistence, routes
 
