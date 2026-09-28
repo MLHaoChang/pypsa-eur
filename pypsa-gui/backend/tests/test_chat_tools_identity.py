@@ -45,6 +45,15 @@ def unbound_identity():
         pytest.param(
             lambda: chat_tools.activate_project("anything"), id="activate_project"
         ),
+        # Not a project tool, but it joined `_route` when its handler grew the
+        # `db`/`actor` dependencies that gate `extra_functionality_code`, so it
+        # now needs an identity for the same reason the rest do. Listed here to
+        # pin that: a regression to a direct call would answer with an
+        # AttributeError from inside the gate instead of this 401.
+        pytest.param(
+            lambda: chat_tools.update_solver_config({"transmission_losses": True}),
+            id="update_solver_config",
+        ),
     ],
 )
 def test_project_tools_refuse_without_an_acting_user(unbound_identity, call):
