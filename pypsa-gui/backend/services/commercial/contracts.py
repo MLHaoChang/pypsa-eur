@@ -113,9 +113,9 @@ def _gen(contract, inputs: SettlementInputs) -> np.ndarray:
     if missing:
         raise ContractError(f"contract {contract.id!r}: asset(s) {missing} are not Generators "
                             "of this network")
-    # A NaN output stays NaN (summed with min_count): the amount is then
-    # refused below, never a partial sum.
-    return inputs.generators[list(contract.asset_ids)].sum(axis=1, min_count=1).to_numpy(
+    # Any NaN output makes the interval NaN (skipna=False): the amount is then
+    # refused below, never a partial sum (review round 2).
+    return inputs.generators[list(contract.asset_ids)].sum(axis=1, skipna=False).to_numpy(
         dtype=float)
 
 
@@ -129,8 +129,11 @@ def _on_index(series, inputs: SettlementInputs) -> np.ndarray | None:
     cut to this period first. None when any row is missing or NaN (ADR-0001)."""
     s = pd.Series(series)
     if isinstance(s.index, pd.MultiIndex):
-        s = (s.xs(inputs.period, level=0) if inputs.period is not None
-             else s.droplevel(0))
+        try:
+            s = (s.xs(inputs.period, level=0) if inputs.period is not None
+                 else s.droplevel(0))
+        except KeyError:
+            return None  # the series does not cover this period (review round 2)
     out = s.reindex(inputs.index).to_numpy(dtype=float)
     return None if np.isnan(out).any() else out
 
@@ -312,7 +315,9 @@ def _dr(contract, inputs: SettlementInputs) -> list[Line]:
         if bus not in frame.columns:
             return unknown("dr_bus_not_dsr_enabled")
         on_bus = [l for l in bus_of.index[bus_of == bus] if l in inputs.loads.columns]
-        bus_load = inputs.loads[on_bus].reindex(inputs.index).sum(axis=1, min_count=1) \
+        # skipna=False: a NaN on ANOTHER load of the bus must not shrink the
+        # bus load and inflate this load's share (review round 2).
+        bus_load = inputs.loads[on_bus].reindex(inputs.index).sum(axis=1, skipna=False) \
             .to_numpy(dtype=float)
         mine = inputs.loads[load].reindex(inputs.index).to_numpy(dtype=float)
         dsr = frame[bus].reindex(inputs.index).to_numpy(dtype=float)
@@ -327,11 +332,16 @@ def _dr(contract, inputs: SettlementInputs) -> list[Line]:
     ev_flags = list(parties)
     step = _step_hours(inputs)
     events, longest = _events(act, step, inputs.index)
+    represented = _represented_events(act, step, w, inputs.index)
     # `max_events` is per calendar year: the sampled count is scaled by the
     # year's hours over the sampled hours, and the estimate is disclosed.
+    # Each sampled event stands for w/step events at its start row (unequally
+    # weighted representative periods); the represented total is scaled to a
+    # year by its represented hours (review round 2).
     sampled_h = float(np.asarray(step, dtype=float).sum())
     year_h = _hours_in_year(modelled_year(inputs))
-    per_year = events * year_h / sampled_h if sampled_h > 0 else float(events)
+    total_w = float(w.sum())
+    per_year = represented * year_h / total_w if total_w > 0 else float(events)
     if abs(sampled_h - year_h) > 1e-6:
         ev_flags.append("dr_events_extrapolated")
     if contract.max_events is not None and per_year > contract.max_events + 1e-9:
@@ -357,6 +367,22 @@ def _step_hours(inputs: SettlementInputs) -> np.ndarray:
     typical = float(np.median(d[d > 0])) if (d > 0).any() else 1.0
     step = np.append(d, typical)
     return np.where((step > 0) & (step <= typical + 1e-9), step, typical)
+
+
+def _represented_events(active_mw, step_h, weights, index) -> float:
+    """Σ over events of w/step at the event's first row: the number of events
+    the sampled ones stand for in the represented hours."""
+    on = np.asarray(active_mw) > 1e-9
+    step = np.broadcast_to(np.asarray(step_h, dtype=float), on.shape)
+    w = np.broadcast_to(np.asarray(weights, dtype=float), on.shape)
+    t = index.asi8 / 3.6e12
+    total = 0.0
+    for i, flag in enumerate(on):
+        starts = flag and (i == 0 or not on[i - 1]
+                           or t[i] - t[i - 1] > float(step[i - 1]) + 1e-9)
+        if starts:
+            total += float(w[i]) / float(step[i]) if step[i] > 0 else 1.0
+    return total
 
 
 def _events(active_mw: np.ndarray, step_h, index: pd.DatetimeIndex | None = None

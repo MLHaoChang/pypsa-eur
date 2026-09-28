@@ -7,6 +7,10 @@ from contextvars import ContextVar
 
 import pypsa
 
+# Installs the PyPSA load-warning filter for the `ic:` reference frames at
+# app start (P2 WP2.2-0), before any loader runs.
+from services.commercial import settlement_inputs as _ic_settlement_inputs  # noqa: F401
+
 from services.project_context import (
     STUDY_KEYS,
     ProjectContext,

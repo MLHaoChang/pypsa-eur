@@ -204,3 +204,31 @@ def test_every_contract_type_carries_base_year_and_library_ref():
     """#4."""
     for cls in (LeaseContract, EaasContract, RetailContract):
         assert {"base_year", "library_ref"} <= set(cls.model_fields)
+
+
+# ── WP2.2 review round 2 ───────────────────────────────────────────────────
+
+
+def test_a_nan_on_another_load_of_the_bus_is_not_established():
+    """Condition 1 (2.2b): it must not inflate the named load's share."""
+    idx = pd.date_range("2030-01-01", periods=2, freq="h")
+    inp = K.SettlementInputs(
+        period=None, index=idx, weights=np.ones(2), generators=pd.DataFrame(index=idx),
+        loads=pd.DataFrame({"l": [10.0, 10.0], "other": [10.0, np.nan]}, index=idx),
+        load_bus={"l": "b", "other": "b"},
+        dsr=(pd.DataFrame({"b": [4.0, 4.0]}, index=idx), []))
+    line = _one(K.settle(_dr_on(), inp), "dr_activation")
+    assert line.amount is None and "dr_activation_not_established" in line.flags
+
+
+def test_unequally_weighted_representative_days_weight_their_events():
+    """LOW: each sampled event stands for w/step events."""
+    idx = pd.DatetimeIndex(["2030-01-07 10:00", "2030-01-07 11:00",
+                            "2030-07-07 10:00", "2030-07-07 11:00"])
+    inp = _hand(["b"], {"l": 1.0, "m": 1.0}, [1.0, 0.0, 1.0, 0.0], idx=idx)
+    inp.weights = np.array([3000.0, 3000.0, 1380.0, 1380.0])       # Σ = 8760: a year
+    step = K._step_hours(inp)
+    assert K._represented_events(np.array([1.0, 0.0, 1.0, 0.0]), step, inp.weights, idx) == \
+        pytest.approx(3000.0 + 1380.0)
+    dr = _dr_on().model_copy(update={"max_events": 4000})
+    assert "dr_max_events_exceeded" in _one(K.settle(dr, inp), "dr_activation").flags

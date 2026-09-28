@@ -281,3 +281,15 @@ def test_the_load_filter_drops_only_the_ic_reference_columns():
              "ic_energy_price of Link are not in main components dataframe links")
     assert f.filter(rec(ours)) is False and f.filter(rec(stale)) is True
     assert SI._FILTER in logging.getLogger("pypsa.network.io").filters   # installed on import
+
+
+def test_the_load_filter_is_installed_at_app_start():
+    """0b #5 residual: before any loader runs."""
+    import subprocess
+    import sys
+
+    code = ("import logging, main; from services.commercial import settlement_inputs as SI; "
+            "print(SI._FILTER in logging.getLogger('pypsa.network.io').filters)")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                         cwd=str(__import__('pathlib').Path(__file__).resolve().parents[1]))
+    assert out.stdout.strip().splitlines()[-1] == "True", out.stderr[-2000:]

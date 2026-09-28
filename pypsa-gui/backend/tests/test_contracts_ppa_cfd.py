@@ -304,3 +304,26 @@ def test_the_sleeving_fee_is_on_all_generation_not_the_capped_volume(c1):
     fee = _one(lines, "ppa_sleeving_fee")
     assert fee.quantity_mwh == pytest.approx(pv_mwh)
     assert _cents(fee.amount) == _cents(2.0 * pv_mwh)
+
+
+# ── WP2.2 review round 2 ───────────────────────────────────────────────────
+
+
+def test_a_nan_in_one_of_several_contracted_generators_is_not_a_partial_sum():
+    """Condition 1 (2.2a)."""
+    idx = pd.date_range("2030-05-01", periods=2, freq="h")
+    gens = pd.DataFrame({"pv": [1.0, np.nan], "pv2": [1.0, 1.0]}, index=idx)
+    ppa = PpaContract(id="p", kind="pay_as_produced", price=10.0,
+                      **{**BASE, "asset_ids": ["pv", "pv2"]})
+    inp = K.SettlementInputs(period=None, index=idx, weights=np.ones(2), generators=gens)
+    line = _one(K.settle(ppa, inp))
+    assert line.amount is None and line.flags == ["generation_not_established"]
+
+
+def test_a_multi_period_reference_without_the_settled_period_is_missing(c1):
+    """LOW: never a KeyError."""
+    mi = pd.MultiIndex.from_arrays([[2030] * len(c1["index"]), c1["index"]])
+    ref = pd.Series(c1["ref"].to_numpy(), index=mi)
+    line = _one(K.settle(_cfd(), _inputs(c1, refs={"c": (ref, [])}, period=2040)),
+                "cfd_difference")
+    assert line.amount is None and "reference_price_missing" in line.flags

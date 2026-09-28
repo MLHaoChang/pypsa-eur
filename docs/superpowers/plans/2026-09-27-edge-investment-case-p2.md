@@ -816,6 +816,15 @@ or generator is a P5 archetype matter) — DR targets `load_ids`.
     - #3 A fee-less EaaS is refused by the model. `link_output` is documented as p1-only.
     - #4 `base_year` and `library_ref` are on every contract type.
 
+- **WP2.2 review round 2 → 2.2-0a PASS, 2.2-0b PASS; 2.2a and 2.2b PASS WITH CONDITIONS, fixed:**
+  - 2.2a condition: a NaN in ONE of several contracted generators gave a partial sum. `_gen` now sums with `skipna=False` ⇒ `generation_not_established`.
+  - 2.2a LOW: a multi-period reference without the settled period ⇒ `reference_price_missing`, never a KeyError.
+  - 2.2b condition: a NaN on ANOTHER load of the bus shrank the bus load and inflated the named load's share. The bus load now sums with `skipna=False` ⇒ `dr_activation_not_established`.
+  - 2.2b LOW: events are extrapolated with each sampled event counting w/step at its first row (`_represented_events`), scaled to a year by the represented hours, so unequally weighted representative days count correctly.
+  - 2.2-0b LOW residual: the load filter is installed at app start (`pypsa_service` imports `settlement_inputs`), tested in a fresh `import main`.
+  - **Migration note:** the new EaaS fee validator refuses a stored Library EaaS item without any fee when it is read back. None can exist yet (the kind and the validator ship in the same phase), but a later import of older data must add a fee.
+  - Out of scope, seen by the reviewer: chat `update_component(Bus, attrs={"name": …})` raises a TypeError (a duplicate `name` kwarg to `BusCreate`). It is a pre-existing bug and does not bypass the `ic:` guard.
+
 ## WP2.2c Contracts on the config + double-count preflight
 
 Files: `models/commercial.py` (`CommercialConfig.contracts: list[Contract]` discriminated by `type`),
