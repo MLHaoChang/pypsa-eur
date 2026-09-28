@@ -41,6 +41,24 @@ def get_user_membership(db: DBSession, user_id: uuid.UUID) -> OrgMembership | No
     return db.scalar(select(OrgMembership).where(OrgMembership.user_id == user_id))
 
 
+def is_org_admin(db: DBSession, actor: User) -> bool:
+    """
+    True iff `actor` may act with org-admin privilege.
+
+    The single definition of "admin" for authorization decisions, so a second
+    surface needing one does not grow its own slightly-different copy.
+    `routers/admin.py::_require_admin_actor` and the `extra_functionality_code`
+    gate in `routers/simulation.py` both resolve through here.
+
+    A predicate rather than a raiser: this is a service, and each caller owns
+    its own status code and message.
+    """
+    if actor.is_super_admin:
+        return True
+    membership = get_user_membership(db, actor.id)
+    return membership is not None and membership.role == "admin"
+
+
 def _normalize_role(role: str) -> str:
     normalized_role = role.strip().lower()
     if normalized_role not in VALID_ORG_ROLES:
