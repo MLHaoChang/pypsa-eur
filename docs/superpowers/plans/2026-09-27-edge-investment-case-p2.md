@@ -393,6 +393,11 @@ round-trip test through `_safe_unpickle_results` proves it.
   8. (LOW, disclosed) `provenance.capacity_basis` records that capacity is the PoC Link's size, also for a group contract. `provenance.billing_calendar` records that a reused weather year bills that year's calendar in every period.
   9. (LOW) The representative-weeks test pins the two sampled months and exactly ten not-established months.
 
+- **Review round 2 → PASS WITH CONDITIONS; round-1 findings 1–4 and 6–9 are closed:**
+  - **Residue 1 (MEDIUM), fixed.** An LP-carried term added after the solve is now flagged `config_changed_since_solve`. That covers a demand item with no demand record, and convex tiers with no tier record. Provenance gains `tier_hash` and `tier_hash_version`. Both cases are tested, and so is a fixed item added, which is not flagged.
+  - **Residue 2 (LOW).** The `_drift_flags` docstring states the rule: items the LP does not carry do not shape the dispatch, so edits to them are not drift. The bill uses their current values.
+  - **Residue 3 (LOW).** `provenance.period_errors` keeps the engine's refusal text (up to 300 characters) for a `period_not_billed:<p>:invalid_dispatch` period.
+
 ## WP2.1c LP: convex demand tiers, windowed tiers, new ratchets, predicted non-convex tier
 
 Files: `lp_bindings.py`, `cost_rows.py`, `test_ratchet.py`, `test_tiers.py`, reconciliation gate.

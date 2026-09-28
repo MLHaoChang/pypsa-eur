@@ -250,3 +250,22 @@ def test_a_tariff_changed_since_the_solve_is_flagged_on_the_bill():
         changed = {"poc_link": "import", "import_tariff": _tariff(TOU, DEMAND)}
         changed["import_tariff"]["items"][item_idx]["periods"][-1]["rate"] += 1.0
         assert "config_changed_since_solve" in B.bill_site(n, changed).flags
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("added", ["demand", "tiers"])
+def test_an_lp_term_added_after_the_solve_is_flagged_on_the_bill(added):
+    """Round 2 #1: the dispatch never saw a demand charge or convex tiers added
+    after it was optimised."""
+    tiers = {"id": "tiered", "kind": "energy", "unit": "per_kwh", "measured_on": "import",
+             "periods": [{"name": "all", "rate": 0.0}],
+             "tiers": [{"threshold": 0, "rate": 0.02}, {"threshold": 500_000, "rate": 0.06}]}
+    n = build_edge_15min()
+    _solve(n, {"poc_link": "import", "import_tariff": _tariff(TOU)})
+    later = {"poc_link": "import",
+             "import_tariff": _tariff(TOU, DEMAND if added == "demand" else tiers)}
+    assert "config_changed_since_solve" in B.bill_site(n, later).flags
+    fixed = {"id": "standing", "kind": "fixed", "unit": "per_month",
+             "periods": [{"name": "all", "rate": 50.0}]}
+    same = {"poc_link": "import", "import_tariff": _tariff(TOU, fixed)}
+    assert "config_changed_since_solve" not in B.bill_site(n, same).flags  # not LP-carried

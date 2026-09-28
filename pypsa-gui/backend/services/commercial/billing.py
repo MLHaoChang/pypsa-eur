@@ -115,7 +115,13 @@ def _flow(p0: pd.DataFrame, link: str, flags: list[str]) -> np.ndarray:
 def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
     """Compare the solve's recorded hashes with the current config, each with
     the recipe its record was made with (WP2.1b review #5, as `cost_rows`):
-    a bill of the old dispatch against a changed tariff says so."""
+    a bill of the old dispatch against a changed tariff says so — also when an
+    LP-carried term (demand, convex tiers) was ADDED after the solve, since the
+    dispatch never saw it (round 2 #1).
+
+    Items the LP does not carry (fixed, per-day, capacity until WP2.1c, …) do
+    not shape the dispatch: editing them changes the bill but not what it
+    rates, so it is not flagged here; the bill uses their current values."""
     flags: list[str] = []
     rec = n.meta.get(_lp.META_LINKS) or {}
     info = n.meta.get(_lp.META_DEMAND_INFO) or {}
@@ -133,10 +139,17 @@ def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
                 info.get("items_hash") is not None and items
                 and info["items_hash"] != _lp.demand_hash(n, cfg, items, _H.version_of(info))):
             changed = True
+    elif items:
+        changed = True  # demand terms added after the solve
     tier_rec = next(iter(tiers.values()), None)
-    if tier_rec is not None and tier_rec.get("items_hash") is not None and \
-            tier_rec["items_hash"] != _lp.tier_items_hash(cfg, _H.version_of(tier_rec)):
-        changed = True
+    solve["tier_hash"] = (tier_rec or {}).get("items_hash")
+    solve["tier_hash_version"] = _H.version_of(tier_rec)
+    if tier_rec is not None:
+        if tier_rec.get("items_hash") is not None and \
+                tier_rec["items_hash"] != _lp.tier_items_hash(cfg, _H.version_of(tier_rec)):
+            changed = True
+    elif _lp.tier_items_hash(cfg) is not None:
+        changed = True  # convex tiers added after the solve
     if not rec:
         flags.append("solve_provenance_unknown")
     if changed:
@@ -168,6 +181,7 @@ def bill_site(n, commercial, *, meter_history: dict | None = None) -> SiteBill:
 
     per_period: dict = {}
     calendar: dict = {}
+    errors: dict = {}
     for i, p in enumerate(periods):
         key = None if p is None else int(p)
         sel = (n.snapshots.get_level_values(0) == p) if multi else np.ones(len(n.snapshots), bool)
@@ -197,6 +211,7 @@ def bill_site(n, commercial, *, meter_history: dict | None = None) -> SiteBill:
             per_period[key] = None
             flags.append(f"period_not_billed:{'_' if key is None else key}:"
                          f"{'billing_period_unknown' if 'billing_period' in str(exc) else 'invalid_dispatch'}")
+            errors[key] = str(exc)[:300]  # what the engine refused (round 2 #3)
 
     drift, solve = _drift_flags(n, cfg)
     flags += drift
@@ -212,6 +227,7 @@ def bill_site(n, commercial, *, meter_history: dict | None = None) -> SiteBill:
         # for a group contract, whose DSO may bill `group_cap_mw` (review #8).
         "capacity_basis": {"link": poc, "p_nom_mw": p_nom_mw},
         "timezone": cfg.timezone,
+        "period_errors": errors,
     }
     return SiteBill(per_period=per_period, flags=flags, provenance=provenance)
 
