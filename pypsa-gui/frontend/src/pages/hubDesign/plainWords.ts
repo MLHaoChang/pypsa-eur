@@ -27,6 +27,9 @@ const RULES: [RegExp, string][] = [
   [/\b(?:the )?fmea_top\b/g, 'the top-risk check'],
   [/\bSCR\b/g, 'grid-strength ratio'],
   [/\bMC\b/g, 'simulation'],
+  // P26: the inconclusive re-run effect ("… with 1000 draws … confidence interval").
+  [/\b(\d+) draws\b/g, '$1 runs'],
+  [/\bconfidence interval\b/g, 'range of the estimate'],
   [/\bstages?\b/g, 'step'],
 ]
 

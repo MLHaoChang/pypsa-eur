@@ -34,7 +34,7 @@ export function ResultsCard() {
   const cost = report?.cost_at_target_eur
 
   return (
-    <CardShell step="results" testId="hub-card-results" title="Results">
+    <CardShell step="results" next="improve" testId="hub-card-results" title="Results">
       {review?.stale === true && (
         <p data-testid="hub-results-stale"
           className="rounded border border-warn/50 bg-warn/10 px-3 py-2 text-[12px] text-warn">

@@ -52,6 +52,7 @@ import { useChatStore, type ChatMessage, type UploadMetaUI } from '../store/chat
 import ApiKeySetup from './ApiKeySetup'
 import ChatLaunchGreeting from './ChatLaunchGreeting'
 import { buildUiContext } from '../utils/uiContext'
+import { plainWords } from '../pages/hubDesign/plainWords'
 import { postChatRewind } from '../api/chat'
 import * as speechOut from '../utils/speechOut'
 import { useUIStore, type UiMode } from '../store/uiStore'
@@ -303,6 +304,32 @@ function _typed_confirmation_target(tool: string, args: Record<string, unknown>)
   return null
 }
 
+// P26 (carried from the P25 gate): in Guided every write-tier call asks for
+// confirmation, but some write-tier tools do not edit the network — they
+// write a file, back the project up, or open another project. The card says
+// what the call is for; "Confirm this change" stays for real edits. Keyed on
+// the tier as well, so a tool that ever moves tier falls back to the tier's
+// wording. Expert never reads this.
+const GUIDED_WRITE_PURPOSE: Record<string, { header: string; note: string }> = {}
+for (const t of ['export_to_csv', 'export_to_excel', 'export_preview_png', 'export_chat_summary',
+  'export_asset_results', 'gridspine_export_handoff_bundle']) {
+  GUIDED_WRITE_PURPOSE[t] = { header: 'Confirm: export a file',
+    note: 'Writes a file you can download. Your network is not changed.' }
+}
+GUIDED_WRITE_PURPOSE.create_project_snapshot = { header: 'Confirm: save a copy',
+  note: 'Saves a backup copy of the project as it is now. Your network is not changed.' }
+for (const t of ['load_project', 'activate_project']) {
+  GUIDED_WRITE_PURPOSE[t] = { header: 'Confirm: open a project',
+    note: 'Switches the workbench to another project. Save first if you have unsaved edits.' }
+}
+
+function guidedConfirmWording(tool: string, tier: string): { header: string; note: string | null } {
+  if (tier !== 'write') return { header: 'Confirm', note: null }
+  return Object.prototype.hasOwnProperty.call(GUIDED_WRITE_PURPOSE, tool)
+    ? GUIDED_WRITE_PURPOSE[tool]
+    : { header: 'Confirm this change', note: null }
+}
+
 interface ToolProgressFrame {
   tool_use_id: string
   line: string
@@ -470,6 +497,9 @@ function ConfirmationCard() {
     ? _typed_confirmation_target(pending.tool_name, pending.args)
     : null
   const typedSatisfied = !requiresTyped || (typedTarget != null && typedConfirmation === typedTarget)
+  const guidedWording = uiMode === 'guided'
+    ? guidedConfirmWording(pending.tool_name, pending.safety_tier)
+    : null
 
   return (
     <div
@@ -492,11 +522,16 @@ function ConfirmationCard() {
         ? 'text-[12px] font-semibold text-amber-500 mb-1'
         : 'text-[11px] uppercase tracking-wider text-amber-500 mb-1'}
         data-testid="chat-confirmation-header">
-        {/* P25 re-gate note 2: plain words in Guided; Expert unchanged. */}
-        {uiMode === 'guided'
-          ? (pending.safety_tier === 'write' ? 'Confirm this change' : 'Confirm')
+        {/* P25 re-gate note 2 / P26: plain words in Guided; Expert unchanged. */}
+        {guidedWording
+          ? guidedWording.header
           : <>Confirm · {pending.safety_tier}</>}
       </div>
+      {guidedWording?.note && (
+        <div className="text-[11px] text-muted mb-1" data-testid="chat-confirmation-note">
+          {guidedWording.note}
+        </div>
+      )}
       <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
         {pending.tool_name}
       </div>
@@ -1166,7 +1201,8 @@ const IMPROVE_REQUEST = /^Apply this recommendation from the study review: "(.+?
 export function userMessageLabel(m: Pick<ChatMessage, 'content' | 'display'>): string | null {
   if (m.display) return m.display
   const hit = IMPROVE_REQUEST.exec(m.content)
-  return hit ? `Apply this recommendation: ${hit[1]}` : null
+  // P26: the same plain words the live label uses (delegate.actionLabel).
+  return hit ? `Apply this recommendation: ${plainWords(hit[1])}` : null
 }
 
 const WRAP = 'whitespace-pre-wrap break-words [overflow-wrap:anywhere]'

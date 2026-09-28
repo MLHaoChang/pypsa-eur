@@ -89,7 +89,7 @@ export function SiteCard() {
   const rows = readiness ? siteRows(readiness, archetype) : null
 
   return (
-    <CardShell step="site" testId="hub-card-site" title="Site">
+    <CardShell step="site" testId="hub-card-site" title="Site" next="goal">
       <label className="flex flex-col gap-1 text-[12px]">
         <span className="font-semibold text-text"><Term k="site_type">Site type</Term></span>
         <select data-testid="hub-site-type" value={archetype}

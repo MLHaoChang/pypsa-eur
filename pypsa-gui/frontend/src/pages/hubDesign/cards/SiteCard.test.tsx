@@ -138,3 +138,18 @@ describe('SiteCard rows', () => {
     expect(resultsApi.getEhReadiness).not.toHaveBeenCalled()
   })
 })
+
+// P26 walkthrough: after reading the Site card a first-time user had no
+// forward button — only the numbered rail. "Next: Goal" moves the rail there,
+// as a manual move (like a rail click).
+describe('SiteCard next step', () => {
+  it('"Next: Goal" moves the rail to Goal as a user move', async () => {
+    const user = mount()
+    await screen.findByTestId('hub-site-grid')
+    const next = screen.getByTestId('hub-next-site')
+    expect(next.textContent).toContain('Next: Goal')
+    await user.click(next)
+    expect(useHubDesignStore.getState().step).toBe('goal')
+    expect(useHubDesignStore.getState().userMovedRail).toBe(true)
+  })
+})

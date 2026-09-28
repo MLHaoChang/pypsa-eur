@@ -2,7 +2,7 @@
 // plain-language intro from the catalogue, at most three decisions, and a
 // footer with "Ask about this" and "Let the assistant do this" (§5.7).
 import type { ReactNode } from 'react'
-import { MessageCircleQuestion, Sparkles } from 'lucide-react'
+import { ArrowRight, MessageCircleQuestion, Sparkles } from 'lucide-react'
 import type { EhArchetype } from '../../../api/simulation'
 import {
   ASK_TITLE, ask, delegate, delegateTitle, footerAskText, footerDelegateText,
@@ -52,14 +52,23 @@ export function DelegateButton({ testId, text, display, label = 'Let the assista
   )
 }
 
-export function CardShell({ step, testId, title, children }: {
+const STEP_NAME: Record<HubStep, string> = {
+  start: 'Start', site: 'Site', goal: 'Goal', results: 'Results', improve: 'Improve',
+}
+
+/** `next`: a forward button to that step (P26 walkthrough — the rail alone
+ *  did not tell a first-time user where to go after reading a card). It is a
+ *  manual move, like a rail click. */
+export function CardShell({ step, testId, title, next, children }: {
   step: HubStep
   testId: string
   title: string
+  next?: HubStep
   children: ReactNode
 }) {
   const intro = useTerm(INTRO_KEY[step])
   const archetype = useHubDesignStore(s => s.archetype) as EhArchetype
+  const setStep = useHubDesignStore(s => s.setStep)
   return (
     <section data-testid={testId}
       className="flex flex-col gap-4 rounded-lg border border-border bg-panel p-5">
@@ -71,6 +80,13 @@ export function CardShell({ step, testId, title, children }: {
       <footer className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-3">
         <AskButton testId={`hub-ask-${step}`} text={footerAskText(step)} />
         <DelegateButton testId={`hub-delegate-${step}`} text={footerDelegateText(step, archetype)} />
+        {next && (
+          <button type="button" data-testid={`hub-next-${step}`}
+            onClick={() => setStep(next, { user: true })}
+            className="ml-auto inline-flex items-center gap-1 rounded border border-border px-2 py-1 text-[11px] text-text hover:border-accent hover:text-accent">
+            Next: {STEP_NAME[next]} <ArrowRight size={12} />
+          </button>
+        )}
       </footer>
     </section>
   )

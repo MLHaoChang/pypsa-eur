@@ -162,3 +162,17 @@ describe('ResultsCard body', () => {
     expect(document.body.textContent).not.toMatch(/get_adequacy_results|poll/)
   })
 })
+
+// P26 walkthrough: the Results card read as the end of the flow; the next
+// step (Improve: findings, the FMEA check) was only reachable from the rail.
+describe('ResultsCard next step', () => {
+  it('"Next: Improve" moves the rail to Improve as a user move', async () => {
+    const user = mount()
+    await screen.findByTestId('hub-results-verdict')
+    const next = screen.getByTestId('hub-next-results')
+    expect(next.textContent).toContain('Next: Improve')
+    await user.click(next)
+    expect(useHubDesignStore.getState().step).toBe('improve')
+    expect(useHubDesignStore.getState().userMovedRail).toBe(true)
+  })
+})

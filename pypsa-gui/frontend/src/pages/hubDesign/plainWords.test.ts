@@ -28,6 +28,14 @@ describe('plainWords', () => {
       .toBe('a spare unit at unserved energy 2.5 parts per 10 000')
   })
 
+  // P26 walkthrough (island microgrid, inconclusive): the Improve card read
+  // "re-run the simulation with 1000 draws (was 500) to narrow the confidence
+  // interval" — "draws" and "confidence interval" are statistics jargon.
+  it('the inconclusive re-run effect (MC draws, confidence interval)', () => {
+    expect(plainWords('re-run the MC with 1000 draws (was 500) to narrow the confidence interval'))
+      .toBe('re-run the simulation with 1000 runs (was 500) to narrow the range of the estimate')
+  })
+
   it('evidence values are rounded, lists too', () => {
     expect(evidenceValue(12.383928571428568)).toBe('12.38')
     expect(evidenceValue([7.68316774385459, 17.084689399002553])).toBe('[7.683, 17.08]')

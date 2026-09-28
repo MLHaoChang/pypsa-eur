@@ -263,8 +263,10 @@ describe('P25 gate: how a card request looks, and when it is not sent', () => {
     useChatStore.setState({ messages: [{ id: 'm1', role: 'user', content: RAW, ts: 1 }] })
     renderPanel()
     const bubble = (await screen.findAllByTestId('chat-message'))[0]
+    // P26: the same plain words as the live label (actionLabel → plainWords);
+    // before, a reload showed the raw engine title ("LOLE").
     expect(bubble.querySelector('[data-testid="chat-message-label"]')!.textContent)
-      .toBe('Apply this recommendation: Not certified: LOLE 12.4 h/yr')
+      .toBe('Apply this recommendation: Not certified: expected shortfall 12.4 h/yr')
     expect((bubble.querySelector('details') as HTMLDetailsElement).open).toBe(false)
   })
 
@@ -429,4 +431,61 @@ describe('P25 re-gate note 2: the card header in plain words (Guided only)', () 
     await screen.findByTestId('chat-confirmation-card')
     expect(header()).toBe(`Confirm · ${tier}`)
   })
+})
+
+// P26 (carried from the P25 gate): Guided asks to confirm every write-tier
+// call, and some write-tier tools do not edit the network at all — exports,
+// a project snapshot, opening a project. "Confirm this change" was wrong for
+// them. The card stays; only its words say what the call is for. Expert is
+// unchanged.
+describe('P26: Guided card wording per tool purpose', () => {
+  const header = () => screen.getByTestId('chat-confirmation-header').textContent
+  const note = () => screen.queryByTestId('chat-confirmation-note')?.textContent ?? null
+  const show = async (tool_name: string, safety_tier = 'write') => {
+    useChatStore.setState({ pending: { ...CARD, tool_name, safety_tier } })
+    renderPanel()
+    await screen.findByTestId('chat-confirmation-card')
+  }
+
+  it.each([
+    'export_to_csv', 'export_to_excel', 'export_preview_png', 'export_chat_summary',
+    'export_asset_results', 'gridspine_export_handoff_bundle',
+  ])('Guided %s → "Confirm: export a file", network not changed', async (tool) => {
+    await show(tool)
+    expect(header()).toBe('Confirm: export a file')
+    expect(note()).toBe('Writes a file you can download. Your network is not changed.')
+  })
+
+  it('Guided create_project_snapshot → "Confirm: save a copy"', async () => {
+    await show('create_project_snapshot')
+    expect(header()).toBe('Confirm: save a copy')
+    expect(note()).toBe('Saves a backup copy of the project as it is now. Your network is not changed.')
+  })
+
+  it.each(['load_project', 'activate_project'])('Guided %s → "Confirm: open a project"', async (tool) => {
+    await show(tool)
+    expect(header()).toBe('Confirm: open a project')
+    expect(note()).toBe('Switches the workbench to another project. Save first if you have unsaved edits.')
+  })
+
+  it.each(['update_component', 'bulk_update_components', 'update_solver_config', 'put_stress_scenarios'])(
+    'Guided edit %s → "Confirm this change", no note', async (tool) => {
+      await show(tool)
+      expect(header()).toBe('Confirm this change')
+      expect(note()).toBeNull()
+    })
+
+  it('the purpose words follow the tier: a non-write tool of an export-like name keeps "Confirm"', async () => {
+    await show('export_to_csv', 'destructive')
+    expect(header()).toBe('Confirm')
+    expect(note()).toBeNull()
+  })
+
+  it.each(['export_to_csv', 'create_project_snapshot', 'load_project', 'update_component'])(
+    'Expert %s → unchanged "Confirm · write", no note', async (tool) => {
+      useUIStore.setState({ uiMode: 'expert' })
+      await show(tool)
+      expect(header()).toBe('Confirm · write')
+      expect(note()).toBeNull()
+    })
 })

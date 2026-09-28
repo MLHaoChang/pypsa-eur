@@ -5,7 +5,7 @@
  *
  *   cd pypsa-gui/frontend
  *   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs \
- *     --phase P22.9|P23|P24-BE|P24|P25 [--template eh_datacenter] [--out <dir>] [--keep]
+ *     --phase P22.9|P23|P24-BE|P24|P25|P26 [--template eh_datacenter] [--out <dir>] [--keep]
  *
  * P24 walks the Guided hub design (spec §5) as a first-time user: the
  * template from /projects opens hubDesign at Site; Site rows match the
@@ -39,6 +39,19 @@
  * Site card's grid fix in Guided stops at an update_component card (write
  * tier) and a denial changes nothing; the same request in Expert applies
  * directly.
+ *
+ * P26 (spec §7 item 1) — the verification walkthrough, once per template in
+ * a fresh first-time browser context: Guided stored before any project →
+ * the switch shows Guided in the workbench → the template opens hub design
+ * at Site → Site rows match readiness → Goal default → Run → running → done →
+ * rail at Results → the §5.5 headline for the verdict actually observed
+ * (recorded in <out>/p26-verdicts.json, never forced) → Improve (data
+ * center: ≥ 1 finding, "Let the assistant do this" → confirmation card with
+ * the plain header → decline; an export asks "Confirm: export a file") →
+ * Check risks (FMEA) → FMEA tab with rows → Expert brings every sidebar
+ * section and Results tab back → reload keeps Expert → Guided → reload keeps
+ * Guided. Live buses / links / generators are compared around the study and
+ * the sweep (only *_nom_opt may differ).
  *
  * It starts its own uvicorn (local mode, ANTHROPIC_API_KEY unset, app data
  * and projects under a scratch dir), Vite on 5173 and — after the send-gate
@@ -80,7 +93,7 @@ const TEMPLATE_NAMES = {
   eh_h2_hub: 'Industrial Hydrogen Hub',
   eh_microgrid: 'Island Microgrid',
 }
-const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25'])
+const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26'])
 
 // ── args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -835,6 +848,44 @@ function expectedHeadline(review, report) {
   return `The study could not certify reliability: ${note ? String(note) : 'the reliability check was not part of this run.'}`
 }
 
+// The Site card's four rows against the readiness body (P24, P26).
+async function readinessFor(templateId, archetype) {
+  const meta = await api('GET', `/api/projects/${encodeURIComponent(TEMPLATE_NAMES[templateId])}/eh_template`)
+  const po = { ...(meta?.pack_overrides ?? {}) }
+  if (archetype !== 'weak_flexible') { delete po.import_p_nom_mw; delete po.import_energy_mwh_per_year }
+  const q = new URLSearchParams({ archetype })
+  if (Object.keys(po).length) q.set('pack_overrides', JSON.stringify(po))
+  return api('GET', `/api/results/eh_readiness?${q}`)
+}
+
+async function checkSiteRows(page, templateId, archetype) {
+  const byId = id => page.locator(`[data-testid="${id}"]`)
+  const textOf = async id => ((await byId(id).textContent()) ?? '').trim()
+  await byId('hub-site-grid').waitFor({ state: 'visible', timeout: 60_000 })
+  check((await byId('hub-site-type').inputValue()) === archetype, `site type = ${archetype}`)
+  const r = await readinessFor(templateId, archetype)
+  const grid = await textOf('hub-site-grid')
+  const critical = await textOf('hub-site-critical')
+  const strength = await textOf('hub-site-strength')
+  const outage = await textOf('hub-site-outage')
+  info(`Site: ${grid} | ${critical} | ${strength} | ${outage}`)
+  for (const l of r.import.links) check(grid.includes(l), `grid row names ${l}`)
+  if (archetype === 'off_grid') {
+    check(/island/.test(grid) && !/\d MW/.test(grid), 'off-grid: the tie is "normally open", no MW rating shown (N4)')
+    check(!/without/.test(outage), 'off-grid: the open tie is not reported as missing outage data (N4)')
+    check((await byId('hub-site-fix-grid').count()) === 0 && (await byId('hub-site-fix-outage').count()) === 0,
+      'off-grid: no grid / outage fix buttons')
+  } else if (r.import_p_nom_mw != null) {
+    check(grid.includes(`(${Number(r.import_p_nom_mw.toPrecision(6))} MW)`), `grid row shows ${r.import_p_nom_mw} MW`)
+  }
+  for (const b of r.critical_buses) check(critical.includes(b), `critical row names ${b}`)
+  const wantStrength = r.scr.status === 'ok' ? 'data present'
+    : r.scr.status === 'not_required' ? 'not needed' : 'data missing'
+  check(strength.includes(wantStrength), `strength row: scr ${r.scr.status} → "${wantStrength}"`)
+  check(outage.includes(`${r.outage_units.count} units`), `outage row: ${r.outage_units.count} units`)
+  return r
+}
+
 async function phaseP24(browser) {
   const consoleLines = []
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
@@ -849,40 +900,7 @@ async function phaseP24(browser) {
   const textOf = async id => ((await byId(id).textContent()) ?? '').trim()
   const verdicts = {}
 
-  async function readinessFor(templateId, archetype) {
-    const meta = await api('GET', `/api/projects/${encodeURIComponent(TEMPLATE_NAMES[templateId])}/eh_template`)
-    const po = { ...(meta?.pack_overrides ?? {}) }
-    if (archetype !== 'weak_flexible') { delete po.import_p_nom_mw; delete po.import_energy_mwh_per_year }
-    const q = new URLSearchParams({ archetype })
-    if (Object.keys(po).length) q.set('pack_overrides', JSON.stringify(po))
-    return api('GET', `/api/results/eh_readiness?${q}`)
-  }
-
-  async function checkSite(templateId, archetype) {
-    await byId('hub-site-grid').waitFor({ state: 'visible', timeout: 60_000 })
-    check((await byId('hub-site-type').inputValue()) === archetype, `site type = ${archetype}`)
-    const r = await readinessFor(templateId, archetype)
-    const grid = await textOf('hub-site-grid')
-    const critical = await textOf('hub-site-critical')
-    const strength = await textOf('hub-site-strength')
-    const outage = await textOf('hub-site-outage')
-    info(`Site: ${grid} | ${critical} | ${strength} | ${outage}`)
-    for (const l of r.import.links) check(grid.includes(l), `grid row names ${l}`)
-    if (archetype === 'off_grid') {
-      check(/island/.test(grid) && !/\d MW/.test(grid), 'off-grid: the tie is "normally open", no MW rating shown (N4)')
-      check(!/without/.test(outage), 'off-grid: the open tie is not reported as missing outage data (N4)')
-      check((await byId('hub-site-fix-grid').count()) === 0 && (await byId('hub-site-fix-outage').count()) === 0,
-        'off-grid: no grid / outage fix buttons')
-    } else if (r.import_p_nom_mw != null) {
-      check(grid.includes(`(${Number(r.import_p_nom_mw.toPrecision(6))} MW)`), `grid row shows ${r.import_p_nom_mw} MW`)
-    }
-    for (const b of r.critical_buses) check(critical.includes(b), `critical row names ${b}`)
-    const wantStrength = r.scr.status === 'ok' ? 'data present'
-      : r.scr.status === 'not_required' ? 'not needed' : 'data missing'
-    check(strength.includes(wantStrength), `strength row: scr ${r.scr.status} → "${wantStrength}"`)
-    check(outage.includes(`${r.outage_units.count} units`), `outage row: ${r.outage_units.count} units`)
-    return r
-  }
+  const checkSite = (templateId, archetype) => checkSiteRows(page, templateId, archetype)
 
   async function runStudy(label, { expectLole, tourWhileRunning = false }) {
     await byId('hub-rail-step-goal').click()
@@ -1499,6 +1517,261 @@ async function phaseP25(browser) {
   }
 }
 
+// ── the P26 path (spec §7 item 1; plan P26) ────────────────────────────────
+// Per template, a fresh first-time browser context walks the whole Guided
+// flow. Verdicts are recorded as observed, never forced: the headline is
+// checked against §5.5 for whatever verdict the review reports.
+const P26_TEMPLATES = [
+  { id: 'eh_datacenter', label: 'dc', archetype: 'weak_flexible', lole: '3', expected: 'fail', improveDo: true },
+  { id: 'eh_h2_hub', label: 'h2', archetype: 'strong_grid', lole: '', expected: 'no target', improveDo: false },
+  { id: 'eh_microgrid', label: 'mg', archetype: 'off_grid', lole: '3', expected: 'inconclusive', improveDo: false },
+]
+// Every Results tab that is not multi-period only (Results.tsx TABS).
+const EXPERT_TABS = ['capex', 'dispatch', 'loadflow', 'prices', 'economics', 'emissions', 'curtailment',
+  'lostload', 'adequacy', 'storage', 'fmea', 'asset']
+// The Guided card's words for a write-tier tool (ChatPanel guidedConfirmWording).
+function guidedHeaderFor(tool, tier) {
+  if (tier !== 'write') return 'Confirm'
+  if (/^export_|_export_/.test(tool)) return 'Confirm: export a file'
+  if (tool === 'create_project_snapshot') return 'Confirm: save a copy'
+  if (tool === 'load_project' || tool === 'activate_project') return 'Confirm: open a project'
+  return 'Confirm this change'
+}
+
+async function phaseP26(browser) {
+  const results = []
+  step('stub model profile (every phase)')
+  await activateStubProfile()
+  for (const tpl of P26_TEMPLATES) results.push(await p26Template(browser, tpl))
+  console.log('\nP26 walkthrough summary')
+  for (const r of results) {
+    console.log(`  ${r.id}: verdict=${r.verdict ?? 'none'} (P20 expected: ${r.expected})`)
+    console.log(`      headline: ${r.headline}`)
+    console.log(`      findings: ${r.findings}; FMEA rows: ${r.fmeaRows}; *_nom_opt changes: study ${r.nomOptStudy}, sweep ${r.nomOptSweep}`)
+  }
+  fs.writeFileSync(path.join(args.out, 'p26-verdicts.json'), JSON.stringify(results, null, 2))
+  info(`verdicts ${path.join(args.out, 'p26-verdicts.json')}`)
+}
+
+async function p26Template(browser, tpl) {
+  const consoleLines = []
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const page = await context.newPage()
+  page.on('console', m => consoleLines.push(`[${m.type()}] ${m.text()}`))
+  page.on('pageerror', e => consoleLines.push(`[pageerror] ${e.message}`))
+  const byId = id => page.locator(`[data-testid="${id}"]`)
+  const railState = async s => byId(`hub-rail-step-${s}`).getAttribute('data-state')
+  const textOf = async id => ((await byId(id).textContent()) ?? '').trim()
+  const pressed = async m => (await byId(`ui-mode-${m}`).getAttribute('aria-pressed')) === 'true'
+  const stored = () => page.evaluate(([m, e]) => ({
+    mode: localStorage.getItem(m), explicit: localStorage.getItem(e),
+  }), [MODE_KEY, EXPLICIT_KEY])
+  const resultsTabIds = () => page.evaluate(() =>
+    [...document.querySelectorAll('[data-testid^="results-tab-"]')]
+      .map(el => el.getAttribute('data-testid').slice('results-tab-'.length)))
+  const L = tpl.label
+  const out = { id: tpl.id, expected: tpl.expected }
+  try {
+    // 1. first-time user → Guided before any project
+    step(`[${tpl.id}] fresh first-time context → localStorage says guided`)
+    await page.goto(`${WEB}/projects`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: /From template/ }).first().waitFor({ timeout: 30_000 })
+    const s0 = await stored()
+    check(s0.mode === 'guided' && s0.explicit === null, `stored ui-mode=${s0.mode}, explicit=${s0.explicit}`)
+    await shot(page, `p26-${L}-01-first-time-projects`)
+
+    // 2–3. template → workbench, switch guided, hub panel at Site
+    step(`[${tpl.id}] New project → template → workbench, switch Guided, hub design at Site`)
+    await page.getByRole('button', { name: /From template/ }).first().click()
+    await byId('new-project-wizard').waitFor({ state: 'visible', timeout: 15_000 })
+    await page.getByRole('button', { name: new RegExp(TEMPLATE_NAMES[tpl.id]) }).click()
+    await page.waitForURL(/\/app\?project=/, { timeout: 60_000 })
+    await byId('ui-mode-switch').waitFor({ state: 'visible', timeout: 30_000 })
+    check(await pressed('guided') && !(await pressed('expert')), 'ui-mode-switch: guided pressed')
+    await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 30_000 })
+    await byId('hub-card-site').waitFor({ state: 'visible', timeout: 60_000 })
+    check(await railState('site') === 'current', 'rail at Site')
+    await shot(page, `p26-${L}-02-workbench-site`)
+
+    // 4. Site rows
+    step(`[${tpl.id}] Site rows: grid link, critical bus, strength, outage count`)
+    await checkSiteRows(page, tpl.id, tpl.archetype)
+    await shot(page, `p26-${L}-03-site`)
+
+    // 5. Goal → Run → running → done → Results
+    step(`[${tpl.id}] "Next: Goal" → Goal shows the default → Run → running → done → rail at Results`)
+    await byId('hub-next-site').click()
+    await byId('hub-goal-lole').waitFor({ state: 'visible', timeout: 15_000 })
+    await page.waitForFunction(v =>
+      document.querySelector('[data-testid="hub-goal-lole"]')?.value === v, tpl.lole, { timeout: 30_000 })
+    ok(`Goal shows the default "${tpl.lole}"`)
+    await page.waitForFunction(() => !document.querySelector('[data-testid="hub-goal-run"]')?.disabled,
+      null, { timeout: 30_000 })
+    await shot(page, `p26-${L}-04-goal`)
+    const before = await snapshotTables()
+    await byId('hub-goal-run').click()
+    await byId('hub-goal-running').waitFor({ state: 'visible', timeout: 30_000 })
+    ok(`running: "${await textOf('hub-goal-running')}"`)
+    await shot(page, `p26-${L}-05-running`)
+    await byId('hub-card-results').waitFor({ state: 'visible', timeout: 10 * 60_000 })
+    check(await railState('results') === 'current', 'done → rail at Results')
+    const study = await api('GET', '/api/results/eh_study')
+    check(study?.status === 'done', 'study done')
+    const afterStudy = tableDiffs(before, await snapshotTables())
+    check(afterStudy.diffs.length === 0,
+      `buses/links/generators equal after the study (*_nom_opt changes: ${afterStudy.nomOpt})`)
+    out.nomOptStudy = afterStudy.nomOpt
+
+    // 6. headline per §5.5, verdict as observed
+    step(`[${tpl.id}] headline matches §5.5 for the observed verdict`)
+    const review = await api('GET', '/api/results/eh_review')
+    const report = study.report ?? await api('GET', '/api/results/eh_reference_design')
+    await byId('hub-results-verdict').waitFor({ state: 'visible', timeout: 30_000 })
+    const got = await textOf('hub-results-verdict')
+    out.verdict = review.summary?.verdict ?? null
+    out.headline = got
+    info(`observed verdict: ${out.verdict} (P20 expected: ${tpl.expected})`)
+    check(got === expectedHeadline(review, report), `headline (§5.5): "${got}"`)
+    await shot(page, `p26-${L}-06-results`)
+
+    // 7. Improve (+ the assistant's confirmation card on the data center)
+    step(`[${tpl.id}] "Next: Improve"${tpl.improveDo ? ': ≥ 1 finding → "Let the assistant do this" → confirmation card → decline' : ''}`)
+    await byId('hub-next-results').click()
+    await byId('hub-card-improve').waitFor({ state: 'visible', timeout: 15_000 })
+    check(await railState('improve') === 'current', 'rail at Improve')
+    const hm = (review.findings ?? []).filter(f => f.severity === 'high' || f.severity === 'medium')
+    const listed = await page.locator('[data-testid="hub-improve-list"] > li').count()
+    out.findings = listed
+    check(listed === hm.length, `${listed} findings listed (${hm.map(f => f.id).join(', ') || 'none'})`)
+    if (tpl.improveDo) {
+      check(listed >= 1, 'the data center lists at least one finding')
+      const f = hm.find(x => x.actions?.length)
+      check(!!f, `a finding with an action: ${f?.id} → ${f?.actions?.[0]?.tool}`)
+      const beforeDo = await snapshotTables()
+      const n0 = (await stubRequests()).length
+      await byId(`hub-improve-do-${f.id}`).click()
+      await byId('chat-confirmation-card').waitFor({ state: 'visible', timeout: 60_000 })
+      const tool = await byId('chat-confirmation-card').getAttribute('data-tool-name')
+      const tier = await byId('chat-confirmation-card').getAttribute('data-safety-tier')
+      check(tool === f.actions[0].tool, `confirmation card for ${tool} (tier ${tier})`)
+      const header = await textOf('chat-confirmation-header')
+      check(header === guidedHeaderFor(tool, tier), `card header in plain words: "${header}"`)
+      out.card = { tool, tier, header }
+      const rec = await stubRequests()
+      check(rec.length > n0 && rec.slice(n0).some(r => (r.last_user_text ?? '').includes('Guided mode is on')),
+        'the stub saw "Guided mode is on"')
+      await shot(page, `p26-${L}-07-improve-card`)
+      await byId('chat-confirm-deny').click()
+      await byId('chat-confirmation-card').waitFor({ state: 'detached', timeout: 30_000 })
+      await page.waitForFunction(() => !document.querySelector('[data-testid="chat-abort"]'), null, { timeout: 60_000 })
+      const declined = tableDiffs(beforeDo, await snapshotTables())
+      check(declined.diffs.length === 0 && declined.nomOpt === 0, 'declined: nothing changed')
+
+      // The P25-gate carry-over: a non-editing write says what it is for.
+      step(`[${tpl.id}] an export asks "Confirm: export a file" and says the network is not changed → decline`)
+      await byId('chat-input').fill('Run the tool export_to_csv with exactly these arguments: {"columns":["asset","risk"],"rows":[["genset_1","low"]],"filename":"p26_risks.csv"}')
+      await byId('chat-send').click()
+      await byId('chat-confirmation-card').waitFor({ state: 'visible', timeout: 60_000 })
+      check(await textOf('chat-confirmation-header') === 'Confirm: export a file', 'export card header "Confirm: export a file"')
+      check(/network is not changed/.test(await textOf('chat-confirmation-note')), 'export card note: network not changed')
+      await shot(page, `p26-${L}-08-export-card`)
+      await byId('chat-confirm-deny').click()
+      await byId('chat-confirmation-card').waitFor({ state: 'detached', timeout: 30_000 })
+      await page.waitForFunction(() => !document.querySelector('[data-testid="chat-abort"]'), null, { timeout: 60_000 })
+    } else {
+      info(`findings: ${hm.map(f => `${f.id}(${f.severity})`).join(', ') || 'none'}`)
+      await shot(page, `p26-${L}-07-improve`)
+    }
+
+    // 8. Check risks (FMEA) → FMEA tab with rows
+    step(`[${tpl.id}] "Check risks (FMEA)" → sweep → FMEA tab with rows; live tables equal`)
+    const beforeSweep = await snapshotTables()
+    await byId('hub-improve-fmea').click()
+    await byId('hub-improve-fmea-started').waitFor({ state: 'visible', timeout: 30_000 })
+    const until = Date.now() + 10 * 60_000
+    let sweep = null
+    await sleep(1000)
+    while (Date.now() < until) {
+      sweep = await api('GET', '/api/results/fmea_sweep')
+      if (sweep && sweep.status !== 'running') break
+      await sleep(1000)
+    }
+    check(sweep?.status === 'done', `sweep done (base_restored=${sweep?.base_restored})`)
+    await byId('hub-improve-open-fmea').click()
+    await byId('results-tab-fmea').waitFor({ state: 'visible', timeout: 30_000 })
+    await page.waitForFunction(() =>
+      document.querySelectorAll('[data-testid="fmea-table"] tbody tr').length > 0, null, { timeout: 30_000 })
+    out.fmeaRows = await page.locator('[data-testid="fmea-table"] tbody tr').count()
+    check((await byId('results-tab-fmea').getAttribute('class')).includes('border-accent'),
+      `FMEA tab active with ${out.fmeaRows} rows`)
+    const afterSweep = tableDiffs(beforeSweep, await snapshotTables())
+    check(afterSweep.diffs.length === 0,
+      `buses/links/generators equal after the sweep (*_nom_opt changes: ${afterSweep.nomOpt})`)
+    out.nomOptSweep = afterSweep.nomOpt
+    const overall = tableDiffs(before, await snapshotTables())
+    check(overall.diffs.length === 0, 'buses/links/generators equal to before the study (except *_nom_opt)')
+    await shot(page, `p26-${L}-09-fmea-tab`)
+
+    // 9. mode switching and persistence
+    step(`[${tpl.id}] switch to Expert → every sidebar section and every Results tab back`)
+    await byId('ui-mode-expert').click()
+    await byId('sidebar-section-data').waitFor({ state: 'visible', timeout: 10_000 })
+    for (const id of ['sidebar-section-project', 'sidebar-section-data', 'sidebar-section-simulation',
+      'sidebar-mode-switcher']) check(await byId(id).isVisible(), `sidebar: ${id} visible`)
+    check((await byId('sidebar-hub-design').count()) === 0, 'sidebar: no Hub design row')
+    const tabs = await resultsTabIds()
+    check(EXPERT_TABS.every(t => tabs.includes(t)), `results tabs (${tabs.length}): ${tabs.join(', ')}`)
+    const s1 = await stored()
+    check(s1.mode === 'expert' && s1.explicit === '1', `stored ui-mode=${s1.mode}, explicit=${s1.explicit}`)
+    await shot(page, `p26-${L}-10-expert`)
+    if (tpl.improveDo) {
+      step(`[${tpl.id}] Expert: a typed message reaches the stub without the Guided addendum`)
+      await page.getByText('Expert mode on').waitFor({ state: 'detached', timeout: 15_000 }).catch(() => {})
+      const n1 = (await stubRequests()).length
+      await byId('chat-input').fill('What does the study say?')
+      await byId('chat-send').click()
+      await page.waitForFunction(() => !document.querySelector('[data-testid="chat-abort"]'), null, { timeout: 60_000 })
+      const rec = (await stubRequests()).slice(n1)
+      const t = rec.at(-1)?.last_user_text ?? ''
+      check(t.includes('What does the study say?') && !t.includes('Guided mode is on'), 'Expert: no addendum')
+    }
+
+    step(`[${tpl.id}] reload → Expert persists`)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await byId('ui-mode-switch').waitFor({ state: 'visible', timeout: 30_000 })
+    await byId('sidebar-section-data').waitFor({ state: 'visible', timeout: 30_000 })
+    check(await pressed('expert'), 'Expert after reload')
+    await sleep(1000)
+    check((await byId('hub-design-panel').count()) === 0, 'no hubDesign auto-open in Expert')
+    await shot(page, `p26-${L}-11-expert-reloaded`)
+
+    step(`[${tpl.id}] switch to Guided → reload → Guided persists`)
+    await byId('ui-mode-guided').click()
+    await byId('sidebar-hub-design').waitFor({ state: 'visible', timeout: 10_000 })
+    const s2 = await stored()
+    check(s2.mode === 'guided' && s2.explicit === '1', `stored ui-mode=${s2.mode}, explicit=${s2.explicit}`)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await byId('ui-mode-switch').waitFor({ state: 'visible', timeout: 30_000 })
+    await byId('sidebar-hub-design').waitFor({ state: 'visible', timeout: 30_000 })
+    check(await pressed('guided'), 'Guided after reload')
+    for (const id of ['sidebar-section-data', 'sidebar-section-simulation', 'sidebar-mode-switcher']) {
+      check((await byId(id).count()) === 0, `sidebar: ${id} hidden again`)
+    }
+    await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 30_000 })
+    ok('hub design reopens with the study done')
+    await shot(page, `p26-${L}-12-guided-reloaded`)
+    return out
+  } catch (e) {
+    try { await shot(page, `FAILURE-${L}`) } catch { /* page gone */ }
+    const logFile = path.join(args.out, `FAILURE-${L}-console.log`)
+    fs.writeFileSync(logFile, consoleLines.join('\n'))
+    info(`console log ${logFile}`)
+    throw e
+  } finally {
+    await context.close()
+  }
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 let code = 0
 let browser
@@ -1545,6 +1818,7 @@ try {
   else if (args.phase === 'P23') await phaseP23(browser)
   else if (args.phase === 'P24') await phaseP24(browser)
   else if (args.phase === 'P25') await phaseP25(browser)
+  else if (args.phase === 'P26') await phaseP26(browser)
   console.log(`\nPASS — ${shots.length} screenshots in ${args.out}`)
 } catch (e) {
   code = e instanceof ToolingError ? 3 : 1

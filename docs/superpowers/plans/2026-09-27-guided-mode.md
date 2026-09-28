@@ -352,3 +352,16 @@ Spec §7.
 - [ ] Verdicts observed per template recorded (expected from P20: data center fail, H₂ hub no target, microgrid inconclusive; differences are recorded, not forced).
 - [ ] Independent QA gate GO (`…-gate-P26.md`), full backend and frontend suites green vs. baseline, `tsc` clean.
 - [ ] Close-out note: what Guided still does not cover (spec §1 non-goals) and the deferred P22.9 items.
+
+**P26 implementation (2026-09-28, before the gate).** `smoke-guided.mjs --phase P26` walks spec §7 item 1 on all three templates, each in a fresh first-time context. The verdicts observed match P20: data center `fail`, H₂ hub no goal (no verdict), microgrid `inconclusive`. Findings from the first-time-user review, fixed test-first:
+
+| Finding | Owning phase | Fix | Test |
+|---|---|---|---|
+| Carried from the P25 gate: a Guided card said "Confirm this change" for write-tier tools that do not edit the network | P25 | Guided header per purpose: exports → "Confirm: export a file"; `create_project_snapshot` → "Confirm: save a copy"; `load_project` / `activate_project` → "Confirm: open a project". Each gets a one-line note (`chat-confirmation-note`). Other writes keep "Confirm this change"; run / delete tiers keep "Confirm". The card and the confirmation are unchanged, and so is Expert. | `ChatPanel.sendRequest.test.tsx` "P26: Guided card wording per tool purpose" |
+| A reloaded Improve request showed the raw engine title ("LOLE") where the live bubble shows plain words | P25 | `userMessageLabel` applies `plainWords` | `ChatPanel.sendRequest.test.tsx` "B2: a reloaded Improve request…" |
+| Microgrid Improve read "1000 draws … confidence interval" | P24-FE | two `plainWords` rules | `plainWords.test.ts` |
+| No forward button after Site and Results; only the rail | P24-FE | `CardShell` `next` → "Next: Goal" (Site), "Next: Improve" (Results), a manual rail move | `SiteCard.test.tsx`, `ResultsCard.test.tsx` "next step" |
+
+**P26 edited assertion (spec §8.3):** `ChatPanel.sendRequest.test.tsx` "B2: a reloaded Improve request" now expects the plain-words label ("expected shortfall", not "LOLE"). Justification: after a reload, the label must read as the live one does (`delegate.actionLabel`).
+
+The larger findings are recorded for the orchestrator in `docs/superpowers/qa/2026-09-28-guided-mode-closeout.md`. They are not fixed.
