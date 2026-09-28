@@ -337,6 +337,8 @@ None` (designated months, URDB `lookbackMonths`) and `Ratchet.cyclic_year: bool 
   - A representative-weeks months-mode test is pinned.
   - **Recorded:** a new-mode ratchet takes the WHOLE demand item out of the LP (`not_in_lp`) until WP2.1c, not only its ratchet. The LP does no peak shaving for that item until then; the engine bills it exactly.
 
+- Round 2 → **PASS** (no residue; 40 random P1 range-mode cases bill identically to the pre-WP engine).
+
 ## WP2.1b Site billing adapter, compact billing frames, `per_item_sampled`
 
 Files: `backend/services/commercial/billing.py` (new, pure), `services/finance/report.py`
