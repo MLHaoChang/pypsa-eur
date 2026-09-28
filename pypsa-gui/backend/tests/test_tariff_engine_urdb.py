@@ -269,3 +269,27 @@ def test_a_peak_import_capacity_item_is_out_of_the_lp_as_capacity():
     from services.commercial import lp_bindings as L
 
     assert L._lp_reason(_tariff(_LP).items[0]) == "capacity_not_in_lp_until_WP2.1c"
+
+
+# ── WP2.1a-i review round 2 ────────────────────────────────────────────────
+
+
+def test_a_full_leap_year_discloses_the_8760_divisor():
+    """R2 #1: 8784 represented hours / 8760 bill 1.00274 × the annual charge."""
+    idx = pd.date_range("2024-01-01", "2024-12-31 23:00", freq="h")
+    res = rate(pd.DataFrame({"import_mw": 1.0, "export_mw": 0.0}, index=idx), _tariff(_CAP),
+               step_hours=1.0, timezone=None, capacity_kw=1000.0)
+    assert res.per_item["cap"] == pytest.approx(40.0 * 1000.0 * 8784 / 8760)
+    assert "capacity_prorated_by_represented_hours" in res.notes["cap"]
+
+
+@pytest.mark.parametrize("lo,hi,days", [("2030-03-04 00:30", "2030-03-05 00:00", 23.5 / 24),
+                                        ("2030-03-04 00:00", "2030-03-04 12:30", 12.5 / 24)])
+def test_a_per_day_charge_over_a_billing_period_counts_the_exact_overlap(lo, hi, days):
+    """R2 #2: the billing period's own bounds, not an hourly walk from its start."""
+    item = {"id": "fixed", "kind": "fixed", "unit": "per_day",
+            "periods": [{"name": "all", "rate": 1.0}]}
+    idx = pd.date_range("2030-03-04", periods=24, freq="h")
+    res = rate(pd.DataFrame({"import_mw": 1.0, "export_mw": 0.0}, index=idx), _tariff(item),
+               step_hours=1.0, timezone=None, billing_period=(lo, hi))
+    assert res.per_item["fixed"] == pytest.approx(days)

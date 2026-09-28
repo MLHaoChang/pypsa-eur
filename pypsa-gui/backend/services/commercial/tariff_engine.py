@@ -375,6 +375,28 @@ def _covered_days_by_month(local: pd.DatetimeIndex, hours: np.ndarray,
     return out
 
 
+def _period_days_by_month(lo: pd.Timestamp, hi: pd.Timestamp,
+                          tz: str | None) -> dict[str, float]:
+    """Calendar days of `[lo, hi)` per local month: each local day contributes
+    its exact overlap with the period ÷ its real length (WP2.1a-i review round 2
+    #2 — no hourly walk, so sub-hour bounds and 30-min DST shifts are exact)."""
+    def midnight(d: pd.Timestamp) -> pd.Timestamp:
+        return d if tz is None else d.tz_localize(tz, ambiguous=True,
+                                                  nonexistent="shift_forward")
+
+    out: dict[str, float] = {}
+    day = (lo.tz_localize(None) if lo.tz is not None else lo).normalize()
+    end_naive = hi.tz_localize(None) if hi.tz is not None else hi
+    while day < end_naive:
+        start, stop = midnight(day), midnight(day + pd.Timedelta(days=1))
+        overlap = (min(hi, stop) - max(lo, start)).total_seconds()
+        if overlap > 0:
+            key = day.strftime("%Y-%m")
+            out[key] = out.get(key, 0.0) + overlap / (stop - start).total_seconds()
+        day += pd.Timedelta(days=1)
+    return out
+
+
 def _hours_by_month_in_period(start, end, tz: str | None) -> dict[str, float]:
     s = pd.Timestamp(start)
     e = pd.Timestamp(end)
@@ -481,7 +503,10 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                 sel = year_key == y
                 cal_h = 8784.0 if calendar.isleap(int(y)) else _HOURS_PER_YEAR
                 note = notes.setdefault(item.id, [])
-                if abs(float(energy_h[sel].sum()) - cal_h) > 1e-6 and \
+                # The divisor is 8760 (the LP fee's nyears), so any year whose
+                # represented hours differ — partial, or a full leap year (8784)
+                # — is pro-rated off the calendar (WP2.1a-i review round 2 #1).
+                if abs(float(energy_h[sel].sum()) - _HOURS_PER_YEAR) > 1e-6 and \
                         "capacity_prorated_by_represented_hours" not in note:
                     note.append("capacity_prorated_by_represented_hours")
                 if item.measured_on == "peak_import" and float(dur[sel].sum()) < cal_h - 1e-6 \
@@ -644,8 +669,7 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                     if timezone is not None:
                         lo = lo.tz_localize(timezone) if lo.tz is None else lo.tz_convert(timezone)
                         hi = hi.tz_localize(timezone) if hi.tz is None else hi.tz_convert(timezone)
-                    span = pd.date_range(lo, hi, freq="h", inclusive="left")
-                    days_by_month = _covered_days_by_month(span, np.ones(len(span)), timezone)
+                    days_by_month = _period_days_by_month(lo, hi, timezone)
                 else:
                     days_by_month = _covered_days_by_month(local, dur, timezone)
             for key, hours in sorted(covered.items()):

@@ -222,7 +222,6 @@ items; `CommercialConfig.power_factor: float | None` (for `per_kva_year`).
 - **As implemented:**
   - `rate(..., capacity_kw=, power_factor=)`. The engine handles capacity items in their own branch, before the demand branch.
   - **Deviation (DE fixture):** a capacity item measured on `peak_import` (the German Leistungspreis) bills the year's **measured** peak (settlement-interval mean) × rate × represented hours / 8760, once per year. Other capacity items bill the contracted `capacity_kw`. In P1 the engine refused every capacity item (`unsupported:capacity_via_connection_agreement`, so the bill's `total` was withheld), and the LP never carried it. The change is from unsupported to billed; `test_a_15min_year_rates_in_under_a_second` pins the amount.
-  - A per-day fixed charge counts covered hours / 24 on the local clock.
   - Demand tiers price the billed kW through `_tier_cost`. A windowed demand tier is `unsupported:demand_tiers_with_windows` until WP2.1a-ii.
   - `capacity_double_count` is refused in `validate_for_network`.
   - `power_factor` is registered in `FIELDS_AFTER_V1`.
@@ -247,6 +246,13 @@ items; `CommercialConfig.power_factor: float | None` (for `per_kva_year`).
   - Oracle hygiene: verbatim REopt scenarios committed, and the R2/R4a tests read their inputs from them. `REOPT_LICENSE` is shipped, and PROVENANCE marks the derived files.
   - Tiered demand lines show `rate` NaN.
   - Carried to WP2.1b (finding 12): capacity on a two-period network. The engine applies the scalar `capacity_kw` to every year, while the LP fee counts only the periods in which the PoC is active. The adapter passes a per-period capacity, and a test pins it.
+
+- **Round 2 → PASS WITH CONDITIONS, closed:**
+  - `capacity_prorated_by_represented_hours` fires whenever a year's represented hours differ from the 8760 divisor, including a full leap year (8784/8760).
+  - A per-day charge over a `billing_period` uses each local day's exact overlap with `[lo, hi)`: no hourly walk, so sub-hour bounds and 30-min DST shifts are exact.
+  - The stale "hours / 24" line is removed.
+  - **Recorded limitation:** a dispatch row is attributed to the local day (and month) it starts in, the same rule the per-month charge uses. Rows longer than an hour that cross local midnight shift a fraction of a day between days (5-h rows over 2024 in Amsterdam: 366.0036 days). Sub-daily axes at ≤ 1 h are exact.
+  - **Recorded behaviour change:** `_lp_reason` checks capacity before demand. A P1 item of kind `capacity`, unit `per_kw_month`, `measured_on="peak_import"` was carried by the P1 LP as a monthly demand peak, while the engine refused it. Now neither bills it: the LP reports it `not_in_lp` and the engine `unsupported:unit_per_kw_month_for_capacity`. No committed fixture uses the combination. A re-solved P1 project with such an item drops that LP term; the correct modelling is kind `demand`.
 
 ## WP2.1a-ii Engine: tiers inside TOU windows
 

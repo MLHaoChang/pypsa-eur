@@ -30,9 +30,7 @@ ALLOWED: dict[str, tuple[int, str]] = {
                                       "IC P2 WP2.0)"),
     "commercial/tariff_engine.py": (4, "8760 h/yr converts a capacity item's €/kW-year to the "
                                        "represented hours (Σ energy hours / 8760, the LP fee's "
-                                       "nyears) — a unit, not a step; freq='h' spans a stated "
-                                       "billing period only to count its calendar days for "
-                                       "per-day charges (IC P2 WP2.1a-i)"),
+                                       "nyears) — a unit, not a step (IC P2 WP2.1a-i)"),
     "commercial/lp_bindings.py": (1, "Σ weights ≈ 8760 h tells whether a period's snapshots "
                                      "REPRESENT a whole year (then every month is billed) — a "
                                      "unit test, not a step (IC WP1.5a review #2)"),
