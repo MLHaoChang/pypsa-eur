@@ -24,6 +24,7 @@ import WorkspacePanel from './pages/WorkspacePanel'
 import CompareView from './pages/CompareView'
 import SolveQueuePanel from './pages/SolveQueuePanel'
 import GridspinePanel from './pages/GridspinePanel'
+import { recoveryFor } from './utils/autoRecovery'
 import LocalSettings from './pages/LocalSettings'
 import CommandPalette from './components/CommandPalette'
 import ShortcutsHelp from './components/ShortcutsHelp'
@@ -435,11 +436,14 @@ export default function App() {
         // load — avoids 404s for projects that were never persisted.
         const projects = await projectsApi.list().catch(() => [])
         if (cancelled) return
-        const exists = projects.some(p => p.name === currentProject)
-        if (!exists) {
+        const recovery = recoveryFor(projects, currentProject)
+        if (recovery === 'missing') {
           appLog('WARN', `currentProject '${currentProject}' has no backend folder; clearing stale tab state`)
           return
         }
+        // A study has no network by design — its empty backend network is not a
+        // loss, and loading one would 404 ("Project '<name>' not found").
+        if (recovery === 'study') return
         appLog('INFO', `Auto-recovering project '${currentProject}' (backend was empty)`)
         await projectsApi.load(currentProject)
         if (cancelled) return
