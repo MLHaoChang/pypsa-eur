@@ -257,3 +257,41 @@ def test_a_free_tier_never_takes_a_nonconvex_energy_item_out_of_the_lp():
     assert np.allclose(n.links_t.marginal_cost["import"], 300.0)
     assert applied.facts["nonconvex_tier_predicted"] == {"plain": {"2030-01": 0}}
     applied.undo()
+
+
+@pytest.mark.parametrize("tiers,history", [
+    ([{"threshold": 0, "rate": 0.0}, {"threshold": 50_000, "rate": 0.2},
+      {"threshold": 100_000, "rate": 0.1}], None),                   # free first, falling
+    ([{"threshold": 0, "rate": 0.3}, {"threshold": 100_000, "rate": 0.1}],
+     {"2029-01": 150_000.0}),                                       # predicted from history
+    ([{"threshold": 200_000, "rate": 0.10}, {"threshold": 400_000, "rate": 0.20}], None),
+])
+def test_a_tier_item_repriced_by_recipe_3_is_a_recipe_change_for_older_records(tiers, history):
+    """Review #1, #2: the item set is unchanged but recipe 3 prices it
+    differently (free-tier fallback, predicted tier, free volume below a first
+    threshold above 0), so an older solve is flagged for a re-solve."""
+    n = _site()
+    extra = {"meter_history_energy_kwh": history} if history else {}
+    cfg = CommercialConfig.model_validate(_commercial(_tariff(_plain(tiers)), **extra))
+    rec = {"energy_hash": L.energy_hash(n, cfg, 2, recipe=2), "hash_version": 2,
+           "lp_recipe": 2}
+    assert L.energy_record_state(n, cfg, rec) == "recipe"
+    rec3 = {"energy_hash": L.energy_hash(n, cfg, 2), "hash_version": 2, "lp_recipe": 3}
+    assert L.energy_record_state(n, cfg, rec3) is None
+
+
+def test_a_period_with_no_volume_in_a_month_is_priced_zero():
+    """Review #3: a windowed key's period without snapshots in a month has no
+    variables; one with snapshots but zero volume gets q = 0 at the optimum."""
+    item = _windowed([0.30, 0.40], [0.10, 0.15])
+    item["periods"][0].update(start_hour=23, end_hour=24)   # peak only 23:00–24:00
+    n = _site()
+    applied = L.materialise_poc_prices(n, _commercial(_tariff(item)))
+    (key,) = getattr(n, L.TIER_SPEC_ATTR)["keys"]
+    assert {p["name"] for p in key["periods"]} == {"peak", "off"}
+    applied.undo()
+    item["periods"][0].update(months=[7], start_hour=None, end_hour=None)   # never in January
+    applied = L.materialise_poc_prices(n, _commercial(_tariff(item)))
+    (key,) = getattr(n, L.TIER_SPEC_ATTR)["keys"]
+    assert [p["name"] for p in key["periods"]] == ["off"]
+    applied.undo()

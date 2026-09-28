@@ -503,6 +503,17 @@ Files: `lp_bindings.py`, `cost_rows.py`, `test_ratchet.py`, `test_tiers.py`, rec
 
     The reconciliation gate has 15 cases (+ `windowed_tiers`). The P1/P2 tests that pinned "windowed tiers stay out of the LP" now pin the new contract.
 
+- **WP2.1c-ii review round 1 → PASS** (three LOW findings, closed):
+  - **#1 and #2.** `energy_record_state` also returns "recipe" when recipe 3 prices an item that the older recipes bound differently (`_repriced_since_recipe_2`):
+    - a non-convex tier item with a free tier (its old adder was 0);
+    - a non-convex tier item priced from energy history;
+    - a convex item whose first threshold is above 0 (the P1 over-charge).
+
+    The stored adders keep the old rows consistent, so the flag is the only signal. It is tested for all three shapes, and for no flag under recipe 3.
+  - **#3.** A windowed key whose period has no snapshots in a month has no variables for it. This is pinned at the spec level.
+  - Reviewer probes: LP 852,553.33 ≤ engine 905,338.62 (3 periods), gap 0; `add_tier_terms` 1.34 s for 4 periods × 12 months × 5 tiers.
+- **WP2.4b-0 review round 1 → PASS** (one LOW finding, informational: the exception chain is one level deeper via `BindingRefusal`).
+
 - **As implemented, WP2.1c-iii (tariff capacity items):**
   - **`_lp_reason` for capacity items.** `per_kw_year` items with one catch-all period, direction cost, and measured on import or `peak_import` are LP terms. The rest stay out with a reason: `per_kva_year_not_in_lp` (the plan's coverage), `unit_*_not_capacity`, `capacity_revenue_not_supported`, `tiers_on_capacity_not_supported`, `capacity_with_windows`.
   - **Capacity never enters the energy or demand filters.** `_adders` skips it, and `_energy_tiered` / `_energy_priced` exclude it, so adding a capacity item leaves the energy hash unchanged. `demand_lp_items` excludes `peak_import` capacity items, so they are never demand keys. `cost_rows` and `billing` use `demand_lp_items`.

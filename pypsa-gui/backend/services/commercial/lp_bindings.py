@@ -901,9 +901,26 @@ def energy_record_state(n, cfg: CommercialConfig, rec: dict | None) -> str | Non
         return "config"
     if r < WINDOWED_TIERS_RECIPE and (
             [i.id for i in _energy_priced(cfg, r)] != [i.id for i in _energy_priced(cfg)]
-            or [i.id for i in _energy_tiered(cfg, r)] != [i.id for i in _energy_tiered(cfg)]):
+            or [i.id for i in _energy_tiered(cfg, r)] != [i.id for i in _energy_tiered(cfg)]
+            or _repriced_since_recipe_2(cfg)):
         return "recipe"
     return None
+
+
+def _repriced_since_recipe_2(cfg: CommercialConfig) -> bool:
+    """Whether recipe 3 prices a tier item the older recipes also bound
+    DIFFERENTLY, so the old dispatch is not this recipe's (WP2.1c-ii review
+    #1, #2): a non-convex item with a free tier (it had a 0 adder) or with
+    energy history (the predicted tier), or a convex item whose first threshold
+    is above 0 (the free volume was charged at the first rate)."""
+    for item in _energy_tiered(cfg, recipe=2):
+        rates = item_tier_rates(item)
+        if item_tiers_convex(item):
+            if item.tiers[0].threshold > 0:
+                return True
+        elif cfg.meter_history_energy_kwh or any(r[0] == 0 for r in rates):
+            return True
+    return False
 
 
 DEMAND_HASH_VERSION = _H.HASH_VERSION  # recorded in the demand info (recipe of items_hash)
