@@ -337,5 +337,21 @@ def test_a_save_persists_the_saved_contexts_series_not_the_active_ones(
         f"the save wrote the ACTIVE context's series into BG's project "
         f"directory instead of BG's own (got {values!r})"
     )
+
+    # …and the netCDF too, which is the half `user_ts.json` cannot speak for.
+    # `_reapply_user_ts_to_network` writes the store onto the `_t` tables
+    # IMMEDIATELY BEFORE the export, so a store/network mismatch there bakes the
+    # wrong project's profile into the file the solver and every later load read
+    # — while leaving `user_ts.json` correct, because that is serialised from a
+    # separately-passed store. Checked because a mutant that dropped `store=`
+    # from the backup/reapply pair alone left the assertion above green.
+    reloaded = pypsa.Network()
+    reloaded.import_from_netcdf(str(tmp_projects_dir / "BG" / "network.nc"))
+    exported = reloaded.loads_t.p_set["L1"].tolist()
+    assert exported == [UPLOADED_P_SET] * len(SNAPS), (
+        f"BG's exported network.nc carries the ACTIVE context's profile "
+        f"instead of BG's own (got {exported!r})"
+    )
+
     # …and the active context's own store was not ingested into either.
     assert foreground.user_ts[key].tolist() == other.tolist()
