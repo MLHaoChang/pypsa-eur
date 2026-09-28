@@ -211,6 +211,10 @@
       "surface": "banner",
       "why": "The endpoint asked for a tool that was never offered this turn. On a branch whose point is aiming the assistant at arbitrary endpoints, the user should see it."
     },
+    "tool_not_started": {
+      "surface": "inline",
+      "why": "The shared chat-tool pool had no free worker, so the call was cancelled before it ran. Inline for the same reason as tool_timeout -- the turn continues and the model can retry or route around it -- and distinct from it because nothing exceeded a deadline: the remedy is capacity, not a smaller request."
+    },
     "tool_timeout": {
       "surface": "inline",
       "why": "One tool exceeded its budget. The turn continues and the model can route around it."

@@ -1279,10 +1279,19 @@ def upload_link_profile(csv_content_b64: str,
 
 
 def update_solver_config(partial: dict) -> dict:
+    """
+    PUT /api/simulation/solver_config.
+
+    Through `_route`, not called directly: the handler declares `db` and `actor`
+    so it can gate `extra_functionality_code` (the field is exec()-ed in-process),
+    and a direct call handed `is_org_admin` raw `Depends` sentinels — an opaque
+    AttributeError for a member, and no way at all for an admin to set the field
+    from chat. See tests/test_chat_tool_solver_config_deps.py.
+    """
     from routers.simulation import update_solver_config as _h
     from models.schemas import SolverConfigSchema
     body = SolverConfigSchema(**partial)
-    return _h(body)
+    return _route(_h, body)
 
 
 # ── Validation (3) ──────────────────────────────────────────────────────────
@@ -1990,7 +1999,22 @@ def _route(handler, *args, **kwargs):
         # signature because handlers reached here declare different subsets and
         # would raise TypeError on an unexpected keyword — `reset_network`
         # (`routers/network.py:1898`) declares `db` and `session` but no `user`.
-        injected = {n: v for n, v in (("db", db), ("user", user)) if n in params}
+        #
+        # `actor` is the SAME value as `user` under the other spelling this
+        # codebase uses for it — `routers/admin.py`, `routers/chat.py` and
+        # `routers/simulation.py` name it `actor` (14 sites) where the project
+        # routers name it `user` (62). A helper that understands only one of the
+        # two spellings is a trap: `update_solver_config` grew an
+        # `actor: User | None = Depends(optional_user)` in the authorization
+        # audit and the tool wrapper, which then called the handler directly,
+        # handed `is_org_admin` a raw `Depends`. Both names resolve here so the
+        # RuntimeError below stays reserved for dependencies that genuinely
+        # cannot be satisfied.
+        injected = {
+            n: v
+            for n, v in (("db", db), ("user", user), ("actor", user))
+            if n in params
+        }
         if "session" in params and "session" not in kwargs:
             injected["session"] = _acting_session(db)
         # `_route`'s contract is "resolve whatever the target declares", and
