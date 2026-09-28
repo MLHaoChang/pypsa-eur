@@ -32,19 +32,18 @@ cannot load any `.docx`, a plain python-docx control file fails identically).
 
 ## §1 — Foundation (WP1, WP2, WP4, WP5)
 
-**Merged so far (2026-09-28):** WP4 `2fa85a6`, WP2 `6406427`, WP1 `6703060`,
-phase-0 gate `3492795`. WP5 (writer from `ReportDocument`, evidence-only
-report, `qa_reports_phase1.py`) in progress.
+**Merged (2026-09-28):** WP4 `2fa85a6`, WP2 `6406427`, WP1 `6703060`,
+phase-0 gate `3492795`, WP5 `e279f43`. **Phase 1 gate: GREEN.**
 
 | Tier | Command | Result |
 |---|---|---|
-| Unit | `tests/test_report_model.py` 8, `test_report_store.py` 33, `test_report_routes.py` 22, `test_report_evidence.py` 18, `test_report_figures.py` 14, `test_report_docx_writer.py` 14, `test_chat_report_export_tools.py` 5 | 114 passed |
+| Unit | `tests/test_report_model.py` 8, `test_report_store.py` 33, `test_report_routes.py` 28, `test_report_evidence.py` 18, `test_report_figures.py` 14, `test_report_docx_writer.py` 25, `test_report_assemble.py` 14, `test_chat_report_export_tools.py` 5, + parity/manifest/packaging/bundle guards | 185 passed (one run, after the WP5 merge) |
 | Regression | chunk 1 (`tests/test_chat_*.py` + manifest + packaging) | exit 0 |
 | Regression | chunk 2 (`tests/test_upload*.py tests/test_desktop*.py tests/test_project*.py tests/test_energy_hub_*.py tests/test_adequacy_*.py`) | exit 0 |
 | Regression | remainder, 180 files in four groups of 43–47 run in parallel (`--durations=15`; slowest single test 18.7 s, `test_solve_queue.py::test_abort_running_solve_is_fast_and_next_job_starts`) | exit 0 ×4 |
-| Integration | `test_report_routes.py` (TestClient: list/get/versions/figures/delete, `%2e%2e` ids, other-org 404, lock refusal, save-as / copy / scenario / snapshot / bundle carry `reports/`) | 22 passed (counted above) |
-| End-to-end QA | `tests/qa_reports_phase0.py` | 18/18 PASS |
-| End-to-end QA | `tests/qa_reports_phase1.py` | _(with WP5)_ |
+| Integration | `test_report_routes.py` (TestClient: list/get/versions/figures/delete, `%2e%2e` ids, other-org 404, lock refusal, save-as / copy / scenario / snapshot / bundle carry `reports/`; POST evidence_only → v1 + figure files, `generated` → 400, lock refusal, export → docx chip served by the blob route, unknown id → 404) | 28 passed (counted above) |
+| End-to-end QA | `tests/qa_reports_phase0.py` (real study → chat tool → blob → python-docx) | 18/18 PASS |
+| End-to-end QA | `tests/qa_reports_phase1.py` (real study → evidence-only report → list/get/figure → export → bookmarks → save-as carries it → delete) | 38/38 PASS |
 
 **Recorded corrections.** The whole backend suite cannot finish inside the
 cloud container's 10-minute per-command ceiling and the "everything else"
@@ -54,7 +53,16 @@ recipe now says so. Agent worktrees are created from `master`, not the
 plan branch: WP1 and WP4 fast-forwarded first; WP2 could not (its
 `reset`/`ff-merge` were refused by the permission classifier) and shipped a
 two-file branch on `master`'s base that merged cleanly — later agents are
-told to fast-forward first.
+told to fast-forward first. WP5 folded WP0's per-section renderers into one
+writer path (`collect_evidence` → `evidence_only_document` →
+`render_document_docx`), so an unestablished section now reads
+"Not established: this section was …" — two assertions reworded, nothing
+weakened. Section bookmarks are `sec:<id>`; Word's dialog hides names with a
+colon but the OOXML is valid and python-docx reads them, so the increment-3
+round trip must match on the XML, not the dialog.
+
+**Owed from a workstation (unchanged).** Desktop download-and-open-in-Word;
+page-layout check of the generated `.docx`.
 
 ## §2 — Generation (WP3, WP6)
 
