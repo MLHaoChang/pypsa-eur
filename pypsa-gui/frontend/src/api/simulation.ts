@@ -60,10 +60,14 @@ export const simulationApi = {
 }
 
 export interface CostBreakdown {
-  // capex           — annualised cost of ALL installed capacity
-  // capex_expansion — annualised cost of NEW capacity built this run
-  // capex_lifetime  — same as capex but × per-asset lifetime (sum over assets)
-  // capex_expansion_lifetime — same as capex_expansion × per-asset lifetime
+  // capex           — annualised FIXED cost of ALL installed capacity:
+  //                   annuitised investment + fixed O&M, i.e. what the LP
+  //                   objective paid (PyPSA's periodized_cost × capacity)
+  // fom             — the fixed-O&M share already INCLUDED in `capex` (and
+  //                   in `total`), broken out; capex − fom is investment only
+  // capex_expansion — annualised fixed cost of NEW capacity built this run
+  // capex_lifetime  — PV of the UPFRONT investment (no FOM) summed over assets
+  // capex_expansion_lifetime — same as capex_expansion, upfront basis (no FOM)
   // The "_lifetime" fields back the "Total over lifetime" toggle on the
   // CapacityExpansion tab. OPEX stays per-year — multiplying it by lifetime
   // would mix construction cost with operating cost and break LCOE intuition.
@@ -102,9 +106,10 @@ export interface CostBreakdown {
     capex_expansion: number
     capex_expansion_lifetime: number | null
     opex: number
+    fom?: number
     total: number
   }>
-  by_carrier:   Array<{ component: string; carrier: string; capex: number; opex: number; total: number }>
+  by_carrier:   Array<{ component: string; carrier: string; capex: number; opex: number; fom?: number; total: number }>
   // Multi-period only: per-period roll-up of capex + opex with the per-period
   // investment_period_weightings.years multiplier baked in. Sum across this
   // list equals the top-level `capex` / `opex` numbers. Single-period
@@ -113,13 +118,14 @@ export interface CostBreakdown {
     period: number | string
     capex: number
     opex: number
+    fom?: number
     total: number
-    by_component: Array<{ component: string; capex: number; opex: number }>
+    by_component: Array<{ component: string; capex: number; opex: number; fom?: number }>
     // Per-carrier breakdown WITHIN the period. Lets the Dispatch tab's
     // "OPEX by carrier" section respect the period selector (when a
     // specific period is picked, use this; otherwise fall back to the
     // horizon-wide `by_carrier` at the root).
-    by_carrier?: Array<{ carrier: string; capex: number; opex: number }>
+    by_carrier?: Array<{ carrier: string; capex: number; opex: number; fom?: number }>
   }>
 }
 
@@ -152,7 +158,19 @@ export interface CostBreakdown {
 //   lifetime         — years, kept for tooltips / CSV.
 //   build_year       — optional; only present when the asset carries one.
 export type AssetCostMap = Record<string, Record<string, {
+  // Annuitised INVESTMENT per unit of capacity per year (PyPSA's
+  // `capital_cost` accessor, no FOM).
   capital_cost: number
+  // Fixed O&M per unit of capacity on the SAME basis as capital_cost: the
+  // typed annual figure × the share of a year the model covers.
+  fom_cost: number
+  // Fixed O&M as typed, per unit of capacity per year.
+  fom_cost_annual?: number
+  // capital_cost + fom_cost — PyPSA's `periodized_cost`, the coefficient the
+  // LP objective paid per unit of optimised capacity. This is the asset's
+  // fixed cost; the "Annualised" cost mode reads it so the per-asset table
+  // agrees with cost_breakdown.capex and the Economics tab's fixed cost.
+  fixed_cost: number
   overnight_cost: number | null
   overnight_cost_pv: number | null
   overnight_cost_available?: boolean
@@ -188,7 +206,8 @@ const tsParams = (s?: ResultSource, range?: TSRange) => {
 export interface LcohPeriodEntry {
   period: number
   h2_produced_mwh: number
-  capex_eur: number
+  capex_eur: number          // fixed cost (CAPEX + FOM) allocated to this period
+  fom_eur?: number           // the FOM share of capex_eur
   vom_cost_eur: number
   electricity_cost_eur: number
   lcoh_eur_per_mwh_h2: number | null
@@ -279,6 +298,20 @@ export interface McResult {
    *  period, beside the reserve margin's own credit for the same group. A
    *  SIBLING of `elcc`, never a row in it; `null` when not requested. */
   elcc_portfolio?: ElccPortfolioBlock | null
+  /** P7: per-unit outage-rate provenance (library vs asset override). */
+  units_provenance?: {
+    name: string
+    rate_source: string
+    library_citation?: string | null
+  }[]
+  /** P7: storage rate provenance (missing entries omitted by the engine). */
+  storage_provenance?: {
+    name: string
+    rate_source: string
+    library_citation?: string | null
+  }[]
+  /** P7 honesty: rate library + provenance only — not full RAM/CMMS. */
+  ram_note?: string | null
 }
 
 export type ElccPortfolioStatus =
@@ -591,6 +624,197 @@ export interface MarginLoopRequestBody {
   // large and it overshoots the bracket entirely.
 }
 
+/** Energy Hub archetype packs the study can run (backend EnergyHubArchetype). */
+export type EhArchetype = 'strong_grid' | 'weak_flexible' | 'off_grid'
+
+export interface EhStudyRequestBody {
+  archetype: EhArchetype
+  stages?: string[]
+  budget_solves?: number
+}
+
+export type EhSectionStatus = 'ok' | 'not_established' | 'skipped'
+
+/** P9 dynamics gate product fields (warn-only thin slice; fail reserved). */
+export type EhScrVerdict = 'pass' | 'warn' | 'fail'
+
+export interface EhGatesBlock {
+  scr?: EhScrVerdict | null
+  emt_recommended?: boolean | null
+}
+
+export interface EhSectionState {
+  status: EhSectionStatus
+  payload?: Record<string, unknown> | null
+  note?: string | null
+}
+
+/** TEA wrap (spec decision 9). LCOH is null + a flag when it cannot be
+ *  established (ADR-0001) — `lcoh_status` says `skipped` (no electrolyser
+ *  Links) or `not_established` (Links that produced no H₂). */
+export interface EhTeaBlock {
+  lcoe_eur_per_mwh?: number | null
+  lcoh_eur_per_kg?: number | null
+  notes?: string | null
+  lcoh_status?: EhSectionStatus | null
+  lcoh_note?: string | null
+}
+
+/** MC LOLE certification verdict (spec decision 2). */
+export type EhCertificationVerdict =
+  | 'certified' | 'failed' | 'no_target' | 'not_established'
+
+/** `sections.certification.payload` from the mc_certify stage. */
+export interface EhCertificationPayload {
+  metric?: string
+  target_lole_h?: number | null
+  mc_lole_h?: number | null
+  lole_ci?: [number, number] | number[] | null
+  eue_mwh?: number | null
+  n_samples?: number | null
+  draws_requested?: number | null
+  converged?: boolean | null
+  resolution_floor_h?: number | null
+  time_basis?: string | null
+  ens_met?: boolean | null
+  verdict?: EhCertificationVerdict
+  warning?: string | null
+}
+
+/** One ε-constraint point in `sections.frontier.payload.points`. */
+export interface EhFrontierPoint {
+  target_permyriad: number
+  status: string
+  point?: {
+    cap_mwh?: number
+    achieved_ens_mwh?: number
+    achieved_shed_hours?: number
+    total_system_cost_eur?: number
+    engine?: string
+    fidelity?: string
+  } | null
+  binding?: string | null
+  period_basis?: string | null
+  excludes_shed_cost?: boolean
+}
+
+/** One ranked mode in `sections.fmea_top.payload.top`. */
+export interface EhFmeaTopMode {
+  rank: number
+  mode_id: string
+  component_class: string
+  name: string
+  failure_class: string
+  occurrence_per_year?: number | null
+  severity_eur?: number | null
+  criticality_eur_per_year?: number | null
+  delta_eue_mwh?: number | null
+  engine?: string
+  note?: string
+}
+
+/** Durable product artifact from GET /results/eh_reference_design. */
+export interface EhReferenceDesignReport {
+  archetype: EhArchetype
+  pack_hash: string
+  assumptions_hash: string
+  ens_cap_permyriad?: number | null
+  achieved_ens_permyriad?: number | null
+  achieved_shed_hours?: number | null
+  mc_lole_h?: number | null
+  cost_at_target_eur?: number | null
+  period_basis?: string | null
+  excludes_shed_cost?: boolean
+  completeness?: Record<string, EhSectionStatus>
+  sections?: Record<string, EhSectionState>
+  tea?: EhTeaBlock | null
+  pipeline?: { aborted?: boolean; solves_consumed?: number } | null
+  /** Dynamics feasibility gate (SCR → EMT flag). Absent when section skipped. */
+  gates?: EhGatesBlock | null
+}
+
+/** Study lifecycle record from GET /results/eh_study. */
+export interface EhStudyPayload {
+  status: string
+  study?: string
+  archetype?: EhArchetype
+  stages?: string[] | null
+  budget_solves?: number
+  report?: EhReferenceDesignReport | null
+  error?: string | null
+  started_at?: number
+  finished_at?: number | null
+}
+
+export interface EhRedundancyOption {
+  scenario_id: string
+  status: string
+  condition?: string | null
+  cost_at_target_eur?: number | null
+  achieved_ens_mwh?: number | null
+  meets_target?: boolean | null
+  not_applicable?: boolean
+  binding_metric?: string
+}
+
+export interface EhRedundancyTable {
+  certify_method?: string
+  ens_cap_permyriad?: number
+  options?: EhRedundancyOption[]
+  comparable_solved?: number
+  aborted?: boolean
+  selection?: { selected_id?: string | null } | null
+  selection_error?: string | null
+}
+
+export interface EhLeverOption {
+  kind: string
+  value: number
+  unit?: string
+  status: string
+  cost_at_target_eur?: number | null
+  achieved_ens_mwh?: number | null
+  meets_target?: boolean | null
+  ineffective?: boolean
+  ineffective_reason?: string | null
+}
+
+export interface EhLeverTable {
+  kind?: string
+  options?: EhLeverOption[]
+  comparable_solved?: number
+  skipped_kinds?: string[]
+  honesty_notes?: string[]
+  aborted?: boolean
+}
+
+export interface EhDtcContingency {
+  contingency: string
+  status: string
+  condition?: string | null
+  critical_unserved_mwh?: number | null
+  noncritical_unserved_mwh?: number | null
+  cost_at_target_eur?: number | null
+  built_p_nom_mw?: number | null
+}
+
+export interface EhDtcStressTable {
+  mode?: string
+  attribution?: string
+  contingencies?: EhDtcContingency[]
+  honesty_notes?: string[]
+  comparable_solved?: number
+  aborted?: boolean
+}
+
+export interface EhDtcPlanningTable {
+  mode?: string
+  attribution?: string
+  contingencies?: EhDtcContingency[]
+  comparable_solved?: number
+  aborted?: boolean
+}
+
 // ── The firm-capacity (planning reserve margin) standard, Phase 8 §4 ────────
 //
 // KEY NAMES ARE VERBATIM from the backend and must stay that way: they come
@@ -735,7 +959,10 @@ export const resultsApi = {
       carrier: string
       p_nom_opt_mw: number
       efficiency: number
+      // Fixed cost: (capital_cost + fom_cost) × p_nom_opt — the LP coefficient.
+      // The name predates FOM and is API; `fom_eur_per_year` is the O&M share.
       capex_eur_per_year: number
+      fom_eur_per_year?: number
       vom_cost_eur: number
       electricity_cost_eur: number
       h2_produced_mwh: number
@@ -746,6 +973,7 @@ export const resultsApi = {
     total: null | {
       h2_produced_mwh: number
       capex_eur_per_year: number
+      fom_eur_per_year?: number
       vom_cost_eur: number
       electricity_cost_eur: number
       lcoh_eur_per_mwh_h2: number
@@ -1029,6 +1257,25 @@ export const resultsApi = {
   // while this loop kept solving.
   abortMarginLoop: () => client.post('/results/margin_loop/abort')
     .then(r => r.data),
+  // Energy Hub reference-design study (P1.5 HTTP / P5 panel). 204 = none this
+  // session. Poll while status === 'running'; durable report also on
+  // getEhReferenceDesign.
+  getEhStudy: () => client.get('/results/eh_study')
+    .then(r => (r.status === 204 ? null : r.data as EhStudyPayload)),
+  startEhStudy: (body: EhStudyRequestBody) =>
+    client.post('/results/eh_study', body).then(r => r.data),
+  abortEhStudy: () => client.post('/results/eh_study/abort')
+    .then(r => r.data as { status: string; aborting: boolean }),
+  getEhReferenceDesign: () => client.get('/results/eh_reference_design')
+    .then(r => (r.status === 204 ? null : r.data as EhReferenceDesignReport)),
+  getEhRedundancy: () => client.get('/results/eh_redundancy')
+    .then(r => (r.status === 204 ? null : r.data as EhRedundancyTable)),
+  getEhLevers: () => client.get('/results/eh_levers')
+    .then(r => (r.status === 204 ? null : r.data as EhLeverTable)),
+  getEhDtc: () => client.get('/results/eh_dtc')
+    .then(r => (r.status === 204 ? null : r.data as EhDtcStressTable)),
+  getEhDtcPlanning: () => client.get('/results/eh_dtc_planning')
+    .then(r => (r.status === 204 ? null : r.data as EhDtcPlanningTable)),
   // FMEA worksheet sidecar (Phase 3): manual class-D rows + mitigability
   // overlays, persisted per project. Computed rows come from getCopt and
   // merge client-side (pages/results/fmea.ts).
@@ -1126,8 +1373,8 @@ export interface GeneratorEconomicsRow {
   capacity_factor: number | null
   revenue_eur: number
   vom_cost_eur: number
-  fixed_cost_eur: number | null       // capital_cost × p_nom_opt (annualised)
-  fom_cost_eur: number | null         // user-typed fom_cost × p_nom_opt (informational)
+  fixed_cost_eur: number | null       // (capital_cost + fom_cost) × p_nom_opt × years — the LP's fixed-cost term
+  fom_cost_eur: number | null         // fom_cost × p_nom_opt × years — the FOM share OF fixed_cost_eur
   net_profit_eur: number | null       // revenue − fixed − vom
   lcoe_eur_per_mwh: number | null
   avg_price_eur_per_mwh: number | null

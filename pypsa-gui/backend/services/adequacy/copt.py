@@ -78,6 +78,9 @@ class CoptUnit:
     basis: str = ""
     mttr_hours: float = float("nan")
     source: str = ""
+    # P7: citation from CARRIER_DEFAULTS when ``source == "carrier_default"``.
+    # Empty for asset overrides / missing — never invent a library line.
+    library_citation: str = ""
     # Availability fraction per modelled hour, ``(H,)``, or None for a plain
     # two-state unit. Excluded from equality and hashing: an ndarray has no
     # scalar truth value, and the identity of a unit is its name and numbers.
@@ -772,12 +775,20 @@ def fleet_and_residual(n, *, keep_zero_capacity: bool = False, cfg=None,
             # static column itself, so folding before the branch would
             # SQUARE it for every must-take farm.
             cf = static_fold_factor(gens, p_max_pu_t, g)
+            carrier = ""
+            if "carrier" in gens.columns:
+                carrier = str(gens.at[g, "carrier"] or "").strip().lower()
+            from services.adequacy.occurrence import library_citation as _lib_cite
+            cite = ""
+            if str(row["source"]) == "carrier_default":
+                cite = _lib_cite(carrier) or ""
             units.append(CoptUnit(
                 name=str(g),
                 capacity_mw=cap if cf is None else cap * cf,
                 q=float(row["rate"]),
                 basis=str(row["basis"]), mttr_hours=float(row["mttr_hours"]),
                 source=str(row["source"]),
+                library_citation=cite,
                 profile=_occurrence_profile(p_max_pu_t, g, snapshots),
                 capacity_series=(series if cf is None or series is None
                                  else series * cf),
@@ -1135,23 +1146,29 @@ def attribute_criticality(units: list[CoptUnit], dist: CapacityDistribution,
         occ = (8760.0 * u.q / u.mttr_hours
                if math.isfinite(u.mttr_hours) and u.mttr_hours > 0 else 0.0)
         severity = crit_eur / occ if occ > 0 else 0.0
+        fm = {
+            "mode_id": f"generator:{u.name}:forced_outage",
+            "component_class": "Generator",
+            "name": u.name,
+            "failure_class": "A",
+            "occurrence_per_year": occ,
+            "occurrence_basis": u.basis or "FOR",
+            "severity_eur": severity,
+            "criticality_eur_per_year": crit_eur,
+            "in_metric_scope": True,
+            "engine": "copt",
+            "fidelity": "analytic_convolution",
+            # P7: library vs override — distinct from folded_units[].source
+            # ("static" CF fold), which is not rate provenance.
+            "rate_source": u.source or "missing",
+        }
+        if u.source == "carrier_default" and u.library_citation:
+            fm["library_citation"] = u.library_citation
         row = {
             "name": u.name,
             "delta_eue_mwh": delta_eue,
             "criticality_eur_per_year": crit_eur,
-            "failure_mode": {
-                "mode_id": f"generator:{u.name}:forced_outage",
-                "component_class": "Generator",
-                "name": u.name,
-                "failure_class": "A",
-                "occurrence_per_year": occ,
-                "occurrence_basis": u.basis or "FOR",
-                "severity_eur": severity,
-                "criticality_eur_per_year": crit_eur,
-                "in_metric_scope": True,
-                "engine": "copt",
-                "fidelity": "analytic_convolution",
-            },
+            "failure_mode": fm,
         }
         if note is not None:
             row["note"] = note

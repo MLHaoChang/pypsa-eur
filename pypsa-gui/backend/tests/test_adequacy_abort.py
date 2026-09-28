@@ -626,6 +626,12 @@ def test_F1j_no_replay_call_site_can_forward_the_stop_flag():
     have been changed back to forward a live flag with this test still green
     (adversarial review of the review fixes, M1).
 
+    The `/mc` worker body lives in ``services/adequacy/mc_loop_runner.py``
+    since the MC study router lift. Scanning ``routers/results.py`` for the
+    exempted call after that cut went *vacuous* — the thin ``post_mc`` still
+    existed, so ``seen_allowed`` stayed green while the live-flag call had
+    moved out of the scanned files.
+
     Bites (verified): drop `stop_event=None` from `elcc.metrics_at`, from
     either portfolio call, or from either loop's `evaluate`.
     """
@@ -633,8 +639,10 @@ def test_F1j_no_replay_call_site_can_forward_the_stop_flag():
     import pathlib
 
     # The one call that MAY carry a live flag: the `/mc` worker's own baseline,
-    # which is the study the user is aborting.
-    ALLOWED = ("post_mc",)
+    # which is the study the user is aborting. Nested as ``worker`` inside
+    # ``start_mc`` after the MC study router lift.
+    ALLOWED = ("start_mc",)
+    _ALLOWED_SRC = pathlib.Path("services/adequacy/mc_loop_runner.py")
 
     offenders: list[str] = []
 
@@ -662,17 +670,17 @@ def test_F1j_no_replay_call_site_can_forward_the_stop_flag():
 
     seen_allowed = 0
     for rel in ("services/adequacy/elcc.py", "services/adequacy/portfolio.py",
-                "routers/results.py"):
+                "routers/results.py", "services/adequacy/mc_loop_runner.py"):
         src = pathlib.Path(rel).read_text()
         scan(rel, src, ast.parse(src), ())
     # The exemption must still match something, or a rename silently turns this
     # into a test that no call site can pass.
-    for node in ast.walk(ast.parse(pathlib.Path("routers/results.py").read_text())):
+    for node in ast.walk(ast.parse(_ALLOWED_SRC.read_text())):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
                 and node.name in ALLOWED:
             seen_allowed += 1
     assert seen_allowed == len(ALLOWED), (
-        f"the exempted function(s) {ALLOWED} are not in routers/results.py any "
+        f"the exempted function(s) {ALLOWED} are not in {_ALLOWED_SRC} any "
         "more — this test is asserting nothing about them")
 
     assert not offenders, (
@@ -806,7 +814,7 @@ def test_F1m2_the_class_C_assembler_returns_the_pair_when_nothing_is_runnable():
     rows, restore = ST.run_class_c_sweep(object(), object(), _cfg(), scen)
 
     assert [r["id"] for r in rows] == ["scenario:s0", "scenario:s1"]
-    assert all(r["status"] == "profiles_not_supported_yet" for r in rows)
+    assert all(r["status"] == "profiles_incomplete" for r in rows)
     # No sweep ran, so nothing was restored — and the flags say exactly that
     # rather than claiming a re-solve that never happened.
     assert restore == {"base_restored": None, "base_restore_status": None,
@@ -850,12 +858,22 @@ def test_F1n2_the_loops_read_the_condition_and_not_the_status():
     with a patched solver to reach one line; this cannot be routed around by a
     fixture.
 
+    The bodies live in ``services/adequacy/{coupling,margin}_loop_runner.py``
+    since the planning-loop router lift (PR #27). Scanning ``routers/results.py``
+    after that cut went *vacuous* — zero matches, green forever — the same
+    self-satisfying shape named in
+    ``docs/superpowers/findings/2026-09-09-chat-stream-loop-two-vestigial-guards.md``.
+
     Bite (verified): put `return status in ("ok", "optimal")` back in either
-    `_restore_closing`.
+    `_restore_closing`, or drop one of the four ``restore_is_clean(word)`` calls.
     """
     import pathlib
 
-    raw = pathlib.Path("routers/results.py").read_text()
+    roots = [
+        pathlib.Path("services/adequacy/coupling_loop_runner.py"),
+        pathlib.Path("services/adequacy/margin_loop_runner.py"),
+    ]
+    raw = "\n".join(p.read_text() for p in roots)
     # Comments are stripped before scanning: the fix's own comment QUOTES the
     # expression it replaced, and a check that trips on prose about a defect
     # rather than the defect is not a check.
@@ -866,7 +884,7 @@ def test_F1n2_the_loops_read_the_condition_and_not_the_status():
         " also covers time_limit, iteration_limit, terminated_by_limit,"
         " suboptimal and imprecise; read the CONDITION through"
         " services.adequacy.sweep.restore_is_clean")
-    # both loops, not just one
+    # both loops, not just one (two call sites each)
     assert raw.count("restore_is_clean(word)") >= 4, (
         "both `_restore_closing` bodies must route through the shared"
         " predicate — found fewer uses than the two loops need")

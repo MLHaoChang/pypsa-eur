@@ -50,7 +50,10 @@ def _network(committable: bool = False) -> pypsa.Network:
           marginal_cost=10.0, committable=committable)
     n.add("Generator", "peak", bus="b", carrier="gas", p_nom=0.0,
           p_nom_extendable=True, p_nom_max=200.0,
-          capital_cost=400_000.0, marginal_cost=250.0)
+          # Annual; the model covers N x WEIGHT hours of a year, so the LP
+          # charges 400_000 EUR/MW for them (capital_cost is annual and scaled
+          # by the modelled share of a year).
+          capital_cost=400_000.0 * 8760 / (N * WEIGHT), marginal_cost=250.0)
     return n
 
 

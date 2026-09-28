@@ -96,16 +96,62 @@ _MOVED: dict[str, str] = {
     "_reapply_snapshot_weights": "services.user_timeseries",
     "_flatten_snapshot_state": "services.user_timeseries",
     "_parse_upload": "services.user_timeseries",
+
+    # ── bulk edit (`PATCH /_bulk`) ───────────────────────────────────────────
+    # Body + coerce / finite-default rules. The FastAPI handler stays thin in
+    # the router; see `_LIFTED_HANDLERS` below.
+    "_COMPONENT_ATTRS": "services.network_bulk",
+    "_FINITE_DEFAULT_BOUNDS": "services.network_bulk",
+    "_finite_input_meta": "services.network_bulk",
+    "_finite_bound_default": "services.network_bulk",
+    "_bool_input_default": "services.network_bulk",
+    "_coerce_bulk_value": "services.network_bulk",
+
+    # ── undo capture (middleware + /undo routes) ──────────────────────────────
+    "_push_undo_snapshot": "services.network_undo",
+
+    # ── generic CRUD factory ──────────────────────────────────────────────────
+    "_serialize_component": "services.network_crud",
+    "_get_component": "services.network_crud",
+    "_meta_payload": "services.network_crud",
+    "_drop_unknown_extras": "services.network_crud",
+    "_normalise_flag_column": "services.network_crud",
+    "_create_component": "services.network_crud",
+    "_merge_partial_update": "services.network_crud",
+    "_detach_component_series": "services.network_crud",
+    "_reattach_component_series": "services.network_crud",
+    "_rename_component_safely": "services.network_crud",
+    "_update_component": "services.network_crud",
+    "_delete_component": "services.network_crud",
 }
 
-# Names other modules import from `routers.network` that must stay put: the
-# CRUD factory, the HTTP-response helpers, and every route.
+# Names other modules import from `routers.network` that must remain exported.
+# The CRUD factory now lives in services.network_crud (see `_MOVED`); this list
+# is empty — kept so the parametrized stay tests still collect.
 _STAYS = [
-    "_serialize_component", "_get_component", "_meta_payload",
-    "_create_component", "_merge_partial_update",
-    "_update_component", "_delete_component", "_xlsx_response",
-    "_push_undo_snapshot", "_apply_profile_upload",
-]
+    ]
+
+# Thin FastAPI handlers whose bodies live in services. The handler name stays
+# on `routers.network` (chat_tools imports them by name); the compute function
+# is defined in the service module. Optional third tuple element = extra
+# `co_names` allowed on the thin wrapper (e.g. an injected CRUD factory).
+_LIFTED_HANDLERS: dict[str, tuple] = {
+    "bulk_update": ("services.network_bulk", "apply_bulk_update"),
+    "undo_info": ("services.network_undo", "get_undo_info"),
+    "undo_last": ("services.network_undo", "apply_undo"),
+    "update_bus": ("services.network_buses", "apply_update_bus", ("_update_component",)),
+    "delete_bus_cascade": ("services.network_buses", "apply_delete_bus_cascade"),
+    "rename_bus": ("services.network_buses", "apply_rename_bus"),
+    "recalculate_line_lengths": ("services.network_lines", "apply_recalculate_line_lengths"),
+    "rescale_impedances": ("services.network_lines", "apply_rescale_impedances"),
+    "create_global_constraint": ("services.network_global_constraints", "apply_create_global_constraint"),
+    "update_global_constraint": (
+        "services.network_global_constraints",
+        "apply_update_global_constraint",
+        ("_merge_partial_update",),
+    ),
+    "delete_global_constraint": ("services.network_global_constraints", "apply_delete_global_constraint"),
+}
 
 # `_filter_transient_names` was in the list above until Phase 5, and came out
 # deliberately rather than quietly. It is a pure domain helper over
@@ -142,9 +188,9 @@ def test_a_moved_name_is_the_identical_object(name, origin):
 @pytest.mark.parametrize("name", _STAYS)
 def test_the_crud_and_http_helpers_stay_in_the_router(name):
     """
-    The ~80 CRUD routes and their factory are deliberately NOT extracted, and
-    `_xlsx_response` returns a `StreamingResponse` — an HTTP concern. If one of
-    these moves, this phase's scope grew without the plan being updated.
+    The ~80 CRUD routes and their factory are deliberately NOT extracted. If
+    one of these moves, this phase's scope grew without the plan being updated.
+    (Profile helpers left with `routers.network_profiles` — see that surface.)
     """
     fn = getattr(NET, name, None)
     assert fn is not None, f"routers.network.{name} disappeared"
@@ -219,3 +265,40 @@ def test_a_name_phase_5_moved_out_is_still_reachable_from_the_router(name, origi
         f"routers.network.{name} is not {origin}.{name.lstrip('_')} — the alias "
         f"must re-export the moved function, not redefine it"
     )
+
+
+@pytest.mark.parametrize("handler,target", sorted(_LIFTED_HANDLERS.items()))
+def test_each_lifted_handler_stays_thin_and_delegates(handler, target):
+    """
+    The FastAPI route stays on `routers.network` (name + decorator are API);
+    the body is a one-line call into the service. A fat body growing back here
+    undoes the lift without failing the pure-move `_MOVED` checks.
+    """
+    module_name, fn_name, *rest = target
+    allowed_extra = set(rest[0]) if rest else set()
+    module = importlib.import_module(module_name)
+    fn = getattr(module, fn_name, None)
+    assert callable(fn), f"{module_name}.{fn_name} missing for {handler}"
+    assert fn.__module__ == module_name, (
+        f"{fn_name} is re-exported into {module_name} rather than defined there"
+    )
+    wrapper = getattr(NET, handler, None)
+    assert callable(wrapper), f"routers.network.{handler} is gone"
+    assert wrapper.__module__ == "routers.network", (
+        f"{handler} must remain the FastAPI handler on routers.network"
+    )
+    src = inspect.getsource(wrapper)
+    assert fn_name in src, (
+        f"routers.network.{handler} no longer calls {fn_name}; the body drifted "
+        f"back into the router"
+    )
+    code = wrapper.__code__
+    expected = (fn_name, *sorted(allowed_extra)) if allowed_extra else (fn_name,)
+    # Order in co_names follows bytecode; compare as sets + require fn first-ish.
+    assert set(code.co_names) == {fn_name, *allowed_extra}, (
+        f"routers.network.{handler} co_names={code.co_names!r}; expected "
+        f"{sorted({fn_name, *allowed_extra})!r} — the lock / write loop belongs "
+        f"in {module_name}"
+    )
+    assert fn_name in code.co_names
+

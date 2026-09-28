@@ -1,0 +1,19 @@
+{
+  "keys": [
+    "archetype",
+    "pack_hash",
+    "assumptions_hash",
+    "ens_cap_permyriad",
+    "achieved_ens_permyriad",
+    "achieved_shed_hours",
+    "mc_lole_h",
+    "cost_at_target_eur",
+    "period_basis",
+    "excludes_shed_cost",
+    "completeness",
+    "sections",
+    "pipeline",
+    "tea",
+    "gates"
+  ]
+}

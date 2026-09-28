@@ -255,6 +255,7 @@ def test_every_destructive_step_of_a_swap_route_runs_AFTER_its_precheck():
     from routers import network as network_router
     from routers import projects as projects_router
     from routers import snapshots as snapshots_router
+    from services import network_undo as network_undo_service
 
     DESTRUCTIVE = (
         "undo_service.pop(", "undo_service.clear(", "create_root(",
@@ -262,7 +263,7 @@ def test_every_destructive_step_of_a_swap_route_runs_AFTER_its_precheck():
         "_create_snapshot_internal(",
     )
     targets = [
-        (network_router, "undo_last"),
+        (network_undo_service, "apply_undo"),  # body; thin undo_last stays on router
         (projects_router, "load_project"),
         (projects_router, "create_from_template"),
         (projects_router, "import_bundle"),

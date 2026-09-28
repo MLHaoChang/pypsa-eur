@@ -52,6 +52,10 @@ def _network_with_costly_fixed_line() -> pypsa.Network:
     """Two buses joined by a NON-extendable AC line that carries capex."""
     n = pypsa.Network()
     n.set_snapshots(pd.date_range("2030-01-01", periods=4, freq="h"))
+    # Four snapshots standing for a whole year (nyears = 1): capital_cost is
+    # annual and the LP charges the modelled share of it, so a full-year
+    # weighting keeps this file's CAPEX figures equal to the typed cost.
+    n.snapshot_weightings.loc[:, :] = 8760.0 / 4
     n.add("Bus", "A", carrier="AC", v_nom=380.0)
     n.add("Bus", "B", carrier="AC", v_nom=380.0)
     n.add("Carrier", "AC")

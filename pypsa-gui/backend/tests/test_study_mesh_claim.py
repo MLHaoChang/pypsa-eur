@@ -2,7 +2,8 @@
 The study mutual-exclusion mesh is a CLAIM, not a check.
 
 Whole-branch review (2026-09-08), findings S2, S3, S4 and M1. Five study
-POSTs (`fmea_sweep`, `frontier`, `mc`, `coupling_loop`, `margin_loop`) and
+POSTs (`fmea_sweep`, `frontier`, `mc`, `coupling_loop`, `margin_loop`,
+`eh_study`) and
 the two foreground solve entrypoints (`/simulation/run`, `/run_ac_pf`) share
 one foreground network. Before this file:
 
@@ -44,7 +45,6 @@ import time
 
 import pytest
 
-import routers.results as RR
 import routers.simulation as RS
 from services import study_state as STUDY
 from services.project_context import record_is_running
@@ -56,6 +56,7 @@ STUDY_POSTS = {
     "mc": "/api/results/mc",
     "coupling_loop": "/api/results/coupling_loop",
     "margin_loop": "/api/results/margin_loop",
+    "eh_study": "/api/results/eh_study",
 }
 
 
@@ -192,9 +193,13 @@ def test_two_study_posts_racing_admit_exactly_one(client, install_network,
     install_network(build_network())
     st = session_state(client)
     _voll(st)
+    import services.adequacy.fmea_sweep_runner as FSR
     import services.adequacy.sweep as SW
     monkeypatch.setattr(SW, "run_class_b_sweep", _slow_sweep)
-    monkeypatch.setattr(RR, "_contextvars", _Barrier2(contextvars))
+    # The copy_context call lives in the runner since the MC/study router
+    # lift — patching ``routers.results._contextvars`` after that cut is a
+    # no-op (AttributeError / dead patch), same vacuous class as F1j.
+    monkeypatch.setattr(FSR, "_contextvars", _Barrier2(contextvars))
 
     out: dict[int, object] = {}
 
@@ -245,8 +250,9 @@ def test_run_and_study_racing_admit_exactly_one(client, install_network,
         return "ok", "optimal"
 
     monkeypatch.setattr(RS, "run_simulation", fake_run)
+    import services.adequacy.fmea_sweep_runner as FSR
     bar = _Barrier2(contextvars)
-    monkeypatch.setattr(RR, "_contextvars", bar)
+    monkeypatch.setattr(FSR, "_contextvars", bar)
     monkeypatch.setattr(RS, "contextvars", bar)
 
     out: dict[str, object] = {}

@@ -31,6 +31,10 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       abortCouplingLoop: vi.fn(), getReserveMargin: vi.fn(),
       getMarginLoop: vi.fn(), startMarginLoop: vi.fn(),
       abortMarginLoop: vi.fn(),
+      getEhStudy: vi.fn(), startEhStudy: vi.fn(), abortEhStudy: vi.fn(),
+      getEhReferenceDesign: vi.fn(),
+      getEhRedundancy: vi.fn(), getEhLevers: vi.fn(),
+      getEhDtc: vi.fn(), getEhDtcPlanning: vi.fn(),
     },
   }
 })
@@ -99,6 +103,16 @@ beforeEach(() => {
     .mockResolvedValue({ status: 'running' })
   vi.mocked(resultsApi.abortMarginLoop).mockReset()
     .mockResolvedValue({ status: 'done', aborting: false })
+  vi.mocked(resultsApi.getEhStudy).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.startEhStudy).mockReset()
+    .mockResolvedValue({ status: 'running', study: 'eh_study' })
+  vi.mocked(resultsApi.abortEhStudy).mockReset()
+    .mockResolvedValue({ status: 'done', aborting: false })
+  vi.mocked(resultsApi.getEhReferenceDesign).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhRedundancy).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhLevers).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhDtc).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhDtcPlanning).mockReset().mockResolvedValue(null)
   // The firm-capacity readout serves 204 before any margin-set solve, and the
   // tab must still mount it — that is the invariant this file exists for.
   vi.mocked(resultsApi.getReserveMargin).mockReset().mockResolvedValue(null)
@@ -121,7 +135,7 @@ function renderTab() {
  *  ordinary condition before anything has been solved with a margin. */
 const PANELS = [
   'reserve-margin-panel', 'frontier-panel', 'mc-panel', 'loop-panel',
-  'margin-loop-panel',
+  'margin-loop-panel', 'eh-reference-design-panel',
 ] as const
 
 describe('AdequacyTab — the ★ mount invariant, no-data state', () => {
@@ -173,7 +187,7 @@ describe('AdequacyTab — the ★ mount invariant, data state', () => {
     const html = document.body.innerHTML
     const seq = [
       'adequacy-chips', 'copt-chips', 'reserve-margin-panel', 'frontier-panel',
-      'mc-panel', 'loop-panel', 'margin-loop-panel',
+      'mc-panel', 'loop-panel', 'margin-loop-panel', 'eh-reference-design-panel',
     ]
     const idx = seq.map(id => html.indexOf(`data-testid="${id}"`))
     expect(Math.min(...idx)).toBeGreaterThan(-1)
@@ -189,7 +203,7 @@ describe('AdequacyTab ordering', () => {
   // the sampler's verdict back into the plan.
   it('renders the panels in the order the plan records', async () => {
     renderTab()
-    await screen.findByTestId('margin-loop-panel')
+    await screen.findByTestId('eh-reference-design-panel')
     const body = document.body
     const order = PANELS.map(
       id => body.innerHTML.indexOf(`data-testid="${id}"`))
