@@ -3960,6 +3960,54 @@ def export_chat_summary(
     )
 
 
+def export_eh_report_docx(filename: str | None = None) -> dict:
+    """
+    The stored Energy Hub ``ReferenceDesignReport`` as a Word document in
+    the active project's uploads/ dir (an ``agent_export`` chip).
+
+    WP0 of the report-generation plan: no language model is involved —
+    every cell is the assembler's own number, formatted so that a missing
+    figure reads "not established" and never 0, and every report section is
+    present even when the study did not establish it.
+    """
+    import time as _time
+
+    from routers import results as results_router
+    from services.reports.docx_writer import (
+        DOCX_MIME,
+        render_reference_design_docx,
+    )
+    from services.reports.figures import fmea_pareto_png
+
+    name = _require_active_project()
+    body = results_router.get_eh_reference_design()
+    if getattr(body, "status_code", None) == 204:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_kind": "eh_report_not_found",
+                "message": _ADEQUACY_NO_DATA_HINTS["eh_reference_design"],
+            },
+        )
+    # The analyst's class-D rows are part of the deliverable; a project that
+    # has no worksheet yet is the common case, not an error.
+    try:
+        worksheet = get_fmea_worksheet(name)
+    except HTTPException:
+        worksheet = None
+    figures: dict[str, bytes] = {}
+    fmea_section = (body.get("sections") or {}).get("fmea_top") or {}
+    png = fmea_pareto_png((fmea_section.get("payload") or {}).get("top"))
+    if png:
+        figures["fmea_top"] = png
+    data = render_reference_design_docx(
+        body, fmea_worksheet=worksheet, figures=figures)
+    target = filename or f"eh_reference_design_{int(_time.time())}.docx"
+    if not target.lower().endswith(".docx"):
+        target += ".docx"
+    return _save_agent_export(data, target, DOCX_MIME)
+
+
 def build_study_report(project: str | None = None) -> dict:
     """
     Assemble the client-facing reliability write-up from everything this
@@ -4707,6 +4755,8 @@ DISPATCHERS: dict[str, Any] = {
     "export_to_csv": export_to_csv,
     "export_preview_png": export_preview_png,
     "export_chat_summary": export_chat_summary,
+    # reports (WP0 spike) — the EH ReferenceDesignReport as a .docx chip
+    "export_eh_report_docx": export_eh_report_docx,
     # uploads — bulk delete (1, locked decision row 7: independent of chat history)
     "clear_uploads": clear_uploads,
     # asset_results (3) — Task 14: per-asset results chat surface

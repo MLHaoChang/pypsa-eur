@@ -1734,6 +1734,21 @@ TOOLS: list[dict[str, Any]] = [
         },
         [],
     ),
+    _t(
+        "export_eh_report_docx",
+        "Render the stored Energy Hub ReferenceDesignReport (the last "
+        "run_eh_study) as a Word .docx in the active project's uploads/ dir "
+        "— headline results, completeness, one section per report section "
+        "(an unestablished section says so), the FMEA top-N table with a "
+        "criticality chart, the analyst's worksheet rows and the study "
+        "pipeline. Every number is the assembler's own; nothing is "
+        "narrated. 404 eh_report_not_found when no EH study has been stored "
+        "— run run_eh_study first. `filename` (optional) overrides "
+        "eh_reference_design_<ts>.docx. The file appears in the chat "
+        "panel's file strip with a download button. Safety: write.",
+        {"filename": {"type": "string"}},
+        [],
+    ),
 
     # ── LLM provider switching (1) — Task 10 ────────────────────────────────
     _t(
@@ -2247,6 +2262,8 @@ TOOL_ROUTES: dict[str, list] = {
     "export_to_csv": _SERVICE_CALL,
     "export_preview_png": _SERVICE_CALL,
     "export_chat_summary": _SERVICE_CALL,
+    # reports (1) — WP0 spike: in-process render + agent-export save
+    "export_eh_report_docx": _SERVICE_CALL,
     "clear_uploads": _SERVICE_CALL,
     # asset_results (3) — Task 14. Real HTTP routes DO exist
     # (routers/asset_results.py, mounted at /api/results/asset in main.py)

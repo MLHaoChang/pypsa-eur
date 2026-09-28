@@ -103,6 +103,10 @@ for dist in ("pypsa", "linopy", "xarray", "fastapi", "uvicorn", "starlette",
 # xarray and pypsa both resolve backends through entry points at first use.
 datas += collect_data_files("xarray", includes=["**/*.yaml", "**/*.yml"])
 datas += collect_data_files("pypsa", includes=["**/*.csv", "**/*.yaml"])
+# python-docx opens its bundled `templates/default.docx` (and the part
+# templates beside it) on every `Document()`; the report writer
+# (`services/reports/`) does that for the built-in report template.
+datas += collect_data_files("docx", includes=["templates/*"])
 
 # ── the planning → dynamics pipeline (gridspine; increment 6) ───────────────
 #

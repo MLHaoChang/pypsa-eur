@@ -664,3 +664,18 @@ Three properties are worth knowing before reading a transcript:
 - `chat.jsonl` is gitignored via the existing `backend/projects/` rule.
 - Confirmation tokens are server-stamped, single-use, TTL'd, and never
   surface in URLs.
+
+## Reports — the study as a Word document
+
+`docs/superpowers/plans/2026-09-28-llm-report-generation-increment-1.md` is the
+plan; the assessment beside it under `assessments/` pins the product
+decisions. WP0 (the spike) ships one tool:
+
+| Tool | Tier | |
+|---|---|---|
+| `export_eh_report_docx` | write | The stored Energy Hub `ReferenceDesignReport` as a `.docx` in the project's uploads/ dir (an `agent_export` chip). No model prose: every cell is the assembler's number, "not established" is never rendered as 0, and every report section is present even when the study did not establish it. 404 `eh_report_not_found` until `run_eh_study` has stored a report. |
+
+What the model must and must not do with it: call it when the user asks for
+the EH report "as a document" / "as Word"; relay the chip; never re-type its
+numbers into chat as if they were new findings — `get_adequacy_results`
+(`eh_reference_design`) is the reading surface, the document is the export.

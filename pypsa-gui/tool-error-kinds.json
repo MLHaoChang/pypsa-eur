@@ -79,6 +79,10 @@
       "surface": "banner",
       "why": "Upload rejected against the 25 MB cap. The user must act."
     },
+    "eh_report_not_found": {
+      "surface": "inline",
+      "why": "export_eh_report_docx found no stored Energy Hub report. Per-call; the message names the remedy (run_eh_study first) and the model relays it."
+    },
     "format_not_supported": {
       "surface": "inline",
       "why": "One tool could not read one format. Per-call, and the model can try another route."
