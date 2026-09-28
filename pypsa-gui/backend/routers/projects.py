@@ -1581,6 +1581,21 @@ def _carry_sidecars_on_move(
     # Best-effort: chat-history lineage must not fail the project save itself,
     # so `handle_save_lineage` swallows OSErrors internally.
     if loaded is not None and loaded != name:
+        # Resolve the SOURCE directory ONCE, for both sidecars. It used to be
+        # resolved for `uploads/` only, a few lines down, while the chat half
+        # resolved by name inside `chat_service` — and the flat
+        # `PROJECTS_DIR / name` shape that resolution uses is not where a
+        # project lives under tenancy, so Save-As and Save-a-Copy carried no
+        # conversation at all there. One resolution, used by both, is also the
+        # only way the two cannot drift apart again.
+        src_dir = _safe_project_dir(loaded)
+        if db is not None and user is not None:
+            from services import project_registry
+
+            src_project = project_registry.find_project(db, user, loaded)
+            if src_project is not None:
+                src_dir = project_registry.project_dir(src_project)
+
         try:
             from services import chat_service
             mode = (
@@ -1595,6 +1610,7 @@ def _carry_sidecars_on_move(
             # move/copy would be a no-op (Phase 4 walkthrough bug).
             chat_service.handle_save_lineage(
                 ctx, target_name=name, mode=mode, source_name=loaded,
+                source_dir=src_dir, target_dir=dest,
             )
         except Exception:  # noqa: BLE001 — never abort save on lineage failure
             pass
@@ -1607,18 +1623,9 @@ def _carry_sidecars_on_move(
         try:
             # Destination is the already-resolved `dest` (the org-scoped
             # storage dir in auth mode, or the flat PROJECTS_DIR/name in legacy
-            # mode). The SOURCE (`loaded`) must be resolved the same way — in
-            # auth mode via the DB registry so we copy from the source
-            # project's org-scoped storage_path rather than a flat
-            # `_safe_project_dir(loaded)` that would point at the wrong (or a
-            # nonexistent) directory.
-            src_dir = _safe_project_dir(loaded)
-            if db is not None and user is not None:
-                from services import project_registry
-
-                src_project = project_registry.find_project(db, user, loaded)
-                if src_project is not None:
-                    src_dir = project_registry.project_dir(src_project)
+            # mode); `src_dir` was resolved the same way above, and is shared
+            # with the chat half so the two sidecars cannot disagree about
+            # where the source project is.
             _copy_bundle_dirs(src_dir, dest)
         except Exception:  # noqa: BLE001 — best-effort, never abort save
             logger.exception("save: _copy_bundle_dirs(%s → %s) failed", loaded, name)
@@ -2726,6 +2733,18 @@ def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> Proj
             if src_file.exists():
                 atomic_write_bytes(child_dir / fname, src_file.read_bytes())
         _copy_bundle_dirs(base_dir, child_dir)
+        # The conversation travels with the branch, which is what
+        # `SAVE_LINEAGE_SCENARIO_COPY` documents for the legacy path — this
+        # one carried the bundle and left the history behind, so a scenario
+        # created from a project started blank. `chat.jsonl` is deliberately
+        # not in `_BUNDLE_FILES`: it is a per-conversation thread, not part of
+        # the exportable bundle, and the two lists must not be conflated.
+        from services.chat_service import CHAT_FILENAME as _CHAT
+
+        for fname in (_CHAT, _CHAT + ".1"):
+            src_file = base_dir / fname
+            if src_file.exists():
+                atomic_write_bytes(child_dir / fname, src_file.read_bytes())
 
         # Keep metadata.json's NAME pointer in sync with the DB parent id so
         # bundle export/import (which only carries the flat metadata) round-trips

@@ -333,6 +333,14 @@ def rename_project(db: DBSession, project: Project, new_name: str) -> Project:
             raise HTTPException(
                 status_code=409, detail=f"Project '{new_name}' already exists"
             ) from exc
+        # Rebind here too. This branch is web mode — the DEPLOYED mode — and
+        # skipping it left the resident context bound to the pre-rename
+        # `loaded_project`, so the next save was attributed to a name that no
+        # longer exists and came back a 409. Nothing moves on disk, so
+        # `project_dir(project)` still resolves to the same directory and the
+        # call only rewrites the cached NAME; that asymmetry with the move
+        # branch below is the point, not an oversight.
+        _rebind_resident_contexts(project)
         db.refresh(project)
         return project
 

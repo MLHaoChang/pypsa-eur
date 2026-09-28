@@ -167,7 +167,25 @@ Fix shape: resolve through the same context-aware helper `get_persist_path` uses
 decide explicitly whether `_create_scenario_db` should inherit chat (my reading: yes,
 matching snapshot).
 
-**Status: OPEN**
+**Status: FIXED**, three parts.
+
+1. `handle_save_lineage` now takes resolved `source_dir` / `target_dir`. The caller
+   (`_carry_sidecars_on_move`) already resolved the source through the registry for
+   the `uploads/` half of the same hook; that resolution is now done ONCE and shared,
+   so the two sidecars cannot drift apart about where the source project is.
+2. `handle_snapshot_lineage` resolves the active project through `get_persist_path`,
+   i.e. the context's own `storage_dir`, which it was handed all along.
+3. `_create_scenario_db` copies `chat.jsonl` and its rotation backup. `chat.jsonl`
+   stays OUT of `_BUNDLE_FILES` on purpose — it is a per-conversation thread, not
+   part of the exportable bundle — so the copy is explicit.
+
+`_project_chat_paths` survives as the documented fallback for local mode and the
+legacy layout, where the flat path IS the project directory.
+
+One test-only note worth keeping: the seam tests stubbed the hook with a narrow
+signature, so the new keyword arguments raised a `TypeError` that the caller's
+best-effort `except Exception` swallowed — and the call then looked as though it had
+never happened. The stubs take `**kwargs` now.
 
 ### QA-P2 — `rename_project` skips context rebinding on its early-return path
 
@@ -183,7 +201,11 @@ rename and enumerates them.
 Fix shape: rebind on every path that changes the stored name, including the early
 return; the docstring's fourth-cache warning (`solve_queue`) applies here too.
 
-**Status: OPEN**
+**Status: FIXED**. Nothing moves on disk on that branch, so `project_dir(project)`
+still resolves to the same directory and the rebind only rewrites the cached NAME —
+that asymmetry with the move branch is the point. Guard: a web-mode sibling of the
+existing local-mode rebind test in `tests/test_storage_layout.py`, which also pins
+that the directory must NOT move.
 
 ### QA-E1 — `asset_economics` documents a reconciliation that is false
 
