@@ -86,6 +86,18 @@ def _tap_ratio(tr):
     return 1.0 + (float(pos) - float(neutral)) * float(step) / 100.0
 
 
+def sgen_mbase(s) -> float:
+    """An sgen row's MBASE: ``sn_mva`` when finite, else installed ``p_mw`` as
+    MVA, else the system base (see the module docstring). The .dyr writer
+    calls this too, so the base its records declare cannot drift from the
+    one the RAW record states."""
+    sn = s.get("sn_mva", np.nan)
+    if sn is not None and np.isfinite(sn):
+        return float(sn)
+    p_inst = float(s["p_mw"])
+    return p_inst if p_inst > 0 else SBASE_MVA
+
+
 class _IdCounter:
     """Sequential 2-char IDs per key — (I, ID) / (I, J, CKT) uniqueness."""
 
@@ -159,12 +171,8 @@ def write_raw(net, path, title="gridspine export", f_hz=50.0):
     if sgen is not None:
         for _, s in sgen.iterrows():
             scal = float(s.get("scaling", 1.0))
-            sn = s.get("sn_mva", np.nan)
             p_inst = float(s["p_mw"])
-            if np.isfinite(sn):
-                mbase = float(sn)
-            else:
-                mbase = p_inst if p_inst > 0 else SBASE_MVA
+            mbase = sgen_mbase(s)
             qg = float(s.get("q_mvar", 0.0)) * scal
             qt_raw = s.get("max_q_mvar", np.nan)
             qb_raw = s.get("min_q_mvar", np.nan)
