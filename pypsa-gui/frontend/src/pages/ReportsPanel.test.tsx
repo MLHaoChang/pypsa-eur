@@ -1,0 +1,219 @@
+/**
+ * The Reports panel (WP7a) lists what the backend's list route reports for
+ * the active Project and does one request per action: create an
+ * evidence-only report (POST, then the list refetches and the new report
+ * opens), delete behind a ConfirmDialog, open a report in the viewer.
+ * Refusals arrive as toasts carrying the backend's message.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import type { ReportDocument, ReportMeta } from '../api/reports'
+import ReportsPanel from './ReportsPanel'
+
+const store = vi.hoisted(() => ({ currentProject: 'Demo' as string | null }))
+vi.mock('../store/uiStore', () => ({
+  useUIStore: (sel: (s: { currentProject: string | null }) => unknown) => sel({ currentProject: store.currentProject }),
+}))
+
+const api = vi.hoisted(() => ({
+  listReports: vi.fn(),
+  getReport: vi.fn(),
+  createEvidenceOnlyReport: vi.fn(),
+  deleteReport: vi.fn(),
+  exportReport: vi.fn(),
+}))
+vi.mock('../api/reports', async () => {
+  const real = await vi.importActual<typeof import('../api/reports')>('../api/reports')
+  return { ...real, ...api }
+})
+
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
+vi.mock('react-hot-toast', () => ({ default: toast }))
+
+const ID_A = 'a1b2c3d4e5f60718'
+const ID_B = 'b1b2c3d4e5f60718'
+
+const META_A: ReportMeta = {
+  report_id: ID_A,
+  title: 'Study report — Demo',
+  created_at: '2026-09-28T10:00:00+00:00',
+  updated_at: '2026-09-28T10:00:00+00:00',
+  latest_version: 2,
+  mode: 'evidence_only',
+  evidence_hash: 'deadbeef',
+  profile_id: null,
+  model: null,
+}
+const META_B: ReportMeta = {
+  ...META_A,
+  report_id: ID_B,
+  title: 'Client report',
+  latest_version: 1,
+  mode: 'generated',
+  profile_id: 'anthropic-default',
+  model: 'claude-sonnet',
+}
+
+const DOC_A: ReportDocument = {
+  schema_version: 1,
+  report_id: ID_A,
+  version: 2,
+  title: META_A.title,
+  language: 'en',
+  created_at: META_A.created_at,
+  evidence_hash: 'deadbeef',
+  profile_id: null,
+  model: null,
+  mode: 'evidence_only',
+  template_file_id: null,
+  sections: [{
+    section_id: 'summary', heading: 'Executive summary', source: 'code', status: 'ok',
+    blocks: [{ type: 'paragraph', md: 'Hello.' }], note: null, audit: { unverified: [], verified: [] },
+  }],
+  tables: {},
+  figures: {},
+}
+
+function renderPanel() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  render(
+    <QueryClientProvider client={client}>
+      <ReportsPanel />
+    </QueryClientProvider>,
+  )
+}
+
+beforeEach(() => {
+  store.currentProject = 'Demo'
+  api.listReports.mockReset().mockResolvedValue([])
+  api.getReport.mockReset().mockResolvedValue(DOC_A)
+  api.createEvidenceOnlyReport.mockReset()
+  api.deleteReport.mockReset().mockResolvedValue({ deleted: true, report_id: ID_A })
+  api.exportReport.mockReset()
+  toast.success.mockReset()
+  toast.error.mockReset()
+})
+
+afterEach(() => cleanup())
+
+describe('ReportsPanel', () => {
+  it('asks for a Project when none is open and disables Create with the reason', () => {
+    store.currentProject = null
+    renderPanel()
+    expect(screen.getByText(/Open a Project/i)).toBeTruthy()
+    const create = screen.getByTestId('reports-create') as HTMLButtonElement
+    expect(create.disabled).toBe(true)
+    expect(create.title).toMatch(/no project/i)
+    expect(api.listReports).not.toHaveBeenCalled()
+  })
+
+  it('shows the empty state when the Project has no reports', async () => {
+    renderPanel()
+    expect((await screen.findByTestId('reports-empty')).textContent).toMatch(/no reports yet/i)
+    expect(api.listReports).toHaveBeenCalledWith('Demo')
+  })
+
+  it('lists reports with title, version, mode, created date and profile/model when set', async () => {
+    api.listReports.mockResolvedValue([META_A, META_B])
+    renderPanel()
+    const rows = await screen.findAllByTestId('report-row')
+    expect(rows).toHaveLength(2)
+    const a = within(rows[0])
+    expect(a.getByText('Study report — Demo')).toBeTruthy()
+    expect(a.getByText('v2')).toBeTruthy()
+    expect(a.getByText(/evidence only/i)).toBeTruthy()
+    expect(a.queryByText('anthropic-default')).toBeNull()
+    const b = within(rows[1])
+    expect(b.getByText('Client report')).toBeTruthy()
+    expect(b.getByText('v1')).toBeTruthy()
+    expect(b.getByText(/generated/i)).toBeTruthy()
+    expect(b.getByText(/anthropic-default/)).toBeTruthy()
+    expect(b.getByText(/claude-sonnet/)).toBeTruthy()
+    expect(rows[0].textContent).toContain('2026')
+  })
+
+  it('creates an evidence-only report, refreshes the list and opens the new report', async () => {
+    api.createEvidenceOnlyReport.mockResolvedValue({ ...META_A, document: DOC_A })
+    api.listReports.mockResolvedValueOnce([]).mockResolvedValue([META_A])
+    const user = userEvent.setup()
+    renderPanel()
+    await screen.findByTestId('reports-empty')
+    await user.click(screen.getByTestId('reports-create'))
+    await waitFor(() => expect(api.createEvidenceOnlyReport).toHaveBeenCalledWith('Demo'))
+    await waitFor(() => expect(api.listReports).toHaveBeenCalledTimes(2))
+    // the viewer opened on the new report
+    expect((await screen.findAllByTestId('report-section'))).toHaveLength(1)
+    expect(api.getReport).toHaveBeenCalledWith('Demo', ID_A, undefined)
+    expect(toast.success).toHaveBeenCalled()
+  })
+
+  it('toasts the backend message when creation is refused', async () => {
+    const { ReportsError } = await vi.importActual<typeof import('../api/reports')>('../api/reports')
+    api.createEvidenceOnlyReport.mockRejectedValue(new ReportsError(
+      { error_kind: 'report_mode_not_supported', message: 'Use mode evidence_only.' }, 400,
+    ))
+    const user = userEvent.setup()
+    renderPanel()
+    await screen.findByTestId('reports-empty')
+    await user.click(screen.getByTestId('reports-create'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(String(toast.error.mock.calls[0][0])).toContain('Use mode evidence_only.')
+  })
+
+  it('deletes only after the ConfirmDialog is confirmed, then refreshes the list', async () => {
+    api.listReports.mockResolvedValueOnce([META_A]).mockResolvedValue([])
+    const user = userEvent.setup()
+    renderPanel()
+    const row = (await screen.findAllByTestId('report-row'))[0]
+    await user.click(within(row).getByTestId('report-delete'))
+    const dialog = await screen.findByRole('dialog')
+    expect(api.deleteReport).not.toHaveBeenCalled()
+    await user.click(within(dialog).getByText('Cancel'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(api.deleteReport).not.toHaveBeenCalled()
+
+    await user.click(within(row).getByTestId('report-delete'))
+    await user.click(within(await screen.findByRole('dialog')).getByText('Delete report'))
+    await waitFor(() => expect(api.deleteReport).toHaveBeenCalledWith('Demo', ID_A))
+    await waitFor(() => expect(api.listReports).toHaveBeenCalledTimes(2))
+    expect(await screen.findByTestId('reports-empty')).toBeTruthy()
+  })
+
+  it('toasts the lock refusal on delete', async () => {
+    const { ReportsError } = await vi.importActual<typeof import('../api/reports')>('../api/reports')
+    api.listReports.mockResolvedValue([META_A])
+    api.deleteReport.mockRejectedValue(new ReportsError(
+      { error_kind: 'project_locked', message: "'Demo' is being edited by another user." }, 409,
+    ))
+    const user = userEvent.setup()
+    renderPanel()
+    const row = (await screen.findAllByTestId('report-row'))[0]
+    await user.click(within(row).getByTestId('report-delete'))
+    await user.click(within(await screen.findByRole('dialog')).getByText('Delete report'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(String(toast.error.mock.calls[0][0])).toContain('being edited by another user')
+  })
+
+  it('opens the viewer when a report is selected and returns to the list on Back', async () => {
+    api.listReports.mockResolvedValue([META_A])
+    const user = userEvent.setup()
+    renderPanel()
+    const row = (await screen.findAllByTestId('report-row'))[0]
+    await user.click(within(row).getByTestId('report-open'))
+    await screen.findAllByTestId('report-section')
+    expect(api.getReport).toHaveBeenCalledWith('Demo', ID_A, undefined)
+    await user.click(screen.getByTestId('report-back'))
+    expect(await screen.findAllByTestId('report-row')).toHaveLength(1)
+  })
+
+  it('shows the list error inline rather than a blank panel', async () => {
+    const { ReportsError } = await vi.importActual<typeof import('../api/reports')>('../api/reports')
+    api.listReports.mockRejectedValue(new ReportsError(
+      { error_kind: 'unknown', message: 'reports request failed: 502 Bad Gateway' }, 502,
+    ))
+    renderPanel()
+    expect((await screen.findByTestId('reports-error')).textContent).toContain('502')
+  })
+})
