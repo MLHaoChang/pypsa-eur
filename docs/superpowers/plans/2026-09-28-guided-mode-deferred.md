@@ -155,7 +155,7 @@ Legend: **Hurts** = first-time user (FTU) / expert / data integrity (DI) / safet
 - **Evidence.** §10: "the assistant is already the Guided surface". A8 delivers the `project_rebound` frame for the creating tools either way; D1 is only the FE `noteNewProjectCreated('template')` on that frame.
 - **What choosing "yes" means (review condition 11).** (a) Spec §1 (non-goal list) and §3.4 are amended — a §10 addendum is **required**. (b) An implicit-Expert user (an existing user with app keys, §3.2) who asks the assistant for a template is flipped to Guided mid-conversation and loses their open panels (§3.7 hiding). Only an explicit choice is respected.
 - **Options.** (a) yes, via the A8 frame + `noteNewProjectCreated` when `via_tool ∈ {create_project_from_template, import_project_bundle}`; (b) keep the non-goal.
-- **Owner decision:** D-8 — **owner input pending**; the reviewer leans (b). P32 stays optional and unscheduled.
+- **Owner decision:** D-8 — **decided (a), 2026-09-28** (product owner: "Yes"). Projects the assistant creates or imports in chat switch to Guided unless the user made an explicit mode choice. This needs a spec §1/§3.4 amendment (§10 addendum in the deferred spec). P32 is scheduled directly after P27a, because it depends on A8's `project_rebound` frame.
 
 #### D2. Non-EH workflows are Expert-only — keep; a second flow needs its own spec (D-9).
 
@@ -173,7 +173,7 @@ Every phase runs the parent spec §8 gate unchanged: row 1 full backend suite (`
 | **P29 — Guided chat and risk table** | B1, B2, B3 | The two Expert surfaces Guided links to | `P29` = P26 (Guided FMEA title, no engine badges, `genset_1` reason text; no raw `→` lines) | M |
 | **P30 — Tours, templates, wizard** | B4, B7, B5, B6, B8, B9, B10, C11, C12 | Friction outside the main loop; all S. If P30 runs long, B5 / B6 / B8 / B9 / B10 move to P31 | `P30` = P24 (tour box ∩ target = ∅, in viewport; templates validate clean) + P22.9 tagging tour (late Link step) | M |
 | **P31 — Cosmetics** | C2, C3, C4, C5 | Lowest value, zero risk | `P31` = P26 (toast ∩ Send = ∅) + `--self-test` | S |
-| **P32 (optional, unscheduled)** | D1 | Needs D-8 and a §10 addendum | `P32` = P25 | S |
+| **P32 (scheduled after P27a)** | D1 | D-8 = (a); needs the deferred spec's P32 section in full and a §10 addendum | `P32` = P25 | S |
 | **P33 (optional)** | D2 | Needs D-9 and a spec | new | L |
 | **P34 (optional)** | D3 | Needs D-10 | `P34` = P23 | M |
 
@@ -190,7 +190,7 @@ Test-first in every phase: each item's red test is written and seen failing befo
 | D-5 | B3: zero-severity explanation | (a) backend `zero_reason` + FE text, exports byte-stable; (b) FE inference | **(a)** | agrees |
 | D-6 | B5: `gen_zero_costs` | (a) exempt series marginal cost and profiled renewables only; (b) template costs | **(a)** | agrees (rule narrowed) |
 | D-7 | B6: save path | (a) real root from `/local-settings` in local mode; (b) drop | **(a)** | agrees |
-| D-8 | D1: chat-created projects → Guided | (a) yes (spec §1/§3.4 addendum; implicit-Expert users flip mid-conversation); (b) keep the non-goal | author leaned (a); **owner input pending** | leans (b) |
+| D-8 | D1: chat-created projects → Guided | (a) yes (spec §1/§3.4 addendum; implicit-Expert users flip mid-conversation); (b) keep the non-goal | **owner: (a), 2026-09-28** | leaned (b); owner overrode |
 | D-9 | D2: second Guided workflow | (a) not now; (b) spec one | **(a)** | agrees |
 | D-10 | D3: server-side mode preference | (a) keep per-browser; (b) hosted preference | **(a)** | agrees |
 | D-11 | C1: "(step i of N)" after reload | (a) accept; (b) persist `display` | **(a)** | agrees |
