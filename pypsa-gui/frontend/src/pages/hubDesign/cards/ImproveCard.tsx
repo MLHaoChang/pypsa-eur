@@ -11,7 +11,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { studyHasResults } from '../flow'
 import { useHubDesignStore } from '../hubDesignStore'
 import {
-  ARCHETYPE_SHORT, actionTexts, askText, stressScenarioText,
+  ARCHETYPE_SHORT, actionLabel, actionTexts, askText, stressScenarioText,
 } from '../delegate'
 import { evidenceValue, plainWords } from '../plainWords'
 import { AskButton, CardShell, DelegateButton } from '../shared/CardShell'
@@ -29,6 +29,8 @@ function Finding({ f }: { f: EhReviewFinding }) {
   // One message per action (§5.7); the queue sends them one after another.
   const doTexts = actionTexts(f)
   const more = doTexts.length - 1
+  const doLabels = doTexts.map((_, i) => i === 0 ? actionLabel(f)
+    : `${actionLabel(f)} (step ${i + 1} of ${doTexts.length})`)
   const effect = f.actions?.[0]?.effect
   // The card shows the title and the action in plain words; the review's own
   // prose (recommendation, effect) and its numbers go in "Why" (§5.8, gate B3).
@@ -49,7 +51,7 @@ function Finding({ f }: { f: EhReviewFinding }) {
       {doTexts.length > 0 && effect && (
         <p className="text-muted">
           The assistant would {plainWords(effect)}
-          {more > 0 ? `, then ${more} more step${more === 1 ? '' : 's'}, each confirmed separately` : ''}.
+          {more > 0 ? `, then ${more} more step${more === 1 ? '' : 's'}, one at a time` : ''}.
         </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
@@ -59,7 +61,7 @@ function Finding({ f }: { f: EhReviewFinding }) {
           {why ? '▾' : '▸'} Why
         </button>
         {doTexts.length > 0 && (
-          <DelegateButton testId={`hub-improve-do-${f.id}`} text={doTexts} />
+          <DelegateButton testId={`hub-improve-do-${f.id}`} text={doTexts} display={doLabels} />
         )}
         <AskButton testId={`hub-improve-ask-${f.id}`} text={askText(f)} label="Ask" />
       </div>

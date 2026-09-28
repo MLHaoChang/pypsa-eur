@@ -428,6 +428,10 @@ function ConfirmationCard() {
       await postChatConfirm(sessionId, {
         token: pending.confirmation_token, decision: 'deny',
       })
+      // P25 gate: a denial ends that card's run — the card's remaining
+      // queued actions (Improve: one message per action) are dropped.
+      const group = useChatStore.getState().activeRequest?.group
+      if (group) useChatStore.getState().dropRequestGroup(group)
       appendMessage({
         role: 'tool', content: `denied: ${pending.tool_name}`,
         tool_use_id: pending.tool_use_id, tool_name: pending.tool_name,
@@ -1127,6 +1131,36 @@ export function starterPromptsFor(
 ): { label: string; text: string }[] {
   if (!currentProject) return CHAT_STARTER_PROMPTS_UNBOUND
   return uiMode === 'guided' ? CHAT_STARTER_PROMPTS_GUIDED : CHAT_STARTER_PROMPTS
+}
+
+// P25 gate B2 — a request a hub-design card sent shows its plain label; the
+// text actually sent (tool name, JSON arguments, the instruction to the
+// model) stays available, collapsed. Render-only: the history keeps the sent
+// text, so a reloaded Improve request is recognised by its §5.7 sentence.
+const IMPROVE_REQUEST = /^Apply this recommendation from the study review: "(.+?)"\. Run the tool \w+ with exactly these arguments: /s
+
+export function userMessageLabel(m: Pick<ChatMessage, 'content' | 'display'>): string | null {
+  if (m.display) return m.display
+  const hit = IMPROVE_REQUEST.exec(m.content)
+  return hit ? `Apply this recommendation: ${hit[1]}` : null
+}
+
+const WRAP = 'whitespace-pre-wrap break-words [overflow-wrap:anywhere]'
+
+function UserMessageText({ message }: { message: ChatMessage }) {
+  const label = userMessageLabel(message)
+  if (!label) return <span className={WRAP} data-testid="chat-message-text">{message.content}</span>
+  return (
+    <>
+      <span className={WRAP} data-testid="chat-message-label">{label}</span>
+      <details className="mt-1 text-[11px] text-muted" data-testid="chat-message-details">
+        <summary className="cursor-pointer select-none">Details</summary>
+        <span className={`${WRAP} block pt-1 font-mono`} data-testid="chat-message-text">
+          {message.content}
+        </span>
+      </details>
+    </>
+  )
 }
 
 function ChatStarterChips({
@@ -2158,7 +2192,7 @@ export default function ChatPanel() {
   // user's draft (and its dictation flag) stays as it is, and the turn is a
   // typed one.
   const dispatchSend = useCallback((text: string, attachIds: string[],
-    opts?: { fromCard?: boolean }) => {
+    opts?: { fromCard?: boolean; label?: string }) => {
     // FIRST, before the composer reset four lines below clears `dictatedRef`.
     // Reading it later — say, next to the createChatStream call that consumes
     // `input_mode` — always yields false, and the bug is invisible: the
@@ -2168,7 +2202,10 @@ export default function ChatPanel() {
     appendMessage({
       role: 'user', content: text,
       attachment_file_ids: attachIds.length > 0 ? attachIds : undefined,
+      ...(opts?.label ? { display: opts.label } : {}),
     })
+    // A typed turn is nobody's card request: a denial in it drops nothing.
+    if (!opts?.fromCard) useChatStore.getState().setActiveRequest(null)
     if (!opts?.fromCard) {
       setInput('')
       dictatedRef.current = false
@@ -2258,12 +2295,22 @@ export default function ChatPanel() {
   // a confirmation card — writes still wait for the user.
   const requestCount = useChatStore((s) => s.requestQueue.length)
   const pendingCard = useChatStore((s) => s.pending)
+  //
+  // Without a key for the active profile (`notReady`, the same gate as Send)
+  // nothing is posted: the queue is dropped — it must not fire by surprise
+  // once a key is added — and the key form below says what to do.
   useEffect(() => {
-    if (requestCount === 0 || streaming || pendingCard != null || pendingSendText != null) return
+    if (requestCount === 0) return
+    if (notReady) {
+      useChatStore.setState({ requestQueue: [] })
+      toast('Add an API key for the assistant first — nothing was sent.')
+      return
+    }
+    if (streaming || pendingCard != null || pendingSendText != null) return
     const req = useChatStore.getState().takeNextRequest()
     if (!req) return
-    dispatchSend(req.text, [], { fromCard: true })
-  }, [requestCount, streaming, pendingCard, pendingSendText, dispatchSend])
+    dispatchSend(req.text, [], { fromCard: true, label: req.label })
+  }, [requestCount, streaming, pendingCard, pendingSendText, notReady, dispatchSend])
 
   const onAbort = useCallback(async () => {
     // Stopping a turn has to stop the VOICE as well. A synthesiser that keeps
@@ -2852,7 +2899,8 @@ export default function ChatPanel() {
                 tool tags aren't flattened. */}
             {m.role === 'assistant'
               ? <ChatMarkdown>{m.content}</ChatMarkdown>
-              : <span className="whitespace-pre-wrap">{m.content}</span>}
+              : m.role === 'user' ? <UserMessageText message={m} />
+              : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>}
             {m.role === 'tool' && m.tool_use_id && (
               <ToolProgressDetails toolUseId={m.tool_use_id} />
             )}

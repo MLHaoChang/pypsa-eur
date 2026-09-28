@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore, type PendingConfirmationCard } from '../store/chatStore'
-import { createChatStream, postChatConfirm } from '../api/chat'
+import { createChatStream, getChatHealth, postChatConfirm } from '../api/chat'
 import { listUploads } from '../api/uploads'
 import ChatPanel from './ChatPanel'
 import chatStoreSource from '../store/chatStore.ts?raw'
@@ -28,7 +28,8 @@ vi.mock('../api/chat', async (importOriginal) => {
       history_gap: 0, pending_turn: null,
     }),
     postChatAbort: vi.fn(),
-    postChatConfirm: vi.fn(),
+    postChatConfirm: vi.fn().mockResolvedValue({ ok: true }),
+    getChatHealth: vi.fn(),
     getApiKeySettings: vi.fn().mockResolvedValue({
       configured: true, source: 'env', hint: 'abcd',
       overridden_by_environment: false, storage_path: '/tmp/user.env',
@@ -77,6 +78,8 @@ const send = (text: string) => act(() => {
 // Give the effect every chance to (wrongly) fire.
 const settle = () => act(async () => { await new Promise(r => setTimeout(r, 20)) })
 
+// A Guided `write` card: since the P25 gate (B1) the backend emits one for
+// update_component in Guided mode, which is what this suite renders.
 const CARD: PendingConfirmationCard = {
   tool_use_id: 'tu1', tool_name: 'update_component', args: {}, safety_tier: 'write',
   confirmation_token: 'tok', ttl_seconds: 60, expires_at_epoch_ms: Date.now() + 60_000,
@@ -84,6 +87,7 @@ const CARD: PendingConfirmationCard = {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(getChatHealth).mockResolvedValue({ ok: true } as never)   // readiness unknown → open
   localStorage.removeItem('chat:firstSendAck')
   useUIStore.setState({
     currentProject: 'Demo', uiMode: 'guided', activeSlidePanel: 'hubDesign',
@@ -93,6 +97,7 @@ beforeEach(() => {
   useChatStore.setState({
     sessionId: 'sess-1', pending: null, messages: [], error: null,
     streaming: false, streamCleanup: null, requestQueue: [], lastRequest: null,
+    activeRequest: null,
     attachedFileIds: [], uploads: [],
     usage: {
       input_tokens: 0, output_tokens: 0,
@@ -217,5 +222,121 @@ describe('ChatPanel dispatches queued card requests', () => {
   it('the store path cannot confirm anything: chatStore imports no chat API', () => {
     expect(chatStoreSource).not.toMatch(/from ['"]\.\.\/api\/chat['"]/)
     expect(chatStoreSource).not.toMatch(/postChatConfirm|\/api\/chat\/confirm/)
+  })
+})
+
+const RAW = 'Apply this recommendation from the study review: "Not certified: LOLE 12.4 h/yr". '
+  + 'Run the tool run_eh_study with exactly these arguments: '
+  + '{"archetype":"weak_flexible","stages":["apply_pack","ens_solve","mc_certify","dtc_stress","dtc_planning"]}. '
+  + 'Say in one sentence what will change, then proceed to the confirmation.'
+
+describe('P25 gate: how a card request looks, and when it is not sent', () => {
+  it('B2: shows the label; the sent text is unchanged and sits in a collapsed Details', async () => {
+    renderPanel()
+    act(() => { useChatStore.getState().sendRequest(RAW, { source: 'hub-design',
+      label: 'Apply this recommendation: Not certified' }) })
+    await waitFor(() => expect(calls()).toHaveLength(1))
+    expect(calls()[0][0].message).toBe(RAW)                       // the wire is unchanged
+    const msg = useChatStore.getState().messages.at(-1)!
+    expect(msg.content).toBe(RAW)                                 // so is the history
+    const bubble = screen.getAllByTestId('chat-message').at(-1)!
+    expect(bubble.querySelector('[data-testid="chat-message-label"]')!.textContent)
+      .toBe('Apply this recommendation: Not certified')
+    const details = bubble.querySelector('details[data-testid="chat-message-details"]') as HTMLDetailsElement
+    expect(details).not.toBeNull()
+    expect(details.open).toBe(false)
+    expect(details.textContent).toContain('run_eh_study')
+    expect(details.textContent).toContain(RAW)
+  })
+
+  it('B2: a user bubble wraps long tokens instead of scrolling sideways', async () => {
+    renderPanel()
+    send('x'.repeat(300))
+    await waitFor(() => expect(calls()).toHaveLength(1))
+    const text = screen.getAllByTestId('chat-message').at(-1)!
+      .querySelector('[data-testid="chat-message-text"]')!
+    expect(text.className).toContain('break-words')
+    expect(text.className).toContain('[overflow-wrap:anywhere]')
+  })
+
+  it('B2: a reloaded Improve request (no label stored) renders the same way', async () => {
+    useChatStore.setState({ messages: [{ id: 'm1', role: 'user', content: RAW, ts: 1 }] })
+    renderPanel()
+    const bubble = (await screen.findAllByTestId('chat-message'))[0]
+    expect(bubble.querySelector('[data-testid="chat-message-label"]')!.textContent)
+      .toBe('Apply this recommendation: Not certified: LOLE 12.4 h/yr')
+    expect((bubble.querySelector('details') as HTMLDetailsElement).open).toBe(false)
+  })
+
+  it('B2: a typed message and a plain card sentence render as before', async () => {
+    renderPanel()
+    send('On the Site card, no critical load is tagged.')
+    await waitFor(() => expect(calls()).toHaveLength(1))
+    const bubble = screen.getAllByTestId('chat-message').at(-1)!
+    expect(bubble.querySelector('details')).toBeNull()
+    expect(bubble.querySelector('[data-testid="chat-message-text"]')!.textContent)
+      .toBe('On the Site card, no critical load is tagged.')
+  })
+
+  it('no API key (chat_ready false): nothing is posted, the queue is dropped, the key form shows', async () => {
+    vi.mocked(getChatHealth).mockResolvedValue({ ok: true, chat_ready: false,
+      active_profile: { id: 'p', label: 'P', wire: 'anthropic' } } as never)
+    renderPanel()
+    await screen.findByTestId('chat-send-gate')
+    send('do it')
+    await settle()
+    expect(calls()).toHaveLength(0)
+    expect(useChatStore.getState().requestQueue).toEqual([])
+    expect(useChatStore.getState().messages).toEqual([])
+    expect(screen.getByTestId('chat-send-gate')).toBeTruthy()
+  })
+
+  it('denying one action drops the rest of that card\'s actions, not other requests', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup()
+    renderPanel()
+    act(() => {
+      const st = useChatStore.getState()
+      st.sendRequest('action one', { group: 'g1' })
+      st.sendRequest('action two', { group: 'g1' })
+      st.sendRequest('another card', { group: 'g2' })
+    })
+    await waitFor(() => expect(calls()).toHaveLength(1))
+    act(() => useChatStore.getState().setPending({ ...CARD, tool_name: 'run_eh_study' }))
+    await user.click(await screen.findByTestId('chat-confirm-deny'))
+    expect(postChatConfirm).toHaveBeenCalledWith('sess-1',
+      expect.objectContaining({ decision: 'deny' }))
+    expect(useChatStore.getState().requestQueue.map(r => r.text)).toEqual(['another card'])
+    act(() => useChatStore.getState().setStreaming(false))
+    await waitFor(() => expect(calls()).toHaveLength(2))
+    expect(calls()[1][0].message).toBe('another card')
+  })
+
+  it('approving keeps the rest of the group queued', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup()
+    renderPanel()
+    act(() => {
+      useChatStore.getState().sendRequest('action one', { group: 'g1' })
+      useChatStore.getState().sendRequest('action two', { group: 'g1' })
+    })
+    await waitFor(() => expect(calls()).toHaveLength(1))
+    act(() => useChatStore.getState().setPending({ ...CARD, tool_name: 'run_eh_study' }))
+    await user.click(await screen.findByTestId('chat-confirm-approve'))
+    act(() => useChatStore.getState().setStreaming(false))
+    await waitFor(() => expect(calls()).toHaveLength(2))
+    expect(calls()[1][0].message).toBe('action two')
+  })
+
+  it('a typed message is not the active card request any more', async () => {
+    renderPanel()
+    act(() => { useChatStore.getState().sendRequest('card', { group: 'g1' }) })
+    await waitFor(() => expect(calls()).toHaveLength(1))
+    expect(useChatStore.getState().activeRequest?.group).toBe('g1')
+    act(() => useChatStore.getState().setStreaming(false))
+    const input = await screen.findByTestId('chat-input')
+    const { fireEvent } = await import('@testing-library/react')
+    fireEvent.change(input, { target: { value: 'typed' } })
+    fireEvent.click(screen.getByTestId('chat-send'))
+    await waitFor(() => expect(calls()).toHaveLength(2))
+    expect(useChatStore.getState().activeRequest).toBeNull()
   })
 })

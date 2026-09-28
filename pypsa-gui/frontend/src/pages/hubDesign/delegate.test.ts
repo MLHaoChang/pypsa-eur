@@ -7,7 +7,7 @@ import { useChatStore } from '../../store/chatStore'
 import { useUIStore } from '../../store/uiStore'
 import type { EhReviewFinding } from '../../api/simulation'
 import {
-  actionText, actionTexts, ask, askText, delegate, DELEGATE_TITLE, footerAskText, footerDelegateText,
+  actionLabel, actionText, actionTexts, ask, askText, delegate, delegateTitle, footerAskText, footerDelegateText,
   siteFixText, stressScenarioText, VOLL_TEXT,
 } from './delegate'
 
@@ -53,8 +53,24 @@ describe('ask / delegate', () => {
     expect(useChatStore.getState().composerSeed).toBeNull()
   })
 
-  it('the button title says it sends and that attached files are not included', () => {
-    expect(DELEGATE_TITLE).toMatch(/^Sends this request to the assistant — your attached files are not included\./)
+  it('delegate forwards the display label and the card group', () => {
+    const spy = vi.spyOn(useChatStore.getState(), 'sendRequest')
+    try {
+      delegate('raw', { label: 'Apply this recommendation: X', group: 'g' })
+      expect(spy).toHaveBeenCalledWith('raw',
+        { source: 'hub-design', label: 'Apply this recommendation: X', group: 'g' })
+    } finally { spy.mockRestore() }
+  })
+
+  // P25 gate B1: true in each mode. Guided confirms every change; Expert
+  // confirms runs and deletions, and applies edits directly.
+  it('the button title says it sends, without attachments, and what confirms — per mode', () => {
+    const lead = /^Sends this request to the assistant — your attached files are not included\. /
+    expect(delegateTitle('guided')).toMatch(lead)
+    expect(delegateTitle('guided')).toMatch(/Nothing changes until you confirm it\.$/)
+    expect(delegateTitle('expert')).toMatch(lead)
+    expect(delegateTitle('expert')).not.toMatch(/Nothing changes until you confirm/)
+    expect(delegateTitle('expert')).toMatch(/edits apply without a confirmation card/)
   })
 })
 
@@ -88,6 +104,10 @@ describe('texts (§5.7, verbatim)', () => {
       + JSON.stringify({ partial: { voll: 5000 } })
       + '. Say in one sentence what will change, then proceed to the confirmation.')
     expect(actionTexts({ ...F, actions: [] })).toEqual([])
+  })
+
+  it('improve: the transcript label is the plain title', () => {
+    expect(actionLabel(F)).toBe('Apply this recommendation: Not certified: expected shortfall 12.38 h/yr exceeds the 3 h/yr target')
   })
 
   it('improve: ask quotes the title and the evidence', () => {

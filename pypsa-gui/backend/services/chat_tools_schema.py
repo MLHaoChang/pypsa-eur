@@ -981,8 +981,8 @@ TOOLS: list[dict[str, Any]] = [
         "with its reason and confidence, plus the units that lack outage data "
         "(a question for the user — no action). `actions` lists ready "
         "update_component / bulk_update_components calls; present them and run "
-        "only the ones the user picks (they ask for confirmation). Applies "
-        "nothing. `archetype` only words the reasons. Safety: read.",
+        "only the ones the user picks (in Guided mode each asks for "
+        "confirmation). Applies nothing. `archetype` only words the reasons. Safety: read.",
         {"archetype": {"type": "string",
                        "enum": ["strong_grid", "weak_flexible", "off_grid"]}},
         [],

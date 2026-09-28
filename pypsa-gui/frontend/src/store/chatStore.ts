@@ -29,6 +29,10 @@ export interface ChatMessage {
   // Phase D — file_ids that were attached to this user turn (for replay).
   // Read-only chip strip renders below the message bubble.
   attachment_file_ids?: string[]
+  // P25 gate B2 — what the transcript shows for a card-sent request; the
+  // sent text (`content`) stays the history and sits in a collapsed Details.
+  // Not persisted: a reloaded transcript falls back to `content`.
+  display?: string
   // Task 13 — accumulated `thinking` SSE deltas for this assistant turn.
   // Rendered as a collapsible block above the answer; absent (not empty
   // string) on every turn the model didn't emit extended thinking for, so
@@ -80,7 +84,18 @@ export interface ChatErrorState {
 /** A request a panel (the hub-design cards) sends to the assistant
  *  (guided-mode spec §6.1). ChatPanel dispatches it through the typed-message
  *  path; nothing here talks to the backend. */
-export interface QueuedRequest { id: string; text: string; source?: string; queuedAt: number }
+export interface QueuedRequest {
+  id: string
+  text: string
+  source?: string
+  queuedAt: number
+  /** What the transcript shows instead of the sent text (P25 gate B2);
+   *  the sent text stays in a collapsed "Details". */
+  label?: string
+  /** Requests from one card click (Improve: one per action). A denial of
+   *  one drops the rest of its group (P25 gate). */
+  group?: string
+}
 
 /** Identical text within this window is a double click, not a new request. */
 export const REQUEST_DEDUPE_MS = 2000
@@ -167,9 +182,17 @@ interface ChatState {
   lastRequest: { text: string; at: number } | null
   /** Queue `text` and open the dock. Returns the id, or null when the text
    * is blank or repeats the last request within REQUEST_DEDUPE_MS. */
-  sendRequest: (text: string, opts?: { source?: string }) => string | null
-  /** ChatPanel only: remove and return the oldest queued request. */
+  sendRequest: (text: string,
+    opts?: { source?: string; label?: string; group?: string }) => string | null
+  /** ChatPanel only: remove and return the oldest queued request; it
+   *  becomes `activeRequest`. */
   takeNextRequest: () => QueuedRequest | null
+  /** The queued request whose turn is (or was last) running; null after a
+   *  typed send. */
+  activeRequest: QueuedRequest | null
+  setActiveRequest: (r: QueuedRequest | null) => void
+  /** Drop every queued request of `group` (a denial ends that card's run). */
+  dropRequestGroup: (group: string) => void
   setSessionId: (id: string | null) => void
   setProfileId: (id: string | null) => void
   appendMessage: (msg: Omit<ChatMessage, 'id' | 'ts'>) => void
@@ -302,6 +325,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   composerSeed: null,
   requestQueue: [],
   lastRequest: null,
+  activeRequest: null,
   profileId: null,
   suppressHydrationOnce: false,
   newChatSeq: 0,
@@ -332,8 +356,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const last = get().lastRequest
     if (last && last.text === text && now - last.at < REQUEST_DEDUPE_MS) return null
     const id = globalThis.crypto?.randomUUID?.() ?? String(now + Math.random())
+    const req: QueuedRequest = { id, text, source: opts?.source, queuedAt: now }
+    if (opts?.label) req.label = opts.label
+    if (opts?.group) req.group = opts.group
     set((s) => ({
-      requestQueue: [...s.requestQueue, { id, text, source: opts?.source, queuedAt: now }],
+      requestQueue: [...s.requestQueue, req],
       lastRequest: { text, at: now },
     }))
     useUIStore.getState().setAssistantDockOpen(true)
@@ -342,9 +369,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   takeNextRequest: () => {
     const [next, ...rest] = get().requestQueue
     if (!next) return null
-    set({ requestQueue: rest, lastRequest: { text: next.text, at: Date.now() } })
+    set({ requestQueue: rest, lastRequest: { text: next.text, at: Date.now() },
+      activeRequest: next })
     return next
   },
+  setActiveRequest: (r) => set({ activeRequest: r }),
+  dropRequestGroup: (group) => set((s) => ({
+    requestQueue: s.requestQueue.filter(r => r.group !== group),
+  })),
   setProfileId: (id) => set({ profileId: id }),
   appendMessage: (msg) => set((s) => ({
     messages: [...s.messages, { ...msg, id: newMessageId(), ts: Date.now() }],
@@ -503,6 +535,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       unseenExportCount: 0,
       uploadBatches: {},
       requestQueue: [],
+      activeRequest: null,
     })
   },
 

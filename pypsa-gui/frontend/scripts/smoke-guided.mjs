@@ -31,10 +31,14 @@
  * and the stub's recorded last user text contains "Guided mode is on"; a
  * second card click while that turn streams is queued, the stub's scripted
  * tool call (§6.6) renders a confirmation card, the user declines, and only
- * then is the queued request sent. Expert: a typed message's body has no
- * ui_mode and the recorded text no addendum. Finally the template's tags are
- * stripped and suggest_eh_setup (run through the stub) recovers them without
- * writing anything.
+ * then is the queued request sent. The bubble shows a plain label with the
+ * sent text in a collapsed Details, and the transcript never scrolls sideways
+ * (gate B2). Expert: a typed message's body has no ui_mode and the recorded
+ * text no addendum. The template's tags are stripped and suggest_eh_setup
+ * (run through the stub) recovers them without writing anything. Gate B1: the
+ * Site card's grid fix in Guided stops at an update_component card (write
+ * tier) and a denial changes nothing; the same request in Expert applies
+ * directly.
  *
  * It starts its own uvicorn (local mode, ANTHROPIC_API_KEY unset, app data
  * and projects under a scratch dir), Vite on 5173 and — after the send-gate
@@ -1228,6 +1232,16 @@ async function phaseP25(browser) {
     await waitUserMessage(`Run the tool ${a.tool} with exactly these arguments`)
     await byId('chat-abort').waitFor({ state: 'visible', timeout: 5_000 })
     ok('the request is in the transcript as the user\'s message and the turn is streaming')
+    // P25 gate B2: the bubble shows the plain label; the sent text is in a
+    // collapsed Details; nothing scrolls sideways.
+    const bubble = page.locator('[data-testid="chat-message"][data-role="user"]').last()
+    const labelText = ((await bubble.locator('[data-testid="chat-message-label"]').textContent()) ?? '').trim()
+    check(labelText.startsWith('Apply this recommendation: ') && !labelText.includes('Run the tool'),
+      `bubble label: "${labelText}"`)
+    check(await bubble.locator('details[data-testid="chat-message-details"]').evaluate(d => !d.open),
+      'the sent text is in a collapsed Details')
+    const overflow = await byId('chat-messages').evaluate(e => [e.scrollWidth, e.clientWidth])
+    check(overflow[0] <= overflow[1], `transcript does not scroll sideways (scrollWidth ${overflow[0]} ≤ clientWidth ${overflow[1]})`)
     await shot(page, 'p25-improve-do-sent-streaming')
 
     step('a second card click while the turn streams is queued, not sent')
@@ -1310,7 +1324,7 @@ async function phaseP25(browser) {
     await byId('chat-input').fill('Run the tool suggest_eh_setup with exactly these arguments: {"archetype":"weak_flexible"}')
     await byId('chat-send').click()
     await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="chat-message"]')]
-      .some(m => (m.textContent ?? '').includes('Done — suggest_eh_setup applied.')), null, { timeout: 60_000 })
+      .some(m => (m.textContent ?? '').includes('Done — suggest_eh_setup finished.')), null, { timeout: 60_000 })
     await waitIdle()
     check((await byId('chat-confirmation-card').count()) === 0, 'a read tool: no confirmation card')
     const rec = (await stubRequests()).slice(n3)
@@ -1326,6 +1340,67 @@ async function phaseP25(browser) {
     const afterSuggest = tableDiffs(stripped, await snapshotTables())
     check(afterSuggest.diffs.length === 0, 'suggest_eh_setup wrote nothing (tables equal)')
     await shot(page, 'p25-suggest-eh-setup')
+
+    step('B2: the Details expand to the exact text that was sent')
+    const improveBubble = page.locator('[data-testid="chat-message"][data-role="user"]')
+      .filter({ has: page.locator('[data-testid="chat-message-label"]') }).first()
+    await improveBubble.scrollIntoViewIfNeeded()
+    await improveBubble.locator('summary').click()
+    const sentText = ((await improveBubble.locator('[data-testid="chat-message-text"]').textContent()) ?? '').trim()
+    check(sentText === doText, 'expanded Details show the sent §5.7 text verbatim')
+    const ow = await byId('chat-messages').evaluate(e => [e.scrollWidth, e.clientWidth])
+    check(ow[0] <= ow[1], `expanded: still no sideways scroll (${ow[0]} ≤ ${ow[1]})`)
+    await shot(page, 'p25-bubble-details-expanded')
+
+    step('B1: a Site fix in Guided (update_component, write tier) stops at a confirmation card')
+    await byId('ui-mode-guided').click()
+    await page.waitForFunction(() =>
+      document.querySelector('[data-testid="ui-mode-guided"]')?.getAttribute('aria-pressed') === 'true',
+    null, { timeout: 15_000 })
+    await page.getByText('Guided mode on').waitFor({ state: 'detached', timeout: 15_000 }).catch(() => {})
+    if (!(await byId('hub-design-panel').isVisible().catch(() => false))) await byId('sidebar-hub-design').click()
+    await byId('hub-rail-step-site').click()
+    // (readiness still finds the grid link through its own selection rule
+    // once the tags are gone, so the critical-load fix is the one offered)
+    await byId('hub-site-fix-critical').waitFor({ state: 'visible', timeout: 60_000 })
+    const beforeFix = await snapshotTables()
+    const n4 = streams.length
+    await byId('hub-site-fix-critical').click()
+    await byId('chat-confirmation-card').waitFor({ state: 'visible', timeout: 60_000 })
+    check(await byId('chat-confirmation-card').getAttribute('data-tool-name') === 'update_component'
+      && await byId('chat-confirmation-card').getAttribute('data-safety-tier') === 'write',
+      'card for update_component, tier write')
+    check(streams[n4]?.ui_context?.ui_mode === 'guided' && streams[n4]?.ui_context?.guided_step === 'site',
+      'sent from the Site card in Guided')
+    const whilePending = tableDiffs(beforeFix, await snapshotTables())
+    check(whilePending.diffs.length === 0, 'nothing changed while the card waits')
+    await byId('chat-confirmation-card').scrollIntoViewIfNeeded()
+    await shot(page, 'p25-site-fix-card-guided')
+    await byId('chat-confirm-deny').click()
+    await byId('chat-confirmation-card').waitFor({ state: 'detached', timeout: 30_000 })
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="chat-message"]')]
+      .some(m => (m.textContent ?? '').includes('Understood — update_component was not applied.')), null, { timeout: 60_000 })
+    await waitIdle()
+    const afterDeny = tableDiffs(beforeFix, await snapshotTables())
+    check(afterDeny.diffs.length === 0, 'denied: nothing changed')
+
+    step('B1: the same Site fix in Expert applies directly (no card), as before P25')
+    await byId('ui-mode-expert').click()
+    await page.waitForFunction(() =>
+      document.querySelector('[data-testid="ui-mode-expert"]')?.getAttribute('aria-pressed') === 'true',
+    null, { timeout: 15_000 })
+    await page.getByText('Expert mode on').waitFor({ state: 'detached', timeout: 15_000 }).catch(() => {})
+    const siteFix = 'On the Site card, no critical load is tagged. Propose which buses must stay on (eh_critical = true) and tag them after I confirm.'
+    await byId('chat-input').fill(siteFix)
+    await byId('chat-send').click()
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="chat-message"]')]
+      .some(m => (m.textContent ?? '').includes('Done — update_component applied.')), null, { timeout: 60_000 })
+    await waitIdle()
+    check((await byId('chat-confirmation-card').count()) === 0, 'Expert: no confirmation card for the write')
+    const buses = await api('GET', '/api/network/buses')
+    check(buses.find(b => b.name === want.critical[0])?.eh_critical === true,
+      `Expert: ${want.critical[0]} tagged eh_critical directly`)
+    await shot(page, 'p25-site-fix-expert-direct')
   } catch (e) {
     try { await shot(page, 'FAILURE') } catch { /* page gone */ }
     const logFile = path.join(args.out, 'FAILURE-console.log')

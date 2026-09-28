@@ -5,10 +5,11 @@ import type { ReactNode } from 'react'
 import { MessageCircleQuestion, Sparkles } from 'lucide-react'
 import type { EhArchetype } from '../../../api/simulation'
 import {
-  ASK_TITLE, DELEGATE_TITLE, ask, delegate, footerAskText, footerDelegateText,
+  ASK_TITLE, ask, delegate, delegateTitle, footerAskText, footerDelegateText,
 } from '../delegate'
 import type { HubStep } from '../hubDesignStore'
 import { useHubDesignStore } from '../hubDesignStore'
+import { useUIStore } from '../../../store/uiStore'
 import { useTerm } from './Term'
 
 const INTRO_KEY = {
@@ -27,13 +28,24 @@ export function AskButton({ testId, text, label = 'Ask about this' }: {
   )
 }
 
-/** Sends `text` — or each of several texts, in order — to the assistant. */
-export function DelegateButton({ testId, text, label = 'Let the assistant do this' }: {
-  testId: string; text: string | readonly string[]; label?: string
+/** Sends `text` — or each of several texts, in order, as one group — to the
+ *  assistant. `display` is what the transcript shows for each (P25 gate B2). */
+export function DelegateButton({ testId, text, display, label = 'Let the assistant do this' }: {
+  testId: string; text: string | readonly string[]; display?: string | readonly string[]
+  label?: string
 }) {
-  const send = () => { for (const t of typeof text === 'string' ? [text] : text) delegate(t) }
+  const mode = useUIStore(s => s.uiMode)
+  const send = () => {
+    const texts = typeof text === 'string' ? [text] : text
+    const labels = typeof display === 'string' ? [display] : display ?? []
+    const group = texts.length > 1
+      ? globalThis.crypto?.randomUUID?.() ?? String(Date.now() + Math.random())
+      : undefined
+    texts.forEach((t, i) => delegate(t, {
+      ...(labels[i] ? { label: labels[i] } : {}), ...(group ? { group } : {}) }))
+  }
   return (
-    <button type="button" data-testid={testId} onClick={send} title={DELEGATE_TITLE}
+    <button type="button" data-testid={testId} onClick={send} title={delegateTitle(mode)}
       className="inline-flex items-center gap-1 px-2 py-1 border border-accent/60 rounded text-[11px] text-accent hover:bg-accent/10">
       <Sparkles size={12} /> {label}
     </button>

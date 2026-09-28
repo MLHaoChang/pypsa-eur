@@ -11,7 +11,7 @@ import { useChatStore } from '../../../store/chatStore'
 import { useUIStore } from '../../../store/uiStore'
 import { useStartFmeaSweep } from '../../../hooks/useStartFmeaSweep'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
-import { actionText, actionTexts, askText, stressScenarioText } from '../delegate'
+import { actionLabel, actionText, actionTexts, askText, stressScenarioText } from '../delegate'
 import { DC_TEMPLATE, REPORT, review } from '../testFixtures'
 import { ImproveCard } from './ImproveCard'
 
@@ -81,6 +81,7 @@ describe('ImproveCard', () => {
     expect(queued()).toEqual([actionText(F[0])])
     expect(queued()[0]).toContain(JSON.stringify(F[0].actions[0].args))
     expect(useChatStore.getState().requestQueue[0].source).toBe('hub-design')
+    expect(useChatStore.getState().requestQueue[0].label).toBe(actionLabel(F[0]))
     expect(useChatStore.getState().composerSeed).toBeNull()
     expect(useUIStore.getState().assistantDockOpen).toBe(true)
     expect(screen.queryByTestId('hub-improve-do-not_established_frontier')).toBeNull()
@@ -94,8 +95,15 @@ describe('ImproveCard', () => {
     await user.click(await screen.findByTestId('hub-improve-do-certification_fail'))
     expect(queued()).toEqual(actionTexts(two))
     expect(queued()).toHaveLength(2)
-    expect(screen.getByTestId('hub-improve-certification_fail').textContent)
-      .toContain('then 1 more step, each confirmed separately')
+    // one card click = one group (a denial drops the rest), each labelled
+    const q = useChatStore.getState().requestQueue
+    expect(q[0].group).toBeTruthy()
+    expect(q[1].group).toBe(q[0].group)
+    expect(q.map(r => r.label)).toEqual([actionLabel(two), `${actionLabel(two)} (step 2 of 2)`])
+    // P25 gate B1: true in both modes — no claim that each step is confirmed
+    const line = screen.getByTestId('hub-improve-certification_fail').textContent
+    expect(line).toContain('then 1 more step, one at a time')
+    expect(line).not.toContain('confirmed separately')
   })
 
   it('Ask → the explain text', async () => {

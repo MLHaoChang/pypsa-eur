@@ -7,24 +7,34 @@
 // confirmation card waits. Every write still goes through that card.
 import type { EhArchetype, EhReviewFinding } from '../../api/simulation'
 import { useChatStore } from '../../store/chatStore'
-import { useUIStore } from '../../store/uiStore'
+import { useUIStore, type UiMode } from '../../store/uiStore'
 import type { HubStep } from './hubDesignStore'
+import { plainWords } from './plainWords'
 
 export function ask(text: string): void {
   useUIStore.getState().setAssistantDockOpen(true)
   useChatStore.getState().seedComposer(text)
 }
 
-export function delegate(text: string): void {
-  useChatStore.getState().sendRequest(text, { source: 'hub-design' })
+/** `label`: what the transcript shows instead of the sent text (P25 gate
+ *  B2). `group`: the requests of one click — a denial drops the rest. */
+export function delegate(text: string, opts?: { label?: string; group?: string }): void {
+  useChatStore.getState().sendRequest(text, { source: 'hub-design', ...opts })
 }
 
 /** Button titles. Ask sends nothing; Delegate sends, without attachments
- *  (§6.1), and changes nothing until the user confirms. */
+ *  (§6.1). What confirms depends on the mode (P25 gate B1): in Guided every
+ *  change shows a confirmation card; in Expert runs and deletions do and
+ *  edits apply directly. */
 export const ASK_TITLE =
   'Opens the assistant with a question prefilled — nothing is sent until you press Send.'
-export const DELEGATE_TITLE =
-  'Sends this request to the assistant — your attached files are not included. Nothing changes until you confirm it.'
+const DELEGATE_LEAD =
+  'Sends this request to the assistant — your attached files are not included. '
+export function delegateTitle(mode: UiMode): string {
+  return DELEGATE_LEAD + (mode === 'guided'
+    ? 'Nothing changes until you confirm it.'
+    : 'Runs and deletions ask you to confirm; in Expert mode, edits apply without a confirmation card.')
+}
 
 export type SiteFix = 'grid' | 'critical' | 'strength' | 'outage'
 
@@ -51,6 +61,12 @@ export const VOLL_TEXT = 'Set VOLL to 5000 €/MWh so the study can price shortf
 export function actionTexts(f: EhReviewFinding): string[] {
   return (f.actions ?? []).map(a =>
     `Apply this recommendation from the study review: "${f.title}". Run the tool ${a.tool} with exactly these arguments: ${JSON.stringify(a.args)}. Say in one sentence what will change, then proceed to the confirmation.`)
+}
+
+/** The transcript's label for a finding's request (the sent text stays in
+ *  a collapsed Details — P25 gate B2). */
+export function actionLabel(f: EhReviewFinding): string {
+  return `Apply this recommendation: ${plainWords(f.title)}`
 }
 
 /** The first action's message; null when the finding has no action. */

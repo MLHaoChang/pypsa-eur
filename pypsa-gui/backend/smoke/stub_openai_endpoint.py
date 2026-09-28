@@ -54,10 +54,19 @@ one failure mode this harness cannot self-detect:
      §5.7 / §6.6): `Run the tool <name> with exactly these arguments: {...}`
      anywhere in the last user text -> that tool call with those arguments
      (id `call_stub_2`). After the tool result it closes with one sentence:
-     "Done — <tool> applied." (or, when the result says the user declined,
-     "Understood — <tool> was not applied."). This is what lets the browser
+     "Done — <tool> applied." for a change, "Done — <tool> finished." for a
+     read tool, or, when the result says the user declined, "Understood —
+     <tool> was not applied.". This is what lets the browser
      smoke see a real confirmation card from a card click. No branch for
-     the Site fixes in v1.
+     the other Site fixes.
+  3. The Site card's grid and critical-load fixes ("… Run suggest_eh_setup,
+     then tag the import Link …" / "… no critical load is tagged …", added
+     at the P25 gate so the smoke can show that a Site fix reaches a
+     confirmation card in Guided): `suggest_eh_setup` first (`call_stub_3a`),
+     then the first action it returned — for the critical fix the first one
+     setting eh_critical — (`call_stub_3b`),
+     then one closing sentence as in branch 2 — the order a real model is
+     told to follow. "Nothing to tag." when there is no action.
 
 Every other prompt gets "Saved.".
 
@@ -91,6 +100,22 @@ _DECLINED = re.compile(r"declin|reject|cancel|denied|expired|abort", re.I)
 REPLY_DELAY_S = int(os.environ.get("STUB_REPLY_DELAY_MS", "0") or 0) / 1000.0
 
 
+def _is_read_tool(name: str) -> bool:
+    """A read tool changes nothing, so the stub must not say "applied".
+    The tier comes from the real schema (`Safety: read.`) when the backend
+    is importable; otherwise from the read-tool name prefixes."""
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from services.chat_tools_schema import TOOLS
+        tool = next((t for t in TOOLS if t["name"] == name), None)
+        if tool is not None:
+            return "Safety: read" in tool["description"]
+    except Exception:  # noqa: BLE001 — the stub must answer regardless
+        pass
+    return name.startswith(("get_", "list_", "review_", "suggest_", "validate_",
+                            "check_", "search_", "describe_"))
+
+
 def _scripted_call(text: str) -> tuple[str, dict] | None:
     m = _RUN_TOOL.search(text)
     if not m:
@@ -100,6 +125,27 @@ def _scripted_call(text: str) -> tuple[str, dict] | None:
     except ValueError:
         return None
     return (m.group(1), args) if isinstance(args, dict) else None
+
+
+_SITE_GRID = "Run suggest_eh_setup, then tag the import Link"
+_SITE_CRITICAL = "no critical load is tagged"
+
+
+def _json_in(text: str):
+    """The JSON object inside a tool result (chat_service may wrap it)."""
+    start = text.find("{")
+    if start < 0:
+        return None
+    try:
+        return json.JSONDecoder().raw_decode(text, start)[0]
+    except ValueError:
+        return None
+
+
+def _tools_after_last_user(messages) -> list[dict]:
+    last_user = max((i for i, m in enumerate(messages) if m.get("role") == "user"),
+                    default=-1)
+    return [m for m in messages[last_user + 1:] if m.get("role") == "tool"]
 
 
 def _tool_after_last_user(messages) -> dict | None:
@@ -166,6 +212,9 @@ class Handler(BaseHTTPRequestHandler):
 
         scripted = _scripted_call(text)
         this_turn_tool = _tool_after_last_user(messages)
+        critical_fix = _SITE_CRITICAL in text
+        site_grid = (_SITE_GRID in text or critical_fix) and not scripted
+        site_tools = _tools_after_last_user(messages) if site_grid else []
 
         if REPLY_DELAY_S:
             time.sleep(REPLY_DELAY_S)
@@ -191,6 +240,34 @@ class Handler(BaseHTTPRequestHandler):
                 "function": {"name": "save_project",
                              "arguments": json.dumps({"name": name})},
             }]}}]}))
+        elif site_grid and not site_tools:
+            emit(_sse({"choices": [{"delta": {"tool_calls": [{
+                "index": 0, "id": "call_stub_3a", "type": "function",
+                "function": {"name": "suggest_eh_setup", "arguments": "{}"},
+            }]}}]}))
+        elif site_grid and len(site_tools) == 1:
+            found = _json_in(str(site_tools[0].get("content") or "")) or {}
+            actions = found.get("actions") or []
+            if critical_fix:
+                actions = [a for a in actions if "eh_critical" in json.dumps(a.get("args"))]
+            if actions:
+                a = actions[0]
+                emit(_sse({"choices": [{"delta": {"tool_calls": [{
+                    "index": 0, "id": "call_stub_3b", "type": "function",
+                    "function": {"name": a["tool"], "arguments": json.dumps(a["args"])},
+                }]}}]}))
+            else:
+                emit(_sse({"choices": [{"delta": {"content": "Nothing to tag."}}]}))
+        elif site_grid:
+            name = "update_component"
+            for m in reversed(messages):
+                for tc in m.get("tool_calls") or []:
+                    if tc.get("id") == "call_stub_3b":
+                        name = tc["function"]["name"]
+            result = str(site_tools[-1].get("content") or "")
+            said = (f"Understood — {name} was not applied." if _DECLINED.search(result)
+                    else f"Done — {name} applied.")
+            emit(_sse({"choices": [{"delta": {"content": said}}]}))
         elif scripted and this_turn_tool is None:
             tool, args = scripted
             emit(_sse({"choices": [{"delta": {"tool_calls": [{
@@ -202,7 +279,9 @@ class Handler(BaseHTTPRequestHandler):
         elif scripted:
             result = str(this_turn_tool.get("content") or "")
             said = (f"Understood — {scripted[0]} was not applied."
-                    if _DECLINED.search(result) else f"Done — {scripted[0]} applied.")
+                    if _DECLINED.search(result)
+                    else f"Done — {scripted[0]} finished." if _is_read_tool(scripted[0])
+                    else f"Done — {scripted[0]} applied.")
             emit(_sse({"choices": [{"delta": {"content": said}}]}))
         else:
             emit(_sse({"choices": [{"delta": {"content": "Saved."}}]}))

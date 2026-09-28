@@ -102,3 +102,38 @@ describe('resetForProjectSwitch', () => {
     expect(queue()).toEqual([])
   })
 })
+
+// P25 gate B2 / note 2: a card request carries its display label and its
+// card group; a denial drops the rest of the group.
+describe('labels and groups (P25 gate)', () => {
+  beforeEach(() => { useChatStore.setState({ activeRequest: null }) })
+
+  it('keeps the label and group with the queued request', () => {
+    useChatStore.getState().sendRequest('raw text', { source: 'hub-design',
+      label: 'Apply this recommendation: X', group: 'g1' })
+    expect(queue()[0]).toMatchObject({ text: 'raw text', label: 'Apply this recommendation: X',
+      group: 'g1' })
+  })
+
+  it('a take makes the request the active one', () => {
+    useChatStore.getState().sendRequest('a', { group: 'g1' })
+    const r = useChatStore.getState().takeNextRequest()
+    expect(useChatStore.getState().activeRequest).toEqual(r)
+  })
+
+  it('dropRequestGroup removes only that group\'s queued requests', () => {
+    useChatStore.getState().sendRequest('a1', { group: 'g1' })
+    useChatStore.getState().sendRequest('b', { group: 'g2' })
+    useChatStore.getState().sendRequest('a2', { group: 'g1' })
+    useChatStore.getState().sendRequest('c')
+    useChatStore.getState().dropRequestGroup('g1')
+    expect(queue().map(r => r.text)).toEqual(['b', 'c'])
+  })
+
+  it('resetForProjectSwitch clears the active request', () => {
+    useChatStore.getState().sendRequest('a', { group: 'g1' })
+    useChatStore.getState().takeNextRequest()
+    useChatStore.getState().resetForProjectSwitch()
+    expect(useChatStore.getState().activeRequest).toBeNull()
+  })
+})

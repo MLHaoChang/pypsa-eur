@@ -297,6 +297,9 @@ def test_registered_as_a_read_tool_with_a_service_route():
     assert tool["input_schema"].get("required", []) == []
     assert TOOL_ROUTES["suggest_eh_setup"] == _SERVICE_CALL
     assert chat_service._safety_tier_for("suggest_eh_setup") == "read"
+    # P25 gate B1: the description is true in both modes
+    assert "they ask for confirmation" not in tool["description"]
+    assert "in Guided mode each asks for confirmation" in tool["description"]
 
 
 def test_dispatcher_reads_the_live_network_and_leaves_it(install_network):

@@ -180,3 +180,104 @@ def test_the_recorded_requests_expose_the_last_user_text(stub):
     assert rec[-1]["last_user_text"].startswith("<untrusted_data>")
     assert "Guided mode is on" in rec[-1]["last_user_text"]
     assert rec[-1]["last_user_text"].endswith("what now?")
+
+
+def test_a_read_tool_is_reported_as_done_not_applied(stub):
+    _mod, base = stub
+    text = 'Run the tool suggest_eh_setup with exactly these arguments: {"archetype":"off_grid"}'
+    calls, said = _chat(base, [
+        {"role": "user", "content": text},
+        {"role": "assistant", "content": None, "tool_calls": [{
+            "id": "call_stub_2", "type": "function",
+            "function": {"name": "suggest_eh_setup", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "call_stub_2", "content": '{"status": "ok"}'},
+    ])
+    assert calls == []
+    assert said == "Done — suggest_eh_setup finished."
+    assert "applied" not in said
+
+
+# ── branch 3 (P25 gate B1 smoke): the Site grid fix ─────────────────────────
+SITE_GRID = ("On the Site card, the grid connection is missing. Run suggest_eh_setup, "
+             "then tag the import Link with eh_role = grid_import and the grid-side bus "
+             "eh_poc = true, explaining each choice before the confirmation.")
+SUGGESTED = {"status": "ok", "actions": [
+    {"tool": "update_component", "args": {"component_class": "Link", "name": "grid_import",
+                                           "attrs": {"eh_role": "grid_import"}},
+     "effect": "tag"},
+    {"tool": "update_component", "args": {"component_class": "Bus", "name": "grid",
+                                           "attrs": {"eh_poc": True}}, "effect": "mark"}]}
+
+
+def _assistant_call(cid, name, args):
+    return {"role": "assistant", "content": None, "tool_calls": [{
+        "id": cid, "type": "function",
+        "function": {"name": name, "arguments": json.dumps(args)}}]}
+
+
+def test_branch_3_first_reads_the_suggestions(stub):
+    _mod, base = stub
+    calls, said = _chat(base, [{"role": "user", "content": GUIDED_BLOCK + SITE_GRID}])
+    assert said == ""
+    assert [(c["id"], c["name"], json.loads(c["arguments"])) for c in calls] == [
+        ("call_stub_3a", "suggest_eh_setup", {})]
+
+
+def test_branch_3_then_runs_the_first_suggested_action(stub):
+    _mod, base = stub
+    # the tool result arrives wrapped, as chat_service sends it
+    wrapped = f"<untrusted_data>\n{json.dumps(SUGGESTED)}\n</untrusted_data>"
+    calls, said = _chat(base, [
+        {"role": "user", "content": SITE_GRID},
+        _assistant_call("call_stub_3a", "suggest_eh_setup", {}),
+        {"role": "tool", "tool_call_id": "call_stub_3a", "content": wrapped},
+    ])
+    assert said == ""
+    assert [(c["id"], c["name"], json.loads(c["arguments"])) for c in calls] == [
+        ("call_stub_3b", "update_component", SUGGESTED["actions"][0]["args"])]
+
+
+@pytest.mark.parametrize("result,want", [
+    ('{"error_kind": "confirmation_denied"}', "Understood — update_component was not applied."),
+    ('{"ok": true}', "Done — update_component applied."),
+])
+def test_branch_3_closes_after_the_action(stub, result, want):
+    _mod, base = stub
+    calls, said = _chat(base, [
+        {"role": "user", "content": SITE_GRID},
+        _assistant_call("call_stub_3a", "suggest_eh_setup", {}),
+        {"role": "tool", "tool_call_id": "call_stub_3a", "content": json.dumps(SUGGESTED)},
+        _assistant_call("call_stub_3b", "update_component", SUGGESTED["actions"][0]["args"]),
+        {"role": "tool", "tool_call_id": "call_stub_3b", "content": result},
+    ])
+    assert calls == [] and said == want
+
+
+def test_branch_3_with_nothing_to_suggest_says_so(stub):
+    _mod, base = stub
+    calls, said = _chat(base, [
+        {"role": "user", "content": SITE_GRID},
+        _assistant_call("call_stub_3a", "suggest_eh_setup", {}),
+        {"role": "tool", "tool_call_id": "call_stub_3a",
+         "content": json.dumps({"status": "ok", "actions": []})},
+    ])
+    assert calls == [] and said == "Nothing to tag."
+
+
+SITE_CRITICAL = ("On the Site card, no critical load is tagged. Propose which buses must "
+                 "stay on (eh_critical = true) and tag them after I confirm.")
+
+
+def test_branch_3_critical_fix_reads_then_runs_the_critical_action(stub):
+    _mod, base = stub
+    calls, _ = _chat(base, [{"role": "user", "content": SITE_CRITICAL}])
+    assert [c["name"] for c in calls] == ["suggest_eh_setup"]
+    crit = {"tool": "update_component", "args": {"component_class": "Bus", "name": "it_bus",
+                                                 "attrs": {"eh_critical": True}}, "effect": "x"}
+    found = {"status": "ok", "actions": SUGGESTED["actions"] + [crit]}
+    calls, said = _chat(base, [
+        {"role": "user", "content": SITE_CRITICAL},
+        _assistant_call("call_stub_3a", "suggest_eh_setup", {}),
+        {"role": "tool", "tool_call_id": "call_stub_3a", "content": json.dumps(found)},
+    ])
+    assert [(c["id"], json.loads(c["arguments"])) for c in calls] == [("call_stub_3b", crit["args"])]

@@ -313,6 +313,7 @@ Spec §6.
 - `ImproveCard.test.tsx`, `SiteCard.test.tsx`, `GoalCard.test.tsx` — the Do / fix / VOLL / stress buttons now assert the queued request instead of the composer seed (§5.7 `delegate` → `sendRequest`); Ask still asserts the seed.
 - `test_energy_hub_review.py` — `_validate_action` moved to `tests/_tool_actions.py` (§6.3, shared) and gained an enum check; `test_prompt_carries_the_eh_workflow_both_modes` extended for `suggest_eh_setup` (§6.3).
 - `smoke-guided.mjs --phase P24` — the Improve step's "composer seeded, nothing sent" check becomes "sent as a user message → confirmation card → decline" (§5.7 P25 behaviour).
+- P25 gate (spec §10 "P25 gate decisions"): `test_guided_mode_prompt.py::SUGGEST_SENTENCE` follows the reworded `_EH_GUIDE_CHAINING` sentence (B1: true in both modes); `delegate.test.ts` "the button title…" now checks the per-mode title (`delegateTitle`); `ImproveCard.test.tsx` "two actions" checks "one at a time" instead of "each confirmed separately" plus the group and labels (B1, B2); `ChatPanel.sendRequest.test.tsx` fixture `CARD` (update_component, tier write) gains a comment — it is now a card the backend emits in Guided (B1); `test_eh_setup_suggest.py` checks the reworded description; the P25 smoke waits for "Done — suggest_eh_setup finished." (note 4).
 
 ---
 
