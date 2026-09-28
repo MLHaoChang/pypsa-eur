@@ -124,7 +124,7 @@ def test_the_regex_guard_specifically_still_answers_400(tmp_path, malformed):
 
 @pytest.mark.parametrize("dotted", [".", "..", "...."])
 def test_dot_ids_pass_the_regex_and_are_an_ordinary_miss(tmp_path, dotted):
-    """
+    r"""
     `_SNAPSHOT_ID_RE` is `[A-Za-z0-9_\-.T]{1,128}`, so `.` and `..` match it.
     The helper this replaced had a SECOND guard — `startswith(".")` → 400 —
     and the rewrite dropped it. That is safe here and only here: the id is
