@@ -4,7 +4,19 @@
 **Found on:** `master` at `499c2e02`, during the merged-tree security pass over
 the provider seam × project-write-safety interaction.
 **Severity:** Medium. **Affects:** server / multi-tenant deployments only.
-**Status: OPEN and UNOWNED at time of writing.** The two sessions that
+**Status: FIXED 2026-09-12.** `chat_service._error_result_content` now builds the
+model-facing `is_error` content from the typed `error_kind` plus ONLY a dict
+detail's human-readable `message`, fenced. Every other key — `lock`,
+`holder_email`, anything unrecognised — is dropped, and a dict with no `message`
+contributes nothing but the kind. This finding's "why redaction is not the fix"
+section was right twice over: the site had since acquired
+`_redact_secrets_in_str`, which targets API keys and `key=value` pairs and does
+nothing to an address — verified by running it against this exact payload.
+Guard: `tests/test_chat_error_content_seam.py` (8 tests, every branch
+mutation-tested; the dict-without-`message` branch was added after a mutation
+proved the first cut of the guard missed it).
+
+**Original status at time of writing: OPEN and UNOWNED.** The two sessions that
 understood the halves (the write-safety line and the provider seam) both ended.
 Written down here precisely so it does not evaporate with them.
 

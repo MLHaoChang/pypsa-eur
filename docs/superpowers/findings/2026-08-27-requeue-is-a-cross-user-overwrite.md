@@ -3,7 +3,14 @@
 **Date:** 2026-08-27
 **Found on:** `master` at `fcb8c4a8` (verified independently in source).
 **Severity:** High — data integrity. **Affects:** multi-tenant / server only.
-**Status: OPEN and UNOWNED.** `routers/solve_queue.py` is not this session's
+**Status: FIXED — verified 2026-09-12.** `routers/solve_queue.py:942-943` now
+carries `lock = project_locks.get_lock(db, project.id)` / `if lock is not None and lock.holder_user_id != user.id` -> 409 `project_locked`,
+placed before the `network.nc` existence test, with a comment recording that it is
+a port of `enqueue_solve`'s check and why the middleware could not cover this route.
+That is exactly the fix this finding asked for. The status below was left stale after
+the fix landed; the original analysis is unchanged and still accurate about the defect.
+
+**Original status at time of writing: OPEN and UNOWNED.** `routers/solve_queue.py` is not this session's
 file; the solve-queue session is standing by. Recorded here so it does not live
 only in a socket conversation.
 
