@@ -230,6 +230,55 @@ semicolon delimiters, mixed dtypes, non-tabular bytes) arriving as a
 `_demand_buses` indirection agreeing exactly with the key `_apply_loads` matches
 on.
 
+## The browser run, 2026-09-28
+
+The owed "browser pass on the study view" (the four owed items below), done:
+the real backend (local mode, scratch data directories) and the real frontend,
+driven in Chromium through Playwright, clicking what a user clicks. Everything
+below was observed on screen, not inferred.
+
+**What works, end to end, through the UI.** Creating a study in the wizard; the
+client's own tables through the picker — the BAD pair (demand 25% over
+generation) refused inline with the balance check's own message naming hour 2,
+both totals and the -1626.1 MW gap, then the good pair accepted and named as the
+source; both studies RUN from the panel (3 client hours in ~10 s, a 48 h generated
+year in ~25 s), all six stages reaching DONE with the stage counters live; the
+ranked table (three hours, each tagged with its criteria, each OK); the per-hour
+handoff zip downloaded — a 14.9 kB PSS/E `.raw`, the `.dyr`, contingencies,
+fault levels, load-flow tables, screening, the ledger and a manifest whose
+provenance names both uploaded files, both digests, the hour count (3 in config
+and manifest alike) and `max_imbalance_mw: 0.0058`; and the PowerFactory
+read-back — an export matching the bundle's own load flow PASSES 39/39, one with
+BUS_16 off by 0.05 pu FAILS 38/39 and the comparison table names BUS_16.
+
+**What it found that no test had.**
+
+1. *A study could be created and never re-opened.* From the Projects page it
+   came up as "No project open" under a "Project '<id>' not found" toast: the
+   switch path calls `/activate`, which needs `network.nc`, and a study has none
+   by design. True on master since increment 4 — the wizard, the only path that
+   ever opened a study, never calls `/activate`. Fixed in `switchToProject`.
+2. *A spurious "not found" on every study open* — the App's auto-recovery read
+   "zero buses" as a lost network and tried to re-load one that never existed.
+   Fixed; the decision is now a tested pure function.
+3. *"Hours 8760" beside a 3-hour client file*, editable. Hours, window and
+   overlap mean something only for a generated year; they are now disabled, with
+   a sentence saying why, when the source brings its own hours.
+
+**Found and deliberately NOT fixed here — the study lives in a network
+workbench.** A study opens inside chrome built for a network: "Run LOPF", "0
+buses · 0 lines · 0 assets", Save / Snapshots / Scenarios / Duplicate / Export
+bundle quick actions, and an assistant card offering to "Summarize this solve".
+Most of it does nothing for a study, and "Export bundle" exports whatever network
+the backend holds under the study's name. None of it errors, and the study's real
+deliverable (the per-hour zip) works — but it is a design problem with the
+project kind, not a defect in one control, and piecemeal fixes would bury that.
+
+**Also recorded, from the bundle's own ledger:** inverter-based units get no
+`.dyr` record — "no IBR dynamic model (REGC/REEC) is in scope yet, so they enter
+the dynamics case as static injections". Disclosed, not hidden; but for a
+planning → dynamics tool it is the largest functional gap left.
+
 ## Out of scope, named
 
 The connection-study driver (`drivers/connection.py`); the grid-strength expansion beyond the SCR that `static/strength.py` already computes; the compliance rule engine; the PowerFactory API exporter; PowSyBl ingest; the clustered producer. Each is either behind one of the spec's own revisit triggers or behind a resource this environment lacks, and every one of them is a larger piece of work than A.
@@ -239,6 +288,6 @@ The connection-study driver (`drivers/connection.py`); the grid-strength expansi
 Recorded here so they are not silently carried forward a third time:
 
 - **ADR 0002 live probe** — needs `ANTHROPIC_API_KEY` in a session. Nothing else. It is the smallest of the four and the only one gating a claim already made in the PR description ("the copilot can do the same things through the same functions"), which is today structurally true and behaviourally unverified.
-- **Browser pass on the study view** — needs a display; Chromium and Playwright are already present in this environment, so a headed run is closer than the other three.
+- **Browser pass on the study view** — DONE 2026-09-28, headless Chromium through Playwright; see "The browser run" above. It found three defects, all fixed.
 - **Real PowerFactory export** — needs a licensed session; the runbook in `tests/gridspine/fixtures/powerfactory/README.md` says exactly what to export.
 - **macOS `.app`** — needs a Mac; the two risks are lightsim2grid's binary under the hardened runtime and its code signature.

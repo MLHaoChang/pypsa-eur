@@ -477,16 +477,22 @@ function DispatchSourcePicker({ name, config, locked }: { name: string; config: 
 // whole form back would silently overwrite a value the copilot changed in
 // between. Locked while a job is queued or running: the backend answers 409
 // then, and a disabled form says why before the request rather than after.
-const NUMERIC_FIELDS: readonly { key: 'hours' | 'k' | 'window' | 'overlap' | 'n2_prune_threshold_pct'; label: string; step?: string }[] = [
-  { key: 'hours', label: 'Hours' },
+// `generationOnly`: the field is an input to the rolling unit commitment, so it
+// means something only when the year is GENERATED here. A study fed a solved
+// network, a finished study's dispatch or the client's own tables brings its
+// own hours, and showing "Hours 8760" beside a 3-hour file (as the browser run
+// found) invites the engineer to believe the study covers a year.
+const NUMERIC_FIELDS: readonly { key: 'hours' | 'k' | 'window' | 'overlap' | 'n2_prune_threshold_pct'; label: string; step?: string; generationOnly?: true }[] = [
+  { key: 'hours', label: 'Hours', generationOnly: true },
   { key: 'k', label: 'k (hours per criterion)' },
-  { key: 'window', label: 'UC window (h)' },
-  { key: 'overlap', label: 'UC overlap (h)' },
+  { key: 'window', label: 'UC window (h)', generationOnly: true },
+  { key: 'overlap', label: 'UC overlap (h)', generationOnly: true },
   { key: 'n2_prune_threshold_pct', label: 'N-2 prune threshold (%)', step: '0.1' },
 ]
 
 function ConfigEditor({ name, config, locked }: { name: string; config: StudyConfig; locked: boolean }) {
   const qc = useQueryClient()
+  const ownHours = !!(config.from_external || config.from_network || config.from_dispatch)
   const [draft, setDraft] = useState<StudyConfigPatch>({})
   const dirty = Object.keys(draft).length > 0
 
@@ -518,15 +524,21 @@ function ConfigEditor({ name, config, locked }: { name: string; config: StudyCon
         </Btn>
       }
     >
+      {ownHours && (
+        <p className="text-[11px] text-muted mb-2" data-testid="config-source-hours">
+          Hours, UC window and overlap apply only to a year generated here — this study&rsquo;s
+          dispatch source brings its own hours.
+        </p>
+      )}
       <div className="flex flex-wrap items-end gap-3" data-testid="config-editor">
         {NUMERIC_FIELDS.map(f => (
           <Field key={f.key} label={f.label}>
             <input
               type="number"
               step={f.step}
-              className="px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 font-mono w-[120px]"
+              className="px-2.5 py-1.5 text-sm border border-border rounded focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/20 font-mono w-[120px] disabled:opacity-50"
               value={value(f.key)}
-              disabled={locked}
+              disabled={locked || (ownHours && !!f.generationOnly)}
               aria-label={f.label}
               onChange={e => {
                 const n = Number(e.target.value)

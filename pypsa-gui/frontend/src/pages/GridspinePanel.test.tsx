@@ -389,6 +389,34 @@ describe('GridspinePanel', () => {
     expect(shown.textContent).toContain("unknown ['G99']")
   })
 
+  it('greys out the generation-only fields when the source brings its own hours', async () => {
+    // Found in the browser: a study fed 3 hours of the client's own tables
+    // showed "Hours 8760", "UC window 168" and "UC overlap 24" — editable, and
+    // describing nothing, since only a year GENERATED here uses them. An
+    // engineer reading "8760" beside a 3-hour file would reasonably believe the
+    // study covers a year.
+    api.config.mockResolvedValue({
+      ...config,
+      from_external: '/p/Study A/gridspine/uploads/external/d.csv',
+      from_external_name: 'd.csv',
+    })
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    for (const label of ['Hours', 'UC window (h)', 'UC overlap (h)']) {
+      expect((screen.getByLabelText(label) as HTMLInputElement).disabled).toBe(true)
+    }
+    // k, the prune threshold and screening still apply to any source.
+    expect((screen.getByLabelText('k (hours per criterion)') as HTMLInputElement).disabled).toBe(false)
+    expect(screen.getByTestId('config-source-hours').textContent).toMatch(/own hours/i)
+  })
+
+  it('keeps the generation fields editable when the year is generated here', async () => {
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    expect((screen.getByLabelText('Hours') as HTMLInputElement).disabled).toBe(false)
+    expect(screen.queryByTestId('config-source-hours')).toBeNull()
+  })
+
   it('shows the current source by project name when the config already names one', async () => {
     api.config.mockResolvedValue({ ...config, from_network: '/projects/Solved 39/network.nc', from_project: 'Solved 39' })
     renderPanel()
