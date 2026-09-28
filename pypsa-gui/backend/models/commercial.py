@@ -101,7 +101,9 @@ LibraryItemKind = Literal["tariff", "contract", "connection_agreement"]
 
 class LibraryItemRef(BaseModel):
     """A pinned Library item version (P2 WP2.4a): `hash` is the sha256 of the
-    item's canonical JSON (`hashing.library_item_digest`)."""
+    item's canonical JSON — `hashing.library_item_digest(model)` for a tariff
+    or a connection agreement; for a contract, the canonical JSON with its
+    `type` added (`services/library/items._canonical_bytes`)."""
 
     kind: LibraryItemKind
     id: str = Field(min_length=1)

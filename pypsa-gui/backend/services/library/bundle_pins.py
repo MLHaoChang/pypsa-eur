@@ -83,7 +83,7 @@ _ITEM_KEYS = frozenset({"kind", "id", "version", "hash"})
 
 def collect_pins(obj: Any) -> list[dict]:
     """Every series ref AND Library item ref nested in `obj`, as pins
-    `{kind, id, version, hash}` (series first by kind order), deduped."""
+    `{kind, id, version, hash}`, deduped, sorted by (kind, id, version, hash)."""
     found: dict[tuple, dict] = {}
     for r in collect_refs(obj):
         found.setdefault((SERIES, r.id, r.version, r.hash), _pin(r))

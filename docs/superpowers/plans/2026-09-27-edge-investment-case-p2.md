@@ -611,6 +611,15 @@ Files: `backend/services/library/items.py` (new; JSON payload written as a file 
     - a bundle into another org reporting its tariff pin as `missing`.
   - **Broad regression** (95 files touching the solver-config, library or pin paths, plus the commercial set): 2684 passed, 3 skipped.
 
+- **WP2.4a review round 1 → PASS WITH CONDITIONS; all findings fixed:**
+  1. **MEDIUM.** A submitted `import_tariff` that differs from its `import_tariff_ref` was silently replaced by the Library copy. It is now refused with 409 `import_tariff_ref_conflict`, and the message offers both ways out. An unchanged inline copy still binds.
+  2. `import_tariff_ref` must be of kind `tariff`. `resolve_tariff_ref` refuses any other kind with a clear 422, and `validate_for_network` does the same in preflight.
+  3. Unknown keys are refused at EVERY level of a Library payload (`items._unknown_keys`). Tested for a tariff top level, a nested tariff item, a contract's nested ref, and an agreement's capacity fee.
+  4. GET `/items/{kind}/{name}` normalises the name as PUT does.
+  5. A tariff that does not bind uses `CommercialBindingError.code` (`commercial_binding_invalid`).
+  6. The docstrings of `LibraryItemRef` and `items` state the contract hash rule (canonical JSON + `type`).
+  7. Stale text is fixed (`import_tariff_id` message, `collect_pins` ordering). The router's two Library resolvers share one org-resolution helper.
+
 ## WP2.2-0 Settlement inputs
 
 Files: `services/results/physical_quantities.py` (extension), `services/solver/assumptions.py` (DSR capture

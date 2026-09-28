@@ -353,45 +353,33 @@ def _bind_commercial(commercial, user) -> dict | None:
                                              "commercial config after it finishes"})
     project_dir = pathlib.Path(ctx.storage_dir) if ctx.storage_dir else None
 
-    def resolve(ref):
-        from db.models import User
-        from db.session import SessionLocal
-        from services import library_acl
+    def resolver(read):
+        """A Library resolver in the ACTIVE PROJECT's org (the caller's org for
+        an unsaved network); `read(db, org, ref)` is the store's resolve."""
+        def resolve(ref):
+            from db.models import User
+            from db.session import SessionLocal
+            from services import library_acl
 
-        # The context carries the org id as a string (`org:uuid` registry key).
-        org = UUID(str(ctx.org_id)) if ctx.org_id else None
-        with SessionLocal() as db:
-            if org is None and isinstance(user, User):
-                org = library_acl.org_of(db, user)
-            if org is None:
-                raise binding.BindingRefusal(
-                    409, "library_org_unknown",
-                    "save the project first: a Library ref resolves in the project's "
-                    "organization")
-            try:
-                return series_store.resolve(db, org, ref)
-            except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
-                raise binding.BindingRefusal(409, "library_ref_stale", str(exc)) from exc
+            # The context carries the org id as a string (`org:uuid` registry key).
+            org = UUID(str(ctx.org_id)) if ctx.org_id else None
+            with SessionLocal() as db:
+                if org is None and isinstance(user, User):
+                    org = library_acl.org_of(db, user)
+                if org is None:
+                    raise binding.BindingRefusal(
+                        409, "library_org_unknown",
+                        "save the project first: a Library ref resolves in the project's "
+                        "organization")
+                try:
+                    return read(db, org, ref)
+                except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
+                    raise binding.BindingRefusal(409, "library_ref_stale", str(exc)) from exc
+        return resolve
 
-    def resolve_item(ref):
-        from db.models import User
-        from db.session import SessionLocal
-        from services import library_acl
-        from services.library import items as library_items
+    from services.library import items as library_items
 
-        org = UUID(str(ctx.org_id)) if ctx.org_id else None
-        with SessionLocal() as db:
-            if org is None and isinstance(user, User):
-                org = library_acl.org_of(db, user)
-            if org is None:
-                raise binding.BindingRefusal(
-                    409, "library_org_unknown",
-                    "save the project first: a Library ref resolves in the project's "
-                    "organization")
-            try:
-                return library_items.resolve(db, org, ref)
-            except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
-                raise binding.BindingRefusal(409, "library_ref_stale", str(exc)) from exc
+    resolve, resolve_item = resolver(series_store.resolve), resolver(library_items.resolve)
 
     try:
         return binding.bind_commercial(PyPSAService.get_network(), commercial,

@@ -495,6 +495,9 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
         # the inline copy the solve uses; a copy that is missing, or that no
         # longer hashes to the ref, is not what the ref names.
         ref = cfg.import_tariff_ref
+        if ref.kind != "tariff":
+            raise CommercialBindingError(
+                f"import_tariff_ref names a Library {ref.kind}, not a tariff")
         if cfg.import_tariff is None:
             raise CommercialBindingError(
                 f"import_tariff_ref names Library tariff {ref.id!r} v{ref.version}, which is not "
@@ -506,8 +509,9 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
                 "ref, or drop import_tariff_ref to keep the edited tariff")
     if cfg.import_tariff_id is not None and cfg.import_tariff is None:
         raise CommercialBindingError(
-            "import_tariff_id names a Library tariff, which arrives in P2 (WP2.4); "
-            "carry the tariff inline as import_tariff")
+            "import_tariff_id is a label: a Library tariff is named by import_tariff_ref "
+            "(P2 WP2.4a); carry the tariff inline as import_tariff, or set "
+            "import_tariff_ref")
     bounds = (n.meta.get("vintage_bounds") or {}).get("Link") if hasattr(n, "meta") else None
     if isinstance(bounds, dict):
         clash = sorted(l for l in {*import_links(cfg), cfg.export_link} if l and l in bounds)

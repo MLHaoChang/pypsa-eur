@@ -7,7 +7,9 @@ content-hashed file under the org's Library directory:
 `<projects_root>/.library/<org_id>/items/<kind>/<name-slug>-<sha16>.json`
 (`LibraryItem.path` is NOT NULL). The canonical bytes are
 `hashing.library_item_canonical(model)` — sorted-key JSON of the model's
-non-default fields — so a model that later grows an optional field keeps every
+non-default fields; for a CONTRACT, that object with its `type` added (two
+contract types can share fields), so a contract's hash is NOT
+`library_item_digest(model)` — so a model that later grows an optional field keeps every
 stored hash, and preflight can check an inline copy against its ref without a
 database (`hashing.library_item_digest`). Rows share `library_items` with the
 series (`kind` is part of the unique key); versions, idempotent PUT and the
@@ -72,7 +74,45 @@ def _slug(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")[:48] or "item"
 
 
+def _unknown_keys(model: BaseModel, raw: Any, path: str = "") -> list[str]:
+    """Keys of `raw` that the validated `model` does not declare, at every
+    nesting level (a typo such as `valid_too` must not silently vanish from a
+    Library item, WP2.4a review #3)."""
+    if not isinstance(raw, dict):
+        return []
+    fields = type(model).model_fields
+    names = set(fields) | {f.alias for f in fields.values() if f.alias}
+    out = [f"{path}{k}" for k in raw if k not in names]
+    for name, info in fields.items():
+        key = info.alias or name
+        if key not in raw:
+            continue
+        value, sub = getattr(model, name), raw[key]
+        if isinstance(value, BaseModel):
+            out += _unknown_keys(value, sub, f"{path}{key}.")
+        elif isinstance(value, list) and isinstance(sub, list):
+            for i, (v, r) in enumerate(zip(value, sub)):
+                if isinstance(v, BaseModel):
+                    out += _unknown_keys(v, r, f"{path}{key}[{i}].")
+    return out
+
+
 def validate_payload(kind: str, payload: Any) -> BaseModel:
+    """The payload as its kind's model, or ValueError. Unknown keys are
+    refused at every level."""
+    model = _validate(kind, payload)
+    raw = payload
+    if kind == "connection_agreement":
+        raw = {k: v for k, v in payload.items() if k != "library_ref"}
+    elif kind == "contract":
+        raw = {k: v for k, v in payload.items() if k not in ("type", "library_ref")}
+    unknown = _unknown_keys(model, raw)
+    if unknown:
+        raise ValueError(f"unknown {kind} field(s): {', '.join(sorted(unknown))}")
+    return model
+
+
+def _validate(kind: str, payload: Any) -> BaseModel:
     """The payload as its kind's model, or ValueError with a readable reason."""
     if kind not in KINDS:
         raise ValueError(f"unknown Library item kind {kind!r}; one of {', '.join(KINDS)}")
@@ -90,9 +130,6 @@ def validate_payload(kind: str, payload: Any) -> BaseModel:
             raise ValueError(f"contract payload needs type, one of "
                              f"{', '.join(CONTRACT_TYPES)}")
         body = {k: v for k, v in payload.items() if k not in ("type", "library_ref")}
-        unknown = sorted(set(body) - set(model.model_fields))
-        if unknown:
-            raise ValueError(f"unknown {ctype} contract field(s): {', '.join(unknown)}")
         return model.model_validate(body)
     except ValidationError as exc:
         err = exc.errors()[0]

@@ -234,3 +234,60 @@ def test_a_bundle_into_another_org_reports_its_tariff_pin(client, other_org_clie
                                   files={"file": ("b.zip", r.content, "application/zip")})
     issues = other.json()["library_issues"]
     assert [(i["reason"], i["kind"], i["id"]) for i in issues] == [("missing", "tariff", "nl")]
+
+
+# ── WP2.4a review round 1 ──────────────────────────────────────────────────
+
+
+def test_an_edited_inline_tariff_with_its_ref_is_a_conflict_not_a_silent_revert(
+        client, install_network, session_ctx):
+    """#1: the submitted edit is never replaced by the Library copy."""
+    install_network(build_edge_15min())
+    ref = _put(client, "tariff", "nl", TARIFF).json()
+    edited = json.loads(json.dumps(TARIFF))
+    edited["items"][0]["periods"][1]["rate"] = 99.0
+    r = client.put("/api/simulation/solver_config", json=_ref_config(ref, import_tariff=edited))
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "import_tariff_ref_conflict"
+    same = client.put("/api/simulation/solver_config", json=_ref_config(ref, import_tariff=TARIFF))
+    assert same.status_code == 200, same.text                     # the unchanged copy is fine
+
+
+def test_a_ref_of_another_kind_is_refused_cleanly(client, install_network):
+    """#2: `import_tariff_ref` names a tariff; anything else is one clear error."""
+    from services.commercial.preflight import commercial_findings
+
+    install_network(build_edge_15min())
+    ref = _put(client, "connection_agreement", "firm70", AGREEMENT).json()
+    r = client.put("/api/simulation/solver_config", json=_ref_config(ref))
+    assert r.status_code == 422
+    assert r.json()["detail"]["code"] == "commercial_binding_invalid"
+    assert "not a tariff" in r.json()["detail"]["message"]
+    from models.commercial import Tariff
+
+    fake = {"kind": "contract", "id": "x", "version": 1,
+            "hash": H.library_item_digest(Tariff.model_validate(TARIFF))}
+    codes = {f[1] for f in commercial_findings(build_edge_15min(), {
+        "poc_link": "import", "import_tariff_ref": fake, "import_tariff": TARIFF})
+        if f[0] == "error"}
+    assert codes == {"commercial.binding_invalid"}
+
+
+@pytest.mark.parametrize("kind,payload", [
+    ("tariff", {**TARIFF, "valid_too": "2031-01-01"}),
+    ("tariff", {**TARIFF, "items": [{**TARIFF["items"][0], "surprise": 1}]}),
+    ("contract", {**PPA, "reference_price": {"id": "px", "version": 1, "hash": "a" * 64,
+                                             "source": "t", "junk": 1}}),
+    ("connection_agreement", {**AGREEMENT, "capacity_fee": {
+        "id": "f", "kind": "capacity", "unit": "per_kw_year",
+        "periods": [{"name": "all", "rate": 1.0, "typo": 2}]}}),
+])
+def test_unknown_keys_are_refused_at_every_level(client, kind, payload):
+    """#3: a typo never silently vanishes from a Library item."""
+    r = _put(client, kind, "x", payload)
+    assert r.status_code == 422 and "unknown" in r.text
+
+
+def test_get_normalises_the_name_like_put(client):
+    """#4."""
+    assert _put(client, "tariff", " sp ", TARIFF).json()["id"] == "sp"
+    assert client.get("/api/library/items/tariff/%20sp%20").status_code == 200

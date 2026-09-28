@@ -180,6 +180,7 @@ def get_item(kind: ItemKind, name: str, version: int | None = None,
              org_id: UUID | None = None, db: DBSession = Depends(get_db),
              user: User = Depends(require_user)):
     org = _target_org(db, user, org_id, write=False)
+    name = _item_name(name)   # the PUT's normalisation (WP2.4a review #4)
     ref = (I.latest_ref(db, org, kind.value, name) if version is None
            else I.ref_for(db, org, kind.value, name, version))
     if ref is None:

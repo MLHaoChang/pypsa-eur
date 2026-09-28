@@ -43,6 +43,20 @@ def resolve_tariff_ref(commercial, resolve_item: Callable[[object], dict] | None
     ref = commercial.import_tariff_ref
     if ref is None:
         return commercial
+    if ref.kind != "tariff":
+        raise BindingRefusal(422, lp_bindings.CommercialBindingError.code,
+                             f"import_tariff_ref names a Library {ref.kind}, not a tariff")
+    if commercial.import_tariff is not None:
+        from services.commercial import hashing as _H
+
+        if _H.library_item_digest(commercial.import_tariff) != ref.hash:
+            # An edited inline copy would be silently replaced by the Library
+            # tariff (WP2.4a review #1): say so, never drop the edit.
+            raise BindingRefusal(
+                409, "import_tariff_ref_conflict",
+                f"the submitted import_tariff differs from Library tariff {ref.id!r} "
+                f"v{ref.version}; drop import_tariff_ref to keep the edited tariff, or drop "
+                "import_tariff to use the Library version")
     if resolve_item is None:
         raise BindingRefusal(409, "library_org_unknown",
                              "a Library tariff ref needs the project's organization")
@@ -51,7 +65,7 @@ def resolve_tariff_ref(commercial, resolve_item: Callable[[object], dict] | None
         return CommercialConfig.model_validate(
             {**commercial.model_dump(mode="json"), "import_tariff": payload})
     except ValueError as exc:
-        raise BindingRefusal(422, "binding_invalid",
+        raise BindingRefusal(422, lp_bindings.CommercialBindingError.code,
                              f"Library tariff {ref.id!r} v{ref.version} does not bind: {exc}") \
             from exc
 
