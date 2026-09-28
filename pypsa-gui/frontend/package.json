@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:auth-gate": "vitest run vite.auth-gate.test.ts && node scripts/smoke-auth-gate.mjs"
+    "test:auth-gate": "vitest run vite.auth-gate.test.ts && node scripts/smoke-auth-gate.mjs",
+    "smoke:reports": "node scripts/smoke-reports.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.80.5",

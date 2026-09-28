@@ -11,8 +11,14 @@
 // Numbers the audit listed in `audit.unverified` are wrapped in a `<mark>`
 // inside the rendered prose (`highlightUnverified.ts`), with the tooltip
 // "not found in the evidence".
-import { useMemo } from 'react'
-import { AlertTriangle, CircleSlash, Info } from 'lucide-react'
+//
+// WP7b: a per-section "Regenerate…" control opens a one-line instruction
+// input; submitting hands `(section_id, instruction)` to the viewer, which
+// posts `POST …/sections/{id}/regenerate`. Offered for every section the
+// document has (the backend rewrites any of them from the latest version)
+// and disabled while a job runs.
+import { useId, useMemo, useState, type FormEvent } from 'react'
+import { AlertTriangle, CircleSlash, Info, RefreshCw } from 'lucide-react'
 import type { Options } from 'react-markdown'
 import ChatMarkdown from '../../components/ChatMarkdown'
 import { Tag } from '../../components/PageKit'
@@ -181,13 +187,33 @@ function BlockView({
 }
 
 export function SectionCard({
-  section, doc, project,
+  section, doc, project, onRegenerate, regenerateDisabled,
 }: {
   section: Section
   doc: ReportDocument
   project: string
+  /** WP7b: present when the viewer can regenerate sections. */
+  onRegenerate?: (sectionId: string, instruction: string) => void | Promise<unknown>
+  regenerateDisabled?: boolean
 }) {
   const unverified = section.audit?.unverified ?? []
+  const inputId = useId()
+  const [regenOpen, setRegenOpen] = useState(false)
+  const [instruction, setInstruction] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  async function submitRegenerate(e: FormEvent) {
+    e.preventDefault()
+    if (!onRegenerate || submitting) return
+    setSubmitting(true)
+    try {
+      await onRegenerate(section.section_id, instruction)
+      setRegenOpen(false)
+      setInstruction('')
+    } finally {
+      setSubmitting(false)
+    }
+  }
   const plugins = useMemo<Options['rehypePlugins']>(
     () => (unverified.length ? [[rehypeMarkUnverified, unverified]] : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -210,7 +236,56 @@ export function SectionCard({
             {unverified.length} number{unverified.length === 1 ? '' : 's'} not found in the evidence
           </span>
         )}
+        {onRegenerate && (
+          <button
+            type="button"
+            onClick={() => setRegenOpen(o => !o)}
+            disabled={regenerateDisabled}
+            data-testid="section-regenerate"
+            aria-expanded={regenOpen}
+            title={regenerateDisabled
+              ? 'A report job is running'
+              : 'Write this section again, with an optional instruction, as a new version'}
+            className={`${unverified.length > 0 ? '' : 'ml-auto '}inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent disabled:opacity-40 disabled:cursor-not-allowed`}
+          >
+            <RefreshCw size={10} /> Regenerate…
+          </button>
+        )}
       </header>
+      {onRegenerate && regenOpen && (
+        <form
+          onSubmit={submitRegenerate}
+          className="flex items-center gap-2 px-4 py-2 border-b border-border bg-bg-2/60 text-[11.5px]"
+          data-testid="regenerate-form"
+        >
+          <label htmlFor={inputId} className="text-muted shrink-0">Instruction</label>
+          <input
+            id={inputId}
+            className="flex-1 min-w-0 px-2 py-1 text-[11.5px] border border-border rounded bg-bg text-text"
+            value={instruction}
+            onChange={e => setInstruction(e.target.value)}
+            placeholder="Optional — e.g. shorter, lead with the number that binds"
+            disabled={submitting || regenerateDisabled}
+            autoFocus
+          />
+          <button
+            type="submit"
+            disabled={submitting || regenerateDisabled}
+            data-testid="regenerate-submit"
+            className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10.5px] text-text hover:border-accent hover:text-accent disabled:opacity-40"
+          >
+            {submitting ? 'Starting…' : 'Regenerate'}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setRegenOpen(false); setInstruction('') }}
+            disabled={submitting}
+            className="px-2 py-1 text-[10.5px] text-muted hover:text-text"
+          >
+            Cancel
+          </button>
+        </form>
+      )}
       <div className="p-4 flex flex-col gap-2.5">
         {section.status !== 'ok' && section.note && (
           <p className="text-[12px] text-muted italic" data-testid="section-note">{section.note}</p>

@@ -9,12 +9,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReportDocument, ReportMeta } from '../api/reports'
+import type { ReportDocument, ReportJobRecord, ReportMeta } from '../api/reports'
 import ReportsPanel from './ReportsPanel'
 
-const store = vi.hoisted(() => ({ currentProject: 'Demo' as string | null }))
+const store = vi.hoisted(() => ({
+  currentProject: 'Demo' as string | null,
+  reportGenerateRequest: false,
+  clearReportGenerateRequest: vi.fn(),
+}))
 vi.mock('../store/uiStore', () => ({
-  useUIStore: (sel: (s: { currentProject: string | null }) => unknown) => sel({ currentProject: store.currentProject }),
+  useUIStore: (sel: (s: typeof store) => unknown) => sel(store),
 }))
 
 const api = vi.hoisted(() => ({
@@ -23,6 +27,10 @@ const api = vi.hoisted(() => ({
   createEvidenceOnlyReport: vi.fn(),
   deleteReport: vi.fn(),
   exportReport: vi.fn(),
+  getGenerateStatus: vi.fn(),
+  generateReport: vi.fn(),
+  abortGenerate: vi.fn(),
+  regenerateSection: vi.fn(),
 }))
 vi.mock('../api/reports', async () => {
   const real = await vi.importActual<typeof import('../api/reports')>('../api/reports')
@@ -92,9 +100,34 @@ beforeEach(() => {
   api.createEvidenceOnlyReport.mockReset()
   api.deleteReport.mockReset().mockResolvedValue({ deleted: true, report_id: ID_A })
   api.exportReport.mockReset()
+  api.getGenerateStatus.mockReset().mockResolvedValue(null)
+  api.generateReport.mockReset().mockResolvedValue({ status: 'running', report_id: ID_B })
+  api.abortGenerate.mockReset().mockResolvedValue({ status: 'running', aborting: true })
+  api.regenerateSection.mockReset()
+  store.reportGenerateRequest = false
+  store.clearReportGenerateRequest.mockReset()
   toast.success.mockReset()
   toast.error.mockReset()
 })
+
+function job(over: Partial<ReportJobRecord> = {}): ReportJobRecord {
+  return {
+    status: 'running',
+    report_id: ID_B,
+    version: null,
+    mode: 'generate',
+    section: null,
+    progress: { done: 1, total: 4, current: 'fmea_top' },
+    repairs: 0,
+    prose_failures: [],
+    error: null,
+    started_at: Date.now() / 1000 - 65,
+    finished_at: null,
+    profile_id: 'anthropic-default',
+    model: 'claude-sonnet',
+    ...over,
+  }
+}
 
 afterEach(() => cleanup())
 
@@ -215,5 +248,114 @@ describe('ReportsPanel', () => {
     ))
     renderPanel()
     expect((await screen.findByTestId('reports-error')).textContent).toContain('502')
+  })
+})
+
+describe('ReportsPanel — generation (WP7b)', () => {
+  it('disables Generate with the reason when no Project is open', () => {
+    store.currentProject = null
+    renderPanel()
+    const gen = screen.getByTestId('reports-generate') as HTMLButtonElement
+    expect(gen.disabled).toBe(true)
+    expect(gen.title).toMatch(/no project/i)
+  })
+
+  it('opens the Generate dialog and starts the job with the submitted options', async () => {
+    api.listReports.mockResolvedValue([META_A])
+    const user = userEvent.setup()
+    renderPanel()
+    await screen.findAllByTestId('report-row')
+    expect(screen.queryByRole('dialog')).toBeNull()
+    await user.click(screen.getByTestId('reports-generate'))
+    const dialog = await screen.findByRole('dialog')
+    await user.type(within(dialog).getByLabelText('Title'), 'Client report')
+    api.getGenerateStatus.mockResolvedValue(job())
+    await user.click(within(dialog).getByTestId('generate-submit'))
+    await waitFor(() => expect(api.generateReport).toHaveBeenCalledWith('Demo', { title: 'Client report', language: 'en' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    // the strip appears once the status says running
+    expect(await screen.findByTestId('report-job-strip')).toBeTruthy()
+  })
+
+  it('offers the sections of the newest evidence-only report in the dialog', async () => {
+    api.listReports.mockResolvedValue([META_B, META_A])
+    const user = userEvent.setup()
+    renderPanel()
+    await screen.findAllByTestId('report-row')
+    await user.click(screen.getByTestId('reports-generate'))
+    const dialog = await screen.findByRole('dialog')
+    await waitFor(() => expect(api.getReport).toHaveBeenCalledWith('Demo', ID_A))
+    await waitFor(() => expect(within(dialog).getAllByRole('checkbox').map(b => (b as HTMLInputElement).value)).toEqual(['summary']))
+  })
+
+  it('pre-armed generation opens the dialog on arrival and clears the request', async () => {
+    store.reportGenerateRequest = true
+    renderPanel()
+    expect(await screen.findByRole('dialog')).toBeTruthy()
+    await waitFor(() => expect(store.clearReportGenerateRequest).toHaveBeenCalled())
+  })
+
+  it('shows the progress strip while running: done/total, the current section title, elapsed, and Abort', async () => {
+    api.listReports.mockResolvedValue([META_B])
+    api.getGenerateStatus.mockResolvedValue(job())
+    renderPanel()
+    const strip = await screen.findByTestId('report-job-strip')
+    expect(strip.textContent).toContain('1/4')
+    expect(strip.textContent).toContain('Residual failure modes')
+    expect(strip.textContent).toMatch(/1:0\d elapsed/)
+    const bar = within(strip).getByRole('progressbar')
+    expect(bar.getAttribute('aria-valuenow')).toBe('25')
+    // the Generate button is disabled while a job runs
+    expect((screen.getByTestId('reports-generate') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('Abort calls the abort route and shows "stopping…" until the record leaves running', async () => {
+    api.listReports.mockResolvedValue([META_B])
+    api.getGenerateStatus.mockResolvedValue(job())
+    const user = userEvent.setup()
+    renderPanel()
+    const strip = await screen.findByTestId('report-job-strip')
+    await user.click(within(strip).getByTestId('report-job-abort'))
+    await waitFor(() => expect(api.abortGenerate).toHaveBeenCalledWith('Demo'))
+    expect((await screen.findByTestId('report-job-abort')).textContent).toMatch(/stopping/i)
+  })
+
+  it('shows the failed banner with the error', async () => {
+    api.listReports.mockResolvedValue([META_B])
+    api.getGenerateStatus.mockResolvedValue(job({ status: 'failed', error: 'provider exploded', finished_at: Date.now() / 1000 }))
+    renderPanel()
+    const banner = await screen.findByTestId('report-job-failed')
+    expect(banner.textContent).toContain('provider exploded')
+    expect(screen.queryByTestId('report-job-abort')).toBeNull()
+  })
+
+  it('shows the done line with profile, model and repairs, and lists prose failures by section', async () => {
+    api.listReports.mockResolvedValue([META_B])
+    api.getGenerateStatus.mockResolvedValue(job({
+      status: 'done', version: 1, repairs: 2,
+      progress: { done: 4, total: 4, current: null }, finished_at: Date.now() / 1000,
+      prose_failures: [
+        { section_id: 'gates', reason: 'invalid_json', raw_head: '{"x":', repairs: 1 },
+        { section_id: 'tea', reason: 'empty', raw_head: null, repairs: 0 },
+      ],
+    }))
+    renderPanel()
+    const done = await screen.findByTestId('report-job-done')
+    expect(done.textContent).toContain('anthropic-default')
+    expect(done.textContent).toContain('claude-sonnet')
+    expect(done.textContent).toMatch(/2 repairs/)
+    const failures = screen.getAllByTestId('report-job-prose-failure')
+    expect(failures).toHaveLength(2)
+    expect(failures[0].textContent).toContain('Dynamics gates')
+    expect(failures[0].textContent).toContain('invalid_json')
+    expect(failures[1].textContent).toContain('Techno-economic')
+  })
+
+  it('the list shows the mode and a "written by <model>" chip on generated reports', async () => {
+    api.listReports.mockResolvedValue([META_A, META_B])
+    renderPanel()
+    const rows = await screen.findAllByTestId('report-row')
+    expect(within(rows[0]).queryByTestId('report-written-by')).toBeNull()
+    expect(within(rows[1]).getByTestId('report-written-by').textContent).toMatch(/written by claude-sonnet/i)
   })
 })

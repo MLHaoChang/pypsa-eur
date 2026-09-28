@@ -13,8 +13,10 @@
  * feeds an `<img src>`. Raw fetch bypasses the axios CSRF interceptor, so the
  * three mutations add the header themselves through `rawFetchHeaders`.
  *
- * Phase-1 routes only. Generation (`generate`, `regenerate`, `abort`,
- * `status`) is WP3's job and lands with WP7b.
+ * Phase-1 routes (WP7a) plus WP3's generation job (WP7b, backend
+ * `routers/report_jobs.py`): `generateReport`, `getGenerateStatus` (204 →
+ * `null`, polled by `pages/reports/useReportJob.ts`), `abortGenerate` and
+ * `regenerateSection`.
  */
 import { rawFetchHeaders } from './csrf'
 import type { UploadMeta } from './uploads'
@@ -116,6 +118,58 @@ export interface ReportMeta {
 
 export interface DeleteReportResponse { deleted: boolean; report_id: string }
 
+// ── the generation job (WP3 / WP7b) ─────────────────────────────────────────
+
+export type ReportJobStatus = 'running' | 'done' | 'failed' | 'aborted'
+export type ReportJobMode = 'generate' | 'regenerate'
+
+/** One section the model could not write: stated in the document as
+ *  `not_established` with the reason, and listed on the job record. */
+export interface ProseFailure {
+  section_id: string
+  reason: string
+  raw_head?: string | null
+  repairs: number
+}
+
+/** `GET …/reports/generate/status` — `services/reports/report_job.py::public_record`. */
+export interface ReportJobRecord {
+  status: ReportJobStatus
+  report_id: string
+  /** The version the job wrote; `null` while running. */
+  version: number | null
+  mode: ReportJobMode
+  /** The section id of a `regenerate` job; `null` for a whole report. */
+  section: string | null
+  progress: { done: number; total: number; current: string | null }
+  repairs: number
+  prose_failures: ProseFailure[]
+  error: string | null
+  /** Unix seconds (`time.time()`). */
+  started_at: number
+  finished_at: number | null
+  profile_id: string
+  model: string
+}
+
+export interface GenerateReportOptions {
+  title?: string
+  /** BCP-47-ish free text; the backend defaults to `"en"`. */
+  language?: string
+  /** Section ids to write; omitted = the backend's default set. */
+  sections?: string[]
+  instruction?: string
+}
+
+export interface RegenerateSectionOptions {
+  instruction?: string
+  language?: string
+}
+
+export interface GenerateReportResponse { status: 'running'; report_id: string }
+export interface AbortGenerateResponse { status: ReportJobStatus; aborting: boolean }
+export interface RegenerateSectionResponse { status: 'running'; report_id: string; version: number }
+
 // ── errors ──────────────────────────────────────────────────────────────────
 
 /**
@@ -132,6 +186,13 @@ export type ReportErrorKind =
   | 'project_locked'
   | 'tool_error'
   | 'unknown'
+  // the job routes (`routers/report_jobs.py`)
+  | 'report_job_in_flight'
+  | 'report_job_not_found'
+  | 'report_section_not_found'
+  | 'no_evidence'
+  | 'missing_api_key'
+  | 'sdk_not_installed'
 
 export interface ReportErrorDetail {
   error_kind: ReportErrorKind | string
@@ -160,6 +221,30 @@ export function reportErrorMessage(e: unknown, fallback = 'Request failed'): str
   if (isReportError(e)) return e.detail.message || fallback
   if (e instanceof Error && e.message) return e.message
   return fallback
+}
+
+/**
+ * The toast copy for a refused generate / regenerate / abort. The kinds the
+ * job routes answer with get a sentence that names the next action; any
+ * other kind falls back to the backend's own message.
+ */
+export function reportJobErrorMessage(e: unknown, fallback = 'Request failed'): string {
+  if (isReportError(e)) {
+    switch (e.detail.error_kind) {
+      case 'report_job_in_flight':
+        return 'A report is already being written — wait for it to finish or abort it.'
+      case 'no_evidence':
+        return 'Nothing to report on yet: run a study first (the Energy Hub reference design or an adequacy study).'
+      case 'missing_api_key':
+      case 'sdk_not_installed':
+        return `No usable LLM profile: configure an LLM profile in Settings. (${e.detail.message})`
+      case 'project_locked':
+        return e.detail.message || 'The Project is being edited by another user.'
+      default:
+        return e.detail.message || fallback
+    }
+  }
+  return reportErrorMessage(e, fallback)
 }
 
 async function _parseError(resp: Response): Promise<ReportsError> {
@@ -277,5 +362,68 @@ export async function exportReport(
       headers: { 'Content-Type': 'application/json', ...rawFetchHeaders('POST') },
       body: JSON.stringify(body),
     },
+  ))
+}
+
+// ── the generation job (WP3 / WP7b) ─────────────────────────────────────────
+
+function _postJson(url: string, body: unknown): Promise<Response> {
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...rawFetchHeaders('POST') },
+    body: JSON.stringify(body),
+  })
+}
+
+/**
+ * `POST /{name}/reports/generate` — start a generated report (v1) on the
+ * active LLM profile from the session's current result state. Refusals:
+ * `report_job_in_flight` (409), `no_evidence` (400), `missing_api_key` /
+ * `sdk_not_installed` (400), `project_locked` (409). Poll `getGenerateStatus`.
+ */
+export async function generateReport(
+  projectName: string,
+  opts: GenerateReportOptions = {},
+): Promise<GenerateReportResponse> {
+  const body: GenerateReportOptions = { language: (opts.language ?? '').trim() || 'en' }
+  if (opts.title != null && opts.title.trim()) body.title = opts.title.trim()
+  if (opts.sections && opts.sections.length > 0) body.sections = opts.sections
+  if (opts.instruction != null && opts.instruction.trim()) body.instruction = opts.instruction.trim()
+  return _json<GenerateReportResponse>(await _postJson(`${base(projectName)}/generate`, body))
+}
+
+/** `GET /{name}/reports/generate/status` — the job record; `null` when never run (204). */
+export async function getGenerateStatus(projectName: string): Promise<ReportJobRecord | null> {
+  const resp = await fetch(`${base(projectName)}/generate/status`)
+  if (resp.status === 204) return null
+  return _json<ReportJobRecord>(resp)
+}
+
+/** `POST /{name}/reports/generate/abort` — stop after the current section (idempotent). */
+export async function abortGenerate(projectName: string): Promise<AbortGenerateResponse> {
+  return _json<AbortGenerateResponse>(await fetch(`${base(projectName)}/generate/abort`, {
+    method: 'POST',
+    headers: { ...rawFetchHeaders('POST') },
+  }))
+}
+
+/**
+ * `POST /{name}/reports/{id}/sections/{section_id}/regenerate` — write one
+ * section again from the latest version, saved as the next version. Same
+ * refusals as `generateReport` plus `report_not_found` /
+ * `report_section_not_found`.
+ */
+export async function regenerateSection(
+  projectName: string,
+  reportId: string,
+  sectionId: string,
+  opts: RegenerateSectionOptions = {},
+): Promise<RegenerateSectionResponse> {
+  const body: RegenerateSectionOptions = {}
+  if (opts.instruction != null && opts.instruction.trim()) body.instruction = opts.instruction.trim()
+  if (opts.language != null && opts.language.trim()) body.language = opts.language.trim()
+  return _json<RegenerateSectionResponse>(await _postJson(
+    `${base(projectName)}/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionId)}/regenerate`,
+    body,
   ))
 }

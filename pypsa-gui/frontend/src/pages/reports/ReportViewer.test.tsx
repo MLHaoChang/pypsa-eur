@@ -10,17 +10,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReportDocument, ReportMeta } from '../../api/reports'
+import type { ReportDocument, ReportJobRecord, ReportMeta } from '../../api/reports'
 import { ReportViewer } from './ReportViewer'
 
 const api = vi.hoisted(() => ({
   getReport: vi.fn(),
   exportReport: vi.fn(),
+  getGenerateStatus: vi.fn(),
+  regenerateSection: vi.fn(),
+  abortGenerate: vi.fn(),
 }))
 
 vi.mock('../../api/reports', async () => {
   const real = await vi.importActual<typeof import('../../api/reports')>('../../api/reports')
-  return { ...real, getReport: api.getReport, exportReport: api.exportReport }
+  return { ...real, ...api }
 })
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
@@ -107,20 +110,47 @@ export const FIXTURE: ReportDocument = {
   },
 }
 
-function renderViewer(meta: ReportMeta = META) {
+function renderViewer(meta: ReportMeta = META, extra: { currentEvidenceHash?: string | null } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const onBack = vi.fn()
-  render(
+  const view = render(
     <QueryClientProvider client={client}>
-      <ReportViewer project="Demo" meta={meta} onBack={onBack} />
+      <ReportViewer project="Demo" meta={meta} onBack={onBack} {...extra} />
     </QueryClientProvider>,
   )
-  return { onBack }
+  const rerender = (m: ReportMeta) => view.rerender(
+    <QueryClientProvider client={client}>
+      <ReportViewer project="Demo" meta={m} onBack={onBack} {...extra} />
+    </QueryClientProvider>,
+  )
+  return { onBack, rerender }
+}
+
+function job(over: Partial<ReportJobRecord> = {}): ReportJobRecord {
+  return {
+    status: 'running',
+    report_id: REPORT_ID,
+    version: null,
+    mode: 'regenerate',
+    section: 'summary',
+    progress: { done: 0, total: 1, current: 'summary' },
+    repairs: 0,
+    prose_failures: [],
+    error: null,
+    started_at: Date.now() / 1000 - 5,
+    finished_at: null,
+    profile_id: 'anthropic-default',
+    model: 'claude-sonnet',
+    ...over,
+  }
 }
 
 beforeEach(() => {
   api.getReport.mockReset().mockResolvedValue(FIXTURE)
   api.exportReport.mockReset()
+  api.getGenerateStatus.mockReset().mockResolvedValue(null)
+  api.regenerateSection.mockReset().mockResolvedValue({ status: 'running', report_id: REPORT_ID, version: 1 })
+  api.abortGenerate.mockReset().mockResolvedValue({ status: 'running', aborting: true })
   toast.success.mockReset()
   toast.error.mockReset()
 })
@@ -254,5 +284,83 @@ describe('ReportViewer', () => {
     await screen.findAllByTestId('report-section')
     await user.click(screen.getByTestId('report-back'))
     expect(onBack).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('ReportViewer — regenerate and evidence status (WP7b)', () => {
+  it('opens a one-line instruction input per section and posts the regenerate request', async () => {
+    const user = userEvent.setup()
+    renderViewer()
+    const sections = await screen.findAllByTestId('report-section')
+    expect(screen.queryByTestId('regenerate-form')).toBeNull()
+    await user.click(within(sections[0]).getByTestId('section-regenerate'))
+    const form = within(sections[0]).getByTestId('regenerate-form')
+    await user.type(within(form).getByLabelText('Instruction'), 'Shorter, please.')
+    api.getGenerateStatus.mockResolvedValue(job())
+    await user.click(within(form).getByTestId('regenerate-submit'))
+    await waitFor(() => expect(api.regenerateSection).toHaveBeenCalledWith(
+      'Demo', REPORT_ID, 'summary', { instruction: 'Shorter, please.' },
+    ))
+    // while the job runs the strip shows and the per-section control is disabled
+    const strip = await screen.findByTestId('report-job-strip')
+    expect(strip.textContent).toContain('Executive summary')
+    expect((within(sections[1]).getByTestId('section-regenerate') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('after the job is done, refetches and switches to the new latest version', async () => {
+    api.getGenerateStatus.mockResolvedValue(null)
+    api.getReport.mockResolvedValue({ ...FIXTURE, version: 2 })
+    const user = userEvent.setup()
+    const { rerender } = renderViewer({ ...META, latest_version: 2 })
+    // the user is looking at v1 explicitly
+    await user.selectOptions(await screen.findByLabelText('Version'), '1')
+    await waitFor(() => expect(api.getReport).toHaveBeenLastCalledWith('Demo', REPORT_ID, 1))
+
+    const sections = await screen.findAllByTestId('report-section')
+    await user.click(within(sections[0]).getByTestId('section-regenerate'))
+    api.getGenerateStatus
+      .mockResolvedValueOnce(job())
+      .mockResolvedValue(job({ status: 'done', version: 3, progress: { done: 1, total: 1, current: null } }))
+    await user.click(within(sections[0]).getByTestId('regenerate-submit'))
+    await waitFor(() => expect(api.regenerateSection).toHaveBeenCalled())
+    await screen.findByTestId('report-job-strip')
+    // the backend holds v3 by the time the record says done
+    api.getReport.mockResolvedValue({ ...FIXTURE, version: 3 })
+    await waitFor(() => expect(screen.queryByTestId('report-job-strip')).toBeNull(), { timeout: 4000 })
+    // the list refresh (the panel's job) hands the viewer the bumped meta
+    rerender({ ...META, latest_version: 3 })
+    await waitFor(() => expect(api.getReport).toHaveBeenLastCalledWith('Demo', REPORT_ID, undefined))
+    await waitFor(() => expect((screen.getByLabelText('Version') as HTMLSelectElement).value).toBe('3'))
+    expect(await screen.findByText('v3')).toBeTruthy()
+  })
+
+  it('toasts the job refusal copy when regenerate is refused', async () => {
+    const { ReportsError } = await vi.importActual<typeof import('../../api/reports')>('../../api/reports')
+    api.regenerateSection.mockRejectedValue(new ReportsError(
+      { error_kind: 'missing_api_key', message: 'no key' }, 400,
+    ))
+    const user = userEvent.setup()
+    renderViewer()
+    const sections = await screen.findAllByTestId('report-section')
+    await user.click(within(sections[0]).getByTestId('section-regenerate'))
+    await user.click(within(sections[0]).getByTestId('regenerate-submit'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(String(toast.error.mock.calls[0][0])).toMatch(/configure an LLM profile in Settings/i)
+  })
+
+  it('shows "evidence changed since v{N}" when the document hash differs from the current evidence hash', async () => {
+    renderViewer(META, { currentEvidenceHash: 'cafebabe' })
+    const badge = await screen.findByTestId('evidence-changed')
+    expect(badge.textContent).toMatch(/evidence changed since v1/i)
+  })
+
+  it('shows no evidence badge when the hashes match or no current hash is known', async () => {
+    renderViewer(META, { currentEvidenceHash: 'deadbeef' })
+    await screen.findAllByTestId('report-section')
+    expect(screen.queryByTestId('evidence-changed')).toBeNull()
+    cleanup()
+    renderViewer(META)
+    await screen.findAllByTestId('report-section')
+    expect(screen.queryByTestId('evidence-changed')).toBeNull()
   })
 })

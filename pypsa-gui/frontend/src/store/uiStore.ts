@@ -342,6 +342,11 @@ interface UIStore {
   // anchor has to live outside it — a set(SlidePanel) parameter cannot
   // survive that remount. Consumed then cleared by the section itself.
   settingsSectionRequest: string | null
+  // WP7b: "generation pre-armed" — the Adequacy tab's Reports button opens
+  // the Reports panel WITH the Generate dialog. Same shape as the settings
+  // deep link: the panel subtree remounts on every switch, so the flag lives
+  // here and ReportsPanel consumes then clears it.
+  reportGenerateRequest: boolean
   // Deep-link into the Asset Detail tab (Task 13). Consumed then cleared by
   // AssetDetail.tsx's effect. Set only via `requestAssetDetail`.
   assetDetailRequest: AssetDetailRequest | null
@@ -426,6 +431,8 @@ interface UIStore {
   clearResultsTabRequest: () => void
   requestSettingsSection: (section: string) => void
   clearSettingsSectionRequest: () => void
+  requestReportGenerate: () => void
+  clearReportGenerateRequest: () => void
   // ONE path for all four entry points (Properties, bottom table, map,
   // chatbot). Each of them only has to call this — the panel, the tab and
   // the selection all move together, so none of them can drift out of step.
@@ -487,6 +494,7 @@ export const useUIStore = create<UIStore>((set) => ({
   bottomTabRequest: null,
   resultsTabRequest: null,
   settingsSectionRequest: null,
+  reportGenerateRequest: false,
   assetDetailRequest: null,
   compareNavRequest: null,
   ioModalRequest: null,
@@ -627,6 +635,8 @@ export const useUIStore = create<UIStore>((set) => ({
   clearResultsTabRequest: () => set({ resultsTabRequest: null }),
   requestSettingsSection: (section) => set({ settingsSectionRequest: section }),
   clearSettingsSectionRequest: () => set({ settingsSectionRequest: null }),
+  requestReportGenerate: () => set({ reportGenerateRequest: true }),
+  clearReportGenerateRequest: () => set({ reportGenerateRequest: false }),
   requestAssetDetail: (req) => set({
     assetDetailRequest: req,
     selectedComponent: { type: req.componentClass, name: req.name },

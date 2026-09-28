@@ -10,16 +10,22 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CSRF_HEADER } from './csrf'
 import {
+  abortGenerate,
   createEvidenceOnlyReport,
   deleteReport,
   exportReport,
+  generateReport,
+  getGenerateStatus,
   getReport,
   getReportVersion,
   isReportError,
   listReports,
+  regenerateSection,
   reportErrorMessage,
   reportFigureUrl,
+  reportJobErrorMessage,
   ReportsError,
+  type ReportJobRecord,
   type ReportMeta,
 } from './reports'
 
@@ -187,5 +193,114 @@ describe('reports api — error kinds', () => {
     const e = new Error('network down')
     expect(isReportError(e)).toBe(false)
     expect(reportErrorMessage(e)).toBe('network down')
+  })
+})
+
+// ── WP7b: the generation job routes (backend `routers/report_jobs.py`) ──────
+
+const RECORD: ReportJobRecord = {
+  status: 'running',
+  report_id: META.report_id,
+  version: null,
+  mode: 'generate',
+  section: null,
+  progress: { done: 1, total: 3, current: 'cost' },
+  repairs: 0,
+  prose_failures: [],
+  error: null,
+  started_at: 1_790_000_000,
+  finished_at: null,
+  profile_id: 'anthropic-default',
+  model: 'claude-sonnet',
+}
+
+describe('reports api — generation job (WP7b)', () => {
+  it('starts a generated report with POST …/generate and the full body', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'running', report_id: META.report_id }))
+    const out = await generateReport('My Project', {
+      title: 'Client report', language: 'de', sections: ['target', 'cost'], instruction: 'Be brief.',
+    })
+    expect(out).toEqual({ status: 'running', report_id: META.report_id })
+    const { url, init } = lastCall()
+    expect(url).toBe('/api/projects/My%20Project/reports/generate')
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toEqual({
+      title: 'Client report', language: 'de', sections: ['target', 'cost'], instruction: 'Be brief.',
+    })
+    expect((init?.headers as Record<string, string>)[CSRF_HEADER]).toBe('tok')
+    expect((init?.headers as Record<string, string>)['Content-Type']).toBe('application/json')
+  })
+
+  it('defaults the language to "en" and omits empty optional fields', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'running', report_id: META.report_id }))
+    await generateReport('Demo', { title: '  ', sections: [], instruction: '' })
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ language: 'en' })
+  })
+
+  it('reads the job record from GET …/generate/status', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(RECORD))
+    const out = await getGenerateStatus('Demo')
+    expect(out).toEqual(RECORD)
+    const { url, init } = lastCall()
+    expect(url).toBe('/api/projects/Demo/reports/generate/status')
+    expect(init?.method ?? 'GET').toBe('GET')
+  })
+
+  it('maps a 204 (never run) status to null', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+    expect(await getGenerateStatus('Demo')).toBeNull()
+  })
+
+  it('aborts with POST …/generate/abort + CSRF and returns {status, aborting}', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'running', aborting: true }))
+    const out = await abortGenerate('Demo')
+    expect(out).toEqual({ status: 'running', aborting: true })
+    const { url, init } = lastCall()
+    expect(url).toBe('/api/projects/Demo/reports/generate/abort')
+    expect(init?.method).toBe('POST')
+    expect((init?.headers as Record<string, string>)[CSRF_HEADER]).toBe('tok')
+  })
+
+  it('regenerates one section with POST …/{id}/sections/{section}/regenerate', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'running', report_id: META.report_id, version: 2 }))
+    const out = await regenerateSection('Demo', META.report_id, 'fmea_top', { instruction: 'Shorter.' })
+    expect(out).toEqual({ status: 'running', report_id: META.report_id, version: 2 })
+    const { url, init } = lastCall()
+    expect(url).toBe(`/api/projects/Demo/reports/${META.report_id}/sections/fmea_top/regenerate`)
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toEqual({ instruction: 'Shorter.' })
+    expect((init?.headers as Record<string, string>)[CSRF_HEADER]).toBe('tok')
+  })
+
+  it('regenerate sends an empty body when nothing is given and carries a language when set', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ status: 'running', report_id: META.report_id, version: 1 }))
+    await regenerateSection('Demo', META.report_id, 'cost')
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({})
+    await regenerateSection('Demo', META.report_id, 'cost', { language: 'fr', instruction: '  ' })
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ language: 'fr' })
+  })
+
+  it('maps the job error kinds and gives each its toast copy', async () => {
+    const cases: Array<[string, number, RegExp]> = [
+      ['report_job_in_flight', 409, /already being written/i],
+      ['no_evidence', 400, /run a study first/i],
+      ['missing_api_key', 400, /configure an LLM profile in Settings/i],
+      ['sdk_not_installed', 400, /configure an LLM profile in Settings/i],
+      ['project_locked', 409, /being edited by another user/i],
+      ['report_section_not_found', 404, /no section/i],
+    ]
+    for (const [kind, status, copy] of cases) {
+      fetchMock.mockResolvedValueOnce(jsonResponse(
+        { detail: { error_kind: kind, message: `backend says ${kind}: 'Demo' is being edited by another user; no section 'x'.` } }, status,
+      ))
+      const err = await generateReport('Demo', {}).catch(e => e)
+      expect(err).toBeInstanceOf(ReportsError)
+      expect(err.status).toBe(status)
+      expect(isReportError(err, kind as never)).toBe(true)
+      expect(reportJobErrorMessage(err)).toMatch(copy)
+    }
+    // Unknown kinds fall back to the backend message; a plain Error keeps its text.
+    expect(reportJobErrorMessage(new ReportsError({ error_kind: 'weird', message: 'odd' }, 500))).toBe('odd')
+    expect(reportJobErrorMessage(new Error('network down'))).toBe('network down')
   })
 })
