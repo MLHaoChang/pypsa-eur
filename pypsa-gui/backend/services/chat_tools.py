@@ -4008,6 +4008,364 @@ def export_eh_report_docx(filename: str | None = None) -> dict:
     return _save_agent_export(data, target, DOCX_MIME)
 
 
+# ── Reports (WP6) — the generated study report ──────────────────────────────
+#
+# Thin wrappers over WP1/WP3/WP5's routes (`routers/reports.py`,
+# `routers/report_jobs.py`), called in-process for the ACTIVE project through
+# `_route(...)` exactly as `run_eh_study` wraps `post_eh_study`. Every refusal
+# the routes raise passes through unchanged (`detail["error_kind"]`), so the
+# manifest's `report_*` kinds are the tools' too. Not campaign-gated: a report
+# solves nothing — it narrates what the studies established.
+#
+# The one thing added here is SHAPE: `get_report` must fit the chat harness's
+# 4000-char result cap (`chat_service._truncate_result`), which a document
+# with its tables inline never would, so tables collapse to their id, columns
+# and row count (`get_report_table` pages the rows), figures to their id and
+# caption, and a document whose PROSE alone would not fit degrades to a
+# per-section outline with a hint to read one section at a time.
+
+# Under `_truncate_result`'s 4000, measured the same way it measures
+# (`len(json.dumps(result, default=str))`) on the very dict it measures.
+REPORT_RESULT_BUDGET = 3900
+_REPORT_HEADER_KEYS = ("report_id", "version", "title", "language", "created_at",
+                       "mode", "profile_id", "model", "evidence_hash")
+_PROSE_SOURCES = ("llm", "user_edit")
+
+
+def _report_project():
+    """The active project as the report routes take it (authorized, with its directory)."""
+    return _authorized_project(_require_active_project())
+
+
+def _newest_report_id(project) -> str:
+    """The newest report of the project, or the 404 that names the remedy."""
+    from services.reports import store
+
+    metas = store.list_reports(project.directory)
+    if not metas:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_kind": "report_not_found",
+                "message": (
+                    "This project has no study report yet — generate_report "
+                    "writes one from the session's results."
+                ),
+            },
+        )
+    return metas[0].report_id
+
+
+def _load_report_document(project, report_id: str, version: int | None) -> dict:
+    """One version of a report as the GET route serves it (a plain dict)."""
+    from routers.reports import get_report as _h
+    return _route(_h, report_id, version, project=project)
+
+
+def _json_len(payload: Any) -> int:
+    return len(json.dumps(payload, default=str))
+
+
+def _compact_block(block: dict, tables: dict, figures: dict) -> dict:
+    """A table reference becomes its shape, a figure its caption; prose stays."""
+    kind = block.get("type")
+    if kind == "table_ref":
+        table = tables.get(block.get("table_id")) or {}
+        out = {
+            "type": "table",
+            "table_id": block.get("table_id"),
+            "columns": list(table.get("columns") or []),
+            "n_rows": len(table.get("rows") or []),
+        }
+        caption = block.get("caption") or table.get("caption")
+        if caption:
+            out["caption"] = caption
+        return out
+    if kind == "figure_ref":
+        figure = figures.get(block.get("figure_id")) or {}
+        out = {"type": "figure", "figure_id": block.get("figure_id")}
+        caption = block.get("caption") or figure.get("caption")
+        if caption:
+            out["caption"] = caption
+        return out
+    return dict(block)
+
+
+def _compact_section(section: dict, tables: dict, figures: dict) -> dict:
+    """The section with its prose intact; an empty audit is left out."""
+    out = {
+        "section_id": section.get("section_id"),
+        "heading": section.get("heading"),
+        "source": section.get("source"),
+        "status": section.get("status"),
+        "blocks": [_compact_block(b, tables, figures) for b in section.get("blocks") or []],
+    }
+    if section.get("note"):
+        out["note"] = section["note"]
+    audit = section.get("audit") or {}
+    if audit.get("unverified") or audit.get("verified"):
+        # `unverified` intact — those are the numbers to check. `verified`
+        # as the texts alone: the evidence path each matched is the viewer's
+        # citation, and nothing in chat can dereference a JSON pointer.
+        out["audit"] = {
+            "unverified": list(audit.get("unverified") or []),
+            "verified": [v.get("text") if isinstance(v, dict) else v
+                         for v in audit.get("verified") or []],
+        }
+    return out
+
+
+def _outline_section(section: dict) -> dict:
+    """
+    One row per section: what is there, not what it says. Empty counts are
+    left out, and so is the heading — the id names the section and a
+    per-section read carries the heading — because a dozen such rows must
+    leave room for the sections that carry prose.
+    """
+    blocks = section.get("blocks") or []
+    audit = section.get("audit") or {}
+    out = {
+        "section_id": section.get("section_id"),
+        "source": section.get("source"),
+        "status": section.get("status"),
+    }
+    counts = {
+        "paragraphs": sum(1 for b in blocks if b.get("type") == "paragraph"),
+        "bullets": sum(len(b.get("items") or []) for b in blocks if b.get("type") == "bullets"),
+        "callouts": sum(1 for b in blocks if b.get("type") == "callout"),
+        "tables": [b.get("table_id") for b in blocks if b.get("type") == "table_ref"],
+        "figures": [b.get("figure_id") for b in blocks if b.get("type") == "figure_ref"],
+        "unverified": list(audit.get("unverified") or []),
+    }
+    out.update({k: v for k, v in counts.items() if v})
+    if section.get("note"):
+        out["note"] = section["note"]
+    return out
+
+
+def generate_report(
+    title: str | None = None,
+    language: str | None = "en",
+    sections: list | None = None,
+    instruction: str | None = None,
+) -> dict:
+    """
+    Start the report job for the active project on the active LLM profile.
+
+    The route collects the evidence and renders the figures in this call;
+    the prose is written on a daemon thread. An empty `sections` list means
+    the default target set, not a 422 — a model that passes `[]` means "all".
+    """
+    from routers.report_jobs import GenerateReportBody, generate_report as _h
+
+    project = _report_project()
+    body = GenerateReportBody(
+        title=title, language=language or "en",
+        sections=[str(s) for s in sections] if sections else None,
+        instruction=instruction,
+    )
+    result = _route(_h, body, project=project)
+    return {
+        **result,
+        "message": (
+            "Report generation started — poll get_report_status until it is "
+            "done, aborted or failed, then read the report with "
+            f"get_report('{result.get('report_id')}')."
+        ),
+    }
+
+
+def get_report_status() -> Any:
+    """The job record of this session; `no_data` when nothing has run yet."""
+    from routers.report_jobs import get_generate_status as _h
+
+    project = _report_project()
+    return _payload_or_no_data(
+        "report_job", _route(_h, project=project),
+        "no report generation has been run in this session — generate_report "
+        "starts one",
+    )
+
+
+def abort_report_generation() -> dict:
+    """Ask the running job to stop after its current section. Idempotent."""
+    from routers.report_jobs import abort_generate as _h
+
+    project = _report_project()
+    return _route(_h, project=project)
+
+
+def list_reports() -> list[dict]:
+    from routers.reports import list_reports as _h
+
+    project = _report_project()
+    return _route(_h, project=project)
+
+
+def get_report(
+    report_id: str | None = None,
+    version: int | None = None,
+    section_id: str | None = None,
+) -> dict:
+    """
+    One report version for the model, under the result cap by construction.
+
+    Prose blocks (paragraphs, bullets, callouts, fields) are intact; tables
+    are their shape, figures their caption; `audit` is the section's own.
+    When even that does not fit, the whole document comes back as an outline
+    and `section_id` reads one section in full.
+    """
+    project = _report_project()
+    rid = report_id if report_id is not None else _newest_report_id(project)
+    raw = _load_report_document(project, rid, version)
+    tables = raw.get("tables") or {}
+    figures = raw.get("figures") or {}
+    sections = list(raw.get("sections") or [])
+    if section_id is not None:
+        sections = [s for s in sections if s.get("section_id") == section_id]
+        if not sections:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error_kind": "report_section_not_found",
+                    "message": (
+                        f"Report {rid} has no section {section_id!r}; it has: "
+                        + ", ".join(s.get("section_id") for s in raw.get("sections") or [])
+                    ),
+                },
+            )
+    head = {k: raw.get(k) for k in _REPORT_HEADER_KEYS}
+    full = {
+        **head,
+        "sections": [_compact_section(s, tables, figures) for s in sections],
+        "message": (
+            "Tables are summarised as {table_id, columns, n_rows}: "
+            "get_report_table(report_id, table_id) pages the rows."
+        ),
+    }
+    if section_id is not None or _json_len(full) <= REPORT_RESULT_BUDGET:
+        return full
+    # Too big with everything in full: every section becomes a row, then the
+    # sections that carry PROSE are put back in full, in document order, as
+    # long as the budget allows — the most of the report one result can
+    # carry, and always under the cap. A row has no `blocks`.
+    rows = [_outline_section(s) for s in sections]
+    out = {
+        **head,
+        "outline": True,
+        "sections": rows,
+        "message": (
+            "Not everything fits one result: sections with `blocks` are in "
+            "full, the rest are rows. get_report(report_id, section_id=...) "
+            "reads any one in full; get_report_table pages a table."
+        ),
+    }
+    used = _json_len(out)
+    for i, section in enumerate(sections):
+        if section.get("source") not in _PROSE_SOURCES:
+            continue
+        whole = _compact_section(section, tables, figures)
+        delta = _json_len(whole) - _json_len(rows[i])
+        if used + delta <= REPORT_RESULT_BUDGET:
+            out["sections"][i] = whole
+            used += delta
+    return out
+
+
+def get_report_table(
+    report_id: str,
+    table_id: str,
+    version: int | None = None,
+    offset: int = 0,
+    limit: int | None = None,
+) -> dict:
+    """The rows of one table of a report version, in the shared page envelope."""
+    project = _report_project()
+    raw = _load_report_document(project, report_id, version)
+    tables = raw.get("tables") or {}
+    table = tables.get(table_id)
+    if table is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error_kind": "report_table_not_found",
+                "message": (
+                    f"Report {report_id} (version {raw.get('version')}) has no "
+                    f"table {table_id!r}; it has: "
+                    + (", ".join(sorted(tables)) or "none")
+                ),
+            },
+        )
+    page = _paginate(list(table.get("rows") or []), offset, limit)
+    return {
+        "table_id": table_id,
+        "columns": list(table.get("columns") or []),
+        "caption": table.get("caption"),
+        "source_path": table.get("source_path"),
+        **page,
+    }
+
+
+def regenerate_report_section(
+    report_id: str,
+    section_id: str,
+    instruction: str | None = None,
+    language: str | None = None,
+) -> dict:
+    """One section again, from the latest version, saved as the next one."""
+    from routers.report_jobs import RegenerateSectionBody, regenerate_section as _h
+
+    project = _report_project()
+    body = RegenerateSectionBody(instruction=instruction, language=language)
+    result = _route(_h, report_id, section_id, body, project=project)
+    return {
+        **result,
+        "message": (
+            "Section rewrite started — poll get_report_status; when it is done, "
+            f"get_report('{report_id}') returns the new version and the "
+            "earlier versions stay readable."
+        ),
+    }
+
+
+def export_report_docx(
+    report_id: str | None = None,
+    version: int | None = None,
+    filename: str | None = None,
+) -> dict:
+    """
+    One report version as a Word document in the active project's uploads/
+    dir. The route renders and saves it as an `agent_export`; this returns
+    the chip in the same shape `_save_agent_export` gives the other exports.
+    """
+    from routers.reports import ExportReportBody, export_report as _h
+
+    project = _report_project()
+    rid = report_id if report_id is not None else _newest_report_id(project)
+    meta = _route(_h, rid, ExportReportBody(version=version, filename=filename),
+                  project=project)
+    return {
+        "file_id": meta["file_id"],
+        "filename": meta["filename"],
+        "mime": meta["mime"],
+        "size": meta["size"],
+        "kind": meta["kind"],
+        "report_id": rid,
+        "message": (
+            f"Exported '{meta['filename']}' ({meta['size']} bytes). It's "
+            "available as a downloadable file in the chat panel's file strip."
+        ),
+    }
+
+
+def delete_report(report_id: str) -> dict:
+    """Remove one report and every version of it (edit-lock checked by the route)."""
+    from routers.reports import delete_report as _h
+
+    project = _report_project()
+    return _route(_h, report_id, project=project)
+
+
 def build_study_report(project: str | None = None) -> dict:
     """
     Assemble the client-facing reliability write-up from everything this
@@ -4757,6 +5115,16 @@ DISPATCHERS: dict[str, Any] = {
     "export_chat_summary": export_chat_summary,
     # reports (WP0 spike) — the EH ReferenceDesignReport as a .docx chip
     "export_eh_report_docx": export_eh_report_docx,
+    # reports (WP6) — the generated study report over the WP1/WP3/WP5 routes
+    "generate_report": generate_report,
+    "get_report_status": get_report_status,
+    "abort_report_generation": abort_report_generation,
+    "list_reports": list_reports,
+    "get_report": get_report,
+    "get_report_table": get_report_table,
+    "regenerate_report_section": regenerate_report_section,
+    "export_report_docx": export_report_docx,
+    "delete_report": delete_report,
     # uploads — bulk delete (1, locked decision row 7: independent of chat history)
     "clear_uploads": clear_uploads,
     # asset_results (3) — Task 14: per-asset results chat surface

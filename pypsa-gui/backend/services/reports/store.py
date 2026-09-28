@@ -122,7 +122,8 @@ def _now_iso() -> str:
 # ── meta ────────────────────────────────────────────────────────────────────
 
 def _meta_from_doc(doc: ReportDocument, *, latest_version: int,
-                   created_at: str | None = None) -> ReportMeta:
+                   created_at: str | None = None,
+                   generation: dict | None = None) -> ReportMeta:
     return ReportMeta(
         report_id=doc.report_id,
         title=doc.title,
@@ -133,6 +134,7 @@ def _meta_from_doc(doc: ReportDocument, *, latest_version: int,
         evidence_hash=doc.evidence_hash,
         profile_id=doc.profile_id,
         model=doc.model,
+        generation=generation,
     )
 
 
@@ -207,8 +209,11 @@ def save_version(project_dir: pathlib.Path, doc: ReportDocument) -> int:
     next_version = max([meta.latest_version, *on_disk]) + 1
     bumped = doc.model_copy(update={"version": next_version})
     _write_version(rdir, bumped)
+    # `generation` is the job's, written after ITS save (WP3); a later version
+    # from any caller keeps it rather than silently dropping it (WP6).
     _write_meta(rdir, _meta_from_doc(
         bumped, latest_version=next_version, created_at=meta.created_at,
+        generation=meta.generation,
     ))
     return next_version
 

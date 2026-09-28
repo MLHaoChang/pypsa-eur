@@ -679,3 +679,52 @@ What the model must and must not do with it: call it when the user asks for
 the EH report "as a document" / "as Word"; relay the chip; never re-type its
 numbers into chat as if they were new findings — `get_adequacy_results`
 (`eh_reference_design`) is the reading surface, the document is the export.
+
+### The generated study report (WP3 + WP6)
+
+Phase 2 adds the report the plan is about: a `ReportDocument` per project
+(`reports/<report_id>/v<N>.json`, versioned, carried by save-as and
+snapshots), written **one section at a time on the active LLM profile**
+between the software's own tables and figures. The model only ever sees the
+evidence slice of the section it is writing, inside the untrusted-data fence;
+every number in its prose is audited against the evidence (`audit.verified`
+with the path it matched, `audit.unverified` when nothing matched); a section
+the model could not write keeps its tables and says "prose not established:
+<reason> (profile …, model …)" in its note. The routes are
+`POST/GET /api/projects/{name}/reports…` (`routers/reports.py`,
+`routers/report_jobs.py`); the tools below call them in-process for the
+active project, so every `report_*` error kind in `tool-error-kinds.json`
+reaches the model with the route's own message.
+
+| Tool | Tier | |
+|---|---|---|
+| `generate_report` | execution | Start the report job for the active project: `title?`, `language?` (default `en`), `sections?` (ids; omitted or `[]` = the executive summary plus every section the evidence established), `instruction?`. Minutes, spends tokens, one job at a time (409 `report_job_in_flight`). 400 `no_evidence` when the session has nothing to report on. Returns `{status: running, report_id, message}`. |
+| `get_report_status` | read | The job record: `status` (running / done / aborted / failed), `report_id`, `version`, `progress{done,total,current}`, `repairs`, `prose_failures`, `error`, `profile_id`, `model`. `{status: no_data}` before any run. |
+| `abort_report_generation` | destructive | Stop after the current section; the written sections are kept and the partial report is saved (status `aborted`). Idempotent; 404 `report_job_not_found` when nothing ever ran. |
+| `list_reports` | read | Every report of the project, newest first, with `latest_version`, `mode`, `profile_id`, `model` and the job's `generation` summary. |
+| `get_report` | read | One version (newest report / latest version by default). Paragraphs, bullets and callouts intact; each table as `{table_id, columns, n_rows, caption}`; each figure as its id and caption; `audit` per section. Fits the 4000-char result cap by construction: a report whose prose alone would not fit comes back as an outline (`outline: true`) and `section_id` reads one section in full. 404 `report_not_found` with the remedy (`generate_report`) when there is none. |
+| `get_report_table` | read | The rows of one table, paginated (`offset`, `limit`) in the shared page envelope. 404 `report_table_not_found` lists the ids the report has. |
+| `regenerate_report_section` | execution | One section again from the latest version, optionally under an `instruction`; saved as the next version, every other section byte-identical. Same job slot as `generate_report`. |
+| `export_report_docx` | write | One version as a `.docx` `agent_export` chip (`report_<id>_v<N>.docx` unless `filename` is given), with a "Numbers to check" appendix listing the unverified numbers. |
+| `delete_report` | destructive | The report with every version and figure; refused under a foreign edit lock. |
+
+What the model must and must not do with a report:
+
+* **Generate only when the user asks for a report or a document** ("write
+  the client report", "as Word", "a file I can send"). A question, a summary
+  of findings or "what did we establish" is `build_study_report`, in chat —
+  the report job takes minutes and spends the user's tokens.
+* **Never re-type a report's numbers into chat as new findings.** The
+  document is the deliverable; `get_report` is for checking what it says and
+  for answering questions about it, not for laundering its prose back into
+  the conversation as if the study had just said it.
+* **Relay `audit.unverified` as "numbers to check"**, per section, and say
+  so before the user sends the document: an unverified number is one the
+  evidence does not contain, and the appendix in the `.docx` lists the same.
+* **Name the profile that wrote it** (`profile_id` / `model` on the status
+  record, the document and the list) whenever the report is discussed — a
+  report written by a local 0.6B model and one written by a frontier model
+  are different deliverables, and the user chose which.
+* A section whose note starts "prose not established" is not an error to
+  retry blindly: say which section, why (the note names the reason, the
+  profile and the model), and offer `regenerate_report_section` once.

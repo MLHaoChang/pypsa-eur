@@ -160,3 +160,7 @@ class ReportMeta(_Model):
     evidence_hash: str
     profile_id: str | None = None
     model: str | None = None
+    # WP3's job writes `{repairs, prose_failures, sections, language, aborted}`
+    # here after the save; the store carries it through a later `save_version`
+    # (WP6). Free-form on purpose: the job record is the authority on its shape.
+    generation: dict | None = None

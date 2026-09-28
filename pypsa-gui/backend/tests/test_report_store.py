@@ -234,3 +234,30 @@ def test_an_unknown_figure_is_not_found(project_dir):
         store.figure_path(project_dir, "0123456789abcdef", "nope")
     with pytest.raises(store.ReportNotFound):
         store.figure_path(project_dir, "ffffffffffffffff", "nope")
+
+
+# ── WP6: the job's `generation` object survives a later save_version ─────────
+
+def test_generation_meta_survives_save_version_and_is_listed(project_dir):
+    """
+    WP3 writes `generation{repairs, prose_failures, …}` into `meta.json`
+    after the save; a later `save_version` used to rewrite the meta from the
+    model and drop it. `ReportMeta.generation` carries it now.
+    """
+    store.create_report(project_dir, _doc())
+    path = project_dir / "reports" / "0123456789abcdef" / "meta.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    assert raw["generation"] is None
+    generation = {"repairs": 1, "prose_failures": [{"section_id": "s", "reason": "no_json"}],
+                  "sections": ["s"], "language": "en", "aborted": False}
+    raw["generation"] = generation
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    assert store.load_meta(project_dir, "0123456789abcdef").generation == generation
+    assert store.save_version(project_dir, _doc()) == 2
+    after = json.loads(path.read_text(encoding="utf-8"))
+    assert after["latest_version"] == 2
+    assert after["generation"] == generation
+    listed = store.list_reports(project_dir)
+    assert listed[0].generation == generation
+    assert listed[0].model_dump()["generation"] == generation
