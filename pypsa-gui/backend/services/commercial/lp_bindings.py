@@ -157,6 +157,11 @@ def _lp_reason(item: TariffItem) -> str | None:
     term the LP carries (WP1.5a), or None."""
     if item.kind == "fixed":
         return "fixed_not_in_lp"
+    if item.kind == "capacity":
+        # Before the demand check: a capacity item measured on peak_import (the
+        # DE Leistungspreis) is a capacity charge, not a demand one. Tariff
+        # capacity items enter the LP in P2 WP2.1c.
+        return "capacity_not_in_lp_until_WP2.1c"
     if _is_demand(item):
         if item.tiers:
             return "tiers_on_demand_not_supported"
@@ -167,8 +172,6 @@ def _lp_reason(item: TariffItem) -> str | None:
         if item.measured_on == "export":
             return "export_demand_not_supported"
         return None
-    if item.kind == "capacity":
-        return "capacity_WP1.4a"
     if item.tiers:
         # WP1.5c: tiers on cumulative monthly import volume, one catch-all period.
         p = item.periods[0]

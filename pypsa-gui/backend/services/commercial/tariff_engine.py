@@ -92,6 +92,7 @@ class RatingResult:
     @property
     def complete(self) -> bool:
         partial = any(("energy_on_partial_coverage" in v) or ("ratchet_seed_missing" in v)
+                      or ("capacity_on_partial_coverage" in v)
                       for v in self.notes.values())
         return not self.unsupported_items and not any(self.flags.values()) and not partial
 
@@ -303,6 +304,8 @@ def _unsupported_reason(item: TariffItem) -> str | None:
         # passes the PoC's p_nom_opt), one catch-all period.
         if item.unit not in ("per_kw_year", "per_kva_year"):
             return f"unsupported:unit_{item.unit}_for_capacity"
+        if item.tiers:
+            return "unsupported:tiers_on_capacity"
         if not _single_catch_all(item):
             return "unsupported:capacity_with_windows"
         return None
@@ -351,6 +354,27 @@ def _month_hours(key: str, tz: str | None) -> float:
     return (end - start).total_seconds() / 3600.0
 
 
+def _covered_days_by_month(local: pd.DatetimeIndex, hours: np.ndarray,
+                           tz: str | None) -> dict[str, float]:
+    """Covered CALENDAR days per local month: each local day contributes its
+    covered hours ÷ that day's real length (23, 24 or 25 h across DST), so a
+    fully covered spring-forward day is one day (P2 WP2.1a-i review #6)."""
+    naive = local.tz_localize(None) if local.tz is not None else local
+    per_day = pd.Series(hours, index=naive.normalize()).groupby(level=0).sum()
+    out: dict[str, float] = {}
+    for day, h in per_day.items():
+        if tz is None:
+            length = 24.0
+        else:
+            start = pd.Timestamp(day).tz_localize(tz, ambiguous=True, nonexistent="shift_forward")
+            end = (pd.Timestamp(day) + pd.Timedelta(days=1)).tz_localize(
+                tz, ambiguous=True, nonexistent="shift_forward")
+            length = (end - start).total_seconds() / 3600.0
+        key = day.strftime("%Y-%m")
+        out[key] = out.get(key, 0.0) + float(h) / length
+    return out
+
+
 def _hours_by_month_in_period(start, end, tz: str | None) -> dict[str, float]:
     s = pd.Timestamp(start)
     e = pd.Timestamp(end)
@@ -382,6 +406,10 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
     capacity capacity items rate on (the PoC's p_nom_opt), ``power_factor`` turns
     it into kVA for `per_kva_year` items (P2 WP2.1a-i)."""
     idx = _validate(dispatch, timezone)
+    if power_factor is not None and not (np.isfinite(power_factor) and 0 < power_factor <= 1):
+        raise ValueError(f"power_factor must be in (0, 1], got {power_factor}")
+    if capacity_kw is not None and np.isfinite(capacity_kw) and capacity_kw < 0:
+        raise ValueError(f"capacity_kw must not be negative, got {capacity_kw}")
     dur = _durations(idx, step_hours)
     energy_h = dur if represents_hours is None else _per_row(idx, represents_hours, "represents_hours")
     local = idx.tz_convert(timezone) if idx.tz is not None else idx
@@ -433,17 +461,36 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                 caps = {}
                 for y in sorted(set(year_key)):
                     sel = year_key == y
-                    g = pd.DataFrame({"g": interval[sel], "qd": kw[sel] * dur[sel], "d": dur[sel]})
-                    agg = g.groupby("g").sum()
-                    means = agg["qd"] / agg["d"]
-                    caps[y] = float(means.max()) if not means.isna().any() else float("nan")
+                    # An interval holding a NaN is unknown, never 0 (review #1).
+                    g = pd.DataFrame({"g": interval[sel], "qd": kw[sel] * dur[sel], "d": dur[sel],
+                                      "nan": np.isnan(kw[sel])})
+                    agg = g.groupby("g").agg(qd=("qd", "sum"), d=("d", "sum"), nan=("nan", "any"))
+                    caps[y] = (float("nan") if agg["nan"].any()
+                               else float((agg["qd"] / agg["d"]).max()))
                 if any(not np.isfinite(v) for v in caps.values()):
-                    flags[item.id].append("nan_quantity")
+                    flags[item.id].append(f"nan_quantity:{int(np.isnan(kw).sum())}")
             else:
                 cap = capacity_kw
-                if cap is None:
+                if cap is None or not np.isfinite(cap):
                     flags[item.id].append("capacity_not_established")
                 caps = {y: cap for y in set(year_key)}
+            # Disclose the conventions (review #10): pro-rated by represented
+            # hours / 8760 like the LP fee (a leap or partial year differs from
+            # the calendar), and a measured peak from part of the year.
+            for y in sorted(set(year_key)):
+                sel = year_key == y
+                cal_h = 8784.0 if calendar.isleap(int(y)) else _HOURS_PER_YEAR
+                note = notes.setdefault(item.id, [])
+                if abs(float(energy_h[sel].sum()) - cal_h) > 1e-6 and \
+                        "capacity_prorated_by_represented_hours" not in note:
+                    note.append("capacity_prorated_by_represented_hours")
+                if item.measured_on == "peak_import" and float(dur[sel].sum()) < cal_h - 1e-6 \
+                        and "peak_from_partial_year" not in note:
+                    note.append("peak_from_partial_year")
+            if has_gaps and represents_hours is None:
+                # Sampled weeks without represents_hours bill only the sampled
+                # hours while fixed items bill the whole billing period (C4).
+                notes.setdefault(item.id, []).append("capacity_on_partial_coverage")
             if item.unit == "per_kva_year" and not flags[item.id]:
                 if power_factor is None:
                     flags[item.id].append("power_factor_missing")
@@ -510,6 +557,12 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             # peaks of earlier months, never billed ones (WP1.5b).
             actual: dict[tuple[str, int], float] = {}
             rate_of: dict[tuple[str, int], float] = {}
+            # Tiers replace the period rate (R2's convention: period rate 0), so a
+            # tiered window is free only if every tier rate is 0 (WP2.1a-i #2).
+            tiered_free = bool(item.tiers) and all(t.rate == 0 for t in item.tiers)
+
+            def _charged(r: float) -> bool:
+                return (not tiered_free) if item.tiers else r != 0
             nan_windows = 0
             for key in months_sorted:
                 for k in range(len(names)):
@@ -534,11 +587,11 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                     rate_k = rate_of[(key, k)]
                     billed = peak
                     # A free window bills nothing: no ratchet, no seed gap.
-                    if item.ratchet is not None and np.isfinite(peak) and rate_k != 0:
+                    if item.ratchet is not None and np.isfinite(peak) and _charged(rate_k):
                         # A free (month, window) bills nothing, so it sets no
                         # ratchet either — the LP has no peak for it (WP2.1a-0
                         # review #1); its month still counts as modelled.
-                        charged = {mk: v for mk, v in actual.items() if rate_of[mk] != 0}
+                        charged = {mk: v for mk, v in actual.items() if _charged(rate_of[mk])}
                         prior, missing = _ratchet_prior(key, k, item.ratchet.lookback_months,
                                                         charged, meter_history,
                                                         set(months_sorted))
@@ -555,8 +608,10 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                                 if np.isfinite(billed) else float("nan"))
                     else:
                         line = sign * rate_k * billed
+                    # A tiered item has no single rate (the tiers price it): NaN, not 0.
                     demand_rows.append({"month": key, "tariff_item": item.id, "period": name,
-                                        "peak_kw": peak, "billed_kw": billed, "rate": rate_k,
+                                        "peak_kw": peak, "billed_kw": billed,
+                                        "rate": float("nan") if item.tiers else rate_k,
                                         "amount": line})
                     amt += line
                 by_month[key] = amt
@@ -581,11 +636,23 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             else:
                 covered = pd.Series(dur).groupby(month_key).sum().to_dict()
             by_month: dict[str, float] = {}
+            days_by_month: dict[str, float] = {}
+            if item.unit == "per_day":
+                if billing_period is not None:
+                    lo = pd.Timestamp(billing_period[0])
+                    hi = pd.Timestamp(billing_period[1])
+                    if timezone is not None:
+                        lo = lo.tz_localize(timezone) if lo.tz is None else lo.tz_convert(timezone)
+                        hi = hi.tz_localize(timezone) if hi.tz is None else hi.tz_convert(timezone)
+                    span = pd.date_range(lo, hi, freq="h", inclusive="left")
+                    days_by_month = _covered_days_by_month(span, np.ones(len(span)), timezone)
+                else:
+                    days_by_month = _covered_days_by_month(local, dur, timezone)
             for key, hours in sorted(covered.items()):
                 mh = _month_hours(key, timezone)
-                # per_day: the covered hours in days (P2 WP2.1a-i); per_month:
-                # the covered share of the month.
-                amt = (sign * monthly_rate * hours / 24.0 if item.unit == "per_day"
+                # per_day: covered CALENDAR days on the local clock (review #6);
+                # per_month: the covered share of the month.
+                amt = (sign * monthly_rate * days_by_month.get(key, 0.0) if item.unit == "per_day"
                        else sign * monthly_rate * hours / mh)
                 by_month[key] = amt
                 fixed_rows.append({"month": key, "tariff_item": item.id, "hours_covered": hours,
@@ -656,7 +723,8 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
     annual.index.name = "year"
     totals = list(per_item.values())
     total_supported = None if any(v is None for v in totals) else float(sum(totals))
-    partial_energy = any("energy_on_partial_coverage" in v for v in notes.values())
+    partial_energy = any(("energy_on_partial_coverage" in v) or ("capacity_on_partial_coverage" in v)
+                         for v in notes.values())
     # A ratchet whose lookback reaches unknown months bills a lower bound.
     seed_missing = any("ratchet_seed_missing" in v for v in notes.values())
     total = None if (unsupported or partial_energy or seed_missing) else total_supported

@@ -221,7 +221,7 @@ items; `CommercialConfig.power_factor: float | None` (for `per_kva_year`).
 
 - **As implemented:**
   - `rate(..., capacity_kw=, power_factor=)`. The engine handles capacity items in their own branch, before the demand branch.
-  - **Deviation (DE fixture):** a capacity item measured on `peak_import` (the German Leistungspreis) bills the year's **measured** peak (settlement-interval mean) × rate × represented hours / 8760, once per year. Other capacity items bill the contracted `capacity_kw`. P1's DE fixture item was billed monthly on the yearly rate, because `_is_demand` matched `peak_import`; it now bills correctly, and `test_a_15min_year_rates_in_under_a_second` pins it.
+  - **Deviation (DE fixture):** a capacity item measured on `peak_import` (the German Leistungspreis) bills the year's **measured** peak (settlement-interval mean) × rate × represented hours / 8760, once per year. Other capacity items bill the contracted `capacity_kw`. In P1 the engine refused every capacity item (`unsupported:capacity_via_connection_agreement`, so the bill's `total` was withheld), and the LP never carried it. The change is from unsupported to billed; `test_a_15min_year_rates_in_under_a_second` pins the amount.
   - A per-day fixed charge counts covered hours / 24 on the local clock.
   - Demand tiers price the billed kW through `_tier_cost`. A windowed demand tier is `unsupported:demand_tiers_with_windows` until WP2.1a-ii.
   - `capacity_double_count` is refused in `validate_for_network`.
@@ -230,6 +230,23 @@ items; `CommercialConfig.power_factor: float | None` (for `per_kva_year`).
   - Oracles are under `tests/fixtures/investment_case/oracles/`, with PROVENANCE and REopt's NOTICE. R2, R4a and R4b pass to the cent (`test_tariff_engine_urdb.py`).
   - The hourly audit allow-lists the capacity unit (48 sites in 23 files).
   - LP: demand tiers, capacity and per-day items stay `not_in_lp` until WP2.1c.
+
+- **Review round 1 → FAIL, fixed:**
+  - A NaN interval makes the measured peak not established (`nan_quantity:N`), never 0.
+  - A tiered demand window is free only if every tier rate is 0, so a ratchet applies at R2's period-rate-0 convention.
+  - At the engine boundary:
+    - a non-finite `capacity_kw` is not established;
+    - a negative one is refused;
+    - a `power_factor` outside (0, 1] is refused.
+  - Tiers on a capacity item are `unsupported:tiers_on_capacity`.
+  - Capacity over gappy data without `represents_hours` gets `capacity_on_partial_coverage`, and `total` is withheld (C4).
+  - Per-day charges count real local calendar days (23/24/25 h).
+  - The pro-rating conventions are disclosed: `capacity_prorated_by_represented_hours` and `peak_from_partial_year`.
+  - The LP's reason for capacity items is `capacity_not_in_lp_until_WP2.1c`, checked before demand.
+  - Preflight emits `commercial.capacity_double_count`.
+  - Oracle hygiene: verbatim REopt scenarios committed, and the R2/R4a tests read their inputs from them. `REOPT_LICENSE` is shipped, and PROVENANCE marks the derived files.
+  - Tiered demand lines show `rate` NaN.
+  - Carried to WP2.1b (finding 12): capacity on a two-period network. The engine applies the scalar `capacity_kw` to every year, while the LP fee counts only the periods in which the PoC is active. The adapter passes a per-period capacity, and a test pins it.
 
 ## WP2.1a-ii Engine: tiers inside TOU windows
 
@@ -296,7 +313,8 @@ L312–337, and one refused value drops every side result). Size bound: < 3 MB f
 (2.52 MB measured for the wide float32 shape). `_RESULTS_STATE_SCHEMA` is not bumped (still DataFrames); a
 round-trip test through `_safe_unpickle_results` proves it.
 
-- [ ] Red: adapter bill == `rate()` on the same frames (identity) on the P1 QA networks; group site billed on
+- [ ] Red: capacity per investment period follows the PoC's activity in that period (WP2.1a-i review #12);
+  adapter bill == `rate()` on the same frames (identity) on the P1 QA networks; group site billed on
   summed members; two periods ⇒ two results; representative weeks ⇒ 12 months with `per_item_sampled` and the
   unsampled months flagged; unsolved ⇒ `None` + `not_solved`; frames round-trip through
   `_safe_unpickle_results` under the bound.

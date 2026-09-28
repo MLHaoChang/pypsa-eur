@@ -89,6 +89,8 @@ def commercial_findings(n, commercial, *, solve_strategy: str = "full",
             conn._validate(n, cfg.connection, cfg.poc_link, cfg.export_link, solve_strategy,
                            multi_period)
     except Exception as exc:  # noqa: BLE001 — every refusal the solve would make
+        if str(exc).startswith("commercial.capacity_double_count"):
+            return [("error", "commercial.capacity_double_count", "", "", str(exc))]
         return [("error", "commercial.binding_invalid", "", "",
                  f"The commercial config cannot bind to this network: {exc}")]
     try:

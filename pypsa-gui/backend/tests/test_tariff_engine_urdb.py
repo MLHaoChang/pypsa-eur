@@ -36,18 +36,25 @@ def _flat(kw: float, *, year=2017, freq="h") -> pd.DataFrame:
 
 
 def test_r2_tiered_demand_matches_reopt_to_the_cent():
-    peak = 1e6 / 8760
+    # REopt's own expectation, read from the verbatim scenario (runtests.jl L2025–2037).
+    scenario = json.loads((ORACLES / "r2_tiered_tou_demand.reopt.json").read_text())
+    tiers = scenario["ElectricTariff"]["urdb_response"]["demandratestructure"][0]
+    peak = scenario["ElectricLoad"]["annual_kwh"] / 8760
+    tier1_max, r1, r2 = tiers[0]["max"], tiers[0]["rate"], tiers[1]["rate"]
     res = rate(_flat(peak), _load("r2_tiered_tou_demand.tariff.json"), step_hours=1.0,
                timezone=None)
-    expected = 12 * (50 * 0.0 + (peak - 50) * 12.0)
+    expected = 12 * (tier1_max * r1 + (peak - tier1_max) * r2)
     assert abs(res.per_item["demand"] - expected) < CENT
 
 
 def test_r4a_blended_hourly_matches_reopt_to_the_cent():
-    res = rate(_flat(10000 / 8760), _load("r4_blended.tariff.json"), step_hours=1.0,
+    scenario = json.loads((ORACLES / "r4_no_techs.reopt.json").read_text())
+    kwh = scenario["ElectricLoad"]["annual_kwh"]
+    t = scenario["ElectricTariff"]
+    res = rate(_flat(kwh / 8760), _load("r4_blended.tariff.json"), step_hours=1.0,
                timezone=None)
-    assert abs(res.per_item["energy"] - 1000.00) < CENT
-    assert abs(res.per_item["demand"] - 12 * 10 * 10000 / 8760) < CENT
+    assert abs(res.per_item["energy"] - t["blended_annual_energy_rate"] * kwh) < CENT
+    assert abs(res.per_item["demand"] - 12 * t["blended_annual_demand_rate"] * kwh / 8760) < CENT
 
 
 def test_r4b_blended_15min_matches_the_formula_to_the_cent():
@@ -133,3 +140,132 @@ def test_a_peak_import_capacity_item_bills_the_annual_measured_peak():
                step_hours=0.25, timezone="Europe/Berlin")
     assert res.per_item["lp"] == pytest.approx(85.0 * 42_000.0)
     assert res.monthly["lp"].sum() == pytest.approx(85.0 * 42_000.0)
+
+
+# ── WP2.1a-i review round 1 ────────────────────────────────────────────────
+
+_CAP = {"id": "cap", "kind": "capacity", "unit": "per_kw_year",
+        "periods": [{"name": "all", "rate": 40.0}]}
+_LP = {"id": "lp", "kind": "capacity", "unit": "per_kw_year", "measured_on": "peak_import",
+       "settlement": "15min", "periods": [{"name": "all", "rate": 85.0}]}
+
+
+def _year(load, freq="15min", tz="Europe/Berlin"):
+    idx = pd.date_range("2030-01-01", "2030-12-31 23:59", freq=freq, tz=tz)
+    return pd.DataFrame({"import_mw": load if np.ndim(load) else np.full(len(idx), load),
+                         "export_mw": 0.0}, index=idx)
+
+
+@pytest.mark.parametrize("settlement,step", [("15min", 0.25), ("h", 0.25)])
+def test_a_nan_import_never_drops_out_of_the_measured_peak(settlement, step):
+    """#1: a NaN interval is unknown, not 0 — the annual peak is not established."""
+    d = _year(10.0)
+    d.iloc[5000, 0] = np.nan
+    res = rate(d, _tariff({**_LP, "settlement": settlement}), step_hours=step,
+               timezone="Europe/Berlin")
+    assert res.per_item["lp"] is None and res.total is None
+    assert any(f.startswith("nan_quantity:") for f in res.flags["lp"])
+
+
+def test_a_ratchet_applies_to_a_tiered_demand_item_with_a_zero_period_rate():
+    """#2: tiers replace the period rate (R2's convention: period rate 0), so the
+    window is charged and its ratchet applies."""
+    item = {"id": "d", "kind": "demand", "unit": "per_kw_month", "settlement": "h",
+            "periods": [{"name": "0", "rate": 0.0}],
+            "tiers": [{"threshold": 0, "rate": 0.0}, {"threshold": 50.0, "rate": 12.0}],
+            "ratchet": {"lookback_months": 11, "share": 0.8}}
+    idx = pd.date_range("2030-01-01", "2030-02-28 23:00", freq="h")
+    load = np.where(idx.month == 1, 0.2, 0.1)     # 200 kW January, 100 kW February
+    history = {f"2029-{m:02d}": 0.0 for m in range(2, 13)}
+    res = rate(pd.DataFrame({"import_mw": load, "export_mw": 0.0}, index=idx), _tariff(item),
+               step_hours=1.0, timezone=None, meter_history=history)
+    feb = res.demand_lines[res.demand_lines["month"] == "2030-02"].iloc[0]
+    assert feb["billed_kw"] == pytest.approx(160.0)
+    assert feb["amount"] == pytest.approx((160.0 - 50.0) * 12.0)
+
+
+@pytest.mark.parametrize("cap,pf,outcome", [
+    (float("nan"), None, "not_established"), (-500.0, None, "refused"),
+    (1000.0, 0.0, "refused"), (1000.0, 1.5, "refused"), (1000.0, -0.9, "refused")])
+def test_capacity_inputs_are_validated_at_the_engine_boundary(cap, pf, outcome):
+    """#3: the model's bounds hold at the engine boundary too."""
+    item = {**_CAP, "unit": "per_kva_year"} if pf is not None else _CAP
+    d = _year(1.0, freq="h")
+    if outcome == "refused":
+        with pytest.raises(ValueError):
+            rate(d, _tariff(item), step_hours=1.0, timezone="Europe/Berlin", capacity_kw=cap,
+                 power_factor=pf)
+    else:
+        res = rate(d, _tariff(item), step_hours=1.0, timezone="Europe/Berlin",
+                   capacity_kw=cap, power_factor=pf)
+        assert res.per_item[item["id"]] is None and res.total is None
+
+
+def test_tiers_on_a_capacity_item_are_unsupported():
+    item = {**_CAP, "tiers": [{"threshold": 0, "rate": 10.0}, {"threshold": 1000, "rate": 50.0}]}
+    res = rate(_year(1.0, freq="h"), _tariff(item), step_hours=1.0, timezone="Europe/Berlin",
+               capacity_kw=500.0)
+    assert res.flags["cap"] == ["unsupported:tiers_on_capacity"]
+    assert res.total is None
+
+
+def test_a_capacity_item_over_gappy_weeks_is_not_a_complete_year():
+    """#5: two sampled weeks billed against a full billing period without
+    represents_hours must not look complete (the C4 invariant)."""
+    fixed = {"id": "fixed", "kind": "fixed", "unit": "per_month",
+             "periods": [{"name": "all", "rate": 100.0}]}
+    parts = [pd.date_range(f"2030-{m:02d}-07", periods=24 * 7, freq="h") for m in (1, 7)]
+    idx = parts[0].append(parts[1])
+    d = pd.DataFrame({"import_mw": 1.0, "export_mw": 0.0}, index=idx)
+    res = rate(d, _tariff(fixed, _CAP), step_hours=1.0, timezone=None, capacity_kw=1000.0,
+               billing_period=("2030-01-01", "2031-01-01"))
+    assert res.total is None
+    assert "capacity_on_partial_coverage" in (res.notes.get("cap") or [])
+
+
+def test_a_per_day_charge_counts_real_days_across_dst():
+    """#6: the spring-forward day is one day (23 h), the fall-back day one day
+    (25 h) — calendar days on the local clock, not hours / 24."""
+    item = {"id": "fixed", "kind": "fixed", "unit": "per_day",
+            "periods": [{"name": "all", "rate": 1.0}]}
+    idx = pd.date_range("2024-03-01", "2024-10-31 23:00", freq="h", tz="Europe/Amsterdam")
+    res = rate(pd.DataFrame({"import_mw": 1.0, "export_mw": 0.0}, index=idx), _tariff(item),
+               step_hours=1.0, timezone="Europe/Amsterdam")
+    assert res.monthly.loc["2024-03", "fixed"] == pytest.approx(31.0)
+    assert res.monthly.loc["2024-10", "fixed"] == pytest.approx(31.0)
+    one = idx[(idx.month == 3) & (idx.day == 31)]
+    day = rate(pd.DataFrame({"import_mw": 1.0, "export_mw": 0.0}, index=one), _tariff(item),
+               step_hours=1.0, timezone="Europe/Amsterdam")
+    assert day.per_item["fixed"] == pytest.approx(1.0)
+
+
+def test_capacity_prorating_is_disclosed():
+    """#10: a partial or leap year is pro-rated by represented hours / 8760 (the
+    LP's convention); say so."""
+    res = rate(_year(1.0, freq="h").iloc[: 24 * 59], _tariff(_LP), step_hours=1.0,
+               timezone="Europe/Berlin")
+    assert "capacity_prorated_by_represented_hours" in res.notes["lp"]
+    assert "peak_from_partial_year" in res.notes["lp"]
+
+
+def test_a_capacity_double_count_has_its_own_preflight_code():
+    """#8: the spec's code, not a generic binding error."""
+    from services.solver_service import SolverConfig
+    from services.validation_service import validate_for_run
+    from tests.fixtures.investment_case.edge_15min import build_edge_15min
+
+    fee = {"kind": "firm", "import_cap_mw": 70.0, "available_from": "2030-01-01",
+           "capacity_fee": {"id": "fee", "kind": "capacity", "unit": "per_kw_year",
+                            "periods": [{"name": "all", "rate": 60.0}]}}
+    tariff = {"id": "t", "name": "t", "jurisdiction": "DE", "valid_from": "2030-01-01",
+              "items": [_CAP]}
+    issues = validate_for_run(build_edge_15min(), SolverConfig(commercial={
+        "poc_link": "import", "import_tariff": tariff, "connection": fee}))
+    assert {i.code for i in issues if i.severity == "error"} == {"commercial.capacity_double_count"}
+
+
+def test_a_peak_import_capacity_item_is_out_of_the_lp_as_capacity():
+    """#7: the LP's reason names capacity, not demand."""
+    from services.commercial import lp_bindings as L
+
+    assert L._lp_reason(_tariff(_LP).items[0]) == "capacity_not_in_lp_until_WP2.1c"
