@@ -42,6 +42,8 @@ FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {
     ("CommercialConfig", "meter_history_energy_kwh"): {},  # WP2.1c-ii
     ("CommercialConfig", "import_tariff_ref"): None,     # WP2.4a
     ("ConnectionAgreement", "library_ref"): None,        # WP2.4a
+    ("CommercialConfig", "contracts"): [],               # WP2.2-0
+    ("CommercialConfig", "grid_cfe_share_ref"): None,    # WP2.2-0
 }
 
 

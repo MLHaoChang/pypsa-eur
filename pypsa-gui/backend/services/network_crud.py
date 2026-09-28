@@ -155,6 +155,12 @@ def _create_component(component_class: str, attr: str, name: str, kwargs: dict) 
     # /bulk writes, rename, and global-constraint mutations all benefit
     # without each having to call an invalidation helper here.
     n = PyPSAService.get_network()
+    if component_class == "Bus":
+        from services.commercial.settlement_inputs import reserved_bus_name
+
+        if reserved_bus_name(name):
+            # `ic:` names the commercial reference frames' columns (P2 WP2.2-0).
+            raise HTTPException(422, f"bus names starting 'ic:' are reserved (got {name!r})")
     kwargs = _drop_unknown_extras(component_class, attr, kwargs)
     with PyPSAService.get_lock():
         df = getattr(n, attr)

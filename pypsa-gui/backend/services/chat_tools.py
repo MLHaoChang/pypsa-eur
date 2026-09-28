@@ -3411,8 +3411,8 @@ def reconstruct_network_from_image(
         for b in buses_in:
             try:
                 bname = str(b.get("name") or "").strip()
-                if not bname or bname in existing_bus_names:
-                    continue
+                if not bname or bname in existing_bus_names or bname.startswith("ic:"):
+                    continue  # `ic:` is reserved (P2 WP2.2-0)
                 px = float(b.get("px") or 0.0)
                 py = float(b.get("py") or 0.0)
                 gx = (px - origin_x) * scale_x

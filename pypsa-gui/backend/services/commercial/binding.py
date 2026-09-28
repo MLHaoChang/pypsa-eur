@@ -106,6 +106,18 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
                 if agreement is not None and agreement.envelope is not None else None)
     fca = agreement is not None and agreement.kind == "fca" \
         and agreement.curtailment_hours_per_year is not None
+    # Contract reference prices and the grid CFE share (P2 WP2.2-0): fully
+    # covered only — an uncovered series is refused like the export price.
+    from services.commercial import settlement_inputs as SI
+
+    ref_prices = {SI.contract_column(c.id): (aligned(c.reference_price,
+                                                     "reference_price_coverage"),
+                                             c.reference_price)
+                  for c in commercial.contracts
+                  if getattr(c, "reference_price", None) is not None}
+    cfe = ({SI.CFE_COLUMN: (aligned(commercial.grid_cfe_share_ref, "grid_cfe_share_coverage"),
+                            commercial.grid_cfe_share_ref)}
+           if commercial.grid_cfe_share_ref is not None else {})
     planned = None
     if fca:
         if project_dir is None:
@@ -131,6 +143,11 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
             lp_bindings.write_export_price(n, commercial.export_link, price, None)
         if envelope is not None:
             conn.write_envelope(n, commercial.poc_link, envelope, None)
+        # The frames hold exactly the config's references: a contract that
+        # left the config loses its column.
+        SI.write_reference_series(n, ref_prices, frame=SI.REF_PRICE_ATTR,
+                                  keep=set(ref_prices))
+        SI.write_reference_series(n, cfe, frame=SI.CFE_ATTR, keep=set(cfe))
     if planned is not None:
         from services.adequacy import stress
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 import math
 
 from datetime import date
-from typing import Literal
+from typing import Annotated, Literal, Union
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -350,6 +350,9 @@ class ConnectionAgreement(BaseModel):
 
 
 class PpaContract(BaseModel):
+    # The discriminator of `CommercialConfig.contracts` (P2 WP2.2-0), with a
+    # per-class default so `PpaContract(...)` without it still constructs.
+    type: Literal["ppa"] = "ppa"
     id: str = Field(min_length=1)
     kind: PpaKind
     price: float = Field(ge=0)
@@ -363,23 +366,55 @@ class PpaContract(BaseModel):
     asset_ids: list[str] = Field(min_length=1)
     reference_price: TimeSeriesRef | None = None
     changes_dispatch: bool = False
+    # P2 WP2.2a (every field optional or defaulted: P0 JSON stays valid).
+    base_year: int | None = None
+    library_ref: LibraryItemRef | None = None
+    pricing: Literal["fixed", "market_plus_premium"] = "fixed"
+    premium_eur_per_mwh: float | None = None          # any sign; indexed like `price`
+    baseload_mw: float | None = Field(default=None, ge=0)
+    sleeving_fee_eur_per_mwh: float | None = Field(default=None, ge=0)
+    sleeving_party: str | None = None
 
     @model_validator(mode="after")
     def _floor_below_cap(self) -> "PpaContract":
         if self.floor is not None and self.cap is not None and self.floor > self.cap:
             raise ValueError("PPA floor must not exceed cap")
+        if self.pricing == "market_plus_premium":
+            # Allowed with pay_as_produced / as_consumed_btm / sleeved; a
+            # baseload PPA settles `price` against the reference (financial).
+            if self.kind == "baseload":
+                raise ValueError("a baseload PPA settles price against the reference; "
+                                 "market_plus_premium is refused")
+            if self.premium_eur_per_mwh is None:
+                raise ValueError("market_plus_premium needs premium_eur_per_mwh")
+            if self.reference_price is None:
+                raise ValueError("market_plus_premium needs a reference_price")
         return self
 
 
 class CfdContract(BaseModel):
+    # The discriminator of `CommercialConfig.contracts` (P2 WP2.2-0), with a
+    # per-class default so `CfdContract(...)` without it still constructs.
+    type: Literal["cfd"] = "cfd"
     id: str = Field(min_length=1)
     strike: float = Field(ge=0)
     reference_price: TimeSeriesRef | None = None
     tenor_years: int = Field(ge=1)
     asset_ids: list[str] = Field(min_length=1)
+    # P2 WP2.2a (optional or defaulted).
+    base_year: int | None = None
+    library_ref: LibraryItemRef | None = None
+    generator_owner: str | None = None
+    counterparty: str | None = None
+    indexation_pct_per_year: float = 0.0
+    reference: Literal["interval", "monthly_capture"] = "interval"
+    suspend_on_negative_price: bool = False
 
 
 class DrContract(BaseModel):
+    # The discriminator of `CommercialConfig.contracts` (P2 WP2.2-0), with a
+    # per-class default so `DrContract(...)` without it still constructs.
+    type: Literal["dr"] = "dr"
     id: str = Field(min_length=1)
     availability_eur_per_mw_year: float = Field(ge=0)
     activation_eur_per_mwh: float = Field(ge=0)
@@ -388,6 +423,12 @@ class DrContract(BaseModel):
     notice_h: float | None = Field(default=None, ge=0)
     asset_ids: list[str] = Field(default_factory=list)
     load_ids: list[str] = Field(default_factory=list)
+    # P2 WP2.2b (optional): the payer of availability and activation, and the
+    # contracted MW availability is paid on (absent ⇒ not established).
+    counterparty: str | None = None
+    contracted_mw: float | None = Field(default=None, ge=0)
+    base_year: int | None = None
+    library_ref: LibraryItemRef | None = None
 
     @model_validator(mode="after")
     def _some_target(self) -> "DrContract":
@@ -397,6 +438,9 @@ class DrContract(BaseModel):
 
 
 class LeaseContract(BaseModel):
+    # The discriminator of `CommercialConfig.contracts` (P2 WP2.2-0), with a
+    # per-class default so `LeaseContract(...)` without it still constructs.
+    type: Literal["lease"] = "lease"
     id: str = Field(min_length=1)
     lessor: str
     lessee: str
@@ -406,6 +450,9 @@ class LeaseContract(BaseModel):
 
 
 class EaasContract(BaseModel):
+    # The discriminator of `CommercialConfig.contracts` (P2 WP2.2-0), with a
+    # per-class default so `EaasContract(...)` without it still constructs.
+    type: Literal["eaas"] = "eaas"
     id: str = Field(min_length=1)
     provider: str
     customer: str
@@ -416,11 +463,33 @@ class EaasContract(BaseModel):
 
 
 class RetailContract(BaseModel):
+    # The discriminator of `CommercialConfig.contracts` (P2 WP2.2-0), with a
+    # per-class default so `RetailContract(...)` without it still constructs.
+    type: Literal["retail"] = "retail"
     id: str = Field(min_length=1)
     retailer: str
     customer: str
     tariff_id: str
     tenor_years: int = Field(ge=1)
+
+
+Contract = Annotated[Union[PpaContract, CfdContract, DrContract, LeaseContract, EaasContract,
+                           RetailContract], Field(discriminator="type")]
+
+
+def _contract_type_from_shape(c: dict) -> str:
+    """The `type` of an untagged P0-era contract payload, from its fields."""
+    if "strike" in c:
+        return "cfd"
+    if "availability_eur_per_mw_year" in c:
+        return "dr"
+    if "annual_payment" in c:
+        return "lease"
+    if "fee_eur_per_mwh" in c or "fee_eur_per_year" in c:
+        return "eaas"
+    if "tariff_id" in c:
+        return "retail"
+    return "ppa"
 
 
 class AncillaryProduct(BaseModel):
@@ -466,6 +535,12 @@ class CommercialConfig(BaseModel):
     # are read on this clock; None → snapshots already are the site clock.
     timezone: str | None = None
     connection: ConnectionAgreement | None = None
+    # Contracts settled on the solved dispatch (P2 WP2.2), discriminated by
+    # `type`; untagged P0-era payloads are tagged from their shape.
+    contracts: list[Contract] = Field(default_factory=list)
+    # The grid's carbon-free share per snapshot, a Library series (P2 WP2.2-0,
+    # for WP2.5's CFE score).
+    grid_cfe_share_ref: TimeSeriesRef | None = None
     group_contract: str | None = None
     # Energy-hub group contract (WP1.6): the member PoC Links whose combined
     # import is capped at `group_cap_mw` in every snapshot.
@@ -485,6 +560,19 @@ class CommercialConfig(BaseModel):
     # The site's power factor for tariff items billed per kVA (P2 WP2.1a-i);
     # absent ⇒ a `per_kva_year` item is not established (ADR-0001).
     power_factor: float | None = Field(default=None, gt=0, le=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _tag_untagged_contracts(cls, data):
+        # A discriminated union refuses a dict without its tag even when the
+        # field has a default (`union_tag_not_found`): tag P0-era payloads
+        # from their shape before the union validates (WP2.2a).
+        if isinstance(data, dict) and isinstance(data.get("contracts"), list):
+            data = {**data, "contracts": [
+                {**c, "type": _contract_type_from_shape(c)}
+                if isinstance(c, dict) and "type" not in c else c
+                for c in data["contracts"]]}
+        return data
 
     @model_validator(mode="after")
     def _tariff_and_links(self) -> "CommercialConfig":

@@ -677,6 +677,9 @@ class PyPSAService:
         the lock is not reentrant and every caller already holds it.
         """
         from services.adequacy.occurrence import normalise_flag_column
+        from services.commercial.settlement_inputs import install_log_filter
+
+        install_log_filter()  # the `ic:` reference frames are not buses (P2 WP2.2-0)
         n.import_from_netcdf(str(path))
         normalise_flag_column(n)
 

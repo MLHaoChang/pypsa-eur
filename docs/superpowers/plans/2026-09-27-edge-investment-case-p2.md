@@ -650,6 +650,35 @@ services) and the netCDF upload path (refuse bus names starting `ic:`), tests.
     - activation across an axis change;
     - a netCDF round trip.
 
+- **As implemented, 2.2-0b:**
+  - **Models.**
+    - Every contract model has `type: Literal[...]` with a per-class default. `Contract` is a discriminated union.
+    - `CommercialConfig.contracts: list[Contract]` has a before-validator that tags untagged P0 payloads from their shape: `strike` ⇒ cfd, `availability_eur_per_mw_year` ⇒ dr, `annual_payment` ⇒ lease, `fee_eur_per_*` ⇒ eaas, `tariff_id` ⇒ retail, else ppa.
+    - `CommercialConfig.grid_cfe_share_ref` is added.
+    - Both fields are registered in `FIELDS_AFTER_V1`, and `types.ts` is mirrored (`CommercialContract`).
+  - **Binding.** `bind_commercial` aligns each contract's `reference_price` and the `grid_cfe_share_ref` before any write.
+    - An uncovered series is refused: `reference_price_coverage` / `grid_cfe_share_coverage` (422), and nothing is written.
+    - The series are written under the lock with `settlement_inputs.write_reference_series`: `buses_t["ic_ref_price"]["ic:contract:<id>"]` and `buses_t["ic_grid_cfe_share"]["ic:cfe:grid"]`, with `meta["ic_ref_series"][col] = {ref, axis_hash}`.
+    - A contract that left the config loses its column. Nothing is written when there is nothing to write or prune.
+    - Contract refs are pinned by the existing collector (they are series refs).
+  - **Readers.** `reference_price(n, contract)` and `grid_cfe_share(n, cfg)` return (series, []) or `None` + `*_missing`: not bound, another axis, or NaN. They also add `reference_changed_since_binding` when the config names another ref.
+  - **Namespace.** Bus names starting `ic:` are refused in:
+    - `network_crud._create_component` (Bus) and `apply_rename_bus` (422);
+    - the chat vision bus loop (skipped);
+    - every `io` import (netCDF, CSV, Excel, MATPOWER), which is undone and refused with 422.
+
+    `PyPSAService.import_network_from_netcdf` installs a `pypsa.network.io` log filter for the "not in main components dataframe" warning on `ic_*` frames. The existing `ic_*` time-series guards are component-agnostic and already cover `buses_t` (tested).
+  - **Tests:** `tests/test_settlement_references.py` has 10 tests:
+    - discriminated and shape-tagged contracts;
+    - registration;
+    - route writes and prunes;
+    - an uncovered series refused;
+    - a reader that is unbound, changed or on another axis;
+    - netCDF / `copy()` / bus remove / rename survival;
+    - no load warning;
+    - the `ic:` guards on create, rename and import;
+    - frames that are not user series.
+
 ## WP2.2a Contracts: PPA (four kinds) and CfD
 
 Files: `models/commercial.py`, `backend/services/commercial/contracts.py` (new, pure), `test_contracts_ppa_cfd.py`.
@@ -709,6 +738,29 @@ or generator is a P5 archetype matter) — DR targets `load_ids`.
 
 - [ ] Red: C1 DR/lease/EaaS/retail to the cent; DR on representative weeks and a leap year; event counting on a
   hand series; `asset_ids` on DR refused.
+
+- **As implemented, WP2.2a + WP2.2b** (one module: `services/commercial/contracts.py`, pure):
+  - **Interface.**
+    - `SettlementInputs` carries per period: index, represented-hour weights, Generator output, commercial-meter export, references (id → (series, flags), from `settlement_inputs.reference_price`), the modelled year, loads with their bus map, the DSR record, StorageUnit discharge, Link output, step hours and `site_party`.
+    - `settle(contract, inputs) -> [Line]`. A `Line` is (period, contract_id, payer, payee, value_stream, quantity_mwh, amount, flags). An amount ≥ 0 means the payer pays the payee; signed settlements keep their sign. An unknown amount is None + flag.
+    - `ContractError` refuses an asset that is not of the needed class, DR on `asset_ids`, a load that is not in the network, and a retail contract naming another tariff.
+  - **Model delta.** The fields match the plan's table, all optional or defaulted.
+    - PPA: `pricing`, `premium_eur_per_mwh`, `baseload_mw`, `sleeving_fee_eur_per_mwh`, `sleeving_party`. A validator refuses `market_plus_premium` on a baseload PPA, or without a premium or a reference.
+    - CfD: `generator_owner`, `counterparty`, `indexation_pct_per_year`, `reference`, `suspend_on_negative_price`.
+    - DR: `counterparty`, `contracted_mw`.
+    - `base_year` and `library_ref` are added to PPA, CfD and DR.
+  - **Formulas and value streams.** The formulas follow the plan's tables; the module docstring carries them as a table.
+    - PPA: `ppa_energy`, plus `ppa_excess_mwh` above the volume cap (the cap is pro-rated to the represented share of the modelled calendar year and filled chronologically), plus `ppa_sleeving_fee`.
+    - CfD: `cfd_difference` (interval / monthly capture / suspended at negative prices).
+    - DR: `dr_availability` and `dr_activation`. Events are maximal runs of activation > 0, and the limits are flagged.
+    - `lease_payment` and `eaas_fee`.
+    - Retail has no lines; `retail_parties` gives the tariff bill's payer and payee.
+  - **Fixture C1** (`tests/fixtures/investment_case/c1_contracts.py`, self-authored). It is a hand-set 15-min week: PV + wind, BESS charging from PV, export on three days, negative reference prices on two, three loads on two buses, three DSR events, BESS discharge and a Link.
+  - **Tests.**
+    - `test_contracts_ppa_cfd.py` (17): every PPA kind and pricing, indexation, the cap, a missing ref, a non-Generator asset, disallowed combinations, CfD interval / suspension / monthly capture (two-month hand case) / parties and its own indexation, multi-period, and P0 payloads still valid.
+    - `test_contracts_dr_lease_eaas_retail.py` (10): DR availability and activation, events, not-established cases, assets refused, representative weeks and a leap year, lease, EaaS, retail.
+    - All expected values are written out independently, to the cent.
+  - **Not here:** the network-level driver (inputs from the seam and readers, per period) is WP2.5's `services/results/billing.py`. The asset-class preflight (`commercial.contract_asset_missing`) is WP2.2c.
 
 ## WP2.2c Contracts on the config + double-count preflight
 

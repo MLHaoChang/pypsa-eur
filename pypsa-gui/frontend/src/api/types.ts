@@ -363,11 +363,24 @@ export interface ConnectionAgreement {
   available_from: string
   group?: string | null
 }
+/** A settled contract (IC P2 WP2.2), discriminated by `type`; the per-type fields follow the backend models. */
+export interface CommercialContract {
+  type: 'ppa' | 'cfd' | 'dr' | 'lease' | 'eaas' | 'retail'
+  id: string
+  reference_price?: LibraryRef | null
+  library_ref?: LibraryItemRef | null
+  [field: string]: unknown
+}
+
 export interface CommercialConfig {
   poc_link: string
   import_tariff_id?: string | null
   /** A Library tariff; PUT /solver_config resolves it into the inline import_tariff. */
   import_tariff_ref?: LibraryItemRef | null
+  /** Contracts settled on the solved dispatch (IC P2 WP2.2). */
+  contracts?: CommercialContract[]
+  /** The grid's carbon-free share per snapshot, a Library series (IC P2 WP2.2-0). */
+  grid_cfe_share_ref?: LibraryRef | null
   import_tariff?: Tariff | null
   export_price_ref?: LibraryRef | null
   export_link?: string | null
