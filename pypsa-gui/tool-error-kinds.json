@@ -187,6 +187,10 @@
       "surface": "inline",
       "why": "The local per-session turn limiter, raised by the chat route before a turn starts — so it never arrives on a tool_error frame in practice."
     },
+    "report_mode_not_supported": {
+      "surface": "inline",
+      "why": "POST /{name}/reports was asked for a mode this build does not offer (only evidence_only until WP3's generator lands). Route-only in phase 1; when WP6's report tool passes a model-typed mode, the message names the supported one and the model corrects within the turn, as with invalid_tool_args."
+    },
     "report_not_found": {
       "surface": "inline",
       "why": "No such study report (or version of it) in this project. Per-call; the message names the remedy (generate one first) and the model relays it, exactly as eh_report_not_found is handled."

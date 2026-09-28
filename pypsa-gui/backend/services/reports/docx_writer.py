@@ -1,18 +1,39 @@
 """
-Render the Energy Hub ``ReferenceDesignReport`` as a Word document.
+Render a study report as a Word document.
 
-WP0 of docs/superpowers/plans/2026-09-28-llm-report-generation-increment-1.md.
-No language model is involved: every cell comes from the report dict the
-assembler produced (``export_reference_design``), formatted by
-``services.reports.formatting`` so nothing missing becomes a zero, and every
-one of ``REPORT_SECTIONS`` is present in the document — an unestablished
-section is one sentence saying so, with the stage's note.
+WP0 + WP5 of docs/superpowers/plans/2026-09-28-llm-report-generation-increment-1.md.
+
+There is ONE writer: ``render_document_docx`` takes a ``ReportDocument``
+(``models/report.py``) and renders its blocks. ``render_reference_design_docx``
+(the WP0 spike's entry point) is now a thin adapter: it collects the
+evidence from the ``ReferenceDesignReport`` dict, builds the code-only
+document with ``services.reports.assemble`` and renders that — decision 16's
+spirit (one report builder), so a chip exported from the chat strip and a
+report exported from the Reports panel are the same bytes for the same
+evidence.
+
+Block mapping (the writer's whole vocabulary):
+
+* ``Paragraph`` — the markdown inline subset (``**bold**``, ``*italic*``,
+  ``` `code` ```, ``[text](url)``) as runs, through a small tokenizer; no
+  markdown dependency.
+* ``Bullets`` — ``List Bullet``; a template without that style gets a
+  ``Normal`` paragraph with a bullet marker.
+* ``TableRef`` — the table from ``doc.tables`` in ``Table Grid`` with a
+  numbered caption; a missing id is one ``Disclosure`` line, never a crash.
+* ``FigureRef`` — the picture and a numbered caption when the bytes are
+  present, else a ``Disclosure`` line saying the figure was not produced.
+* ``Callout`` — ``Disclosure`` style; a gap is prefixed "Gap:", a
+  not-established statement is a "Not established:" sentence.
+* ``Field`` — bold label, then the value.
+
+Every section heading carries a bookmark ``sec:<section_id>`` — the anchor
+the round trip (increment 3) matches an edited Word file back on.
 
 Template handling: ``template`` may be ``None`` (the code-built default),
-bytes, or a path. The writer keeps the template's section properties
-(page size, margins, headers, footers) and styles, clears its body, and
-writes the report into it — the same path a user template will take in
-increment 2.
+bytes, or a path. The writer keeps the template's section properties (page
+size, margins, headers, footers) and styles, clears its body, and writes
+the report into it — the same path a user template will take in increment 2.
 """
 from __future__ import annotations
 
@@ -20,13 +41,24 @@ import copy
 import io
 import json
 import pathlib
+import re
 from typing import Any
-from collections.abc import Callable
 
 from docx import Document
-from docx.shared import Inches
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Inches, RGBColor
 
-from models.energy_hub import REPORT_SECTIONS
+from models.report import (
+    Bullets,
+    Callout,
+    Field,
+    FigureRef,
+    Paragraph,
+    ReportDocument,
+    Section,
+    TableRef,
+)
 from services.reports import formatting as F
 from services.reports.default_template import (
     CAPTION_STYLE,
@@ -54,6 +86,15 @@ SECTION_TITLES: dict[str, str] = {
     "multi_energy": "Multi-energy adequacy",
 }
 
+# WP0's ``figures=`` argument is keyed by EH section; the document's figure
+# ids are WP4's. The adapter translates.
+_SECTION_FIGURE_IDS = {"fmea_top": "fmea_pareto", "frontier": "frontier",
+                       "sizing": "capacity_mix"}
+
+BOOKMARK_PREFIX = "sec:"
+APPENDIX_HEADING = "Numbers to check"
+_CODE_FONT = "Consolas"
+_LINK_COLOR = RGBColor(0x1F, 0x4E, 0x9E)
 _MAX_CELL_CHARS = 200
 
 
@@ -93,7 +134,8 @@ def _para(doc, text: str, style: str | None = None):
 
 def _disclosure(doc, text: str | None):
     if text:
-        _para(doc, str(text), DISCLOSURE_STYLE)
+        return _para(doc, str(text), DISCLOSURE_STYLE)
+    return None
 
 
 def _caption(doc, text: str):
@@ -146,256 +188,250 @@ def _picture(doc, png: bytes, caption: str | None = None):
         _caption(doc, caption)
 
 
-# ── headline ─────────────────────────────────────────────────────────────
+# ── bookmarks ────────────────────────────────────────────────────────────
 
 
-def _title_block(doc, report: dict) -> None:
-    doc.add_heading("Energy Hub reference design report", level=0)
-    _para(doc, f"Archetype: {F.fmt_text(report.get('archetype'))}")
-    _disclosure(doc, (
-        "Every figure in this document was computed by the study engines "
-        "and rendered by code. Sections the study did not establish say so."))
+class _Bookmarks:
+    """Unique ``w:id`` values per document; Word rejects duplicates."""
+
+    def __init__(self) -> None:
+        self._next = 0
+
+    def wrap(self, paragraph, name: str) -> None:
+        """Wrap the paragraph's runs in ``bookmarkStart``/``bookmarkEnd``."""
+        bid = str(self._next)
+        self._next += 1
+        start = OxmlElement("w:bookmarkStart")
+        start.set(qn("w:id"), bid)
+        start.set(qn("w:name"), name)
+        end = OxmlElement("w:bookmarkEnd")
+        end.set(qn("w:id"), bid)
+        p = paragraph._p
+        p_pr = p.find(qn("w:pPr"))
+        index = list(p).index(p_pr) + 1 if p_pr is not None else 0
+        p.insert(index, start)
+        p.append(end)
 
 
-def _headline_table(doc, report: dict) -> None:
-    tea = report.get("tea") or {}
-    cost = F.fmt_number(report.get("cost_at_target_eur"), unit="€")
-    basis = report.get("period_basis")
-    if cost != F.NOT_ESTABLISHED:
-        cost += f" ({F.fmt_text(basis)}; excludes load-shedding cost)"
-    lcoh = F.fmt_number(tea.get("lcoh_eur_per_kg"), unit="€/kg", digits=2)
-    if lcoh == F.NOT_ESTABLISHED and tea.get("lcoh_note"):
-        lcoh = f"{F.NOT_ESTABLISHED} — {tea['lcoh_note']}"
-    rows = [
-        ("ENS cap (‱ of demand)", F.fmt_number(report.get("ens_cap_permyriad"), digits=2)),
-        ("Achieved ENS (‱ of demand)", F.fmt_number(report.get("achieved_ens_permyriad"), digits=2)),
-        ("Achieved shed hours (h/yr)", F.fmt_number(report.get("achieved_shed_hours"), digits=1)),
-        ("MC LOLE (h/yr)", F.fmt_number(report.get("mc_lole_h"), unit="h/yr", digits=2)),
-        ("Cost at target", cost),
-        ("LCOE", F.fmt_number(tea.get("lcoe_eur_per_mwh"), unit="€/MWh", digits=1)),
-        ("LCOH", lcoh),
-        ("Pack hash", F.fmt_text(report.get("pack_hash"))),
-        ("Assumptions hash", F.fmt_text(report.get("assumptions_hash"))),
-    ]
-    _kv_table(doc, rows, "Table 1 — Headline results of the reference design")
+def _heading(doc, text: str, level: int, bookmarks: _Bookmarks | None = None,
+             name: str | None = None):
+    p = doc.add_heading(text, level=level)
+    if bookmarks is not None and name:
+        bookmarks.wrap(p, name)
+    return p
 
 
-def _completeness_table(doc, report: dict) -> None:
-    completeness = report.get("completeness") or {}
-    rows = [[SECTION_TITLES.get(name, name), F.fmt_status(completeness.get(name))]
-            for name in REPORT_SECTIONS]
-    _table(doc, ["Section", "Status"], rows,
-           "Table 2 — What this study established, and what it did not")
+# ── the markdown inline subset ───────────────────────────────────────────
+
+_INLINE = re.compile(
+    r"(?P<code>`(?P<code_t>[^`]+)`)"
+    r"|(?P<bold>\*\*(?P<bold_t>.+?)\*\*)"
+    r"|(?P<italic>\*(?P<italic_t>[^*]+?)\*)"
+    r"|(?P<link>\[(?P<link_t>[^\]]+)\]\((?P<link_u>[^)\s]+)\))"
+)
 
 
-# ── section renderers: (doc, payload, note, report) ──────────────────────
+def tokenize_inline(md: str) -> list[tuple[str, str, str | None]]:
+    """
+    ``[(kind, text, url)]`` for the inline subset: ``text``, ``bold``,
+    ``italic``, ``code``, ``link``. Nesting is not supported (bold inside a
+    link renders its markers) — the generator's schema does not produce it.
+    """
+    out: list[tuple[str, str, str | None]] = []
+    pos = 0
+    for m in _INLINE.finditer(md):
+        if m.start() > pos:
+            out.append(("text", md[pos:m.start()], None))
+        if m.group("code"):
+            out.append(("code", m.group("code_t"), None))
+        elif m.group("bold"):
+            out.append(("bold", m.group("bold_t"), None))
+        elif m.group("italic"):
+            out.append(("italic", m.group("italic_t"), None))
+        else:
+            out.append(("link", m.group("link_t"), m.group("link_u")))
+        pos = m.end()
+    if pos < len(md):
+        out.append(("text", md[pos:], None))
+    return out
 
 
-def _render_target(doc, payload: dict, note, report) -> None:
-    system = payload.get("system") or {}
-    metrics = payload.get("metrics") or {}
-    rows = [
-        ("Binding target", F.fmt_text(payload.get("binding"))),
-        ("ENS cap (MWh)", F.fmt_number(system.get("cap_mwh"))),
-        ("Achieved ENS (MWh)", F.fmt_number(system.get("achieved_ens_mwh"))),
-        ("Achieved shed hours (h/yr)", F.fmt_number(system.get("achieved_shed_hours"), digits=1)),
-        ("Demand (MWh)", F.fmt_number(metrics.get("demand_mwh"))),
-    ]
-    _kv_table(doc, rows)
+def _add_runs(paragraph, md: str) -> None:
+    for kind, text, url in tokenize_inline(md):
+        run = paragraph.add_run(text)
+        if kind == "bold":
+            run.bold = True
+        elif kind == "italic":
+            run.italic = True
+        elif kind == "code":
+            run.font.name = _CODE_FONT
+        elif kind == "link":
+            run.underline = True
+            run.font.color.rgb = _LINK_COLOR
+            if url and url != text:
+                paragraph.add_run(f" ({url})").font.color.rgb = _LINK_COLOR
 
 
-def _render_certification(doc, payload: dict, note, report) -> None:
-    rows = [
-        ("Metric", F.fmt_text(payload.get("metric"))),
-        ("Target LOLE", F.fmt_number(payload.get("target_lole_h"), unit="h/yr", digits=2)),
-        ("MC LOLE", F.fmt_number(payload.get("mc_lole_h"), unit="h/yr", digits=2)),
-        ("LOLE interval", F.fmt_ci(payload.get("lole_ci"), unit="h/yr")),
-        ("EUE", F.fmt_number(payload.get("eue_mwh"), unit="MWh", digits=1)),
-        ("EUE interval", F.fmt_ci(payload.get("eue_ci"), unit="MWh", digits=1)),
-        ("Draws (sampled / requested)",
-         f"{F.fmt_number(payload.get('n_samples'))} / {F.fmt_number(payload.get('draws_requested'))}"),
-        ("Converged", F.fmt_number(payload.get("converged"))),
-        ("ENS target met by the plan", F.fmt_number(payload.get("ens_met"))),
-        ("Verdict", F.fmt_text(payload.get("verdict"))),
-        ("Engine / fidelity",
-         f"{F.fmt_text(payload.get('engine'))} / {F.fmt_text(payload.get('fidelity'))}"),
-    ]
-    _kv_table(doc, rows)
-    _disclosure(doc, payload.get("warning"))
+# ── block renderers ──────────────────────────────────────────────────────
 
 
-def _render_cost(doc, payload: dict, note, report) -> None:
-    rows = [
-        ("Total system cost", F.fmt_number(payload.get("total_system_cost_eur"), unit="€")),
-        ("Period basis", F.fmt_text(payload.get("period_basis"))),
-        ("Excludes load-shedding cost", F.fmt_number(payload.get("excludes_shed_cost", True))),
-    ]
-    _kv_table(doc, rows)
+class _Counters:
+    def __init__(self) -> None:
+        self.tables = 0
+        self.figures = 0
 
 
-def _render_frontier(doc, payload: dict, note, report) -> None:
-    knee = payload.get("knee_index")
-    rows = []
-    for i, pt in enumerate(payload.get("points") or []):
-        point = pt.get("point") or {}
-        status = F.fmt_text(pt.get("status"))
-        if knee is not None and i == knee:
-            status += " (knee)"
-        rows.append([
-            F.fmt_number(pt.get("target_permyriad"), digits=2),
-            status,
-            F.fmt_number(point.get("total_system_cost_eur"), unit="€"),
-            F.fmt_number(point.get("achieved_ens_mwh")),
-            F.fmt_number(point.get("achieved_shed_hours"), digits=1),
-        ])
-    basis = F.fmt_text(payload.get("period_basis"))
-    _table(doc, ["Target (‱)", "Status", "Total system cost", "ENS (MWh)",
-                 "Shed hours (h/yr)"], rows,
-           f"Cost of reliability, one full expansion solve per target; "
-           f"{basis}; excludes load-shedding cost; "
-           f"VoLL {F.fmt_number(payload.get('voll_eur_per_mwh'), unit='€/MWh')}")
-    _disclosure(doc, payload.get("warning"))
+def _render_paragraph(doc, block: Paragraph) -> None:
+    for chunk in [c for c in block.md.split("\n\n") if c.strip()]:
+        p = doc.add_paragraph()
+        _add_runs(p, chunk.replace("\n", " ").strip())
 
 
-def _render_sizing(doc, payload: dict, note, report) -> None:
-    by_carrier = payload.get("by_carrier") or {}
-    rows = [[str(k), F.fmt_number(v, unit="MW", digits=1)]
-            for k, v in by_carrier.items()]
-    rows.append(["Total", F.fmt_number(payload.get("total_p_nom_mw"), unit="MW", digits=1)])
-    _table(doc, ["Carrier", "Installed capacity"], rows)
+def _render_bullets(doc, block: Bullets) -> None:
+    for item in block.items:
+        try:
+            p = doc.add_paragraph(style=doc.styles["List Bullet"])
+            _add_runs(p, item)
+        except KeyError:
+            p = doc.add_paragraph()
+            p.add_run("• ")
+            _add_runs(p, item)
 
 
-def _render_fmea_top(doc, payload: dict, note, report) -> None:
-    rows = []
-    for r in payload.get("top") or []:
-        rows.append([
-            F.fmt_number(r.get("rank")),
-            F.fmt_text(r.get("failure_class")),
-            F.fmt_text(r.get("component_class")),
-            F.fmt_text(r.get("name")),
-            F.fmt_number(r.get("occurrence_per_year"), unit="/yr", digits=2),
-            F.fmt_number(r.get("severity_eur"), unit="€"),
-            F.fmt_number(r.get("criticality_eur_per_year"), unit="€/yr"),
-            F.fmt_number(r.get("delta_eue_mwh"), digits=2),
-        ])
-    classes = F.fmt_text(payload.get("classes_included"))
-    _table(doc, ["Rank", "Class", "Component", "Name", "Occurrence",
-                 "Severity", "Criticality", "ΔEUE (MWh)"], rows,
-           f"Ranked by criticality (€/yr) then mode id; classes included: "
-           f"{classes}; {F.fmt_number(payload.get('n_total_modes'))} modes in "
-           f"total; VoLL {F.fmt_number(payload.get('voll_eur_per_mwh'), unit='€/MWh')}")
-    _disclosure(doc, payload.get("note"))
-    class_b = payload.get("class_b") or {}
-    if class_b:
-        line = f"Class-B Link sweep: {F.fmt_text(class_b.get('status'))}"
-        if class_b.get("reason"):
-            line += f" — {class_b['reason']}"
-        _disclosure(doc, line)
-    _disclosure(doc, payload.get("copt_fidelity_note"))
-
-
-def _render_tea(doc, payload: dict, note, report) -> None:
-    tea = report.get("tea") or payload or {}
-    rows = [
-        ("LCOE", F.fmt_number(tea.get("lcoe_eur_per_mwh"), unit="€/MWh", digits=1)),
-        ("LCOH", F.fmt_number(tea.get("lcoh_eur_per_kg"), unit="€/kg", digits=2)),
-        ("LCOH status", F.fmt_status(tea.get("lcoh_status"))),
-    ]
-    _kv_table(doc, rows)
-    _disclosure(doc, tea.get("notes"))
-    _disclosure(doc, tea.get("lcoh_note"))
-
-
-def _render_gates(doc, payload: dict, note, report) -> None:
-    gates = report.get("gates") or payload or {}
-    rows = [
-        ("Short-circuit ratio gate", F.fmt_text(gates.get("scr"))),
-        ("EMT study recommended", F.fmt_number(gates.get("emt_recommended"))),
-    ]
-    _kv_table(doc, rows)
-
-
-def _render_generic(doc, payload: dict, note, report) -> None:
-    rows = [(str(k), _cell(v)) for k, v in payload.items()]
-    _kv_table(doc, rows)
-
-
-_RENDERERS: dict[str, Callable] = {
-    "target": _render_target,
-    "certification": _render_certification,
-    "cost": _render_cost,
-    "frontier": _render_frontier,
-    "sizing": _render_sizing,
-    "fmea_top": _render_fmea_top,
-    "tea": _render_tea,
-    "gates": _render_gates,
-}
-
-_FIGURE_CAPTIONS = {
-    "fmea_top": "Figure — criticality of the ranked residual failure modes "
-                "(€/yr), cumulative share annotated",
-}
-
-
-def _render_section(doc, name: str, report: dict,
-                    figures: dict[str, bytes] | None) -> None:
-    doc.add_heading(SECTION_TITLES.get(name, name), level=1)
-    section = (report.get("sections") or {}).get(name) or {}
-    status = section.get("status") or "not_established"
-    note = section.get("note")
-    payload = section.get("payload")
-    # tea / gates live on the report as blocks even when the section payload
-    # is empty; treat a present block as established evidence.
-    block_present = name in ("tea", "gates") and bool(report.get(name))
-    if status != "ok" or (not payload and not block_present):
-        sentence = f"This section was {F.fmt_status(status)}."
-        if note:
-            sentence += f" {note}"
-        _para(doc, sentence)
+def _render_table_ref(doc, block: TableRef, report: ReportDocument,
+                      counters: _Counters) -> None:
+    table = report.tables.get(block.table_id)
+    if table is None:
+        _disclosure(doc, f"Table {block.table_id!r} is not available in this "
+                         f"version of the report.")
         return
-    _RENDERERS.get(name, _render_generic)(doc, payload or {}, note, report)
-    if note:
-        _disclosure(doc, f"Stage note: {note}")
-    png = (figures or {}).get(name)
-    if png:
-        _picture(doc, png, _FIGURE_CAPTIONS.get(name))
+    counters.tables += 1
+    caption = block.caption or table.caption
+    label = f"Table {counters.tables}"
+    _table(doc, list(table.columns), [list(r) for r in table.rows],
+           f"{label} — {caption}" if caption else label)
 
 
-def _render_worksheet(doc, worksheet: dict | None) -> None:
-    rows_in = (worksheet or {}).get("manual_rows") or []
-    if not rows_in:
+def _render_figure_ref(doc, block: FigureRef, report: ReportDocument,
+                       figure_bytes: dict[str, bytes], counters: _Counters) -> None:
+    figure = report.figures.get(block.figure_id)
+    png = figure_bytes.get(block.figure_id)
+    if not png:
+        _disclosure(doc, f"Figure {block.figure_id!r} was not produced for this "
+                         f"version of the report.")
         return
-    doc.add_heading("Expert-entered failure modes (class D)", level=1)
-    rows = [[
-        F.fmt_text(r.get("component_class")),
-        F.fmt_text(r.get("name")),
-        F.fmt_number(r.get("occurrence_per_year"), unit="/yr", digits=2),
-        F.fmt_number(r.get("severity_eur"), unit="€"),
-        F.fmt_number(r.get("criticality_eur_per_year"), unit="€/yr"),
-        F.fmt_text(r.get("rate_source")),
-    ] for r in rows_in]
-    _table(doc, ["Component", "Name", "Occurrence", "Severity",
-                 "Criticality", "Rate source"], rows,
-           "Rows entered by the analyst in the FMEA worksheet "
-           "(engine: expert; fidelity: expert judgement)")
+    counters.figures += 1
+    caption = block.caption or (figure.caption if figure is not None else None)
+    label = f"Figure {counters.figures}"
+    _picture(doc, png, f"{label} — {caption}" if caption else label)
 
 
-def _render_pipeline(doc, report: dict) -> None:
-    pipeline = report.get("pipeline") or {}
-    doc.add_heading("Study pipeline", level=1)
-    rows = [[
-        F.fmt_text(s.get("stage")),
-        F.fmt_status(s.get("status")),
-        F.fmt_number(s.get("solves_charged")),
-        F.fmt_text(s.get("note")) if s.get("note") else "",
-    ] for s in pipeline.get("stages") or []]
-    _table(doc, ["Stage", "Status", "Solves", "Note"], rows,
-           f"Solves consumed {F.fmt_number(pipeline.get('solves_consumed'))} "
-           f"of a budget of {F.fmt_number(pipeline.get('budget_solves'))}"
-           + ("; the study was aborted" if pipeline.get("aborted") else ""))
+def _render_callout(doc, block: Callout) -> None:
+    if block.kind == "gap":
+        _disclosure(doc, f"Gap: {block.text}")
+    elif block.kind == "not_established":
+        text = block.text.strip()
+        if text and text[-1] not in ".!?":
+            text += "."
+        _para(doc, f"Not established: {text}")
+    else:
+        _disclosure(doc, block.text)
 
 
-# ── entry point ──────────────────────────────────────────────────────────
+def _render_field(doc, block: Field) -> None:
+    p = doc.add_paragraph()
+    p.add_run(f"{block.key}: ").bold = True
+    p.add_run(block.value)
+
+
+def _render_block(doc, block, report: ReportDocument,
+                  figure_bytes: dict[str, bytes], counters: _Counters) -> None:
+    if isinstance(block, Paragraph):
+        _render_paragraph(doc, block)
+    elif isinstance(block, Bullets):
+        _render_bullets(doc, block)
+    elif isinstance(block, TableRef):
+        _render_table_ref(doc, block, report, counters)
+    elif isinstance(block, FigureRef):
+        _render_figure_ref(doc, block, report, figure_bytes, counters)
+    elif isinstance(block, Callout):
+        _render_callout(doc, block)
+    elif isinstance(block, Field):
+        _render_field(doc, block)
+    else:  # a block type the model grew after this writer — say so, never drop it
+        _disclosure(doc, f"Unsupported block {getattr(block, 'type', type(block).__name__)!r}.")
+
+
+def _render_doc_section(doc, section: Section, report: ReportDocument,
+                        figure_bytes: dict[str, bytes], counters: _Counters,
+                        bookmarks: _Bookmarks) -> None:
+    _heading(doc, section.heading, 1, bookmarks,
+             f"{BOOKMARK_PREFIX}{section.section_id}")
+    for block in section.blocks:
+        _render_block(doc, block, report, figure_bytes, counters)
+    # A section whose status says it was not established but which carries
+    # no such block (a hand-edited version, a future generator) is still
+    # stated: the omission is the finding.
+    if section.status != "ok" and not any(
+            isinstance(b, Callout) and b.kind == "not_established"
+            for b in section.blocks):
+        sentence = f"Not established: this section was {F.fmt_status(section.status)}"
+        if section.note:
+            sentence += f" ({section.note})"
+        _para(doc, sentence + ".")
+
+
+def _generated_from_line(report: ReportDocument) -> str:
+    parts = [f"Version {report.version}",
+             f"mode {report.mode.replace('_', ' ')}",
+             f"evidence {report.evidence_hash[:12]}",
+             f"generated {report.created_at}"]
+    if report.profile_id:
+        parts.append(f"profile {report.profile_id}")
+    if report.model:
+        parts.append(f"model {report.model}")
+    return " · ".join(parts)
+
+
+def _appendix(doc, report: ReportDocument, bookmarks: _Bookmarks) -> None:
+    flagged = [s for s in report.sections if s.audit.unverified]
+    if not flagged:
+        return
+    _heading(doc, APPENDIX_HEADING, 1, bookmarks, f"{BOOKMARK_PREFIX}numbers_to_check")
+    _disclosure(doc, "Numbers in the prose that could not be matched to the "
+                     "evidence. They were flagged, not edited: check each "
+                     "against the section's table before the report leaves "
+                     "your hands.")
+    for section in flagged:
+        p = doc.add_paragraph()
+        p.add_run(f"{section.heading}: ").bold = True
+        p.add_run(", ".join(section.audit.unverified))
+
+
+# ── entry points ─────────────────────────────────────────────────────────
+
+
+def render_document_docx(doc: ReportDocument, *, template: Any = None,
+                         figure_bytes: dict[str, bytes]) -> bytes:
+    """
+    ``doc`` rendered to ``.docx`` bytes. ``figure_bytes`` maps a figure id to
+    its PNG; a referenced figure with no bytes is stated as not produced.
+    """
+    d = _open_template(template)
+    bookmarks = _Bookmarks()
+    counters = _Counters()
+    d.add_heading(doc.title, level=0)
+    _para(d, _generated_from_line(doc))
+    _disclosure(d, (
+        "Every table and figure in this document was computed by the study "
+        "engines and rendered by code. Sections the study did not establish "
+        "say so."))
+    for section in doc.sections:
+        _render_doc_section(d, section, doc, figure_bytes, counters, bookmarks)
+    _appendix(d, doc, bookmarks)
+    buf = io.BytesIO()
+    d.save(buf)
+    return buf.getvalue()
 
 
 def render_reference_design_docx(
@@ -406,18 +442,23 @@ def render_reference_design_docx(
     figures: dict[str, bytes] | None = None,
 ) -> bytes:
     """
+    WP0's entry point, as an adapter over the one writer.
+
     ``report`` is the ``export_reference_design`` dict (or a full
-    ``ReferenceDesignReport.model_dump``). Returns the ``.docx`` bytes.
+    ``ReferenceDesignReport.model_dump``); ``figures`` is keyed by EH section
+    (``fmea_top`` → the Pareto PNG), as the chat tool passes it. Returns the
+    ``.docx`` bytes.
     """
+    from services.reports.assemble import evidence_only_document
+    from services.reports.evidence import collect_evidence
+    from services.reports.store import new_report_id
+
     report = copy.deepcopy(report)
-    doc = _open_template(template)
-    _title_block(doc, report)
-    _headline_table(doc, report)
-    _completeness_table(doc, report)
-    for name in REPORT_SECTIONS:
-        _render_section(doc, name, report, figures)
-    _render_worksheet(doc, fmea_worksheet)
-    _render_pipeline(doc, report)
-    buf = io.BytesIO()
-    doc.save(buf)
-    return buf.getvalue()
+    evidence = collect_evidence(study_report=None, eh_report=report,
+                                worksheet=fmea_worksheet)
+    figure_pngs = {_SECTION_FIGURE_IDS[k]: v for k, v in (figures or {}).items()
+                   if k in _SECTION_FIGURE_IDS and v}
+    doc = evidence_only_document(
+        evidence, title="Energy Hub reference design report",
+        report_id=new_report_id(), figure_pngs=figure_pngs)
+    return render_document_docx(doc, template=template, figure_bytes=figure_pngs)

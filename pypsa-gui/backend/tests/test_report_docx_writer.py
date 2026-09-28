@@ -183,8 +183,10 @@ def test_skeleton_renders_and_states_every_section_as_not_established():
     text = _text(data)
     for name in REPORT_SECTIONS:
         assert SECTION_TITLES[name] in text, name
-    # One "not established" statement per section, plus the headline fields.
-    assert text.count("This section was not established") == len(REPORT_SECTIONS)
+    # One "Not established:" statement per section (WP5: the adapter renders
+    # the section's `not_established` callout), plus the headline fields.
+    assert text.count("Not established: this section was not established") \
+        == len(REPORT_SECTIONS)
 
 
 def test_skeleton_never_renders_a_missing_headline_as_zero():
@@ -274,3 +276,212 @@ def test_a_user_template_is_honoured_and_its_body_replaced():
 def test_docx_mime_is_the_upload_allowlist_entry():
     from services import upload_service
     assert DOCX_MIME in upload_service.ALLOWED_MIME_TYPES
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# WP5 — ``render_document_docx``: the writer from a ``ReportDocument``
+# ═════════════════════════════════════════════════════════════════════════
+
+from docx.oxml.ns import qn  # noqa: E402
+
+from models.report import (  # noqa: E402
+    Bullets,
+    Callout,
+    Field,
+    Figure,
+    FigureRef,
+    Paragraph,
+    ReportDocument,
+    Section,
+    SectionAudit,
+    Table,
+    TableRef,
+)
+from services.reports.docx_writer import render_document_docx  # noqa: E402
+
+
+def _document(*, unverified: list[str] | None = None) -> ReportDocument:
+    """One document with every block type, three sections, a table and a figure."""
+    return ReportDocument(
+        report_id="0123456789abcdef", version=2, title="Client study report",
+        created_at="2026-09-28T10:00:00+00:00", evidence_hash="c" * 64,
+        profile_id="local-llama", model="llama-3.1-8b", mode="generated",
+        sections=[
+            Section(section_id="executive_summary", heading="Executive summary",
+                    source="code", status="ok", blocks=[
+                        Callout(kind="gap", text="the demand profile is frozen"),
+                        Callout(kind="disclosure", text="excludes load-shedding cost"),
+                        TableRef(table_id="headline"),
+                    ]),
+            Section(section_id="fmea_top", heading="Residual failure modes",
+                    source="llm", status="ok",
+                    audit=SectionAudit(unverified=unverified or []),
+                    blocks=[
+                        Paragraph(md="The **top mode** is *backup* at `100,000 €/yr` "
+                                     "([source](https://example.org/x))."),
+                        Bullets(items=["first point", "second point"]),
+                        TableRef(table_id="fmea_top", caption="Ranked modes"),
+                        FigureRef(figure_id="fmea_pareto", caption="Pareto"),
+                        Field(key="Engine", value="copt"),
+                        TableRef(table_id="does_not_exist"),
+                    ]),
+            Section(section_id="certification", heading="Certification",
+                    source="code", status="skipped", note="budget exhausted",
+                    blocks=[Callout(kind="not_established",
+                                    text="this section was not run in this study "
+                                         "(budget exhausted).")]),
+        ],
+        tables={
+            "headline": Table(table_id="headline", columns=["Item", "Value"],
+                              rows=[["MC LOLE (h/yr)", "not established"],
+                                    ["Cost at target", "1,234,568 €"]],
+                              caption="Headline results"),
+            "fmea_top": Table(table_id="fmea_top",
+                              columns=["Rank", "Name", "Criticality"],
+                              rows=[["1", "backup", "100,000 €/yr"],
+                                    ["2", "import", "25,000 €/yr"],
+                                    ["3", "spare", "not established"]]),
+        },
+        figures={"fmea_pareto": Figure(figure_id="fmea_pareto",
+                                       png_file="figures/fmea_pareto.png",
+                                       caption="criticality by mode")},
+    )
+
+
+def _headings(doc) -> list[str]:
+    return [p.text for p in doc.paragraphs if p.style.name.startswith("Heading")
+            or p.style.name == "Title"]
+
+
+def _bookmarks(doc) -> list[str]:
+    starts = doc.element.body.iter(qn("w:bookmarkStart"))
+    return [el.get(qn("w:name")) for el in starts]
+
+
+def test_document_with_every_block_type_renders_as_a_docx():
+    data = render_document_docx(_document(), figure_bytes={"fmea_pareto": _PNG_1x1})
+    assert data[:2] == b"PK"
+    text = _text(data)
+    assert "Client study report" in text
+    # The generated-from line names the version, hash, mode and profile.
+    assert "cccccccccccc" in text and "local-llama" in text
+    assert "version 2" in text.lower()
+    assert "first point" in text and "second point" in text
+    assert "the demand profile is frozen" in text
+    assert "excludes load-shedding cost" in text
+    assert "copt" in text
+
+
+def test_headings_are_in_order_and_each_carries_its_section_bookmark():
+    doc = Document(io.BytesIO(render_document_docx(
+        _document(), figure_bytes={"fmea_pareto": _PNG_1x1})))
+    heads = _headings(doc)
+    assert heads[:4] == ["Client study report", "Executive summary",
+                         "Residual failure modes", "Certification"]
+    marks = _bookmarks(doc)
+    assert marks == ["sec:executive_summary", "sec:fmea_top", "sec:certification"]
+    # The bookmark wraps the heading run, and its ids are unique.
+    starts = list(doc.element.body.iter(qn("w:bookmarkStart")))
+    ends = list(doc.element.body.iter(qn("w:bookmarkEnd")))
+    ids = [s.get(qn("w:id")) for s in starts]
+    assert len(set(ids)) == len(ids) == len(ends)
+    heading_p = next(p for p in doc.paragraphs if p.text == "Residual failure modes")
+    assert heading_p._p.find(qn("w:bookmarkStart")) is not None
+    assert heading_p._p.find(qn("w:bookmarkEnd")) is not None
+
+
+def test_tables_have_the_right_row_counts_and_a_caption():
+    doc = Document(io.BytesIO(render_document_docx(_document(), figure_bytes={})))
+    assert len(doc.tables) == 2
+    headline, fmea = doc.tables
+    assert len(headline.rows) == 1 + 2
+    assert [c.text for c in headline.rows[0].cells] == ["Item", "Value"]
+    assert headline.rows[1].cells[1].text == "not established"
+    assert len(fmea.rows) == 1 + 3
+    assert fmea.rows[3].cells[2].text == "not established"
+    assert fmea.style.name == "Table Grid"
+    text = _text(render_document_docx(_document(), figure_bytes={}))
+    assert "Headline results" in text      # the table's own caption
+    assert "Ranked modes" in text          # the block's caption wins when given
+
+
+def test_one_picture_per_figure_ref_with_bytes_else_a_sentence():
+    with_png = render_document_docx(_document(), figure_bytes={"fmea_pareto": _PNG_1x1})
+    assert _pictures(with_png) == 1
+    assert "Pareto" in _text(with_png)
+    without = render_document_docx(_document(), figure_bytes={})
+    assert _pictures(without) == 0
+    assert "fmea_pareto" in _text(without) and "not produced" in _text(without)
+
+
+def test_a_missing_table_id_renders_a_disclosure_line_never_a_crash():
+    data = render_document_docx(_document(), figure_bytes={})
+    doc = Document(io.BytesIO(data))
+    line = next(p for p in doc.paragraphs if "does_not_exist" in p.text)
+    assert "not available" in line.text
+    assert line.style.name == "Disclosure"
+
+
+def test_callouts_map_to_their_styles_and_prefixes():
+    doc = Document(io.BytesIO(render_document_docx(_document(), figure_bytes={})))
+    gap = next(p for p in doc.paragraphs if "demand profile is frozen" in p.text)
+    assert gap.text.startswith("Gap:")
+    assert gap.style.name == "Disclosure"
+    disc = next(p for p in doc.paragraphs if "excludes load-shedding" in p.text)
+    assert disc.style.name == "Disclosure"
+    ne = next(p for p in doc.paragraphs if "budget exhausted" in p.text)
+    assert ne.text.startswith("Not established:")
+
+
+def test_paragraph_markdown_inline_subset_becomes_runs():
+    doc = Document(io.BytesIO(render_document_docx(_document(), figure_bytes={})))
+    p = next(p for p in doc.paragraphs if p.text.startswith("The top mode"))
+    assert "**" not in p.text and "`" not in p.text and "](" not in p.text
+    bold = [r.text for r in p.runs if r.bold]
+    italic = [r.text for r in p.runs if r.italic]
+    code = [r.text for r in p.runs if r.font.name == "Consolas"]
+    assert bold == ["top mode"]
+    assert italic == ["backup"]
+    assert code == ["100,000 €/yr"]
+    assert "source" in p.text and "https://example.org/x" in p.text
+
+
+def test_bullets_use_the_list_bullet_style_or_fall_back_to_a_marker():
+    doc = Document(io.BytesIO(render_document_docx(_document(), figure_bytes={})))
+    items = [p for p in doc.paragraphs if p.text.endswith("point")]
+    assert len(items) == 2
+    assert all(p.style.name == "List Bullet" or p.text.startswith("• ")
+               for p in items)
+
+
+def test_field_renders_bold_label_and_value():
+    doc = Document(io.BytesIO(render_document_docx(_document(), figure_bytes={})))
+    p = next(p for p in doc.paragraphs if p.text.startswith("Engine"))
+    assert p.runs[0].bold and p.runs[0].text.startswith("Engine")
+    assert "copt" in p.text
+
+
+def test_numbers_to_check_appendix_only_when_unverified_numbers_exist():
+    clean = render_document_docx(_document(), figure_bytes={})
+    assert "Numbers to check" not in _text(clean)
+    flagged = render_document_docx(
+        _document(unverified=["3.5 h/yr", "42 MWh"]), figure_bytes={})
+    doc = Document(io.BytesIO(flagged))
+    heads = _headings(doc)
+    assert heads[-1] == "Numbers to check"
+    text = _text(flagged)
+    assert "Residual failure modes" in text.split("Numbers to check")[-1]
+    assert "3.5 h/yr" in text and "42 MWh" in text
+
+
+def test_render_document_honours_a_user_template():
+    tpl = Document()
+    tpl.add_paragraph("Confidential — draft template body")
+    tpl.sections[0].footer.paragraphs[0].text = "ACME Energy Consulting"
+    buf = io.BytesIO()
+    tpl.save(buf)
+    data = render_document_docx(_document(), template=buf.getvalue(), figure_bytes={})
+    doc = Document(io.BytesIO(data))
+    assert doc.sections[0].footer.paragraphs[0].text == "ACME Energy Consulting"
+    assert "Confidential — draft template body" not in _text(data)
+    assert "sec:fmea_top" in _bookmarks(doc)
