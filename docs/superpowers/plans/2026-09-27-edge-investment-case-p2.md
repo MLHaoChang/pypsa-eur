@@ -825,6 +825,8 @@ or generator is a P5 archetype matter) — DR targets `load_ids`.
   - **Migration note:** the new EaaS fee validator refuses a stored Library EaaS item without any fee when it is read back. None can exist yet (the kind and the validator ship in the same phase), but a later import of older data must add a fee.
   - Out of scope, seen by the reviewer: chat `update_component(Bus, attrs={"name": …})` raises a TypeError (a duplicate `name` kwarg to `BusCreate`). It is a pre-existing bug and does not bypass the `ic:` guard.
 
+- **WP2.2 review round 3 → WP2.2a PASS, WP2.2b PASS**, and the 2.2-0b residual is closed (no residue). The reviewer re-ran every round-2 probe: a multi-asset NaN gives `generation_not_established`; a missing period gives `reference_price_missing`; a NaN on another load gives `dr_activation_not_established`; representative days weighted 182.5 each extrapolate to 365 events a year; the filter is present after `import main`. The monthly-capture CfD with suspension still settles +70.
+
 ## WP2.2c Contracts on the config + double-count preflight
 
 Files: `models/commercial.py` (`CommercialConfig.contracts: list[Contract]` discriminated by `type`),
