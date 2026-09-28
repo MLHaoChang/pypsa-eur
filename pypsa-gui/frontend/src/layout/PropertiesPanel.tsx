@@ -267,7 +267,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
     { label: 'p_max_pu',      value: gen.p_max_pu,                           tip: docTip('generator.p_max_pu') },
     { label: 'Efficiency',    value: gen.efficiency,                         tip: docTip('generator.efficiency') },
     { label: 'Marginal cost', value: gen.marginal_cost,     unit: ' €/MWh',  tip: docTip('generator.marginal_cost') },
-    { label: 'Capital cost',  value: gen.capital_cost,      unit: ' €/MW',   tip: docTip('generator.capital_cost') },
+    { label: 'Capital cost',  value: gen.capital_cost,      unit: ' €/MW/yr',   tip: docTip('generator.capital_cost') },
     { label: 'FOM cost',      value: gen.fom_cost ?? null,  unit: ' €/MW/yr', tip: docTip('generator.fom_cost') },
     { label: 'Overnight cost', value: gen.overnight_cost ?? null, unit: ' €/MW', tip: docTip('generator.overnight_cost') },
     // Per-asset discount rate (decimal in PyPSA, displayed as percent here).
@@ -410,7 +410,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
       <NumInput label="Efficiency" k="efficiency" fs={form} set={setForm} tip={docTip('generator.efficiency')} />
       <SectionHdr title="Costs" />
       <NumInput label="Marginal cost" k="marginal_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('generator.marginal_cost')} />
-      <NumInput label="Capital cost" k="capital_cost" fs={form} set={setForm} unit="€/MW" tip={docTip('generator.capital_cost')} />
+      <NumInput label="Capital cost" k="capital_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('generator.capital_cost')} />
       <NumInput label="FOM cost" k="fom_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('generator.fom_cost')} />
       <NumInput label="Overnight cost" k="overnight_cost" fs={form} set={setForm} unit="€/MW" tip={docTip('generator.overnight_cost')} />
       {/* Per-asset discount rate. Leave blank to use the global rate from
@@ -573,7 +573,7 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
     { label: 'Cyclic SoC',     value: su.cyclic_state_of_charge,                   tip: docTip('storage_unit.cyclic_state_of_charge') },
     { label: 'Initial SoC',    value: su.cyclic_state_of_charge ? null : su.state_of_charge_initial, tip: docTip('storage_unit.state_of_charge_initial') },
     { label: 'Marginal cost',  value: su.marginal_cost,            unit: ' €/MWh', tip: docTip('storage_unit.marginal_cost') },
-    { label: 'Capital cost',   value: su.capital_cost,             unit: ' €/MW',  tip: docTip('storage_unit.capital_cost') },
+    { label: 'Capital cost',   value: su.capital_cost,             unit: ' €/MW/yr',  tip: docTip('storage_unit.capital_cost') },
     { label: 'FOM cost',       value: su.fom_cost ?? null,         unit: ' €/MW/yr', tip: docTip('storage_unit.fom_cost') },
     { label: 'Overnight cost', value: su.overnight_cost ?? null,   unit: ' €/MW',    tip: docTip('storage_unit.overnight_cost') },
     { label: 'Discount rate',
@@ -673,7 +673,7 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
                 tip="Exogenous energy into the SoC equation (e.g. river-flow rate × turbine head efficiency for hydro). Constant value here; for hourly profiles upload via the TimeSeries tab as storage_units/inflow." />
       <SectionHdr title="Costs" />
       <NumInput label="Marginal cost" k="marginal_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('storage_unit.marginal_cost')} />
-      <NumInput label="Capital cost" k="capital_cost" fs={form} set={setForm} unit="€/MW" tip={docTip('storage_unit.capital_cost')} />
+      <NumInput label="Capital cost" k="capital_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('storage_unit.capital_cost')} />
       <NumInput label="FOM cost" k="fom_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('storage_unit.fom_cost')} />
       <NumInput label="Overnight cost" k="overnight_cost" fs={form} set={setForm} unit="€/MW" tip={docTip('storage_unit.overnight_cost')} />
       <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost for this asset. Leave blank to use the global rate from Solver Settings." />
@@ -786,7 +786,7 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
     { label: 'e_max_pu',      value: store.e_max_pu,                                         tip: docTip('store.e_max_pu') },
     { label: 'e_initial',     value: store.e_cyclic ? null : store.e_initial,  unit: ' MWh', tip: docTip('store.e_initial') },
     { label: 'Cyclic SoE',    value: store.e_cyclic,                                         tip: docTip('store.e_cyclic') },
-    { label: 'Capital cost',  value: store.capital_cost,                       unit: ' €/MWh', tip: docTip('store.capital_cost') },
+    { label: 'Capital cost',  value: store.capital_cost,                       unit: ' €/MWh/yr', tip: docTip('store.capital_cost') },
     { label: 'Marginal cost', value: store.marginal_cost,                      unit: ' €/MWh', tip: docTip('store.marginal_cost') },
     { label: 'FOM cost',      value: store.fom_cost ?? null,                   unit: ' €/MWh/yr', tip: docTip('store.fom_cost') },
     { label: 'Overnight cost', value: store.overnight_cost ?? null,            unit: ' €/MWh',    tip: docTip('store.overnight_cost') },
@@ -869,7 +869,7 @@ function StoreCard({ store, onRename, mode = 'card', title }: {
       <NumInput label="e_initial" k="e_initial" fs={form} set={setForm} tip={docTip('store.e_initial')} />
       <ChkInput label="Cyclic SoE" k="e_cyclic" fs={form} set={setForm} tip={docTip('store.e_cyclic')} />
       <SectionHdr title="Costs" />
-      <NumInput label="Capital cost" k="capital_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('store.capital_cost')} />
+      <NumInput label="Capital cost" k="capital_cost" fs={form} set={setForm} unit="€/MWh/yr" tip={docTip('store.capital_cost')} />
       <NumInput label="Marginal cost" k="marginal_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('store.marginal_cost')} />
       <NumInput label="FOM cost" k="fom_cost" fs={form} set={setForm} unit="€/MWh/yr" tip={docTip('store.fom_cost')} />
       <NumInput label="Overnight cost" k="overnight_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('store.overnight_cost')} />
@@ -1203,7 +1203,7 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
     { label: 'p_min_pu',        value: link.p_min_pu,                              tip: docTip('link.p_min_pu') },
     { label: 'p_max_pu',        value: link.p_max_pu,                              tip: docTip('link.p_max_pu') },
     { label: 'Marginal cost',   value: link.marginal_cost,     unit: ' €/MWh',     tip: docTip('link.marginal_cost') },
-    { label: 'Capital cost',    value: link.capital_cost,      unit: ' €/MW',      tip: docTip('link.capital_cost') },
+    { label: 'Capital cost',    value: link.capital_cost,      unit: ' €/MW/yr',      tip: docTip('link.capital_cost') },
     { label: 'FOM cost',        value: link.fom_cost ?? null,  unit: ' €/MW/yr',   tip: docTip('link.fom_cost') },
     { label: 'Overnight cost',  value: link.overnight_cost ?? null, unit: ' €/MW',  tip: docTip('link.overnight_cost') },
     { label: 'Discount rate',
@@ -1348,7 +1348,7 @@ function LinkCard({ link, onRename, mode = 'card', title }: {
       <NumInput label="p_max_pu (static)" k="p_max_pu" fs={form} set={setForm} tip={docTip('link.p_max_pu')} />
       <SectionHdr title="Costs" />
       <NumInput label="Marginal cost" k="marginal_cost" fs={form} set={setForm} unit="€/MWh" tip={docTip('link.marginal_cost')} />
-      <NumInput label="Capital cost" k="capital_cost" fs={form} set={setForm} unit="€/MW" tip={docTip('link.capital_cost')} />
+      <NumInput label="Capital cost" k="capital_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('link.capital_cost')} />
       <NumInput label="FOM cost" k="fom_cost" fs={form} set={setForm} unit="€/MW/yr" tip={docTip('link.fom_cost')} />
       <NumInput label="Overnight cost" k="overnight_cost" fs={form} set={setForm} unit="€/MW" tip={docTip('link.overnight_cost')} />
       <DiscountRateInput fs={form} set={setForm} tip="Discount rate used to annuitize overnight_cost for this asset. Leave blank to use the global rate from Solver Settings." />
@@ -1550,7 +1550,7 @@ function AddForm({ bus, type, onClose }: { bus: string; type: AddType; onClose: 
       </label>
       {(type === 'Generator' || type === 'StorageUnit') && inp('p_nom (MW)', 'p_nom', '0', 'number')}
       {type === 'Generator' && inp('Marginal cost (€/MWh)', 'mc', '0', 'number')}
-      {type === 'Generator' && inp('Capital cost (€/MW)', 'cc', '0', 'number')}
+      {type === 'Generator' && inp('Capital cost (€/MW/yr)', 'cc', '0', 'number')}
       {type === 'Load' && inp('p_set (MW)', 'p_set', '0', 'number')}
       {type === 'StorageUnit' && inp('Max hours (h)', 'max_hours', '6', 'number')}
       {type === 'Store' && inp('e_nom (MWh)', 'e_nom', '0', 'number')}
@@ -2030,7 +2030,7 @@ function LinePanel({ name }: { name: string }) {
           {vintageOpen && line && (
             <VintagePeriodBoundsModal componentClass="Line" name={line.name} onClose={() => setVintageOpen(false)} />
           )}
-          {numInp('Capital cost', 'capital_cost', '€/MVA', docTip('line.capital_cost'))}
+          {numInp('Capital cost', 'capital_cost', '€/MVA/yr', docTip('line.capital_cost'))}
           {numInp('FOM cost', 'fom_cost', '€/MVA/yr', docTip('line.fom_cost'))}
           {numInp('Overnight cost', 'overnight_cost', '€/MVA', docTip('line.overnight_cost'))}
           <div className="mb-1.5">
@@ -2090,7 +2090,7 @@ function LinePanel({ name }: { name: string }) {
             <Row label="Extendable"  value={line.s_nom_extendable}          tip={docTip('line.s_nom_extendable')} />
             {line.s_nom_extendable && <Row label="s_nom_min" value={line.s_nom_min} unit=" MVA" tip={docTip('line.s_nom_min')} />}
             {line.s_nom_extendable && <Row label="s_nom_max" value={line.s_nom_max ?? null} unit=" MVA" tip={docTip('line.s_nom_max')} />}
-            <Row label="Capital cost" value={line.capital_cost} unit=" €/MVA" tip={docTip('line.capital_cost')} />
+            <Row label="Capital cost" value={line.capital_cost} unit=" €/MVA/yr" tip={docTip('line.capital_cost')} />
             <Row label="FOM cost"     value={line.fom_cost ?? null} unit=" €/MVA/yr" tip={docTip('line.fom_cost')} />
             <Row label="Overnight cost" value={line.overnight_cost ?? null} unit=" €/MVA" tip={docTip('line.overnight_cost')} />
             <Row label="Discount rate"
@@ -2294,7 +2294,7 @@ function TransformerPanel({ name }: { name: string }) {
           {vintageOpen && tr && (
             <VintagePeriodBoundsModal componentClass="Transformer" name={tr.name} onClose={() => setVintageOpen(false)} />
           )}
-          {numInp('Capital cost', 'capital_cost', '€/MVA')}
+          {numInp('Capital cost', 'capital_cost', '€/MVA/yr')}
           {numInp('FOM cost', 'fom_cost', '€/MVA/yr')}
           {numInp('Overnight cost', 'overnight_cost', '€/MVA')}
           <div className="mb-1.5">
@@ -2332,7 +2332,7 @@ function TransformerPanel({ name }: { name: string }) {
             <Row label="Tap ratio"   value={tr.tap_ratio} />
             <Row label="Phase shift" value={tr.phase_shift ?? 0}  unit="°" />
             <Row label="Extendable"  value={tr.s_nom_extendable} />
-            <Row label="Capital cost" value={tr.capital_cost}     unit=" €/MVA" />
+            <Row label="Capital cost" value={tr.capital_cost}     unit=" €/MVA/yr" />
             <Row label="FOM cost"     value={tr.fom_cost ?? null} unit=" €/MVA/yr" />
             <Row label="Overnight cost" value={tr.overnight_cost ?? null} unit=" €/MVA" />
             <Row label="Discount rate"

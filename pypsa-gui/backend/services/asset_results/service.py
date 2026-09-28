@@ -302,6 +302,7 @@ def build_response(
     metric_ids: list[str], source: str, from_iso: str | None,
     to_iso: str | None, period, mode: str,
 ) -> dict:
+    from services.results.economics_caveats import interior_optimum_notes
     from services.serialization import clean_scalar
 
     from routers.simulation import _state_snapshot
@@ -410,5 +411,11 @@ def build_response(
         "metrics": metric_rows,
         "scalars": scalars,
         "headline": headline,
+        # Same sentence, same classifier as the Economics tab and the chat
+        # tool: the zero-profit-by-construction note for an interior optimum.
+        "reading_notes": (
+            interior_optimum_notes(n, {component_class: [name]})
+            if category == "summary" else []
+        ),
         **shaped,
     }

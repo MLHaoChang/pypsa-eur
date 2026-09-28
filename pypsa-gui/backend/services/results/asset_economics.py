@@ -935,9 +935,22 @@ def compute_asset_economics(n, cfg, *, result_df):
         except Exception:
             pass
 
+    # The framing the tab must show beside the numbers. An extendable asset
+    # the LP stopped between its bounds earns ≈ zero net profit BY
+    # CONSTRUCTION; until this key existed that sentence reached only the
+    # chat model, and the Economics tab showed the zero bare.
+    from services.results.economics_caveats import interior_optimum_notes
+    reading_notes = interior_optimum_notes(n, {
+        "Generator": [r["name"] for r in gen_rows],
+        "StorageUnit": [r["name"] for r in su_rows],
+        "Store": [r["name"] for r in store_rows],
+        "Link": [r["name"] for r in link_rows],
+    })
+
     return {
         "currency": "EUR",
         "is_multi_period": is_multi,
+        "reading_notes": reading_notes,
         # False when `periodized_capital_costs` raised. Every capital-cost-
         # derived field in every row (and every `by_period` entry) is `null`
         # in that case — see `_capital_derived`. The flag is the summary; the

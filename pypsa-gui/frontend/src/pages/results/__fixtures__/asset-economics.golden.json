@@ -1,6 +1,9 @@
 {
   "currency": "EUR",
   "is_multi_period": true,
+  "reading_notes": [
+    "Zero-profit equilibrium: an extendable asset at an interior optimum earns approximately zero net profit BY CONSTRUCTION \u2014 the LP builds until the marginal MW breaks even. A near-zero net_profit_eur here is the expected result, not a fault."
+  ],
   "capital_costs_available": true,
   "periods": [
     2030,

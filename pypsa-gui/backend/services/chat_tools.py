@@ -4060,98 +4060,11 @@ _INVESTMENT_BUS_COLS: dict[str, tuple[str, ...]] = {
     "Transformer": ("bus0", "bus1"),
 }
 
-# One sentence per structural outcome — the LP fact, not advice.
-_BINDING_EXPLANATIONS: dict[str, str] = {
-    "not_solved": (
-        "the network has no fresh dispatch, so there is no sizing decision to "
-        "explain — every capacity below is an input or a stale leftover"
-    ),
-    "not_extendable": (
-        "the LP could not size this asset at all: its capacity is an INPUT, "
-        "not a result. Set p_nom_extendable (or the class's equivalent) to "
-        "let the optimisation choose it"
-    ),
-    "at_upper_bound": (
-        "the LP took every MW the upper bound allowed. The BOUND set this "
-        "size, not the economics — raise it to learn what the economics would "
-        "build"
-    ),
-    "not_built": (
-        "the LP chose to build none of it: at these costs it did not compete "
-        "at the margin against everything else on the system. Nothing blocked "
-        "it — it was simply not worth building"
-    ),
-    "at_lower_bound": (
-        "the LP built the minimum it was FORCED to and no more. The asset was "
-        "not competitive at the margin; a non-zero floor is holding it up, so "
-        "this capacity is a constraint's doing, not the economics'"
-    ),
-    "interior": (
-        "the LP stopped between the bounds, so this size IS the economic "
-        "answer: the marginal MW broke even against everything else on the "
-        "system"
-    ),
-}
-
-
-def _finite(value: Any) -> float | None:
-    """float(value) or None for anything non-finite, missing or unparseable."""
-    try:
-        out = float(value)
-    except (TypeError, ValueError):
-        return None
-    return out if math.isfinite(out) else None
-
-
-def _is_at(value: float | None, bound: float | None) -> bool:
-    """
-    Is an optimised capacity sitting ON a bound?
-
-    Relative, because an LP lands on a bound within solver tolerance and an
-    exact `==` reports "interior" for a plainly saturated asset — the single
-    wrong answer this whole tool exists to avoid.
-    """
-    if value is None or bound is None:
-        return False
-    return abs(value - bound) <= max(abs(bound), abs(value), 1.0) * 1e-6
-
-
-def _sizing(row: Any, nom_col: str, *, solved: bool) -> dict:
-    """Classify the sizing decision from the asset's static row."""
-    existing = _finite(row.get(nom_col))
-    optimised = _finite(row.get(f"{nom_col}_opt")) if solved else None
-    lower = _finite(row.get(f"{nom_col}_min"))
-    upper = _finite(row.get(f"{nom_col}_max"))   # None == unbounded (inf)
-    extendable = bool(row.get(f"{nom_col}_extendable", False))
-
-    if not solved:
-        binding = "not_solved"
-    elif not extendable:
-        binding = "not_extendable"
-    elif _is_at(optimised, upper):
-        binding = "at_upper_bound"
-    elif _is_at(optimised, lower):
-        # A floor of zero is not a floor. Reporting "the minimum it was forced
-        # to" for an asset nobody forced anywhere reads as if a constraint
-        # explained the zero, when the honest answer is that it lost on cost.
-        binding = "at_lower_bound" if (lower or 0.0) > 0 else "not_built"
-    else:
-        binding = "interior"
-
-    added = None if (optimised is None or existing is None) else optimised - existing
-    headroom = None if (optimised is None or upper is None) else upper - optimised
-    return {
-        "capacity_column": nom_col,
-        "extendable": extendable,
-        "existing": existing,
-        "optimised": optimised,
-        "added": added,
-        "lower_bound": lower,
-        "upper_bound": upper,          # null = unbounded (p_nom_max = inf)
-        "headroom": headroom,
-        "binding_constraint": binding,
-        "explanation": _BINDING_EXPLANATIONS[binding],
-    }
+# The classifier and its sentences live in `services.results.sizing` so the
+# Economics tab and Asset Detail read the SAME `binding_constraint` this tool
+# reports. Bound here under the names the rest of this module uses.
+from services.results.sizing import classify_sizing as _sizing  # noqa: E402
+from services.results.economics_caveats import ZERO_PROFIT_BY_CONSTRUCTION  # noqa: E402
 
 
 def _bus_price_signals(n: Any, buses: list[str]) -> dict:
@@ -4249,12 +4162,7 @@ def _reading_notes(sizing: dict, co2: list[dict], buses: list[str]) -> list[str]
     ]
     binding = sizing["binding_constraint"]
     if binding == "interior":
-        notes.append(
-            "Zero-profit equilibrium: an extendable asset at an interior "
-            "optimum earns approximately zero net profit BY CONSTRUCTION — "
-            "the LP builds until the marginal MW breaks even. A near-zero "
-            "net_profit_eur here is the expected result, not a fault."
-        )
+        notes.append(ZERO_PROFIT_BY_CONSTRUCTION)
     elif binding == "at_upper_bound":
         notes.append(
             "The size is a bound, not an optimum: do not narrate capture "

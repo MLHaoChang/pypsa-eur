@@ -760,6 +760,15 @@ export default function Economics() {
                sub="Σ revenue / Σ energy delivered"
                hint="Volume-weighted average price the portfolio earned on delivered MWh (discharge for storage). Compare to System LCOE / LCOS: capture above LCOE means market prices cover production cost on average." />
         </div>
+        {/* The backend's own framing of a near-zero net profit: an extendable
+            asset at an interior optimum earns ≈ zero BY CONSTRUCTION. Said
+            here, beside the number, not only in a chat reading note. */}
+        {(payload?.reading_notes?.length ?? 0) > 0 && (
+          <p className="mt-3 text-[11px] text-muted border border-border rounded px-2 py-1"
+             data-testid="economics-reading-notes">
+            {payload!.reading_notes!.join(' ')}
+          </p>
+        )}
       </section>
 
       {/* ── Top profit / loss chart ───────────────────────────────────── */}

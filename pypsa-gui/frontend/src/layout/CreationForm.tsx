@@ -58,8 +58,8 @@ const genFields = (carrier: string): FieldSpec[] => [
   // extendable generator at zero.
   { key: 'p_nom_min',        label: 'P nom min',      type: 'number',   defaultValue: '0',    unit: 'MW',     half: true },
   { key: 'p_nom_max',        label: 'P nom max',      type: 'number',                         unit: 'MW',     half: true },
-  { key: 'marginal_cost',    label: 'Marginal cost',  type: 'number',   defaultValue: '0',    unit: '$/MWh',  half: true },
-  { key: 'capital_cost',     label: 'Capital cost',   type: 'number',   defaultValue: '0',    unit: '$/MW',   half: true },
+  { key: 'marginal_cost',    label: 'Marginal cost',  type: 'number',   defaultValue: '0',    unit: '€/MWh',  half: true },
+  { key: 'capital_cost',     label: 'Capital cost',   type: 'number',   defaultValue: '0',    unit: '€/MW/yr',   half: true },
 ]
 
 const storFields = (carrier: string, hours = '4'): FieldSpec[] => [
@@ -125,7 +125,7 @@ const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
     { key: 'tap_ratio',    label: 'Tap ratio',      type: 'number', defaultValue: '1.0',              half: true },
     { key: 'phase_shift',  label: 'Phase shift',    type: 'number', defaultValue: '0.0', unit: '°',   half: true },
     { key: 's_nom_extendable', label: 'Extendable', type: 'checkbox', defaultValue: 'false' },
-    { key: 'capital_cost', label: 'Capital cost',   type: 'number', defaultValue: '0', unit: '€/MVA' },
+    { key: 'capital_cost', label: 'Capital cost',   type: 'number', defaultValue: '0', unit: '€/MVA/yr' },
   ],
   line: [
     { key: 'name',             label: 'Name',         type: 'text',     required: true },

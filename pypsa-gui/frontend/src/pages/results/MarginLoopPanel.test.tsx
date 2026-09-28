@@ -744,3 +744,14 @@ describe('MarginLoopPanel run controls', () => {
     )
   }, 10_000)
 })
+
+describe('MarginLoopPanel not-run copy', () => {
+  // The pre-run cost disclosure names the solve budget. It rendered the
+  // literal placeholder text "max_solves" where the number belongs.
+  it('states the solve ceiling as a number, not as a placeholder', async () => {
+    await openPanel()
+    const copy = (await screen.findByTestId('margin-loop-not-run')).textContent ?? ''
+    expect(copy).not.toContain('max_solves')
+    expect(copy).toMatch(/up to 8 full capacity expansions/)
+  })
+})

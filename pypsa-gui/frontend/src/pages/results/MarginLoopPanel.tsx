@@ -14,6 +14,10 @@ import {
   targetEcho, wireTarget, type LeverCopy,
 } from './LoopPanel'
 
+/** The loop's solve ceiling — mirrors `MAX_LOOP_SOLVES` in
+ *  backend/services/adequacy/coupling.py, the cap the route enforces. */
+export const MAX_LOOP_SOLVES = 8
+
 // ── The margin-driven planning loop (Phase 9, margin-loop spec §3) ──────────
 //
 // The SAME search as LoopPanel's, on the OTHER lever. The backend substitutes
@@ -344,7 +348,7 @@ export function MarginLoopPanel() {
             <p className="text-[10px] text-muted" data-testid="margin-loop-not-run">
               No reserve-margin loop has been run in this session. Nothing below
               is a result of zero: there is no result. A run costs one probing
-              solve plus up to {'max_solves'} full capacity expansions with a
+              solve plus up to {MAX_LOOP_SOLVES} full capacity expansions with a
               sampling study each, and it holds the network throughout.
             </p>
           )}
