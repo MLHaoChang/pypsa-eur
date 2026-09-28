@@ -220,12 +220,25 @@ network with no branch capex. `services/compare/economics.py` deliberately walks
 network with expandable transmission the two sides differ by exactly the branch
 capex — and the docstring invites a user to quote the mismatch as a consistency proof.
 
-Fix shape: state the identity with its actual scope (generation and storage assets
-only), name branch capex as the documented difference, point at the compare module as
-the place that does include it, and drop the single measured figure — it was true of
-one network, not of the invariant.
+Fix shape: state the identity with its actual scope, name branch capex as the
+documented difference, point at the compare module as the place that does include it,
+and drop the single measured figure — it was true of one network, not of the
+invariant.
 
-**Status: OPEN**
+**Status: FIXED**. The docstring now leads with the endpoint's scope (Generator,
+StorageUnit, Store, Link — no `lines` key, never `Transformer`) because two of its
+three reconciliations turn on it, and marks the first as holding only where there is
+no branch capex. The withdrawn figure is not re-measured: a number from one network
+is not an invariant.
+
+Measured while fixing, on a two-bus network with one priced line: Σ `fixed_cost_eur`
+9,132.42 against Σ `capex_meur` × 1e6 of 9,771.69, the difference 639.27 being
+exactly the `ac` carrier bucket. Guard:
+`tests/test_asset_economics_reconciliation.py`, which pins the identity in both
+directions — exact without branch capex, and off by exactly the branch capex with it
+— plus a check that the corrected sentence cannot be edited back out silently. Both
+arithmetic tests pass against the old code, which is the point: the arithmetic was
+always right and only the sentence describing it was wrong.
 
 ---
 
