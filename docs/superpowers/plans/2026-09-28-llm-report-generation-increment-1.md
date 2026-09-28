@@ -32,11 +32,65 @@
 
 ---
 
+## Phases, and the test gate every phase must pass
+
+The work packages below are grouped into phases. A phase is **complete only
+when all four test tiers are green and recorded** in the findings file; a
+phase that is green on unit tests alone is not complete.
+
+| Tier | What it is | Where it lives | Run with |
+|---|---|---|---|
+| **Unit (TDD)** | Red → green per step inside a work package; pure functions and single modules; `llm_fake` for anything that would call a model | `tests/test_report_*.py`, `tests/test_chat_report_*.py` | `python -m pytest tests/test_report_*.py tests/test_chat_report_*.py -q` |
+| **Regression** | The suites the phase could break, unchanged and green: chat tools + schema/manifest/packaging parity, uploads, Energy Hub + adequacy, projects/tenancy/desktop; frontend `vitest` for phase 3+ | existing files | the four chunks in §"Regression chunks" below (the whole backend suite exceeds a 10-minute run in the cloud container, so it is chunked, never skipped) |
+| **Integration** | The HTTP journey through `TestClient` with the solver stubbed the way `test_energy_hub_study_http.py` stubs `run_eh_study`: routes, auth/ACL, edit lock, bundle transitions, job start/poll/abort, chat-tool dispatch through `chat_service._dispatch_real_tool_call` | `tests/test_report_routes.py`, `tests/test_report_job_http.py`, `tests/test_chat_report_dispatch.py` | `python -m pytest tests/test_report_routes.py tests/test_report_job_http.py tests/test_chat_report_dispatch.py -q` |
+| **End-to-end QA** | One standalone `qa_reports_<phase>.py` driver per phase (PASS/FAIL script, exit code, runs under `tests/run_qa_drivers.py`): a signed-in client, a real network, the real EH study on a small fixture where the phase needs real numbers, the fake LLM provider where it needs prose, the produced `.docx` re-opened and its content asserted; plus, from phase 3, a Playwright smoke (`frontend/scripts/smoke-reports.mjs`, Chromium) against uvicorn + the built SPA; plus the manual desktop check recorded in the findings file | `tests/qa_reports_*.py`, `frontend/scripts/smoke-reports.mjs` | `python tests/run_qa_drivers.py` (all drivers) / `node scripts/smoke-reports.mjs` |
+
+**Regression chunks** (each fits the container's per-command ceiling; together
+they are the backend suite minus `slow`):
+
+```
+cd pypsa-gui/backend
+python -m pytest tests/test_chat_*.py tests/test_tool_error_kind_manifest.py tests/test_packaging_requirements.py -m "not slow" -q
+python -m pytest tests/test_energy_hub_*.py tests/test_report_*.py tests/test_study_report.py tests/test_adequacy_*.py -m "not slow" -q
+python -m pytest tests/test_upload*.py tests/test_desktop*.py tests/test_project*.py -m "not slow" -q
+python -m pytest tests -m "not slow" -q --ignore-glob='tests/test_chat_*.py' --ignore-glob='tests/test_energy_hub_*.py' --ignore-glob='tests/test_report_*.py' --ignore-glob='tests/test_upload*.py' --ignore-glob='tests/test_desktop*.py' --ignore-glob='tests/test_project*.py'
+```
+
+| Phase | Work packages | Deliverable the e2e driver proves | Findings file |
+|---|---|---|---|
+| **0 — Spike** (done 2026-09-28) | WP0 | `export_eh_report_docx` turns a stored EH report into a `.docx` chip; owed: `qa_reports_phase0.py` (HTTP: stubbed EH study → tool → blob → python-docx re-open) — delivered with phase 1 | `findings/2026-09-28-llm-report-generation-increment-1.md` §0 |
+| **1 — Foundation** | WP1 model/store/routes, WP2 evidence collector, WP4 figures, WP5 writer-from-`ReportDocument` + an **evidence-only** report (`POST /{name}/reports` with `mode: "evidence_only"`: tables, figures, disclosures and `not_established` sentences, no prose) | `qa_reports_phase1.py`: real small EH study → evidence-only report created → listed → fetched → exported `.docx` re-opened with every section present → project saved-as carries `reports/` → snapshot restore replaces it | §1 |
+| **2 — Generation** | WP3 generator + job + number audit, WP6 chat tools/manifest/docs | `qa_reports_phase2.py`: same study → `generate_report` on the fake provider (scripted valid JSON, one repair, one failure) → every section `ok` or `not_established` with reason → audit flags a planted wrong number → regenerate one section with an instruction → new version → abort mid-run leaves a partial version; optional live probe on a local OpenAI-wire model behind `PYPSA_GUI_TEST_LIVE_OPENAI_PROFILE` (same gate as the wire probe runbook) | §2 |
+| **3 — Reading and export in the app** | WP7 Reports panel, viewer, regenerate, panel buttons | `smoke-reports.mjs`: sign in → open project → Generate → progress → viewer shows sections, flagged numbers, figures → Regenerate → Export → the download lands; plus the macOS desktop download-and-open-in-Word check | §3 |
+| **4 — Templates** (increment 2) | template upload kind, `docx_reader`, tagged + untagged modes, `docx-preview`, language detection | `qa_reports_phase4.py`: a tagged template and an untagged corporate template (fixtures under `tests/fixtures/report_templates/`) → both render with cover/footer intact, TOC refresh flag set, every section mapped or reported unmapped | §4 |
+| **5 — Round trip** (increment 3) | edited-`.docx` upload, tracked changes, bookmark matching, comments as instructions, versions diff, opportunistic PDF | `qa_reports_phase5.py`: export → edit paragraphs + add a comment via python-docx → re-upload → merged version marks `user_edit`, comment becomes an instruction, unmatched content reported | §5 |
+
+## Agent-based TDD protocol (how each work package is executed)
+
+One agent per work package, in its own git worktree on a branch named
+`wp/<n>-<slug>` off this branch, files disjoint from every other agent in
+the same phase. Each agent:
+
+1. reads this plan's package, the assessment §1 inventory and the files the
+   package names — nothing else is assumed;
+2. writes the failing tests first (the package's **Acceptance** list, one
+   test per bullet at minimum), runs them, records the red output;
+3. writes the minimum code to green, runs the package's unit tests, then
+   the regression chunk(s) the package touches, then `ruff check` on its
+   files;
+4. ticks the plan's checkboxes, fills the package's **TDD evidence** line
+   with real counts and the red→green corrections worth keeping;
+5. commits on its branch with a message naming the package and the counts,
+   and reports: branch, commit, files, test counts, anything it could not
+   do and why. It never pushes, never merges, never edits another package's
+   files, and never skips, disables or marks a failing test.
+
+The orchestrator merges the phase's branches into this branch, runs the
+phase gate (all four tiers), writes the findings section, and only then
+starts the next phase. A red gate goes back to the owning package as a
+fix task before anything new starts.
+
 ## Phase QA gate + TDD protocol (mandatory)
-
-**red** (a failing test encodes the acceptance) → **green** (minimum code) → **verify** (re-run the package's test files, then `python -m pytest -m "not slow"` for the backend and `npx vitest run` for the frontend) → record the evidence under the package. Every new `error_kind` is classified in `pypsa-gui/tool-error-kinds.json` in the same commit. The packaging check (`test_packaging_requirements.py`) and the tool parity tests (`test_chat_tools_schema_match.py`, `test_chat_tools_endpoint_map.py`, `test_tool_error_kind_manifest.py`) must stay green at every commit.
-
----
 
 ## WP0 — Spike: a no-LLM `.docx` of the EH report, downloadable from the chat strip
 
