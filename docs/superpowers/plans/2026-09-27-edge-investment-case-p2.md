@@ -760,6 +760,7 @@ or generator is a P5 archetype matter) — DR targets `load_ids`.
     - `test_contracts_ppa_cfd.py` (17): every PPA kind and pricing, indexation, the cap, a missing ref, a non-Generator asset, disallowed combinations, CfD interval / suspension / monthly capture (two-month hand case) / parties and its own indexation, multi-period, and P0 payloads still valid.
     - `test_contracts_dr_lease_eaas_retail.py` (10): DR availability and activation, events, not-established cases, assets refused, representative weeks and a leap year, lease, EaaS, retail.
     - All expected values are written out independently, to the cent.
+  - **Broad regression** (159 files: the network, import, library, solver-config and chat paths, plus the commercial and contract sets): 4402 passed, 12 skipped. The one failure was the hourly audit catching a literal 8760 in `contracts.py`; it is fixed by reusing the engine's `_HOURS_PER_YEAR`, so the allow-list is unchanged.
   - **Not here:** the network-level driver (inputs from the seam and readers, per period) is WP2.5's `services/results/billing.py`. The asset-class preflight (`commercial.contract_asset_missing`) is WP2.2c.
 
 ## WP2.2c Contracts on the config + double-count preflight

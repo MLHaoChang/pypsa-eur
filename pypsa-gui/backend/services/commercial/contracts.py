@@ -43,6 +43,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
+from services.commercial.tariff_engine import _HOURS_PER_YEAR
+
 
 class ContractError(ValueError):
     """A contract that cannot settle on this network (refused, not flagged)."""
@@ -97,7 +99,7 @@ def indexed(price: float, pct: float, base_year: int | None, year: int) -> float
 
 
 def _hours_in_year(year: int) -> float:
-    return 8784.0 if calendar.isleap(year) else 8760.0
+    return 8784.0 if calendar.isleap(year) else _HOURS_PER_YEAR
 
 
 def _gen(contract, inputs: SettlementInputs) -> np.ndarray:
