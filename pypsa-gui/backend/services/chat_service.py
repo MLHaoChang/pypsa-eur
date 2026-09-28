@@ -225,11 +225,21 @@ _RATE_LOCK = threading.Lock()
 # across dispatches — spinning up a fresh ThreadPoolExecutor per call (up to
 # MAX_TOOL_CALLS_PER_TURN/turn) churns threads, and a `with ...:` form would
 # BLOCK on __exit__ waiting for a timed-out worker (defeating the timeout). The
-# pool is unbounded-ish (a small max) and a timed-out worker stays detached
-# (a Python thread can't be force-killed) — acceptable: the SSE thread is
-# freed, the orphan finishes or hangs harmlessly.
+# pool is bounded and a timed-out worker stays detached (a Python thread can't be
+# force-killed).
+#
+# "the orphan finishes or hangs harmlessly" is what this comment used to claim,
+# and it is not true: the orphan holds one of the eight workers for as long as it
+# hangs, so eight hung handlers ANYWHERE in the process refuse tool calls for
+# every session. That is OPEN-ITEMS item 16 and wants isolation, not a bigger
+# number. What the dispatch site does now is refuse honestly when the pool is
+# full, and cancel rather than defer — see the submit site below.
+# Named rather than inlined so the saturation message can quote the real ceiling
+# instead of reaching into `_max_workers`, and so a test can reason about the
+# pool's size without depending on a CPython private.
+TOOL_EXECUTOR_MAX_WORKERS: int = 8
 _TOOL_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
-    max_workers=8, thread_name_prefix="chat-tool",
+    max_workers=TOOL_EXECUTOR_MAX_WORKERS, thread_name_prefix="chat-tool",
 )
 
 # Cap on a single tool result's serialized size handed to the model. Oversized
@@ -4619,17 +4629,20 @@ def _dispatch_real_tool_call(
     # confirmation gate — see Improvement #19 there.
 
     # #16 — per-tool execution deadline for NON-solver tools. A hung read/write
-    # handler would otherwise freeze this SSE worker thread forever. We run it
-    # on a shared worker pool and abandon it after PER_TOOL_TIMEOUT_SECONDS,
-    # emitting tool_timeout. Solver tools (run_simulation / run_ac_pf_stage)
+    # handler would otherwise freeze this SSE worker thread forever. We run it on
+    # a shared worker pool and give up on it after PER_TOOL_TIMEOUT_SECONDS of
+    # EXECUTION, emitting tool_timeout — or, when it never got a worker at all,
+    # cancel it and emit tool_not_started. Solver tools (run_simulation / run_ac_pf_stage)
     # are EXCLUDED — they return immediately (spawning their own worker) and
     # the solver_log_bridge below owns their long-running lifecycle, so a
-    # timeout here would be wrong. A timed-out worker stays detached (a Python
-    # thread can't be force-killed): the SSE thread is freed, the orphan
-    # finishes or hangs harmlessly. CAVEAT (documented): an orphan that LATER
-    # acquires PyPSAService.get_lock() and mutates the network after we emitted
-    # tool_timeout will still land + autosave — the 30s default is generous so
-    # legitimate writes finish well inside it.
+    # timeout here would be wrong. A worker that blew its EXECUTION deadline stays
+    # detached (a Python thread can't be force-killed): the SSE thread is freed
+    # and the orphan runs on, holding a pool slot (item 16). CAVEAT, still open
+    # for that case only: an orphan that LATER acquires PyPSAService.get_lock()
+    # and mutates the network after we emitted tool_timeout will still land +
+    # autosave — the 30s default is generous so legitimate writes finish well
+    # inside it. The tool_not_started case does NOT carry that caveat; it is
+    # cancelled, so it cannot run at all.
     try:
         if tool_name in ("run_simulation", "run_ac_pf_stage"):
             result = handler(**(args or {}))
@@ -4640,9 +4653,54 @@ def _dispatch_real_tool_call(
             # without this every project tool would raise 401 no matter who is
             # signed in.
             _ctx_snapshot = contextvars.copy_context()
-            future = _TOOL_EXECUTOR.submit(
-                lambda: _ctx_snapshot.run(lambda: handler(**(args or {})))
-            )
+            # `PER_TOOL_TIMEOUT_SECONDS` is a deadline for RUNNING the handler,
+            # and `future.result(timeout=...)` alone measured queue + run. On a
+            # pool shared by every session that is not a detail: eight hung
+            # handlers elsewhere in the process were enough for a trivial read
+            # here to be reported as having "exceeded the execution deadline"
+            # without ever starting — and, because the timeout path abandoned the
+            # future instead of cancelling it, to then RUN once a slot freed,
+            # minutes after the user read the failure. For a destructive tool the
+            # user had approved and was told had timed out, that is the mutation
+            # landing after its own refusal.
+            #
+            # So: wait for the worker to pick the call up (its own grace period of
+            # the same length), then time the execution from the start event.
+            # Worst case an SSE thread blocks for 2× the budget, and only when
+            # the pool is jammed.
+            started = threading.Event()
+
+            def _run_tool(_snapshot=_ctx_snapshot):
+                started.set()
+                return _snapshot.run(lambda: handler(**(args or {})))
+
+            future = _TOOL_EXECUTOR.submit(_run_tool)
+            if not started.wait(timeout=PER_TOOL_TIMEOUT_SECONDS):
+                # CANCEL, not abandon. `Future.cancel()` succeeds only while the
+                # work is still queued, and success is the guarantee that matters
+                # here: the handler can no longer run behind the user's back.
+                if future.cancel():
+                    yield "tool_error", {
+                        "tool_use_id": tool_use_id,
+                        "tool_name": tool_name,
+                        "error_kind": "tool_not_started",
+                        "message": (
+                            f"tool {tool_name!r} never started: all "
+                            f"{TOOL_EXECUTOR_MAX_WORKERS} chat-tool workers "
+                            f"were busy for {PER_TOOL_TIMEOUT_SECONDS:g}s. It was "
+                            f"cancelled rather than left queued to run later."
+                        ),
+                    }
+                    tool_results_collector.append({
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "is_error": True,
+                        "content": "tool_not_started",
+                    })
+                    return
+                # cancel() lost the race — the worker started between the wait
+                # expiring and the cancel. It is genuinely running now, so fall
+                # through and give it the execution budget from here.
             try:
                 result = future.result(timeout=PER_TOOL_TIMEOUT_SECONDS)
             except concurrent.futures.TimeoutError:

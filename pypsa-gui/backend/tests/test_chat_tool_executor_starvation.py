@@ -56,7 +56,7 @@ def saturated_pool():
         up.release()
         release.wait(60)
 
-    workers = chat_service._TOOL_EXECUTOR._max_workers
+    workers = chat_service.TOOL_EXECUTOR_MAX_WORKERS
     try:
         for _ in range(workers):
             chat_service._TOOL_EXECUTOR.submit(hog)
