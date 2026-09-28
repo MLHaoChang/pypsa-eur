@@ -118,6 +118,7 @@ def physical_quantities(n, cfg, *, result_df: Callable[..., Any]) -> dict[str, A
 
     components: dict[str, pd.DataFrame] = {}
     energy_by_period: dict[str, pd.DataFrame] = {}
+    intervals: dict[str, pd.DataFrame] = {}
 
     for frame_attr, accessor, cap_col, facts_key in _CLASSES:
         df = getattr(n, frame_attr, None)
@@ -215,6 +216,7 @@ def physical_quantities(n, cfg, *, result_df: Callable[..., Any]) -> dict[str, A
             out["input_mwh"] = p0_df.multiply(w_energy, axis=0).sum(axis=0).values
             out["energy_mwh"] = out["output_mwh"]
             energy_frame = out_df
+            intervals["links_p0"], intervals["links_output"] = p0_df, out_df
         elif frame_attr in ("storage_units", "stores"):
             p = result_df(n, accessor, "p", "lopf")
             p_df = pd.DataFrame({c: _series_or_zero(p, c, sns) for c in cols})
@@ -225,12 +227,14 @@ def physical_quantities(n, cfg, *, result_df: Callable[..., Any]) -> dict[str, A
             out["charge_mwh"] = chg.multiply(w_energy, axis=0).sum(axis=0).values
             out["energy_mwh"] = out["discharge_mwh"]
             energy_frame = dis
+            intervals[f"{frame_attr}_discharge"], intervals[f"{frame_attr}_charge"] = dis, chg
         else:
             p = result_df(n, accessor, "p", "lopf")
             p_df = pd.DataFrame({c: _series_or_zero(p, c, sns) for c in cols})
             p_df.columns = out.index
             out["energy_mwh"] = p_df.multiply(w_energy, axis=0).sum(axis=0).values
             energy_frame = p_df
+            intervals[frame_attr] = p_df
         components[frame_attr] = out
         energy_by_period[frame_attr] = _by_period(energy_frame, w_energy, periods)
 
@@ -252,6 +256,21 @@ def physical_quantities(n, cfg, *, result_df: Callable[..., Any]) -> dict[str, A
                 "export_mwh": float((exp * w_energy).sum()),
             }
 
+    # ── loads and the commercial meter (P2 WP2.2-0) ──────────────────────
+    loads = getattr(n, "loads", None)
+    if loads is not None and not loads.empty:
+        served = result_df(n, "loads_t", "p", "lopf")
+        p_set_t = getattr(n.loads_t, "p_set", None)
+        frame = {}
+        for c in loads.index:
+            if served is not None and c in getattr(served, "columns", []):
+                frame[str(c)] = served[c].reindex(sns).astype(float)
+            elif p_set_t is not None and c in getattr(p_set_t, "columns", []):
+                frame[str(c)] = p_set_t[c].reindex(sns).astype(float)
+            else:
+                frame[str(c)] = pd.Series(float(loads.at[c, "p_set"] or 0.0), index=sns)
+        intervals["loads"] = pd.DataFrame(frame, index=sns)
+
     return {
         "is_multi_period": is_multi,
         "periods": periods,
@@ -261,4 +280,32 @@ def physical_quantities(n, cfg, *, result_df: Callable[..., Any]) -> dict[str, A
         "components": components,
         "energy_by_period": energy_by_period,
         "poc": poc,
+        # MW per snapshot (P2 WP2.2-0): Generator p; StorageUnit / Store
+        # discharge and charge (both ≥ 0); Link p0 and output; per load.
+        "intervals": intervals,
+        "commercial_meter": _commercial_meter(n, cfg, result_df),
     }
+
+
+def _commercial_meter(n, cfg, result_df) -> dict[str, Any] | None:
+    """The PoC flows ON THE COMMERCIAL METER (the LP's and the bill's): Σ the
+    config's import Links' p0 (a group contract's members), the export Link's
+    p0. None without a commercial config; a Link without p0 ⇒ that side None."""
+    commercial = getattr(cfg, "commercial", None)
+    if not commercial:
+        return None
+    from services.commercial import lp_bindings as _lp
+
+    try:
+        c = _lp._parse(commercial)
+    except Exception:  # noqa: BLE001 — an invalid config has no meter
+        return None
+    links = _lp.import_links(c)
+    p0 = result_df(n, "links_t", "p0", "lopf")
+    cols = set(getattr(p0, "columns", []))
+    imp = (sum(p0[l].reindex(n.snapshots).astype(float) for l in links)
+           if links and all(l in cols for l in links) else None)
+    exp = (p0[c.export_link].reindex(n.snapshots).astype(float)
+           if c.export_link and c.export_link in cols else None)
+    return {"import_links": links, "export_link": c.export_link,
+            "import_mw": imp, "export_mw": exp}

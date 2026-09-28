@@ -1115,6 +1115,10 @@ def run_simulation(
                 # prices with another run's dispatch).
                 if status in ("ok", "optimal"):
                     _ic_conn.commit()
+                    # The DSR dispatch record (IC P2 WP2.2-0): committed, or
+                    # cleared, only after a successful non-operational solve.
+                    from services.commercial.settlement_inputs import commit_dsr
+                    commit_dsr(network, captured.get("dsr_t"), captured.get("dsr_total_mwh"))
                     # Published only after a successful solve, like the commit
                     # (WP1.5a review #6); None after a plain successful solve.
                     _emit_state(last_commercial_terms=(

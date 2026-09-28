@@ -598,6 +598,7 @@ Files: `backend/services/library/items.py` (new; JSON payload written as a file 
     - registration;
     - pin collection, schema 1/2 writing and reading;
     - a bundle into another org reporting its tariff pin as `missing`.
+  - **Broad regression** (95 files touching the solver-config, library or pin paths, plus the commercial set): 2684 passed, 3 skipped.
 
 ## WP2.2-0 Settlement inputs
 
@@ -630,6 +631,24 @@ services) and the netCDF upload path (refuse bus names starting `ic:`), tests.
 
 - [ ] Red: interval frames sum to the seam's period totals; DSR commit survives save → load; a reference series
   survives reload and is re-hashed; a changed ref version is drift.
+
+- **Split:** 2.2-0a covers the interval quantities and the DSR record. 2.2-0b covers `contracts` on the config, the reference series and the `ic:` guards.
+- **As implemented, 2.2-0a:**
+  - **`physical_quantities` returns `intervals`**, all in MW per snapshot: `generators`, `storage_units_discharge` / `_charge`, `stores_discharge` / `_charge`, `links_p0` and `links_output`, and `loads` (served `loads_t.p`, else `p_set`).
+  - **It also returns `commercial_meter`**: Σ `import_links(cfg)` p0 and the export Link's p0. It is None without a commercial config, and a side is None when a Link has no p0.
+  - The WP0.3 seam tests are unchanged and green.
+  - **`services/commercial/settlement_inputs.py`.**
+    - `commit_dsr(n, dsr_t, total_mwh)` is called by `run_simulation` right after `_ic_conn.commit()` on a successful solve.
+    - It writes `buses_t["ic_dsr_p"]` (columns = bus names) and `meta["ic_dsr"] = {axis_hash, total_mwh, buses}`, clears both after a successful solve without DSR, and does nothing on an `_ic_operational` solve.
+    - `dsr_activation(n)` gives (frame, []) or (None, `dr_activation_not_established`) when the record is missing, on another axis, or has NaN.
+  - **Tests:** `tests/test_settlement_inputs.py` has 7 tests:
+    - interval frames × energy weights = the seam's totals;
+    - the group meter;
+    - no meter without a commercial config;
+    - the DSR commit;
+    - operational keeps it and a DSR-less solve clears it;
+    - activation across an axis change;
+    - a netCDF round trip.
 
 ## WP2.2a Contracts: PPA (four kinds) and CfD
 
