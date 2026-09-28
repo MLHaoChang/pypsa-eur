@@ -307,18 +307,19 @@ an agent-export chip, download it in the desktop shell, open it in Word.
 Proves the writer, the template style mapping, and the download path.
 Also pins `python-docx` in `gui-requirements.txt`.
 
-**Increment 1 — generate, read, export (3–5 days).**
+**Increment 1 — generate, read, export (4–6 days).**
 `ReportDocument` model and store; evidence collector; report job with
-section-wise generation through the provider seam; number audit; default
-template; `.docx` export; chat tools; a Reports list and read-only viewer with
+section-wise generation through the provider seam on every wire; number
+audit; default template; server-rendered PNGs (frontier curve, FMEA Pareto
+bar, capacity mix) embedded as figures (decision 6); `.docx` export; chat
+tools and a panel button; a Reports list and read-only viewer with
 per-section regenerate. Deliverable: "write me the client report" produces a
 Word file the user can read in the app and download.
 
-**Increment 2 — user templates and figures (3–5 days).**
+**Increment 2 — user templates (3–5 days).**
 Template upload kind; tagged mode (Jinja fields and loops); untagged mode
 (outline extraction, mapping plan, body rebuild, TOC refresh flag);
-`docx-preview` pane; server-rendered PNGs (frontier curve, FMEA Pareto bar,
-capacity mix) embedded as figures.
+`docx-preview` pane; template-language detection.
 
 **Increment 3 — round trip and versions (3–5 days).**
 Upload an edited `.docx`; tracked-change acceptance; section matching by
@@ -331,46 +332,34 @@ studies themselves compute their numbers.
 
 ---
 
-## 7. Decisions needed before a plan is written
+## 7. Decisions — resolved 2026-09-28 with the owner
 
-Each has a proposed default; the plan will assume the default unless told
-otherwise.
+Asked and answered in the session that produced this assessment. The plan
+(`docs/superpowers/plans/2026-09-28-llm-report-generation-increment-1.md`)
+takes these as pinned.
 
-1. **Report subject.** EH `ReferenceDesignReport` only, the general adequacy
-   study (`build_study_report`), or one report over both?
-   *Default: one evidence collector over both; the EH reference design is the
-   first target because it already carries a completeness enum per section.*
-2. **Numbers policy.** Strict placeholders, audit-and-flag, or free?
-   *Default: audit-and-flag for prose; tables and figures always from code.*
-3. **Template semantics.** Tagged (`{{ }}`) only, untagged (LLM maps the
-   outline), or both auto-detected?
-   *Default: both; tagged ships first.*
-4. **Reading and editing level.** Download only, Reports panel with viewer and
-   per-section regenerate, or a full in-app editor?
-   *Default: viewer + per-section regenerate; Word remains the editor.*
-5. **Round-trip semantics.** Merge the user's edits by section, treat the
-   re-upload only as a new template, or also honour Word comments as
-   instructions? *Default: merge by section and honour comments.*
-6. **PDF.** Required, or `.docx` only with PDF when LibreOffice is present?
-   *Default: `.docx` only; opportunistic PDF.*
-7. **Figures.** Charts embedded (server-rendered PNG) or tables only in
-   increment 1? *Default: tables only in increment 1, charts in increment 2.*
-8. **Language.** English only, or the language of the template / a chosen
-   language? *Default: follow the template's language, English fallback.*
-9. **Trigger.** Chat-only, panel button, or both? *Default: both.*
-10. **Providers.** Must generation work on local / OpenAI-compatible profiles
-    with the same quality bar, or is Anthropic the supported path with local
-    as best-effort? *Default: Anthropic supported; local best-effort with the
-    profile named on the report.*
-11. **Sharing the template.** Per project (lives in `uploads/`, travels with
-    the bundle) or per user / per org (a template library)?
-    *Default: per project now; library later.*
-12. **Audience and tone.** Is there an example of a real deliverable (even
-    redacted) that the default template and the writing guide should match?
-    *Default: IEC 60812 FMECA worksheet conventions plus the EH spec's
-    section order.*
+| # | Question | Decision |
+|---|---|---|
+| 1 | Report subject | **Both**, one evidence collector over the EH `ReferenceDesignReport` and the adequacy `build_study_report`; EH is the first target. |
+| 2 | Numbers policy | **Audit and flag**: prose numbers are matched against the evidence payload, misses are flagged in the viewer and listed in an appendix. Tables and figures always from code. |
+| 3 | Template semantics | **Both, auto-detected; tagged (`{{ }}`) ships first**, untagged mapping plan second. |
+| 4 | Reading and editing | **Viewer + per-section regenerate + Word round trip.** Word stays the editor of record; no in-app rich-text editor. |
+| 5 | PDF | **`.docx` only; PDF opportunistically** when a LibreOffice binary is found at runtime. |
+| 6 | Figures | **Charts from increment 1** (server-rendered PNG: frontier curve, FMEA Pareto bar, capacity mix), not deferred to increment 2. |
+| 7 | Language | **Follow the template's language, English fallback**, with an explicit override on the request. |
+| 8 | Trigger | **Chat tool and panel button**, both starting the same job. |
+| 9 | Providers | **All profiles equally.** Generation is designed for the weakest model: small per-section schemas, JSON-in-text validated with pydantic and one repair retry on every wire, the number audit as the safety net; Anthropic strict-schema tools are an optimisation on top, never the baseline. The report records the profile that wrote it. |
+| 10 | Template ownership | **Per project** (an upload in `uploads/`, travels with bundle, snapshots, save-as). Library later. |
+| 11 | Sample deliverable | **None available; standard conventions**: IEC 60812 FMECA worksheet conventions plus the EH spec's section order. |
+| 12 | Next step | **Write the increment plan, then build the spike** on this branch. |
 
----
+Consequence of decision 9 on the design in §4: the `emit_section` strict tool
+becomes a provider-specific fast path inside the generator, and the
+provider-neutral contract is "one JSON object per section, validated,
+repaired once, else `not_established`". Section prompts must be short and
+self-contained so a 7B-class local model can follow them; the evidence
+payload sent per section is the slice that section needs, not the whole
+report.
 
 ## 8. Sources consulted outside the tree
 
