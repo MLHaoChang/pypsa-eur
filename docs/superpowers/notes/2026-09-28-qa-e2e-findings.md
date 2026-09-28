@@ -10,6 +10,37 @@ The point of this file is durability: the findings were produced in a session wh
 scratchpad was later wiped by a container restart. Anything not committed does not
 exist.
 
+## Where this stands
+
+Eleven filed. One (QA-S1) was withdrawn on re-check — it had been fixed on
+2026-09-12 and was carried onto the list without being verified against current
+`master`. The remaining ten are fixed, each with a guard test that fails against the
+code as it was.
+
+| ID | Area | Severity as filed | Status |
+|---|---|---|---|
+| QA-N1 | cascade bus delete orphans side data | Critical | FIXED |
+| QA-N2 | clustering discards `n.meta` | Critical | FIXED |
+| QA-A1 | negative availability frozen as "silent" | Serious | FIXED |
+| QA-N3 | period weights assigned positionally | Serious | FIXED |
+| QA-N5 | GUI-only attributes dropped on a fresh network | filed Moderate, **is Serious** | FIXED |
+| QA-P1 | chat lineage resolves the legacy flat dir | Serious | FIXED |
+| QA-P2 | `rename_project` skips rebinding in web mode | Serious | FIXED |
+| QA-E1 | a documented reconciliation that is false | Serious | FIXED |
+| QA-N4 | upload accepts columns naming no asset | Moderate | FIXED |
+| QA-N6 | weightings accept negative and non-finite | Moderate | FIXED |
+| QA-S1 | lock-holder email reaches the provider | Serious | withdrawn — already fixed |
+
+Two corrections the fixes forced on the register itself, both recorded in place rather
+than edited away:
+
+- **QA-N5 was mis-sized.** Filed as "bus `country` is dropped", it turned out to drop
+  the adequacy occurrence trio on every generator, branch and storage class — this
+  integration's own primary input — on any network built from scratch.
+- **QA-N2's mechanism was guessed wrong.** Clustering does not rename one-port
+  components on the pinned PyPSA; it is the branches that vanish. The fix and its
+  tests follow what was measured, not what was assumed.
+
 ## Status legend
 
 - **OPEN** — reproduced, not yet fixed.
