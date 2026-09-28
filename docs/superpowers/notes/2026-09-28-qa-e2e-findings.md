@@ -209,6 +209,9 @@ one network, not of the invariant.
 
 ## Moderate
 
+(QA-N5 below was filed here and belongs in Serious — see its entry. It is left in
+place so the register reads as it was written, with the correction attached.)
+
 ### QA-N4 — generic timeseries upload accepts columns that name no asset
 
 - Site: `routers/network_time_axis.py::upload_timeseries` (`POST /timeseries/upload`).
@@ -230,34 +233,62 @@ different route.
 Fix shape: partition the columns into matched and unmatched before taking the lock;
 store only the matched ones, and return the unmatched names in the response (plus the
 change-log line) so the UI can warn. Do not fail the upload — partial uploads are
-legitimate. Validate `attribute` against the component's time-varying attributes for
-the same reason.
+legitimate. Validate `attribute` against the component's time-varying attributes,
+which IS refused: an attribute with no time-varying table can never be applied, so it
+is a typo rather than a partial upload.
 
-**Status: OPEN**
+**Status: FIXED** — `columns` in the response is now the count applied rather than
+the count submitted, and `unmatched_columns` names the rest. Guard:
+`tests/test_timeseries_upload_unmatched.py`.
 
-### QA-N5 — bus `country` is advertised by the schema and dropped by the filter
+### QA-N5 — every GUI-only attribute is dropped on a from-scratch network
 
-- Sites: `models/schemas.py::BusCreate` (declares `country: str = ""`) versus
+Filed as "bus `country` is dropped". Measuring it turned it into the most expensive
+finding in this register.
+
+- Sites: `models/schemas.py` (the `*Create` models) versus
   `services/network_crud.py::_drop_unknown_extras`.
 
 `_drop_unknown_extras` keeps a key only if PyPSA's catalog reports it as an Input
-attribute **or** it is already a column on the frame. On PyPSA 1.1.2 — the version CI
-pins — the `Bus` catalog is
-`name, v_nom, type, x, y, carrier, unit, location, v_mag_pu_set, v_mag_pu_min,
-v_mag_pu_max, control, generator, sub_network, …` with no `country`, and a fresh
-`n.buses` has no `country` column. So on any network the GUI builds from scratch,
-`country` fails both arms and is stripped — while `BusCreate` declares it, the API
-docs advertise it, and the response reports success.
+attribute **or** it is already a column on the frame. Neither arm knows about the
+attributes the GUI adds on purpose — and the Create models' own comments say they
+exist: "Custom GUI columns, same pattern as `curtailment_cost`: stored on the
+component DataFrame, no PyPSA meaning, netCDF round-trip for free."
 
-It is invisible on networks imported from PyPSA-Eur, because those arrive with a
-`country` column already present and the second arm then lets it through. That is why
-it survives casual testing: it only bites the from-scratch path.
+Measured on the pinned PyPSA (1.1.2), the full casualty list on a fresh network:
 
-Fix shape: the second arm exists precisely for attributes the Create models declare
-but PyPSA does not catalog, so extend it — union the catalog with the declared fields
-of the component's Create model, rather than special-casing `country` alone.
+| Component | Declared, dropped |
+|---|---|
+| Bus | `country` |
+| Carrier | `unit` |
+| Generator | `outage_rate_value`, `outage_rate_basis`, `mttr_hours`, `p_max_pu_includes_outages`, `curtailment_cost`, `unit` |
+| Line, Store, StorageUnit | `outage_rate_value`, `outage_rate_basis`, `mttr_hours` |
+| Link | the three above plus `bus2`, `bus3`, `bus4`, `efficiency2`, `efficiency3` |
+| Transformer | `v_nom_0`, `v_nom_1` |
 
-**Status: OPEN**
+The adequacy trio is what makes this serious rather than cosmetic. A generator
+created through the API with an explicit outage rate reads back as having none, so
+the entire occurrence chain — COPT, Monte Carlo, the FMEA worksheet — falls through
+to the per-carrier default library, silently, with nothing anywhere to show that the
+user's number ever arrived. This is the integration's own primary input being
+discarded at the front door.
+
+It is invisible on networks imported from PyPSA-Eur, which arrive with the columns
+already present and so pass on the second arm. Only the from-scratch path bites —
+which is the path a new user takes, and the path every test fixture takes.
+
+Fix shape: a third arm — the fields the component's `*Create` model declares. A
+declared field is by definition something this API intends to persist, so the model
+is the right authority, and the whitelist stays a whitelist: an undeclared,
+uncatalogued key is still dropped.
+
+**Status: FIXED** — `_declared_attributes`, cached, keyed by a
+`_CREATE_MODEL_NAMES` map. Guard:
+`tests/test_create_model_attributes_survive.py`, which pins the specific casualties
+AND states the general invariant per component class, so a field added to a Create
+model tomorrow is covered without anyone remembering the file exists. The control
+pins that an undeclared key is still dropped — widening the filter to the declared
+surface must not widen it to an arbitrary one.
 
 ### QA-N6 — snapshot and investment-period weightings accept negative and non-finite values
 

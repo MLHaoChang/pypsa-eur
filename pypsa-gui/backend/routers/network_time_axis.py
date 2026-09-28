@@ -1094,6 +1094,17 @@ def get_timeseries(component: str, attribute: str, columns: str | None = None):
     ts_store = getattr(n, f"{component}_t", None)
     if ts_store is None:
         raise HTTPException(404, f"Component '{component}' not found")
+    # An attribute this component has no time-varying table for can never be
+    # applied — `_reapply_user_ts_to_network` would have nowhere to write it —
+    # so it is a typo, not a partial upload. PyPSA initialises every
+    # time-varying attribute as an (empty) frame, so membership is the whole
+    # test.
+    if attribute not in ts_store:
+        raise HTTPException(
+            400,
+            f"'{component}' has no time-varying attribute '{attribute}'. "
+            f"Valid attributes: {', '.join(sorted(ts_store.keys()))}.",
+        )
 
     net_df = ts_store.get(attribute)
     wanted = [c.strip() for c in columns.split(",")] if columns else None
@@ -1234,6 +1245,17 @@ async def upload_timeseries(
     ts_store = getattr(n, f"{component}_t", None)
     if ts_store is None:
         raise HTTPException(404, f"Component '{component}' not found")
+    # An attribute this component has no time-varying table for can never be
+    # applied — `_reapply_user_ts_to_network` would have nowhere to write it —
+    # so it is a typo, not a partial upload. PyPSA initialises every
+    # time-varying attribute as an (empty) frame, so membership is the whole
+    # test.
+    if attribute not in ts_store:
+        raise HTTPException(
+            400,
+            f"'{component}' has no time-varying attribute '{attribute}'. "
+            f"Valid attributes: {', '.join(sorted(ts_store.keys()))}.",
+        )
 
     is_multi = isinstance(n.snapshots, pd.MultiIndex)
     if period is not None:
@@ -1263,9 +1285,23 @@ async def upload_timeseries(
     # an entry that reaches `_user_ts` is re-injected on every solve.
     _reject_nonfinite_timeseries(df, component, attribute)
 
+    # Partition the columns before anything is stored. A column naming no row
+    # on the component's frame cannot be applied to anything, and storing it
+    # anyway is not harmless: `_user_ts` is persisted in every project save
+    # and re-injected on every solve, so the orphan accumulates forever and is
+    # inherited by any later asset that reuses the name — the same failure the
+    # cascade-delete cleanup exists to prevent, reached from the other end.
+    # Reported rather than refused: a partial upload (a file covering more
+    # assets than this network has) is a legitimate thing to do, and the
+    # caller is told exactly which headers went nowhere.
+    static_df = getattr(n, component, None)
+    known = set(map(str, static_df.index)) if static_df is not None else set()
+    matched = [c for c in df.columns if str(c) in known]
+    unmatched = [str(c) for c in df.columns if str(c) not in known]
+
     with PyPSAService.get_lock():
         with _user_ts_lock:
-            for col in df.columns:
+            for col in matched:
                 new_s = df[col]
                 if period is not None:
                     existing = _user_ts.get((component, attribute, col))
@@ -1295,16 +1331,25 @@ async def upload_timeseries(
         # MultiIndex broadcast, MultiIndex+MultiIndex direct).
         _reapply_user_ts_to_network(n)
 
-    cols_preview = ", ".join(list(df.columns)[:3]) + ("…" if len(df.columns) > 3 else "")
+    cols_preview = ", ".join(matched[:3]) + ("…" if len(matched) > 3 else "")
+    unmatched_note = (
+        f" — {len(unmatched)} column(s) matched no {component} and were NOT "
+        f"stored: {', '.join(unmatched[:10])}"
+        + ("…" if len(unmatched) > 10 else "")
+    ) if unmatched else ""
     change_log_service.log(
         "timeseries", component.capitalize(), file.filename or cols_preview,
         f"Uploaded {component}/{attribute} time series '{file.filename}': "
-        f"{len(df.columns)} column(s), {len(df)} rows"
-        + (f", period={period}" if period is not None else ""),
+        f"{len(matched)} column(s), {len(df)} rows"
+        + (f", period={period}" if period is not None else "")
+        + unmatched_note,
     )
     return {
         "rows": len(df),
-        "columns": len(df.columns),
+        # The count APPLIED, not the count submitted. A success count that
+        # includes the columns that went nowhere is worse than no count.
+        "columns": len(matched),
+        "unmatched_columns": unmatched,
         "period": period,
         "mode": "per_period" if period is not None else ("broadcast" if is_multi else "flat"),
     }

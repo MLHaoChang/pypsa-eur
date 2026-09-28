@@ -9,6 +9,7 @@ router. Never imports ``routers.*``.
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from typing import Any
 
 import pandas as pd
@@ -108,26 +109,81 @@ def _meta_payload(n: Any, loaded_project: str | None) -> dict:
         "snapshot_count": len(n.snapshots),
         "bus_count": len(n.buses),
     }
+# The request model each component class is created and updated through. The
+# fields those models DECLARE are the API's published surface, so they are part
+# of the whitelist below — see `_declared_attributes`.
+_CREATE_MODEL_NAMES: dict[str, str] = {
+    "Bus": "BusCreate",
+    "Carrier": "CarrierCreate",
+    "Generator": "GeneratorCreate",
+    "Load": "LoadCreate",
+    "Line": "LineCreate",
+    "Link": "LinkCreate",
+    "StorageUnit": "StorageUnitCreate",
+    "Store": "StoreCreate",
+    "Transformer": "TransformerCreate",
+    "ShuntImpedance": "ShuntImpedanceCreate",
+}
+
+
+@lru_cache(maxsize=None)
+def _declared_attributes(component_class: str) -> frozenset[str]:
+    """The fields the component's Create model declares, minus `name`.
+
+    Cached: the models are immutable once imported, and this is called on
+    every create and update.
+    """
+    import models.schemas as schemas
+
+    model = getattr(schemas, _CREATE_MODEL_NAMES.get(component_class, ""), None)
+    if model is None:
+        return frozenset()
+    return frozenset(model.model_fields) - {"name"}
+
+
 def _drop_unknown_extras(component_class: str, attr: str, kwargs: dict) -> dict:
     """
-    Drop any key PyPSA does not recognise for this component class (spec D21).
+    Drop any key neither PyPSA nor this API recognises for this component class
+    (spec D21).
 
     Pydantic's `extra='allow'` lets an undeclared key survive
     `model_dump(exclude_unset=True)` so a newly-exposed attribute can persist
     instead of being silently ignored. Without a whitelist that same setting
     would let an arbitrary key reach `n.add()`, so the two ship together.
 
-    A key passes if the catalog reports it as an Input attribute, OR it is
-    already a column on the frame. The second arm is what preserves today's
-    behaviour for fields a Create model declares but PyPSA marks Output —
-    narrowing to catalog-Input alone would be a silent behaviour change.
+    Three arms. A key passes if the catalog reports it as an Input attribute,
+    OR it is already a column on the frame, OR the component's Create model
+    DECLARES it.
+
+    The second arm preserves behaviour for fields a Create model declares but
+    PyPSA marks Output. The third arm is the one that was missing, and it cost
+    real data: the GUI adds attributes PyPSA has never heard of — the adequacy
+    occurrence trio (`outage_rate_value`, `outage_rate_basis`, `mttr_hours`),
+    `p_max_pu_includes_outages`, `curtailment_cost`, a bus `country`, a
+    multi-output link's `bus2`/`efficiency2` — and says so in the models'
+    own comments ("Custom GUI columns ... stored on the component DataFrame").
+    On a network that already carries the column the second arm let them
+    through, which is every network imported from PyPSA-Eur; on a network
+    built from scratch the FIRST asset created through the API lost them,
+    silently, behind a 201. A generator created with an explicit outage rate
+    then read back as having none, so the occurrence chain fell through to the
+    per-carrier default library with nothing to show the user's number had
+    ever arrived.
+
+    A declared field is by definition something this API intends to persist,
+    so the model is the right authority — and the whitelist stays a whitelist:
+    an undeclared, uncatalogued key is still dropped.
     """
     n = PyPSAService.get_network()
     allowed = attribute_catalog.input_attributes(n, component_class)
     if not allowed:
         return kwargs
     columns = set(getattr(n, attr).columns)
-    return {k: v for k, v in kwargs.items() if k in allowed or k in columns}
+    declared = _declared_attributes(component_class)
+    return {
+        k: v for k, v in kwargs.items()
+        if k in allowed or k in columns or k in declared
+    }
 
 
 def _normalise_flag_column(n, attr: str) -> None:
