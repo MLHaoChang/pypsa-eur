@@ -272,14 +272,16 @@ Each slice follows the house protocol: adversarial plan review before code, TDD 
 - An LLM that computes, draws, or writes unlabelled prose into a client document.
 - Billing, code signing, auto-update and the SaaS worker queue (unchanged from their own specs).
 
-## 11. Open questions
+## 11. Open questions, resolved by the owner on 2026-09-28
 
-1. Whose money is the default perspective (decision 8), and does the multi-party split need to be in v1 for the data-centre case?
-2. The baseline for waste heat: gas boiler or existing heat pump on the district network. It changes every KPI on that template.
-3. Which tariff library first: German capacity-based grid fees and EU balancing products, or US demand charges with the OpenEI database?
-4. Does the company's equipment catalogue become the default assumptions library, and who owns its versions?
-5. Should the copilot draft prose in client reports at all (decision 16 assumes yes with labels and review)?
-6. Do the technology-data cost files at repo root satisfy the provenance format, or does the library need a curation step before they can be shown to clients?
+| # | Question | Decision |
+|---|---|---|
+| 1 | Whose money is the default perspective? | `site_owner` for the BESS, C&I, data-centre and waste-heat questions; `developer` for co-located BESS + renewables and hydrogen. Multi-party cash-flow splits are MVP-3. |
+| 2 | What is "doing nothing" per question? | BESS: grid supply on the chosen tariff with existing assets. Hydrogen: buying delivered hydrogen at a market price. Waste heat: the district network's current source, asked at intake, gas boiler as the default. Data-centre power: grid-only from the connection date with diesel backup. Co-located storage: the renewables alone. Off-grid: diesel-only. Every headline is a delta against the named baseline. |
+| 3 | Which tariff library first? | EU first, with German capacity-based grid fees and EU balancing products. The tariff format is generic so US demand charges and an OpenEI import follow without redesign. |
+| 4 | Financial conventions? | Real terms, pre-tax, without subsidy as the one labelled default (the IRENA convention); nominal, post-tax and with-subsidy as toggles that re-label every figure. |
+| 5 | Assumptions library source? | Seed from the PyPSA-Eur technology-data cost files (source and year already carried), curated into the ledger row format and vendored with a library version; add a private house price book overlay for the company's own equipment. Ownership and versioning of the overlay is a governance decision outside this spec. |
+| 6 | May the copilot draft prose in client reports? | Yes, with three guards: every figure cites a fact ID the renderer resolves, AI paragraphs carry a label, and nothing exports until each AI paragraph has a reviewed tick. The report must render fully without the copilot. Not in MVP-1. |
 
 ## 12. Risks
 
