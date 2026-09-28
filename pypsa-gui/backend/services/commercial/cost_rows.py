@@ -139,6 +139,8 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
     elif wanted:
         block["demand_charge"] = None
         flags.append("demand_charge_not_established")
+        if _lp.demand_all_newly_bound(n.meta.get(_lp.META_LINKS), wanted_items):
+            flags.append("demand_recipe_changed")  # …because that recipe bound none
 
     cfg_now = None
     if commercial:

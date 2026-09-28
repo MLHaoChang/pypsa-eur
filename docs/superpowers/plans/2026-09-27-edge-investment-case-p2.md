@@ -459,6 +459,14 @@ Files: `lp_bindings.py`, `cost_rows.py`, `test_ratchet.py`, `test_tiers.py`, rec
 
     The reconciliation gate gains `demand_tiers`, `ratchet_designated` and `ratchet_cyclic` (14 cases), each checked before and after save → load. The urdb test now pins the R3 fixtures as LP terms.
 
+- **WP2.1c-i review round 1 → PASS WITH CONDITIONS, closed:**
+  1. **MEDIUM, fixed.** Non-convex demand tiers whose first rate is 0 (for example [0, 12, 5]) were priced at 0, so the LP did no shaving. A non-convex key is now priced at the tier the same month a year earlier landed in (`meter_history_peaks_kw`, first period only), else at the first NON-ZERO rate. Tested at the spec level and live, with gap 0.
+  2. **MEDIUM, fixed.** An old solve whose demand items are ALL newly bindable wrote no demand record, so it could not be dated. `ic_poc_links` now records `lp_recipe` (`LP_RECIPE = 2`). When that is absent and every wanted demand item is of a newly bindable kind, the rows add `demand_recipe_changed` to `demand_charge_not_established` and the bill says `demand_recipe_changed` (`demand_all_newly_bound`). Tested, including the converse under recipe 2.
+  3. **Disclosed: behaviour change.** A rolling or multi-period myopic solve is now REFUSED for tiered demand items and designated-month / cyclic ratchets. Before this recipe they were `not_in_lp` and the solve ran without them. The refusal text now says "not supported until P6".
+  4. (LOW) Non-convex demand notes are per item: `nonconvex_tier:<item>` sits next to `nonconvex_tier`. The docstring states that the whole billed kW is priced at one rate, including the free part below a first threshold above 0, and that this is the item's gap cause.
+  5. (LOW, accepted) `add_demand_terms` adds about 2.8 s on a 15-min year with 72 tiered keys. A vectorised sum constraint is left for performance work.
+  6. (LOW) The `demand_only_newly_bound` docstring states that an item of a newly bindable kind ADDED after an old solve also reads as a recipe change. Both mean re-solve.
+
 ## WP2.4b-0 Condition 4 refactor (lands before the Library work)
 
 Files: `backend/services/commercial/binding.py` (new: org resolution by an injected resolver, alignment,

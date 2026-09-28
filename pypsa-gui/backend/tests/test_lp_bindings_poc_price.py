@@ -196,6 +196,7 @@ def test_after_a_solve_the_poc_price_is_persisted_and_the_users_cost_untouched()
     assert record.pop("energy_hash")  # the drift check's content hash
     assert record.pop("agreement_recorded") is True  # this solve records its agreement (WP2.0)
     assert record.pop("hash_version") == 2  # the recipe of energy_hash (WP2.0 condition 1)
+    assert record.pop("lp_recipe") == L.LP_RECIPE  # the LP recipe that solved (WP2.1c)
     assert record == {"import": "import", "export": None,
                       "import_members": ["import"], "priced": ["import"]}
     assert sink["last_commercial_terms"]["poc_link"] == "import"

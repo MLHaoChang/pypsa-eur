@@ -145,7 +145,10 @@ def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
             else:
                 changed = True
     elif items:
-        changed = True  # demand terms added after the solve
+        if _lp.demand_all_newly_bound(rec, items):
+            flags.append("demand_recipe_changed")  # the old recipe bound none of them
+        else:
+            changed = True  # demand terms added after the solve
     tier_rec = next(iter(tiers.values()), None)
     solve["tier_hash"] = (tier_rec or {}).get("items_hash")
     solve["tier_hash_version"] = _H.version_of(tier_rec)

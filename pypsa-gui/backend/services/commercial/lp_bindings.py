@@ -514,14 +514,27 @@ def _ratchet_months(ratchet, month: str) -> list[str]:
     return [(here - back).strftime("%Y-%m") for back in range(1, ratchet.lookback_months + 1)]
 
 
-def _demand_segments(item: TariffItem, rates: list[float]) -> tuple[list[dict] | None, float]:
+def _demand_segments(item: TariffItem, rates: list[float],
+                     seen_kw: float | None = None) -> tuple[list[dict] | None, float]:
     """(tier segments of the billed demand in MW and €/MW, or None when the
-    rates fall; the €/kW rate a key without segments is priced at). Rising
-    rates are convex: stacked segments, with a free one below a first
-    threshold above 0, as `_tier_cost_with` bills it. Falling rates are priced
-    at the first tier (WP2.1c; as P1 prices falling energy tiers)."""
+    rates are not rising; the €/kW rate a key without segments is priced at).
+    Rising rates are convex: stacked segments, with a free one below a first
+    threshold above 0, as `_tier_cost_with` bills it.
+
+    Non-convex rates price the WHOLE billed kW at one marginal rate: the tier
+    the same month a year earlier (`seen_kw`, metered history) landed in, else
+    the FIRST NON-ZERO rate — a free first tier must not take the charge out of
+    the LP (WP2.1c-i review #1). The engine bills the tiers exactly; the gap
+    (incl. the free part below a first threshold above 0, over-priced here) is
+    the item's `nonconvex_tier` cause."""
     if not all(b >= a for a, b in zip(rates, rates[1:])):
-        return None, float(rates[0])
+        if seen_kw is not None:
+            k = -1
+            for j, t in enumerate(item.tiers):
+                if seen_kw >= t.threshold:
+                    k = j
+            return None, (0.0 if k < 0 else float(rates[k]))
+        return None, float(next((r for r in rates if r != 0), 0.0))
     th = [t.threshold / _KWH_PER_MWH for t in item.tiers] + [np.inf]
     segs = [{"width_mw": th[0], "eur_per_mw": 0.0}] if th[0] > 0 else []
     segs += [{"width_mw": float(th[k + 1] - th[k]), "eur_per_mw": float(r) * _KWH_PER_MWH}
@@ -588,6 +601,7 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
         missing += [m if p is None else f"{p}:{m}" for m in gone]
     keys: list[dict] = []
     tier_notes: list[str] = []
+    first_inv = (min(n.investment_periods) if isinstance(n.snapshots, pd.MultiIndex) else None)
     for item in items:
         # Windows are the item's period NAMES (fragments of one URDB period are
         # one window with one monthly peak; IC P2 WP2.1a-0), as in the engine.
@@ -610,9 +624,14 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
                                    else [t.rate for t in item.tiers])
                         if not any(r != 0 for r in rates_k):
                             continue
-                        segments, rate = _demand_segments(item, rates_k)
-                        if segments is None and "nonconvex_tier" not in tier_notes:
-                            tier_notes.append("nonconvex_tier")
+                        seen_kw = (cfg.meter_history_peaks_kw.get(
+                            (pd.Period(m, freq="M") - 12).strftime("%Y-%m"))
+                            if p is None or p == first_inv else None)
+                        segments, rate = _demand_segments(item, rates_k, seen_kw)
+                        if segments is None:
+                            for note in ("nonconvex_tier", f"nonconvex_tier:{item.id}"):
+                                if note not in tier_notes:
+                                    tier_notes.append(note)
                     elif rate == 0:
                         continue
                     _, group = np.unique(interval[pos], return_inverse=True)
@@ -692,6 +711,7 @@ def energy_hash(n, cfg: CommercialConfig, version: int = _H.HASH_VERSION) -> str
 
 DEMAND_HASH_VERSION = _H.HASH_VERSION  # recorded in the demand info (recipe of items_hash)
 DEMAND_LP_RECIPE = 2  # recorded in the demand info: 2 = WP2.1c-i (tiers, all ratchet modes)
+LP_RECIPE = 2  # recorded in `ic_poc_links`: the LP recipe of the solve (absent ⇒ 1)
 
 
 def demand_hash(n, cfg: CommercialConfig, items, version: int = _H.HASH_VERSION) -> str:
@@ -711,10 +731,23 @@ def _bound_before_wp21c(item) -> bool:
     return not item.tiers and not (r is not None and (r.months is not None or r.cyclic_year))
 
 
+def demand_all_newly_bound(links_rec: dict | None, wanted_items: list) -> bool:
+    """A solve with NO demand record, made before WP2.1c-i (its `ic_poc_links`
+    has no `lp_recipe` ≥ 2), whose current demand items are all of a kind that
+    recipe could not bind: it wrote no record because it bound nothing — a
+    recipe change, not a drift (WP2.1c-i review #2)."""
+    return (bool(links_rec) and int(links_rec.get("lp_recipe") or 1) < 2
+            and bool(wanted_items)
+            and not any(_bound_before_wp21c(i) for i in wanted_items))
+
+
 def demand_only_newly_bound(n, info: dict, wanted_items: list, cfg) -> bool:
     """True when a demand record from before WP2.1c-i differs from the current
     config only by the items that recipe could not bind: the rest hashes as
-    solved, so the config is unchanged and a re-solve binds the new terms."""
+    solved, so the config is unchanged and a re-solve binds the new terms.
+
+    An item of such a kind ADDED after the old solve reads the same way (the
+    records cannot tell them apart); both mean re-solve (review #6)."""
     if cfg is None or info.get("lp_recipe") is not None:
         return False
     old = [i for i in wanted_items if _bound_before_wp21c(i)]
@@ -1014,11 +1047,11 @@ def refuse_windowed_terms(demand: dict | None, tier_spec: dict | None,
     if tier_spec is not None:
         raise CommercialBindingError(
             f"tiered rates with solve_strategy={solve_strategy!r} would restart the monthly "
-            "volume per window (P6); not supported in P1")
+            "volume per window; not supported until P6")
     if demand is not None:
         raise CommercialBindingError(
             f"demand charges with solve_strategy={solve_strategy!r} would be re-created per "
-            "window without the month's running peak (spec §5.2, P6); not supported in P1")
+            "window without the month's running peak (spec §5.2); not supported until P6")
 
 
 def tier_floor_eur_per_mwh(cfg: CommercialConfig) -> float:
@@ -1176,7 +1209,11 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
                               "hash_version": _H.HASH_VERSION,
                               # This solve records its connection agreement in
                               # `ic_connection` (P2 WP2.0); a P1 solve did not.
-                              "agreement_recorded": True}
+                              "agreement_recorded": True,
+                              # The LP recipe of this solve (absent ⇒ 1): 2 —
+                              # demand tiers and every ratchet mode bound
+                              # (WP2.1c-i). Dates a solve with no demand record.
+                              "lp_recipe": LP_RECIPE}
         if "v" in solved_peaks:
             n.meta[META_DEMAND] = solved_peaks["v"]
             n.meta[META_DEMAND_INFO] = demand["info"]

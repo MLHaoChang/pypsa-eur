@@ -216,3 +216,57 @@ def test_a_record_solved_before_tiers_were_bound_is_a_recipe_change_not_a_drift(
     flags = commercial_cost_terms(n, commercial)["flags"]
     assert "config_changed_since_solve" in flags
     assert "config_changed_since_solve" in B.bill_site(n, commercial).flags
+
+
+FREE_THEN_FALLING = [{"threshold": 0, "rate": 0.0}, {"threshold": 30_000, "rate": 12.0},
+                     {"threshold": 45_000, "rate": 5.0}]
+
+
+def test_a_free_first_tier_does_not_take_a_nonconvex_charge_out_of_the_lp():
+    """Review #1: rates [0, 12, 5] are priced at the first NON-ZERO rate, or at
+    the tier the same month a year earlier landed in (metered history)."""
+    t = _tariff(_demand(FREE_THEN_FALLING))
+    n = _site()
+    applied = L.materialise_poc_prices(n, _commercial(t))
+    keys = getattr(n, L.DEMAND_SPEC_ATTR)["keys"]
+    assert {k["eur_per_mw"] for k in keys} == {12_000.0}
+    assert "nonconvex_tier:demand" in applied.facts["notes"]
+    applied.undo()
+    applied = L.materialise_poc_prices(
+        n, _commercial(t, meter_history_peaks_kw={"2029-01": 50_000.0, "2029-02": 10_000.0}))
+    by_month = {k["month"]: k["eur_per_mw"] for k in getattr(n, L.DEMAND_SPEC_ATTR)["keys"]}
+    assert by_month == {"2030-01": 5_000.0, "2030-02": 0.0}      # tiers 2 and 0
+    applied.undo()
+
+
+@pytest.mark.live_solve
+def test_a_free_first_tier_keeps_the_lp_shaving_the_peak():
+    t = _tariff(_demand(FREE_THEN_FALLING))
+    n = _site()
+    cfg = _solve(n, _commercial(t))
+    gap, rows = _gap_and_rows(n, cfg)
+    assert abs(gap) < 1e-6
+    lp = sum(12_000.0 * v["billed_mw"] for v in n.meta[L.META_DEMAND].values())
+    assert rows["demand_charge"] == pytest.approx(lp, rel=1e-9) and lp > 0
+
+
+@pytest.mark.live_solve
+def test_an_old_solve_whose_demand_items_are_all_newly_bound_is_a_recipe_change():
+    """Review #2: the old recipe bound none of them, so it wrote no demand record."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    commercial = _commercial(_tariff(_demand(RISING)))
+    n = _site()
+    _solve(n, commercial)
+    n.meta.pop(L.META_DEMAND)
+    n.meta.pop(L.META_DEMAND_INFO)
+    n.meta[L.META_LINKS].pop("lp_recipe")
+    flags = commercial_cost_terms(n, commercial)["flags"]
+    assert {"demand_charge_not_established", "demand_recipe_changed"} <= set(flags)
+    assert "config_changed_since_solve" not in flags
+    bill = B.bill_site(n, commercial).flags
+    assert "demand_recipe_changed" in bill and "config_changed_since_solve" not in bill
+    # A solve under this recipe with no demand record is a real change.
+    n.meta[L.META_LINKS]["lp_recipe"] = L.LP_RECIPE
+    assert "demand_recipe_changed" not in commercial_cost_terms(n, commercial)["flags"]
+    assert "config_changed_since_solve" in B.bill_site(n, commercial).flags
