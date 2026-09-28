@@ -10,8 +10,10 @@ there is nowhere else to keep a queue. It is deliberately thin: one entry per
 open item with its anchor and its source. **If Issues is ever enabled, move these
 there and delete this file.**
 
-Items 1–9 below came from two independent QA reviews on 2026-09-12 (chat/tool
-dispatch, and authorization/tenancy) plus the per-route authorization audit. The
+Items 1–9 came from two independent QA reviews on 2026-09-12 (chat/tool dispatch,
+and authorization/tenancy) plus the per-route authorization audit; items 4–7 are
+fixed on a branch and are listed near the bottom, not deleted, because on master
+they are still live. Item 16 is the residual item 4's fix deliberately left open. The
 reviewers' reproduction probes were written to `/tmp/claude-0/qa1..qa3/` and are
 **not durable** — each entry therefore states the reproduction in words. They run
 as pytest files from outside the tree with
@@ -97,50 +99,6 @@ per skipped tool as the project-switch branch already does.
 
 ## Medium
 
-### 4. A shared tool executor lets one session time out another's tools
-
-`services/chat_service.py` — a single module-level `ThreadPoolExecutor(max_workers=8)`
-for all sessions, and `future.result(timeout=PER_TOOL_TIMEOUT_SECONDS)` measures
-queue + run, not run. Reproduced: 8 hung handlers occupy the pool, then a trivial
-read tool in a DIFFERENT session reports `tool_timeout` having never started — and
-runs later, after the user was told it timed out. For an approved destructive write
-that means the mutation lands long after the refusal was reported.
-
-### 5. The `update_solver_config` chat tool hits the new gate with `Depends` sentinels
-
-`services/chat_tools.py` calls `routers.simulation.update_solver_config(body)`
-directly, bypassing `_route`, so the `db`/`actor` parameters PR #18 added arrive as
-`fastapi.params.Depends` objects and the call dies with `AttributeError` inside
-`is_org_admin`. It fails **closed** (nothing is stored), but the model gets an
-opaque error instead of the authored `user_code_forbidden` 403.
-
-Note the fix needs two changes: `_route` injects by parameter NAME (`db`/`user`/
-`session`) and the new parameter is named `actor`, so routing it through `_route`
-as-is trips that helper's deliberate `RuntimeError`.
-
-### 6. An admin importing a hostile bundle still gets silent code execution
-
-`routers/projects.py` — PR #18's strip is conditional on
-`not user_code_authorized(db, user)`, so a bundle's `extra_functionality_code`
-survives when the **importer** is an admin. With the operator flag on, an admin who
-imports a `.pypsaproj.zip` a colleague sent them gets arbitrary Python executed on
-the next solve, and `_compile_extra_functionality` `exec`s the module body, so side
-effects fire at compile time. The check asks "is the importer privileged"; the
-security question is "did the importer author this code". The repo already reaches
-the other conclusion for the sibling field in the same bundle — `results_state.pkl`
-goes through a restricted unpickler at every read site regardless of who imported
-it.
-
-### 7. A fifth `is_error` site is still unfenced
-
-`services/chat_service.py` appends `{"is_error": True, "content": problem}` where
-`problem` is the pre-dispatch validator output, and those validators interpolate the
-caller-supplied component name with `!r`, which does not escape the delimiter. The
-laundering path is real: the model reads a hostile name out of a (now-fenced) tool
-result and passes it to `delete_component`, and the validator re-emits it unfenced.
-`_result_to_anthropic_content`'s docstring counts "four is_error sites"; there are
-five reachable ones.
-
 ### 8. `ProjectAccessDep` is adopted by 6 of 23 routers
 
 `routers/deps.py` defines the right primitive — a per-route dependency that resolves
@@ -171,6 +129,22 @@ model-facing text with no character-class check. Shared root cause behind the
 untrusted-fence bypass and the `Content-Disposition` defect, both of which were
 treated at the sink. `upload_service`'s `_FILE_ID_RE` shows the right pattern,
 anchored and narrow, and it is not applied to names generally.
+
+---
+
+### 16. The chat tool pool is shared, and a hung handler's thread is gone for good
+
+`services/chat_service.py` — `TOOL_EXECUTOR_MAX_WORKERS` is 8 for the whole
+process. Item 4 made a saturated pool fail honestly and stopped it running work
+behind the user's back, but it did not make sessions independent: a Python thread
+cannot be killed, so each hung handler costs the deployment one of eight workers
+permanently, and eight of them anywhere refuse tool calls everywhere. The fix is
+isolation, not a bigger number — a pool per session, or a per-session in-flight
+bound over a larger shared pool, either of which needs a decision about lifecycle
+(`services/shutdown.py:424` shuts the single executor down as step 7 and takes it
+by injection, so a per-session pool has to be reachable from there too). Severity
+is Medium and not higher because the failure is now loud and no longer corrupts:
+the refusal is accurate and the work does not run later.
 
 ---
 
@@ -219,6 +193,41 @@ line away.
 
 ---
 
+## Fixed on `claude/gui-backend-qa-followups` — NOT yet merged to master
+
+Kept here, with their original numbers, rather than deleted: this file is verified
+against master, and on master these are still live. Delete each entry when the
+branch merges.
+
+### 4. A shared tool executor lets one session time out another's tools — `05cfdcd` (RED) + `ca091ff`
+
+`future.result(timeout=...)` measured queue + run and abandoned the future without
+cancelling it, so a starved tool was reported as having exceeded a deadline it
+never reached and then RAN once a slot freed. Now: the worker start gets its own
+grace period, the execution deadline is measured from the start event, and a tool
+that never started is cancelled and reported `tool_not_started`.
+**Residual, deliberately not fixed here — see item 16.**
+
+### 5. The `update_solver_config` chat tool hits the new gate with `Depends` sentinels — `168384b` (RED) + `f089be8`
+
+Routed through `_route`, and `_route` now resolves the name `actor` as well as
+`user` (the same value under the spelling `admin.py`/`chat.py`/`simulation.py`
+use), so its `RuntimeError` stays reserved for dependencies that genuinely cannot
+be satisfied.
+
+### 6. An admin importing a hostile bundle still gets silent code execution — `7d37d60`
+
+The bundle strip is now unconditional. The privileged-importer check asked "is the
+importer privileged" where the question is "did the importer author this code",
+which a zip cannot answer. Demonstrated with the old guard restored: a colleague's
+module body writes its sentinel file inside the admin's session.
+
+### 7. A fifth `is_error` site is still unfenced — `5a84784` (RED) + `a8eb52b`
+
+The pre-dispatch validator's output now goes through `_error_result_content`.
+
+---
+
 ## Verification / CI — read before trusting a green check
 
 - **Three jobs are path-filtered and read green while running nothing.**
@@ -231,8 +240,39 @@ line away.
   previous run. Do not push while it is in flight.
   A `check_suite.completed` event is silent about this — its own text excludes
   cancelled suites, and several arrived for already-superseded heads.
-- **The local gate is "the failing set is unchanged", not "green"**: this backend
-  carries pre-existing `No module named 'gridspine'` failures. Extract the set with
+- **The local gate is "the failing set is unchanged", not "green"**: the suite has
+  pre-existing failures (three on 3.12 — listed below). Extract the set with
   `grep -E '^(FAILED|ERROR) tests/'` — anchoring on `^ERROR` alone also matches log
-  lines and silently over-reports.
+  lines and silently over-reports. Whether the set matches CI's is a separate
+  question: a local venv built from `gui-requirements.txt` imports `gridspine`
+  fine, and CI has been seen without it, so a `No module named 'gridspine'`
+  failure in a CI log is an environment difference, not a regression.
 - `dev-env` has been red since `14eae4d`.
+
+### Running the backend suite locally
+
+The project floor is **Python ≥3.12** (`pyproject.toml:31`; pixi pins 3.12.12) and
+master uses PEP 701 f-strings, so a 3.11 interpreter cannot even import the
+backend — a failure that looks exactly like a syntax regression and is not one.
+
+    python3.12 -m venv /tmp/venv312
+    /tmp/venv312/bin/pip install -r pypsa-gui/gui-requirements.txt
+    /tmp/venv312/bin/pip install pytest openpyxl httpx
+    cd pypsa-gui/backend
+    /tmp/venv312/bin/python -m pytest tests/ -p no:cacheprovider -q \
+        --no-header -W ignore::DeprecationWarning
+
+Note the requirements file is `pypsa-gui/gui-requirements.txt`, NOT
+`pypsa-gui/backend/`.
+
+**The 3.12 baseline on `83bde2c` is three failures**, verified by running the full
+suite against a clean master worktree with the same interpreter and diffing the
+extracted sets — identical to the branch's:
+
+    tests/test_chat_uploads.py::TestUploadsEndpoints::test_post_renamed_exe_as_xlsx_still_rejected
+    tests/test_solver_facade_surface.py::test_no_call_site_was_left_behind_by_a_move
+    tests/test_sqlite_pragmas.py::test_non_sqlite_engine_is_returned_untouched
+
+Do the master comparison in a separate worktree rather than by stashing, and do
+not run two full suites at once — they contend and the timing-sensitive tests get
+flaky.
