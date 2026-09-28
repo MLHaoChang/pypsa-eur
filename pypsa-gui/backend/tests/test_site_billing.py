@@ -36,8 +36,10 @@ CAP = {"id": "cap", "kind": "capacity", "unit": "per_kw_year",
 
 
 def _tariff(*items):
+    import copy
+
     return {"id": "t", "name": "t", "jurisdiction": "DE", "valid_from": "2029-01-01",
-            "items": list(items)}
+            "items": copy.deepcopy(list(items))}   # tests mutate their copy, never TOU
 
 
 def _solve(n, commercial, **cfg_kw):
@@ -117,10 +119,11 @@ def test_representative_weeks_bill_their_calendar_year_with_sampled_sums():
     commercial = {"poc_link": "import", "import_tariff": _tariff(TOU, DEMAND)}
     _solve(n, commercial)
     (res,) = B.bill_site(n, commercial).per_period.values()
-    assert len(res.monthly.index) == 12 or res.flags["demand"]
+    assert list(res.monthly.index) == ["2030-01", "2030-07"]  # the sampled months
     assert res.per_item["demand"] is None                   # ten months not established
     assert res.per_item_sampled["demand"] > 0               # the sampled months' sum
-    assert any(f.startswith("demand_month_not_established:") for f in res.flags["demand"])
+    missing = [f for f in res.flags["demand"] if f.startswith("demand_month_not_established:")]
+    assert len(missing) == 10                               # the calendar year 2030
 
 
 def test_meter_history_seeds_the_first_period_only(monkeypatch):
@@ -170,3 +173,80 @@ def test_compact_frames_survive_the_restricted_unpickler_under_the_size_bound():
     back = load_billing_frames(_safe_unpickle_results(blob)["data"])
     pd.testing.assert_frame_equal(back["_:lines"], frames["_:lines"])
     assert back["_:lines"].index.tz is not None                # the zone is restored
+
+
+def test_per_item_sampled_is_unknown_when_a_present_month_is_unknown():
+    """Review #4: only months ABSENT from the dispatch are left out."""
+    idx = pd.date_range("2030-01-01", periods=48, freq="h")
+    d = pd.DataFrame({"import_mw": 1.0, "export_mw": 0.0}, index=idx)
+    d.iloc[5, 0] = np.nan
+    res = rate(d, Tariff.model_validate(_tariff(TOU)), step_hours=1.0, timezone=None)
+    assert res.per_item["energy"] is None and res.per_item_sampled["energy"] is None
+
+
+def test_compact_frames_keep_unknown_amounts_nan_through_the_store():
+    """Review #1: an unrated or unknown cell is NaN, never a confident 0."""
+    from routers.projects import _RESULTS_STATE_SCHEMA, _safe_unpickle_results
+    from services.finance.report import load_billing_frames, store_billing_frames
+
+    idx = pd.date_range("2030-01-07", periods=24, freq="h")
+    d = pd.DataFrame({"import_mw": 1.0, "export_mw": 0.0}, index=idx)
+    d.iloc[3, 0] = np.nan
+    evening = {"id": "eve", "kind": "energy", "unit": "per_kwh",
+               "periods": [{"name": "eve", "rate": 0.3, "start_hour": 17, "end_hour": 21}]}
+    res = rate(d, Tariff.model_validate(_tariff(TOU, evening)), step_hours=1.0, timezone=None)
+    engine_nan = int(res.lines["amount"].isna().sum())
+    assert engine_nan > 1
+    frames = B.compact_frames(B.SiteBill(per_period={None: res}))
+    assert int(frames["_:lines"].isna().sum().sum()) == engine_nan
+    store: dict = {}
+    store_billing_frames(store, frames)
+    blob = pickle.dumps({"__schema__": _RESULTS_STATE_SCHEMA, "data": store})
+    back = load_billing_frames(_safe_unpickle_results(blob)["data"])
+    assert int(back["_:lines"].isna().sum().sum()) == engine_nan
+
+
+def _dispatched(n, mw=5.0):
+    n.links_t.p0 = pd.DataFrame({"import": np.full(len(n.snapshots), mw)}, index=n.snapshots)
+    return n
+
+
+def test_sampled_weeks_standing_for_half_a_year_are_flagged_not_raised():
+    """Review #2: no calendar billing period can be stated — the period is None."""
+    n = build_edge_15min()
+    parts = [pd.date_range(f"2030-{m:02d}-07", periods=96 * 7, freq="15min") for m in (1, 7)]
+    idx = parts[0].append(parts[1])
+    n.set_snapshots(idx)
+    n.snapshot_weightings.loc[:, :] = 4380.0 / len(idx)
+    bill = B.bill_site(_dispatched(n), {"poc_link": "import", "import_tariff": _tariff(TOU)})
+    assert bill.per_period == {None: None}
+    assert "period_not_billed:_:billing_period_unknown" in bill.flags
+    assert B.compact_frames(bill) == {}
+
+
+def test_solver_round_off_below_zero_is_zero_and_a_real_negative_is_flagged():
+    """Review #3: the engine refuses negatives; the adapter never crashes."""
+    commercial = {"poc_link": "import", "import_tariff": _tariff(TOU)}
+    n = _dispatched(build_edge_15min())
+    n.links_t.p0.iloc[3, 0] = -1e-9
+    (res,) = B.bill_site(n, commercial).per_period.values()
+    assert res.per_item["energy"] is not None
+    n.links_t.p0.iloc[3, 0] = -0.5
+    bill = B.bill_site(n, commercial)
+    assert "negative_flow:import:1" in bill.flags
+    assert bill.per_period[None].per_item["energy"] is None       # unknown, not guessed
+
+
+@pytest.mark.live_solve
+def test_a_tariff_changed_since_the_solve_is_flagged_on_the_bill():
+    """Review #5: the bill rates the solved dispatch with the CURRENT config."""
+    n = build_edge_15min()
+    commercial = {"poc_link": "import", "import_tariff": _tariff(TOU, DEMAND)}
+    _solve(n, commercial)
+    bill = B.bill_site(n, commercial)
+    assert "config_changed_since_solve" not in bill.flags
+    assert bill.provenance["energy_hash"] and bill.provenance["demand_hash"]
+    for item_idx in (0, 1):                                      # energy, then demand
+        changed = {"poc_link": "import", "import_tariff": _tariff(TOU, DEMAND)}
+        changed["import_tariff"]["items"][item_idx]["periods"][-1]["rate"] += 1.0
+        assert "config_changed_since_solve" in B.bill_site(n, changed).flags

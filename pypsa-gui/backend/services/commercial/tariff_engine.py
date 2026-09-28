@@ -84,10 +84,10 @@ class RatingResult:
     flags: dict[str, list[str]] = field(default_factory=dict)   # incompleteness
     notes: dict[str, list[str]] = field(default_factory=dict)   # disclosures
     unsupported_items: list[str] = field(default_factory=list)
-    # The sum of each item's RATED months (P2 WP2.1b): equals `per_item` when
-    # every month is rated; with months not established it is the sampled sum
-    # the LP rows also report (one convention, sampled to sampled). None when
-    # no month of the item is rated.
+    # The sum of each item's months PRESENT in the dispatch (P2 WP2.1b): equals
+    # `per_item` when every month is established; with months not established
+    # it is the sampled sum the LP rows also report (one convention, sampled to
+    # sampled). None when a present month is unknown, or none is present.
     per_item_sampled: dict[str, float | None] = field(default_factory=dict)
     # One row per (month, demand item, period window): the peak and its bill
     # (WP1.5a). Empty when the tariff has no demand items.
@@ -874,8 +874,13 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
     annual.index.name = "year"
     per_item_sampled = {}
     for item_id, part in monthly_parts.items():
-        finite = pd.Series(part, dtype=float).dropna()
-        per_item_sampled[item_id] = float(finite.sum()) if len(finite) else None
+        # Only months ABSENT from the dispatch are left out (not established);
+        # a present month that is unknown (NaN quantity, unrated interval,
+        # unknown ratchet prior or tier position) makes the sum unknown too
+        # (WP2.1b review #4) — never a partial number.
+        part = pd.Series(part, dtype=float)
+        per_item_sampled[item_id] = (float(part.sum()) if len(part) and part.notna().all()
+                                     else None)
     for item_id in per_item:
         per_item_sampled.setdefault(item_id, None)
     totals = list(per_item.values())

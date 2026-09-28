@@ -382,6 +382,17 @@ round-trip test through `_safe_unpickle_results` proves it.
   - Tests: `tests/test_site_billing.py` has 8 tests. Four live solves cover the identity on the 15-min edge, the group meter, two periods with the PoC retired before 2040 and an off-grid backup supplying that period, and representative weeks with `per_item_sampled` and not-established flags. The other four cover the unsolved case, the meter-history spy, `per_item_sampled` on a missing month and the unpickler round-trip.
     - `test_tariff_engine_urdb.py` gains the self-represented-month case.
 
+- **Review round 1 → FAIL (1 HIGH, 4 MEDIUM, 4 LOW); all fixed:**
+  1. **HIGH.** `compact_frames` summed with `min_count=0`, which stored unrated or unknown cells as 0. It now uses `groupby(...).sum(min_count=1).unstack()`, so NaN survives the store round-trip (tested with a NaN import plus an unrated window).
+  2. A period whose sampled rows stand for something other than a calendar year (two weeks weighted to 4380 h) made the engine raise. That period is now `None` with `period_not_billed:<p>:billing_period_unknown`; the results path never raises.
+  3. Solver round-off below 0 on a one-way Link (≥ −1e-6 MW) is clipped to 0. A larger negative is flagged `negative_flow:<link>:<n>` and rated NaN, so the bill is unknown rather than guessed.
+  4. `per_item_sampled` leaves out only months absent from the dispatch. A present month that is unknown (NaN quantity, unrated interval, unknown ratchet prior or tier position) makes it `None`.
+  5. The bill compares the solve's recorded energy, demand and tier hashes with the current config, each under its record's recipe. It flags `config_changed_since_solve` on a mismatch and `solve_provenance_unknown` when there is no `ic_poc_links`. Provenance records `tariff_hash_version` and the solve hashes with their versions.
+  6. (LOW) The float32 frames are for display; totals come from `per_item` / `monthly` (docstring).
+  7. (LOW) An axis whose every step exceeds 24 h takes its minimum step, as `preflight._max_step_h` does.
+  8. (LOW, disclosed) `provenance.capacity_basis` records that capacity is the PoC Link's size, also for a group contract. `provenance.billing_calendar` records that a reused weather year bills that year's calendar in every period.
+  9. (LOW) The representative-weeks test pins the two sampled months and exactly ten not-established months.
+
 ## WP2.1c LP: convex demand tiers, windowed tiers, new ratchets, predicted non-convex tier
 
 Files: `lp_bindings.py`, `cost_rows.py`, `test_ratchet.py`, `test_tiers.py`, reconciliation gate.
