@@ -299,14 +299,40 @@ Spec §6.
 | `suggest_eh_setup` | `BE/services/adequacy/eh_setup.py`, `chat_tools.py`, `chat_tools_schema.py`, `BE/tests/_tool_actions.py` (shared `_validate_action`) | `BE/tests/test_eh_setup_suggest.py` (three templates with tags stripped recover the builder's tags; actions validate; network untouched; bulk collapse) |
 | Stub scripted tool call (§6.6) | `BE/smoke/stub_openai_endpoint.py` | `BE/tests/test_stub_openai_endpoint.py`; smoke |
 
-**P25 integration gate (spec §8):**
-- [ ] 1 full backend suite — zero new failures
-- [ ] 2 targeted EH set green (+ `test_eh_setup_suggest.py`, `test_guided_mode_prompt.py`, `test_stub_openai_endpoint.py`)
-- [ ] 3 `tsc` clean
-- [ ] 4 `vitest` — zero new failures
-- [ ] 5 browser smoke `--phase P25`: Improve → "Let the assistant do this" → request appears as a user message, the stub's recorded last user text contains `Guided mode is on`, a **confirmation card** renders, decline; a second click while streaming is queued and sent after; in Expert the recorded text has no addendum and the request body has no `ui_mode`
-- [ ] 6 QA-gate review GO (`…-gate-P25.md`)
-- [ ] 7 Expert-unchanged review signed (only the `_EH_GUIDE_CHAINING` sentence differs)
+**P25 integration gate (spec §8): GO at Re-gate 2 on `e19c04e`, 2026-09-28.**
+
+The gate took three rounds:
+- **First gate: NO-GO.**
+  - **B1:** write-tier tools applied with no confirmation card, although every Guided sentence promised one. Decision: in Guided, the write tier goes through the card. Expert is unchanged.
+  - **B2:** the request bubble overflowed.
+- **Re-gate 1: NO-GO.**
+  - **R1:** the next card was wiped by the previous card's `/confirm`, a race that became reachable only once several writes could go through cards. Fixed with a token guard.
+- **Re-gate 2: GO.**
+
+Evidence at Re-gate 2:
+
+| Check | Result |
+|---|---|
+| Row 1, full backend suite | `6235 passed, 31 skipped, 11 deselected`, 0 failures |
+| Row 2 | 613 passed |
+| Chat tests | 1155 passed |
+| tsc | clean |
+| vitest | 2431 passed |
+| Stress | ×10, 0 failures |
+| Smokes | all five pass |
+| R1 browser probe | 12/12 rounds |
+| Mutations | 8/9 killed; the survivor is the expiry guard, harmless defence judged not to need a test |
+| Expert wire and prompt | byte-identical to `0689df3` except for the one reworded sentence and the added tool |
+
+Gate file: `docs/superpowers/qa/2026-09-27-guided-mode-gate-P25.md`. Items carried to P26: confirmation friction and wording for non-editing write-tier tools (export, snapshot, load project).
+
+- [x] 1 full backend suite — zero new failures
+- [x] 2 targeted EH set green (+ `test_eh_setup_suggest.py`, `test_guided_mode_prompt.py`, `test_stub_openai_endpoint.py`)
+- [x] 3 `tsc` clean
+- [x] 4 `vitest` — zero new failures
+- [x] 5 browser smoke `--phase P25`: Improve → "Let the assistant do this" → request appears as a user message, the stub's recorded last user text contains `Guided mode is on`, a **confirmation card** renders, decline; a second click while streaming is queued and sent after; in Expert the recorded text has no addendum and the request body has no `ui_mode`
+- [x] 6 QA-gate review GO (`…-gate-P25.md`)
+- [x] 7 Expert-unchanged review signed (only the `_EH_GUIDE_CHAINING` sentence differs)
 
 **P25 edited assertions (spec §8.3, one line each):**
 - `delegate.test.ts` — "delegate behaves like ask until P25" becomes "delegate calls `sendRequest` with `source:'hub-design'`"; the Site-fix grid text gains the `suggest_eh_setup` clause (spec §5.7: both are the P25 change).

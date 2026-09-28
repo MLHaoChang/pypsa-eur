@@ -323,3 +323,85 @@ No uvicorn / vite / stub / chromium / vitest processes remain. The scratch workt
 ## To reach GO
 
 Fix R1: token-guarded `setPending(null)` in `onApprove` and `onDeny`. Adopt the two unit probes, add a two-writes-in-one-response smoke step that denies card 1 and asserts card 2 is visible (≥ 5 rounds), and re-run rows 3–5. Notes 1–3 can be deferred to P26 by recording them in the plan.
+
+---
+
+# Re-gate 2 (2026-09-28, commit `e19c04e`, `git diff 9982945..HEAD`)
+
+Scratch evidence: `/tmp/claude-0/-home-user-pypsa-eur/93e65137-63f8-5e19-b114-b55788c10af8/scratchpad/qa25r2/`, referred to below as `qa25r2/`.
+
+## Verdict: **GO**
+
+- R1 is fixed and pinned.
+- Notes 1–3 are resolved.
+- Rows 2–5 are green, and the stress run had 0 failures in 10.
+- I found no new blocker.
+- Row 1, the full backend suite, is the coordinator's re-run. It is a condition of closing the phase. It is not re-run here.
+
+## R1: the next card survives the previous confirm
+
+**The fix.** `ChatPanel.tsx` gains `clearIfStill(token)`. The token is captured before the `await`, and `onApprove` / `onDeny` clear only the card they answered. The expiry path is guarded the same way.
+
+**My probes against HEAD.**
+- `qa25r2/probes/QA25R.probe.test.tsx`, the re-gate-1 unit repro: **2 of 2 pass** (Approve and Deny). The implementer adopted the same tests, together with "with no next card, the answered card is cleared".
+- `qa25r2/probes/qa-probe.mjs --phase QA`, on HEAD's stub plus my two-writes branch (`qa25r2/qa_stub.py`), run through `SMOKE_STUB`: **12 of 12 rounds show card 2** after card 1 was answered (6 Approve, 6 Deny; before the fix, 4 of 8 Deny rounds lost it). In every round card 2 could be clicked, and **no stale card** remained after the turn ended (`qaprobe/qa-results.json`).
+- Every card header read "Confirm this change".
+- The probe's old VOLL step now stops at a real `update_solver_config` card (`qaprobe/02-FAILURE.png`). My probe expected the old no-branch reply, so this is the new stub branch working, not a defect.
+
+**The smoke.** P25 step 14 answers three writes in one response: rounds 1–5 deny first and round 6 approves first. Each next card shows after the previous answer, and "no card left, turn ended" holds each round.
+
+## Mutation check of the token guard and the notes
+
+The runner is `qa25r2/mutate.py` and the log is `qa25r2/mut.log`, run against `ChatPanel.sendRequest.test.tsx`. **8 of 9 were killed:**
+
+| # | Mutant | Result |
+|---|---|---|
+| T1 | Approve clears unconditionally | killed ("approve: card B arriving before /confirm returns survives") |
+| T2 | Deny clears unconditionally | killed (deny twin) |
+| T3 | expiry clears unconditionally | **survived**, see below |
+| T4 | the guard never clears (stale card) | killed ("…with no next card, the answered card is cleared" ×2) |
+| T5 | Approve reads the token after the await | killed |
+| T6 | expiry keeps the group | killed ("a card that expires drops the rest of its group") |
+| T7 | Stop keeps the queue | killed ("Stop clears every queued card request") |
+| T8 | Guided header shown in Expert | killed (3 Expert header tests) |
+| T9 | Expert header text changed | killed |
+
+**T3 is effectively an equivalent mutant.** The countdown effect is keyed on `pending`. When a newer card replaces the one that lapsed, the effect's cleanup clears the old interval, so an old card's expiry cannot normally run while another card shows. The guard only covers a tick that lands between the store update and React's commit. It is harmless defence, but no deterministic test can target it without fake timers around a commit, so I do not ask for one.
+
+## Regressions looked for
+
+- **Stale card after the answer, with no next card:** none. The unit tests cover both decisions (T4 killed), and my browser probe's 12 rounds end with no card.
+- **Expert header:** the text is unchanged ("Confirm · write" / "· execution" / "· destructive") and so are the classes (T8/T9 killed). The only markup difference in Expert is a new `data-testid="chat-confirmation-header"` attribute, which renders nothing visible. Smoke step 17 (screenshot 12) shows the Expert Site fix applying with no card, as before.
+- **Stop and the user's own messages:** `onAbort` (`ChatPanel.tsx:2339`; its only caller is the Stop button, `:2772`) clears `requestQueue` and nothing else.
+  - The queue holds only card requests: typed sends go straight to `dispatchSend` and are never queued.
+  - The composer draft, the first-send modal's pending text and the attachments are untouched.
+
+  So Stop cannot drop a message the user typed.
+- **Expiry group drop:** `activeRequest` is set to null on every typed send, so a card that lapses in a typed turn drops nothing.
+- **Expert wire, events and prompt:** this diff touches no backend service code (only the smoke stub and its tests), so the re-gate-1 byte comparison with `0689df3` still holds.
+
+## Screenshots read (P25, 12 in all; the requested 09–11 plus 12)
+
+- **09** `p25-r1-card2-after-deny`: the Site footer request, `suggest_eh_setup`, then three `update_component` requests. After card 1's "denied", card 2 is showing: "Confirm this change", `update_component` for `grid` with `eh_poc: true`, 299 s.
+- **10** `p25-goal-voll-card`: the Goal VOLL button's own sentence "Set VOLL to 5000 €/MWh…" leads to an `update_solver_config` card (`{"partial":{"voll":5000}}`). The Goal card still says "not set" while it waits. The previous three-card turn closed with "Done — 1 applied, 2 not applied."
+- **11** `p25-stress-card`: Improve "Add a stress scenario" leads to `get_stress_scenarios`, then a `put_stress_scenarios` card with the whole list plus `assistant_stress_1`. The registry is unchanged until Approve (the smoke asserts it grows 2 → 3 after).
+- **12** `p25-site-fix-expert-direct`: Expert, the same Site fix, `✓ update_component`, "Done — update_component applied.", no card.
+
+## Evidence (re-gate 2)
+
+| Row | Result |
+|---|---|
+| 2 (14 files) | **613 passed** (`qa25r2/row2.log`) |
+| `tests/test_chat*.py` | **1155 passed, 2 skipped** |
+| 3 tsc | exit 0 |
+| 4 vitest | **233 files / 2431 passed** |
+| stress (App + hubDesign + ChatPanel* + chatStore.sendRequest + uiContext.uiMode, 398 tests) ×10 | **0 failures in 10** (`qa25r2/stress.log`) |
+| 5 smokes | P25 PASS (12 screenshots); P24 PASS (21); P23 PASS (13); P24-BE PASS (10); P22.9 PASS (10) |
+| 1 full backend | the coordinator's re-run (the last full run passed 6230; only the stub and its tests changed since) |
+
+No uvicorn / vite / stub / chromium / vitest processes remain. The scratch worktree is removed, and `git status` is clean apart from this file.
+
+## Carried to P26 (non-blocking)
+
+- The Guided cards now also cover exports, snapshots and project loads, because those tools are write tier. Review the friction and the "Confirm this change" wording for non-edit tools in the P26 click-through.
+- The Goal card's "Run again" row sits next to "not set" while the VOLL card is pending (screenshot 10). This is expected, and Run stays disabled until VOLL > 0.
