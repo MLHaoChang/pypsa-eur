@@ -280,7 +280,15 @@ gap cause `tier_allocation` in WP2.3).
     - requires same-name demand fragments to agree on `tier_rates`.
   - The LP reports any item with `tier_rates` `not_in_lp` (`tiers_with_windows`) until WP2.1c, so its zero `Tier.rate` is never priced as 0.
   - `types.ts` mirrored.
-  - **Behaviour change:** the P1 shape "windows + rates on `Tier.rate`" (billed `unsupported:tiers_with_windows` in P1) is now a validation error. Two P1 tests are updated to the new form.
+  - (Superseded by review round 1 below: the P1 windowed shape now migrates rather than being refused.)
+
+- **Review round 1 → FAIL, fixed:**
+  - **Lossless migration.** A before-validator on `TariffItem` migrates the P1 shape (tiers with rates on `Tier.rate` and periods that are not one catch-all) to per-period `tier_rates` holding the same rates in every window, with `Tier.rate` set to 0. Persisted P1 configs keep validating. A single windowed period (P1: `unsupported:tiers_with_windows`) bills only inside its window; intervals outside are unrated (`unrated_intervals:N`), like any windowed item without a catch-all, and are never billed.
+  - The validator treats a single non-catch-all tiered period as windowed.
+  - Windowed-tier flags count only uncovered and NaN intervals, and name `tier_month_not_established:<YYYY-MM>`.
+  - `tiers_on_represented_volume` is noted when `represents_hours` scales the volume that monthly thresholds see; carried to WP2.1b's representative-week work.
+  - **Recorded URDB mapping limit (for WP2.4b-i):** the model holds ONE cumulative threshold list per item and the same number of rates on every period. REopt takes each month's tier limits from the weekday hour-0 period, reads `max` as a width, and tolerates periods with different tier counts. The importer refuses URDB tariffs whose periods differ in tier `max` or tier count, naming the field; it never picks one silently.
+  - **Recorded deferral:** the spec's "H3 3-tier windowed fixture" is an in-test hand bill here (872.00, `test_windowed_energy_tiers_split_the_month_in_proportion_to_the_total`). The H3 fixture file (the full US C&I hand bill) lands with the P2 QA gate driver.
 
 ## WP2.1a-iii Engine: designated-month and cyclic ratchets
 

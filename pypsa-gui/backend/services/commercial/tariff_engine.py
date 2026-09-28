@@ -719,10 +719,14 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             thresholds = [t.threshold for t in item.tiers]
             amount = np.full(len(idx), np.nan)
             r = np.full(len(idx), np.nan)
+            wt_unknown_months: list[str] = []
             for key in sorted(set(month_key)):
                 pos = np.flatnonzero(month_key == key)
                 if np.isnan(q_kwh[pos]).any() or (frag[pos] < 0).any():
-                    continue  # an unknown volume or an unrated interval: month unknown
+                    # An unknown volume or an unrated interval: the month's tier
+                    # position is unknown, so the whole month is (review #3).
+                    wt_unknown_months.append(key)
+                    continue
                 total = float(q_kwh[pos].sum())
                 widths = np.diff(np.clip(np.array(thresholds + [np.inf]), 0.0, total))
                 for k_frag in np.unique(frag[pos]):
@@ -751,7 +755,13 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             "interval": idx, "tariff_item": item.id, "quantity_kwh": q_kwh,
             "rate": r, "amount": amount}))
         item_flags = []
-        n_unrated = int(np.isnan(r).sum())
+        if is_windowed_tiered(item):
+            # Count what is actually unknown (review #3): uncovered intervals and
+            # NaN quantities, and name the months they make unknown.
+            n_unrated = int((_period_index(item, local) < 0).sum())
+            item_flags += [f"tier_month_not_established:{m}" for m in wt_unknown_months]
+        else:
+            n_unrated = int(np.isnan(r).sum())
         n_nan_q = int(np.isnan(q_kwh).sum())
         if n_unrated:
             item_flags.append(f"unrated_intervals:{n_unrated}")
@@ -761,6 +771,10 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
         per_item[item.id] = None if item_flags else float(amount.sum())
         if billing_period is not None and has_gaps and represents_hours is None:
             notes.setdefault(item.id, []).append("energy_on_partial_coverage")
+        if item.tiers and represents_hours is not None:
+            # Monthly tier thresholds see the REPRESENTED volume (a sampled week
+            # standing for more); disclosed, WP2.1b revisits (review #4).
+            notes.setdefault(item.id, []).append("tiers_on_represented_volume")
         if represents_hours is not None and has_gaps:
             # Each sampled row's represented energy lands in its OWN month; the
             # monthly frame is not a calendar bill (NaN months = no rows).

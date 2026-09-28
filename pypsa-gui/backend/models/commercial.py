@@ -153,6 +153,44 @@ class TariffItem(BaseModel):
     measured_on: MeasuredOn = "import"
     direction: Direction = "cost"
 
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_p1_windowed_tiers(cls, data):
+        """The P1 shape — tiers with their rates on `Tier.rate` and periods that
+        are not one catch-all — means "the same tier rates in every window".
+        Migrate it losslessly to per-period `tier_rates` (and `Tier.rate` 0), so
+        persisted P1 configs keep validating and a single windowed period bills
+        only inside its window (IC P2 WP2.1a-ii review #1/#2)."""
+        if not isinstance(data, dict):
+            return data
+        tiers, periods = data.get("tiers"), data.get("periods")
+        if not tiers or not periods:
+            return data
+
+        def get(o, k):
+            return o.get(k) if isinstance(o, dict) else getattr(o, k, None)
+
+        if any(get(per, "tier_rates") is not None for per in periods):
+            return data
+        catch_all = (len(periods) == 1 and not get(periods[0], "months")
+                     and not get(periods[0], "weekdays") and get(periods[0], "start_hour") is None)
+        if catch_all:
+            return data                     # P1 single catch-all tiers: unchanged semantics
+        rates = [float(get(t, "rate")) for t in tiers]
+
+        def with_rates(per):
+            if isinstance(per, dict):
+                return {**per, "tier_rates": list(rates)}
+            return per.model_copy(update={"tier_rates": list(rates)})
+
+        def zeroed(t):
+            if isinstance(t, dict):
+                return {**t, "rate": 0.0}
+            return t.model_copy(update={"rate": 0.0})
+
+        return {**data, "periods": [with_rates(per) for per in periods],
+                "tiers": [zeroed(t) for t in tiers]}
+
     @model_validator(mode="after")
     def _tiers_monotone(self) -> "TariffItem":
         if self.tiers:
@@ -164,7 +202,10 @@ class TariffItem(BaseModel):
         with_rates = [per for per in self.periods if per.tier_rates is not None]
         if with_rates and not self.tiers:
             raise ValueError(f"item {self.id!r}: tier_rates need the item's tiers (thresholds)")
-        if self.tiers and (with_rates or len(self.periods) > 1):
+        p0 = self.periods[0]
+        windowed = len(self.periods) > 1 or bool(p0.months or p0.weekdays
+                                                 or p0.start_hour is not None)
+        if self.tiers and (with_rates or windowed):
             # A windowed tiered item (IC P2 WP2.1a-ii): one threshold list, each
             # period's own rates; `Tier.rate` must be 0 so rates have one source.
             for per in self.periods:

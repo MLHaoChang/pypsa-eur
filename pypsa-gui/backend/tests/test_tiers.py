@@ -53,15 +53,19 @@ def test_engine_bills_cumulative_monthly_volume_by_tier():
     assert res.monthly.loc["2030-01", "tiered"] == pytest.approx(20.0)
 
 
-def test_tiers_inside_time_windows_need_per_period_rates():
-    """Since P2 WP2.1a-ii windowed tiers are billed with each period's own
-    `tier_rates` (URDB semantics, test_tariff_engine_urdb.py); the P1 shape —
-    windows with the rates on `Tier.rate` — is refused at validation (one
-    source of rates) instead of being billed as unsupported."""
+def test_p1_tiers_inside_time_windows_migrate_and_bill_with_one_rate_set():
+    """P1 billed this shape `unsupported:tiers_with_windows`. Since P2 WP2.1a-ii
+    it migrates losslessly to per-period `tier_rates` (the same rates in every
+    window) and is billed with URDB semantics — here both windows cover the day,
+    so it bills exactly like one catch-all tier set."""
     item = _tiered(RISING, periods=[{"name": "peak", "rate": 0.0, "start_hour": 8, "end_hour": 20},
                                     {"name": "rest", "rate": 0.0}])
-    with pytest.raises(ValueError, match="tier_rates"):
-        _tariff(item)
+    t = _tariff(item)
+    assert [p.tier_rates for p in t.items[0].periods] == [[0.10, 0.30], [0.10, 0.30]]
+    idx = pd.date_range("2030-01-07", periods=24, freq="h")
+    d = pd.DataFrame({"import_mw": 5.0, "export_mw": 0.0}, index=idx)   # 120 MWh
+    res = rate(d, t, step_hours=1.0, timezone=None)
+    assert res.per_item["tiered"] == pytest.approx(100_000 * 0.10 + 20_000 * 0.30)
 
 
 # ── LP ─────────────────────────────────────────────────────────────────────

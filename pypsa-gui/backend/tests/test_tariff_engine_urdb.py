@@ -387,3 +387,53 @@ def test_a_single_period_item_with_tier_rates_is_not_priced_at_zero_in_the_lp():
             "tiers": [{"threshold": 0, "rate": 0.0}, {"threshold": 1000, "rate": 0.0}],
             "periods": [{"name": "all", "rate": 0.0, "tier_rates": [0.1, 0.2]}]}
     assert L._lp_reason(_tariff(item).items[0]) == "tiers_with_windows"
+
+
+# ── WP2.1a-ii review round 1 ───────────────────────────────────────────────
+
+_P1_TIERS = [{"threshold": 0, "rate": 0.1}, {"threshold": 100, "rate": 0.2}]
+
+
+def test_p1_windowed_tiers_migrate_to_the_same_rates_in_every_window():
+    """#2: the P1 shape (windows + rates on Tier.rate) means one rate set for
+    every window; it validates by migrating losslessly to per-period rates."""
+    item = _tariff({"id": "e", "kind": "energy", "unit": "per_kwh", "tiers": _P1_TIERS,
+                    "periods": [{"name": "peak", "rate": 0.0, "start_hour": 17, "end_hour": 21},
+                                {"name": "rest", "rate": 0.0}]}).items[0]
+    assert [t.rate for t in item.tiers] == [0.0, 0.0]
+    assert [p.tier_rates for p in item.periods] == [[0.1, 0.2], [0.1, 0.2]]
+
+
+def test_a_single_windowed_tier_period_bills_only_inside_its_window():
+    """#1: P1 refused this shape; it must never bill outside the window. Outside
+    intervals are unrated, like any windowed item without a catch-all."""
+    item = {"id": "e", "kind": "energy", "unit": "per_kwh", "tiers": _P1_TIERS,
+            "periods": [{"name": "day", "rate": 0.0, "start_hour": 8, "end_hour": 20}]}
+    idx = pd.date_range("2030-01-07", periods=24, freq="h")
+    res = rate(pd.DataFrame({"import_mw": 0.01, "export_mw": 0.0}, index=idx), _tariff(item),
+               step_hours=1.0, timezone=None)
+    assert res.per_item["e"] is None
+    assert "unrated_intervals:12" in res.flags["e"]
+    summer = {**item, "periods": [{"name": "summer", "rate": 0.0, "months": [6, 7, 8]}]}
+    res = rate(pd.DataFrame({"import_mw": 0.01, "export_mw": 0.0}, index=idx), _tariff(summer),
+               step_hours=1.0, timezone=None)
+    assert res.per_item["e"] is None                      # January is outside the window
+
+
+def test_one_nan_names_its_month_and_counts_one_interval():
+    """#3: the flags say what is unknown, not the month's row count."""
+    idx = pd.date_range("2030-01-01", "2030-01-31 23:00", freq="h")
+    d = pd.DataFrame({"import_mw": 0.005, "export_mw": 0.0}, index=idx)
+    d.iloc[10, 0] = np.nan
+    res = rate(d, _tariff(_windowed_energy()), step_hours=1.0, timezone=None)
+    assert res.per_item["e"] is None
+    assert sorted(res.flags["e"]) == ["nan_quantity:1", "tier_month_not_established:2030-01"]
+
+
+def test_tiers_on_represented_volume_are_disclosed():
+    """#4: with represents_hours the tiers see the represented volume."""
+    idx = pd.date_range("2030-01-07", periods=24 * 7, freq="h")
+    d = pd.DataFrame({"import_mw": 0.005, "export_mw": 0.0}, index=idx)
+    res = rate(d, _tariff(_windowed_energy()), step_hours=1.0, timezone=None,
+               represents_hours=8760 / 168, billing_period=("2030-01-01", "2031-01-01"))
+    assert "tiers_on_represented_volume" in res.notes["e"]
