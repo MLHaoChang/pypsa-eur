@@ -2,9 +2,18 @@
 
 **Date:** 2026-09-12
 **Severity:** CRITICAL — cross-tenant data read AND cross-tenant data write.
-**Status: OPEN, NOT FIXED.** The real fix is architectural (see "Why this is not
-patched here"). Found by an independent QA review; reproduced independently
-before being written up.
+**Status: FIXED 2026-09-28** — the store is per-`ProjectContext`
+(`ProjectContext.user_ts`), and `services/user_timeseries._user_ts` is a view
+that resolves to the calling session's context. All four criteria below are
+asserted directly by `pypsa-gui/backend/tests/test_user_ts_tenancy.py`, and each
+was proven red on the pre-fix code for the reason stated here (org B served
+`777.0`; A's `777.0` written into B's `user_ts.json`; A's in-flight upload
+discarded by B's load) before the fix landed. Two follow-ups this uncovered are
+NOT part of that fix and are tracked in `../OPEN-ITEMS.md`: the shutdown flush's
+`persist_user_ts=False` (its own finding, 2026-09-28) and
+`_hydrate_context_from_disk` still not restoring `user_ts.json`.
+Found by an independent QA review; reproduced independently before being written
+up.
 **Scope:** the multi-tenant server for the cross-tenant leak. The desktop build
 is **also** affected, as a multi-project data-integrity bug.
 
@@ -63,7 +72,7 @@ That reasoning holds for one desktop user. It does not survive tenancy: with one
 process serving many signed-in sessions, **every** session is a foreground
 context, so the ungated path is the normal path rather than the exception.
 
-## Why this is not patched here
+## Why this was not patched here (kept as the record of the deferral)
 
 `_user_ts` has ~230 references across 13 production modules. Making it
 per-`ProjectContext` is the actual fix and is a scoped piece of work with its own

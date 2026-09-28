@@ -1,7 +1,8 @@
 # Open items
 
-**Verified against the tree on 2026-09-12.** Every entry below was reproduced or
-re-read in source on that date, not carried forward on trust.
+**Verified against the tree on 2026-09-12**, except the entries marked
+**(2026-09-28)**, which were added or re-read on that date. Every entry below was
+reproduced or re-read in source on its own date, not carried forward on trust.
 
 This file exists because GitHub Issues is **disabled** on this repository, so
 there is nowhere else to keep a queue. It is deliberately thin: one entry per
@@ -14,34 +15,6 @@ fixed weeks earlier; see the 2026-09-12 triage commit).
 Closed items are not listed. Each finding in `findings/` now carries its own
 truthful status line, so a file that is not named here is either closed or a
 verification record.
-
----
-
-## Critical
-
-### 1. The user-timeseries store is a process global shared across tenants
-
-`services/user_timeseries.py:39` — `_user_ts` is keyed `(component, attribute,
-column)` with no org, project or session. It is authoritative, not a cache: the
-timeseries GET prefers it over the network's own data, and every foreground save
-serialises it into that project's `user_ts.json` and reapplies it onto the
-network before the netCDF export.
-
-Reproduced: org A uploads a profile for `L1`; org B activates its OWN project and
-reads A's values, then saves them into B's storage. Cross-tenant read AND
-cross-tenant write. The desktop build is affected too, as a multi-project
-data-integrity bug.
-
-The code mitigated only the BACKGROUND case, on the stated basis that the store
-"belongs to the FOREGROUND ctx" — true for one desktop user, false once one
-process serves many signed-in sessions, where every session is a foreground.
-
-NOT patched: ~230 references across 13 modules; per-`ProjectContext` isolation is
-the real fix and needs its own plan. A narrow containment exists (restore-or-clear
-on activate, as `load_project` already does) but closes only the demonstrated
-path, not the class — two concurrent sessions on different projects still share
-one dict. Full analysis, reproduction and fix criteria:
-`findings/2026-09-12-user-ts-is-a-process-global-shared-across-tenants.md`.
 
 ---
 
@@ -84,6 +57,27 @@ OrgMembership. The predicate should be "is a super-admin", not "has no
 membership". Server only.
 
 
+### 12. Every shutdown flush saves with `persist_user_ts=False` **(2026-09-28)**
+
+`desktop/gui.py:331` passes `active = PyPSAService._active` and
+`services/shutdown.py`'s `flush_all` saves each resident context with
+`persist_user_ts=(ctx is active)`. After Step 0b `_active` is a bootstrap slot
+that the first session ADOPTS and clears, so at quit time it is None and every
+context takes the `False` branch — the one `flush_all`'s own docstring describes
+as "loses the active project's" series. The flush still rewrites `network.nc`
+but skips `user_ts.json`, so the next open restores the stale file and reapplies
+it over the fresher `_t` tables: a profile uploaded after the last explicit save
+is reverted on reopen, silently.
+
+Now cheap to fix, and deliberately not fixed here: `_save_context` serialises
+the context it is saving (`store=ctx.user_ts`) since the per-context store
+landed, so `True` for every context would write each project's own profiles.
+What stops it being a one-line change is that
+`tests/test_chat_state_carry.py:156` and `tests/test_shutdown.py:1049` pin the
+current `False`. Source, reproduction status and the one unobserved step:
+`findings/2026-09-28-every-shutdown-flush-saves-with-persist-user-ts-false.md`.
+
+
 ## Medium
 
 ### 5. Chat sessions have no owner, so the confirmation gate rests on id secrecy
@@ -115,7 +109,8 @@ used by `compare`, `adequacy_worksheet`, `uploads`, `snapshots`, `gridspine` and
 routes), `results` (48), `chat` (20), `simulation` (14), `io` (8) — 171 of 267.
 Those rely on the path-prefix middleware instead.
 
-This is the structural cause of item 1, and it is a shape rather than a one-off:
+This is the structural cause of the route-scoping defects above, and it is a
+shape rather than a one-off:
 a prefix list denies by omission, so a new router under a new prefix is ungated
 by default, silently, with nothing failing. A dependency declared on the route
 has the opposite default. Worth a test that fails when a route is mounted under
@@ -146,6 +141,25 @@ behind the untrusted-fence bypass (fixed in #18) and the
 sink. `services/upload_service.py`'s `_FILE_ID_RE` shows the right pattern,
 anchored and narrow, and it is not applied to names generally. Source: gap 3 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
+
+### 13. A cold-activated project still ignores its own `user_ts.json` **(2026-09-28)**
+
+`routers/projects._hydrate_context_from_disk` deliberately does not restore
+`user_ts.json`, and says why: the store was a process global belonging to the
+foreground, so restoring a background project's profiles into it would clobber
+the foreground's. That reason is gone — the store is per-`ProjectContext` and
+`_restore_user_ts` takes a `store=` — and the docstring's own parenthesis
+("when per-ctx `_user_ts` lands in a later phase this can reapply safely")
+names this as the follow-up.
+
+Consequence today: a project reached by a COLD activate (or by the per-session
+resolver hydrating it) has an empty store, so the timeseries GET falls back to
+the netCDF-baked `_t` tables, and the next save rebuilds `user_ts.json` from
+those rather than from the file on disk. Values normally match, because the save
+path reapplies before exporting; what is lost is any part of a series that lies
+outside the saved snapshot range. Not fixed here because it changes what a cold
+activate serves, which wants its own tests rather than a line inside the tenancy
+fix. Background: the same 2026-09-12 finding, "what a fix has to establish".
 
 ---
 
