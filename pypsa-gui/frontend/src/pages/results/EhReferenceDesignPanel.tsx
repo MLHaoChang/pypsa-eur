@@ -20,6 +20,7 @@ import {
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
+import { ehStudyRefetchInterval } from './ehStudyPoll'
 import { useChatStore } from '../../store/chatStore'
 import { nk } from '../../utils/queryKeys'
 import { blockerMessage } from './McPanel'
@@ -634,10 +635,8 @@ export function ReadinessSummary({ r }: { r: EhReadiness }) {
   )
 }
 
-/** The study record's poll: every 2 s while it runs. One export so the
- *  hub-design cards share the query (same key, same options — spec §9). */
-export const ehStudyRefetchInterval = (q: { state: { data: unknown } }): number | false =>
-  (q.state.data as EhStudyPayload | null)?.status === 'running' ? 2000 : false
+// The study record's poll lives in ./ehStudyPoll (shared with the greeting).
+export { ehStudyRefetchInterval }
 
 /** Everything a new study makes stale — the panel's `invalidateAll` set,
  *  shared with the hub-design Goal card's Run. */

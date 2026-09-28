@@ -42,7 +42,8 @@ describe('ui_open_panel with results_tab in Guided', () => {
 describe('greeting chips', () => {
   it('Guided: Hub design, adequacy, and a summary — nothing hidden', () => {
     const chips = starterPromptsFor('Demo', 'guided')
-    expect(chips.map(c => c.label)).toEqual(['Open Hub design', 'Check adequacy', 'Summarize this solve'])
+    // P26 gate friction 2: plain chips in Guided (were "Check adequacy" / "Summarize this solve").
+    expect(chips.map(c => c.label)).toEqual(['Open Hub design', 'Explain my results', 'What should I improve?'])
     const text = chips.map(c => c.text).join(' | ')
     expect(text).not.toMatch(/Economics|compare/i)
   })

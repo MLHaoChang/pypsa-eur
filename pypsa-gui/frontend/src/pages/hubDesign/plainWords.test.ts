@@ -36,6 +36,12 @@ describe('plainWords', () => {
       .toBe('re-run the simulation with 1000 runs (was 500) to narrow the range of the estimate')
   })
 
+  // P26 gate friction 3: finding titles end in "— outage-driven".
+  it('outage-driven', () => {
+    expect(plainWords('Not certified: LOLE 12.38 h/yr exceeds the 3 h/yr target — outage-driven'))
+      .toBe('Not certified: expected shortfall 12.38 h/yr exceeds the 3 h/yr target — caused by equipment outages')
+  })
+
   it('evidence values are rounded, lists too', () => {
     expect(evidenceValue(12.383928571428568)).toBe('12.38')
     expect(evidenceValue([7.68316774385459, 17.084689399002553])).toBe('[7.683, 17.08]')

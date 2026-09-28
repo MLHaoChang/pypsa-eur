@@ -43,6 +43,7 @@ import { getApiKeySettings, getChatHealth, type ApiKeySettings, type ChatHealth 
 import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
 import { nk } from '../utils/queryKeys'
+import { ehStudyRefetchInterval } from '../pages/results/ehStudyPoll'
 import ApiKeySetup, { API_KEY_SETTINGS_KEY } from './ApiKeySetup'
 import type { SimulationStatus } from '../api/types'
 
@@ -57,6 +58,9 @@ function solveLine(status: SimulationStatus | undefined, guided = false,
   if (!status) return null
   if (status.running) return 'A solve is running right now.'
   if (guided && hubStudy === 'running') return 'The hub study is running — follow it in Hub design.'
+  if (guided && (hubStudy === 'failed' || hubStudy === 'aborted')) {
+    return 'The last hub study did not finish — see Hub design.'
+  }
   if (guided && hubStudy === 'done' && status.dispatch !== 'stale'
     && !(status.condition != null && status.solve_time != null && status.dispatch === 'fresh')) {
     return 'A study has run on this network — its results are in Hub design.'
@@ -126,6 +130,9 @@ export default function ChatLaunchGreeting() {
   const { data: hubStudy } = useQuery({
     queryKey: nk(currentProject, 'results', 'eh_study'),
     queryFn: () => resultsApi.getEhStudy({ quiet: true }),
+    // P26 gate B1: poll like the hub does, so a study that finishes while the
+    // hub panel is closed does not leave the greeting on "running".
+    refetchInterval: ehStudyRefetchInterval,
     enabled: guided && !!currentProject,
   })
   // The key offer follows the Send gate's profile rule (ChatPanel): the turn

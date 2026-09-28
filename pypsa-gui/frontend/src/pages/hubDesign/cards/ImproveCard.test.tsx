@@ -177,7 +177,8 @@ describe('ImproveCard', () => {
     expect(screen.getByTestId('hub-improve-fmea_dominant_mode').textContent)
       .toContain('site_transformer accounts for 93% of the outage risk')
     expect(screen.getByTestId('hub-improve-fmea_dominant_mode').textContent)
-      .toContain('The assistant would compare the cost with and without a spare unit or extra storage (rough estimate).')
+      // P26 gate friction 4: the button runs the study; the effect is its aim.
+      .toContain('The assistant would run the reliability study again. Aim: compare the cost with and without a spare unit or extra storage (rough estimate).')
     // the engine prose moved into Why, verbatim
     const ev = screen.getByTestId('hub-improve-evidence-certification_fail').textContent ?? ''
     expect(ev).toContain(ENGINE[0].recommendation)
@@ -235,5 +236,28 @@ describe('ImproveCard follows the sweep it started (P26)', () => {
     await screen.findByTestId('hub-improve-fmea')
     await new Promise(r => setTimeout(r, 50))
     expect(resultsApi.getFmeaModes).not.toHaveBeenCalled()
+  })
+})
+
+// P26 gate friction 4: the description said "the assistant would size the
+// local capacity…" while the button opens a "Run the reliability study" card.
+// For a study re-run the text now says so; the effect becomes its aim. Other
+// tools keep "The assistant would <effect>".
+describe('Improve description matches the action (P26 gate)', () => {
+  it('run_eh_study → "run the reliability study again. Aim: …"', async () => {
+    mount()
+    const li = await screen.findByTestId('hub-improve-certification_fail')
+    expect(li.textContent).toContain('The assistant would run the reliability study again. Aim: size the local capacity.')
+  })
+
+  it('another tool keeps "The assistant would <effect>"', async () => {
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ findings: [
+      { id: 'voll_missing', severity: 'high', title: 'frontier: not established', evidence: {},
+        recommendation: 'Set VOLL.', actions: [{ tool: 'update_solver_config',
+          args: { partial: { voll: 5000 } }, effect: 'set VOLL to 5000 €/MWh' }] },
+    ] }))
+    mount()
+    const li = await screen.findByTestId('hub-improve-voll_missing')
+    expect(li.textContent).toContain('The assistant would set the price of undelivered energy to 5000 €/MWh.')
   })
 })

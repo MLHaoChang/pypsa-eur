@@ -176,3 +176,22 @@ describe('ResultsCard next step', () => {
     expect(useHubDesignStore.getState().userMovedRail).toBe(true)
   })
 })
+
+// P26 gate friction 5: with no goal (the H2 hub) the headline says "set an
+// allowed shortfall in step 3 (Goal)" but nothing took the user there.
+describe('ResultsCard: Set a goal (P26 gate)', () => {
+  it('no goal → "Set a goal" jumps to Goal as a user move', async () => {
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(
+      review({ summary: { verdict: null, mc_lole_h_per_year: null, target_lole_h: null } }))
+    const user = mount()
+    await user.click(await screen.findByTestId('hub-results-set-goal'))
+    expect(useHubDesignStore.getState().step).toBe('goal')
+    expect(useHubDesignStore.getState().userMovedRail).toBe(true)
+  })
+
+  it('with a goal → no "Set a goal" button', async () => {
+    mount()
+    await screen.findByTestId('hub-results-verdict')
+    expect(screen.queryByTestId('hub-results-set-goal')).toBeNull()
+  })
+})

@@ -151,3 +151,33 @@ describe('greeting solve line in Guided after the hub study (P26)', () => {
     expect(resultsApi.getEhStudy).not.toHaveBeenCalled()
   })
 })
+
+// P26 gate B1: the greeting's study query had no poll, so with the hub panel
+// closed a finished study still read "running" for as long as the chat stayed
+// empty. It now polls with the hub's own interval (same key, same options).
+// Also: a failed / aborted study says so instead of "Not solved yet.".
+describe('greeting follows the hub study with the hub closed (P26 gate B1)', () => {
+  const NONE = { running: false, status: 'idle', condition: null,
+    objective: null, solve_time: null, dispatch: 'none' } as const
+  it('running → done updates the line with no hub panel mounted', async () => {
+    useUIStore.setState({ uiMode: 'guided', activeSlidePanel: null })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy)
+      .mockResolvedValueOnce({ status: 'running' } as never)
+      .mockResolvedValue({ status: 'done' } as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
+      .toBe('The hub study is running — follow it in Hub design.'))
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
+      .toBe('A study has run on this network — its results are in Hub design.'), { timeout: 5000 })
+  })
+
+  it.each(['failed', 'aborted'])('a %s hub study → "did not finish", not "Not solved yet."', async (st) => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: st } as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
+      .toBe('The last hub study did not finish — see Hub design.'))
+  })
+})

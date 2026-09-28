@@ -71,6 +71,11 @@ describe('GoalCard defaults', () => {
     await waitFor(() => expect(resultsApi.getEhReadiness).toHaveBeenCalled())
     await new Promise(r => setTimeout(r, 0))
     expect(input('hub-goal-lole').value).toBe('')
+    // P26 gate friction 5: the empty box says what to type, in plain words.
+    expect(input('hub-goal-lole').placeholder).toBe('e.g. 3')
+    expect(screen.getByTestId('hub-goal-empty-hint').textContent).toBe(
+      'No goal yet. Type how many hours per year without power you can accept (for example 3) '
+      + 'to get a pass or fail answer.')
   })
 
   // The pack default depends on the site type: strong_grid has none here.

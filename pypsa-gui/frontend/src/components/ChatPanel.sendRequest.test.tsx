@@ -5,7 +5,7 @@ import { useUIStore } from '../store/uiStore'
 import { useChatStore, type PendingConfirmationCard } from '../store/chatStore'
 import { createChatStream, getChatHealth, postChatAbort, postChatConfirm } from '../api/chat'
 import { listUploads } from '../api/uploads'
-import ChatPanel from './ChatPanel'
+import ChatPanel, { guidedCardSummary } from './ChatPanel'
 import chatStoreSource from '../store/chatStore.ts?raw'
 
 // Guided-mode spec §6.1: a card's "Let the assistant do this" goes through
@@ -612,5 +612,89 @@ describe('P26: a declined card in Guided', () => {
     renderPanel()
     await waitFor(() => expect(toolRows()).toHaveLength(1))
     expect(toolRows()[0].textContent).toContain('validation_error')
+  })
+})
+
+// P26 gate B2: the collapsed Details hid what a destructive card deletes or
+// replaces. Every destructive and execution tool the assistant can call
+// (BE/services/chat_tools_schema.py, "Safety: destructive" / "execution" /
+// "execution_long_running") has a summary that names its target; the fallback
+// names the first identifying argument; destructive cards open their Details.
+describe('P26 gate B2: Guided cards name what they touch', () => {
+  const DESTRUCTIVE_AND_EXECUTION = [
+    'delete_component', 'cascade_delete_bus', 'batch_delete_components', 'cluster_network',
+    'delete_vintage_bounds', 'delete_timeseries', 'run_simulation', 'run_ac_pf_stage',
+    'abort_simulation', 'force_reset_simulation', 'run_fmea_sweep', 'run_frontier_study',
+    'run_mc_study', 'run_coupling_loop', 'run_margin_loop', 'run_eh_study', 'abort_adequacy_study',
+    'solve_queue_enqueue', 'solve_queue_abort', 'save_project', 'save_project_as',
+    'save_project_a_copy', 'rename_project', 'delete_project', 'create_scenario',
+    'import_project_bundle', 'create_project_from_template', 'restore_project_snapshot',
+    'delete_project_snapshot', 'import_network_nc', 'import_csv_bundle', 'import_excel',
+    'import_matpower', 'clear_audit_log', 'undo_last', 'clear_chat_history',
+    'apply_demand_from_excel', 'delete_upload', 'reconstruct_network_from_image', 'clear_uploads',
+    'set_active_profile', 'gridspine_run_pipeline',
+  ]
+  it.each(DESTRUCTIVE_AND_EXECUTION)('%s has its own summary (not the fallback)', (tool) => {
+    expect(guidedCardSummary(tool, {})).not.toMatch(/^The assistant wants to use/)
+  })
+
+  it.each<[string, Record<string, unknown>, string]>([
+    ['delete_component', { component_class: 'Generator', name: 'genset_1' }, 'Delete genset_1 from the network'],
+    ['cascade_delete_bus', { name: 'it_bus' }, 'Delete the bus it_bus and everything connected to it'],
+    ['batch_delete_components', { component_class: 'Load', names: ['a', 'b', 'c', 'd', 'e', 'f'] },
+      'Delete 6 components from the network: a, b, c, d, e and 1 more'],
+    ['delete_timeseries', { component: 'Load', name: 'it_load', attribute: 'p_set' },
+      'Delete the p_set time series of it_load'],
+    ['delete_vintage_bounds', { component_class: 'Generator', name: 'pv' }, 'Remove the build-year limits of pv'],
+    ['delete_project', { name: 'Demo' }, 'Delete the project Demo'],
+    ['delete_project', { name: 'Demo', cascade: true }, 'Delete the project Demo and every scenario made from it'],
+    ['delete_project_snapshot', { name: 'Demo', snapshot_id: 's1' }, 'Delete the backup s1 of the project Demo'],
+    ['restore_project_snapshot', { name: 'Demo', snapshot_id: 's1' },
+      'Restore the project Demo to the backup s1 (replaces the current network)'],
+    ['import_network_nc', { bytes_b64: 'AAAA', filename: 'grid.nc' },
+      'Replace the whole network with the imported file grid.nc'],
+    ['import_excel', { bytes_b64: 'AAAA' }, 'Replace the whole network with an imported file'],
+    ['rename_project', { name: 'A', new_name: 'B' }, 'Rename the project A to B'],
+    ['save_project_as', { name: 'B' }, 'Save the project under the new name B'],
+    ['create_project_from_template', { template_id: 'eh_microgrid', new_name: 'Isle' },
+      'Create the project Isle from the eh_microgrid template'],
+    ['apply_demand_from_excel', { file_id: 'f1', load_name: 'it_load', time_col: 't', value_col: 'v' },
+      'Replace the demand of it_load with values from the uploaded file f1'],
+    ['delete_upload', { file_id: 'f9' }, 'Delete the uploaded file f9'],
+    ['abort_adequacy_study', { study: 'eh_study' }, 'Stop the running eh_study study'],
+    ['run_mc_study', { draws: 1000 }, 'Run the reliability simulation (1000 runs)'],
+    ['run_coupling_loop', { target_lole_h: 3 }, 'Size the design to meet 3 h/yr of shortfall (repeated calculations)'],
+    ['solve_queue_enqueue', { project_id: 'Demo' }, 'Queue a calculation of the project Demo'],
+    ['set_active_profile', { profile_id: 'local' }, 'Switch the assistant to the model profile local'],
+  ])('%s names its target', (tool, args, want) => {
+    expect(guidedCardSummary(tool, args)).toBe(want)
+  })
+
+  it.each<[Record<string, unknown>, string]>([
+    [{ name: 'genset_1' }, 'The assistant wants to use frob widget on genset_1'],
+    [{ names: ['a', 'b'] }, 'The assistant wants to use frob widget on a, b'],
+    [{ component: 'Load' }, 'The assistant wants to use frob widget on Load'],
+    [{ project_id: 'Demo' }, 'The assistant wants to use frob widget on Demo'],
+    [{ filename: 'x.csv' }, 'The assistant wants to use frob widget on x.csv'],
+    [{ other: 1 }, 'The assistant wants to use frob widget'],
+  ])('fallback names the first identifying argument %j', (args, want) => {
+    expect(guidedCardSummary('frob_widget', args)).toBe(want)
+  })
+
+  const details = () => screen.getByTestId('chat-confirmation-details') as HTMLDetailsElement
+  it('destructive tier: Details open by default, the target in the summary', async () => {
+    useChatStore.setState({ pending: { ...CARD, tool_name: 'delete_component', safety_tier: 'destructive',
+      args: { component_class: 'Generator', name: 'genset_1' } } })
+    renderPanel()
+    await screen.findByTestId('chat-confirmation-card')
+    expect(screen.getByTestId('chat-confirmation-summary').textContent).toBe('Delete genset_1 from the network')
+    expect(details().open).toBe(true)
+  })
+
+  it.each(['execution', 'write'])('%s tier: Details stay collapsed', async (tier) => {
+    useChatStore.setState({ pending: { ...CARD, tool_name: 'run_mc_study', safety_tier: tier, args: { draws: 10 } } })
+    renderPanel()
+    await screen.findByTestId('chat-confirmation-card')
+    expect(details().open).toBe(false)
   })
 })

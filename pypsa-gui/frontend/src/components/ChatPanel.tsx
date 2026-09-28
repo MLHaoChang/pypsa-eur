@@ -368,7 +368,84 @@ const GUIDED_CARD_SUMMARY: Record<string, (a: Record<string, unknown>) => string
     const n = _str(a.project_id) ?? _str(a.name)
     return n ? `Open the project ${n}` : 'Open another project'
   },
-  save_project: () => 'Save the project',
+  save_project: (a) => {
+    const n = _str(a.name)
+    const base = n ? `Save the project ${n}` : 'Save the project'
+    return a.force === true ? `${base}, overwriting the saved version` : base
+  },
+  // P26 gate B2: every destructive and execution tool names its target
+  // (BE/services/chat_tools_schema.py safety tiers), because the raw call is
+  // no longer the first thing on the card.
+  delete_component: (a) => `Delete ${_str(a.name) ?? 'a component'} from the network`,
+  cascade_delete_bus: (a) => `Delete the bus ${_str(a.name) ?? '(unnamed)'} and everything connected to it`,
+  batch_delete_components: (a) => {
+    const names = Array.isArray(a.names) ? a.names.map(String) : []
+    if (!names.length) return 'Delete several components from the network'
+    const shown = names.slice(0, 5).join(', ')
+    const rest = names.length - 5
+    return `Delete ${names.length} components from the network: ${shown}${rest > 0 ? ` and ${rest} more` : ''}`
+  },
+  cluster_network: (a) => typeof a.n_clusters === 'number'
+    ? `Simplify the network by merging buses into ${a.n_clusters} groups (replaces the current network)`
+    : 'Simplify the network by merging buses (replaces the current network)',
+  delete_vintage_bounds: (a) => `Remove the build-year limits of ${_str(a.name) ?? 'a component'}`,
+  delete_timeseries: (a) => `Delete ${_str(a.attribute) ? `the ${a.attribute}` : 'a'} time series of ${
+    _str(a.name) ?? 'a component'}`,
+  run_ac_pf_stage: () => 'Run the power-flow check on the network',
+  abort_simulation: () => 'Stop the running calculation',
+  force_reset_simulation: () => 'Force-reset the calculation state (stops anything running)',
+  run_frontier_study: () => 'Run the cost-versus-reliability check',
+  run_mc_study: (a) => typeof a.draws === 'number'
+    ? `Run the reliability simulation (${a.draws} runs)` : 'Run the reliability simulation',
+  run_coupling_loop: (a) => typeof a.target_lole_h === 'number'
+    ? `Size the design to meet ${a.target_lole_h} h/yr of shortfall (repeated calculations)`
+    : 'Size the design to meet the shortfall goal (repeated calculations)',
+  run_margin_loop: (a) => typeof a.target_lole_h === 'number'
+    ? `Size the reserve margin to meet ${a.target_lole_h} h/yr of shortfall (repeated calculations)`
+    : 'Size the reserve margin to meet the shortfall goal (repeated calculations)',
+  abort_adequacy_study: (a) => `Stop the running ${_str(a.study) ?? 'reliability'} study`,
+  solve_queue_enqueue: (a) => `Queue a calculation of the project ${_str(a.project_id) ?? '(current)'}`,
+  solve_queue_abort: (a) => `Stop the queued calculation ${_str(a.job_id) ?? ''}`.trimEnd(),
+  save_project_as: (a) => `Save the project under the new name ${_str(a.name) ?? '(unnamed)'}`,
+  save_project_a_copy: (a) => `Save a copy of the project named ${_str(a.name) ?? '(unnamed)'}`,
+  rename_project: (a) => `Rename the project ${_str(a.name) ?? '(unnamed)'} to ${_str(a.new_name) ?? '(unnamed)'}`,
+  delete_project: (a) => `Delete the project ${_str(a.name) ?? '(unnamed)'}`
+    + (a.cascade === true ? ' and every scenario made from it' : ''),
+  create_scenario: (a) => `Create the scenario ${_str(a.new_name) ?? '(unnamed)'} from ${_str(a.base) ?? 'the project'}`,
+  import_project_bundle: (a) => _str(a.filename)
+    ? `Import a project from the file ${a.filename}` : 'Import a project from a file',
+  create_project_from_template: (a) =>
+    `Create the project ${_str(a.new_name) ?? '(unnamed)'} from the ${_str(a.template_id) ?? ''} template`,
+  restore_project_snapshot: (a) =>
+    `Restore the project ${_str(a.name) ?? '(unnamed)'} to the backup ${_str(a.snapshot_id) ?? ''} (replaces the current network)`,
+  delete_project_snapshot: (a) =>
+    `Delete the backup ${_str(a.snapshot_id) ?? ''} of the project ${_str(a.name) ?? '(unnamed)'}`,
+  clear_audit_log: () => 'Clear the change log of this project',
+  undo_last: () => 'Undo the last change to the network',
+  clear_chat_history: () => "Delete this project's chat history",
+  apply_demand_from_excel: (a) =>
+    `Replace the demand of ${_str(a.load_name) ?? 'a load'} with values from the uploaded file ${_str(a.file_id) ?? ''}`.trimEnd(),
+  delete_upload: (a) => `Delete the uploaded file ${_str(a.file_id) ?? ''}`.trimEnd(),
+  reconstruct_network_from_image: (a) =>
+    `Build the network from the uploaded image ${_str(a.file_id) ?? ''} (replaces the current network)`,
+  clear_uploads: () => "Delete every uploaded file of this project",
+  set_active_profile: (a) => `Switch the assistant to the model profile ${_str(a.profile_id) ?? ''}`.trimEnd(),
+  gridspine_run_pipeline: (a) => `Run the GridSpine pipeline for the project ${_str(a.project_id) ?? '(current)'}`,
+}
+for (const t of ['import_network_nc', 'import_csv_bundle', 'import_excel', 'import_matpower']) {
+  GUIDED_CARD_SUMMARY[t] = (a) => (_str(a.filename)
+    ? `Replace the whole network with the imported file ${a.filename}`
+    : 'Replace the whole network with an imported file')
+}
+// The fallback names the first identifying argument it finds, in this order.
+const IDENTIFYING_ARGS = ['name', 'names', 'component', 'project_id', 'project', 'file_id', 'filename', 'path']
+function _identifying(a: Record<string, unknown>): string | null {
+  for (const k of IDENTIFYING_ARGS) {
+    const v = a[k]
+    if (typeof v === 'string' && v.trim()) return v
+    if (Array.isArray(v) && v.length) return v.map(String).join(', ')
+  }
+  return null
 }
 for (const t of ['export_to_csv', 'export_to_excel', 'export_preview_png', 'export_chat_summary',
   'export_asset_results', 'gridspine_export_handoff_bundle']) {
@@ -377,7 +454,9 @@ for (const t of ['export_to_csv', 'export_to_excel', 'export_preview_png', 'expo
 
 export function guidedCardSummary(tool: string, args: Record<string, unknown>): string {
   const f = Object.prototype.hasOwnProperty.call(GUIDED_CARD_SUMMARY, tool) ? GUIDED_CARD_SUMMARY[tool] : null
-  return f ? f(args ?? {}) : `The assistant wants to use ${tool.replace(/_/g, ' ')}`
+  if (f) return f(args ?? {})
+  const target = _identifying(args ?? {})
+  return `The assistant wants to use ${tool.replace(/_/g, ' ')}${target ? ` on ${target}` : ''}`
 }
 
 // P26 (coordinator item 6): after a Deny, Guided shows one plain line. The
@@ -600,7 +679,9 @@ function ConfirmationCard() {
             data-testid="chat-confirmation-summary">
             {guidedCardSummary(pending.tool_name, pending.args)}
           </div>
-          <details className="mb-2 text-[11px] text-muted" data-testid="chat-confirmation-details">
+          {/* P26 gate B2: a destructive card shows its raw call by default. */}
+          <details className="mb-2 text-[11px] text-muted" data-testid="chat-confirmation-details"
+            open={pending.safety_tier === 'destructive'}>
             <summary className="cursor-pointer select-none">Details</summary>
             <div className="font-mono mt-1">{pending.tool_name}</div>
             <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mt-1 whitespace-pre-wrap break-all">
