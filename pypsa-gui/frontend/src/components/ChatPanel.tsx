@@ -1334,13 +1334,14 @@ const CHAT_STARTER_PROMPTS_GUIDED: { label: string; text: string }[] = [
     label: 'Open Hub design',
     text: 'Open the Hub design panel',
   },
+  // P26 gate: plain questions instead of "Check adequacy" / "Summarize this solve".
   {
-    label: 'Check adequacy',
-    text: 'Open the Results Adequacy tab',
+    label: 'Explain my results',
+    text: 'Explain the results of my hub design study in plain language.',
   },
   {
-    label: 'Summarize this solve',
-    text: 'Summarize the key results of the current project',
+    label: 'What should I improve?',
+    text: 'What is the single most useful thing I can improve in my hub design, and why?',
   },
 ]
 

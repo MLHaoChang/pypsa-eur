@@ -1522,9 +1522,9 @@ async function phaseP25(browser) {
 // flow. Verdicts are recorded as observed, never forced: the headline is
 // checked against §5.5 for whatever verdict the review reports.
 const P26_TEMPLATES = [
-  { id: 'eh_datacenter', label: 'dc', archetype: 'weak_flexible', lole: '3', expected: 'fail', improveDo: true },
-  { id: 'eh_h2_hub', label: 'h2', archetype: 'strong_grid', lole: '', expected: 'no target', improveDo: false },
-  { id: 'eh_microgrid', label: 'mg', archetype: 'off_grid', lole: '3', expected: 'inconclusive', improveDo: false },
+  { id: 'eh_datacenter', label: 'dc', archetype: 'weak_flexible', lole: '3', expected: 'fail', improveDo: true, fmeaRows: 8 },
+  { id: 'eh_h2_hub', label: 'h2', archetype: 'strong_grid', lole: '', expected: 'no target', improveDo: false, fmeaRows: 4 },
+  { id: 'eh_microgrid', label: 'mg', archetype: 'off_grid', lole: '3', expected: 'inconclusive', improveDo: false, fmeaRows: 6 },
 ]
 // Every Results tab that is not multi-period only (Results.tsx TABS).
 const EXPERT_TABS = ['capex', 'dispatch', 'loadflow', 'prices', 'economics', 'emissions', 'curtailment',
@@ -1636,6 +1636,12 @@ async function p26Template(browser, tpl) {
     out.headline = got
     info(`observed verdict: ${out.verdict} (P20 expected: ${tpl.expected})`)
     check(got === expectedHeadline(review, report), `headline (§5.5): "${got}"`)
+    if (tpl.lole === '') {
+      // P26 gate friction 5: no goal → a "Set a goal" button on Results.
+      check(await byId('hub-results-set-goal').isVisible(), 'no goal: "Set a goal" button on Results')
+    } else {
+      check((await byId('hub-results-set-goal').count()) === 0, 'goal set: no "Set a goal" button')
+    }
     // P26 item 7: the greeting points to Hub design, never "Not solved yet."
     const HUB_LINE = 'A study has run on this network — its results are in Hub design.'
     await page.waitForFunction(w => document.querySelector('[data-testid="chat-launch-solve"]')?.textContent === w,
@@ -1692,6 +1698,21 @@ async function p26Template(browser, tpl) {
       const declined = tableDiffs(beforeDo, await snapshotTables())
       check(declined.diffs.length === 0 && declined.nomOpt === 0, 'declined: nothing changed')
 
+      // P26 gate B2: a destructive card names its target and opens its Details.
+      step(`[${tpl.id}] a destructive card names what it deletes → decline`)
+      await byId('chat-input').fill('Run the tool delete_component with exactly these arguments: {"component_class":"Generator","name":"genset_1"}')
+      await byId('chat-send').click()
+      await byId('chat-confirmation-card').waitFor({ state: 'visible', timeout: 60_000 })
+      check(await textOf('chat-confirmation-summary') === 'Delete genset_1 from the network',
+        'destructive card: "Delete genset_1 from the network"')
+      check(await byId('chat-confirmation-details').evaluate(d => d.open), 'destructive card: Details open')
+      await shot(page, `p26-${L}-07c-delete-card`)
+      const beforeDel = await snapshotTables()
+      await byId('chat-confirm-deny').click()
+      await byId('chat-confirmation-card').waitFor({ state: 'detached', timeout: 30_000 })
+      await page.waitForFunction(() => !document.querySelector('[data-testid="chat-abort"]'), null, { timeout: 60_000 })
+      check(tableDiffs(beforeDel, await snapshotTables()).diffs.length === 0, 'declined: genset_1 still there')
+
       // The P25-gate carry-over: a non-editing write says what it is for.
       step(`[${tpl.id}] an export asks "Confirm: export a file" and says the network is not changed → decline`)
       await byId('chat-input').fill('Run the tool export_to_csv with exactly these arguments: {"columns":["asset","risk"],"rows":[["genset_1","low"]],"filename":"p26_risks.csv"}')
@@ -1724,11 +1745,22 @@ async function p26Template(browser, tpl) {
     check(sweep?.status === 'done', `sweep done (base_restored=${sweep?.base_restored})`)
     await byId('hub-improve-open-fmea').click()
     await byId('results-tab-fmea').waitFor({ state: 'visible', timeout: 30_000 })
-    await page.waitForFunction(() =>
-      document.querySelectorAll('[data-testid="fmea-table"] tbody tr').length > 0, null, { timeout: 30_000 })
-    out.fmeaRows = await page.locator('[data-testid="fmea-table"] tbody tr').count()
-    check((await byId('results-tab-fmea').getAttribute('class')).includes('border-accent'),
-      `FMEA tab active with ${out.fmeaRows} rows`)
+    // P26 gate note 1: right after the sweep the tab can show the partial
+    // rows for ~2 s while its shared query catches up. Wait until "Sweeping…"
+    // is gone and the row count has held for 3 s, then assert the true count.
+    const rowCount = () => page.locator('[data-testid="fmea-table"] tbody tr').count()
+    let last = -1, since = Date.now()
+    const settleUntil = Date.now() + 60_000
+    while (Date.now() < settleUntil) {
+      const sweeping = await page.getByText('Sweeping…').count()
+      const n = await rowCount()
+      if (n !== last || sweeping) { last = n; since = Date.now() }
+      else if (n > 0 && Date.now() - since >= 3000) break
+      await sleep(250)
+    }
+    out.fmeaRows = await rowCount()
+    check(out.fmeaRows === tpl.fmeaRows, `FMEA rows settled at ${out.fmeaRows} (expected ${tpl.fmeaRows})`)
+    check((await byId('results-tab-fmea').getAttribute('class')).includes('border-accent'), 'FMEA tab active')
     const afterSweep = tableDiffs(beforeSweep, await snapshotTables())
     check(afterSweep.diffs.length === 0,
       `buses/links/generators equal after the sweep (*_nom_opt changes: ${afterSweep.nomOpt})`)

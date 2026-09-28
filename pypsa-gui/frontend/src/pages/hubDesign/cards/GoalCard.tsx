@@ -90,12 +90,13 @@ export function GoalCard() {
         </span>
         <input type="number" step="any" min={0} data-testid="hub-goal-lole"
           value={loleTarget} disabled={running}
-          placeholder="no goal"
+          placeholder="e.g. 3"
           onChange={e => setLoleTarget(e.target.value)}
           className="w-32 rounded border border-border bg-bg px-2 py-1 font-mono text-[12px] text-text" />
         {loleTarget.trim() === '' && (
-          <span className="text-muted">
-            Without a goal the study reports the shortfall but gives no pass or fail answer.
+          <span className="text-muted" data-testid="hub-goal-empty-hint">
+            No goal yet. Type how many hours per year without power you can accept (for example 3)
+            to get a pass or fail answer.
           </span>
         )}
       </label>

@@ -366,6 +366,19 @@ Spec §7.
 | Item 7: the Guided greeting said "Not solved yet." after the study and the sweep | P22.9-FE / P24-FE | The greeting reads the hub study record (Guided only). The Improve card follows the sweep it started and re-reads `/simulation/status` when it ends. | `ChatLaunchGreeting.solvedState.test.tsx`, `ImproveCard.test.tsx` "follows the sweep" |
 | Item 8: the Anthropic key offer showed while a ready profile ran the chat (both modes) | P22.9-FE | Hidden while `chat_ready` is true for `profileId ?? active` (the Send gate's rule) | `ChatLaunchGreeting.test.tsx` "the key offer follows the effective profile" |
 
+**P26 final-gate fixes (NO-GO B1, B2 and friction; frontend only, test-first):**
+
+| Item | Fix | Test |
+|---|---|---|
+| B1: the greeting is stuck on "running" once the hub is closed | Greeting query `refetchInterval: ehStudyRefetchInterval` (moved to `pages/results/ehStudyPoll.ts`, re-exported). A failed or aborted study reads "The last hub study did not finish — see Hub design." | `ChatLaunchGreeting.solvedState.test.tsx` "follows the hub study with the hub closed" |
+| B2: destructive cards hide their target | A summary for all 42 destructive / execution tools. The fallback names the first identifying argument. Destructive Details start open. | `ChatPanel.sendRequest.test.tsx` "P26 gate B2" |
+| Chips, `outage-driven`, Improve copy, "Set a goal" and the goal hint | See the close-out note, §5 items 11–14 | `ChatPanel.hubDesignPanel.test.tsx`, `plainWords.test.ts`, `ImproveCard.test.tsx`, `ResultsCard.test.tsx`, `GoalCard.test.tsx` |
+| Smoke FMEA row count | Waits until "Sweeping…" is gone and the count has held for 3 s, then asserts 8 / 4 / 6 | smoke `--phase P26` |
+
+**Edited assertions (spec §8.3):**
+- `ChatPanel.hubDesignPanel.test.tsx`: the Guided chip labels are now "Explain my results" and "What should I improve?". Justification: the P26 gate asked for plain chips.
+- `ImproveCard.test.tsx` "no engine terms…": the `fmea_dominant_mode` line reads "The assistant would run the reliability study again. Aim: compare the cost…". Justification: the text must say what the button does (P26 gate).
+
 **P26 test-harness edits (no assertion changed):** `ChatLaunchGreeting.solvedState.test.tsx` now mocks `resultsApi.getEhStudy`, and `ChatLaunchGreeting.test.tsx` mocks `getChatHealth` (readiness unknown by default). The greeting now reads both.
 
 **P26 edited assertion (spec §8.3):** `ChatPanel.sendRequest.test.tsx` "B2: a reloaded Improve request" now expects the plain-words label ("expected shortfall", not "LOLE"). Justification: after a reload, the label must read as the live one does (`delegate.actionLabel`).

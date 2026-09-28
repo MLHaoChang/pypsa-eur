@@ -8,6 +8,7 @@ const RULES: [RegExp, string][] = [
   [/\bcarries (\d+(?:\.\d+)?%) of ranked Link risk\b/g, 'accounts for $1 of the outage risk'],
   [/\bprice generic N\s*\/\s*N\+1\s*\/\s*storage scenarios \(indicative\)/g,
     'compare the cost with and without a spare unit or extra storage (rough estimate)'],
+  [/\boutage-driven\b/g, 'caused by equipment outages'],
   [/\bLOLE\b/g, 'expected shortfall'],
   [/\bENS target\b/g, 'energy target'],
   [/\bENS\b/g, 'unserved energy'],

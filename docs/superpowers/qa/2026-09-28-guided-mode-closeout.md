@@ -28,7 +28,8 @@ These steps were checked by `smoke-guided.mjs --phase P26` on all three Energy H
      - "Confirm: open a project" for `load_project` / `activate_project`;
      - "Confirm" for runs and deletions.
    - The three non-edit kinds carry a one-line note, such as "Your network is not changed."
-   - Every Guided card leads with one plain sentence ("Run the reliability study for this site (about 30 calculation steps)"), with the raw call under a collapsed Details.
+   - Every Guided card leads with one plain sentence that names its target ("Run the reliability study for this site (about 30 calculation steps)", "Delete genset_1 from the network"), with the raw call under a Details section. The Details section starts open on destructive cards and collapsed otherwise.
+   - *Correction after the P26 gate (B2):* the first version of this line overstated the case. Destructive tools then read only "The assistant wants to use delete component", and the target sat hidden in collapsed Details. That is now fixed; see §5.
    - A declined card leaves one line: "You declined — nothing was changed."
    - Expert is unchanged: write-tier tools still apply directly there.
 6. **Mode switching.** One click in the header or the palette. An explicit choice persists across reloads in both directions.
@@ -71,12 +72,26 @@ All three match the P20 expectations. The `*_nom_opt` changes after the sweep we
 
 - **Send gate and bound profiles (P22.9-FE).** Send is gated on the active profile's readiness. A session already bound to another ready profile, with the store's `profileId` reset (for example after a reload), is gated wrongly. Picking the profile in the dropdown lifts the gate. Follow-up: expose the session's bound profile id to the client.
 - **Edits during a study are reverted (P22.9-BE).** An edit to a restored topology column (`control`, `sub_network`, `generator`) made while a live-network study runs is reverted when the study ends. The restore writes outside the network lock. This is the same class as `freeze_capacities`' undo, and not a regression.
-- **`*_nom_opt` after a sweep (P22.9-BE, accepted).** The sweep's closing base re-solve writes the `*_nom_opt` outputs and leaves `dispatch: fresh` with no foreground condition (bug 2). The greeting explains this state.
+- **`*_nom_opt` after a sweep (P22.9-BE, accepted).** The sweep's closing base re-solve writes the `*_nom_opt` outputs and leaves `dispatch: fresh` with no foreground condition (bug 2). The greeting explains this state. *Correction after the P26 gate (B1):* the earlier wording held only while the greeting's data was fresh. With the hub panel closed, the greeting stayed on "running" after the study finished. It now polls the study record the way the hub does.
 - **A blank `carrier` is filled from the bus** by PyPSA's topology pass. It is an optional input and is not restored (P22.9-BE).
 - **A foreground solve writes topology columns.** `POST /api/simulation/run` still writes `control` / `sub_network` / `generator`, as it always has (spec §2.1 item 4).
 - **Surviving mutation at P25.** The confirmation card's TTL-expiry guard has no test that kills a mutation of it. It is harmless defence and was judged not to need one (P25 gate).
 
-### New findings from the P26 first-time-user review, still open (deferred by the coordinator)
+### Still open after the final P26 gate (deferred by the coordinator)
+
+The gate reviewer's remaining friction list, and what the coordinator deferred:
+
+- **Raw tool progress lines.** "… preparing <tool>" and "→ <tool>" still show in raw form above the card. This is shared chat rendering.
+- **Expert-styled FMEA tab reached from Guided.** It shows "SIMULATION · RESULTS", "Optimization results", "FOR", class letters, `lp_proxy` / `copt`, and bug 5's `€0.0` rows.
+- **Transient stale FMEA tab.** For about 2 s after a sweep, the tab can show "Sweeping…" and the partial rows: 4 of 8 on the data center, self-healing in about 2.3 s (gate note 1). The smoke now waits for the rows to settle and asserts the true counts 8 / 4 / 6. The window itself is not changed.
+- **In-app project switch.** It was not run end to end. The greeting and Improve queries are keyed by project. `ImproveCard` keeps `sweep.isSuccess` across a switch, so the new project's `fmea_modes` is fetched once for nothing (gate note 4).
+- **The greeting ignores study staleness.** After an edit, it still says "A study has run…" while the review is `stale` (gate note 2).
+- **Greeting words before any study.** "Not solved yet." / "Solved…" are engine words in Guided before a first study. The chips are now plain.
+- **The "created from template" toast** briefly covers Send.
+- **A reloaded Improve request** loses its "(step i of N)" suffix.
+- **A stub-only artefact.** The stub's closing sentence "Understood — <tool> was not applied." comes from the smoke model, not from the app.
+
+### Earlier P26 review notes
 
 1. **Engine vocabulary on the FMEA tab.** When the tab is opened from Guided it shows the eyebrow "SIMULATION · RESULTS", the title "Optimization results", "FOR", class letters, and `lp_proxy` / `copt` badges. This is an Expert surface that Guided links to (spec §1 obstacle 7). A Guided header, or a plain column legend, would help. Bug 5 is part of the same view.
 2. **Tool progress lines** ("… preparing run_eh_study", "→ run_eh_study") are still shown in raw form in Guided, above the card. This is shared chat rendering. (The closing sentence "Understood — run_eh_study was not applied." in the smoke comes from the stub model, not from the app.)
@@ -114,11 +129,24 @@ All three match the P20 expectations. The `*_nom_opt` changes after the sweep we
 7. **Microgrid Improve wording.** "draws" became "runs", and "confidence interval" became "range of the estimate".
 8. **"Next" buttons.** Site gets "Next: Goal" and Results gets "Next: Improve".
 
+9. **Gate B1: the greeting follows the study with the hub closed.**
+   - The greeting's study query polls with `ehStudyRefetchInterval`, the same key and option as the hub, so there is no second poll. The option moved to `pages/results/ehStudyPoll.ts` and is re-exported from `EhReferenceDesignPanel`.
+   - A failed or aborted study reads "The last hub study did not finish — see Hub design."
+10. **Gate B2: destructive and execution cards name their target.**
+    - All 42 destructive / execution tools in `chat_tools_schema.py` have their own summary. Examples: "Delete genset_1 from the network", "Replace the whole network with the imported file grid.nc", "Restore the project Demo to the backup s1 (replaces the current network)".
+    - The generic fallback names the first identifying argument (`name`, `names`, `component`, `project_id`, `project`, `file_id`, `filename`, `path`).
+    - Destructive cards open their Details by default.
+11. **Guided greeting chips.** "Open Hub design", "Explain my results", "What should I improve?".
+12. **plainWords.** "outage-driven" became "caused by equipment outages".
+13. **Improve description matches the action.** A study re-run reads "The assistant would run the reliability study again. Aim: <effect>".
+14. **H₂ hub: "Set a goal".** Results shows a "Set a goal" button when no goal is set; it jumps to Goal. The empty goal box reads "e.g. 3", with the hint "No goal yet. Type how many hours per year without power you can accept (for example 3) to get a pass or fail answer."
+
 **The implementer's runs after these fixes** (the full backend suite and the independent gate belong to the orchestrator):
 - tsc exit 0.
-- vitest 233 files / 2481 passed (P25: 2431; 50 new).
+- vitest 233 files / 2561 passed (P25: 2431; 130 new).
 - Backend gate row 2, 14 files: 613 passed. It was run before items 5–8, and there is still no backend change.
-- Smokes after items 5–8: P26 PASS (37 screenshots), P25 PASS (12), P22.9 PASS (10). The earlier round was P26 / P25 / P24 / P23 / P24-BE / P22.9, all PASS.
+- Stress ×10 on the gate's selection: App*, pages/hubDesign/**, ChatPanel*, ChatLaunchGreeting*, chatStore*, uiContext*. That is 36 files, and each run passed 565/565, 10 of 10.
+- Smokes after the gate fixes: P26 PASS (38 screenshots), P25 PASS (12), P22.9 PASS (10). The earlier rounds were P26 / P25 / P24 / P23 / P24-BE / P22.9, all PASS.
 
 ## 6. Gate files
 

@@ -8,6 +8,7 @@ import { fmeaTopRows, notEstablishedNotes } from '../../results/EhReferenceDesig
 import { fmtCurrency } from '../../results/shared'
 import { studyHasResults } from '../flow'
 import { headline } from '../headline'
+import { useHubDesignStore } from '../hubDesignStore'
 import { CardShell } from '../shared/CardShell'
 import { Term } from '../shared/Term'
 import { useHubReport, useHubReview, useHubStudy } from '../useHubData'
@@ -32,6 +33,7 @@ export function ResultsCard() {
   const risks = report ? fmeaTopRows(report).slice(0, 3) : []
   const gaps = report ? notEstablishedNotes(report) : []
   const cost = report?.cost_at_target_eur
+  const setStep = useHubDesignStore(s => s.setStep)
 
   return (
     <CardShell step="results" next="improve" testId="hub-card-results" title="Results">
@@ -50,6 +52,14 @@ export function ResultsCard() {
           <p data-testid="hub-results-verdict" className="text-[14px] font-semibold text-text">
             {headline(review, report)}
           </p>
+          {/* P26 gate: with no goal the headline asks for one — take the user there. */}
+          {review.status === 'ok' && review.summary?.target_lole_h == null && (
+            <button type="button" data-testid="hub-results-set-goal"
+              onClick={() => setStep('goal', { user: true })}
+              className="self-start mt-1 inline-flex items-center gap-1 rounded bg-accent px-3 py-1.5 text-[12px] font-semibold text-white">
+              Set a goal
+            </button>
+          )}
         </div>
       ) : (
         <p data-testid="hub-results-loading" className="text-[12px] text-muted">

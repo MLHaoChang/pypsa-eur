@@ -53,7 +53,11 @@ function Finding({ f }: { f: EhReviewFinding }) {
       </div>
       {doTexts.length > 0 && effect && (
         <p className="text-muted">
-          The assistant would {plainWords(effect)}
+          {/* P26 gate: the button opens a "Run the reliability study" card,
+              so a study re-run says so; the review's effect is its aim. */}
+          {f.actions?.[0]?.tool === 'run_eh_study'
+            ? <>The assistant would run the reliability study again. Aim: {plainWords(effect)}</>
+            : <>The assistant would {plainWords(effect)}</>}
           {more > 0 ? `, then ${more} more step${more === 1 ? '' : 's'}, one at a time` : ''}.
         </p>
       )}
