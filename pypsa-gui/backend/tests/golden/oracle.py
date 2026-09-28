@@ -59,3 +59,43 @@ def horizon_capex(rate_per_mw: float, p_nom_opt: float, years: tuple[int, ...]) 
     `annualised_capital_cost`.
     """
     return rate_per_mw * p_nom_opt * sum(years)
+
+
+def fixed_cost_rate(annualised_investment: float, fom_cost: float) -> float:
+    """
+    What the LP objective multiplies each MW of optimised capacity by.
+
+    MEASURED against PyPSA 1.1.2 on 2026-09-26: `Component.periodized_cost`
+    (the accessor `optimize.py` reads) is `capital_cost + fom_cost`;
+    `Component.capital_cost` — and therefore `statistics.capex()` — is the
+    investment share alone. Every surface's "fixed cost" / "CAPEX" must use
+    the sum, or it disagrees with the objective by `fom_cost x p_nom_opt`.
+    """
+    return annualised_investment + fom_cost
+
+
+def fom_per_horizon(annual_fom: float, snapshots_per_period: int) -> float:
+    """
+    An annual fixed O&M (EUR/MW/yr, what the GUI asks for) on the per-period
+    basis the LP charges: scaled by the share of a year one period models,
+    exactly like `annualised_capital_cost` scales an overnight investment.
+
+    PyPSA itself adds `fom_cost` UNSCALED (MEASURED 2026-09-27); the GUI's
+    periodized-cost fill applies this scaling around the solve and every
+    report so a typed annual FOM is not charged as if one day were a year.
+    """
+    return annual_fom * (snapshots_per_period / HOURS_PER_YEAR)
+
+
+def capital_cost_per_horizon(annual_capital_cost: float, snapshots_per_period: int) -> float:
+    """
+    A `capital_cost` typed directly (annualised EUR/MW/yr — the GUI's unit)
+    on the per-period basis the LP charges. Same share-of-a-year scaling as
+    `annualised_capital_cost` applies to an overnight investment and
+    `fom_per_horizon` to FOM.
+
+    PyPSA itself uses a directly typed `capital_cost` UNSCALED, per modelled
+    horizon (MEASURED 2026-09-27); the GUI's periodized-cost fill applies this
+    scaling around the solve and every report.
+    """
+    return annual_capital_cost * (snapshots_per_period / HOURS_PER_YEAR)

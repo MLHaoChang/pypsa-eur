@@ -110,8 +110,8 @@ def test_cap_scopes_to_electrical_buses_only():
     ELECTRICAL 1200 MWh, not of 1800) still lands electrical shed at 120."""
     sink, _ = _solve(_network(h2_side=True), ens_cap_permyriad=CAP_PERMYRIAD)
     cap = sink["last_lost_load"]
-    assert _weighted_shed(cap, columns=["b"]) == pytest.approx(CAP_MWH, rel=1e-3)
-    assert _weighted_shed(cap, columns=["b_h2"]) == pytest.approx(
+    assert _weighted_shed(cap, columns=["l"]) == pytest.approx(CAP_MWH, rel=1e-3)
+    assert _weighted_shed(cap, columns=["l_h2"]) == pytest.approx(
         50.0 * N_SNAPSHOTS * WEIGHT, rel=1e-3)
 
 
@@ -235,10 +235,10 @@ def test_zone_ceiling_binds_below_the_loose_system_cap():
         ens_zone_cap_multiple=ZONE_MULTIPLE,
     )
     ll = sink["last_lost_load"]["lost_load_t"]
-    for bus in ("bus_a", "bus_b"):
-        shed = float(ll[bus].clip(lower=0).sum()) * WEIGHT
+    for load_id in ("load_a", "load_b"):
+        shed = float(ll[load_id].clip(lower=0).sum()) * WEIGHT
         assert shed == pytest.approx(per_zone_cap, rel=1e-3), (
-            f"{bus} shed {shed} MWh — un-capped would be "
+            f"{load_id} shed {shed} MWh — un-capped would be "
             f"{UNCAPPED_SHED_MWH}, the zone ceiling must hold {per_zone_cap}"
         )
 

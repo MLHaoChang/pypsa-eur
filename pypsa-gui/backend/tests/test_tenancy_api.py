@@ -270,6 +270,59 @@ def test_super_admin_creates_organization(super_admin_client, auth_session_local
     assert created_org is not None
 
 
+def test_a_super_admin_claiming_into_an_unknown_org_is_refused(
+    super_admin_client,
+) -> None:
+    """
+    `org_id` is resolved to the Organization ROW, so an id that names nothing
+    is a 404 before any work happens.
+
+    CORRECTION — what this change actually did. An earlier version of this
+    docstring (and the commit message with it) said the claim "used to proceed"
+    and that `storage_paths.taken_names` would "quietly create a directory
+    belonging to no organization". Both halves are false, and an independent
+    review measured it: `legacy_migrate._validate_claim_request` ALREADY did
+    `db.get(Organization, org_id)` and raised `ValidationError("Organization
+    not found")` — a 400 — and `taken_names` only does `root.is_dir()` then
+    `iterdir()`, never `mkdir`, and runs after that validation anyway.
+
+    So the only behavioural effect is 400 → 404, and the reason to keep the
+    change is the CodeQL flow, not a hole: `_resolve_claim_org_id` used to hand
+    back the caller's uuid unchecked, which is tainted into a path segment
+    (`py/path-injection`), and resolving it to the row removes the taint edge.
+    Note the inconsistency this leaves: `tenancy_service.create_user` still
+    answers 400 for the identical condition. No frontend caller branches on the
+    code — `api/admin.ts` and `LegacyMigratePage.tsx` render `detail` — so this
+    is a wart, not a break.
+
+    The second assertion below is kept but proves nothing on its own: it passes
+    identically against the old code, because nothing ever created that
+    directory.
+    """
+    legacy_root = get_settings().legacy_root
+    (legacy_root / "Orphan").mkdir(parents=True)
+    (legacy_root / "Orphan" / "metadata.json").write_text(
+        json.dumps({"name": "Orphan", "parent_project": None}), encoding="utf-8",
+    )
+    (legacy_root / "Orphan" / "network.nc").write_text("x", encoding="utf-8")
+
+    response = super_admin_client.post(
+        "/api/admin/legacy-projects/Orphan/claim",
+        json={
+            "owner_id": str(uuid.uuid4()),
+            "org_id": "00000000-0000-4000-8000-000000000000",
+            "member_ids": [],
+            "include_descendants": False,
+        },
+    )
+
+    assert response.status_code == 404, response.text
+    assert "organization" in response.text.lower()
+    # And nothing was created for it.
+    root = get_settings().projects_root
+    assert not (root / "00000000-0000-4000-8000-000000000000").exists()
+
+
 def test_admin_lists_and_claims_legacy_project_tree(
     admin_client,
     auth_session_local,

@@ -548,6 +548,41 @@ describe('MarginLoopPanel verdict', () => {
     expect(s).toMatch(/unbounded/i)
   })
 
+  // ★ B2 (whole-branch review). The chip showed the FLEET ceiling only, so an
+  // unbounded fleet read "ceiling unbounded" beside an `unreachable` verdict
+  // whose own sentence says the search is bounded above by the schema's cap.
+  // Bite: drop the `search_ceiling` branch — the chip says "unbounded" with
+  // no bound beside it and the pair contradicts again.
+  it('names the bound the search stopped at when the fleet is unbounded',
+    async () => {
+      vi.mocked(resultsApi.getMarginLoop).mockResolvedValue(
+        { ...UNREACHABLE, margin_ceiling: null, search_ceiling: 5 })
+      await openPanel()
+      const s = (await screen.findByTestId('margin-loop-ceiling')).textContent ?? ''
+      expect(s).toMatch(/unbounded/i)
+      expect(s).toMatch(/500%/)
+    })
+
+  it('shows ONE number when the fleet ceiling is what the search stopped at',
+    async () => {
+      vi.mocked(resultsApi.getMarginLoop).mockResolvedValue(
+        { ...UNREACHABLE, margin_ceiling: 2.2, search_ceiling: 2.2 })
+      await openPanel()
+      const s = (await screen.findByTestId('margin-loop-ceiling')).textContent ?? ''
+      expect(s).toMatch(/ceiling 220%/)
+      expect(s).not.toMatch(/search stops/)
+    })
+
+  it('names both when the schema cap stops the search under the fleet ceiling',
+    async () => {
+      vi.mocked(resultsApi.getMarginLoop).mockResolvedValue(
+        { ...UNREACHABLE, margin_ceiling: 7, search_ceiling: 5 })
+      await openPanel()
+      const s = (await screen.findByTestId('margin-loop-ceiling')).textContent ?? ''
+      expect(s).toMatch(/700%/)
+      expect(s).toMatch(/search stops at 500%/)
+    })
+
   // ★ [S9] Bite: render nothing for `base_restored`.
   it('says whether the closing restore actually ran', async () => {
     vi.mocked(resultsApi.getMarginLoop).mockResolvedValue(MET)

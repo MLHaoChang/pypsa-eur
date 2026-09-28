@@ -23,6 +23,7 @@ recent N restore points without the dir growing unbounded.
 from __future__ import annotations
 
 import json
+import logging
 import pathlib
 import re
 import shutil
@@ -61,6 +62,8 @@ from routers.projects import (
     _solver_config_from_dict,
 )
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 
@@ -82,6 +85,15 @@ _MAX_SNAPSHOTS_PER_PROJECT = 50
 # check below, but we still validate the form for defence in depth. The `T`
 # separator and `-` digit-group dividers are the only non-alphanumerics that
 # leak out of strftime + slugify.
+# The characters `_LABEL_RE` used to let through, as data rather than as a
+# pattern. Kept beside it so the two cannot drift: `test_snapshot_slug.py`
+# asserts every member survives slugification and that nothing else does.
+_SLUG_ALPHABET = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789_-"
+)
+
 _SNAPSHOT_ID_RE = re.compile(r"^[A-Za-z0-9_\-.T]{1,128}$")
 _LABEL_RE = re.compile(r"[^A-Za-z0-9_\-]+")
 
@@ -136,6 +148,74 @@ def _safe_snapshot_dir(project_dir: pathlib.Path, snapshot_id: str) -> pathlib.P
     return dest
 
 
+def _existing_snapshot_dir(
+    project_dir: pathlib.Path, snapshot_id: str, not_found: str,
+) -> pathlib.Path:
+    """
+    The directory of an EXISTING snapshot, found by matching the real directory
+    entries rather than by joining the caller's string onto a path.
+
+    WHY NOT `_safe_snapshot_dir`. That function is correct — regex allowlist,
+    `resolve()`, `is_relative_to` containment — but the path it returns is still
+    BUILT from the caller's string, and CodeQL's `py/path-injection` does not
+    model `Path.is_relative_to` as a barrier. The flows it reported ran straight
+    through the guard: `snapshots.py:118 -> :130 -> :136`, sink somewhere
+    downstream. A reader auditing those alerts has to re-derive the containment
+    argument every time, and a future edit that weakens the check would not be
+    caught by anything.
+
+    Here the tainted value is used ONLY in an equality comparison. The path
+    handed back comes out of `iterdir()`, so its NAME is one the directory
+    really contains rather than one the caller supplied. Same shape as
+    `gridspine_service._authorized_dispatch_dir` (859a7265), which resolves a
+    caller's directory string back to a project row and returns the path derived
+    from that row.
+
+    `iterdir()` DOES NOT SUBSUME THE CONTAINMENT CHECK, and the first version of
+    this function wrongly said it did. `iterdir()` yields a symlink as an
+    ordinary child, `is_dir()` follows it, and the entry `snapshots/<valid-id>`
+    may therefore be a link to any directory on the box. The helper this
+    replaced resolved the path and refused it with 400; without the resolve
+    below, `restore` would copy that target's `network.nc` and `chat.jsonl` into
+    the caller's project — another tenant's, if the link points there. So the
+    resolve stays, for the reason `upload_service._safe_file_dir` states: the
+    regex forbids traversal by construction, and only the resolved path can
+    refuse a symlink.
+
+    The regex still runs first: it rejects an obviously malformed id with 400
+    rather than 404, so a client sending nonsense gets told so instead of being
+    told the snapshot does not exist.
+
+    `not_found` is the caller's message because the two callers word it
+    differently — `restore` says "(or incomplete)" since it also requires
+    `network.nc` — and those strings are what clients see.
+    """
+    if not isinstance(snapshot_id, str) or not _SNAPSHOT_ID_RE.match(snapshot_id):
+        raise HTTPException(400, f"Invalid snapshot id: {snapshot_id!r}")
+    try:
+        entries = list(_snapshots_dir(project_dir).iterdir())
+    except (FileNotFoundError, NotADirectoryError):
+        entries = []
+    for child in entries:
+        if child.name != snapshot_id or not child.is_dir():
+            continue
+        try:
+            resolved = child.resolve()
+            if not resolved.is_relative_to(_snapshots_dir(project_dir).resolve()):
+                # A symlink out of the snapshots tree. 404, not 400: the id is
+                # well-formed, and "no such snapshot" is the truth a client is
+                # entitled to — it just isn't a snapshot of this project.
+                logger.warning(
+                    "snapshots: refused id %r — resolves outside the snapshots "
+                    "dir (symlink?)", snapshot_id,
+                )
+                break
+        except (OSError, ValueError):
+            break
+        return resolved
+    raise HTTPException(404, not_found)
+
+
 def _slugify_label(label: str) -> str:
     """
     Convert a free-form label to a filename-safe slug.
@@ -145,7 +225,40 @@ def _slugify_label(label: str) -> str:
     with ``-`` and leading/trailing dashes are trimmed. Capped to 32 chars so
     the full ``<iso>-<slug>`` id stays under the Windows 260-char path limit.
     """
-    slug = _LABEL_RE.sub("-", (label or "").strip())[:32].strip("-_.")
+    # REBUILT FROM `_SLUG_ALPHABET`, not sliced out of `label`.
+    #
+    # `_LABEL_RE.sub("-", ...)` produced exactly the same string and was just as
+    # safe — every surviving character was already drawn from `[A-Za-z0-9_-]`.
+    # What it was not is LEGIBLE: a regex substitution is not a barrier CodeQL
+    # models, so the slug stayed tainted, went into the snapshot id, and the id
+    # went into a directory name — which is why one label flowed to ~30
+    # `py/path-injection` sinks across atomic_io, chat_service, projects and
+    # main.
+    #
+    # Indexing the constant makes the provenance explicit: every character in
+    # the result is a character of `_SLUG_ALPHABET`, chosen by a position
+    # derived from the label rather than copied out of it. The label decides
+    # WHICH safe character appears; it never supplies one.
+    #
+    # `find` returns -1 for anything outside the alphabet. The old pattern was
+    # `[^A-Za-z0-9_\-]+` — note the `+`: a RUN of rejected characters collapsed
+    # to ONE dash, so "a  b" slugified to "a-b" and not "a--b". Emitting a dash
+    # per character would have changed every id containing two adjacent spaces.
+    # The `substituted` flag is that `+`, written out; `test_snapshot_slug.py`
+    # compares the two implementations over a corpus rather than trusting
+    # this note — the first draft of it dropped the collapsing and would have
+    # renamed every snapshot whose label had two adjacent spaces.
+    picked: list[str] = []
+    substituted = False          # was the character just appended a stand-in?
+    for ch in (label or "").strip():
+        i = _SLUG_ALPHABET.find(ch)
+        if i >= 0:
+            picked.append(_SLUG_ALPHABET[i])
+            substituted = False
+        elif not substituted:
+            picked.append("-")   # one dash per RUN, which is what the `+` did
+            substituted = True
+    slug = "".join(picked)[:32].strip("-_.")
     return slug or "snapshot"
 
 
@@ -167,14 +280,37 @@ def _list_snapshot_dirs(project_dir: pathlib.Path) -> list[pathlib.Path]:
 
     Lexicographic descending order on the ISO-prefixed id IS newest-first since
     the prefix is sortable.
+
+    Entries that resolve outside `snapshots/` are dropped, for the reason
+    `_existing_snapshot_dir` states: `iterdir()` yields a symlink as an ordinary
+    child and `is_dir()` follows it. Fixing the lookup helper alone was not
+    enough — this function feeds `list_snapshots` AND `_prune_oldest`, which
+    runs on every create once the cap is hit, and `_force_rmtree` on a link
+    does not refuse: it chmods the TARGET to 0o200 and returns normally, so the
+    prune reported a success, counted a directory it had not removed, and left
+    the poisoned entry to be re-selected on the next create. Filtering here
+    makes the property hold for every consumer instead of one of three.
     """
     snaps = _snapshots_dir(project_dir)
     if not snaps.exists():
         return []
-    return sorted(
-        (d for d in snaps.iterdir() if d.is_dir()),
-        key=lambda d: d.name, reverse=True,
-    )
+    root = snaps.resolve()
+    kept = []
+    for d in snaps.iterdir():
+        if not d.is_dir():
+            continue
+        try:
+            resolved = d.resolve()
+            if not resolved.is_relative_to(root):
+                logger.warning(
+                    "snapshots: ignoring %r — resolves outside the snapshots "
+                    "dir (symlink?)", d.name,
+                )
+                continue
+        except (OSError, ValueError):
+            continue
+        kept.append(resolved)
+    return sorted(kept, key=lambda d: d.name, reverse=True)
 
 
 def _to_info(snap_dir: pathlib.Path) -> SnapshotInfo:
@@ -461,8 +597,11 @@ def restore_snapshot(
     if not (project_dir / "network.nc").exists():
         raise HTTPException(404, f"Project '{name}' not found")
 
-    snap_dir = _safe_snapshot_dir(project_dir, snapshot_id)
-    if not snap_dir.exists() or not (snap_dir / "network.nc").exists():
+    snap_dir = _existing_snapshot_dir(
+        project_dir, snapshot_id,
+        f"Snapshot '{snapshot_id}' not found (or incomplete)",
+    )
+    if not (snap_dir / "network.nc").exists():
         raise HTTPException(404, f"Snapshot '{snapshot_id}' not found (or incomplete)")
 
     _enforce_project_lock(db, _lock_target(project), user)
@@ -653,9 +792,9 @@ def delete_snapshot(
     project_dir = project.directory
     if not (project_dir / "network.nc").exists():
         raise HTTPException(404, f"Project '{name}' not found")
-    snap_dir = _safe_snapshot_dir(project_dir, snapshot_id)
-    if not snap_dir.exists():
-        raise HTTPException(404, f"Snapshot '{snapshot_id}' not found")
+    snap_dir = _existing_snapshot_dir(
+        project_dir, snapshot_id, f"Snapshot '{snapshot_id}' not found",
+    )
     _enforce_project_lock(db, _lock_target(project), user)
     label = _read_snapshot_meta(snap_dir).get("label", snapshot_id)
     # `_force_rmtree` clears read-only attributes and retries with a backoff —

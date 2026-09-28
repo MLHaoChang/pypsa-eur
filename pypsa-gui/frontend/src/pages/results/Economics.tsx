@@ -26,8 +26,9 @@ import { canonicaliseCarrier, type ComponentClass } from './carrierAliases'
 // ── Economics tab ──────────────────────────────────────────────────────────
 // Per-asset profitability view. Each row is one Generator / StorageUnit /
 // Store / Link with its annualised revenue (production × bus marginal price),
-// fixed cost (capital_cost × p_nom_opt, already annualised), variable cost
-// (marginal_cost × dispatch), and the net profit + LCOE/LCOS that fall out.
+// fixed cost ((capital_cost + fom_cost) × p_nom_opt — the annuitised CAPEX plus
+// fixed O&M the LP objective paid), variable cost (marginal_cost × dispatch),
+// and the net profit + LCOE/LCOS that fall out.
 //
 // Two-level drill-down:
 //   1. By group (Thermal / Renewables / Storage / Converters) — quick
@@ -720,9 +721,9 @@ export default function Economics() {
           <KPI label="Fixed cost"
                value={kpis.fixed != null ? fmtCurrency(kpis.fixed) : COST_UNAVAILABLE}
                sub={kpis.fixed != null
-                 ? 'annualised CAPEX (gens + storage)'
+                 ? 'annualised CAPEX + fixed O&M (gens + storage)'
                  : 'capital-cost resolver failed — see the note above'}
-               hint="Σ (overnight × annuity, or capital_cost) × p_nom_opt over generators, storage units, stores and converters (electrolysers / heat pumps / P2X). Reconciles EXACTLY with the Dispatch tab's CAPEX (annuitised) KPI — measured Δ 0.00. It does NOT match Capacity Expansion's cost_breakdown.capex, which also includes line and transformer CAPEX and is several times larger. Shown as 'unavailable' rather than 0 when the capital-cost resolver fails." />
+               hint="Σ ((overnight × annuity, or capital_cost) + fom_cost) × p_nom_opt over generators, storage units, stores and converters (electrolysers / heat pumps / P2X) — the fixed cost the LP objective actually paid (PyPSA's periodized_cost). FOM is shown separately in the table but is already part of this figure. Reconciles EXACTLY with the Dispatch tab's CAPEX (annuitised) KPI — measured Δ 0.00. It does NOT match Capacity Expansion's cost_breakdown.capex, which also includes line and transformer CAPEX and is several times larger. Shown as 'unavailable' rather than 0 when the capital-cost resolver fails." />
           <KPI label="Variable cost"
                value={fmtCurrency(kpis.vom + kpis.charge_cost)}
                sub={kpis.charge_cost > 0
@@ -872,7 +873,7 @@ export default function Economics() {
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Revenue</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Storage only — cost to charge from the market.">Charge cost</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Σ |p| × marginal_cost.">VOM</th>
-                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Annualised CAPEX (capital_cost × p_nom_opt).">Fixed</th>
+                <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Fixed cost: (capital_cost + fom_cost) × p_nom_opt × horizon years — annuitised CAPEX plus fixed O&M, what the LP objective paid.">Fixed</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase">Net profit</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="LCOE for generators, LCOS for storage, and for converters the all-in cost per MWh of output — capital + VOM + the energy bought. That last one matches the LCOH panel exactly.">LCOE/LCOS</th>
                 <th className="text-right px-2 py-1.5 text-[10px] font-semibold text-muted uppercase" title="Avg price for generators (€/MWh sold); discharge−charge spread for storage.">Spread / avg €</th>
@@ -961,8 +962,9 @@ export default function Economics() {
             matches the dispatch sign convention; storage applies marginal_cost to discharge only (PyPSA's standard formulation).
           </p>
           <p>
-            <span className="font-mono">fixed_cost</span> = capital_cost × p_nom_opt. PyPSA's capital_cost is already annualised
-            (overnight × annuity if you typed overnight_cost), so this equals the LP-objective contribution.
+            <span className="font-mono">fixed_cost</span> = (capital_cost + fom_cost) × p_nom_opt × horizon years. PyPSA's capital_cost is already annualised
+            (overnight × annuity if you typed overnight_cost) and the LP objective adds fixed O&M on top of it, so this equals the
+            LP-objective contribution; <span className="font-mono">fom_cost</span> is the O&M share of it, shown separately, not an extra.
             Σ fixed_cost across this table reconciles exactly with the Dispatch tab's <span className="font-mono">CAPEX (annuitised)</span> KPI.
             It is deliberately smaller than Capacity Expansion's <span className="font-mono">cost_breakdown.capex</span>, which also
             counts line and transformer CAPEX — this tab covers only generators, storage units, stores and converters.
@@ -1214,7 +1216,7 @@ function LcohSection() {
         </span>
       </div>
       <p className="text-[11px] text-muted mb-2.5">
-        LCOH = (annuitised CAPEX + variable OPEX + electricity input cost) ÷ H₂ produced.
+        LCOH = (fixed cost [annuitised CAPEX + fixed O&M] + variable OPEX + electricity input cost) ÷ H₂ produced.
         €/kg uses LHV-based 33.33 kWh/kg conversion. Covers electrolyser
         <span className="font-mono"> Link</span> components only — H₂ <em>storage</em> shows up as
         LCOS in the per-asset chart above (a different asset), and the Compare tab's
@@ -1230,10 +1232,10 @@ function LcohSection() {
                value={fmtEnergy(fleetH2)}
                sub={`across ${scopeLabel}`}
                hint="Σ p0_consume × efficiency × weights — output at bus1 in MWh_H2" />
-          <KPI label="Annuitised CAPEX"
+          <KPI label="Fixed cost (CAPEX + FOM)"
                value={fmtCurrency(fleetCapex)}
                sub="electrolyser fleet"
-               hint="Σ capital_cost × p_nom_opt scaled by ipw.years for the selected scope" />
+               hint="Σ (capital_cost + fom_cost) × p_nom_opt scaled by ipw.years for the selected scope — annuitised CAPEX plus fixed O&M, the fixed cost the LP objective paid" />
           <KPI label="Electricity input cost"
                value={fmtCurrency(fleetElec)}
                sub="corrected bus0 price × consume"
@@ -1250,7 +1252,7 @@ function LcohSection() {
                 <th className="text-right py-1 px-3 font-medium">p_nom (MW)</th>
                 <th className="text-right py-1 px-3 font-medium">η</th>
                 <th className="text-right py-1 px-3 font-medium">H₂ produced</th>
-                <th className="text-right py-1 px-3 font-medium">CAPEX</th>
+                <th className="text-right py-1 px-3 font-medium" title="Annuitised CAPEX + fixed O&M">Fixed cost</th>
                 <th className="text-right py-1 px-3 font-medium">VOM</th>
                 <th className="text-right py-1 px-3 font-medium">Electricity</th>
                 <th className="text-right py-1 px-3 font-medium">€/MWh_H₂</th>

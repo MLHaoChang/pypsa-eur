@@ -345,6 +345,36 @@ describe('McPanel', () => {
     await screen.findByTestId('mc-metrics')
     expect(screen.queryByTestId('mc-fold-note')).toBeNull()
   })
+  it('renders the RAM provenance chip from units_provenance + ram_note', async () => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue({
+      ...DONE,
+      result: {
+        ...DONE.result!,
+        units_provenance: [
+          { name: 'lib_gas', rate_source: 'carrier_default',
+            library_citation: 'NERC GADS (illustrative)' },
+          { name: 'typed_gas', rate_source: 'asset' },
+        ],
+        storage_provenance: [
+          { name: 'bat', rate_source: 'carrier_default', library_citation: 'NERC' },
+        ],
+        ram_note: 'Rate library + provenance only — not full RAM/CMMS; planned-outage calendars deferred.',
+      },
+    })
+    await openPanel()
+    const chip = await screen.findByTestId('mc-ram-note')
+    expect(chip.textContent).toBe('1 library · 1 asset · storage 1 library')
+    expect(chip.getAttribute('title')).toMatch(/lib_gas: carrier_default/)
+    expect(chip.getAttribute('title')).toMatch(/not full RAM\/CMMS/)
+  })
+
+  it('shows no RAM chip on a pre-P7 result', async () => {
+    vi.mocked(resultsApi.getMc).mockResolvedValue(DONE)
+    await openPanel()
+    await screen.findByTestId('mc-metrics')
+    expect(screen.queryByTestId('mc-ram-note')).toBeNull()
+  })
+
   it('shows no activity chip on a pre-phase result or a null note', async () => {
     vi.mocked(resultsApi.getMc).mockResolvedValue(DONE)
     await openPanel()

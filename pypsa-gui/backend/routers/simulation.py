@@ -497,9 +497,13 @@ def asset_costs():
     here so the table matches the LP-effective numbers — without it, the
     table would show €0 for any asset whose `capital_cost` field is blank.
 
-    Returns {component_attr: {asset_name: effective_capital_cost}} where
-    component_attr is one of 'generators', 'storage_units', 'stores',
-    'links', 'lines', 'transformers'.
+    Returns {component_attr: {asset_name: {...}}} where component_attr is one
+    of 'generators', 'storage_units', 'stores', 'links', 'lines',
+    'transformers' and each entry carries `capital_cost` (annuitised
+    investment), `fom_cost`, `fixed_cost` (= capital_cost + fom_cost, the LP
+    objective's coefficient — what the frontend's "Annualised" mode shows),
+    the upfront `overnight_cost` / `overnight_cost_pv` pair and `lifetime`.
+    See `periodized_capital_costs` for the contract.
     """
     n = PyPSAService.get_network()
     cfg = _state["solver_config"]
@@ -823,6 +827,11 @@ def run():
             last_lost_load=None,
             adequacy_report=None,
             last_reserve_margin=None,
+            eh_redundancy_comparison=None,
+            eh_lever_comparison=None,
+            eh_dtc_stress=None,
+            eh_dtc_planning=None,
+            eh_reference_design_report=None,
             lopf_results=None,
             ac_pf_results=None,
             ac_pf_convergence=None,

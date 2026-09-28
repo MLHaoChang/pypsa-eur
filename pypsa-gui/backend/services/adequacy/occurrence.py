@@ -115,6 +115,40 @@ class OutageParams:
     source: str         # where the number comes from — shown to the user
 
 
+# P7 honesty: COPT/MC payloads carry this so a rate-source ledger is never
+# mistaken for a full RAM/CMMS product.
+RAM_NOTE = (
+    "Rate library + provenance only — not full RAM/CMMS; "
+    "planned-outage calendars deferred."
+)
+
+
+def library_citation(carrier: str | None) -> str | None:
+    """Citation string from ``CARRIER_DEFAULTS``, or None when absent/VRE."""
+    if carrier is None:
+        return None
+    key = str(carrier).strip().lower()
+    if not key:
+        return None
+    default = CARRIER_DEFAULTS.get(key)
+    return default.source if default is not None else None
+
+
+def provenance_entry(
+    *,
+    name: str,
+    rate_source: str,
+    citation: str | None = None,
+) -> dict:
+    """Wire shape for COPT/MC rate-source disclosure (P7)."""
+    entry = {"name": str(name), "rate_source": str(rate_source)}
+    if rate_source == "carrier_default":
+        cite = citation or None
+        if cite:
+            entry["library_citation"] = cite
+    return entry
+
+
 # Per-carrier defaults. Order-of-magnitude class averages for screening, NOT
 # unit-specific data — every entry names its source so the worksheet can show
 # provenance, and the resolve step marks them "carrier_default" so the UI can

@@ -83,6 +83,7 @@ _LIFTED: dict[str, tuple[str, str]] = {
     "get_unit_commitment": ("services.results.unit_commitment", "compute_unit_commitment"),
     "get_statistics": ("services.results.statistics", "compute_statistics"),
     "get_load_results": ("services.results.loads", "compute_load_results"),
+    "get_lost_load": ("services.results.lost_load", "compute_lost_load"),
 }
 
 # The two shared helpers move to services with a `result_df` keyword; the

@@ -87,7 +87,16 @@ PROJECTS_DIR = pathlib.Path(get_settings().flat_projects_root)
 # `SIDECAR_NAME` constants (a router-level import of the adequacy services
 # is a cycle waiting to happen); `test_bundle_sidecars` pins them equal.
 _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.json", "layout.json", "results_state.pkl",
-                 "adequacy_worksheet.json", "adequacy_stress_scenarios.json")
+                 "adequacy_worksheet.json", "adequacy_stress_scenarios.json",
+                 # Review finding S7, third recurrence: the outage-rate
+                 # provenance ledger. Dropping it on a bundle/snapshot/fork is
+                 # not cosmetic — `study_report._evidence_gaps` reads it, so a
+                 # restored project reports every asset-level rate as
+                 # `unsourced` and a clean study grows a provenance gap it does
+                 # not have. test_bundle_sidecars now enumerates every
+                 # SIDECAR_NAME under services/adequacy/ so a fourth sidecar
+                 # cannot repeat this.
+                 "asset_health.json")
 
 # Per-project subdirectories that travel alongside the bundle FILES on every
 # project-to-project transition. Chatbot uploads (Phase A) live here under
@@ -119,6 +128,15 @@ def _rm_onexc(func, path, _exc):  # noqa: ANN001 — shutil callback signature
     is genuinely locked, so re-raise and let `_force_rmtree`'s retry loop back
     off and try the whole tree again.
     """
+    if os.path.islink(path):
+        # NEVER chmod through a link. `shutil.rmtree` refuses a symlink root
+        # by routing `Cannot call rmtree on a symbolic link` here with
+        # `func=os.path.islink` — and `os.path.islink(path)` does not raise, so
+        # the old body SWALLOWED that refusal after chmod-ing the link's TARGET
+        # to 0o200. Measured: `_force_rmtree` on `snapshots/<id> -> /some/dir`
+        # returned normally, left the target in place unreadable and
+        # untraversable, and the delete route answered 204. Re-raise instead.
+        raise OSError(f"refusing to remove a symbolic link: {path}")
     try:
         os.chmod(path, stat.S_IWRITE)
     except OSError:
@@ -143,8 +161,12 @@ def _force_rmtree(target: pathlib.Path) -> None:
       * transient locks (OneDrive sync handle, AV scan, an open file) — the
         whole call is retried a few times with a short backoff.
 
-    Raises the final ``OSError`` if the tree genuinely can't be removed.
+    Raises the final ``OSError`` if the tree genuinely can't be removed — and
+    refuses a symlink outright rather than retrying it four times, since no
+    amount of backoff turns a link into a tree.
     """
+    if target.is_symlink():
+        raise OSError(f"refusing to remove a symbolic link: {target}")
     last: OSError | None = None
     for attempt in range(4):
         try:
@@ -1263,13 +1285,23 @@ def create_from_template(
     # refusal advises then fails FOREVER, because the committed row makes
     # every attempt 409 with "already exists" instead.
     PyPSAService.refuse_if_study_running("create a project from a template")
-    if template_id not in _TEMPLATE_DEFAULT_NAMES:
+    # The KEY from the registry, not the string off the URL. `in` already
+    # decided this is one of a fixed set, so the two are equal by construction
+    # — but only one of them is a value this module owns, and it is the one
+    # that goes on to name a directory. CodeQL reported the caller's string
+    # tainted into `_PROJECT_TEMPLATES_DIR / ... / "network.nc"`; a membership
+    # test is not a barrier it models, the same way `is_relative_to` and a
+    # `re.sub` allowlist are not.
+    template_key = next(
+        (known for known in _TEMPLATE_DEFAULT_NAMES if known == template_id), None
+    )
+    if template_key is None:
         raise HTTPException(
             404,
             f"Unknown template '{template_id}'. Available: "
             f"{', '.join(sorted(_TEMPLATE_DEFAULT_NAMES))}.",
         )
-    src_nc = _PROJECT_TEMPLATES_DIR / template_id / "network.nc"
+    src_nc = _PROJECT_TEMPLATES_DIR / template_key / "network.nc"
     if not src_nc.exists():
         raise HTTPException(
             404,
@@ -1279,7 +1311,7 @@ def create_from_template(
 
     # `name` is optional — default to the template's friendly name, then
     # uniquify so clicking the same template twice doesn't clobber the first.
-    requested = (name or "").strip() or _TEMPLATE_DEFAULT_NAMES[template_id]
+    requested = (name or "").strip() or _TEMPLATE_DEFAULT_NAMES[template_key]
     from services import project_registry
 
     project_registry.require_user(user)

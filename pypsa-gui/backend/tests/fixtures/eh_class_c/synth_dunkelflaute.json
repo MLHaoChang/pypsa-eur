@@ -1,0 +1,9 @@
+{
+  "id": "synth_dunkelflaute",
+  "name": "Synthetic dunkelflaute (2h)",
+  "kind": "profiles",
+  "frequency_per_year": 0.05,
+  "loads_p_set": {"l": [130.0, 130.0]},
+  "generators_p_max_pu": {"wind1": [0.25, 0.25]},
+  "provenance": "synthetic_fixture_v1"
+}

@@ -44,7 +44,10 @@ def _network() -> pypsa.Network:
     n.add("Carrier", "gas")
     n.add("Load", "L", bus="B", p_set=100.0)
     n.add("Generator", "g", bus="B", carrier="gas", p_nom_extendable=True,
-          capital_cost=100.0, marginal_cost=10.0, p_nom_max=10_000.0)
+          # Annual 100 x 8760 EUR/MW/yr: each period models one hour, so the
+          # LP charges 100 EUR/MW per period (capital_cost is annual and
+          # scaled by the modelled share of a year).
+          capital_cost=100.0 * 8760, marginal_cost=10.0, p_nom_max=10_000.0)
     return n
 
 
