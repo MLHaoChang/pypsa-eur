@@ -107,7 +107,12 @@ def _reachable():
         if m.__name__ in seen:
             return
         seen[m.__name__] = m
-        for f in m.model_fields.values():
+        for fname, f in m.model_fields.items():
+            if (m.__name__, fname) in H.FIELDS_AFTER_V1:
+                # A field added after recipe 1 is absent from every recipe-1
+                # record, so nothing below it is ever hashed with recipe 1
+                # (e.g. `LibraryItemRef` under `import_tariff_ref`, WP2.4a).
+                continue
             for t in [f.annotation, *typing.get_args(f.annotation)]:
                 for tt in [t, *typing.get_args(t)]:
                     if isinstance(tt, type) and issubclass(tt, pydantic.BaseModel):

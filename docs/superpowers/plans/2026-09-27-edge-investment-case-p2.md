@@ -569,6 +569,36 @@ Files: `backend/services/library/items.py` (new; JSON payload written as a file 
   `binding_invalid` in preflight; bundle into another org reports `library_issues` for tariff pins; schema-1
   sidecars still read.
 
+- **As implemented:**
+  - **`services/library/items.py`.**
+    - Kinds are `tariff`, `contract` and `connection_agreement`.
+    - A payload is validated against its model. A contract carries `type` (ppa/cfd/dr/lease/eaas/retail, WP2.2a's discriminator); unknown keys are refused and a `library_ref` is dropped.
+    - The stored file is `items/<kind>/<slug>-<sha16>.json`. Its bytes are `hashing.library_item_canonical`: sorted-key JSON of the NON-default fields, so a model that grows an optional field keeps every hash. The contract `type` is part of a contract's bytes.
+    - PUT is idempotent on content and follows the series store's race rule. `resolve` re-hashes the file (missing, altered or out-of-org paths ⇒ `LibraryRefStale`).
+  - **`routers/library`.** It adds `GET /items/{kind}`, `PUT /items/{kind}/{name}` and `GET /items/{kind}/{name}[?version]`. The kind is an enum (422 otherwise), and the org ACL is `_target_org`, as for series. The `/series` routes are unchanged.
+  - **Models.**
+    - `LibraryItemRef(kind, id, version, hash[64])`.
+    - `CommercialConfig.import_tariff_ref` and `ConnectionAgreement.library_ref`, both registered in `FIELDS_AFTER_V1`.
+    - The hash-version inventory walk no longer descends into fields added after recipe 1; recipe-1 records never hold their subtrees.
+    - `types.ts` is mirrored.
+  - **Binding.** `binding.resolve_tariff_ref` runs first in `bind_commercial` through an injected `resolve_item`, re-validating the whole config with the resolved tariff inline.
+    - Stale or missing ⇒ `library_ref_stale` (409).
+    - A tariff that does not bind ⇒ `binding_invalid` (422).
+  - **Preflight.** `lp_bindings.validate_for_network` refuses a ref without an inline copy, and an inline copy whose `library_item_digest` differs from the ref's hash. Preflight reports both as `commercial.binding_invalid` without a database.
+  - **Pins v2.**
+    - `collect_pins` collects series and item refs, each as `{kind, id, version, hash}`.
+    - `write_pins` keeps schema 1 when every pin is a series, else writes schema 2 with `kind`. `read_pins` reads both.
+    - `check_pins` checks item pins with the series rules (missing / changed / payload_unreadable / unpinned), and issues carry `kind`.
+    - `routers/projects` pins with `collect_pins`.
+  - **Tests:** `tests/test_library_items.py` has 16 tests:
+    - CRUD per kind, idempotence, the canonical hash, 422s, contract validation, 404, ACL, 401, and series/item names not colliding;
+    - route resolution into the inline tariff, and 409 for a bad hash, a missing version or a missing id;
+    - preflight on edited and unresolved copies;
+    - a template copied with `library_ref`;
+    - registration;
+    - pin collection, schema 1/2 writing and reading;
+    - a bundle into another org reporting its tariff pin as `missing`.
+
 ## WP2.2-0 Settlement inputs
 
 Files: `services/results/physical_quantities.py` (extension), `services/solver/assumptions.py` (DSR capture

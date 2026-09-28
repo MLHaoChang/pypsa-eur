@@ -35,10 +35,34 @@ class BindingRefusal(Exception):
         self.status, self.code, self.message = status, code, message
 
 
+def resolve_tariff_ref(commercial, resolve_item: Callable[[object], dict] | None):
+    """`commercial` with its `import_tariff_ref` resolved into the inline
+    `import_tariff` (P2 WP2.4a); unchanged without a ref."""
+    from models.commercial import CommercialConfig
+
+    ref = commercial.import_tariff_ref
+    if ref is None:
+        return commercial
+    if resolve_item is None:
+        raise BindingRefusal(409, "library_org_unknown",
+                             "a Library tariff ref needs the project's organization")
+    payload = resolve_item(ref)
+    try:
+        return CommercialConfig.model_validate(
+            {**commercial.model_dump(mode="json"), "import_tariff": payload})
+    except ValueError as exc:
+        raise BindingRefusal(422, "binding_invalid",
+                             f"Library tariff {ref.id!r} v{ref.version} does not bind: {exc}") \
+            from exc
+
+
 def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
-                    resolve_ref: Callable[[object], pd.Series], lock=None) -> dict | None:
+                    resolve_ref: Callable[[object], pd.Series], lock=None,
+                    resolve_item: Callable[[object], dict] | None = None) -> dict | None:
     """Returns the plain dict stored on `SolverConfig.commercial` (None when
-    clearing). `commercial` is a parsed `CommercialConfig` or None."""
+    clearing). `commercial` is a parsed `CommercialConfig` or None. A Library
+    tariff ref is resolved first (`resolve_item`), so everything after checks
+    the tariff the solve will use."""
 
     def plan_registry(entry):
         try:
@@ -56,6 +80,7 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
                 pass  # clearing never fails on an unreadable registry; nothing written
         return None
 
+    commercial = resolve_tariff_ref(commercial, resolve_item)
     try:
         lp_bindings.validate_for_network(n, commercial)
     except lp_bindings.CommercialBindingError as exc:

@@ -342,6 +342,14 @@ export interface Tariff {
   items: TariffItem[]
   pack_hash?: string | null
 }
+/** A pinned Library item version (IC P2 WP2.4a); `hash` is the item's canonical-JSON sha256. */
+export interface LibraryItemRef {
+  kind: 'tariff' | 'contract' | 'connection_agreement'
+  id: string
+  version: number
+  hash: string
+}
+
 export interface ConnectionAgreement {
   kind: 'firm' | 'non_firm_static' | 'non_firm_dynamic' | 'fca'
   import_cap_mw: number
@@ -350,12 +358,16 @@ export interface ConnectionAgreement {
   curtailment_hours_per_year?: number | null
   curtailment_compensation_eur_per_mwh?: number | null
   capacity_fee?: TariffItem | null
+  /** The Library template this agreement was copied from (provenance only). */
+  library_ref?: LibraryItemRef | null
   available_from: string
   group?: string | null
 }
 export interface CommercialConfig {
   poc_link: string
   import_tariff_id?: string | null
+  /** A Library tariff; PUT /solver_config resolves it into the inline import_tariff. */
+  import_tariff_ref?: LibraryItemRef | null
   import_tariff?: Tariff | null
   export_price_ref?: LibraryRef | null
   export_link?: string | null

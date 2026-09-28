@@ -11,6 +11,7 @@ store is `services/library/series_store.py`.
 """
 from __future__ import annotations
 
+from enum import Enum
 from uuid import UUID
 
 import pandas as pd
@@ -21,8 +22,9 @@ from sqlalchemy.orm import Session as DBSession
 from db.models import Organization, User
 from db.session import get_db
 from deps import require_user
-from models.commercial import PriceSeriesRef
+from models.commercial import LibraryItemRef, PriceSeriesRef
 from services import library_acl
+from services.library import items as I
 from services.library import series_io
 from services.library import series_store as S
 
@@ -59,6 +61,22 @@ class SeriesIn(BaseModel):
             raise ValueError("name must be printable, not '.' or '..', and "
                              "contain no '/', '?' or '#'")
         return v
+
+
+class ItemKind(str, Enum):
+    tariff = "tariff"
+    contract = "contract"
+    connection_agreement = "connection_agreement"
+
+
+class ItemIn(BaseModel):
+    payload: dict
+    meta: dict = Field(default_factory=dict)
+
+
+class ItemOut(BaseModel):
+    ref: LibraryItemRef
+    payload: dict
 
 
 class SeriesOut(BaseModel):
@@ -126,3 +144,52 @@ def get_series(name: str, version: int | None = None, org_id: UUID | None = None
     tz = str(series.index.tz) if series.index.tz is not None else None
     return SeriesOut(ref=ref, timestamps=[t.isoformat() for t in series.index],
                      values=[float(v) for v in series.to_numpy()], timezone=tz)
+
+
+# ── items: tariffs, contracts, connection agreements (P2 WP2.4a) ───────────
+
+
+def _item_name(name: str) -> str:
+    name = name.strip()
+    if (not name or name in {".", ".."} or any(ch in "/?#" for ch in name)
+            or not name.isprintable()):
+        raise HTTPException(422, "item name must be printable, not '.' or '..', and "
+                                 "contain no '/', '?' or '#'")
+    return name
+
+
+@router.get("/items/{kind}", response_model=list[LibraryItemRef])
+def list_items(kind: ItemKind, org_id: UUID | None = None, db: DBSession = Depends(get_db),
+               user: User = Depends(require_user)):
+    return I.list_items(db, _target_org(db, user, org_id, write=False), kind.value)
+
+
+@router.put("/items/{kind}/{name}", response_model=LibraryItemRef)
+def put_item(kind: ItemKind, name: str, body: ItemIn, org_id: UUID | None = None,
+             db: DBSession = Depends(get_db), user: User = Depends(require_user)):
+    org = _target_org(db, user, org_id, write=True)
+    try:
+        return I.put_item(db, org, kind.value, _item_name(name), body.payload, body.meta,
+                          created_by=user.id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get("/items/{kind}/{name}", response_model=ItemOut)
+def get_item(kind: ItemKind, name: str, version: int | None = None,
+             org_id: UUID | None = None, db: DBSession = Depends(get_db),
+             user: User = Depends(require_user)):
+    org = _target_org(db, user, org_id, write=False)
+    ref = (I.latest_ref(db, org, kind.value, name) if version is None
+           else I.ref_for(db, org, kind.value, name, version))
+    if ref is None:
+        what = f"{kind.value} {name!r}" if version is None else \
+            f"version {version} of {kind.value} {name!r}"
+        raise HTTPException(404, f"No {what} in this Library")
+    try:
+        payload = I.resolve(db, org, ref)
+    except S.LibraryRefNotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except S.LibraryRefStale as exc:
+        raise HTTPException(409, {"code": "library_ref_stale", "message": str(exc)}) from exc
+    return ItemOut(ref=ref, payload=payload)

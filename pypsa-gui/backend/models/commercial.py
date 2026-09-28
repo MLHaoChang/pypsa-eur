@@ -96,6 +96,19 @@ TimeSeriesRef = PriceSeriesRef  # one ref type; the kind lives in the Library it
 # ------------------------------------------------------------------ tariffs
 
 
+LibraryItemKind = Literal["tariff", "contract", "connection_agreement"]
+
+
+class LibraryItemRef(BaseModel):
+    """A pinned Library item version (P2 WP2.4a): `hash` is the sha256 of the
+    item's canonical JSON (`hashing.library_item_digest`)."""
+
+    kind: LibraryItemKind
+    id: str = Field(min_length=1)
+    version: int = Field(ge=1)
+    hash: str = Field(min_length=64, max_length=64)
+
+
 class TariffPeriod(BaseModel):
     """Season × weekday × time-window applicability with one rate.
 
@@ -317,6 +330,9 @@ class ConnectionAgreement(BaseModel):
     capacity_fee: TariffItem | None = None
     available_from: date
     group: str | None = None
+    # The Library template this agreement was copied from (P2 WP2.4a):
+    # provenance only — nothing resolves it at solve time.
+    library_ref: LibraryItemRef | None = None
 
     @model_validator(mode="after")
     def _kind_requirements(self) -> "ConnectionAgreement":
@@ -438,6 +454,10 @@ class CommercialConfig(BaseModel):
     # P1 carries the tariff inline: Library CRUD for tariffs is P2 WP2.4, from
     # which point `import_tariff_id` names a Library tariff (plan WP1.3 note).
     import_tariff: Tariff | None = None
+    # A Library tariff (P2 WP2.4a). `PUT /solver_config` resolves it into the
+    # inline `import_tariff`, which the solve uses; the ref is provenance and
+    # drift (preflight checks the inline copy hashes to it).
+    import_tariff_ref: LibraryItemRef | None = None
     export_price_ref: TimeSeriesRef | None = None
     # The `poc→grid` Link that carries export (spec §5: export price = −price
     # on a second PoC Link). Required by an export price or an export item.

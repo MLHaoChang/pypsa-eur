@@ -40,6 +40,8 @@ FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {
     ("Ratchet", "months"): None,                         # WP2.1a-iii
     ("Ratchet", "cyclic_year"): False,                   # WP2.1a-iii
     ("CommercialConfig", "meter_history_energy_kwh"): {},  # WP2.1c-ii
+    ("CommercialConfig", "import_tariff_ref"): None,     # WP2.4a
+    ("ConnectionAgreement", "library_ref"): None,        # WP2.4a
 }
 
 
@@ -80,6 +82,20 @@ def digest(obj: Any, *, version: int = HASH_VERSION) -> str:
     """16-hex sha256 of the canonical JSON (sorted keys)."""
     raw = json.dumps(canonical(obj, version=version), sort_keys=True)
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def library_item_canonical(model: Any) -> str:
+    """A Library item's canonical JSON (P2 WP2.4a): its NON-DEFAULT fields,
+    sorted keys, no whitespace — a model that later grows an optional field
+    keeps every stored item hash."""
+    return json.dumps(model.model_dump(mode="json", exclude_defaults=True),
+                      sort_keys=True, separators=(",", ":"))
+
+
+def library_item_digest(model: Any) -> str:
+    """The full sha256 of `library_item_canonical(model)` — a Library item's
+    hash, so an inline copy can be checked against its ref without a database."""
+    return hashlib.sha256(library_item_canonical(model).encode("utf-8")).hexdigest()
 
 
 def version_of(record: dict | None) -> int:

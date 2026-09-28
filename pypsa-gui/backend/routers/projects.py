@@ -1905,7 +1905,7 @@ def _save_context(
         _atomic_write_text(dest / "solver_config.json", json.dumps(asdict(cfg), indent=2))
         # Pin the Library versions the config references (WP1.1c).
         from services.library import bundle_pins
-        bundle_pins.write_pins(dest, bundle_pins.collect_refs(asdict(cfg)))
+        bundle_pins.write_pins(dest, bundle_pins.collect_pins(asdict(cfg)))
 
     # Persist solve-time _state fields that n.export_to_netcdf doesn't
     # capture. Without these, after reload:

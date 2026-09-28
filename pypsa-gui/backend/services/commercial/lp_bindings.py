@@ -490,6 +490,20 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
         raise CommercialBindingError(
             "commercial.demand_items (a selection of demand items) is not supported in P1; "
             "every demand item of the tariff is charged — remove the unwanted items instead")
+    if cfg.import_tariff_ref is not None:
+        # A Library tariff (P2 WP2.4a): `PUT /solver_config` resolves it into
+        # the inline copy the solve uses; a copy that is missing, or that no
+        # longer hashes to the ref, is not what the ref names.
+        ref = cfg.import_tariff_ref
+        if cfg.import_tariff is None:
+            raise CommercialBindingError(
+                f"import_tariff_ref names Library tariff {ref.id!r} v{ref.version}, which is not "
+                "resolved into import_tariff; re-apply the commercial config")
+        if _H.library_item_digest(cfg.import_tariff) != ref.hash:
+            raise CommercialBindingError(
+                f"the inline import_tariff is not Library tariff {ref.id!r} v{ref.version} "
+                "(content differs from the ref's hash); re-apply the config to resolve the "
+                "ref, or drop import_tariff_ref to keep the edited tariff")
     if cfg.import_tariff_id is not None and cfg.import_tariff is None:
         raise CommercialBindingError(
             "import_tariff_id names a Library tariff, which arrives in P2 (WP2.4); "

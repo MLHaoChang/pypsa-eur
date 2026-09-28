@@ -373,10 +373,31 @@ def _bind_commercial(commercial, user) -> dict | None:
             except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
                 raise binding.BindingRefusal(409, "library_ref_stale", str(exc)) from exc
 
+    def resolve_item(ref):
+        from db.models import User
+        from db.session import SessionLocal
+        from services import library_acl
+        from services.library import items as library_items
+
+        org = UUID(str(ctx.org_id)) if ctx.org_id else None
+        with SessionLocal() as db:
+            if org is None and isinstance(user, User):
+                org = library_acl.org_of(db, user)
+            if org is None:
+                raise binding.BindingRefusal(
+                    409, "library_org_unknown",
+                    "save the project first: a Library ref resolves in the project's "
+                    "organization")
+            try:
+                return library_items.resolve(db, org, ref)
+            except (series_store.LibraryRefNotFound, series_store.LibraryRefStale) as exc:
+                raise binding.BindingRefusal(409, "library_ref_stale", str(exc)) from exc
+
     try:
         return binding.bind_commercial(PyPSAService.get_network(), commercial,
                                        project_dir=project_dir, resolve_ref=resolve,
-                                       lock=PyPSAService.get_lock())
+                                       lock=PyPSAService.get_lock(),
+                                       resolve_item=resolve_item)
     except binding.BindingRefusal as exc:
         raise HTTPException(exc.status, {"code": exc.code, "message": exc.message}) from exc
 
