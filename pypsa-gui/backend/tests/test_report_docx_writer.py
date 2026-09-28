@@ -485,3 +485,24 @@ def test_render_document_honours_a_user_template():
     assert doc.sections[0].footer.paragraphs[0].text == "ACME Energy Consulting"
     assert "Confidential — draft template body" not in _text(data)
     assert "sec:fmea_top" in _bookmarks(doc)
+
+
+def test_an_established_section_with_a_prose_failure_note_states_it():
+    """
+    WP6 finding: the job records "prose not established" in `note` on a
+    section whose EVIDENCE is ok; the writer used to state notes only on
+    non-ok sections, so the reader never learned the prose was missing.
+    """
+    doc = _document()
+    note = "prose not established: garbage twice (profile local-llama, model llama-3.1-8b)"
+    doc.sections[1].note = note
+    text = _text(render_document_docx(doc, figure_bytes={}))
+    assert f"Note: {note}" in text
+
+
+def test_a_note_already_carried_by_a_callout_is_not_stated_twice():
+    doc = _document()
+    doc.sections[0].note = "excludes load-shedding cost"   # same text as its Callout
+    text = _text(render_document_docx(doc, figure_bytes={}))
+    assert text.count("excludes load-shedding cost") == 1
+

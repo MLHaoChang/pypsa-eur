@@ -369,6 +369,15 @@ def _render_doc_section(doc, section: Section, report: ReportDocument,
              f"{BOOKMARK_PREFIX}{section.section_id}")
     for block in section.blocks:
         _render_block(doc, block, report, figure_bytes, counters)
+    # An ESTABLISHED section can still carry a note the reader must see — the
+    # generation job writes "prose not established: <reason> (profile …)" on a
+    # section whose evidence is fine but whose write-up the model could not
+    # produce. State it, unless a Callout block already carries the same text
+    # (the evidence-only assembler puts stage notes into a disclosure Callout).
+    if section.status == "ok" and section.note and not any(
+            isinstance(b, Callout) and b.text.strip() == section.note.strip()
+            for b in section.blocks):
+        _disclosure(doc, f"Note: {section.note}")
     # A section whose status says it was not established but which carries
     # no such block (a hand-edited version, a future generator) is still
     # stated: the omission is the finding.
