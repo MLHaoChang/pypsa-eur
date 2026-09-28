@@ -34,7 +34,8 @@ def test_recipe_2_ignores_a_new_field_at_its_default():
 
 
 def test_recipe_1_is_a_full_dump_minus_later_fields_at_their_default(monkeypatch):
-    monkeypatch.setattr(H, "FIELDS_AFTER_V1", {"new_field": None, "new_flag": False})
+    monkeypatch.setattr(H, "FIELDS_AFTER_V1", {("_After", "new_field"): None,
+                                               ("_After", "new_flag"): False})
     assert H.digest(_After(a=1), version=1) == H.digest(_Before(a=1), version=1)
     assert H.digest(_After(a=1, new_flag=True), version=1) != H.digest(_Before(a=1), version=1)
     assert H.digest(_After(a=1, b=None), version=1) != H.digest(_After(a=1, b="x"), version=1)
@@ -68,3 +69,68 @@ def test_records_carry_the_current_version():
     applied.undo()
     applied.commit()
     assert n.meta[L.META_LINKS]["hash_version"] == H.HASH_VERSION
+
+
+# The fields recipe 1 knew (P1 → 04c3c17), per model reachable from
+# CommercialConfig. WP2.0 review round 2 R1: a field added to any of these
+# models must be registered in `hashing.FIELDS_AFTER_V1` as (model, field) with
+# its default, or every recipe-1 record holding that model flips to drift.
+V1_FIELDS: dict[str, set[str]] = {
+    "CommercialConfig": {"connection", "demand_items", "export_link", "export_price_ref",
+                         "group_cap_mw", "group_contract", "group_members", "import_tariff",
+                         "import_tariff_id", "initial_peak_lower_bound",
+                         "meter_history_peaks_kw", "poc_link", "timezone"},
+    "ConnectionAgreement": {"available_from", "capacity_fee",
+                            "curtailment_compensation_eur_per_mwh", "curtailment_hours_per_year",
+                            "envelope", "export_cap_mw", "group", "import_cap_mw", "kind"},
+    "PriceSeriesRef": {"hash", "id", "provider", "source", "version", "vintage_year"},
+    "Ratchet": {"lookback_months", "share"},
+    "Tariff": {"dso_or_retailer", "id", "items", "jurisdiction", "name", "pack_hash",
+               "valid_from", "valid_to"},
+    "TariffItem": {"direction", "id", "kind", "measured_on", "periods", "ratchet", "settlement",
+                   "tiers", "unit"},
+    "TariffPeriod": {"end_hour", "months", "name", "rate", "start_hour", "weekdays"},
+    "Tier": {"rate", "threshold"},
+}
+
+
+def _reachable():
+    import typing
+
+    import pydantic
+
+    from models.commercial import CommercialConfig
+
+    seen: dict[str, type] = {}
+
+    def walk(m):
+        if m.__name__ in seen:
+            return
+        seen[m.__name__] = m
+        for f in m.model_fields.values():
+            for t in [f.annotation, *typing.get_args(f.annotation)]:
+                for tt in [t, *typing.get_args(t)]:
+                    if isinstance(tt, type) and issubclass(tt, pydantic.BaseModel):
+                        walk(tt)
+
+    walk(CommercialConfig)
+    return seen
+
+
+def test_every_field_added_after_recipe_1_is_registered_with_its_default():
+    for name, model in _reachable().items():
+        for field, info in model.model_fields.items():
+            if field in V1_FIELDS.get(name, set()):
+                continue
+            key = (name, field)
+            assert key in H.FIELDS_AFTER_V1, (
+                f"{name}.{field} was added after recipe 1: register {key} with its default in "
+                "services/commercial/hashing.FIELDS_AFTER_V1")
+            assert H.FIELDS_AFTER_V1[key] == info.get_default(call_default_factory=True), key
+
+
+def test_no_recipe_1_field_disappeared():
+    models = _reachable()
+    for name, fields in V1_FIELDS.items():
+        assert name in models, name
+        assert fields <= set(models[name].model_fields), name

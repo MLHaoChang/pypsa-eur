@@ -148,6 +148,13 @@ convention), `backend/tests/test_physical_quantities_seam.py` (L117 test updated
     - An 11th case, `poc_capex_fee`.
   - **Gap-figure note** amended.
 
+- Round 2 → **PASS**. Hardening R1 closed:
+  - `FIELDS_AFTER_V1` is keyed by (model, field) and walked per model.
+  - `test_commercial_hash_versions.py` pins the recipe-1 field inventory of every model reachable from `CommercialConfig`, and fails on a field added without its registration and default.
+  - The `hashing.py` docstring says that changing an existing default must bump `HASH_VERSION` (R2).
+  
+  **Every later WP that adds a commercial model field registers it there.**
+
 ## WP2.1a-0 Demand windows keyed by period name
 
 A URDB demand period is one `TariffPeriod` per `[start, end)` fragment and per weekday/weekend set; P1 keys

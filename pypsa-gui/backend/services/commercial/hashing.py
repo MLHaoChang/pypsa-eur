@@ -10,11 +10,16 @@ recipe that made it, or a schema change would flip every solved project:
 
   * recipe 1 — `model_dump(mode="json")`, every field. Records without a
     `hash_version` were made by it (P1 and P2 up to this change). When a model
-    grows a field after recipe 1, the field is listed in `FIELDS_AFTER_V1` with
-    its default and dropped from recipe-1 dumps while it holds that default, so
-    a stored recipe-1 hash still compares equal.
+    grows a field after recipe 1, register it in `FIELDS_AFTER_V1` as
+    `(model class name, field)` with its default: it is dropped from recipe-1
+    dumps while it holds that default, so a stored recipe-1 hash still compares
+    equal. `tests/test_commercial_hash_versions.py` pins the recipe-1 field
+    inventory and fails on an unregistered new field.
   * recipe 2 — `model_dump(mode="json", exclude_defaults=True)`: a new optional
-    field never changes a hash. Fields added from now on need no list entry.
+    field never changes a hash (they still need their `FIELDS_AFTER_V1` entry
+    for recipe-1 comparisons). **Changing an existing default** is invisible to
+    recipe 2 (a config relying on the old default hashes the same while its
+    meaning changes): it must bump `HASH_VERSION`.
 
 Pure service: imports neither routers nor `solver_service`.
 """
@@ -26,18 +31,31 @@ from typing import Any
 
 HASH_VERSION = 2
 
-# Fields added to the commercial models after recipe 1, with their defaults.
-# Append here in the WP that adds a field (P2: WP2.1a-i/ii/iii, WP2.2a/b, …).
-FIELDS_AFTER_V1: dict[str, Any] = {}
+# Fields added to the commercial models after recipe 1: (model class name,
+# field) → default. Append in the WP that adds a field (P2: WP2.1a-i/ii/iii,
+# WP2.2a/b, …); the inventory test fails until it is here.
+FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {}
 
 
-def _drop_later_fields(obj: Any) -> Any:
-    if isinstance(obj, dict):
-        return {k: _drop_later_fields(v) for k, v in obj.items()
-                if not (k in FIELDS_AFTER_V1 and v == FIELDS_AFTER_V1[k])}
+def _recipe_1(obj: Any) -> Any:
+    """The full JSON dump of `obj`, minus the fields registered as added after
+    recipe 1 while they hold their default — walked per model, so the same
+    field name on two models (e.g. `months`) never collides."""
     if isinstance(obj, list):
-        return [_drop_later_fields(v) for v in obj]
-    return obj
+        return [_recipe_1(o) for o in obj]
+    if not hasattr(obj, "model_dump"):
+        return obj
+    out = obj.model_dump(mode="json")
+    name = type(obj).__name__
+    for field in type(obj).model_fields:
+        value = getattr(obj, field)
+        key = (name, field)
+        if key in FIELDS_AFTER_V1 and out.get(field) == FIELDS_AFTER_V1[key]:
+            out.pop(field, None)
+        elif hasattr(value, "model_dump") or (isinstance(value, list) and value
+                                              and hasattr(value[0], "model_dump")):
+            out[field] = _recipe_1(value)
+    return out
 
 
 def canonical(obj: Any, *, version: int = HASH_VERSION) -> Any:
@@ -48,7 +66,7 @@ def canonical(obj: Any, *, version: int = HASH_VERSION) -> Any:
     if hasattr(obj, "model_dump"):
         if version >= 2:
             return obj.model_dump(mode="json", exclude_defaults=True)
-        return _drop_later_fields(obj.model_dump(mode="json"))
+        return _recipe_1(obj)
     return obj
 
 
