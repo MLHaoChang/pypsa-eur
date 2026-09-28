@@ -45,9 +45,10 @@ from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services import gridspine_service as gs
 from services import project_registry
-from services.upload_guard import read_capped
+from services.upload_guard import UploadBudget
 
-#: Per-part cap for the two client TABLES, well below the process-wide 512 MB
+#: Cap for the two client TABLES together (one `UploadBudget` per request),
+#: well below the process-wide 512 MB
 #: that exists for a clustered `network.nc`. A year of hourly dispatch for 50
 #: units is ~440k rows, around 20 MB of CSV, and an Excel workbook of the same
 #: is smaller still — so 64 MB is generous for every legitimate file while taking
@@ -216,9 +217,10 @@ async def upload_readback(
 ):
     """The engineer's PowerFactory export for hour `hour`'s bundle: the bus
     CSV is required, the branch CSV optional (spec stage 6). Both are read
-    under the same size cap as every other upload."""
-    bus_bytes = await read_capped(bus)
-    branch_bytes = await read_capped(branches) if branches is not None else None
+    under ONE size cap, shared, so two files cannot buffer twice it."""
+    budget = UploadBudget()
+    bus_bytes = await budget.read(bus)
+    branch_bytes = await budget.read(branches) if branches is not None else None
     # Off the event loop: the comparison parses the engineer's CSVs and reads the
     # bundle, and none of that is async. See the note on the external upload.
     return await run_in_threadpool(
@@ -239,15 +241,16 @@ async def upload_external_dispatch(
     (increment 7). Two files, or one Excel workbook with `dispatch` and `loads`
     sheets — the producer decides and says so when the single file cannot carry
     both. Validated on arrival, so a 422 here means the engineer's file needs
-    fixing before the study is worth queueing. Both read under the same size cap
-    as every other upload.
+    fixing before the study is worth queueing. Both are read under ONE
+    `TABLE_MAX_BYTES` budget, shared, so the pair cannot buffer twice it.
 
     Under `/dispatch-source/` rather than `/uploads/` on purpose: the effect of
     this call is to SET the study's dispatch source, which is what
     `PUT /{name}/dispatch-source` does for the other three.
     """
-    dispatch_bytes = await read_capped(dispatch, TABLE_MAX_BYTES)
-    loads_bytes = await read_capped(loads, TABLE_MAX_BYTES) if loads is not None else None
+    budget = UploadBudget(TABLE_MAX_BYTES)
+    dispatch_bytes = await budget.read(dispatch)
+    loads_bytes = await budget.read(loads) if loads is not None else None
     # Off the event loop. The service call loads case39 and hands the client's
     # bytes to pandas/openpyxl, all of it synchronous and all of it sized by the
     # CLIENT: a crafted workbook that costs minutes to parse would otherwise

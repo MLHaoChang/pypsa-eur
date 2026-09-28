@@ -99,6 +99,11 @@ openpyxl==3.1.5      # xlsx templates, asset-results export, template upload.
                      # `network.py:441` reaches it through pandas' engine
                      # registry, which is a string lookup — not an import
                      # statement, so no static analysis can see it at all.
+defusedxml==0.7.1    # openpyxl hardens its XML parsing (entity expansion,
+                     # quadratic blowup) ONLY when it can import this, and
+                     # it parses every uploaded workbook. Nothing imports it
+                     # by name, so the scan cannot see the need; without it
+                     # the app parses hostile XML and nothing fails.
 Jinja2==3.1.6        # matpower export (`io.py:125`), unguarded. Was reaching
                      # the bundle only as an undeclared transitive — it worked
                      # by luck, and a resolver change would have made it the

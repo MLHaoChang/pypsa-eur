@@ -335,3 +335,20 @@ def test_a_table_over_the_cap_is_refused_before_it_is_parsed(client, study, monk
     )
     assert resp.status_code == 413, resp.text
     assert called == []
+
+
+def test_the_two_tables_share_one_cap(client, study, monkeypatch):
+    """Each part fits the table cap alone; together they do not. A request is
+    one budget, so two tables cannot buffer twice what one may."""
+    import routers.gridspine as router
+
+    monkeypatch.setattr(router, "TABLE_MAX_BYTES", 1024)
+    called = []
+    monkeypatch.setattr(gs, "upload_external_dispatch", lambda *a, **k: called.append(1))
+    resp = client.post(
+        "/api/gridspine/Router Study/dispatch-source/external",
+        files={"dispatch": ("d.csv", b"x" * 600, "text/csv"),
+               "loads": ("l.csv", b"y" * 600, "text/csv")},
+    )
+    assert resp.status_code == 413, resp.text
+    assert called == []
