@@ -161,6 +161,22 @@ outside the saved snapshot range. Not fixed here because it changes what a cold
 activate serves, which wants its own tests rather than a line inside the tenancy
 fix. Background: the same 2026-09-12 finding, "what a fix has to establish".
 
+### 14. An adequacy-sweep guard is pinned by a test that cannot fail for it **(2026-09-28)**
+
+`tests/test_adequacy_stress.py::test_contingency_mutation_survives_the_user_ts_reapply`
+does `monkeypatch.setattr(network_router, "_user_ts", store)`, but
+`_reapply_user_ts_to_network` is defined in `services/user_timeseries.py` and
+resolves `_user_ts` in THAT module's namespace — so the store it reads stays
+empty and the reapply is a no-op regardless of the guard. Measured: delete the
+`not _transient_profiles` half of the gate in `services/solver_service.py` — the
+exact regression the test is named for — and the test still passes. Positive
+control in the same finding: with the series written into the real store, the
+gate's removal fails the test with its own intended message, so the guard does
+real work and only the test's wiring is wrong. Verified three-line remedy, and
+the general shape (patching a facade re-export reaches nothing defined in the
+service behind it):
+`findings/2026-09-28-the-adequacy-reapply-test-patches-a-name-the-code-never-reads.md`.
+
 ---
 
 ## Low
