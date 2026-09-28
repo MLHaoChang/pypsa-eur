@@ -84,6 +84,11 @@ class RatingResult:
     flags: dict[str, list[str]] = field(default_factory=dict)   # incompleteness
     notes: dict[str, list[str]] = field(default_factory=dict)   # disclosures
     unsupported_items: list[str] = field(default_factory=list)
+    # The sum of each item's RATED months (P2 WP2.1b): equals `per_item` when
+    # every month is rated; with months not established it is the sampled sum
+    # the LP rows also report (one convention, sampled to sampled). None when
+    # no month of the item is rated.
+    per_item_sampled: dict[str, float | None] = field(default_factory=dict)
     # One row per (month, demand item, period window): the peak and its bill
     # (WP1.5a). Empty when the tariff has no demand items.
     demand_lines: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(
@@ -409,6 +414,18 @@ def _month_hours(key: str, tz: str | None) -> float:
     return (end - start).total_seconds() / 3600.0
 
 
+def _months_not_self_represented(month_key: np.ndarray, energy_h: np.ndarray) -> list[str]:
+    """The sampled months whose rows do not represent that month's calendar
+    hours (±1 %; days × 24, DST's hour is inside the tolerance)."""
+    rep = pd.Series(energy_h, dtype=float).groupby(month_key).sum()
+    off = []
+    for m, h in rep.items():
+        cal = pd.Period(m, freq="M").days_in_month * 24.0
+        if not abs(h - cal) <= 0.01 * cal:
+            off.append(str(m))
+    return off
+
+
 def _covered_days_by_month(local: pd.DatetimeIndex, hours: np.ndarray,
                            tz: str | None) -> dict[str, float]:
     """Covered CALENDAR days per local month: each local day contributes its
@@ -496,6 +513,8 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
     sign_of = {"cost": 1.0, "revenue": -1.0}
     covered_span_h = ((idx.asi8[-1] - idx.asi8[0]) / 3.6e12 + dur[-1]) if len(idx) else 0.0
     has_gaps = len(idx) > 0 and dur.sum() < covered_span_h - 1e-9
+    off_months = ([] if represents_hours is None
+                  else _months_not_self_represented(month_key, energy_h))
     if represents_hours is not None and has_gaps and billing_period is None:
         # Energy would be scaled to the represented period while fixed items
         # bill only the sampled weeks (review C4): the two must describe the
@@ -820,9 +839,12 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
         if billing_period is not None and has_gaps and represents_hours is None:
             notes.setdefault(item.id, []).append("energy_on_partial_coverage")
         if item.tiers and represents_hours is not None:
-            # Monthly tier thresholds see the REPRESENTED volume (a sampled week
-            # standing for more); disclosed, WP2.1b revisits (review #4).
-            notes.setdefault(item.id, []).append("tiers_on_represented_volume")
+            # Monthly tier thresholds see the REPRESENTED volume. It is the
+            # month's real volume when the month's rows represent that month's
+            # calendar hours (one sampled week per month, weighted to it); a
+            # month standing for more or less is named (WP2.1b, review #4).
+            notes.setdefault(item.id, []).extend(
+                f"tiers_on_represented_volume:{m}" for m in off_months)
         if represents_hours is not None and has_gaps:
             # Each sampled row's represented energy lands in its OWN month; the
             # monthly frame is not a calendar bill (NaN months = no rows).
@@ -850,6 +872,12 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
     monthly.index.name = "month"
     annual = pd.DataFrame(annual_parts).sort_index()
     annual.index.name = "year"
+    per_item_sampled = {}
+    for item_id, part in monthly_parts.items():
+        finite = pd.Series(part, dtype=float).dropna()
+        per_item_sampled[item_id] = float(finite.sum()) if len(finite) else None
+    for item_id in per_item:
+        per_item_sampled.setdefault(item_id, None)
     totals = list(per_item.values())
     total_supported = None if any(v is None for v in totals) else float(sum(totals))
     partial_energy = any(("energy_on_partial_coverage" in v) or ("capacity_on_partial_coverage" in v)
@@ -862,4 +890,4 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
     return RatingResult(lines=lines, fixed_lines=fixed_lines, monthly=monthly, annual=annual,
                         per_item=per_item, total=total, total_supported=total_supported,
                         flags=flags, notes=notes, unsupported_items=unsupported,
-                        demand_lines=demand_lines)
+                        demand_lines=demand_lines, per_item_sampled=per_item_sampled)

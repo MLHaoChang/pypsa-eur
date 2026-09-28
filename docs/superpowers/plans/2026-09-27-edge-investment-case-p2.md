@@ -368,6 +368,20 @@ round-trip test through `_safe_unpickle_results` proves it.
   unsampled months flagged; unsolved ⇒ `None` + `not_solved`; frames round-trip through
   `_safe_unpickle_results` under the bound.
 
+- **As implemented:**
+  - `services/commercial/billing.py` (pure; the tripwires confirm it imports no routers and no `solver_service`) provides `SiteBill(per_period, flags, provenance)`, `bill_site` and `compact_frames`.
+  - An unsolved network returns `per_period={}` with `not_solved`; a config without an import tariff returns `no_import_tariff`. There is no `None` bill, so callers test the flag.
+  - The step is the median in-period step; gaps longer than 24 h between sampled stretches are excluded, so representative weeks keep a 0.25 h step.
+  - Representative weeks: `represents_hours` is the objective weights, passed only when they differ from the step. The `billing_period` is the calendar year holding most of the weight, when the period's Σ weights is 8760 h ± 1 % (the `lp_bindings` rule). `commercial/billing.py: 1` is added to the hourly audit allow-list, now 51 sites in 24 files.
+  - Capacity: `capacity_kw` is the PoC `p_nom_opt` (falling back to `p_nom`) × 1000 in periods where `get_active_assets` has the PoC active, and 0 otherwise. Meter history seeds the first period only.
+  - Provenance: `tariff_hash` (current recipe), plus the solve's `energy_hash` (`ic_poc_links`) and `demand_hash` (`ic_demand_info.items_hash`), `period_years` from `investment_period_weightings.years`, and `timezone`.
+  - `RatingResult.per_item_sampled` is the finite sum of the item's monthly parts (None when there are none). `per_item` still stays None when months are not established.
+  - `compact_frames` keys are `"{period|_}:lines" / ":quantities"` (wide float32 from a `pivot_table`), plus `":monthly"` and `":demand_lines"` (month, item and period columns stored as object strings). The existing `store_billing_frames` / `load_billing_frames` pair keeps the zone.
+    - A 15-min Europe/Berlin year with 8 items round-trips through `_safe_unpickle_results` under 3 MB.
+  - **Carried item `tiers_on_represented_volume` resolved:** monthly tier thresholds see the month's real volume when that month's rows represent its calendar hours (days × 24, ±1 %), as with one week per month weighted to its month. Only months that stand for more or less are noted, as `tiers_on_represented_volume:<month>`. There is no bare note any more.
+  - Tests: `tests/test_site_billing.py` has 8 tests. Four live solves cover the identity on the 15-min edge, the group meter, two periods with the PoC retired before 2040 and an off-grid backup supplying that period, and representative weeks with `per_item_sampled` and not-established flags. The other four cover the unsolved case, the meter-history spy, `per_item_sampled` on a missing month and the unpickler round-trip.
+    - `test_tariff_engine_urdb.py` gains the self-represented-month case.
+
 ## WP2.1c LP: convex demand tiers, windowed tiers, new ratchets, predicted non-convex tier
 
 Files: `lp_bindings.py`, `cost_rows.py`, `test_ratchet.py`, `test_tiers.py`, reconciliation gate.

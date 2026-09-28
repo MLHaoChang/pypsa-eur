@@ -436,7 +436,19 @@ def test_tiers_on_represented_volume_are_disclosed():
     d = pd.DataFrame({"import_mw": 0.005, "export_mw": 0.0}, index=idx)
     res = rate(d, _tariff(_windowed_energy()), step_hours=1.0, timezone=None,
                represents_hours=8760 / 168, billing_period=("2030-01-01", "2031-01-01"))
-    assert "tiers_on_represented_volume" in res.notes["e"]
+    assert "tiers_on_represented_volume:2030-01" in res.notes["e"]
+
+
+def test_a_week_weighted_to_its_own_month_sees_the_real_monthly_volume():
+    """WP2.1b: one sampled week per month weighted to that month's hours is the
+    month's real volume — nothing to disclose."""
+    parts = [pd.date_range(f"2030-{m:02d}-07", periods=24 * 7, freq="h") for m in (1, 2)]
+    idx = parts[0].append(parts[1])
+    w = np.r_[np.full(168, 31 * 24 / 168), np.full(168, 28 * 24 / 168)]
+    d = pd.DataFrame({"import_mw": 0.005, "export_mw": 0.0}, index=idx)
+    res = rate(d, _tariff(_windowed_energy()), step_hours=1.0, timezone=None,
+               represents_hours=w, billing_period=("2030-01-01", "2030-03-01"))
+    assert not any(x.startswith("tiers_on_represented_volume") for x in res.notes.get("e", []))
 
 
 @pytest.mark.parametrize("tiers", [[{"threshold": 0}], [{"threshold": 0, "rate": None}], "bad",
