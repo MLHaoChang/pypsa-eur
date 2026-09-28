@@ -10,15 +10,22 @@ and `extra_functionality_code` IS a live field. So a plain member refused with
 end-to-end: the code landed in `_state["solver_config"]`, was written to
 `<org>/<uuid>/solver_config.json`, and `_compile_extra_functionality` executed it.
 
-Two vectors, both closed here:
+Three vectors, all closed here:
   * ACTIVATION — the member's own session gets the code as live solver config.
   * PLANTING — the code stays on disk in a project an ADMIN may later open, at
     which point `load_project` loads it and a solve runs it with full privileges.
     Stripping only the in-memory copy would leave this one open.
+  * DELEGATION — the importer is an ADMIN, and the code is not theirs. The first
+    fix gated on `user_code_authorized(db, user)`, which let this one straight
+    through: an admin who imports a colleague's .pypsaproj.zip was running that
+    colleague's module body. Demonstrated, not inferred — with the old guard
+    restored, the payload in the last test below writes its sentinel file inside
+    the admin's session. So the strip is now unconditional.
 
-Found by an independent QA review, 2026-09-12. The lesson is about gate
-placement: a field is only as gated as its least-guarded writer, and the PUT was
-not the only writer.
+Found by an independent QA review, 2026-09-12; the third vector by a follow-up
+review of that fix. The lesson is about gate placement, twice over: a field is
+only as gated as its least-guarded writer (the PUT was not the only writer), and
+a privilege check is the wrong gate for a question about provenance.
 """
 import io
 import json
@@ -137,12 +144,22 @@ def test_the_smuggled_code_is_not_left_on_disk_for_an_admin_to_open(
     )
 
 
-def test_an_admin_bundle_keeps_its_code_when_the_operator_opted_in(
+def test_even_an_admin_bundle_is_stripped_and_the_response_says_so(
     client, api_project, project_storage_dir, monkeypatch,
 ):
     """
-    The gate must not break the supported path: an org admin, with the operator
-    flag on, may still carry `extra_functionality_code` in a bundle.
+    The strip is UNCONDITIONAL, admins included, and the import reports it.
+
+    The first version of the gate asked `user_code_authorized(db, user)` -- "is
+    the importer privileged". That is the wrong question: the field carries code
+    the importer did not write, and a zip cannot attest authorship. An org admin
+    with the operator flag on is exactly the identity whose solve runs with the
+    most privilege, so it is the worst one to hand a stranger's module body to.
+
+    The workflow cost is real and is asserted here rather than hidden: an admin
+    moving their own project by bundle gets the field back only by re-setting it
+    through the gated PUT. `stripped` in the response is what makes that
+    discoverable instead of mysterious.
     """
     monkeypatch.setenv("PYPSA_GUI_ALLOW_USER_CODE", "1")
     src = api_project("ok-src")
@@ -150,12 +167,70 @@ def test_an_admin_bundle_keeps_its_code_when_the_operator_opted_in(
     benign = "def extra_functionality(n, sns):\n    pass\n"
 
     r = client.post(
-        "/api/projects/import_bundle", params={"name": "ok-evil"},
-        files={"file": ("e.zip", _bundle_with_code(nc, "ok-evil", benign),
+        "/api/projects/import_bundle", params={"name": "ok-strip"},
+        files={"file": ("e.zip", _bundle_with_code(nc, "ok-strip", benign),
                         "application/zip")},
     )
     assert r.status_code in (200, 201), r.text[:300]
+    assert "extra_functionality_code" in (r.json().get("stripped") or []), (
+        "the field was dropped without telling the importer -- a silent "
+        f"difference between what was uploaded and what was imported: {r.text[:300]}"
+    )
+
     live = client.get("/api/simulation/solver_config").json()
-    assert benign.strip() in (live.get("extra_functionality_code") or ""), (
-        "an admin's own bundle lost its code — the gate over-reached"
+    assert not (live.get("extra_functionality_code") or "").strip(), (
+        "an admin's bundle still set exec()-able code as live solver config"
+    )
+    cfg_path = project_storage_dir("ok-strip") / "solver_config.json"
+    if cfg_path.exists():
+        on_disk = json.loads(cfg_path.read_text()).get("extra_functionality_code") or ""
+        assert not on_disk.strip(), "left on disk for the next load_project"
+
+
+def test_an_admin_importing_a_colleagues_bundle_gets_no_execution(
+    client, api_project, project_storage_dir, monkeypatch, tmp_path,
+):
+    """
+    The scenario the privileged-importer gate missed entirely.
+
+    A member cannot set the field, so they send the admin a .pypsaproj.zip
+    instead -- "here is my project, have a look". Under the old check the admin
+    is authorized, so the code was kept, and `_compile_extra_functionality`
+    exec()s the MODULE BODY: the payload here needs no call to
+    `extra_functionality` at all, it fires the moment the config is compiled.
+
+    Asserted by running the compile step itself, not just by reading the config:
+    "not in the config" and "did not run" are different claims, and the second
+    one is the one that matters. `_compile_extra_functionality` is exactly what
+    `services.solver_service` reaches for at the top of a solve.
+    """
+    monkeypatch.setenv("PYPSA_GUI_ALLOW_USER_CODE", "1")
+    sentinel = tmp_path / "colleague-payload-ran"
+    payload = (
+        "import pathlib\n"
+        f"pathlib.Path({str(sentinel)!r}).write_text('rce')\n"
+        "def extra_functionality(n, sns):\n    pass\n"
+    )
+    src = api_project("colleague-src")
+    nc = (project_storage_dir(src) / "network.nc").read_bytes()
+
+    r = client.post(
+        "/api/projects/import_bundle", params={"name": "colleague-proj"},
+        files={"file": ("c.zip", _bundle_with_code(nc, "colleague-proj", payload),
+                        "application/zip")},
+    )
+    assert r.status_code in (200, 201), r.text[:300]
+
+    from services.solver_service import _compile_extra_functionality
+
+    live = client.get("/api/simulation/solver_config").json()
+    # Execution first, and deliberately before the config assertion: if the
+    # config one ran first it would always trip first and this one could rot
+    # unfalsifiable.
+    _compile_extra_functionality(live.get("extra_functionality_code") or "")
+    assert not sentinel.exists(), (
+        "a colleague's module body executed inside the admin's session"
+    )
+    assert not (live.get("extra_functionality_code") or "").strip(), (
+        "a colleague's code became the admin's live solver config"
     )
