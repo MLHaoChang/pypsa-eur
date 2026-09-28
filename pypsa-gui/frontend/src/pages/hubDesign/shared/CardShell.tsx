@@ -27,11 +27,13 @@ export function AskButton({ testId, text, label = 'Ask about this' }: {
   )
 }
 
+/** Sends `text` — or each of several texts, in order — to the assistant. */
 export function DelegateButton({ testId, text, label = 'Let the assistant do this' }: {
-  testId: string; text: string; label?: string
+  testId: string; text: string | readonly string[]; label?: string
 }) {
+  const send = () => { for (const t of typeof text === 'string' ? [text] : text) delegate(t) }
   return (
-    <button type="button" data-testid={testId} onClick={() => delegate(text)} title={DELEGATE_TITLE}
+    <button type="button" data-testid={testId} onClick={send} title={DELEGATE_TITLE}
       className="inline-flex items-center gap-1 px-2 py-1 border border-accent/60 rounded text-[11px] text-accent hover:bg-accent/10">
       <Sparkles size={12} /> {label}
     </button>

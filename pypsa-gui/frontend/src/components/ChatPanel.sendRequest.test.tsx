@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore, type PendingConfirmationCard } from '../store/chatStore'
 import { createChatStream, postChatConfirm } from '../api/chat'
+import { listUploads } from '../api/uploads'
 import ChatPanel from './ChatPanel'
 import chatStoreSource from '../store/chatStore.ts?raw'
 
@@ -158,14 +159,37 @@ describe('ChatPanel dispatches queued card requests', () => {
   })
 
   it('attached files present and no first-send ack → no modal, files not sent, attachments kept', async () => {
-    useChatStore.setState({ attachedFileIds: ['f1', 'f2'] })
+    // The panel hydrates the chip strip from disk and attaches every file
+    // (default-ON), exactly as for a user with two uploads.
+    const up = (id: string) => ({ file_id: id, filename: `${id}.csv`, mime: 'text/csv',
+      size: 1, kind: 'user_upload' as const, uploaded_at: 1 })
+    vi.mocked(listUploads).mockResolvedValueOnce([up('f1'), up('f2')] as never)
     renderPanel()
+    await waitFor(() => expect(useChatStore.getState().attachedFileIds).toEqual(['f1', 'f2']))
     send('do it')
     await waitFor(() => expect(calls()).toHaveLength(1))
     expect(calls()[0][0].attachment_file_ids).toBeUndefined()
     expect(screen.queryByTestId('chat-first-send-modal')).toBeNull()
     expect(useChatStore.getState().attachedFileIds).toEqual(['f1', 'f2'])
     expect(localStorage.getItem('chat:firstSendAck')).toBeNull()
+  })
+
+  it('waits while the user\'s own first-send modal is open', async () => {
+    const up = (id: string) => ({ file_id: id, filename: `${id}.csv`, mime: 'text/csv',
+      size: 1, kind: 'user_upload' as const, uploaded_at: 1 })
+    vi.mocked(listUploads).mockResolvedValueOnce([up('f1')] as never)
+    const user = (await import('@testing-library/user-event')).default.setup()
+    renderPanel()
+    await waitFor(() => expect(useChatStore.getState().attachedFileIds).toEqual(['f1']))
+    await user.type(await screen.findByTestId('chat-input'), 'typed with a file')
+    await user.click(screen.getByTestId('chat-send'))
+    expect(await screen.findByTestId('chat-first-send-modal')).toBeTruthy()
+    send('card request')
+    await settle()
+    expect(calls()).toHaveLength(0)
+    await user.click(screen.getByTestId('chat-first-send-modal'))   // backdrop = cancel
+    await waitFor(() => expect(calls()).toHaveLength(1))
+    expect(calls()[0][0].message).toBe('card request')
   })
 
   it('a re-render storm still sends once', async () => {

@@ -11,7 +11,7 @@ import { useChatStore } from '../../../store/chatStore'
 import { useUIStore } from '../../../store/uiStore'
 import { useStartFmeaSweep } from '../../../hooks/useStartFmeaSweep'
 import { HUB_DESIGN_INITIAL, useHubDesignStore } from '../hubDesignStore'
-import { actionText, askText, stressScenarioText } from '../delegate'
+import { actionText, actionTexts, askText, stressScenarioText } from '../delegate'
 import { DC_TEMPLATE, REPORT, review } from '../testFixtures'
 import { ImproveCard } from './ImproveCard'
 
@@ -31,7 +31,7 @@ vi.mock('../../../hooks/useStartFmeaSweep', () => ({ useStartFmeaSweep: vi.fn(()
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo', activeSlidePanel: 'hubDesign',
     resultsTabRequest: null, assistantDockOpen: false })
-  useChatStore.setState({ composerSeed: null })
+  useChatStore.setState({ composerSeed: null, requestQueue: [], lastRequest: null })
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true,
     step: 'improve', archetype: 'weak_flexible' })
   vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done', report: REPORT })
@@ -71,13 +71,31 @@ describe('ImproveCard', () => {
     expect(screen.queryByTestId('hub-improve-evidence-certification_fail')).toBeNull()
   })
 
-  it('Do → the §5.7 text with JSON.stringify(args); no Do without an action', async () => {
+  // P25 (§5.7, §6.1): Do SENDS the request — it is queued for ChatPanel,
+  // not seeded in the composer.
+  const queued = () => useChatStore.getState().requestQueue.map(r => r.text)
+
+  it('Do → sends the §5.7 text with JSON.stringify(args); no Do without an action', async () => {
     const user = mount()
     await user.click(await screen.findByTestId('hub-improve-do-certification_fail'))
-    expect(useChatStore.getState().composerSeed).toBe(actionText(F[0]))
-    expect(useChatStore.getState().composerSeed).toContain(JSON.stringify(F[0].actions[0].args))
+    expect(queued()).toEqual([actionText(F[0])])
+    expect(queued()[0]).toContain(JSON.stringify(F[0].actions[0].args))
+    expect(useChatStore.getState().requestQueue[0].source).toBe('hub-design')
+    expect(useChatStore.getState().composerSeed).toBeNull()
     expect(useUIStore.getState().assistantDockOpen).toBe(true)
     expect(screen.queryByTestId('hub-improve-do-not_established_frontier')).toBeNull()
+  })
+
+  it('Do on a finding with two actions → two messages, in order', async () => {
+    const two = { ...F[0], actions: [F[0].actions[0],
+      { tool: 'update_solver_config', args: { partial: { voll: 5000 } }, effect: 'set the price' }] }
+    vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ findings: [two] }))
+    const user = mount()
+    await user.click(await screen.findByTestId('hub-improve-do-certification_fail'))
+    expect(queued()).toEqual(actionTexts(two))
+    expect(queued()).toHaveLength(2)
+    expect(screen.getByTestId('hub-improve-certification_fail').textContent)
+      .toContain('then 1 more step, each confirmed separately')
   })
 
   it('Ask → the explain text', async () => {
@@ -103,8 +121,8 @@ describe('ImproveCard', () => {
   it('Add a stress scenario → the registry request with the site context', async () => {
     const user = mount()
     await user.click(await screen.findByTestId('hub-improve-add-stress'))
-    expect(useChatStore.getState().composerSeed).toBe(
-      stressScenarioText('a weak-grid site like the Data Center Energy Hub example'))
+    expect(queued()).toEqual(
+      [stressScenarioText('a weak-grid site like the Data Center Energy Hub example')])
   })
 
   // P24-FE gate B3 (spec §5.8): engine prose — stage ids, ‱, attribute

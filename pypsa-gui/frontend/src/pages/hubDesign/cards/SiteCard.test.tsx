@@ -28,7 +28,7 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo', assistantDockOpen: false })
-  useChatStore.setState({ composerSeed: null })
+  useChatStore.setState({ composerSeed: null, requestQueue: [], lastRequest: null })
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true,
     step: 'site', archetype: 'weak_flexible' })
   vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
@@ -78,10 +78,13 @@ describe('SiteCard rows', () => {
       ['grid', siteFixText('grid')], ['critical', siteFixText('critical')],
       ['strength', siteFixText('strength')], ['outage', siteFixText('outage', 2)],
     ]
+    // P25 (§5.7): a fix button SENDS its request (queued for ChatPanel).
     for (const [k, want] of cases) {
-      useChatStore.setState({ composerSeed: null })
+      useChatStore.setState({ composerSeed: null, requestQueue: [] })
+      useUIStore.setState({ assistantDockOpen: false })
       await user.click(screen.getByTestId(`hub-site-fix-${k}`))
-      expect(useChatStore.getState().composerSeed).toBe(want)
+      expect(useChatStore.getState().requestQueue.map(r => r.text)).toEqual([want])
+      expect(useChatStore.getState().composerSeed).toBeNull()
       expect(useUIStore.getState().assistantDockOpen).toBe(true)
     }
   })

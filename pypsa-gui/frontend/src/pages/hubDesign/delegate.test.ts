@@ -1,18 +1,19 @@
 // Guided-mode spec §5.7: the cards hand work to the assistant through two
-// calls. In P24 both seed the composer and open the dock — nothing is sent
-// (P25 turns `delegate` into chatStore.sendRequest at this one import site).
-import { beforeEach, describe, expect, it } from 'vitest'
+// calls. `ask` seeds the composer and opens the dock — nothing is sent.
+// `delegate` ("Let the assistant do this", the user's own click) SENDS: since
+// P25 it is chatStore.sendRequest with source 'hub-design' (§6.1).
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore } from '../../store/uiStore'
 import type { EhReviewFinding } from '../../api/simulation'
 import {
-  actionText, ask, askText, delegate, footerAskText, footerDelegateText,
+  actionText, actionTexts, ask, askText, delegate, DELEGATE_TITLE, footerAskText, footerDelegateText,
   siteFixText, stressScenarioText, VOLL_TEXT,
 } from './delegate'
 
 beforeEach(() => {
   useUIStore.setState({ assistantDockOpen: false })
-  useChatStore.setState({ composerSeed: null })
+  useChatStore.setState({ composerSeed: null, requestQueue: [], lastRequest: null })
 })
 
 const F: EhReviewFinding = {
@@ -25,28 +26,42 @@ const F: EhReviewFinding = {
   ],
 }
 
-describe('ask / delegate (P24: seed, never send)', () => {
-  it('ask opens the dock and seeds the composer with the text', () => {
+describe('ask / delegate', () => {
+  it('ask opens the dock and seeds the composer with the text — nothing is sent', () => {
+    useChatStore.setState({ messages: [], streaming: false })
     ask('hello there')
     expect(useUIStore.getState().assistantDockOpen).toBe(true)
     expect(useChatStore.getState().composerSeed).toBe('hello there')
+    expect(useChatStore.getState().requestQueue).toEqual([])
+    expect(useChatStore.getState().messages).toEqual([])
   })
 
-  it('delegate behaves exactly like ask until P25', () => {
-    useChatStore.setState({ messages: [], streaming: false })
+  it('delegate calls sendRequest with source hub-design (P25)', () => {
+    const spy = vi.spyOn(useChatStore.getState(), 'sendRequest')
+    try {
+      delegate('do it')
+      expect(spy).toHaveBeenCalledTimes(1)
+      expect(spy).toHaveBeenCalledWith('do it', { source: 'hub-design' })
+    } finally { spy.mockRestore() }
+  })
+
+  it('delegate queues the request, opens the dock and leaves the composer alone', () => {
     delegate('do it')
     expect(useUIStore.getState().assistantDockOpen).toBe(true)
-    expect(useChatStore.getState().composerSeed).toBe('do it')
-    // shown, not sent: no transcript entry, no stream
-    expect(useChatStore.getState().messages).toEqual([])
-    expect(useChatStore.getState().streaming).toBe(false)
+    expect(useChatStore.getState().requestQueue.map(r => [r.text, r.source]))
+      .toEqual([['do it', 'hub-design']])
+    expect(useChatStore.getState().composerSeed).toBeNull()
+  })
+
+  it('the button title says it sends and that attached files are not included', () => {
+    expect(DELEGATE_TITLE).toMatch(/^Sends this request to the assistant — your attached files are not included\./)
   })
 })
 
 describe('texts (§5.7, verbatim)', () => {
   it('site fixes', () => {
     expect(siteFixText('grid')).toBe(
-      'On the Site card, the grid connection is missing. Tag the import Link with eh_role = grid_import and the grid-side bus eh_poc = true, explaining each choice before the confirmation.')
+      'On the Site card, the grid connection is missing. Run suggest_eh_setup, then tag the import Link with eh_role = grid_import and the grid-side bus eh_poc = true, explaining each choice before the confirmation.')
     expect(siteFixText('critical')).toBe(
       'On the Site card, no critical load is tagged. Propose which buses must stay on (eh_critical = true) and tag them after I confirm.')
     expect(siteFixText('strength')).toBe(
@@ -61,6 +76,18 @@ describe('texts (§5.7, verbatim)', () => {
       + 'Run the tool run_eh_study with exactly these arguments: '
       + JSON.stringify({ archetype: 'weak_flexible', stages: ['apply_pack', 'dtc_stress'] })
       + '. Say in one sentence what will change, then proceed to the confirmation.')
+  })
+
+  it('improve: one message per action, in order (sent one after the other by the queue)', () => {
+    const texts = actionTexts(F)
+    expect(texts).toHaveLength(2)
+    expect(texts[0]).toBe(actionText(F))
+    expect(texts[1]).toBe(
+      'Apply this recommendation from the study review: "Not certified: LOLE 12.38 h/yr exceeds the 3 h/yr target". '
+      + 'Run the tool update_solver_config with exactly these arguments: '
+      + JSON.stringify({ partial: { voll: 5000 } })
+      + '. Say in one sentence what will change, then proceed to the confirmation.')
+    expect(actionTexts({ ...F, actions: [] })).toEqual([])
   })
 
   it('improve: ask quotes the title and the evidence', () => {

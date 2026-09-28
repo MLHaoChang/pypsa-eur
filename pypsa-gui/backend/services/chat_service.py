@@ -2176,7 +2176,12 @@ _EH_GUIDE_CHAINING = (
     "report what changed. Class-C scenarios are added with "
     "put_stress_scenarios (read the registry first, send the whole list). "
     "A finding without an action (e.g. a tag whose value only the user "
-    "knows) is a question for the user, not a guess."
+    "knows) is a question for the user, not a guess. "
+    # Guided-mode spec §6.3: the one intended system-prompt change of P25
+    # (the tool exists in both modes). Pinned by test_guided_mode_prompt.
+    "For a network that is not tagged yet, call suggest_eh_setup, present "
+    "each suggestion with its reason, and apply only the ones the user picks "
+    "(update_component / bulk_update_components will ask for confirmation)."
 )
 _EH_GUIDE = _EH_GUIDE_FACTS + _EH_GUIDE_CHAINING
 
@@ -2268,6 +2273,38 @@ def _sanitise_ui_value(value: Any) -> str | None:
     return text or None
 
 
+# Guided mode (guided-mode spec §6.2). The frontend sends `ui_mode: 'guided'`
+# only in Guided; `'expert'` is accepted and renders exactly as no key.
+# Anything else is dropped (fail closed, like every other key here), and so
+# is a `guided_step` outside the five cards or without Guided.
+_GUIDED_STEPS = {
+    "start": "Start", "site": "Site", "goal": "Goal",
+    "results": "Results", "improve": "Improve",
+}
+
+
+def _guided_mode_addendum(step: str | None) -> str:
+    """The Guided rules for ONE turn — per-turn user content, never the
+    system prompt (which stays byte-identical in both modes, so the prompt
+    cache and Expert behaviour are unchanged). `step` is an allow-listed
+    `guided_step`; with none the card clause is dropped."""
+    card = (
+        f'the user is on the "{_GUIDED_STEPS[step]}" card of the hub design '
+        "— refer to it by name and say what to do there; "
+        if step in _GUIDED_STEPS else ""
+    )
+    return (
+        "Guided mode is on. Rules for this turn: answer in plain language a "
+        "non-specialist can follow; keep it short (about 120 words unless the "
+        "user asks for detail); gloss any technical term in a few words the "
+        f"first time; {card}when the user delegates a step, do it with the "
+        "tools rather than explaining how, and before any write or run say in "
+        "one sentence what will change and that a confirmation card follows; "
+        "never apply a change the user has not asked for; questions are "
+        "welcome at any time."
+    )
+
+
 def _format_ui_context(ui_context: dict[str, Any] | None) -> str | None:
     """
     Render what the user is looking at, for the USER turn.
@@ -2307,15 +2344,32 @@ def _format_ui_context(ui_context: dict[str, Any] | None) -> str | None:
         if klass and name:
             lines.append(f"  selected component: {klass} '{name}'")
 
+    # Guided only (§6.2). An Expert context — `ui_mode: 'expert'` or no key —
+    # adds nothing here, so its block is byte-identical to before P25.
+    mode = ui_context.get("ui_mode")
+    guided = isinstance(mode, str) and mode == "guided"
+    step = ui_context.get("guided_step") if guided else None
+    step = step if isinstance(step, str) and step in _GUIDED_STEPS else None
+    if guided:
+        lines.append("  mode: guided")
+        if step:
+            lines.append(f"  guided step: {step}")
+
     if not lines:
         return None
 
-    return "\n".join([
+    block = "\n".join([
         _UNTRUSTED_OPEN,
         "The user is currently looking at:",
         *lines,
         _UNTRUSTED_CLOSE,
     ])
+    if guided:
+        # The app's own rules for the turn: OUTSIDE the untrusted region
+        # (the block above is data the model is told never to obey). Persisted
+        # with the turn exactly as the block is.
+        block += "\n\n" + _guided_mode_addendum(step)
+    return block
 
 
 # A6 — session history soft/hard caps. Trim drops COMPLETE turn groups so a

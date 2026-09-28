@@ -96,10 +96,19 @@ _NOT_EQUIPMENT_KW = ("slack", "sink", "dump", "spill")
 
 def _outage_units(net, import_links) -> dict[str, Any]:
     """P24: units with usable outage data, per class, and the thermal-like
-    units without it. "Usable" is what the occurrence resolver yields
-    (``resolve_outage_params``: asset value, else carrier default) — a finite
-    rate AND a finite MTTR. Thermal-like := Generators whose carrier
-    ``_gen_category`` calls ``conventional``, plus the import Links."""
+    units without it (see ``outage_scan``), the list capped for the card."""
+    by_class, missing = outage_scan(net, import_links)
+    return {"count": sum(by_class.values()), "by_class": by_class,
+            "missing": missing[:_OUTAGE_MISSING_CAP]}
+
+
+def outage_scan(net, import_links) -> tuple[dict[str, int], list[dict[str, str]]]:
+    """Units with usable outage data per class, and EVERY thermal-like unit
+    without it (uncapped; ``suggest_eh_setup`` shares this rule, P25).
+    "Usable" is what the occurrence resolver yields (``resolve_outage_params``:
+    asset value, else carrier default) — a finite rate AND a finite MTTR.
+    Thermal-like := Generators whose carrier ``_gen_category`` calls
+    ``conventional`` (minus modelling devices), plus the import Links."""
     import math
 
     from services.adequacy.occurrence import resolve_outage_params
@@ -135,8 +144,7 @@ def _outage_units(net, import_links) -> dict[str, Any]:
             if thermal:
                 missing.append({"class": cls, "name": str(name)})
         by_class[cls] = count
-    return {"count": sum(by_class.values()), "by_class": by_class,
-            "missing": missing[:_OUTAGE_MISSING_CAP]}
+    return by_class, missing
 
 
 def _finite_or_none(v) -> float | None:

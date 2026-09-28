@@ -11,7 +11,7 @@ import { useUIStore } from '../../../store/uiStore'
 import { studyHasResults } from '../flow'
 import { useHubDesignStore } from '../hubDesignStore'
 import {
-  ARCHETYPE_SHORT, actionText, askText, stressScenarioText,
+  ARCHETYPE_SHORT, actionTexts, askText, stressScenarioText,
 } from '../delegate'
 import { evidenceValue, plainWords } from '../plainWords'
 import { AskButton, CardShell, DelegateButton } from '../shared/CardShell'
@@ -26,7 +26,9 @@ export function openFmeaTab(): void {
 
 function Finding({ f }: { f: EhReviewFinding }) {
   const [why, setWhy] = useState(false)
-  const doText = actionText(f)
+  // One message per action (§5.7); the queue sends them one after another.
+  const doTexts = actionTexts(f)
+  const more = doTexts.length - 1
   const effect = f.actions?.[0]?.effect
   // The card shows the title and the action in plain words; the review's own
   // prose (recommendation, effect) and its numbers go in "Why" (§5.8, gate B3).
@@ -44,8 +46,11 @@ function Finding({ f }: { f: EhReviewFinding }) {
         </span>
         <span className="font-semibold text-text">{plainWords(f.title)}</span>
       </div>
-      {doText && effect && (
-        <p className="text-muted">The assistant would {plainWords(effect)}.</p>
+      {doTexts.length > 0 && effect && (
+        <p className="text-muted">
+          The assistant would {plainWords(effect)}
+          {more > 0 ? `, then ${more} more step${more === 1 ? '' : 's'}, each confirmed separately` : ''}.
+        </p>
       )}
       <div className="flex flex-wrap items-center gap-2">
         <button type="button" data-testid={`hub-improve-why-${f.id}`} aria-expanded={why}
@@ -53,7 +58,9 @@ function Finding({ f }: { f: EhReviewFinding }) {
           className="px-2 py-1 text-[11px] text-muted hover:text-accent">
           {why ? '▾' : '▸'} Why
         </button>
-        {doText && <DelegateButton testId={`hub-improve-do-${f.id}`} text={doText} />}
+        {doTexts.length > 0 && (
+          <DelegateButton testId={`hub-improve-do-${f.id}`} text={doTexts} />
+        )}
         <AskButton testId={`hub-improve-ask-${f.id}`} text={askText(f)} label="Ask" />
       </div>
       {why && (

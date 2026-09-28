@@ -31,7 +31,7 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
 
 beforeEach(() => {
   useUIStore.setState({ currentProject: 'Demo', assistantDockOpen: false })
-  useChatStore.setState({ composerSeed: null })
+  useChatStore.setState({ composerSeed: null, requestQueue: [], lastRequest: null })
   useHubDesignStore.setState({ ...HUB_DESIGN_INITIAL, project: 'Demo', ready: true,
     step: 'goal', archetype: 'weak_flexible' })
   vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
@@ -162,7 +162,9 @@ describe('GoalCard run', () => {
     await screen.findByTestId('hub-goal-voll-fix')
     expect((screen.getByTestId('hub-goal-run') as HTMLButtonElement).disabled).toBe(true)
     await user.click(screen.getByTestId('hub-goal-voll-fix'))
-    expect(useChatStore.getState().composerSeed).toBe(VOLL_TEXT)
+    // P25 (§5.7): the fix is sent (queued for ChatPanel), not seeded.
+    expect(useChatStore.getState().requestQueue.map(r => r.text)).toEqual([VOLL_TEXT])
+    expect(useChatStore.getState().composerSeed).toBeNull()
     expect(useUIStore.getState().assistantDockOpen).toBe(true)
   })
 

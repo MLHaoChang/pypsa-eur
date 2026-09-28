@@ -20,7 +20,7 @@ from fastapi import HTTPException
 from services import chat_service
 from services import chat_tools as T
 from services.adequacy.eh_review import review_report
-from services.chat_tools_schema import TOOLS
+from tests._tool_actions import _validate_action  # shared with the setup tests (§6.3)
 
 BACKEND = pathlib.Path(__file__).resolve().parents[1]
 
@@ -48,31 +48,6 @@ RECORD = {"archetype": "weak_flexible", "budget_solves": 60,
 
 def _by_id(out, fid):
     return next(f for f in out["findings"] if f["id"] == fid)
-
-
-def _validate_action(action: dict) -> None:
-    """The named tool exists and accepts these args unchanged."""
-    tool = next((t for t in TOOLS if t["name"] == action["tool"]), None)
-    assert tool is not None, action
-    schema = tool["input_schema"]
-    assert set(action["args"]) <= set(schema["properties"]), action
-    assert set(schema.get("required", [])) <= set(action["args"]), action
-    if action["tool"] == "run_eh_study":
-        from services.adequacy.eh_study import validate_stages
-        from services.adequacy.eh_study_runner import (
-            _PACK_FACTORY,
-            EhStudyRequest,
-            McOptions,
-            apply_pack_overrides,
-            resolve_dtc_attribution,
-        )
-        body = EhStudyRequest.model_validate(action["args"])
-        apply_pack_overrides(_PACK_FACTORY[body.archetype](), body.pack_overrides,
-                             raise_http=True)
-        McOptions.model_validate(body.mc or {})
-        resolve_dtc_attribution(body.dtc_config, body.dtc_attribution)
-        if body.stages is not None:
-            validate_stages(body.stages)
 
 
 # ── rules ───────────────────────────────────────────────────────────────────
@@ -189,6 +164,10 @@ def test_prompt_carries_the_eh_workflow_both_modes():
     assert "review_eh_study" in chat_service._EH_GUIDE
     assert "OFFER" in chat_service._EH_GUIDE
     assert "review_eh_study" not in chat_service._EH_GUIDE_FACTS   # tools-off
+    # P25 (guided-mode spec §6.3): the setup tool is offered in both modes,
+    # tools-on only — a tools-off prompt names no tool.
+    assert "suggest_eh_setup" in chat_service._EH_GUIDE
+    assert "suggest_eh_setup" not in chat_service._EH_GUIDE_FACTS
 
 
 # ── the loop, live: study → review → apply the action → review again ───────

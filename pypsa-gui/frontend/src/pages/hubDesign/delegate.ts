@@ -2,8 +2,9 @@
 //
 // `ask(text)` opens the dock with the text in the composer — shown, not sent
 // (the P22 behaviour). `delegate(text)` is the "Let the assistant do this"
-// path: in P24 it is identical to `ask`; P25 changes this ONE function to
-// `useChatStore.getState().sendRequest(text, { source: 'hub-design' })`.
+// path — the user's own click, so it SENDS (P25, §6.1): the request is queued
+// and ChatPanel sends it as a typed message once no turn is streaming and no
+// confirmation card waits. Every write still goes through that card.
 import type { EhArchetype, EhReviewFinding } from '../../api/simulation'
 import { useChatStore } from '../../store/chatStore'
 import { useUIStore } from '../../store/uiStore'
@@ -15,23 +16,23 @@ export function ask(text: string): void {
 }
 
 export function delegate(text: string): void {
-  ask(text)
+  useChatStore.getState().sendRequest(text, { source: 'hub-design' })
 }
 
-/** Button titles: in P24 nothing is sent until the user presses Send. */
+/** Button titles. Ask sends nothing; Delegate sends, without attachments
+ *  (§6.1), and changes nothing until the user confirms. */
 export const ASK_TITLE =
   'Opens the assistant with a question prefilled — nothing is sent until you press Send.'
 export const DELEGATE_TITLE =
-  'Opens the assistant with this request prefilled — nothing is sent or changed until you send it and confirm any action.'
+  'Sends this request to the assistant — your attached files are not included. Nothing changes until you confirm it.'
 
 export type SiteFix = 'grid' | 'critical' | 'strength' | 'outage'
 
-/** Site-card fix requests. P24 omits the grid text's suggest_eh_setup clause
- *  (the tool arrives in P25, which adds it back). */
+/** Site-card fix requests (§5.7). */
 export function siteFixText(kind: SiteFix, n = 0): string {
   switch (kind) {
     case 'grid':
-      return 'On the Site card, the grid connection is missing. Tag the import Link with eh_role = grid_import and the grid-side bus eh_poc = true, explaining each choice before the confirmation.'
+      return 'On the Site card, the grid connection is missing. Run suggest_eh_setup, then tag the import Link with eh_role = grid_import and the grid-side bus eh_poc = true, explaining each choice before the confirmation.'
     case 'critical':
       return 'On the Site card, no critical load is tagged. Propose which buses must stay on (eh_critical = true) and tag them after I confirm.'
     case 'strength':
@@ -43,12 +44,18 @@ export function siteFixText(kind: SiteFix, n = 0): string {
 
 export const VOLL_TEXT = 'Set VOLL to 5000 €/MWh so the study can price shortfall.'
 
-/** "Let the assistant do this" on a finding: its FIRST action (P25 queues
- *  one message per action). Null when the finding has no action. */
+/** "Let the assistant do this" on a finding, one message per action (§5.7):
+ *  the queue sends them one after the other. The sentence "Run the tool …
+ *  with exactly these arguments: {…}" is what the smoke's stub model parses
+ *  (§6.6) — change the two together. */
+export function actionTexts(f: EhReviewFinding): string[] {
+  return (f.actions ?? []).map(a =>
+    `Apply this recommendation from the study review: "${f.title}". Run the tool ${a.tool} with exactly these arguments: ${JSON.stringify(a.args)}. Say in one sentence what will change, then proceed to the confirmation.`)
+}
+
+/** The first action's message; null when the finding has no action. */
 export function actionText(f: EhReviewFinding): string | null {
-  const a = f.actions?.[0]
-  if (!a) return null
-  return `Apply this recommendation from the study review: "${f.title}". Run the tool ${a.tool} with exactly these arguments: ${JSON.stringify(a.args)}. Say in one sentence what will change, then proceed to the confirmation.`
+  return actionTexts(f)[0] ?? null
 }
 
 export function askText(f: EhReviewFinding): string {
