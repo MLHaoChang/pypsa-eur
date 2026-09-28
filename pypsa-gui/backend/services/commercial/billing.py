@@ -171,7 +171,9 @@ def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
         if _lp.capacity_all_newly_bound(rec):
             flags.append("capacity_recipe_changed")  # the old recipe bound none
         else:
-            changed = True  # capacity items added after the solve
+            # This recipe binds them, yet the solve wrote no record (an
+            # unreadable peak): not established, as in the rows (review #5).
+            flags.append("tariff_capacity_not_established")
     if not rec:
         flags.append("solve_provenance_unknown")
     if changed:
@@ -201,6 +203,14 @@ def bill_site(n, commercial, *, meter_history: dict | None = None) -> SiteBill:
     p_nom_mw = float(pn) if np.isfinite(pn) else float(n.links.at[poc, "p_nom"])
     years_w = (n.investment_period_weightings["years"] if multi else None)
 
+    cap_rec = n.meta.get(_lp.META_CAPACITY) or {}
+    cap_periods = None
+    if cap_rec.get("contracted") or cap_rec.get("fixed"):
+        cap_periods = set()
+        for c in (cap_rec.get("contracted") or {}).values():
+            cap_periods |= set(c.get("eur_per_mw_by_period") or {})
+        for c in (cap_rec.get("fixed") or {}).values():
+            cap_periods |= set(c.get("eur_by_period") or {})
     per_period: dict = {}
     calendar: dict = {}
     errors: dict = {}
@@ -216,6 +226,10 @@ def bill_site(n, commercial, *, meter_history: dict | None = None) -> SiteBill:
         active = True
         if multi:
             active = bool(n.get_active_assets("Link", p).reindex([poc]).fillna(False).iloc[0])
+            if cap_periods is not None:
+                # The periods the solve charged (a connection's available_from
+                # moves the PoC's build_year for the solve only; review #1).
+                active = str(key) in cap_periods
         dispatch = pd.DataFrame({"import_mw": imp_all[sel], "export_mw": exp_all[sel]},
                                 index=idx)
         try:

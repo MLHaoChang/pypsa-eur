@@ -355,6 +355,12 @@ def _adders(n, cfg: CommercialConfig) -> tuple[dict[str, np.ndarray], list[str],
             not_in_lp[item.id] = reason
             continue
         if item.kind == "capacity":
+            if item.periods[0].rate < 0:
+                # A capacity credit would pay the LP to build the PoC to its
+                # max, or leave the annual peak unbounded (review #2).
+                raise CommercialBindingError(
+                    f"capacity item {item.id!r} has a negative rate; a capacity credit is "
+                    "not a capacity charge")
             continue  # a p_nom or annual-peak term, built by `_capacity_spec`
         if _is_demand(item):
             neg = [p.name for p in item.periods if p.rate < 0
@@ -1295,9 +1301,23 @@ def _capacity_spec(n, cfg: CommercialConfig) -> dict | None:
                               "inv_period": None if p is None else int(p), "year": y,
                               "eur_per_mw": eur_per_mw_year * float(w[pos].sum()) / _HOURS_PER_YEAR,
                               "positions": pos, "group": group})
+    # A contracted item on a FIXED PoC is a constant, harmless per window;
+    # the PoC's extendability at apply time is the LP build's (the connection
+    # agreement applied next never changes it: review #6).
+    extendable = bool(n.links.at[cfg.poc_link, "p_nom_extendable"]) \
+        if cfg.poc_link in n.links.index else False
     return {"link": cfg.poc_link, "import_links": import_links(cfg),
             "contracted": contracted, "peaks": peaks,
+            "extendable_poc": extendable and bool(contracted),
             "items_hash": _items_hash(items), "hash_version": _H.HASH_VERSION}
+
+
+# Convention (review #3): a contracted capacity charge accrues over every
+# represented hour of each ACTIVE period (the LP fee's nyears; on a flat axis
+# the whole horizon), also before a connection's `available_from` — the DSO
+# bills the contracted capacity, the agreement gates the flow. In a
+# multi-period solve `available_from` moves the PoC's build_year, so a period
+# before it is not active and is not charged (the record lists the periods).
 
 
 def add_capacity_terms(n) -> None:
@@ -1448,7 +1468,7 @@ def refuse_windowed_terms(demand: dict | None, tier_spec: dict | None,
     windowed = solve_strategy == "rolling" or (solve_strategy == "myopic" and multi_period)
     if not windowed:
         return
-    if capacity is not None:
+    if capacity is not None and (capacity["peaks"] or capacity.get("extendable_poc")):
         raise CommercialBindingError(
             f"tariff capacity items with solve_strategy={solve_strategy!r} would be paid (or "
             "their annual peak restarted) per window; not supported until P6 — solve the "

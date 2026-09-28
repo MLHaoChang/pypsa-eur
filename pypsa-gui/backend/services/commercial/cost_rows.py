@@ -185,19 +185,27 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
     cap = n.meta.get(_lp.META_CAPACITY)
     wanted_cap = _lp.capacity_items_hash(cfg_now) if cfg_now is not None else None
     if cap:
+        cap_items: list[tuple] = []
+        known = True
         for item_id, c in (cap.get("contracted") or {}).items():
             link = c.get("link")
             if link in n.links.index and "p_nom_opt" in n.links.columns and \
                     np.isfinite(float(n.links.at[link, "p_nom_opt"])):
                 size = float(n.links.at[link, "p_nom_opt"])
                 for key, eur_per_mw in c.get("eur_per_mw_by_period", {}).items():
-                    items.append(("tariff_capacity", None if key == "_" else int(key),
-                                  float(eur_per_mw) * size, 0.0))
+                    cap_items.append(("tariff_capacity", None if key == "_" else int(key),
+                                      float(eur_per_mw) * size, 0.0))
             else:
-                flags.append("tariff_capacity_not_established")
+                known = False
         for v in (cap.get("peaks") or {}).values():
-            items.append(("tariff_capacity", v.get("inv_period"), 0.0,
-                          float(v["eur_per_mw"]) * float(v["peak_mw"])))
+            cap_items.append(("tariff_capacity", v.get("inv_period"), 0.0,
+                              float(v["eur_per_mw"]) * float(v["peak_mw"])))
+        if known:
+            items.extend(cap_items)
+        else:
+            # A partly unknown term is unknown: nothing of it enters the
+            # totals (ADR-0001; review #4).
+            flags.append("tariff_capacity_not_established")
         if cap.get("contracted") or cap.get("peaks"):
             block["tariff_capacity"] = (None if "tariff_capacity_not_established" in flags
                                         else weighted("tariff_capacity"))

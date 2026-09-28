@@ -207,3 +207,104 @@ def test_a_capacity_priced_poc_needs_no_capital_cost_but_other_links_still_do():
     assert ("link_no_capital_cost", "import") not in codes(_commercial(TOU, CAP))
     assert ("link_no_capital_cost", "import") in codes(_commercial(TOU))
     assert ("link_no_capital_cost", "import") in codes(_commercial(TOU, LEISTUNG))
+
+
+# ── WP2.1c-iii review round 1 ──────────────────────────────────────────────
+
+
+def _backed_up(n):
+    n.add("Carrier", "diesel")
+    n.add("Generator", "backup", bus="site", carrier="diesel", p_nom=100.0, marginal_cost=500.0)
+    return n
+
+
+@pytest.mark.live_solve
+def test_the_bill_charges_the_periods_the_solve_charged_when_the_connection_opens_late():
+    """#1: available_from moves the PoC's build_year for the solve only; the
+    bill reads the charged periods from the record, not the restored build_year."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _backed_up(_site())
+    n.set_investment_periods([2030, 2040])
+    n.investment_period_weightings["years"] = 10.0
+    n.investment_period_weightings["objective"] = 10.0
+    commercial = _commercial(TOU, CAP, connection={
+        "kind": "firm", "import_cap_mw": 120.0, "available_from": "2035-01-01"})
+    cfg = _solve(n, commercial, multi_investment_periods=True)
+    gap, _rows_ = _rows(n, cfg)
+    assert abs(gap) < 1e-6
+    rows = {p: a + b for lab, p, a, b in commercial_cost_terms(n, commercial)["items"]
+            if lab == "tariff_capacity"}
+    bill = B.bill_site(n, commercial).per_period
+    assert set(rows) == {2040}
+    assert bill[2030].per_item["cap"] == 0.0
+    assert bill[2040].per_item["cap"] == pytest.approx(rows[2040], rel=1e-9)
+
+
+def test_a_negative_capacity_rate_is_refused():
+    """#2: a credit would build the PoC to its max or leave the peak unbounded."""
+    for item in (CAP, LEISTUNG):
+        neg = {**item, "periods": [{"name": "all", "rate": -50.0}]}
+        with pytest.raises(L.CommercialBindingError, match="negative"):
+            L.materialise_poc_prices(_site(), _commercial(TOU, neg))
+
+
+@pytest.mark.live_solve
+def test_on_a_flat_axis_contracted_capacity_accrues_over_the_whole_horizon():
+    """#3 (convention): the DSO bills the contracted capacity from the start;
+    `available_from` gates the flow, not the charge (rows = bill)."""
+    n = _site()
+    commercial = _commercial(TOU, CAP, connection={
+        "kind": "firm", "import_cap_mw": 120.0, "available_from": "2030-01-09"})
+    n.add("Carrier", "diesel")
+    n.add("Generator", "backup", bus="site", carrier="diesel", p_nom=100.0, marginal_cost=500.0)
+    cfg = _solve(n, commercial)
+    gap, rows = _rows(n, cfg)
+    assert abs(gap) < 1e-6
+    size = float(n.links.at["import", "p_nom_opt"])
+    assert rows["tariff_capacity"] == pytest.approx(400_000.0 * size * 168 / 8760.0, rel=1e-9)
+    assert rows["tariff_capacity"] == pytest.approx(
+        B.bill_site(n, commercial).per_period[None].per_item["cap"], rel=1e-9)
+
+
+@pytest.mark.live_solve
+def test_a_partly_unknown_capacity_term_adds_nothing_to_the_totals():
+    """#4 (ADR-0001)."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _site()
+    commercial = _commercial(TOU, CAP, LEISTUNG)
+    _solve(n, commercial)
+    n.meta[L.META_CAPACITY]["contracted"]["cap"]["link"] = "ghost"
+    out = commercial_cost_terms(n, commercial)
+    assert out["block"]["tariff_capacity"] is None
+    assert "tariff_capacity_not_established" in out["flags"]
+    assert not [i for i in out["items"] if i[0] == "tariff_capacity"]
+
+
+@pytest.mark.live_solve
+def test_a_current_recipe_solve_without_a_record_is_not_established_on_the_bill():
+    """#5: not a config change."""
+    n = _site()
+    commercial = _commercial(TOU, CAP)
+    _solve(n, commercial)
+    n.meta.pop(L.META_CAPACITY)
+    flags = B.bill_site(n, commercial).flags
+    assert "tariff_capacity_not_established" in flags
+    assert "config_changed_since_solve" not in flags
+
+
+def test_windowed_solves_refuse_only_capacity_terms_that_change_per_window():
+    """#6: a contracted item on a fixed PoC is a constant."""
+    from models.commercial import CommercialConfig
+
+    fixed = _site(extendable=False)
+    spec = L._capacity_spec(fixed, CommercialConfig.model_validate(_commercial(TOU, CAP)))
+    L.refuse_windowed_terms(None, None, "rolling", False, spec)          # allowed
+    ext = _site()
+    spec = L._capacity_spec(ext, CommercialConfig.model_validate(_commercial(TOU, CAP)))
+    with pytest.raises(L.CommercialBindingError):
+        L.refuse_windowed_terms(None, None, "rolling", False, spec)
+    spec = L._capacity_spec(fixed, CommercialConfig.model_validate(_commercial(TOU, LEISTUNG)))
+    with pytest.raises(L.CommercialBindingError):
+        L.refuse_windowed_terms(None, None, "rolling", False, spec)

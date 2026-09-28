@@ -539,6 +539,16 @@ Files: `lp_bindings.py`, `cost_rows.py`, `test_ratchet.py`, `test_tiers.py`, rec
 
     The reconciliation gate has 17 cases (+ `tariff_capacity`, `tariff_capacity_peak`, compared across the reload too).
 
+- **WP2.1c-iii review round 1 → PASS WITH CONDITIONS; all findings fixed:**
+  1. **MEDIUM.** In a multi-period solve with a late `available_from`, the connection agreement moved the PoC's build_year for the solve only, but the bill used the restored one and charged capacity in a closed period. `bill_site` now reads the charged periods from `ic_tariff_capacity` (the contracted `eur_per_mw_by_period` and fixed `eur_by_period` keys). Tested live: rows {2040}, bill 2030 = 0, and 2040 = rows.
+  2. **MEDIUM.** A negative capacity rate is refused (`CommercialBindingError`, like demand). Before, it left the peak unbounded or built the PoC to its maximum for the credit.
+  3. (LOW, convention stated and tested) On a flat axis, contracted capacity accrues over the whole horizon, also before `available_from`: the DSO bills the contracted capacity and the agreement gates the flow. In multi-period, a period before it is not active and not charged.
+  4. (LOW) A partly unknown capacity term adds nothing to the totals (ADR-0001).
+  5. (LOW) The bill flags `tariff_capacity_not_established` for a current-recipe solve without a record, not a config change.
+  6. (LOW) Windowed (rolling / multi-period myopic) solves refuse only capacity terms that change per window: a measured peak, or a contracted item on an extendable PoC. A contracted item on a fixed PoC is a constant and is allowed. The spec records `extendable_poc`.
+  - Reviewer probes: the LP equals the bill to 1e-9 with a gap of about 1e-10 across Tokyo and New York new-year crossings, two periods in Berlin, sampled weeks across DST with 30-min settlement, a firm cap and a non-firm fixed PoC.
+- **WP2.4a review round 2 → PASS** (no residue). WP2.4b-0's PASS still holds with the shared `resolver(read)`. Noted, no action needed: `_unknown_keys` does not walk dict-valued model fields, and no current item kind has one.
+
 ## WP2.4b-0 Condition 4 refactor (lands before the Library work)
 
 Files: `backend/services/commercial/binding.py` (new: org resolution by an injected resolver, alignment,
