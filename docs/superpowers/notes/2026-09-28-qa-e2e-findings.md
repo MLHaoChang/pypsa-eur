@@ -142,7 +142,10 @@ Fix shape: pair each weight with its submitted period *before* sorting and assig
 label (`df.at[period, col]`), the way `update_investment_period_weightings` already
 does; reject a length mismatch with a 400 naming both counts.
 
-**Status: OPEN**
+**Status: FIXED** — pairing is done before anything is mutated, so a bad list no
+longer leaves the snapshots rebuilt. Guard: `tests/test_weightings_integrity.py`,
+which submits periods descending (ascending input cannot distinguish the two) and
+keeps the ascending case as a control.
 
 ### QA-P1 — chat lineage resolves to the flat legacy directory
 
@@ -270,7 +273,13 @@ where they came from.
 Fix shape: reject non-finite values and negative values with a 400 naming the column
 and the offending value, at every entry point that writes a weighting.
 
-**Status: OPEN**
+**Status: FIXED** — one `_weight_value` parser at all five entry points (both
+broadcasts and the per-period path on the investment-period PATCH, the broadcast and
+per-row paths on the snapshot PATCH, and the CSV upload). Zero stays legal: a
+zero-weight snapshot is how a user excludes an hour without deleting it, and the
+tests pin that boundary. The per-period path was also made two-pass, matching the
+rest of the module — it wrote row by row, so a rejection at row N left rows 0..N-1
+applied.
 
 ### QA-S1 — lock-holder email reaches the LLM provider — NOT A FINDING
 
