@@ -31,7 +31,8 @@ ValueStreamKind = Literal[
 ]
 
 TariffItemKind = Literal["energy", "demand", "capacity", "fixed", "certificate", "tax_levy"]
-TariffUnit = Literal["per_kwh", "per_kw_month", "per_kw_year", "per_month", "per_kva_year"]
+TariffUnit = Literal["per_kwh", "per_kw_month", "per_kw_year", "per_month", "per_kva_year",
+                     "per_day"]
 Settlement = Literal["15min", "30min", "h"]
 MeasuredOn = Literal["import", "export", "net", "peak_import"]
 Direction = Literal["cost", "revenue"]
@@ -359,6 +360,9 @@ class CommercialConfig(BaseModel):
     meter_history_peaks_kw: dict[str, float] = Field(default_factory=dict)
     # P6 hook (windowed dispatch): a floor on a month's modelled peak, {"YYYY-MM": MW}.
     initial_peak_lower_bound: dict[str, float] = Field(default_factory=dict)
+    # The site's power factor for tariff items billed per kVA (P2 WP2.1a-i);
+    # absent ⇒ a `per_kva_year` item is not established (ADR-0001).
+    power_factor: float | None = Field(default=None, gt=0, le=1)
 
     @model_validator(mode="after")
     def _tariff_and_links(self) -> "CommercialConfig":

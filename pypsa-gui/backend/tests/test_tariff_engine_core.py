@@ -181,7 +181,11 @@ def test_a_15min_year_rates_in_under_a_second():
     t0 = time.perf_counter()
     res = rate(df, de, step_hours=0.25, timezone="Europe/Berlin")
     assert time.perf_counter() - t0 < 1.0
-    assert len(res.lines) > 0 and "network_capacity" in res.unsupported_items
+    # Since P2 WP2.1a-i the DE Leistungspreis (capacity, per_kw_year, measured on
+    # peak_import) bills the year's measured peak (15-min mean), once a year.
+    assert len(res.lines) > 0 and res.unsupported_items == []
+    peak_kw = df["import_mw"].max() * 1000.0
+    assert res.per_item["network_capacity"] == pytest.approx(85.0 * peak_kw, rel=1e-9)
 
 
 def test_engine_is_pure_no_lp_or_router_imports():

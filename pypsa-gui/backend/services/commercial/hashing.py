@@ -34,7 +34,9 @@ HASH_VERSION = 2
 # Fields added to the commercial models after recipe 1: (model class name,
 # field) → default. Append in the WP that adds a field (P2: WP2.1a-i/ii/iii,
 # WP2.2a/b, …); the inventory test fails until it is here.
-FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {}
+FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {
+    ("CommercialConfig", "power_factor"): None,          # WP2.1a-i
+}
 
 
 def _recipe_1(obj: Any) -> Any:

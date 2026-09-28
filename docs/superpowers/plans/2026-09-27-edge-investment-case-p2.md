@@ -219,6 +219,18 @@ items; `CommercialConfig.power_factor: float | None` (for `per_kva_year`).
 - [ ] Red: R2, R4a, R4b to the cent (hand-translated JSON); per-day over a leap February (H3 slice); capacity
   on a two-period network; kVA without power factor `not_established`; P1 engine tests unchanged.
 
+- **As implemented:**
+  - `rate(..., capacity_kw=, power_factor=)`. The engine handles capacity items in their own branch, before the demand branch.
+  - **Deviation (DE fixture):** a capacity item measured on `peak_import` (the German Leistungspreis) bills the year's **measured** peak (settlement-interval mean) × rate × represented hours / 8760, once per year. Other capacity items bill the contracted `capacity_kw`. P1's DE fixture item was billed monthly on the yearly rate, because `_is_demand` matched `peak_import`; it now bills correctly, and `test_a_15min_year_rates_in_under_a_second` pins it.
+  - A per-day fixed charge counts covered hours / 24 on the local clock.
+  - Demand tiers price the billed kW through `_tier_cost`. A windowed demand tier is `unsupported:demand_tiers_with_windows` until WP2.1a-ii.
+  - `capacity_double_count` is refused in `validate_for_network`.
+  - `power_factor` is registered in `FIELDS_AFTER_V1`.
+  - `types.ts` is mirrored.
+  - Oracles are under `tests/fixtures/investment_case/oracles/`, with PROVENANCE and REopt's NOTICE. R2, R4a and R4b pass to the cent (`test_tariff_engine_urdb.py`).
+  - The hourly audit allow-lists the capacity unit (48 sites in 23 files).
+  - LP: demand tiers, capacity and per-day items stay `not_in_lp` until WP2.1c.
+
 ## WP2.1a-ii Engine: tiers inside TOU windows
 
 Model delta: `TariffPeriod.tier_rates: list[float] | None` aligned with the **item's** `tiers` thresholds (one

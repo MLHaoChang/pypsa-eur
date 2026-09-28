@@ -64,6 +64,7 @@ import pandas as pd
 
 from models.commercial import Tariff, TariffItem
 
+_HOURS_PER_YEAR = 8760.0  # capacity items: represented hours → years, a unit
 _KWH_PER_MWH = 1000.0
 _SETTLEMENT_HOURS = {"15min": 0.25, "30min": 0.5, "h": 1.0}
 _REQUIRED = ("import_mw", "export_mw")
@@ -291,14 +292,26 @@ def tiers_are_convex(tiers) -> bool:
     return all(b >= a for a, b in zip(rates, rates[1:]))
 
 
+def _single_catch_all(item: TariffItem) -> bool:
+    p = item.periods[0]
+    return len(item.periods) == 1 and not p.months and not p.weekdays and p.start_hour is None
+
+
 def _unsupported_reason(item: TariffItem) -> str | None:
     if item.kind == "capacity":
-        return "unsupported:capacity_via_connection_agreement"
+        # P2 WP2.1a-i: rated on the capacity the caller passes (the adapter
+        # passes the PoC's p_nom_opt), one catch-all period.
+        if item.unit not in ("per_kw_year", "per_kva_year"):
+            return f"unsupported:unit_{item.unit}_for_capacity"
+        if not _single_catch_all(item):
+            return "unsupported:capacity_with_windows"
+        return None
     if _is_demand(item):
-        if item.tiers:
-            return "unsupported:tiers_on_demand"
         if item.unit != "per_kw_month":
             return f"unsupported:unit_{item.unit}_for_demand"
+        if item.tiers and not _single_catch_all(item):
+            # Tier rates per window arrive with `TariffPeriod.tier_rates` (WP2.1a-ii).
+            return "unsupported:demand_tiers_with_windows"
         return None
     if item.tiers:
         # WP1.5c: tiers on cumulative monthly volume, for a single catch-all
@@ -309,7 +322,7 @@ def _unsupported_reason(item: TariffItem) -> str | None:
         if item.unit != "per_kwh":
             return f"unsupported:unit_{item.unit}_for_tiers"
     if item.kind == "fixed":
-        if item.unit != "per_month":
+        if item.unit not in ("per_month", "per_day"):
             return f"unsupported:unit_{item.unit}_for_fixed"
         p = item.periods[0]
         if len(item.periods) != 1 or p.months or p.weekdays or p.start_hour is not None:
@@ -362,9 +375,12 @@ def _hours_by_month_in_period(start, end, tz: str | None) -> dict[str, float]:
 
 def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | None,
          billing_period: tuple | None = None, represents_hours=None,
-         meter_history: pd.DataFrame | None = None) -> RatingResult:
+         meter_history: pd.DataFrame | None = None, capacity_kw: float | None = None,
+         power_factor: float | None = None) -> RatingResult:
     """Rate ``dispatch`` against ``tariff`` (see module docstring).
-    ``meter_history`` is accepted for ratchets (WP1.5b) and unused here."""
+    ``meter_history`` seeds ratchets (WP1.5b). ``capacity_kw`` is the contracted
+    capacity capacity items rate on (the PoC's p_nom_opt), ``power_factor`` turns
+    it into kVA for `per_kva_year` items (P2 WP2.1a-i)."""
     idx = _validate(dispatch, timezone)
     dur = _durations(idx, step_hours)
     energy_h = dur if represents_hours is None else _per_row(idx, represents_hours, "represents_hours")
@@ -398,6 +414,53 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             flags[item.id] = [reason]
             continue
         sign = sign_of[item.direction]
+        if item.kind == "capacity":
+            # Capacity items (P2 WP2.1a-i), €/kW(A)-year, pro-rated like the LP's
+            # fee by the represented hours (the energy hours) / 8760:
+            #   * measured on `peak_import` — the year's MEASURED peak (settlement-
+            #     interval mean), e.g. the German Leistungspreis on the
+            #     Jahreshöchstleistung; once per year, never per month;
+            #   * otherwise — the contracted capacity the caller passes
+            #     (`capacity_kw`, the PoC's p_nom_opt).
+            flags[item.id] = []
+            by_month: dict[str, float] = {}
+            hours_by_month = pd.Series(energy_h).groupby(month_key).sum()
+            year_key = np.asarray([m[:4] for m in month_key])
+            if item.measured_on == "peak_import":
+                interval = interval_key(local, {"15min": "15min", "30min": "30min",
+                                                "h": "h"}[item.settlement])
+                kw = imp * _KWH_PER_MWH
+                caps = {}
+                for y in sorted(set(year_key)):
+                    sel = year_key == y
+                    g = pd.DataFrame({"g": interval[sel], "qd": kw[sel] * dur[sel], "d": dur[sel]})
+                    agg = g.groupby("g").sum()
+                    means = agg["qd"] / agg["d"]
+                    caps[y] = float(means.max()) if not means.isna().any() else float("nan")
+                if any(not np.isfinite(v) for v in caps.values()):
+                    flags[item.id].append("nan_quantity")
+            else:
+                cap = capacity_kw
+                if cap is None:
+                    flags[item.id].append("capacity_not_established")
+                caps = {y: cap for y in set(year_key)}
+            if item.unit == "per_kva_year" and not flags[item.id]:
+                if power_factor is None:
+                    flags[item.id].append("power_factor_missing")
+                else:
+                    caps = {y: v / power_factor for y, v in caps.items()}
+            if not flags[item.id]:
+                for key, hours in sorted(hours_by_month.items()):
+                    amt = (sign * item.periods[0].rate * caps[key[:4]] * float(hours)
+                           / _HOURS_PER_YEAR)
+                    by_month[key] = amt
+                    fixed_rows.append({"month": key, "tariff_item": item.id,
+                                       "hours_covered": float(hours),
+                                       "hours_in_month": _month_hours(key, timezone),
+                                       "amount": amt})
+            per_item[item.id] = None if flags[item.id] else float(sum(by_month.values()))
+            monthly_parts[item.id] = pd.Series(by_month, dtype=float)
+            continue
         if _is_demand(item):
             # WP1.5a: per local month and period window, rate × max kW over
             # the item's demand INTERVALS (`settlement`): finer dispatch is
@@ -485,7 +548,13 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                             note = notes.setdefault(item.id, [])
                             if "ratchet_seed_missing" not in note:
                                 note.append("ratchet_seed_missing")
-                    line = sign * rate_k * billed
+                    if item.tiers:
+                        # Demand tiers (P2 WP2.1a-i): the billed kW priced
+                        # through the tiers (thresholds in kW, rates per kW).
+                        line = (sign * float(_tier_cost(item.tiers, np.array([billed]))[0])
+                                if np.isfinite(billed) else float("nan"))
+                    else:
+                        line = sign * rate_k * billed
                     demand_rows.append({"month": key, "tariff_item": item.id, "period": name,
                                         "peak_kw": peak, "billed_kw": billed, "rate": rate_k,
                                         "amount": line})
@@ -514,7 +583,10 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             by_month: dict[str, float] = {}
             for key, hours in sorted(covered.items()):
                 mh = _month_hours(key, timezone)
-                amt = sign * monthly_rate * hours / mh
+                # per_day: the covered hours in days (P2 WP2.1a-i); per_month:
+                # the covered share of the month.
+                amt = (sign * monthly_rate * hours / 24.0 if item.unit == "per_day"
+                       else sign * monthly_rate * hours / mh)
                 by_month[key] = amt
                 fixed_rows.append({"month": key, "tariff_item": item.id, "hours_covered": hours,
                                    "hours_in_month": mh, "amount": amt})

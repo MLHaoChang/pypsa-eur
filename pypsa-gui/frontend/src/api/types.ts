@@ -320,7 +320,7 @@ export interface TariffRatchet { lookback_months: number; share: number }
 export interface TariffItem {
   id: string
   kind: 'energy' | 'demand' | 'capacity' | 'fixed' | 'certificate' | 'tax_levy'
-  unit: 'per_kwh' | 'per_kw_month' | 'per_kw_year' | 'per_month' | 'per_kva_year'
+  unit: 'per_kwh' | 'per_kw_month' | 'per_kw_year' | 'per_month' | 'per_kva_year' | 'per_day'
   periods: TariffPeriod[]
   tiers?: TariffTier[] | null
   ratchet?: TariffRatchet | null
@@ -363,6 +363,8 @@ export interface CommercialConfig {
   meter_history_peaks_kw?: Record<string, number>
   /** P6 hook: a floor on a month's modelled peak, {"YYYY-MM": MW}. */
   initial_peak_lower_bound?: Record<string, number>
+  /** Site power factor for per-kVA tariff items (IC P2 WP2.1a-i). */
+  power_factor?: number | null
 }
 /**
  * Actionable failure card for a finished solve. Produced by the backend's

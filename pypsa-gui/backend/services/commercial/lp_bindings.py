@@ -314,6 +314,13 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
     if cfg.export_link is not None:
         _require_link(n, cfg.export_link, "export_link")
         _require_one_way(n, cfg.export_link, "export_link")
+    if cfg.connection is not None and cfg.connection.capacity_fee is not None and any(
+            i.kind == "capacity" for i in (cfg.import_tariff.items if cfg.import_tariff else [])):
+        # Two capacity charges on one PoC (P2 WP2.1a-i): the connection fee and a
+        # tariff capacity item would bill the same contracted capacity twice.
+        raise CommercialBindingError(
+            "commercial.capacity_double_count: the import tariff has a capacity item and the "
+            "connection agreement a capacity_fee on the same PoC; keep one")
     if cfg.demand_items:
         # Not implemented in P1: every demand item of the tariff is charged, so
         # a selection would be silently ignored (Phase 1 gate finding #4).

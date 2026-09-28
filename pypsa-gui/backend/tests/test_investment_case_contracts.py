@@ -183,7 +183,8 @@ def test_tariff_item_enums_exact():
     assert set(C.TariffItemKind.__args__) == {
         "energy", "demand", "capacity", "fixed", "certificate", "tax_levy"}
     assert set(C.TariffUnit.__args__) == {
-        "per_kwh", "per_kw_month", "per_kw_year", "per_month", "per_kva_year"}
+        "per_kwh", "per_kw_month", "per_kw_year", "per_month", "per_kva_year",
+        "per_day"}  # per_day: IC P2 WP2.1a-i
     assert set(C.Settlement.__args__) == {"15min", "30min", "h"}
     assert set(C.MeasuredOn.__args__) == {"import", "export", "net", "peak_import"}
 
