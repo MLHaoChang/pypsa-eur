@@ -537,11 +537,11 @@ def test_ratchet_modes_are_validated(ratchet, match):
                  "periods": [{"name": "all", "rate": 10.0}], "ratchet": ratchet})
 
 
-def test_new_ratchet_modes_stay_out_of_the_lp_until_wp2_1c():
+def test_new_ratchet_modes_are_lp_terms_since_wp2_1c():
     from services.commercial import lp_bindings as L
 
     for f in ("r3_case2.tariff.json", "r3_case3.tariff.json"):
-        assert L._lp_reason(_load(f).items[0]) == "ratchet_mode_not_in_lp_until_WP2.1c"
+        assert L._lp_reason(_load(f).items[0]) is None
 
 
 def test_new_ratchet_fields_are_registered_for_hash_recipe_1():

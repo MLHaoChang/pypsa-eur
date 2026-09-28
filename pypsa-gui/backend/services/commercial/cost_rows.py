@@ -88,6 +88,8 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
     peaks = n.meta.get(_lp.META_DEMAND)
     info = n.meta.get(_lp.META_DEMAND_INFO) or {}
     wanted: list[str] = []
+    wanted_items: list = []
+    cfg_parsed = None
     wanted_hash = None
     if commercial:
         try:
@@ -102,12 +104,17 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
             wanted = []
     if peaks:
         for v in peaks.values():
-            amount = float(v["eur_per_mw"]) * float(v.get("billed_mw", v["peak_mw"]))
+            amount = _lp.demand_amount(v)
             items.append(("demand_charge", v.get("inv_period"), 0.0, amount))
         block["demand_charge"] = weighted("demand_charge")
         drift = sorted(info.get("items", [])) != sorted(wanted) or (
             info.get("items_hash") is not None and info.get("items_hash") != wanted_hash)
-        if drift:
+        if drift and commercial and _lp.demand_only_newly_bound(n, info, wanted_items, cfg_parsed):
+            # Solved before WP2.1c-i put demand tiers and designated-month /
+            # cyclic ratchets in the LP: the config is unchanged, the recipe
+            # binds more of it now — re-solve (not a config drift).
+            flags.append("demand_recipe_changed")
+        elif drift:
             flags.append("config_changed_since_solve" if commercial else
                          "config_cleared_since_solve")
         if info.get("hash_version") is None:

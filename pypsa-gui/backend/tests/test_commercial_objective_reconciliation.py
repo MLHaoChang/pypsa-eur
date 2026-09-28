@@ -10,9 +10,10 @@ recomputes the rows after a reload with no solver state at all, and
 `_HANDLER_PARAMS` is unchanged (no new route argument; plan deviation from the
 `commercial_terms=` keyword, recorded in the plan).
 
-Eleven cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
+Fourteen cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
 tiers; + group cap; a representative-weeks axis; two investment periods (TOU +
-demand + fee); a two-period group whose demand is metered on the group; annual FOM on the extendable assets; capex and FOM on a fee-bearing PoC Link (WP2.0).
+demand + fee); a two-period group whose demand is metered on the group; annual FOM on the extendable assets; capex and FOM on a fee-bearing PoC Link (WP2.0);
+rising demand tiers, a designated-month and a cyclic ratchet (WP2.1c-i).
 After the reload the gap must still be computed (never None), and the flags,
 the not-established months and the group record must be the same.
 """
@@ -41,6 +42,12 @@ FEE = {"kind": "firm", "import_cap_mw": 70.0, "available_from": "2030-01-01",
        "capacity_fee": {"id": "fee", "kind": "capacity", "unit": "per_kw_year",
                         "periods": [{"name": "all", "rate": 60.0}]}}
 HISTORY = {f"2029-{m:02d}": 30_000.0 for m in range(2, 13)}
+# WP2.1c-i: rising demand tiers, designated-month and cyclic ratchets.
+DEMAND_TIERS = {**DEMAND, "periods": [{"name": "all", "rate": 0.0}],
+                "tiers": [{"threshold": 0, "rate": 5.0}, {"threshold": 30_000, "rate": 20.0}]}
+RATCHET_MONTHS = {**DEMAND, "ratchet": {"months": [1], "share": 0.95}}
+RATCHET_CYCLIC = {**DEMAND, "ratchet": {"lookback_months": 1, "share": 0.9,
+                                        "cyclic_year": True}}
 
 
 def _tariff(*items):
@@ -63,6 +70,21 @@ def _two_members():
     n.add("Load", "site_b_load", bus="site_b", p_set=n.loads_t.p_set["site_load"] * 0.8)
     n.add("Generator", "backup_b", bus="site_b", p_nom=100.0, marginal_cost=500.0, carrier="grid")
     n.add("Generator", "backup", bus="site", p_nom=100.0, marginal_cost=500.0, carrier="grid")
+    return n
+
+
+def _jan_feb():
+    """The 15-min edge across a month boundary (Jan 28 – Feb 3): a ratchet
+    reads one modelled month from the other."""
+    from tests.fixtures.investment_case import edge_15min as F
+
+    old = F.START
+    F.START = "2030-01-28 00:00"
+    try:
+        n = F.build_edge_15min()
+    finally:
+        F.START = old
+    n.generators.loc["grid_supply", "marginal_cost"] = 0.0
     return n
 
 
@@ -120,6 +142,10 @@ CASES = {
                                            "connection": FEE}),
     "fom": (_with_fom, {"import_tariff": _tariff(TOU)}),
     "poc_capex_fee": (_poc_capex, {"import_tariff": _tariff(TOU), "connection": FEE}),
+    "demand_tiers": (_edge, {"import_tariff": _tariff(TOU, DEMAND_TIERS)}),
+    "ratchet_designated": (_jan_feb, {"import_tariff": _tariff(TOU, RATCHET_MONTHS)}),
+    "ratchet_cyclic": (_jan_feb, {"import_tariff": _tariff(TOU, RATCHET_CYCLIC),
+                                  "meter_history_peaks_kw": {"2030-12": 60_000.0}}),
     "group_multi_period": (_two_periods(_two_members),
                            {"import_tariff": _tariff(TOU, DEMAND), "group_contract": "hub",
                             "group_members": ["import", "import_b"], "group_cap_mw": 60.0}),

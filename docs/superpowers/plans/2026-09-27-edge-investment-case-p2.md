@@ -398,6 +398,8 @@ round-trip test through `_safe_unpickle_results` proves it.
   - **Residue 2 (LOW).** The `_drift_flags` docstring states the rule: items the LP does not carry do not shape the dispatch, so edits to them are not drift. The bill uses their current values.
   - **Residue 3 (LOW).** `provenance.period_errors` keeps the engine's refusal text (up to 300 characters) for a `period_not_billed:<p>:invalid_dispatch` period.
 
+- Round 3 → **PASS** (no residue). Probes on live solves: a demand item or convex tiers added after the solve are flagged, a fixed item added is not, and removed or edited tiers are flagged.
+
 ## WP2.1c LP: convex demand tiers, windowed tiers, new ratchets, predicted non-convex tier
 
 Files: `lp_bindings.py`, `cost_rows.py`, `test_ratchet.py`, `test_tiers.py`, reconciliation gate.
@@ -429,6 +431,33 @@ Files: `lp_bindings.py`, `cost_rows.py`, `test_ratchet.py`, `test_tiers.py`, rec
 - [ ] Red: each construct = engine on the same dispatch, gap 0; reconciliation cases `demand_tiers`,
   `windowed_tiers`, `ratchet_designated`, `ratchet_cyclic` before and after save → load; drift hashes cover the
   new fields.
+
+- **Split for review:** c-i covers demand tiers and the new ratchet modes. c-ii covers windowed energy tiers and the predicted non-convex tier. c-iii covers tariff capacity items.
+
+- **As implemented, WP2.1c-i:**
+  - `_lp_reason` no longer leaves demand tiers or designated-month / cyclic ratchets out. A negative tier rate on a demand item is refused, as a negative period rate is.
+  - `_demand_spec`:
+    - A tiered window is free only when all its tier rates are 0 (the engine's `_charged`). A windowed item uses its window's `tier_rates`.
+    - `_demand_segments` turns rising rates into MW/€-per-MW segments. A first threshold above 0 adds a free segment, as `_tier_cost_with` bills. A key with segments has `eur_per_mw` 0.
+    - Falling rates are priced at the first tier and noted `nonconvex_tier`.
+    - `_ratchet_months` is the engine's month rule for all three modes. History still seeds the first period only.
+  - `add_demand_terms` adds `ic_demand_tier_q` (0 ≤ q ≤ width), Σ q = `ic_billed_demand` per key, and Σ w_obj · €/MW · q in the objective.
+  - `_read_demand_solution`:
+    - Records the segments; the open top width is None, since JSON has no inf.
+    - Records a tiered key's billed demand as the rule's value (the max of the peak and its ratchet rows). A 0-rate segment leaves the variable free, at the same cost.
+  - `demand_amount(rec)` fills the segments in order. `cost_rows` uses it for every demand row.
+  - **Recipe migration:**
+    - The demand info records `lp_recipe: 2`.
+    - A record without it, which differs from the config only by items the old recipe could not bind (verified by re-hashing the rest with the record's version), is flagged `demand_recipe_changed`, not a config drift.
+    - `lp_bindings.demand_only_newly_bound` is shared by `cost_rows` and `billing._drift_flags`.
+  - **Tests:** `tests/test_lp_demand_tiers_ratchets.py` has 9 tests:
+    - spec shape;
+    - months and cyclic rows, including history and a missing seed;
+    - rising, falling and windowed demand tiers, with LP = engine and gap 0;
+    - months and cyclic ratchets, with LP billed demand equal to the engine's per month and gap 0;
+    - recipe change vs drift, in the rows and on the bill.
+
+    The reconciliation gate gains `demand_tiers`, `ratchet_designated` and `ratchet_cyclic` (14 cases), each checked before and after save → load. The urdb test now pins the R3 fixtures as LP terms.
 
 ## WP2.4b-0 Condition 4 refactor (lands before the Library work)
 

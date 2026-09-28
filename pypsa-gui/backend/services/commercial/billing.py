@@ -138,7 +138,12 @@ def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
         if sorted(info.get("items", [])) != sorted(i.id for i in items) or (
                 info.get("items_hash") is not None and items
                 and info["items_hash"] != _lp.demand_hash(n, cfg, items, _H.version_of(info))):
-            changed = True
+            if _lp.demand_only_newly_bound(n, info, items, cfg):
+                # The config is unchanged; WP2.1c-i's recipe binds more of it
+                # (as `cost_rows`): re-solve.
+                flags.append("demand_recipe_changed")
+            else:
+                changed = True
     elif items:
         changed = True  # demand terms added after the solve
     tier_rec = next(iter(tiers.values()), None)

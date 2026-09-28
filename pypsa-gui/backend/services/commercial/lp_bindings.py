@@ -51,6 +51,15 @@ Items the LP does not carry here are listed in `not_in_lp` with a reason: fixed
 items (never in the LP, §5.5), tiers (WP1.5c), demand (WP1.5a), capacity (the
 connection agreement, WP1.4a).
 
+Demand (P2 WP2.1c-i): every ratchet mode (range, cyclic range, designated
+months — `_ratchet_months`, the engine's rule) is a linear row on
+`ic_billed_demand`; demand tiers are stacked `ic_demand_tier_q` segments summing
+to it (rising rates; a first threshold above 0 adds a free segment), and
+falling tiers are priced at the first tier, noted `nonconvex_tier`. The demand
+record carries the segments (`tiers`, open top width None) and
+`demand_amount(rec)` prices it; the demand info records `lp_recipe` so a record
+from before this recipe is told apart (`demand_only_newly_bound`).
+
 `_wrap_with_commercial_bindings` is the `extra_functionality` hook for the
 LP-level terms (peaks, ratchets, tiers, group caps) that later work packages
 add. In WP1.3 it only chains.
@@ -72,6 +81,7 @@ from services.commercial.tariff_engine import (
     _rates,
     demand_windows,
     interval_key,
+    is_windowed_tiered,
     tiers_are_convex,
     window_rate,
 )
@@ -163,13 +173,8 @@ def _lp_reason(item: TariffItem) -> str | None:
         # capacity items enter the LP in P2 WP2.1c.
         return "capacity_not_in_lp_until_WP2.1c"
     if _is_demand(item):
-        if item.ratchet is not None and (item.ratchet.months is not None
-                                         or item.ratchet.cyclic_year):
-            # Designated-month and cyclic ratchets (WP2.1a-iii) are billed
-            # exactly; the LP terms arrive in WP2.1c.
-            return "ratchet_mode_not_in_lp_until_WP2.1c"
-        if item.tiers:
-            return "tiers_on_demand_not_supported"
+        # Demand tiers (stacked on the billed demand) and every ratchet mode are
+        # LP terms since P2 WP2.1c-i.
         if item.unit != "per_kw_month":
             return f"unit_{item.unit}_not_demand"
         if item.direction != "cost":
@@ -271,7 +276,10 @@ def _adders(n, cfg: CommercialConfig) -> tuple[dict[str, np.ndarray], list[str],
             not_in_lp[item.id] = reason
             continue
         if _is_demand(item):
-            neg = [p.name for p in item.periods if p.rate < 0]
+            neg = [p.name for p in item.periods if p.rate < 0
+                   or any(r < 0 for r in (p.tier_rates or []))]
+            if item.tiers and any(t.rate < 0 for t in item.tiers):
+                neg.append("tiers")
             if neg:
                 # A negative €/kW would pay the LP to raise its peak without
                 # bound (review round 3 #5).
@@ -491,6 +499,53 @@ def _items_hash(items, version: int = _H.HASH_VERSION) -> str:
     return _H.digest(list(items), version=version)
 
 
+def _ratchet_months(ratchet, month: str) -> list[str]:
+    """The months whose ACTUAL peak the ratchet reads for `month`, as the
+    engine's `_ratchet_floor_prior` (WP2.1a-iii): range — the lookback months
+    before it; cyclic range — the same, wrapping inside its rate year; months —
+    the designated months of its rate year."""
+    year, mm = int(month[:4]), int(month[5:])
+    if ratchet.months is not None:
+        return [f"{year}-{d:02d}" for d in ratchet.months]
+    if ratchet.cyclic_year:
+        return [f"{year}-{((mm - back - 1) % 12) + 1:02d}"
+                for back in range(1, ratchet.lookback_months + 1)]
+    here = pd.Period(month, freq="M")
+    return [(here - back).strftime("%Y-%m") for back in range(1, ratchet.lookback_months + 1)]
+
+
+def _demand_segments(item: TariffItem, rates: list[float]) -> tuple[list[dict] | None, float]:
+    """(tier segments of the billed demand in MW and €/MW, or None when the
+    rates fall; the €/kW rate a key without segments is priced at). Rising
+    rates are convex: stacked segments, with a free one below a first
+    threshold above 0, as `_tier_cost_with` bills it. Falling rates are priced
+    at the first tier (WP2.1c; as P1 prices falling energy tiers)."""
+    if not all(b >= a for a, b in zip(rates, rates[1:])):
+        return None, float(rates[0])
+    th = [t.threshold / _KWH_PER_MWH for t in item.tiers] + [np.inf]
+    segs = [{"width_mw": th[0], "eur_per_mw": 0.0}] if th[0] > 0 else []
+    segs += [{"width_mw": float(th[k + 1] - th[k]), "eur_per_mw": float(r) * _KWH_PER_MWH}
+             for k, r in enumerate(rates)]
+    return segs, 0.0
+
+
+def demand_amount(rec: dict) -> float:
+    """A committed demand key's charge: its tier segments filled in order (the
+    LP's optimum on rising rates), else €/MW × billed MW."""
+    billed = float(rec.get("billed_mw", rec["peak_mw"]))
+    segs = rec.get("tiers")
+    if not segs:
+        return float(rec["eur_per_mw"]) * billed
+    out, left = 0.0, billed
+    for sg in segs:
+        q = left if sg["width_mw"] is None else min(left, float(sg["width_mw"]))
+        out += q * float(sg["eur_per_mw"])
+        left -= q
+        if left <= 0:
+            break
+    return out
+
+
 def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list[str], list[str]]:
     """(spec for the LP wrapper, demand item ids, months not established).
 
@@ -532,6 +587,7 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
         gone = sorted(set(span) - set(months[sel]))
         missing += [m if p is None else f"{p}:{m}" for m in gone]
     keys: list[dict] = []
+    tier_notes: list[str] = []
     for item in items:
         # Windows are the item's period NAMES (fragments of one URDB period are
         # one window with one monthly peak; IC P2 WP2.1a-0), as in the engine.
@@ -545,7 +601,19 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
                 for m in sorted(set(months[(inv == p) & (window == k)])):
                     pos = np.flatnonzero((inv == p) & (window == k) & (months == m))
                     rate = window_rate(item, frag[pos])
-                    if rate == 0:
+                    segments = None
+                    if item.tiers:
+                        # Tiers replace the period rate (the engine's `_charged`):
+                        # a window is free only if all its tier rates are 0.
+                        rates_k = (list(item.periods[int(frag[pos][0])].tier_rates)
+                                   if is_windowed_tiered(item)
+                                   else [t.rate for t in item.tiers])
+                        if not any(r != 0 for r in rates_k):
+                            continue
+                        segments, rate = _demand_segments(item, rates_k)
+                        if segments is None and "nonconvex_tier" not in tier_notes:
+                            tier_notes.append("nonconvex_tier")
+                    elif rate == 0:
                         continue
                     _, group = np.unique(interval[pos], return_inverse=True)
                     keys.append({
@@ -553,7 +621,7 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
                         "key": f"{item.id}|{name}|{'' if p is None else p}|{m}",
                         "item": item.id, "period": name, "month": m,
                         "inv_period": None if p is None else int(p),
-                        "eur_per_mw": rate * _KWH_PER_MWH,
+                        "eur_per_mw": rate * _KWH_PER_MWH, "tiers": segments,
                         "net": item.measured_on == "net", "positions": pos})
     if len({k["key"] for k in keys}) != len(keys):  # '|' is refused in ids and names
         raise CommercialBindingError("demand peak keys are not unique")
@@ -576,9 +644,7 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
         # Meter history is the site's past: it seeds the FIRST period only; a
         # later investment period's lookback is unknown (review round 2 #3).
         history_ok = k["inv_period"] in (None, first_period)
-        here = pd.Period(k["month"], freq="M")
-        for back in range(1, r.lookback_months + 1):
-            m = (here - back).strftime("%Y-%m")
+        for m in _ratchet_months(r, k["month"]):
             other = by_ident.get((k["item"], k["period"], k["inv_period"], m))
             if other is not None:
                 ratchets.append({"key": k["key"], "share": r.share, "of_key": other})
@@ -589,6 +655,7 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
                                  "floor_mw": cfg.meter_history_peaks_kw[m] / _KWH_PER_MWH})
             elif "ratchet_seed_missing" not in notes:
                 notes.append("ratchet_seed_missing")
+    notes += [x for x in tier_notes if x not in notes]
     floors = {k["key"]: cfg.initial_peak_lower_bound[k["month"]] for k in keys
               if k["month"] in cfg.initial_peak_lower_bound}
     spec = {"import_links": import_links(cfg), "export_link": cfg.export_link, "keys": keys,
@@ -599,7 +666,10 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
                      # Recipe version of items_hash (P2 WP2.1a-0): a future recipe
                      # change compares a P1 record (no version) with the P1 recipe
                      # instead of flagging every solved project as drift.
-                     "hash_version": DEMAND_HASH_VERSION}}
+                     "hash_version": DEMAND_HASH_VERSION,
+                     # The LP recipe (P2 WP2.1c-i: demand tiers and every
+                     # ratchet mode bound); absent on older records.
+                     "lp_recipe": DEMAND_LP_RECIPE}}
     return spec, [i.id for i in items], missing, notes
 
 
@@ -621,6 +691,7 @@ def energy_hash(n, cfg: CommercialConfig, version: int = _H.HASH_VERSION) -> str
 
 
 DEMAND_HASH_VERSION = _H.HASH_VERSION  # recorded in the demand info (recipe of items_hash)
+DEMAND_LP_RECIPE = 2  # recorded in the demand info: 2 = WP2.1c-i (tiers, all ratchet modes)
 
 
 def demand_hash(n, cfg: CommercialConfig, items, version: int = _H.HASH_VERSION) -> str:
@@ -631,6 +702,28 @@ def demand_hash(n, cfg: CommercialConfig, items, version: int = _H.HASH_VERSION)
                       "floors": sorted(cfg.initial_peak_lower_bound.items()),
                       "axis": _axis_hash(n.snapshots)}, sort_keys=True)
     return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+def _bound_before_wp21c(item) -> bool:
+    """Whether the recipe before WP2.1c-i bound this demand item in the LP
+    (it left out demand tiers and designated-month / cyclic ratchets)."""
+    r = item.ratchet
+    return not item.tiers and not (r is not None and (r.months is not None or r.cyclic_year))
+
+
+def demand_only_newly_bound(n, info: dict, wanted_items: list, cfg) -> bool:
+    """True when a demand record from before WP2.1c-i differs from the current
+    config only by the items that recipe could not bind: the rest hashes as
+    solved, so the config is unchanged and a re-solve binds the new terms."""
+    if cfg is None or info.get("lp_recipe") is not None:
+        return False
+    old = [i for i in wanted_items if _bound_before_wp21c(i)]
+    if len(old) == len(wanted_items) or sorted(i.id for i in old) != sorted(info.get("items", [])):
+        return False
+    if not old:
+        return False
+    return info.get("items_hash") is None or \
+        demand_hash(n, cfg, old, _H.version_of(info)) == info["items_hash"]
 
 
 def add_demand_terms(n) -> None:
@@ -690,6 +783,25 @@ def add_demand_terms(n) -> None:
     coef = xr.DataArray([w * k["eur_per_mw"] for w, k in zip(weight, spec["keys"])],
                         coords={"key": names}, dims="key")
     m.objective += (billed * coef).sum()
+    # Rising demand tiers (P2 WP2.1c-i): Σ_k q[key,k] = billed[key], 0 ≤ q ≤
+    # width_k, objective += Σ w_obj · €/MW_k · q (convex: the cheap segments
+    # fill first, as the engine's cumulative tiers bill).
+    seg_names, seg_upper, seg_coef, seg_of = [], [], [], []
+    for w, k in zip(weight, spec["keys"]):
+        for j, sg in enumerate(k.get("tiers") or []):
+            seg_names.append(f"{k['key']}|{j}")
+            seg_upper.append(sg["width_mw"])
+            seg_coef.append(w * sg["eur_per_mw"])
+            seg_of.append(k["key"])
+    if seg_names:
+        q = m.add_variables(lower=0, upper=xr.DataArray(seg_upper, coords={"seg": seg_names},
+                                                          dims="seg"),
+                            name="ic_demand_tier_q", coords=[pd.Index(seg_names, name="seg")])
+        for i, key in enumerate(dict.fromkeys(seg_of)):
+            mine = [s for s, o in zip(seg_names, seg_of) if o == key]
+            m.add_constraints(q.sel(seg=mine).sum() - billed.sel(key=key) == 0,
+                              name=f"ic_demand_tier_sum_{i}")
+        m.objective += (q * xr.DataArray(seg_coef, coords={"seg": seg_names}, dims="seg")).sum()
     setattr(n, DEMAND_BUILT_ATTR, True)
 
 
@@ -714,6 +826,7 @@ def _read_demand_solution(n, spec: dict) -> dict | None:
         return None
     w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
     out = {}
+    peaks_now: dict[str, float] = {}
     for k in spec["keys"]:
         b = float(billed.loc[k["key"]])
         pos, group = k["positions"], k["group"]
@@ -737,6 +850,26 @@ def _read_demand_solution(n, spec: dict) -> dict | None:
         out[k["key"]] = {"item": k["item"], "period": k["period"], "month": k["month"],
                          "inv_period": k["inv_period"], "eur_per_mw": k["eur_per_mw"],
                          "peak_mw": v, "billed_mw": b}
+        if k.get("tiers"):
+            # The open top segment is recorded as width None (JSON has no inf;
+            # the record rides network.nc).
+            out[k["key"]]["tiers"] = [
+                {"width_mw": float(sg["width_mw"]) if np.isfinite(sg["width_mw"]) else None,
+                 "eur_per_mw": float(sg["eur_per_mw"])} for sg in k["tiers"]]
+            peaks_now[k["key"]] = v
+    # A tiered key's billed demand is free inside a 0-rate segment: record the
+    # rule's value (max of the peak and its ratchet rows), which the bill uses
+    # and which costs the same (WP2.1c-i).
+    for key, v in peaks_now.items():
+        floor = v
+        for r in spec.get("ratchets", []):
+            if r["key"] != key:
+                continue
+            if "of_key" in r:
+                floor = max(floor, r["share"] * out[r["of_key"]]["peak_mw"])
+            else:
+                floor = max(floor, r["share"] * r["floor_mw"])
+        out[key]["billed_mw"] = floor
     return out
 
 
