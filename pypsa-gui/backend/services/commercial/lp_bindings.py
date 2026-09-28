@@ -172,6 +172,10 @@ def _lp_reason(item: TariffItem) -> str | None:
         if item.measured_on == "export":
             return "export_demand_not_supported"
         return None
+    if item.tiers and item.periods[0].tier_rates is not None:
+        # Per-period tier rates (WP2.1a-ii) — its `Tier.rate` are 0 by rule, so
+        # the P1 tier terms would price it at 0; the LP carries them in WP2.1c.
+        return "tiers_with_windows"
     if item.tiers:
         # WP1.5c: tiers on cumulative monthly import volume, one catch-all period.
         p = item.periods[0]

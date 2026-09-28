@@ -314,6 +314,8 @@ export interface TariffPeriod {
   name: string; rate: number
   months?: number[]; weekdays?: number[]
   start_hour?: number | null; end_hour?: number | null
+  /** Per-period tier rates on the item's thresholds (IC P2 WP2.1a-ii). */
+  tier_rates?: number[] | null
 }
 export interface TariffTier { threshold: number; rate: number }
 export interface TariffRatchet { lookback_months: number; share: number }

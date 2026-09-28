@@ -270,6 +270,18 @@ gap cause `tier_allocation` in WP2.3).
   item with a period lacking `tier_rates`, or with a non-zero `Tier.rate`, is refused; every P1 tier test
   unchanged.
 
+- **As implemented:**
+  - `TariffPeriod.tier_rates`, registered in `FIELDS_AFTER_V1`. `is_windowed_tiered(item)` is true when the periods carry `tier_rates`.
+  - Energy: per month, the total energy positions the tiers, and each fragment's intervals pay the blended rate Σ_k tier_rates[p][k] · Q_k / E. The interval lines add up to the bill; the hand bill is 872.00 to the cent.
+  - Demand: each window's billed kW is priced through the thresholds with that window's `tier_rates`. A window is charged if any of its tier rates is non-zero, which gates ratchets.
+  - The validator:
+    - requires `tier_rates` on every period of a windowed tiered item, with every `Tier.rate` at 0;
+    - refuses `tier_rates` without the item's `tiers`;
+    - requires same-name demand fragments to agree on `tier_rates`.
+  - The LP reports any item with `tier_rates` `not_in_lp` (`tiers_with_windows`) until WP2.1c, so its zero `Tier.rate` is never priced as 0.
+  - `types.ts` mirrored.
+  - **Behaviour change:** the P1 shape "windows + rates on `Tier.rate`" (billed `unsupported:tiers_with_windows` in P1) is now a validation error. Two P1 tests are updated to the new form.
+
 ## WP2.1a-iii Engine: designated-month and cyclic ratchets
 
 Model delta: `Ratchet.lookback_months: int | None` (was required `ge=1`); new `Ratchet.months: list[int] |

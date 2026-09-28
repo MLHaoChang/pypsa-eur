@@ -293,3 +293,97 @@ def test_a_per_day_charge_over_a_billing_period_counts_the_exact_overlap(lo, hi,
     res = rate(pd.DataFrame({"import_mw": 1.0, "export_mw": 0.0}, index=idx), _tariff(item),
                step_hours=1.0, timezone=None, billing_period=(lo, hi))
     assert res.per_item["fixed"] == pytest.approx(days)
+
+
+# ── P2 WP2.1a-ii: tiers inside TOU windows ─────────────────────────────────
+# URDB semantics: the tier position is the month's TOTAL energy across periods
+# (a tier `max` is cumulative); each period's energy is split into the tiers in
+# proportion to the month's total. One threshold list per item; each period
+# carries its own rates (`tier_rates`), and every `Tier.rate` is then 0.
+
+_THRESH = [{"threshold": 0, "rate": 0.0}, {"threshold": 1000, "rate": 0.0},
+           {"threshold": 3000, "rate": 0.0}]
+
+
+def _windowed_energy():
+    import copy
+
+    return {"id": "e", "kind": "energy", "unit": "per_kwh", "tiers": copy.deepcopy(_THRESH),
+            "periods": [{"name": "peak", "rate": 0.0, "start_hour": 17, "end_hour": 21,
+                         "tier_rates": [0.30, 0.35, 0.40]},
+                        {"name": "off", "rate": 0.0, "tier_rates": [0.10, 0.12, 0.15]}]}
+
+
+def test_windowed_energy_tiers_split_the_month_in_proportion_to_the_total():
+    """Hand bill: January, 1000 kWh in the peak window, 4000 kWh off-peak. Month
+    total 5000 kWh → tiers [1000, 2000, 2000] kWh; peak share 0.2:
+    0.2 × (1000×0.30 + 2000×0.35 + 2000×0.40) + 0.8 × (1000×0.10 + 2000×0.12 + 2000×0.15)
+    = 360 + 512 = 872.00."""
+    idx = pd.date_range("2030-01-01", "2030-01-31 23:00", freq="h")
+    peak = (idx.hour >= 17) & (idx.hour < 21)
+    kw = np.where(peak, 1000.0 / peak.sum(), 4000.0 / (~peak).sum())
+    res = rate(pd.DataFrame({"import_mw": kw / 1000.0, "export_mw": 0.0}, index=idx),
+               _tariff(_windowed_energy()), step_hours=1.0, timezone=None)
+    assert abs(res.per_item["e"] - 872.00) < CENT
+    assert abs(res.lines["amount"].sum() - 872.00) < CENT   # the interval lines add up
+
+
+@pytest.mark.parametrize("mutate,match", [
+    (lambda i: i["periods"][1].pop("tier_rates"), "tier_rates"),
+    (lambda i: i["tiers"][0].update(rate=0.1), "Tier.rate"),
+    (lambda i: i["periods"][0].update(tier_rates=[0.3, 0.35]), "tier_rates"),
+])
+def test_a_malformed_windowed_tier_item_is_refused(mutate, match):
+    item = _windowed_energy()
+    mutate(item)
+    with pytest.raises(ValueError, match=match):
+        _tariff(item)
+
+
+def test_windowed_demand_tiers_price_each_window_with_its_own_rates():
+    """Peak window 80 kW, off window 30 kW; thresholds [0, 50] kW;
+    peak rates [5, 10], off rates [1, 2]: 50×5 + 30×10 + 30×1 = 580."""
+    item = {"id": "d", "kind": "demand", "unit": "per_kw_month", "settlement": "h",
+            "tiers": [{"threshold": 0, "rate": 0.0}, {"threshold": 50, "rate": 0.0}],
+            "periods": [{"name": "peak", "rate": 0.0, "start_hour": 17, "end_hour": 21,
+                         "tier_rates": [5.0, 10.0]},
+                        {"name": "off", "rate": 0.0, "tier_rates": [1.0, 2.0]}]}
+    idx = pd.date_range("2030-01-07", periods=24, freq="h")
+    kw = np.where((idx.hour >= 17) & (idx.hour < 21), 80.0, 30.0)
+    res = rate(pd.DataFrame({"import_mw": kw / 1000.0, "export_mw": 0.0}, index=idx),
+               _tariff(item), step_hours=1.0, timezone=None)
+    assert res.per_item["d"] == pytest.approx(580.0)
+
+
+def test_same_name_demand_fragments_must_agree_on_tier_rates():
+    item = {"id": "d", "kind": "demand", "unit": "per_kw_month",
+            "tiers": [{"threshold": 0, "rate": 0.0}, {"threshold": 50, "rate": 0.0}],
+            "periods": [{"name": "peak", "rate": 0.0, "start_hour": 12, "end_hour": 14,
+                         "tier_rates": [5.0, 10.0]},
+                        {"name": "peak", "rate": 0.0, "start_hour": 17, "end_hour": 19,
+                         "tier_rates": [5.0, 12.0]},
+                        {"name": "off", "rate": 0.0, "tier_rates": [1.0, 2.0]}]}
+    with pytest.raises(ValueError, match="peak"):
+        _tariff(item)
+
+
+def test_tier_rates_is_registered_for_hash_recipe_1():
+    from services.commercial.hashing import FIELDS_AFTER_V1
+
+    assert FIELDS_AFTER_V1[("TariffPeriod", "tier_rates")] is None
+
+
+def test_windowed_tiers_stay_out_of_the_lp_until_wp2_1c():
+    from services.commercial import lp_bindings as L
+
+    assert L._lp_reason(_tariff(_windowed_energy()).items[0]) == "tiers_with_windows"
+
+
+def test_a_single_period_item_with_tier_rates_is_not_priced_at_zero_in_the_lp():
+    """Its `Tier.rate` are 0 by rule; the LP must not read them as the P1 rates."""
+    from services.commercial import lp_bindings as L
+
+    item = {"id": "e", "kind": "energy", "unit": "per_kwh",
+            "tiers": [{"threshold": 0, "rate": 0.0}, {"threshold": 1000, "rate": 0.0}],
+            "periods": [{"name": "all", "rate": 0.0, "tier_rates": [0.1, 0.2]}]}
+    assert L._lp_reason(_tariff(item).items[0]) == "tiers_with_windows"

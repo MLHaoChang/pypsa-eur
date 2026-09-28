@@ -53,13 +53,15 @@ def test_engine_bills_cumulative_monthly_volume_by_tier():
     assert res.monthly.loc["2030-01", "tiered"] == pytest.approx(20.0)
 
 
-def test_engine_refuses_tiers_inside_time_windows():
+def test_tiers_inside_time_windows_need_per_period_rates():
+    """Since P2 WP2.1a-ii windowed tiers are billed with each period's own
+    `tier_rates` (URDB semantics, test_tariff_engine_urdb.py); the P1 shape —
+    windows with the rates on `Tier.rate` — is refused at validation (one
+    source of rates) instead of being billed as unsupported."""
     item = _tiered(RISING, periods=[{"name": "peak", "rate": 0.0, "start_hour": 8, "end_hour": 20},
                                     {"name": "rest", "rate": 0.0}])
-    idx = pd.date_range("2030-01-07", periods=2, freq="h")
-    res = rate(pd.DataFrame({"import_mw": 1.0, "export_mw": 0.0}, index=idx), _tariff(item),
-               step_hours=1.0, timezone=None)
-    assert res.flags["tiered"] == ["unsupported:tiers_with_windows"]
+    with pytest.raises(ValueError, match="tier_rates"):
+        _tariff(item)
 
 
 # ── LP ─────────────────────────────────────────────────────────────────────
@@ -135,9 +137,13 @@ def test_falling_tiers_are_flagged_and_priced_at_the_first_tier():
 
 
 def test_windowed_tiers_are_left_out_of_the_lp_with_a_reason():
+    """Until P2 WP2.1c the LP leaves windowed tiers out (billed exactly)."""
     n = _site()
-    item = _tiered(RISING, periods=[{"name": "peak", "rate": 0.0, "start_hour": 8, "end_hour": 20},
-                                    {"name": "rest", "rate": 0.0}])
+    thresholds = [{"threshold": t["threshold"], "rate": 0.0} for t in RISING]
+    item = _tiered(thresholds, periods=[
+        {"name": "peak", "rate": 0.0, "start_hour": 8, "end_hour": 20,
+         "tier_rates": [t["rate"] for t in RISING]},
+        {"name": "rest", "rate": 0.0, "tier_rates": [t["rate"] for t in RISING]}])
     applied = L.materialise_poc_prices(
         n, {"poc_link": "import", "import_tariff": _tariff(item).model_dump(mode="json")})
     assert applied.facts["not_in_lp"] == {"tiered": "tiers_with_windows"}

@@ -36,6 +36,7 @@ HASH_VERSION = 2
 # WP2.2a/b, …); the inventory test fails until it is here.
 FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {
     ("CommercialConfig", "power_factor"): None,          # WP2.1a-i
+    ("TariffPeriod", "tier_rates"): None,                # WP2.1a-ii
 }
 
 

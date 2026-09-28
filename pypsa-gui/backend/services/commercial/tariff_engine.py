@@ -287,6 +287,21 @@ def _tier_cost(tiers, volume_kwh: np.ndarray) -> np.ndarray:
     return out
 
 
+def is_windowed_tiered(item: TariffItem) -> bool:
+    """Tiers whose rates sit on the periods (`tier_rates`, WP2.1a-ii)."""
+    return bool(item.tiers) and item.periods[0].tier_rates is not None
+
+
+def _tier_cost_with(thresholds: list[float], rates: list[float], volume) -> np.ndarray:
+    """`_tier_cost` for explicit per-period rates on shared thresholds."""
+    th = list(thresholds) + [np.inf]
+    v = np.asarray(volume, dtype=float)
+    out = np.zeros_like(v)
+    for k, r in enumerate(rates):
+        out += r * np.clip(v - th[k], 0.0, th[k + 1] - th[k])
+    return out
+
+
 def tiers_are_convex(tiers) -> bool:
     """Rising marginal rates: convex in a cost minimisation."""
     rates = [t.rate for t in tiers]
@@ -312,16 +327,11 @@ def _unsupported_reason(item: TariffItem) -> str | None:
     if _is_demand(item):
         if item.unit != "per_kw_month":
             return f"unsupported:unit_{item.unit}_for_demand"
-        if item.tiers and not _single_catch_all(item):
-            # Tier rates per window arrive with `TariffPeriod.tier_rates` (WP2.1a-ii).
-            return "unsupported:demand_tiers_with_windows"
+        # Windowed demand tiers carry per-period `tier_rates` (validated, WP2.1a-ii).
         return None
     if item.tiers:
-        # WP1.5c: tiers on cumulative monthly volume, for a single catch-all
-        # energy period (tier rates replace the period rate).
-        p = item.periods[0]
-        if len(item.periods) != 1 or p.months or p.weekdays or p.start_hour is not None:
-            return "unsupported:tiers_with_windows"
+        # WP1.5c: tiers on cumulative monthly volume; windows allowed since
+        # WP2.1a-ii (per-period `tier_rates`, validated by the model).
         if item.unit != "per_kwh":
             return f"unsupported:unit_{item.unit}_for_tiers"
     if item.kind == "fixed":
@@ -582,12 +592,17 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             # peaks of earlier months, never billed ones (WP1.5b).
             actual: dict[tuple[str, int], float] = {}
             rate_of: dict[tuple[str, int], float] = {}
-            # Tiers replace the period rate (R2's convention: period rate 0), so a
-            # tiered window is free only if every tier rate is 0 (WP2.1a-i #2).
-            tiered_free = bool(item.tiers) and all(t.rate == 0 for t in item.tiers)
+            tier_rates_of: dict[tuple[str, int], tuple[float, ...]] = {}
+            windowed = is_windowed_tiered(item)
+            item_tier_rates = tuple(t.rate for t in item.tiers) if item.tiers else ()
 
-            def _charged(r: float) -> bool:
-                return (not tiered_free) if item.tiers else r != 0
+            def _charged(mk) -> bool:
+                # Tiers replace the period rate (R2's convention: period rate 0),
+                # so a tiered window is free only if every tier rate of it is 0
+                # (WP2.1a-i #2; per window since WP2.1a-ii).
+                if item.tiers:
+                    return any(r != 0 for r in tier_rates_of.get(mk, item_tier_rates))
+                return rate_of[mk] != 0
             nan_windows = 0
             for key in months_sorted:
                 for k in range(len(names)):
@@ -595,6 +610,9 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                     if not sel.any():
                         continue
                     rate_of[(key, k)] = window_rate(item, g_frag[sel])
+                    if windowed:  # one set per window and month (model validator)
+                        tier_rates_of[(key, k)] = tuple(
+                            item.periods[int(g_frag[sel][0])].tier_rates)
                     if np.isnan(q_int[sel]).any():
                         nan_windows += 1  # only the window's own intervals matter
                         actual[(key, k)] = float("nan")
@@ -612,11 +630,11 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                     rate_k = rate_of[(key, k)]
                     billed = peak
                     # A free window bills nothing: no ratchet, no seed gap.
-                    if item.ratchet is not None and np.isfinite(peak) and _charged(rate_k):
+                    if item.ratchet is not None and np.isfinite(peak) and _charged((key, k)):
                         # A free (month, window) bills nothing, so it sets no
                         # ratchet either — the LP has no peak for it (WP2.1a-0
                         # review #1); its month still counts as modelled.
-                        charged = {mk: v for mk, v in actual.items() if _charged(rate_of[mk])}
+                        charged = {mk: v for mk, v in actual.items() if _charged(mk)}
                         prior, missing = _ratchet_prior(key, k, item.ratchet.lookback_months,
                                                         charged, meter_history,
                                                         set(months_sorted))
@@ -629,7 +647,10 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                     if item.tiers:
                         # Demand tiers (P2 WP2.1a-i): the billed kW priced
                         # through the tiers (thresholds in kW, rates per kW).
-                        line = (sign * float(_tier_cost(item.tiers, np.array([billed]))[0])
+                        rates_k = tier_rates_of.get((key, k), item_tier_rates)
+                        line = (sign * float(_tier_cost_with(
+                                    [t.threshold for t in item.tiers], list(rates_k),
+                                    np.array([billed]))[0])
                                 if np.isfinite(billed) else float("nan"))
                     else:
                         line = sign * rate_k * billed
@@ -689,7 +710,29 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
             continue
 
         q_kwh = _quantity_mw(item, imp, exp) * energy_h * _KWH_PER_MWH
-        if item.tiers:
+        if is_windowed_tiered(item):
+            # URDB semantics (WP2.1a-ii): the month's TOTAL energy positions the
+            # tiers; each period's energy is split into them in proportion to
+            # the total, so a period's interval pays its blended month rate
+            # Σ_k tier_rates[p][k] · Q_k / E. Exact and traceable per line.
+            frag = _period_index(item, local)
+            thresholds = [t.threshold for t in item.tiers]
+            amount = np.full(len(idx), np.nan)
+            r = np.full(len(idx), np.nan)
+            for key in sorted(set(month_key)):
+                pos = np.flatnonzero(month_key == key)
+                if np.isnan(q_kwh[pos]).any() or (frag[pos] < 0).any():
+                    continue  # an unknown volume or an unrated interval: month unknown
+                total = float(q_kwh[pos].sum())
+                widths = np.diff(np.clip(np.array(thresholds + [np.inf]), 0.0, total))
+                for k_frag in np.unique(frag[pos]):
+                    rates_p = np.asarray(item.periods[int(k_frag)].tier_rates, dtype=float)
+                    blended = (float((rates_p * widths).sum() / total) if total > 0
+                               else float(rates_p[0]))
+                    sel = pos[frag[pos] == k_frag]
+                    r[sel] = blended
+                    amount[sel] = sign * q_kwh[sel] * blended
+        elif item.tiers:
             # Cumulative monthly volume, each interval priced at the tiers its
             # kWh fall into (chronologically): exact and traceable per line.
             amount = np.full(len(idx), np.nan)

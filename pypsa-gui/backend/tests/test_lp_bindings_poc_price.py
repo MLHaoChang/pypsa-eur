@@ -140,13 +140,19 @@ def test_an_unknown_poc_link_is_refused():
 def test_tiered_and_non_energy_items_are_left_to_later_bindings_and_reported():
     from models.commercial import Tier
 
-    tiered = _tou("tiered", tiers=[Tier(threshold=0, rate=0.1), Tier(threshold=100, rate=0.2)])
+    # A windowed tiered item carries its rates per period (P2 WP2.1a-ii).
+    tiered = TariffItem(
+        id="tiered", kind="energy", unit="per_kwh",
+        tiers=[Tier(threshold=0, rate=0.0), Tier(threshold=100, rate=0.0)],
+        periods=[TariffPeriod(name="night", rate=0.0, start_hour=0, end_hour=6,
+                              tier_rates=[0.1, 0.2]),
+                 TariffPeriod(name="day", rate=0.0, tier_rates=[0.15, 0.25])])
     fixed = TariffItem(id="standing", kind="fixed", unit="per_month",
                        periods=[TariffPeriod(name="all", rate=10.0)])
     n = build_edge_15min()
     terms = L.materialise_poc_prices(n, _commercial(_tariff(_tou(), tiered, fixed))).facts
     assert terms["energy_items"] == ["energy"]
-    # `_tou` is windowed; tiers need one catch-all period (WP1.5c).
+    # Windowed tiers are billed exactly and enter the LP in WP2.1c.
     assert terms["not_in_lp"] == {"tiered": "tiers_with_windows", "standing": "fixed_not_in_lp"}
 
 

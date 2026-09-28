@@ -10,6 +10,8 @@ Nothing here imports ``services``.
 """
 from __future__ import annotations
 
+import math
+
 from datetime import date
 from typing import Literal
 
@@ -108,9 +110,15 @@ class TariffPeriod(BaseModel):
     weekdays: list[int] = Field(default_factory=list)  # 0 = Monday
     start_hour: int | None = Field(default=None, ge=0, le=23)
     end_hour: int | None = Field(default=None, ge=1, le=24)
+    # Tier rates of THIS period (URDB `energyratestructure[period][tier]`), aligned
+    # with the item's `tiers` thresholds (IC P2 WP2.1a-ii). Set on every period of a
+    # windowed tiered item, whose `Tier.rate` are then 0; absent otherwise.
+    tier_rates: list[float] | None = None
 
     @model_validator(mode="after")
     def _window(self) -> "TariffPeriod":
+        if self.tier_rates is not None and not all(math.isfinite(r) for r in self.tier_rates):
+            raise ValueError("tier_rates must be finite")
         if (self.start_hour is None) != (self.end_hour is None):
             raise ValueError("start_hour and end_hour must be set together")
         if self.start_hour is not None and self.end_hour <= self.start_hour:
@@ -153,6 +161,20 @@ class TariffItem(BaseModel):
                 raise ValueError("tier thresholds must be strictly increasing")
         if self.ratchet is not None and self.kind != "demand":
             raise ValueError("ratchet only applies to demand items")
+        with_rates = [per for per in self.periods if per.tier_rates is not None]
+        if with_rates and not self.tiers:
+            raise ValueError(f"item {self.id!r}: tier_rates need the item's tiers (thresholds)")
+        if self.tiers and (with_rates or len(self.periods) > 1):
+            # A windowed tiered item (IC P2 WP2.1a-ii): one threshold list, each
+            # period's own rates; `Tier.rate` must be 0 so rates have one source.
+            for per in self.periods:
+                if per.tier_rates is None or len(per.tier_rates) != len(self.tiers):
+                    raise ValueError(
+                        f"item {self.id!r}: every period of a windowed tiered item needs "
+                        f"tier_rates with {len(self.tiers)} rates (period {per.name!r})")
+            if any(t.rate != 0 for t in self.tiers):
+                raise ValueError(f"item {self.id!r}: a windowed tiered item takes its rates from "
+                                 "the periods' tier_rates; every Tier.rate must be 0")
         if self.kind == "demand" or self.measured_on == "peak_import":
             # Billed as demand (the engine's and LP's `_is_demand`). A demand
             # WINDOW is the set of periods sharing a name (a URDB period is
@@ -176,11 +198,12 @@ class TariffItem(BaseModel):
                             if per.start_hour is not None and not (
                                     per.start_hour <= hour < per.end_hour):
                                 continue
-                            prev = seen.setdefault((month, per.name), per.rate)
-                            if prev != per.rate:
+                            val = (per.rate, tuple(per.tier_rates or ()))
+                            prev = seen.setdefault((month, per.name), val)
+                            if prev != val:
                                 raise ValueError(
                                     f"demand item {self.id!r}: the window {per.name!r} has two "
-                                    f"rates ({prev} and {per.rate}) in month {month}; one demand "
+                                    f"rates ({prev} and {val}) in month {month}; one demand "
                                     "window has one rate per month")
                             break
         return self
