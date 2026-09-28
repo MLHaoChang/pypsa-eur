@@ -449,6 +449,8 @@ class LeaseContract(BaseModel):
     annual_payment: float = Field(ge=0)
     tenor_years: int = Field(ge=1)
     asset_ids: list[str] = Field(min_length=1)
+    base_year: int | None = None                  # P2: all contracts (P4 escalates)
+    library_ref: LibraryItemRef | None = None
 
 
 class EaasContract(BaseModel):
@@ -462,6 +464,15 @@ class EaasContract(BaseModel):
     fee_eur_per_year: float | None = Field(default=None, ge=0)
     tenor_years: int = Field(ge=1)
     asset_ids: list[str] = Field(min_length=1)
+    base_year: int | None = None
+    library_ref: LibraryItemRef | None = None
+
+    @model_validator(mode="after")
+    def _some_fee(self) -> "EaasContract":
+        if self.fee_eur_per_mwh is None and self.fee_eur_per_year is None:
+            # A fee-less EaaS would settle a confident 0 (review 2.2b #3).
+            raise ValueError("an EaaS contract needs fee_eur_per_mwh or fee_eur_per_year")
+        return self
 
 
 class RetailContract(BaseModel):
@@ -473,6 +484,8 @@ class RetailContract(BaseModel):
     customer: str
     tariff_id: str
     tenor_years: int = Field(ge=1)
+    base_year: int | None = None
+    library_ref: LibraryItemRef | None = None
 
 
 Contract = Annotated[Union[PpaContract, CfdContract, DrContract, LeaseContract, EaasContract,
@@ -575,6 +588,14 @@ class CommercialConfig(BaseModel):
                 if isinstance(c, dict) and "type" not in c else c
                 for c in data["contracts"]]}
         return data
+
+    @model_validator(mode="after")
+    def _unique_contract_ids(self) -> "CommercialConfig":
+        ids = [c.id for c in self.contracts]
+        if len(ids) != len(set(ids)):
+            # One `ic:contract:<id>` column per contract (WP2.2-0 review 0b #3).
+            raise ValueError("contract ids must be unique")
+        return self
 
     @model_validator(mode="after")
     def _tariff_and_links(self) -> "CommercialConfig":

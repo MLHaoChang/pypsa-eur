@@ -58,6 +58,8 @@ def test_interval_frames_sum_to_the_seams_totals():
     links = comp["links"]
     assert np.allclose(iv["links_p0"].mul(w, axis=0).sum(), links["input_mwh"])
     assert np.allclose(iv["links_output"].mul(w, axis=0).sum(), links["output_mwh"])
+    # Delivered at bus1 only (review 0a #2): −p1 per Link.
+    assert np.allclose(iv["links_p1_output"]["poc_site"], -n.links_t.p1["poc_site"])
     load = iv["loads"]["site_load"]
     assert np.allclose(load, n.loads_t.p_set["site_load"])     # served load (no shedding)
     assert (iv["storage_units_charge"] >= 0).all().all()

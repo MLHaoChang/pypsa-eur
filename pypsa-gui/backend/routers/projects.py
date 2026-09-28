@@ -1052,6 +1052,13 @@ async def import_bundle(
             atomic_write_bytes(target_path, zf.read(member))
 
     nc_path = dest / "network.nc"
+    from services.commercial.settlement_inputs import reserved_buses_in_netcdf
+
+    reserved = reserved_buses_in_netcdf(nc_path)
+    if reserved:
+        # `ic:` names the commercial reference frames' columns (P2 WP2.2-0):
+        # refused before anything is swapped (review 0b #2).
+        raise HTTPException(422, f"bus names starting 'ic:' are reserved: {reserved[:5]}")
     from services import dirty_state, undo_service
     undo_service.clear()
     dirty_state.clear()  # memory and disk now agree

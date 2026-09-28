@@ -22,7 +22,8 @@ BASE = dict(tenor_years=10, seller="Wind BV", buyer="site", asset_ids=["pv"])
 def _inputs(c1, *, refs=None, period=None, year=None):
     return K.SettlementInputs(period=period, index=c1["index"], weights=c1["weights"],
                               generators=c1["generators"], export_mw=c1["export_mw"],
-                              references=refs or {}, modelled_year=year)
+                              references=refs or {}, modelled_year=year,
+                              site_generators=c1["site_generators"])
 
 
 def _cents(x):
@@ -73,6 +74,7 @@ def test_a_volume_cap_is_filled_chronologically_and_the_excess_is_not_settled(c1
         total += mwh
         settled += min(mwh, max(cap - settled, 0.0))
     energy, excess = _one(lines), _one(lines, "ppa_excess_mwh")
+    assert energy.quantity_mwh == pytest.approx(settled)
     assert _cents(energy.amount) == _cents(55.0 * settled)
     assert excess.quantity_mwh == pytest.approx(total - settled)
     assert excess.amount == 0.0 and "ppa_volume_cap_exceeded" in excess.flags
@@ -106,6 +108,18 @@ def test_as_consumed_btm_attributes_export_pro_rata_and_counts_bess_charging(c1)
     assert _cents(line.amount) == _cents(55.0 * consumed)
     produced = (c1["generators"]["pv"] * 0.25).sum()
     assert consumed < produced                                    # export days attribute some
+    # Day 0 exports nothing: all its PV is consumed, including the part that
+    # charged the BESS (on-site use).
+    day0 = c1["day"] == 0
+    charged = float((c1["storage_charge"]["bess"][day0] * 0.25).sum())
+    assert charged > 0
+    one_day = K.SettlementInputs(period=None, index=c1["index"][day0],
+                                 weights=c1["weights"][day0],
+                                 generators=c1["generators"][day0],
+                                 export_mw=c1["export_mw"][day0],
+                                 site_generators=c1["site_generators"])
+    assert _one(K.settle(ppa, one_day)).quantity_mwh == pytest.approx(
+        float((c1["generators"]["pv"][day0] * 0.25).sum()))
 
 
 def test_a_sleeved_ppa_adds_the_sleeving_fee_line(c1):
@@ -218,3 +232,75 @@ def test_new_contract_fields_keep_p0_payloads_valid():
     assert (ppa.pricing, ppa.base_year, ppa.library_ref) == ("fixed", None, None)
     assert (cfd.reference, cfd.suspend_on_negative_price, cfd.indexation_pct_per_year) == \
         ("interval", False, 0.0)
+
+
+
+# ── WP2.2a review round 1 ──────────────────────────────────────────────────
+
+
+def test_monthly_capture_with_suspension_takes_the_whole_months_capture():
+    """#1 (HIGH): the capture price is the month's generation-weighted ref over
+    ALL its intervals; suspension only stops the payment at negative prices.
+    gen 1 MW × 4 h, ref [100, 100, −50, −50], strike 60: capture 25,
+    paid (60 − 25) × 2 = 70."""
+    idx = pd.date_range("2030-05-01 10:00", periods=4, freq="h")
+    inp = K.SettlementInputs(period=None, index=idx, weights=np.ones(4),
+                             generators=pd.DataFrame({"pv": 1.0}, index=idx),
+                             references={"c": (pd.Series([100.0, 100.0, -50.0, -50.0],
+                                                         index=idx), [])})
+    cfd = CfdContract(id="c", strike=60.0, tenor_years=15, asset_ids=["pv"],
+                                  generator_owner="O", counterparty="A", reference_price=REF,
+                                  reference="monthly_capture", suspend_on_negative_price=True)
+    line = _one(K.settle(cfd, inp), "cfd_difference")
+    assert line.amount == pytest.approx(70.0)
+    assert line.quantity_mwh == pytest.approx(2.0)                 # the paid volume
+
+
+def test_a_nan_reference_or_export_is_none_with_a_flag(c1):
+    """#2 (ADR-0001)."""
+    ref = c1["ref"].copy()
+    ref.iloc[5] = np.nan
+    base = PpaContract(id="p", kind="baseload", price=55.0, baseload_mw=1.0,
+                       reference_price=REF, **BASE)
+    line = _one(K.settle(base, _inputs(c1, refs={"p": (ref, [])})))
+    assert line.amount is None and line.flags == ["reference_price_missing"]
+    btm = PpaContract(id="b", kind="as_consumed_btm", price=55.0, **BASE)
+    inp = _inputs(c1)
+    inp.export_mw = c1["export_mw"].iloc[:-1]                      # one row missing
+    line = _one(K.settle(btm, inp))
+    assert line.amount is None and line.flags == ["export_not_established"]
+
+
+def test_a_multi_period_reference_series_is_cut_to_its_period(c1):
+    """#2: `settlement_inputs.reference_price` returns (period, timestep) series."""
+    mi = pd.MultiIndex.from_arrays([[2030] * len(c1["index"]), c1["index"]])
+    ref = pd.Series(c1["ref"].to_numpy(), index=mi)
+    line = _one(K.settle(_cfd(), _inputs(c1, refs={"c": (ref, [])}, period=2030)),
+                "cfd_difference")
+    expected = sum((70.0 - r) * g * 0.25 for r, g in zip(c1["ref"], c1["generators"]["pv"]))
+    assert _cents(line.amount) == _cents(expected)
+
+
+def test_as_consumed_attributes_export_among_the_site_generators_only():
+    """#3: a grid-side generator is not on-site."""
+    idx = pd.date_range("2030-05-01 12:00", periods=1, freq="h")
+    gens = pd.DataFrame({"pv": [10.0], "grid_supply": [100.0]}, index=idx)
+    ppa = PpaContract(id="p", kind="as_consumed_btm", price=1.0, **BASE)
+    inp = K.SettlementInputs(period=None, index=idx, weights=np.ones(1), generators=gens,
+                             export_mw=pd.Series([5.0], index=idx), site_generators=["pv"])
+    assert _one(K.settle(ppa, inp)).quantity_mwh == pytest.approx(5.0)
+    inp.site_generators = None
+    line = _one(K.settle(ppa, inp))
+    assert line.amount is None and line.flags == ["site_generators_not_established"]
+
+
+def test_the_sleeving_fee_is_on_all_generation_not_the_capped_volume(c1):
+    """#4: the plan's table — the sleeving party delivers all of it."""
+    ppa = PpaContract(id="p", kind="sleeved", price=55.0, sleeving_fee_eur_per_mwh=2.0,
+                      sleeving_party="S", volume_cap_mwh_per_year=100.0, **BASE)
+    lines = K.settle(ppa, _inputs(c1))
+    pv_mwh = float((c1["generators"]["pv"] * 0.25).sum())
+    assert _one(lines).quantity_mwh < pv_mwh                       # the PPA is capped
+    fee = _one(lines, "ppa_sleeving_fee")
+    assert fee.quantity_mwh == pytest.approx(pv_mwh)
+    assert _cents(fee.amount) == _cents(2.0 * pv_mwh)

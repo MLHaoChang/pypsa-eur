@@ -67,9 +67,15 @@ class SettlementInputs:
     load_bus: dict = field(default_factory=dict)      # load → bus
     dsr: tuple = (None, ["dr_activation_not_established"])   # (bus frame | None, flags)
     storage_discharge: pd.DataFrame | None = None
-    link_output: pd.DataFrame | None = None  # MW delivered at bus1
-    step_hours: np.ndarray | None = None     # interval length (events); default = weights
+    # MW delivered at bus1 ONLY (−p1; the seam's `links_p1_output`, not the
+    # all-ports `links_output`).
+    link_output: pd.DataFrame | None = None
+    step_hours: np.ndarray | None = None     # interval length; default: the index's steps
     site_party: str = "site"
+    # The Generators behind the PoC meter (an `as_consumed_btm` PPA's share of
+    # export is taken among these; a grid-side or other member's generator is
+    # not on-site). None ⇒ that PPA is not established.
+    site_generators: list[str] | None = None
 
 
 @dataclass
@@ -107,18 +113,34 @@ def _gen(contract, inputs: SettlementInputs) -> np.ndarray:
     if missing:
         raise ContractError(f"contract {contract.id!r}: asset(s) {missing} are not Generators "
                             "of this network")
-    return inputs.generators[list(contract.asset_ids)].sum(axis=1).to_numpy(dtype=float)
+    # A NaN output stays NaN (summed with min_count): the amount is then
+    # refused below, never a partial sum.
+    return inputs.generators[list(contract.asset_ids)].sum(axis=1, min_count=1).to_numpy(
+        dtype=float)
 
 
 def _parties(*names) -> list[str]:
     return ["party_not_established"] if any(n is None for n in names) else []
 
 
+def _on_index(series, inputs: SettlementInputs) -> np.ndarray | None:
+    """`series` on the period's flat index: a (period, timestep) series (what
+    `settlement_inputs.reference_price` returns on a multi-period network) is
+    cut to this period first. None when any row is missing or NaN (ADR-0001)."""
+    s = pd.Series(series)
+    if isinstance(s.index, pd.MultiIndex):
+        s = (s.xs(inputs.period, level=0) if inputs.period is not None
+             else s.droplevel(0))
+    out = s.reindex(inputs.index).to_numpy(dtype=float)
+    return None if np.isnan(out).any() else out
+
+
 def _ref(contract, inputs: SettlementInputs) -> tuple[np.ndarray | None, list[str]]:
     series, flags = inputs.references.get(contract.id, (None, ["reference_price_missing"]))
     if series is None:
         return None, list(flags) or ["reference_price_missing"]
-    return pd.Series(series).reindex(inputs.index).to_numpy(dtype=float), []
+    out = _on_index(series, inputs)
+    return (None, ["reference_price_missing"]) if out is None else (out, [])
 
 
 def _ppa(contract, inputs: SettlementInputs) -> list[Line]:
@@ -138,6 +160,8 @@ def _ppa(contract, inputs: SettlementInputs) -> list[Line]:
                     None if amount is None else float(amount),
                     sorted(set(list(flags) + _parties(payer, payee))))
 
+    if kind != "baseload" and np.isnan(gen).any():
+        return [line("ppa_energy", None, None, ["generation_not_established"])]
     ref = None
     ref_flags: list[str] = []
     if kind == "baseload" or pricing == "market_plus_premium":
@@ -154,10 +178,14 @@ def _ppa(contract, inputs: SettlementInputs) -> list[Line]:
         return [line("ppa_energy", qty.sum(), float(((price_y - ref) * qty).sum()))]
 
     if kind == "as_consumed_btm":
-        if inputs.export_mw is None:
+        exp = None if inputs.export_mw is None else _on_index(inputs.export_mw, inputs)
+        if exp is None:
             return [line("ppa_energy", None, None, ["export_not_established"])]
-        total = inputs.generators.sum(axis=1).to_numpy(dtype=float)
-        exp = pd.Series(inputs.export_mw).reindex(inputs.index).to_numpy(dtype=float)
+        site = inputs.site_generators
+        if not site or any(g not in inputs.generators.columns for g in site):
+            return [line("ppa_energy", None, None, ["site_generators_not_established"])]
+        # Export is attributed among the generators BEHIND the meter only.
+        total = inputs.generators[list(site)].sum(axis=1).to_numpy(dtype=float)
         share = np.divide(gen, total, out=np.zeros_like(gen), where=total > 0)
         attributed = np.minimum(gen, np.clip(exp, 0.0, None) * share)
         mw = gen - attributed
@@ -189,14 +217,16 @@ def _ppa(contract, inputs: SettlementInputs) -> list[Line]:
     if excess > 1e-9:
         lines.append(line("ppa_excess_mwh", excess, 0.0, ["ppa_volume_cap_exceeded"]))
     if kind == "sleeved":
+        # The sleeving party delivers ALL the generation, capped or not: the
+        # fee is on gen (the plan's table), not on the PPA-settled volume.
         fee = getattr(contract, "sleeving_fee_eur_per_mwh", None)
         party = getattr(contract, "sleeving_party", None)
+        sleeved = float((mw * w).sum())
         if fee is None:
-            lines.append(line("ppa_sleeving_fee", mwh.sum(), None,
+            lines.append(line("ppa_sleeving_fee", sleeved, None,
                               ["sleeving_fee_not_established"], payee=party))
         else:
-            lines.append(line("ppa_sleeving_fee", mwh.sum(), float(fee * mwh.sum()),
-                              payee=party))
+            lines.append(line("ppa_sleeving_fee", sleeved, float(fee * sleeved), payee=party))
     return lines
 
 
@@ -210,23 +240,29 @@ def _cfd(contract, inputs: SettlementInputs) -> list[Line]:
     if ref is None:
         return [Line(inputs.period, contract.id, payer, payee, "cfd_difference", None, None,
                      sorted(set(flags + ref_flags)))]
+    if np.isnan(gen).any():
+        return [Line(inputs.period, contract.id, payer, payee, "cfd_difference", None, None,
+                     sorted(set(flags + ["generation_not_established"])))]
     strike_y = indexed(contract.strike, getattr(contract, "indexation_pct_per_year", 0.0),
                        getattr(contract, "base_year", None), y)
     mwh = gen * w
-    if getattr(contract, "suspend_on_negative_price", False):
-        mwh = np.where(ref < 0, 0.0, mwh)          # §51 EEG style: no support at negative prices
+    # §51 EEG style: intervals at a negative price are not supported — the
+    # PAYMENT is suspended there; a monthly capture price is still the whole
+    # month's generation-weighted reference (review 2.2a #1).
+    paid = (np.where(ref < 0, 0.0, mwh) if getattr(contract, "suspend_on_negative_price", False)
+            else mwh)
     if getattr(contract, "reference", "interval") == "monthly_capture":
         months = np.asarray(inputs.index.strftime("%Y-%m"))
-        amount = 0.0
+        diff = np.zeros(len(mwh))
         for m in np.unique(months):
             sel = months == m
             vol = float(mwh[sel].sum())
             if vol > 0:
-                capture = float((ref[sel] * mwh[sel]).sum()) / vol
-                amount += (strike_y - capture) * vol
+                diff[sel] = strike_y - float((ref[sel] * mwh[sel]).sum()) / vol
+        amount = float((diff * paid).sum())
     else:
-        amount = float(((strike_y - ref) * mwh).sum())
-    return [Line(inputs.period, contract.id, payer, payee, "cfd_difference", float(mwh.sum()),
+        amount = float(((strike_y - ref) * paid).sum())
+    return [Line(inputs.period, contract.id, payer, payee, "cfd_difference", float(paid.sum()),
                  float(amount), flags)]
 
 
@@ -263,23 +299,42 @@ def _dr(contract, inputs: SettlementInputs) -> list[Line]:
                                               ["dr_activation_not_established"])))))
         return out
     # Activated MW on each named load: the bus's DSR dispatch × the load's
-    # share of its bus's load in that interval.
+    # share of its bus's load in that interval. Nothing unknown becomes 0
+    # (ADR-0001; review 2.2b #1).
+    def unknown(flag):
+        return out + [Line(inputs.period, contract.id, payer, payee, "dr_activation", None,
+                           None, sorted(set(parties + [flag])))]
+
     act = np.zeros(len(inputs.index))
     bus_of = pd.Series(inputs.load_bus)
     for load in contract.load_ids:
         bus = inputs.load_bus[load]
         if bus not in frame.columns:
-            continue
+            return unknown("dr_bus_not_dsr_enabled")
         on_bus = [l for l in bus_of.index[bus_of == bus] if l in inputs.loads.columns]
-        bus_load = inputs.loads[on_bus].sum(axis=1).to_numpy(dtype=float)
-        mine = inputs.loads[load].to_numpy(dtype=float)
+        bus_load = inputs.loads[on_bus].reindex(inputs.index).sum(axis=1, min_count=1) \
+            .to_numpy(dtype=float)
+        mine = inputs.loads[load].reindex(inputs.index).to_numpy(dtype=float)
+        dsr = frame[bus].reindex(inputs.index).to_numpy(dtype=float)
+        if np.isnan(dsr).any() or np.isnan(mine).any() or np.isnan(bus_load).any():
+            return unknown("dr_activation_not_established")
+        if ((dsr > 1e-9) & (bus_load <= 0)).any():
+            return unknown("dr_attribution_not_established")   # activation with no load
         share = np.divide(mine, bus_load, out=np.zeros_like(mine), where=bus_load > 0)
-        act += frame[bus].reindex(inputs.index).fillna(0.0).to_numpy(dtype=float) * share
+        act += dsr * share
     w = np.asarray(inputs.weights, dtype=float)
     mwh = float((act * w).sum())
     ev_flags = list(parties)
-    events, longest = _events(act, inputs.step_hours if inputs.step_hours is not None else w)
-    if contract.max_events is not None and events > contract.max_events:
+    step = _step_hours(inputs)
+    events, longest = _events(act, step, inputs.index)
+    # `max_events` is per calendar year: the sampled count is scaled by the
+    # year's hours over the sampled hours, and the estimate is disclosed.
+    sampled_h = float(np.asarray(step, dtype=float).sum())
+    year_h = _hours_in_year(modelled_year(inputs))
+    per_year = events * year_h / sampled_h if sampled_h > 0 else float(events)
+    if abs(sampled_h - year_h) > 1e-6:
+        ev_flags.append("dr_events_extrapolated")
+    if contract.max_events is not None and per_year > contract.max_events + 1e-9:
         ev_flags.append("dr_max_events_exceeded")
     if contract.max_duration_h is not None and longest > contract.max_duration_h + 1e-9:
         ev_flags.append("dr_max_duration_exceeded")
@@ -288,16 +343,38 @@ def _dr(contract, inputs: SettlementInputs) -> list[Line]:
     return out
 
 
-def _events(active_mw: np.ndarray, step_h) -> tuple[int, float]:
+def _step_hours(inputs: SettlementInputs) -> np.ndarray:
+    """Each row's real interval length in hours: `step_hours`, else the
+    index's steps (the median in-stretch step for the last row and across
+    gaps) — never the represented-hour weights (review 2.2b #2)."""
+    if inputs.step_hours is not None:
+        return np.broadcast_to(np.asarray(inputs.step_hours, dtype=float),
+                               (len(inputs.index),)).copy()
+    idx = inputs.index
+    if len(idx) < 2:
+        return np.ones(len(idx))
+    d = np.diff(idx.asi8) / 3.6e12
+    typical = float(np.median(d[d > 0])) if (d > 0).any() else 1.0
+    step = np.append(d, typical)
+    return np.where((step > 0) & (step <= typical + 1e-9), step, typical)
+
+
+def _events(active_mw: np.ndarray, step_h, index: pd.DatetimeIndex | None = None
+            ) -> tuple[int, float]:
     """(number of events, the longest in hours): an event is a maximal run of
-    consecutive intervals with activation > 0."""
+    consecutive intervals with activation > 0. Rows adjacent in the index but
+    not in time (a gap longer than the row's step, e.g. two representative
+    days) end a run."""
     on = np.asarray(active_mw) > 1e-9
     step = np.broadcast_to(np.asarray(step_h, dtype=float), on.shape)
+    t = None if index is None else index.asi8 / 3.6e12
     events, longest, run = 0, 0.0, 0.0
     for i, flag in enumerate(on):
+        contiguous = (i > 0 and (t is None or t[i] - t[i - 1] <= float(step[i - 1]) + 1e-9))
         if flag:
-            if run == 0.0:
+            if run == 0.0 or not contiguous:
                 events += 1
+                run = 0.0
             run += float(step[i])
             longest = max(longest, run)
         else:

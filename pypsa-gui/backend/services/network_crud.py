@@ -281,6 +281,17 @@ def _reattach_component_series(n, attr: str, name: str,
 
 
 def _rename_component_safely(n, component_class: str, old: str, new: str) -> None:
+    if component_class == "Bus":
+        from services.commercial.settlement_inputs import reserved_bus_name
+
+        if reserved_bus_name(new):
+            # `ic:` names the commercial reference frames' columns (P2
+            # WP2.2-0; the PUT rename path, review 0b #1).
+            raise HTTPException(422, f"bus names starting 'ic:' are reserved (got {new!r})")
+    _rename_component_safely_impl(n, component_class, old, new)
+
+
+def _rename_component_safely_impl(n, component_class: str, old: str, new: str) -> None:
     """Rename a component, re-pointing whatever refers to it — without the
     ``KeyError`` PyPSA raises for every class but ``Bus``.
 
@@ -347,6 +358,13 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
         if component_class != "Carrier":
             ensure_carrier(n, merged.get("carrier", ""))
         new_name = merged.pop("name", name)
+        if component_class == "Bus" and new_name != name:
+            from services.commercial.settlement_inputs import reserved_bus_name
+
+            if reserved_bus_name(new_name):
+                # Before any mutation (review 0b #1): nothing half-applied.
+                raise HTTPException(422, f"bus names starting 'ic:' are reserved "
+                                         f"(got {new_name!r})")
         # Refuse to rename onto an occupied name. Without this the remove+add
         # below silently destroyed the source component and (once the rename
         # goes through PyPSA) would drag its dependents onto the target — a

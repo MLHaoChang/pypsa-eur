@@ -75,13 +75,15 @@ def test_dr_events_are_counted_and_limits_flagged():
         period=None, index=idx, weights=np.ones(10), generators=pd.DataFrame(index=idx),
         loads=pd.DataFrame({"l": 1.0}, index=idx), load_bus={"l": "b"},
         dsr=(pd.DataFrame({"b": act}, index=idx, dtype=float), []), step_hours=np.ones(10))
-    assert K._events(np.array(act, dtype=float), np.ones(10)) == (3, 3.0)
+    assert K._events(np.array(act, dtype=float), np.ones(10), idx) == (3, 3.0)
+    # `max_events` is per calendar year: 3 events in 10 sampled hours are
+    # 3 × 8760 / 10 = 2628 a year, and the estimate is disclosed.
     ok = DrContract(id="d", availability_eur_per_mw_year=0.0, activation_eur_per_mwh=1.0,
-                    load_ids=["l"], counterparty="A", max_events=3, max_duration_h=3.0)
-    assert _one(K.settle(ok, inp), "dr_activation").flags == []
-    tight = ok.model_copy(update={"max_events": 2, "max_duration_h": 2.0})
+                    load_ids=["l"], counterparty="A", max_events=3000, max_duration_h=3.0)
+    assert _one(K.settle(ok, inp), "dr_activation").flags == ["dr_events_extrapolated"]
+    tight = ok.model_copy(update={"max_events": 2000, "max_duration_h": 2.0})
     assert _one(K.settle(tight, inp), "dr_activation").flags == [
-        "dr_max_duration_exceeded", "dr_max_events_exceeded"]
+        "dr_events_extrapolated", "dr_max_duration_exceeded", "dr_max_events_exceeded"]
 
 
 def test_dr_without_a_dsr_record_or_contracted_mw_is_not_established(c1):
@@ -148,3 +150,57 @@ def test_retail_adds_no_lines_and_names_the_payer_and_payee_of_the_tariff_bill(c
     assert K.retail_parties(retail, tariff) == ("site", "Energie BV")
     with pytest.raises(K.ContractError, match="tariff"):
         K.retail_parties(retail.model_copy(update={"tariff_id": "other"}), tariff)
+
+
+
+# ── WP2.2b review round 1 ──────────────────────────────────────────────────
+
+
+def _hand(dsr_cols, loads, act, idx=None):
+    idx = idx if idx is not None else pd.date_range("2030-01-01", periods=len(act), freq="h")
+    return K.SettlementInputs(
+        period=None, index=idx, weights=np.ones(len(idx)), generators=pd.DataFrame(index=idx),
+        loads=pd.DataFrame(loads, index=idx), load_bus={"l": "b", "m": "c"},
+        dsr=(pd.DataFrame({c: act for c in dsr_cols}, index=idx, dtype=float), []))
+
+
+def _dr_on(load="l"):
+    return DrContract(id="d", availability_eur_per_mw_year=0.0, activation_eur_per_mwh=1.0,
+                      load_ids=[load], counterparty="A")
+
+
+def test_dr_never_settles_a_silent_zero():
+    """#1 (ADR-0001): a bus without DSR, NaN rows, activation with no load."""
+    act = [1.0, 0.0, 1.0]
+    line = _one(K.settle(_dr_on("m"), _hand(["b"], {"l": 1.0, "m": 1.0}, act)),
+                "dr_activation")
+    assert line.amount is None and "dr_bus_not_dsr_enabled" in line.flags
+    line = _one(K.settle(_dr_on(), _hand(["b"], {"l": [1.0, np.nan, 1.0], "m": 1.0}, act)),
+                "dr_activation")
+    assert line.amount is None and "dr_activation_not_established" in line.flags
+    line = _one(K.settle(_dr_on(), _hand(["b"], {"l": 0.0, "m": 1.0}, act)), "dr_activation")
+    assert line.amount is None and "dr_attribution_not_established" in line.flags
+
+
+def test_events_on_representative_days_break_at_the_gap():
+    """#2: the last hour of one sampled day and the first of the next are two
+    events, measured in real hours (not represented ones)."""
+    idx = pd.DatetimeIndex(["2030-01-07 22:00", "2030-01-07 23:00",
+                            "2030-07-07 00:00", "2030-07-07 01:00"])
+    inp = _hand(["b"], {"l": 1.0, "m": 1.0}, [0.0, 1.0, 1.0, 0.0], idx=idx)
+    inp.weights = np.full(4, 8760.0 / 4)                           # two days stand for a year
+    dr = _dr_on().model_copy(update={"max_duration_h": 1.0})
+    assert K._events(np.array([0.0, 1.0, 1.0, 0.0]), K._step_hours(inp), idx) == (2, 1.0)
+    assert "dr_max_duration_exceeded" not in _one(K.settle(dr, inp), "dr_activation").flags
+
+
+def test_an_eaas_contract_needs_a_fee():
+    """#3: a fee-less EaaS would settle a confident 0."""
+    with pytest.raises(ValueError, match="fee"):
+        EaasContract(id="e", provider="p", customer="c", tenor_years=1, asset_ids=["pv"])
+
+
+def test_every_contract_type_carries_base_year_and_library_ref():
+    """#4."""
+    for cls in (LeaseContract, EaasContract, RetailContract):
+        assert {"base_year", "library_ref"} <= set(cls.model_fields)

@@ -58,7 +58,7 @@ def test_contracts_are_discriminated_by_type_and_untagged_p0_payloads_are_tagged
         {"id": "e", "provider": "a", "customer": "b", "fee_eur_per_mwh": 1.0, "tenor_years": 5,
          "asset_ids": ["pv"]},
         {"id": "r", "retailer": "a", "customer": "b", "tariff_id": "t", "tenor_years": 1},
-        {k: v for k, v in PPA.items() if k != "type"}]})
+        {**{k: v for k, v in PPA.items() if k != "type"}, "id": "ppa2"}]})
     assert [c.type for c in cfg.contracts] == ["ppa", "cfd", "dr", "lease", "eaas", "retail",
                                                "ppa"]
     with pytest.raises(ValueError):
@@ -198,3 +198,86 @@ def test_reference_frames_are_not_user_time_series(client, install_network, sess
               for e in client.get("/api/network/timeseries").json()}
     assert ("buses", SI.REF_PRICE_ATTR) not in listed
     assert client.get(f"/api/network/timeseries/buses/{SI.REF_PRICE_ATTR}").status_code == 404
+
+
+
+# ── WP2.2-0 review round 1 ─────────────────────────────────────────────────
+
+
+def test_a_renamed_dsr_bus_keeps_its_activation():
+    """0a #1: the rename renames the column and the loads' bus alike."""
+    n = build_edge_15min()
+    SI.commit_dsr(n, pd.DataFrame({"site": 2.0}, index=n.snapshots), 1.0)
+    n.rename_component_names("Bus", site="site2")
+    frame, flags = SI.dsr_activation(n)
+    assert flags == [] and list(frame.columns) == ["site2"]
+
+
+def test_a_put_that_renames_a_bus_into_ic_is_refused(client, install_network, session_ctx):
+    """0b #1: every rename path, before any mutation."""
+    install_network(build_edge_15min())
+    r = client.put("/api/network/buses/site", json={"name": "ic:contract:ppa1"})
+    assert r.status_code == 422
+    assert "site" in session_ctx(client).network.buses.index
+
+
+def test_a_bundle_with_an_ic_bus_is_refused_before_the_swap(client, api_project, session_ctx):
+    """0b #2."""
+    import io as _io
+    import zipfile
+
+    name = api_project("clean")
+    r = client.get(f"/api/projects/{name}/bundle")
+    src = zipfile.ZipFile(_io.BytesIO(r.content))
+    import pypsa
+    import tempfile
+
+    bad = pypsa.Network()
+    bad.add("Bus", "ic:x")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = f"{tmp}/network.nc"
+        bad.export_to_netcdf(path)
+        nc = open(path, "rb").read()
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        for m in src.namelist():
+            zf.writestr(m, nc if m == "network.nc" else src.read(m))
+    before = list(session_ctx(client).network.buses.index)
+    r = client.post("/api/projects/import_bundle?name=bad_in",
+                    files={"file": ("b.zip", buf.getvalue(), "application/zip")})
+    assert r.status_code == 422, r.text
+    assert list(session_ctx(client).network.buses.index) == before
+
+
+def test_duplicate_contract_ids_are_refused():
+    """0b #3."""
+    with pytest.raises(ValueError, match="unique"):
+        CommercialConfig.model_validate({"poc_link": "import", "contracts": [PPA, PPA]})
+
+
+def test_clearing_the_config_prunes_the_reference_frames(client, install_network, session_ctx):
+    """0b #4."""
+    n = build_edge_15min()
+    install_network(n)
+    ref = _series(client, n, "px")
+    assert _put(client, [{**PPA, "reference_price": ref}]).status_code == 200
+    assert client.put("/api/simulation/solver_config",
+                      json={"commercial": None}).status_code == 200
+    live = session_ctx(client).network
+    assert live.buses_t[SI.REF_PRICE_ATTR].empty
+    assert not (live.meta.get(SI.META_REF) or {})
+
+
+def test_the_load_filter_drops_only_the_ic_reference_columns():
+    """0b #5."""
+    f = SI._IcFrameLogFilter()
+
+    def rec(msg):
+        return logging.LogRecord("pypsa.network.io", logging.WARNING, "", 0, msg, None, None)
+
+    ours = ("Components Index(['ic:contract:x'], dtype='object', name='name') for attribute "
+            "ic_ref_price of Bus are not in main components dataframe buses")
+    stale = ("Components Index(['gone'], dtype='object', name='name') for attribute "
+             "ic_energy_price of Link are not in main components dataframe links")
+    assert f.filter(rec(ours)) is False and f.filter(rec(stale)) is True
+    assert SI._FILTER in logging.getLogger("pypsa.network.io").filters   # installed on import

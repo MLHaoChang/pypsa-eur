@@ -87,6 +87,12 @@ def bind_commercial(n, commercial, *, project_dir: pathlib.Path | None,
             raise BindingRefusal(422, "stress_registry_invalid", str(exc)) from exc
 
     if commercial is None:
+        from services.commercial import settlement_inputs as SI
+
+        with (lock if lock is not None else nullcontext()):
+            # A cleared config names no reference series (review 0b #4).
+            SI.write_reference_series(n, {}, frame=SI.REF_PRICE_ATTR, keep=set())
+            SI.write_reference_series(n, {}, frame=SI.CFE_ATTR, keep=set())
         if project_dir is not None:
             try:
                 conn.register_fca_entry(project_dir, None)

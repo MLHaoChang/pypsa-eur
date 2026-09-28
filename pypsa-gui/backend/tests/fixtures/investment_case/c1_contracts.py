@@ -46,10 +46,15 @@ def build():
         ((day == 4) & (hour >= 18) & (hour < 18.5))
     dsr = pd.DataFrame({"site": np.where(dsr_on, 4.0, 0.0)}, index=idx)
     bess = pd.DataFrame({"bess": np.where((hour >= 18) & (hour < 20), 2.0, 0.0)}, index=idx)
+    # The BESS charges from PV 10:00–14:00 (up to 3 MW): on-site use of the
+    # PV that an as_consumed_btm PPA counts as consumed.
+    bess_charge = pd.DataFrame({"bess": np.where((hour >= 10) & (hour < 14),
+                                                 np.minimum(pv, 3.0), 0.0)}, index=idx)
     chp = pd.DataFrame({"chp": 1.0}, index=idx)
     return {
         "loads": loads, "load_bus": {"site_load": "site", "aux": "site", "far": "other"},
-        "dsr": dsr, "storage_discharge": bess, "link_output": chp,
+        "dsr": dsr, "storage_discharge": bess, "storage_charge": bess_charge,
+        "link_output": chp, "site_generators": ["pv", "wind"],
         "index": idx, "weights": np.full(STEPS, W), "generators": gens,
         "export_mw": pd.Series(export, index=idx), "ref": pd.Series(ref, index=idx),
         "hour": hour, "day": day,

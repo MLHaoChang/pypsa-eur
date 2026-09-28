@@ -217,6 +217,14 @@ def physical_quantities(n, cfg, *, result_df: Callable[..., Any]) -> dict[str, A
             out["energy_mwh"] = out["output_mwh"]
             energy_frame = out_df
             intervals["links_p0"], intervals["links_output"] = p0_df, out_df
+            # Delivered at bus1 only (−p1; p0 × efficiency without a p1
+            # column): what an EaaS contract bills (review 0a #2).
+            p1_only = pd.DataFrame({
+                c: (-_series_or_zero(p1, c, sns) if c in p1_cols
+                    else p0_df[str(c)] * float(eff.get(c, 1.0)))
+                for c in cols})
+            p1_only.columns = out.index
+            intervals["links_p1_output"] = p1_only
         elif frame_attr in ("storage_units", "stores"):
             p = result_df(n, accessor, "p", "lopf")
             p_df = pd.DataFrame({c: _series_or_zero(p, c, sns) for c in cols})

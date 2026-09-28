@@ -68,8 +68,9 @@ def dsr_activation(n) -> tuple[pd.DataFrame | None, list[str]]:
     frame = n.buses_t.get(DSR_ATTR) if hasattr(n.buses_t, "get") else None
     if not rec or frame is None or frame.empty or rec.get("axis_hash") != axis_hash(n.snapshots):
         return None, ["dr_activation_not_established"]
-    cols = [c for c in (rec.get("buses") or frame.columns) if c in frame.columns]
-    out = frame[cols].reindex(n.snapshots)
+    # Every column, never the recorded list: a bus rename renames the column
+    # AND the loads' bus, so the list would drop it silently (review 0a #1).
+    out = frame.reindex(n.snapshots)
     if out.isna().any().any():
         return None, ["dr_activation_not_established"]
     return out, []
@@ -86,6 +87,19 @@ RESERVED_BUS_PREFIX = "ic:"
 
 def contract_column(contract_id: str) -> str:
     return f"ic:contract:{contract_id}"
+
+
+def reserved_buses_in_netcdf(path) -> list[str]:
+    """Bus names in the `ic:` namespace inside a network.nc, read without
+    loading it (checked BEFORE a load resets the live network)."""
+    import xarray as xr
+
+    try:
+        with xr.open_dataset(path) as ds:
+            names = [str(b) for b in ds["buses_i"].values] if "buses_i" in ds else []
+    except Exception:  # noqa: BLE001 — an unreadable file fails in the loader itself
+        return []
+    return [b for b in names if reserved_bus_name(b)]
 
 
 def reserved_bus_name(name) -> bool:
@@ -159,7 +173,10 @@ class _IcFrameLogFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
-        return not ("not in main components dataframe" in msg and "attribute ic_" in msg)
+        # Only the `ic:` reference columns — a stale P1 `ic_*` column of a
+        # removed component still warns (review 0b #5).
+        return not ("not in main components dataframe" in msg and "attribute ic_" in msg
+                    and "'ic:" in msg)
 
 
 _FILTER = _IcFrameLogFilter()
@@ -169,3 +186,6 @@ def install_log_filter() -> None:
     lg = logging.getLogger("pypsa.network.io")
     if _FILTER not in lg.filters:
         lg.addFilter(_FILTER)
+
+
+install_log_filter()  # every loader (compare, projects, the runtime path) from first import

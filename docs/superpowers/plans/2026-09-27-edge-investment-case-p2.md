@@ -547,6 +547,7 @@ Files: `lp_bindings.py`, `cost_rows.py`, `test_ratchet.py`, `test_tiers.py`, rec
   5. (LOW) The bill flags `tariff_capacity_not_established` for a current-recipe solve without a record, not a config change.
   6. (LOW) Windowed (rolling / multi-period myopic) solves refuse only capacity terms that change per window: a measured peak, or a contracted item on an extendable PoC. A contracted item on a fixed PoC is a constant and is allowed. The spec records `extendable_poc`.
   - Reviewer probes: the LP equals the bill to 1e-9 with a gap of about 1e-10 across Tokyo and New York new-year crossings, two periods in Berlin, sampled weeks across DST with 30-min settlement, a firm cap and a non-firm fixed PoC.
+- **WP2.1c-iii review round 2 → PASS** (no residue). Probes: p4 bill {2030: 0, 2040: 272,329} = rows, gap about 1e-12; a negative rate is stopped at validation; a rolling solve with a contracted item on a fixed PoC is allowed and `tariff_capacity_fixed` equals the bill. Noted, no action: a per-kVA item (outside the LP) with only a measured-peak record still follows the restored build_year on the bill.
 - **WP2.4a review round 2 → PASS** (no residue). WP2.4b-0's PASS still holds with the shared `resolver(read)`. Noted, no action needed: `_unknown_keys` does not walk dict-valued model fields, and no current item kind has one.
 
 ## WP2.4b-0 Condition 4 refactor (lands before the Library work)
@@ -792,6 +793,28 @@ or generator is a P5 archetype matter) — DR targets `load_ids`.
     - All expected values are written out independently, to the cent.
   - **Broad regression** (159 files: the network, import, library, solver-config and chat paths, plus the commercial and contract sets): 4402 passed, 12 skipped. The one failure was the hourly audit catching a literal 8760 in `contracts.py`; it is fixed by reusing the engine's `_HOURS_PER_YEAR`, so the allow-list is unchanged.
   - **Not here:** the network-level driver (inputs from the seam and readers, per period) is WP2.5's `services/results/billing.py`. The asset-class preflight (`commercial.contract_asset_missing`) is WP2.2c.
+
+- **WP2.2 review round 1 → 2.2-0a / 2.2-0b / 2.2b PASS WITH CONDITIONS, 2.2a FAIL; all findings fixed:**
+  - **2.2-0a:**
+    - #1 (MEDIUM) `dsr_activation` no longer filters by the recorded bus list: a rename renames the column and the loads' bus, so the filter dropped it silently.
+    - #2 The seam adds `intervals["links_p1_output"]` (−p1 at bus1 only, what EaaS bills).
+  - **2.2-0b:**
+    - #1 (MEDIUM) `PUT /buses/{name}` with a new `ic:` name is refused before any mutation (`_update_component`), and at `_rename_component_safely` for every rename path.
+    - #2 A bundle import whose network.nc has an `ic:` bus is refused BEFORE the swap. `reserved_buses_in_netcdf` reads `buses_i` with xarray. Other loads (saved projects from before the guards) load with a logged warning.
+    - #3 Contract ids must be unique.
+    - #4 Clearing the config prunes the reference frames and meta.
+    - #5 The load-warning filter drops only messages naming `ic:` columns (a stale P1 `ic_*` still warns), and it is installed on import of `settlement_inputs`, so every loader benefits.
+  - **2.2a:**
+    - #1 (HIGH) A monthly-capture CfD with negative-price suspension now takes the capture over the WHOLE month's generation-weighted reference and suspends only the payment. Hand case: gen 1 MW × 4 h, ref [100, 100, −50, −50], strike 60 gives +70.
+    - #2 (MEDIUM) A NaN or missing reference, export or generation is None + flag (`reference_price_missing` / `export_not_established` / `generation_not_established`). A (period, timestep) reference is cut to its period.
+    - #3 (MEDIUM) `as_consumed_btm` attributes export among `SettlementInputs.site_generators` (behind the meter); absent ⇒ `site_generators_not_established`.
+    - #4 The sleeving fee is on all generation (the plan's table), not the capped PPA volume.
+    - #5 C1 carries the BESS charging series. The test shows a no-export day's PV counted fully as consumed, BESS charge included.
+  - **2.2b:**
+    - #1 (MEDIUM) DR never settles a silent zero: `dr_bus_not_dsr_enabled`, `dr_activation_not_established` (NaN), `dr_attribution_not_established` (activation with no load).
+    - #2 (MEDIUM) Events use real step hours (`step_hours`, else the index's steps), and runs break at timestamp gaps. `max_events` is PER CALENDAR YEAR: the sampled count is extrapolated by the year's hours over the sampled hours and disclosed as `dr_events_extrapolated`.
+    - #3 A fee-less EaaS is refused by the model. `link_output` is documented as p1-only.
+    - #4 `base_year` and `library_ref` are on every contract type.
 
 ## WP2.2c Contracts on the config + double-count preflight
 
