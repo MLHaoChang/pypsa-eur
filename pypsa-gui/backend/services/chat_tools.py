@@ -4070,8 +4070,15 @@ def record_asset_health(name: str, entries: list) -> dict:
     the network, which it cannot be if it writes the network.
     """
     from routers.adequacy_worksheet import AssetHealthPut, put_asset_health as _h
-    return _h(AssetHealthPut(entries=list(entries or [])),
-              project=_authorized_project(name))
+
+    # Through `_route`, not bare. The handler now declares `db` / `user` for
+    # its foreign-lock check, and `_route`'s contract is to "resolve whatever
+    # the target declares" — called bare, those two arrive as raw `Depends`
+    # sentinels and die inside the lock lookup. Routing it is also what makes
+    # the new check real on THIS path: a non-holder editing the provenance
+    # ledger through chat is refused exactly as they are over HTTP.
+    return _route(_h, AssetHealthPut(entries=list(entries or [])),
+                  project=_authorized_project(name))
 
 
 # ── Explanation / synthesis (1) ─────────────────────────────────────────────
