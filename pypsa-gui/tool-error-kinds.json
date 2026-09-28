@@ -144,8 +144,8 @@
       "why": "The file type cannot be attached; the user is told to use the read tool instead."
     },
     "missing_api_key": {
-      "surface": "inline",
-      "why": "The active LLM profile has no key in its slot, surfaced as a 400 by the report generation routes (WP3); the chat turn itself reports the same condition on its own error frame, never as a tool_error. Per-call; the message names the remedy (configure the key or pick another profile) and WP6's report tool relays it."
+      "surface": "banner",
+      "why": "The active LLM profile has no key in its slot. The chat turn reports it on its own error frame; the report generation routes (WP3) are the first to emit it as a tool_error literal. ChatPanel already routes this kind to the key-entry banner (TOOL_ERROR_BANNER_KINDS, KIND_COPY with the user.env field), so the classification must say banner or the frontend contract test fails."
     },
     "no_acting_user": {
       "surface": "banner",
