@@ -489,3 +489,128 @@ describe('P26: Guided card wording per tool purpose', () => {
       expect(note()).toBeNull()
     })
 })
+
+// P26 (coordinator item 5): a Guided card leads with one plain sentence; the
+// tool id and its JSON arguments sit in a collapsed "Details". The card and
+// Approve / Deny are unchanged. Expert keeps the tool name and the JSON.
+describe('P26: Guided card summary line, raw call under Details', () => {
+  const summary = () => screen.queryByTestId('chat-confirmation-summary')?.textContent ?? null
+  const show = async (tool_name: string, args: Record<string, unknown>, safety_tier = 'write') => {
+    useChatStore.setState({ pending: { ...CARD, tool_name, args, safety_tier } })
+    renderPanel()
+    return screen.findByTestId('chat-confirmation-card')
+  }
+
+  it('run_eh_study with budget_solves → the study, with the step count', async () => {
+    const card = await show('run_eh_study', { archetype: 'weak_flexible', budget_solves: 30,
+      stages: ['apply_pack', 'mc_certify'] }, 'execution')
+    expect(summary()).toBe('Run the reliability study for this site (about 30 calculation steps)')
+    const details = card.querySelector('details[data-testid="chat-confirmation-details"]') as HTMLDetailsElement
+    expect(details).not.toBeNull()
+    expect(details.open).toBe(false)
+    expect(details.textContent).toContain('run_eh_study')
+    expect(details.textContent).toContain('"budget_solves": 30')
+    // nothing technical outside the collapsed Details
+    const outside = [...card.childNodes].filter(n => n !== details).map(n => n.textContent).join(' ')
+    expect(outside).not.toContain('run_eh_study')
+    expect(outside).not.toContain('mc_certify')
+    expect(card.getAttribute('aria-labelledby')).toBe('chat-confirmation-title')
+    expect(screen.getByTestId('chat-confirmation-summary').id).toBe('chat-confirmation-title')
+  })
+
+  it('run_eh_study without budget_solves → no count', async () => {
+    await show('run_eh_study', { archetype: 'off_grid' }, 'execution')
+    expect(summary()).toBe('Run the reliability study for this site')
+  })
+
+  it.each<[string, Record<string, unknown>, string]>([
+    ['update_component', { component_class: 'Bus', name: 'it_bus', attrs: { eh_critical: true } },
+      'Change the settings of it_bus'],
+    ['bulk_update_components', { component_class: 'Bus', names: ['a', 'b', 'c'], updates: { eh_critical: true } },
+      'Change the settings of 3 components'],
+    ['update_solver_config', { partial: { voll: 5000 } },
+      'Set the price of undelivered energy to €5,000 per MWh'],
+    ['update_solver_config', { partial: { solver_name: 'highs' } }, 'Change the study settings'],
+    ['put_stress_scenarios', { name: 'Demo', scenarios: [{}, {}, {}] },
+      'Save the list of hard conditions to test (3 scenarios)'],
+    ['export_to_csv', { filename: 'risks.csv', columns: [], rows: [] }, 'Export the file risks.csv'],
+    ['create_project_snapshot', { name: 'Demo', label: 'before-fix' }, 'Save a backup copy named "before-fix"'],
+    ['activate_project', { project_id: 'Island Microgrid' }, 'Open the project Island Microgrid'],
+    ['set_snapshots', { snapshots: [] }, 'The assistant wants to use set snapshots'],
+  ])('Guided %s → a plain summary', async (tool, args, want) => {
+    await show(tool, args)
+    expect(summary()).toBe(want)
+  })
+
+  it('run_fmea_sweep → a plain summary', async () => {
+    await show('run_fmea_sweep', {}, 'execution')
+    expect(summary()).toBe('Run the equipment-failure check (FMEA)')
+  })
+
+  it('Expert is unchanged: tool name as the title, JSON shown, no summary, no Details', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    const card = await show('run_eh_study', { budget_solves: 30 }, 'execution')
+    expect(summary()).toBeNull()
+    expect(card.querySelector('details')).toBeNull()
+    expect(document.getElementById('chat-confirmation-title')!.textContent).toBe('run_eh_study')
+    expect(card.querySelector('pre')!.textContent).toContain('"budget_solves": 30')
+  })
+
+  it('Guided: Approve still answers the card', async () => {
+    await show('run_eh_study', { budget_solves: 30 }, 'execution')
+    await act(async () => { screen.getByTestId('chat-confirm-approve').click() })
+    expect(postChatConfirm).toHaveBeenCalledWith('sess-1', { token: 'tok', decision: 'approve' })
+  })
+})
+
+// P26 (coordinator item 6): after a Deny, Guided shows one plain line; the
+// technical lines (the backend's confirmation_denied error, "denied: <tool>")
+// sit under Details or are hidden. Expert keeps both lines as they were.
+describe('P26: a declined card in Guided', () => {
+  const ERR = "✗ run_eh_study — confirmation_denied: deny on confirmation for 'run_eh_study'"
+  const seed = () => useChatStore.setState({ messages: [
+    { id: 't1', role: 'tool', content: ERR, tool_use_id: 'tu1', tool_name: 'run_eh_study', ts: 1 },
+    { id: 't2', role: 'tool', content: 'denied: run_eh_study', tool_use_id: 'tu1', tool_name: 'run_eh_study', ts: 2 },
+  ] })
+  const toolRows = () => screen.queryAllByTestId('chat-message').filter(m => m.getAttribute('data-role') === 'tool')
+
+  it('Guided: one line "You declined — nothing was changed.", the raw line under Details', async () => {
+    seed()
+    renderPanel()
+    await waitFor(() => expect(toolRows()).toHaveLength(1))
+    const row = toolRows()[0]
+    expect(row.querySelector('[data-testid="chat-tool-label"]')!.textContent)
+      .toBe('You declined — nothing was changed.')
+    const details = row.querySelector('details') as HTMLDetailsElement
+    expect(details.open).toBe(false)
+    expect(details.textContent).toContain('denied: run_eh_study')
+    expect(screen.queryByText(ERR)).toBeNull()
+  })
+
+  it('Guided: clicking Deny produces that line', async () => {
+    useChatStore.setState({ pending: CARD })
+    renderPanel()
+    await act(async () => { (await screen.findByTestId('chat-confirm-deny')).click() })
+    await waitFor(() => expect(screen.getByTestId('chat-tool-label').textContent)
+      .toBe('You declined — nothing was changed.'))
+  })
+
+  it('Expert is unchanged: both raw lines, no label', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    seed()
+    renderPanel()
+    await waitFor(() => expect(toolRows()).toHaveLength(2))
+    expect(toolRows()[0].textContent).toContain(ERR)
+    expect(toolRows()[1].textContent).toContain('denied: run_eh_study')
+    expect(screen.queryByTestId('chat-tool-label')).toBeNull()
+  })
+
+  it('other failed tools still show in Guided', async () => {
+    useChatStore.setState({ messages: [
+      { id: 't1', role: 'tool', content: '✗ update_component — validation_error: bus Field required', ts: 1 },
+    ] })
+    renderPanel()
+    await waitFor(() => expect(toolRows()).toHaveLength(1))
+    expect(toolRows()[0].textContent).toContain('validation_error')
+  })
+})

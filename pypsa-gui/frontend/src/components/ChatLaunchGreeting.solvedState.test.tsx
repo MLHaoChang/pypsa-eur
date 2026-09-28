@@ -3,7 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { networkApi } from '../api/network'
-import { simulationApi } from '../api/simulation'
+import { resultsApi, simulationApi } from '../api/simulation'
 import { getApiKeySettings } from '../api/chat'
 import ChatLaunchGreeting from './ChatLaunchGreeting'
 
@@ -14,7 +14,10 @@ import ChatLaunchGreeting from './ChatLaunchGreeting'
 // say "Run a simulation to enable"; the greeting must not claim "Solved" then.
 
 vi.mock('../api/network', () => ({ networkApi: { getMeta: vi.fn() } }))
-vi.mock('../api/simulation', () => ({ simulationApi: { getStatus: vi.fn() } }))
+vi.mock('../api/simulation', () => ({
+  simulationApi: { getStatus: vi.fn() },
+  resultsApi: { getEhStudy: vi.fn() },
+}))
 vi.mock('../api/chat', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../api/chat')>()
   return { ...actual, getApiKeySettings: vi.fn() }
@@ -103,3 +106,48 @@ describe('greeting solve line in Guided', () => {
   })
 })
 
+
+// P26 (coordinator item 7): after the hub study (and the FMEA sweep) a Guided
+// greeting still said "Not solved yet.". Two reasons: the EH study solves a
+// copy, so the live network's dispatch stays `none`; and a sweep started from
+// the Improve card was polled by no mounted panel, so the cached status was
+// never re-read. The greeting now also reads the hub study record (Guided only).
+describe('greeting solve line in Guided after the hub study (P26)', () => {
+  const NONE = { running: false, status: 'idle', condition: null,
+    objective: null, solve_time: null, dispatch: 'none' } as const
+  it('a finished hub study → points to Hub design, never "Not solved yet."', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done' } as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
+      .toBe('A study has run on this network — its results are in Hub design.'))
+  })
+
+  it('a running hub study → says so and where to follow it', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'running' } as never)
+    renderGreeting()
+    await vi.waitFor(() => expect(screen.getByTestId('chat-launch-solve').textContent)
+      .toBe('The hub study is running — follow it in Hub design.'))
+  })
+
+  it('no hub study yet → still "Not solved yet."', async () => {
+    useUIStore.setState({ uiMode: 'guided' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(null)
+    renderGreeting()
+    await vi.waitFor(() => expect(resultsApi.getEhStudy).toHaveBeenCalled())
+    expect((await screen.findByTestId('chat-launch-solve')).textContent).toBe('Not solved yet.')
+  })
+
+  it('Expert is unchanged: "Not solved yet." and the study record is not read', async () => {
+    useUIStore.setState({ uiMode: 'expert' })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue({ ...NONE })
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({ status: 'done' } as never)
+    renderGreeting()
+    expect((await screen.findByTestId('chat-launch-solve')).textContent).toBe('Not solved yet.')
+    expect(resultsApi.getEhStudy).not.toHaveBeenCalled()
+  })
+})

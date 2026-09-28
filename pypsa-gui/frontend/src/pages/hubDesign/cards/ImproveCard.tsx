@@ -4,10 +4,13 @@
 // FMEA tab does (the lifted hook), and a stress scenario is added through
 // the assistant.
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { ShieldAlert } from 'lucide-react'
-import type { EhReviewFinding } from '../../../api/simulation'
+import { resultsApi, type EhReviewFinding } from '../../../api/simulation'
 import { useStartFmeaSweep } from '../../../hooks/useStartFmeaSweep'
+import { useStudyFinishedInvalidation } from '../../../hooks/useStudyFinishedInvalidation'
 import { useUIStore } from '../../../store/uiStore'
+import { nk } from '../../../utils/queryKeys'
 import { studyHasResults } from '../flow'
 import { useHubDesignStore } from '../hubDesignStore'
 import {
@@ -88,6 +91,20 @@ export function ImproveCard() {
   const { template } = useHubTemplate()
   const archetype = useHubDesignStore(s => s.archetype)
   const sweep = useStartFmeaSweep()
+  // P26: follow a sweep started here on FmeaTab's own query and options, so
+  // /simulation/status is re-read when it ends (its closing re-solve leaves
+  // fresh dispatch). FmeaTab does this only while it is open.
+  const project = useUIStore(s => s.currentProject)
+  const { data: modes } = useQuery({
+    queryKey: nk(project, 'results', 'fmea_modes'),
+    queryFn: () => resultsApi.getFmeaModes(),
+    refetchInterval: q =>
+      (q.state.data as { sweep_status?: string } | null)?.sweep_status === 'running'
+        ? 2000 : false,
+    enabled: sweep.isSuccess,
+  })
+  useStudyFinishedInvalidation(!sweep.isSuccess || modes === undefined ? undefined
+    : (modes as { sweep_status?: string | null } | null)?.sweep_status ?? null)
   const findings = (review?.findings ?? [])
     .filter(f => f.severity === 'high' || f.severity === 'medium')
   const context = `a ${ARCHETYPE_SHORT[archetype]} site`

@@ -5,7 +5,7 @@ import { useUIStore } from '../store/uiStore'
 import { useChatStore } from '../store/chatStore'
 import { networkApi } from '../api/network'
 import { simulationApi } from '../api/simulation'
-import { getApiKeySettings } from '../api/chat'
+import { getChatHealth, getApiKeySettings } from '../api/chat'
 import ChatLaunchGreeting from './ChatLaunchGreeting'
 
 // The launch orientation, from the approved spec
@@ -39,6 +39,7 @@ vi.mock('../api/chat', async (importOriginal) => {
   return {
     ...actual,
     getApiKeySettings: vi.fn(),
+    getChatHealth: vi.fn(),
     putApiKeySettings: vi.fn(),
     deleteApiKeySettings: vi.fn(),
   }
@@ -72,6 +73,9 @@ beforeEach(() => {
     objective: 1234, solve_time: 12, dispatch: 'fresh',
   })
   vi.mocked(getApiKeySettings).mockResolvedValue(KEY_CONFIGURED)
+  // Readiness unknown (the probe carries no chat_ready) unless a test says.
+  vi.mocked(getChatHealth).mockResolvedValue({ ok: true } as never)
+  useChatStore.setState({ profileId: null })
 })
 
 describe('the launch orientation, with a project open', () => {
@@ -200,5 +204,52 @@ describe('the launch orientation with no API key', () => {
     })
     expect(screen.queryByTestId('chat-launch-key-offer')).toBeNull()
     expect(useChatStore.getState().error).toBeNull()
+  })
+})
+
+// P26 (coordinator item 8): "Add an Anthropic API key to talk to me" showed
+// while the assistant worked on another profile (the smoke's stub, a local
+// model). The offer follows the Send gate's rule: the session's effective
+// profile is `profileId ?? active`, and the offer hides while that profile is
+// known to be ready. Both modes.
+describe('the key offer follows the effective profile (P26)', () => {
+  const health = (chat_ready: boolean) => ({ ok: true, chat_ready,
+    active_profile: { id: 'local', label: 'Local', wire: 'openai' } })
+  for (const mode of ['expert', 'guided'] as const) {
+    it(`${mode}: hidden while the active profile is ready and no other is picked`, async () => {
+      useUIStore.setState({ uiMode: mode })
+      vi.mocked(getApiKeySettings).mockResolvedValue(KEY_MISSING)
+      vi.mocked(getChatHealth).mockResolvedValue(health(true) as never)
+      renderGreeting()
+      await waitFor(() => expect(vi.mocked(getChatHealth)).toHaveBeenCalled())
+      await waitFor(() => expect(vi.mocked(getApiKeySettings)).toHaveBeenCalled())
+      await new Promise(r => setTimeout(r, 20))
+      expect(screen.queryByTestId('chat-launch-key-offer')).toBeNull()
+    })
+  }
+
+  it('hidden while the picked profile IS the ready active one', async () => {
+    useChatStore.setState({ profileId: 'local' })
+    vi.mocked(getApiKeySettings).mockResolvedValue(KEY_MISSING)
+    vi.mocked(getChatHealth).mockResolvedValue(health(true) as never)
+    renderGreeting()
+    await waitFor(() => expect(vi.mocked(getChatHealth)).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 20))
+    expect(screen.queryByTestId('chat-launch-key-offer')).toBeNull()
+  })
+
+  it('shown while the effective profile is not ready', async () => {
+    vi.mocked(getApiKeySettings).mockResolvedValue(KEY_MISSING)
+    vi.mocked(getChatHealth).mockResolvedValue(health(false) as never)
+    renderGreeting()
+    expect(await screen.findByTestId('chat-launch-key-offer')).toBeTruthy()
+  })
+
+  it('shown when another profile is picked (its readiness is not known here)', async () => {
+    useChatStore.setState({ profileId: 'anthropic-default' })
+    vi.mocked(getApiKeySettings).mockResolvedValue(KEY_MISSING)
+    vi.mocked(getChatHealth).mockResolvedValue(health(true) as never)
+    renderGreeting()
+    expect(await screen.findByTestId('chat-launch-key-offer')).toBeTruthy()
   })
 })

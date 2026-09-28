@@ -38,17 +38,29 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { networkApi } from '../api/network'
-import { simulationApi } from '../api/simulation'
-import { getApiKeySettings, type ApiKeySettings } from '../api/chat'
+import { resultsApi, simulationApi } from '../api/simulation'
+import { getApiKeySettings, getChatHealth, type ApiKeySettings, type ChatHealth } from '../api/chat'
 import { useUIStore } from '../store/uiStore'
+import { useChatStore } from '../store/chatStore'
 import { nk } from '../utils/queryKeys'
 import ApiKeySetup, { API_KEY_SETTINGS_KEY } from './ApiKeySetup'
 import type { SimulationStatus } from '../api/types'
 
-/** One sentence about the solve, or null while we do not yet know. */
-function solveLine(status: SimulationStatus | undefined, guided = false): string | null {
+/** One sentence about the solve, or null while we do not yet know.
+ *  `hubStudy` (Guided only) is the hub study record's status: the EH study
+ *  solves a copy, so the live network's dispatch stays `none` after it, and a
+ *  sweep started from the Improve card is not polled by any mounted panel —
+ *  without it a Guided user with a finished study read "Not solved yet."
+ *  (P26). */
+function solveLine(status: SimulationStatus | undefined, guided = false,
+  hubStudy: string | null = null): string | null {
   if (!status) return null
   if (status.running) return 'A solve is running right now.'
+  if (guided && hubStudy === 'running') return 'The hub study is running — follow it in Hub design.'
+  if (guided && hubStudy === 'done' && status.dispatch !== 'stale'
+    && !(status.condition != null && status.solve_time != null && status.dispatch === 'fresh')) {
+    return 'A study has run on this network — its results are in Hub design.'
+  }
   switch (status.dispatch) {
     case 'fresh':
       // One signal with the canvas footer and SnapshotPicker (`hasResults`):
@@ -109,8 +121,30 @@ export default function ChatLaunchGreeting() {
     window.dispatchEvent(new CustomEvent('chat:open-new-project-wizard'))
   }
 
-  const solve = solveLine(status, guided)
-  const needsKey = keySettings?.configured === false
+  // Guided only: the hub study record, on the key and fetcher the hub panel
+  // uses (useHubStudy), so it is usually already cached. Expert never reads it.
+  const { data: hubStudy } = useQuery({
+    queryKey: nk(currentProject, 'results', 'eh_study'),
+    queryFn: () => resultsApi.getEhStudy({ quiet: true }),
+    enabled: guided && !!currentProject,
+  })
+  // The key offer follows the Send gate's profile rule (ChatPanel): the turn
+  // runs on `profileId ?? active`, and `chat_ready` describes the active
+  // profile. While that effective profile is known to be ready the assistant
+  // works, so offering an Anthropic key is noise (P26).
+  const profileId = useChatStore((s) => s.profileId)
+  const { data: chatHealth } = useQuery<ChatHealth>({
+    queryKey: ['chat', 'health'],
+    queryFn: getChatHealth,
+    staleTime: 30_000,
+    retry: false,
+  })
+  const effectiveReady = chatHealth?.chat_ready === true
+    && (profileId == null || profileId === chatHealth.active_profile?.id)
+
+  const solve = solveLine(status, guided,
+    (hubStudy as { status?: string } | null | undefined)?.status ?? null)
+  const needsKey = keySettings?.configured === false && !effectiveReady
 
   return (
     <div

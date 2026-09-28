@@ -361,6 +361,12 @@ Spec §7.
 | A reloaded Improve request showed the raw engine title ("LOLE") where the live bubble shows plain words | P25 | `userMessageLabel` applies `plainWords` | `ChatPanel.sendRequest.test.tsx` "B2: a reloaded Improve request…" |
 | Microgrid Improve read "1000 draws … confidence interval" | P24-FE | two `plainWords` rules | `plainWords.test.ts` |
 | No forward button after Site and Results; only the rail | P24-FE | `CardShell` `next` → "Next: Goal" (Site), "Next: Improve" (Results), a manual rail move | `SiteCard.test.tsx`, `ResultsCard.test.tsx` "next step" |
+| Coordinator item 5: a Guided card showed only the tool id and its JSON | P25 | `guidedCardSummary`: one plain sentence (`run_eh_study` → "Run the reliability study for this site (about N calculation steps)" from `budget_solves`; fallback "The assistant wants to use <tool name in words>"). The raw call sits in a collapsed Details. Expert is unchanged. | `ChatPanel.sendRequest.test.tsx` "P26: Guided card summary line" |
+| Item 6: a denied card left technical lines | P25 | Guided: "You declined — nothing was changed.", with "denied: <tool>" under Details. The `confirmation_denied` error line is hidden. Render-only. | `ChatPanel.sendRequest.test.tsx` "P26: a declined card in Guided" |
+| Item 7: the Guided greeting said "Not solved yet." after the study and the sweep | P22.9-FE / P24-FE | The greeting reads the hub study record (Guided only). The Improve card follows the sweep it started and re-reads `/simulation/status` when it ends. | `ChatLaunchGreeting.solvedState.test.tsx`, `ImproveCard.test.tsx` "follows the sweep" |
+| Item 8: the Anthropic key offer showed while a ready profile ran the chat (both modes) | P22.9-FE | Hidden while `chat_ready` is true for `profileId ?? active` (the Send gate's rule) | `ChatLaunchGreeting.test.tsx` "the key offer follows the effective profile" |
+
+**P26 test-harness edits (no assertion changed):** `ChatLaunchGreeting.solvedState.test.tsx` now mocks `resultsApi.getEhStudy`, and `ChatLaunchGreeting.test.tsx` mocks `getChatHealth` (readiness unknown by default). The greeting now reads both.
 
 **P26 edited assertion (spec §8.3):** `ChatPanel.sendRequest.test.tsx` "B2: a reloaded Improve request" now expects the plain-words label ("expected shortfall", not "LOLE"). Justification: after a reload, the label must read as the live one does (`delegate.actionLabel`).
 

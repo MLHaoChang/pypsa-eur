@@ -1591,6 +1591,10 @@ async function p26Template(browser, tpl) {
     await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 30_000 })
     await byId('hub-card-site').waitFor({ state: 'visible', timeout: 60_000 })
     check(await railState('site') === 'current', 'rail at Site')
+    // P26 item 8: the stub profile is active and ready → no Anthropic key offer.
+    await byId('chat-launch-greeting').waitFor({ state: 'visible', timeout: 30_000 })
+    await sleep(1000)
+    check((await byId('chat-launch-key-offer').count()) === 0, 'greeting: no "Add an Anthropic API key" while the profile is ready')
     await shot(page, `p26-${L}-02-workbench-site`)
 
     // 4. Site rows
@@ -1632,6 +1636,11 @@ async function p26Template(browser, tpl) {
     out.headline = got
     info(`observed verdict: ${out.verdict} (P20 expected: ${tpl.expected})`)
     check(got === expectedHeadline(review, report), `headline (§5.5): "${got}"`)
+    // P26 item 7: the greeting points to Hub design, never "Not solved yet."
+    const HUB_LINE = 'A study has run on this network — its results are in Hub design.'
+    await page.waitForFunction(w => document.querySelector('[data-testid="chat-launch-solve"]')?.textContent === w,
+      HUB_LINE, { timeout: 15_000 })
+    ok(`greeting after the study: "${HUB_LINE}"`)
     await shot(page, `p26-${L}-06-results`)
 
     // 7. Improve (+ the assistant's confirmation card on the data center)
@@ -1656,7 +1665,16 @@ async function p26Template(browser, tpl) {
       check(tool === f.actions[0].tool, `confirmation card for ${tool} (tier ${tier})`)
       const header = await textOf('chat-confirmation-header')
       check(header === guidedHeaderFor(tool, tier), `card header in plain words: "${header}"`)
-      out.card = { tool, tier, header }
+      const summary = await textOf('chat-confirmation-summary')
+      const budget = f.actions[0].args?.budget_solves
+      check(summary === (typeof budget === 'number'
+        ? `Run the reliability study for this site (about ${budget} calculation steps)`
+        : 'Run the reliability study for this site'), `card summary: "${summary}"`)
+      check(!(await byId('chat-confirmation-details').evaluate(d => d.open)),
+        'tool id and arguments in a collapsed Details')
+      check(!(await byId('chat-confirmation-card').innerText()).includes('mc_certify'),
+        'no engine ids visible on the card')
+      out.card = { tool, tier, header, summary }
       const rec = await stubRequests()
       check(rec.length > n0 && rec.slice(n0).some(r => (r.last_user_text ?? '').includes('Guided mode is on')),
         'the stub saw "Guided mode is on"')
@@ -1664,6 +1682,13 @@ async function p26Template(browser, tpl) {
       await byId('chat-confirm-deny').click()
       await byId('chat-confirmation-card').waitFor({ state: 'detached', timeout: 30_000 })
       await page.waitForFunction(() => !document.querySelector('[data-testid="chat-abort"]'), null, { timeout: 60_000 })
+      // P26 item 6: one plain line; the technical ones are under Details / hidden.
+      check((await byId('chat-tool-label').first().textContent()) === 'You declined — nothing was changed.',
+        'transcript: "You declined — nothing was changed."')
+      const visible = await byId('chat-messages').innerText()
+      check(!visible.includes('confirmation_denied') && !/^denied: /m.test(visible),
+        'no confirmation_denied / "denied:" line visible')
+      await shot(page, `p26-${L}-07b-declined`)
       const declined = tableDiffs(beforeDo, await snapshotTables())
       check(declined.diffs.length === 0 && declined.nomOpt === 0, 'declined: nothing changed')
 
@@ -1708,6 +1733,18 @@ async function p26Template(browser, tpl) {
     check(afterSweep.diffs.length === 0,
       `buses/links/generators equal after the sweep (*_nom_opt changes: ${afterSweep.nomOpt})`)
     out.nomOptSweep = afterSweep.nomOpt
+    if (!tpl.improveDo) {
+      // P26 item 7, after the sweep too (no chat yet, so the greeting shows).
+      await byId('sidebar-hub-design').click()
+      await byId('hub-design-panel').waitFor({ state: 'visible', timeout: 15_000 })
+      const line = await textOf('chat-launch-solve')
+      check(line !== 'Not solved yet.' && /Hub design/.test(line), `greeting after the sweep: "${line}"`)
+      await shot(page, `p26-${L}-08b-greeting-after-sweep`)
+      await page.keyboard.press('Control+k')
+      await page.getByPlaceholder(/Type a command/i).fill('Open results panel')
+      await page.getByText('Open results panel', { exact: true }).first().click()
+      await byId('results-tab-adequacy').waitFor({ state: 'visible', timeout: 30_000 })
+    }
     const overall = tableDiffs(before, await snapshotTables())
     check(overall.diffs.length === 0, 'buses/links/generators equal to before the study (except *_nom_opt)')
     await shot(page, `p26-${L}-09-fmea-tab`)

@@ -330,6 +330,68 @@ function guidedConfirmWording(tool: string, tier: string): { header: string; not
     : { header: 'Confirm this change', note: null }
 }
 
+// P26 (coordinator item 5): a Guided card leads with one plain sentence
+// about the call; the tool id and its JSON arguments move into a collapsed
+// "Details". Unknown tools fall back to "The assistant wants to use <tool
+// name in words>". Expert never reads this.
+const _str = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : null)
+const _count = (v: unknown): number | null => (Array.isArray(v) ? v.length : null)
+const GUIDED_CARD_SUMMARY: Record<string, (a: Record<string, unknown>) => string> = {
+  run_eh_study: (a) => {
+    const n = typeof a.budget_solves === 'number' && Number.isFinite(a.budget_solves) ? a.budget_solves : null
+    return n != null
+      ? `Run the reliability study for this site (about ${n} calculation steps)`
+      : 'Run the reliability study for this site'
+  },
+  run_fmea_sweep: () => 'Run the equipment-failure check (FMEA)',
+  run_simulation: () => 'Run a full calculation of the network',
+  update_component: (a) => `Change the settings of ${_str(a.name) ?? 'one component'}`,
+  bulk_update_components: (a) => {
+    const n = _count(a.names)
+    return n != null ? `Change the settings of ${n} components` : 'Change the settings of several components'
+  },
+  update_solver_config: (a) => {
+    const p = (a.partial ?? {}) as Record<string, unknown>
+    return typeof p.voll === 'number' && Number.isFinite(p.voll)
+      ? `Set the price of undelivered energy to €${p.voll.toLocaleString('en-US')} per MWh`
+      : 'Change the study settings'
+  },
+  put_stress_scenarios: (a) => {
+    const n = _count(a.scenarios)
+    return n != null ? `Save the list of hard conditions to test (${n} scenarios)`
+      : 'Save the list of hard conditions to test'
+  },
+  create_project_snapshot: (a) => _str(a.label)
+    ? `Save a backup copy named "${a.label}"` : 'Save a backup copy of the project',
+  load_project: (a) => _str(a.name) ? `Open the project ${a.name}` : 'Open another project',
+  activate_project: (a) => {
+    const n = _str(a.project_id) ?? _str(a.name)
+    return n ? `Open the project ${n}` : 'Open another project'
+  },
+  save_project: () => 'Save the project',
+}
+for (const t of ['export_to_csv', 'export_to_excel', 'export_preview_png', 'export_chat_summary',
+  'export_asset_results', 'gridspine_export_handoff_bundle']) {
+  GUIDED_CARD_SUMMARY[t] = (a) => (_str(a.filename) ? `Export the file ${a.filename}` : 'Export a file')
+}
+
+export function guidedCardSummary(tool: string, args: Record<string, unknown>): string {
+  const f = Object.prototype.hasOwnProperty.call(GUIDED_CARD_SUMMARY, tool) ? GUIDED_CARD_SUMMARY[tool] : null
+  return f ? f(args ?? {}) : `The assistant wants to use ${tool.replace(/_/g, ' ')}`
+}
+
+// P26 (coordinator item 6): after a Deny, Guided shows one plain line. The
+// backend's `confirmation_denied` error line is hidden (the "denied: <tool>"
+// line says the same thing) and the raw "denied: <tool>" goes under Details.
+// Render-only: the transcript keeps the raw lines, and Expert shows them.
+const DENIED_LINE = /^denied: \S+$/
+const DENIED_ERROR_LINE = /^✗ \S+ — confirmation_denied\b/
+export function guidedToolLine(content: string): { hidden: true } | { hidden: false; label: string | null } {
+  if (DENIED_ERROR_LINE.test(content)) return { hidden: true }
+  if (DENIED_LINE.test(content)) return { hidden: false, label: 'You declined — nothing was changed.' }
+  return { hidden: false, label: null }
+}
+
 interface ToolProgressFrame {
   tool_use_id: string
   line: string
@@ -532,12 +594,30 @@ function ConfirmationCard() {
           {guidedWording.note}
         </div>
       )}
-      <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
-        {pending.tool_name}
-      </div>
-      <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
-        {JSON.stringify(pending.args, null, 2)}
-      </pre>
+      {guidedWording ? (
+        <>
+          <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text"
+            data-testid="chat-confirmation-summary">
+            {guidedCardSummary(pending.tool_name, pending.args)}
+          </div>
+          <details className="mb-2 text-[11px] text-muted" data-testid="chat-confirmation-details">
+            <summary className="cursor-pointer select-none">Details</summary>
+            <div className="font-mono mt-1">{pending.tool_name}</div>
+            <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mt-1 whitespace-pre-wrap break-all">
+              {JSON.stringify(pending.args, null, 2)}
+            </pre>
+          </details>
+        </>
+      ) : (
+        <>
+          <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
+            {pending.tool_name}
+          </div>
+          <pre className="text-[10px] text-muted bg-bg-2 p-2 rounded overflow-x-auto mb-2 whitespace-pre-wrap break-all">
+            {JSON.stringify(pending.args, null, 2)}
+          </pre>
+        </>
+      )}
       {requiresTyped && typedTarget && (
         <div className="mb-2" data-testid="chat-typed-confirmation">
           <div className="text-[10px] text-muted mb-1">
@@ -2930,7 +3010,12 @@ export default function ChatPanel() {
             }}
           />
         )}
-        {messages.map((m) => (
+        {messages.map((m) => {
+          // P26 item 6: Guided renders a declined card as one plain line.
+          const toolLine = m.role === 'tool' && uiMode === 'guided' ? guidedToolLine(m.content) : null
+          if (toolLine?.hidden) return null
+          const toolLabel = toolLine && !toolLine.hidden ? toolLine.label : null
+          return (
           <div
             key={m.id}
             className={
@@ -2963,6 +3048,15 @@ export default function ChatPanel() {
             {m.role === 'assistant'
               ? <ChatMarkdown>{m.content}</ChatMarkdown>
               : m.role === 'user' ? <UserMessageText message={m} />
+              : toolLabel ? (
+                <>
+                  <span className="font-sans text-[12px] text-text" data-testid="chat-tool-label">{toolLabel}</span>
+                  <details className="mt-0.5" data-testid="chat-tool-details">
+                    <summary className="cursor-pointer select-none font-sans">Details</summary>
+                    <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>
+                  </details>
+                </>
+              )
               : <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{m.content}</span>}
             {m.role === 'tool' && m.tool_use_id && (
               <ToolProgressDetails toolUseId={m.tool_use_id} />
@@ -2973,7 +3067,8 @@ export default function ChatPanel() {
             <MessageActions message={m} streaming={streaming}
               onCopy={onCopyMessage} onRetry={onRetryMessage} onEdit={onEditMessage} />
           </div>
-        ))}
+          )
+        })}
         <ConfirmationCard />
         <div ref={messagesEndRef} />
         </div>

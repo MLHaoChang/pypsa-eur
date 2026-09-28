@@ -22,6 +22,7 @@ vi.mock('../../../api/simulation', async (importOriginal) => {
     resultsApi: {
       ...actual.resultsApi,
       getEhStudy: vi.fn(), getEhReview: vi.fn(), getEhTemplate: vi.fn(),
+      getFmeaModes: vi.fn(),
     },
   }
 })
@@ -207,5 +208,32 @@ describe('ImproveCard', () => {
     vi.mocked(resultsApi.getEhReview).mockResolvedValue(review({ findings: [F[2], F[3]] }))
     mount()
     expect((await screen.findByTestId('hub-improve-none')).textContent).toMatch(/nothing urgent/i)
+  })
+})
+
+// P26 (coordinator item 7): a sweep started here was polled by no mounted
+// panel (FmeaTab re-reads /simulation/status only if it is open when the sweep
+// ends), so the greeting / status bar kept "Not solved yet.". Once a sweep has
+// started, the card follows it on FmeaTab's own query and re-reads the status
+// when it leaves running.
+describe('ImproveCard follows the sweep it started (P26)', () => {
+  it('sweep running → done invalidates simulationStatus', async () => {
+    sweep.isSuccess = true
+    vi.mocked(resultsApi.getFmeaModes)
+      .mockResolvedValueOnce({ sweep_status: 'running' } as never)
+      .mockResolvedValue({ sweep_status: 'done' } as never)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const spy = vi.spyOn(client, 'invalidateQueries')
+    render(<QueryClientProvider client={client}><ImproveCard /></QueryClientProvider>)
+    await vi.waitFor(() => expect(spy).toHaveBeenCalledWith(
+      { queryKey: ['simulationStatus', 'Demo'] }), { timeout: 5000 })
+    expect(vi.mocked(resultsApi.getFmeaModes).mock.calls.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('no sweep started from here → the modes are not polled', async () => {
+    mount()
+    await screen.findByTestId('hub-improve-fmea')
+    await new Promise(r => setTimeout(r, 50))
+    expect(resultsApi.getFmeaModes).not.toHaveBeenCalled()
   })
 })

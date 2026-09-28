@@ -28,6 +28,8 @@ These steps were checked by `smoke-guided.mjs --phase P26` on all three Energy H
      - "Confirm: open a project" for `load_project` / `activate_project`;
      - "Confirm" for runs and deletions.
    - The three non-edit kinds carry a one-line note, such as "Your network is not changed."
+   - Every Guided card leads with one plain sentence ("Run the reliability study for this site (about 30 calculation steps)"), with the raw call under a collapsed Details.
+   - A declined card leaves one line: "You declined — nothing was changed."
    - Expert is unchanged: write-tier tools still apply directly there.
 6. **Mode switching.** One click in the header or the palette. An explicit choice persists across reloads in both directions.
 7. **The live network is left alone.** On every template, the live buses, links and generators are equal before and after the study and the FMEA sweep, except the `*_nom_opt` outputs, which are an accepted deviation (see §4).
@@ -74,28 +76,49 @@ All three match the P20 expectations. The `*_nom_opt` changes after the sweep we
 - **A foreground solve writes topology columns.** `POST /api/simulation/run` still writes `control` / `sub_network` / `generator`, as it always has (spec §2.1 item 4).
 - **Surviving mutation at P25.** The confirmation card's TTL-expiry guard has no test that kills a mutation of it. It is harmless defence and was judged not to need one (P25 gate).
 
-### New findings from the P26 first-time-user review (not fixed; for the orchestrator)
+### New findings from the P26 first-time-user review, still open (deferred by the coordinator)
 
-1. **The run card is not plain.** In Guided the most common card, Improve's `run_eh_study`, shows the header "Confirm", the raw tool id, and the JSON arguments with engine stage ids (`apply_pack`, `mc_certify`, `dtc_stress`, …). A plain one-line summary per tool (for example "Run the study again with …") would need a per-tool wording table and a spec decision. The P25 re-gate fixed "Confirm" for the run and delete tiers.
-2. **A denied card leaves technical lines** in the transcript. Examples: "✗ run_eh_study — confirmation_denied: deny on confirmation for 'run_eh_study'", "denied: run_eh_study", and the "preparing run_eh_study" / "→ run_eh_study" progress lines. These are shared chat rendering, so the same lines appear in Expert.
-3. **The greeting says "Not solved yet."** after the EH study and the sweep have finished. The study solves a copy, and no foreground solve is recorded. This is correct, but it reads as a contradiction next to a finished study. It is shared with Expert (bug-2 family).
-4. **The greeting offers "Add an Anthropic API key to talk to me"** whenever no Anthropic key is configured, even while a ready non-Anthropic profile is active. It is shared with Expert.
-5. **The FMEA tab has an engine vocabulary** when opened from Guided: the eyebrow "SIMULATION · RESULTS", the title "Optimization results", "FOR", class letters, and `lp_proxy` / `copt` badges. This is an Expert surface that Guided links to (spec §1 obstacle 7). It is worth a Guided header, or a plain column legend.
-6. **The request's step count is lost on reload.** A reloaded Improve request shows the plain label but not its "(step i of N)" suffix; the live bubble shows it. This is cosmetic.
-7. **The "created from template" toast covers the Send button** for a few seconds after a project is created. This is cosmetic.
+1. **Engine vocabulary on the FMEA tab.** When the tab is opened from Guided it shows the eyebrow "SIMULATION · RESULTS", the title "Optimization results", "FOR", class letters, and `lp_proxy` / `copt` badges. This is an Expert surface that Guided links to (spec §1 obstacle 7). A Guided header, or a plain column legend, would help. Bug 5 is part of the same view.
+2. **Tool progress lines** ("… preparing run_eh_study", "→ run_eh_study") are still shown in raw form in Guided, above the card. This is shared chat rendering. (The closing sentence "Understood — run_eh_study was not applied." in the smoke comes from the stub model, not from the app.)
+3. **Cosmetic.**
+   - A reloaded Improve request loses its "(step i of N)" suffix.
+   - The "created from template" toast briefly covers the Send button.
 
 ## 5. Fixes made in P26 (test-first; details in the plan's P26 section)
 
-- **Guided card wording by tool purpose** (the item carried from the P25 gate).
-- **Reloaded Improve label.** A reloaded Improve request now uses the same plain words as the live label.
-- **Microgrid Improve wording.** "draws" became "runs", and "confidence interval" became "range of the estimate".
-- **"Next" buttons.** Site gets "Next: Goal" and Results gets "Next: Improve".
+1. **Card wording by tool purpose** (Guided; carried from the P25 gate).
+   - Exports read "Confirm: export a file", a snapshot "Confirm: save a copy", and a project load "Confirm: open a project".
+   - Each of these carries a one-line note. Edits keep "Confirm this change"; runs and deletions keep "Confirm".
+2. **Plain summary on every Guided card** (coordinator item 5).
+   - The card leads with one plain sentence, for example "Run the reliability study for this site (about 30 calculation steps)". The count comes from `budget_solves` and is dropped when absent.
+   - Other examples: "Change the settings of it_bus", "Set the price of undelivered energy to €5,000 per MWh", and "Export the file risks.csv".
+   - Tools without their own wording fall back to "The assistant wants to use <tool name in words>".
+   - The tool id and the JSON arguments sit in a collapsed "Details". The summary is the dialog's accessible label.
+   - Approve / Deny, typed confirmation, and the card itself are unchanged.
+3. **A declined card in Guided** (item 6).
+   - The transcript shows one line: "You declined — nothing was changed."
+   - The raw "denied: <tool>" line sits under a collapsed Details, and the backend's `confirmation_denied` error line is hidden.
+   - This is render-only: the stored transcript is unchanged.
+4. **The greeting after a study in Guided** (item 7). The Guided sentence from P22.9 was never reached, for two reasons:
+   - (a) The EH study solves a copy, so the live network's `dispatch` stays `none` after it. The greeting fell through to "Not solved yet."
+   - (b) A sweep started from the Improve card is polled by no mounted panel. FmeaTab re-reads `/simulation/status` only if it is open when the sweep ends, so the cached "none" stayed.
+
+   Fixes:
+   - The Guided greeting reads the hub study record, on the same key and fetcher as the hub panel. A finished study gives "A study has run on this network — its results are in Hub design." A running one gives "The hub study is running — follow it in Hub design."
+   - The Improve card follows a sweep it started on FmeaTab's own query, and re-reads the status when the sweep ends.
+   - Expert does not read the study record, and its greeting is unchanged.
+5. **The API-key offer in the greeting** (item 8, both modes).
+   - "Add an Anthropic API key to talk to me" now hides while the session's effective profile is ready. The rule is the Send gate's: `profileId ?? active`, with `chat_ready === true` for the active profile.
+   - When the user has picked a different profile, its readiness is not known client-side, and the offer behaves as before.
+6. **Reloaded Improve label.** It uses the same plain words as the live label.
+7. **Microgrid Improve wording.** "draws" became "runs", and "confidence interval" became "range of the estimate".
+8. **"Next" buttons.** Site gets "Next: Goal" and Results gets "Next: Improve".
 
 **The implementer's runs after these fixes** (the full backend suite and the independent gate belong to the orchestrator):
 - tsc exit 0.
-- vitest 233 files / 2452 passed (P25: 2431; 21 new).
-- Backend gate row 2, 14 files: 613 passed. There is no backend change in P26.
-- Smokes: P26 PASS (34 screenshots), P25 PASS (12), P24 PASS (21), P23 PASS (13), P24-BE PASS (10), P22.9 PASS (10).
+- vitest 233 files / 2481 passed (P25: 2431; 50 new).
+- Backend gate row 2, 14 files: 613 passed. It was run before items 5–8, and there is still no backend change.
+- Smokes after items 5–8: P26 PASS (37 screenshots), P25 PASS (12), P22.9 PASS (10). The earlier round was P26 / P25 / P24 / P23 / P24-BE / P22.9, all PASS.
 
 ## 6. Gate files
 
