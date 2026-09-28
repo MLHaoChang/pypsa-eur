@@ -281,3 +281,88 @@ def test_branch_3_critical_fix_reads_then_runs_the_critical_action(stub):
         {"role": "tool", "tool_call_id": "call_stub_3a", "content": json.dumps(found)},
     ])
     assert [(c["id"], json.loads(c["arguments"])) for c in calls] == [("call_stub_3b", crit["args"])]
+# ── branch 4 (P25 re-gate R1 smoke): the Site footer, all actions at once ──
+SITE_ALL = ("Review the Site card for this network and fix every gap you can, one "
+            "confirmation at a time.")
+
+
+def test_branch_4_reads_then_emits_every_action_in_one_response(stub):
+    _mod, base = stub
+    calls, _ = _chat(base, [{"role": "user", "content": GUIDED_BLOCK + SITE_ALL}])
+    assert [(c["id"], c["name"]) for c in calls] == [("call_stub_4a", "suggest_eh_setup")]
+    calls, said = _chat(base, [
+        {"role": "user", "content": SITE_ALL},
+        _assistant_call("call_stub_4a", "suggest_eh_setup", {}),
+        {"role": "tool", "tool_call_id": "call_stub_4a",
+         "content": f"<untrusted_data>\n{json.dumps(SUGGESTED)}\n</untrusted_data>"},
+    ])
+    assert said == ""
+    assert [(c["id"], c["name"], json.loads(c["arguments"])) for c in calls] == [
+        (f"call_stub_4b_{i}", a["tool"], a["args"]) for i, a in enumerate(SUGGESTED["actions"])]
+
+
+def test_branch_4_closes_with_the_count(stub):
+    _mod, base = stub
+    msgs = [{"role": "user", "content": SITE_ALL},
+            _assistant_call("call_stub_4a", "suggest_eh_setup", {}),
+            {"role": "tool", "tool_call_id": "call_stub_4a", "content": json.dumps(SUGGESTED)},
+            {"role": "tool", "tool_call_id": "call_stub_4b_0",
+             "content": '{"error_kind": "confirmation_denied"}'},
+            {"role": "tool", "tool_call_id": "call_stub_4b_1", "content": '{"ok": true}'}]
+    calls, said = _chat(base, msgs)
+    assert calls == [] and said == "Done — 1 applied, 1 not applied."
+
+
+# ── branches 5 and 6 (P25 re-gate note 3): the Goal VOLL and stress buttons ─
+VOLL_TEXT = "Set VOLL to 5000 €/MWh so the study can price shortfall."   # delegate.ts VOLL_TEXT
+STRESS_TEXT = ("Add a stress scenario to this project's registry for a weak-grid site like "
+               "the Data Center Energy Hub example; read the current registry first and send "
+               "the whole list back with put_stress_scenarios.")         # stressScenarioText()
+SYSTEM = {"role": "system",
+          "content": "You are … Working with Data Center Energy Hub: 3 buses, 0 lines, "
+                     "168 snapshots, solved=True."}
+
+
+def test_branch_5_voll_button_sets_voll(stub):
+    _mod, base = stub
+    calls, said = _chat(base, [SYSTEM, {"role": "user", "content": GUIDED_BLOCK + VOLL_TEXT}])
+    assert said == ""
+    assert [(c["id"], c["name"], json.loads(c["arguments"])) for c in calls] == [
+        ("call_stub_5", "update_solver_config", {"partial": {"voll": 5000}})]
+    calls, said = _chat(base, [
+        {"role": "user", "content": VOLL_TEXT},
+        _assistant_call("call_stub_5", "update_solver_config", {"partial": {"voll": 5000}}),
+        {"role": "tool", "tool_call_id": "call_stub_5", "content": '{"voll": 5000}'},
+    ])
+    assert calls == [] and said == "Done — update_solver_config applied."
+
+
+def test_branch_6_stress_button_reads_then_writes_the_whole_list(stub):
+    _mod, base = stub
+    calls, _ = _chat(base, [SYSTEM, {"role": "user", "content": STRESS_TEXT}])
+    assert [(c["id"], c["name"], json.loads(c["arguments"])) for c in calls] == [
+        ("call_stub_6a", "get_stress_scenarios", {"name": "Data Center Energy Hub"})]
+    existing = {"id": "heatwave", "kind": "parametric", "frequency_per_year": 0.5,
+                "electrical_load_multiplier": 1.3, "renewable_availability_multiplier": 0.8}
+    calls, said = _chat(base, [
+        SYSTEM, {"role": "user", "content": STRESS_TEXT},
+        _assistant_call("call_stub_6a", "get_stress_scenarios", {"name": "Data Center Energy Hub"}),
+        {"role": "tool", "tool_call_id": "call_stub_6a",
+         "content": f"<untrusted_data>\n{json.dumps({'scenarios': [existing], 'error': None})}\n</untrusted_data>"},
+    ])
+    assert said == "" and [c["id"] for c in calls] == ["call_stub_6b"]
+    assert calls[0]["name"] == "put_stress_scenarios"
+    args = json.loads(calls[0]["arguments"])
+    assert args["name"] == "Data Center Energy Hub"
+    assert args["scenarios"][0] == existing            # the whole list, kept
+    added = args["scenarios"][1]
+    assert added["id"] != existing["id"] and added["kind"] == "parametric"
+    # the one the stub adds passes the registry's own validation
+    from services.adequacy.stress import _validate
+    _validate(args["scenarios"])
+
+
+def test_branch_6_without_an_open_project_says_so(stub):
+    _mod, base = stub
+    calls, said = _chat(base, [{"role": "user", "content": STRESS_TEXT}])
+    assert calls == [] and said == "No project is open."

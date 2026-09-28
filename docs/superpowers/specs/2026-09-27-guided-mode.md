@@ -601,6 +601,7 @@ Guided mode is on. Rules for this turn: answer in plain language a non-specialis
 `BE/smoke/stub_openai_endpoint.py` scripts one prompt today (`"Save the current network"` → `save_project`, lines 48–51 and 121–133); every other prompt gets `"Saved."`. `_last_user_text` (line 68) returns the last user text, which in Guided carries the ui block and the addendum. Add:
 - **Branch 2** — unanchored regex over the last user text: `Run the tool (\w+) with exactly these arguments: (\{.*?\})` (DOTALL). Emits a tool call with that name and those parsed arguments, id `call_stub_2`. After the following `role: tool` message it answers with one plain sentence (`"Done — <tool> applied."`; `"Done — <tool> finished."` for a read tool; `"Understood — <tool> was not applied."` after a denial — P25 gate note 4) and stops. The arguments are decoded as one JSON value from the matched `{` (`raw_decode`), so nested objects are not cut at the first `}`.
 - The module docstring's "what it proves" list gains this branch.
+- **Branches 4–6** (added at the P25 re-gate): the Site footer ("fix every gap you can, one confirmation at a time") → `suggest_eh_setup`, then **every** returned action as tool calls in one response (the R1 smoke step); the Goal VOLL text → `update_solver_config {"partial":{"voll":5000}}`; the "Add a stress scenario" text → `get_stress_scenarios` for the project named in the system prompt's "Working with <project>:" line, then `put_stress_scenarios` with the whole list plus one parametric scenario. Each closes with one sentence.
 - **Branch 3** (added at the P25 gate, for the B1 smoke): the Site card's grid and critical-load fix texts → `suggest_eh_setup` (`call_stub_3a`), then the first action it returned (for the critical fix, the first setting `eh_critical`; `call_stub_3b`), then one closing sentence as in branch 2. No branch for the strength and outage fixes (their values are the user's to give).
 - The stub already records request payloads; the smoke asserts that the recorded request's **last user text contains `Guided mode is on`** in Guided and **does not** in Expert.
 - Unit test `BE/tests/test_stub_openai_endpoint.py` (fast, in-process): branch 2 parses the §5.7 delegate text into the tool call; text without the marker falls through to the default reply.
@@ -756,4 +757,12 @@ A separate agent (not the implementer; Fable reviews the plan, an Opus-class rev
 | Note 2 — Deny on a multi-action Improve | One click's requests share a `group`; a Deny on a card during that group's turn drops the rest of the group from the queue. Other queued requests stay. |
 | Note 3 — sanitiser | `_sanitise_ui_value` strips the delimiters until stable (pre-existing gap, fixed now). |
 | Note 4 — stub wording | Read tools close with "Done — <tool> finished.". Stub branch 3 (§6.6) scripts the Site grid / critical fixes for the B1 smoke step. |
+
+### §10 addendum: P25 re-gate 1 decisions (2026-09-28, coordinator)
+| Item | Decision |
+|---|---|
+| R1 — the next card wiped by the previous card's handler | Approve / Deny capture the card's token before `await postChatConfirm` and afterwards clear `pending` only if it still holds that token; the TTL-expiry timer does the same. The Deny side effects (group drop, "denied" line) still describe the answered card. Pinned by the two adopted probe tests (Approve and Deny: card B arriving before `/confirm` returns survives) and the P25 smoke step "several writes in one response" (5 deny rounds + 1 approve round; each next card is asserted still shown 0.6 s after the previous answer). |
+| Note 1 — expiry and Stop | A card that lapses by TTL drops the rest of its group, like a Deny. Stop clears every queued card request. |
+| Note 2 — card header | In Guided the header reads "Confirm this change" for the `write` tier and "Confirm" for run / delete tiers, in normal case. Expert keeps "Confirm · <tier>" (uppercase) unchanged. |
+| Note 3 — button flows in the smoke | Stub branches 5 (Goal VOLL) and 6 (stress scenario) script those buttons' texts, so the P25 smoke takes both cards from the buttons themselves. |
 

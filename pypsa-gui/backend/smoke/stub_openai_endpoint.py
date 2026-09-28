@@ -68,6 +68,22 @@ one failure mode this harness cannot self-detect:
      then one closing sentence as in branch 2 — the order a real model is
      told to follow. "Nothing to tag." when there is no action.
 
+  4. The Site card's footer ("Review the Site card for this network and fix
+     every gap you can, one confirmation at a time.", added at the P25
+     re-gate for R1): `suggest_eh_setup` (`call_stub_4a`), then EVERY action
+     it returned as tool calls in ONE response (`call_stub_4b_<i>`) — in
+     Guided each is a write card, one after the other, which is what the
+     smoke's two-cards-in-one-response step needs — then one closing
+     sentence counting what was applied and what was not.
+  5. The Goal card's VOLL button ("Set VOLL to 5000 €/MWh …", P25 re-gate
+     note 3): `update_solver_config {"partial": {"voll": 5000}}`
+     (`call_stub_5`), then one closing sentence as in branch 2.
+  6. The Improve card's "Add a stress scenario" text: `get_stress_scenarios`
+     for the open project (`call_stub_6a`; the name is read from the system
+     prompt's "Working with <project>: …" line), then `put_stress_scenarios`
+     with the whole list plus one parametric scenario (`call_stub_6b`), then
+     one closing sentence. "No project is open." without a project.
+
 Every other prompt gets "Saved.".
 
 Test-only extra: `GET /_stub/requests` returns what was received — for each
@@ -129,6 +145,35 @@ def _scripted_call(text: str) -> tuple[str, dict] | None:
 
 _SITE_GRID = "Run suggest_eh_setup, then tag the import Link"
 _SITE_CRITICAL = "no critical load is tagged"
+_SITE_ALL = "fix every gap you can, one confirmation at a time"
+_VOLL = "Set VOLL to 5000 €/MWh"
+_STRESS = "Add a stress scenario to this project's registry"
+_PROJECT = re.compile(r"Working with (.+?): \d+ buses")
+
+
+def _project_name(messages) -> str | None:
+    for m in messages:
+        if m.get("role") == "system":
+            c = m.get("content")
+            text = c if isinstance(c, str) else " ".join(
+                p.get("text", "") for p in c or [] if isinstance(p, dict))
+            hit = _PROJECT.search(text or "")
+            if hit:
+                return hit.group(1)
+    return None
+
+
+def _call(cid: str, name: str, args: dict) -> dict:
+    return {"choices": [{"delta": {"tool_calls": [{
+        "index": 0, "id": cid, "type": "function",
+        "function": {"name": name, "arguments": json.dumps(args)},
+    }]}}]}
+
+
+def _closing(name: str, result_msg: dict) -> str:
+    result = str(result_msg.get("content") or "")
+    return (f"Understood — {name} was not applied." if _DECLINED.search(result)
+            else f"Done — {name} applied.")
 
 
 def _json_in(text: str):
@@ -212,6 +257,11 @@ class Handler(BaseHTTPRequestHandler):
 
         scripted = _scripted_call(text)
         this_turn_tool = _tool_after_last_user(messages)
+        site_all = _SITE_ALL in text and not scripted
+        all_tools = _tools_after_last_user(messages) if site_all else []
+        voll = _VOLL in text and not scripted
+        stress = _STRESS in text and not scripted
+        turn_tools = _tools_after_last_user(messages)
         critical_fix = _SITE_CRITICAL in text
         site_grid = (_SITE_GRID in text or critical_fix) and not scripted
         site_tools = _tools_after_last_user(messages) if site_grid else []
@@ -240,6 +290,53 @@ class Handler(BaseHTTPRequestHandler):
                 "function": {"name": "save_project",
                              "arguments": json.dumps({"name": name})},
             }]}}]}))
+        elif voll and not turn_tools:
+            emit(_sse(_call("call_stub_5", "update_solver_config", {"partial": {"voll": 5000}})))
+        elif voll:
+            emit(_sse({"choices": [{"delta": {"content":
+                _closing("update_solver_config", turn_tools[-1])}}]}))
+        elif stress and not turn_tools:
+            project = _project_name(messages)
+            if project:
+                emit(_sse(_call("call_stub_6a", "get_stress_scenarios", {"name": project})))
+            else:
+                emit(_sse({"choices": [{"delta": {"content": "No project is open."}}]}))
+        elif stress and len(turn_tools) == 1:
+            project = _project_name(messages) or ""
+            current = (_json_in(str(turn_tools[0].get("content") or "")) or {}).get("scenarios") or []
+            taken = {str(sc.get("id")) for sc in current if isinstance(sc, dict)}
+            n = 1
+            while f"assistant_stress_{n}" in taken:
+                n += 1
+            added = {"id": f"assistant_stress_{n}", "name": "Hot, still week (assistant)",
+                     "kind": "parametric", "frequency_per_year": 1.0,
+                     "electrical_load_multiplier": 1.2,
+                     "renewable_availability_multiplier": 0.5}
+            emit(_sse(_call("call_stub_6b", "put_stress_scenarios",
+                            {"name": project, "scenarios": [*current, added]})))
+        elif stress:
+            emit(_sse({"choices": [{"delta": {"content":
+                _closing("put_stress_scenarios", turn_tools[-1])}}]}))
+        elif site_all and not all_tools:
+            emit(_sse({"choices": [{"delta": {"tool_calls": [{
+                "index": 0, "id": "call_stub_4a", "type": "function",
+                "function": {"name": "suggest_eh_setup", "arguments": "{}"},
+            }]}}]}))
+        elif site_all and len(all_tools) == 1:
+            found = _json_in(str(all_tools[0].get("content") or "")) or {}
+            actions = found.get("actions") or []
+            if actions:
+                emit(_sse({"choices": [{"delta": {"tool_calls": [{
+                    "index": i, "id": f"call_stub_4b_{i}", "type": "function",
+                    "function": {"name": a["tool"], "arguments": json.dumps(a["args"])},
+                } for i, a in enumerate(actions)]}}]}))
+            else:
+                emit(_sse({"choices": [{"delta": {"content": "Nothing to tag."}}]}))
+        elif site_all:
+            done = all_tools[1:]
+            denied = sum(1 for t in done if _DECLINED.search(str(t.get("content") or "")))
+            emit(_sse({"choices": [{"delta": {"content":
+                f"Done — {len(done) - denied} applied, {denied} not applied."}}]}))
         elif site_grid and not site_tools:
             emit(_sse({"choices": [{"delta": {"tool_calls": [{
                 "index": 0, "id": "call_stub_3a", "type": "function",

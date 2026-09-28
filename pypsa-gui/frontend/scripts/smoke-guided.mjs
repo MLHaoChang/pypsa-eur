@@ -1432,6 +1432,45 @@ async function phaseP25(browser) {
       }
     }
 
+    step('note 3: the Goal VOLL button → update_solver_config card; VOLL unchanged until Approve')
+    await api('PUT', '/api/simulation/solver_config', { voll: 0 })
+    await byId('hub-rail-step-goal').click()
+    await byId('hub-goal-voll-fix').waitFor({ state: 'visible', timeout: 30_000 })
+    await byId('hub-goal-voll-fix').click()
+    await byId('chat-confirmation-card').waitFor({ state: 'visible', timeout: 60_000 })
+    check(await byId('chat-confirmation-card').getAttribute('data-tool-name') === 'update_solver_config',
+      'card for update_solver_config (from the Goal button itself)')
+    check((await textOf('chat-confirmation-header')) === 'Confirm this change', 'Guided header: "Confirm this change"')
+    check((await api('GET', '/api/simulation/solver_config')).voll === 0, 'VOLL still 0 while the card waits')
+    await byId('chat-confirmation-card').scrollIntoViewIfNeeded()
+    await shot(page, 'p25-goal-voll-card')
+    await byId('chat-confirm-approve').click()
+    await waitIdle()
+    check((await api('GET', '/api/simulation/solver_config')).voll === 5000, 'approved → VOLL 5000')
+    await page.waitForFunction(() => /€5,000 per MWh/.test(
+      document.querySelector('[data-testid="hub-goal-voll"]')?.textContent ?? ''), null, { timeout: 30_000 })
+    ok('the Goal card shows €5,000 per MWh')
+
+    step('note 3: Improve "Add a stress scenario" → read, then a put_stress_scenarios card; registry unchanged until Approve')
+    const proj = encodeURIComponent(TEMPLATE_NAMES.eh_datacenter)
+    const regBefore = (await api('GET', `/api/projects/${proj}/stress_scenarios`)).scenarios
+    await byId('hub-rail-step-improve').click()
+    await byId('hub-improve-add-stress').waitFor({ state: 'visible', timeout: 30_000 })
+    await byId('hub-improve-add-stress').click()
+    await byId('chat-confirmation-card').waitFor({ state: 'visible', timeout: 60_000 })
+    check(await byId('chat-confirmation-card').getAttribute('data-tool-name') === 'put_stress_scenarios',
+      'card for put_stress_scenarios (from the Improve button itself)')
+    const regPending = (await api('GET', `/api/projects/${proj}/stress_scenarios`)).scenarios
+    check(JSON.stringify(regPending) === JSON.stringify(regBefore), 'registry unchanged while the card waits')
+    await byId('chat-confirmation-card').scrollIntoViewIfNeeded()
+    await shot(page, 'p25-stress-card')
+    await byId('chat-confirm-approve').click()
+    await waitIdle()
+    const regAfter = (await api('GET', `/api/projects/${proj}/stress_scenarios`)).scenarios
+    check(regAfter.length === regBefore.length + 1
+      && JSON.stringify(regAfter.slice(0, regBefore.length)) === JSON.stringify(regBefore),
+      `approved → the whole list kept plus one (${regBefore.length} → ${regAfter.length})`)
+
     step('B1: the same Site fix in Expert applies directly (no card), as before P25')
     await byId('ui-mode-expert').click()
     await page.waitForFunction(() =>
