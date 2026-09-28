@@ -10,12 +10,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const activate = vi.fn()
 const save = vi.fn()
+const list = vi.fn()
 const getLockStatus = vi.fn()
 
 vi.mock('../api/projects', () => ({
   projectsApi: {
     activate: (...a: unknown[]) => activate(...a),
     save: (...a: unknown[]) => save(...a),
+    list: (...a: unknown[]) => list(...a),
   },
 }))
 vi.mock('../api/simulation', () => ({
@@ -44,6 +46,8 @@ function reject409(detail: unknown) {
 beforeEach(() => {
   activate.mockReset()
   save.mockReset()
+  list.mockReset()
+  list.mockResolvedValue([])
   save.mockResolvedValue({ ts_columns_saved: 0 })
   getLockStatus.mockReset()
   getLockStatus.mockResolvedValue({ lock_held: false, worker_alive: false })
@@ -103,5 +107,85 @@ describe('switchToProject on a 409 from activate', () => {
       Object.assign(new Error('404'), { response: { status: 404, data: { detail: 'nope' } } }),
     )
     await expect(switchToProject('B', qc)).resolves.toEqual({ status: 'not-found' })
+  })
+})
+
+
+// ── A planning → dynamics study has no network to activate ─────────────────
+//
+// Found by driving the real app in Chromium, which no component test could:
+// a study opened from the Projects page came up as "No project open" with a
+// "Project '<id>' not found" toast. `/activate` hydrates a network context from
+// `network.nc`, and a study deliberately has none — it is a config and a run
+// directory — so the backend 404s for every study, and has since increment 4.
+// It went unnoticed because the ONE path that ever opened a study, the
+// new-project wizard, never calls `/activate`: it sets the current project and
+// opens the study panel directly. So a study could be created and never
+// re-opened. These hold `switchToProject` — which every other entry point uses
+// (the project card, tabs, sidebar, command palette, workspace panel) — to what
+// the wizard does.
+
+const STUDY = { id: 's-uuid-1', name: 'Study S', project_kind: 'planning_dynamics' }
+const NETWORK = { id: 'b-uuid-2', name: 'B', project_kind: null }
+const cached = (projects: unknown[]) => ({
+  getQueryData: (key: unknown[]) => (key[0] === 'projects' ? projects : undefined),
+  invalidateQueries: vi.fn().mockResolvedValue(undefined),
+  removeQueries: vi.fn(),
+}) as never
+
+describe('switchToProject with a planning → dynamics study', () => {
+  it('opens a study by id without asking the backend to activate a network', async () => {
+    const r = await switchToProject('s-uuid-1', cached([STUDY, NETWORK]))
+    expect(activate).not.toHaveBeenCalled()
+    expect(r).toEqual({ status: 'switched' })
+    expect(useUIStore.getState().currentProject).toBe('Study S')
+    expect(useUIStore.getState().activeSlidePanel).toBe('gridspine')
+  })
+
+  it('opens a study by name the same way', async () => {
+    await switchToProject('Study S', cached([STUDY, NETWORK]))
+    expect(activate).not.toHaveBeenCalled()
+    expect(useUIStore.getState().currentProject).toBe('Study S')
+  })
+
+  it('looks the kind up when the project list is not cached yet', async () => {
+    // The browser case exactly: `/app?project=<id>` on a fresh page load,
+    // before anything has populated the ['projects'] query.
+    list.mockResolvedValue([STUDY, NETWORK])
+    const r = await switchToProject('s-uuid-1', qc)
+    expect(list).toHaveBeenCalledTimes(1)
+    expect(activate).not.toHaveBeenCalled()
+    expect(r).toEqual({ status: 'switched' })
+    expect(useUIStore.getState().currentProject).toBe('Study S')
+  })
+
+  it("does not save a network under a study's name on the way out", async () => {
+    // Leaving a study used to save "the current project" — whatever network the
+    // backend happened to hold — under the study's name.
+    useUIStore.setState({ currentProject: 'Study S' })
+    activate.mockResolvedValue({ activated: 'B', evicted: [] })
+    await switchToProject('B', cached([STUDY, NETWORK]))
+    expect(save).not.toHaveBeenCalled()
+    expect(activate).toHaveBeenCalledWith('B')
+  })
+
+  it('still activates an ordinary project, and still saves an ordinary outgoing one', async () => {
+    useUIStore.setState({ currentProject: 'A' })
+    activate.mockResolvedValue({ activated: 'B', evicted: [] })
+    const r = await switchToProject('B', cached([STUDY, NETWORK, { id: 'a', name: 'A', project_kind: null }]))
+    expect(save).toHaveBeenCalledTimes(1)
+    expect(activate).toHaveBeenCalledWith('B')
+    expect(r).toEqual({ status: 'switched' })
+  })
+
+  it('falls back to the ordinary path when the kind cannot be looked up', async () => {
+    // A failed list must not strand the user: the switch proceeds exactly as
+    // it did before this change, and a genuine study then fails the way it
+    // always did rather than in a new way.
+    list.mockRejectedValue(new Error('network down'))
+    activate.mockResolvedValue({ activated: 'B', evicted: [] })
+    const r = await switchToProject('B', qc)
+    expect(activate).toHaveBeenCalledWith('B')
+    expect(r).toEqual({ status: 'switched' })
   })
 })
