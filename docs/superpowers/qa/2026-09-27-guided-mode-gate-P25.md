@@ -188,3 +188,138 @@ Every smoke stopped its stub, Vite and uvicorn. No uvicorn / vite / stub / chrom
 
 1. B1: implement option 1 (Guided gates `write` through the existing card), or record the owner's option 2 in a §10 addendum. Either way, make the six listed sentences / fixtures true. Re-run rows 1–5; the P25 smoke should add an Improve/Goal step that exercises a `write` tool (e.g. the VOLL button through a stub branch, or a direct `update_solver_config` delegate text) and asserts a card in Guided and none in Expert.
 2. B2: the one-class overflow fix, plus a vitest or smoke assertion that `chat-messages` has `scrollWidth <= clientWidth` after a card request.
+
+---
+
+# Re-gate 1 (2026-09-28, commit `daa4608`, `git diff aab608f..HEAD`)
+
+Scratch evidence: `/tmp/claude-0/-home-user-pypsa-eur/93e65137-63f8-5e19-b114-b55788c10af8/scratchpad/qa25r/`, referred to below as `qa25r/`.
+
+## Verdict: **NO-GO**
+
+The fixes for B1, B2 and notes 1–4 are correct, well pinned and Expert-safe:
+- the Guided write gate holds against all 13 backend mutants;
+- the Expert event streams, the prompt and the ui block match `0689df3` byte for byte, apart from the intended differences;
+- the bubble wraps;
+- rows 2–5 are green.
+
+One new, system-level bug stops the gate. It is **reachable only because B1 now puts several write cards into one response**: when the second card of a response arrives before the first card's `/confirm` POST returns, the first card's handler clears it. The user is left with no card and a turn that shows "streaming…" for up to the 5-minute TTL, which then ends in "expired" (R1).
+
+## Blocker R1: the next confirmation card is wiped by the previous card's Approve / Deny handler
+
+**Where:** `pypsa-gui/frontend/src/components/ChatPanel.tsx`.
+- `onApprove` (`:413`) runs `await postChatConfirm(...)` and then `setPending(null)` at `:419`, unconditionally.
+- `onDeny` (`:425`) does the same at `:439`, after `dropRequestGroup` and `appendMessage`.
+
+The backend resolves the decision, dispatches the call (or skips it, on a deny) and emits the **next** `tool_pending_confirmation` on the SSE stream. That frame often lands before the `/confirm` response. The handler then clears the new card.
+
+**Why it is new:** before the re-gate, a second card in one response was impossible. M7 refuses two destructive / execution calls in one response, so a later card needed a new LLM round trip, seconds after `/confirm` had returned. Now "several Guided writes in one response … carded one after the other" is the designed path (spec §10 "P25 gate decisions", B1 row 2). It is also what a real model does for the Site footer text "fix every gap you can, one confirmation at a time".
+
+**Repro 1 (unit, deterministic):** `qa25r/probes/QA25R.probe.test.tsx`. It uses the `ChatPanel.sendRequest` harness. `postChatConfirm` is mocked to deliver card B (`setPending(CARD_B)`) before it resolves, then Approve or Deny is clicked.
+
+```
+× approve: card B arriving before /confirm returns survives   expected undefined to be 'tokB'
+× deny:    card B arriving before /confirm returns survives   expected undefined to be 'tokB'
+```
+
+**Repro 2 (real browser, real backend):** `qa25r/probes/qa-probe.mjs --phase QA`. This is a copy of the smoke with a scratch stub (`qa25r/qa_stub.py`) that emits **two** `update_component` calls in one response on the text `QA-TWO-WRITES`. The probe answers card 1, then waits 8 s for card 2.
+
+| Run | Deny rounds: card 2 lost | Approve rounds: card 2 lost |
+|---|---|---|
+| `qa25r/qaprobe/` | 2 of 3 (rounds 1 and 5; round 5: card 2 rendered, then vanished before it could be clicked) | 0 of 3 |
+| `qa25r/qaprobe3/` | 2 of 5 (rounds 5 and 7) | 0 of 5 |
+
+`qa25r/qaprobe/02-FAILURE.png` shows the stuck state. The transcript reads `→ update_component` (card 2 requested), then `denied: update_component`. There is no card, the composer says "streaming…" and the backend is blocked on card 2's decision. Approve lost no card in the browser because the approved write takes a few milliseconds before card 2 is emitted. The code path is the same, and the unit repro fails for Approve too. Approve would lose the card on a slower network, or when the next tool in the response is fast.
+
+**Smallest fix:** in both handlers (and nowhere else), clear only the card they answered:
+- capture `const token = pending.confirmation_token` before the `await`;
+- afterwards, `if (useChatStore.getState().pending?.confirmation_token === token) setPending(null)`.
+
+In `onDeny`, the group drop and the "denied" line stay as they are. They describe the card that was answered. Pin the fix with the two probe tests above (adopt them into `ChatPanel.sendRequest.test.tsx` or a sibling file). Add a smoke step: two writes in one response (a stub branch like `qa_stub.py`'s), Deny card 1, then assert card 2 is visible, repeated ≥ 5 times.
+
+## Notes (non-blocking)
+
+1. **Expiry and Stop do not drop the group.**
+   - When a card's TTL expires while the user reads, `ConfirmationCard`'s timer clears it and shows the error, but the rest of that Improve group stays queued and is sent once the turn ends.
+   - Pressing Stop on a card-sent turn also leaves the rest of the queue (every group) to be sent.
+   - A user who stops or lets a card lapse probably wants the batch to stop too. Consider `dropRequestGroup(activeRequest.group)` on expiry, and clearing the queue on Stop.
+2. **Guided cards now cover every write-tier tool**, including exports (`export_to_csv`, `export_to_excel`, `export_chat_summary`, …), `create_project_snapshot`, `load_project` and `activate_project`. This is G3 as the coordinator decided. Asking to confirm an export is some friction, and the card header reads "CONFIRM · WRITE" (jargon for a first-time user). This is for P26 wording, and it does not block.
+3. **The stub has no branch for the Goal VOLL text** (`Set VOLL to 5000 €/MWh …`) **or the stress-scenario text.** Clicking these buttons in the smoke gets the stub's "Saved.", so the smoke does not exercise these two card flows from the button itself. I exercised both end to end in the browser with branch-2 text (below). Consider stub branches for them in P26.
+4. **The Expert `session_init` frame's `tool_count` is 143 → 144** (the new `suggest_eh_setup`). This is intended. It is the only Expert event difference besides the prompt sentence.
+
+## Checks asked for
+
+**1. Original probe against HEAD.** `qa25/probes/test_probe_write_no_card.py` asserts "no card". It now **blocks** on the first case. The Guided `update_component` turn waits on its confirmation, which is the intended effect; I killed it after 120 s. The adopted `tests/test_guided_write_confirmation.py` (27 tests) covers the four tools in Guided (card, then applied / nothing on deny) and in Expert (direct, including `{"ui_mode":"GUIDED"}`), plus sequential cards and M7.
+
+**2. Expert is byte-identical.** Probe `qa25r/probes/test_expert_events.py` ran on a `0689df3` worktree and on HEAD. It covers seven tool scenarios (the three write tools, a read, a destructive, two writes in one response, two destructives) × four Expert contexts (`None`, `{panel}`, the hub panel, `ui_mode:'expert'`), 28 turns in all:
+- full normalised event streams: identical except `session_init.tool_count` 143 → 144;
+- the user content sent to the model: identical;
+- the tools sent: identical, plus `suggest_eh_setup` at the end;
+- the system prompt: identical once the one new sentence is removed.
+
+The new sentence, "…apply only the ones the user picks with update_component / bulk_update_components (in Guided mode every change asks the user for confirmation; in Expert mode edits apply directly)", is **true in Expert**: the probe's Expert `update_component` stream is `tool_request → tool_running → tool_result` with no card, and smoke step 14 applies the change directly. The Expert button title ("Runs and deletions ask you to confirm; in Expert mode, edits apply without a confirmation card.") is also true. Destructive and execution tiers still card in Expert (probe: `delete_component` → `tool_pending_confirmation`).
+
+**3. Can Guided be made less strict? No.**
+- `_is_guided` is an exact `== "guided"`.
+- Every other value, including `"GUIDED"`, lists, bools and a missing key, is Expert. That is the pre-P25 behaviour, and it is what the user's own Expert choice sends.
+- Forging `ui_mode:'guided'` from an Expert client only adds cards.
+- There is one production path to the gate: `_run_turn_body` → `_dispatch_tool_uses` → `_dispatch_real_tool_call` → `_confirm_destructive_tool`, all with `guided` threaded through. `_dispatch_stub_call` is the Phase-2 scripted driver, reached only with an explicit `script`.
+- `AUTO_APPROVE_TIERS` is intersected with `DESTRUCTIVE_TIERS`, so it can never contain `write`.
+- No tool dispatches another tool internally. The only `DISPATCHERS` lookup is at `chat_service.py:4468`.
+- Retry and Edit go through `dispatchSend`, which builds `ui_context` fresh, so a Guided retry stays Guided.
+- The router passes `ui_context` through untouched: there is no size cap that could drop it and demote a Guided turn.
+
+Mutants `qa25r/mutate_base.py`, logs `qa25r/mut_be.log` and `mut_fe.log`. **All 22 were killed:**
+
+| # | Mutant | Killed by |
+|---|---|---|
+| R1 | `_is_guided` case-insensitive | `test_expert_write_still_applies_directly[…-ctx3]` (`"GUIDED"`) |
+| R2 / R3 | `_is_guided` always False / always True | guided-waits / expert-applies tests |
+| R4 | `write` not in `GUIDED_CONFIRM_TIERS` | `test_guided_write_waits_for_the_card_then_applies` |
+| R5 / R6 / R7 | `guided` dropped at the confirm call / at `_dispatch_tool_uses` / `run_turn` passes False | same |
+| R8 | M7 pre-scan uses the Guided tiers (would refuse several writes) | `test_several_guided_writes_in_one_response_each_get_a_card_in_turn` |
+| R9 | write auto-approved in Guided | `test_guided_write_waits_for_the_card_then_applies` |
+| R10 | sanitiser back to one pass | `test_a_nested_delimiter_in_a_component_name_cannot_close_the_block` |
+| R11 | chaining sentence reworded | system-prompt snapshot test |
+| R12 | stub says "applied" for a read | `test_a_read_tool_is_reported_as_done_not_applied` |
+| R13 | stub branch 3 skips `suggest_eh_setup` | `test_branch_3_first_reads_the_suggestions` |
+| F10 | Deny does not drop the group | "denying one action drops the rest of that card's actions, not other requests" |
+| F11 | Deny drops the whole queue | same + `dropRequestGroup removes only that group's queued requests` |
+| F12 | a typed send keeps `activeRequest` | "a typed message is not the active card request any more" |
+| F13 | no group on a multi-action click | `ImproveCard` "two actions → two messages, in order" |
+| F14 | `notReady` ignored | "no API key … nothing is posted, the queue is dropped, the key form shows" |
+| F15 | no wrap class | "B2: a user bubble wraps long tokens" |
+| F16 / F17 | label ignored / reload fallback off | the two B2 label tests |
+| F18 | the delegate title is the same in both modes | `delegate.test` "…what confirms — per mode" |
+
+**4. Integration hunt.**
+- **Several write cards in sequence:** fails, R1.
+- **TTL expiry:** by construction, the handling is unchanged from pre-P25. Expiry clears only its own card, because the timer closure is the current card. It does not drop the group (note 1). I did not run a 5-minute browser expiry.
+- **The P24 card flows end to end with the cards,** in the browser (`qa25r/qaprobe3/`, screenshots 02–05):
+  - **Site "Must stay on" fix:** smoke step 13. It gives an `update_component` card (tier write, `it_bus` `eh_critical`); nothing changes while it waits; Deny changes nothing. In Expert the same text applies directly (step 14).
+  - **Goal VOLL fix:** with VOLL set to 0, `hub-goal-voll-fix` appears and the click sends the text (the stub has no branch, note 3). The branch-2 `update_solver_config` gives a **write card**, and VOLL stays 0 while it is pending. After Approve, VOLL is 5000, and the Goal card's line refreshes to "€5,000 per MWh" without a reload.
+  - **Stress scenario:** branch-2 `put_stress_scenarios` gives a write card, the registry is unchanged while it is pending, and the registry is updated after Approve. The Improve "Add a stress scenario" button sends its text, but the stub has no branch for it (note 3).
+
+## Evidence (re-gate 1)
+
+| Row | Result |
+|---|---|
+| 2 (14 files, incl. `test_guided_write_confirmation.py`) | **608 passed** (`qa25r/row2.log`) |
+| `tests/test_chat*.py` | **1155 passed, 2 skipped** (`qa25r/chat.log`) |
+| 3 tsc | exit 0 |
+| 4 vitest | **233 files / 2418 passed** |
+| stress (App + hubDesign + ChatPanel* + chatStore.sendRequest + uiContext.uiMode, 385 tests) ×10 | **0 failures in 10** |
+| 5 smokes | P25 PASS (9 screenshots); P24 PASS (21); P23 PASS (13); P24-BE PASS (10); P22.9 PASS (10) |
+
+**P25 screenshots read:**
+- `01`: the plain label "Apply this recommendation: Not certified: …" with "▸ Details"; no sideways overflow (scrollWidth 419 = clientWidth 419);
+- `04`: after the decline, the queued footer request was sent;
+- `07`: Details expanded, the raw text wraps inside the dock;
+- `08`: Guided Site fix, "CONFIRM · WRITE" card for `update_component` (`it_bus`, `eh_critical: true`), 299 s;
+- `09`: Expert, the same fix, `✓ update_component` "Done — update_component applied." with no card.
+
+No uvicorn / vite / stub / chromium / vitest processes remain. The scratch worktrees are removed, and `git status` is clean apart from this file.
+
+## To reach GO
+
+Fix R1: token-guarded `setPending(null)` in `onApprove` and `onDeny`. Adopt the two unit probes, add a two-writes-in-one-response smoke step that denies card 1 and asserts card 2 is visible (≥ 5 rounds), and re-run rows 3–5. Notes 1–3 can be deferred to P26 by recording them in the plan.
