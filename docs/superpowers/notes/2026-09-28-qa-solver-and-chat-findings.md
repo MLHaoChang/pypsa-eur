@@ -25,7 +25,8 @@ mechanism backwards. Both survived only because they were re-checked.
 
 ### SL-1 — a raise inside `_apply_modelling_assumptions` leaves the network mutated, unrevertable
 
-**Serious. VERIFIED.**
+**Serious. VERIFIED, not yet fixed** — the largest diff of the set, deferred behind
+the small verified ones.
 
 - `services/solver/assumptions.py::_apply_modelling_assumptions` builds `undo_actions`
   from its first step onward but defines and returns `restore()` only at the very end.
@@ -54,7 +55,7 @@ re-raise. Key the scaling registry by weak reference, or discard in a `finally`.
 
 ### SL-2 — a queued solve is saved beside a config that did not produce it
 
-**Serious. VERIFIED.**
+**Serious. VERIFIED, not yet fixed.**
 
 `services/solve_queue.py::_run_solve_job` deliberately solves with the *enqueue-time*
 config snapshot (`job.solver_config_json`) rather than the context's — the comment at
@@ -74,7 +75,9 @@ the lock before solving, or pass it to `_save_context` explicitly.
 
 ### SL-3 — the queue claim does not clear the five `eh_*` result keys
 
-**Serious. VERIFIED.**
+**Serious. VERIFIED. FIXED** — both claims now splat `cleared_result_state()`, derived
+from `RESULT_STATE_KEYS`. Guard: `tests/test_claim_clears_every_result_key.py`, which
+also fails if either claim starts hand-listing a result key again.
 
 `routers/simulation.py::run` resets `eh_redundancy_comparison`, `eh_lever_comparison`,
 `eh_dtc_stress`, `eh_dtc_planning` and `eh_reference_design_report` on claim
@@ -96,7 +99,10 @@ both claims, instead of two hand-maintained lists.
 
 ### SL-4 — a failed or aborted job publishes the previous solve's objective
 
-**Moderate. VERIFIED.**
+**Moderate. VERIFIED. FIXED** on BOTH paths — `/run` had it too, which the reviewer
+did not claim and I found while fixing. Guard:
+`tests/test_objective_only_on_success.py`, which first asserts the premise (the stale
+number really does survive) rather than assuming it.
 
 `_run_solve_job` computes `objective = sim._compute_run_objective(n, config)` *before*
 branching on status, and publishes it unconditionally through `ctx_state_update` and
@@ -124,7 +130,10 @@ and can leave the network half-restored.
 
 ### SL-6 — web-mode rename is not blocked by a queued or running job
 
-**Moderate. VERIFIED, and sharpened by this branch's QA-P2 fix.**
+**Moderate. VERIFIED, sharpened by this branch's QA-P2 fix. FIXED** — the guard moved
+above the branch so both modes reach it; the rebind stays. Guard: two tests in
+`tests/test_storage_layout.py`, one of them the control that an ordinary web rename is
+still allowed.
 
 `services/project_registry.py::rename_project` reaches `_queued_job_blocks_rename`
 only on the directory-move branch. The row-only branch — which is the **web** branch,
@@ -152,7 +161,9 @@ never resumed.
 
 ### SL-8 — `clear_finished` reports rows it did not delete
 
-**Moderate. VERIFIED.**
+**Moderate. VERIFIED. FIXED** — `delete_jobs` returns a count or `None`; a failed
+delete reports only what left memory. Guard:
+`tests/test_clear_finished_honest_count.py`.
 
 `services/solve_job_store.py::delete_jobs` swallows every exception and returns `None`.
 `SolveQueue.clear_finished` returns `len(to_delete)` unconditionally, so on a database
@@ -168,7 +179,10 @@ Fix shape: have `delete_jobs` return a count or raise; report what actually went
 
 ### CH-1 — a colleague's email still reaches the LLM provider, on the success path
 
-**Serious. VERIFIED.**
+**Serious. VERIFIED. FIXED** — `_scrub_identities` at the single model-facing seam,
+recursive (the member travels inside `detail` and inside lists), keeping the sibling
+`yours`. Guard: `tests/test_chat_result_identity_scrub.py`, with a control that
+ordinary payloads are untouched.
 
 The 2026-08-27 finding was fixed on the `is_error` path only:
 `chat_service._error_result_content` strips everything but a typed kind and a
@@ -208,7 +222,17 @@ why the suite does not catch it.
 
 ### CH-3 — `undo_last` reverts the wrong thing, and the schema says otherwise
 
-**Serious. REPORTED.**
+**Serious. VERIFIED (both halves). DOCUMENTATION HALF FIXED; behaviour still open.**
+
+The false claims are corrected: the `chat_tools` module docstring no longer lists undo
+among what tools inherit (it listed five things and was wrong about exactly one), the
+`bulk_update_components` schema no longer promises "single undo snapshot", and the
+`undo_last` schema now tells the model plainly that the stack holds the user's CANVAS
+edits and not its own, and not to offer it as a way to reverse its own change.
+
+Still open: giving chat writes a real snapshot. That is a design change — a snapshot
+is an `export_to_netcdf` round-trip, so one per in-process tool call is not obviously
+affordable — and it is not attempted here.
 
 Undo snapshots are pushed by the HTTP middleware in `main.py`. Chat tools call
 handlers in-process, so a chat edit pushes nothing. `undo_last` therefore either
@@ -222,7 +246,18 @@ undo snapshot"), and the module docstring.
 
 ### CH-4 — write tools that skip the holder check the REST route enforces
 
-**Serious. REPORTED.**
+**Serious. `put_asset_health` VERIFIED and FIXED; the rest REPORTED.**
+
+`put_asset_health` had no check while its two sidecar siblings do — it did not even
+accept `db`/`user`, so it could not have checked. It is the third handler missed by
+the same sweep (`routers/uploads.py` carries a comment about being the second), and
+`asset_health.json` is the outage-rate provenance ledger in `_BUNDLE_FILES`. Guard:
+two tests added to `tests/test_worksheet_foreign_lock.py`, the module written for the
+first two.
+
+Still open and unverified: `delete_upload`, `clear_uploads`, `_save_agent_export`
+(reached by every `export_*` tool), `clear_chat_history`, `start_campaign` /
+`end_campaign`.
 
 `_lock_gated_tool_names` derives its set from route prefixes plus five hand-listed
 mutators, so tools that call services directly are outside it. Named:
@@ -236,7 +271,10 @@ The header comment asserting that "/api/projects/* write tools already call
 
 ### CH-5 — `GET /api/chat/history` clears a live session and can poison it
 
-**Serious. REPORTED.**
+**Serious. VERIFIED, not yet fixed.** The `session_was_freshly_minted` guard wraps
+only the three-line profile adoption; the `sess.messages.clear()` rebuild directly
+below it runs unconditionally — under a comment that explains at length why a live
+session must not be disturbed.
 
 `routers/chat.py::chat_history` does `sess.messages.clear()` and rebuilds from disk
 unconditionally; only the profile adoption is guarded by `session_was_freshly_minted`.
@@ -246,7 +284,8 @@ that makes every later turn 400 at the provider.
 
 ### CH-6 — chat session ownership is not enforced on `/stream` or `/history`
 
-**Moderate. REPORTED.**
+**Moderate. VERIFIED, not yet fixed.** `session_owner_allows` is called at three
+sites — `/confirm`, `/rewind`, `/abort` — and `chat_stream` is not one of them.
 
 `/confirm`, `/rewind` and `/abort` all call `session_owner_allows`; `chat_stream` does
 not, and `chat_history` mints the session owned by whoever fetched it first. Since
