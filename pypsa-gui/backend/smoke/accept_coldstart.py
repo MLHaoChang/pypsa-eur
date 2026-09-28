@@ -64,7 +64,14 @@ out = {"action": ACTION, "cwd": os.getcwd()}
 # DATABASE_URL requirement, which none of the three had.
 from smoke.isolation import require_isolated_environment  # noqa: E402
 
-require_isolated_environment()
+# `require_database_url=False`: this harness must run with DATABASE_URL UNSET,
+# because `launcher.build_environment` leaves an exported one alone
+# (launcher.py:129) and the pin it applies otherwise is the whole thing this
+# file exists to prove. The shared guard's isolation is not lost, it moves: with
+# the variable unset the pin puts the database under PYPSAGUI_APP_DATA_DIR,
+# already forced to a throwaway above, and the assertion after startup checks
+# the file the engine REALLY opened is inside it.
+require_isolated_environment(require_database_url=False)
 
 # The two throwaway roots. Read back from the environment AFTER the guard, so
 # they are known set and non-blank.
@@ -189,6 +196,23 @@ def work():
 
         s = get_settings()
         dbfile = get_engine().url.database
+        # The isolation guarantee, asserted rather than merely reported. This
+        # is what earns the `require_database_url=False` exemption above: the
+        # shared guard polices a URL STRING, and a string is only a proxy for
+        # the question that matters — which file did the engine open? With the
+        # variable unset, the answer must be the pin's, inside the throwaway
+        # app-data root. If it is anywhere else the run is writing to a real
+        # location and must stop before it creates anything.
+        assert dbfile, (
+            "refusing to continue: the engine reports no database file, so "
+            "there is nothing to prove the pin landed anywhere in particular"
+        )
+        _dbp = Path(dbfile).resolve()
+        assert _is_inside(_dbp, Path(_appdata)), (
+            f"refusing to continue: the engine opened {_dbp}, which is OUTSIDE "
+            f"the throwaway app-data root {_appdata} — the DATABASE_URL pin "
+            f"this harness exists to prove did not apply"
+        )
         out["config"] = {
             "database_url": s.database_url,
             "db_file_resolved": str(Path(dbfile).resolve()) if dbfile else None,
