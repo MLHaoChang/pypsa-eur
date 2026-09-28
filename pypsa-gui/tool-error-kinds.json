@@ -143,6 +143,10 @@
       "surface": "banner",
       "why": "The file type cannot be attached; the user is told to use the read tool instead."
     },
+    "missing_api_key": {
+      "surface": "inline",
+      "why": "The active LLM profile has no key in its slot, surfaced as a 400 by the report generation routes (WP3); the chat turn itself reports the same condition on its own error frame, never as a tool_error. Per-call; the message names the remedy (configure the key or pick another profile) and WP6's report tool relays it."
+    },
     "no_acting_user": {
       "surface": "banner",
       "why": "No authenticated identity is bound to the turn, so every project-scoped tool 401s. Same family as inactive_acting_user and equally terminal — it was the one member of that family still unrouted."
@@ -150,6 +154,10 @@
     "no_active_project": {
       "surface": "inline",
       "why": "Most tools need a project; the model recovers by asking which one, in prose, inside the same turn. Promoting it would banner a question the assistant is already asking."
+    },
+    "no_evidence": {
+      "surface": "inline",
+      "why": "POST /{name}/reports/generate found no Energy Hub reference design, no reliability surface and no worksheet rows: there is nothing a model may narrate. The evidence-only POST still produces a document that states every section as not established; generation refuses. The message names the remedy (run a study) and the model relays it."
     },
     "not_authorized": {
       "surface": "banner",
@@ -187,6 +195,14 @@
       "surface": "inline",
       "why": "The local per-session turn limiter, raised by the chat route before a turn starts — so it never arrives on a tool_error frame in practice."
     },
+    "report_job_in_flight": {
+      "surface": "inline",
+      "why": "POST /{name}/reports/generate (or a section regenerate) while a report job is still running — one job per process; the message says to wait or abort. Route-only in WP3; WP6's generate_report tool relays the message and the model waits or aborts within the turn."
+    },
+    "report_job_not_found": {
+      "surface": "inline",
+      "why": "POST /{name}/reports/generate/abort when no report generation has ever run in this session. Nothing to abort; the model relays it."
+    },
     "report_mode_not_supported": {
       "surface": "inline",
       "why": "POST /{name}/reports was asked for a mode this build does not offer (only evidence_only until WP3's generator lands). Route-only in phase 1; when WP6's report tool passes a model-typed mode, the message names the supported one and the model corrects within the turn, as with invalid_tool_args."
@@ -194,6 +210,14 @@
     "report_not_found": {
       "surface": "inline",
       "why": "No such study report (or version of it) in this project. Per-call; the message names the remedy (generate one first) and the model relays it, exactly as eh_report_not_found is handled."
+    },
+    "report_section_not_found": {
+      "surface": "inline",
+      "why": "A section id the report does not have, on generate (`sections`) or on the per-section regenerate (WP3). The message names the id; when WP6's tool passes a model-typed id the model corrects within the turn, as with invalid_tool_args."
+    },
+    "sdk_not_installed": {
+      "surface": "inline",
+      "why": "The SDK the active profile's wire needs is missing from this build, surfaced as a 400 by the report generation routes (WP3); the chat turn reports it on its own error frame. Per-call; the message says so and the model relays it."
     },
     "snapshot_count_mismatch": {
       "surface": "banner",
