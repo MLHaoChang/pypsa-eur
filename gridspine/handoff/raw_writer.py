@@ -30,7 +30,10 @@ sgen (RES / IBR machine) decisions:
 - LEDGER ASSUMPTION: MBASE falls back to installed ``p_mw`` treated as MVA
   when ``sn_mva`` is absent — the RES ledger records capacity in MW only.
   ``sn_mva`` wins when finite (it IS the machine MVA base); a non-positive
-  fallback degrades to system SBASE rather than an invalid 0 MBASE.
+  fallback degrades to system SBASE rather than an invalid 0 MBASE. The
+  fallback means "installed" only on a net no snapshot has touched: applying
+  an hour overwrites ``p_mw`` with that hour's output, so a net that will be
+  snapshotted must carry ``sn_mva`` (``load_case39_res`` does).
 - Q limits: an sgen is a PQ injection with no voltage-control duty. The v33
   convention for fixed-Q machines is QT == QB (== QG) — PSS/E and
   PowerFactory both hold such a machine at its Q value instead of letting it
