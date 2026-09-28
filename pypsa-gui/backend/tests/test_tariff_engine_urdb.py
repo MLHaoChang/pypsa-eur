@@ -437,3 +437,15 @@ def test_tiers_on_represented_volume_are_disclosed():
     res = rate(d, _tariff(_windowed_energy()), step_hours=1.0, timezone=None,
                represents_hours=8760 / 168, billing_period=("2030-01-01", "2031-01-01"))
     assert "tiers_on_represented_volume" in res.notes["e"]
+
+
+@pytest.mark.parametrize("tiers", [[{"threshold": 0}], [{"threshold": 0, "rate": None}], "bad",
+                                   [{"threshold": 0, "rate": True}]])
+def test_malformed_tiers_on_a_windowed_item_are_a_validation_error(tiers):
+    """WP2.1a-ii round 2: the migration never turns bad input into a raw TypeError."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        _tariff({"id": "e", "kind": "energy", "unit": "per_kwh", "tiers": tiers,
+                 "periods": [{"name": "peak", "rate": 0.0, "start_hour": 17, "end_hour": 21},
+                             {"name": "rest", "rate": 0.0}]})

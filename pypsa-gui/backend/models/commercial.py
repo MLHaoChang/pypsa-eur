@@ -164,8 +164,8 @@ class TariffItem(BaseModel):
         if not isinstance(data, dict):
             return data
         tiers, periods = data.get("tiers"), data.get("periods")
-        if not tiers or not periods:
-            return data
+        if not isinstance(tiers, list) or not isinstance(periods, list) or not tiers or not periods:
+            return data                     # malformed or absent: field validation reports it
 
         def get(o, k):
             return o.get(k) if isinstance(o, dict) else getattr(o, k, None)
@@ -176,7 +176,10 @@ class TariffItem(BaseModel):
                      and not get(periods[0], "weekdays") and get(periods[0], "start_hour") is None)
         if catch_all:
             return data                     # P1 single catch-all tiers: unchanged semantics
-        rates = [float(get(t, "rate")) for t in tiers]
+        raw = [get(t, "rate") for t in tiers]
+        if not all(isinstance(r, (int, float)) and not isinstance(r, bool) for r in raw):
+            return data                     # a bad rate: field validation reports it
+        rates = [float(r) for r in raw]
 
         def with_rates(per):
             if isinstance(per, dict):

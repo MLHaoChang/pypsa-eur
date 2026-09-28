@@ -290,6 +290,8 @@ gap cause `tier_allocation` in WP2.3).
   - **Recorded URDB mapping limit (for WP2.4b-i):** the model holds ONE cumulative threshold list per item and the same number of rates on every period. REopt takes each month's tier limits from the weekday hour-0 period, reads `max` as a width, and tolerates periods with different tier counts. The importer refuses URDB tariffs whose periods differ in tier `max` or tier count, naming the field; it never picks one silently.
   - **Recorded deferral:** the spec's "H3 3-tier windowed fixture" is an in-test hand bill here (872.00, `test_windowed_energy_tiers_split_the_month_in_proportion_to_the_total`). The H3 fixture file (the full US C&I hand bill) lands with the P2 QA gate driver.
 
+- Round 2 → **PASS WITH CONDITIONS**, closed: the migration validator returns malformed tier input (a missing, null or boolean rate; non-list `tiers`) unchanged, so field validation reports a `ValidationError`, never a raw `TypeError` (a 500 on the config route). The reviewer confirmed no false drift for P1-solved projects: recipe-1 hashes are identical between the P1-tip and the current code, and the migrated items were never in a hashed set.
+
 ## WP2.1a-iii Engine: designated-month and cyclic ratchets
 
 Model delta: `Ratchet.lookback_months: int | None` (was required `ge=1`); new `Ratchet.months: list[int] |
