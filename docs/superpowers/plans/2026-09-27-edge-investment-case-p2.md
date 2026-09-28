@@ -467,6 +467,8 @@ Files: `lp_bindings.py`, `cost_rows.py`, `test_ratchet.py`, `test_tiers.py`, rec
   5. (LOW, accepted) `add_demand_terms` adds about 2.8 s on a 15-min year with 72 tiered keys. A vectorised sum constraint is left for performance work.
   6. (LOW) The `demand_only_newly_bound` docstring states that an item of a newly bindable kind ADDED after an old solve also reads as a recipe change. Both mean re-solve.
 
+- **WP2.1c-i round 2 → PASS WITH CONDITIONS; residue fixed:** a metered peak inside the free tier predicted a rate of 0, and the LP again did no shaving. A predicted rate of 0 now falls back to the first charged rate. The live test is parametrised with history in the free tier.
+
 ## WP2.4b-0 Condition 4 refactor (lands before the Library work)
 
 Files: `backend/services/commercial/binding.py` (new: org resolution by an injected resolver, alignment,

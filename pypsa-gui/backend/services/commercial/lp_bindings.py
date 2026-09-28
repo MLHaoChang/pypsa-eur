@@ -523,18 +523,22 @@ def _demand_segments(item: TariffItem, rates: list[float],
 
     Non-convex rates price the WHOLE billed kW at one marginal rate: the tier
     the same month a year earlier (`seen_kw`, metered history) landed in, else
-    the FIRST NON-ZERO rate — a free first tier must not take the charge out of
-    the LP (WP2.1c-i review #1). The engine bills the tiers exactly; the gap
+    the FIRST NON-ZERO rate — a free tier (predicted or first) must not take
+    the charge out of the LP (WP2.1c-i review #1, round 2). The engine bills the tiers exactly; the gap
     (incl. the free part below a first threshold above 0, over-priced here) is
     the item's `nonconvex_tier` cause."""
     if not all(b >= a for a, b in zip(rates, rates[1:])):
+        first_charged = float(next((r for r in rates if r != 0), 0.0))
         if seen_kw is not None:
             k = -1
             for j, t in enumerate(item.tiers):
                 if seen_kw >= t.threshold:
                     k = j
-            return None, (0.0 if k < 0 else float(rates[k]))
-        return None, float(next((r for r in rates if r != 0), 0.0))
+            predicted = 0.0 if k < 0 else float(rates[k])
+            # A last-year peak inside a free tier would price the key at 0 and
+            # stop the LP shaving (round 2 residue): the first charged rate.
+            return None, (predicted if predicted != 0 else first_charged)
+        return None, first_charged
     th = [t.threshold / _KWH_PER_MWH for t in item.tiers] + [np.inf]
     segs = [{"width_mw": th[0], "eur_per_mw": 0.0}] if th[0] > 0 else []
     segs += [{"width_mw": float(th[k + 1] - th[k]), "eur_per_mw": float(r) * _KWH_PER_MWH}

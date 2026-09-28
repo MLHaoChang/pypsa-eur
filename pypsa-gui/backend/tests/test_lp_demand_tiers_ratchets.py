@@ -235,15 +235,19 @@ def test_a_free_first_tier_does_not_take_a_nonconvex_charge_out_of_the_lp():
     applied = L.materialise_poc_prices(
         n, _commercial(t, meter_history_peaks_kw={"2029-01": 50_000.0, "2029-02": 10_000.0}))
     by_month = {k["month"]: k["eur_per_mw"] for k in getattr(n, L.DEMAND_SPEC_ATTR)["keys"]}
-    assert by_month == {"2030-01": 5_000.0, "2030-02": 0.0}      # tiers 2 and 0
+    # Jan: tier 2; Feb's 10 MW lands in the FREE tier — the first charged rate.
+    assert by_month == {"2030-01": 5_000.0, "2030-02": 12_000.0}
     applied.undo()
 
 
 @pytest.mark.live_solve
-def test_a_free_first_tier_keeps_the_lp_shaving_the_peak():
+@pytest.mark.parametrize("history", [None, {"2029-01": 20_000.0, "2029-02": 20_000.0}])
+def test_a_free_first_tier_keeps_the_lp_shaving_the_peak(history):
+    """Also when last year's peak sat inside the free tier (round 2 residue)."""
     t = _tariff(_demand(FREE_THEN_FALLING))
     n = _site()
-    cfg = _solve(n, _commercial(t))
+    kw = {"meter_history_peaks_kw": history} if history else {}
+    cfg = _solve(n, _commercial(t, **kw))
     gap, rows = _gap_and_rows(n, cfg)
     assert abs(gap) < 1e-6
     lp = sum(12_000.0 * v["billed_mw"] for v in n.meta[L.META_DEMAND].values())
