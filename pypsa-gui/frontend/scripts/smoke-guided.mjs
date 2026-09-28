@@ -232,7 +232,9 @@ function saveReviewTranscript() {
 
 // ── the stub model (every phase, spec §8.4 step 2) ─────────────────────────
 async function activateStubProfile({ replyDelayMs = 0 } = {}) {
-  start('stub', PYTHON, [path.join(BACKEND, 'smoke', 'stub_openai_endpoint.py')],
+  // SMOKE_STUB: a stub script to use instead of the committed one (a
+  // reviewer's scratch probe, or a branch not landed yet).
+  start('stub', PYTHON, [process.env.SMOKE_STUB ?? path.join(BACKEND, 'smoke', 'stub_openai_endpoint.py')],
     { cwd: BACKEND, env: { ...process.env, STUB_REPLY_DELAY_MS: String(replyDelayMs) } })
   await waitFor(`http://127.0.0.1:${STUB_PORT}/v1/models`, 'stub model', 30_000)
   await api('PUT', `/api/chat/settings/llm/profiles/${STUB_PROFILE}`, {
@@ -1383,6 +1385,52 @@ async function phaseP25(browser) {
     await waitIdle()
     const afterDeny = tableDiffs(beforeFix, await snapshotTables())
     check(afterDeny.diffs.length === 0, 'denied: nothing changed')
+
+    step('R1: several writes in ONE response — deny card 1, card 2 is still shown (5 rounds + 1 approve round)')
+    // The Site footer asks to fix every gap; the stub (branch 4) reads
+    // suggest_eh_setup and returns ALL its actions in one response, so the
+    // backend cards them one after the other and the next card's frame can
+    // land before the previous /confirm returns (re-gate R1).
+    const cardArgs = async () => ((await byId('chat-confirmation-card').locator('pre').textContent()) ?? '').trim()
+    const nextCard = prev => page.waitForFunction(p => {
+      const c = document.querySelector('[data-testid="chat-confirmation-card"]')
+      return c && (c.querySelector('pre')?.textContent ?? '').trim() !== p
+    }, prev, { timeout: 8_000 })
+    const beforeR1 = await snapshotTables()
+    const answer = async (decision) => {
+      const b = byId(decision === 'approve' ? 'chat-confirm-approve' : 'chat-confirm-deny')
+      await b.click()
+    }
+    for (let round = 1; round <= 6; round++) {
+      const approveFirst = round === 6
+      await byId('hub-delegate-site').click()
+      await byId('chat-confirmation-card').waitFor({ state: 'visible', timeout: 60_000 })
+      const seen = []
+      let args = await cardArgs()
+      seen.push(args)
+      for (let k = 0; k < 10; k++) {
+        await answer(approveFirst && k === 0 ? 'approve' : 'deny')
+        const more = await nextCard(args).then(() => true, () => false)
+        if (!more) break
+        // The bug wiped the next card a moment after it rendered: look again.
+        await sleep(600)
+        check(await byId('chat-confirmation-card').isVisible(),
+          `round ${round}: card ${seen.length + 1} still shown after answering card ${seen.length}`)
+        args = await cardArgs()
+        seen.push(args)
+        if (round === 1 && k === 0) {
+          await byId('chat-confirmation-card').scrollIntoViewIfNeeded()
+          await shot(page, 'p25-r1-card2-after-deny')
+        }
+      }
+      await waitIdle()
+      check(seen.length >= 2, `round ${round}: ${seen.length} cards in one response, each shown after the previous answer (${approveFirst ? 'approve' : 'deny'} first)`)
+      check((await byId('chat-confirmation-card').count()) === 0, `round ${round}: no card left, turn ended`)
+      if (!approveFirst) {
+        const d = tableDiffs(beforeR1, await snapshotTables())
+        check(d.diffs.length === 0, `round ${round}: all denied → nothing changed`)
+      }
+    }
 
     step('B1: the same Site fix in Expert applies directly (no card), as before P25')
     await byId('ui-mode-expert').click()

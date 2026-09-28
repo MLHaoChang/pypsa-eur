@@ -3,7 +3,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { useChatStore, type PendingConfirmationCard } from '../store/chatStore'
-import { createChatStream, getChatHealth, postChatConfirm } from '../api/chat'
+import { createChatStream, getChatHealth, postChatAbort, postChatConfirm } from '../api/chat'
 import { listUploads } from '../api/uploads'
 import ChatPanel from './ChatPanel'
 import chatStoreSource from '../store/chatStore.ts?raw'
@@ -338,5 +338,95 @@ describe('P25 gate: how a card request looks, and when it is not sent', () => {
     fireEvent.click(screen.getByTestId('chat-send'))
     await waitFor(() => expect(calls()).toHaveLength(2))
     expect(useChatStore.getState().activeRequest).toBeNull()
+  })
+})
+
+// P25 re-gate R1 (adopted from qa25r/probes/QA25R.probe.test.tsx): with
+// several Guided writes in one response, the NEXT card's SSE frame often
+// lands while the previous card's /confirm POST is still in flight. The
+// handler must clear only the card it answered.
+const CARD_B: PendingConfirmationCard = { ...CARD, tool_use_id: 'tu2', confirmation_token: 'tokB',
+  args: { name: 'B2' } }
+
+describe('R1: two cards in one response', () => {
+  for (const decision of ['approve', 'deny'] as const) {
+    it(`${decision}: card B arriving before /confirm returns survives`, async () => {
+      useChatStore.setState({ pending: CARD, streaming: true })
+      vi.mocked(postChatConfirm).mockImplementationOnce(async () => {
+        act(() => useChatStore.getState().setPending(CARD_B))
+        return { ok: true } as never
+      })
+      renderPanel()
+      const btn = await screen.findByTestId(decision === 'approve' ? 'chat-confirm-approve' : 'chat-confirm-deny')
+      await act(async () => { btn.click() })
+      await settle()
+      expect(useChatStore.getState().pending?.confirmation_token).toBe('tokB')
+      expect(screen.getByTestId('chat-confirmation-card')).toBeTruthy()
+    })
+
+    it(`${decision}: with no next card, the answered card is cleared`, async () => {
+      useChatStore.setState({ pending: CARD, streaming: true })
+      renderPanel()
+      const btn = await screen.findByTestId(decision === 'approve' ? 'chat-confirm-approve' : 'chat-confirm-deny')
+      await act(async () => { btn.click() })
+      await settle()
+      expect(useChatStore.getState().pending).toBeNull()
+    })
+  }
+})
+
+describe('P25 re-gate notes: expiry and Stop end the card run', () => {
+  it('a card that expires drops the rest of its group (like a Deny)', async () => {
+    renderPanel()
+    act(() => {
+      useChatStore.getState().sendRequest('action one', { group: 'g1' })
+      useChatStore.getState().sendRequest('action two', { group: 'g1' })
+      useChatStore.getState().sendRequest('other', { group: 'g2' })
+    })
+    await waitFor(() => expect(calls()).toHaveLength(1))
+    act(() => useChatStore.getState().setPending({ ...CARD, expires_at_epoch_ms: Date.now() - 1 }))
+    await waitFor(() => expect(useChatStore.getState().pending).toBeNull())
+    expect(useChatStore.getState().error?.error_kind).toBe('confirmation_expired')
+    expect(useChatStore.getState().requestQueue.map(r => r.text)).toEqual(['other'])
+  })
+
+  it('Stop clears every queued card request', async () => {
+    renderPanel()
+    act(() => {
+      useChatStore.getState().sendRequest('first', { group: 'g1' })
+      useChatStore.getState().sendRequest('second', { group: 'g1' })
+      useChatStore.getState().sendRequest('third')
+    })
+    await waitFor(() => expect(calls()).toHaveLength(1))
+    await act(async () => { screen.getByTestId('chat-abort').click() })
+    await waitFor(() => expect(postChatAbort).toHaveBeenCalled())
+    expect(useChatStore.getState().requestQueue).toEqual([])
+    await settle()
+    expect(calls()).toHaveLength(1)
+  })
+})
+
+describe('P25 re-gate note 2: the card header in plain words (Guided only)', () => {
+  const header = () => screen.getByTestId('chat-confirmation-header').textContent
+  it('Guided write → "Confirm this change"', async () => {
+    useChatStore.setState({ pending: CARD })
+    renderPanel()
+    await screen.findByTestId('chat-confirmation-card')
+    expect(header()).toBe('Confirm this change')
+  })
+
+  it.each(['execution', 'execution_long_running', 'destructive'])('Guided %s → "Confirm"', async (tier) => {
+    useChatStore.setState({ pending: { ...CARD, safety_tier: tier } })
+    renderPanel()
+    await screen.findByTestId('chat-confirmation-card')
+    expect(header()).toBe('Confirm')
+  })
+
+  it.each(['write', 'execution', 'destructive'])('Expert %s → unchanged "Confirm · <tier>"', async (tier) => {
+    useUIStore.setState({ uiMode: 'expert' })
+    useChatStore.setState({ pending: { ...CARD, safety_tier: tier } })
+    renderPanel()
+    await screen.findByTestId('chat-confirmation-card')
+    expect(header()).toBe(`Confirm · ${tier}`)
   })
 })

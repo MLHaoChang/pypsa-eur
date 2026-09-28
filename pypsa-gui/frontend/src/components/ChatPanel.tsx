@@ -364,6 +364,7 @@ function ConfirmationCard() {
   const setError = useChatStore((s) => s.setError)
   const sessionId = useChatStore((s) => s.sessionId)
   const appendMessage = useChatStore((s) => s.appendMessage)
+  const uiMode = useUIStore((s) => s.uiMode)
   const [secondsLeft, setSecondsLeft] = useState<number>(0)
   const [typedConfirmation, setTypedConfirmation] = useState<string>('')
   const timerRef = useRef<number | null>(null)
@@ -393,7 +394,14 @@ function ConfirmationCard() {
         // destructive action is harmless is the one lesson this card must
         // not give. Withdraw it and say why; the agent re-prompts with a
         // fresh token, which is the flow the backend already implements.
-        setPending(null)
+        // Only this card: a newer one may already be showing (R1).
+        if (useChatStore.getState().pending?.confirmation_token === pending.confirmation_token) {
+          setPending(null)
+        }
+        // P25 re-gate note 1: a card left to lapse ends its card run like a
+        // Deny — the rest of that click's queued actions are dropped.
+        const lapsedGroup = useChatStore.getState().activeRequest?.group
+        if (lapsedGroup) useChatStore.getState().dropRequestGroup(lapsedGroup)
         setError({
           error_kind: 'confirmation_expired',
           message: `The confirmation for ${pending.tool_name} expired before it was answered. Ask again to retry.`,
@@ -410,23 +418,33 @@ function ConfirmationCard() {
     }
   }, [pending])
 
+  // P25 re-gate R1: several Guided writes in one response are carded one
+  // after the other, and the NEXT card's SSE frame often lands while this
+  // card's /confirm POST is still in flight. Clear only the card that was
+  // answered — the token is captured before the await.
+  const clearIfStill = useCallback((token: string) => {
+    if (useChatStore.getState().pending?.confirmation_token === token) setPending(null)
+  }, [setPending])
+
   const onApprove = useCallback(async () => {
     if (!pending || !sessionId) return
+    const token = pending.confirmation_token
     try {
       await postChatConfirm(sessionId, {
-        token: pending.confirmation_token, decision: 'approve',
+        token, decision: 'approve',
       })
-      setPending(null)
+      clearIfStill(token)
     } catch (err) {
       toast.error(`confirmation failed: ${(err as Error).message}`)
     }
-  }, [pending, sessionId, setPending])
+  }, [pending, sessionId, clearIfStill])
 
   const onDeny = useCallback(async () => {
     if (!pending || !sessionId) return
+    const token = pending.confirmation_token
     try {
       await postChatConfirm(sessionId, {
-        token: pending.confirmation_token, decision: 'deny',
+        token, decision: 'deny',
       })
       // P25 gate: a denial ends that card's run — the card's remaining
       // queued actions (Improve: one message per action) are dropped.
@@ -436,11 +454,11 @@ function ConfirmationCard() {
         role: 'tool', content: `denied: ${pending.tool_name}`,
         tool_use_id: pending.tool_use_id, tool_name: pending.tool_name,
       })
-      setPending(null)
+      clearIfStill(token)
     } catch (err) {
       toast.error(`confirmation failed: ${(err as Error).message}`)
     }
-  }, [pending, sessionId, setPending, appendMessage])
+  }, [pending, sessionId, clearIfStill, appendMessage])
 
   if (!pending) return null
 
@@ -470,8 +488,14 @@ function ConfirmationCard() {
       data-tool-name={pending.tool_name}
       data-safety-tier={pending.safety_tier}
     >
-      <div className="text-[11px] uppercase tracking-wider text-amber-500 mb-1">
-        Confirm · {pending.safety_tier}
+      <div className={uiMode === 'guided'
+        ? 'text-[12px] font-semibold text-amber-500 mb-1'
+        : 'text-[11px] uppercase tracking-wider text-amber-500 mb-1'}
+        data-testid="chat-confirmation-header">
+        {/* P25 re-gate note 2: plain words in Guided; Expert unchanged. */}
+        {uiMode === 'guided'
+          ? (pending.safety_tier === 'write' ? 'Confirm this change' : 'Confirm')
+          : <>Confirm · {pending.safety_tier}</>}
       </div>
       <div id="chat-confirmation-title" className="text-sm font-medium mb-1 text-text">
         {pending.tool_name}
@@ -2319,6 +2343,9 @@ export default function ChatPanel() {
     // why the machine is still talking.
     speechOut.cancelSpeech()
     voiceTurnRef.current = false
+    // P25 re-gate note 1: Stop ends the card run too — nothing a card
+    // queued is sent after the user stopped.
+    useChatStore.setState({ requestQueue: [] })
     if (!sessionId) return
     try {
       await postChatAbort(sessionId)
