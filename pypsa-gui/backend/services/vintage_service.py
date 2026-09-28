@@ -150,9 +150,9 @@ def prune_orphaned_entries(n) -> dict[str, list[str]]:
     discover it when a later solve behaves differently.
 
     Two callers, both of which hand the network a component index they did not
-    themselves choose: ``cleanup_orphan_vintages`` (after removing orphan
-    vintage rows) and spatial clustering (after PyPSA aggregates and renames
-    components wholesale). A stale bound is expanded by the solver for an
+    themselves choose: ``routers.vintage.cleanup_orphan_vintages`` (after
+    removing orphan vintage rows) and ``routers.clustering.apply_clustering``
+    (after PyPSA aggregates components wholesale). A stale bound is expanded by the solver for an
     asset that no longer exists, and a stale ``vintage_results`` entry is
     walked by Compare's capacity and economics roll-ups, so both stores are
     swept, not just the bounds.
@@ -179,12 +179,19 @@ def prune_orphaned_entries(n) -> dict[str, list[str]]:
     bucket = _ensure_meta_bucket(n)
     # Snapshot the keys — `delete_bounds_for_asset` mutates the dict.
     for cls in list(bucket.keys()):
-        index = _index_for(cls)
-        if index is None:
-            _record(cls, list(bucket[cls].keys()))
+        by_class = bucket.get(cls)
+        if not isinstance(by_class, dict):
+            # `n.meta` survives a netCDF round-trip as free-form JSON, so a
+            # hand-edited or foreign bundle can put anything here. Same guard
+            # the results sweep below carries.
             bucket.pop(cls, None)
             continue
-        orphans = [name for name in list(bucket[cls].keys()) if name not in index]
+        index = _index_for(cls)
+        if index is None:
+            _record(cls, list(by_class.keys()))
+            bucket.pop(cls, None)
+            continue
+        orphans = [name for name in list(by_class.keys()) if name not in index]
         for name in orphans:
             delete_bounds_for_asset(n, cls, name)
         _record(cls, orphans)

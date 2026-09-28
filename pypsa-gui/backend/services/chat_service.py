@@ -5203,6 +5203,12 @@ def handle_snapshot_lineage(
     # flat-by-name resolution captured an empty (or another tenant's) history
     # under tenancy. `get_persist_path` is the one resolver that handles both
     # layouts, and it caches on `ctx.chat_state` as a side benefit.
+    if not ctx.loaded_project:
+        # `get_persist_path` returns None only for `loaded_project is None`;
+        # an empty STRING would resolve to `PROJECTS_DIR / "" / chat.jsonl`,
+        # i.e. the projects root itself. The by-name resolver this replaced
+        # rejected both, so keep rejecting both.
+        return
     active_path = get_persist_path(ctx)
     if active_path is None:
         return
