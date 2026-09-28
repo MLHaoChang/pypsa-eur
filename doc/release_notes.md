@@ -51,6 +51,13 @@
 
 * Add missing regex anchor with `re.fullmatch` to `create_zenodo_deposition_cli` utils script ([#2225](https://github.com/PyPSA/pypsa-eur/pull/2225)).
 
+* feat(pypsa-gui): The Energy Hub reference design now certifies the hub with its import sampled instead of counted as a firm block ([#55](https://github.com/MLHaoChang/pypsa-eur/pull/55)).
+  The import Link with outage data is a two-state unit in the sequential MC and the COPT.
+  Each grid the hub's Links reach is sampled as its own area (new `services/adequacy/mc_zonal.py`); grid-side storage is dispatched grid-first, then as support bounded by the Link headroom.
+  Opt-in `common_mode_rate` / `common_mode_mttr_hours` on an import Link model an event that takes the Link and its grid down together.
+  `fmea_top` screens the Link at the grid's expected surplus, reports an exact analytic cross-check (`copt_metrics.import_exact`), and ranks common-mode events as their own class-A modes.
+  The report discloses the import model in `fleet_scope` (`import_model`, `import_firmness`, `grid_areas`, `import_common_mode`), and the panel and chat tools show it.
+
 ## PyPSA-Eur v2026.02.0 (18th February 2026)
 
 **Features**

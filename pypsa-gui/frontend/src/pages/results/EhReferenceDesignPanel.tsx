@@ -5,6 +5,7 @@ import {
   resultsApi,
   type EhArchetype,
   type EhCertificationPayload,
+  type EhFleetScope,
   type EhCertificationVerdict,
   type EhDtcPlanningTable,
   type EhDtcStressTable,
@@ -103,6 +104,101 @@ export function certificationPayload(
   return payload as EhCertificationPayload
 }
 
+/**
+ * One line saying how the import entered the certification fleet, or null
+ * when the payload says nothing about it (whole-network scope, or a report
+ * without a hub-side scope). A report from before 2026-09-27 carries a
+ * `fleet_scope` with `import_firmness: planning_limit_only` and no
+ * `import_model` — that was a firm block.
+ */
+export function importModelLabel(payload: EhCertificationPayload | null): string | null {
+  if (!payload) return null
+  const scope = payload.fleet_scope ?? null
+  const model = payload.import_model ?? scope?.import_model
+    ?? (scope?.mode === 'hub_side' ? 'firm_block' : null)
+  const cap = scope?.import_cap_mw_max ?? scope?.import_firm_mw_max
+  const capText = cap != null ? ` (cap ${Number(cap).toFixed(0)} MW)` : ''
+  const firmness = payload.import_firmness ?? scope?.import_firmness
+  if (firmness === 'common_mode_sampled') {
+    return `firm block; common-mode event sampled (Link and grid down together)${capText}`
+  }
+  if (firmness === 'outage_and_common_mode_sampled') {
+    return `Link outages + common-mode event sampled (Link and grid down together)${capText}`
+  }
+  switch (model) {
+    case 'zonal':
+      return firmness === 'grid_sampled'
+        ? `grid-side surplus sampled; Links firm at their planning cap (two-area MC)${capText}`
+        : `Link outages + grid-side surplus sampled (two-area MC)${capText}`
+    case 'sampled_unit':
+      return `Link outages sampled (two-state unit at its planning cap)${capText}`
+    case 'mixed':
+      return `partly sampled: Links without outage data counted firm${capText}`
+    case 'islanded':
+      return 'islanded (0 MW)'
+    case 'firm_block':
+      return `firm at the planning limit (no Link outage data)${capText}`
+    default:
+      return null
+  }
+}
+
+/** `copt_metrics.import_exact` — the analytic LOLE with the import mixed in. */
+export interface EhImportExact {
+  lole_hours?: number | null
+  eue_mwh?: number | null
+  delta_mw?: number
+  levels?: number
+  note?: string
+}
+
+/** One line on the grid area(s) behind the hub, or null when not zonal. */
+export function gridAreasSummary(scope: EhFleetScope | null | undefined): string | null {
+  const areas = scope?.grid_areas ?? []
+  if (areas.length === 0) return null
+  const sampled = areas.filter(a => a.sampled)
+  const parts = [`${areas.length} grid area${areas.length === 1 ? '' : 's'}, ${sampled.length} sampled`]
+  const stores = sampled.flatMap(a => (a.storage_dispatched ? a.storage : []))
+  if (stores.length > 0) parts.push(`grid storage dispatched: ${stores.join(', ')}`)
+  for (const a of areas.filter(x => !x.sampled)) {
+    parts.push(`${a.links.join(', ')}: unbounded (v1)${a.reason ? ` — ${a.reason}` : ''}`)
+  }
+  return parts.join('; ')
+}
+
+/** One line per common-mode event (applied, or why not). */
+export function commonModeLines(scope: EhFleetScope | null | undefined): string[] {
+  return (scope?.import_common_mode ?? []).map(e => (e.applied
+    ? (e.rate > 0
+      ? `${e.link}: common-mode q=${e.rate} (${e.basis}), MTTR ${e.mttr_hours} h — Link and grid area down together`
+      : `${e.link}: common-mode q=0 — no effect`)
+    : `${e.link}: common-mode data not applied — ${e.reason ?? 'no reason given'}`))
+}
+
+/** How the COPT screening holds the import, plus the exact import LOLE. */
+export function coptImportSummary(
+  scope: EhFleetScope | null | undefined,
+  coptMetrics: { import_exact?: EhImportExact | null } | null | undefined,
+): string | null {
+  const model = scope?.copt_import_model
+  if (!model) return null
+  const label = model === 'expected_surplus_profile'
+    ? 'COPT screening: import Link scaled by the expected grid surplus (ranking only)'
+    : model === 'two_state'
+      ? 'COPT screening: import Link as a two-state unit'
+      : 'COPT screening: import as a firm block at the planning limit'
+  const withEvents = scope?.copt_common_mode === 'event_mixture'
+    ? `${label}; common-mode events mixed exactly`
+    : label
+  const exact = coptMetrics?.import_exact?.lole_hours
+  if (exact == null) return withEvents
+  const delta = coptMetrics?.import_exact?.delta_mw
+  const rounding = delta != null && delta > 1
+    ? `, import rounded down to ${Number(delta).toFixed(0)} MW levels`
+    : ''
+  return `${withEvents}; exact import LOLE ${Number(exact).toFixed(2)} h (analytic, no storage${rounding})`
+}
+
 /** True when there is a certification verdict or an honest reason to show. */
 export function hasCertificationBlock(report: EhReferenceDesignReport): boolean {
   const section = report.sections?.certification
@@ -150,6 +246,39 @@ export function fmeaTopModes(report: EhReferenceDesignReport): EhFmeaTopMode[] {
       Boolean(m) && typeof m === 'object'
       && typeof (m as EhFmeaTopMode).mode_id === 'string',
   )
+}
+
+/** The fmea_top payload's COPT import line (see ``coptImportSummary``). */
+export function fmeaCoptImportSummary(report: EhReferenceDesignReport): string | null {
+  const payload = report.sections?.fmea_top?.payload as {
+    fleet_scope?: EhFleetScope | null
+    copt_metrics?: { import_exact?: EhImportExact | null } | null
+  } | undefined
+  return coptImportSummary(payload?.fleet_scope, payload?.copt_metrics)
+}
+
+/** The COPT caveat and fidelity notes carried on the fmea_top payload. */
+export function fmeaCoptNotes(report: EhReferenceDesignReport): string[] {
+  const payload = report.sections?.fmea_top?.payload as {
+    fleet_scope?: EhFleetScope | null
+    copt_fidelity_note?: string | null
+  } | undefined
+  return [payload?.fleet_scope?.copt_import_note, payload?.copt_fidelity_note]
+    .filter((x): x is string => typeof x === 'string' && x.length > 0)
+}
+
+/** How a sampled import Link is ranked in fmea_top (once: B, else A). */
+export function fmeaImportRankingNote(report: EhReferenceDesignReport): string | null {
+  const payload = report.sections?.fmea_top?.payload as {
+    import_link_ranking?: Record<string, string>
+    import_link_ranking_note?: string | null
+  } | undefined
+  const ranking = payload?.import_link_ranking
+  if (!ranking || Object.keys(ranking).length === 0) return null
+  const parts = Object.entries(ranking).map(
+    ([link, view]) => `${link}: ${view === 'class_b' ? 'Class-B row' : 'class-A row'}`)
+  return `Import Link ranked once — ${parts.join(', ')}.`
+    + (payload?.import_link_ranking_note ? ` ${payload.import_link_ranking_note}` : '')
 }
 
 /** CSV rows for the FMEA top-N table. */
@@ -637,7 +766,34 @@ export function EhReferenceDesignPanel() {
                           <span className="text-text">{certification.ens_met ? 'met' : 'missed'}</span>
                         </span>
                       )}
+                      {importModelLabel(certification) && (
+                        <span
+                          data-testid="eh-certification-import"
+                          data-import-model={certification.import_model
+                            ?? certification.fleet_scope?.import_model ?? 'firm_block'}
+                        >
+                          <span className="text-muted">import </span>
+                          <span className="text-text">{importModelLabel(certification)}</span>
+                        </span>
+                      )}
                     </div>
+                  )}
+                  {gridAreasSummary(certification?.fleet_scope) && (
+                    <p className="text-[10px] text-muted" data-testid="eh-certification-grid-areas">
+                      {gridAreasSummary(certification?.fleet_scope)}
+                    </p>
+                  )}
+                  {commonModeLines(certification?.fleet_scope).length > 0 && (
+                    <ul className="text-[10px] text-muted" data-testid="eh-certification-common-mode">
+                      {commonModeLines(certification?.fleet_scope).map(line => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {certification?.fleet_scope?.note && (
+                    <p className="text-[10px] text-muted" data-testid="eh-certification-scope-note">
+                      {certification.fleet_scope.note}
+                    </p>
                   )}
                   {report.sections?.certification?.note && (
                     <p className="text-[10px] text-muted" data-testid="eh-certification-note">
@@ -790,6 +946,21 @@ export function EhReferenceDesignPanel() {
                   {report.sections?.fmea_top?.note && (
                     <p className="text-[10px] text-muted" data-testid="eh-fmea-top-note">
                       {report.sections.fmea_top.note}
+                    </p>
+                  )}
+                  {fmeaCoptImportSummary(report) && (
+                    <p className="text-[10px] text-muted" data-testid="eh-fmea-top-copt-import">
+                      {fmeaCoptImportSummary(report)}
+                    </p>
+                  )}
+                  {fmeaCoptNotes(report).length > 0 && (
+                    <div className="text-[10px] text-muted" data-testid="eh-fmea-top-copt-notes">
+                      {fmeaCoptNotes(report).map(line => <p key={line}>{line}</p>)}
+                    </div>
+                  )}
+                  {fmeaImportRankingNote(report) && (
+                    <p className="text-[10px] text-muted" data-testid="eh-fmea-top-import-ranking">
+                      {fmeaImportRankingNote(report)}
                     </p>
                   )}
                 </div>
