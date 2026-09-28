@@ -157,12 +157,22 @@ turned out to be, and one turned out to be more severe.
 Requiring a loads table (the amendment above) stops gridspine from INVENTING
 demand. It does not stop a client's two tables from disagreeing with each other —
 and nothing checked. Measured on the real 39-bus grid: a dispatch at 90% of its
-own demand was accepted, converged with **+625 MW arriving through the external
-grid's slack**, and produced flows at 150% loading — while `import_mw`, the
-ranking criterion whose whole purpose is "greatest reliance on the external
-grid", read **0.0**, because it sums what the client wrote on the ext_grid row
-rather than what the slack did. Every N-1 severity, fault level and `.raw` in
-that study describes a grid state the client's tables do not.
+own demand was accepted and converged with **+717.3 MW arriving through the
+external grid's slack**, where the same fixture balanced draws +130.6 MW — its
+losses. `import_mw`, the ranking criterion whose whole purpose is "greatest
+reliance on the external grid", read **0.0** in both cases, because it sums what
+the client wrote on the ext_grid row rather than what the slack did. Every N-1
+severity, fault level and `.raw` in that study describes a grid state the
+client's tables do not.
+
+Two corrections to the first version of this section, both found by re-measuring
+rather than re-reading. **+625 MW was the wrong number in the wrong place:** that
+is the TABLE gap (625.4 MW); the slack carries 717.3 MW, the difference being the
+network's losses. And **the branch loading proves nothing**: the short case's
+worst line sits at 149.7%, the balanced case's at 181.4%, because an equal-share
+dispatch ignores the network — so loading is a property of the fixture, not a
+symptom of the imbalance. The undeclared import is the whole finding; quoting an
+overload beside it made the evidence look stronger than it is.
 
 This is the same argument the increment's own amendment makes for requiring
 demand, applied one step further, and it was missed for the same reason: the

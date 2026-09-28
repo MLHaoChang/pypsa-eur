@@ -59,10 +59,14 @@ two tables from disagreeing with each other. When they do, the load flow still
 converges — the external grid's slack absorbs the difference in silence — and
 then the flows, the N-1 severities, the fault levels and the `.raw` in the
 handoff bundle all describe a grid state the client's tables do not. Measured on
-the 39-bus grid: generation at 90% of demand converges with +717 MW through the
-slack and 149.7% branch loading, while `import_mw` — the ranking criterion whose
-whole purpose is "greatest reliance on the external grid" — reads 0.0, because it
-sums what the client wrote on the ext_grid row rather than what the slack did.
+the 39-bus grid: a dispatch at 90% of demand converges with +717 MW through the
+slack where a BALANCED one draws +131 MW (its losses), while `import_mw` — the
+ranking criterion whose whole purpose is "greatest reliance on the external grid"
+— reads 0.0 in both cases, because it sums what the client wrote on the ext_grid
+row rather than what the slack did. The slack figure is the signature. Branch
+loading is NOT: on the same equal-share fixture the balanced case's worst line
+sits at 181%, above the short case's 150%, because an equal-share dispatch ignores
+the network. What the imbalance hides is ~586 MW of undeclared import.
 
 So the hourly totals must agree to within what losses could explain. This does
 not forbid imports: the producer already requires a row for every registry unit,

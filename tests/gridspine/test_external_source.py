@@ -421,11 +421,13 @@ def test_a_literally_duplicated_header_is_refused_rather_than_silently_dropped(t
 # `.raw` in the handoff bundle describe a grid state the client's tables do not.
 #
 # Measured on the real 39-bus grid: generation at 90% of demand converges with
-# +717 MW coming through the slack and 149.7% branch loading, while `import_mw`
-# — the ranking criterion whose entire purpose is "greatest reliance on the
-# external grid" — reads 0.0, because it sums what the client WROTE on the
-# ext_grid row. A 10% gap is what a kW-for-MW slip, a 15-minute energy column or
-# one omitted machine produces.
+# +717 MW coming through the slack, where the same fixture balanced draws +131 MW
+# (its losses), while `import_mw` — the ranking criterion whose entire purpose is
+# "greatest reliance on the external grid" — reads 0.0 either way, because it sums
+# what the client WROTE on the ext_grid row. The slack is the signature; branch
+# loading is not (balanced, this fixture's worst line sits at 181%, ABOVE the short
+# case's 150%, because an equal-share dispatch ignores the network). A 10% gap is
+# what a kW-for-MW slip, a 15-minute energy column or one omitted machine produces.
 #
 # Refusing is not the same as forbidding imports. The producer already requires
 # a row for every registry unit, the external grid's included, so a client who
