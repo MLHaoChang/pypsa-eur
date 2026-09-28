@@ -186,7 +186,13 @@ Files: `tariff_engine.py`, `lp_bindings.py`, `test_tariff_engine_demand.py`, `te
   - `|` is refused in demand item ids and period names, and peak keys are asserted unique.
   - A P1 record without `hash_version` holding two peaks for one (item, window, month) flags `demand_recipe_changed`; unique-name P1 records are unflagged.
   - New live LP = engine tests: ratchet on a split peak; summer/winter windows with and without a ratchet; a free winter with a ratchet; net hourly; two periods. Engine tests are in `test_tariff_engine_demand.py`.
-  - **Upgrade note:** saved P1 tariffs whose same-name demand fragments have two effective rates in one month no longer validate. The project still loads, and rows are shown with `commercial_config_invalid`; a re-solve needs the tariff fixed (rename one fragment).
+  - **Upgrade note:** two kinds of saved P1 demand item no longer validate — same-name fragments with two
+  effective rates in one month, and a demand item id or period name containing `|`. The project still loads and
+  its rows are still shown, flagged `commercial_config_invalid`; they also carry `config_changed_since_solve`
+  (the stored config no longer parses, so it cannot be matched — the config itself did not change) and, for a
+  split window billed twice under P1, `demand_recipe_changed`. A re-solve needs the tariff fixed (rename one
+  fragment, or drop the `|`).
+- Round 2 → **PASS** (conditions C1, C2 closed: the upgrade note above).
 
 ## WP2.1a-i Engine: per-day fixed, tariff capacity items, demand tiers
 
