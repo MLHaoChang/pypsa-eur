@@ -318,7 +318,12 @@ export interface TariffPeriod {
   tier_rates?: number[] | null
 }
 export interface TariffTier { threshold: number; rate: number }
-export interface TariffRatchet { lookback_months: number; share: number }
+/** Range mode (`lookback_months`, optionally `cyclic_year`) or designated months
+ *  (`months`, year-wide) — exactly one of the two (IC P2 WP2.1a-iii). */
+export interface TariffRatchet {
+  lookback_months?: number | null; share: number
+  months?: number[] | null; cyclic_year?: boolean
+}
 export interface TariffItem {
   id: string
   kind: 'energy' | 'demand' | 'capacity' | 'fixed' | 'certificate' | 'tax_levy'

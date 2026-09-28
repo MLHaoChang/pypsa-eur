@@ -37,6 +37,8 @@ HASH_VERSION = 2
 FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {
     ("CommercialConfig", "power_factor"): None,          # WP2.1a-i
     ("TariffPeriod", "tier_rates"): None,                # WP2.1a-ii
+    ("Ratchet", "months"): None,                         # WP2.1a-iii
+    ("Ratchet", "cyclic_year"): False,                   # WP2.1a-iii
 }
 
 

@@ -277,6 +277,43 @@ def _ratchet_prior(month: str, k: int, lookback: int, actual: dict,
     return (max(values) if values else None), missing
 
 
+def _ratchet_floor_prior(ratchet, month: str, k: int, actual: dict, meter_history,
+                        in_dispatch: set[str]) -> tuple[float | None, bool]:
+    """(max ACTUAL peak kW the ratchet reads for `month`, window `k`; whether a
+    month it needs is unknown) for the three modes (P2 WP2.1a-iii):
+
+    * range, non-cyclic — `_ratchet_prior` (P1: months before, history before the
+      horizon);
+    * range, cyclic — the `lookback_months` before `month`, wrapping within its
+      rate year (January reads December of the SAME year);
+    * months — year-wide: the designated months of the rate year.
+
+    Cyclic and months mode read an unmodelled month's meter history under its
+    SAME-rate-year key; absent ⇒ unknown (never inferred from other months)."""
+    if ratchet.months is None and not ratchet.cyclic_year:
+        return _ratchet_prior(month, k, ratchet.lookback_months, actual, meter_history,
+                              in_dispatch)
+    hist = _history_kw(meter_history)
+    year, mm = int(month[:4]), int(month[5:])
+    if ratchet.months is not None:
+        wanted = [f"{year}-{d:02d}" for d in ratchet.months]
+    else:
+        wanted = [f"{year}-{((mm - back - 1) % 12) + 1:02d}"
+                  for back in range(1, ratchet.lookback_months + 1)]
+    values: list[float] = []
+    missing = False
+    for m in wanted:
+        if (m, k) in actual:
+            values.append(actual[(m, k)])
+        elif m in in_dispatch:
+            continue  # modelled month with no charged interval in this window
+        elif m in hist:
+            values.append(hist[m])
+        else:
+            missing = True
+    return (max(values) if values else None), missing
+
+
 def _tier_cost(tiers, volume_kwh: np.ndarray) -> np.ndarray:
     """Cumulative cost of `volume_kwh` under `tiers` (each tier's rate applies
     to the volume between its threshold and the next)."""
@@ -635,9 +672,8 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
                         # ratchet either — the LP has no peak for it (WP2.1a-0
                         # review #1); its month still counts as modelled.
                         charged = {mk: v for mk, v in actual.items() if _charged(mk)}
-                        prior, missing = _ratchet_prior(key, k, item.ratchet.lookback_months,
-                                                        charged, meter_history,
-                                                        set(months_sorted))
+                        prior, missing = _ratchet_floor_prior(item.ratchet, key, k, charged,
+                                                              meter_history, set(months_sorted))
                         if prior is not None and np.isfinite(prior):
                             billed = max(peak, item.ratchet.share * prior)
                         if missing:

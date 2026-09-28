@@ -320,6 +320,17 @@ None` (designated months, URDB `lookbackMonths`) and `Ratchet.cyclic_year: bool 
   with `cyclic_year=False` and no history ⇒ `ratchet_seed_missing`; months mode on representative weeks
   missing a designated month ⇒ `ratchet_seed_missing`.
 
+- **As implemented:**
+  - `Ratchet.months` and `Ratchet.cyclic_year`, and `lookback_months` is now optional. The validator enforces exactly one mode, allows `cyclic_year` in range mode only with `lookback_months ≤ 11`, and requires months to be unique values in 1..12. Both fields are registered in `FIELDS_AFTER_V1`.
+  - `tariff_engine._ratchet_floor_prior` dispatches the three modes. Cyclic and months modes read an unmodelled month's history under its same-rate-year key; a month that is still unknown sets `ratchet_seed_missing`.
+  - The LP reports the new modes `not_in_lp` (`ratchet_mode_not_in_lp_until_WP2.1c`), so it never reads a missing `lookback_months`.
+  - Oracle fixtures, with PROVENANCE:
+    - `r3_case2`, `r3_case3` (derived);
+    - `r3prime.urdb.json` (self-authored);
+    - `r3prime.tariff.json`.
+  - R3 cases 2 and 3 match REopt's `monthly_peaks` per month to the cent. R3′ matches in cyclic range mode.
+  - `types.ts` mirrored.
+
 ## WP2.1b Site billing adapter, compact billing frames, `per_item_sampled`
 
 Files: `backend/services/commercial/billing.py` (new, pure), `services/finance/report.py`

@@ -163,6 +163,11 @@ def _lp_reason(item: TariffItem) -> str | None:
         # capacity items enter the LP in P2 WP2.1c.
         return "capacity_not_in_lp_until_WP2.1c"
     if _is_demand(item):
+        if item.ratchet is not None and (item.ratchet.months is not None
+                                         or item.ratchet.cyclic_year):
+            # Designated-month and cyclic ratchets (WP2.1a-iii) are billed
+            # exactly; the LP terms arrive in WP2.1c.
+            return "ratchet_mode_not_in_lp_until_WP2.1c"
         if item.tiers:
             return "tiers_on_demand_not_supported"
         if item.unit != "per_kw_month":

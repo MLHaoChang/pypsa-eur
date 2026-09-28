@@ -449,3 +449,91 @@ def test_malformed_tiers_on_a_windowed_item_are_a_validation_error(tiers):
         _tariff({"id": "e", "kind": "energy", "unit": "per_kwh", "tiers": tiers,
                  "periods": [{"name": "peak", "rate": 0.0, "start_hour": 17, "end_hour": 21},
                              {"name": "rest", "rate": 0.0}]})
+
+
+# ── P2 WP2.1a-iii: designated-month and cyclic ratchets ────────────────────
+# REopt's lookback cases (runtests.jl L1893–1956, 0-based hours below).
+
+R3_RATES = [10, 10, 20, 50, 20, 10, 20, 20, 20, 20, 20, 5]
+
+
+def _r3_load():
+    idx = pd.date_range("2022-01-01", "2022-12-31 23:00", freq="h")
+    kw = np.full(len(idx), 100.0)
+    kw[21], kw[2402], kw[4087], kw[8332] = 200.0, 400.0, 500.0, 300.0
+    return pd.DataFrame({"import_mw": kw / 1000.0, "export_mw": 0.0}, index=idx)
+
+
+@pytest.mark.parametrize("fixture,peaks", [
+    ("r3_case2.tariff.json", [300, 300, 300, 400, 300, 500, 300, 300, 300, 300, 300, 300]),
+    ("r3_case3.tariff.json", [225, 225, 225, 400, 300, 500, 375, 375, 375, 375, 375, 375]),
+])
+def test_r3_lookbacks_match_reopt_to_the_cent(fixture, peaks):
+    res = rate(_r3_load(), _load(fixture), step_hours=1.0, timezone=None)
+    expected = sum(p * r for p, r in zip(peaks, R3_RATES))
+    assert abs(res.per_item["demand"] - expected) < CENT
+    billed = res.demand_lines.sort_values("month")["billed_kw"].tolist()
+    assert billed == pytest.approx(peaks)
+    assert "ratchet_seed_missing" not in (res.notes.get("demand") or [])
+
+
+def _r3prime_load():
+    idx = pd.date_range("2022-01-01", "2022-12-31 23:00", freq="h")
+    kw = np.ones(len(idx))
+    kw[7] = 100.0
+    return pd.DataFrame({"import_mw": kw / 1000.0, "export_mw": 0.0}, index=idx)
+
+
+def test_r3prime_cyclic_range_matches_reopt_to_the_cent():
+    res = rate(_r3prime_load(), _load("r3prime.tariff.json"), step_hours=1.0, timezone=None)
+    expected = 100 * (10.5 + 0.35 * 10.5 * 5 + 0.35 * 11.5 * 6)
+    assert abs(res.per_item["demand"] - expected) < CENT
+    assert res.total is not None
+
+
+def test_r3prime_without_cyclic_year_and_history_is_a_lower_bound():
+    t = json.loads((ORACLES / "r3prime.tariff.json").read_text())
+    t["items"][0]["ratchet"]["cyclic_year"] = False
+    res = rate(_r3prime_load(), Tariff.model_validate(t), step_hours=1.0, timezone=None)
+    assert "ratchet_seed_missing" in res.notes["demand"]
+    assert res.total is None
+
+
+def test_months_mode_reads_same_rate_year_history_for_an_unmodelled_month():
+    """A designated month outside the dispatch reads meter history under ITS
+    rate-year key; absent, the ratchet is a lower bound."""
+    t = _load("r3_case2.tariff.json")
+    d = _r3_load()
+    d = d[d.index.month >= 2]                         # January (designated) not modelled
+    res = rate(d, t, step_hours=1.0, timezone=None)
+    assert "ratchet_seed_missing" in res.notes["demand"]
+    res = rate(d, t, step_hours=1.0, timezone=None, meter_history={"2022-01": 1000.0})
+    feb = res.demand_lines[res.demand_lines["month"] == "2022-02"].iloc[0]
+    assert feb["billed_kw"] == pytest.approx(750.0)   # 0.75 × the metered January 1000 kW
+
+
+@pytest.mark.parametrize("ratchet,match", [
+    ({"share": 0.5}, "lookback_months"),                                  # neither
+    ({"lookback_months": 3, "months": [1], "share": 0.5}, "lookback_months"),  # both
+    ({"months": [1], "share": 0.5, "cyclic_year": True}, "cyclic_year"),
+    ({"months": [13], "share": 0.5}, "months"),
+    ({"lookback_months": 12, "share": 0.5, "cyclic_year": True}, "cyclic_year"),
+])
+def test_ratchet_modes_are_validated(ratchet, match):
+    with pytest.raises(ValueError, match=match):
+        _tariff({"id": "d", "kind": "demand", "unit": "per_kw_month",
+                 "periods": [{"name": "all", "rate": 10.0}], "ratchet": ratchet})
+
+
+def test_new_ratchet_modes_stay_out_of_the_lp_until_wp2_1c():
+    from services.commercial import lp_bindings as L
+
+    for f in ("r3_case2.tariff.json", "r3_case3.tariff.json"):
+        assert L._lp_reason(_load(f).items[0]) == "ratchet_mode_not_in_lp_until_WP2.1c"
+
+
+def test_new_ratchet_fields_are_registered_for_hash_recipe_1():
+    from services.commercial.hashing import FIELDS_AFTER_V1
+
+    assert FIELDS_AFTER_V1[("Ratchet", "months")] is None
+    assert FIELDS_AFTER_V1[("Ratchet", "cyclic_year")] is False

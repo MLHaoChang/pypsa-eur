@@ -138,8 +138,39 @@ class Tier(BaseModel):
 
 
 class Ratchet(BaseModel):
-    lookback_months: int = Field(ge=1, le=36)
+    """A demand ratchet: billed demand ≥ `share` × the maximum ACTUAL peak of the
+    lookback months (IC P2 WP2.1a-iii adds two URDB modes):
+
+    * range mode (`lookback_months = N`, URDB `lookbackRange`): the N months
+      before; with `cyclic_year` the lookback wraps within the rate year
+      (January reads December of the SAME year — REopt's steady-state year);
+    * months mode (`months = [...]`, URDB `lookbackMonths`): year-wide — every
+      month of the rate year is billed at least `share` × the maximum actual
+      peak over the designated months of that year.
+
+    Exactly one of `lookback_months` / `months` is set.
+    """
+
+    lookback_months: int | None = Field(default=None, ge=1, le=36)
     share: float = Field(gt=0, le=1)
+    months: list[int] | None = None
+    cyclic_year: bool = False
+
+    @model_validator(mode="after")
+    def _one_mode(self) -> "Ratchet":
+        if (self.lookback_months is None) == (self.months is None):
+            raise ValueError("a ratchet sets exactly one of lookback_months (range mode) and "
+                             "months (designated months)")
+        if self.months is not None:
+            if not self.months or any(m < 1 or m > 12 for m in self.months) \
+                    or len(set(self.months)) != len(self.months):
+                raise ValueError("ratchet months are unique values in 1..12")
+            if self.cyclic_year:
+                raise ValueError("cyclic_year applies to range mode only (months mode is "
+                                 "year-wide by definition)")
+        if self.cyclic_year and self.lookback_months is not None and self.lookback_months > 11:
+            raise ValueError("cyclic_year wraps within one rate year: lookback_months ≤ 11")
+        return self
 
 
 class TariffItem(BaseModel):
