@@ -4552,7 +4552,22 @@ def _dispatch_real_tool_call(
                 "type": "tool_result",
                 "tool_use_id": tool_use_id,
                 "is_error": True,
-                "content": problem,
+                # THE FIFTH is_error SITE. `problem` comes from a pre-dispatch
+                # validator, and those interpolate the caller-supplied component
+                # name with `!r` — which escapes quotes and backslashes and NOT
+                # the fence delimiter. So this reached the provider as untrusted
+                # free text in an unfenced region, and the laundering path is
+                # real: the model reads a hostile name out of a (fenced) tool
+                # result, passes it to delete_component, and the validator
+                # re-emitted it here raw.
+                #
+                # `_result_to_anthropic_content`'s docstring counted FOUR
+                # is_error sites; there are five. Routed through the same builder
+                # as the others so there is one answer to "what does an error
+                # look like to the model", not five.
+                "content": _error_result_content(
+                    problem, None, "invalid_tool_args",
+                ),
             })
             return
 
@@ -4886,7 +4901,9 @@ def _apply_turn_tool_result_budget(
 _ERROR_DETAIL_CAP: int = 1000
 
 
-def _error_result_content(detail: Any, exc: BaseException, error_kind: str) -> str:
+def _error_result_content(
+    detail: Any, exc: BaseException | None, error_kind: str,
+) -> str:
     """
     The MODEL-FACING content of an `is_error` tool_result: a typed kind we
     author, then the free-text detail, fenced.
