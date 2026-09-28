@@ -135,6 +135,16 @@ def _fresh(ss: np.random.SeedSequence, extra_key: tuple = ()) -> np.random.SeedS
                                   pool_size=ss.pool_size)
 
 
+def _placeholder(u):
+    """
+    A slot-keeping stand-in for a unit another ``sample_capacity`` call
+    owns: ``q = 0`` consumes no stream, and without a profile / series it
+    skips the per-unit array work — so a unit's path is generated once per
+    batch, by the one call that keeps it.
+    """
+    return dataclasses.replace(u, q=0.0, profile=None, capacity_series=None)
+
+
 def _discharge_only(need, soc, p_rem, e_nom, eff_s, eff_d):
     """
     Discharge ``need`` (≥ 0, grid-side MW) from the grid stores this hour.
@@ -185,10 +195,13 @@ class _AreaState:
     """Per-area arrays for one simulation call."""
 
     def __init__(self, area: GridArea, hub, units, ss, H, draws,
-                 grid_storage_enabled, initial_soc_frac):
+                 grid_storage_enabled, initial_soc_frac, track=False):
         self.area = area
+        # The trace sums cost a pass over (S, draws) per hour — only when
+        # a caller asked for them.
+        self.track = bool(track)
         imp = frozenset(int(i) for i in area.import_idx)
-        link_only = tuple(u if i in imp else dataclasses.replace(u, q=0.0)
+        link_only = tuple(u if i in imp else _placeholder(u)
                           for i, u in enumerate(units))
         self.link_t = np.ascontiguousarray(sample_capacity(
             link_only, H, draws, _fresh(ss),
@@ -261,7 +274,8 @@ class _AreaState:
             if short.any():
                 unmet, given = _discharge_only(short, self.soc, self.p_rem,
                                                self.e_nom, self.eff_s, self.eff_d)
-                self.own_mwh += float(given.sum())
+                if self.track:
+                    self.own_mwh += float(given.sum())
                 g_def = np.where(g_def > 0.0, unmet, g_def)
         self.surplus_g = np.maximum(-g_def, 0.0)
         if self.cm_up is not None:
@@ -284,7 +298,8 @@ class _AreaState:
             return deficit
         _, given = _discharge_only(need_h / r, self.soc, self.p_rem,
                                    self.e_nom, self.eff_s, self.eff_d)
-        self.support_mwh += float(given.sum())
+        if self.track:
+            self.support_mwh += float(given.sum())
         return deficit - given * r
 
     def charge(self, h, imp):
@@ -295,10 +310,11 @@ class _AreaState:
         reserved = imp / r if r > 0.0 else 0.0
         left = np.maximum(self.surplus_g - reserved, 0.0)
         if left.any():
-            before = self.soc.sum()
+            before = self.soc.sum() if self.track else 0.0
             _charge_only(left, self.soc, self.p_rem, self.e_nom, self.eff_s,
                          self.eff_d)
-            self.charge_mwh += float(self.soc.sum() - before)
+            if self.track:
+                self.charge_mwh += float(self.soc.sum() - before)
 
 
 def simulate_zonal_blocks(z: ZonalInputs, *, draws: int, seed,
@@ -336,10 +352,16 @@ def simulate_zonal_blocks(z: ZonalInputs, *, draws: int, seed,
     units = tuple(hub.units)
     all_imp = frozenset(int(i) for a in z.areas for i in a.import_idx)
 
+    # The Links are excluded here and sampled by their area's own call; as
+    # placeholders they keep their slots without generating their paths twice.
+    hub_units = tuple(_placeholder(u) if i in all_imp else u
+                      for i, u in enumerate(units))
     hub_t = np.ascontiguousarray(sample_capacity(
-        units, H, draws, _fresh(ss), exclude=all_imp, periods=hub.periods).T)
+        hub_units, H, draws, _fresh(ss), exclude=all_imp,
+        periods=hub.periods).T)
     areas = [_AreaState(a, hub, units, ss, H, draws, grid_storage_enabled,
-                        initial_soc_frac) for a in z.areas]
+                        initial_soc_frac, track=trace is not None)
+             for a in z.areas]
     add_order = sorted(range(len(z.areas)), key=lambda k: (
         min(z.areas[k].import_idx) if z.areas[k].import_idx else len(units), k))
 
@@ -413,15 +435,17 @@ def zonal_mc_adequacy(z: ZonalInputs, *, draws: int = 500, seed=0,
 
 # ── WP3: the grid surplus as the COPT screening sees it ──────────────────
 
-def _grid_surface(units, x, periods) -> tuple[np.ndarray, np.ndarray]:
+def _grid_surfaces(units, xs, periods) -> list[tuple[np.ndarray, np.ndarray]]:
     """
     Per hour ``(P[C_h < x_h], E[max(x_h − C_h, 0)])`` for the fleet
-    ``units`` — the COPT surface's own recipe (``copt._screen_block``):
-    split the fleet, net the units beyond ``K_EXACT`` at expectation and
-    the rate-zero profiled ones at full availability, convolve the two-state
-    units, mix the profiled ones exactly. Units with a per-period capacity
-    series are evaluated block by block at their constant block capacity,
-    as ``screening_analysis`` does.
+    ``units``, once per threshold array in ``xs`` — the COPT surface's own
+    recipe (``copt._screen_block``): split the fleet, net the units beyond
+    ``K_EXACT`` at expectation and the rate-zero profiled ones at full
+    availability, convolve the two-state units, mix the profiled ones
+    exactly. Units with a per-period capacity series are evaluated block by
+    block at their constant block capacity, as ``screening_analysis`` does.
+    The split and the table depend on the fleet only, so they are built
+    ONCE per block and every threshold is read off them.
     """
     from services.adequacy.activity import block_capacity
     from services.adequacy.copt import (
@@ -432,13 +456,15 @@ def _grid_surface(units, x, periods) -> tuple[np.ndarray, np.ndarray]:
         split_fleet,
     )
 
-    x = np.asarray(x, dtype=np.float64)
-    H = x.shape[0]
+    xs = [np.asarray(x, dtype=np.float64) for x in xs]
+    if not xs:
+        return []
+    H = xs[0].shape[0]
     has_series = any(getattr(u, "capacity_series", None) is not None
                      for u in units)
     blocks = tuple(periods) if has_series else (("ALL", 0, H),)
-    lolp = np.zeros(H, dtype=np.float64)
-    es = np.zeros(H, dtype=np.float64)
+    out = [(np.zeros(H, dtype=np.float64), np.zeros(H, dtype=np.float64))
+           for _ in xs]
     for _label, start, end in blocks:
         block_units = []
         for u in units:
@@ -450,14 +476,20 @@ def _grid_surface(units, x, periods) -> tuple[np.ndarray, np.ndarray]:
                     else np.asarray(u.profile, dtype=np.float64)[start:end])
             block_units.append(dataclasses.replace(
                 u, capacity_mw=cap, capacity_series=None, profile=prof))
-        xb = x[start:end]
         hb = end - start
         split = split_fleet(block_units)
-        xb = (xb - netted_expectation(split.netted, hb)
-              - deterministic_output(split.deterministic, hb))
+        shift = (netted_expectation(split.netted, hb)
+                 + deterministic_output(split.deterministic, hb))
         dist = build_copt(list(split.table))
-        lolp[start:end], es[start:end] = mixture_hourly(dist, xb, split.mixed)
-    return lolp, es
+        for x, (lolp, es) in zip(xs, out):
+            lolp[start:end], es[start:end] = mixture_hourly(
+                dist, x[start:end] - shift, split.mixed)
+    return out
+
+
+def _grid_surface(units, x, periods) -> tuple[np.ndarray, np.ndarray]:
+    """``_grid_surfaces`` for one threshold array."""
+    return _grid_surfaces(units, [x], periods)[0]
 
 
 def _grid_expected_shortfall(units, x, periods) -> np.ndarray:
@@ -489,8 +521,8 @@ def expected_surplus_fraction(grid_units, grid_residual, *, cap, ratio,
     r = np.asarray(grid_residual, dtype=np.float64)
     live = (cap > 0.0) & (ratio > 0.0)
     c_grid = np.where(live, cap / np.where(ratio > 0.0, ratio, 1.0), 0.0)
-    es_r = _grid_expected_shortfall(grid_units, r, periods)
-    es_rc = _grid_expected_shortfall(grid_units, r + c_grid, periods)
+    (_, es_r), (_, es_rc) = _grid_surfaces(grid_units, [r, r + c_grid],
+                                           periods)
     with np.errstate(divide="ignore", invalid="ignore"):
         f = np.where(live, ratio * (c_grid + es_r - es_rc) / np.where(
             live, cap, 1.0), 1.0)
@@ -573,17 +605,17 @@ def exact_import_metrics(z: ZonalInputs, *,
         else:
             ratio = np.asarray(a.delivery_ratio, dtype=np.float64)
             r = a.grid.residual
-            for j in range(1, L + 2):
-                y = np.where(ratio > 0.0,
-                             r + j * delta / np.where(ratio > 0.0, ratio, 1.0),
-                             np.inf)
-                finite = np.isfinite(y)
-                lolp_y = np.ones(H, dtype=np.float64)
-                if finite.any():
-                    lp, _ = _grid_surface(a.grid.units, np.where(finite, y, 0.0),
-                                          a.grid.periods)
-                    lolp_y = np.where(finite, lp, 1.0)
-                S[:, j] = 1.0 - lolp_y
+            finite = ratio > 0.0
+            if finite.any():
+                inv = 1.0 / np.where(finite, ratio, 1.0)
+                surfaces = _grid_surfaces(
+                    a.grid.units,
+                    [np.where(finite, r + j * delta * inv, 0.0)
+                     for j in range(1, L + 2)],
+                    a.grid.periods)
+                for j, (lp, _) in enumerate(surfaces, start=1):
+                    # A dead Link (ratio 0) passes nothing: survival 0.
+                    S[:, j] = np.where(finite, 1.0 - lp, 0.0)
         pk = np.zeros((H, L + 1), dtype=np.float64)
         for bits in itertools.product((0, 1), repeat=len(links)):
             p = 1.0
@@ -608,11 +640,11 @@ def exact_import_metrics(z: ZonalInputs, *,
 
     lolp = np.zeros(H, dtype=np.float64)
     eue = np.zeros(H, dtype=np.float64)
-    for j in range(pmf.shape[1]):
+    levels = [j for j in range(pmf.shape[1]) if (pmf[:, j] > 0.0).any()]
+    surfaces = _grid_surfaces(base, [res - j * delta for j in levels],
+                              hub.periods)
+    for j, (lp, es) in zip(levels, surfaces):
         w = pmf[:, j]
-        if not (w > 0.0).any():
-            continue
-        lp, es = _grid_surface(base, res - j * delta, hub.periods)
         lolp += w * lp
         eue += w * es
     weights = np.asarray(hub.weights, dtype=np.float64)

@@ -152,9 +152,6 @@ class FleetScope:
     link_models: list[ImportLinkModel] = field(default_factory=list)
     # CoptUnits appended to the hub fleet for the sampled Links.
     import_units: list = field(default_factory=list)
-    # Per snapshot: MW delivered at the hub per MW withdrawn from the grid.
-    delivery_ratio: Any = None
-    n_grid_components: int = 0
     # Per live Link: its grid component and its hub-side / grid-side series —
     # what the zonal builder groups into areas (plan 2026-09-28, WP2).
     link_grid: dict = field(default_factory=dict)
@@ -421,7 +418,6 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
     params = resolve_outage_params(n, "links")
     firm = np.zeros(H, dtype=float)
     cap_total = np.zeros(H, dtype=float)
-    sending_total = np.zeros(H, dtype=float)
     models: list[ImportLinkModel] = []
     import_units: list = []
     link_grid: dict = {}
@@ -455,7 +451,6 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
                                           cap_mw_max=0.0, source=src))
             continue
         cap_total += delivered
-        sending_total += sending
         link_grid[str(lk)] = {"comp": comp[g], "delivered": delivered,
                               "sending": sending}
         mttr = float(occ["mttr_hours"]) if src != "missing" else float("nan")
@@ -500,14 +495,10 @@ def hub_fleet_scope(n, overlay, *, sample_links: bool = True) -> FleetScope:
             f"outage rate outside [0, 1) on import Link(s): {', '.join(bad)}. "
             "An outage rate is a probability-like unavailability; fix the "
             "value (or clear it) before certifying the hub.")
-    with np.errstate(divide="ignore", invalid="ignore"):
-        ratio = np.where(sending_total > 0, cap_total / sending_total, 1.0)
     scope = FleetScope(mode="hub_side", note="", import_links=list(links),
                        excluded_buses=excluded, excluded_units=sorted(units),
                        import_firm_mw=firm, import_cap_mw=cap_total,
                        link_models=models, import_units=import_units,
-                       delivery_ratio=ratio,
-                       n_grid_components=len(grid_comps),
                        link_grid=link_grid,
                        grid_components={c: sorted(by_comp[c])
                                         for c in sorted(grid_comps)},
@@ -533,6 +524,15 @@ def _link_value(ldf, lk: str, col: str):
     return f if math.isfinite(f) else None
 
 
+def _common_mode_basis(ldf, lk: str) -> str:
+    """The Link's ``common_mode_basis`` (default ``"FOR"`` when unset)."""
+    if "common_mode_basis" in ldf.columns:
+        b = str(ldf.at[lk, "common_mode_basis"] or "").strip()
+        if b and b not in ("nan", "None"):
+            return b
+    return "FOR"
+
+
 def _common_mode_entry(ldf, lk: str, *, islanded: bool) -> dict | None:
     """
     The Link's opt-in common-mode data (plan 2026-09-28, WP4) → payload
@@ -547,12 +547,8 @@ def _common_mode_entry(ldf, lk: str, *, islanded: bool) -> dict | None:
     if rate is None:
         return None
     mttr = _link_value(ldf, lk, "common_mode_mttr_hours")
-    basis = "FOR"
-    if "common_mode_basis" in ldf.columns:
-        b = str(ldf.at[lk, "common_mode_basis"] or "").strip()
-        if b and b not in ("nan", "None"):
-            basis = b
-    entry = {"link": lk, "rate": rate, "mttr_hours": mttr, "basis": basis,
+    entry = {"link": lk, "rate": rate, "mttr_hours": mttr,
+             "basis": _common_mode_basis(ldf, lk),
              "area": None, "applied": False, "reason": None}
     if not rate_is_usable(rate):
         entry["_bad"] = f"common_mode_rate {rate:g} outside [0, 1)"
@@ -594,7 +590,8 @@ def _ignored_common_mode(ldf, keep: set, reason: str) -> list[dict]:
         out.append({"link": str(lk), "rate": rate,
                     "mttr_hours": _link_value(ldf, str(lk),
                                               "common_mode_mttr_hours"),
-                    "basis": "FOR", "area": None, "applied": False,
+                    "basis": _common_mode_basis(ldf, str(lk)), "area": None,
+                    "applied": False,
                     "reason": reason})
     return out
 
@@ -1033,10 +1030,10 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
                     inputs,
                     units=tuple(inputs.units) + tuple(scope.import_units),
                     residual=np.ascontiguousarray(inputs.residual - firm))
+                why = None
                 if import_model == "auto":
                     snap.zonal_inputs, why = _grid_areas(network, cfg, scope,
                                                          inputs)
-                    scope.note = _scope_note(scope, why)
                 # Review of WP4 (B1): only the "auto" path builds the chains.
                 for e in scope.common_mode:
                     if e["applied"] and e["area"] is None:
@@ -1044,6 +1041,9 @@ def freeze_fixed_plan(network, cfg, lock, *, overlay=None,
                         e["reason"] = (
                             f"import_model={import_model}: common-mode events "
                             "are modelled only on the default 'auto' path")
+                # AFTER the loop: the note states import_firmness, which
+                # reads the `applied` flags the loop may just have cleared.
+                scope.note = _scope_note(scope, why)
             else:
                 inputs = snapshot_inputs(network, cfg=cfg)
         except Exception as exc:  # noqa: BLE001 — the reason is the payload

@@ -233,6 +233,11 @@ def test_an_event_is_not_reported_applied_on_a_path_that_ignores_it(mode):
     frozen = _freeze(_weak(rate=0.05, mttr=24.0), import_model=mode)
     [entry] = frozen.scope["import_common_mode"]
     assert entry["applied"] is False and mode in entry["reason"]
+    # The note is written after the flag is cleared, so it states the same
+    # firmness as the payload (it said common_mode_sampled before).
+    firmness = frozen.scope["import_firmness"]
+    assert firmness != "common_mode_sampled"
+    assert f"import_firmness={firmness}" in frozen.scope["note"]
 
 
 def test_an_implied_mttf_under_one_hour_refuses_at_snapshot():
