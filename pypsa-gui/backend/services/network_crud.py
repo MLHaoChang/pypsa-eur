@@ -384,6 +384,28 @@ def _update_component(component_class: str, attr: str, name: str, kwargs: dict) 
     return {"name": new_name}
 
 
+def purge_component_side_data(n, component_class: str, attr: str, name: str) -> None:
+    """Drop the side data a removed component leaves behind.
+
+    Two stores outlive `n.remove`, and both bite later rather than now:
+
+      * per-period vintage bounds (and any stored vintage results) — stale
+        entries are expanded by the solver for an asset that is gone;
+      * `_user_ts` profile entries — they accumulate forever in project saves,
+        are re-injected on every solve, and a future component reusing the
+        same name inherits the deleted asset's profile.
+
+    EVERY path that removes a component must call this, not just the CRUD
+    delete. It is a free function taking `n` so the cascade delete — which
+    removes up to seven component classes in one call and lives in
+    `services.network_buses` — can share it without either module importing
+    the other's callers. Call it inside the same `PyPSAService.get_lock()`
+    block as the `n.remove` it follows.
+    """
+    vintage_service.delete_bounds_for_asset(n, component_class, name)
+    _user_ts_delete_asset(attr, name)
+
+
 def _delete_component(component_class: str, attr: str, name: str) -> None:
     n = PyPSAService.get_network()
     with PyPSAService.get_lock():
@@ -391,12 +413,5 @@ def _delete_component(component_class: str, attr: str, name: str) -> None:
         if name not in df.index:
             raise HTTPException(404, f"{component_class} '{name}' not found")
         n.remove(component_class, name)
-        # Drop any saved per-period bounds for the now-gone asset so the
-        # vintage_bounds dict doesn't keep stale entries that the solver would
-        # try (and fail) to expand at next solve.
-        vintage_service.delete_bounds_for_asset(n, component_class, name)
-        # Drop _user_ts entries too — without this they accumulate forever
-        # in project saves and a future component reusing the same name
-        # inherits the deleted asset's profile.
-        _user_ts_delete_asset(attr, name)
+        purge_component_side_data(n, component_class, attr, name)
     change_log_service.log("delete", component_class, name, f"Deleted {component_class.lower()} '{name}'")
