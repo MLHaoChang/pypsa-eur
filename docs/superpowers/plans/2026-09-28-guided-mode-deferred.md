@@ -16,7 +16,7 @@ Every file:line below was checked in the tree on 2026-09-28. `FE` = `pypsa-gui/f
 | Accepted, not fixed | E1–E2 (2) | — |
 | Non-goals (owner decision) | D1–D3 (3) | — |
 
-27 open items in 9 phases (P27a, P27b, P28–P31 committed; P32–P34 optional, not scheduled). 11 owner decisions, §4.
+27 open items in 9 phases (P27a, P27b, P28–P31 committed; P32 scheduled after P27a per D-8 = (a); P33–P34 optional, not scheduled). 11 owner decisions, §4.
 
 ## 1. Already fixed — no work (verified in code)
 
@@ -204,8 +204,8 @@ Test-first in every phase: each item's red test is written and seen failing befo
 | P28 loosens the send gate on a wrong readiness answer | readiness comes from the backend per profile; fail-open only when unknown |
 | P29 changes FMEA markup Expert users rely on | `FmeaTab.expertUnchanged` snapshot taken on the P28-GO commit, byte-compared as in the P23 gate |
 | B3 touches three engines | additive field only; invariant suites and golden tests stay green; no number changes |
-| **Prompt cache** | no phase P27–P31 touches `chat_tools_schema.TOOLS`, any tool description, or the system block (`test_guided_mode_prompt.py::test_system_block_is_the_same_in_both_modes` stays green). B3 changes tool-result **bodies** only (one additive key, within the per-turn result budget). A8 changes a frozenset in `chat_service.py`, not a prompt. If P32 ever adds a description sentence it costs one cache miss and must say so. |
-| **Packaging** | no new backend module in any phase: B3's helper goes into `services/adequacy/worksheet.py`, B2's keys into the already-rooted `data/guides/eh_fmea_guide.json` (`smoke/check_bundle.py:176` `ROOTED`), B6 reads `app_paths` (packaged), A1's detail helper moves within existing modules. `check_bundle.py` is the gate for any new file. |
+| **Prompt cache** | no phase P27–P31 touches `chat_tools_schema.TOOLS`, any tool description, or the system block (`test_guided_mode_prompt.py::test_expert_block_is_byte_equal_to_no_mode` and its siblings stay green). B3 changes tool-result **bodies** only (one additive key, within the per-turn result budget). A8 changes a frozenset in `chat_service.py`, not a prompt. If P32 ever adds a description sentence it costs one cache miss and must say so. |
+| **Packaging** | no new backend module in any phase: B3's helper goes into `services/adequacy/worksheet.py`, B2's keys into the already-rooted `data/guides/eh_fmea_guide.json` (`smoke/check_bundle.py:172` `ROOTED`), B6 reads `app_paths` (packaged), A1's detail helper moves within existing modules. `check_bundle.py` is the gate for any new file. |
 | Smoke growth | phases stay independent (`--phase P27a` runs base + extension); run time recorded per gate |
 
 ## 6. Review conditions applied
