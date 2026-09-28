@@ -146,19 +146,21 @@ red — the three new files fail collection with `ModuleNotFoundError: No module
 **Files.** `services/reports/evidence.py`, `tests/test_report_evidence.py`.
 
 **Steps**
-- [ ] `collect_evidence(*, read, eh_report: dict | None, worksheet: dict | None, campaign, health) -> Evidence`. Unions `build_study_report(...)` (adequacy sections with `engine`/`fidelity`, `required_disclosures`, `not_established`, `evidence_gaps`) with the EH report's `sections` + `completeness` + headline fields + `tea` + `gates` + `pipeline`, and the worksheet's class-D rows and overlays. Every EH section carries its `status` and `note` the way adequacy sections carry `engine`/`fidelity`.
-- [ ] `evidence_hash`: sha256 of the canonical JSON (sorted keys, floats rounded to 6 significant digits) — what `ReportDocument.evidence_hash` and the viewer's staleness banner compare.
-- [ ] Tables: `evidence.tables` built here, once, by code: `headline`, `completeness`, `certification`, `frontier`, `sizing`, `fmea_top`, `fmea_expert_rows`, `redundancy`, `levers`, `dtc`, `tea`, `gates`, `pipeline`, `adequacy_sections` (the study_report sections as engine/fidelity/status rows). Each with `source_path` (JSON pointer into the evidence) so the audit and the viewer can cite it.
-- [ ] `flatten_numbers(evidence) -> list[NumberFact{path, value, unit}]` for the audit (WP3).
-- [ ] Per-section slices: `slice_for(section_id) -> dict` returns only the fields that section's prompt needs (assessment §7, decision 9 consequence).
+- [x] `collect_evidence(*, study_report: dict | None, eh_report: dict | None, worksheet: dict | None) -> Evidence` — shipped pure: the caller runs `build_study_report` and passes its dict, so the module needs no network. Unions the study report (adequacy sections with `engine`/`fidelity`, `required_disclosures`, `not_established`, `evidence_gaps`) with the EH report's `sections` + `completeness` + headline fields + `tea` + `gates` + `pipeline`, and the worksheet's class-D rows and overlays. Every EH section carries its `status` and `note` the way adequacy sections carry `engine`/`fidelity`.
+- [x] `evidence_hash`: sha256 of the canonical JSON (sorted keys, floats rounded to 6 significant digits) — what `ReportDocument.evidence_hash` and the viewer's staleness banner compare.
+- [x] Tables: `evidence.tables` built here, once, by code: `headline`, `completeness`, `certification`, `frontier`, `sizing`, `fmea_top`, `fmea_expert_rows`, `redundancy`, `levers`, `dtc`, `tea`, `gates`, `pipeline`, `adequacy_sections` (the study_report sections as engine/fidelity/status rows). Each with `source_path` (JSON pointer into the evidence) so the audit and the viewer can cite it.
+- [x] `flatten_numbers(evidence) -> list[NumberFact{path, value, unit}]` for the audit (WP3).
+- [x] Per-section slices: `slice_for(section_id) -> dict` returns only the fields that section's prompt needs (assessment §7, decision 9 consequence).
 
 **Acceptance**
-- [ ] With no EH report and no adequacy surfaces: every section `not_established` with the `get_adequacy_results` hint; `required_disclosures` still non-empty (the "nothing was measured" disclosure).
-- [ ] With the P5 MVP-A fixture: `tables["fmea_top"].rows` equal the payload's `top` in order; `tables["headline"]` shows `cost_at_target_eur` with `period_basis` and `excludes_shed_cost`.
-- [ ] Two collections over the same state produce the same `evidence_hash`; changing one number changes it.
-- [ ] `flatten_numbers` contains every numeric leaf of `fmea_top.top[*]` with its path.
+- [x] With no EH report and no adequacy surfaces: every section `not_established` with the `get_adequacy_results` hint; `required_disclosures` still non-empty (the "nothing was measured" disclosure).
+- [x] With the P5 MVP-A fixture: `tables["fmea_top"].rows` equal the payload's `top` in order; `tables["headline"]` shows `cost_at_target_eur` with `period_basis` and `excludes_shed_cost`.
+- [x] Two collections over the same state produce the same `evidence_hash`; changing one number changes it.
+- [x] `flatten_numbers` contains every numeric leaf of `fmea_top.top[*]` with its path.
 
 ---
+
+**TDD evidence (2026-09-28):** `tests/test_report_evidence.py` — red: 1 collection error (module absent, 18 tests blocked); green: 18 passed. Regression chunk (`test_energy_hub_report_p5`, `test_study_report`, `test_adequacy_worksheet`, `test_report_docx_writer`): 65 passed. ruff clean. Corrections kept: `frontier` is a section id in both `REPORT_SECTIONS` (EH) and `SECTION_ORDER` (adequacy) — the adequacy one is keyed `adequacy_frontier` (`ADEQUACY_ALIASES`, `adequacy_section_id()`) and every adequacy section carries `study_id` + `source`; `lole_ci`/`eue_ci` elements take the bounded metric's unit; the pipeline's `solves_charged: 0` is a measured zero and is excluded from the None-never-0 scan. The agent's worktree was based on `master`, so its branch carried only the two new files; merged onto the plan branch conflict-free.
 
 ## WP3 — Generation job (provider seam, per section, number audit)
 
