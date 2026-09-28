@@ -11,12 +11,18 @@ import {
   dtcPlanningCsvRows,
   dtcStressCsvRows,
   EhReferenceDesignPanel,
+  fmeaImportRankingNote,
   fmeaTopCsvRows,
   fmeaTopModes,
   frontierCsvRows,
   frontierPoints,
   hasCertificationBlock,
   hasMultiEnergyBlock,
+  gridAreasSummary,
+  commonModeLines,
+  coptImportSummary,
+  fmeaCoptNotes,
+  importModelLabel,
   lcohChip,
   leverCsvRows,
   multiEnergyCarrierEntries,
@@ -771,5 +777,242 @@ describe('wired stages — certification / frontier / fmea_top / LCOH (2026-09-2
     expect(screen.queryByTestId('eh-report-mc-lole')).toBeNull()
     expect(screen.queryByTestId('eh-report-lcoh')).toBeNull()
     expect(screen.queryByTestId('eh-report-lcoh-flag')).toBeNull()
+  })
+})
+
+describe('import model in the certification (2026-09-27)', () => {
+  const scope = (over: Record<string, unknown> = {}) => ({
+    mode: 'hub_side' as const, import_links: ['import_poc'],
+    import_cap_mw_max: 50, import_firm_mw_max: null,
+    note: 'MC / COPT fleet restricted to the hub side of import Link(s) import_poc',
+    ...over,
+  })
+  const cert = (over: Record<string, unknown> = {}) => ({
+    metric: 'mc_lole', target_lole_h: 3, mc_lole_h: 585.28, verdict: 'failed' as const,
+    n_samples: 200, ens_met: true, ...over,
+  })
+
+  it('labels each import model and never invents one', () => {
+    expect(importModelLabel(cert({ import_model: 'zonal', fleet_scope: scope() })))
+      .toMatch(/grid-side surplus sampled.*cap 50 MW/)
+    expect(importModelLabel(cert({ import_model: 'sampled_unit', fleet_scope: scope() })))
+      .toMatch(/Link outages sampled/)
+    expect(importModelLabel(cert({ import_model: 'islanded',
+      fleet_scope: scope({ import_cap_mw_max: 0, import_firm_mw_max: 0 }) })))
+      .toBe('islanded (0 MW)')
+    expect(importModelLabel(cert({ import_model: 'firm_block',
+      fleet_scope: scope({ import_firm_mw_max: 50 }) }))).toMatch(/firm at the planning limit/)
+    expect(importModelLabel(cert({ import_model: 'mixed', fleet_scope: scope() })))
+      .toMatch(/partly sampled/)
+    // A pre-2026-09-27 report: hub-side scope, no import_model → it WAS firm.
+    expect(importModelLabel(cert({ fleet_scope: { mode: 'hub_side',
+      import_firm_mw_max: 50, import_firmness: 'planning_limit_only' } })))
+      .toMatch(/firm at the planning limit.*50 MW/)
+    // Whole-network scope / no scope: nothing to say.
+    expect(importModelLabel(cert({ fleet_scope: { mode: 'whole_network' } }))).toBeNull()
+    expect(importModelLabel(cert())).toBeNull()
+    expect(importModelLabel(null)).toBeNull()
+  })
+
+  it('states how the sampled Link is ranked in fmea_top', () => {
+    const base = { ...REPORT, sections: { fmea_top: { status: 'ok' as const,
+      payload: { top: [], import_link_ranking: { import_poc: 'class_b' },
+        import_link_ranking_note: 'ranked ONCE' }, note: null } } }
+    expect(fmeaImportRankingNote(base)).toMatch(/import_poc: Class-B row.*ranked ONCE/)
+    expect(fmeaImportRankingNote(REPORT)).toBeNull()
+  })
+
+  it('renders the import line and the fleet-scope note in the certification block', async () => {
+    const report = {
+      ...REPORT,
+      archetype: 'weak_flexible' as const,
+      mc_lole_h: 585.28,
+      completeness: { ...REPORT.completeness, certification: 'ok' as const },
+      sections: {
+        certification: { status: 'ok' as const, note: 'MC LOLE 585 h > target 3 h',
+          payload: cert({ import_model: 'zonal', import_firmness: 'outage_and_grid_sampled',
+            fleet_scope: scope({ import_model: 'zonal' }) }) },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report,
+    } as never)
+    await openPanel()
+    const line = await screen.findByTestId('eh-certification-import')
+    expect(line.getAttribute('data-import-model')).toBe('zonal')
+    expect(line.textContent).toMatch(/two-area MC/)
+    expect(screen.getByTestId('eh-certification-scope-note').textContent)
+      .toMatch(/hub side/)
+  })
+})
+
+describe('zonal open items: grid areas, COPT import, common mode (2026-09-28)', () => {
+  const area = (over: Record<string, unknown> = {}) => ({
+    area: 0, links: ['poc_a'], sampled: true, reason: null, units: ['gen_a'],
+    n_units: 1, capacity_mw: 200, demand_peak_mw: 170, storage: [],
+    storage_dispatched: false, copt_surplus_fraction_min: 0.4, note: null, ...over,
+  })
+
+  it('summarises grid areas: count, sampled, storage, and unsampled reasons', () => {
+    expect(gridAreasSummary(null)).toBeNull()
+    expect(gridAreasSummary({ mode: 'hub_side', grid_areas: [] })).toBeNull()
+    const two = gridAreasSummary({ mode: 'hub_side', grid_areas: [
+      area({ storage: ['grid_bat'], storage_dispatched: true }),
+      area({ area: 1, links: ['poc_b'], sampled: false, units: [], n_units: 0,
+        capacity_mw: null, demand_peak_mw: null, reason: 'no occurrence data' }),
+    ] })
+    expect(two).toMatch(/2 grid areas, 1 sampled/)
+    expect(two).toMatch(/grid storage dispatched: grid_bat/)
+    expect(two).toMatch(/poc_b.*unbounded.*no occurrence data/)
+  })
+
+  it('lists common-mode events, applied or with the reason they are not', () => {
+    expect(commonModeLines(null)).toEqual([])
+    expect(commonModeLines({ mode: 'hub_side', import_common_mode: [
+      { link: 'poc', rate: 0.05, mttr_hours: 24, basis: 'FOR', area: 0,
+        applied: true, reason: null },
+      { link: 'poc2', rate: 0.1, mttr_hours: null, basis: 'FOR', area: null,
+        applied: false, reason: 'no MTTR' },
+    ] })).toEqual([
+      'poc: common-mode q=0.05 (FOR), MTTR 24 h — Link and grid area down together',
+      'poc2: common-mode data not applied — no MTTR',
+    ])
+  })
+
+  it('states the COPT import model and the exact import LOLE, never inventing one', () => {
+    expect(coptImportSummary(null, null)).toBeNull()
+    expect(coptImportSummary({ mode: 'hub_side', copt_import_model: 'two_state' }, null))
+      .toBe('COPT screening: import Link as a two-state unit')
+    const s = coptImportSummary(
+      { mode: 'hub_side', copt_import_model: 'expected_surplus_profile' },
+      { import_exact: { lole_hours: 576.1, eue_mwh: 11000, delta_mw: 1 } })
+    expect(s).toMatch(/expected grid surplus/)
+    expect(s).toMatch(/exact import LOLE 576\.10 h/)
+    // An exact metric that could not be computed is null: no number shown.
+    expect(coptImportSummary(
+      { mode: 'hub_side', copt_import_model: 'expected_surplus_profile' },
+      { import_exact: { lole_hours: null, eue_mwh: null } })).not.toMatch(/exact import LOLE/)
+  })
+
+  it('renders the three lines in the certification and FMEA blocks', async () => {
+    const scope = {
+      mode: 'hub_side' as const, import_model: 'zonal' as const,
+      import_cap_mw_max: 80, import_firm_mw_max: null,
+      copt_import_model: 'expected_surplus_profile' as const,
+      grid_areas: [area({ storage: ['grid_bat'], storage_dispatched: true })],
+      import_common_mode: [{ link: 'poc_a', rate: 0.05, mttr_hours: 24, basis: 'FOR',
+        area: 0, applied: true, reason: null }],
+      note: 'hub side',
+    }
+    const report = {
+      ...REPORT,
+      archetype: 'weak_flexible' as const,
+      mc_lole_h: 600,
+      completeness: { ...REPORT.completeness, certification: 'ok' as const, fmea_top: 'ok' as const },
+      sections: {
+        certification: { status: 'ok' as const, note: 'failed',
+          payload: { metric: 'mc_lole', mc_lole_h: 600, target_lole_h: 3, verdict: 'failed' as const,
+            import_model: 'zonal', fleet_scope: scope } },
+        fmea_top: { status: 'ok' as const, note: 'Link-primary',
+          payload: { top: [{ rank: 1, mode_id: 'generator:base:forced_outage',
+            component_class: 'Generator', name: 'base', failure_class: 'A',
+            criticality_eur_per_year: 1 }], fleet_scope: scope,
+            copt_metrics: { lole_hours: 802, import_exact: { lole_hours: 576.1, eue_mwh: 1 } } } },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report,
+    } as never)
+    await openPanel()
+    expect((await screen.findByTestId('eh-certification-grid-areas')).textContent)
+      .toMatch(/1 grid area, 1 sampled/)
+    expect(screen.getByTestId('eh-certification-common-mode').textContent)
+      .toMatch(/poc_a: common-mode q=0.05/)
+    expect(screen.getByTestId('eh-fmea-top-copt-import').textContent)
+      .toMatch(/exact import LOLE 576\.10 h/)
+  })
+})
+
+describe('review of WP5: labels that do not hide an event or a firm Link', () => {
+  it('labels a firm block under a sampled event and a firm Link behind a sampled grid', () => {
+    expect(importModelLabel({ metric: 'mc_lole', import_model: 'firm_block',
+      import_firmness: 'common_mode_sampled',
+      fleet_scope: { mode: 'hub_side', import_cap_mw_max: 50 } }))
+      .toMatch(/firm block; common-mode event sampled/)
+    expect(importModelLabel({ metric: 'mc_lole', import_model: 'zonal',
+      import_firmness: 'grid_sampled',
+      fleet_scope: { mode: 'hub_side', import_cap_mw_max: 50 } }))
+      .toMatch(/grid-side surplus sampled; Links firm/)
+    expect(importModelLabel({ metric: 'mc_lole', import_model: 'sampled_unit',
+      import_firmness: 'outage_and_common_mode_sampled',
+      fleet_scope: { mode: 'hub_side', import_cap_mw_max: 50 } }))
+      .toMatch(/Link outages \+ common-mode event sampled/)
+  })
+
+  it('says the screening mixes events, and when the exact metric is rounded', () => {
+    expect(coptImportSummary({ mode: 'hub_side', copt_import_model: 'firm_block',
+      copt_common_mode: 'event_mixture' }, null))
+      .toMatch(/firm block.*common-mode events mixed exactly/)
+    expect(coptImportSummary(
+      { mode: 'hub_side', copt_import_model: 'expected_surplus_profile' },
+      { import_exact: { lole_hours: 10, delta_mw: 4 } }))
+      .toMatch(/import rounded down to 4 MW levels/)
+    expect(coptImportSummary(
+      { mode: 'hub_side', copt_import_model: 'expected_surplus_profile' },
+      { import_exact: { lole_hours: 10, delta_mw: 1 } })).not.toMatch(/rounded/)
+  })
+
+  it('shows the COPT caveat and fidelity notes, and nothing on an older report', () => {
+    const report = { ...REPORT, sections: { fmea_top: { status: 'ok' as const, note: null,
+      payload: { top: [], copt_fidelity_note: 'areas [6] held UP',
+        fleet_scope: { mode: 'hub_side' as const,
+          copt_import_note: 'may over- or under-state LOLE against the MC' } } } } }
+    expect(fmeaCoptNotes(report)).toEqual([
+      'may over- or under-state LOLE against the MC', 'areas [6] held UP'])
+    expect(fmeaCoptNotes(REPORT)).toEqual([])
+  })
+
+  it('does not call a zero-rate event an event, and keeps ignored entries', () => {
+    expect(commonModeLines({ mode: 'hub_side', import_common_mode: [
+      { link: 'p', rate: 0, mttr_hours: 24, basis: 'FOR', area: 0, applied: true, reason: null },
+      { link: 'x', rate: 0.1, mttr_hours: null, basis: 'FOR', area: null, applied: false,
+        reason: 'whole-network scope (no identified hub boundary) — common-mode data not modelled' },
+    ] })).toEqual([
+      'p: common-mode q=0 — no effect',
+      'x: common-mode data not applied — whole-network scope (no identified hub boundary) — common-mode data not modelled',
+    ])
+  })
+
+  it('does not list idle grid storage as dispatched', () => {
+    expect(gridAreasSummary({ mode: 'hub_side', grid_areas: [{
+      area: 0, links: ['a'], sampled: true, units: ['g'], n_units: 1, capacity_mw: 1,
+      demand_peak_mw: 1, storage: ['bat'], storage_dispatched: false }] }))
+      .not.toMatch(/dispatched/)
+  })
+
+  it('renders a CommonMode FMEA row and the COPT notes', async () => {
+    const report = {
+      ...REPORT,
+      completeness: { ...REPORT.completeness, fmea_top: 'ok' as const },
+      sections: {
+        fmea_top: { status: 'ok' as const, note: 'Link-primary',
+          payload: { top: [{ rank: 1, mode_id: 'common_mode:poc:forced_outage',
+            component_class: 'CommonMode', name: 'common_mode:poc', failure_class: 'A',
+            criticality_eur_per_year: 1200, delta_eue_mwh: 8 }],
+          fleet_scope: { mode: 'hub_side' as const, copt_import_model: 'two_state' as const,
+            copt_common_mode: 'event_mixture' as const,
+            copt_import_note: 'common-mode events are MIXED exactly' } } },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report,
+    } as never)
+    await openPanel()
+    expect((await screen.findByTestId('eh-fmea-top-row-1')).textContent)
+      .toMatch(/CommonMode/)
+    expect(screen.getByTestId('eh-fmea-top-copt-notes').textContent)
+      .toMatch(/MIXED exactly/)
+    expect(screen.getByTestId('eh-fmea-top-copt-import').textContent)
+      .toMatch(/common-mode events mixed exactly/)
   })
 })

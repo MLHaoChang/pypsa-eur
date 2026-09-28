@@ -88,6 +88,7 @@ def test_off_grid_certification_ignores_generation_behind_the_islanded_poc():
     assert scope["import_links"] == ["import_poc"]
     assert scope["import_firm_mw_max"] == pytest.approx(0.0)  # islanded
     assert scope["import_firmness"] == "planning_limit_only"
+    assert scope["import_model"] == "islanded"
     assert "hub side" in scope["note"]
 
 
@@ -106,8 +107,12 @@ def test_weak_flexible_counts_import_as_firm_up_to_its_planning_cap_only():
     assert scope["mode"] == "hub_side"
     assert "grid_supply" in scope["excluded_units"]
     # apply_pack capped the PoC Link at the pack's 50 MW; that cap, not the
-    # 200 MW generator behind it, is what the hub can count on.
-    assert scope["import_firm_mw_max"] == pytest.approx(50.0)
+    # 200 MW generator behind it, is what the hub can count on. Since
+    # 2026-09-27 the Link's occurrence data is SAMPLED (and the grid behind
+    # it is a second area), so no part of the import is a firm block.
+    assert scope["import_cap_mw_max"] == pytest.approx(50.0)
+    assert scope["import_firm_mw_max"] is None
+    assert scope["import_model"] == "zonal"
     # The screened (class-A) fleet is the same hub-side fleet.
     top = report.sections["fmea_top"].payload["top"]
     names = {m["name"] for m in top if m["failure_class"] == "A"}
