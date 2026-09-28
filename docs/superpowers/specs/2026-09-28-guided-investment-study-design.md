@@ -294,3 +294,14 @@ Each slice follows the house protocol: adversarial plan review before code, TDD 
 | The copilot is absent (no key) | The facts layer, the Verdict screen and the report render without it; AI prose is an optional layer |
 | Multi-solve studies are slow on a laptop | Quick-screen fidelity with representative weeks and a visible solve budget; full study is an explicit choice; the campaign abort and restore guarantees apply |
 | Financial conventions get mixed | One labelled default basis, toggles that re-label every figure, and a render-time check that all facts in a section share a basis |
+
+## 13. Revision history
+
+| Date | Change | Reason |
+|---|---|---|
+| 2026-09-28 | Owner resolved the six open questions (§11). | Owner decision. |
+| 2026-09-28 | **Decision 14 amended for MVP-1:** both `quick_screen` and `full_study` are 8760 h of one representative year. The representative-week quick screen returns in MVP-2 with a billing-period-aware aggregation. | Plan review v1 [B1]: `time_aggregation_service.aggregate_period_snapshots` is a myopic-only helper for future periods, `tsam` is not pinned for the desktop build, and clustered weeks cannot carry monthly demand-charge peaks. |
+| 2026-09-28 | **Decision 19 amended:** MVP-1 exports DOCX and printable HTML; native PDF moves to MVP-2. | Plan review v1 [S1]: no PDF renderer is installed in the backend environment. |
+| 2026-09-28 | **§8.1 amended for MVP-1:** the guided battery is a `StorageUnit` with enumerated duration (1, 2, 4 h) priced through `overnight_cost` per MW = inverter cost + duration × storage cost. "Battery power (MW)" → `p_nom`; "Hours of storage (h)" → `max_hours`. The Store + Link pair (separately priced energy and power) returns in MVP-2 with a power-ratio constraint, storage-cycling coverage for Stores, one carrier convention and a golden case. | Plan review v1 [B3], [B4]: the pair is unsupported by `compare/storage_cycling`, `cost_breakdown.storage_capex_expansion` and the Store row's LCOS, and the v1 plan wrote upfront costs into the annuity field. |
+| 2026-09-28 | **§9 amended:** the maturity badge and ledger CSV export move into MVP-1; ledger CSV import stays in MVP-2. | Plan review v1 [S1]; the badge is cheap and the verdict page needs it. |
+| 2026-09-28 | **§5 clarified:** the tornado holds the recommended sizes fixed and re-dispatches (`method=redispatch_fixed_sizes`); re-solving at each bound cannot flip the NPV sign because the baseline is a feasible point of the option's LP. The verdict page carries `npv_nonnegative_at_optimum_by_construction`. | Plan review v1 [B5]. |

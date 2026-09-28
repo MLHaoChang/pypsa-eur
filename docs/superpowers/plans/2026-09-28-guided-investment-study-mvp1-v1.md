@@ -1,3 +1,7 @@
+> **SUPERSEDED by `2026-09-28-guided-investment-study-mvp1-v2.md`.** Adversarial review v1 returned **NO-GO**
+> (8 blockers, 11 should-fixes, 13 nits); the full review is `docs/superpowers/notes/2026-09-28-mvp1-plan-review-v1.md`.
+> Kept for the revision history. Do not execute this version.
+
 # Guided investment study — MVP-1 plan (the BESS question, end to end)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: use superpowers:subagent-driven-development or superpowers:executing-plans. Implement phase by phase. Extend `pypsa-gui/backend/services/adequacy/` runners, `services/results/` surfaces and `services/solver/objective.py` over any new parallel stack. Every number this plan adds is the tenth economic surface and must reconcile with the nine that exist.
