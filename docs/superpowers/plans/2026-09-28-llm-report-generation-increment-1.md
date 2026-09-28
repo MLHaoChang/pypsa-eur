@@ -185,14 +185,17 @@ red — `ModuleNotFoundError: services.reports` / `AttributeError: chat_tools ha
 **Files.** `services/reports/figures.py` (from WP0), `tests/test_report_figures.py`.
 
 **Steps**
-- [ ] `frontier_png(points, knee_index)`: cost vs achieved ENS ‱, knee marked, non-ok points hollow; caption states `period_basis` and "excludes shed cost".
-- [ ] `capacity_mix_png(by_carrier)`: horizontal bars, MW.
-- [ ] `fmea_pareto_png(top)`: criticality €/yr bars with cumulative share line; class letter in the tick label.
-- [ ] Deterministic output for a fixed input (same bytes, `matplotlib.rcParams` pinned in the function, no timestamps in metadata: `metadata={"Software": None}`).
+- [x] `frontier_png(points, knee_index)`: cost (€) vs ENS **target** ‱ (the achieved ‱ is not on a frontier point; the table carries achieved MWh), knee ringed and labelled, non-ok points hollow on the baseline with their status word; the caption (`period_basis`, "excludes shed cost") is the writer's, not the figure's.
+- [x] `capacity_mix_png(by_carrier)`: horizontal bars, MW, largest first; beyond 30 carriers the tail folds into "other" (`_capacity_rows` is the pure helper).
+- [x] `fmea_pareto_png(top)`: criticality €/yr bars with cumulative share line; class letter in the tick label.
+- [x] Deterministic output for a fixed input (same bytes, `matplotlib.rcParams` pinned in the function, no timestamps in metadata: `metadata={"Software": None}`).
 
 **Acceptance**
-- [ ] Each function returns `None` on empty input and PNG bytes otherwise; rendering the same input twice gives identical bytes.
-- [ ] Figures are written to `reports/<id>/figures/` by the job and referenced by `FigureRef` blocks; the viewer route serves them inline.
+- [x] Each function returns `None` on empty input and PNG bytes otherwise; rendering the same input twice gives identical bytes.
+- [ ] Figures are written to `reports/<id>/figures/` by the job and referenced by `FigureRef` blocks; the viewer route serves them inline. *(WP3/WP5 — not part of the figures package.)*
+
+**TDD evidence (2026-09-28, branch `worktree-agent-ab2e60f44ff5debba`, off `506fac6`):**
+red — 10 new tests failed with `AttributeError: module 'services.reports.figures' has no attribute 'frontier_png' / 'capacity_mix_png' / '_capacity_rows'` (4 Pareto tests still green) → green — `test_report_figures.py` 14, `test_report_docx_writer.py` 14 (28 passed); `ruff check` clean on the two files. The three figures now share `_style_axis` (left title, top/right spines off, grid on the magnitude axis only, thousands-grouped ticks); the Pareto was moved onto it with no behaviour change. Layout rcParams (`figure.dpi`, `savefig.dpi`, autolayout/constrained_layout off, title/label/tick sizes, marker size, hinting, path simplification) are pinned in `_RC` so a caller's style sheet cannot make two renders differ; a fresh-interpreter double render of each figure was byte-identical. All three PNGs were rendered and inspected: the knee ring and "knee" label are visible and clear of the line, infeasible points read as hollow markers on the baseline with "infeasible" above them (one in the middle of the frontier, one below the last ok point), ε and ‱ render in DejaVu Sans without glyph warnings, y ticks group thousands, and the capacity bars are sorted descending with grouped value labels.
 
 ---
 
