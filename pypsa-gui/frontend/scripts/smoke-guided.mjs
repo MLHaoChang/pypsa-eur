@@ -5,14 +5,14 @@
  *
  *   cd pypsa-gui/frontend
  *   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs \
- *     --phase P22.9|P23|P24-BE|P24 [--template eh_datacenter] [--out <dir>] [--keep]
+ *     --phase P22.9|P23|P24-BE|P24|P25 [--template eh_datacenter] [--out <dir>] [--keep]
  *
  * P24 walks the Guided hub design (spec §5) as a first-time user: the
  * template from /projects opens hubDesign at Site; Site rows match the
  * readiness body; Goal shows the pack default; Run → running → done → the
  * rail moves to Results with the §5.5 headline; Open full report; Improve
- * lists findings; "Let the assistant do this" seeds the composer (P24 sends
- * nothing); Check risks (FMEA) runs the sweep and opens the FMEA tab; the
+ * lists findings; "Let the assistant do this" sends the request (P25: a user
+ * message, then the stub's confirmation card, declined); Check risks (FMEA) runs the sweep and opens the FMEA tab; the
  * hub_design tour walks its steps. Then the other two templates are created
  * from the Start card: the H2 hub (no goal → "No reliability goal…") and the
  * island microgrid (off-grid wording on Site, its own verdict). Live tables
@@ -22,6 +22,19 @@
  * checks GET /api/results/eh_review with curl: 204 before, `running` while
  * the study runs, `ok` with `stale:false` after (plan P24-BE gate row 5).
  * The transcript goes to <out>/eh_review-curl.txt.
+ *
+ * P25 (spec §6, §8.4; plan P25 row 5) — the assistant does the steps. The
+ * stub model replies after a delay so a turn is visibly streaming. Data
+ * center, Guided: Improve → "Let the assistant do this" → the request is a
+ * user message sent once (a double click is deduped), the stream body carries
+ * ui_context.ui_mode = guided and guided_step = improve and no attachments,
+ * and the stub's recorded last user text contains "Guided mode is on"; a
+ * second card click while that turn streams is queued, the stub's scripted
+ * tool call (§6.6) renders a confirmation card, the user declines, and only
+ * then is the queued request sent. Expert: a typed message's body has no
+ * ui_mode and the recorded text no addendum. Finally the template's tags are
+ * stripped and suggest_eh_setup (run through the stub) recovers them without
+ * writing anything.
  *
  * It starts its own uvicorn (local mode, ANTHROPIC_API_KEY unset, app data
  * and projects under a scratch dir), Vite on 5173 and — after the send-gate
@@ -63,7 +76,7 @@ const TEMPLATE_NAMES = {
   eh_h2_hub: 'Industrial Hydrogen Hub',
   eh_microgrid: 'Island Microgrid',
 }
-const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24'])
+const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25'])
 
 // ── args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -214,8 +227,9 @@ function saveReviewTranscript() {
 }
 
 // ── the stub model (every phase, spec §8.4 step 2) ─────────────────────────
-async function activateStubProfile() {
-  start('stub', PYTHON, [path.join(BACKEND, 'smoke', 'stub_openai_endpoint.py')], { cwd: BACKEND })
+async function activateStubProfile({ replyDelayMs = 0 } = {}) {
+  start('stub', PYTHON, [path.join(BACKEND, 'smoke', 'stub_openai_endpoint.py')],
+    { cwd: BACKEND, env: { ...process.env, STUB_REPLY_DELAY_MS: String(replyDelayMs) } })
   await waitFor(`http://127.0.0.1:${STUB_PORT}/v1/models`, 'stub model', 30_000)
   await api('PUT', `/api/chat/settings/llm/profiles/${STUB_PROFILE}`, {
     label: 'Smoke stub', preset: 'custom', wire: 'openai',
@@ -223,9 +237,19 @@ async function activateStubProfile() {
     tools: true, vision: false, auth: 'none', fallback_model: null, max_output_tokens: null,
   })
   await api('POST', '/api/chat/settings/llm/active', { profile_id: STUB_PROFILE })
+  stubSeenBase = (await stubRequests()).length
   const h = await api('GET', '/api/chat/health')
   check(h.chat_ready === true && h.active_profile?.id === STUB_PROFILE,
     `health: active_profile=${h.active_profile?.id} chat_ready=true`)
+}
+
+// What the stub model received (test-only route, §6.6): per request the last
+// user text and the raw payload.
+let stubSeenBase = 0
+async function stubRequests() {
+  const r = await fetch(`http://127.0.0.1:${STUB_PORT}/_stub/requests`)
+  if (!r.ok) throw new Error(`stub /_stub/requests → ${r.status}`)
+  return r.json()
 }
 
 // Seeds localStorage once per context, before the app's first script runs
@@ -990,7 +1014,7 @@ async function phaseP24(browser) {
     await byId('hub-card-results').waitFor({ state: 'visible', timeout: 15_000 })
 
     // ── 6. Improve ────────────────────────────────────────────────────────
-    step('Improve lists the high / medium findings; Why; Let the assistant do this seeds the composer')
+    step('Improve lists the high / medium findings; Why; Let the assistant do this sends (P25) → card → decline')
     await byId('hub-rail-step-improve').click()
     await byId('hub-improve-list').waitFor({ state: 'visible', timeout: 15_000 })
     const items = await byId('hub-improve-list').locator(':scope > li').count()
@@ -1001,16 +1025,19 @@ async function phaseP24(browser) {
     await byId(`hub-improve-why-${first.id}`).click()
     check(/technical evidence/i.test(await textOf(`hub-improve-evidence-${first.id}`)), 'Why shows the technical evidence')
     if (withAction) {
+      // Since P25 the button SENDS (§5.7): the §5.7 text becomes a user
+      // message, the stub's scripted call a confirmation card; decline it.
       await byId(`hub-improve-do-${withAction.id}`).click()
-      await byId('chat-input').waitFor({ state: 'visible', timeout: 15_000 })
-      await page.waitForFunction(() =>
-        (document.querySelector('[data-testid="chat-input"]')?.value ?? '').includes('Run the tool'),
-      null, { timeout: 10_000 })
-      const seeded = await byId('chat-input').inputValue()
-      check(seeded.includes(`Run the tool ${withAction.actions[0].tool} with exactly these arguments: ${JSON.stringify(withAction.actions[0].args)}`),
-        'composer seeded with the §5.7 action text (P24: shown, not sent)')
-      await shot(page, 'p24-dc-improve-delegate-seeded')
-      await byId('chat-input').fill('')
+      const want = `Run the tool ${withAction.actions[0].tool} with exactly these arguments: ${JSON.stringify(withAction.actions[0].args)}`
+      await page.waitForFunction(w => [...document.querySelectorAll('[data-testid="chat-message"][data-role="user"]')]
+        .some(m => (m.textContent ?? '').includes(w)), want, { timeout: 15_000 })
+      ok('the §5.7 action text was sent as a user message')
+      await byId('chat-confirmation-card').waitFor({ state: 'visible', timeout: 30_000 })
+      ok('the stub\'s scripted call rendered a confirmation card')
+      await shot(page, 'p24-dc-improve-delegate-card')
+      await byId('chat-confirm-deny').click()
+      await byId('chat-confirmation-card').waitFor({ state: 'detached', timeout: 30_000 })
+      ok('declined')
     } else {
       info('no high / medium finding carries an action on this run')
     }
@@ -1126,6 +1153,190 @@ async function phaseP24(browser) {
   }
 }
 
+// ── the P25 path (spec §6, §8.4; plan P25 row 5) ────────────────────────────
+async function phaseP25(browser) {
+  const consoleLines = []
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const page = await context.newPage()
+  page.on('console', m => consoleLines.push(`[${m.type()}] ${m.text()}`))
+  page.on('pageerror', e => consoleLines.push(`[pageerror] ${e.message}`))
+  const byId = id => page.locator(`[data-testid="${id}"]`)
+  const textOf = async id => ((await byId(id).textContent()) ?? '').trim()
+  // Every chat request body the page sends, in order.
+  const streams = []
+  page.on('request', r => {
+    if (r.method() === 'POST' && r.url().endsWith('/api/chat/stream')) {
+      try { streams.push(JSON.parse(r.postData() ?? '{}')) } catch { streams.push({}) }
+    }
+  })
+  const userMessages = () => page.$$eval('[data-testid="chat-message"][data-role="user"]',
+    els => els.map(e => (e.textContent ?? '').trim()))
+  const waitUserMessage = (w, timeout = 30_000) => page.waitForFunction(x =>
+    [...document.querySelectorAll('[data-testid="chat-message"][data-role="user"]')]
+      .some(m => (m.textContent ?? '').includes(x)), w, { timeout })
+  const waitIdle = (timeout = 60_000) => page.waitForFunction(() =>
+    !document.querySelector('[data-testid="chat-abort"]'), null, { timeout })
+  const lastStubText = async () => {
+    const rec = await stubRequests()
+    return rec.slice(stubSeenBase).at(-1)?.last_user_text ?? ''
+  }
+  const REPLY_DELAY_MS = 4000
+
+  try {
+    step(`stub model profile, replies after ${REPLY_DELAY_MS} ms (so a turn is visibly streaming)`)
+    await activateStubProfile({ replyDelayMs: REPLY_DELAY_MS })
+
+    step('fresh profile → Guided; data center template → hub design')
+    await page.goto(`${WEB}/projects`, { waitUntil: 'domcontentloaded' })
+    await page.getByRole('button', { name: /From template/ }).first().waitFor({ timeout: 30_000 })
+    check(await page.evaluate(k => localStorage.getItem(k), MODE_KEY) === 'guided', 'first-time user is Guided')
+    await page.getByRole('button', { name: /From template/ }).first().click()
+    await byId('new-project-wizard').waitFor({ state: 'visible', timeout: 15_000 })
+    await page.getByRole('button', { name: new RegExp(TEMPLATE_NAMES.eh_datacenter) }).click()
+    await page.waitForURL(/\/app\?project=/, { timeout: 60_000 })
+    await byId('hub-card-site').waitFor({ state: 'visible', timeout: 60_000 })
+    const tagsBefore = { buses: await api('GET', '/api/network/buses'), links: await api('GET', '/api/network/links') }
+
+    step('Goal → Run → done → Results')
+    await byId('hub-rail-step-goal').click()
+    await page.waitForFunction(() =>
+      document.querySelector('[data-testid="hub-goal-lole"]')?.value === '3', null, { timeout: 30_000 })
+    await page.waitForFunction(() => !document.querySelector('[data-testid="hub-goal-run"]')?.disabled,
+      null, { timeout: 30_000 })
+    const before = await snapshotTables()
+    await byId('hub-goal-run').click()
+    await byId('hub-goal-running').waitFor({ state: 'visible', timeout: 30_000 })
+    await byId('hub-card-results').waitFor({ state: 'visible', timeout: 10 * 60_000 })
+    const study = await api('GET', '/api/results/eh_study')
+    check(study?.status === 'done', 'study done')
+    const diffs = tableDiffs(before, await snapshotTables())
+    check(diffs.diffs.length === 0, `buses/links/generators equal after the study (*_nom_opt changes: ${diffs.nomOpt})`)
+    const review = await api('GET', '/api/results/eh_review')
+
+    step('Improve → "Let the assistant do this" (double click) → ONE user message, Guided context, no attachments')
+    await byId('hub-rail-step-improve').click()
+    await byId('hub-improve-list').waitFor({ state: 'visible', timeout: 15_000 })
+    const f = review.findings.find(x => (x.severity === 'high' || x.severity === 'medium') && x.actions?.length)
+    check(!!f, `a high/medium finding with an action: ${f?.id} → ${f?.actions?.[0]?.tool}`)
+    const a = f.actions[0]
+    const doText = `Apply this recommendation from the study review: "${f.title}". Run the tool ${a.tool} with exactly these arguments: ${JSON.stringify(a.args)}. Say in one sentence what will change, then proceed to the confirmation.`
+    check((await byId(`hub-improve-do-${f.id}`).getAttribute('title')).startsWith('Sends this request to the assistant — your attached files are not included.'),
+      'the button title says it sends, without attachments')
+    const n0 = streams.length
+    await byId(`hub-improve-do-${f.id}`).click()
+    await byId(`hub-improve-do-${f.id}`).click()          // a double click is deduped
+    await waitUserMessage(`Run the tool ${a.tool} with exactly these arguments`)
+    await byId('chat-abort').waitFor({ state: 'visible', timeout: 5_000 })
+    ok('the request is in the transcript as the user\'s message and the turn is streaming')
+    await shot(page, 'p25-improve-do-sent-streaming')
+
+    step('a second card click while the turn streams is queued, not sent')
+    await byId('hub-delegate-improve').click()
+    const footerText = 'Apply the highest-severity recommendation from review_eh_study, one confirmation at a time, then review again.'
+    await sleep(500)
+    check(streams.length === n0 + 1, `one stream request so far (${streams.length - n0}); the double click was deduped`)
+    check(!(await userMessages()).some(m => m.includes(footerText)), 'the second request is not in the transcript yet')
+    const sent = streams[n0]
+    check(sent.message === doText, 'stream body message === the §5.7 text')
+    check(sent.attachment_file_ids === undefined, 'no attachment_file_ids')
+    check(sent.ui_context?.ui_mode === 'guided' && sent.ui_context?.guided_step === 'improve'
+      && sent.ui_context?.panel === 'hubDesign',
+      `ui_context: ${JSON.stringify(sent.ui_context)}`)
+    check(sent.input_mode === 'text', 'input_mode text')
+    await shot(page, 'p25-second-click-queued')
+
+    step('the stub\'s scripted tool call (§6.6) → confirmation card; the stub saw the Guided addendum')
+    await byId('chat-confirmation-card').waitFor({ state: 'visible', timeout: 60_000 })
+    const card = await textOf('chat-confirmation-card')
+    check(card.includes(a.tool), `confirmation card for ${a.tool}`)
+    const recorded = await lastStubText()
+    check(recorded.includes('Guided mode is on') && recorded.includes('"Improve" card'),
+      'stub\'s recorded last user text contains "Guided mode is on" and the Improve card')
+    check(recorded.trimEnd().endsWith(doText), 'the user\'s own words come last')
+    check(streams.length === n0 + 1, 'the queued request still waits while the card is pending')
+    await shot(page, 'p25-confirmation-card')
+
+    step('decline → the turn ends → the queued request is sent')
+    const beforeDecline = await snapshotTables()
+    await byId('chat-confirm-deny').click()
+    await byId('chat-confirmation-card').waitFor({ state: 'detached', timeout: 30_000 })
+    await waitUserMessage(footerText, 60_000)
+    check(streams.length === n0 + 2 && streams[n0 + 1].message === footerText,
+      'the queued request was sent after the first turn ended, in order')
+    await waitIdle()
+    const declined = tableDiffs(beforeDecline, await snapshotTables())
+    check(declined.diffs.length === 0, 'nothing changed on the network after the decline')
+    const all = await userMessages()
+    check(all.filter(m => m.includes(`Run the tool ${a.tool}`)).length === 1, 'the action request appears exactly once')
+    await shot(page, 'p25-queued-sent-after-decline')
+
+    step('Expert: a typed message carries no ui_mode and the stub sees no addendum')
+    await byId('ui-mode-expert').click()
+    await page.waitForFunction(() =>
+      document.querySelector('[data-testid="ui-mode-expert"]')?.getAttribute('aria-pressed') === 'true',
+    null, { timeout: 15_000 })
+    // The switch's toast sits over the Send button until it fades.
+    await page.getByText('Expert mode on').waitFor({ state: 'detached', timeout: 15_000 }).catch(() => {})
+    const n2 = streams.length
+    await byId('chat-input').fill('What does the study say?')
+    await byId('chat-send').click()
+    await waitUserMessage('What does the study say?')
+    await waitIdle()
+    const expertBody = streams[n2]
+    check(!!expertBody && !('ui_mode' in (expertBody.ui_context ?? {}))
+      && !('guided_step' in (expertBody.ui_context ?? {})),
+      `Expert body has no ui_mode / guided_step (ui_context: ${JSON.stringify(expertBody?.ui_context ?? null)})`)
+    const expertText = await lastStubText()
+    check(expertText.includes('What does the study say?') && !expertText.includes('Guided mode is on')
+      && !expertText.includes('mode: guided'), 'stub\'s recorded text has no Guided addendum')
+    await shot(page, 'p25-expert-no-addendum')
+
+    step('suggest_eh_setup on the template with its tags stripped: recovers them, writes nothing')
+    const want = {
+      import: tagsBefore.links.filter(l => l.eh_role === 'grid_import').map(l => l.name),
+      poc: tagsBefore.buses.filter(b => b.eh_poc === true).map(b => b.name),
+      critical: tagsBefore.buses.filter(b => b.eh_critical === true).map(b => b.name),
+    }
+    check(want.import.length && want.poc.length && want.critical.length,
+      `template tags: ${JSON.stringify(want)}`)
+    await api('PATCH', '/api/network/_bulk', { component_class: 'Bus',
+      names: tagsBefore.buses.map(b => b.name), updates: { eh_poc: false, eh_critical: false } })
+    await api('PATCH', '/api/network/_bulk', { component_class: 'Link',
+      names: tagsBefore.links.map(l => l.name), updates: { eh_role: '' } })
+    const stripped = await snapshotTables()
+    check(!stripped.buses.some(b => b.eh_poc || b.eh_critical) && !stripped.links.some(l => l.eh_role),
+      'tags stripped')
+    const n3 = (await stubRequests()).length
+    await byId('chat-input').fill('Run the tool suggest_eh_setup with exactly these arguments: {"archetype":"weak_flexible"}')
+    await byId('chat-send').click()
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-testid="chat-message"]')]
+      .some(m => (m.textContent ?? '').includes('Done — suggest_eh_setup applied.')), null, { timeout: 60_000 })
+    await waitIdle()
+    check((await byId('chat-confirmation-card').count()) === 0, 'a read tool: no confirmation card')
+    const rec = (await stubRequests()).slice(n3)
+    const toolMsg = rec.flatMap(r => r.payload.messages ?? []).filter(m => m.role === 'tool').at(-1)
+    const body = String(toolMsg?.content ?? '')
+    const jsonStart = body.indexOf('{')
+    const result = JSON.parse(body.slice(jsonStart, body.lastIndexOf('}') + 1))
+    const got = kind => result.suggestions.filter(s => s.kind === kind).map(s => s.name).sort()
+    check(JSON.stringify(got('import_link')) === JSON.stringify([...want.import].sort()), `import link: ${got('import_link')}`)
+    check(JSON.stringify(got('poc_bus')) === JSON.stringify([...want.poc].sort()), `PoC bus: ${got('poc_bus')}`)
+    check(JSON.stringify(got('critical_bus')) === JSON.stringify([...want.critical].sort()), `critical: ${got('critical_bus')}`)
+    info(`actions: ${result.actions.map(x => `${x.tool}(${x.args.name ?? x.args.names})`).join(', ')}`)
+    const afterSuggest = tableDiffs(stripped, await snapshotTables())
+    check(afterSuggest.diffs.length === 0, 'suggest_eh_setup wrote nothing (tables equal)')
+    await shot(page, 'p25-suggest-eh-setup')
+  } catch (e) {
+    try { await shot(page, 'FAILURE') } catch { /* page gone */ }
+    const logFile = path.join(args.out, 'FAILURE-console.log')
+    fs.writeFileSync(logFile, consoleLines.join('\n'))
+    info(`console log ${logFile}`)
+    throw e
+  } finally {
+    await context.close()
+  }
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 let code = 0
 let browser
@@ -1171,6 +1382,7 @@ try {
   else if (args.phase === 'P24-BE') await phaseP229(browser, { reviewChecks: true })
   else if (args.phase === 'P23') await phaseP23(browser)
   else if (args.phase === 'P24') await phaseP24(browser)
+  else if (args.phase === 'P25') await phaseP25(browser)
   console.log(`\nPASS — ${shots.length} screenshots in ${args.out}`)
 } catch (e) {
   code = e instanceof ToolingError ? 3 : 1

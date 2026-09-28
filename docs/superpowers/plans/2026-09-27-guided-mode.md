@@ -308,6 +308,12 @@ Spec §6.
 - [ ] 6 QA-gate review GO (`…-gate-P25.md`)
 - [ ] 7 Expert-unchanged review signed (only the `_EH_GUIDE_CHAINING` sentence differs)
 
+**P25 edited assertions (spec §8.3, one line each):**
+- `delegate.test.ts` — "delegate behaves like ask until P25" becomes "delegate calls `sendRequest` with `source:'hub-design'`"; the Site-fix grid text gains the `suggest_eh_setup` clause (spec §5.7: both are the P25 change).
+- `ImproveCard.test.tsx`, `SiteCard.test.tsx`, `GoalCard.test.tsx` — the Do / fix / VOLL / stress buttons now assert the queued request instead of the composer seed (§5.7 `delegate` → `sendRequest`); Ask still asserts the seed.
+- `test_energy_hub_review.py` — `_validate_action` moved to `tests/_tool_actions.py` (§6.3, shared) and gained an enum check; `test_prompt_carries_the_eh_workflow_both_modes` extended for `suggest_eh_setup` (§6.3).
+- `smoke-guided.mjs --phase P24` — the Improve step's "composer seeded, nothing sent" check becomes "sent as a user message → confirmation card → decline" (§5.7 P25 behaviour).
+
 ---
 
 ## P26 — Verification

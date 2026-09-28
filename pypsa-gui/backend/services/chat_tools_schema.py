@@ -974,6 +974,20 @@ TOOLS: list[dict[str, Any]] = [
         "the user agrees. Safety: read.",
     ),
     _t(
+        "suggest_eh_setup",
+        "Suggest the Energy Hub tags a network that is not tagged yet needs: "
+        "the grid import Link (eh_role = grid_import), the point-of-connection "
+        "bus (eh_poc) and the buses whose load must stay on (eh_critical), each "
+        "with its reason and confidence, plus the units that lack outage data "
+        "(a question for the user — no action). `actions` lists ready "
+        "update_component / bulk_update_components calls; present them and run "
+        "only the ones the user picks (they ask for confirmation). Applies "
+        "nothing. `archetype` only words the reasons. Safety: read.",
+        {"archetype": {"type": "string",
+                       "enum": ["strong_grid", "weak_flexible", "off_grid"]}},
+        [],
+    ),
+    _t(
         "run_fmea_sweep",
         "Start the contingency sweep: class B (every single link outage) plus "
         "any class-C `scenarios` given (get them from get_stress_scenarios). "
@@ -2321,6 +2335,7 @@ TOOL_ROUTES: dict[str, list] = {
     "get_eh_template": [("GET", "/api/projects/{name}/eh_template")],
     "get_feature_guide": [("GET", "/api/guides/{topic}")],
     "review_eh_study": [("GET", "/api/results/eh_review")],  # P24: one source
+    "suggest_eh_setup": _SERVICE_CALL,  # P25: pure read of the live network
     "run_fmea_sweep": [("POST", "/api/results/fmea_sweep")],
     "run_frontier_study": [("POST", "/api/results/frontier")],
     "run_mc_study": [("POST", "/api/results/mc")],

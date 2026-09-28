@@ -1617,6 +1617,16 @@ def review_eh_study() -> dict:
         no_data_message=_ADEQUACY_NO_DATA_HINTS["eh_reference_design"])
 
 
+def suggest_eh_setup(archetype: str | None = None) -> dict:
+    """Suggested Energy Hub tags for the live network (P25): the grid import
+    Link, the point-of-connection bus, critical buses, and units without
+    outage data — each with a reason and a ready update_component /
+    bulk_update_components action. READ: nothing is applied; the write tools
+    confirm whatever the user picks."""
+    from services.adequacy.eh_setup import suggest_eh_setup as _suggest
+    return _suggest(PyPSAService.get_network(), archetype=archetype)
+
+
 def _campaign_gated(study: str, start, **estimate_kwargs):
     """
     Run a study under the active campaign's budget, if there is one.
@@ -4701,6 +4711,7 @@ DISPATCHERS: dict[str, Any] = {
     "get_eh_template": get_eh_template,
     "get_feature_guide": get_feature_guide,
     "review_eh_study": review_eh_study,
+    "suggest_eh_setup": suggest_eh_setup,
     "run_fmea_sweep": run_fmea_sweep,
     "run_frontier_study": run_frontier_study,
     "run_mc_study": run_mc_study,

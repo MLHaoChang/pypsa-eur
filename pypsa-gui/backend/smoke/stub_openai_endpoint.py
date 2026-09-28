@@ -45,20 +45,69 @@ USAGE
     pixi run -e test python pypsa-gui/backend/smoke/run_chat_smoke.py \
       --profile stub-openai --prompts 1 --verbose
 
-Only P1 (`save_project`) is scripted, deliberately: it is destructive, so it
-exercises the confirmation card too, and one prompt is enough to prove the
-chain. A second scripted prompt is more stub surface to get wrong, and the
-stub being wrong is the one failure mode this harness cannot self-detect.
+Two branches are scripted, deliberately few — the stub being wrong is the
+one failure mode this harness cannot self-detect:
+
+  1. "Save the current network" -> `save_project` (P1 of run_chat_smoke). It
+     is destructive, so it exercises the confirmation card too.
+  2. The guided hub's "Let the assistant do this" text (guided-mode spec
+     §5.7 / §6.6): `Run the tool <name> with exactly these arguments: {...}`
+     anywhere in the last user text -> that tool call with those arguments
+     (id `call_stub_2`). After the tool result it closes with one sentence:
+     "Done — <tool> applied." (or, when the result says the user declined,
+     "Understood — <tool> was not applied."). This is what lets the browser
+     smoke see a real confirmation card from a card click. No branch for
+     the Site fixes in v1.
+
+Every other prompt gets "Saved.".
+
+Test-only extra: `GET /_stub/requests` returns what was received — for each
+request its `last_user_text` and the raw payload — so a smoke can assert on
+what the model was sent (the Guided addendum in Guided, none in Expert). A
+real endpoint has no such route; nothing in the app calls it.
+
+`STUB_REPLY_DELAY_MS` (env, default 0) holds every reply that long before its
+first byte, so a smoke can act while a turn is still streaming.
 """
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 11999
 seen_payloads: list[dict] = []
+
+
+# Branch 2 (§6.6): the §5.7 delegate sentence. The regex LOCATES the call;
+# the arguments are then decoded as one JSON value from the opening brace, so
+# nested objects ({"partial":{"voll":5000}}) are not cut at the first "}".
+_RUN_TOOL = re.compile(r"Run the tool (\w+) with exactly these arguments: (\{.*?\})",
+                       re.DOTALL)
+_DECLINED = re.compile(r"declin|reject|cancel|denied|expired|abort", re.I)
+REPLY_DELAY_S = int(os.environ.get("STUB_REPLY_DELAY_MS", "0") or 0) / 1000.0
+
+
+def _scripted_call(text: str) -> tuple[str, dict] | None:
+    m = _RUN_TOOL.search(text)
+    if not m:
+        return None
+    try:
+        args, _end = json.JSONDecoder().raw_decode(text, m.start(2))
+    except ValueError:
+        return None
+    return (m.group(1), args) if isinstance(args, dict) else None
+
+
+def _tool_after_last_user(messages) -> dict | None:
+    """The tool result answering THIS turn (history replays earlier ones)."""
+    last_user = max((i for i, m in enumerate(messages) if m.get("role") == "user"),
+                    default=-1)
+    tools = [m for m in messages[last_user + 1:] if m.get("role") == "tool"]
+    return tools[-1] if tools else None
 
 
 def _sse(obj) -> bytes:
@@ -86,7 +135,16 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        if self.path.rstrip("/").endswith("/models"):
+        if self.path.rstrip("/") == "/_stub/requests":
+            body = json.dumps([
+                {"last_user_text": _last_user_text(p.get("messages", [])),
+                 "payload": p} for p in seen_payloads]).encode()
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        elif self.path.rstrip("/").endswith("/models"):
             body = json.dumps({"data": [{"id": "stub-model"}]}).encode()
             self.send_response(200)
             self.send_header("content-type", "application/json")
@@ -106,6 +164,11 @@ class Handler(BaseHTTPRequestHandler):
         answered = any(m.get("role") == "tool" for m in messages)
         text = _last_user_text(messages)
 
+        scripted = _scripted_call(text)
+        this_turn_tool = _tool_after_last_user(messages)
+
+        if REPLY_DELAY_S:
+            time.sleep(REPLY_DELAY_S)
         self.send_response(200)
         self.send_header("content-type", "text/event-stream")
         self.send_header("cache-control", "no-cache")
@@ -128,6 +191,19 @@ class Handler(BaseHTTPRequestHandler):
                 "function": {"name": "save_project",
                              "arguments": json.dumps({"name": name})},
             }]}}]}))
+        elif scripted and this_turn_tool is None:
+            tool, args = scripted
+            emit(_sse({"choices": [{"delta": {"tool_calls": [{
+                "index": 0,
+                "id": "call_stub_2",
+                "type": "function",
+                "function": {"name": tool, "arguments": json.dumps(args)},
+            }]}}]}))
+        elif scripted:
+            result = str(this_turn_tool.get("content") or "")
+            said = (f"Understood — {scripted[0]} was not applied."
+                    if _DECLINED.search(result) else f"Done — {scripted[0]} applied.")
+            emit(_sse({"choices": [{"delta": {"content": said}}]}))
         else:
             emit(_sse({"choices": [{"delta": {"content": "Saved."}}]}))
 

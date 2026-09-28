@@ -273,8 +273,11 @@ def test_outage_data_lists_the_datacenter_gensets_without_it():
 
 def test_outage_data_ignores_slack_and_renewables_and_rated_units():
     n = _strip(TPL.build_eh_microgrid())
+    # A VOLL slack is neither missing equipment nor supply: with it the tie
+    # is still found (it would dwarf every real unit if it counted).
     n.add("Generator", "voll_slack", bus="island", carrier="load_slack", p_nom=1e6)
     out = suggest_eh_setup(n)
+    assert _proposed(out)["import_link"] == {"subsea_tie"}
     od = {s["name"] for s in out["suggestions"] if s["kind"] == "outage_data"}
     assert "voll_slack" not in od
     assert "pv_plant" not in od and "wind_turbines" not in od
@@ -307,3 +310,30 @@ def test_dispatcher_reads_the_live_network_and_leaves_it(install_network):
     assert _proposed(out) == _builder_tags(TPL.build_eh_microgrid())
     for name, df in _frames(PyPSAService.get_network()).items():
         pd.testing.assert_frame_equal(df, before[name])
+
+
+def _utility_site() -> pypsa.Network:
+    n = pypsa.Network()
+    n.set_snapshots(pd.RangeIndex(2))
+    for b in ("utility", "site", "spare"):
+        n.add("Bus", b, carrier="AC")
+    n.add("Generator", "utility_supply", bus="utility", p_nom=100.0)
+    n.add("Link", "tie", bus0="utility", bus1="site", p_nom=50.0)
+    n.add("Link", "spur", bus0="utility", bus1="spare", p_nom=50.0)
+    n.add("Load", "d", bus="site", p_set=10.0)
+    return n
+
+
+def test_the_far_side_of_the_import_must_serve_load():
+    # `spur` scores exactly like `tie` on supply and names, but nothing
+    # beyond it consumes anything: it is not how the site is fed.
+    out = suggest_eh_setup(_utility_site())
+    assert _proposed(out)["import_link"] == {"tie"}
+
+
+def test_a_conversion_role_the_user_set_is_respected():
+    n = _utility_site()
+    n.links["eh_role"] = ""
+    n.links.at["tie", "eh_role"] = "conversion"
+    out = suggest_eh_setup(n)
+    assert "tie" not in _proposed(out)["import_link"]
