@@ -347,11 +347,11 @@ Gate file: `docs/superpowers/qa/2026-09-27-guided-mode-gate-P25.md`. Items carri
 
 Spec §7.
 
-- [ ] Real-app click-through of the Guided flow on all three templates (`smoke-guided.mjs --phase P26`): first-time user → Guided → template → site → goal → run → results → improve via the assistant (confirmation shown) → FMEA check; mode persistence both ways.
-- [ ] Any new finding fixed test-first in the owning phase's files; recorded here.
-- [ ] Verdicts observed per template recorded (expected from P20: data center fail, H₂ hub no target, microgrid inconclusive; differences are recorded, not forced).
-- [ ] Independent QA gate GO (`…-gate-P26.md`), full backend and frontend suites green vs. baseline, `tsc` clean.
-- [ ] Close-out note: what Guided still does not cover (spec §1 non-goals) and the deferred P22.9 items.
+- [x] Real-app click-through of the Guided flow on all three templates (`smoke-guided.mjs --phase P26`): first-time user → Guided → template → site → goal → run → results → improve via the assistant (confirmation shown) → FMEA check; mode persistence both ways.
+- [x] Any new finding fixed test-first in the owning phase's files; recorded here.
+- [x] Verdicts observed per template recorded (expected from P20: data center fail, H₂ hub no target, microgrid inconclusive; differences are recorded, not forced).
+- [x] Independent QA gate GO (`…-gate-P26.md`), full backend and frontend suites green vs. baseline, `tsc` clean.
+- [x] Close-out note: what Guided still does not cover (spec §1 non-goals) and the deferred P22.9 items.
 
 **P26 implementation (2026-09-28, before the gate).** `smoke-guided.mjs --phase P26` walks spec §7 item 1 on all three templates, each in a fresh first-time context. The verdicts observed match P20: data center `fail`, H₂ hub no goal (no verdict), microgrid `inconclusive`. Findings from the first-time-user review, fixed test-first:
 
@@ -384,3 +384,21 @@ Spec §7.
 **P26 edited assertion (spec §8.3):** `ChatPanel.sendRequest.test.tsx` "B2: a reloaded Improve request" now expects the plain-words label ("expected shortfall", not "LOLE"). Justification: after a reload, the label must read as the live one does (`delegate.actionLabel`).
 
 The larger findings are recorded for the orchestrator in `docs/superpowers/qa/2026-09-28-guided-mode-closeout.md`. They are not fixed.
+
+**P26 result: GO at the final re-gate on `f582f792`, 2026-09-28.**
+- The first final gate was NO-GO on two findings:
+  - the Guided greeting stayed stuck on "running" once the hub panel was closed;
+  - destructive cards hid their target behind collapsed Details.
+- Both are fixed.
+- Evidence:
+  - full backend suite: `6235 passed, 31 skipped, 11 deselected`, 0 failures;
+  - row 2: 613 passed;
+  - `tsc`: clean;
+  - vitest: 2561 passed;
+  - stress run ×10: 10 of 10 passed;
+  - smokes: P26 (all three templates), P25, P24, P23, P24-BE and P22.9 all pass;
+  - mutation checks on the fixes: 8 of 8 killed.
+- Verdicts are as expected: data center fail, H₂ hub no goal, microgrid inconclusive.
+- Gate file: `docs/superpowers/qa/2026-09-28-guided-mode-gate-P26.md`. Close-out note: `docs/superpowers/qa/2026-09-28-guided-mode-closeout.md`.
+- **Guided mode (P22.9–P26) is complete.** The follow-up work is in `docs/superpowers/plans/2026-09-28-guided-mode-deferred.md` (P27a–P32).
+
