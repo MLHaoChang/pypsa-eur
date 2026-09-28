@@ -723,3 +723,14 @@ describe('LoopPanel run controls', () => {
       .toMatch(/the controller raised/)
   })
 })
+
+describe('LoopPanel not-run copy', () => {
+  // The pre-run cost disclosure names the solve budget. It rendered the
+  // literal placeholder text "max_solves" where the number belongs.
+  it('states the solve ceiling as a number, not as a placeholder', async () => {
+    await openPanel()
+    const copy = (await screen.findByTestId('loop-not-run')).textContent ?? ''
+    expect(copy).not.toContain('max_solves')
+    expect(copy).toMatch(/up to\s*8 full capacity expansions/)
+  })
+})

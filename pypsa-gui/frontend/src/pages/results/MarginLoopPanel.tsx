@@ -11,12 +11,8 @@ import { basisSuffix, type CoptPayload } from './adequacy'
 import { blockerMessage, trim } from './McPanel'
 import {
   compact, entryHorizonYears, eur, leverSpelling, loleCell, restoreSentence,
-  targetEcho, wireTarget, type LeverCopy,
+  MAX_LOOP_SOLVES, targetEcho, wireTarget, type LeverCopy,
 } from './LoopPanel'
-
-/** The loop's solve ceiling — mirrors `MAX_LOOP_SOLVES` in
- *  backend/services/adequacy/coupling.py, the cap the route enforces. */
-export const MAX_LOOP_SOLVES = 8
 
 // ── The margin-driven planning loop (Phase 9, margin-loop spec §3) ──────────
 //

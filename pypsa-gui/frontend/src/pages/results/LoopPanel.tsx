@@ -11,6 +11,11 @@ import { nk } from '../../utils/queryKeys'
 import { basisSuffix, type CoptPayload } from './adequacy'
 import { blockerMessage, ciRange, trim } from './McPanel'
 
+/** The loops' solve ceiling — mirrors `MAX_LOOP_SOLVES` in
+ *  backend/services/adequacy/coupling.py, the cap the routes enforce;
+ *  tests/test_loop_solve_ceiling_parity.py pins the two equal. */
+export const MAX_LOOP_SOLVES = 8
+
 // ── The adequacy-coupled planning loop (Phase 7, plan §3 / spec §4) ──────────
 //
 // Solve the LP under an energy cap, run the sequential MC on the PLAN that
@@ -490,7 +495,7 @@ export function LoopPanel() {
             <p className="text-[10px] text-muted" data-testid="loop-not-run">
               No coupling loop has been run in this session. Nothing below is a
               result of zero: there is no result. A run costs up to{' '}
-              {'max_solves'} full capacity expansions plus one sampling study
+              {MAX_LOOP_SOLVES} full capacity expansions plus one sampling study
               each, and it holds the network for its whole duration.
             </p>
           )}

@@ -80,3 +80,17 @@ it('renders no note when the backend sends none', async () => {
   await screen.findAllByText('Net profit')
   expect(screen.queryByTestId('economics-reading-notes')).toBeNull()
 })
+
+// The cross-surface golden payload (written by the backend's golden test)
+// carries the note because its `gas` and `electrolyzer` are interior. This
+// makes the recorded contract live: the string the chip shows IS the
+// backend's string, not a third copy typed here.
+import golden from './__fixtures__/asset-economics.golden.json'
+
+it('renders the golden payload\'s own note', async () => {
+  vi.mocked(resultsApi.getAssetEconomics).mockReset().mockResolvedValue(golden as never)
+  renderPage()
+  const chip = await screen.findByTestId('economics-reading-notes')
+  expect(golden.reading_notes.length).toBeGreaterThan(0)
+  expect(chip.textContent).toBe(golden.reading_notes.join(' '))
+})

@@ -114,15 +114,3 @@ def classify_sizing(row: Any, nom_col: str, *, solved: bool) -> dict:
         "explanation": BINDING_EXPLANATIONS[binding],
     }
 
-
-def is_interior_optimum(df: Any, name: str, nom_col: str) -> bool:
-    """
-    True when `name` in the static table `df` was sized by the LP and sits on
-    neither bound. "Solved" is read off the table itself: an `<nom>_opt`
-    column exists only after a solve, and a missing column is never taken
-    for an interior result.
-    """
-    if df is None or name not in df.index or f"{nom_col}_opt" not in df.columns:
-        return False
-    row = df.loc[name]
-    return classify_sizing(row, nom_col, solved=True)["binding_constraint"] == "interior"

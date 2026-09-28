@@ -466,7 +466,7 @@ export function GeneratorCard({ gen, onRename, mode = 'card', title }: {
 }
 
 // ── Storage unit card ──────────────────────────────────────────────────────────
-function StorageUnitCard({ su, onRename, mode = 'card', title }: {
+export function StorageUnitCard({ su, onRename, mode = 'card', title }: {
   su: StorageUnit
   onRename?: (newName: string) => void
   mode?: 'card' | 'detail'
@@ -693,7 +693,7 @@ function StorageUnitCard({ su, onRename, mode = 'card', title }: {
 }
 
 // ── Store card ─────────────────────────────────────────────────────────────────
-function StoreCard({ store, onRename, mode = 'card', title }: {
+export function StoreCard({ store, onRename, mode = 'card', title }: {
   store: Store
   onRename?: (newName: string) => void
   mode?: 'card' | 'detail'
@@ -1087,7 +1087,7 @@ const H2_CAT_DISPLAY_LABELS: Partial<Record<AssetCategory, string>> = {
 }
 
 // ── Link card ──────────────────────────────────────────────────────────────────
-function LinkCard({ link, onRename, mode = 'card', title }: {
+export function LinkCard({ link, onRename, mode = 'card', title }: {
   link: Link
   onRename?: (newName: string) => void
   mode?: 'card' | 'detail'
@@ -1779,7 +1779,7 @@ function BusPanel({ name }: { name: string }) {
 }
 
 // ── Line panel ─────────────────────────────────────────────────────────────────
-function LinePanel({ name }: { name: string }) {
+export function LinePanel({ name }: { name: string }) {
   const qc = useQueryClient()
   const { setSelectedComponent } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
@@ -2112,7 +2112,7 @@ function LinePanel({ name }: { name: string }) {
 }
 
 // ── Transformer panel ──────────────────────────────────────────────────────────
-function TransformerPanel({ name }: { name: string }) {
+export function TransformerPanel({ name }: { name: string }) {
   const qc = useQueryClient()
   const { setSelectedComponent } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
