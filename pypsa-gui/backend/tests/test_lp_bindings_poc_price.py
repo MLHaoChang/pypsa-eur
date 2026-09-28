@@ -188,6 +188,7 @@ def test_after_a_solve_the_poc_price_is_persisted_and_the_users_cost_untouched()
     assert "import" not in n.links_t.marginal_cost.columns  # applied for the solve, undone
     record = dict(n.meta[L.META_LINKS])
     assert record.pop("energy_hash")  # the drift check's content hash
+    assert record.pop("agreement_recorded") is True  # this solve records its agreement (WP2.0)
     assert record == {"import": "import", "export": None,
                       "import_members": ["import"], "priced": ["import"]}
     assert sink["last_commercial_terms"]["poc_link"] == "import"

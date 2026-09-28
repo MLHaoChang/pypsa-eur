@@ -1017,7 +1017,10 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
         n.links_t[ENERGY_PRICE_ATTR] = frame
         n.meta[META_LINKS] = {"import": cfg.poc_link, "export": cfg.export_link,
                               "import_members": import_links(cfg),
-                              "priced": sorted(targets), "energy_hash": energy_hash(n, cfg)}
+                              "priced": sorted(targets), "energy_hash": energy_hash(n, cfg),
+                              # This solve records its connection agreement in
+                              # `ic_connection` (P2 WP2.0); a P1 solve did not.
+                              "agreement_recorded": True}
         if "v" in solved_peaks:
             n.meta[META_DEMAND] = solved_peaks["v"]
             n.meta[META_DEMAND_INFO] = demand["info"]

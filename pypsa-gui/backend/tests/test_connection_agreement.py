@@ -591,3 +591,20 @@ def _tou_tariff(rate_night=0.07):
             "items": [{"id": "e", "kind": "energy", "unit": "per_kwh", "periods": [
                 {"name": "night", "rate": rate_night, "start_hour": 0, "end_hour": 6},
                 {"name": "day", "rate": 0.2}]}]}
+
+
+@pytest.mark.live_solve
+def test_a_p1_solved_project_without_the_agreement_record_is_not_drift():
+    """Upgrade path: a P1 solve never wrote `ic_connection`; its agreement must
+    not read as "added after the solve" (P2 WP2.0)."""
+    from services.commercial import connection as conn
+    from services.commercial import lp_bindings as L
+    from services.results.cost_breakdown import compute_cost_breakdown
+
+    n = build_edge_15min()
+    status, _, cfg = _run(n, {**_conn(_agreement(cap=60.0)), "import_tariff": _tou_tariff()})
+    assert status in ("ok", "optimal")
+    n.meta.pop(conn.META_AGREEMENT, None)                  # as a P1 solve left it
+    n.meta[L.META_LINKS] = {k: v for k, v in n.meta[L.META_LINKS].items()
+                            if k != "agreement_recorded"}
+    assert "config_changed_since_solve" not in compute_cost_breakdown(n, cfg)["commercial"]["flags"]

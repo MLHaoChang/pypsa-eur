@@ -210,8 +210,11 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
             _conn.agreement_hash(agreement):
         flags.append("config_changed_since_solve" if commercial else
                      "config_cleared_since_solve")
-    elif not solved_agreement and agreement is not None and n.meta.get(_lp.META_LINKS):
-        flags.append("config_changed_since_solve")  # an agreement the solve did not bind
+    elif not solved_agreement and agreement is not None and \
+            (n.meta.get(_lp.META_LINKS) or {}).get("agreement_recorded"):
+        # An agreement the solve did not bind. Only for solves that record
+        # agreements: a P1 solve never wrote `ic_connection` (upgrade path).
+        flags.append("config_changed_since_solve")
 
     # Fixed connection fee — reported, NOT in the reconciled total (§5.5).
     fixed = n.meta.get(_conn.META_FIXED_FEE)
