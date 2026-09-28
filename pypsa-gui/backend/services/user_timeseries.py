@@ -9,11 +9,15 @@ anywhere else in this decomposition: `services/chat_tools.py`,
 chat_tools guards its import with a comment reading "only fails if
 routers/network refactor breaks paths".
 
-`_user_ts` is a module-level dict and `_user_ts_lock` the RLock guarding it.
-Both are shared MUTABLE state: importers take them by value and mutate in
-place, so the re-export is only sound while nothing ever rebinds them.
+`_user_ts` is a per-ProjectContext VIEW of that context's `user_ts` dict (see
+`_ActiveUserTsStore` below and the finding it cites) and `_user_ts_lock` the
+process-wide RLock guarding whichever dict a caller resolved. Both are shared
+MUTABLE state: importers take them by value and mutate in place, so the
+re-export is only sound while nothing ever rebinds them.
 `tests/test_network_facade_surface.py::test_the_user_ts_store_is_never_rebound`
-enforces that statically, here and in the router.
+enforces that statically, here and in the router — and it is the view's identity
+that has to hold, not the storage's, which is precisely why the storage could
+move per-context without touching a single one of them.
 
 Depends on `services/snapshot_index.py` and `PyPSAService` — both services.
 Nothing here imports a router.
@@ -36,9 +40,114 @@ from services.snapshot_index import _build_period_multiindex
 # pandas index-alignment pitfall: uploading a column with 2024 timestamps will
 # never corrupt another column that was uploaded with 2026 timestamps, and a
 # re-upload of any column simply overwrites its own entry.
-_user_ts: dict[tuple[str, str, str], pd.Series] = {}
+#
+# The key says nothing about WHOSE column it is, and that is on purpose: the
+# tenancy dimension is not in the key, it is in WHICH DICT the key lives in.
+# The actual storage is `ProjectContext.user_ts` — one dict per resident project
+# context — and `_user_ts` below is a stable VIEW that resolves to the context
+# the caller is on, exactly as `routers.simulation._state` resolves to that
+# context's `solver_state`.
+#
+# ★ WHY IT IS NOT ONE DICT. It used to be, and the store is authoritative
+# rather than a cache: `GET /api/network/timeseries/{component}/{attribute}`
+# prefers it over the network's own `_t` tables, every foreground save
+# serialises it into that project's `user_ts.json`, and
+# `_reapply_user_ts_to_network` writes it back onto the network immediately
+# before the netCDF export. On one process serving many signed-in sessions all
+# of that was shared: org A's uploaded demand profile was readable from org B's
+# OWN project, was persisted into B's `user_ts.json`, and from there into B's
+# `network.nc` and its solve results — while `GET /api/network/loads` still
+# showed B's own static `p_set`, so the two surfaces disagreed and the leaked
+# one won at export time. Symmetrically, A opening a project wiped B's
+# in-flight uploads. Reproduced cross-org and written up in
+# `docs/superpowers/findings/2026-09-12-user-ts-is-a-process-global-shared-across-tenants.md`;
+# `tests/test_user_ts_tenancy.py` pins the four properties it requires.
+# The desktop build had the same defect as a multi-project data-integrity bug.
+class _ActiveUserTsStore:
+    """
+    Mapping view of the ACTIVE project context's user time-series store.
+
+    A view rather than a dict so the ~50 sites that read or write `_user_ts`
+    — four production modules and six test modules, several of which import the
+    name BY VALUE inside a function body — did not have to change to become
+    tenant-scoped. Every operation resolves through
+    `PyPSAService.get_user_ts()`, i.e. through the request-scoped context when
+    there is one and the process foreground otherwise, so a stale binding
+    captured at import time still reaches whichever project is current NOW.
+
+    The object is bound ONCE and never rebound (enforced statically by
+    `tests/test_network_facade_surface.py::test_the_user_ts_store_is_never_rebound`,
+    which is what keeps the by-value importers pointing at this view rather than
+    at a detached dict of their own).
+    """
+
+    __slots__ = ()
+
+    @staticmethod
+    def _t() -> dict:
+        return PyPSAService.get_user_ts()
+
+    def __getitem__(self, key):
+        return self._t()[key]
+
+    def __setitem__(self, key, value):
+        self._t()[key] = value
+
+    def __delitem__(self, key):
+        del self._t()[key]
+
+    def __contains__(self, key):
+        return key in self._t()
+
+    def __iter__(self):
+        return iter(self._t())
+
+    def __len__(self):
+        return len(self._t())
+
+    def __repr__(self):
+        return f"_ActiveUserTsStore({self._t()!r})"
+
+    def get(self, key, default=None):
+        return self._t().get(key, default)
+
+    def update(self, *args, **kwargs):
+        self._t().update(*args, **kwargs)
+
+    def clear(self):
+        self._t().clear()
+
+    def keys(self):
+        return self._t().keys()
+
+    def items(self):
+        return self._t().items()
+
+    def values(self):
+        return self._t().values()
+
+    def setdefault(self, key, default=None):
+        return self._t().setdefault(key, default)
+
+    def pop(self, key, *args):
+        return self._t().pop(key, *args)
+
+    def copy(self):
+        return self._t().copy()
 
 
+_user_ts = _ActiveUserTsStore()
+
+
+# Guards multi-step reads/writes of whichever context's store the caller
+# resolved. Deliberately still ONE process-wide RLock and not a per-context one:
+# it protects dict-level atomicity (serialise-while-uploading, the
+# clear-then-update in `_restore_user_ts`), and one lock over N dicts is coarser
+# than necessary and never wrong — whereas a lock that MOVES when the active
+# context moves would be acquired on one object and released on another across
+# the reset/set swaps that `load_project` performs inside a held critical
+# section. Same argument the netCDF I/O lock and `solver_state_lock` already
+# make in their own places.
 _user_ts_lock = _ts_threading.RLock()
 
 
