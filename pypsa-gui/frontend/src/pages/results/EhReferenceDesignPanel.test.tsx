@@ -943,6 +943,10 @@ describe('review of WP5: labels that do not hide an event or a firm Link', () =>
       import_firmness: 'grid_sampled',
       fleet_scope: { mode: 'hub_side', import_cap_mw_max: 50 } }))
       .toMatch(/grid-side surplus sampled; Links firm/)
+    expect(importModelLabel({ metric: 'mc_lole', import_model: 'sampled_unit',
+      import_firmness: 'outage_and_common_mode_sampled',
+      fleet_scope: { mode: 'hub_side', import_cap_mw_max: 50 } }))
+      .toMatch(/Link outages \+ common-mode event sampled/)
   })
 
   it('says the screening mixes events, and when the exact metric is rounded', () => {

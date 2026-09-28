@@ -169,3 +169,22 @@ The single-area engine (`mc.py`) was not modified in this round. The MC, ELCC an
 - **The class-A screening's grid is held at its expected value.** It ranks modes but does not certify; the ±40 % caveat is on the payload. `import_exact` (exact, no storage) and the MC (certifying) sit beside it. Exact per-mode attribution under the grid distribution would need a multi-state unit in `copt.py`'s attribution engine; that is a larger change, left for a later round.
 - **The grid-storage policy is pinned, not optimal:** grid-first, remote support within the Link headroom, and charging only from surplus not offered to the hub. That is non-anticipative and conservative, and disclosed.
 - **Common-mode events are opt-in data only.** Nothing is defaulted, and there is no library of event rates.
+
+## PR #55 review pass (after the PR was opened)
+
+The PR had no reviewer, so a full code review of its diff against `master` (at `high` effort) stood in for one. It found 9 issues. The review tool fixed 6 itself (commit `833b2d6`). It skipped the other 3 as "behaviour changes", and those were then fixed deliberately with tests first (`test_energy_hub_zonal_review.py`, red → green).
+
+| # | Finding | Resolution |
+|---|---|---|
+| P1 | On the `sampled_unit` / `firm_block` paths the scope note was written before the common-mode `applied` flags were cleared, so note and payload disagreed | The note is now written after the loop. An assertion added to the B1 test fails on the old code. |
+| P2 | `exact_import_metrics` rebuilt the full COPT up to about 260 times, while holding the network lock | `_grid_surfaces` builds the split and table once per block and evaluates every threshold. |
+| P3 | Each import Link's outage chain was generated twice per batch | A `_placeholder()` stand-in consumes no stream. The draws are unchanged and the bit-identity tests pass. |
+| P4 | `FleetScope.delivery_ratio` / `n_grid_components` were computed but never read | Removed. |
+| P5 | The trace sums ran every hour even when no trace was requested | Gated on a `trace` being requested. |
+| P6 | Ignored common-mode entries always reported basis `FOR` | They share `_common_mode_basis()`. |
+| P7 | **A grid unit with a rate outside [0, 1) fell back silently to an unbounded grid**, while the same data on the hub side refuses the study | `OutageRateError` from a grid snapshot now refuses the study, naming the unit. Other snapshot failures keep the documented fallback; one test pins each case. |
+| P8 | `fmea_top` returned before the Class-B sweep whenever the COPT had nothing to screen, so a hub with no sampled unit never had its Link ranked | The early return is removed and the payload carries `copt_error`. Live-solve test: the Link is ranked by its Class-B row. |
+| P9 | A sampled Link plus a common-mode event with no sampled grid was labelled only `outage_sampled` | New `import_firmness` value `outage_and_common_mode_sampled`. The frontend type and label were updated, with a vitest. |
+| — | The area note said the event "cuts the export only", but grid stores also don't charge during the event (pinned by a test) | Reworded: the area exports nothing and its stores neither support the hub nor charge, but still serve the area's own deficit. |
+
+Verification: EH + sweep + MC suites 371 passed; `qa_eh_reference_design.py` 108/108; `EhReferenceDesignPanel.test.tsx` 45 passed; `tsc` clean; ruff clean on changed files.

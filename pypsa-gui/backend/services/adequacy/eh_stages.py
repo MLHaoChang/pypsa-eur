@@ -203,6 +203,9 @@ class FleetScope:
             # Review of WP4 (R2): a firm block under a sampled common-mode
             # event is not "planning_limit_only" any more.
             return "common_mode_sampled"
+        if base == "sampled_unit" and self.common_mode_sampled:
+            # Review of PR #55: say the event is sampled too.
+            return "outage_and_common_mode_sampled"
         return {"sampled_unit": "outage_sampled",
                 "mixed": "partially_outage_sampled"}.get(
                     base, "planning_limit_only")
@@ -673,6 +676,7 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
     stays on v1 and the reasons go into the note.
     """
     from services.adequacy.mc import snapshot_inputs
+    from services.adequacy.occurrence import OutageRateError
     from services.adequacy.mc_zonal import (
         CommonMode,
         GridArea,
@@ -721,6 +725,11 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
                 why = ("no occurrence data (no unit in this grid area carries "
                        "a resolvable outage rate) — its Links see an "
                        "unbounded surplus (v1)")
+        except OutageRateError:
+            # Review of PR #55: bad DATA on the grid side refuses the study,
+            # exactly as it does on the hub side — falling back to an
+            # unbounded grid would certify on optimistic inputs.
+            raise
         except Exception as exc:  # noqa: BLE001 — the reason is the payload
             why = (f"grid-side snapshot refused ({exc}) — its Links see an "
                    "unbounded surplus (v1)")
@@ -777,9 +786,10 @@ def _grid_areas(network, cfg, scope: FleetScope, hub_inputs):
                             "only from surplus not offered to the hub (power "
                             "offered but not used by the hub is not stored — "
                             "conservative)"
-                            + ("; during a common-mode event the area's own "
-                               "storage still serves the area's own deficit "
-                               "(the event cuts the export only)"
+                            + ("; during a common-mode event the area exports "
+                               "nothing and its stores neither support the hub "
+                               "nor charge, but still serve the area's own "
+                               "deficit"
                                if area_cm else "")
                             if stores else "; no storage in this area")),
             })
@@ -1391,8 +1401,10 @@ def run_fmea_top_stage(
     """
     from services.adequacy.sweep import class_b_contingencies, run_class_b_sweep
 
-    if frozen.copt_error and not frozen.copt_rows:
-        return "not_established", None, frozen.copt_error, 0
+    # Review of PR #55: no early return on a COPT error — a hub with no
+    # sampled unit of its own (COPT screening skipped) still has a Link to
+    # rank by its Class-B row. With no mode at all the stage ends
+    # not_established below, with the COPT's reason.
     modes: list[dict] = []
     for r in frozen.copt_rows:
         if r.get("failure_mode"):
@@ -1462,6 +1474,7 @@ def run_fmea_top_stage(
         "classes_included": sorted(classes),
         "class_b": class_b,
         "copt_metrics": frozen.copt_metrics,
+        "copt_error": frozen.copt_error,
         "copt_fidelity_note": getattr(frozen, "copt_fidelity_note", None),
         "fleet_scope": frozen.scope,
         "voll_eur_per_mwh": frozen.voll,

@@ -122,6 +122,9 @@ export function importModelLabel(payload: EhCertificationPayload | null): string
   if (firmness === 'common_mode_sampled') {
     return `firm block; common-mode event sampled (Link and grid down together)${capText}`
   }
+  if (firmness === 'outage_and_common_mode_sampled') {
+    return `Link outages + common-mode event sampled (Link and grid down together)${capText}`
+  }
   switch (model) {
     case 'zonal':
       return firmness === 'grid_sampled'

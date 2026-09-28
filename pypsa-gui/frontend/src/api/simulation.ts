@@ -657,6 +657,7 @@ export type EhImportModel =
 export type EhImportFirmness =
   | 'planning_limit_only' | 'outage_sampled' | 'partially_outage_sampled'
   | 'grid_sampled' | 'outage_and_grid_sampled' | 'common_mode_sampled'
+  | 'outage_and_common_mode_sampled'
 
 /** One import Link in `fleet_scope.import_link_models`. */
 export interface EhImportLinkModel {
