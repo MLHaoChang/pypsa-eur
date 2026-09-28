@@ -47,7 +47,9 @@ Consequences, in order of severity:
 Fix shape: factor the two cleanups into one helper and call it from both paths, for
 every component the cascade removes (not just the bus).
 
-**Status: OPEN**
+**Status: FIXED** — `cabe756`. `services.network_crud.purge_component_side_data`,
+called by both paths. Guard: `tests/test_bus_cascade_side_data.py`, with the
+plain-delete path as a control.
 
 ### QA-N2 — spatial clustering drops `n.meta`
 
@@ -62,11 +64,20 @@ vintage results. The comment beside the assignment reassures about coordinates
 
 Fix shape: carry `meta` across explicitly, and decide per key whether it survives
 aggregation — asset-keyed `vintage_bounds` entries whose asset no longer exists after
-clustering must be dropped or remapped rather than carried blindly, otherwise QA-N1's
+clustering must be dropped rather than carried blindly, otherwise QA-N1's
 stale-bounds failure mode is reintroduced through the back door. Whatever is dropped
 must be reported in the audit log entry the handler already writes.
 
-**Status: OPEN**
+Measured, because the obvious guess is wrong: on PyPSA 1.1.2 clustering re-buses
+one-port components under their ORIGINAL names, so a generator's bounds must
+SURVIVE the run. It is the branches that vanish — three lines collapse to one
+renamed branch — so the prune is not a formality on either side.
+
+**Status: FIXED** — `cabe756`'s sibling commit; `vintage_service.prune_orphaned_entries`
+plus the carry in `routers/clustering.py`, guarded by
+`tests/test_clustering_meta_carry.py` (the first clustering tests in the repo).
+Both halves of the fix are bite-tested independently: removing the carry reddens
+three, removing only the prune reddens two.
 
 ---
 
@@ -99,12 +110,13 @@ must-take branch a few dozen lines below does `.clip(lower=0.0)`. That asymmetry
 how a negative availability reaches `mixture_hourly` in the first place. Clipping the
 occurrence profile at zero closes the gap the F6 review left open.
 
-Fix shape: make the `silent` test exact (`np.all(avail[i] == 0.0)` under the existing
-finiteness guard) **and** clip the occurrence profile, so both the proof's premise and
-the data path that violates it are repaired. Fixing only one of the two leaves either
-a correctness hole or a silent behaviour change.
+Fix shape: make the `silent` test exact under the existing finiteness guard **and**
+clip the occurrence profile, so both the proof's premise and the data path that
+violates it are repaired. Fixing only one of the two leaves either a correctness hole
+or a silent behaviour change.
 
-**Status: OPEN**
+**Status: FIXED** — `fbae12e`. Guard: `tests/test_adequacy_copt_negative_availability.py`,
+whose reference is a brute-force enumeration of the full state space with no freezing.
 
 ### QA-N3 — investment-period weightings are assigned positionally against a sorted index
 
@@ -260,16 +272,19 @@ and the offending value, at every entry point that writes a weighting.
 
 **Status: OPEN**
 
-### QA-S1 — lock-holder email reaches the LLM provider
+### QA-S1 — lock-holder email reaches the LLM provider — NOT A FINDING
 
-Originally raised 2026-08-27; still open. When a project lock is held, the holder's
-email address is included in the payload sent to the LLM provider. The secrets
-redactor does not catch it, and correctly so — it is a secrets redactor by design,
-not a PII redactor. The fix belongs where the payload is assembled: the lock-holder
-identity should be reduced to a non-identifying form ("held by another user", or an
-opaque handle) before it is ever put in a prompt.
+Carried into the review's list from the 2026-08-27 finding without being re-checked
+against current `master`. It was fixed on 2026-09-12 and the finding document says so:
+`chat_service._error_result_content` now builds the model-facing `is_error` content
+from the typed `error_kind` plus only a dict detail's `message`, dropping `lock`,
+`holder_email` and anything unrecognised, and
+`tests/test_chat_error_content_seam.py` guards every branch.
 
-**Status: OPEN**
+Recorded here rather than deleted, because "a stale entry on the list" is the failure
+mode a findings register exists to make visible.
+
+**Status: ALREADY FIXED (2026-09-12) — withdrawn**
 
 ---
 

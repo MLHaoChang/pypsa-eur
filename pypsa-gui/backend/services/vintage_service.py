@@ -142,6 +142,77 @@ def delete_bounds_for_asset(n, component_class: str, name: str) -> bool:
     return found
 
 
+def prune_orphaned_entries(n) -> dict[str, list[str]]:
+    """Drop every saved bounds / results entry whose asset is gone from ``n``.
+
+    Returns ``{component_class: [dropped names]}``, empty when nothing was
+    dropped, so the caller can report the loss rather than let the user
+    discover it when a later solve behaves differently.
+
+    Two callers, both of which hand the network a component index they did not
+    themselves choose: ``cleanup_orphan_vintages`` (after removing orphan
+    vintage rows) and spatial clustering (after PyPSA aggregates and renames
+    components wholesale). A stale bound is expanded by the solver for an
+    asset that no longer exists, and a stale ``vintage_results`` entry is
+    walked by Compare's capacity and economics roll-ups, so both stores are
+    swept, not just the bounds.
+
+    A bounds bucket keyed by a class this module does not support is dropped
+    whole — it cannot be applied at solve time under any name.
+    """
+    dropped: dict[str, list[str]] = {}
+
+    def _record(cls: str, names: list[str]) -> None:
+        if not names:
+            return
+        seen = dropped.setdefault(cls, [])
+        seen.extend(name for name in names if name not in seen)
+
+    def _index_for(cls: str) -> set | None:
+        """The asset names ``cls`` currently has, or None when unsupported."""
+        spec = SUPPORTED_COMPONENTS.get(cls)
+        if spec is None:
+            return None
+        df = getattr(n, spec["attr"], None)
+        return set(df.index) if df is not None else set()
+
+    bucket = _ensure_meta_bucket(n)
+    # Snapshot the keys — `delete_bounds_for_asset` mutates the dict.
+    for cls in list(bucket.keys()):
+        index = _index_for(cls)
+        if index is None:
+            _record(cls, list(bucket[cls].keys()))
+            bucket.pop(cls, None)
+            continue
+        orphans = [name for name in list(bucket[cls].keys()) if name not in index]
+        for name in orphans:
+            delete_bounds_for_asset(n, cls, name)
+        _record(cls, orphans)
+
+    # `delete_bounds_for_asset` already clears the matching results entry, so
+    # this second pass only reaches results that never had bounds beside them.
+    results_root = (n.meta or {}).get("vintage_results")
+    if isinstance(results_root, dict):
+        for cls in list(results_root.keys()):
+            by_class = results_root.get(cls)
+            if not isinstance(by_class, dict):
+                results_root.pop(cls, None)
+                continue
+            index = _index_for(cls)
+            if index is None:
+                _record(cls, list(by_class.keys()))
+                results_root.pop(cls, None)
+                continue
+            orphans = [name for name in list(by_class.keys()) if name not in index]
+            for name in orphans:
+                by_class.pop(name, None)
+            if not by_class:
+                results_root.pop(cls, None)
+            _record(cls, orphans)
+
+    return dropped
+
+
 def rename_asset(n, component_class: str, old_name: str, new_name: str) -> None:
     """
     Re-key any saved bounds AND any stored vintage results on rename.
