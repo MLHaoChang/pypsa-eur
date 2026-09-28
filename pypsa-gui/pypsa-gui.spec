@@ -168,6 +168,13 @@ hiddenimports = [
     # from the bundle without a build error.
     "cloudpickle",
     "gridspine.drivers.study", "gridspine.drivers.status",
+    # `drivers.readback` reached that guard with the PowerFactory read-back
+    # (increment 6) and never reached this list. Analysis follows a try/except
+    # import today, so this is not a fix for a broken build — it is the rule
+    # stated just above, applied to the module that slipped it. Enforced now
+    # by `test_the_spec_names_every_gridspine_module_the_backend_guard_imports`,
+    # which derives the list from the guard instead of trusting this one.
+    "gridspine.drivers.readback",
     "gridspine.schema.contracts", "gridspine.templates.unit_params",
 ]
 
@@ -331,26 +338,6 @@ app = BUNDLE(                              # noqa: F821 - injected
         # cwd-relative DATABASE_URL that killed the launch.
         "NSHighResolutionCapable": True,
         "LSMinimumSystemVersion": "14.0",   # netCDF4's arm64 wheel floor
-        # The chat panel's mic button (`useSpeechToText` / `ChatPanel.tsx`)
-        # dictates into the message box via the Web Speech API. Without this
-        # key macOS TCC kills the whole process the instant recognition
-        # starts — a hard termination, not a Python exception, and nothing
-        # reaches `pypsa-gui.log`. The string is shown verbatim in the
-        # permission dialog, so it names the feature rather than saying
-        # "this app uses speech recognition".
-        "NSSpeechRecognitionUsageDescription": (
-            "PyPSA Studio uses speech recognition to turn what you say into "
-            "text when you use the mic button to dictate a message into the "
-            "chat box."
-        ),
-        # On-device speech recognition captures audio through the microphone,
-        # so macOS gates it behind BOTH usage-description keys — shipping
-        # only NSSpeechRecognitionUsageDescription just moves the same TCC
-        # kill from the speech check to this one.
-        "NSMicrophoneUsageDescription": (
-            "PyPSA Studio uses the microphone to capture your voice when you "
-            "use the mic button to dictate a message into the chat box."
-        ),
         "CFBundleShortVersionString": "0.1.0",
         # The MACHINE-readable build number, distinct from the marketing
         # string above. D9's updater and any stapling workflow key off this
@@ -358,11 +345,24 @@ app = BUNDLE(                              # noqa: F821 - injected
         # a version that only ever existed as "0.1.0" gives an updater nothing
         # to compare.
         "CFBundleVersion": "0.1.0",
-        # macOS denies the microphone outright to a bundle that does not
-        # declare why it wants one. Measured before adding these: a WKWebView
-        # exposes `webkitSpeechRecognition`, `.start()` runs, and it fires
+        # The chat panel's mic button (`useSpeechToText` / `ChatPanel.tsx`)
+        # dictates into the message box via the Web Speech API. macOS denies
+        # the microphone outright to a bundle that does not declare why it
+        # wants one, and TCC kills the whole process the instant recognition
+        # starts — a hard termination, not a Python exception, with nothing in
+        # `pypsa-gui.log`. Measured before adding these: a WKWebView exposes
+        # `webkitSpeechRecognition`, `.start()` runs, and it fires
         # `not-allowed` — the signature of a permission refusal rather than a
-        # missing API. The strings are shown verbatim in the OS prompt.
+        # missing API. On-device recognition captures audio through the
+        # microphone, so BOTH keys are required: shipping only the speech one
+        # moves the same kill to the microphone check. The strings are shown
+        # verbatim in the OS prompt, so they name the feature rather than
+        # saying "this app uses speech recognition".
+        #
+        # There used to be a SECOND copy of both keys earlier in this dict,
+        # with different wording. A dict literal keeps the last value, so that
+        # copy shipped nothing and only its comments were read — these two are
+        # the strings a user has always seen, and they are now the only ones.
         "NSMicrophoneUsageDescription":
             "PyPSA Studio uses the microphone only while you hold the "
             "dictate button in the assistant, to turn speech into text.",
