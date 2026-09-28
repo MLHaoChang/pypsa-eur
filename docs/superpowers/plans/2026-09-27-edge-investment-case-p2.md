@@ -254,6 +254,8 @@ items; `CommercialConfig.power_factor: float | None` (for `per_kva_year`).
   - **Recorded limitation:** a dispatch row is attributed to the local day (and month) it starts in, the same rule the per-month charge uses. Rows longer than an hour that cross local midnight shift a fraction of a day between days (5-h rows over 2024 in Amsterdam: 366.0036 days). Sub-daily axes at ≤ 1 h are exact.
   - **Recorded behaviour change:** `_lp_reason` checks capacity before demand. A P1 item of kind `capacity`, unit `per_kw_month`, `measured_on="peak_import"` was carried by the P1 LP as a monthly demand peak, while the engine refused it. Now neither bills it: the LP reports it `not_in_lp` and the engine `unsupported:unit_per_kw_month_for_capacity`. No committed fixture uses the combination. A re-solved P1 project with such an item drops that LP term; the correct modelling is kind `demand`.
 
+- Round 3 → **PASS** (no residue).
+
 ## WP2.1a-ii Engine: tiers inside TOU windows
 
 Model delta: `TariffPeriod.tier_rates: list[float] | None` aligned with the **item's** `tiers` thresholds (one
