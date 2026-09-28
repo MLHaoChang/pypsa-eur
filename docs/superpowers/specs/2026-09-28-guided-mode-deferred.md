@@ -135,7 +135,7 @@
 | `FE/api/client.mismatch.test.ts` (new) | while mismatched: `PUT /network/buses/a` rejects client-side with `error_kind 'project_mismatch'` and no request leaves (adapter spy); `GET /projects/X` passes (reads are never blocked); `POST /projects/Y/activate` passes; `PUT /projects/X/layout` passes |
 | `FE/layout/Sidebar.autosave.test.tsx` (new) | mismatched → the autosave tick posts nothing and logs one WARN; a 409 whose detail matches `/bound to project/` sets `projectMismatch` from the detail's names; a manual save refused with the `study_in_flight` **dict** toasts `detail.message`, not "[object Object]" or the empty-network sentence |
 | `FE/components/ChatPanel.sendGate.test.tsx` | "mismatch → Send disabled, `chat-send-gate` shows the banner sentence, `createChatStream` not called on Enter" |
-| `FE/utils/pendingEdgeDeletes.test.ts` | "mismatch → the keepalive DELETE is dropped with one WARN" |
+| `FE/utils/pendingEdgeDeletes.test.ts` (existing) | "mismatch → the keepalive DELETE is dropped with one WARN" |
 
 **Mutation targets.** detection `!==` dropped → App test; two-sample rule dropped → the one-sample case; `projectSwitchInProgress` ignored → the switch case; allowlist emptied → the activate case; interceptor bypass for `put` → client test; chat gate dropped → sendGate test.
 

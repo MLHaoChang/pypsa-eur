@@ -149,7 +149,7 @@ Legend: **Hurts** = first-time user (FTU) / expert / data integrity (DI) / safet
 | E1 | Same-name re-create latch: a deleted and re-created project keeps the derived store | P24-FE re-gate 2 note 7 | pre-existing guard condition (`storeProject === project`), no Guided path reaches it |
 | E2 | `unpriced` zero reason only on the copt path | B3 | the sweep refuses VOLL ≤ 0 (`sweep.py:380-384`); the helper documents it |
 
-### D. Non-goals (spec §1) — optional phases, not scheduled
+### D. Non-goals (spec §1) — D1 decided and scheduled (P32); D2–D3 optional, not scheduled
 
 #### D1. Chat-created projects do not switch the mode
 - **Evidence.** §10: "the assistant is already the Guided surface". A8 delivers the `project_rebound` frame for the creating tools either way; D1 is only the FE `noteNewProjectCreated('template')` on that frame.
