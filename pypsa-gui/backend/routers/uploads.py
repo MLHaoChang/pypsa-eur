@@ -158,9 +158,10 @@ def _validate_filename(filename: str | None) -> str:
 
 def _upload_kind_or_400(kind: str | None, allowed: frozenset[str], *, default: str | None) -> str | None:
     """
-    The `?kind=` query parameter, allowlisted. On upload only `user_upload`
-    and `report_template` may be asked for (`agent_export` is assigned by the
-    tools that produce one); on list any known kind filters. Anything else
+    The `?kind=` query parameter, allowlisted. On upload only `user_upload`,
+    `report_template` and `report_roundtrip` may be asked for (`agent_export`
+    is assigned by the tools that produce one); on list any known kind
+    filters. Anything else
     is 400 `unsupported_upload_kind` — a typo must not silently list nothing
     or file a template as a plain upload.
     """
@@ -195,8 +196,11 @@ async def post_upload(
 
     ``?kind=report_template`` files the upload as a report template (the
     report viewer's picker lists these; the study-report routes bind one to
-    a report). Only ``user_upload`` (the default) and ``report_template`` may
-    be asked for — 400 ``unsupported_upload_kind`` otherwise.
+    a report); ``?kind=report_roundtrip`` files an exported report the user
+    edited in Word, to be merged back by ``POST …/reports/{id}/roundtrip``.
+    Only ``user_upload`` (the default), ``report_template`` and
+    ``report_roundtrip`` may be asked for — 400 ``unsupported_upload_kind``
+    otherwise.
 
     The ``{name}`` path parameter is consumed by `ProjectAccessDep`, which
     resolves it inside the caller's org and ACL-gates it (404 otherwise). The

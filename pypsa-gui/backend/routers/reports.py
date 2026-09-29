@@ -17,9 +17,24 @@ plus an id the store validated against an anchored regex.
   POST   /{name}/reports/{report_id}/template              bind {file_id} / unbind {null} (WP11)
   GET    /{name}/reports/{report_id}/template              the outline + the stored mapping plan
   PUT    /{name}/reports/{report_id}/template/plan         a user-edited mapping plan (validated)
+  GET    /{name}/reports/capabilities                      {pdf: bool} — LibreOffice on PATH (WP13)
+  POST   /{name}/reports/{report_id}/roundtrip             an edited Word copy merged back as the
+                                                           next version (WP13; synchronous)
+  GET    /{name}/reports/{report_id}/versions/{a}/diff/{b} per-section change between two versions
 
 The mapping job (`POST …/template/plan`) lives in `routers/report_jobs.py`
-with the other job routes.
+with the other job routes. `capabilities` is declared BEFORE the
+`/{report_id}` routes: a literal segment must win over the id parameter.
+
+Increment 3 (WP13): the export body takes `format: "docx"|"pdf"` — a PDF is
+LibreOffice's headless conversion of the rendered `.docx` (501
+`pdf_not_available` without it, 500 `pdf_conversion_failed` when it fails),
+saved as an `agent_export` upload with MIME `application/pdf`. The round
+trip reads an upload of kind `report_roundtrip` (any `.docx` upload works)
+through WP12's reader and merge (`services/reports/roundtrip_service.py`
+reaches them through lazy accessors), writes the merge as the next version
+and binds the file as the report's template unless `bind_as_template` is
+false.
 
 A template is an ordinary upload of kind `report_template` (or any `.docx`
 upload); binding it is a NEW VERSION of the document carrying
@@ -45,7 +60,7 @@ import logging
 import uuid
 from types import SimpleNamespace
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
@@ -58,7 +73,7 @@ from deps import optional_user
 from models.report import ReportDocument
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services.http_filenames import content_disposition
-from services.reports import store, templates
+from services.reports import pdf, roundtrip_service, store, templates
 from services.reports.docx_reader import TemplateOutline
 
 logger = logging.getLogger(__name__)
@@ -104,6 +119,17 @@ def _http(exc: store.ReportStoreError) -> HTTPException:
 @router.get("/{name}/reports")
 def list_reports(project: AuthorizedProject = ProjectAccessDep) -> list[dict]:
     return [m.model_dump() for m in store.list_reports(project.directory)]
+
+
+@router.get("/{name}/reports/capabilities")
+def get_report_capabilities(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """
+    What this host can do beyond the `.docx`: `{"pdf": bool}` — true when
+    LibreOffice (`soffice` or `libreoffice`) is on PATH, so the viewer shows
+    a PDF button only where `export {format: pdf}` can answer 200. Declared
+    before the `/{report_id}` routes so the literal segment wins.
+    """
+    return {"pdf": pdf.pdf_available()}
 
 
 @router.get("/{name}/reports/{report_id}")
@@ -180,10 +206,15 @@ class CreateReportBody(BaseModel):
     title: str | None = None
 
 
+ExportFormat = Literal["docx", "pdf"]
+
+
 class ExportReportBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
     version: int | None = None
     filename: str | None = None
+    # WP13: a PDF is LibreOffice's conversion of the rendered .docx.
+    format: ExportFormat = "docx"
 
 
 def _check_lock(project: AuthorizedProject, db: DBSession, user: User | None) -> None:
@@ -307,6 +338,12 @@ def export_report(report_id: str, body: ExportReportBody,
     untagged one gets its body rebuilt from the stored mapping plan (or the
     code-only default mapping when none was accepted); no template → the
     default writer, unchanged.
+
+    WP13: `format: "pdf"` converts the rendered `.docx` with LibreOffice —
+    501 `pdf_not_available` when it is not on PATH (checked BEFORE the lock
+    and the render, so a host without it answers the same whatever the
+    state), 500 `pdf_conversion_failed` with the head of stderr when the
+    conversion fails — and saves the PDF as the `agent_export` upload.
     """
     from services import upload_service
     from services.reports.docx_writer import DOCX_MIME
@@ -315,6 +352,12 @@ def export_report(report_id: str, body: ExportReportBody,
         store.validate_report_id(report_id)
     except store.ReportStoreError as exc:
         raise _http(exc) from exc
+    if body.format == "pdf" and not pdf.pdf_available():
+        raise HTTPException(501, {
+            "error_kind": "pdf_not_available",
+            "message": "PDF export needs LibreOffice (soffice) on this host's PATH, "
+                       "and it is not installed here. Export the .docx instead.",
+        })
     _check_lock(project, db, user)
     try:
         doc = store.load_report(project.directory, report_id, body.version)
@@ -342,10 +385,22 @@ def export_report(report_id: str, body: ExportReportBody,
         }) from exc
     except templates.TemplateReadError as exc:
         raise _template_unreadable(exc) from exc
-    target = (body.filename or "").strip() or f"report_{report_id}_v{doc.version}.docx"
-    if not target.lower().endswith(".docx"):
-        target += ".docx"
-    meta = upload_service.add_upload(project.name, data, target, DOCX_MIME,
+    ext, mime = (".pdf", pdf.PDF_MIME) if body.format == "pdf" else (".docx", DOCX_MIME)
+    if body.format == "pdf":
+        try:
+            data = pdf.convert_docx_to_pdf(data)
+        except pdf.PdfConversionError as exc:
+            logger.warning("reports: pdf conversion failed for %s v%s: %s",
+                           report_id, doc.version, exc)
+            raise HTTPException(500, {
+                "error_kind": "pdf_conversion_failed",
+                "message": f"LibreOffice could not convert the document to PDF: {exc}. "
+                           "The .docx export still works.",
+            }) from exc
+    target = (body.filename or "").strip() or f"report_{report_id}_v{doc.version}{ext}"
+    if not target.lower().endswith(ext):
+        target += ext
+    meta = upload_service.add_upload(project.name, data, target, mime,
                                      kind="agent_export", project_dir=project.directory)
     return meta.model_dump()
 
@@ -530,3 +585,121 @@ def put_template_plan(report_id: str, body: dict[str, Any],
     except store.ReportStoreError as exc:
         raise _http(exc) from exc
     return plan
+
+
+# ── WP13: the round trip and the version diff ───────────────────────────────
+
+class RoundTripBody(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    file_id: str
+    bind_as_template: bool = True
+
+
+def _http_version(exc: store.ReportStoreError) -> HTTPException:
+    """A missing VERSION of an existing report → 404 `report_version_not_found`."""
+    if isinstance(exc, store.ReportNotFound):
+        return HTTPException(404, {
+            "error_kind": "report_version_not_found",
+            "message": f"{exc}. list_reports shows each report's latest_version.",
+        })
+    return _http(exc)
+
+
+def _job_slot_busy() -> bool:
+    """A report job is writing (or about to write) a version: the round trip must wait."""
+    from routers.report_jobs import _state
+    from services.pypsa_service import PyPSAService
+    from services.reports.report_job import slot_is_busy
+
+    with PyPSAService.get_solver_state_lock():
+        return slot_is_busy(_state())
+
+
+@router.post("/{name}/reports/{report_id}/roundtrip")
+def roundtrip_report(report_id: str, body: RoundTripBody,
+                     project: AuthorizedProject = ProjectAccessDep,
+                     db: DBSession = Depends(get_db),
+                     user: User | None = Depends(optional_user)) -> dict:
+    """
+    Merge an edited Word copy of the report (an upload, normally of kind
+    `report_roundtrip`) back into it as the NEXT version, synchronously:
+    tracked changes accepted, changed sections marked `user_edit` with their
+    new text, comments stored as each section's `pending_instruction`, and
+    the file bound as the report's template (unless `bind_as_template` is
+    false) so the styling the user changed survives the next export.
+
+    Returns `{report_id, version, result: RoundTripResult, template_file_id}`
+    — `result.unmatched` lists content the reader could not place. Errors,
+    all before anything is written: 404 `report_not_found` /
+    `upload_not_found`, 400 `roundtrip_unreadable` (not a Word document),
+    400 `roundtrip_not_a_report` (nothing matched a section), 409
+    `project_locked`, 409 `report_job_in_flight`.
+    """
+    from services import upload_service
+
+    _latest_or_404(project, report_id)
+    _check_lock(project, db, user)
+    if _job_slot_busy():
+        raise HTTPException(409, {
+            "error_kind": "report_job_in_flight",
+            "message": "A report job is writing this project's reports — wait for "
+                       "it to finish (or abort it) before merging an edited copy.",
+        })
+    meta = upload_service.get_upload_meta(project.name, body.file_id,
+                                          project_dir=project.directory)
+    data = upload_service.get_upload_bytes(project.name, body.file_id,
+                                           project_dir=project.directory)
+    try:
+        doc, result = roundtrip_service.run_round_trip(
+            project.directory, report_id, data,
+            bind_as_template=body.bind_as_template, file_id=body.file_id)
+    except ImportError as exc:
+        raise HTTPException(500, {
+            "error_kind": "tool_error",
+            "message": "The round trip is not available in this build "
+                       "(services.reports.roundtrip is missing).",
+        }) from exc
+    except templates.TemplateReadError as exc:
+        raise HTTPException(400, {
+            "error_kind": "roundtrip_unreadable",
+            "message": f"Upload {body.file_id} ({meta.filename}) could not be read as a "
+                       f"Word document: {exc}. Export the report, edit the .docx in "
+                       "Word and upload that file.",
+        }) from exc
+    except roundtrip_service.RoundTripNotAReport as exc:
+        raise HTTPException(400, {
+            "error_kind": "roundtrip_not_a_report",
+            "message": f"Upload {body.file_id} ({meta.filename}) is not an edited copy of "
+                       f"report {report_id}: {exc}. Nothing was merged.",
+        }) from exc
+    except store.ReportStoreError as exc:
+        raise _http(exc) from exc
+    return {
+        "report_id": report_id,
+        "version": doc.version,
+        "result": result.model_dump(mode="json") if hasattr(result, "model_dump") else result,
+        "template_file_id": doc.template_file_id,
+    }
+
+
+@router.get("/{name}/reports/{report_id}/versions/{a}/diff/{b}")
+def diff_report_versions(report_id: str, a: int, b: int,
+                         project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """
+    Per-section change between two stored versions: `{a, b, sections:
+    [{section_id, heading, change: unchanged|changed|added|removed,
+    source_a, source_b, pending_instruction, comments}]}`. 404
+    `report_version_not_found` when either version does not exist.
+    """
+    try:
+        store.validate_report_id(report_id)
+        store.load_meta(project.directory, report_id)
+    except store.ReportStoreError as exc:
+        raise _http(exc) from exc
+    try:
+        a_doc = store.load_report(project.directory, report_id, a)
+        b_doc = store.load_report(project.directory, report_id, b)
+    except store.ReportStoreError as exc:
+        raise _http_version(exc) from exc
+    return {"a": a_doc.version, "b": b_doc.version,
+            "sections": roundtrip_service.diff_versions(a_doc, b_doc)}
