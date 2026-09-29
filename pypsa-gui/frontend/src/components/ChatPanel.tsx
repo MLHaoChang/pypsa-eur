@@ -2338,7 +2338,8 @@ export default function ChatPanel() {
       case 'project_rebound': {
         // The agent dispatched a tool that legitimately changed the
         // backend's active project (activate_project / load_project /
-        // save_project_as / rename_project / restore_project_snapshot).
+        // save_project_as / rename_project / restore_project_snapshot /
+        // create_project_from_template / import_project_bundle).
         // Mirror the change into uiStore.currentProject so the autosave
         // loop's `expect=<name>` matches the backend's binding —
         // otherwise the next autosave 409s with "Backend network is
@@ -2352,6 +2353,14 @@ export default function ChatPanel() {
           ui.setCurrentProject(d.to)
           ui.setProjectName(d.to)
           ui.touchTab(d.to)
+          // P32 (D-8 = (a), deferred spec §7.1): a project the assistant
+          // CREATED is a new project for G4 — an implicit mode starts Guided;
+          // an explicit choice is kept (the rule is inside
+          // noteNewProjectCreated). After setCurrentProject, so the §3.7
+          // pruning sees the project. A save or an open is not a new project;
+          // a network import unbinds (`to: null`) and creates none.
+          if (d.via_tool === 'create_project_from_template') ui.noteNewProjectCreated('template')
+          else if (d.via_tool === 'import_project_bundle') ui.noteNewProjectCreated('file')
           qc.invalidateQueries({ queryKey: nk(d.to, 'meta') })
           qc.invalidateQueries({ queryKey: nk(d.to, 'simulationStatus') })
           qc.invalidateQueries({ queryKey: nk(d.to, 'snapshots') })

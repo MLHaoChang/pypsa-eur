@@ -134,3 +134,124 @@ describe('project_rebound with to: null (a network import unbinds the tab)', () 
     expect(toastFn.mock.calls.map(c => String(c[0]))).toContain('Active project: Other')
   })
 })
+
+
+// P32 (deferred spec 2026-09-28 §7.1; D-8 = (a)): a project the assistant
+// CREATES — `project_rebound` with `via_tool` create_project_from_template or
+// import_project_bundle — is a new project for G4, so an implicit mode flips
+// to Guided (`noteNewProjectCreated('template' | 'file')`), called AFTER
+// `setCurrentProject` so the §3.7 pruning sees the project (a non-Guided panel
+// becomes `hubDesign`, not null). A save is not a new project; a network
+// import that unbinds (`to: null`) creates no project either (the tab has
+// nothing to guide); an explicit choice is never overridden (the rule lives
+// in `noteNewProjectCreated`, not here). The dock stays open and the rebind
+// toast still fires.
+describe('P32 — a project the assistant creates or imports starts Guided', () => {
+  const EXPLICIT_KEY = 'network-diagram:ui-mode-explicit'
+  const MODE_KEY = 'network-diagram:ui-mode'
+  const original = useUIStore.getState().noteNewProjectCreated
+  let note: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    toastFn.mockClear()
+    localStorage.removeItem(EXPLICIT_KEY)
+    localStorage.setItem(MODE_KEY, 'expert')
+    note = vi.fn(original)
+    useUIStore.setState({
+      uiMode: 'expert', uiModeExplicit: false,
+      activeSlidePanel: 'timeseries', assistantDockOpen: true,
+      compareRailOpen: false,
+      noteNewProjectCreated: note as never,
+    })
+  })
+  afterEach(() => {
+    useUIStore.setState({ noteNewProjectCreated: original, uiMode: 'expert', uiModeExplicit: false })
+    localStorage.removeItem(EXPLICIT_KEY)
+    localStorage.removeItem(MODE_KEY)
+  })
+
+  async function rebound(via_tool: string, to: string | null = 'Created', from: string | null = 'Demo') {
+    renderWithSpy()
+    await sendFrames([
+      { event: 'session_init', data: { session_id: `p32-${via_tool}` } },
+      { event: 'project_rebound', data: { from, to, via_tool } },
+      { event: 'turn_done', data: {} },
+    ])
+  }
+
+  it('create_project_from_template → noteNewProjectCreated("template") once; Guided; the panel becomes hubDesign', async () => {
+    await rebound('create_project_from_template')
+    expect(note).toHaveBeenCalledTimes(1)
+    expect(note).toHaveBeenCalledWith('template')
+    const s = useUIStore.getState()
+    expect(s.currentProject).toBe('Created')
+    expect(s.uiMode).toBe('guided')
+    expect(s.uiModeExplicit).toBe(false)
+    expect(s.activeSlidePanel).toBe('hubDesign')
+    expect(s.compareRailOpen).toBe(false)
+    expect(localStorage.getItem(MODE_KEY)).toBe('guided')
+  })
+
+  it('import_project_bundle → noteNewProjectCreated("file"); Guided', async () => {
+    await rebound('import_project_bundle')
+    expect(note).toHaveBeenCalledTimes(1)
+    expect(note).toHaveBeenCalledWith('file')
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
+  })
+
+  it('the flip runs after setCurrentProject: from an unbound tab the panel still becomes hubDesign', async () => {
+    useUIStore.setState({ currentProject: null })
+    await rebound('create_project_from_template', 'Created', null)
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().activeSlidePanel).toBe('hubDesign')
+  })
+
+  it.each(['save_project_as', 'save_project', 'activate_project', 'load_project'])(
+    '%s is not a new project → not called, mode and panel unchanged', async (tool) => {
+      await rebound(tool)
+      expect(useUIStore.getState().currentProject).toBe('Created')
+      expect(note).not.toHaveBeenCalled()
+      expect(useUIStore.getState().uiMode).toBe('expert')
+      expect(useUIStore.getState().activeSlidePanel).toBe('timeseries')
+    })
+
+  it.each(['import_network_nc', 'import_csv_bundle', 'import_excel', 'import_matpower'])(
+    'a network import that unbinds (%s, to: null) creates no project → mode unchanged', async (tool) => {
+      await rebound(tool, null)
+      expect(useUIStore.getState().currentProject).toBeNull()
+      expect(note).not.toHaveBeenCalled()
+      expect(useUIStore.getState().uiMode).toBe('expert')
+    })
+
+  it('an explicit Expert choice is never flipped; panels unchanged', async () => {
+    localStorage.setItem(EXPLICIT_KEY, '1')
+    useUIStore.setState({ uiModeExplicit: true })
+    await rebound('create_project_from_template')
+    expect(note).toHaveBeenCalledWith('template')
+    const s = useUIStore.getState()
+    expect(s.currentProject).toBe('Created')
+    expect(s.uiMode).toBe('expert')
+    expect(s.activeSlidePanel).toBe('timeseries')
+  })
+
+  it('an explicit choice made in another tab (storage only) is adopted, not overridden', async () => {
+    localStorage.setItem(EXPLICIT_KEY, '1')
+    await rebound('import_project_bundle')
+    expect(useUIStore.getState().uiMode).toBe('expert')
+    expect(useUIStore.getState().uiModeExplicit).toBe(true)
+  })
+
+  it('the dock stays open and the rebind toast still fires', async () => {
+    await rebound('create_project_from_template')
+    expect(useUIStore.getState().uiMode).toBe('guided')
+    expect(useUIStore.getState().assistantDockOpen).toBe(true)
+    expect(toastFn.mock.calls.map(c => String(c[0]))).toContain('Active project: Created')
+    expect(screen.getByTestId('chat-input')).toBeTruthy()
+  })
+
+  it('no mismatch is raised by the flip', async () => {
+    await rebound('create_project_from_template')
+    expect(useUIStore.getState().projectMismatch).toBeNull()
+  })
+})

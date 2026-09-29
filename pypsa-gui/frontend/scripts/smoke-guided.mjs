@@ -5,7 +5,7 @@
  *
  *   cd pypsa-gui/frontend
  *   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs \
- *     --phase P22.9|P23|P24-BE|P24|P25|P26|P27a|P27b [--template eh_datacenter] [--out <dir>] [--keep]
+ *     --phase P22.9|P23|P24-BE|P24|P25|P26|P27a|P27b|P32 [--template eh_datacenter] [--out <dir>] [--keep]
  *
  * P24 walks the Guided hub design (spec §5) as a first-time user: the
  * template from /projects opens hubDesign at Site; Site rows match the
@@ -81,6 +81,15 @@
  * counts: the P26 settle loop stays the gate (spec §2.2: replaced only once
  * ten runs are stable); a one-shot read after the extra tick is logged.
  *
+ * P32 (deferred spec 2026-09-28 §7.1, D-8 = (a)) — P25 (every step), then
+ * stub branch 7 from the dock in two fresh contexts seeded with the P25
+ * project as `network-diagram:current-project` and `ui-mode = expert`:
+ * IMPLICIT Expert (no `ui-mode-explicit`) → after the turn the switch reads
+ * Guided, `hub-card-site` is visible, the toast says "Active project: <name>",
+ * the dock is still open and no `project-mismatch` banner shows; EXPLICIT
+ * Expert (`ui-mode-explicit = 1`) → the switch stays Expert, no
+ * `hub-card-site`.
+ *
  * It starts its own uvicorn (local mode, ANTHROPIC_API_KEY unset, app data
  * and projects under a scratch dir), Vite on 5173 and — after the send-gate
  * check — the OpenAI-wire stub model, then walks the phase path in a fresh
@@ -121,7 +130,7 @@ const TEMPLATE_NAMES = {
   eh_h2_hub: 'Industrial Hydrogen Hub',
   eh_microgrid: 'Island Microgrid',
 }
-const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a', 'P27b'])
+const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a', 'P27b', 'P32'])
 
 // ── args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -2398,6 +2407,111 @@ async function p27bMidStudySwitch(browser, dc) {
   }
 }
 
+// ── the P32 extension (deferred spec 2026-09-28 §7.1) ──────────────────────
+// Stub branch 7 from the dock: the assistant creates a project from a
+// template. An implicit-Expert user starts Guided on the new project; an
+// explicit-Expert user stays Expert.
+async function p32Branch7(browser, { project, explicit }) {
+  const label = explicit ? 'explicit' : 'implicit'
+  const consoleLines = []
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const seed = {
+    'network-diagram:current-project': project,
+    [MODE_KEY]: 'expert',
+  }
+  if (explicit) seed[EXPLICIT_KEY] = '1'
+  await seedStorageOnce(context, seed)
+  const page = await context.newPage()
+  page.on('console', m => consoleLines.push(`[${m.type()}] ${m.text()}`))
+  page.on('pageerror', e => consoleLines.push(`[pageerror] ${e.message}`))
+  const byId = id => page.locator(`[data-testid="${id}"]`)
+  const pressed = async m => (await byId(`ui-mode-${m}`).getAttribute('aria-pressed')) === 'true'
+  await page.addInitScript(() => {
+    window.__toasts = []
+    new MutationObserver(() => {
+      for (const el of document.querySelectorAll('[role="status"]')) {
+        if (el.__seen) continue
+        el.__seen = true
+        window.__toasts.push((el.textContent ?? '').trim())
+      }
+    }).observe(document, { childList: true, subtree: true })
+  })
+  try {
+    step(`P32 (${label} Expert): open ${project}, then stub branch 7 from the dock`)
+    // The backend is where the previous context's turn left it (the project
+    // it created): bind it to the seeded project first, as a user's app would
+    // be, so this tab starts matched (else the P27b fence rightly pauses it).
+    await api('POST', `/api/projects/${encodeURIComponent(project)}/activate`)
+    check((await api('GET', '/api/network/meta')).loaded_project === project,
+      `POST /api/projects/${project}/activate → meta.loaded_project=${project}`)
+    await page.goto(`${WEB}/app?project=${encodeURIComponent(project)}`, { waitUntil: 'domcontentloaded' })
+    await byId('ui-mode-switch').waitFor({ state: 'visible', timeout: 60_000 })
+    const stored = await page.evaluate(([m, e]) => ({ mode: localStorage.getItem(m), explicit: localStorage.getItem(e) }),
+      [MODE_KEY, EXPLICIT_KEY])
+    check(stored.mode === 'expert' && (stored.explicit === '1') === explicit,
+      `stored mode expert, explicit=${stored.explicit}`)
+    check(await pressed('expert'), 'ui-mode-expert is pressed before the turn')
+    const newName = `p32-${label}-${Date.now().toString(36)}`
+    const input = byId('chat-input')
+    await page.waitForSelector(
+      '[data-testid="chat-input"]:visible, [data-testid="assistant-dock-launcher"]:visible',
+      { timeout: 30_000 })
+    if (!(await input.isVisible().catch(() => false))) await byId('assistant-dock-launcher').click()
+    await input.waitFor({ state: 'visible', timeout: 15_000 })
+    await input.fill(`Create a project from the ${args.template} template called ${newName}`)
+    await byId('chat-send').click()
+    await byId('chat-confirmation-card').waitFor({ state: 'visible', timeout: 60_000 })
+    const card = ((await byId('chat-confirmation-card').textContent()) ?? '')
+    check(card.includes('create_project_from_template'), 'confirmation card for create_project_from_template')
+    await byId('chat-confirm-approve').click()
+    await page.waitForFunction(() => !document.querySelector('[data-testid="chat-abort"]'),
+      null, { timeout: 120_000 })
+    await page.waitForFunction(n => window.__toasts.some(t => t.includes(`Active project: ${n}`)),
+      newName, { timeout: 15_000 })
+    ok(`toast "Active project: ${newName}"`)
+    const meta = await api('GET', '/api/network/meta')
+    check(meta.loaded_project === newName, `GET /api/network/meta loaded_project=${meta.loaded_project}`)
+    if (!explicit) {
+      await page.waitForFunction(() =>
+        document.querySelector('[data-testid="ui-mode-guided"]')?.getAttribute('aria-pressed') === 'true',
+      null, { timeout: 15_000 })
+      check(await pressed('guided') && !(await pressed('expert')), 'ui-mode-guided[aria-pressed="true"] after the turn')
+      await byId('hub-card-site').waitFor({ state: 'visible', timeout: 30_000 })
+      ok('hub-card-site visible (hub design opened for the new project)')
+      check(await page.evaluate(k => localStorage.getItem(k), MODE_KEY) === 'guided', 'stored mode is guided')
+      check(await page.evaluate(k => localStorage.getItem(k), EXPLICIT_KEY) === null, 'still no explicit flag')
+    } else {
+      await sleep(3000)
+      check(await pressed('expert') && !(await pressed('guided')), 'ui-mode-expert still pressed after the turn')
+      check((await byId('hub-card-site').count()) === 0, 'no hub-card-site')
+    }
+    check(await input.isVisible(), 'the assistant dock is still open')
+    // The P27b detection needs two settled disagreeing samples (≥ 6 s at the
+    // idle rate): watch past that window.
+    await sleep(8000)
+    check((await byId('project-mismatch').count()) === 0, 'no project-mismatch banner 8 s after the rebind')
+    check(!consoleLines.some(l => l.includes('[project_mismatch]')), 'no project_mismatch refusal in the console')
+    await shot(page, `p32-${label}-expert`)
+    return newName
+  } catch (e) {
+    try { await shot(page, `FAILURE-p32-${label}`) } catch { /* page gone */ }
+    const logFile = path.join(args.out, `FAILURE-p32-${label}-console.log`)
+    fs.writeFileSync(logFile, consoleLines.join('\n'))
+    info(`console log ${logFile}`)
+    throw e
+  } finally {
+    await context.close()
+  }
+}
+
+async function phaseP32(browser) {
+  await phaseP25(browser)
+  const project = (await api('GET', '/api/network/meta')).loaded_project
+  check(!!project, `the P25 project is loaded: ${project}`)
+  await p32Branch7(browser, { project, explicit: false })
+  await p32Branch7(browser, { project, explicit: true })
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 let startBackend = () => { throw new ToolingError('backend not configured yet') }
 let code = 0
@@ -2450,6 +2564,7 @@ try {
   else if (args.phase === 'P26') await phaseP26(browser)
   else if (args.phase === 'P27a') await phaseP27a(browser)
   else if (args.phase === 'P27b') await phaseP27b(browser)
+  else if (args.phase === 'P32') await phaseP32(browser)
   console.log(`\nPASS — ${shots.length} screenshots in ${args.out}`)
 } catch (e) {
   code = e instanceof ToolingError ? 3 : 1
