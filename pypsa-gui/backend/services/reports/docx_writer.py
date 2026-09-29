@@ -143,10 +143,10 @@ def _caption(doc, text: str):
 
 
 def _table(doc, header: list[str], rows: list[list[str]],
-           caption: str | None = None):
+           caption: str | None = None, style: str = "Table Grid"):
     table = doc.add_table(rows=1, cols=len(header))
     try:
-        table.style = doc.styles["Table Grid"]
+        table.style = doc.styles[style]
     except KeyError:
         pass
     for cell, text in zip(table.rows[0].cells, header):
@@ -276,9 +276,19 @@ def _add_runs(paragraph, md: str) -> None:
 
 
 class _Counters:
-    def __init__(self) -> None:
+    """
+    Per-document render state: the running table/figure numbers and the
+    style names a user template may substitute for the defaults (WP10
+    passes the template's own list and table styles; the default writer
+    keeps ``List Bullet`` / ``Table Grid``).
+    """
+
+    def __init__(self, *, bullet_style: str = "List Bullet",
+                 table_style: str = "Table Grid") -> None:
         self.tables = 0
         self.figures = 0
+        self.bullet_style = bullet_style
+        self.table_style = table_style
 
 
 def _render_paragraph(doc, block: Paragraph) -> None:
@@ -287,10 +297,15 @@ def _render_paragraph(doc, block: Paragraph) -> None:
         _add_runs(p, chunk.replace("\n", " ").strip())
 
 
-def _render_bullets(doc, block: Bullets) -> None:
+def _render_bullets(doc, block: Bullets, counters: _Counters | None = None) -> None:
+    style = counters.bullet_style if counters is not None else "List Bullet"
     for item in block.items:
         try:
-            p = doc.add_paragraph(style=doc.styles["List Bullet"])
+            p = doc.add_paragraph(style=doc.styles[style])
+            # ``List Paragraph`` carries no numbering of its own: the marker
+            # is written so the bullet is visible.
+            if style != "List Bullet":
+                p.add_run("• ")
             _add_runs(p, item)
         except KeyError:
             p = doc.add_paragraph()
@@ -309,7 +324,8 @@ def _render_table_ref(doc, block: TableRef, report: ReportDocument,
     caption = block.caption or table.caption
     label = f"Table {counters.tables}"
     _table(doc, list(table.columns), [list(r) for r in table.rows],
-           f"{label} — {caption}" if caption else label)
+           f"{label} — {caption}" if caption else label,
+           style=counters.table_style)
 
 
 def _render_figure_ref(doc, block: FigureRef, report: ReportDocument,
@@ -349,7 +365,7 @@ def _render_block(doc, block, report: ReportDocument,
     if isinstance(block, Paragraph):
         _render_paragraph(doc, block)
     elif isinstance(block, Bullets):
-        _render_bullets(doc, block)
+        _render_bullets(doc, block, counters)
     elif isinstance(block, TableRef):
         _render_table_ref(doc, block, report, counters)
     elif isinstance(block, FigureRef):
@@ -367,6 +383,12 @@ def _render_doc_section(doc, section: Section, report: ReportDocument,
                         bookmarks: _Bookmarks) -> None:
     _heading(doc, section.heading, 1, bookmarks,
              f"{BOOKMARK_PREFIX}{section.section_id}")
+    _render_section_body(doc, section, report, figure_bytes, counters)
+
+
+def _render_section_body(doc, section: Section, report: ReportDocument,
+                         figure_bytes: dict[str, bytes], counters: _Counters) -> None:
+    """The section's blocks and status sentences — everything but its heading."""
     for block in section.blocks:
         _render_block(doc, block, report, figure_bytes, counters)
     # An ESTABLISHED section can still carry a note the reader must see — the
@@ -402,11 +424,21 @@ def _generated_from_line(report: ReportDocument) -> str:
     return " · ".join(parts)
 
 
-def _appendix(doc, report: ReportDocument, bookmarks: _Bookmarks) -> None:
+def _appendix(doc, report: ReportDocument, bookmarks: _Bookmarks, *,
+              heading_style: str | None = None) -> None:
+    """
+    The "Numbers to check" appendix, when any section carries unverified
+    numbers. ``heading_style`` names a template's own top-level heading
+    style (WP10); ``None`` writes a ``Heading 1``.
+    """
     flagged = [s for s in report.sections if s.audit.unverified]
     if not flagged:
         return
-    _heading(doc, APPENDIX_HEADING, 1, bookmarks, f"{BOOKMARK_PREFIX}numbers_to_check")
+    name = f"{BOOKMARK_PREFIX}numbers_to_check"
+    if heading_style is None:
+        _heading(doc, APPENDIX_HEADING, 1, bookmarks, name)
+    else:
+        bookmarks.wrap(_para(doc, APPENDIX_HEADING, heading_style), name)
     _disclosure(doc, "Numbers in the prose that could not be matched to the "
                      "evidence. They were flagged, not edited: check each "
                      "against the section's table before the report leaves "
