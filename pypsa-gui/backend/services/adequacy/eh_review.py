@@ -247,7 +247,10 @@ def review_report(report: dict, record: dict | None = None,
     fr = (sections.get("frontier") or {}).get("payload") or {}
     ok_points = [p for p in (fr.get("points") or []) if p.get("status") == "ok"]
     knee = fr.get("knee_index")
-    if isinstance(knee, int) and 0 <= knee < len(ok_points) and pack_ens:
+    # Owner's Q3 rule: a knee needs three solved points — a report stored
+    # before the rule may carry one from two, and must not yield a finding.
+    if isinstance(knee, int) and 0 <= knee < len(ok_points) \
+            and len(ok_points) >= 3 and pack_ens:
         kp = ok_points[knee]
         kt = _num(kp.get("target_permyriad"))
         if kt is not None and abs(kt - pack_ens) > 1e-9:

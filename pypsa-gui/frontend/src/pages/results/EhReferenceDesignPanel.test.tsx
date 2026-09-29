@@ -549,8 +549,13 @@ describe('EhReferenceDesignPanel', () => {
       .toBe('true')
     expect(screen.getByTestId('eh-fmea-top').textContent).toMatch(/feed1/)
     expect(screen.getByTestId('eh-fmea-unsolved').textContent).toMatch(/feed2 \(infeasible\)/)
-    // knee_index 0 of the OK points → the 20‱ row.
-    expect(screen.getByTestId('eh-frontier-row-0').textContent).toMatch(/knee/)
+    // Owner's Q3 rule (2026-09-29): this fixture has only TWO solved points,
+    // so its stored knee_index 0 is not a knee — no row is marked and the
+    // knee note says why. (Before the rule this pinned a 2-point knee.)
+    expect(screen.queryByTestId('eh-frontier-knee')).toBeNull()
+    expect(screen.getByTestId('eh-frontier-row-0').getAttribute('data-knee')).toBe('false')
+    expect(screen.getByTestId('eh-frontier-knee-note').textContent)
+      .toMatch(/needs at least 3 solved points/)
     await user.click(screen.getByTestId('eh-frontier-csv'))
     await user.click(screen.getByTestId('eh-fmea-top-csv'))
     expect(downloadCSV).toHaveBeenCalledWith(
@@ -1831,5 +1836,42 @@ describe('merge of master (2026-09-28): one rendering, both payload shapes', () 
     await openPanel()
     const line = await screen.findByTestId('eh-certification-lole')
     expect(line.textContent).toMatch(/12\.50 h\/yr \[10\.00, 15\.00\]/)
+  })
+})
+
+describe("owner's Q3 rule: the knee needs three solved points", () => {
+  const frontier = (n: number, extra: Record<string, unknown> = {}) => ({
+    ...REPORT,
+    completeness: { ...REPORT.completeness, frontier: 'ok' as const },
+    sections: { frontier: { status: 'ok' as const, note: null, payload: {
+      knee_index: 0, ...extra,
+      points: [[40, 1000, 9], [20, 1500, 5], [10, 9000, 2]].slice(0, n).map(
+        ([t, c, e]) => ({ target_permyriad: t, status: 'ok',
+          point: { total_system_cost_eur: c, achieved_ens_mwh: e } })),
+    } } },
+  })
+
+  it('does not mark a knee with fewer than three solved points', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid',
+      report: frontier(2, { knee_status: 'not_established',
+        knee_note: 'a knee needs at least 3 solved points; 2 solved' }),
+    } as never)
+    await openPanel()
+    await screen.findByTestId('eh-frontier')
+    expect(screen.queryByTestId('eh-frontier-knee')).toBeNull()
+    expect(screen.getByTestId('eh-frontier-knee-note').textContent)
+      .toMatch(/Knee not established: a knee needs at least 3 solved points; 2 solved/)
+  })
+
+  it('marks the knee from three solved points', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report: frontier(3),
+    } as never)
+    await openPanel()
+    await screen.findByTestId('eh-frontier')
+    expect(screen.getByTestId('eh-frontier-knee')).toBeTruthy()
+    expect(screen.getByTestId('eh-frontier-row-0').getAttribute('data-knee')).toBe('true')
+    expect(screen.queryByTestId('eh-frontier-knee-note')).toBeNull()
   })
 })

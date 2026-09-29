@@ -613,12 +613,27 @@ def _stage_frontier(st: _Study) -> None:
     points = [{**pt, "excludes_shed_cost": True} for pt in result["points"]]
     st.solves += len(points)
     ok_points = [pt for pt in points if pt.get("status") == "ok"]
+    # Owner's Q3 rule: the knee needs three solved points (merge review B2).
+    voll = float(st.cfg.voll or 0.0)
+    n_ok = len([pt for pt in ok_points if pt.get("point")])
+    if n_ok >= stages_mod.MIN_EH_FRONTIER_KNEE_POINTS:
+        knee = fr.knee_index(points, voll)
+        knee_status, knee_note = (("ok", None) if knee is not None else (
+            "not_established",
+            "no VOLL crossing inside the swept range — the knee lies outside it"))
+    else:
+        knee, knee_status = None, "not_established"
+        knee_note = (f"a knee needs at least "
+                     f"{stages_mod.MIN_EH_FRONTIER_KNEE_POINTS} solved points; "
+                     f"{n_ok} solved")
     payload = {
         "targets_permyriad": sorted(targets, reverse=True),
         "pack_target_permyriad": float(st.ens_cap),
         "points": points,
         # Index into the OK points (loosest first), not into `points`.
-        "knee_index": fr.knee_index(points, float(st.cfg.voll or 0.0)),
+        "knee_index": knee,
+        "knee_status": knee_status,
+        "knee_note": knee_note,
         "knee_index_basis": "ok_points",
         "warning": result.get("warning"),
         "aborted": bool(result.get("aborted")),

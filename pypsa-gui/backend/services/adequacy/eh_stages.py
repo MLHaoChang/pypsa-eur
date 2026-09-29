@@ -44,6 +44,10 @@ FMEA_TOP_N = DEFAULT_EH_FMEA_TOP_N
 #: stage needs two solved points; master PR #53 asked for three — merge
 #: decision 2026-09-28 keeps the gated P12 budget rule).
 MIN_EH_FRONTIER_POINTS = 2
+#: The product owner's Q3 rule (2026-09-29): a curve needs 2 solved points,
+#: the KNEE needs 3 — a VOLL crossing must lie BETWEEN alternatives. Below
+#: this the knee is ``not_established`` and never reported.
+MIN_EH_FRONTIER_KNEE_POINTS = 3
 
 # Spec decision 14 / P2: FMEA top-N from the EH study is Link-primary Class-B
 # residual risk. AC Line/Transformer N-1 stays on SCLOPF and is omitted from

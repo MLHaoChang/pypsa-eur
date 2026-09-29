@@ -203,3 +203,61 @@ def test_the_pack_ladder_drives_the_study_frontier():
     assert payload["targets_permyriad"] == pytest.approx([30.0, 10.0, 5.0])
     rec = next(s for s in report.pipeline.stages if s.stage == "frontier")
     assert rec.solves_charged == 3                  # no closing restore
+
+
+# ── owner's Q3 rule (2026-09-29): a curve from 2 points, a knee from 3 ─────
+# Merge review B2. Stubbed sweeps put a VOLL crossing at the FIRST step, so
+# the engine's ``knee_index`` returns 0 whenever it is asked; the stage must
+# not ask (and must say why) below three solved points.
+
+def _ok_points_with_a_crossing(targets, n_ok):
+    t = sorted(targets, reverse=True)[:n_ok]
+    costs = [100.0, 1e9, 2e9][:n_ok]
+    ens = [10.0, 9.0, 8.0][:n_ok]
+    return {
+        "points": [
+            {"target_permyriad": t[i], "status": "ok",
+             "period_basis": "single_period",
+             "point": {"total_system_cost_eur": costs[i],
+                       "achieved_ens_mwh": ens[i]}}
+            for i in range(n_ok)],
+        "warning": None, "aborted": False,
+    }
+
+
+@pytest.mark.live_solve
+def test_frontier_with_two_points_reports_the_curve_but_no_knee(monkeypatch):
+    from services.adequacy import frontier as fr
+
+    monkeypatch.setattr(
+        fr, "run_frontier_sweep",
+        lambda net, lock, cfg, targets, **kw: _ok_points_with_a_crossing(targets, 2))
+    report = _run(certifiable_weak_network(), _pack(10.0),
+                  stages=("apply_pack", "ens_solve", "frontier", "assemble"))
+    sec = report.sections["frontier"]
+    assert report.completeness["frontier"] == "ok"          # curve from 2 points
+    assert len([p for p in sec.payload["points"] if p["status"] == "ok"]) == 2
+    assert sec.payload["knee_index"] is None                # the knee needs 3
+    assert sec.payload["knee_status"] == "not_established"
+    assert "3" in sec.payload["knee_note"]
+
+
+@pytest.mark.live_solve
+def test_frontier_with_three_points_reports_the_knee(monkeypatch):
+    """Positive control: three solved points with a crossing give a knee."""
+    from services.adequacy import frontier as fr
+
+    monkeypatch.setattr(
+        fr, "run_frontier_sweep",
+        lambda net, lock, cfg, targets, **kw: _ok_points_with_a_crossing(targets, 3))
+    report = _run(certifiable_weak_network(), _pack(10.0),
+                  stages=("apply_pack", "ens_solve", "frontier", "assemble"))
+    p = report.sections["frontier"].payload
+    assert p["knee_index"] == 0
+    assert p["knee_status"] == "ok"
+    assert p["knee_note"] is None
+
+
+def test_the_knee_floor_is_three_and_the_curve_floor_two():
+    assert ST.MIN_EH_FRONTIER_KNEE_POINTS == 3
+    assert ST.MIN_EH_FRONTIER_POINTS == 2

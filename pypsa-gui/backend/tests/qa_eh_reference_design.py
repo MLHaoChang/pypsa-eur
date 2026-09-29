@@ -12,7 +12,8 @@ while the worker runs the whole default pipeline, then read the persisted
 ``GET /api/results/eh_reference_design`` and find, in ONE report,
 
 * a finite ``mc_lole_h`` and a ``certification`` verdict (WP1),
-* a frontier of at least three points, every cost ex-shed with a period
+* a frontier of at least three points (the ladder's five here; the stage
+  accepts two, a knee needs three), every cost ex-shed with a period
   basis (WP2),
 * a non-empty, criticality-ranked ``fmea_top`` carrying the Link-primary
   note (WP3),
@@ -248,6 +249,15 @@ def section_1_weak_flexible() -> None:
     _step("the frontier ran on a private copy (no closing restore, Q4)",
           (fr.get("payload") or {}).get("restore_skipped_on_private_copy") is True,
           str((fr.get("payload") or {}).get("restore_skipped_on_private_copy")))
+    frp = fr.get("payload") or {}
+    _step("a knee is reported only from ≥ 3 solved points (owner's Q3 rule)",
+          (isinstance(frp.get("knee_index"), int)
+           and frp.get("knee_status") == "ok" and len(ok_pts) >= 3)
+          or (frp.get("knee_index") is None
+              and frp.get("knee_status") == "not_established"
+              and bool(frp.get("knee_note"))),
+          f"knee={frp.get('knee_index')} status={frp.get('knee_status')} "
+          f"ok_points={len(ok_pts)}")
     _step("frontier solves are charged (one per point)",
           _stage(rep, "frontier").get("solves_charged") == len(pts),
           str(_stage(rep, "frontier")))

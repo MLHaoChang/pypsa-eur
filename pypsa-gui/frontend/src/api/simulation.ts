@@ -805,6 +805,20 @@ export interface EhCertificationPayload {
   fleet_scope?: EhFleetScope | null
 }
 
+/** `sections.frontier.payload` (the fields the panel reads). The knee needs
+ *  at least 3 solved points (owner's Q3 rule, 2026-09-29); below that
+ *  `knee_index` is null, `knee_status` is `not_established` and `knee_note`
+ *  says why. */
+export interface EhFrontierPayload {
+  points?: EhFrontierPoint[]
+  pack_target_permyriad?: number
+  knee_index?: number | null
+  knee_status?: EhSectionStatus | null
+  knee_note?: string | null
+  period_basis?: string | null
+  warning?: string | null
+}
+
 /** One ε-constraint point in `sections.frontier.payload.points`. */
 export interface EhFrontierPoint {
   target_permyriad: number

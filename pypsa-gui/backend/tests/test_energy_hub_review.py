@@ -318,3 +318,32 @@ def test_the_study_record_stores_the_whole_request(client, install_network,
     assert rec["mc"] == {"draws": 300, "seed": 3}
     assert rec["dsr_buses"] == ["hub"]
     assert rec["dtc_config"]["islanding_contingencies"] == ["import"]
+
+
+# ── owner's Q3 rule (2026-09-29): no knee finding below three points ───────
+
+
+def _frontier_report(n_ok: int, knee: int = 0) -> dict:
+    pts = [{"target_permyriad": t, "status": "ok",
+            "point": {"total_system_cost_eur": c, "achieved_ens_mwh": e}}
+           for t, c, e in [(40.0, 1.0, 9.0), (20.0, 2.0, 5.0),
+                           (10.0, 3.0, 2.0)][:n_ok]]
+    return {
+        "archetype": "strong_grid", "ens_cap_permyriad": 5.0,
+        "completeness": {"frontier": "ok"},
+        "sections": {"frontier": {"status": "ok", "note": None, "payload": {
+            "knee_index": knee, "points": pts}}},
+    }
+
+
+def test_review_never_reports_a_knee_from_two_points():
+    """A report stored before the fix may carry knee_index from 2 points."""
+    out = review_report(_frontier_report(2))
+    ids = [f.get("id") for f in (out.get("findings") or [])]
+    assert "frontier_knee" not in ids, ids
+
+
+def test_review_reports_a_knee_from_three_points():
+    out = review_report(_frontier_report(3))
+    ids = [f.get("id") for f in (out.get("findings") or [])]
+    assert "frontier_knee" in ids, ids

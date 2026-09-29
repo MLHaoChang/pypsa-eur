@@ -12,6 +12,7 @@ import {
   type EhDtcPlanningTable,
   type EhDtcStressTable,
   type EhFmeaTopMode,
+  type EhFrontierPayload,
   type EhFrontierPoint,
   type EhLeverTable,
   type EhPipelineStage,
@@ -183,6 +184,10 @@ export function buildEhStudyBody(
   }
   return { body, error: null }
 }
+
+/** Solved frontier points a knee needs (owner's Q3 rule; mirrors the
+ *  backend's `MIN_EH_FRONTIER_KNEE_POINTS`). */
+export const MIN_KNEE_POINTS = 3
 
 /** Stable display order for completeness chips (matches REPORT_SECTIONS). */
 export const COMPLETENESS_ORDER = [
@@ -1107,14 +1112,20 @@ export function EhReferenceDesignPanel() {
   const cert = report ? certificationHeadline(report) : null
   const frPoints = report ? frontierPoints(report) : []
   const frPayload = report?.sections?.frontier?.payload as
-    | { pack_target_permyriad?: number; knee_index?: number | null } | null | undefined
+    | EhFrontierPayload | null | undefined
   const fmeaUnsolved = ((report?.sections?.fmea_top?.payload as
     | { unsolved?: { id: string; status: string }[] } | null | undefined)
     ?.unsolved) ?? []
   // knee_index indexes the OK points (loosest first), not all points.
   const okFr = frPoints.filter(p => p.status === 'ok')
-  const kneeTarget = frPayload?.knee_index != null
+  // Owner's Q3 rule (2026-09-29): a knee needs at least three solved points
+  // — a report stored before the rule may still carry one from two.
+  const kneeTarget = okFr.length >= MIN_KNEE_POINTS && frPayload?.knee_index != null
     ? okFr[frPayload.knee_index]?.target_permyriad : undefined
+  const kneeNote = okFr.length > 0 && okFr.length < MIN_KNEE_POINTS
+    ? (frPayload?.knee_note
+      ?? `Knee not established: needs at least ${MIN_KNEE_POINTS} solved points (${okFr.length} solved).`)
+    : null
   const meCarriers = report ? multiEnergyCarrierEntries(report) : []
   const meLoads = report ? multiEnergyLoadEntries(report) : []
   const certification = report ? certificationPayload(report) : null
@@ -1762,6 +1773,11 @@ export function EhReferenceDesignPanel() {
                       )}
                     />
                   </div>
+                  {kneeNote && (
+                    <p className="text-[10px] text-muted" data-testid="eh-frontier-knee-note">
+                      {kneeNote.startsWith('Knee') ? kneeNote : `Knee not established: ${kneeNote}.`}
+                    </p>
+                  )}
                   {typeof report.sections?.frontier?.payload?.warning === 'string' && (
                     <p className="text-[10px] text-warn" data-testid="eh-frontier-warning">
                       {String(report.sections.frontier.payload.warning)}
