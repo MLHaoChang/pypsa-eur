@@ -6,15 +6,17 @@ the callable handed to `n.optimize()`, or rescales the results that come back,
 so this is the highest-consequence module in the package after `myopic`: a
 defect here moves numbers the frontend serves rather than lines in a log.
 
-Depends only on `services/solver/runtime.py` for `_safe_log`, and never on
-`solver_service`.
+Depends only on `services/solver/runtime.py` for `_safe_log` and
+`ValidationRefused`, and never on `solver_service`. The demand-charge wrapper
+imports `services.study.tariff` and `services.validation_service.Issue`
+lazily, inside the functions that use them.
 """
 import math
 
 import pandas as pd
 import pypsa  # noqa: F401 — resolves the `"pypsa.Network"` annotations below
 
-from services.solver.runtime import _safe_log
+from services.solver.runtime import ValidationRefused, _safe_log
 
 
 def _wrap_with_capex_budget(network: "pypsa.Network", user_fn, cfg, log_queue=None):
@@ -163,6 +165,128 @@ def _wrap_with_capex_budget(network: "pypsa.Network", user_fn, cfg, log_queue=No
         if user_fn is not None:
             user_fn(n, snapshots)
         capex_budget_fn(n, snapshots)
+
+    return wrapper
+
+
+class DemandChargeRefused(ValidationRefused):
+    """
+    A demand charge the LP will not carry (decision study MVP-1, S3; review
+    v1 B1; S1 gate). A user-input refusal, not a crash: it subclasses
+    `ValidationRefused`, so `run_simulation` reports `validation_failed`,
+    logs the issue the way preflight does and dumps no traceback. `code` is
+    stable: `demand_charge_strategy_{myopic,rolling}`, `demand_charge_sclopf`,
+    `demand_charge_multi_period`, `demand_charge_snapshots_not_flat`,
+    `demand_charge_basis_{annual_peak,ratchet}`, `demand_charge_invalid`,
+    `demand_charge_unknown_import_link`.
+    """
+
+    def __init__(self, code: str, message: str):
+        from services.validation_service import Issue
+
+        self.code = code
+        self.message = message
+        issue = Issue(severity="error", code=code, component_class="",
+                      name="demand_charge", message=message)
+        super().__init__("at the demand-charge wrapper", [issue])
+        self.args = (f"{code}: {message}",)
+
+
+def _wrap_with_demand_charge(network: "pypsa.Network", user_fn, cfg, log_queue=None):
+    """
+    Compose the extra_functionality callback with a site demand charge
+    (`cfg.demand_charge`, parsed by `services.study.tariff`):
+
+        peak_import[p] ≥ Σ_{l ∈ import_links} Link-p[l, t]   ∀ t in billing period p
+        objective     += Σ_p price × peak_import[p]
+
+    `peak_import` (dim `billing_period`, labels `YYYY-MM` or `YYYY`) and
+    the constraint `peak_import_le` carry no hyphenated component prefix, so
+    PyPSA's `assign_duals` (which parses `Component-attr`) leaves them
+    alone. The term is charged once per billing period touched by the
+    snapshots, unweighted: a peak is MW, not MWh. It is added before
+    `_wrap_with_objective_scale`, so the scale multiplies it with the rest
+    of the objective and is divided back out of `n.objective`.
+    `demand_charge_eur` is reported by the objective decomposition from
+    `links_t.p0` through the bill calculator, never from `n.model`.
+
+    Refused at wrap time with `DemandChargeRefused` and a `[TARIFF]` log
+    line under myopic or rolling strategies, SCLOPF, multi-period
+    investment, snapshots that are not a flat DatetimeIndex, and the
+    `annual_peak` and `ratchet` bases. Returns `user_fn` unchanged when no
+    demand charge is configured, so the LP is untouched.
+    """
+    raw = getattr(cfg, "demand_charge", None)
+    if not raw:
+        return user_fn
+
+    from services.study.tariff import (
+        TariffError,
+        billing_period_labels,
+        parse_demand_charge_config,
+    )
+
+    def _emit(msg: str) -> None:
+        _safe_log(log_queue, f"[TARIFF] {msg}")
+
+    def _refuse(code: str, message: str):
+        _emit(f"Demand charge refused ({code}): {message}")
+        raise DemandChargeRefused(code, message)
+
+    try:
+        spec = parse_demand_charge_config(raw)
+    except TariffError as exc:
+        _refuse(exc.code, str(exc))
+    strategy = str(getattr(cfg, "solve_strategy", "full") or "full")
+    if strategy in ("myopic", "rolling"):
+        _refuse(f"demand_charge_strategy_{strategy}",
+                f"a demand charge is not supported with the '{strategy}' "
+                "solve strategy: each LP window would see only part of a "
+                "billing period's peak. Use the full strategy.")
+    if bool(getattr(cfg, "sclopf", False)):
+        _refuse("demand_charge_sclopf",
+                "a demand charge is not supported with SCLOPF in MVP-1.")
+    if bool(getattr(cfg, "multi_investment_periods", False)):
+        _refuse("demand_charge_multi_period",
+                "a demand charge is not supported with multi-period "
+                "investment in MVP-1 (one representative year only).")
+    if not isinstance(network.snapshots, pd.DatetimeIndex):
+        _refuse("demand_charge_snapshots_not_flat",
+                "a demand charge needs a flat DatetimeIndex of snapshots to "
+                f"assign billing periods; got {type(network.snapshots).__name__}.")
+    missing = [ln for ln in spec.import_links if ln not in network.links.index]
+    if missing:
+        _refuse("demand_charge_unknown_import_link",
+                f"import link(s) {missing} are not in the network.")
+
+    price = spec.price_per_mw_per_period
+
+    def demand_charge_fn(n, snapshots):
+        import xarray as xr
+
+        m = n.model
+        link_p = m.variables["Link-p"].sel(name=list(spec.import_links))
+        snap = pd.DatetimeIndex(link_p.coords["snapshot"].values)
+        labels = billing_period_labels(snap, spec.billing_period)
+        periods = pd.Index(list(dict.fromkeys(labels.tolist())), name="billing_period")
+        peak = m.add_variables(lower=0.0, coords=[periods], name="peak_import")
+        # Broadcast each period's peak onto its snapshots (vectorised
+        # label selection), then one constraint over the snapshot dim.
+        per_snapshot = xr.DataArray(labels, dims=["snapshot"],
+                                    coords={"snapshot": link_p.coords["snapshot"]})
+        peak_t = peak.sel(billing_period=per_snapshot)
+        m.add_constraints(link_p.sum("name") - peak_t <= 0.0, name="peak_import_le")
+        m.objective += (price * peak).sum()
+        _emit(
+            f"Demand charge active: EUR {price:,.2f}/MW per "
+            f"{spec.billing_period} on the peak of "
+            f"{', '.join(spec.import_links)} over {len(periods)} billing "
+            f"period(s) ({', '.join(periods)}).")
+
+    def wrapper(n, snapshots):
+        if user_fn is not None:
+            user_fn(n, snapshots)
+        demand_charge_fn(n, snapshots)
 
     return wrapper
 

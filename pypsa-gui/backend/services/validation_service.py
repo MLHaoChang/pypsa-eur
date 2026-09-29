@@ -2141,6 +2141,62 @@ def _check_reserve_margin(n, solver_config) -> list[Issue]:
     return issues
 
 
+def _check_export_cycling(n) -> list[Issue]:
+    """
+    Tariff sanity (decision study S3; review v1 N13): for every pair of
+    Links that connect the same two buses in opposite directions (a site's
+    import and export links), warn when moving a MWh out through one and
+    back through the other EARNS money in any snapshot, i.e. when the export
+    credit exceeds the import price after the forward link's efficiency:
+
+        −mc_back[t] × efficiency_forward − mc_forward[t] > 0
+
+    The LP would then cycle energy through the site connection for profit
+    (both links run at once, or a battery charges from the grid to export),
+    which no real meter pays. A warning, not an error: some contracts do pay
+    export above import in some hours, and the user decides.
+    """
+    links = getattr(n, "links", None)
+    if links is None or len(links) < 2 or not {"bus0", "bus1"} <= set(links.columns):
+        return []
+    try:
+        mc = n.get_switchable_as_dense("Link", "marginal_cost")
+    except Exception:
+        return []
+    by_buses: dict[tuple[str, str], list[str]] = {}
+    for name in links.index:
+        by_buses.setdefault((str(links.at[name, "bus0"]), str(links.at[name, "bus1"])),
+                            []).append(name)
+    eff = (links["efficiency"] if "efficiency" in links.columns
+           else pd.Series(1.0, index=links.index)).astype(float).fillna(1.0)
+    issues: list[Issue] = []
+    seen: set[frozenset] = set()
+    for (b0, b1), forward in by_buses.items():
+        for a in forward:
+            for b in by_buses.get((b1, b0), []):
+                key = frozenset((a, b))
+                if a == b or key in seen:
+                    continue
+                seen.add(key)
+                gain_ab = -mc[b] * float(eff[a]) - mc[a]
+                gain_ba = -mc[a] * float(eff[b]) - mc[b]
+                gain = np.maximum(gain_ab.to_numpy(), gain_ba.to_numpy())
+                hit = gain > 1e-9
+                if not hit.any():
+                    continue
+                first = mc.index[hit][0]
+                issues.append(_warn(
+                    "tariff_export_exceeds_import", "Link", str(a),
+                    f"Links '{a}' ({b0}→{b1}) and '{b}' ({b1}→{b0}): the "
+                    f"export price exceeds the import price in "
+                    f"{int(hit.sum())} snapshot(s) (first {first}, up to "
+                    f"{float(gain.max()):,.2f} per MWh), so cycling energy "
+                    "out and back in would pay and the LP will do it. Check "
+                    "the tariff's export price against its energy bands.",
+                ))
+    return issues
+
+
 def _check_profiled_occurrence_units(n) -> list[Issue]:
     """Phase 12c-pre / 12h: how a unit that carries BOTH a ``p_max_pu`` and
     outage data is modelled — the disclosure that replaced 12a's shadowed-
@@ -2439,6 +2495,9 @@ def validate_for_run(n, solver_config) -> list[Issue]:
         # margin left in the config cannot make an AC power flow wrong, and
         # blocking one on it would be a refusal with no standard behind it.
         issues += _check_reserve_margin(n, solver_config)
+        # Tariff sanity (decision study S3): an export credit above the
+        # import price makes grid cycling pay. Warning only.
+        issues += _check_export_cycling(n)
     else:
         issues.append(_err("unknown_mode", "", "",
             f"Solver mode '{mode}' not recognised (expected lopf/pf)."))

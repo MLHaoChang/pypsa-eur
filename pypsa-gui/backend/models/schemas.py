@@ -608,6 +608,10 @@ class SolverConfigSchema(BaseModel):
     # LP constraint Σ overnight_cost × Δp_nom ≤ budget[P] for all
     # extendable assets with build_year=P.
     capex_budget_per_period: dict[str, float] = {}
+    # Site demand charge (decision study MVP-1, S3): the spec and the import
+    # link names only; see `SolverConfig.demand_charge`. None = off. Parsed
+    # and refused at solve time by `_wrap_with_demand_charge`.
+    demand_charge: dict[str, Any] | None = None
     # Security-Constrained LOPF (N-1). When `sclopf` is True and mode == "lopf",
     # solver_service routes the solve through PyPSA's
     # `n.optimize.optimize_security_constrained()` instead of plain `n.optimize`.

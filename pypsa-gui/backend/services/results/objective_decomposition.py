@@ -82,6 +82,7 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
         lp_total = cost_breakdown_total
                    − nonextendable_fixed_cost_eur
                    + period_weighting_adjustment_eur
+                   + demand_charge_eur
                    + residual_gap_eur
 
       * ``nonextendable_fixed_cost_eur`` — fixed cost of assets the LP could
@@ -92,6 +93,12 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
         spent); the LP weights it by `.objective` (1.0 by default, PV × years
         under auto-discount). Applied to what the LP charges: OPEX and the
         extendable fixed cost.
+      * ``demand_charge_eur`` — the site demand charge the LP carried
+        (`cfg.demand_charge`, decision study S3): Σ price × peak import per
+        billing period, recomputed from `links_t.p0` by the bill calculator,
+        never read from `n.model`. ``0.0`` when no charge is configured;
+        ``None`` (and left in the residual) when the import links carry no
+        dispatch.
       * ``residual_gap_eur`` — whatever those do not explain: custom LP terms
         (the curtailment-subsidy wrapper, VOLL slacks, an objective scale not
         yet reverted). Zero on a plain solve.
@@ -127,10 +134,17 @@ def _bridge(n, cost_breakdown, cfg) -> dict:
         lp_basis += weight * (opex_raw + f["extendable"])
         nonext_reported += years * f["nonextendable"]
     cb_total = float(cost_breakdown["total"])
+    # The demand charge is refused on multi-period networks, so it is one
+    # flat-network term at LP weight 1.0; it is not in `cost_breakdown`.
+    from services.study.tariff import demand_charge_eur_from_network
+
+    demand_charge = demand_charge_eur_from_network(
+        n, getattr(cfg, "demand_charge", None) if cfg is not None else None)
     return {
         "nonextendable_fixed_cost_eur": nonext_reported,
         "period_weighting_adjustment_eur": lp_basis - (cb_total - nonext_reported),
-        "lp_basis_total": lp_basis,
+        "demand_charge_eur": demand_charge,
+        "lp_basis_total": lp_basis + (demand_charge or 0.0),
         "is_multi_period": is_mp,
     }
 
@@ -163,9 +177,11 @@ def compute_objective_decomposition(n, cost_breakdown, cfg=None):
         "myopic_period_objectives": None,
         "myopic_horizon_total": None,
         # Reconciliation bridge: gap_eur = −nonextendable_fixed_cost_eur
-        #   + period_weighting_adjustment_eur + residual_gap_eur.
+        #   + period_weighting_adjustment_eur + demand_charge_eur
+        #   + residual_gap_eur.
         "nonextendable_fixed_cost_eur": None,
         "period_weighting_adjustment_eur": None,
+        "demand_charge_eur": None,
         "lp_basis_total": None,
         "residual_gap_eur": None,
         "residual_gap_pct": None,
@@ -220,6 +236,7 @@ def compute_objective_decomposition(n, cost_breakdown, cfg=None):
             b = _bridge(n, cost_breakdown, cfg)
             out["nonextendable_fixed_cost_eur"] = b["nonextendable_fixed_cost_eur"]
             out["period_weighting_adjustment_eur"] = b["period_weighting_adjustment_eur"]
+            out["demand_charge_eur"] = b["demand_charge_eur"]
             out["lp_basis_total"] = b["lp_basis_total"]
             residual = out["lp_total"] - b["lp_basis_total"]
             out["residual_gap_eur"] = residual

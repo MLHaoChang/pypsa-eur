@@ -1,0 +1,502 @@
+"""
+Tariff prices as network data, and the bill calculator (MVP-1 phase S3).
+
+Plan: docs/superpowers/plans/2026-09-28-guided-investment-study-mvp1-v2.md (S3)
+Review deltas: B2 (prices are permanent network data; the demand charge is a
+solver-config field; `demand_charge_eur` recomputed from `links_t.p0`), N13.
+
+Three tariff semantics are pinned here (carried from the S1 gate,
+docs/superpowers/notes/2026-09-29-mvp1-s1-gate.md):
+
+* **Band precedence: first match wins.** Energy bands are tried in list
+  order; a snapshot takes the price of the first band whose `TimeRule`
+  matches it. A band set that leaves any snapshot unpriced is refused
+  (`UnpricedHoursError`), never priced at zero.
+* **Export pricing is one or the other.** `ExportCompensation.price_per_mwh`
+  or `ExportCompensation.series_ref`, never both (`ExportPricingError`).
+  Writing prices for an export link with neither is refused too; the bill
+  calculator reports the export credit as null with a flag instead.
+* **Demand-charge basis.** MVP-1 models one billing-period demand charge.
+  `annual_peak` and `ratchet` are refused with `UnsupportedTariffError`
+  (code `demand_charge_basis_<basis>`), here and in the LP wrapper
+  (`services/solver/objective.py::_wrap_with_demand_charge`).
+
+`TimeRule` fields read the snapshot timestamp as given (month 1..12, weekday
+0 = Monday, hour of the snapshot's start); snapshots are local clock time.
+
+The bill is one engine (`engine="bill_calculator"`): the LP wrapper prices
+the demand charge from the same spec, and the objective decomposition
+recomputes `demand_charge_eur` through `BillCalculator.demand_charge` from
+`links_t.p0`, never from `n.model`.
+"""
+from __future__ import annotations
+
+import math
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import ClassVar, Literal
+
+import numpy as np
+import pandas as pd
+from pydantic import Field, ValidationError
+
+from models.study import (
+    DemandCharge,
+    EnergyBand,
+    ExportCompensation,
+    FinancialBasis,
+    Tariff,
+    TimeRule,
+    _FigureBlock,
+)
+
+__all__ = [
+    "Bill", "BillCalculator", "BillComponents", "DemandChargeSpec",
+    "ExportPricingError", "REFUSED_DEMAND_CHARGE_BASES", "TariffError",
+    "UnpricedHoursError", "UnsupportedTariffError", "band_prices",
+    "billing_period_labels", "demand_charge_eur_from_network",
+    "parse_demand_charge_config", "write_tariff_prices",
+]
+
+REFUSED_DEMAND_CHARGE_BASES = ("annual_peak", "ratchet")
+BillingPeriod = Literal["month", "year"]
+_ONE_YEAR_HOURS = (8760.0, 8784.0)
+_NETWORK_CHARGE_BASES = ("per_mwh", "per_period", "per_year")
+
+
+# ── typed errors ──────────────────────────────────────────────────────────
+
+class TariffError(ValueError):
+    """A tariff the engine will not price. `code` is stable and machine-read."""
+
+    code: str = "tariff_invalid"
+
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        if code is not None:
+            self.code = code
+
+
+class UnpricedHoursError(TariffError):
+    code = "tariff_unpriced_hours"
+
+
+class ExportPricingError(TariffError):
+    code = "tariff_export_pricing"
+
+
+class UnsupportedTariffError(TariffError):
+    code = "tariff_unsupported"
+
+
+# ── calendar helpers ──────────────────────────────────────────────────────
+
+def _require_datetime_index(index, what: str) -> pd.DatetimeIndex:
+    if not isinstance(index, pd.DatetimeIndex):
+        raise UnsupportedTariffError(
+            f"{what} needs a flat DatetimeIndex of snapshots; got "
+            f"{type(index).__name__}. Tariff time rules and billing periods "
+            "read the snapshot timestamp.",
+            code="tariff_snapshots_not_flat")
+    return index
+
+
+def billing_period_labels(index, billing_period: BillingPeriod) -> np.ndarray:
+    """One label per snapshot: `YYYY-MM` for a month, `YYYY` for a year."""
+    idx = _require_datetime_index(index, "a billing period")
+    if billing_period == "month":
+        return np.asarray(idx.strftime("%Y-%m"))
+    if billing_period == "year":
+        return np.asarray(idx.strftime("%Y"))
+    raise TariffError(f"unknown billing period {billing_period!r}",
+                      code="tariff_billing_period")
+
+
+def _ordered_unique(labels: np.ndarray) -> list[str]:
+    return list(dict.fromkeys(labels.tolist()))
+
+
+def _rule_mask(idx: pd.DatetimeIndex, rule: TimeRule) -> np.ndarray:
+    mask = np.ones(len(idx), dtype=bool)
+    if rule.months:
+        mask &= np.isin(idx.month, rule.months)
+    if rule.weekdays:
+        mask &= np.isin(idx.weekday, rule.weekdays)
+    if rule.hours:
+        mask &= np.isin(idx.hour, rule.hours)
+    return mask
+
+
+def band_prices(index, bands: list[EnergyBand]) -> pd.Series:
+    """
+    The energy price of every snapshot, first matching band wins. Refuses
+    (`UnpricedHoursError`) when any snapshot matches no band.
+    """
+    idx = _require_datetime_index(index, "energy-band pricing")
+    price = np.full(len(idx), np.nan)
+    for band in bands:
+        m = _rule_mask(idx, band.applies) & np.isnan(price)
+        price[m] = float(band.price_per_mwh)
+    unpriced = np.isnan(price)
+    if unpriced.any():
+        first = ", ".join(str(t) for t in idx[unpriced][:3])
+        raise UnpricedHoursError(
+            f"{int(unpriced.sum())} of {len(idx)} snapshot(s) match no energy "
+            f"band (first: {first}). Bands are matched first-match-wins and "
+            "must price every hour; add a catch-all band (`applies: {}`) last.")
+    return pd.Series(price, index=idx, name="energy_price")
+
+
+def _network_per_mwh(index, tariff: Tariff) -> pd.Series:
+    adder = 0.0
+    for nc in tariff.network_charges:
+        if nc.basis not in _NETWORK_CHARGE_BASES:
+            raise UnsupportedTariffError(
+                f"network charge {nc.label!r} has basis {nc.basis!r}; MVP-1 "
+                f"prices {', '.join(_NETWORK_CHARGE_BASES)}",
+                code="network_charge_basis_unsupported")
+        if nc.basis == "per_mwh":
+            adder += float(nc.price)
+    return pd.Series(adder, index=index)
+
+
+def _export_price(index, export: ExportCompensation,
+                  series: Mapping[str, pd.Series] | None) -> pd.Series | None:
+    """The export credit per MWh (positive), or None when none is given."""
+    if export.price_per_mwh is not None and export.series_ref is not None:
+        raise ExportPricingError(
+            "export compensation gives both price_per_mwh and series_ref; "
+            "it is one or the other")
+    if export.cap_mw is not None:
+        raise UnsupportedTariffError(
+            "export compensation cap_mw is not modelled in MVP-1 (a single "
+            "link price cannot stop paying above a cap)",
+            code="export_cap_unsupported")
+    if export.price_per_mwh is not None:
+        return pd.Series(float(export.price_per_mwh), index=index)
+    if export.series_ref is not None:
+        src = (series or {}).get(export.series_ref)
+        if src is None:
+            raise ExportPricingError(
+                f"export series_ref {export.series_ref!r} does not resolve",
+                code="tariff_export_series_missing")
+        out = pd.Series(src).reindex(index).astype(float)
+        if out.isna().any():
+            raise ExportPricingError(
+                f"export series {export.series_ref!r} does not cover every "
+                "snapshot", code="tariff_export_series_missing")
+        return out
+    return None
+
+
+def _refuse_basis(basis: str) -> None:
+    if basis in REFUSED_DEMAND_CHARGE_BASES:
+        raise UnsupportedTariffError(
+            f"demand-charge basis {basis!r} is not modelled in MVP-1 (one "
+            "billing-period demand charge only); it is refused rather than "
+            "solved as a billing-period peak",
+            code=f"demand_charge_basis_{basis}")
+
+
+# ── prices as network data ────────────────────────────────────────────────
+
+def write_tariff_prices(n, tariff: Tariff, import_link: str,
+                        export_link: str | None, *,
+                        series: Mapping[str, pd.Series] | None = None) -> dict:
+    """
+    Write the tariff's energy prices into `n.links_t.marginal_cost` as
+    permanent network data: the import link pays the band price plus every
+    per-MWh network charge (positive); the export link is credited the
+    export price (negative marginal cost). Nothing is reverted after a solve.
+
+    Returns ``{"import": Series, "export": Series | None}``, the prices written.
+    """
+    idx = _require_datetime_index(n.snapshots, "write_tariff_prices")
+    for name in (import_link, export_link):
+        if name is not None and name not in n.links.index:
+            raise TariffError(f"link {name!r} is not in the network",
+                              code="tariff_unknown_link")
+    imp = band_prices(idx, tariff.energy_bands) + _network_per_mwh(idx, tariff)
+    exp = None
+    if export_link is not None:
+        credit = _export_price(idx, tariff.export, series)
+        if credit is None:
+            raise ExportPricingError(
+                "an export link needs price_per_mwh or series_ref (one or "
+                "the other); the tariff gives neither")
+        exp = -credit
+    mc = n.links_t.marginal_cost
+    mc[import_link] = imp.to_numpy()
+    if exp is not None:
+        mc[export_link] = exp.to_numpy()
+    return {"import": imp, "export": exp}
+
+
+# ── the demand-charge solver-config spec ──────────────────────────────────
+
+@dataclass(frozen=True)
+class DemandChargeSpec:
+    """`SolverConfig.demand_charge`, parsed. Only the charge and the links."""
+
+    price_per_mw_per_period: float
+    billing_period: BillingPeriod
+    import_links: tuple[str, ...]
+    basis: str = "billing_period_peak"
+
+
+_SPEC_KEYS = frozenset({"price_per_mw_per_period", "basis", "ratchet",
+                        "billing_period", "import_links"})
+
+
+def parse_demand_charge_config(raw: Mapping) -> DemandChargeSpec:
+    """
+    Parse `SolverConfig.demand_charge`:
+    ``{"price_per_mw_per_period", "basis", "billing_period", "import_links"}``.
+    Refuses `annual_peak` and `ratchet` first (typed, before any other
+    check), then unknown keys, a bad price, a bad billing period or an empty
+    import-link list (`TariffError`, code `demand_charge_invalid`).
+    """
+    if not isinstance(raw, Mapping):
+        raise TariffError("demand_charge must be a mapping",
+                          code="demand_charge_invalid")
+    _refuse_basis(str(raw.get("basis", "billing_period_peak")))
+    stray = set(raw) - _SPEC_KEYS
+    if stray:
+        raise TariffError(f"demand_charge has unknown key(s) {sorted(stray)}",
+                          code="demand_charge_invalid")
+    try:
+        dc = DemandCharge.model_validate(
+            {k: raw[k] for k in ("price_per_mw_per_period", "basis", "ratchet")
+             if k in raw})
+    except ValidationError as exc:
+        raise TariffError(f"demand_charge is invalid: {exc.errors()[0]['msg']}",
+                          code="demand_charge_invalid") from exc
+    if not math.isfinite(dc.price_per_mw_per_period):
+        raise TariffError("demand_charge price must be finite",
+                          code="demand_charge_invalid")
+    period = raw.get("billing_period", "month")
+    if period not in ("month", "year"):
+        raise TariffError(f"demand_charge billing_period {period!r} is not "
+                          "'month' or 'year'", code="demand_charge_invalid")
+    links = raw.get("import_links")
+    if (not isinstance(links, (list, tuple)) or not links
+            or not all(isinstance(x, str) and x for x in links)):
+        raise TariffError("demand_charge needs a non-empty import_links list",
+                          code="demand_charge_invalid")
+    return DemandChargeSpec(
+        price_per_mw_per_period=float(dc.price_per_mw_per_period),
+        billing_period=period, import_links=tuple(dict.fromkeys(links)),
+        basis=dc.basis)
+
+
+# ── the bill ──────────────────────────────────────────────────────────────
+
+class BillComponents(_FigureBlock):
+    """
+    Signed contributions to the bill over the modelled horizon, in the
+    tariff's currency: charges are positive, `export_credit` is negative (a
+    credit), and the bill is their sum. `capacity` is the tariff's
+    `CapacityCharge`, pro-rated by horizon hours / 8760.
+    """
+
+    _figure_fields: ClassVar[tuple[str, ...]] = (
+        "energy", "demand", "capacity", "fixed", "network", "export_credit")
+
+    energy: float | None
+    demand: float | None
+    capacity: float | None
+    fixed: float | None
+    network: float | None
+    export_credit: float | None
+
+
+class Bill(_FigureBlock):
+    """
+    The site's grid bill (spec §4.4; ADR-0001). `total` covers the modelled
+    snapshots; `annual_bill` is the same figure when they are one year and
+    null (`horizon_not_one_year`) otherwise, never extrapolated.
+    """
+
+    _figure_fields: ClassVar[tuple[str, ...]] = ("total", "annual_bill")
+
+    total: float | None
+    annual_bill: float | None
+    by_component: BillComponents
+    peak_mw_by_billing_period: dict[str, float] = Field(default_factory=dict)
+    billing_periods: list[str] = Field(default_factory=list)
+    horizon_hours: float
+    basis: FinancialBasis = Field(default_factory=FinancialBasis)
+    currency: str = "EUR"
+    currency_year: int | None = None
+    engine: Literal["bill_calculator"] = "bill_calculator"
+    honesty_notes: tuple[str, ...] = ()
+
+
+def _weights(snapshot_weightings) -> pd.Series:
+    if isinstance(snapshot_weightings, pd.DataFrame):
+        col = ("generators" if "generators" in snapshot_weightings.columns
+               else snapshot_weightings.columns[0])
+        w = snapshot_weightings[col]
+    else:
+        w = pd.Series(snapshot_weightings)
+    return w.astype(float)
+
+
+def _aligned(series, index, what: str) -> pd.Series | None:
+    if series is None:
+        return None
+    out = pd.Series(series).reindex(index).astype(float)
+    if out.isna().any():
+        raise TariffError(f"{what} series does not cover every snapshot",
+                          code="tariff_series_misaligned")
+    return out
+
+
+class BillCalculator:
+    """
+    Prices a site's import and export series under a `Tariff`. `series`
+    resolves `ExportCompensation.series_ref`.
+    """
+
+    def __init__(self, series: Mapping[str, pd.Series] | None = None):
+        self.series = dict(series or {})
+
+    @staticmethod
+    def demand_charge(import_mw: pd.Series, price_per_mw_per_period: float,
+                      billing_period: BillingPeriod) -> tuple[float, dict[str, float]]:
+        """Σ over billing periods of price × that period's peak import (MW)."""
+        labels = billing_period_labels(import_mw.index, billing_period)
+        peaks = import_mw.groupby(labels, sort=False).max()
+        peaks = {str(k): float(v) for k, v in peaks.items()}
+        return float(price_per_mw_per_period) * sum(peaks.values()), peaks
+
+    def bill(self, import_mw: pd.Series | None, export_mw: pd.Series | None,
+             tariff: Tariff, snapshot_weightings) -> Bill:
+        w = _weights(snapshot_weightings)
+        idx = _require_datetime_index(w.index, "the bill")
+        imp = _aligned(import_mw, idx, "import")
+        exp = _aligned(export_mw, idx, "export")
+        if tariff.demand_charge is not None:
+            _refuse_basis(tariff.demand_charge.basis)
+        # Validate every price before any figure is computed, so a tariff
+        # the engine refuses is refused whatever series are present.
+        energy_price = band_prices(idx, tariff.energy_bands)
+        per_mwh_network = _network_per_mwh(idx, tariff)
+        export_price = _export_price(idx, tariff.export, self.series)
+
+        labels = billing_period_labels(idx, tariff.billing_period)
+        periods = _ordered_unique(labels)
+        hours = float(w.sum())
+        years = hours / 8760.0
+        flags: dict[str, str] = {}
+        notes: list[str] = []
+        comp: dict[str, float | None] = {}
+
+        if imp is None:
+            comp["energy"] = None
+            flags["energy"] = "no_import_series"
+        else:
+            comp["energy"] = float((imp * w * energy_price).sum())
+
+        peaks: dict[str, float] = {}
+        if tariff.demand_charge is None:
+            comp["demand"] = 0.0
+        elif imp is None:
+            comp["demand"] = None
+            flags["demand"] = "no_import_series"
+        else:
+            comp["demand"], peaks = self.demand_charge(
+                imp, tariff.demand_charge.price_per_mw_per_period,
+                tariff.billing_period)
+
+        cc = tariff.capacity_charge
+        if cc is None:
+            comp["capacity"] = 0.0
+        elif cc.basis == "contracted":
+            if tariff.connection_limit_mw is None:
+                comp["capacity"] = None
+                flags["capacity"] = "no_contracted_mw"
+            else:
+                comp["capacity"] = (cc.price_per_mw_per_year
+                                    * float(tariff.connection_limit_mw) * years)
+        elif imp is None:
+            comp["capacity"] = None
+            flags["capacity"] = "no_import_series"
+        else:
+            comp["capacity"] = cc.price_per_mw_per_year * float(imp.max()) * years
+        if cc is not None:
+            notes.append("capacity charge pro-rated by horizon hours / 8760")
+
+        comp["fixed"] = float(tariff.fixed_charge_per_period) * len(periods)
+
+        needs_import = any(nc.basis == "per_mwh" for nc in tariff.network_charges)
+        if needs_import and imp is None:
+            comp["network"] = None
+            flags["network"] = "no_import_series"
+        else:
+            net = 0.0
+            if imp is not None:
+                net += float((imp * w * per_mwh_network).sum())
+            for nc in tariff.network_charges:
+                if nc.basis == "per_period":
+                    net += float(nc.price) * len(periods)
+                elif nc.basis == "per_year":
+                    net += float(nc.price) * years
+            comp["network"] = net
+
+        if exp is None:
+            comp["export_credit"] = None
+            flags["export_credit"] = "no_export_series"
+        elif export_price is None:
+            # Nothing exported is a real zero whatever the (absent) price.
+            if float(exp.abs().sum()) == 0.0:
+                comp["export_credit"] = 0.0
+            else:
+                comp["export_credit"] = None
+                flags["export_credit"] = "no_export_price"
+        else:
+            comp["export_credit"] = -float((exp * w * export_price).sum())
+
+        components = BillComponents(**comp, unavailable=flags)
+        bill_flags: dict[str, str] = {}
+        if flags:
+            total = None
+            bill_flags["total"] = "component_unavailable"
+        else:
+            total = float(sum(v for v in comp.values() if v is not None))
+        if total is None:
+            annual = None
+            bill_flags["annual_bill"] = "component_unavailable"
+        elif any(abs(hours - h) < 1e-6 for h in _ONE_YEAR_HOURS):
+            annual = total
+        else:
+            annual = None
+            bill_flags["annual_bill"] = "horizon_not_one_year"
+        if tariff.demand_charge is not None or tariff.fixed_charge_per_period:
+            notes.append("each billing period touched by the snapshots is "
+                         "charged in full (fixed and demand charges)")
+        return Bill(
+            total=total, annual_bill=annual, by_component=components,
+            peak_mw_by_billing_period=peaks, billing_periods=periods,
+            horizon_hours=hours, currency=tariff.currency,
+            currency_year=tariff.currency_year, unavailable=bill_flags,
+            honesty_notes=tuple(notes))
+
+
+def demand_charge_eur_from_network(n, raw) -> float | None:
+    """
+    `demand_charge_eur` after a solve, recomputed from `links_t.p0` by the
+    bill calculator (never from `n.model`). ``0.0`` when no demand charge is
+    configured (the LP had no such term); ``None`` when one is configured but
+    the import links carry no dispatch.
+    """
+    if not raw:
+        return 0.0
+    spec = parse_demand_charge_config(raw)
+    p0 = getattr(n.links_t, "p0", None)
+    if p0 is None or p0.empty or any(ln not in p0.columns for ln in spec.import_links):
+        return None
+    import_mw = p0[list(spec.import_links)].sum(axis=1)
+    total, _ = BillCalculator.demand_charge(
+        import_mw, spec.price_per_mw_per_period, spec.billing_period)
+    return total
