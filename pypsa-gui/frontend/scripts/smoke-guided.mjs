@@ -2146,11 +2146,21 @@ const STUDY_RUNNING_SWITCH =
   'A study is still running — wait for it to finish or abort it before switching project.'
 
 async function phaseP27b(browser) {
-  const { project: dc } = await phaseP229(browser)
+  const { project: p229 } = await phaseP229(browser)
+  // P26 creates every template under its default name again, so the P22.9
+  // data-center project moves out of the way first (the route answers 409
+  // "already exists" otherwise); it stays the tab's project below.
+  const dc = 'P27b Data Center'
+  await api('POST', `/api/projects/${encodeURIComponent(p229)}/rename`, { new_name: dc })
+  ok(`P22.9 project renamed: ${p229} → ${dc}`)
   const p26 = await phaseP26(browser)
   const other = p26.find(r => r.id === 'eh_h2_hub')?.project
   check(Boolean(dc) && Boolean(other) && dc !== other, `tab project ${dc}, other project ${other}`)
   await p27bRestart(browser, dc, other)
+  // (b) creates the H2 hub from its template: move P26's copy (same default
+  // name) out of the way first, as for P22.9's data center above.
+  await api('POST', `/api/projects/${encodeURIComponent(other)}/rename`, { new_name: `P26 ${other}` })
+  ok(`P26 project renamed: ${other} → P26 ${other}`)
   await p27bMidStudySwitch(browser, dc)
   const oneShot = p26.map(r => `${r.id}: ${r.fmeaOneShot} (settled ${r.fmeaRows})`).join('; ')
   info(`P27b (c) FMEA one-shot reads after the extra tick — ${oneShot}`)
@@ -2355,11 +2365,11 @@ async function p27bMidStudySwitch(browser, dc) {
     await page.waitForFunction(() => !document.querySelector('[data-testid="hub-start-template-eh_h2_hub"]')?.disabled,
       null, { timeout: 30_000 })
     await t2.click()
-    await page.waitForFunction(async (old) => {
-      const r = await fetch('/api/network/meta'); const m = await r.json()
-      return m.loaded_project && m.loaded_project !== old
-    }, dc, { timeout: 120_000, polling: 1000 })
-    const p2 = (await api('GET', '/api/network/meta')).loaded_project
+    let p2 = dc
+    for (const u = Date.now() + 120_000; Date.now() < u && (p2 === dc || !p2); await sleep(1000)) {
+      p2 = (await api('GET', '/api/network/meta')).loaded_project
+    }
+    check(Boolean(p2) && p2 !== dc, `the backend moved to project 2 (${p2})`)
     ok(`project 2: ${p2}`)
     await byId('hub-card-site').waitFor({ state: 'visible', timeout: 60_000 })
     await page.waitForSelector(
