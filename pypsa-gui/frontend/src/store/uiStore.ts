@@ -407,6 +407,10 @@ interface UIStore {
   // newly-loaded network under the OLD project's name (silent cross-project
   // overwrite). In-memory only; defaults false.
   projectSwitchInProgress: boolean
+  // How many switches are in flight (P27b gate note 8): overlapping switches
+  // must not drop the fence when the first one finishes. The boolean above
+  // mirrors `projectSwitchDepth > 0` and is what every reader uses.
+  projectSwitchDepth: number
   // A2 (deferred spec §2.1): the tab's `currentProject` and the backend's
   // binding (`/network/meta.loaded_project`) disagree — after a backend
   // restart another tab's project was resumed, or an external client swapped
@@ -596,6 +600,7 @@ export const useUIStore = create<UIStore>((set) => ({
   assistantDockWidth: storedAssistantDockWidth(),
   assistantSpeakEnabled: storedAssistantSpeak(),
   projectSwitchInProgress: false,
+  projectSwitchDepth: 0,
   projectMismatch: null,
   compareRailOpen: storedCompareRailOpen(),
   compareRailWidth: storedCompareRailWidth(),
@@ -743,7 +748,12 @@ export const useUIStore = create<UIStore>((set) => ({
     persistAssistantDockOpen(next)
     return { assistantDockOpen: next }
   }),
-  setProjectSwitchInProgress: (v) => set({ projectSwitchInProgress: v }),
+  setProjectSwitchInProgress: (v) => set(s => {
+    // A counter under the boolean (gate note 8). A test or caller that set
+    // the boolean directly (depth 0) still gets `false` from a finish.
+    const depth = Math.max(0, (s.projectSwitchDepth ?? 0) + (v ? 1 : -1))
+    return { projectSwitchDepth: depth, projectSwitchInProgress: depth > 0 }
+  }),
   setProjectMismatch: (v) => set({ projectMismatch: v }),
   setCompareRailOpen: (v) => {
     try { localStorage.setItem(COMPARE_RAIL_KEY, v ? 'true' : 'false') } catch { /* noop */ }
