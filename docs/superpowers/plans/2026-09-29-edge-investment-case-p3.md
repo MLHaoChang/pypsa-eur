@@ -320,6 +320,43 @@ template on its fixture; drafts for missing contracts; `template_version` pinned
 - `ValueFlowConfig.built_assets_digest` added (for `template_stale`).
 - Meter Links and network branches stay with `site_party` in every template (the connection is the site's).
 - `is_fuel_supply` moved beside the classifier (`participants`), and `branch_edges` extracted.
+
+**WP3.2 review round 1 (c41ca58): FAIL** — binding #1–#3; #4–#9 fixed with them; #10–#11 notes.
+Probed end to end through the routes (POST template → PUT solver_config with the drafts → PUT
+value_flows with If-Match → solve on the session → `value_flow_ledger`).
+- #1 HIGH: contract parties were never listed as externals — single_owner / btm_ppa on V1 (PPA + lease)
+  got 422 from the value-flows route. → `_with_parties` in `build`: every party a saved contract or a
+  draft names that is not a participant becomes an external; no participant stays an external.
+- #2 HIGH: the dso_developer DR draft had no `contracted_mw` (ledger `ok=None`) and DSR state was
+  ignored. → the draft carries `contracted_mw: null`; `dr_needs_contracted_mw:<id>` for an adopted DR
+  without it; `dsr_not_enabled:<bus>` when the load's bus is not among the buses the solve enables
+  (the route passes `dsr_buses` only when DSR price and share are > 0).
+- #3 MEDIUM (binding): zero-price drafts solved silently. → every draft money field is `null` (the
+  contract model refuses to save it until priced) with a `draft_needs:<id>:<fields>` note.
+- #4: btm_ppa owns `PPA.asset_ids ∩` site-side generators, notes `ppa_assets_not_on_site`,
+  `several_btm_ppas_first_used`, and refuses `template_conflicting_ppa` rather than drafting a second
+  PPA over output the site does not buy.
+- #5: landlord_tenant gives the landlord `lease.asset_ids ∩` site assets only.
+- #6: dso_developer adopts only a DSO-like counterparty (`dso`, or not a default external); others are
+  noted (`dr_counterparty_not_a_dso`, `dr_without_counterparty`), never drafted over.
+- #7: the pin hashes the whole module plus the classifier (`code_sha()`); the fixture is a history of
+  `{code_sha, versions}` whose entries must each bump a version; `template_outdated` when a stored
+  `template_version` is older than the registry's.
+- #8: `config_digest` leaves defaults out (nested, and a top-level value equal to its default in any
+  order) and sorts lists canonically — a reorder or a new defaulted field is not an edit.
+- #9: `built_assets_digest` → `built_inputs_digest` (site assets + contracts' type/id/parties/assets/
+  loads + PoC + group members; money fields excluded). A build counts its own drafts as saved, so the
+  normal flow reads `[]`; an unsaved draft reads `template_stale`. A PoC that leaves nothing site-side
+  is noted `no_site_side_assets`.
+- #10: the route takes no lock and no solver-in-flight check — it only reads the network and the
+  solver config (the solve adds no component the builders read; its slacks are transient) and writes
+  nothing; stated in its docstring. The WP3.4 chat and WP3.6 designer surface `notes`.
+- #11: landlord_tenant notes `connection_costs_on_tenant`; energy_hub member ids never collide with
+  `site_party` and the member region reads bus0–bus4. **M5 deviation (recorded):** btm_ppa drafts no
+  EaaS contract; storage stays with the site and the note is
+  `site_keeps_assets_developer_needs_eaas_or_lease:<ids>`.
+- Tests: `test_value_flow_templates.py` (46 incl. 7 live e2e on V1 through the routes: all five
+  templates, with and without drafts; dso with DSR enabled; energy_hub on a two-member hub).
 ---
 
 ## WP3.3a Energy hub: allocation

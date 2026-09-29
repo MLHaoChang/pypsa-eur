@@ -487,8 +487,8 @@ export interface ValueFlowConfig {
   template?: 'single_owner' | 'btm_ppa' | 'landlord_tenant' | 'dso_developer' | 'energy_hub' | 'custom'
   template_version?: string | null
   built_digest?: string | null
-  /** The site-side assets the builder saw; `template_stale` when they differ. */
-  built_assets_digest?: string | null
+  /** What the builder read (site assets, contracts, PoC); `template_stale` when they differ. */
+  built_inputs_digest?: string | null
   participants?: Participant[]
   /** Default: retailer, dso, tso, market, tax_authority, capex_supplier, om_contractor. */
   externals?: string[]

@@ -665,7 +665,13 @@ def build_value_flow_template(body: TemplateIn):
     """Build a participants template for the current network and commercial
     config (IC P3 WP3.2). Nothing is saved: the answer is the config, the
     unsaved draft contracts it needs and notes; the client saves them through
-    the value-flows and solver-config routes."""
+    the value-flows and solver-config routes.
+
+    No lock and no solver-in-flight check: it only reads the network and the
+    solver config (a solve adds no components the builders read — the DSR and
+    VoLL slacks are transient and removed before results), and it writes
+    nothing. The DSR buses passed are those the solve actually enables
+    (price > 0, share > 0), as DR activation settles on them."""
     from dataclasses import asdict as _asdict
 
     from models.commercial import CommercialConfig
@@ -681,7 +687,11 @@ def build_value_flow_template(body: TemplateIn):
         raise HTTPException(409, {"code": "commercial_config_invalid",
                                   "message": exc.errors()[0]["msg"]}) from exc
     try:
-        result = T.build(body.template, PyPSAService.get_network(), bound)
+        cfg = _state["solver_config"]
+        dsr_on = (float(getattr(cfg, "dsr_price_eur_per_mwh", 0.0) or 0.0) > 0
+                  and float(getattr(cfg, "dsr_share_of_load", 0.0) or 0.0) > 0)
+        result = T.build(body.template, PyPSAService.get_network(), bound,
+                         dsr_buses=tuple(getattr(cfg, "dsr_buses", None) or ()) if dsr_on else ())
     except T.TemplateRefused as exc:
         raise HTTPException(422 if exc.code == "template_unknown" else 409,
                             {"code": exc.code, "message": str(exc)}) from exc
