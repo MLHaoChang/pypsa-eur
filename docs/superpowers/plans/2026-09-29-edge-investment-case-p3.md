@@ -764,6 +764,30 @@ draft); no gap computed (stated); no state written. Save to Library or inline. *
 reproduces `h3_us_ci.json`'s tariff exactly; the preview handler: no state change, the preview flag, no
 drift flags, 409; FE preview rendering.
 
+
+**WP3.7b implementation.**
+- `services/results/billing.compute_billing_preview(n, cfg, tariff)`: the draft replaces the stored
+  tariff and its Library ref / id (and the value-flows sub-tree) in a COPY of the commercial config,
+  `lp_bindings.validate_for_network` checks it (never `bind_commercial`), `bill_site` rates the last
+  dispatch; the drift flags `_drift_flags` names are removed and `preview_dispatch_not_optimised_for_
+  draft` added; no settlement (`contracts_not_settled_in_preview`) and no gap
+  (`provenance.gap = "not_computed_for_preview"`); nothing stored. Route `POST
+  /api/results/billing/preview {tariff}` (`BillingPreviewIn`, extra=forbid): 409 `solver_in_flight`
+  / `no_commercial_config`, 204 before a solve, 422 `tariff_invalid` (pydantic errors with `loc`) /
+  `tariff_not_bindable`; holds the network lock while it reads. Route inventory + `ROUTE_SURFACES`.
+- FE: `tariffModel.ts` (`normaliseTariff` — optional fields and defaults left out, so H3 round-trips
+  byte-for-byte as JSON; list parsing; `errorsByField` / `errorsUnder` map a 422's `loc` — with or
+  without a `body` / `payload` prefix — to item and period fields) and `TariffBuilder.tsx` (header,
+  items: id / kind / unit / measured_on / direction / settlement, periods with months / weekdays /
+  hours and per-period tier rates, tiers, the ratchet in its three modes; "Preview the bill", "Save
+  to Library", "Save as the project tariff" — inline save clears `import_tariff_ref`; results
+  invalidated). The Investment tab's Tariff section edits the project's inline tariff (or a blank
+  one). The client's last 404 fallback (`notYetDeployed`) is gone — both routes shipped (gate item).
+- Tests: `test_results_billing_preview.py` (3: rates the dispatch under the draft, the drift flags
+  replaced, config / meta / state unchanged, the real bill untouched; 422 invalid and unbindable;
+  409 / 204 through the route), `tariffModel.test.ts` (4: H3 exact), `TariffBuilder.test.tsx` (4:
+  H3 saved unchanged inline and to the Library, a windowed tiered item built through the form, the
+  preview rendered, a 422 at its item; `expectAllButtonsNamed`).
 ## WP3.7c Contracts and connection-agreement editors
 
 Typed forms per contract type (P2 models, allowed pricing combinations; party pickers from participants +

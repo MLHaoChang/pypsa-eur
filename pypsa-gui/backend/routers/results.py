@@ -22,6 +22,7 @@ from typing import Any
 import threading as _threading
 
 from fastapi import APIRouter, HTTPException, Query, Response
+from pydantic import BaseModel, ConfigDict
 
 from services.dispatch_status import dispatch_status as _dispatch_status
 from services.pypsa_service import PyPSAService
@@ -1781,6 +1782,49 @@ def get_billing():
     if not _dispatch_ready(n):
         return Response(status_code=204)
     payload = compute_billing(n, _state["solver_config"], state=_state, result_df=_result_df)
+    return Response(status_code=204) if payload is None else payload
+
+
+class BillingPreviewIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tariff: dict
+
+
+@results_router.post("/billing/preview")
+def preview_billing(body: BillingPreviewIn):
+    """The last solve's dispatch billed under a DRAFT import tariff (IC P3
+    WP3.7b, `services/results/billing.compute_billing_preview`): nothing is
+    stored, no gap is computed, the drift flags are replaced by
+    `preview_dispatch_not_optimised_for_draft`. 409 during a solve or without
+    a commercial config, 204 before a solve, 422 for a draft that does not
+    validate or bind on this network. Holds the network lock while it reads."""
+    from pydantic import ValidationError as _VE
+
+    from services.commercial.lp_bindings import CommercialBindingError
+    from services.results.billing import compute_billing_preview
+
+    if _solver_in_flight():
+        raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                                  "message": "a solve is running; preview the bill after it ends"})
+    cfg = _state["solver_config"]
+    if not getattr(cfg, "commercial", None):
+        raise HTTPException(409, {"code": "no_commercial_config",
+                                  "message": "set the commercial config (poc_link) first"})
+    with PyPSAService.get_lock():
+        n = PyPSAService.get_network()
+        if not _dispatch_ready(n):
+            return Response(status_code=204)
+        try:
+            payload = compute_billing_preview(n, cfg, body.tariff)
+        except _VE as exc:
+            raise HTTPException(422, {"code": "tariff_invalid",
+                                      "message": str(exc.errors()[0].get("msg"))[:300],
+                                      "errors": [{"loc": list(e.get("loc", ())),
+                                                  "msg": str(e.get("msg"))[:200]}
+                                                 for e in exc.errors()[:20]]}) from exc
+        except CommercialBindingError as exc:
+            raise HTTPException(422, {"code": "tariff_not_bindable",
+                                      "message": str(exc)[:500]}) from exc
     return Response(status_code=204) if payload is None else payload
 
 

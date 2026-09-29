@@ -212,6 +212,7 @@ GET     /api/results/asset/{component_class}/{name}              -> get_asset_re
 GET     /api/results/asset/{component_class}/{name}/export.xlsx  -> export_asset_results_xlsx
 GET     /api/results/asset_economics                             -> get_asset_economics_api_results_asset_economics_get
 GET     /api/results/billing                                     -> get_billing_api_results_billing_get
+POST    /api/results/billing/preview                             -> preview_billing_api_results_billing_preview_post
 GET     /api/results/carrier_kpis                                -> get_carrier_kpis_api_results_carrier_kpis_get
 GET     /api/results/cfe_score                                   -> get_cfe_score_api_results_cfe_score_get
 GET     /api/results/copt                                        -> get_copt_api_results_copt_get

@@ -14,6 +14,8 @@ import { CompletenessChips, type CompletenessRow } from '../../components/Comple
 import { fmtAmount } from './investment/valueFlows'
 import ValueFlowsView from './investment/ValueFlowsView'
 import ParticipantsDesigner from './investment/ParticipantsDesigner'
+import TariffBuilder from './investment/TariffBuilder'
+import { blankTariff } from './investment/tariffModel'
 
 const SECTIONS = [
   { id: 'participants', label: 'Participants' },
@@ -97,6 +99,22 @@ function BillSection({ billing, error }: { billing: BillingPayload | null | unde
   )
 }
 
+function TariffSection() {
+  const project = useUIStore(s => s.currentProject)
+  const current = useQuery({ queryKey: nk(project, 'commercial', 'config'),
+                             queryFn: () => commercialApi.getCommercial() })
+  if (current.isPending) return <p className="text-[11px] text-muted py-2">Loading the tariff…</p>
+  const tariff = current.data?.import_tariff
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-muted">
+        {tariff ? `Editing the project's import tariff ${tariff.id}.`
+          : 'The project has no import tariff: build one.'}</p>
+      <TariffBuilder key={tariff?.id ?? 'new'} initial={tariff ?? blankTariff()} />
+    </div>
+  )
+}
+
 export default function InvestmentTab() {
   const project = useUIStore(s => s.currentProject)
   const billing = useQuery({ queryKey: nk(project, 'results', 'billing'),
@@ -165,7 +183,8 @@ export default function InvestmentTab() {
             {designing && <ParticipantsDesigner />}
           </div>
         )}
-        {(section === 'library' || section === 'tariff' || section === 'contracts') && (
+        {section === 'tariff' && <TariffSection />}
+        {(section === 'library' || section === 'contracts') && (
           <p className="text-[11px] text-muted py-2">This section is not available yet.</p>
         )}
       </div>

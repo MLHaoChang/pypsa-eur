@@ -176,6 +176,7 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_billing"):                     frozenset(),
     ("routers/results.py", "get_cfe_score"):                   frozenset(),
     ("routers/results.py", "get_value_flows"):                 frozenset(),   # P3 WP3.4
+    ("routers/results.py", "preview_billing"):                 frozenset(),   # P3 WP3.7b
     # ── routers/simulation.py ───────────────────────────────────────────
     ("routers/simulation.py", "get_solver_config"):    frozenset(),
     ("routers/simulation.py", "update_solver_config"):  frozenset(),

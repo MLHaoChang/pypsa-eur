@@ -84,13 +84,6 @@ function typed(e: unknown): never {
 function resultError(e: unknown): never {
   return typed(e)
 }
-/** The same, but a 404 reads as "no result": for a route that lands later in
- *  IC P3 (POST /results/billing/preview in WP3.7b; GET /results/value_flows
- *  shipped in WP3.4). TODO: drop this when the preview ships (a P3 gate item). */
-function notYetDeployed(e: unknown): null {
-  if (detailOf(e).status === 404) return null
-  return typed(e)
-}
 const QUIET = { skipErrorToast: true } as const
 
 const enc = encodeURIComponent
@@ -272,5 +265,9 @@ export const commercialApi = {
       .then(r => r.data, typed),
   previewBilling: (tariff: Tariff) =>
     client.post<BillingPayload>('/results/billing/preview', { tariff }, QUIET)
-      .then(orNull, notYetDeployed),
+      .then(orNull, resultError),
+  /** The stored commercial config (the editors' starting point), or null. */
+  getCommercial: () =>
+    client.get<SolverConfig>('/simulation/solver_config')
+      .then(r => (r.data.commercial ?? null) as CommercialConfig | null),
 }
