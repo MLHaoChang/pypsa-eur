@@ -2015,6 +2015,24 @@ def gridspine_compute_capacity(project_id: str, bus: str, kind: str) -> dict:
         return _h(_gridspine_project(db, user, project_id), bus, kind)
 
 
+def gridspine_get_connection_assessments(project_id: str, assessment_id: str | None = None,
+                                         hour: int | None = None) -> dict:
+    from services.gridspine_service import get_connection as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), assessment_id=assessment_id, hour=hour)
+
+
+def gridspine_assess_connection(project_id: str, bus: str, load_mw: float, load_pf: float = 0.98,
+                                onsite_mw: float = 0.0, onsite_converter: bool = True,
+                                profile: str = "eu_rfg_dcc_ce") -> dict:
+    from services.gridspine_service import assess_facility as _h
+    with _acting() as (db, user):
+        return _h(_gridspine_project(db, user, project_id), {
+            "bus": bus, "load_mw": float(load_mw), "load_pf": float(load_pf),
+            "onsite_mw": float(onsite_mw), "onsite_converter": bool(onsite_converter), "profile": profile,
+        })
+
+
 def gridspine_export_handoff_bundle(project_id: str, hour: int) -> dict:
     from services.gridspine_service import export_handoff_bundle as _h
     with _acting() as (db, user):
@@ -4726,6 +4744,8 @@ DISPATCHERS: dict[str, Any] = {
     "gridspine_fetch_result_figure": gridspine_fetch_result_figure,
     "gridspine_get_capacity": gridspine_get_capacity,
     "gridspine_compute_capacity": gridspine_compute_capacity,
+    "gridspine_get_connection_assessments": gridspine_get_connection_assessments,
+    "gridspine_assess_connection": gridspine_assess_connection,
     # project_mgmt (21)
     "list_projects": list_projects,
     "load_project": load_project,
