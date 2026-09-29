@@ -667,15 +667,21 @@ def build_value_flow_template(body: TemplateIn):
     unsaved draft contracts it needs and notes; the client saves them through
     the value-flows and solver-config routes.
 
-    No lock and no solver-in-flight check: it only reads the network and the
-    solver config (a solve adds no components the builders read — the DSR and
-    VoLL slacks are transient and removed before results), and it writes
-    nothing. The DSR buses passed are those the solve actually enables
+    Refused while a solve runs (409 `solver_in_flight`, as the value-flows
+    PUT): a solve adds its VoLL and DSR slack generators to the live network
+    for the whole optimisation, and a build then would own them and draft
+    contracts on them (WP3.2 review round 2 #10). It writes nothing, so it
+    takes no lock. The DSR buses passed are those the solve actually enables
     (price > 0, share > 0), as DR activation settles on them."""
     from dataclasses import asdict as _asdict
 
     from models.commercial import CommercialConfig
     from services.commercial import value_flow_templates as T
+
+    if _solver_in_flight_ctx(PyPSAService.get_active_context()):
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project; build the "
+                                             "template after it finishes"})
 
     commercial = getattr(_state["solver_config"], "commercial", None)
     if not isinstance(commercial, dict):

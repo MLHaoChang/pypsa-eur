@@ -357,6 +357,14 @@ value_flows with If-Match → solve on the session → `value_flow_ledger`).
   `site_keeps_assets_developer_needs_eaas_or_lease:<ids>`.
 - Tests: `test_value_flow_templates.py` (46 incl. 7 live e2e on V1 through the routes: all five
   templates, with and without drafts; dso with DSR enabled; energy_hub on a two-member hub).
+
+**WP3.2 review round 2 (1e952e7): PASS WITH CONDITIONS** — #1–#9 and #11 closed; binding #10: the
+route's "a solve adds no components" was false (the VoLL/DSR slacks sit on the live network for the
+whole optimisation; a build mid-solve owned `__voll_*` / `__dsr_*` and drafted a PPA on them). → the
+route answers 409 `solver_in_flight` like the value-flows PUT (tested), docstring corrected. INFO taken:
+btm_ppa notes `developer_is_default_external:<party>` (btm_ppa → version 3, pin history appended).
+INFO left: `_contract_parties` / `same_party` / the models are outside `code_sha`; hub member ids
+`member_import_2` vs `member_import2` read alike (the name field disambiguates). **WP3.2 closed.**
 ---
 
 ## WP3.3a Energy hub: allocation

@@ -10,6 +10,16 @@
     "dso_developer": "2",
     "energy_hub": "2"
    }
+  },
+  {
+   "code_sha": "a9c6b9872946671f",
+   "versions": {
+    "single_owner": "2",
+    "btm_ppa": "3",
+    "landlord_tenant": "2",
+    "dso_developer": "2",
+    "energy_hub": "2"
+   }
   }
  ]
 }

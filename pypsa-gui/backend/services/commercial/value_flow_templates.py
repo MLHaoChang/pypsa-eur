@@ -216,6 +216,9 @@ def _btm_ppa(commercial: CommercialConfig, site: _Site) -> TemplateResult:
     ppa = eligible[0] if eligible else None
     if ppa is not None:
         developer = ppa.seller
+        if any(same_party(developer, e) for e in _DEFAULT_EXTERNALS):
+            # Its default-payee tariff items become internal flows to the developer.
+            notes.append(f"developer_is_default_external:{developer}")
         assets = [a for a in ppa.asset_ids if a in site.generators]
         off = [a for a in ppa.asset_ids if a not in site.generators]
         if off:
@@ -351,7 +354,7 @@ def _energy_hub(commercial: CommercialConfig, site: _Site) -> TemplateResult:
 
 TEMPLATES: dict[str, Template] = {t.name: t for t in (
     Template("single_owner", "2", _single_owner),
-    Template("btm_ppa", "2", _btm_ppa),
+    Template("btm_ppa", "3", _btm_ppa),
     Template("landlord_tenant", "2", _landlord_tenant),
     Template("dso_developer", "2", _dso_developer),
     Template("energy_hub", "2", _energy_hub),

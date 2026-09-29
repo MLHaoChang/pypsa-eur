@@ -71,7 +71,7 @@ def _saved(result, commercial: CommercialConfig) -> CommercialConfig:
 def _build(name, n, commercial, **kw):
     result = T.build(name, n, commercial, **kw)
     assert result.config.template == name
-    assert result.config.template_version == f"{name}@2"
+    assert result.config.template_version == f"{name}@{T.TEMPLATES[name].version}"
     saved = _saved(result, commercial)
     assert P.value_flows_problems(result.config, saved, n) == [], result.config
     assert T.template_status(result.config, n, saved) == []     # the normal flow is clean
@@ -159,6 +159,8 @@ def test_a_party_that_is_a_default_external_is_not_listed_twice():
     ppa = {**PPA, "seller": "retailer"}
     r = _build("single_owner", build_edge_15min(), _commercial(contracts=[ppa]))
     assert r.config.externals.count("retailer") == 1
+    r = _build("btm_ppa", build_edge_15min(), _commercial(contracts=[ppa]))
+    assert "developer_is_default_external:retailer" in r.notes
 
 
 def test_btm_ppa_with_its_ppa_gives_the_developer_only_the_ppa_assets():
@@ -439,6 +441,16 @@ def test_the_template_route_reads_the_enabled_dsr_buses(site):
                  json={"dsr_price_eur_per_mwh": 40.0, "dsr_share_of_load": 0.1})
     assert r.status_code == 200, r.text
     assert "dsr_not_enabled:site" not in notes()
+
+
+def test_the_template_route_refuses_during_a_solve(site, monkeypatch):
+    """Round 2 #10: a solve's VoLL/DSR slacks are on the live network while it
+    runs — a build then would own them."""
+    import routers.simulation as S
+
+    monkeypatch.setattr(S, "_solver_in_flight_ctx", lambda ctx: True)
+    r = site.post("/api/simulation/value_flows/template", json={"template": "single_owner"})
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "solver_in_flight"
 
 
 def test_the_template_route_refusals(site, client, install_network):
