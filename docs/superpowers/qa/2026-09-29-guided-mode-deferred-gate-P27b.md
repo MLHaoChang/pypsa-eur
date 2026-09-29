@@ -183,3 +183,92 @@ Screenshots read:
 ## To reach GO
 
 Fix B1 (allowlist the three lock routes and add a test for them, plus an auth-mode Switch case that ends writable). Then re-run rows 3, 4, the 4s subset, and smoke P27b. Notes 1 and 2 are recommended in the same change but are not required.
+
+---
+
+## Re-gate (2026-09-29, HEAD `1edf4209c`, fix diff `git diff cd32777ae..HEAD`)
+
+### Verdict: **GO**
+
+B1 is fixed and I verified the fix independently. Notes 1, 2, 6 and 8 are also closed. All rows are green. 15 of my 16 re-gate mutants are killed; the one survivor cannot cause harm.
+
+Scratch for this re-gate: `qa27b/regate/`.
+
+### 1. My B1 probes against HEAD
+I ran them unchanged on a fresh copy of the HEAD frontend (`qa27b/regate/fe`). All 7 cases pass:
+
+| Probe | Result |
+|---|---|
+| `probeLock` | Banner Switch now lands writable on Y. `POST /projects/Y/lock` leaves the tab |
+| `probeHeartbeat` | The tab keeps its lock through a 45 s mismatch and after Reload |
+| `probePoll` | Meta reads over 60 s: agreeing 13, mismatched 14, unbound 13, **study 13** (was 61) |
+| `probeSteal` (new) | See §5 |
+
+### 2. Rows (from `pypsa-gui/frontend`)
+
+| Row | Result |
+|---|---|
+| `npx tsc --noEmit -p .` | 0 errors |
+| `npx vitest run` | **241 files, 2686 passed**, exit 0 |
+| 4s: `for i in $(seq 10); do npx vitest run src/App src/components/ProjectMismatchBanner src/hooks/useProjectMismatchDetection src/store/uiStore.switchFence src/api/client src/layout/Sidebar src/components/ChatPanel src/utils/pendingEdgeDeletes src/utils/projectActions src/pages/hubDesign src/pages/results/FmeaTab; done` | **10 / 10 green**, 674 tests each (`regate/stress.summary`) |
+| `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs --phase P27b --out …/regate/smoke-P27b` | **PASS**, 54 screenshots. Banner after 6.4 s. (c) 8 / 4 / 6 = settled. No processes left running |
+
+The backend is still unchanged since `88aabcfe0`. I also ran `tests/test_project_locks.py`: 18 passed, including `test_second_user_cannot_acquire_lock`.
+
+### 3. Mutations
+`regate/mutate2.py` and `regate/mutations.log`, applied to the scratch copy.
+
+| # | Mutant | Result |
+|---|---|---|
+| R1 | Lock acquire/release not allowlisted | killed |
+| R2 | Heartbeat not allowlisted | killed |
+| R3 | Lock regex loosened to a prefix (longer paths let through) | killed |
+| R4 | Lock route allowed for any verb (e.g. PUT) | **survived**: harmless, the backend has no PUT/PATCH on `/lock`, so such a request 405s and moves nothing |
+| R5 | Reload does not re-acquire | killed |
+| R6 | Last-held project not recorded on acquire | killed |
+| R7 | Release does not clear last-held | killed |
+| R8 | Approve button not disabled | killed |
+| R9 | Approve gate removed (button and handler) | killed |
+| R10 | Poll: study tab back to 1 Hz | killed |
+| R11 | Poll: switch in flight back to fast | killed |
+| R12 | Poll: raised mismatch back to fast | killed |
+| R13 | Poll: confirm window removed | killed |
+| R14 | Fence back to a boolean | killed |
+| R15 | Fence clamp removed | killed |
+| R16 | `p.at !== seq` guard removed | killed |
+
+The Reload re-acquire has one more test layer. Its `lastHeldLockProject() === tab` condition is pinned by "Reload does not claim a lock the tab never held".
+
+### 4. Is adapter-level lock coverage enough without an auth-mode smoke?
+**Yes, for this gate.**
+
+What is covered:
+- The frontend half runs end to end below the network layer. `ProjectMismatchBanner.lock.test.tsx` and my probes use the real `client` interceptors, the real `switchToProject`, and the real acquire / heartbeat / release code; only the transport is mocked.
+- The backend half is covered by `test_project_locks.py`: foreign-holder refusal, expiry, the endpoint wire shapes, and logout release.
+- The allowlist regex matches the real route shapes: `routers/projects.py:2434` POST `/{project_id}/lock`, `:2455` heartbeat, `:2479` DELETE. That includes percent-encoded names, because `[^/]+` accepts them.
+
+What an auth-mode smoke would add:
+- Proof that two tabs of one session do share the active-project pointer, which is how the mismatch arises in hosted mode.
+- A cookie / CSRF round trip on the lock routes. Those routes existed before P27b and P27b does not change how they are called.
+
+Neither affects whether the P27b logic is correct. **Recommended follow-up (non-gating):** add an auth-mode harness mode to `smoke-guided.mjs` with two users and two tabs. It belongs with P28's C10 multi-tab work.
+
+### 5. Can Reload steal a lock another user holds? No
+- **Backend.** `project_locks.acquire_lock` (`services/project_locks.py:42-72`) returns `None` when a live lock belongs to another user. The route then raises 409 `project_locked` with the holder (`routers/projects.py:2445-2452`). There is no force parameter. An expired lock can be taken, which is the intended TTL semantics (`test_expired_lock_can_be_stolen`).
+- **Frontend probe** (`regate/fe/src/qa/probeSteal.test.tsx`, output `regate/steal.out`):
+  - Setup: the tab holds X's lock, becomes mismatched, and Bob takes the lock. The heartbeat's re-acquire gets 409, so the tab is read-only with Bob named.
+  - Action: click Reload.
+  - Requests: exactly `GET /projects/X` and **one** `POST /projects/X/lock`, which returns 409.
+  - Final state: `readOnly=true`, reason `locked-by-user`, holder `bob@x`. The mismatch is cleared and no Reload error is shown; the network did reload, for viewing only.
+  - Afterwards: no second attempt, no force, and three more heartbeat periods send no lock traffic.
+
+  The re-acquire fails cleanly and the tab stays read-only.
+
+### Other checks on the fix
+- **Fence counter call sites.** All six `setProjectSwitchInProgress(true)` sites pair with a `false` in a `finally`: CommandPalette `:543/572`, ProjectMismatchBanner `:58/71`, ProjectTabs `:172/204` and `:267/297`, Sidebar `:977/1054`, ScenariosPanel `:442/505`. Sidebar's early `return` for the unsaved-reload prompt sits inside the `try`. So the depth cannot stick above 0 and switch off detection. The clamp at 0 guards against an unmatched finish.
+- **Approve gate.** The button is disabled with the sentence (`chat-confirm-mismatch`), and the handler rechecks the store so a stale click cannot slip through. Deny stays live (tested), which is correct because a denial writes nothing.
+- **Poll rule.** The fast rate applies only inside the confirm window. It is off for a raised mismatch, a study tab and a switch in flight. The 1 s confirmation after a first disagreeing sample is kept: the smoke banner appeared after 6.4 s.
+- **`structuralSharing:false` removed.** Detection keys on `dataUpdateCount`, and R16 plus "a failed refetch between two samples" pin it.
+
+### Remaining notes (non-gating, carried)
+Notes 3 (baseline cadence of about 0.37 requests/s), 4 (the detection window of about 6 s), 5 (the tab shows the backend's data under its own name) and 7 (liveness of `useLiveStudyRunning`) stand as accepted limitations. The implementer's phase-note addendum records them. Add the auth-mode smoke harness as a follow-up (§4).

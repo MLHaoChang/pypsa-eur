@@ -362,3 +362,26 @@ Test-first in every phase: each item's red test is written and seen failing befo
 | Smoke `--phase P26` | PASS, 38 screenshots |
 
 No processes are left running. There is no backend change, so row 2 stands at 1598 passed.
+
+## P27b result: GO at re-gate on `1edf4209c`, 2026-09-29
+
+- **First gate: NO-GO, blocker B1 (auth mode).** The mismatch write block also refused the edit-lock routes, so Switch or a heartbeat left the tab read-only as "locked-by-user".
+- **Fixed:**
+  - The three lock routes are allowlisted.
+  - Reload re-acquires a lock the tab held.
+  - Chat Approve is gated while the tab is mismatched.
+  - Meta polls fast only inside the confirm window.
+  - The distinct-sample guard is pinned by a test.
+  - The switch fence is a counter.
+- **Evidence at the re-gate:**
+  - `tsc` clean, vitest 241 files / 2686 passed, stress ×10 green.
+  - Smokes P27b, P27a and P26 PASS.
+  - Mutations: 15 of 16 killed. The one survivor is harmless (it lets any verb on `/lock` through, and the backend answers 405).
+  - The reviewer's steal probe shows Reload cannot take a lock another user holds.
+  - The backend is unchanged since P27a (6660 passed).
+- **Recommended, not gating:** a two-user, two-tab auth harness alongside P28's multi-tab work (C10).
+- **Accepted limitations:**
+  - An edit can land during the ~6 s window before a mismatch is detected.
+  - A mismatched tab shows the backend's data under its own name.
+  - An external sweep reaches the Guided buttons only on their next fetch.
+- **Gate file:** `docs/superpowers/qa/2026-09-29-guided-mode-deferred-gate-P27b.md`.
