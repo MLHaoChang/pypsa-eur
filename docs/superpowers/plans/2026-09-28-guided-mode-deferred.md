@@ -309,3 +309,56 @@ Test-first in every phase: each item's red test is written and seen failing befo
 | 7 | `git diff 88aabcfe0 -- 'pypsa-gui/frontend/src/**' \| grep -c uiMode` | 3: two test-store setups and one unchanged context line (`DelegateButton`'s `const mode`); no new `uiMode` branch; `*.expertUnchanged.*` snapshots green in row 4 |
 
 **For the gate (spec §2.2 fallback).** One run of one-shot reads after the extra tick matched the settled counts on all three templates; the settle loop stays until ten runs in a row agree, so the backend `finalising` value is not needed on this evidence. The (b) `fmea_modes` check: project 1 had 4 rows, project 2 (fresh H2 hub) has none of them (0 rows, no class B/C).
+
+**Gate NO-GO fixes** (`docs/superpowers/qa/2026-09-29-guided-mode-deferred-gate-P27b.md`):
+
+- **B1, the edit lock in auth mode.**
+  - `mismatchAllows` lets `POST|DELETE /projects/<x>/lock` and `POST /projects/<x>/lock/heartbeat` through. They move lease metadata, not the live network. Longer lock-like paths stay refused.
+  - Reload re-acquires the lock the tab last held. `projectActions.lastHeldLockProject()` records it: it is set on acquire, survives a lost heartbeat, and is cleared on release.
+  - The gate's `probeLock` / `probeHeartbeat` are adopted as `components/ProjectMismatchBanner.lock.test.tsx`. Its cases are: Switch lands writable, the heartbeat keeps the lock across a mismatch and Reload, Reload re-acquires a lost lock, and Reload claims no lock the tab never held. They were red before the fix.
+  - `client.mismatch.test.ts` gains the three lock routes and a refused longer path.
+- **Note 6, fixed.** A confirmation card's Approve is disabled while mismatched, with the banner sentence on the card (`chat-confirm-mismatch`) and as its title; `onApprove` also returns early. Deny stays available.
+- **Note 1, fixed.** The 1 s interval applies only to a disagreeing sample that can still raise the mismatch. A raised mismatch, a study tab and a switch in flight poll at the idle 5 s. Pinned counts (`hooks/useProjectMismatchDetection.test.tsx`, fake timers, real defaults):
+
+  | Tab state | Reads | Before the fix |
+  |---|---|---|
+  | Agreeing, 60 s | 13 | 13 |
+  | Mismatched, 60 s | 14 (0, 1, 2 and then every 5 s) | 14 |
+  | Study tab, 59 s | 12 | 61 in 60 s |
+  | Switch stuck in flight, 59 s | 12 | 61 in 60 s |
+
+- **Note 2, fixed.**
+  - The distinct-sample guard (`p.at !== seq`) is pinned by a failed refetch between two samples: the effect re-runs on the same sample and must not treat it as the second.
+  - `structuralSharing: false` is **dropped**. The effect keys on `dataUpdateCount`, and the option only re-rendered every meta observer. `App.recovery` and the hook test pass ×10 without it.
+- **Note 8, fixed.** `projectSwitchInProgress` mirrors a depth counter (`projectSwitchDepth`, never below 0), so overlapping switches keep the fence until the last one finishes (`store/uiStore.switchFence.test.ts`).
+- **Mutants for these fixes: 11 of 11 killed** (`scratchpad/p27b/mutate2.py`, log `mutations-regate.log`):
+  - N1: the lock routes are not allowlisted.
+  - N2: the heartbeat is not allowlisted.
+  - N3: Reload does not re-acquire the lock.
+  - N4: Reload re-acquires unconditionally.
+  - N5: Approve is not gated.
+  - N6: a study tab keeps the fast poll.
+  - N7: a switch in flight keeps the fast poll.
+  - N7b: a raised mismatch keeps the fast poll.
+  - N8: the sample guard is dropped.
+  - N9: the fence is back to a boolean.
+  - N10: there is no confirm re-check.
+- **Auth-mode smoke: not added.** The harness starts uvicorn in local mode (`PYPSAGUI_LOCAL_MODE=1`), where there is no user, no login and no edit lock. An auth-mode step would need a hosted backend configuration, a database with a seeded user and a scripted login in each context: a new harness mode, not a step. The lock path is covered at the axios/adapter level by `ProjectMismatchBanner.lock.test.tsx`, with the real client, the real `switchToProject` and the real lock code.
+
+**Accepted limitations (gate notes 4, 5, 7).**
+- **The ~6 s detection window.** Until two samples agree on the disagreement (5 s idle + 1 s confirm; the smokes measured 5.5–6.3 s), edits from the stale tab still land in the backend's project. Saves are caught by the backend identity guard.
+- **A mismatched tab shows the backend's data under its own project name.** Reads are never blocked. The banner says the tab is paused.
+- **Guided buttons learn about an external sweep on the next `fmea_modes` fetch.** An example is a sweep started by the assistant; the fetch happens on mount or focus. Until then the buttons stay enabled, and P27a's 409 refuses the edit.
+
+**Re-gate evidence** (`pypsa-gui/frontend`):
+
+| Check | Result |
+|---|---|
+| `npx tsc --noEmit -p .` | 0 errors |
+| `npx vitest run` | 241 files, 2686 passed |
+| Stress ×10 (`src/App src/pages/hubDesign src/pages/results/FmeaTab src/hooks/useStudyFinishedInvalidation src/hooks/useProjectMismatchDetection src/api/client src/layout/Sidebar src/components/ChatPanel src/components/ProjectMismatchBanner src/utils/pendingEdgeDeletes src/utils/projectActions src/layout/PropertiesPanel.save src/store/uiStore`) | 10 of 10 green, 59 files, 736 tests each |
+| Smoke `--phase P27b` | PASS, 54 screenshots; banner after 6.0 s; (c) 8 / 4 / 6 = settled |
+| Smoke `--phase P27a` | PASS, 14 screenshots; the toast carries "is running" |
+| Smoke `--phase P26` | PASS, 38 screenshots |
+
+No processes are left running. There is no backend change, so row 2 stands at 1598 passed.
