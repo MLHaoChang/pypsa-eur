@@ -154,9 +154,45 @@ would have mutated the main checkout.
 (TOC refresh prompt on the untagged one), and the `docx-preview` pane in the
 desktop shell.
 
+## §5 — Round trip (WP12, WP13, WP14), 2026-09-29
+
+**Merged:** WP14 `f03e772` (upload an edited copy, merge result panel,
+version diff view, PDF button), WP12 `f96b050` (round-trip reader and
+merge; additive `Section.pending_instruction`, `Section.comments`,
+`ReportMeta.roundtrip_file_id`), WP13 `b86d558` (round-trip route, version
+diff, capabilities, opportunistic PDF, four chat tools,
+`qa_reports_phase5.py`), store fix `6810a1b`. **Phase 5 gate: GREEN.**
+
+| Tier | Command | Result |
+|---|---|---|
+| Unit | `test_report_roundtrip.py` 20, `test_report_roundtrip_routes.py` 20, `test_report_pdf.py` 7, `test_chat_report_roundtrip_tools.py` 13, `test_report_store.py` +1, `test_report_model.py` +1, plus every other `test_report_*`, `test_chat_report_*`, `test_chat_uploads.py`, parity/manifest/packaging | 453 passed (one run on the merged tree; WP13's conditional xfail ran as a real passing test once WP12 was present) |
+| Regression | chunk 1 (`tests/test_chat_*.py` + manifest + packaging) | _(run in progress at commit time; filled in the next commit)_ |
+| Regression | chunk 2a (`tests/test_upload*.py tests/test_desktop*.py tests/test_project*.py`) | _(run in progress at commit time; filled in the next commit)_ |
+| Regression | chunk 2b (`tests/test_energy_hub_*.py` / `tests/test_adequacy_*.py`) | _(run in progress at commit time; filled in the next commit)_ |
+| Regression | remainder (four groups) | unchanged since §1: phase 5 touches no file those groups import; re-run owed before merge to `master` |
+| Regression | frontend `npx vitest run` + `npx tsc -b` | 190 files, 2140 tests passed; tsc clean |
+| Integration | `test_report_roundtrip_routes.py` (roundtrip POST every status, diff on stored versions, capabilities via `shutil.which`, export pdf 501/200/500 with `subprocess.run` faked, regenerate uses and clears `pending_instruction`, upload kind) | 20 passed (counted above) |
+| End-to-end QA | `tests/qa_reports_phase5.py` (real study → generate on the fake provider → export → edit with python-docx: a rewritten `fmea_top` paragraph, a comment "shorten this" on a `certification` run, a tracked deletion+insertion in `target` → upload as `report_roundtrip` → merge: `fmea_top` is `user_edit` with the edited text, `certification.pending_instruction == "shorten this"`, `accepted_tracked_changes == 2` → diff marks `fmea_top` changed, the rest unchanged → regenerate `certification` with no instruction: the provider saw "shorten this", the new version's `pending_instruction` is null → capabilities `pdf: true` (soffice on PATH) → export pdf → 500 `pdf_conversion_failed` here because LibreOffice in the container writes no PDF → chat `list_report_roundtrips`, `diff_report_versions`) | 37/37 PASS, 0 skipped |
+| End-to-end QA | drivers 0–4 re-run on this tree | _(run in progress at commit time; filled in the next commit)_ |
+
+**Recorded corrections.** The three phase-5 packages were built in parallel
+against pinned interfaces; the only seam neither side owned was the store's
+carried-meta list, so `roundtrip_file_id` would have been dropped by the
+regenerate that follows a round trip — fixed in `6810a1b` with a test. WP12
+found that the writer's link run carries `w:u val="single"`, so underline is
+"on unless none", not a toggle. LibreOffice in the container exits 0 and
+writes no PDF (its "source file could not be loaded" goes to stdout), so
+the PDF service reports the stdout line first. A background command that
+starts with `cd` can lose its working directory in this harness; the gate
+commands now use absolute paths.
+
+**Owed from a workstation.** A real LibreOffice PDF export; opening a
+round-tripped document in Word; the desktop drop-zone for the edited copy.
+
 ## Increment 1 — status
 
-Phases 0–4 delivered on `claude/fmea-llm-reporting-feasibility-jtm6w1`
-(increments 1 and 2). Not done: increment 3 (the edited-document round trip,
-phase 5) and the workstation checks above. `export_eh_report_docx` (WP0) remains alongside
+Phases 0–5 delivered on `claude/fmea-llm-reporting-feasibility-jtm6w1`
+(increments 1, 2 and 3). Not done: the workstation checks listed per phase,
+the live LLM probe (no key or local model in the container), and the
+"remainder" regression groups' re-run before a merge to `master`. `export_eh_report_docx` (WP0) remains alongside
 `export_report_docx`; keep as the no-LLM shortcut or remove in review.
