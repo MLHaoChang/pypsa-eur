@@ -51,6 +51,10 @@
       "surface": "banner",
       "why": "The profile cannot do what the turn needs (vision, tools). A configuration problem only the user can fix, and the turn is over. It already had KIND_COPY and did not route — the same unreachable-copy shape as inactive_acting_user."
     },
+    "commercial_binding_invalid": {
+      "surface": "inline",
+      "why": "The commercial config cannot bind to this network (a missing Link, an unrated snapshot, ...). The model reads the message and fixes the config within the turn."
+    },
     "confirmation_denied": {
       "surface": "inline",
       "why": "The user denied the card. Their own decision, already visible on the card."
@@ -91,9 +95,17 @@
       "surface": "banner",
       "why": "Attachment rejected against the 10 MB multimodal cap."
     },
+    "import_tariff_ref_conflict": {
+      "surface": "inline",
+      "why": "The project's inline tariff differs from the Library item its ref names. The model explains and asks which to keep; a binding code surfaced by attach_tariff."
+    },
     "inactive_acting_user": {
       "surface": "banner",
       "why": "The account stopped being active mid-turn. Nothing will work until it is fixed, and a gray tool line truncates that away — this is the correction the whole manifest generalises."
+    },
+    "inline_tariff_would_be_replaced": {
+      "surface": "inline",
+      "why": "attach_tariff refused to replace a project's inline import tariff with a different Library tariff. The model asks the user and calls again with replace_inline=true — a question it is already asking in prose."
     },
     "internal_error": {
       "surface": "inline",
@@ -123,6 +135,10 @@
       "surface": "inline",
       "why": "Raised by POST /chat/import validating a pasted transcript. Route-only — no tool imports transcripts."
     },
+    "library_ref_stale": {
+      "surface": "inline",
+      "why": "A Library reference no longer matches its item (edited or removed). The model re-reads the Library and retries or asks; a route code surfaced by attach_tariff."
+    },
     "load_not_found": {
       "surface": "banner",
       "why": "The named load is not in the network. The user gave a name that does not exist."
@@ -138,6 +154,10 @@
     "no_active_project": {
       "surface": "inline",
       "why": "Most tools need a project; the model recovers by asking which one, in prose, inside the same turn. Promoting it would banner a question the assistant is already asking."
+    },
+    "no_commercial_config": {
+      "surface": "inline",
+      "why": "attach_tariff needs a commercial config with a poc_link first. The model sets it (update_solver_config) and retries within the turn."
     },
     "not_authorized": {
       "surface": "banner",
@@ -223,6 +243,10 @@
       "surface": "inline",
       "why": "A confirm arrived for a token this session does not know — a stale tab or a double-submit, not a user-actionable state."
     },
+    "unknown_library_kind": {
+      "surface": "inline",
+      "why": "A Library tool got a kind other than tariff / contract / connection_agreement. The model corrects the argument and retries, like invalid_tool_args."
+    },
     "unknown_profile_id": {
       "surface": "banner",
       "why": "The selected profile no longer exists — fires for every open chat the moment a super-admin deletes one, and C-4 made it reachable."
@@ -250,6 +274,22 @@
     "upload_quota_exceeded": {
       "surface": "banner",
       "why": "The per-project upload quota is full. The user must delete something."
+    },
+    "urdb_invalid": {
+      "surface": "inline",
+      "why": "The URDB import arguments did not validate (e.g. valid_from not a date). The model corrects and retries."
+    },
+    "urdb_multiple_rates": {
+      "surface": "inline",
+      "why": "The uploaded OpenEI response holds several rates; the error lists them and the model retries with item_index, asking the user which one if unclear."
+    },
+    "urdb_refused": {
+      "surface": "inline",
+      "why": "A URDB import refused fields by name (the route's 422). The model lists them and asks whether to import partially (accept_partial) — a question in prose, within the turn."
+    },
+    "urdb_upload_unreadable": {
+      "surface": "inline",
+      "why": "The uploaded file is not a URDB rate the importer can read (not JSON, no rates, a REopt scenario with only a label). The model says so in prose and asks for another file."
     },
     "validation_error": {
       "surface": "inline",

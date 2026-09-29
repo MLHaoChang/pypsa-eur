@@ -94,7 +94,7 @@ RESULTS_ENUM = [
     "losses", "carrier_kpis", "emissions", "transformers", "unit_commitment",
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
-    "asset_economics",
+    "asset_economics", "billing", "cfe_score",
 ]
 RESULTS_SOURCE_ENUM = ["lopf", "ac_pf"]
 # Task 14 — per-asset results chat tools (get_asset_results /
@@ -351,6 +351,13 @@ TOOLS: list[dict[str, Any]] = [
         "forwarded where the underlying handler accepts it. "
         "Returns (dispatch kinds): {index:[iso], columns:[name], data:[[float]]}; "
         "(cost_breakdown): {total, capex, opex, by_component, by_carrier, by_period}. "
+        "(billing): {per_period: {'_'|period: {per_item, per_item_sampled, total, "
+        "flags, monthly, demand_lines, fixed_lines}}, flags, contracts: {lines: "
+        "[{period, contract_id, payer, payee, value_stream, quantity_mwh, amount, "
+        "flags}], flags}, gap: {periods, gates, ...}, provenance}; "
+        "(cfe_score): {per_period: {'_'|period: {score, load_mwh, clean_mwh, "
+        "matched_mwh, ...}}, flags, notes}. A null amount or total is unknown, "
+        "never zero. "
         "Returns {status:'no_data', kind, message} when the underlying endpoint "
         "has nothing to serve — an unsolved or stale network, or a solve that "
         "produced none of this kind (lost_load on a run that shed nothing). "
@@ -1985,44 +1992,59 @@ TOOLS: list[dict[str, Any]] = [
         "list_library_items",
         "List the latest version of every Library item of one kind in the "
         "user's organization: tariffs, contract templates or connection "
-        "agreements. Returns [{kind, id, version, hash}]; `id` is the item's "
-        "name. Safety: read.",
-        {"kind": {"type": "string", "enum": ["tariff", "contract", "connection_agreement"]}},
+        "agreements. Paged: {items: [{kind, id, version, hash}], total_count, "
+        "offset, returned, has_more}; `id` is the item's name. Safety: read.",
+        {
+            "kind": {"type": "string", "enum": ["tariff", "contract", "connection_agreement"]},
+            "offset": {"type": "integer"},
+            "limit": {"type": "integer"},
+        },
         ["kind"],
     ),
     _t(
         "get_library_item",
-        "Read one Library item: {ref: {kind, id, version, hash}, payload, meta}. "
-        "The payload is the tariff, contract template or connection agreement "
-        "itself; meta says where it came from (source, provider, notes such as "
-        "an importer's assumptions). `version` defaults to the latest. "
-        "Safety: read.",
+        "Read one Library item: {ref: {kind, id, version, hash}, meta, ...}. meta "
+        "says where it came from (source, provider, notes such as an importer's "
+        "assumptions). For a tariff the default is a SUMMARY (per item: kind, "
+        "unit, periods, windows, tiers, ratchet, rate range); detail='full' "
+        "returns the whole payload, item_id one item in full. Contract templates "
+        "and connection agreements always return the payload. `version` defaults "
+        "to the latest. Safety: read.",
         {
             "kind": {"type": "string", "enum": ["tariff", "contract", "connection_agreement"]},
             "name": {"type": "string"},
             "version": {"type": "integer"},
+            "detail": {"type": "string", "enum": ["summary", "full"]},
+            "item_id": {"type": "string"},
         },
         ["kind", "name"],
     ),
     _t(
         "import_urdb_tariff",
         "Import a URDB (OpenEI Utility Rate Database) rate the user UPLOADED "
-        "as a JSON file into the Library as tariff `name`. `file_id` is the "
-        "upload's id (list_uploads); never paste rate JSON into the call. "
-        "Accepts one rate object, an OpenEI response {items: [...]} (the first "
-        "item) or a REopt scenario (ElectricTariff.urdb_response). Fields the "
-        "importer cannot map are refused by name (422 with refusals) unless "
+        "as a JSON file into the Library as tariff `name` (an existing name "
+        "gets a new version). `file_id` is the upload's id (list_uploads); "
+        "never paste rate JSON into the call. Accepts one rate object, an "
+        "OpenEI response {items: [...]} (several rates: refused with a list "
+        "unless item_index picks one) or a REopt scenario "
+        "(ElectricTariff.urdb_response). Fields the importer cannot map are "
+        "refused by name (urdb_refused, with refusals) unless "
         "accept_partial=true, which stores them in the tariff's "
         "unsupported_fields and bills it as incomplete. cyclic_year makes a "
         "range-mode ratchet wrap within the rate year. valid_from (YYYY-MM-DD) "
-        "is required when the rate has no startdate. Returns {ref, notes, "
-        "refusals, unsupported_fields}. Safety: write.",
+        "is required when the rate has no startdate; tariff_id and "
+        "jurisdiction (default US) set the tariff's own id and country. "
+        "Returns {ref, notes, refusals, refusals_total, unsupported_fields}. "
+        "Safety: write.",
         {
             "file_id": {"type": "string"},
             "name": {"type": "string"},
             "cyclic_year": {"type": "boolean"},
             "accept_partial": {"type": "boolean"},
             "valid_from": {"type": "string"},
+            "item_index": {"type": "integer"},
+            "tariff_id": {"type": "string"},
+            "jurisdiction": {"type": "string"},
         },
         ["file_id", "name"],
     ),
@@ -2031,9 +2053,14 @@ TOOLS: list[dict[str, Any]] = [
         "Make Library tariff `name` (latest, or `version`) the project's import "
         "tariff: sets commercial.import_tariff_ref through the solver-config "
         "route, which resolves it into the inline tariff the solve uses and "
-        "pins it. Needs a commercial config with poc_link already set. Returns "
-        "{import_tariff_ref, commercial}. Safety: write.",
-        {"name": {"type": "string"}, "version": {"type": "integer"}},
+        "pins it. This REPLACES the current import tariff: when the project "
+        "has an inline tariff that is not this item, the call is refused "
+        "(inline_tariff_would_be_replaced) until the user confirms and you "
+        "pass replace_inline=true. Needs a commercial config with poc_link "
+        "already set. Returns {import_tariff_ref, import_tariff: {id, name, "
+        "items}, replaced}. Safety: write.",
+        {"name": {"type": "string"}, "version": {"type": "integer"},
+         "replace_inline": {"type": "boolean"}},
         ["name"],
     ),
 ]

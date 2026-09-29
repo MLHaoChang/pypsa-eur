@@ -45,6 +45,14 @@ def unbound_identity():
         pytest.param(
             lambda: chat_tools.activate_project("anything"), id="activate_project"
         ),
+        # Library tools (P2 WP2.4c review M5).
+        pytest.param(lambda: chat_tools.list_library_items("tariff"),
+                     id="list_library_items"),
+        pytest.param(lambda: chat_tools.get_library_item("tariff", "x"),
+                     id="get_library_item"),
+        pytest.param(lambda: chat_tools.attach_tariff("x"), id="attach_tariff"),
+        pytest.param(lambda: chat_tools.import_urdb_tariff("f", "x"),
+                     id="import_urdb_tariff"),
     ],
 )
 def test_project_tools_refuse_without_an_acting_user(unbound_identity, call):

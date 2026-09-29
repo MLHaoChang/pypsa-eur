@@ -1661,6 +1661,43 @@ def get_asset_economics():
     return _not_solved() if payload is None else payload
 
 
+@results_router.get("/billing")
+def get_billing():
+    """The site bill, contract settlement and billing-vs-LP gap of the last
+    solve (Edge Investment Case P2 WP2.5, `services/results/billing.py`).
+    Stores the compact billing frames in the solver state. 204 before a solve
+    or without a commercial config."""
+    from services.results.billing import compute_billing
+
+    n = PyPSAService.get_network()
+    if _solver_in_flight():
+        # The network carries the LP transforms mid-solve (review F9).
+        raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                                  "message": "a solve is running; read the bill after it ends"})
+    if not _dispatch_ready(n):
+        return Response(status_code=204)
+    payload = compute_billing(n, _state["solver_config"], state=_state, result_df=_result_df)
+    return Response(status_code=204) if payload is None else payload
+
+
+@results_router.get("/cfe_score")
+def get_cfe_score():
+    """Hourly 24/7 carbon-free matching of the site (P2 WP2.5,
+    `services/results/cfe_score.py`). 204 before a solve or without a
+    commercial config."""
+    from services.results.cfe_score import compute_cfe_score
+
+    n = PyPSAService.get_network()
+    if _solver_in_flight():
+        # The network carries the LP transforms mid-solve (review F9).
+        raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                                  "message": "a solve is running; read the score after it ends"})
+    if not _dispatch_ready(n):
+        return Response(status_code=204)
+    payload = compute_cfe_score(n, _state["solver_config"], result_df=_result_df)
+    return Response(status_code=204) if payload is None else payload
+
+
 @results_router.get("/eh_dtc_planning")
 def get_eh_dtc_planning():
     """Last DtC planning table (Phase 4b). 204 if none."""

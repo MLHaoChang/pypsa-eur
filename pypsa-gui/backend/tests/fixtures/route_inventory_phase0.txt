@@ -206,7 +206,9 @@ GET     /api/results/asset/assets                                -> list_asset_r
 GET     /api/results/asset/{component_class}/{name}              -> get_asset_results
 GET     /api/results/asset/{component_class}/{name}/export.xlsx  -> export_asset_results_xlsx
 GET     /api/results/asset_economics                             -> get_asset_economics_api_results_asset_economics_get
+GET     /api/results/billing                                     -> get_billing_api_results_billing_get
 GET     /api/results/carrier_kpis                                -> get_carrier_kpis_api_results_carrier_kpis_get
+GET     /api/results/cfe_score                                   -> get_cfe_score_api_results_cfe_score_get
 GET     /api/results/copt                                        -> get_copt_api_results_copt_get
 GET     /api/results/cost_breakdown                              -> get_cost_breakdown_api_results_cost_breakdown_get
 GET     /api/results/coupling_loop                               -> get_coupling_loop_api_results_coupling_loop_get
