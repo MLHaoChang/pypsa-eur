@@ -315,3 +315,32 @@ def test_the_export_split_by_hand_with_two_site_generators(reset_backend):
                       and ln.payee == "developer")
     assert got_price == pytest.approx(hand_price, abs=0.005)
     assert got_feed_in == pytest.approx(hand_feed_in, abs=0.005)
+
+
+@pytest.mark.live_solve
+def test_two_generators_of_one_owner_share_the_export_and_close(reset_backend):
+    """R1 live: pv and pv2 both owned by the developer."""
+    n = _network()
+    prof = 0.5 + 0.5 * np.cos(np.arange(len(n.snapshots)) / 96 * 2 * np.pi)
+    n.add("Generator", "pv2", bus="site", carrier="solar", p_nom=15.0,
+          p_max_pu=pd.Series(np.clip(prof, 0, 1), index=n.snapshots), marginal_cost=0.0)
+    vf = {**copy.deepcopy(VF), "export_revenue_to": "asset_owner",
+          "participants": [{"id": "site", "name": "Site", "role": "offtaker"},
+                           {"id": "developer", "name": "Dev", "role": "developer"}],
+          "asset_owners": [{"asset_id": g, "component": "Generator", "owner": "developer"}
+                           for g in ("pv", "pv2")]}
+    n, cfg = _solve(n, _commercial(vf))
+    inputs, _vf, ledger, res = _ledger(n, cfg)
+    assert res.periods["_"].ok is True, _checks(res, "_")
+
+
+@pytest.mark.live_solve
+def test_a_representative_week_keeps_its_ledger(reset_backend):
+    """R2 live: one week standing for a year (the solver's own advice) leaves
+    most months out of the dispatch; that is a disclosure, not unknown money."""
+    n = _network()
+    n.snapshot_weightings.loc[:, :] = 8760.0 / len(n.snapshots)
+    n, cfg = _solve(n, _commercial())
+    inputs, vf, ledger, res = _ledger(n, cfg)
+    assert res.periods["_"].ok is True, _checks(res, "_")
+    assert "demand_months_not_established" in ledger.flags

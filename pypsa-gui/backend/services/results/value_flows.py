@@ -89,6 +89,40 @@ def _per_asset(frame_or_series, periods) -> dict[tuple[str, str], dict[str, floa
     return out
 
 
+# Electric bus carriers (PyPSA and PyPSA-Eur conventions): a generator on one of
+# these is never a fuel supply, whatever the PoC bus's own carrier.
+_ELECTRIC = frozenset({"ac", "dc", "low voltage", "lv", "mv", "hv", "electricity", ""})
+
+
+def is_fuel_supply(n, parsed, generator: str) -> bool:
+    """A site-side Generator whose output is a FUEL bought for conversion (gas
+    behind a CHP Link), not electricity (WP3.1 review round 2 #3): its bus
+    carries a non-electric carrier different from the PoC's site bus, no Load,
+    and feeds the rest of the site only as the INPUT (bus0) of Links — no Line,
+    no Transformer, no Link delivering into it."""
+    if generator not in n.generators.index:
+        return False
+    bus = str(n.generators.at[generator, "bus"])
+    carriers = n.buses["carrier"] if "carrier" in n.buses.columns else None
+    carrier = str(carriers.get(bus, "")) if carriers is not None else ""
+    poc_bus = str(n.links.at[parsed.poc_link, "bus1"]) if parsed.poc_link in n.links.index \
+        else None
+    site_carrier = str(carriers.get(poc_bus, "")) if (carriers is not None and poc_bus) else ""
+    if carrier.strip().casefold() in _ELECTRIC or carrier == site_carrier:
+        return False
+    if not n.loads.empty and (n.loads["bus"].astype(str) == bus).any():
+        return False
+    for comp in ("lines", "transformers"):
+        df = getattr(n, comp)
+        if not df.empty and ((df["bus0"].astype(str) == bus) | (df["bus1"].astype(str) == bus)).any():
+            return False
+    links = n.links
+    outs = [c for c in ("bus1", "bus2", "bus3", "bus4") if c in links.columns]
+    if any((links[c].astype(str) == bus).any() for c in outs):
+        return False
+    return bool((links["bus0"].astype(str) == bus).any()) if not links.empty else False
+
+
 def _asset_costs(n, cfg, parsed, sides) -> list[P.AssetCost]:
     from services.solver_service import with_periodized_cost_defaults
 
@@ -98,20 +132,11 @@ def _asset_costs(n, cfg, parsed, sides) -> list[P.AssetCost]:
         fom = _per_asset(n.statistics.fom(groupby=False), periods)
         opex = _per_asset(n.statistics.opex(groupby=False), periods)
     out = []
-    # The meter's site-bus carrier: a site-side Generator on a bus of another
-    # carrier (gas behind a CHP Link) is a fuel supply, its opex a purchase.
-    poc_bus = str(n.links.at[parsed.poc_link, "bus1"]) if parsed.poc_link in n.links.index \
-        else None
-    carrier = (lambda b: str(n.buses.at[b, "carrier"]) if b in n.buses.index and
-               "carrier" in n.buses.columns else "")
-    site_carrier = carrier(poc_bus) if poc_bus else ""
     for key in sorted(set(capex) | set(fom) | set(opex)):
         comp, name = key
         side, flags = P.asset_side(n, comp, name, sides)
-        if comp == "Generator" and side == "site" and name in n.generators.index:
-            bus_carrier = carrier(str(n.generators.at[name, "bus"]))
-            if bus_carrier and site_carrier and bus_carrier != site_carrier:
-                flags = [*flags, "fuel_supply_generator"]
+        if comp == "Generator" and side == "site" and is_fuel_supply(n, parsed, name):
+            flags = [*flags, "fuel_supply_generator"]
         out.append(P.AssetCost(component=comp, name=name, side=side, flags=flags,
                                capex=capex.get(key, {}), fom=fom.get(key, {}),
                                opex=opex.get(key, {})))

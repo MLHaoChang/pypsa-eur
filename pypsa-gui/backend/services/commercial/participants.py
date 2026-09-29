@@ -230,10 +230,19 @@ _KIND_STREAMS = {"demand": "demand_charge", "capacity": "network_capacity",
                  "fixed": "retail_fixed", "certificate": "certificates", "tax_levy": "tax"}
 _DEFAULT_PAYEE = {"energy": "retailer", "fixed": "retailer", "certificate": "retailer",
                   "demand": "dso", "capacity": "dso", "tax_levy": "tax_authority"}
-# Input flags that make the money of a period unknown (substring match).
-_BLOCKING = ("config_changed_since_solve", "config_cleared_since_solve", "recipe_changed",
-             "tariff_incomplete", "period_not_billed", "_not_established",
-             "contract_not_settled", "not_solved")
+# Input flags that make the money of a period unknown: exact names and prefixes
+# (WP3.1 review round 2 #2). Everything else is a disclosure — e.g.
+# `demand_months_not_established` (months absent from a representative-week
+# dispatch: `per_item_sampled` leaves them out on both sides),
+# `group_energy_share_not_established` (a report field), `*_recipe_changed`
+# (the dispatch and the bill are still known).
+_BLOCKING_EXACT = frozenset({
+    "config_changed_since_solve", "config_cleared_since_solve", "not_solved",
+    "demand_charge_not_established", "energy_tiers_not_established",
+    "network_capacity_not_established", "ppa_settlement_not_established",
+    "tariff_capacity_not_established"})
+_BLOCKING_PREFIXES = ("tariff_incomplete", "period_not_billed:", "contract_not_settled:",
+                      "export_split_not_established:")
 
 
 @dataclass
@@ -375,7 +384,23 @@ def _item_stream(it: BillItem, payee: str) -> str:
 
 
 def _blocking(flags) -> list[str]:
-    return sorted({f for f in flags if any(b in f for b in _BLOCKING)})
+    return sorted({f for f in flags
+                   if f in _BLOCKING_EXACT or f.startswith(_BLOCKING_PREFIXES)})
+
+
+def _merge_legs(legs):
+    """Legs with the same (debtor, creditor) — same_party — summed into one:
+    two split shares resolving to the same owner must not collide in coverage
+    (WP3.1 review round 2 #1). A None in a group makes the group None."""
+    out: list[list] = []
+    for d, c, v in legs:
+        for row in out:
+            if same_party(row[0], d) and same_party(row[1], c):
+                row[2] = None if (row[2] is None or v is None) else row[2] + v
+                break
+        else:
+            out.append([d, c, v])
+    return [tuple(r) for r in out]
 
 
 def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]:
@@ -399,8 +424,8 @@ def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]
                       meta={"tariff_item": item_id, "tariff_item_kind": it.kind})
         parts = split.get(item_id) if _finite(v) else None
         if parts:
-            src.legs = [(owner_of(k), payee, a) for k, a in
-                        sorted(parts.items(), key=lambda kv: str(kv[0]))]
+            src.legs = _merge_legs([(owner_of(k), payee, a) for k, a in
+                                    sorted(parts.items(), key=lambda kv: str(kv[0]))])
         else:
             src.legs = [(site, payee, v if _finite(v) else None)]
             if not _finite(v):
@@ -424,8 +449,8 @@ def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]
         src = _Source("export_price", "export_price", "energy_export", legs=[])
         parts = split.get("export_price") if _finite(v) else None
         if parts:
-            src.legs = [("market", owner_of(k), a) for k, a in
-                        sorted(parts.items(), key=lambda kv: str(kv[0]))]
+            src.legs = _merge_legs([("market", owner_of(k), a) for k, a in
+                                    sorted(parts.items(), key=lambda kv: str(kv[0]))])
         else:
             src.legs = [("market", site, v if _finite(v) else None)]
             if not _finite(v):

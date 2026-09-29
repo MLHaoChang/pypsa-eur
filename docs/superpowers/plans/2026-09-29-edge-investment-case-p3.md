@@ -284,6 +284,12 @@ internal DSO (V4) closes; the DSR / VoLL disclosures when they dispatch.
   - **#9:** skipped export-split sources are flagged; bill items split at any sign; `asset_under_external_ppa` notes.
   - **#10:** imports moved to the top, and the `build_ledger` docstring written. The plan's `site_party` argument is `inputs.site_party`.
   - **#11:** V1b is multi-period too; live DSR/VoLL (VoLL equals the lost-load capture's cost); live unsettled and dead-retail contracts, drift, partial import; the export split by hand with two site generators whose shares vary; the phantom-party cases split (a stale party in a source → None, a line contradicting its source → coverage fails).
+- **Review round 2 → PASS WITH CONDITIONS, fixed:**
+  - **R1 (regression):** split legs resolving to the same (payer, payee) collided in coverage (two generators of one owner; a site generator beside the no-generation share). Legs are now merged by (debtor, creditor), compared with `same_party`, before emitting. Unit and live same-owner tests.
+  - **R2:** the blocking list is explicit (exact names plus prefixes). `demand_months_not_established`, `group_energy_share_not_established` and `*_recipe_changed` are disclosures. A representative-week run keeps its ledger (live test).
+  - **R3:** `is_fuel_supply` requires a non-electric bus carrier (AC, DC, low voltage, … never qualify), no Load, and a bus that feeds the site only as Link input. Tests: PV on LV and DC buses, gas behind a CHP, a heat bus fed by a Link.
+  - **R4 (LOW, accepted):** with a bypass, both searches reach the whole connected network, so every asset carries `meter_bypass`. Placement is right and preflight warns; noise only.
+  - **R5:** check 2 stays a documented identity.
 ---
 
 ## WP3.2 Templates

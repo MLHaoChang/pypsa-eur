@@ -388,7 +388,7 @@ def test_a_recased_party_is_the_same_party():
 @pytest.mark.parametrize("flag", [
     "config_changed_since_solve", "tariff_incomplete:demandratchet",
     "contract_not_settled:ppa2:no asset", "network_capacity_not_established",
-    "lp_recipe_changed", "period_not_billed:_"])
+    "period_not_billed:_"])
 def test_an_input_that_makes_money_unknown_makes_the_result_none(flag):
     """#2: drift, a partial import, an unsettled contract or an unestablished
     cost term is never a confident True."""
@@ -458,3 +458,42 @@ def test_unknown_disclosures_and_the_curtailment_penalty_are_flagged():
 def test_bill_flags_reach_the_ledger():
     led = P.build_ledger(_inputs(bill_flags={"_": ["demand:demand_on_partial_month"]}), VF)
     assert "bill:_:demand:demand_on_partial_month" in led.flags
+
+
+# ── WP3.1 review round 2 ───────────────────────────────────────────────────
+
+
+def test_split_shares_resolving_to_the_same_owner_do_not_collide():
+    """R1: two generators of one owner, and a site-owned generator beside the
+    no-generation share (also the site's), reconcile."""
+    raw = VF.model_dump(mode="json")
+    vf = ValueFlowConfig.model_validate({
+        **raw, "export_revenue_to": "asset_owner",
+        "asset_owners": [*raw["asset_owners"],
+                         {"asset_id": "chp", "component": "Generator", "owner": "developer"}]})
+    split = {"_": {"export_price": {("Generator", "pv"): 5.0, ("Generator", "chp"): 2.0,
+                                    None: 1.0},
+                   "export": {("Generator", "pv"): -12.0, ("Generator", "chp"): -6.0,
+                              None: -2.0}}}
+    inputs = _inputs(export_split=split)
+    led = P.build_ledger(inputs, vf)
+    price = {(ln.payee, ln.amount) for ln in _lines(led, source="export_price")}
+    assert price == {("developer", 7.0), ("site", 1.0)}
+    res = P.check_conservation(led, inputs, vf)
+    assert _check(res, "coverage")["ok"] is True, _check(res, "coverage")
+
+
+@pytest.mark.parametrize("flag,blocks", [
+    ("demand_months_not_established", False),
+    ("group_energy_share_not_established", False),
+    ("energy_recipe_changed", False),
+    ("demand_charge_not_established", True),
+    ("network_capacity_not_established", True),
+    ("export_split_not_established:export_price:_", True),
+    ("config_cleared_since_solve", True),
+])
+def test_the_blocking_list_is_explicit(flag, blocks):
+    """R2: a disclosure never blocks; an unknown amount does."""
+    inputs = _inputs(input_flags=[flag])
+    res = P.check_conservation(P.build_ledger(inputs, VF), inputs, VF)
+    assert (res.ok is None) is blocks

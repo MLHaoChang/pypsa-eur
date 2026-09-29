@@ -108,3 +108,40 @@ def test_a_group_connection_starts_from_every_member():
     assert {"poc", "site", "poc2"} <= sides.site
     assert P.asset_side(n, "Link", "import2", sides) == ("site", [])
     assert P.asset_side(n, "Generator", "pv2", sides) == ("site", [])
+
+
+# ── fuel supply (WP3.1 review round 2 #3) ──────────────────────────────────
+
+
+def test_pv_on_a_low_voltage_or_dc_bus_is_not_a_fuel_supply():
+    from services.results.value_flows import is_fuel_supply
+
+    n = build_edge_15min()
+    n.buses.loc["site", "carrier"] = "low voltage"               # PyPSA-Eur convention
+    assert not is_fuel_supply(n, _cfg(), "pv")
+    n.add("Bus", "dc", carrier="DC")
+    n.add("Generator", "pv_dc", bus="dc", p_nom=2.0)
+    n.add("Link", "inverter", bus0="dc", bus1="site", p_nom=2.0)
+    assert not is_fuel_supply(n, _cfg(), "pv_dc")
+
+
+def test_gas_behind_a_chp_link_is_a_fuel_supply():
+    from services.results.value_flows import is_fuel_supply
+
+    n = build_edge_15min()
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Generator", "gas_supply", bus="gas", p_nom=50.0)
+    n.add("Link", "chp", bus0="gas", bus1="site", p_nom=10.0, efficiency=0.4)
+    assert is_fuel_supply(n, _cfg(), "gas_supply")
+    n.add("Load", "gas_load", bus="gas", p_set=1.0)               # gas is also consumed
+    assert not is_fuel_supply(n, _cfg(), "gas_supply")
+
+
+def test_a_heat_bus_fed_by_a_link_is_not_a_fuel_supply():
+    from services.results.value_flows import is_fuel_supply
+
+    n = build_edge_15min()
+    n.add("Bus", "heat", carrier="heat")
+    n.add("Generator", "boiler", bus="heat", p_nom=5.0)
+    n.add("Link", "hp", bus0="site", bus1="heat", p_nom=2.0)        # delivers into heat
+    assert not is_fuel_supply(n, _cfg(), "boiler")
