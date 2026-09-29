@@ -496,6 +496,13 @@ def _tariff_rows(tariff: Tariff, provenance: str) -> list[dict[str, Any]]:
         source_year=tariff.source_year, range=_assumed_30(1.0),
         domain=LedgerDomain(low=0.0, low_open=True), **who,
     )
+    if len({float(b.price_per_mwh) for b in tariff.energy_bands}) <= 1:
+        # Gate S4 [S5]: on a single-band tariff the level rescales nothing, so
+        # the row is not applicable — an edit is refused (BC-S2-2 machinery),
+        # the maturity badge does not ask for it, and a re-seed onto such a
+        # tariff flags a kept user value. The pack reads a null level as 1.0.
+        level.update(value=None, range=None, provenance=provenance,
+                     status="default", unavailable={"value": "not_applicable"})
     return [descriptor, demand, level]
 
 

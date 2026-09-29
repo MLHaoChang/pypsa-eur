@@ -541,6 +541,10 @@ def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
             ctx.solver_state["solver_config"] = cfg
             _save_context(ctx, row.name, project_row=row, storage_dir=base_dir,
                           persist_user_ts=False, db=db, user=user)
+            # The first-save claim re-keys the build context INTO the registry
+            # (`rekey_context`); it is a throw-away here, and a resident base
+            # would count against the user's resident cap (gate S4 BC-S4-1).
+            PyPSAService.drop(key)
         load = body.intake.get("load") if isinstance(body.intake, dict) else None
         if isinstance(load, dict) and load.get("upload_id"):
             _copy_upload(project, base_dir, str(load["upload_id"]))

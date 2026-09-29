@@ -98,6 +98,11 @@ def test_an_unknown_library_version_is_refused():
 def test_every_key_driver_row_carries_source_year_currency_year_and_range(seeded):
     for key in KEY_DRIVERS:
         row = _row(seeded, key)
+        if row.value is None:
+            # Gate S4 [S5]: energy_price_level on the single-band seed is not
+            # applicable (null + flag), like a demand charge a tariff lacks.
+            assert row.unavailable == {"value": "not_applicable"}, key
+            continue
         assert row.source, key
         assert isinstance(row.source_year, int), key
         assert isinstance(row.currency_year, int), key
@@ -349,6 +354,9 @@ def test_a_seeded_ledger_is_screening_and_names_every_row_holding_it(seeded):
     assert (m.accuracy_band.low_pct_narrow, m.accuracy_band.high_pct_narrow) == (-20.0, 30.0)
     assert "18R-97" in m.accuracy_band.reference
     for key in KEY_DRIVERS:
+        if _row(seeded, key).value is None:  # not applicable: never asked for
+            assert not any(r.startswith(f"{key}:") for r in m.reasons), key
+            continue
         assert any(r.startswith(f"{key}:") for r in m.reasons), (key, m.reasons)
     assert any(r.startswith("load:") for r in m.reasons), m.reasons
 
@@ -391,7 +399,8 @@ def test_measured_rows_count_as_established(seeded_user):
     led = led.model_copy(update={"rows": [
         r.model_copy(update={"status": "default"}) if r.key in KEY_DRIVERS else r
         for r in led.rows]})
-    assert {_row(led, k).provenance for k in KEY_DRIVERS} == {"measured"}
+    applicable = [k for k in KEY_DRIVERS if _row(led, k).value is not None]
+    assert {_row(led, k).provenance for k in applicable} == {"measured"}
     assert {_row(led, k).status for k in KEY_DRIVERS} == {"default"}
     assert L.maturity_from_ledger(led, "uploaded").class_ == "feasibility"
 
@@ -400,10 +409,10 @@ def test_a_needs_attention_key_row_keeps_it_at_screening(seeded_user):
     led = _customise_key_drivers(seeded_user)
     led = led.model_copy(update={"rows": [
         r.model_copy(update={"status": "needs_attention"})
-        if r.key == "energy_price_level" else r for r in led.rows]})
+        if r.key == "discount_rate" else r for r in led.rows]})
     m = L.maturity_from_ledger(led, "uploaded")
     assert m.class_ == "screening"
-    assert m.reasons == ["energy_price_level: needs_attention (user)"]
+    assert m.reasons == ["discount_rate: needs_attention (user)"]
 
 
 def test_a_ledger_without_key_drivers_is_never_feasibility(library):
@@ -548,7 +557,11 @@ def test_reset_puts_the_seed_row_back(library, seeded):
     ("discount_rate", -0.5, "per unit", "[0, 1)"),
     ("discount_rate", 1.0, "per unit", "[0, 1)"),
 ])
-def test_a_value_outside_the_rows_domain_is_refused(seeded, key, value, unit, domain):
+def test_a_value_outside_the_rows_domain_is_refused(seeded, library, key, value, unit, domain):
+    if key == "energy_price_level":
+        # Gate S4 [S5]: only a multi-band tariff makes the level editable.
+        seeded = lib.seed_ledger(
+            KEY_DRIVERS, {"tariff": {"tariff_id": "tou_reference_illustrative"}}, library)
     with pytest.raises(L.LedgerEditError) as exc:
         L.apply_user_row(seeded, key, value, unit=unit, changed_by="u1", changed_at=NOW)
     assert key in str(exc.value) and domain in str(exc.value), str(exc.value)

@@ -82,6 +82,7 @@ STUDY_KEY = "decision_study"
 _POLL_S = 0.05
 _TERMINAL = ("completed", "failed", "aborted", "interrupted")
 _PUBLIC_DROP = ("thread", "stop_event")
+_ECON_CLASSES = ("generators", "storage_units", "stores", "links")
 
 
 class RunRefused(RuntimeError):
@@ -203,15 +204,43 @@ def _read_option(n, cfg, tariff, opt, fidelity: Fidelity, currency_year) -> dict
     try:
         from services.results.asset_economics import compute_asset_economics
 
-        econ = compute_asset_economics(n, cfg, result_df=_live_result_df) or {}
-        rows = [a for a in (econ.get("assets") or [])
-                if a.get("name") in (packs.BATTERY_NAME, packs.PV_NAME)]
-        detail["asset_economics"] = rows
-    except Exception as exc:  # noqa: BLE001
+        econ = compute_asset_economics(n, cfg, result_df=_live_result_df)
+        if econ is None:
+            raise LookupError("asset economics answered no data for this network")
+        # The per-class keys `compute_asset_economics` returns (gate S4 BC-S4-5),
+        # filtered to the assets the option sizes.
+        mine = (packs.BATTERY_NAME, packs.PV_NAME)
+        detail["asset_economics"] = {
+            cls: [row for row in (econ.get(cls) or []) if row.get("name") in mine]
+            for cls in _ECON_CLASSES}
+        detail["asset_economics"]["capital_costs_available"] = econ.get(
+            "capital_costs_available")
+        present = [a for a, df in ((packs.BATTERY_NAME, n.storage_units),
+                                   (packs.PV_NAME, n.generators)) if a in df.index]
+        found = {row.get("name") for cls in _ECON_CLASSES
+                 for row in detail["asset_economics"][cls]}
+        missing = [a for a in present if a not in found]
+        if missing:
+            # An asset the engine skipped (no dispatch or no price) is named,
+            # never read as a zero (ADR-0001).
+            detail["asset_economics_missing"] = missing
+    except Exception as exc:  # noqa: BLE001 — null with a flag (ADR-0001), never []
         detail["asset_economics"] = None
         detail["asset_economics_unavailable"] = f"{type(exc).__name__}: {exc}"
 
+    from services.results.sizing import classify_sizing
+
     sizes: list[AssetSize] = []
+    detail["sizing"] = {}
+
+    def _classify(row, asset: str) -> None:
+        # The shared classifier (gate S4 [S7]); a size at its bound is not an
+        # optimum and the verdict must say so.
+        c = classify_sizing(row, "p_nom", solved=True)
+        detail["sizing"][asset] = c
+        if c["binding_constraint"] == "at_upper_bound":
+            detail["caveats"].append(f"size_at_upper_bound:{asset}")
+
     if packs.BATTERY_NAME in n.storage_units.index:
         su = n.storage_units.loc[packs.BATTERY_NAME]
         p = _opt_value(su.get("p_nom_opt"))
@@ -219,16 +248,14 @@ def _read_option(n, cfg, tariff, opt, fidelity: Fidelity, currency_year) -> dict
         flags = {} if p is not None else {"p_nom_opt": "not_solved", "e_nom_opt": "not_solved"}
         sizes.append(AssetSize(asset=packs.BATTERY_NAME, p_nom_opt=p, e_nom_opt=e,
                                unavailable=flags))
-        if p is not None and p >= float(su["p_nom_max"]) - 1e-6:
-            detail["caveats"].append(f"size_at_upper_bound:{packs.BATTERY_NAME}")
+        _classify(su, packs.BATTERY_NAME)
     if packs.PV_NAME in n.generators.index:
         g = n.generators.loc[packs.PV_NAME]
         p = _opt_value(g.get("p_nom_opt"))
         sizes.append(AssetSize(asset=packs.PV_NAME, p_nom_opt=p, e_nom_opt=None,
                                unavailable={"e_nom_opt": "not_applicable",
                                             **({} if p is not None else {"p_nom_opt": "not_solved"})}))
-        if p is not None and p >= float(g["p_nom_max"]) - 1e-6:
-            detail["caveats"].append(f"size_at_upper_bound:{packs.PV_NAME}")
+        _classify(g, packs.PV_NAME)
 
     objective = _opt_value(getattr(n, "objective", None))
     const = _opt_value(getattr(n, "objective_constant", 0.0)) or 0.0
@@ -276,10 +303,8 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
     the worker. Raises `RunRefused` (with an HTTP status) before anything
     starts. ``fidelity`` is recorded; both are 8760 h in MVP-1.
     """
-    from routers.simulation import _solver_in_flight_ctx
     from services import project_registry
     from services.adequacy import campaign
-    from services.project_context import STUDY_LABELS, running_study_key
 
     fidelity = Fidelity(fidelity)
     base_uuid = str(base_row.id)
@@ -303,21 +328,57 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
         raise RunRefused(status, exc.code, exc.message) from None
     options = Q.options_for(question, study.intake)
     solves = campaign.estimate_solves(None, STUDY_KEY, options=[o.option_id for o in options])
-    budget = study.budget.solves_max if budget_solves is None else int(budget_solves)
+    # BC-S4-3: the default budget is the CURRENT option count (PV enabled after
+    # creation adds one), never the count at creation.
+    budget = solves if budget_solves is None else int(budget_solves)
 
-    ctx = base_context(base_row)
+    # BC-S4-1: every check that can refuse runs BEFORE the base context is
+    # registered, on the resident context if there is one; a base the run
+    # registers itself is study-owned (outside the resident cap), so the
+    # registration can never evict a user's context.
+    key = project_registry.registry_key(base_row)
+    resident = PyPSAService.get_context(key)
+    if resident is not None:
+        _refuse_busy(resident)
+    open_campaign = (resident is not None
+                     and _on_ctx(resident, campaign.status)["active"])
+    if open_campaign:
+        try:
+            _on_ctx(resident, campaign.check, STUDY_KEY, solves)
+        except campaign.CampaignBudgetError as exc:
+            raise RunRefused(409, "campaign_budget_exhausted", str(exc)) from None
+    elif solves > budget:
+        raise RunRefused(409, "campaign_budget_exhausted", _shortfall(solves, budget, budget))
+    if not 1 <= budget <= campaign.MAX_BUDGET_SOLVES:
+        raise RunRefused(422, "campaign_budget_invalid",
+                         f"budget_solves must be 1..{campaign.MAX_BUDGET_SOLVES}")
+
+    registered = resident is None
+    if registered:
+        PyPSAService.mark_study_owned(key)
+    try:
+        ctx = base_context(base_row)
+    except BaseException:
+        if registered:
+            PyPSAService.unmark_study_owned(key)
+        raise
     stop_event = threading.Event()
     record: dict[str, Any] = {
         "status": "running", "study": STUDY_KEY, "study_id": study_id,
         "fidelity": fidelity.value, "options": [o.option_id for o in options],
         "solved": [], "current": None, "pending": [o.option_id for o in options],
         "solves_charged": solves, "campaign": None, "own_campaign": False,
+        # BC-S4-2: what the forks are built from, captured now; `_finish`
+        # records THIS hash and marks the study stale if the stored ledger or
+        # intake moved during the run.
+        "ledger_hash": packs.ledger_hash(ledger), "registered_base": registered,
         "error": None, "started_at": time.time(), "finished_at": None,
         "thread": None, "stop_event": stop_event,
     }
     worker_args = dict(study_id=study_id, base_row_id=base_uuid,
                        base_dir=base_dir, user_id=user_id, fidelity=fidelity,
-                       record=record, stop_event=stop_event, ctx=ctx)
+                       record=record, stop_event=stop_event, ctx=ctx,
+                       ledger=ledger, intake=dict(study.intake))
     run_ctx = contextvars.copy_context()
     thread = threading.Thread(
         target=lambda: run_ctx.run(_worker, **worker_args),
@@ -326,18 +387,17 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
 
     lock = ctx.mutation_lock
     if not lock.acquire(timeout=5.0):
+        _release_base(key, registered)
         raise RunRefused(409, "solver_in_flight",
                          "a solve holds the study's base project; wait for it to finish")
     try:
         with ctx.solver_state_lock:
-            busy = running_study_key(ctx.solver_state)
-            if busy is not None:
-                raise RunRefused(409, "study_running", (
-                    f"{STUDY_LABELS.get(busy, busy)} is running on this study's "
-                    "base project — wait for it to finish, or abort it"))
-            if _solver_in_flight_ctx(ctx):
-                raise RunRefused(409, "solver_in_flight",
-                                 "a solve is running on this study's base project")
+            # The claim: the same checks again, under the base context's locks.
+            try:
+                _refuse_busy(ctx)
+            except RunRefused:
+                _release_base(key, registered)
+                raise
             # Check-then-record on the BASE context's campaign.
             own = not _on_ctx(ctx, campaign.status)["active"]
             if own:
@@ -352,6 +412,7 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
             except campaign.CampaignBudgetError as exc:
                 if own:
                     _on_ctx(ctx, campaign.end, "refused before the first solve")
+                _release_base(key, registered)
                 raise RunRefused(409, "campaign_budget_exhausted", str(exc)) from None
             record["own_campaign"] = own
             ctx.solver_state[STUDY_KEY] = record
@@ -368,6 +429,46 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
     return {"status": "running", "study_id": study_id, "fidelity": fidelity.value,
             "options": record["options"], "solves_charged": solves,
             "campaign": record["campaign"]}
+
+
+def _refuse_busy(ctx) -> None:
+    """The study mesh and the in-flight test, on THIS context (BC-5)."""
+    from routers.simulation import _solver_in_flight_ctx
+    from services.project_context import STUDY_LABELS, running_study_key
+
+    with ctx.solver_state_lock:
+        busy = running_study_key(ctx.solver_state)
+    if busy is not None:
+        raise RunRefused(409, "study_running", (
+            f"{STUDY_LABELS.get(busy, busy)} is running on this study's "
+            "base project — wait for it to finish, or abort it"))
+    if _solver_in_flight_ctx(ctx):
+        raise RunRefused(409, "solver_in_flight",
+                         "a solve is running on this study's base project")
+
+
+def _shortfall(solves: int, remaining: int, budget: int) -> str:
+    return (f"the run needs up to {solves} solve(s), one per option, and the "
+            f"campaign has {remaining} of {budget} left. Raise budget_solves "
+            "or run fewer options (disable PV)")
+
+
+def _release_base(key: str, registered: bool) -> None:
+    """
+    Undo a base registration this run made: drop the context unless a
+    session has it open (then it is the user's, and counts against the cap
+    like any other), and lift the cap exemption either way.
+    """
+    if not registered:
+        return
+    try:
+        in_use = (key in PyPSAService._session_active_keys()
+                  or PyPSAService.get_active_id() == key)
+    except Exception:  # noqa: BLE001
+        in_use = True
+    if not in_use:
+        PyPSAService.drop(key)
+    PyPSAService.unmark_study_owned(key)
 
 
 def _set(ctx, record: dict, **kw) -> None:
@@ -387,7 +488,7 @@ def _wait(job, stop_event: threading.Event) -> None:
 
 
 def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
-            stop_event, ctx) -> None:
+            stop_event, ctx, ledger, intake) -> None:
     """The run itself, on the base context (bound for this thread only)."""
     from db.models import Project
     from db.session import SessionLocal
@@ -407,9 +508,10 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
         study = store.load_study(base_dir, study_id)
         question = Q.get_question(study.question_id)
         library = study_library.load_library()
-        ledger = study.ledger or study_library.seed_ledger(question, study.intake, library)
-        tariff = packs.effective_tariff(study.intake, ledger, library)
-        options = Q.options_for(question, study.intake)
+        # The ledger and intake captured when the run started (BC-S4-2), not
+        # whatever the sidecar holds by now.
+        tariff = packs.effective_tariff(intake, ledger, library)
+        options = Q.options_for(question, intake)
         currency_year = tariff.currency_year
 
         def resolve_upload(file_id: str) -> bytes:
@@ -421,7 +523,7 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
         for opt in options:
             if stop_event.is_set():
                 break
-            net = packs.build_site_network(study.intake, ledger, opt.option_id,
+            net = packs.build_site_network(intake, ledger, opt.option_id,
                                            library=library, question=question,
                                            resolve_upload=resolve_upload)
             cfg = packs.option_solver_config(ledger, tariff)
@@ -446,6 +548,9 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                 break
             key = project_registry.registry_key(row)
             _set(ctx, record, current=opt.option_id)
+            # BC-S4-1: the queue registers the fork; exempt it from the cap
+            # BEFORE it is enqueued so that registration never evicts.
+            PyPSAService.mark_study_owned(key)
             job, _new = solve_queue.enqueue_unique(
                 row.name, project_key=key,
                 storage_dir=str(project_registry.project_dir(row)),
@@ -469,6 +574,8 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                 PyPSAService.drop(key)
             except Exception:  # noqa: BLE001
                 pass
+            finally:
+                PyPSAService.unmark_study_owned(key)
             with ctx.solver_state_lock:
                 if outcome["result"].solve_status == "ok":
                     record["solved"].append(opt.option_id)
@@ -490,13 +597,18 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
         try:
             _finish(db, ctx, record, study_id=study_id, base_row_id=base_row_id,
                     base_dir=base_dir, created=created, outcomes=outcomes,
-                    fidelity=fidelity, status=status, error=error)
+                    fidelity=fidelity, status=status, error=error,
+                    run_ledger=ledger, run_intake=intake)
         except Exception:  # noqa: BLE001
             logger.exception("decision study %s: finishing the run failed", study_id)
             _set(ctx, record, status="failed", finished_at=time.time(),
                  error=error or "finishing the run failed")
         finally:
             db.close()
+            for _o, row, _c in created:
+                PyPSAService.unmark_study_owned(project_registry.registry_key(row))
+            if record.get("registered_base"):
+                _release_base(ctx.registry_key, True)
 
 
 def _uuid(value):
@@ -505,7 +617,7 @@ def _uuid(value):
 
 
 def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcomes,
-            fidelity, status, error) -> None:
+            fidelity, status, error, run_ledger, run_intake) -> None:
     """Remove unsolved forks, write the findings and the run record."""
     solved_rows = {o.option_id: r for o, r, _c in created
                    if outcomes.get(o.option_id, {}).get("result") is not None
@@ -546,13 +658,23 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
                                           {"bill": b.unavailable["bill"]} if b.bill is None else {}))
         else:
             baseline = BaselineResult(bill=None, unavailable={"bill": "not_run"})
-        ledger = study.ledger
+        # BC-S4-2: the hash of the ledger the forks were BUILT from; a ledger or
+        # intake that moved during the run marks the study stale, so nothing
+        # downstream attributes these results to the edited assumptions.
+        run_hash = packs.ledger_hash(run_ledger)
+        now_ledger = study.ledger or study_library.seed_ledger(
+            question, study.intake, study_library.load_library())
+        stale_reasons = []
+        if packs.ledger_hash(now_ledger) != run_hash:
+            stale_reasons.append("ledger_changed_during_run")
+        if dict(study.intake) != dict(run_intake):
+            stale_reasons.append("intake_changed_during_run")
         findings = Findings(
             options=results,
             options_status="ok" if all_ok else "not_established",
             pending_options=pending,
             hashes=FindingsHashes(
-                ledger_hash=packs.ledger_hash(ledger) if ledger is not None else None,
+                ledger_hash=run_hash,
                 option_network_hashes={
                     str(solved_rows[k].id): v["network_hash"]
                     for k, v in details.items()
@@ -573,8 +695,10 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
             "option_projects": [str(r.id) for r in solved_rows.values()],
             "findings_ref": store.aux_ref(study_id, "findings"),
             "fidelity_last_run": fidelity,
-            "budget": study.budget.model_copy(update={"solves_used": record["solves_charged"]}),
-            "stale": False, "stale_reasons": [],
+            "budget": study.budget.model_copy(update={
+                "solves_max": record["solves_charged"],
+                "solves_used": record["solves_charged"]}),
+            "stale": bool(stale_reasons), "stale_reasons": stale_reasons,
             "updated_at": datetime.now(tz=UTC)})
         store.save_study(base_dir, study)
     _set(ctx, record, status=status, error=error, finished_at=time.time(),

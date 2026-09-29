@@ -79,6 +79,14 @@
       "surface": "banner",
       "why": "Upload rejected against the 25 MB cap. The user must act."
     },
+    "fork_has_children": {
+      "surface": "inline",
+      "why": "Decision study (S4): deleting a study, or re-running it, refused because a user branched a project from one of its option forks. Route-only today (routers/studies.py); the user moves or deletes that project and retries, so the refusal reads in place rather than as a banner."
+    },
+    "fork_solving": {
+      "surface": "inline",
+      "why": "Decision study (S4): a study fork still has an active solve-queue job, so it cannot be removed yet. Route-only today; transient, the user waits for or aborts the job."
+    },
     "format_not_supported": {
       "surface": "inline",
       "why": "One tool could not read one format. Per-call, and the model can try another route."
@@ -190,6 +198,14 @@
     "study_in_flight": {
       "surface": "inline",
       "why": "An adequacy study is running and a save/queue was refused. Deliberately QUIET on the client (`QUIET_TOAST_CODES` in api/client.ts): it is a standing condition the caller handles, and one toast per autosave tick would bury the workbench."
+    },
+    "study_never_run": {
+      "surface": "inline",
+      "why": "Decision study (S4): asking for the run status or aborting a study that has never been run. A client-side sequencing slip, not a condition the user must act on."
+    },
+    "study_running": {
+      "surface": "inline",
+      "why": "Decision study (S4): a second run, a delete, or another study refused while a study runs on the base project. Route-only today; the message names the study and the user waits or aborts it."
     },
     "time_column_parse_error": {
       "surface": "banner",

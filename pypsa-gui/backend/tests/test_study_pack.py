@@ -219,12 +219,19 @@ def test_energy_price_level_scales_bands_around_their_time_weighted_mean(library
     assert scaled.std() == pytest.approx(2.0 * base.std())        # spread doubled
 
 
-def test_energy_price_level_is_a_no_op_on_a_flat_tariff(library, ledger):
-    led2 = L.apply_user_row(ledger, "energy_price_level", 1.5, unit="multiplier",
-                            changed_by="u", changed_at=NOW)
-    a = P.build_site_network(_intake(), ledger, "none").links_t.marginal_cost
-    b = P.build_site_network(_intake(), led2, "none").links_t.marginal_cost
-    pd.testing.assert_frame_equal(a, b)
+def test_energy_price_level_is_not_applicable_on_a_flat_tariff(ledger):
+    """
+    Gate S4 [S5]: on a single-band tariff the row is null + not_applicable,
+    an edit is refused (not stored and ignored), and the pack prices as 1.0.
+    """
+    [row] = [r for r in ledger.rows if r.key == "energy_price_level"]
+    assert row.value is None and row.unavailable == {"value": "not_applicable"}
+    with pytest.raises(L.LedgerEditError) as exc:
+        L.apply_user_row(ledger, "energy_price_level", 1.5, unit="multiplier",
+                         changed_by="u", changed_at=NOW)
+    assert "single energy band" in str(exc.value)
+    mc = P.build_site_network(_intake(), ledger, "none").links_t.marginal_cost
+    assert (mc["grid_import"] == 110.0 + 20.0).all()
 
 
 # ── refusals ─────────────────────────────────────────────────────────────
@@ -312,3 +319,12 @@ def test_the_bills_demand_charge_equals_the_bridges_on_a_solved_pack(library, le
     decomposition = compute_objective_decomposition(n, compute_cost_breakdown(n, cfg), cfg)
     assert decomposition["demand_charge_eur"] == pytest.approx(bill.by_component.demand, rel=1e-9)
     assert abs(decomposition["residual_gap_pct"]) < 1e-3
+
+
+@pytest.mark.parametrize("year", [2024, 2028])
+def test_a_leap_year_is_refused(ledger, year):
+    """BC-S4-4: 8760 hours from 1 January of a leap year stop on 30 December."""
+    intake = _intake(site={"zone": "DE", "connection_mw": 2.0, "year": year})
+    with pytest.raises(P.PackError) as exc:
+        P.build_site_network(intake, ledger, "none")
+    assert exc.value.code == "leap_year_unsupported"

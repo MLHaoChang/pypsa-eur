@@ -62,6 +62,7 @@ measured capacity charge and the other tariff forms MVP-1 does not price
 """
 from __future__ import annotations
 
+import calendar
 import csv
 import functools
 import hashlib
@@ -248,7 +249,9 @@ def _snapshots(intake: Mapping[str, Any]) -> pd.DatetimeIndex:
     except (TypeError, ValueError):
         raise PackError("intake_invalid", f"site.year {year!r} is not a year") from None
     idx = pd.date_range(f"{year}-01-01", periods=HOURS, freq="h")
-    if idx[-1].year != year:
+    # BC-S4-4: 8760 hours from 1 January of a leap year stop on 30 December,
+    # leaving a short December billed in full; refused, not truncated.
+    if calendar.isleap(year):
         raise PackError(
             "leap_year_unsupported",
             f"{year} is a leap year; MVP-1 models 8760 hourly steps of one "

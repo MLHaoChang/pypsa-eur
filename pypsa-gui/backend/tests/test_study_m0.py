@@ -194,3 +194,25 @@ def test_incomplete_intake_is_refused_at_creation(client, api_project, studies_o
                           intake={"tariff": {"tariff_id": "de_industrial_illustrative"}})
     assert r.status_code == 422
     assert r.json()["detail"]["error_kind"] == "intake_incomplete"
+
+
+def test_an_energy_price_level_edit_on_a_flat_tariff_is_refused(
+        client, api_project, studies_on):
+    """
+    Gate S4 [S5]: on a single-band tariff the level changes nothing, so an
+    edit is refused rather than stored and ignored.
+    """
+    api_project("m0-flat")
+    sid = create_pack_study(client, "m0-flat", "m0-flat-base").json()["study_id"]
+    r = client.put(f"/api/projects/m0-flat-base/studies/{sid}/ledger", json={
+        "rows": [{"key": "energy_price_level", "value": 1.5, "unit": "multiplier"}]})
+    assert r.status_code == 422, r.text
+    assert "single" in r.text and "energy_price_level" in r.text
+    # On a time-of-use tariff the same edit is accepted.
+    r = client.patch(f"/api/projects/m0-flat-base/studies/{sid}", json={
+        "step": "tariff", "intake": {"tariff": {"tariff_id": "tou_reference_illustrative"}}})
+    assert r.status_code == 200, r.text
+    r = client.put(f"/api/projects/m0-flat-base/studies/{sid}/ledger", json={
+        "reseed": True,
+        "rows": [{"key": "energy_price_level", "value": 1.5, "unit": "multiplier"}]})
+    assert r.status_code == 200, r.text

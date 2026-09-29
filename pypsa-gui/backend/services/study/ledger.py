@@ -69,7 +69,13 @@ _NOT_EDITABLE = {
     "tariff_descriptor": ("the tariff is chosen or supplied at the tariff step, "
                           "not typed into the ledger"),
 }
-_NOT_APPLICABLE_WHY = {"demand_charge_price": "the chosen tariff has no demand charge"}
+_NOT_APPLICABLE_WHY = {
+    "demand_charge_price": "the chosen tariff has no demand charge",
+    # Gate S4 [S5]: the level rescales energy bands around their mean.
+    "energy_price_level": ("the chosen tariff has a single energy band price, so "
+                           "energy_price_level (which rescales bands around "
+                           "their time-weighted mean) would have no effect"),
+}
 
 # A user row a re-seed could not keep as it was is flagged in the ledger's
 # honesty notes as `needs_attention:<key>:<reason>`; it must be reset before

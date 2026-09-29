@@ -39,6 +39,13 @@ class PyPSAService:
     # stays the authoritative pointer for get_network() and uniquely handles the
     # UNBOUND (New Project) case the registry can't key (no project_id yet).
     _contexts: dict[str, ProjectContext] = {}
+    # Registry keys registered ON A DECISION STUDY'S BEHALF (gate S4 BC-S4-1):
+    # the study's base context and each option fork the queue solves. They
+    # neither count toward RESIDENT_CAP nor may be chosen as its victims, and
+    # registering one never runs the cap check — so a study can never evict,
+    # and so write back, a user's context. Bounded: the runner drops each fork
+    # after reading it and the base it registered when the run ends.
+    _study_owned: set[str] = set()
 
     # ── LRU eviction cap (B9) ─────────────────────────────────────────────────
     # Max number of RESIDENT bound contexts held in `_contexts`. Every
@@ -745,7 +752,21 @@ class PyPSAService:
         # `_registry_lock`.
         if prior is not None and prior is not ctx:
             cls._save_evicted_ctx(project_id, prior)
+        if project_id in cls._study_owned:
+            # A study's registration never makes room (BC-S4-1).
+            return []
         return cls._evict_if_over_cap(protected_ids={project_id})
+
+    @classmethod
+    def mark_study_owned(cls, key: str) -> None:
+        """Exempt `key` from the resident cap (see `_study_owned`)."""
+        with cls._registry_lock:
+            cls._study_owned.add(key)
+
+    @classmethod
+    def unmark_study_owned(cls, key: str) -> None:
+        with cls._registry_lock:
+            cls._study_owned.discard(key)
 
     @classmethod
     def _session_active_keys(cls) -> set[str]:
@@ -871,12 +892,15 @@ class PyPSAService:
                         protected.add(pid)
                 except Exception:                             # noqa: BLE001
                     continue
-            while len(cls._contexts) > cls.RESIDENT_CAP:
+            # Study-owned contexts (BC-S4-1) are outside the cap: not counted,
+            # never a victim.
+            while (sum(1 for k in cls._contexts if k not in cls._study_owned)
+                   > cls.RESIDENT_CAP):
                 # Candidate victims = resident, not protected. Pick the smallest
                 # recency stamp (least-recently-interacted).
                 candidates = [
                     (pid, c) for pid, c in cls._contexts.items()
-                    if pid not in protected
+                    if pid not in protected and pid not in cls._study_owned
                 ]
                 if not candidates:
                     logger.warning(

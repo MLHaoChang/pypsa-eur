@@ -18,6 +18,7 @@ from services.pypsa_service import PyPSAService
 from services.study import runner as R
 from services.study import tariff as T
 from tests.study_s4_support import (
+    INTAKE,
     OPTIONS,
     create_pack_study,
     enable_studies,
@@ -44,8 +45,20 @@ class FakeSolver:
         shave = 0.3 if storage else 0.0
         n.links_t.p0 = pd.DataFrame({"grid_import": (load - shave).clip(lower=0.0),
                                      "grid_export": 0.0}, index=n.snapshots)
+        # What a real solve leaves behind that the result reads need: the
+        # storage dispatch and the site bus price (asset economics reads both).
+        n.buses_t.marginal_price = pd.DataFrame(
+            {"site": n.links_t.marginal_cost["grid_import"], "grid": 0.0},
+            index=n.snapshots)
+        gen_p = {"grid": n.links_t.p0["grid_import"]}
+        if "pv" in n.generators.index:
+            gen_p["pv"] = 0.2 * n.generators_t.p_max_pu["pv"]
+        n.generators_t.p = pd.DataFrame(gen_p, index=n.snapshots)
         if storage:
             n.storage_units["p_nom_opt"] = 0.3
+            n.storage_units_t.p = pd.DataFrame(
+                {"battery": [0.1 if i % 2 else -0.1 for i in range(len(n.snapshots))]},
+                index=n.snapshots)
         n.generators["p_nom_opt"] = n.generators["p_nom"]
         if "pv" in n.generators.index:
             n.generators.loc["pv", "p_nom_opt"] = 0.5
@@ -185,9 +198,9 @@ def test_a_budget_of_two_refuses_before_the_first_solve(
     assert "5 solve(s)" in detail["message"] and "2 of 2 left" in detail["message"]
     assert fake.calls == []
     assert all(v is None for v in _fork_rows(project_row, "run-budget").values())
-    ctx = _base_ctx(registry_key_for, "run-budget")
-    assert R._on_ctx(ctx, campaign.status)["active"] is False
-    assert not (ctx.solver_state.get("decision_study") or {}).get("status")
+    # Refused before anything was registered: no base context, so no
+    # campaign and no study record anywhere (gate S4 BC-S4-1).
+    assert _base_ctx(registry_key_for, "run-budget") is None
 
 
 # ── abort ────────────────────────────────────────────────────────────────
@@ -347,3 +360,146 @@ def test_bill_is_a_bill_calculator_figure(client, api_project, studies_on, fake)
     rec = wait_run(client, "run-bill", sid)
     bill = T.Bill.model_validate(rec["details"]["none"]["bill"])
     assert bill.engine == "bill_calculator" and bill.annual_bill is not None
+
+
+# ── gate S4 binding conditions ───────────────────────────────────────────
+
+def _names(session_local):
+    from sqlalchemy import select
+
+    from db.models import Project
+
+    with session_local() as db:
+        return {str(p.id): p.name for p in db.scalars(select(Project)).all()}
+
+
+@pytest.mark.parametrize("path", ["full_run", "refused_run"])
+def test_a_run_at_the_resident_cap_changes_no_user_project(
+        client, api_project, studies_on, fake, _auth_db, registry_key_for,
+        project_storage_dir, path):
+    """
+    BC-S4-1: no registration made for a study (the base context, each fork
+    the queue registers) may evict — and so write back — a user context.
+    Five visited user projects fill the cap; one holds an unsaved edit.
+    """
+    import pypsa
+
+    from tests.study_s4_support import all_project_dirs, dir_hash
+
+    _e, session_local = _auth_db
+    assert PyPSAService.RESIDENT_CAP == 5
+    for i in range(5):
+        api_project(f"cap-user{i}")
+    api_project("cap-src")
+    edited = PyPSAService.get_context(registry_key_for("cap-user1"))
+    assert edited is not None, "the fixture needs cap-user1 resident"
+    edited.network.add("Bus", "unsaved_edit_bus")
+    r = create_pack_study(client, "cap-src", "cap-base")
+    assert r.status_code == 201, r.text
+    sid = r.json()["study_id"]
+    names = _names(session_local)
+    before = {k: dir_hash(d) for k, d in all_project_dirs(session_local).items()
+              if names[k] != "cap-base"}
+    resident_before = set(PyPSAService._contexts)
+
+    if path == "full_run":
+        assert client.post(f"/api/projects/cap-base/studies/{sid}/run", json={}).status_code == 202
+        assert wait_run(client, "cap-base", sid)["status"] == "done"
+    else:
+        r = client.post(f"/api/projects/cap-base/studies/{sid}/run", json={"budget_solves": 2})
+        assert r.status_code == 409, r.text
+        assert fake.calls == []
+        # The checks come BEFORE any registration.
+        assert registry_key_for("cap-base") not in PyPSAService._contexts
+
+    after = all_project_dirs(session_local)
+    changed = [names[k] for k, d in before.items() if dir_hash(after[k]) != d]
+    assert changed == [], f"user projects rewritten by a study run: {changed}"
+    assert resident_before <= set(PyPSAService._contexts), "a user context was evicted"
+    still = PyPSAService.get_context(registry_key_for("cap-user1"))
+    assert still is edited and "unsaved_edit_bus" in still.network.buses.index
+    on_disk = pypsa.Network(str(project_storage_dir("cap-user1") / "network.nc"))
+    assert "unsaved_edit_bus" not in on_disk.buses.index
+
+
+def test_findings_record_the_ledger_the_forks_were_built_from(
+        client, api_project, studies_on, monkeypatch, project_storage_dir):
+    """BC-S4-2: a ledger edit during a run is never attributed to its results."""
+    import pypsa
+
+    from services import solver_service
+
+    holder = {}
+
+    def after(k):
+        if k == 1:
+            holder["put"] = client.put(
+                f"/api/projects/lh-base/studies/{holder['sid']}/ledger",
+                json={"rows": [{"key": "battery_storage_eur_per_kwh", "value": 100.0,
+                                "unit": "EUR/kWh"}]}).status_code
+
+    monkeypatch.setattr(solver_service, "run_simulation", FakeSolver(on_call=after))
+    api_project("lh-src")
+    sid = create_pack_study(client, "lh-src", "lh-base").json()["study_id"]
+    holder["sid"] = sid
+    assert client.post(f"/api/projects/lh-base/studies/{sid}/run", json={}).status_code == 202
+    wait_run(client, "lh-base", sid)
+    assert holder["put"] == 200
+    study = client.get(f"/api/projects/lh-base/studies/{sid}").json()
+    findings = json.loads((project_storage_dir("lh-base") / study["findings_ref"]).read_text())
+    n = pypsa.Network(str(project_storage_dir("lh-base-opt-bess_2h") / "network.nc"))
+    assert findings["hashes"]["ledger_hash"] == n.meta["decision_study_pack"]["ledger_hash"]
+    assert study["stale"] is True
+    assert "ledger_changed_during_run" in study["stale_reasons"]
+
+
+def test_the_budget_follows_the_current_option_count(
+        client, api_project, studies_on, fake):
+    """BC-S4-3: enabling PV after creation adds an option; the run still runs."""
+    api_project("pv-src")
+    intake = {**INTAKE, "pv": {"enabled": False}}
+    r = create_pack_study(client, "pv-src", "pv-base", intake=intake)
+    sid = r.json()["study_id"]
+    assert r.json()["budget"]["solves_max"] == 4
+    r = client.patch(f"/api/projects/pv-base/studies/{sid}", json={
+        "step": "pv", "intake": {"pv": {"enabled": True, "kind": "rooftop"}}})
+    assert r.status_code == 200, r.text
+    r = client.post(f"/api/projects/pv-base/studies/{sid}/run", json={})
+    assert r.status_code == 202, r.text
+    assert r.json()["solves_charged"] == 5
+    assert wait_run(client, "pv-base", sid)["status"] == "done"
+    assert len(fake.calls) == 5
+
+
+def test_the_battery_asset_economics_arrive_with_fom(
+        client, api_project, studies_on, fake):
+    """BC-S4-5: read under the real per-class keys, never an empty list."""
+    sid = _setup(client, api_project, "run-econ")
+    client.post(f"/api/projects/run-econ/studies/{sid}/run", json={})
+    rec = wait_run(client, "run-econ", sid)
+    econ = rec["details"]["bess_2h"]["asset_economics"]
+    assert econ is not None, rec["details"]["bess_2h"].get("asset_economics_unavailable")
+    [battery] = econ["storage_units"]
+    assert battery["name"] == "battery"
+    assert battery["fom_cost_eur"] == pytest.approx(0.3 * 213.9279 * 1000 * 0.3375 / 100, rel=1e-3)
+    assert [g["name"] for g in rec["details"]["bess_pv_2h"]["asset_economics"]["generators"]] == ["pv"]
+
+
+def test_a_size_at_its_bound_is_flagged_by_the_shared_classifier(
+        client, api_project, studies_on, monkeypatch):
+    from services import solver_service
+
+    class AtBound(FakeSolver):
+        def __call__(self, config, n, *a, **k):
+            out = super().__call__(config, n, *a, **k)
+            if len(n.storage_units):
+                n.storage_units["p_nom_opt"] = n.storage_units["p_nom_max"]
+            return out
+
+    monkeypatch.setattr(solver_service, "run_simulation", AtBound())
+    sid = _setup(client, api_project, "run-bound")
+    client.post(f"/api/projects/run-bound/studies/{sid}/run", json={})
+    rec = wait_run(client, "run-bound", sid)
+    assert "size_at_upper_bound:battery" in rec["details"]["bess_1h"]["caveats"]
+    assert rec["details"]["bess_1h"]["sizing"]["battery"]["binding_constraint"] == "at_upper_bound"
+    assert rec["details"]["none"]["caveats"] == []

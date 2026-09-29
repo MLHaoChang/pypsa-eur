@@ -37,8 +37,11 @@ def _url(name, sid, tail="ledger"):
 
 def _edits(ledger, keys=KEY_DRIVERS, factor=1.1):
     rows = {r["key"]: r for r in ledger["rows"]}
-    return [{"key": k, "value": (rows[k]["value"] or 1.0) * factor,
-             "unit": rows[k]["unit"]} for k in keys]
+    # A row with no value is not applicable under this tariff and not
+    # editable (gate S4 [S5] made `energy_price_level` one on a single-band
+    # tariff), as the library test's `_customise_key_drivers` already skips.
+    return [{"key": k, "value": rows[k]["value"] * factor,
+             "unit": rows[k]["unit"]} for k in keys if rows[k]["value"] is not None]
 
 
 # A study on a tariff the user supplied: the only kind that can reach
