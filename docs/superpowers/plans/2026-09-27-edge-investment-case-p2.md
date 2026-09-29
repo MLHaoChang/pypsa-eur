@@ -1093,6 +1093,21 @@ values other than 15/30/60.
     - `startdate`;
     - partial ⇒ `tariff_incomplete` and `total` None;
     - the route's 422, partial import and meta notes.
+- **WP2.4b-i review round 1 → PASS WITH CONDITIONS; all findings fixed:**
+  - Property probe (reviewer): 800 random-schedule year axes, 0 mismatches. R1 matches every REopt branch.
+  - M1: a lookback that reads a free (rate-0) facility month is now refused (`lookbackpercent`). REopt's ratchet reads every month's actual peak; the engine's reads charged months only, so the import would have under-billed silently.
+  - M2: an item whose structure had a refused unit or tier key was still built and billed under a misreading. → A refused structure yields no item, and a non-kW demand unit drops the demand items. A partial import misses a charge; it never misstates one.
+  - L1: the R1 test covers both REopt branches with REopt's 1-based index minus 1.
+  - L2:
+    - A cyclic `lookbackrange` ≥ 12 is months mode over all 12, with a note.
+    - A range that is not representable is refused under `lookbackrange`.
+    - `lookbackmonths` that are not 12 flags are refused.
+  - L3: an `enddate` before the given `valid_from` is ignored, with a note.
+  - L4: `tariff_incomplete` now reaches `SiteBill.flags`.
+  - L5: notes for `fixedchargefirstmeter` ignored under `fixedmonthlycharge`, and for per-day billing on covered days.
+  - L6: re-importing identical content with a different label keeps v1 and its meta. Accepted: the item's content is its identity, and the response's notes describe this import.
+  - L7: `supercedes`, `isdefault` and `utility_id` are metadata.
+  - `test_urdb_import.py` has 38 tests.
 
 ## WP2.4b-ii Series and meter-data import
 

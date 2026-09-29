@@ -77,6 +77,7 @@ _METADATA = {
     "peakkwhusagemax", "peakkwhusagehistory", "voltageminimum", "voltagemaximum",
     "energycomments", "demandcomments", "basicinformationcomments", "latest_update",
     "minchargeunits",   # only a companion of `mincharge`, which is refused itself
+    "supercedes", "isdefault", "utility_id",   # URDB spellings seen in the wild
 }
 _MAPPED = {
     "energyratestructure", "energyweekdayschedule", "energyweekendschedule",
@@ -154,7 +155,14 @@ class _Import:
         return v
 
     def structure(self, field: str, unit: str) -> list[list[tuple[float, float | None]]] | None:
-        """Per URDB period, its tiers as (rate + adj, cumulative max or None)."""
+        """Per URDB period, its tiers as (rate + adj, cumulative max or None).
+        None when any part of it is refused: a partial import then misses the
+        charge rather than misstating it (review M2)."""
+        before = len(self.refusals)
+        out = self._structure(field, unit)
+        return None if len(self.refusals) > before else out
+
+    def _structure(self, field: str, unit: str):
         v = self._json(field)
         if not isinstance(v, list) or not all(isinstance(p, list) and p for p in v):
             self.refuse(field, "a rate structure is a list of periods, each a list of tiers")
@@ -311,14 +319,21 @@ class _Import:
             return None
         rng = self.u.get("lookbackrange") or 0
         months = self._json("lookbackmonths") or []
-        chosen = [i + 1 for i, x in enumerate(months) if not _empty(x)] \
-            if isinstance(months, list) else []
+        if not isinstance(months, list) or (months and len(months) != 12):
+            self.refuse("lookbackmonths", "12 month flags")
+            return None
+        chosen = [i + 1 for i, x in enumerate(months) if not _empty(x)]
         if rng and chosen:
             self.refuse("lookbackrange/lookbackmonths", "both lookback modes are set")
             return None
         try:
             share = float(pct)
             if rng:
+                if cyclic_year and int(rng) >= 12:
+                    # Wrapping within the rate year, a lookback of 12 or more
+                    # months reads every month: months mode over all 12.
+                    self.note("cyclic_lookbackrange_ge_12_as_all_months")
+                    return Ratchet(months=list(range(1, 13)), share=share)
                 r = Ratchet(lookback_months=int(rng), share=share, cyclic_year=cyclic_year)
                 if cyclic_year:
                     self.note("cyclic_year_set_by_importer")
@@ -327,7 +342,8 @@ class _Import:
                 return Ratchet(months=chosen, share=share)
         except (TypeError, ValueError, ValidationError) as exc:
             msg = exc.errors()[0]["msg"] if isinstance(exc, ValidationError) else str(exc)
-            self.refuse("lookbackpercent", f"not representable: {msg}")
+            self.refuse("lookbackrange" if rng else "lookbackpercent",
+                        f"not representable: {msg}")
             return None
         self.refuse("lookbackpercent", "a lookback percent with neither lookbackrange nor "
                                        "lookbackmonths")
@@ -338,6 +354,8 @@ class _Import:
         first = self.u.get("fixedchargefirstmeter")
         if not _empty(monthly):
             unit, amount = "per_month", float(monthly)
+            if not _empty(first):
+                self.note("fixedchargefirstmeter_ignored_fixedmonthlycharge_used")
         elif not _empty(first):
             units = self.u.get("fixedchargeunits")
             if _empty(units):
@@ -348,6 +366,9 @@ class _Import:
                 unit, amount = "per_month", float(first)
             elif u == "$/day":
                 unit, amount = "per_day", float(first)
+                # REopt bills $/day × 30.4375 per month; the engine bills the
+                # days covered (a documented deviation).
+                self.note("fixed_per_day_billed_on_covered_days")
             elif u == "$/year":
                 unit, amount = "per_month", float(first) / 12.0
             else:
@@ -381,12 +402,14 @@ def urdb_to_tariff(urdb_response: dict, *, name: str, cyclic_year: bool = False,
             imp.refuse(field, "coincident demand charges are not supported")
         else:
             imp.refuse(field, _REASONS.get(field, "not mapped by the importer"))
+    demand_ok = True
     for field in ("demandunits", "flatdemandunit", "demandrateunit"):
         if not _empty(u.get(field)) and str(u[field]).strip().lower() != "kw":
             imp.refuse(field, f"only kW demand is supported, got {u[field]!r}")
+            demand_ok = False   # billed as kW it would be misstated (review M2)
 
-    has_tou_demand = "demandratestructure" in u and not _empty(u.get("demandratestructure"))
-    has_facility = "flatdemandstructure" in u and not _empty(u.get("flatdemandstructure"))
+    has_tou_demand = demand_ok and not _empty(u.get("demandratestructure"))
+    has_facility = demand_ok and not _empty(u.get("flatdemandstructure"))
     settlement = "15min"
     if has_tou_demand or has_facility:
         window = u.get("demandwindow")
@@ -410,6 +433,18 @@ def urdb_to_tariff(urdb_response: dict, *, name: str, cyclic_year: bool = False,
             items.append(tou)
     facility = imp.facility(settlement) if has_facility else None
     ratchet = imp.ratchet(cyclic_year)
+    if ratchet is not None and facility is not None:
+        free = sorted({m for p in facility.periods if p.rate == 0 and not p.tier_rates
+                       for m in (p.months or range(1, 13))})
+        reads = (set(ratchet.months) if ratchet.months is not None else set(range(1, 13)))
+        if free and reads & set(free):
+            # REopt's ratchet reads every month's actual peak; the engine's
+            # reads charged months only, so the import would under-bill
+            # silently (review M1).
+            imp.refuse("lookbackpercent", f"the lookback reads facility months {free} whose "
+                                          "rate is 0; the ratchet here reads charged months "
+                                          "only")
+            ratchet = None
     if ratchet is not None:
         if facility is None:
             imp.refuse("lookbackpercent", "a ratchet needs the facility demand item "
@@ -433,6 +468,10 @@ def urdb_to_tariff(urdb_response: dict, *, name: str, cyclic_year: bool = False,
     if start is None:
         raise ValueError("valid_from is required: the URDB rate has no startdate")
     end = _date(u.get("enddate")) if not _empty(u.get("enddate")) else None
+    if end is not None and end < start:
+        # An expired URDB rate imported for a later period (review L3).
+        imp.note("enddate_before_valid_from_ignored")
+        end = None
     tid = tariff_id or (re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._") or "urdb")
     tariff = Tariff(id=tid, name=name, jurisdiction=jurisdiction or "US", valid_from=start,
                     valid_to=end, items=items,

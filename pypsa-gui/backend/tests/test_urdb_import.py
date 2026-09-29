@@ -46,7 +46,8 @@ def _dump(t: Tariff) -> dict:
 
 
 @pytest.mark.parametrize("stem,kw,notes", [
-    ("r1_leap_year", {}, ["demandwindow_absent_assumed_15min"]),
+    ("r1_leap_year", {}, ["demandwindow_absent_assumed_15min",
+                          "fixed_per_day_billed_on_covered_days"]),
     ("r2_tiered_tou_demand", {}, ["demandwindow_absent_assumed_15min"]),
     ("r3prime", {"cyclic_year": True}, ["cyclic_year_set_by_importer"]),
 ])
@@ -67,16 +68,28 @@ def test_schedules_given_as_json_strings_import_the_same():
 
 
 def test_r1_bills_the_reopt_leap_year_cases():
-    """The imported R1 rates the REopt testset's loads (energy and demand;
-    REopt's per-day fixed conversion is a documented deviation)."""
+    """The imported R1 rates both REopt testset branches (runtests.jl
+    L4143–4210; REopt's `loads_kw[i]` is 1-based, so step i − 1). Energy and
+    demand only: REopt's per-day fixed conversion is a documented deviation."""
     tariff, _, _ = _import(_json("r1_leap_year.urdb.json"), _json("r1_leap_year.tariff.json"))
-    for year, energy, demand in ((2023, 0.28 * 10, 18.05 * 10), (2024, 0.36 * 10, 28.05 * 10)):
+
+    def bill(year, hours):
         idx = pd.date_range(f"{year}-01-01", periods=8760, freq="h")
         load = np.zeros(8760)
-        load[31 * 24 + 29 * 24 + 3 * 24 + 16] = 10.0 / 1000.0          # MW
-        res = rate(pd.DataFrame({"import_mw": load, "export_mw": 0.0}, index=idx), tariff,
-                   step_hours=1.0, timezone=None)
+        for h in hours:
+            load[h - 1] = 10.0 / 1000.0          # 10 kW in MW
+        return rate(pd.DataFrame({"import_mw": load, "export_mw": 0.0}, index=idx), tariff,
+                    step_hours=1.0, timezone=None)
+
+    tou = 31 * 24 + 29 * 24 + 3 * 24 + 16
+    for year, energy, demand in ((2023, 0.28 * 10, 18.05 * 10), (2024, 0.36 * 10, 28.05 * 10)):
+        res = bill(year, [tou])
         assert res.per_item["energy"] == pytest.approx(energy, abs=0.005)
+        assert res.per_item["demand"] + res.per_item["demand_tou"] == \
+            pytest.approx(demand, abs=0.005)
+    facility = [31 * 24 + 27 * 24 + 8, 31 * 24 + 28 * 24 + 8]   # Feb 28; Feb 29 or Mar 1
+    for year, demand in ((2023, 2 * 18.05 * 10), (2024, 18.05 * 10)):
+        res = bill(year, facility)
         assert res.per_item["demand"] + res.per_item["demand_tou"] == \
             pytest.approx(demand, abs=0.005)
 
@@ -165,6 +178,80 @@ def test_ratchet_modes():
     assert (r.lookback_months, r.months) == (None, [1, 7])
     t, _, _ = _imp(_facility(lookbackpercent=0.0, lookbackrange=6))
     assert _item(t, "demand").ratchet is None
+
+
+def test_a_lookback_reading_free_facility_months_is_refused():
+    """Review M1: REopt's ratchet reads every month's actual peak; the
+    engine's reads charged months only — refused, never under-billed."""
+    urdb = _base(flatdemandstructure=[[{"rate": 0.0}], [{"rate": 10.0}]],
+                 flatdemandmonths=[0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0], demandwindow=15,
+                 lookbackpercent=0.8, lookbackrange=11)
+    with pytest.raises(U.UrdbRefused) as exc:
+        _imp(urdb, cyclic_year=True)
+    assert [r["field"] for r in exc.value.refusals] == ["lookbackpercent"]
+    # Designated months that are all charged are fine.
+    ok = {**urdb, "lookbackrange": 0, "lookbackmonths": [0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0]}
+    _, refusals, _ = _imp(ok)
+    assert refusals == []
+
+
+def test_a_refused_unit_drops_the_item_instead_of_misreading_it():
+    """Review M2: a partial import misses a charge, never misstates it."""
+    urdb = _facility(flatdemandunit="kVA",
+                     energyratestructure=[[{"rate": 0.1, "max": 10, "unit": "kWh daily"},
+                                           {"rate": 0.2}]])
+    urdb["fixedmonthlycharge"] = 5.0
+    t, refusals, _ = _imp(urdb, accept_partial=True)
+    assert {r["field"] for r in refusals} == {"flatdemandunit", "energyratestructure.unit"}
+    assert [i.id for i in t.items] == ["fixed"]
+
+
+def test_cyclic_lookback_of_twelve_or_more_is_every_month_and_bad_flags_are_refused():
+    """Review L2."""
+    t, refusals, notes = _imp(_facility(lookbackpercent=0.5, lookbackrange=12),
+                              cyclic_year=True)
+    assert refusals == [] and "cyclic_lookbackrange_ge_12_as_all_months" in notes
+    assert _item(t, "demand").ratchet.months == list(range(1, 13))
+    with pytest.raises(U.UrdbRefused) as exc:
+        _imp(_facility(lookbackpercent=0.5, lookbackmonths=[1, 0, 1]))
+    assert [r["field"] for r in exc.value.refusals] == ["lookbackmonths"]
+
+
+def test_an_enddate_before_the_given_valid_from_is_ignored_and_noted():
+    """Review L3: an expired URDB rate imported for a later year."""
+    t, _, notes = _imp(_base(enddate=1577836800))                  # 2020-01-01
+    assert t.valid_to is None and "enddate_before_valid_from_ignored" in notes
+
+
+def test_notes_disclose_the_fixed_charge_choices():
+    """Review L5."""
+    _, _, notes = _imp(_base(fixedmonthlycharge=12.0, fixedchargefirstmeter=1.0,
+                             fixedchargeunits="$/day"))
+    assert "fixedchargefirstmeter_ignored_fixedmonthlycharge_used" in notes
+    _, _, notes = _imp(_base(fixedchargefirstmeter=1.0, fixedchargeunits="$/day"))
+    assert "fixed_per_day_billed_on_covered_days" in notes
+
+
+@pytest.mark.live_solve
+def test_a_partial_tariff_says_so_on_the_site_bill():
+    """Review L4: `tariff_incomplete` reaches `SiteBill.flags`."""
+    import queue
+    import threading
+
+    from services.commercial import billing as B
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig, run_simulation
+    from tests.fixtures.investment_case.edge_15min import build_edge_15min
+
+    t, _, _ = _imp(_base(mincharge=5.0), accept_partial=True)
+    commercial = {"poc_link": "import", "import_tariff": t.model_dump(mode="json")}
+    n = build_edge_15min()
+    PyPSAService.set_network(n)
+    status, _ = run_simulation(SolverConfig(commercial=commercial), n, PyPSAService.get_lock(),
+                               threading.Event(), queue.SimpleQueue(),
+                               state_update=lambda **k: None)
+    assert status in ("ok", "optimal")
+    assert "tariff_incomplete:mincharge" in B.bill_site(n, commercial).flags
 
 
 def test_tou_and_facility_demand_are_two_items():

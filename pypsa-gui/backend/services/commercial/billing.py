@@ -270,6 +270,10 @@ def bill_site(n, commercial, *, meter_history: dict | None = None) -> SiteBill:
                          f"{'billing_period_unknown' if 'billing_period' in str(exc) else 'invalid_dispatch'}")
             errors[key] = str(exc)[:300]  # what the engine refused (round 2 #3)
 
+    for res in per_period.values():
+        for f in (res.flags.get("_tariff") if res is not None else None) or []:
+            if f not in flags:
+                flags.append(f)   # a partial URDB import (WP2.4b-i review L4)
     drift, solve = _drift_flags(n, cfg)
     flags += drift
     provenance = {
