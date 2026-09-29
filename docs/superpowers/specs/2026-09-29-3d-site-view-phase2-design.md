@@ -3,14 +3,14 @@
 **Date:** 2026-09-29
 **Branch:** `claude/3d-site-visualization-gatc5z`
 **Parent:** `docs/superpowers/assessments/2026-09-28-3d-site-view-feasibility.md` (§8a decisions 5 and 9; §10 row "2 — assets + results") and the Phase 1 design `docs/superpowers/specs/2026-09-29-3d-site-view-phase1-design.md`, whose QA note (`docs/superpowers/notes/2026-09-29-3d-site-view-phase1-qa.md`) closes Phase 1.
-**Status:** design — the plan that implements it is a separate document.
+**Status:** design, revised after the two plan reviews (v2 of the plan lists the findings) — the plan that implements it is a separate document.
 
 ## 1. Goal
 
 Phase 1 gave the product its shape: a site the user draws, opens in 3D, arranges and grows. Phase 2 makes it answer the **investment question** the assessment set for it: *what does this plan look like on this plot, and how does it run?*
 
 1. **Every asset looks like what it is.** A table-driven library of asset types covers the palette and the carriers the app uses. Today an electrolyser added from the palette draws as a line bay, a pumped-hydro unit as battery containers, a heat load as a data hall.
-2. **A few assets look real.** A handful of curated, freely licensed models (turbine, container, transformer, tank, PV table, chiller) replace boxes up close, with the parametric geometry kept as the far and fallback form.
+2. **A few assets look real.** Five curated public-domain models (wind turbine, container, bullet tank, PV table, hall) replace the parametric boxes for those units, with the parametric geometry kept as the loading and fallback form.
 3. **Solved results move.** With a fresh solve, the timeline that already floats over every canvas drives the 3D scene: storage fills and empties, turbines turn with their output, halls glow with their load, feeders and transformers colour with their loading and show which way power flows.
 
 ## 2. Decisions
@@ -22,17 +22,17 @@ The decisions below are this design's. The owner has not been asked about them; 
 | # | Question | Decision (recommended) | Why |
 |---|---|---|---|
 | E1 | Where do asset types live? | **One data table, `site3d/assetLibrary.ts`**: each entry = match rule + sizing rule + geometry *template* + land-take rule + zone + colour + label + summary. `layout.ts` becomes the packer and template interpreter; it no longer names asset types. Replaces Phase 1's D17 `assetRules.ts` (its 13 numbers move into the entries that use them). | Phase 1 put 13 numbers in a table and left the classification, most geometry, zones, colours and labels hard-coded; adding a type meant editing five places. |
-| E2 | How is a component matched to a type? | **Class + carrier + port side**, first match wins, in table order; the last entry per class is its fallback. Link rules can test `bus2` (CHP). The component *name* is never used. | Names are user text; carriers are the model's own taxonomy (the app's carrier catalog). |
+| E2 | How is a component matched to a type? | Each type lists one or more **match rules** `{cls, carrier?, farCarrier?, hasBus2?, port?}`; the first matching type in table order wins; every class has exactly one **fallback** rule (no carrier). `farCarrier` tests the carrier of the port that is *not* the electrical one, which separates an electrolyser (AC → H2) from a fuel cell (H2 → AC). The **owner** (the member bus the object is drawn from) is chosen **after** matching: the port the rule names if that bus is a member, else the first member among bus0, bus1, bus2. Carrier regexes are anchored and have no `g`/`y` flag. The component *name* is never used. | Names are user text; carriers are the model's own taxonomy. Phase 1 chose the owner before knowing the type (bus0 first), which draws a fuel cell as an electrolyser at the H2 manifold and never draws a CHP whose only member is its heat bus. |
 | E3 | Which types? | **17 asset types plus 4 infrastructure types** (§4.2), chosen from the palette, the carrier catalog and the results views: every palette item gets a type that looks like it. | The assessment's 14–18 asset types; the palette has 18 items and several map wrongly today. |
-| E4 | Geometry vocabulary | Parts gain a **shape**: box (today), **cylinder** (tanks, towers, stacks, silos), and **hero** (a model reference with a box fallback). Templates stay parametric. | Tanks and towers as boxes read wrong; a cylinder is one more three.js primitive. |
-| E5 | Draw performance | **One merged geometry per object** (all its box/cylinder parts, vertex-coloured), not one mesh per part. Selection, hover and the outside-the-boundary tint stay per object. The per-object part cap (120) stays for the packer's summary, not for the renderer. | A campus is ~40 objects × up to 120 parts = several thousand draw calls today. Merging keeps selection semantics (one object = one mesh) without instancing bookkeeping. |
-| E6 | Sizes: installed or optimised? | **Installed (`p_nom`, `e_nom`, `s_nom`) by default; a "Sized: as built / optimised" switch** in the site overlay when a solve is fresh, which sizes extendable assets from `*_nom_opt`. **Owner check.** | "Investment decision" use wants to see what the optimiser built; the default must not change geometry behind the user's back after every solve. |
-| E7 | Hero models: which and how many | **Five hero models, all CC0, from one pack** (Kenney *City Kit Industrial 2.0*): wind turbine, shipping container, PV table group, bullet tank, industrial hall. Bundled with the app as static files (no CDN), **no Draco/meshopt** (so no decoder to ship or fetch), ~83 kB gzipped in total. The transformer, switchgear and dry coolers stay parametric. Details §5. **Owner check** (low-poly style). | §8a Q9 asked for 5–8 CC0/CC-BY models; the only CC-BY transformer candidates cannot be downloaded without a Sketchfab account, and nothing acceptable exists for switchgear. One pack = one consistent style and no attribution burden. |
-| E8 | Level of detail | **No distance LOD.** A hero is drawn **instanced**, one instance per unit (container, turbine, table, tank), one draw call per hero type per object; the packer's existing cap (≤ 120 units drawn per object, the rest summarised) bounds the instance count. The parametric form is drawn while the model loads and **whenever it fails to load**. | Measured sizes make LOD unnecessary: the worst case (120 containers × 402 triangles) is ~50k triangles in one call. The assessment's LOD line assumed heavier models. |
+| E4 | Geometry vocabulary | Parts gain a **shape**: box (today) or **cylinder** (tanks, towers, stacks), plus an **axis** for cylinders (`up`, `east`, `north`). `size` keeps Phase 1's order (east, north, height): a vertical tank is `[d, d, h]`, a horizontal bullet along north is `[d, length, d]`. Units a hero can replace are flagged `heroable`. | Tanks and towers as boxes read wrong; keeping the size order means the packer's pitch and ground-height rules do not change. |
+| E5 | Draw performance | **One merged geometry per object** (all its box/cylinder parts, vertex-coloured, indexed), not one mesh per part, **except** each turbine's rotor, which is its own mesh with its pivot at the hub (so it can spin). Selection, hover and the outside-the-boundary tint stay per object. The part cap (120 units drawn per object) now also applies to wind. | A campus is ~40 objects × up to 120 parts = several thousand draw calls today. Merging keeps selection semantics (one object = one mesh) without instancing bookkeeping. |
+| E6 | Sizes: installed or optimised? | **Installed (`p_nom`, `e_nom`, `s_nom`) by default; a "Sized: as built / optimised" switch** in the site overlay when a solve is fresh, which sizes extendable assets from `*_nom_opt`. The effective mode is optimised **only while** dispatch is fresh; after an edit the scene falls back to installed sizes even if the switch was left on. **Owner check.** | "Investment decision" use wants to see what the optimiser built; the default must not change geometry behind the user's back after every solve. |
+| E7 | Hero models: which and how many | **Five hero models, all CC0, from one pack** (Kenney *City Kit Industrial 2.0*): wind turbine, shipping container, PV table group, bullet tank, industrial hall. Bundled with the app as static files (no CDN), **no Draco/meshopt** (so no decoder to ship or fetch), ~59 kB gzipped in total (measured after processing). The transformer, switchgear and dry coolers stay parametric. Details §5. **Owner check** (low-poly style). | §8a Q9 asked for 5–8 CC0/CC-BY models; the only CC-BY transformer candidates cannot be downloaded without a Sketchfab account, and nothing acceptable exists for switchgear. One pack = one consistent style and no attribution burden. |
+| E8 | Level of detail | **No distance LOD.** A hero is drawn **instanced**, one instance per unit, with the model's own node transforms baked in, a per-hero base rotation onto the site axes, and a per-template **fit mode**: uniform scale (turbine, tank), long-axis stretch (container), uniform scale plus tiling (PV tables, halls). The turbine's blades are a second instanced mesh so each hub can spin. Hero materials are cloned per object (tint and selection never leak between objects). The packer's cap bounds the instance count. The parametric form is drawn while the model loads and whenever it fails. | Measured sizes make LOD unnecessary: the worst case (120 containers × 402 triangles) is ~50k triangles in one call. The assessment's LOD line assumed heavier models. |
 | E9 | Which results animate | Per asset, at the selected snapshot: **storage state of charge** (fill level), **output as a share of capacity** (generators, electrolysers, heat pumps, CHP), **load** (halls, offtakes), **loading and flow direction** (lines, transformers, DC links). Bus prices, voltages, curtailment and unit commitment are **not** drawn in Phase 2 (they stay in the Results tabs). | The four quantities a customer reads off a moving site; everything else is a table. |
 | E10 | How each result is shown | Fill level = a translucent level plane inside tanks and a bar on container rows; output = emissive intensity plus **wind rotors turning** at a speed ∝ output; loading = the existing red/amber/green `loadingColor` bands **plus** the percentage in the label (never colour only); direction = chevrons on feeders and transformers pointing downstream. | Reuses the canvases' conventions (`loadingColor`, SoC bands) so the 3D view reads like the other two. |
 | E11 | Timeline | **Reuse `SnapshotPicker` and `resultsSnapshotIdx`** (already shown over the 3D view). No second timeline. Values ease between snapshots over ~300 ms; **`prefers-reduced-motion` turns easing and rotor spin off**. | One time control for the whole app. |
-| E12 | When results show | Only when the Eye toggle is on (`resultsOverlayEnabled`) **and** `/simulation/status` says `dispatch === 'fresh'` — the 3D view does not trust cached result chunks after an edit (§6.3). Otherwise the scene is exactly Phase 1's. | The canvas overlays keep showing cached chunks after an edit today; the 3D view must not copy that. |
+| E12 | When results show | Only when the Eye toggle is on (`resultsOverlayEnabled`) **and** the 3D view's **own** status poll says `dispatch === 'fresh'` **and** each chunk was fetched after the latest transition to fresh (§6.3). Otherwise the scene is exactly Phase 1's. | Nothing in the app polls the status reliably (the status bar polls only after an in-session solve), and the canvases keep showing cached chunks after an edit and briefly after a re-solve; the 3D view must not copy either. |
 | E13 | Transformer flows | Fetched from `/results/transformers` and keyed `Transformer:<name>`. | The existing canvases never fetch them and the schematic looks transformers up in the Lines map (a bug to not copy; fixing the schematic is out of scope, §3). |
 
 **Rejected: instancing everything (E5).** Instanced meshes per part type would draw fastest, but selection, hover, per-object tint and the gizmo all work per object; with instancing each needs per-instance colour bookkeeping and a pick map. Merging per object gets the draw count from thousands to tens with none of that.
@@ -46,33 +46,36 @@ The decisions below are this design's. The owner has not been asked about them; 
 - Editing the asset table from the UI; per-project asset tables.
 - Product-faithful equipment, manufacturer models, BIM/IFC.
 - Photoreal context (Google 3D Tiles), Overture/LiDAR heights, glTF export — Phase 3.
-- Moving multi-port Links (CHP) as one object across two sites; a CHP belongs to the site of its `bus0`.
+- Drawing a multi-port Link (CHP) in two sites; it is drawn once, from the owner chosen by E2.
 
 ## 4. Asset library
 
 ### 4.1 Entry shape
 
 ```ts
+interface Match {
+  cls: PyPSAClass                    // 'Generator' | 'StorageUnit' | 'Store' | 'Load' | 'Link' | 'Line' | 'Transformer' | 'Bus'
+  carrier?: RegExp                   // the component's carrier (Bus: the bus's); absent = the class fallback
+  farCarrier?: RegExp                // Links: the carrier of the non-electrical port (H2 for an electrolyser's bus1)
+  hasBus2?: boolean                  // three-port Links (CHP); an empty-string bus2 counts as absent
+  port?: 'bus0' | 'bus1' | 'bus2'    // the port the object is drawn from when that bus is a member
+}
 interface AssetType {
-  id: string                         // 'bess', 'electrolyser', …
-  label: string                      // legend text
+  id: string                         // Phase 1 ids kept where the type is unchanged (switchyard, transformer, feeder, bess, pv, wind, electrolyser, h2store, load)
+  label: string | ((carrier: string) => string)   // legend text; the Generator fallback names the carrier
   color: string                      // body colour; parts may override
   zone: 'yard' | 'west' | 'east' | 'northeast' | 'south' | 'roof'
-  match: {
-    cls: PyPSAClass                  // 'Generator' | 'StorageUnit' | 'Store' | 'Load' | 'Link' | 'Line' | 'Transformer' | 'Bus'
-    carrier?: RegExp                 // tested against the carrier; absent = any
-    side?: 'bus0' | 'bus1'           // the member bus must be this port (two-port Links)
-    hasBus2?: boolean                // CHP-style three-port Links
-  }
+  match: Match[]                     // one or more; a type may span classes (BESS: StorageUnit and Store)
   size: SizeRule                     // which parameter, unit rating, minimum placeholder
   geometry: Template                 // one of the templates in §4.3, with its numbers
   land: 'footprint' | { haPerMW: number } | 'none'   // rooftop PV takes no land
   summary: (n: SizeInfo) => string   // "40 MWh in 10 containers"
   hero?: HeroRef                     // §5; absent = parametric only
+  flags?: { bay?: boolean; infrastructure?: boolean }   // bays widen the yard; infrastructure is not counted as an asset
 }
 ```
 
-Validation (`validateLibrary`) replaces `validateRules`: every number finite and > 0, every id unique, every class has a fallback entry (an entry with no `carrier`), templates known, hero refs known. The table is frozen; `buildSiteLayout(input, library = DEFAULT_LIBRARY)` takes it as an argument (no module-level mutable state; Phase 1 held the rules in a module global).
+Validation (`validateLibrary`) replaces `validateRules`: every number finite and > 0, every id unique, every class has exactly one fallback rule (a rule with no `carrier`) and it belongs to the last type matching that class, no regex carries a `g`/`y` flag, templates known, hero refs known. The table is frozen; `buildSiteLayout(input, library = DEFAULT_LIBRARY)` takes it as an argument (no module-level mutable state; Phase 1 held the rules in a module global).
 
 ### 4.2 The types
 
@@ -102,7 +105,9 @@ Validation (`validateLibrary`) replaces `validateRules`: every number finite and
 
 The first four rows are infrastructure; the other 17 are asset types. Remaining carriers (nuclear, coal, lignite, ror, geothermal, wave, tidal) fall to the class fallback of their class — the engine genset for Generators, which is labelled with the carrier so it does not pretend to be a genset ("coal — generic plant block").
 
-`H2` as a Link carrier is ambiguous (the palette uses it for both electrolysers and fuel cells). The **side** rule resolves it: a Link whose `bus0` is the electrical member and whose `bus1` carrier is H2 is an electrolyser; the reverse is a fuel cell. That needs the far bus's carrier, which the layout input gains (`busCarrier(name)`).
+`H2` as a Link carrier is ambiguous (the palette uses it for both electrolysers and fuel cells). `farCarrier` resolves it: an H2 Link whose bus1 is an H2 bus is an electrolyser (drawn from bus0, the electrical side); one whose bus0 is an H2 bus is a fuel cell (drawn from bus1, the electrical side). That needs every bus's carrier, which the layout input gains (`busCarrier(name)`, built from all network buses; an unknown carrier counts as AC). A type whose named port is not a member is drawn from the first member port instead, so it still appears once.
+
+**Rooftop PV** is placed by a site-wide pass after placements are applied: it takes the final origin of the largest data hall in the site (any member bus), follows it when the hall moves, and is exempt from the no-overlap rule (it is on the roof). Without a hall it stands on a 4 m canopy in the south zone.
 
 ### 4.3 Templates
 
@@ -128,13 +133,15 @@ Source: Kenney, *City Kit (Industrial) 2.0*, https://kenney.nl/assets/city-kit-i
 | Bullet tank | `detail-tank.glb` | H₂ storage | 310 | 8 kB | Horizontal on saddles; scaled to the tank length. |
 | Hall | `building-s.glb` | Data hall, electrolyser BoP building | ~1–2k | 10–28 kB | Long low shed; scaled to the hall footprint. |
 
-Every file shares one 512² colour-map texture (12 kB). Measured by download and `gltf-transform inspect`; total ≈ 83 kB gzipped.
+After processing, each file embeds its own 2.6 kB WebP copy of the pack's colour map (`EXT_texture_webp`, required); the five files total 192 kB raw, 59 kB gzipped (measured). WebP is decoded by Chromium and by WKWebView on macOS 14, the packaged app's minimum (`pypsa-gui.spec`).
+
+The models do not share the site's axes or scale: the container's root carries a 0.27 scale and runs along glTF Z; the tank's root is mirrored (`scale [-1, 1, 1]`) and runs along X; the turbine's hub is at 1.676 units, not at its 2.31 total height, and its rotor axis is X. The manifest records, per hero, the baked node matrices, a base rotation onto (east, north, up), the hub pivot and rotor axis, and the fit mode (E8).
 
 ### 5.2 Processing and loading
 
-- Files are processed once, offline, with `@gltf-transform/cli` and committed under `frontend/public/site3d/models/`: `optimize --compress false --texture-compress webp --join-named false --flatten false` (**not** meshopt: it rewrites node transforms and made the blade node wobble; **not** Draco: it would need a decoder shipped or fetched). The shared texture is kept as PNG if WebP cannot be confirmed in the packaged webview.
+- Files are processed once, offline, with `@gltf-transform/cli` and committed under `frontend/public/site3d/models/`: `optimize --compress false --texture-compress webp --join-named false --flatten false` (**not** meshopt: it rewrites node transforms and made the blade node wobble; **not** Draco: it would need a decoder shipped or fetched).
 - A `models/README.md` records source URL, licence, version and the exact command, so a file can be regenerated.
-- Loading: `useGLTF(url, false, false)` — drei's default fetches the Draco decoder from a Google CDN, which the offline desktop app must never do. Loaded under `<Suspense>` per object with the parametric form as the fallback; an `ErrorBoundary` keeps the parametric form on failure.
+- Loading: `useGLTF(url, false, false)` — drei's default fetches the Draco decoder from a Google CDN, which the offline desktop app must never do. Loaded under `<Suspense>` per object with the parametric form as the fallback; a small scene-graph error boundary (the app's DOM `ErrorBoundary` cannot render inside the Canvas) keeps the parametric form on failure.
 - Vite copies `public/` into `dist/`, which the desktop build already bundles; nothing in the JS chunks grows.
 
 ### 5.3 Rejected
@@ -147,7 +154,7 @@ Every file shares one 512² colour-map texture (12 kB). Measured by download and
 
 ### 6.1 Data
 
-A new hook, `useSiteResults(project, site objects)`, reuses the chunked-series machinery of `CanvasResultsContext` (`useChunkedSeries`, exported for the purpose, same query keys, so the 3D view shares the cache with the other canvases) and builds **one map per snapshot**: `Map<"Class:name", AssetState>` for the site's objects only.
+A new hook, `useSiteResults(project, objects, components)`, takes the site's objects **and** the component lists SiteCanvas already fetched (capacities, buses, `max_hours` live there, not on `SiteObject`). It reuses the chunked-series machinery of `CanvasResultsContext` (`useChunkedSeries`, exported with an additive variant that also reports when a chunk was fetched; same query keys, so the 3D view shares the cache with the other canvases) and builds **one map per snapshot**: `Map<"Class:name", AssetState>` for the site's objects only. It runs in a leaf component inside the Canvas and writes into a ref, so a snapshot step re-renders that leaf only.
 
 | Class | Series (endpoint) | State |
 |---|---|---|
@@ -159,7 +166,7 @@ A new hook, `useSiteResults(project, site objects)`, reuses the chunked-series m
 | Line | `p0` (`/results/lines`) | MW, loading %, direction |
 | Transformer | `p0` (`/results/transformers`) | MW, loading %, direction |
 
-Capacity denominators: `*_nom_opt` when present, else `*_nom` (the same rule as the context's SoC). Loading uses `s_nom_opt`/`s_nom`, as the other canvases do (they ignore `s_max_pu`; so does this, and the label says "of rating").
+Capacity denominators come from one helper: `*_nom_opt` if finite and > 0, else `*_nom` if > 0, else no share (the label shows MW only). In multi-period runs the capacity is the **period-effective** one (the context's vintage rule, moved into a shared pure module). A load's share is of its **profile peak** (load-profile metadata × the largest scaler, else |p_set|), clamped to 0–1, and the label always shows MW. Link values are **MW in** at bus0 (there is no bulk p1 series). Loading uses `s_nom_opt`/`s_nom`, as the other canvases do (they ignore `s_max_pu`; so does this, and the label says "of rating"). Every share's label names its capacity ("SoC 64 % of 160 MWh"), because the drawn size (E6) and the denominator can differ.
 
 ### 6.2 Pure mapping
 
@@ -167,16 +174,26 @@ Capacity denominators: `*_nom_opt` when present, else `*_nom` (the same rule as 
 
 ### 6.3 Freshness
 
-The hook is enabled only when `resultsOverlayEnabled` and `status.dispatch === 'fresh'` (`/simulation/status`, already polled by `StatusBar`). A fresh → not-fresh transition drops the map immediately, before any cached chunk can be drawn.
+Three rules, because no existing observer is reliable (the status bar polls `/simulation/status` only after an in-session solve; component edits do not invalidate the status; result chunks are not invalidated by edits):
+
+1. The hook **owns a status poll** (same query key as the status bar, every 3 s while the Eye is on), independent of the simulation store's state. Its data never triggers the status bar's toast.
+2. It **drops the map** as soon as any component list the site reads refetches after the map was built (an edit), without waiting for the poll. Placement writes go to the sites sidecar and do not count.
+3. It **rejects a chunk fetched before the latest transition to fresh** (a re-solve), so the previous solve's values are never shown as current.
 
 ### 6.4 Rendering
 
-A `ResultsLayer` inside the Canvas reads the map for the current snapshot and drives each object's animation anchors in `useFrame`, easing towards the target over ~300 ms; the scene graph does not re-render per tick (anchors are refs). With reduced motion, targets apply instantly and rotors hold still (their speed shows in the label). The legend gains the loading and SoC bands when results are on.
+A `ResultsLayer` inside the Canvas reads the map for the current snapshot and drives each object's anchors in `useFrame`, easing towards the target over ~300 ms; SiteCanvas and the object meshes do not re-render per snapshot (selector subscriptions, memoised meshes; the driver leaf is the only thing that renders per snapshot, nothing renders per frame). With reduced motion, targets apply instantly and rotors hold still (their speed shows in the label).
+
+- **Fill** is an exterior **gauge** (a bar beside the tank array or container row, its own material), not a plane inside an opaque body.
+- **Glow** uses the emissive channel with a fixed precedence: selected > outside the boundary > results.
+- **Spin**: each turbine's rotor mesh (parametric) or blade instance (hero) rotates about its own hub.
+- **Flow**: `SiteObject` gains `bus` (its owner) and `far` (the other end); the flow anchor is a segment from the owner's yard side to the far side; chevrons point downstream: `sign(p0) × (bus is bus0 ? 1 : −1)`, and the label names the destination bus.
+- **Not colour-only, and not hover-only**: while results are on, the overlay lists the site's objects with their current value (a compact readout), the legend prints the band thresholds, and the timeline's slider gets an accessible name and value text.
 
 ## 7. Performance and bundle
 
 - Objects: one merged mesh per object (E5); a campus of ~40 objects draws in ~40–60 calls plus context.
-- Heroes: instanced per type; LOD distance per type.
+- Heroes: instanced per type (no distance LOD, E8); blades a second instanced mesh.
 - Bundle: nothing new in the main chunk except `resultStyle.ts` and the library table (both small; the main-chunk budget of +5 kB over the Phase 1 close applies again). three.js loaders stay in the `SiteCanvas` chunk. Model files are static assets, not in any JS chunk.
 
 ## 8. Follow-ups noticed (not in this phase)
