@@ -188,6 +188,18 @@ disjointness, stale party at ledger time → flag, not an invalid config); `If-M
 `ppa_dispatch_hash`, `contracts_record`, no `config_changed_since_solve`, and an unchanged adequacy
 `assumptions_hash`; the FIELDS_AFTER_V1 inventory test.
 
+
+**WP3.0 implementation (fb35865; master-merge regressions fixed in the next commit).**
+- **Review round 1 → PASS WITH CONDITIONS, fixed:**
+  - #1 a misshaped body (the config unwrapped, or `{}`) cleared the stored value; the body field is now required and extra keys are forbidden (422);
+  - #2 the fixture test was tautological; it is now a recipe-1/2 invisibility check plus route round trips of three P1/P2 shapes;
+  - #3 `value_flows: Any`, so a string or list in a hand-edited file cannot fail `_lp._parse`; a live solve with three corrupted values solves, bills and reconciles;
+  - #4 a stored commercial config that no longer validates answers 409 `commercial_config_invalid`, not 500;
+  - #5 more party checks: blank ids, blank or duplicate externals, a payee rule naming an item the tariff lacks, duplicate hub links or participants, `contracted_capacity` needing every `contracted_mw`;
+  - #6 `If-Match` accepts quoted and weak tags;
+  - #7 `attach_tariff` strips `value_flows` before its PUT;
+  - #8 a live solve, then a value-flows edit, then billing and `cost_breakdown`, shows no `config_changed_since_solve`.
+- The WP3.5 editor and the WP3.4 chat tool must always send `If-Match`. Chat errors from the new 422s arrive as the generic `tool_error` kind, like the existing binding refusals (INFO).
 ---
 
 ## WP3.1 Ledger: sources, lines, coverage, reconciliation

@@ -90,9 +90,18 @@ def value_flows_problems(vf: ValueFlowConfig, commercial: CommercialConfig, n) -
     ids = [p.id for p in vf.participants]
     seen: list[str] = []
     for pid in ids:
-        if _in(pid, seen):
+        if not pid.strip():
+            problems.append(f"a participant id is empty after trimming: {pid!r}")
+        elif _in(pid, seen):
             problems.append(f"participant ids must be unique (trimmed, case-insensitive): {pid!r}")
         seen.append(pid)
+    ext_seen: list[str] = []
+    for ext in vf.externals:
+        if not ext.strip():
+            problems.append(f"an external is empty after trimming: {ext!r}")
+        elif _in(ext, ext_seen):
+            problems.append(f"externals must be unique (trimmed, case-insensitive): {ext!r}")
+        ext_seen.append(ext)
     for pid in ids:
         if _in(pid, vf.externals):
             problems.append(f"participant {pid!r} is also an external; a party is one or the other")
@@ -122,10 +131,16 @@ def value_flows_problems(vf: ValueFlowConfig, commercial: CommercialConfig, n) -
             problems.append(f"{own.component} {own.asset_id!r} is owned twice")
         owned.append(key)
 
+    item_ids = ([i.id for i in commercial.import_tariff.items]
+                if commercial.import_tariff is not None else None)
     for rule in vf.tariff_payees:
         if not _in(rule.payee, parties):
             problems.append(f"tariff payee {rule.payee!r} is neither a participant nor an "
                             "external")
+        if rule.item_id is not None and item_ids is not None and rule.item_id not in item_ids:
+            # A typo would silently fall back to the default payee.
+            problems.append(f"tariff payee rule names item {rule.item_id!r}, which the import "
+                            f"tariff does not have (items: {item_ids})")
 
     grouped = commercial.group_contract is not None
     if vf.template == "energy_hub" and not grouped:
@@ -134,13 +149,24 @@ def value_flows_problems(vf: ValueFlowConfig, commercial: CommercialConfig, n) -
         problems.append("hub_members need a group contract")
     if vf.allocation is not None and not grouped:
         problems.append("an allocation key needs a group contract")
-    hub_parts = []
+    hub_parts: list[str] = []
+    hub_links: list[str] = []
     for m in vf.hub_members:
         if m.link not in commercial.group_members:
             problems.append(f"hub member link {m.link!r} is not a group member")
+        if m.link in hub_links:
+            problems.append(f"hub member link {m.link!r} is listed twice")
         if not _in(m.participant, ids):
             problems.append(f"hub member {m.participant!r} is not a participant")
+        elif _in(m.participant, hub_parts):
+            problems.append(f"hub member participant {m.participant!r} is listed twice")
         hub_parts.append(m.participant)
+        hub_links.append(m.link)
+    if vf.allocation is not None and vf.allocation.basis == "contracted_capacity":
+        missing = [m.link for m in vf.hub_members if m.contracted_mw is None]
+        if missing or not vf.hub_members:
+            problems.append("the contracted_capacity key needs contracted_mw on every hub "
+                            f"member (missing: {missing or 'no hub members'})")
     if vf.allocation is not None and vf.allocation.basis == "fixed_shares":
         keys = list((vf.allocation.shares or {}).keys())
         if sorted(k.strip().casefold() for k in keys) != \

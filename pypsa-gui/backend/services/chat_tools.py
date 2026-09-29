@@ -1538,6 +1538,9 @@ def attach_tariff(name: str, version: int | None = None, replace_inline: bool = 
 
     ref = _library_call(_get, ItemKind.tariff, name, version=version).ref.model_dump(mode="json")
     commercial = dict((_cfg() or {}).get("commercial") or {})
+    # The value-flow config is owned by its own route: omit it so the solver-config
+    # route keeps whatever is stored when this PUT lands (IC P3 WP3.0, plan C7).
+    commercial.pop("value_flows", None)
     if not commercial.get("poc_link"):
         raise HTTPException(status_code=409, detail={
             "error_kind": "no_commercial_config",

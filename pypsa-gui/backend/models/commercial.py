@@ -655,7 +655,9 @@ class CommercialConfig(BaseModel):
     # stored value that later fails a rule never fails a solve or invalidates
     # the commercial rows. Written only through its own route; never read by
     # the LP or any committed hash (decision 9).
-    value_flows: dict[str, Any] | None = None
+    # `Any`, not `dict`: a hand-edited file holding a string or a list must not
+    # make `_lp._parse` fail the solve either (WP3.0 review #3).
+    value_flows: Any = None
 
     @model_validator(mode="before")
     @classmethod

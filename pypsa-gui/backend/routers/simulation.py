@@ -152,7 +152,7 @@ class BufferedLogQueue:
             self._subscribers.pop(sub_id, None)
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.orm import Session as DBSession
 
 from db.models import User
@@ -566,7 +566,20 @@ def update_solver_config(
 
 
 class ValueFlowsIn(BaseModel):
-    value_flows: dict[str, Any] | None = None
+    # Required and closed: an unwrapped config or an empty body must be a 422,
+    # never a default `null` that clears the stored value (WP3.0 review #1).
+    model_config = ConfigDict(extra="forbid")
+    value_flows: dict[str, Any] | None = Field(...)
+
+
+def _entity_tag(value: str | None) -> str | None:
+    """An `If-Match` value without the `W/` prefix and quotes (review #6)."""
+    if value is None:
+        return None
+    tag = value.strip()
+    if tag.startswith("W/"):
+        tag = tag[2:]
+    return tag.strip('"')
 
 
 def _value_flows_state(commercial) -> dict:
@@ -611,7 +624,7 @@ def put_value_flows(body: ValueFlowsIn, if_match: str | None = Header(default=No
             raise HTTPException(409, {"code": "no_commercial_config",
                                       "message": "set the commercial config (poc_link) first"})
         current = commercial.get("value_flows")
-        if if_match is not None and if_match != P.value_flows_digest(current):
+        if if_match is not None and _entity_tag(if_match) != P.value_flows_digest(current):
             raise HTTPException(412, {"code": "value_flows_changed",
                                       "message": "the value-flow config changed since it was "
                                                  "read; reload and re-apply the edit"})
@@ -621,8 +634,15 @@ def put_value_flows(body: ValueFlowsIn, if_match: str | None = Header(default=No
                 vf = P.parse_value_flows(body.value_flows)
             except P.ValueFlowsInvalid as exc:
                 raise HTTPException(422, {"code": exc.code, "message": str(exc)}) from exc
-            problems = P.value_flows_problems(vf, CommercialConfig.model_validate(commercial),
-                                              PyPSAService.get_network())
+            try:
+                bound = CommercialConfig.model_validate(commercial)
+            except ValidationError as exc:
+                # The load path does not re-validate a stored config (review #4).
+                raise HTTPException(409, {"code": "commercial_config_invalid",
+                                          "message": "the stored commercial config does not "
+                                                     f"validate; re-save it first ({exc.errors()[0]['msg']})"}) \
+                    from exc
+            problems = P.value_flows_problems(vf, bound, PyPSAService.get_network())
             if problems:
                 raise HTTPException(422, {"code": "value_flows_invalid",
                                           "message": "; ".join(problems),

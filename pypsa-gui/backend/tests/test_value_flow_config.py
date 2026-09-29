@@ -71,12 +71,18 @@ def test_the_commercial_config_stores_value_flows_raw_so_a_bad_value_never_fails
     assert cfg.value_flows == bad
 
 
-def test_every_p1_and_p2_commercial_fixture_still_validates_unchanged():
+def test_an_earlier_config_validates_and_its_recipe_1_form_is_unchanged():
+    """A P0-era payload validates, and the new field is invisible to recipe 1
+    at its default, so a recipe-1 hash stored before P3 still compares equal."""
+    from services.commercial import hashing as H
+
     raw = json.loads((FIXTURES / "commercial_config_minimal.json").read_text())
     cfg = CommercialConfig.model_validate(raw)
     assert cfg.value_flows is None
-    assert cfg.model_dump(mode="json", exclude_defaults=True) == \
-        CommercialConfig.model_validate(raw).model_dump(mode="json", exclude_defaults=True)
+    assert "value_flows" not in H.canonical(cfg, version=1)
+    assert "value_flows" not in H.canonical(cfg, version=2)
+    with_vf = CommercialConfig.model_validate({**raw, "value_flows": VF})
+    assert "value_flows" in H.canonical(with_vf, version=1)   # a set value is not hidden
 
 
 # ── lazy parsing and party validation ──────────────────────────────────────
@@ -318,3 +324,127 @@ def test_a_corrupted_stored_value_still_solves_the_commercial_layer(site, sessio
     r = site.get("/api/simulation/commercial/value_flows")
     assert r.status_code == 200
     assert r.json()["status"] == "value_flows_invalid"
+
+
+# ── WP3.0 review round 1 ───────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("body", [VF, {}, {"value_flows": VF, "extra": 1}])
+def test_a_misshaped_body_is_422_never_a_silent_clear(site, body):
+    """#1: an unwrapped config or an empty body used to default to `null` and
+    clear the stored value."""
+    site.put("/api/simulation/commercial/value_flows", json={"value_flows": VF})
+    r = site.put("/api/simulation/commercial/value_flows", json=body)
+    assert r.status_code == 422, r.text
+    assert _get(site)["value_flows"]["template"] == "btm_ppa"
+
+
+def test_a_quoted_or_weak_if_match_is_the_same_token(site):
+    """#6: HTTP clients may quote an entity tag."""
+    d = _get(site)["digest"]
+    for header in (f'"{d}"', f'W/"{d}"'):
+        r = site.put("/api/simulation/commercial/value_flows", json={"value_flows": None},
+                     headers={"If-Match": header})
+        assert r.status_code == 200, (header, r.text)
+
+
+def test_a_stored_commercial_config_that_no_longer_validates_is_409_not_500(site, session_ctx):
+    """#4: the load path does not re-validate a stored config."""
+    ctx = session_ctx(site)
+    commercial = dict(ctx.solver_state["solver_config"].commercial)
+    commercial["poc_link"] = ""
+    ctx.solver_state["solver_config"].commercial = commercial
+    r = site.put("/api/simulation/commercial/value_flows", json={"value_flows": VF})
+    assert r.status_code == 409
+    assert r.json()["detail"]["code"] == "commercial_config_invalid"
+
+
+@pytest.mark.parametrize("mutate,needle", [
+    (lambda v: v["participants"].append({"id": "  ", "name": "blank", "role": "other"}),
+     "empty"),
+    (lambda v: v.update(externals=["", "dso"]), "empty"),
+    (lambda v: v.update(externals=["dso", "DSO"]), "externals must be unique"),
+    (lambda v: v.update(tariff_payees=[{"item_id": "demnd", "payee": "dso"}]), "demnd"),
+])
+def test_further_party_problems_are_named(mutate, needle):
+    """#5."""
+    vf = copy.deepcopy(VF)
+    mutate(vf)
+    problems = _problems(vf)
+    assert any(needle in p for p in problems), problems
+
+
+def test_hub_members_are_unique_and_contracted_capacity_needs_every_member_mw():
+    hub = {"template": "energy_hub",
+           "participants": [{"id": "site", "name": "Hub", "role": "site_owner"},
+                            {"id": "a", "name": "A", "role": "hub_member"}],
+           "hub_members": [{"link": "import", "participant": "a"},
+                           {"link": "import", "participant": "a"}],
+           "allocation": {"basis": "contracted_capacity"}}
+    problems = _problems(hub, contracts=(), group_contract="g", group_members=["import"],
+                         group_cap_mw=5.0)
+    assert any("twice" in p for p in problems), problems
+    assert any("contracted_mw" in p for p in problems), problems
+
+
+# `commercial_config_minimal.json` carries only an `import_tariff_id` label, which the
+# binding refuses on a network (P2 WP2.4a); it is covered at the model level above.
+@pytest.mark.parametrize("commercial", [
+    _commercial(),
+    _commercial(contracts=(PPA, {"type": "lease", "id": "l", "lessor": "a", "lessee": "site",
+                                 "annual_payment": 1000.0, "tenor_years": 5,
+                                 "asset_ids": ["bess"]})),
+    _commercial(group_contract="g", group_members=["import"], group_cap_mw=5.0),
+], ids=["tariff_ppa", "lease", "group"])
+def test_p1_and_p2_configs_round_trip_through_the_route_unchanged(client, install_network,
+                                                                  commercial):
+    """#2: every earlier shape binds and comes back as it went in, with only
+    `value_flows: null` added."""
+    install_network(build_edge_15min(), name="vf_rt")
+    r = client.put("/api/simulation/solver_config", json={"commercial": commercial})
+    assert r.status_code == 200, r.text
+    back = client.get("/api/simulation/solver_config").json()["commercial"]
+    assert back["value_flows"] is None
+    want = CommercialConfig.model_validate(commercial).model_dump(mode="json")
+    assert {k: v for k, v in back.items() if k != "value_flows"} == \
+        {k: v for k, v in want.items() if k != "value_flows"}
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("garbage", ["garbage", {"participants": "x"}, [1, 2]])
+def test_a_corrupted_value_flows_still_solves_bills_and_reconciles(reset_backend, garbage):
+    """#3 (C8): a stored value of any shape is data, never a solve failure."""
+    import routers.results as R
+    from tests.test_results_billing import _commercial as billed, _solved
+
+    commercial = {**billed(), "value_flows": garbage}
+    n, cfg = _solved(commercial)
+    out = R.get_billing()
+    assert out["gap"]["gates"] == []
+    for kind, v in out["gap"]["periods"]["_"].items():
+        assert v["unattributed_pct"] is not None and v["unattributed_pct"] < 1e-6, kind
+
+
+@pytest.mark.live_solve
+def test_a_value_flows_edit_after_a_solve_raises_no_drift(reset_backend):
+    """#8: the plan's 'no config_changed_since_solve' — solve, edit the
+    participants through the route, and read every commercial surface."""
+    import routers.results as R
+    import routers.simulation as S
+    from services.results.cost_breakdown import compute_cost_breakdown
+    from tests.test_results_billing import _commercial as billed, _solved
+
+    n, cfg = _solved(billed())
+    before = json.dumps(R.get_billing(), sort_keys=True, default=str)
+    assert "config_changed_since_solve" not in before
+    vf = {"participants": [{"id": "site", "name": "Site", "role": "site_owner"},
+                           {"id": "Solar BV", "name": "Solar", "role": "developer"},
+                           {"id": "Leasing GmbH", "name": "L", "role": "landlord"}]}
+    S.put_value_flows(S.ValueFlowsIn(value_flows=vf), if_match=None)
+    cfg2 = S._state["solver_config"]
+    assert cfg2.commercial["value_flows"]["participants"][1]["id"] == "Solar BV"
+    after = R.get_billing()
+    text = json.dumps(after, sort_keys=True, default=str)
+    assert "config_changed_since_solve" not in text and "lp_recipe_changed" not in text
+    rows = compute_cost_breakdown(S.PyPSAService.get_network(), cfg2)["commercial"]
+    assert "config_changed_since_solve" not in json.dumps(rows, default=str)
