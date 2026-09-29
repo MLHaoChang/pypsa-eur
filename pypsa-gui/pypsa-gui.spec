@@ -175,6 +175,12 @@ hiddenimports = [
     # by `test_the_spec_names_every_gridspine_module_the_backend_guard_imports`,
     # which derives the list from the guard instead of trusting this one.
     "gridspine.drivers.readback",
+    # `drivers.year_study` reached the guard the same way, with the client's
+    # own dispatch as a study source (increment 7, A2): `check_external`
+    # validates the uploaded dispatch/loads tables before they are promoted.
+    # Missing here, the external-dispatch upload would 503 in a build that
+    # dropped it — the same slip as readback, caught by the test above.
+    "gridspine.drivers.year_study",
     "gridspine.schema.contracts", "gridspine.templates.unit_params",
 ]
 
