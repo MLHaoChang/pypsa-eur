@@ -173,7 +173,7 @@ diff, capabilities, opportunistic PDF, four chat tools,
 | Regression | frontend `npx vitest run` + `npx tsc -b` | 190 files, 2140 tests passed; tsc clean |
 | Integration | `test_report_roundtrip_routes.py` (roundtrip POST every status, diff on stored versions, capabilities via `shutil.which`, export pdf 501/200/500 with `subprocess.run` faked, regenerate uses and clears `pending_instruction`, upload kind) | 20 passed (counted above) |
 | End-to-end QA | `tests/qa_reports_phase5.py` (real study → generate on the fake provider → export → edit with python-docx: a rewritten `fmea_top` paragraph, a comment "shorten this" on a `certification` run, a tracked deletion+insertion in `target` → upload as `report_roundtrip` → merge: `fmea_top` is `user_edit` with the edited text, `certification.pending_instruction == "shorten this"`, `accepted_tracked_changes == 2` → diff marks `fmea_top` changed, the rest unchanged → regenerate `certification` with no instruction: the provider saw "shorten this", the new version's `pending_instruction` is null → capabilities `pdf: true` (soffice on PATH) → export pdf → 500 `pdf_conversion_failed` here because LibreOffice in the container writes no PDF → chat `list_report_roundtrips`, `diff_report_versions`) | 37/37 PASS, 0 skipped |
-| End-to-end QA | drivers 0–4 re-run on this tree | _(run in progress at commit time; filled in the next commit)_ |
+| End-to-end QA | drivers 0–4 re-run on this tree | phase 0 18/18, phase 1 38/38, phase 2 47/47, phase 4 47/47 — all PASS |
 
 **Recorded corrections.** The three phase-5 packages were built in parallel
 against pinned interfaces; the only seam neither side owned was the store's
