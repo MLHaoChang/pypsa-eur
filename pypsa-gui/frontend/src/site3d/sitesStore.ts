@@ -87,7 +87,14 @@ interface SitesState {
   setPlacement: (project: string | null, siteId: string, key: string, placement: Placement) => void
   removePlacement: (project: string | null, siteId: string, key: string) => void
   renamePlacement: (project: string | null, cls: string, oldName: string, newName: string) => boolean
-  /** Replace a project's document wholesale (Arrange, prune). */
+  /**
+   * Arrange (D8): write every packed object's current position as a
+   * placement so it becomes stable, and prune the placements the layout
+   * reported as orphans (D14 — the one moment they are removed). Any other
+   * existing placement is kept.
+   */
+  arrangeAll: (project: string | null, siteId: string, objects: Array<{ key: string; origin: [number, number]; heading: number }>, orphans: string[]) => void
+  /** Replace a project's document wholesale. */
   replaceDocument: (project: string | null, doc: SitesDocument) => void
   resetForTests: () => void
 }
@@ -180,6 +187,15 @@ export const useSitesStore = create<SitesState>((set, get) => {
       }))
       return true
     },
+    arrangeAll: (project, siteId, objects, orphans) => editSite(project, siteId, s => {
+      // Every existing placement survives unless the layout named it an
+      // orphan; a key absent from `objects` for another reason (its bus has
+      // no coordinates today) keeps its placement.
+      const placements: Record<string, Placement> = { ...s.placements }
+      for (const k of orphans) delete placements[k]
+      for (const o of objects) placements[o.key] ??= { x: o.origin[0], y: o.origin[1], heading: o.heading }
+      return { ...s, placements }
+    }),
     replaceDocument: (project, doc) => {
       doc.sites.forEach(assertSiteValid)
       write(project, () => doc)

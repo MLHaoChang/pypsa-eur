@@ -2,10 +2,12 @@
 //
 // Phase 1 (docs/superpowers/specs/2026-09-29-3d-site-view-phase1-design.md):
 // a SITE — a user-drawn boundary grouping one or more buses — opened as a
-// portal from the map. Every component attached to the site's primary bus
-// is drawn as parametric boxes on a ground plane textured with the Esri
-// imagery the map view already uses; the boundary is a ribbon on the
-// ground; the status line says whether the plan fits the plot (D9).
+// portal from the map. One switchyard per member bus at that bus's offset
+// from the site origin; every component attached to a member bus is drawn
+// as parametric boxes packed around its yard, or at its placement if the
+// user moved it; the boundary is a ribbon on the ground; the status line
+// says whether the plan fits the plot (D9); the selected object carries a
+// gizmo (D7).
 //
 // Clicking a box selects the component exactly as the other two canvases do
 // (`setSelectedComponent({type, name})`), so the properties panel opens and
@@ -13,17 +15,15 @@
 // invalidation — the scene holds no state of its own beyond hover and camera.
 //
 // Frames. Everything in the scene is metres east/north of the SITE ORIGIN
-// (the boundary's stored centroid). The packed layout is computed about the
-// primary bus and shifted by that bus's offset from the origin
-// (`busOffsets`). WP3 replaces the single-bus layout with one yard per bus.
+// (the boundary's stored centroid); the layout is built in that frame.
 //
 // This module is loaded lazily (App.tsx) and is the only importer of three.js
 // (and of the site3d modules that import it).
 
-import { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
-import { OrbitControls, Html, Line } from '@react-three/drei'
+import { OrbitControls, Html, Line, PivotControls } from '@react-three/drei'
 import * as THREE from 'three'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
@@ -31,29 +31,34 @@ import { networkApi } from '../api/network'
 import { busLatLng } from '../utils/geo'
 import { tileRangeAround, mosaicExtent, zoomFor, tileCount, type LngLat, type LocalExtent } from '../site3d/geo'
 import { buildGroundMosaic, ESRI_ATTRIBUTION } from '../site3d/imagery'
-import { buildSiteLayout, KIND_COLOR, KIND_LABEL, type SiteObject, type SiteKind } from '../site3d/layout'
+import { buildSiteLayout, objectKey, KIND_COLOR, KIND_LABEL, type SiteObject, type SiteKind } from '../site3d/layout'
+import { matrixFor, placementFromMatrix } from '../site3d/placementMath'
+import SiteOverlay from '../components/SiteOverlay'
 import { toScene, toBoxArgs, fitCamera, chooseSite, unionBounds, halfSizeFor, type Bounds } from '../site3d/scene'
 import { useSitesStore } from '../site3d/sitesStore'
 import { writeActiveSite } from '../site3d/activeSite'
 import { boundaryToLocal } from '../site3d/boundary'
-import { busOffsets, primaryBus, siteBounds } from '../site3d/siteModel'
-import { fitReport, formatHa, type FitObject } from '../site3d/fit'
+import { busOffsets, siteBounds } from '../site3d/siteModel'
+import { fitReport, type FitObject } from '../site3d/fit'
 import SiteEmptyState from '../components/SiteEmptyState'
 import type { Bus } from '../api/types'
 import type { Site } from '../site3d/types'
 
 // ── One object = one group of boxes, one click target ────────────────────────
 
-function SiteObjectMesh({ obj, selected, hovered, outside, onHover, onSelect }: {
+function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSelect }: {
   obj: SiteObject
   selected: boolean
   hovered: boolean
   /** Sticks out of the site boundary (fit check, D9). */
   outside: boolean
+  /** Wrapped in a PivotControls whose matrix carries position and heading — render at identity. */
+  pivot?: boolean
   onHover: (name: string | null) => void
   onSelect: (obj: SiteObject) => void
 }) {
-  const [ox, oy] = obj.origin
+  const [ox, oy] = pivot ? [0, 0] : obj.origin
+  const heading = pivot ? 0 : obj.heading
   const tint = selected ? '#ffffff' : hovered ? '#fde68a' : undefined
   const emissive = selected ? obj.color : outside ? '#dc2626' : '#000000'
   const emissiveIntensity = selected ? 0.6 : outside ? 0.45 : 0
@@ -63,7 +68,7 @@ function SiteObjectMesh({ obj, selected, hovered, outside, onHover, onSelect }: 
       name={`${obj.type}:${obj.name}`}
       position={toScene(ox, oy, 0)}
       // Heading is clockwise from north; a rotation about the up axis by −heading.
-      rotation={[0, (-obj.heading * Math.PI) / 180, 0]}
+      rotation={[0, (-heading * Math.PI) / 180, 0]}
       onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect(obj) }}
       onPointerOver={(e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); onHover(obj.name) }}
       onPointerOut={() => onHover(null)}
@@ -175,11 +180,14 @@ function Site3dDebugHook({ objects, site }: { objects: SiteObject[]; site: Site 
   const gl = useThree(s => s.gl)
   const size = useThree(s => s.size)
   useEffect(() => {
+    // The centre of the object's FIRST box (its main body), not the union
+    // bounding box: a genset block's 20 m stack would put the union centre
+    // in mid-air. A click there lands on solid geometry at any zoom.
     const project = (key: string) => {
       const o = scene.getObjectByName(key)
       if (!o) return null
-      const v = new THREE.Vector3()
-      o.getWorldPosition(v).project(camera)
+      const body = o.children.find(c => (c as THREE.Mesh).isMesh) ?? o
+      const v = new THREE.Box3().setFromObject(body).getCenter(new THREE.Vector3()).project(camera)
       const rect = gl.domElement.getBoundingClientRect()
       return { x: rect.left + ((v.x + 1) / 2) * rect.width, y: rect.top + ((1 - v.y) / 2) * rect.height }
     }
@@ -195,6 +203,45 @@ function Site3dDebugHook({ objects, site }: { objects: SiteObject[]; site: Site 
   return null
 }
 
+// ── The selected object's gizmo ───────────────────────────────────────────────
+
+function SelectedPivot({ obj, enabled, onCommit, children }: {
+  obj: SiteObject
+  enabled: boolean
+  onCommit: (p: { x: number; y: number; heading: number }) => void
+  children: React.ReactNode
+}) {
+  // A NEW matrix per position: drei's autoTransform writes into this object
+  // during a drag; when the placement lands in the store the layout gives a
+  // new origin and this memo hands the pivot a fresh, equal matrix.
+  const matrix = useMemo(() => matrixFor({ x: obj.origin[0], y: obj.origin[1], heading: obj.heading }),
+    [obj.origin[0], obj.origin[1], obj.heading]) // eslint-disable-line react-hooks/exhaustive-deps
+  // drei's onDragEnd carries no matrix and fires on every pointer-up on a
+  // handle, moved or not. The last dragged matrix is kept here, PER pivot
+  // (keyed per object, so a fresh one per selection), seeded at drag start,
+  // and a click that never moved commits nothing — a packed object must not
+  // become "placed" by being touched.
+  const last = useRef(new THREE.Matrix4())
+  const moved = useRef(false)
+  return (
+    <PivotControls
+      matrix={matrix}
+      activeAxes={[true, false, true]}
+      disableScaling
+      enabled={enabled}
+      fixed
+      scale={90}
+      depthTest={false}
+      annotations={false}
+      onDragStart={() => { last.current.copy(matrix); moved.current = false }}
+      onDrag={l => { last.current.copy(l); moved.current = true }}
+      onDragEnd={() => { if (moved.current) onCommit(placementFromMatrix(last.current)) }}
+    >
+      {children}
+    </PivotControls>
+  )
+}
+
 // ── The view ──────────────────────────────────────────────────────────────────
 
 export default function SiteCanvas() {
@@ -202,15 +249,25 @@ export default function SiteCanvas() {
   const activeSiteId = useUIStore(s => s.activeSiteId)
   const setActiveSiteId = useUIStore(s => s.setActiveSiteId)
   const sitesDoc = useSitesStore(s => s.docFor(currentProject))
+  const setPlacement = useSitesStore(s => s.setPlacement)
+  const removePlacement = useSitesStore(s => s.removePlacement)
+  const arrangeAll = useSitesStore(s => s.arrangeAll)
+  const readOnly = useUIStore(s => s.readOnly)
 
-  const { data: buses = [], isLoading } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
-  const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
-  const { data: storageUnits = [] } = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
-  const { data: stores = [] }       = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores })
-  const { data: loads = [] }        = useQuery({ queryKey: nk(currentProject, 'loads'),         queryFn: networkApi.getLoads })
-  const { data: transformers = [] } = useQuery({ queryKey: nk(currentProject, 'transformers'),  queryFn: networkApi.getTransformers })
-  const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })
-  const { data: links = [] }        = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks })
+  const qBuses = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
+  const qGen   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
+  const qSu    = useQuery({ queryKey: nk(currentProject, 'storage_units'), queryFn: networkApi.getStorageUnits })
+  const qSt    = useQuery({ queryKey: nk(currentProject, 'stores'),        queryFn: networkApi.getStores })
+  const qLoad  = useQuery({ queryKey: nk(currentProject, 'loads'),         queryFn: networkApi.getLoads })
+  const qTr    = useQuery({ queryKey: nk(currentProject, 'transformers'),  queryFn: networkApi.getTransformers })
+  const qLine  = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })
+  const qLink  = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks })
+  const buses = qBuses.data ?? [], isLoading = qBuses.isLoading
+  const generators = qGen.data ?? [], storageUnits = qSu.data ?? [], stores = qSt.data ?? [], loads = qLoad.data ?? []
+  const transformers = qTr.data ?? [], lines = qLine.data ?? [], links = qLink.data ?? []
+  // Arrange rewrites the placement map from the CURRENT layout; with a
+  // component list still loading (or failed) it would write a partial site.
+  const allLoaded = [qBuses, qGen, qSu, qSt, qLoad, qTr, qLine, qLink].every(q => q.isSuccess)
 
   // uiStore restores the remembered site on every project switch; here we
   // only clear an id whose site no longer exists (deleted elsewhere), so the
@@ -226,29 +283,39 @@ export default function SiteCanvas() {
   const selectedBus = selectedComponent?.type === 'Bus' ? selectedComponent.name : null
   const site = useMemo(() => chooseSite(sitesDoc, activeSiteId, selectedBus), [sitesDoc, activeSiteId, selectedBus])
 
+  // The packed layout for one bus alone, in that bus's frame — what the
+  // empty state needs to size a default boundary.
   const layoutForBus = (busName: string) => {
     const bus = buses.find(b => b.name === busName)
-    return buildSiteLayout({ bus: { name: busName, v_nom: bus?.v_nom ?? 0 }, generators, storageUnits, stores, loads, transformers, lines, links })
+    return buildSiteLayout({ buses: [{ name: busName, v_nom: bus?.v_nom ?? 0, offset: [0, 0] }], generators, storageUnits, stores, loads, transformers, lines, links })
   }
 
-  const primary = site ? primaryBus(site) : null
+  // Member buses with a position; a member that is not placed cannot be
+  // drawn and is reported on the status line.
   const offsets = useMemo(() => (site ? busOffsets(site, buses as Bus[]) : {}), [site, buses])
-  const busOff: [number, number] = (primary && offsets[primary]) || [0, 0]
+  const memberInputs = useMemo(() => (site ? site.buses
+    .filter(name => offsets[name] != null)
+    .map(name => ({ name, v_nom: buses.find(b => b.name === name)?.v_nom ?? 0, offset: offsets[name] })) : []),
+  [site, offsets, buses])
+  const unplacedMembers = site ? site.buses.filter(name => offsets[name] == null) : []
 
-  const layout = useMemo(() => (primary ? layoutForBus(primary) : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [primary, buses, generators, storageUnits, stores, loads, transformers, lines, links])
+  // The layout is in the SITE frame already: one yard per bus at its
+  // offset, placements honoured.
+  const layout = useMemo(() => (site && memberInputs.length > 0
+    ? buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, placements: site.placements })
+    : null),
+  [site, memberInputs, generators, storageUnits, stores, loads, transformers, lines, links])
+  const objects: SiteObject[] = layout?.objects ?? []
 
-  // Objects in the SITE frame: the packed layout shifted by the primary bus's offset.
-  const objects: SiteObject[] = useMemo(() => layout
-    ? layout.objects.map(o => ({ ...o, origin: [o.origin[0] + busOff[0], o.origin[1] + busOff[1]] as [number, number] }))
-    : [], [layout, busOff[0], busOff[1]]) // eslint-disable-line react-hooks/exhaustive-deps
-
+  // Two extents. The CAMERA frames the plot (spec §6.2: fit to the boundary,
+  // not to the assets — a wind farm packed outside the fence must not shrink
+  // the site to a speck); the ground mosaic and the shadow frustum cover the
+  // union, so an asset outside the fence still stands on imagery.
+  const plotExtent: Bounds | null = useMemo(() => (site ? siteBounds(site) : null), [site])
   const siteExtent: Bounds | null = useMemo(() => {
     if (!site || !layout) return null
-    const shifted = { x0: layout.bounds.x0 + busOff[0], x1: layout.bounds.x1 + busOff[0], y0: layout.bounds.y0 + busOff[1], y1: layout.bounds.y1 + busOff[1] }
-    return unionBounds(siteBounds(site), shifted)
-  }, [site, layout, busOff[0], busOff[1]]) // eslint-disable-line react-hooks/exhaustive-deps
+    return unionBounds(siteBounds(site), layout.bounds)
+  }, [site, layout])
   const halfSizeM = siteExtent ? halfSizeFor(siteExtent) : 0
 
   const fit = useMemo(() => {
@@ -302,7 +369,7 @@ export default function SiteCanvas() {
   if (!site) {
     return <SiteEmptyState buses={buses as Bus[]} boundsFor={name => layoutForBus(name).bounds} />
   }
-  if (!layout || !ground || !siteExtent || !fit) {
+  if (!layout || !ground || !siteExtent || !plotExtent || !fit) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-center px-8">
         <div className="text-[13px] font-medium text-text">{site.name} has no placed bus</div>
@@ -314,7 +381,9 @@ export default function SiteCanvas() {
   const kindsPresent = Array.from(new Set(objects.map(o => o.kind))) as SiteKind[]
   const selectedName = selectedComponent?.name ?? null
   const selectedType = selectedComponent?.type ?? null
-  const primaryPlaced = primary != null && offsets[primary] != null
+  const selectedKey = selectedType && selectedName ? `${selectedType}:${selectedName}` : null
+  const selectedObj = objects.find(o => objectKey(o) === selectedKey) ?? null
+  const selectedPlacedKey = selectedKey && layout.placed.includes(selectedKey) ? selectedKey : null
 
   return (
     <div className="relative h-full w-full bg-canvas">
@@ -345,17 +414,32 @@ export default function SiteCanvas() {
         />
         <Ground extent={ground.extent} texture={texture} onMiss={() => setSelectedComponent(null)} />
         <BoundaryRibbon site={site} />
-        {objects.map(o => (
-          <SiteObjectMesh
-            key={`${o.type}:${o.name}`}
-            obj={o}
-            selected={o.type === selectedType && o.name === selectedName}
-            hovered={o.name === hovered}
-            outside={outsideSet.has(`${o.type}:${o.name}`)}
-            onHover={setHovered}
-            onSelect={obj => setSelectedComponent({ type: obj.type, name: obj.name })}
-          />
-        ))}
+        {objects.map(o => {
+          const key = objectKey(o)
+          const isSelected = key === selectedKey
+          const mesh = (
+            <SiteObjectMesh
+              key={key}
+              obj={o}
+              selected={isSelected}
+              hovered={o.name === hovered}
+              outside={outsideSet.has(key)}
+              pivot={isSelected}
+              onHover={setHovered}
+              onSelect={obj => setSelectedComponent({ type: obj.type, name: obj.name })}
+            />
+          )
+          if (!isSelected) return mesh
+          // The selected object carries the gizmo (D7): translate in the
+          // ground plane, rotate about the vertical, no scaling. The pivot
+          // sits at scene root, so its local matrix IS the world matrix.
+          return (
+            <SelectedPivot key={`pivot:${key}`} obj={o} enabled={!readOnly}
+              onCommit={p => setPlacement(currentProject, site.id, key, p)}>
+              {mesh}
+            </SelectedPivot>
+          )
+        })}
         <OrbitControls
           makeDefault
           maxPolarAngle={Math.PI / 2 - 0.05}
@@ -363,36 +447,22 @@ export default function SiteCanvas() {
           maxDistance={halfSizeM * 8}
           enableDamping
         />
-        <FitCamera bounds={siteExtent} />
+        <FitCamera bounds={plotExtent} />
         {DEBUG_ENABLED && <Site3dDebugHook objects={objects} site={site} />}
       </Canvas>
 
-      {/* Site picker + fit check — top-left, BELOW the switcher's row. */}
-      <div className="absolute left-3 top-12 z-[400] flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border bg-bg/95 px-2 py-1.5 text-[11px] shadow max-w-[calc(100%-24px)]">
-        <span className="text-muted">Site</span>
-        <select
-          className="bg-transparent text-text outline-none"
-          value={site.id}
-          onChange={e => { setActiveSiteId(e.target.value); writeActiveSite(currentProject, e.target.value) }}
-          aria-label="Site"
-        >
-          {sitesDoc.sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-        </select>
-        <span className="text-muted">·</span>
-        <span className="text-muted">{objects.length - 1} asset{objects.length === 2 ? '' : 's'}</span>
-        <span className="text-muted">·</span>
-        <span
-          data-testid="fit-status"
-          className={fit.over ? 'text-accent font-semibold' : 'text-muted'}
-          title="Sum of every asset's land take from its parameters, against the plot area inside the boundary"
-        >
-          land {formatHa(fit.landM2)} · plot {formatHa(fit.plotM2)}{fit.over ? ' · does not fit' : ''}
-        </span>
-        {fit.outside.length > 0 && (
-          <span className="text-accent" title={fit.outside.join(', ')}>· {fit.outside.length} outside</span>
-        )}
-        {!primaryPlaced && <span className="text-accent">· primary bus not placed</span>}
-      </div>
+      <SiteOverlay
+        sites={sitesDoc.sites}
+        site={site}
+        onPickSite={id => { setActiveSiteId(id); writeActiveSite(currentProject, id) }}
+        assetCount={objects.filter(o => o.kind !== 'switchyard').length}
+        fit={fit}
+        unplacedMembers={unplacedMembers}
+        selectedPlacedKey={selectedPlacedKey}
+        canArrange={allLoaded}
+        onArrange={() => arrangeAll(currentProject, site.id, objects.map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading })), layout.orphans)}
+        onResetPlacement={() => { if (selectedPlacedKey) removePlacement(currentProject, site.id, selectedPlacedKey) }}
+      />
 
       {/* Legend — under the picker. */}
       <div className="absolute left-3 top-[5.5rem] z-[400] flex flex-wrap gap-x-3 gap-y-1 rounded-md border border-border bg-bg/95 px-2 py-1.5 text-[11px] shadow max-w-[60%]">

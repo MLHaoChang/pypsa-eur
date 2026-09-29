@@ -238,3 +238,45 @@ describe('lifecycle', () => {
     fetchSpy.mockRestore()
   })
 })
+
+describe('arrange and reset (WP3)', () => {
+  beforeEach(async () => {
+    getSites.mockResolvedValue(doc([site({ placements: { 'Generator:kept': { x: 9, y: 9, heading: 9 }, 'Generator:orphan': { x: 1, y: 1, heading: 1 } } })]))
+    await useSitesStore.getState().ensureLoaded('p')
+  })
+
+  it('arrangeAll writes packed positions, keeps existing placements, prunes only the named orphans, and is idempotent', () => {
+    // 'Generator:kept' is placed; 'Generator:orphan' is an orphan; 'Store:unplacedBus' is
+    // a placement absent from the layout for another reason (its bus has no coordinates).
+    useSitesStore.getState().setPlacement('p', 'site_a', 'Store:unplacedBus', { x: 5, y: 5, heading: 5 })
+    const objects = [
+      { key: 'Generator:kept', origin: [0, 0] as [number, number], heading: 0 },
+      { key: 'Load:packed', origin: [50, -20] as [number, number], heading: 0 },
+      { key: 'Bus:B1', origin: [0, 0] as [number, number], heading: 0 },
+    ]
+    useSitesStore.getState().arrangeAll('p', 'site_a', objects, ['Generator:orphan'])
+    const expected = {
+      'Generator:kept': { x: 9, y: 9, heading: 9 },
+      'Store:unplacedBus': { x: 5, y: 5, heading: 5 },
+      'Load:packed': { x: 50, y: -20, heading: 0 },
+      'Bus:B1': { x: 0, y: 0, heading: 0 },
+    }
+    expect(useSitesStore.getState().docFor('p').sites[0].placements).toEqual(expected)
+    useSitesStore.getState().arrangeAll('p', 'site_a', objects, [])
+    expect(useSitesStore.getState().docFor('p').sites[0].placements).toEqual(expected)
+  })
+
+  it('removePlacement resets one object to packed and leaves the rest', () => {
+    useSitesStore.getState().removePlacement('p', 'site_a', 'Generator:kept')
+    expect(Object.keys(useSitesStore.getState().docFor('p').sites[0].placements)).toEqual(['Generator:orphan'])
+  })
+
+  it('both are refused when read-only', async () => {
+    useUIStore.setState({ readOnly: true, readOnlyReason: 'solving' })
+    useSitesStore.getState().arrangeAll('p', 'site_a', [{ key: 'Load:x', origin: [1, 1], heading: 0 }], [])
+    useSitesStore.getState().removePlacement('p', 'site_a', 'Generator:kept')
+    expect(Object.keys(useSitesStore.getState().docFor('p').sites[0].placements).sort()).toEqual(['Generator:kept', 'Generator:orphan'])
+    await vi.advanceTimersByTimeAsync(SITES_SAVE_DEBOUNCE_MS * 2)
+    expect(putSites).not.toHaveBeenCalled()
+  })
+})

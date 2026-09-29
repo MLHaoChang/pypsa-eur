@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { buildSiteLayout, type SiteInput } from './layout'
+import { buildSiteLayout, objectKey, type SiteInput } from './layout'
+import { DEFAULT_ASSET_RULES } from './assetRules'
 import type { Generator, Load, StorageUnit, Store, Transformer, Line, Link } from '../api/types'
 
 // Minimal component factories: only the fields the layout reads, cast to the
@@ -14,7 +15,7 @@ const ln  = (o: Partial<Line>): Line => ({ name: 'ln', bus0: 'B', bus1: 'Y', s_n
 const lk  = (o: Partial<Link>): Link => ({ name: 'lk', bus0: 'B', bus1: 'Z', carrier: 'DC', p_nom: 50, ...o } as Link)
 
 const empty: SiteInput = {
-  bus: { name: 'B', v_nom: 110 },
+  buses: [{ name: 'B', v_nom: 110, offset: [0, 0] }],
   generators: [], storageUnits: [], stores: [], loads: [], transformers: [], lines: [], links: [],
 }
 
@@ -135,6 +136,103 @@ describe('buildSiteLayout', () => {
 
   it('is deterministic', () => {
     const input = { ...empty, generators: [gen({}), gen({ name: 'h', carrier: 'solar' })], storageUnits: [su({})] }
+    expect(buildSiteLayout(input)).toEqual(buildSiteLayout(input))
+  })
+})
+
+describe('buildSiteLayout — several buses, placements, rules (WP3)', () => {
+  const two: SiteInput = {
+    ...empty,
+    buses: [{ name: 'B', v_nom: 110, offset: [0, 0] }, { name: 'C', v_nom: 33, offset: [300, -50] }],
+    generators: [gen({ name: 'gB', bus: 'B' }), gen({ name: 'gC', bus: 'C', carrier: 'solar', p_nom: 2 })],
+    transformers: [tr({ name: 'T', bus0: 'B', bus1: 'C' })],
+    lines: [ln({ name: 'L', bus0: 'C', bus1: 'Z' })],
+  }
+
+  it('draws one switchyard per member bus at that bus\'s offset and packs each bus\'s assets around its own yard', () => {
+    const { objects } = buildSiteLayout(two)
+    const yards = objects.filter(o => o.kind === 'switchyard')
+    expect(yards.map(y => y.name)).toEqual(['B', 'C'])
+    expect(yards[0].origin).toEqual([0, 0])
+    expect(yards[1].origin).toEqual([300, -50])
+    // C's assets sit exactly where a one-bus layout of C would put them, shifted by C's offset.
+    const alone = buildSiteLayout({ ...two, buses: [{ name: 'C', v_nom: 33, offset: [0, 0] }] })
+    const gC = objects.find(o => o.name === 'gC')!, gCAlone = alone.objects.find(o => o.name === 'gC')!
+    expect(gC.origin[0]).toBeCloseTo(gCAlone.origin[0] + 300, 6)
+    expect(gC.origin[1]).toBeCloseTo(gCAlone.origin[1] - 50, 6)
+  })
+
+  it('a two-terminal component between two member buses is drawn once, at the first member it touches', () => {
+    const { objects } = buildSiteLayout(two)
+    const ts = objects.filter(o => o.name === 'T')
+    expect(ts).toHaveLength(1)
+    // bus0 = B is a member → attributed to B (north of B's yard, i.e. near x≈0).
+    expect(Math.abs(ts[0].origin[0])).toBeLessThan(100)
+    expect(objects.filter(o => o.name === 'L')).toHaveLength(1)
+  })
+
+  it('a placement keeps its origin and heading; orphans are reported, never pruned', () => {
+    const { objects, orphans, placed } = buildSiteLayout({
+      ...two,
+      placements: {
+        'Generator:gB': { x: -120, y: 40, heading: 45 },
+        'Generator:gone': { x: 1, y: 1, heading: 0 },
+      },
+    })
+    const gB = objects.find(o => o.name === 'gB')!
+    expect(gB.origin).toEqual([-120, 40])
+    expect(gB.heading).toBe(45)
+    expect(placed).toEqual(['Generator:gB'])
+    expect(orphans).toEqual(['Generator:gone'])
+  })
+
+  it('a placement for the bus moves its yard, and its unplaced assets follow it', () => {
+    const base = buildSiteLayout(two)
+    const moved = buildSiteLayout({ ...two, placements: { 'Bus:C': { x: 600, y: 200, heading: 0 } } })
+    const yardC = moved.objects.find(o => o.kind === 'switchyard' && o.name === 'C')!
+    expect(yardC.origin).toEqual([600, 200])
+    const gC0 = base.objects.find(o => o.name === 'gC')!
+    const gC1 = moved.objects.find(o => o.name === 'gC')!
+    expect(gC1.origin[0] - gC0.origin[0]).toBeCloseTo(300, 6)
+    expect(gC1.origin[1] - gC0.origin[1]).toBeCloseTo(250, 6)
+    // B's assets did not move.
+    expect(moved.objects.find(o => o.name === 'gB')!.origin).toEqual(base.objects.find(o => o.name === 'gB')!.origin)
+    // A PLACED asset on the moved bus stays where the user put it.
+    const pinned = buildSiteLayout({ ...two, placements: { 'Bus:C': { x: 600, y: 200, heading: 0 }, 'Generator:gC': { x: -5, y: -5, heading: 10 } } })
+    expect(pinned.objects.find(o => o.name === 'gC')!.origin).toEqual([-5, -5])
+  })
+
+  it('a line whose bus1 is the member is drawn at that member, labelled with the far bus', () => {
+    const { objects } = buildSiteLayout({ ...empty, lines: [ln({ name: 'L', bus0: 'FAR', bus1: 'B' })] })
+    const l = objects.find(o => o.name === 'L')!
+    expect(l.summary).toContain('to FAR')
+    // An electrolyser link seen from its hydrogen side is a feeder, not an electrolyser.
+    const h2 = buildSiteLayout({ ...empty, links: [lk({ name: 'ely', carrier: 'electrolysis', bus0: 'ELEC', bus1: 'B' })] })
+    expect(h2.objects.find(o => o.name === 'ely')!.kind).toBe('feeder')
+    expect(h2.objects.find(o => o.name === 'ely')!.summary).toContain('to ELEC')
+  })
+
+  it('objectKey is the placement key', () => {
+    expect(objectKey({ type: 'Generator', name: 'gB' })).toBe('Generator:gB')
+  })
+
+  it('the rules table drives the geometry: halving MWh per container doubles the container count and nothing else', () => {
+    const input = { ...empty, storageUnits: [su({ p_nom: 10, max_hours: 4 })] }
+    const a = buildSiteLayout(input).objects[1]
+    const b = buildSiteLayout({ ...input, rules: { ...DEFAULT_ASSET_RULES, mwhPerBessContainer: 2 } }).objects[1]
+    expect(a.summary).toContain('10 containers')
+    expect(b.summary).toContain('20 containers')
+    const c = buildSiteLayout({ ...empty, generators: [gen({ carrier: 'solar', p_nom: 4 })], rules: { ...DEFAULT_ASSET_RULES, mwhPerBessContainer: 2 } }).objects[1]
+    const c0 = buildSiteLayout({ ...empty, generators: [gen({ carrier: 'solar', p_nom: 4 })] }).objects[1]
+    expect(c.areaM2).toBe(c0.areaM2)
+  })
+
+  it('invalid rules are refused with the field named', () => {
+    expect(() => buildSiteLayout({ ...empty, rules: { ...DEFAULT_ASSET_RULES, mwPerTurbine: 0 } })).toThrow(/mwPerTurbine/)
+  })
+
+  it('is deterministic with placements and two buses', () => {
+    const input = { ...two, placements: { 'Generator:gB': { x: 1, y: 2, heading: 3 } } }
     expect(buildSiteLayout(input)).toEqual(buildSiteLayout(input))
   })
 })
