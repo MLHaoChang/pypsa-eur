@@ -19,7 +19,10 @@ docs/superpowers/notes/2026-09-29-mvp1-s1-gate.md):
 * **Demand-charge basis.** MVP-1 models one billing-period demand charge.
   `annual_peak` and `ratchet` are refused with `UnsupportedTariffError`
   (code `demand_charge_basis_<basis>`), here and in the LP wrapper
-  (`services/solver/objective.py::_wrap_with_demand_charge`).
+  (`services/solver/objective.py::_wrap_with_demand_charge`). A `measured`
+  `CapacityCharge` is the same annual-peak charge under another field and is
+  refused too (code `capacity_charge_measured_unsupported`); `contracted` is
+  priced on `connection_limit_mw`.
 
 `TimeRule` fields read the snapshot timestamp as given (month 1..12, weekday
 0 = Monday, hour of the snapshot's start); snapshots are local clock time.
@@ -198,6 +201,36 @@ def _refuse_basis(basis: str) -> None:
             code=f"demand_charge_basis_{basis}")
 
 
+def _refuse_measured_capacity(tariff: Tariff) -> None:
+    """
+    A `measured` capacity charge prices the horizon's peak import, which the
+    LP never carries: it is the refused `annual_peak` basis arriving through
+    `CapacityCharge` (gate S3 BC-S3-2). MVP-1 prices `contracted` only.
+    """
+    cc = tariff.capacity_charge
+    if cc is not None and cc.basis == "measured":
+        raise UnsupportedTariffError(
+            "a measured capacity charge prices the horizon's peak import, "
+            "which the LP does not model in MVP-1; it is refused rather than "
+            "billed on a peak the sizing never saw. Use basis 'contracted' "
+            "or a billing-period demand charge.",
+            code="capacity_charge_measured_unsupported")
+
+
+def _partial_periods(w: pd.Series, labels: np.ndarray,
+                     billing_period: BillingPeriod) -> list[str]:
+    """Billing periods the snapshots cover for fewer hours than they last."""
+    covered = w.groupby(labels, sort=False).sum()
+    out: list[str] = []
+    for label, hours in covered.items():
+        start = pd.Timestamp(f"{label}-01" if billing_period == "month" else f"{label}-01-01")
+        end = start + (pd.DateOffset(months=1) if billing_period == "month"
+                       else pd.DateOffset(years=1))
+        if float(hours) < (end - start) / pd.Timedelta(hours=1) - 1e-6:
+            out.append(str(label))
+    return out
+
+
 # ── prices as network data ────────────────────────────────────────────────
 
 def write_tariff_prices(n, tariff: Tariff, import_link: str,
@@ -212,6 +245,7 @@ def write_tariff_prices(n, tariff: Tariff, import_link: str,
     Returns ``{"import": Series, "export": Series | None}``, the prices written.
     """
     idx = _require_datetime_index(n.snapshots, "write_tariff_prices")
+    _refuse_measured_capacity(tariff)
     for name in (import_link, export_link):
         if name is not None and name not in n.links.index:
             raise TariffError(f"link {name!r} is not in the network",
@@ -315,6 +349,11 @@ class Bill(_FigureBlock):
     The site's grid bill (spec §4.4; ADR-0001). `total` covers the modelled
     snapshots; `annual_bill` is the same figure when they are one year and
     null (`horizon_not_one_year`) otherwise, never extrapolated.
+
+    `honesty_notes` are stable snake_case codes, never prose (S7's prose
+    validator rejects digits): `partial_billing_period_charged_in_full`
+    (a period in `partial_billing_periods` carries a per-period charge in
+    full) and `capacity_charge_prorated_by_hours` (horizon hours / a year).
     """
 
     _figure_fields: ClassVar[tuple[str, ...]] = ("total", "annual_bill")
@@ -330,6 +369,8 @@ class Bill(_FigureBlock):
     currency_year: int | None = None
     engine: Literal["bill_calculator"] = "bill_calculator"
     honesty_notes: tuple[str, ...] = ()
+    # Billing periods the snapshots cover only in part (labels, not prose).
+    partial_billing_periods: list[str] = Field(default_factory=list)
 
 
 def _weights(snapshot_weightings) -> pd.Series:
@@ -378,6 +419,7 @@ class BillCalculator:
         exp = _aligned(export_mw, idx, "export")
         if tariff.demand_charge is not None:
             _refuse_basis(tariff.demand_charge.basis)
+        _refuse_measured_capacity(tariff)
         # Validate every price before any figure is computed, so a tariff
         # the engine refuses is refused whatever series are present.
         energy_price = band_prices(idx, tariff.energy_bands)
@@ -412,20 +454,14 @@ class BillCalculator:
         cc = tariff.capacity_charge
         if cc is None:
             comp["capacity"] = 0.0
-        elif cc.basis == "contracted":
-            if tariff.connection_limit_mw is None:
-                comp["capacity"] = None
-                flags["capacity"] = "no_contracted_mw"
-            else:
-                comp["capacity"] = (cc.price_per_mw_per_year
-                                    * float(tariff.connection_limit_mw) * years)
-        elif imp is None:
+        elif tariff.connection_limit_mw is None:  # contracted (measured refused)
             comp["capacity"] = None
-            flags["capacity"] = "no_import_series"
+            flags["capacity"] = "no_contracted_mw"
         else:
-            comp["capacity"] = cc.price_per_mw_per_year * float(imp.max()) * years
+            comp["capacity"] = (cc.price_per_mw_per_year
+                                * float(tariff.connection_limit_mw) * years)
         if cc is not None:
-            notes.append("capacity charge pro-rated by horizon hours / 8760")
+            notes.append("capacity_charge_prorated_by_hours")
 
         comp["fixed"] = float(tariff.fixed_charge_per_period) * len(periods)
 
@@ -455,7 +491,8 @@ class BillCalculator:
                 comp["export_credit"] = None
                 flags["export_credit"] = "no_export_price"
         else:
-            comp["export_credit"] = -float((exp * w * export_price).sum())
+            # `+ 0.0` turns a negated zero into 0.0 (no `-0.0` in JSON).
+            comp["export_credit"] = -float((exp * w * export_price).sum()) + 0.0
 
         components = BillComponents(**comp, unavailable=flags)
         bill_flags: dict[str, str] = {}
@@ -472,15 +509,18 @@ class BillCalculator:
         else:
             annual = None
             bill_flags["annual_bill"] = "horizon_not_one_year"
-        if tariff.demand_charge is not None or tariff.fixed_charge_per_period:
-            notes.append("each billing period touched by the snapshots is "
-                         "charged in full (fixed and demand charges)")
+        partial = _partial_periods(w, labels, tariff.billing_period)
+        per_period_charge = (
+            tariff.demand_charge is not None or bool(tariff.fixed_charge_per_period)
+            or any(nc.basis == "per_period" for nc in tariff.network_charges))
+        if partial and per_period_charge:
+            notes.insert(0, "partial_billing_period_charged_in_full")
         return Bill(
             total=total, annual_bill=annual, by_component=components,
             peak_mw_by_billing_period=peaks, billing_periods=periods,
             horizon_hours=hours, currency=tariff.currency,
             currency_year=tariff.currency_year, unavailable=bill_flags,
-            honesty_notes=tuple(notes))
+            honesty_notes=tuple(notes), partial_billing_periods=partial)
 
 
 def demand_charge_eur_from_network(n, raw) -> float | None:

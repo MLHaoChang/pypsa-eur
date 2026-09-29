@@ -324,3 +324,128 @@ def test_preflight_warns_when_export_price_exceeds_import_price():
     clean = [i for i in validate_for_run(_cycling_network(25.0), SolverConfig())
              if i.code == "tariff_export_exceeds_import"]
     assert clean == []
+
+
+def _spy_densifier(monkeypatch) -> list:
+    """Record every Link densification `_check_export_cycling` asks for."""
+    calls: list = []
+    real = pypsa.Network.get_switchable_as_dense
+
+    def spy(self, component, attr, snapshots=None, inds=None):
+        if component == "Link":
+            calls.append(None if inds is None else sorted(map(str, inds)))
+        return real(self, component, attr, snapshots=snapshots, inds=inds)
+
+    monkeypatch.setattr(pypsa.Network, "get_switchable_as_dense", spy)
+    return calls
+
+
+def test_preflight_with_no_reverse_link_pair_builds_no_dense_frame(monkeypatch):
+    """
+    Gate S3 BC-S3-1: many unpaired Links take the early return; no
+    marginal-cost frame is densified for a check that can find nothing.
+    """
+    from services.validation_service import _check_export_cycling
+
+    idx = pd.date_range("2030-01-01", periods=48, freq="h")
+    n = pypsa.Network()
+    n.set_snapshots(idx)
+    for i in range(301):
+        n.add("Bus", f"b{i}")
+    for i in range(300):  # a chain: every Link one way, none reversed
+        n.add("Link", f"l{i}", bus0=f"b{i}", bus1=f"b{i + 1}", p_nom=1.0,
+              marginal_cost=pd.Series(-5.0, index=idx))
+    calls = _spy_densifier(monkeypatch)
+    assert _check_export_cycling(n) == []
+    assert calls == []
+
+
+def test_preflight_densifies_only_the_paired_links(monkeypatch):
+    from services.validation_service import _check_export_cycling
+
+    n = _cycling_network(40.0)
+    idx = n.snapshots
+    n.add("Bus", "far")
+    for i in range(50):
+        n.add("Link", f"unpaired{i}", bus0="grid", bus1="far", p_nom=1.0,
+              marginal_cost=pd.Series(1.0, index=idx))
+    calls = _spy_densifier(monkeypatch)
+    hit = _check_export_cycling(n)
+    assert [i.code for i in hit] == ["tariff_export_exceeds_import"]
+    assert calls == [["grid_export", "grid_import"]]
+
+
+# ── capacity charge (gate S3 BC-S3-2) ─────────────────────────────────────
+
+def test_contracted_capacity_charge_is_priced_on_the_contracted_mw():
+    t = _tariff(capacity_charge={"price_per_mw_per_year": 8760.0, "basis": "contracted"},
+                connection_limit_mw=12.0)
+    bill = BillCalculator().bill(pd.Series(3.0, index=JAN_FEB),
+                                 pd.Series(0.0, index=JAN_FEB), t, _w(JAN_FEB))
+    # 8760 EUR/MW/yr pro-rated by hours: 1 EUR per MW per modelled hour.
+    assert bill.by_component.capacity == pytest.approx(12.0 * len(JAN_FEB))
+    assert "capacity_charge_prorated_by_hours" in bill.honesty_notes
+
+
+def test_contracted_capacity_charge_without_a_limit_is_null_with_a_flag():
+    t = _tariff(capacity_charge={"price_per_mw_per_year": 8760.0, "basis": "contracted"})
+    bill = BillCalculator().bill(pd.Series(3.0, index=JAN_FEB),
+                                 pd.Series(0.0, index=JAN_FEB), t, _w(JAN_FEB))
+    assert bill.by_component.capacity is None
+    assert bill.by_component.unavailable["capacity"] == "no_contracted_mw"
+    assert bill.total is None
+
+
+def test_measured_capacity_charge_is_refused_like_an_annual_peak():
+    """
+    A measured capacity charge is a charge on the horizon's peak, which the
+    LP never carries: the refused `annual_peak` basis under another field.
+    """
+    t = _tariff(capacity_charge={"price_per_mw_per_year": 8760.0, "basis": "measured"},
+                export={"price_per_mwh": 40.0})
+    with pytest.raises(UnsupportedTariffError) as exc:
+        BillCalculator().bill(pd.Series(3.0, index=JAN_FEB),
+                              pd.Series(0.0, index=JAN_FEB), t, _w(JAN_FEB))
+    assert exc.value.code == "capacity_charge_measured_unsupported"
+    with pytest.raises(UnsupportedTariffError) as exc:
+        write_tariff_prices(_network(), t, "grid_import", "grid_export")
+    assert exc.value.code == "capacity_charge_measured_unsupported"
+
+
+# ── honesty notes are codes; export credit has no negative zero ───────────
+
+def test_honesty_notes_are_codes_without_digits():
+    import re
+
+    t = _tariff(fixed_charge_per_period=100.0,
+                demand_charge={"price_per_mw_per_period": 10.0},
+                capacity_charge={"price_per_mw_per_year": 1.0, "basis": "contracted"},
+                connection_limit_mw=1.0)
+    part = pd.date_range("2030-01-15", "2030-02-10 23:00", freq="h")
+    bill = BillCalculator().bill(pd.Series(1.0, index=part),
+                                 pd.Series(0.0, index=part), t, _w(part))
+    assert set(bill.honesty_notes) == {
+        "partial_billing_period_charged_in_full", "capacity_charge_prorated_by_hours"}
+    assert all(re.fullmatch(r"[a-z_]+", note) for note in bill.honesty_notes)
+    assert bill.partial_billing_periods == ["2030-01", "2030-02"]
+
+
+def test_fully_covered_billing_periods_carry_no_partial_period_note():
+    t = _tariff(fixed_charge_per_period=100.0,
+                demand_charge={"price_per_mw_per_period": 10.0})
+    bill = BillCalculator().bill(pd.Series(1.0, index=JAN_FEB),
+                                 pd.Series(0.0, index=JAN_FEB), t, _w(JAN_FEB))
+    assert bill.honesty_notes == ()
+    assert bill.partial_billing_periods == []
+
+
+def test_export_credit_with_nothing_exported_is_positive_zero():
+    import json
+    import math
+
+    t = _tariff(export={"price_per_mwh": 40.0})
+    bill = BillCalculator().bill(pd.Series(1.0, index=JAN_FEB),
+                                 pd.Series(0.0, index=JAN_FEB), t, _w(JAN_FEB))
+    assert math.copysign(1.0, bill.by_component.export_credit) == 1.0
+    assert '"export_credit":0.0' in json.dumps(
+        bill.by_component.model_dump(), separators=(",", ":"))

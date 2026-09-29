@@ -2159,17 +2159,14 @@ def _check_export_cycling(n) -> list[Issue]:
     links = getattr(n, "links", None)
     if links is None or len(links) < 2 or not {"bus0", "bus1"} <= set(links.columns):
         return []
-    try:
-        mc = n.get_switchable_as_dense("Link", "marginal_cost")
-    except Exception:
-        return []
+    # Pairs first, from the static bus columns only (gate S3 BC-S3-1): a
+    # network with no reverse pair returns here without densifying anything,
+    # and only the paired Links' marginal costs are ever built.
     by_buses: dict[tuple[str, str], list[str]] = {}
-    for name in links.index:
-        by_buses.setdefault((str(links.at[name, "bus0"]), str(links.at[name, "bus1"])),
-                            []).append(name)
-    eff = (links["efficiency"] if "efficiency" in links.columns
-           else pd.Series(1.0, index=links.index)).astype(float).fillna(1.0)
-    issues: list[Issue] = []
+    for name, b0, b1 in zip(links.index, links["bus0"].astype(str),
+                            links["bus1"].astype(str)):
+        by_buses.setdefault((b0, b1), []).append(name)
+    pairs: list[tuple[str, str, str, str]] = []
     seen: set[frozenset] = set()
     for (b0, b1), forward in by_buses.items():
         for a in forward:
@@ -2178,22 +2175,34 @@ def _check_export_cycling(n) -> list[Issue]:
                 if a == b or key in seen:
                     continue
                 seen.add(key)
-                gain_ab = -mc[b] * float(eff[a]) - mc[a]
-                gain_ba = -mc[a] * float(eff[b]) - mc[b]
-                gain = np.maximum(gain_ab.to_numpy(), gain_ba.to_numpy())
-                hit = gain > 1e-9
-                if not hit.any():
-                    continue
-                first = mc.index[hit][0]
-                issues.append(_warn(
-                    "tariff_export_exceeds_import", "Link", str(a),
-                    f"Links '{a}' ({b0}→{b1}) and '{b}' ({b1}→{b0}): the "
-                    f"export price exceeds the import price in "
-                    f"{int(hit.sum())} snapshot(s) (first {first}, up to "
-                    f"{float(gain.max()):,.2f} per MWh), so cycling energy "
-                    "out and back in would pay and the LP will do it. Check "
-                    "the tariff's export price against its energy bands.",
-                ))
+                pairs.append((a, b, b0, b1))
+    if not pairs:
+        return []
+    paired = pd.Index(sorted({x for a, b, _, _ in pairs for x in (a, b)}))
+    try:
+        mc = n.get_switchable_as_dense("Link", "marginal_cost", inds=paired)
+    except Exception:
+        return []
+    eff = (links["efficiency"] if "efficiency" in links.columns
+           else pd.Series(1.0, index=links.index)).astype(float).fillna(1.0)
+    issues: list[Issue] = []
+    for a, b, b0, b1 in pairs:
+        gain_ab = -mc[b] * float(eff[a]) - mc[a]
+        gain_ba = -mc[a] * float(eff[b]) - mc[b]
+        gain = np.maximum(gain_ab.to_numpy(), gain_ba.to_numpy())
+        hit = gain > 1e-9
+        if not hit.any():
+            continue
+        first = mc.index[hit][0]
+        issues.append(_warn(
+            "tariff_export_exceeds_import", "Link", str(a),
+            f"Links '{a}' ({b0}→{b1}) and '{b}' ({b1}→{b0}): the "
+            f"export price exceeds the import price in "
+            f"{int(hit.sum())} snapshot(s) (first {first}, up to "
+            f"{float(gain.max()):,.2f} per MWh), so cycling energy "
+            "out and back in would pay and the LP will do it. Check "
+            "the tariff's export price against its energy bands.",
+        ))
     return issues
 
 
