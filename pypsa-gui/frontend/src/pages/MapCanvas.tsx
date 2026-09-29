@@ -243,7 +243,7 @@ function lineColor(vNom: number): string {
 
 interface MapCanvasProps {
   // 'satellite' = Esri imagery only; 'hybrid' = Esri imagery + street/place labels.
-  mode: Exclude<CanvasView, 'blank'>
+  mode: Exclude<CanvasView, 'blank' | 'site'>
 }
 
 // One-shot helper that fits the map view to the network bounds the first

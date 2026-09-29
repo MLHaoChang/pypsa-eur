@@ -159,6 +159,8 @@ now inputs to the spike and the spec, not open items.
 
 ### Spike scope implied by the decisions
 
+> **Done 2026-09-28** — see `docs/superpowers/notes/2026-09-28-3d-site-view-spike.md` for what landed, how it was verified, and the eight findings the spec should carry.
+
 Phase 0 in §10, made concrete by the answers above:
 
 - A fourth `CanvasView` value and a fourth switcher segment; the 3D canvas is the first `React.lazy` canvas, in its own Vite chunk (three, R3F, drei only — no Cesium, no MapLibre).

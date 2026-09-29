@@ -44,11 +44,13 @@ export type SlidePanel = 'timeseries' | 'simparams' | 'horizon' | 'results' | 's
 // `'projects'` = focused project switcher (⌘P).
 export type PaletteMode = 'all' | 'projects' | null
 export type SidebarMode = 'expanded' | 'icon' | 'hidden'
-// Three canvas backgrounds:
+// Four canvas views:
 //   blank      — current React Flow grid (full edit, drag-to-move)
 //   satellite  — Leaflet + Esri World_Imagery tiles
 //   hybrid     — satellite with place / boundary labels overlay
-export type CanvasView = 'blank' | 'satellite' | 'hybrid'
+//   site       — 3D site view of one bus (pages/SiteCanvas.tsx; spike, see
+//                docs/superpowers/assessments/2026-09-28-3d-site-view-feasibility.md)
+export type CanvasView = 'blank' | 'satellite' | 'hybrid' | 'site'
 export type Theme = 'light' | 'dark'
 export type Density = 'comfortable' | 'compact'
 
@@ -136,7 +138,7 @@ function storedOpenTabs(): OpenTab[] {
 function storedCanvasView(): CanvasView {
   try {
     const v = localStorage.getItem(CANVAS_VIEW_KEY)
-    if (v === 'blank' || v === 'satellite' || v === 'hybrid') return v
+    if (v === 'blank' || v === 'satellite' || v === 'hybrid' || v === 'site') return v
   } catch { /* noop */ }
   return 'blank'
 }
