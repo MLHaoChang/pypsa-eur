@@ -96,7 +96,11 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
                  # not have. test_bundle_sidecars now enumerates every
                  # SIDECAR_NAME under services/adequacy/ so a fourth sidecar
                  # cannot repeat this.
-                 "asset_health.json")
+                 "asset_health.json",
+                 # The 3D site view's sidecar (sites, boundaries, placements).
+                 # services/site_service.py owns it; its cached context lives
+                 # under the `sites/` dir below.
+                 "sites.json")
 
 # Per-project subdirectories that travel alongside the bundle FILES on every
 # project-to-project transition. Chatbot uploads (Phase A) live here under
@@ -106,7 +110,12 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
 # because the source and destination ARE the same dir. The legacy bundle-file
 # loop already handles the small files; bundling dirs separately keeps it
 # robust to growth (e.g. agent_export PNGs accumulating in uploads/).
-_BUNDLE_DIRS = ("uploads",)
+_BUNDLE_DIRS = ("uploads", "sites")
+
+# The bundle files `_save_context` writes itself on every save. `_carry_sidecars_on_move`
+# copies every OTHER `_BUNDLE_FILES` entry from the source project; these it must
+# not touch, or it would overwrite the freshly written network with the source's.
+_SAVE_WRITTEN_FILES = frozenset({"network.nc", "metadata.json", "solver_config.json", "user_ts.json", "results_state.pkl"})
 
 # Cap on the serialized blank-canvas layout document. Even a large network's
 # schematic is a few hundred KB of coordinates; 4 MB bounds a malformed or
@@ -1546,13 +1555,25 @@ def _carry_sidecars_on_move(
     """
     Carry a project's sidecars when a save's TARGET differs from its binding.
 
-    Two sidecars, travelling differently:
+    Three kinds of sidecar, travelling differently:
 
     * `chat.jsonl` — MOVED on `rebind=True` (Save-As claims the new name, so the
-      conversation goes with it), COPIED otherwise (Save-a-Copy /
-      create_scenario must leave the original's thread intact).
-    * `uploads/` — ALWAYS copied. Reference material a user may want in both
-      projects, not a per-conversation thread.
+      conversation goes with it), COPIED otherwise (Save-a-Copy must leave the
+      original's thread intact).
+    * `uploads/` and every other `_BUNDLE_DIRS` entry — ALWAYS copied.
+      Reference material a user may want in both projects.
+    * Every `_BUNDLE_FILES` sidecar the save does not write itself
+      (`layout.json`, `sites.json`, the adequacy sidecars, …) — ALWAYS copied,
+      REPLACING whatever the destination holds: a forced Save-As over an
+      existing project must not keep the overwritten project's schematic.
+      The five files `_save_context` writes (`network.nc`, `metadata.json`,
+      `solver_config.json`, `user_ts.json`, `results_state.pkl`) are excluded
+      because the save has already written the correct ones. Before this loop
+      only chat and uploads travelled, so Save-As, Save-a-Copy and the Clone
+      wizard silently lost `layout.json`.
+
+    Callers: `_save_context` only. `create_scenario` copies the bundle tuples
+    directly and never calls this.
 
     `loaded` is the PRE-rebind name and must be passed explicitly:
     `ctx.loaded_project` has already been re-bound to `name` by the time this
@@ -1622,6 +1643,21 @@ def _carry_sidecars_on_move(
             _copy_bundle_dirs(src_dir, dest)
         except Exception:  # noqa: BLE001 — best-effort, never abort save
             logger.exception("save: _copy_bundle_dirs(%s → %s) failed", loaded, name)
+
+        # The bundle-file sidecars the save itself does not write. Copy-and-
+        # replace, one file at a time, each best-effort: a failure on one
+        # must not stop the rest (a missing layout is a nuisance; a missing
+        # worksheet is lost user work).
+        for fname in _BUNDLE_FILES:
+            if fname in _SAVE_WRITTEN_FILES:
+                continue
+            src_file = src_dir / fname
+            if not src_file.is_file():
+                continue
+            try:
+                shutil.copy2(src_file, dest / fname)
+            except OSError:
+                logger.exception("save: sidecar copy %s (%s → %s) failed", fname, loaded, name)
 
 
 
@@ -3333,6 +3369,61 @@ def put_layout(
         )
     _atomic_write_text(dest / "layout.json", serialized)
     return {"saved": name}
+
+
+@router.get("/{name}/sites")
+def get_sites(
+    name: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    The project's 3D site document (`sites.json`): sites, boundaries, bus
+    membership and asset placements. Same degrade rules as `/layout`:
+    missing or corrupt → the empty document; a permission denial is surfaced,
+    never reported as "no sites". See services/site_service.py.
+    """
+    from services import site_service
+
+    src, name = _resolve_project_src(name, db, user)
+    if not src.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    try:
+        return site_service.read_sites(src)
+    except PermissionError as exc:
+        raise _access_denied(src / site_service.SITES_FILE) from exc
+
+
+@router.put("/{name}/sites")
+def put_sites(
+    name: str,
+    sites: dict,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Persist the site document. Validated (422 names the field), capped like
+    the layout (413), lock-CHECKED like the layout (409, never acquiring —
+    the canvas writes on drag-settle). The one side effect: a `sites/<id>/`
+    context cache whose site is no longer in the document is removed.
+    """
+    from services import project_registry, site_service
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    lock_project = project_registry.find_project(db, user, name)
+    _check_project_lock(db, lock_project, user)
+    try:
+        site_service.validate_sites(sites)
+    except site_service.SitesInvalid as exc:
+        raise HTTPException(422, str(exc)) from exc
+    try:
+        site_service.write_sites(dest, sites)
+    except site_service.SitesTooLarge as exc:
+        raise HTTPException(413, str(exc)) from exc
+    site_service.prune_site_dirs(dest, sites, rmtree=_force_rmtree)
+    return {"saved": name, "sites": len(sites["sites"])}
 
 
 def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:

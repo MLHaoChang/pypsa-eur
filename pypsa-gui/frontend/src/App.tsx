@@ -15,6 +15,7 @@ import MapCanvas from './pages/MapCanvas'
 // bindings are ~300 kB gzipped that a user who never opens it should never
 // download. Vite splits the dynamic import into its own chunk on its own.
 const SiteCanvas = React.lazy(() => import('./pages/SiteCanvas'))
+import { useSitesLifecycle } from './site3d/sitesStore'
 import TimeSeriesManager from './pages/TimeSeriesManager'
 import SolverSettings from './pages/SolverSettings'
 import ModelHorizon from './pages/ModelHorizon'
@@ -180,6 +181,8 @@ export default function App() {
     lastProjectId, lastSavedByProject, markProjectSaved, pruneRecents, recents, setLastProjectId,
     theme, density, compareRailOpen, setCompareRailOpen,
   } = useUIStore()
+  // The 3D site sidecar: load per project, persist on unload (WP1, Task 1.5).
+  useSitesLifecycle(currentProject)
 
   // Results + Time Series take the whole main area (see FULL_SCREEN_TABS);
   // every other sidebar tab opens as a half-width panel beside the canvas.
