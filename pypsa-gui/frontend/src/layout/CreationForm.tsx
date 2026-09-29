@@ -15,6 +15,7 @@ import { fromLocal } from '../site3d/geo'
 import { PLACEABLE_CLASSES } from '../site3d/types'
 import toast from 'react-hot-toast'
 import type { Bus, Line, Link, Generator, Load, StorageUnit, Store, Transformer } from '../api/types'
+import { PALETTE_COMPONENT_TYPE } from './paletteData'
 
 // Carrier classification used by the bus-picker filters. Lower-case match.
 const H2_CARRIERS   = new Set(['h2', 'hydrogen', 'h2 pipeline', 'h2_pipeline'])
@@ -90,7 +91,7 @@ function truncate(text: string, n: number): string {
   return `${(lastSpace > n * 0.6 ? cut.slice(0, lastSpace) : cut).trimEnd()}…`
 }
 
-const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
+export const FIELD_MAP: Record<string, (FieldSpec | BusFieldSpec)[]> = {
   bus: [
     { key: 'name',    label: 'Name',       type: 'text',   required: true },
     { key: 'v_nom',   label: 'Voltage',    type: 'number', defaultValue: '1',  unit: 'kV',  half: true },
@@ -292,16 +293,8 @@ const QUERY_KEY: Record<string, string> = {
   load_elec: 'loads', load_h2: 'loads', load_heat: 'loads',
 }
 
-const COMPONENT_TYPE: Record<string, string> = {
-  bus: 'Bus', line: 'Line', transformer: 'Transformer',
-  thermal: 'Generator', renewable: 'Generator',
-  battery: 'StorageUnit', psh: 'StorageUnit', hydrogen: 'StorageUnit',
-  caes: 'StorageUnit', flywheel: 'StorageUnit',
-  electrolyzer: 'Link', fuel_cell: 'Link',
-  power_to_heat: 'Link', chp: 'Link',
-  thermal_storage: 'Store',
-  load_elec: 'Load', load_h2: 'Load', load_heat: 'Load',
-}
+// The class each palette item creates lives with the rest of the palette data.
+const COMPONENT_TYPE: Record<string, string> = PALETTE_COMPONENT_TYPE
 
 type CreateFn = (p: Record<string, unknown>) => Promise<unknown>
 

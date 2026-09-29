@@ -65,6 +65,7 @@ function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSel
   onHover: (key: string | null) => void
   onSelect: (obj: SiteObject) => void
 }) {
+  countRender(`mesh:${obj.type}:${obj.name}`)
   const [ox, oy] = pivot ? [0, 0] : obj.origin
   const heading = pivot ? 0 : obj.heading
   const tint = selected ? '#ffffff' : hovered ? '#fde68a' : undefined
@@ -276,26 +277,47 @@ function FitCamera({ bounds }: { bounds: Bounds }) {
 
 const DEBUG_ENABLED = import.meta.env.DEV || (typeof location !== 'undefined' && location.search.includes('site3dDebug'))
 
-function Site3dDebugHook({ objects, site, context, groundMode: mode }: { objects: SiteObject[]; site: Site; context: SiteContext | null; groundMode: string }) {
+/**
+ * Render counters for the debug hook (Phase 2 plan Tasks 0.4, 2.2, 6.2): how
+ * often each component has rendered, so a browser test can show that a
+ * snapshot step re-renders only the results driver. Counted only when the
+ * hook is enabled.
+ */
+const renderCounts: Record<string, number> = {}
+function countRender(name: string): void {
+  if (DEBUG_ENABLED) renderCounts[name] = (renderCounts[name] ?? 0) + 1
+}
+
+function Site3dDebugHook({ objects, site, context, groundMode: mode, heightAt }: { objects: SiteObject[]; site: Site; context: SiteContext | null; groundMode: string; heightAt: HeightAt }) {
   const camera = useThree(s => s.camera)
   const scene = useThree(s => s.scene)
   const gl = useThree(s => s.gl)
   const size = useThree(s => s.size)
   useEffect(() => {
-    // The centre of the object's FIRST box (its main body), not the union
-    // bounding box: a genset block's 20 m stack would put the union centre
-    // in mid-air. A click there lands on solid geometry at any zoom.
+    // From the object's DATA, not its meshes: the centre of its first part
+    // (the main body by convention — a genset block's 20 m stack or a wind
+    // object's empty sky between turbines would put a bounding-box centre in
+    // mid-air), through the object's origin, heading and terrain lift. After
+    // Phase 2 merges an object's parts into one mesh, or replaces them with a
+    // hero model, the meshes no longer say where the body is.
     const project = (key: string) => {
-      const o = scene.getObjectByName(key)
-      if (!o) return null
-      const body = o.children.find(c => (c as THREE.Mesh).isMesh) ?? o
-      const v = new THREE.Box3().setFromObject(body).getCenter(new THREE.Vector3()).project(camera)
+      const obj = objects.find(o => objectKey(o) === key)
+      const first = obj?.parts[0]
+      if (!obj || !first) return null
+      const local = new THREE.Vector3(...toScene(first.pos[0], first.pos[1], first.pos[2]))
+        .applyAxisAngle(new THREE.Vector3(0, 1, 0), (-obj.heading * Math.PI) / 180)
+      const world = local.add(new THREE.Vector3(...toScene(obj.origin[0], obj.origin[1], heightAt(obj.origin[0], obj.origin[1]))))
+      camera.updateMatrixWorld()
+      const v = world.project(camera)
       const rect = gl.domElement.getBoundingClientRect()
       return { x: rect.left + ((v.x + 1) / 2) * rect.width, y: rect.top + ((1 - v.y) / 2) * rect.height }
     }
     const hook = {
       project,
-      objects: objects.map(o => ({ key: `${o.type}:${o.name}`, origin: o.origin, heading: o.heading, parts: o.parts.length, summary: o.summary })),
+      objects: objects.map(o => ({ key: `${o.type}:${o.name}`, kind: o.kind, origin: o.origin, heading: o.heading, parts: o.parts.length, summary: o.summary })),
+      /** Draw calls of the last frame (the shadow pass counts too). */
+      calls: () => gl.info.render.calls,
+      renders: () => ({ ...renderCounts }),
       site: { id: site.id, name: site.name, placements: site.placements },
       context: context ? { buildings: context.buildings.length, lines: context.lines.length, areas: context.areas.length, terrain: !!context.terrain, missingTiles: context.terrain?.missing_tiles ?? null } : null,
       groundMode: mode,
@@ -303,7 +325,7 @@ function Site3dDebugHook({ objects, site, context, groundMode: mode }: { objects
     }
     ;(window as unknown as { __site3d?: unknown }).__site3d = hook
     return () => { delete (window as unknown as { __site3d?: unknown }).__site3d }
-  }, [camera, scene, gl, size, objects, site, context, mode])
+  }, [camera, scene, gl, size, objects, site, context, mode, heightAt])
   return null
 }
 
@@ -366,6 +388,7 @@ function SelectedPivot({ obj, enabled, onCommit, children }: {
 // ── The view ──────────────────────────────────────────────────────────────────
 
 export default function SiteCanvas() {
+  countRender('SiteCanvas')
   const { currentProject, selectedComponent, setSelectedComponent } = useUIStore()
   const activeSiteId = useUIStore(s => s.activeSiteId)
   const setActiveSiteId = useUIStore(s => s.setActiveSiteId)
@@ -687,7 +710,7 @@ export default function SiteCanvas() {
         <FitCamera bounds={plotExtent} />
         <DropTargetRegistrar siteId={site.id} />
         <LabelTracker keys={labelObjects.map(objectKey)} refs={labelRefs} />
-        {DEBUG_ENABLED && <Site3dDebugHook objects={objects} site={site} context={context} groundMode={mode} />}
+        {DEBUG_ENABLED && <Site3dDebugHook objects={objects} site={site} context={context} groundMode={mode} heightAt={heightAt} />}
       </Canvas>
 
       {/* Hover / selection labels (LabelTracker positions them every frame). */}

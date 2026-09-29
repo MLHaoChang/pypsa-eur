@@ -12,6 +12,8 @@ export interface Line {
   outage_rate_basis?: 'FOR' | 'EFORd' | null
   mttr_hours?: number | null
   name: string; bus0: string; bus1: string; length: number; r: number; x: number
+  /** Optimised capacity after a solve (sent by the API with every static column; absent before any solve). */
+  s_nom_opt?: number
   b: number; s_nom: number; s_nom_extendable: boolean; s_nom_min: number
   s_nom_max: number | null; capital_cost: number; fom_cost: number
   overnight_cost: number | null
@@ -33,6 +35,9 @@ export interface Link {
   outage_rate_basis?: 'FOR' | 'EFORd' | null
   mttr_hours?: number | null
   name: string; bus0: string; bus1: string; carrier: string; efficiency: number
+  /** Third port (CHP heat output, …). PyPSA's default for an unused port is ''. */
+  bus2?: string
+  p_nom_opt?: number
   p_nom: number; p_nom_extendable: boolean; p_nom_min: number; p_nom_max: number | null
   p_min_pu: number; p_max_pu: number
   marginal_cost: number; capital_cost: number; fom_cost: number
@@ -52,6 +57,7 @@ export interface Generator {
   p_max_pu_includes_outages?: boolean | null
   name: string; bus: string; carrier: string; p_nom: number; p_nom_extendable: boolean
   p_nom_min: number; p_nom_max: number | null; p_min_pu: number; p_max_pu: number
+  p_nom_opt?: number
   // PyPSA AC control mode. Consumed by n.pf() in Stage 2; defaults to 'PQ'.
   control: 'PQ' | 'PV' | 'Slack'
   marginal_cost: number; capital_cost: number; fom_cost: number
@@ -80,6 +86,7 @@ export interface StorageUnit {
   mttr_hours?: number | null
   name: string; bus: string; carrier: string; p_nom: number; p_nom_extendable: boolean
   p_nom_min: number; p_nom_max: number | null
+  p_nom_opt?: number
   max_hours: number; efficiency_store: number; efficiency_dispatch: number
   standing_loss: number; cyclic_state_of_charge: boolean; state_of_charge_initial: number
   // Exogenous energy input to the SoC equation (MW). Constant here; the
@@ -100,6 +107,7 @@ export interface Store {
   mttr_hours?: number | null
   name: string; bus: string; carrier: string; e_nom: number; e_nom_extendable: boolean
   e_nom_min: number; e_nom_max: number | null
+  e_nom_opt?: number
   e_min_pu: number; e_max_pu: number; e_initial: number; e_cyclic: boolean
   capital_cost: number; marginal_cost: number; fom_cost: number
   overnight_cost: number | null
@@ -118,6 +126,7 @@ export interface Transformer {
   name: string; bus0: string; bus1: string; type: string; s_nom: number
   r: number; x: number; tap_ratio: number; tap_side: number; phase_shift: number
   s_nom_extendable: boolean; s_nom_min: number; s_nom_max: number | null
+  s_nom_opt?: number
   capital_cost: number; fom_cost: number
   overnight_cost: number | null
   discount_rate: number | null

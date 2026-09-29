@@ -41,6 +41,7 @@ import { isActive } from '../api/solveQueue'
 import { evaluateMutation } from '../utils/mutationGuard'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
 import { flushPendingSitesToServer } from '../site3d/sitesStore'
+import { PALETTE_SECTIONS_DATA } from './paletteData'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const SIDEBAR_EXPANDED_W = 240
@@ -128,59 +129,25 @@ const TransformerIcon = () => (
 )
 
 // ── Asset palette sections ─────────────────────────────────────────────────────
+// The data (ids, labels, sections) lives in `paletteData.ts`; only the icons
+// are the sidebar's own, keyed by item id.
 interface PaletteItem { id: string; label: string; subtitle: string; icon: React.ReactNode }
 interface PaletteSection { id: string; label: string; items: PaletteItem[] }
 
-const PALETTE_SECTIONS: PaletteSection[] = [
-  {
-    id: 'network', label: 'NETWORK',
-    items: [
-      { id: 'bus',         label: 'Bus (Node)',        subtitle: 'Voltage / carrier node', icon: <BusIcon /> },
-      { id: 'line',        label: 'Transmission Line', subtitle: 'AC line / branch',       icon: <LineIcon /> },
-      { id: 'transformer', label: 'Transformer',       subtitle: 'Voltage step (e.g. 380/220)', icon: <TransformerIcon /> },
-    ],
-  },
-  {
-    id: 'electricity', label: 'ELECTRICITY',
-    items: [
-      { id: 'thermal',   label: 'Conventional', subtitle: 'Coal, CCGT, oil, gas…', icon: <Flame size={14} /> },
-      { id: 'renewable', label: 'Renewable',    subtitle: 'Wind, solar, hydro',    icon: <Wind size={14} /> },
-    ],
-  },
-  {
-    id: 'hydrogen', label: 'HYDROGEN',
-    items: [
-      { id: 'electrolyzer', label: 'Electrolyzer', subtitle: 'Electricity → H₂', icon: <ElectrolyzerIcon /> },
-      { id: 'fuel_cell',    label: 'Fuel Cell',    subtitle: 'H₂ → Electricity', icon: <FuelCellIcon /> },
-    ],
-  },
-  {
-    id: 'heat', label: 'HEAT',
-    items: [
-      { id: 'power_to_heat', label: 'Power-to-Heat', subtitle: 'Heat pump / resistive heater', icon: <PowerToHeatIcon /> },
-      { id: 'chp',           label: 'CHP Plant',     subtitle: 'Co-generation (elec + heat)', icon: <CHPIcon /> },
-    ],
-  },
-  {
-    id: 'storage', label: 'STORAGE',
-    items: [
-      { id: 'battery',         label: 'Battery',          subtitle: 'Li-Ion / BESS',       icon: <BatteryCharging size={14} /> },
-      { id: 'psh',             label: 'Pumped Hydro',     subtitle: 'Large-scale PSH',     icon: <Droplets size={14} /> },
-      { id: 'caes',            label: 'Compressed Air',   subtitle: 'CAES',                icon: <CAESIcon /> },
-      { id: 'flywheel',        label: 'Flywheel',         subtitle: 'Short-duration',      icon: <FlywheelIcon /> },
-      { id: 'hydrogen',        label: 'Hydrogen Storage', subtitle: 'H₂ tank / cavern',    icon: <H2Icon /> },
-      { id: 'thermal_storage', label: 'Thermal Storage',  subtitle: 'Hot-water tank / TES', icon: <ThermalStorageIcon /> },
-    ],
-  },
-  {
-    id: 'demand', label: 'DEMAND',
-    items: [
-      { id: 'load_elec', label: 'Electrical Demand', subtitle: 'Load on AC/DC bus', icon: <Zap size={14} /> },
-      { id: 'load_h2',   label: 'Hydrogen Demand',   subtitle: 'Load on H₂ bus',    icon: <H2Icon /> },
-      { id: 'load_heat', label: 'Heating Demand',    subtitle: 'Load on heat bus',  icon: <Thermometer size={14} /> },
-    ],
-  },
-]
+export const PALETTE_ICONS: Record<string, React.ReactNode> = {
+  bus: <BusIcon />, line: <LineIcon />, transformer: <TransformerIcon />,
+  thermal: <Flame size={14} />, renewable: <Wind size={14} />,
+  electrolyzer: <ElectrolyzerIcon />, fuel_cell: <FuelCellIcon />,
+  power_to_heat: <PowerToHeatIcon />, chp: <CHPIcon />,
+  battery: <BatteryCharging size={14} />, psh: <Droplets size={14} />, caes: <CAESIcon />,
+  flywheel: <FlywheelIcon />, hydrogen: <H2Icon />, thermal_storage: <ThermalStorageIcon />,
+  load_elec: <Zap size={14} />, load_h2: <H2Icon />, load_heat: <Thermometer size={14} />,
+}
+
+const PALETTE_SECTIONS: PaletteSection[] = PALETTE_SECTIONS_DATA.map(section => ({
+  ...section,
+  items: section.items.map(item => ({ ...item, icon: PALETTE_ICONS[item.id] })),
+}))
 
 // ── Shared sidebar item row ────────────────────────────────────────────────────
 function SItem({
