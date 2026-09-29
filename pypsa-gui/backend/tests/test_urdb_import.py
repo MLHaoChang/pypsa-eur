@@ -195,6 +195,27 @@ def test_a_lookback_reading_free_facility_months_is_refused():
     assert refusals == []
 
 
+def test_free_months_follow_the_engines_rule_for_tiered_facilities():
+    """Round 2 M1a: a season whose tier rates are all 0 is free — refused.
+    M1b: a tiered catch-all facility is charged — imported. L1: a refused
+    ratchet leaves no cyclic note."""
+    seasonal = _base(flatdemandstructure=[[{"rate": 0, "max": 50}, {"rate": 0}],
+                                          [{"rate": 5, "max": 50}, {"rate": 10}]],
+                     flatdemandmonths=[0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0], demandwindow=15,
+                     lookbackpercent=0.8, lookbackrange=11)
+    with pytest.raises(U.UrdbRefused) as exc:
+        _imp(seasonal, cyclic_year=True)
+    assert [r["field"] for r in exc.value.refusals] == ["lookbackpercent"]
+    _, _, notes = _imp(seasonal, cyclic_year=True, accept_partial=True)
+    assert "cyclic_year_set_by_importer" not in notes
+    flat_tiers = _base(flatdemandstructure=[[{"rate": 5, "max": 50}, {"rate": 10}]],
+                       flatdemandmonths=[0] * 12, demandwindow=15,
+                       lookbackpercent=0.8, lookbackrange=11)
+    t, refusals, notes = _imp(flat_tiers, cyclic_year=True)
+    assert refusals == [] and "cyclic_year_set_by_importer" in notes
+    assert _item(t, "demand").ratchet.lookback_months == 11
+
+
 def test_a_refused_unit_drops_the_item_instead_of_misreading_it():
     """Review M2: a partial import misses a charge, never misstates it."""
     urdb = _facility(flatdemandunit="kVA",

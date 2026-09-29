@@ -122,6 +122,7 @@ class _Import:
         self.u = urdb
         self.refusals: list[dict] = []
         self.notes: list[str] = []
+        self.pending: list[str] = []   # notes that hold only if the ratchet is attached
 
     def refuse(self, field: str, reason: str) -> None:
         if all(r["field"] != field for r in self.refusals):
@@ -331,12 +332,13 @@ class _Import:
             if rng:
                 if cyclic_year and int(rng) >= 12:
                     # Wrapping within the rate year, a lookback of 12 or more
-                    # months reads every month: months mode over all 12.
-                    self.note("cyclic_lookbackrange_ge_12_as_all_months")
+                    # months reads every month: months mode over all 12. The
+                    # note is recorded once the ratchet is attached (round 2 L1).
+                    self.pending.append("cyclic_lookbackrange_ge_12_as_all_months")
                     return Ratchet(months=list(range(1, 13)), share=share)
                 r = Ratchet(lookback_months=int(rng), share=share, cyclic_year=cyclic_year)
                 if cyclic_year:
-                    self.note("cyclic_year_set_by_importer")
+                    self.pending.append("cyclic_year_set_by_importer")
                 return r
             if chosen:
                 return Ratchet(months=chosen, share=share)
@@ -434,7 +436,15 @@ def urdb_to_tariff(urdb_response: dict, *, name: str, cyclic_year: bool = False,
     facility = imp.facility(settlement) if has_facility else None
     ratchet = imp.ratchet(cyclic_year)
     if ratchet is not None and facility is not None:
-        free = sorted({m for p in facility.periods if p.rate == 0 and not p.tier_rates
+        # The engine's rule (`tariff_engine._charged`): a window is free when
+        # every effective rate of it is 0 — its `tier_rates`, else the item's
+        # tier rates, else its rate (round 2 M1a/M1b).
+        def effective(p) -> list[float]:
+            if p.tier_rates is not None:
+                return list(p.tier_rates)
+            return [t.rate for t in facility.tiers] if facility.tiers else [p.rate]
+
+        free = sorted({m for p in facility.periods if all(r == 0 for r in effective(p))
                        for m in (p.months or range(1, 13))})
         reads = (set(ratchet.months) if ratchet.months is not None else set(range(1, 13)))
         if free and reads & set(free):
@@ -452,6 +462,8 @@ def urdb_to_tariff(urdb_response: dict, *, name: str, cyclic_year: bool = False,
         else:
             facility = facility.model_copy(update={"ratchet": ratchet})
             facility = TariffItem.model_validate(facility.model_dump())
+            for note in imp.pending:
+                imp.note(note)
     if facility is not None:
         items.append(facility)
     fixed = imp.fixed()

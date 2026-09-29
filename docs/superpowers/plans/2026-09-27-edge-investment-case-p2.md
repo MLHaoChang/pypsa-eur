@@ -1114,6 +1114,11 @@ values other than 15/30/60.
   - L6: re-importing identical content with a different label keeps v1 and its meta. Accepted: the item's content is its identity, and the response's notes describe this import.
   - L7: `supercedes`, `isdefault` and `utility_id` are metadata.
   - `test_urdb_import.py` has 38 tests.
+- **WP2.4b-i review round 2 → PASS WITH CONDITIONS; fixed:**
+  - Probes: property 800/0, bills 60/0, R1 both branches, and REopt's real scenarios.
+  - M1a/M1b: the free-month check now uses the engine's `_charged` rule. A window is free when every effective rate is 0: `tier_rates`, else the item's tier rates, else its rate. A tiered season at [0, 0] is refused. A tiered catch-all facility (period rate 0, rates on the tiers) imports.
+  - L1: the cyclic notes are recorded only once the ratchet is attached.
+  - `test_urdb_import.py` has 39 tests.
 
 ## WP2.4b-ii Series and meter-data import
 
