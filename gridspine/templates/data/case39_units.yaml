@@ -35,6 +35,86 @@
 # read as MVA -- the same ledgered assumption the RAW writer's MBASE fallback
 # makes. k_sc / rx_sc are the IEC 60909 converter-source parameters (max
 # current ratio Ik''/In and R/X); typical values, assumed, for task 6.
+#
+# The inverters' REGCA1 + REECA1 group (increment 8) is ONE generic set,
+# shared through the anchor below so five units do not repeat 65 lines each;
+# the loader still records one (unit, param, value, source) row per field.
+# Every value is `assumed`: typical generic WECC second-generation values, NOT
+# a vendor model. Choices that are one decision, so they can be revisited:
+#   wind is Type 4 (full converter): REGCA1 + REECA1, no drive train;
+#   PQFLAG = 0 (Q priority during a dip), Kqv = 2 on a +/-0.05 pu deadband
+#     with Vdip/Vup = 0.9/1.1 -- reactive current injection in the style of
+#     European FRT requirements;
+#   VFLAG = QFLAG = 0: constant Q at the load-flow value, since no plant
+#     controller (REPCA1) is modelled;
+#   Imax = 1.1 pu on MBASE; VDL tables flat at 1.1 (no voltage-dependent
+#     current limiting); Vref0 = 0 (initialised from the load flow).
+x-ibr-generic: &ibr_generic
+  regc_lvplsw:  {value: 1, source: assumed}
+  regc_tg:      {value: 0.02, source: assumed}
+  regc_rrpwr:   {value: 10.0, source: assumed}
+  regc_brkpt:   {value: 0.9, source: assumed}
+  regc_zerox:   {value: 0.4, source: assumed}
+  regc_lvpl1:   {value: 1.22, source: assumed}
+  regc_volim:   {value: 1.2, source: assumed}
+  regc_lvpnt1:  {value: 0.8, source: assumed}
+  regc_lvpnt0:  {value: 0.4, source: assumed}
+  regc_iolim:   {value: -1.3, source: assumed}
+  regc_tfltr:   {value: 0.02, source: assumed}
+  regc_khv:     {value: 0.7, source: assumed}
+  regc_iqrmax:  {value: 99.0, source: assumed}
+  regc_iqrmin:  {value: -99.0, source: assumed}
+  regc_accel:   {value: 0.7, source: assumed}
+  reec_pfflag:  {value: 0, source: assumed}
+  reec_vflag:   {value: 0, source: assumed}
+  reec_qflag:   {value: 0, source: assumed}
+  reec_pflag:   {value: 0, source: assumed}
+  reec_pqflag:  {value: 0, source: assumed}
+  reec_vdip:    {value: 0.9, source: assumed}
+  reec_vup:     {value: 1.1, source: assumed}
+  reec_trv:     {value: 0.02, source: assumed}
+  reec_dbd1:    {value: -0.05, source: assumed}
+  reec_dbd2:    {value: 0.05, source: assumed}
+  reec_kqv:     {value: 2.0, source: assumed}
+  reec_iqh1:    {value: 1.05, source: assumed}
+  reec_iql1:    {value: -1.05, source: assumed}
+  reec_vref0:   {value: 0.0, source: assumed}
+  reec_iqfrz:   {value: 0.0, source: assumed}
+  reec_thld:    {value: 0.0, source: assumed}
+  reec_thld2:   {value: 0.0, source: assumed}
+  reec_tp:      {value: 0.02, source: assumed}
+  reec_qmax:    {value: 0.436, source: assumed}
+  reec_qmin:    {value: -0.436, source: assumed}
+  reec_vmax:    {value: 1.1, source: assumed}
+  reec_vmin:    {value: 0.9, source: assumed}
+  reec_kqp:     {value: 0.0, source: assumed}
+  reec_kqi:     {value: 0.1, source: assumed}
+  reec_kvp:     {value: 0.0, source: assumed}
+  reec_kvi:     {value: 40.0, source: assumed}
+  reec_vbias:   {value: 0.0, source: assumed}
+  reec_tiq:     {value: 0.02, source: assumed}
+  reec_dpmax:   {value: 99.0, source: assumed}
+  reec_dpmin:   {value: -99.0, source: assumed}
+  reec_pmax:    {value: 1.0, source: assumed}
+  reec_pmin:    {value: 0.0, source: assumed}
+  reec_imax:    {value: 1.1, source: assumed}
+  reec_tpord:   {value: 0.02, source: assumed}
+  reec_vq1:     {value: 0.2, source: assumed}
+  reec_iq1:     {value: 1.1, source: assumed}
+  reec_vq2:     {value: 0.5, source: assumed}
+  reec_iq2:     {value: 1.1, source: assumed}
+  reec_vq3:     {value: 0.8, source: assumed}
+  reec_iq3:     {value: 1.1, source: assumed}
+  reec_vq4:     {value: 1.0, source: assumed}
+  reec_iq4:     {value: 1.1, source: assumed}
+  reec_vp1:     {value: 0.2, source: assumed}
+  reec_ip1:     {value: 1.1, source: assumed}
+  reec_vp2:     {value: 0.5, source: assumed}
+  reec_ip2:     {value: 1.1, source: assumed}
+  reec_vp3:     {value: 0.8, source: assumed}
+  reec_ip3:     {value: 1.1, source: assumed}
+  reec_vp4:     {value: 1.0, source: assumed}
+  reec_ip4:     {value: 1.1, source: assumed}
 units:
   G_BUS_30:
     model: GENSAL
@@ -249,6 +329,7 @@ units:
     mbase_mva: 600.0
     include_in_inertia: false
     params:
+      <<: *ibr_generic
       k_sc:  {value: 1.2, source: assumed}
       rx_sc: {value: 0.1, source: assumed}
   W_BUS_35:
@@ -256,6 +337,7 @@ units:
     mbase_mva: 600.0
     include_in_inertia: false
     params:
+      <<: *ibr_generic
       k_sc:  {value: 1.2, source: assumed}
       rx_sc: {value: 0.1, source: assumed}
   W_BUS_37:
@@ -263,6 +345,7 @@ units:
     mbase_mva: 600.0
     include_in_inertia: false
     params:
+      <<: *ibr_generic
       k_sc:  {value: 1.2, source: assumed}
       rx_sc: {value: 0.1, source: assumed}
   S_BUS_34:
@@ -270,6 +353,7 @@ units:
     mbase_mva: 500.0
     include_in_inertia: false
     params:
+      <<: *ibr_generic
       k_sc:  {value: 1.2, source: assumed}
       rx_sc: {value: 0.1, source: assumed}
   S_BUS_36:
@@ -277,5 +361,6 @@ units:
     mbase_mva: 500.0
     include_in_inertia: false
     params:
+      <<: *ibr_generic
       k_sc:  {value: 1.2, source: assumed}
       rx_sc: {value: 0.1, source: assumed}

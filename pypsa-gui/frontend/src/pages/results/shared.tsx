@@ -811,6 +811,16 @@ export function downloadCSV(filename: string, header: string[], rows: unknown[][
   URL.revokeObjectURL(url)
 }
 
+/** Save `data` as pretty-printed JSON (EH P18 whole-report export). */
+export function downloadJSON(filename: string, data: unknown): void {
+  const blob = new Blob([JSON.stringify(data, null, 2) + '\n'],
+    { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url; a.download = filename; a.click()
+  URL.revokeObjectURL(url)
+}
+
 // ── SVG export ────────────────────────────────────────────────────────────
 // Walks `container` for the first <svg> element (Recharts always emits a
 // single SVG per ResponsiveContainer) and serialises it to a downloadable

@@ -12,6 +12,7 @@ import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Ledger, RankedSnapshot, StageStatus, StudyConfig } from '../api/gridspine'
 import GridspinePanel from './GridspinePanel'
+import toast from 'react-hot-toast'
 
 const store = vi.hoisted(() => ({ currentProject: 'Study A' as string | null }))
 
@@ -387,6 +388,27 @@ describe('GridspinePanel', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
     const shown = await screen.findByTestId('external-refusal')
     expect(shown.textContent).toContain("unknown ['G99']")
+  })
+
+  it('says the upload is too large, not unreadable, when the pair is over the size cap', async () => {
+    // Found in the browser: two 33 MiB tables over the shared 64 MiB cap came
+    // back 413 and toasted "That dispatch could not be read" — which sends the
+    // engineer to look for a fault in files the server never read. The inline
+    // line already carried the server's own sentence; the toast now agrees.
+    const err = vi.spyOn(toast, 'error').mockImplementation(() => '')
+    api.uploadExternalDispatch.mockRejectedValue({
+      response: { status: 413, data: { detail: 'The files in this upload exceed the 64 MB limit together.' } },
+    })
+    renderPanel()
+    await screen.findByTestId('dispatch-source-current')
+    await userEvent.selectOptions(screen.getByLabelText('Dispatch source'), 'from_external')
+    await userEvent.upload(screen.getByLabelText(/dispatch table/i), new File(['x'], 'd.xlsx'))
+    await userEvent.click(screen.getByRole('button', { name: 'Apply' }))
+    const shown = await screen.findByTestId('external-refusal')
+    expect(shown.textContent).toContain('exceed the 64 MB limit together')
+    expect(err).toHaveBeenCalledWith('Those files are too large to upload')
+    expect(err).not.toHaveBeenCalledWith('That dispatch could not be read')
+    err.mockRestore()
   })
 
   it('greys out the generation-only fields when the source brings its own hours', async () => {

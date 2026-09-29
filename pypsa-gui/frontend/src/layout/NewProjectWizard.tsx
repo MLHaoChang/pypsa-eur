@@ -10,6 +10,7 @@ import type { ProjectInfo } from '../api/types'
 import { projectsApi } from '../api/projects'
 import { formatApiDetail } from '../api/client'
 import { useAuthMode } from '../auth/AuthModeProvider'
+import { useCreateFromTemplate, useOpenInWorkbench } from '../hooks/useCreateFromTemplate'
 import FromFolderTab from './FromFolderTab'
 import { ioApi } from '../api/io'
 import { networkApi } from '../api/network'
@@ -52,7 +53,9 @@ type Tab = NewProjectTab
 // projectsApi.createFromTemplate. See project_templates/_build.py for how each
 // is generated (3bus/ieee14 are synthetic; belgium is PyPSA-Eur's own test
 // network — the OSM-derived Belgian grid clustered to 5 nodes).
-const TEMPLATES = [
+// Exported for the hub-design Start card (guided-mode spec §5.3), which offers
+// the energy-hub rows of this same table.
+export const TEMPLATES = [
   { id: '3bus',    name: '3-Bus Tutorial', description: 'Minimal AC network — 3 buses, 3 lines, 1 generator. Best starting point for learning PyPSA.', buses: 3,  lines: 3,  badge: 'simple',    available: true },
   { id: 'ieee14',  name: 'IEEE 14-Bus',    description: 'Classic test case. 14 buses, 20 lines, 5 generators. Stable baseline for benchmarking.',     buses: 14, lines: 20, badge: 'reference', available: true },
   { id: 'belgium', name: 'Belgium Grid',   description: "PyPSA-Eur's Belgian network — OSM-derived HV grid clustered to 5 nodes, with wind, solar, nuclear, gas, batteries and H2. Solves out of the box.", buses: 10, lines: 6, badge: 'PyPSA-Eur', available: true },
@@ -60,6 +63,12 @@ const TEMPLATES = [
   // so a project made from it, solved and saved, is a valid dispatch source for
   // a planning → dynamics study — its generators are the detailed grid's units.
   { id: 'ieee39',  name: 'IEEE 39-Bus (New England)', description: 'The New England test system gridspine studies — 39 buses, 10 synchronous units (9 committable), 5 wind and solar sites, 24 h. Solve and save it, then pick it as a study\'s dispatch source.', buses: 39, lines: 35, badge: 'planning → dynamics', available: true },
+  // P19 Energy Hub templates (project_templates/eh_templates.py): tagged,
+  // with outage data, a stress-scenario registry, VOLL and a recommended
+  // archetype pack — open the Energy Hub panel and press Run.
+  { id: 'eh_datacenter', name: 'Data Center Energy Hub', description: '50 MW hyperscale campus behind a weak 40 MW grid connection: critical IT with UPS, gas gensets, rooftop PV, expansion candidates. Ready for an Energy Hub study (weak_flexible).', buses: 3, lines: 0, badge: 'energy hub', available: true },
+  { id: 'eh_h2_hub', name: 'Industrial Hydrogen Hub', description: 'Grid-connected site with wind, PV, electrolyser, H2 storage and fuel cell, critical process load and H2 offtake. Ready for an Energy Hub study (strong_grid).', buses: 3, lines: 0, badge: 'energy hub', available: true },
+  { id: 'eh_microgrid', name: 'Island Microgrid', description: 'Island system that must run without its subsea tie: PV, wind, battery, diesel fleet, critical hospital feeder. Ready for an off-grid Energy Hub study.', buses: 3, lines: 0, badge: 'energy hub', available: true },
 ] as const
 
 export default function NewProjectWizard({
@@ -241,27 +250,14 @@ function BlankTab({ existingProjects, onConfirm, onClose, isPending }: NewProjec
 
 // ── Tab 2: Template — curated example networks ────────────────────────────
 
-function TemplateTab({ onClose }: { onClose: () => void }) {
-  const qc = useQueryClient()
-  const setCurrentProject = useUIStore(s => s.setCurrentProject)
-  const setProjectName    = useUIStore(s => s.setProjectName)
+// Obstacle 2 (guided-mode spec §2.6): a project created here must open the
+// workbench — `useOpenInWorkbench` (hooks/useCreateFromTemplate.ts, lifted
+// there in P24 together with the Templates tab's mutation).
 
-  // Available templates import via the backend's /projects/from_template/<id>
-  // endpoint, which copies the bundled network.nc into a fresh project dir and
-  // loads it — same success path as FromFileTab's bundle import.
-  const importMut = useMutation({
-    mutationFn: (templateId: string) => projectsApi.createFromTemplate(templateId),
-    onSuccess: (res) => {
-      invalidateNetworkQueries(qc, res.imported)
-      qc.invalidateQueries({ queryKey: ['projects'] })
-      setCurrentProject(res.imported)
-      setProjectName(res.imported)
-      appLog('INFO', `Created '${res.imported}' from template (${res.summary.buses} buses)`)
-      toast.success(`Created '${res.imported}' from template`)
-      onClose()
-    },
-    onError: (e: Error) => toast.error(`Template import failed: ${e.message}`),
-  })
+function TemplateTab({ onClose }: { onClose: () => void }) {
+  // The create mutation is shared with the hub-design Start card (P24):
+  // G4 note, current project, close, then open in the workbench.
+  const importMut = useCreateFromTemplate({ onCreated: () => onClose() })
 
   const handlePick = useCallback((id: string, available: boolean) => {
     if (!available) {
@@ -346,6 +342,7 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
   const qc = useQueryClient()
   const setCurrentProject = useUIStore(s => s.setCurrentProject)
   const setProjectName    = useUIStore(s => s.setProjectName)
+  const openInWorkbench = useOpenInWorkbench()
   const [dragOver, setDragOver] = useState(false)
   const { data: existingProjects = [] } = useQuery({
     queryKey: ['projects'],
@@ -375,6 +372,9 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
       )
     },
     onSuccess: (res) => {
+      // G4 (guided-mode spec §3.4): a new project starts Guided unless the
+      // user chose a mode explicitly. First, before any navigation.
+      useUIStore.getState().noteNewProjectCreated('file')
       invalidateNetworkQueries(qc, res.imported)
       qc.invalidateQueries({ queryKey: nk(res.imported, 'results') })
       qc.invalidateQueries({ queryKey: ['projects'] })
@@ -383,6 +383,7 @@ function FromFileTab({ onClose }: { onClose: () => void }) {
       appLog('INFO', `Imported '${res.imported}' via wizard (${res.summary.buses} buses)`)
       toast.success(`Opened project '${res.imported}'`)
       onClose()
+      openInWorkbench(res.imported)
     },
     onError: (e: Error) => toast.error(`Import failed: ${e.message}`),
   })
@@ -444,6 +445,7 @@ function CloneTab({ existingProjects, onClose }: {
   const setCurrentProject = useUIStore(s => s.setCurrentProject)
   const setProjectName    = useUIStore(s => s.setProjectName)
   const currentProject    = useUIStore(s => s.currentProject)
+  const openInWorkbench = useOpenInWorkbench()
   const [sourceId, setSourceId] = useState<string | null>(null)
   const [newName, setNewName]   = useState('')
 
@@ -487,6 +489,9 @@ function CloneTab({ existingProjects, onClose }: {
       return res
     },
     onSuccess: (res) => {
+      // G4 (guided-mode spec §3.4): a new project starts Guided unless the
+      // user chose a mode explicitly. First, before any navigation.
+      useUIStore.getState().noteNewProjectCreated('clone')
       invalidateNetworkQueries(qc, res.saved)
       setCurrentProject(res.saved)
       setProjectName(res.saved)
@@ -494,6 +499,7 @@ function CloneTab({ existingProjects, onClose }: {
       appLog('INFO', `Cloned '${sourceId}' → '${res.saved}' via wizard`)
       toast.success(`Cloned to '${res.saved}'`)
       onClose()
+      openInWorkbench(res.saved)
     },
     onError: (e: Error) => {
       // Same seam ScenariosPanel/`formatApiDetail` use to read a structured
@@ -670,6 +676,8 @@ function StudyTab({ existingProjects, onClose }: { existingProjects: ProjectInfo
       hours: Number(hours), k: Number(k), window: Number(window_), overlap: Number(overlap), screen,
     }),
     onSuccess: (res) => {
+      // G4 (guided-mode spec §3.4, literal): a study is a new project too.
+      useUIStore.getState().noteNewProjectCreated('study')
       qc.invalidateQueries({ queryKey: ['projects'] })
       setCurrentProject(res.name, res.id)
       setProjectName(res.name)

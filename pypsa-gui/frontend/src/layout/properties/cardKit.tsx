@@ -4,10 +4,10 @@
 // MiniProfileChart, VintageCloneButton. Extracted verbatim from PropertiesPanel
 // (Step 1 of the card-split) — pure leaf helpers; the Edit cards stay in
 // PropertiesPanel and import these. No back-dependency on PropertiesPanel.
-
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useCatalog } from '../../hooks/useCatalog'
+import { useGuideField } from '../../components/GuidedTour'
 import { editScope, loadExtras, saveExtras } from '../../utils/extrasStore'
 import type { SolveMode } from '../../utils/attributeCatalog'
 import { useQuery, useMutation, useQueryClient, type QueryClient } from '@tanstack/react-query'
@@ -195,9 +195,12 @@ export function ExpandedProps({ items }: { items: ExpandedItem[] }) {
 // same pattern as BusPanel's "Edit Bus" footer so the layout matches across
 // every asset type in the single-asset right panel.
 export function DetailFooter({
-  editLabel, assetName, onEdit, onDelete, deletePending, hasProfile, showChart, onToggleChart,
+  editLabel, testId, assetName, onEdit, onDelete, deletePending, hasProfile, showChart, onToggleChart,
 }: {
   editLabel: string
+  // Test id of the Edit button — a tour anchor (EH tagging tour `reveal`,
+  // spec §2.7). Named `testId` so test_guides.py's literal scan finds it.
+  testId?: string
   // The asset's own name (gen.name / su.name / …) — used only to disambiguate
   // the Delete button's accessible name when several DetailFooters stack in
   // the "all connected assets" view (PropertiesPanel's per-bus asset list).
@@ -225,6 +228,7 @@ export function DetailFooter({
       <div className="flex gap-2 mt-2">
         <button
           onClick={onEdit}
+          data-testid={testId}
           className="flex-1 py-1.5 border border-border rounded text-xs text-muted hover:border-accent hover:text-accent transition-colors flex items-center justify-center gap-1.5"
         >
           <Pencil size={11} /> {editLabel}
@@ -986,6 +990,90 @@ export function ExtrasSection({ componentClass, fs, set, curated }: {
         <button type="button" onClick={() => setPicking(true)}
                 className="text-[9px] text-accent hover:underline">+ Add parameter</button>
       )}
+    </div>
+  )
+}
+
+// ── Energy Hub tags (P14) ─────────────────────────────────────────────────────
+// Custom columns the EH study reads: which bus is the grid point of
+// connection, which buses are critical, the PoC short-circuit data for the
+// SCR gate, and which Link is the grid import. Mirrors the backend's
+// `models.energy_hub.EH_LINK_ROLES` (the backend refuses anything else).
+export const EH_LINK_ROLES = [
+  '', 'grid_import', 'eh_import', 'import',
+  'eh_conversion', 'conversion', 'electrolyser', 'fuel_cell',
+] as const
+
+const EH_BUS_BOOLS = ['eh_poc', 'eh_critical'] as const
+const EH_BUS_NUMS = ['eh_sk_mva', 'eh_ibr_mva'] as const
+
+/** Form seed for a Bus's EH tags (booleans as 'true'/'false'). */
+export function ehBusFS(bus: object): FS {
+  const row = bus as Record<string, unknown>
+  const out: FS = {}
+  for (const k of EH_BUS_BOOLS) out[k] = row[k] === true ? 'true' : 'false'
+  for (const k of EH_BUS_NUMS) {
+    const v = row[k]
+    out[k] = typeof v === 'number' && Number.isFinite(v) ? String(v) : ''
+  }
+  return out
+}
+
+/**
+ * The EH part of a Bus PUT. A tag is sent only when the user set it or the
+ * column already exists on the row — so editing an ordinary bus never
+ * creates `eh_*` columns across the network, and an existing tag can still
+ * be cleared.
+ */
+export function ehBusPayload(fs: FS, current: object): Record<string, unknown> {
+  const row = current as Record<string, unknown>
+  const out: Record<string, unknown> = {}
+  for (const k of EH_BUS_BOOLS) {
+    if (fs[k] === 'true' || k in row) out[k] = fs[k] === 'true'
+  }
+  for (const k of EH_BUS_NUMS) {
+    const v = no(fs, k)
+    if (v !== null || k in row) out[k] = v
+  }
+  return out
+}
+
+/** The EH part of a Link PUT (same send-only-when-meaningful rule). */
+export function ehLinkPayload(fs: FS, current: object): Record<string, unknown> {
+  const role = (fs.eh_role ?? '').trim()
+  const cur = current as Record<string, unknown>
+  // An unchanged role is not re-sent: a study-internal role (set by the
+  // redundancy scenarios) is refused by the API as a hand-set value, and must
+  // not block an unrelated edit of the same Link.
+  if ('eh_role' in cur && String(cur.eh_role ?? '') === role) return {}
+  return role !== '' || 'eh_role' in cur ? { eh_role: role } : {}
+}
+
+export function EhBusInputs({ fs, set }: { fs: FS; set: SetFS }) {
+  // Hover text comes from the guide catalogue (P21) — the same wording the
+  // tour and the assistant use; the literals are the offline fallback.
+  const tip = {
+    poc: useGuideField('eh_poc', 'Energy Hub: the GRID-side bus of the import boundary. The hub is everything on the other side of the import Links (used for MC certification and the SCR gate).'),
+    crit: useGuideField('eh_critical', 'Energy Hub: demand here must be served under islanding (DtC stress/planning).'),
+    sk: useGuideField('eh_sk_mva', 'Energy Hub SCR gate: grid short-circuit capacity at this PoC.'),
+    ibr: useGuideField('eh_ibr_mva', 'Energy Hub SCR gate: inverter-based capacity at this PoC (defaults to installed IBR generators when blank).'),
+  }
+  return (
+    <div data-testid="eh-bus-fields" className="col-span-2 grid grid-cols-2 gap-x-2 gap-y-1.5">
+      <ChkInput label="Grid point of connection (PoC)" k="eh_poc" fs={fs} set={set} tip={tip.poc} />
+      <ChkInput label="Critical bus" k="eh_critical" fs={fs} set={set} tip={tip.crit} />
+      <NumInput label="Short-circuit level" k="eh_sk_mva" fs={fs} set={set} unit="MVA" tip={tip.sk} />
+      <NumInput label="IBR capacity" k="eh_ibr_mva" fs={fs} set={set} unit="MVA" tip={tip.ibr} />
+    </div>
+  )
+}
+
+export function EhLinkInputs({ fs, set }: { fs: FS; set: SetFS }) {
+  const tip = useGuideField('eh_role', 'grid_import marks the Link the archetype packs cap or island (spec §6 rule 1). Conversion roles identify electrolysers / fuel cells for redundancy scenarios.')
+  return (
+    <div data-testid="eh-link-role" className="col-span-2">
+      <SelInput label="Energy Hub role" k="eh_role" fs={fs} set={set}
+        options={[...EH_LINK_ROLES]} tip={tip} />
     </div>
   )
 }

@@ -91,6 +91,7 @@ from services.validation_service import has_errors, validate_for_run
 from services.solver.adequacy import (  # noqa: F401
     _prm_margin,
     _wrap_with_ens_cap,
+    _wrap_with_import_energy_cap,
     _wrap_with_reserve_margin,
     reserve_margin_facts,
 )
@@ -175,6 +176,13 @@ class SolverConfig:
     # Per-zone ceiling as a multiple of the system target, applied to each
     # zone's OWN demand (zone = bus `country`). None = no zone ceilings.
     ens_zone_cap_multiple: float | None = None
+    # ── Energy import cap (EH spec §6 P17 amendment) ─────────────────────
+    # PACK-ONLY: set by `archetypes.solver_config_patch_with_preflight` from a
+    # weak_flexible pack, never a user global — absent from
+    # SolverConfigSchema and stripped by projects._solver_config_from_dict.
+    # Per period: Σ w·η·p0 over the grid→hub Links ≤ E × Σw / 8760.
+    import_energy_cap_mwh_per_year: float | None = None
+    import_energy_links: list = field(default_factory=list)
     # ── Planning reserve margin (Phase 8 spec §1) ─────────────────────────
     # Firm-capacity standard as a FRACTION (0.15 == 15 %). None/0 = off.
     # Enforced per active investment period by `_wrap_with_reserve_margin`:
@@ -511,6 +519,9 @@ def run_simulation(
         # Reliability target: per-period ENS cap (+ per-zone ceilings) on the
         # involuntary slack dispatch. Adds work only when a target is set.
         extra_fn = _wrap_with_ens_cap(network, extra_fn, config, log_queue=log_queue)
+        # Energy import cap (EH pack only). Adds work only when set.
+        extra_fn = _wrap_with_import_energy_cap(
+            network, extra_fn, config, log_queue=log_queue)
         # Firm-capacity standard: a per-period planning reserve margin on
         # derated installed capacity. Adds work only when a margin is set.
         extra_fn = _wrap_with_reserve_margin(

@@ -41,6 +41,7 @@ GET     /api/gridspine/{name}/bundles/{hour}                     -> export_hando
 GET     /api/gridspine/{name}/config                             -> get_config_api_gridspine__name__config_get
 PUT     /api/gridspine/{name}/config                             -> update_config_api_gridspine__name__config_put
 POST    /api/gridspine/{name}/dispatch-source                    -> set_dispatch_source_api_gridspine__name__dispatch_source_post
+POST    /api/gridspine/{name}/dispatch-source/external           -> upload_external_dispatch_api_gridspine__name__dispatch_source_external_post
 GET     /api/gridspine/{name}/figures/{hour}/{figure}            -> fetch_result_figure_api_gridspine__name__figures__hour___figure__get
 GET     /api/gridspine/{name}/ledger                             -> get_assumption_ledger_api_gridspine__name__ledger_get
 GET     /api/gridspine/{name}/readback                           -> get_readback_api_gridspine__name__readback_get
@@ -49,6 +50,8 @@ POST    /api/gridspine/{name}/run                                -> run_pipeline
 GET     /api/gridspine/{name}/snapshots                          -> list_ranked_snapshots_api_gridspine__name__snapshots_get
 GET     /api/gridspine/{name}/status                             -> get_stage_status_api_gridspine__name__status_get
 PUT     /api/gridspine/{name}/templates/{unit_id}/{param}        -> edit_template_param_api_gridspine__name__templates__unit_id___param__put
+GET     /api/guides                                              -> list_guides_api_guides_get
+GET     /api/guides/{topic}                                      -> get_guide_api_guides__topic__get
 GET     /api/health                                              -> health_api_health_get
 GET     /api/io/export/csv                                       -> export_csv_api_io_export_csv_get
 GET     /api/io/export/excel                                     -> export_excel_api_io_export_excel_get
@@ -171,6 +174,7 @@ GET     /api/projects/{name}/asset_health                        -> get_asset_he
 PUT     /api/projects/{name}/asset_health                        -> put_asset_health_api_projects__name__asset_health_put
 GET     /api/projects/{name}/bundle                              -> download_bundle_api_projects__name__bundle_get
 GET     /api/projects/{name}/compare-state                       -> get_compare_state_api_projects__name__compare_state_get
+GET     /api/projects/{name}/eh_template                         -> get_eh_template_api_projects__name__eh_template_get
 GET     /api/projects/{name}/layout                              -> get_layout_api_projects__name__layout_get
 PUT     /api/projects/{name}/layout                              -> put_layout_api_projects__name__layout_put
 GET     /api/projects/{name}/members                             -> get_project_members_api_projects__name__members_get
@@ -184,6 +188,7 @@ POST    /api/projects/{name}/snapshots                           -> create_snaps
 DELETE  /api/projects/{name}/snapshots/{snapshot_id}             -> delete_snapshot_api_projects__name__snapshots__snapshot_id__delete
 POST    /api/projects/{name}/snapshots/{snapshot_id}/restore     -> restore_snapshot_api_projects__name__snapshots__snapshot_id__restore_post
 GET     /api/projects/{name}/statistics                          -> project_statistics_api_projects__name__statistics_get
+GET     /api/projects/{name}/stress_profile_packs                -> get_stress_profile_packs_api_projects__name__stress_profile_packs_get
 GET     /api/projects/{name}/stress_scenarios                    -> get_stress_scenarios_api_projects__name__stress_scenarios_get
 PUT     /api/projects/{name}/stress_scenarios                    -> put_stress_scenarios_api_projects__name__stress_scenarios_put
 GET     /api/projects/{name}/uploads                             -> get_uploads_api_projects__name__uploads_get
@@ -219,8 +224,10 @@ GET     /api/results/economics_by_carrier                        -> get_economic
 GET     /api/results/eh_dtc                                      -> get_eh_dtc_api_results_eh_dtc_get
 GET     /api/results/eh_dtc_planning                             -> get_eh_dtc_planning_api_results_eh_dtc_planning_get
 GET     /api/results/eh_levers                                   -> get_eh_levers_api_results_eh_levers_get
+GET     /api/results/eh_readiness                                -> get_eh_readiness_api_results_eh_readiness_get
 GET     /api/results/eh_redundancy                               -> get_eh_redundancy_api_results_eh_redundancy_get
 GET     /api/results/eh_reference_design                         -> get_eh_reference_design_api_results_eh_reference_design_get
+GET     /api/results/eh_review                                   -> get_eh_review_api_results_eh_review_get
 GET     /api/results/eh_study                                    -> get_eh_study_api_results_eh_study_get
 POST    /api/results/eh_study                                    -> post_eh_study_api_results_eh_study_post
 POST    /api/results/eh_study/abort                              -> post_eh_study_abort_api_results_eh_study_abort_post

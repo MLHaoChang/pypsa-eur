@@ -72,6 +72,11 @@ logger = logging.getLogger(__name__)
 # rather than a silent change to everyone's queue.
 MAX_CONCURRENT_SOLVES: int = int(os.environ.get("PYPSA_GUI_MAX_CONCURRENT_SOLVES", "1"))
 
+#: How long `reset_for_tests` waits for aborted jobs to unwind. A test solve
+#: aborts in well under a second; the bound only stops a job that ignores its
+#: stop event from hanging the suite.
+_RESET_JOIN_TIMEOUT_S = 30.0
+
 
 def _row_epoch(value: Any) -> float:
     """
@@ -699,11 +704,15 @@ class SolveQueue:
         thread parked on an empty queue (it is a daemon; killing it is neither
         possible nor necessary). Used by the pytest harness between tests.
 
-        Best-effort: signals the stop_event of EVERY job currently mid-solve (a
-        pool can have more than one) so each aborts (run_simulation returns
-        "aborted" -> no save) rather than bleeding its solve into the next test.
-        Doesn't join — a sub-second test solve will unwind on its own; the next
-        test's reset + reset_network() supersede it.
+        Signals the stop_event of EVERY job currently mid-solve (a pool can
+        have more than one) so each aborts (run_simulation returns "aborted" ->
+        no save) rather than bleeding its solve into the next test — and then
+        WAITS, bounded, for those jobs to unwind. Signalling alone was not
+        enough: an aborted job still runs its status write, which opens
+        `db.session.SessionLocal` at call time, and returning early let that
+        write land after the next test had patched `SessionLocal` onto its own
+        single-connection engine. On macOS it rolled back the next test's
+        seeding and surfaced as a 404 two tests away.
         """
         events = []
         with self._lock:
@@ -732,6 +741,25 @@ class SolveQueue:
                 ev.set()
             except Exception:
                 pass
+        # Every popped job ends in the dispatcher's `task_done()` (the drain
+        # above balanced its own), so the queue's counter reaching zero means
+        # every in-flight job has finished its finally-block writes. Several
+        # tests swap `_q` for a stand-in that swallows work; nothing is
+        # dispatched from one, so there is nothing to wait for.
+        all_done = getattr(self._q, "all_tasks_done", None)
+        if all_done is None:
+            return
+        deadline = time.monotonic() + _RESET_JOIN_TIMEOUT_S
+        with all_done:
+            while self._q.unfinished_tasks:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    logger.warning(
+                        "solve_queue.reset_for_tests: %d job(s) still unwinding after %ss",
+                        self._q.unfinished_tasks, _RESET_JOIN_TIMEOUT_S,
+                    )
+                    break
+                all_done.wait(remaining)
 
     def restore(self, row: dict) -> tuple[SolveJob, bool]:
         """

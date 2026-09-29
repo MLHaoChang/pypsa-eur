@@ -238,6 +238,8 @@ async def import_csv(file: UploadFile = File(...)):
             n = PyPSAService.get_network()
             n.import_from_csv_folder(tmpdir)
             _refuse_reserved_buses(n)
+            from services.adequacy.eh_columns import normalise_eh_columns
+            normalise_eh_columns(n)
     summary = _build_summary(n)
     change_log_service.log(
         "import", "Network", file.filename or "network_csv.zip",
@@ -274,6 +276,9 @@ async def import_excel(file: UploadFile = File(...)):
                     except Exception:
                         pass
         _refuse_reserved_buses(n)
+        # P14: typed eh_* tags (a sheet's TRUE/1/blank → bool; netCDF-safe).
+        from services.adequacy.eh_columns import normalise_eh_columns
+        normalise_eh_columns(n)
     summary = _build_summary(n)
     change_log_service.log(
         "import", "Network", file.filename or "network.xlsx",

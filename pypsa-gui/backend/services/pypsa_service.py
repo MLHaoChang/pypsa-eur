@@ -518,8 +518,10 @@ class PyPSAService:
         # network-replacing path that does not go through the netCDF import
         # helper. Without it the flag is silently dropped by the swap.
         try:
+            from services.adequacy.eh_columns import normalise_eh_columns
             from services.adequacy.occurrence import normalise_flag_column
             normalise_flag_column(n)
+            normalise_eh_columns(n)
         except Exception:                                     # noqa: BLE001
             pass
         # Same project (clustering swaps the network in place): carry identity,
@@ -662,8 +664,10 @@ class PyPSAService:
         again would deadlock the save while the mutation lock is held — the
         app would wedge rather than error.
         """
+        from services.adequacy.eh_columns import normalise_eh_columns
         from services.adequacy.occurrence import normalise_flag_column
         normalise_flag_column(n)
+        normalise_eh_columns(n)
         n.export_to_netcdf(str(path))
 
     @staticmethod
@@ -680,6 +684,7 @@ class PyPSAService:
         Like the export helper it does NOT take ``get_netcdf_io_lock()`` —
         the lock is not reentrant and every caller already holds it.
         """
+        from services.adequacy.eh_columns import normalise_eh_columns
         from services.adequacy.occurrence import normalise_flag_column
         from services.commercial.settlement_inputs import install_log_filter
 
@@ -695,6 +700,7 @@ class PyPSAService:
                 "bus names starting 'ic:' are reserved for the commercial reference "
                 "frames: %s", bad[:5])
         normalise_flag_column(n)
+        normalise_eh_columns(n)
 
     # ── Active-context solver state ──────────────────────────────────────────
     # The solver lifecycle + result state of the ACTIVE project. The simulation

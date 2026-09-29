@@ -38,7 +38,7 @@ Electricity-only adequacy remains the default until the multi-energy phase.
 | 5 | **Redundancy** = discrete options / train counts (scenario enum first, then outer-loop selection). Not continuous FOR derating. |
 | 6 | **Import caps** = planning overlays per **§6** (normative selection + mutation). **Not** certified interconnector adequacy unless outages are modelled. |
 | 7 | **Storage duration** = scenario enum first (hours of autonomy / `max_hours` options). Continuous expansion later. Annual ENS/LOLE alone does not claim multi-day autonomy. |
-| 8 | **DtC** = critical-load tags + islanding contingencies; **stress-on-fixed-plan first**, then **planning** per §10. No per-load shed attribution on today’s one-slack-per-bus model. |
+| 8 | **DtC** = critical-load tags + islanding contingencies; **stress-on-fixed-plan first**, then **planning** per §10. No per-load shed attribution on today’s one-slack-per-bus model. **Amended 2026-09-26 (P16, Q5):** since P6(b) there is one VOLL slack per **Load**, so `per_load` attribution is available **opt-in** under a disclosed critical VOLL premium (§10 amendment); `bus_aggregate_not_per_load` stays the default. |
 | 9 | **TEA** = post-process wrap (LCOE / optional LCOH) — no second cost engine. |
 | 10 | **Dynamics** = **feasibility gate, not co-opt lever** (v1). EMT = escalation flag behind SCR only. |
 | 11 | **RAM v1** = rate library + provenance (+ optional spare-lead-time modifier). Not full CMMS; planned-outage MC deferred. |
@@ -91,6 +91,44 @@ Electricity-only adequacy remains the default until the multi-energy phase.
 - `completeness`: map of section name → status
 - `pipeline`: stages run / skipped / aborted, budgets consumed
 
+**Amendment (2026-09-25, P11 — MC certification; product decisions Q1/Q2/Q7 in [`plans/2026-09-25-eh-post-seal-implementation.md`](../plans/2026-09-25-eh-post-seal-implementation.md)):**
+
+**New section and fields**
+- `certification` joins the section list. Its payload is the MC LOLE evidence and a verdict.
+- `certified: bool | None` is a new report field:
+  - `True` only when the verdict is `pass`;
+  - `False` on `fail` or `inconclusive`. This follows decision 2: a LOLE failure fails certification even when the ENS target is met;
+  - `None` when no LOLE target is set or certification is not established.
+- `mc_lole_h` is **per year** (`lole_hours / horizon_years`).
+- `notes: list[str]` holds study-level disclosures that belong to no single section, such as the DSR preflight.
+
+**Units and comparison**
+- `AvailabilityTarget.target_lole_h` is **h/yr**.
+- Certification compares the MC's per-horizon `lole_hours` and its 95% CI against `target_lole_h × horizon_years`, the coupling-loop convention.
+
+**Verdict**
+- `pass` iff CI upper ≤ target;
+- `fail` iff CI lower > target;
+- otherwise `inconclusive`.
+- A target below the MC `resolution_floor_h` is `inconclusive`.
+- The section is `not_established` in any of these cases:
+  - `horizon_years ≤ 0`;
+  - the modelled horizon is shorter than the largest unit MTTR;
+  - the MC fleet is empty;
+  - the run was aborted.
+
+**Fleet boundary**
+- The MC engine is copper-plate and network-free.
+- Certification therefore samples a **hub-boundary copy**: every component on the far side of the selected import Links is removed.
+- An import Link enters the MC fleet only when it carries its own outage data (decision 6). It then becomes one two-state unit of its hub-side capacity.
+- Carrier-only Link selection (§6 rule 3), or a hub side that can't be told apart from the far side, is `not_established` with the instruction "tag `eh_role`/`eh_poc`".
+
+**Amendment (2026-09-28, merge of master PR #53/#55 — decisions in [`qa/2026-09-28-merge-master-decisions.md`](../qa/2026-09-28-merge-master-decisions.md)):**
+- The hub boundary and decision 6 above stay normative. Within them, a counted import Link is a two-state unit at its **hourly** hub-side cap (not the horizon mean), and when the grid behind it carries occurrence data that grid is sampled as its own area (two-area MC, `mc_zonal`), with grid storage and opt-in Link `common_mode_rate` / `common_mode_mttr_hours` events.
+- A Link that is not counted (no outage data of its own, no finite MTTR, or an energy-limited import) is `excluded` — never a firm block at its planning cap. Its common-mode data is disclosed as not applied.
+- The payload discloses `fleet_scope`, `import_model` (`zonal` / `sampled_unit` / `mixed` / `excluded` / `islanded`), `import_firmness` (… / `not_counted`), `engine`, `ens_met` and `mc_lole_h` (h/yr) beside the P11 fields. The verdict vocabulary stays `pass` / `fail` / `inconclusive`.
+- MC draws / seed / CoV come from the pack's `mc_*` fields (defaults = the P13 study defaults) unless the request's `mc` options override them.
+
 ---
 
 ## 5. Study pipeline (normative)
@@ -119,7 +157,19 @@ If none match: `strong_grid` is a no-op; `weak_flexible` / `off_grid` **prefligh
 | `weak_flexible` | Set each selected Link `p_nom` (and `p_nom_max` if present) to pack `import_p_nom_mw` (per-link equal split if one number); optional static `p_max_pu` left unchanged | restore saved `p_nom` / `p_nom_max` |
 | `off_grid` | Force selected Links **out of service via `p_max_pu`/`p_min_pu` → 0** (keep `p_nom` > 0 so preflight `link_p_nom_invalid` does not fire — same discipline as Class-B Link outages). Optionally also clamp `p_nom_max` if present | restore saved `p_max_pu` / `p_min_pu` / `p_nom_max` |
 
-**Energy (optional field on pack):** `import_energy_mwh_per_year` is **reserved**. Phase 1 apply is **power-only**; if the field is set, `apply_archetype_pack` MUST emit a warning and must NOT add a GlobalConstraint. Energy import caps land in P3c (or a later overlay phase), not P1.
+**Energy (optional field on pack):** `import_energy_mwh_per_year` is **reserved** — *superseded 2026-09-26 by the P17 amendment below*. Phase 1 apply is **power-only**; if the field is set, `apply_archetype_pack` MUST emit a warning and must NOT add a GlobalConstraint. Energy import caps land in P3c (or a later overlay phase), not P1.
+
+**Amendment (2026-09-26, P17): energy import cap.** The reserved field becomes a real constraint for `weak_flexible` (the only archetype with a finite import that an energy budget can bind; `strong_grid` imports freely and `off_grid` imports nothing, so the field is refused there rather than ignored). It is **not** a PyPSA `GlobalConstraint` row: it is added through `extra_functionality` (`_wrap_with_import_energy_cap`), like the ENS cap.
+
+| Rule | Normative |
+|---|---|
+| Metered Links | The selected import Links oriented **grid → hub** (`bus0` beyond, `bus1` inside the hub side established by the P11 hub-boundary rule). Hub-side energy = `p0 × efficiency`. |
+| Wrong direction | A one-way Link oriented hub → grid can never import (`−p1 = η·p0` is export): it is left out with a note; if it is the only selected Link, the pack is refused. |
+| Bidirectional | A metered Link that can run backwards (`p_min_pu < 0`, static or time series) is **refused** in v1 — capping only the import direction needs positive-part variables. |
+| Boundary | If the hub side cannot be established (carrier-rule selection, ambiguous hub), the pack is refused: an unoriented cap would meter the wrong quantity. |
+| Budget per period | For each investment period P: `Σ_{t∈P} w_t · η · p0_t ≤ E × Σ_{t∈P} w_t / 8760`, with `w` the `generators` snapshot weighting **without** the `years` multiplier (the cap is per year of the period). |
+| Strategy | Rolling / myopic refused (a window would need its own budget), as the ENS cap. |
+| Scope | `SolverConfig.import_energy_cap_mwh_per_year` / `import_energy_links` are set only from the pack (`solver_config_patch`); they are not part of the solver-config API schema and are stripped from saved/loaded project configs. |
 
 **Firmness:** overlays are **planning limits**, not adequacy of the external grid. Report `levers.import_firmness = "planning_limit_only"` unless Link outages are modelled in the same study.
 
@@ -143,7 +193,7 @@ P3b (auto-select redundancy) and P4b (DtC planning) complete co-opt but are post
 - Statutory PRAS/Antares replacement
 - Full maintainability / spares logistics program
 - Treating import caps as firm interconnection adequacy without outage modelling
-- Per-load DtC attribution on the current single slack-per-bus geometry
+- Per-load DtC attribution on the current single slack-per-bus geometry — *superseded 2026-09-26 (P16)*: available opt-in as `attribution="per_load"` under the §10 VOLL-priority rule; never the default, never without Load-keyed shed data
 - Replacing the existing FMEA worksheet UX
 - Rebuilding shipped Class-B Link sweep
 
@@ -152,6 +202,15 @@ P3b (auto-select redundancy) and P4b (DtC planning) complete co-opt but are post
 ## 9. Relationship to FMEA design
 
 Solution FMEA remains the **diagnostic** under a single plan. The EH reference design is the **product wrapper**: archetype → orchestrated levers → existing co-opt/diagnostic engines → `ReferenceDesignReport`. Every point on an EH frontier still gets its own FMEA ranking (same principle as solution FMEA).
+
+**Amendment (2026-09-25, P12):**
+- **Per-frontier-point FMEA is deferred.** In v1 the EH study ranks **only the ENS plan**. `fmea_top` is the top-5 Class-B Link modes on the pack-applied `ens_solve` plan, frozen.
+- **Frontier scope.** The `frontier` stage sweeps the pack target and its nearest default targets. It runs by default only for `strong_grid` (pack flag `frontier_default`) and takes at most ~40% of `budget_solves`.
+- **Closing re-solves are skipped.** Both stages run on disposable private copies, so they skip the engines' closing re-solve (decision Q4). HTTP routes always restore.
+
+**Amendment (2026-09-28, merge of master PR #53):**
+- The frontier's candidate targets are the pack's `frontier_ladder` (factors on the pack cap, default ×4 ×2 ×1 ×½ ×¼); the P12 budget rule (≤ ~40 %, ≥ 2 points, private copy, no closing restore) selects from them.
+- `fmea_top` keeps the Class-B Link ranking above as the section's evidence (`rows`, `top_n` = the pack's `fmea_top_n`, default 5). Beside it, `class_a` carries the zero-solve COPT screening of the same hub-side fleet the certification samples (unit forced outages, common-mode events as their own modes; a sampled import Link ranked once). `class_a` never decides the section status.
 
 ## 10. DtC planning spike (P4b) — decision recorded
 
@@ -174,6 +233,22 @@ Solution FMEA remains the **diagnostic** under a single plan. The EH reference d
 | 4 | Report system ENS, cost@target, sizing; `attribution=bus_aggregate_not_per_load`; honesty notes must include `retained_critical_demand` and `no_per_load_attribution`. |
 
 **Not claimed.** Per-load shed ranking; certified islanding resilience without the Class-B contingency set; multi-energy critical carriers (P6).
+
+**Amendment (2026-09-26, P16 — decision Q5): opt-in per-Load attribution.**
+
+*Premise change.* P6(b) replaced one-slack-per-bus with one VOLL slack per **Load**, and the capture (`lost_load_load_period_mwh`) is keyed by Load id. The remaining obstacle was degeneracy: every slack bids the same VOLL, so on a shared bus the LP's split of shed between critical and non-critical Loads is arbitrary and any per-Load number would be a solver artefact.
+
+*Rule — VOLL priority.* With `DtcConfig.attribution="per_load"`, the DtC **stress** re-dispatch prices each **critical** Load's slack at `VOLL × (1 + ε_crit)` (ε_crit = 0.05, reported as `voll_premium_eps`). The LP therefore sheds non-critical Loads first **wherever delivery is loss-free enough**: on a shared bus short by X MWh with non-critical demand N, critical unserved = max(0, X − N) per snapshot. *Limit (P16 gate):* serving a critical Load through a path of efficiency η costs V/η of non-critical shed against (1+ε)·V of critical shed, so the priority can **invert** when η < 1/(1+ε) ≈ 0.952 (converter chains, lossy Links, LP line losses). The stress table reports `priority_exact` and, conservatively, names every electrical Link below that efficiency (`priority_caveat_links`) and LP line losses (`priority_caveat_line_losses`); when inexact the honesty note `priority_may_invert_on_lossy_paths` is added. ε is not raised to cover arbitrary losses: a larger premium would start to act as a valuation rather than a tie-break. The premium is a documented priority, not a valuation: it changes cost only by the ε term, and that cost is not reported.
+
+*Scope [R5].* The premium is applied **only** inside the DtC stress re-dispatch (a context the DtC loop sets around its own solve on a disposable copy). It is not a `SolverConfig` field, so no API, saved project, `ens_solve`, frontier, sweep or user solve can carry it.
+
+*Critical set.* Under `per_load`, critical Loads = `critical_load_ids` ∪ every Load on a critical bus (`critical_bus_ids` / `eh_critical`); every other Load is non-critical — including Loads that share a bus with a critical Load. Under the default `bus_aggregate_not_per_load`, a critical Load still promotes its whole bus (unchanged).
+
+*Refusal.* `per_load` refuses (the stage fails with the reason) when the shed capture carries no Load-keyed data. There is no `"auto"`.
+
+*Planning.* Under `per_load`, the retained-critical overlay zeroes every **non-critical Load** (not every non-critical bus); system ENS stays the planning metric. No premium is needed there — only critical demand remains.
+
+*Honesty notes.* Under `per_load`, stress replaces `no_per_load_attribution` with `per_load_by_voll_priority` and reports `voll_premium_eps`; its rows add `critical_unserved_by_load`, `critical_loads`, `noncritical_loads`. Planning replaces it with `retained_critical_by_load` (no premium is applied there).
 
 ---
 
