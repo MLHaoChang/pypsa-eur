@@ -168,7 +168,7 @@ diff, capabilities, opportunistic PDF, four chat tools,
 | Unit | `test_report_roundtrip.py` 20, `test_report_roundtrip_routes.py` 20, `test_report_pdf.py` 7, `test_chat_report_roundtrip_tools.py` 13, `test_report_store.py` +1, `test_report_model.py` +1, plus every other `test_report_*`, `test_chat_report_*`, `test_chat_uploads.py`, parity/manifest/packaging | 453 passed (one run on the merged tree; WP13's conditional xfail ran as a real passing test once WP12 was present) |
 | Regression | chunk 1 (`tests/test_chat_*.py` + manifest + packaging) | 1277 passed, 2 skipped |
 | Regression | chunk 2a (`tests/test_upload*.py tests/test_desktop*.py tests/test_project*.py`) | 242 passed, 1 skipped |
-| Regression | chunk 2b (`tests/test_energy_hub_*.py` / `tests/test_adequacy_*.py`) | Energy Hub: 308 passed; adequacy: _(run in progress at commit time; filled in the next commit)_ |
+| Regression | chunk 2b (`tests/test_energy_hub_*.py` / `tests/test_adequacy_*.py`) | Energy Hub: 308 passed; adequacy: 663 passed, 11 deselected in 304.03s (0:05:04) |
 | Regression | remainder (four groups) | unchanged since §1: phase 5 touches no file those groups import; re-run owed before merge to `master` |
 | Regression | frontend `npx vitest run` + `npx tsc -b` | 190 files, 2140 tests passed; tsc clean |
 | Integration | `test_report_roundtrip_routes.py` (roundtrip POST every status, diff on stored versions, capabilities via `shutil.which`, export pdf 501/200/500 with `subprocess.run` faked, regenerate uses and clears `pending_instruction`, upload kind) | 20 passed (counted above) |
