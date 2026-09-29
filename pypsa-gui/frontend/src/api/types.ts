@@ -381,6 +381,8 @@ export interface CommercialConfig {
   contracts?: CommercialContract[]
   /** The grid's carbon-free share per snapshot, a Library series (IC P2 WP2.2-0). */
   grid_cfe_share_ref?: LibraryRef | null
+  /** Who the site is in contract parties (IC P2 WP2.2c); default "site". */
+  site_party?: string
   import_tariff?: Tariff | null
   export_price_ref?: LibraryRef | null
   export_link?: string | null

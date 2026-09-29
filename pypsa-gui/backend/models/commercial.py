@@ -556,6 +556,9 @@ class CommercialConfig(BaseModel):
     # The grid's carbon-free share per snapshot, a Library series (P2 WP2.2-0,
     # for WP2.5's CFE score).
     grid_cfe_share_ref: TimeSeriesRef | None = None
+    # Who the site is in contract parties (P2 WP2.2c): a PPA the site SELLS
+    # while its output also earns the export price is a double count.
+    site_party: str = Field(default="site", min_length=1)
     group_contract: str | None = None
     # Energy-hub group contract (WP1.6): the member PoC Links whose combined
     # import is capped at `group_cap_mw` in every snapshot.

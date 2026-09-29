@@ -189,3 +189,33 @@ def install_log_filter() -> None:
 
 
 install_log_filter()  # every loader (compare, projects, the runtime path) from first import
+
+
+# ── the contracts a solve ran with (WP2.2c) ────────────────────────────────
+
+META_CONTRACTS = "ic_contracts"
+
+
+def contracts_record(cfg) -> dict:
+    """What the settlement compares against: the contracts' content hash
+    (versioned recipe, `hashing`) and their ids."""
+    from services.commercial import hashing as _H
+
+    return {"hash": _H.digest(list(cfg.contracts)), "hash_version": _H.HASH_VERSION,
+            "ids": [c.id for c in cfg.contracts]}
+
+
+def contracts_state(n, cfg) -> str | None:
+    """None — the settlement's contracts are the solve's; "config" — changed
+    since the solve (`config_changed_since_solve`); "not_recorded" — the config
+    names contracts the solve did not record (solved before WP2.2c, or with
+    none)."""
+    from services.commercial import hashing as _H
+
+    rec = (n.meta or {}).get(META_CONTRACTS) if hasattr(n, "meta") else None
+    if not rec:
+        return "not_recorded" if cfg.contracts else None
+    if not cfg.contracts:
+        return "config"
+    return None if rec.get("hash") == _H.digest(list(cfg.contracts),
+                                                version=_H.version_of(rec)) else "config"

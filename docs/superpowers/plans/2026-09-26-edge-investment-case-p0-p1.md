@@ -616,7 +616,7 @@ Files: `backend/services/validation_service.py`, `backend/tests/test_validation_
   agreement); `commercial.arbitrage_loop` (warning — snapshots where exporting pays more than importing costs);
   `commercial.demand_resolution` (demand interval finer than the axis); `commercial.demand_partial_months`
   (spec §5.2); `commercial.tariff_out_of_validity`. **Deviation:** the PPA/export-price and DR-contract/`dsr_buses`
-  double-count checks need P2's contracts (not in the P1 config) and move to P2 WP2.2. Tests:
+  double-count checks need P2's contracts (not in the P1 config) and move to P2 WP2.2. **Closed in P2 WP2.2c** (`commercial.ppa_export_double_count`, `commercial.dr_double_count`). Tests:
   `test_validation_commercial.py`.
 - Review round 1 → **FAIL**, fixed: preflight evaluates the strategy that will RUN
   (`lp_bindings.effective_strategy`, shared with the solve) and the same windowed-terms guard

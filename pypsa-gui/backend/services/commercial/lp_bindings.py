@@ -463,6 +463,43 @@ def _predicted_tier_price(n, cfg: CommercialConfig, item: TariffItem,
     return price * _KWH_PER_MWH, got
 
 
+# Where each contract type's assets may live (P2 WP2.2c): what `contracts.settle`
+# can read for it. A DR contract names loads, never assets (P5).
+_CONTRACT_ASSET_CLASSES = {"ppa": ("generators",), "cfd": ("generators",),
+                           "lease": ("generators", "storage_units", "stores", "links"),
+                           "eaas": ("generators", "storage_units", "links")}
+
+
+def _validate_contracts(n, cfg: CommercialConfig) -> None:
+    """`commercial.contract_asset_missing` / `commercial.contract_tariff_mismatch`:
+    a contract naming what the network cannot settle is refused before a solve
+    whose settlement would then fail (WP2.2c)."""
+    for c in cfg.contracts:
+        allowed = _CONTRACT_ASSET_CLASSES.get(c.type)
+        if allowed is not None:
+            missing = [a for a in c.asset_ids
+                       if not any(a in getattr(n, cls).index for cls in allowed)]
+            if missing:
+                raise CommercialBindingError(
+                    f"commercial.contract_asset_missing: {c.type} contract {c.id!r} names "
+                    f"{missing}, which are not {' / '.join(allowed)} of this network")
+        if c.type == "dr":
+            if c.asset_ids:
+                raise CommercialBindingError(
+                    f"commercial.contract_asset_missing: DR contract {c.id!r} names assets "
+                    f"{list(c.asset_ids)}; DR on assets arrives in P5 — name load_ids")
+            missing = [l for l in c.load_ids if l not in n.loads.index]
+            if missing:
+                raise CommercialBindingError(
+                    f"commercial.contract_asset_missing: DR contract {c.id!r} names loads "
+                    f"{missing} that are not in this network")
+        if c.type == "retail" and cfg.import_tariff is not None \
+                and c.tariff_id != cfg.import_tariff.id:
+            raise CommercialBindingError(
+                f"commercial.contract_tariff_mismatch: retail contract {c.id!r} names tariff "
+                f"{c.tariff_id!r}, but the import tariff is {cfg.import_tariff.id!r}")
+
+
 def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
     """Refuse a commercial config this network cannot bind. The config route
     runs this, so the user hears about a bad config when editing it rather than
@@ -490,6 +527,7 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
         raise CommercialBindingError(
             "commercial.capacity_double_count: the import tariff has a capacity item and the "
             "connection agreement a capacity_fee on the same PoC; keep one")
+    _validate_contracts(n, cfg)
     if cfg.demand_items:
         # Not implemented in P1: every demand item of the tariff is charged, so
         # a selection would be silently ignored (Phase 1 gate finding #4).
@@ -1667,6 +1705,12 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
                               # The LP recipe of this solve (see `LP_RECIPE`):
                               # dates a solve with no demand or tier record.
                               "lp_recipe": LP_RECIPE}
+        from services.commercial import settlement_inputs as _SI
+
+        if cfg.contracts:
+            n.meta[_SI.META_CONTRACTS] = _SI.contracts_record(cfg)
+        else:
+            n.meta.pop(_SI.META_CONTRACTS, None)
         if "v" in solved_peaks:
             n.meta[META_DEMAND] = solved_peaks["v"]
             n.meta[META_DEMAND_INFO] = demand["info"]

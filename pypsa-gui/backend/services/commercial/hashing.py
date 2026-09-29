@@ -44,6 +44,7 @@ FIELDS_AFTER_V1: dict[tuple[str, str], Any] = {
     ("ConnectionAgreement", "library_ref"): None,        # WP2.4a
     ("CommercialConfig", "contracts"): [],               # WP2.2-0
     ("CommercialConfig", "grid_cfe_share_ref"): None,    # WP2.2-0
+    ("CommercialConfig", "site_party"): "site",          # WP2.2c
 }
 
 

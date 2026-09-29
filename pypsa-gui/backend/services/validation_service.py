@@ -2486,7 +2486,8 @@ def _check_commercial(n, solver_config) -> list[Issue]:
     return [Issue(severity=sev, code=code, component_class=cls, name=name, message=msg)
             for sev, code, cls, name, msg in commercial_findings(
                 n, getattr(solver_config, "commercial", None), solve_strategy=strategy,
-                multi_period=multi)]
+                multi_period=multi,
+                dsr_buses=list(getattr(solver_config, "dsr_buses", None) or []))]
 
 
 def has_errors(issues: list[Issue]) -> bool:

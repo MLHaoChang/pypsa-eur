@@ -68,7 +68,7 @@ def _max_step_h(snapshots: pd.Index) -> float | None:
 
 
 def commercial_findings(n, commercial, *, solve_strategy: str = "full",
-                        multi_period: bool = False
+                        multi_period: bool = False, dsr_buses: list[str] | None = None
                         ) -> list[tuple[str, str, str, str, str]]:
     """`solve_strategy` is the strategy that will RUN
     (`lp_bindings.effective_strategy`), so a refusal that depends on it is
@@ -90,12 +90,16 @@ def commercial_findings(n, commercial, *, solve_strategy: str = "full",
             conn._validate(n, cfg.connection, cfg.poc_link, cfg.export_link, solve_strategy,
                            multi_period)
     except Exception as exc:  # noqa: BLE001 — every refusal the solve would make
-        if str(exc).startswith("commercial.capacity_double_count"):
-            return [("error", "commercial.capacity_double_count", "", "", str(exc))]
+        # A refusal that names its own code (`commercial.<code>: …`) keeps it.
+        for code in ("commercial.capacity_double_count", "commercial.contract_asset_missing",
+                     "commercial.contract_tariff_mismatch"):
+            if str(exc).startswith(code):
+                return [("error", code, "", "", str(exc))]
         return [("error", "commercial.binding_invalid", "", "",
                  f"The commercial config cannot bind to this network: {exc}")]
     try:
-        return _warnings(n, cfg, adders, price, demand)
+        return _warnings(n, cfg, adders, price, demand) + _contract_warnings(
+            n, cfg, dsr_buses or [])
     except Exception as exc:  # noqa: BLE001 — preflight never takes validation down
         return [("warning", "commercial.preflight_incomplete", "", "",
                  f"Some commercial preflight checks could not run ({type(exc).__name__}: "
@@ -159,4 +163,40 @@ def _warnings(n, cfg, adders, price, demand) -> list[tuple[str, str, str, str, s
             out.append(("warning", "commercial.tariff_out_of_validity", "", tariff.id,
                         f"{where} fall outside tariff {tariff.id!r}'s validity "
                         f"{tariff.valid_from}..{tariff.valid_to or 'open'}."))
+    return out
+
+
+def _contract_warnings(n, cfg, dsr_buses: list[str]) -> list[tuple[str, str, str, str, str]]:
+    """Double counts between contracts and the rest of the config (P2 WP2.2c;
+    closes P1 WP1.8's deviation)."""
+    out: list[tuple[str, str, str, str, str]] = []
+    grid_bus = str(n.links.at[cfg.poc_link, "bus0"]) if cfg.poc_link in n.links.index else None
+    exports = cfg.export_link is not None
+    items = cfg.import_tariff.items if cfg.import_tariff is not None else []
+    commodity = [i.id for i in items if i.kind == "energy" and i.measured_on != "export"]
+    load_bus = n.loads["bus"].astype(str).to_dict() if not n.loads.empty else {}
+    for c in cfg.contracts:
+        if c.type == "ppa" and exports and not c.changes_dispatch and c.seller == cfg.site_party:
+            onsite = [a for a in c.asset_ids if a in n.generators.index
+                      and str(n.generators.at[a, "bus"]) != grid_bus]
+            if onsite:
+                out.append(("warning", "commercial.ppa_export_double_count", "Generator",
+                            onsite[0],
+                            f"The site ({cfg.site_party!r}) sells PPA {c.id!r}'s output of "
+                            f"{onsite}, and its exported share also earns the export price "
+                            f"through {cfg.export_link!r}: the same MWh is paid twice. Settle "
+                            "one of them, or let the PPA change dispatch (changes_dispatch)."))
+        if c.type == "dr":
+            on_dsr = sorted({load_bus.get(l) for l in c.load_ids} & {str(b) for b in dsr_buses})
+            if on_dsr:
+                out.append(("warning", "commercial.dr_double_count", "Bus", on_dsr[0],
+                            f"DR contract {c.id!r} is settled on the DSR dispatch of bus(es) "
+                            f"{on_dsr}, which the LP already pays at the DSR price: the "
+                            "activation is valued twice. Keep the DSR price at the contract's "
+                            "activation rate, or report one of them."))
+        if c.type == "ppa" and c.kind == "sleeved" and commodity:
+            out.append(("warning", "commercial.sleeved_commodity_double_count", "", c.id,
+                        f"Sleeved PPA {c.id!r} buys the commodity, and the import tariff's "
+                        f"energy item(s) {commodity} charge it again on PoC import. Remove "
+                        "the tariff's commodity item and keep network and levy items."))
     return out

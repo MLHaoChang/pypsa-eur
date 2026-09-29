@@ -842,6 +842,26 @@ Files: `models/commercial.py` (`CommercialConfig.contracts: list[Contract]` disc
   settlement ⇒ `config_changed_since_solve` (contract hash in the settlement record).
 - Acceptance: P1 WP1.8's recorded deviation closed.
 
+- **As implemented:**
+  - **Model.** `CommercialConfig.site_party: str = "site"` is registered in `FIELDS_AFTER_V1` and mirrored in `types.ts`. WP2.2d's buyer check uses it too. The `contracts` field landed in WP2.2-0b.
+  - **Errors** (from `lp_bindings.validate_for_network → _validate_contracts`, so they refuse at binding, at solve time and in preflight under their own codes):
+    - **`commercial.contract_asset_missing`** covers:
+      - PPA / CfD assets that are not Generators;
+      - lease assets not in Generator / StorageUnit / Store / Link;
+      - EaaS assets not in Generator / StorageUnit / Link;
+      - DR on `asset_ids` (P5);
+      - DR `load_ids` that are not loads.
+    - **`commercial.contract_tariff_mismatch`**: a retail `tariff_id` that is not the import tariff's id.
+  - **Warnings** (`preflight._contract_warnings`):
+    - **`commercial.ppa_export_double_count`**: the site (`seller == site_party`) sells a PPA without `changes_dispatch` on an ON-SITE Generator (bus ≠ the PoC's grid bus) while an export Link is configured. The buyer case, `changes_dispatch`, and no export do not warn.
+    - **`commercial.dr_double_count`**: a DR contract's load sits on one of the solver config's `dsr_buses`. The DSR slack is already paid in the LP. `validation_service._check_commercial` passes `dsr_buses`.
+    - **`commercial.sleeved_commodity_double_count`**: a sleeved PPA while the import tariff has an energy item that is not export-only.
+    - `commercial.capacity_double_count` is unchanged.
+  - **Settlement drift record.** At solve commit, `ic_contracts = {hash (versioned recipe), hash_version, ids}` is written when the config has contracts and cleared otherwise. `settlement_inputs.contracts_state(n, cfg)` gives None, "config" (→ `config_changed_since_solve`) or "not_recorded". WP2.5's settlement consumes it.
+  - **Round trips.** Contracts with reference series go through `PUT /solver_config` → save → load (readers resolve after the reload) → bundle. The sidecar pins the reference series, and another org reports it `missing`.
+  - **Acceptance: P1 WP1.8's recorded deviation is closed.** The PPA/export-price and DR/`dsr_buses` checks now exist.
+  - **Tests:** `tests/test_contracts_config.py` has 17 tests.
+
 ## WP2.2d `changes_dispatch` PPA in the LP (buyer case only)
 
 v1 supports `changes_dispatch=True` only for **pay-as-produced PPAs on on-site generators where the PoC owner
