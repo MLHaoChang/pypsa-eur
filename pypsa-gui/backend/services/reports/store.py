@@ -124,7 +124,8 @@ def _now_iso() -> str:
 # The meta fields that are NOT derived from the document: the job's
 # `generation` (WP3/WP6) and the template binding + mapping plan (WP11). A
 # meta rewrite from a document carries them over; `update_meta` sets them.
-_CARRIED_META_FIELDS = ("generation", "template_mode", "template_language", "mapping_plan")
+_CARRIED_META_FIELDS = ("generation", "template_mode", "template_language", "mapping_plan",
+                        "roundtrip_file_id")
 
 
 def _meta_from_doc(doc: ReportDocument, *, latest_version: int,

@@ -304,3 +304,19 @@ def test_template_fields_and_mapping_plan_survive_save_version(project_dir):
         store.update_meta(project_dir, "ffffffffffffffff", mapping_plan=plan)
     with pytest.raises(TypeError):
         store.update_meta(project_dir, "0123456789abcdef", not_a_field=1)
+
+
+def test_roundtrip_file_id_survives_save_version(project_dir):
+    """
+    WP12 added `ReportMeta.roundtrip_file_id`; WP13 sets it through
+    `update_meta` when an edited copy is merged. Both were built in parallel
+    and neither added the field to `_CARRIED_META_FIELDS`, so a later
+    `save_version` (the regenerate that follows a round trip) dropped it.
+    """
+    store.create_report(project_dir, _doc())
+    updated = store.update_meta(project_dir, "0123456789abcdef",
+                                roundtrip_file_id="fedcba9876543210")
+    assert updated.roundtrip_file_id == "fedcba9876543210"
+    assert store.save_version(project_dir, _doc()) == 2
+    assert store.load_meta(project_dir, "0123456789abcdef").roundtrip_file_id == "fedcba9876543210"
+    assert store.list_reports(project_dir)[0].roundtrip_file_id == "fedcba9876543210"
