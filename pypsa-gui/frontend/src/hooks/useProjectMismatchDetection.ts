@@ -33,24 +33,28 @@ export function useProjectMismatchDetection(isStudy: boolean): void {
   const pending = useRef<Pending | null>(null)
   const qc = useQueryClient()
   const key = nk(currentProject, 'meta')
+  // The interval function sees neither props nor effects: hand it the
+  // study flag through a ref.
+  const studyRef = useRef(isStudy)
+  studyRef.current = isStudy
   const { data, isFetching } = useQuery({
     queryKey: key,
     queryFn: networkApi.getMeta,
     enabled: !!currentProject,
-    // Re-sample quickly while an unconfirmed disagreeing sample waits. Read
-    // from the sample itself: React Query computes the interval when the data
+    // Re-sample quickly only inside the confirm window: a disagreeing sample
+    // that COULD raise the mismatch and has not yet. A raised mismatch, a
+    // study tab (never raisable) and a switch in flight all poll at the idle
+    // rate (P27b gate note 1: a study tab polled at 1 Hz forever). Read from
+    // the sample itself: React Query computes the interval when the data
     // lands, before this hook's effect has recorded it as pending.
     refetchInterval: (q) => {
       const backend = (q.state.data as NetworkMeta | undefined)?.loaded_project ?? null
       const ui = useUIStore.getState()
-      const suspect = backend != null && ui.currentProject != null
+      const unconfirmed = backend != null && ui.currentProject != null
         && backend !== ui.currentProject && ui.projectMismatch == null
-      return suspect ? mismatchPoll.confirmMs : mismatchPoll.idleMs
+        && !studyRef.current && !ui.projectSwitchInProgress
+      return unconfirmed ? mismatchPoll.confirmMs : mismatchPoll.idleMs
     },
-    // Every sample must re-render this hook, even one equal to the last
-    // (structural sharing would hand back the same object and, within one
-    // millisecond, an identical result — the sample would be missed).
-    structuralSharing: false,
   })
   // Each completed fetch is one sample — counted, not timed, so two samples
   // landing in the same millisecond are still two.
