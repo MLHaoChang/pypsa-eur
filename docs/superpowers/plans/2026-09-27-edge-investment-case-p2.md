@@ -1193,6 +1193,7 @@ Files: `services/library/series_io.py` (from WP2.4b-0), `routers/library.py` (up
   - N2: peak decisions are per month (`peaks_not_established:<m>:<why>`).
   - N3: an end-labelled row's duration is the gap to the previous row, and a row stamped on a month start takes the step of the month it closes.
   - `test_series_io.py` has 30 tests.
+- **WP2.4b-ii review round 3 → PASS** (no residue). Probes: fall-back order kept (0 swaps), the peak is 900 in every spike placement, energy exact, the 5- and 1-min end labels store, a store fault is a 500, peaks per month, and a combined probe of all fixes on one file.
 
 ## WP2.4c Library chat tools
 
@@ -1230,6 +1231,26 @@ routes; ADR-0002 live-API probe recorded.
 
     The four guard suites cover the tools through the registries: chat tool suites plus library tests give 605 passed.
   - **ADR-0002 live-API probe: NOT RUN.** This environment has no provider credentials (no Anthropic key, no local Ollama). The tools are exercised in process through `DISPATCHERS`; the model-facing schemas are covered by the guard suites. The live probe (`test_live_probe_anthropic_wire` or the openai-wire probe with the new tools) is **owed** and carried to the Phase 2 QA gate's findings as an open item.
+- **WP2.4c review round 1 → FAIL (H1); all findings fixed:**
+  - H1: four new `error_kind`s were not in `pypsa-gui/tool-error-kinds.json`, so the manifest suite was red. → Six kinds are classified, all `inline`: `unknown_library_kind`, `urdb_upload_unreadable`, `urdb_invalid`, `no_commercial_config`, and the new `inline_tariff_would_be_replaced` and `urdb_multiple_rates`. The backend manifest suite and the frontend `ChatPanel.manifest.test.tsx` (92) pass.
+  - M2: `attach_tariff` silently discarded an inline or bare-id tariff. → Refused with 409 `inline_tariff_would_be_replaced` (naming the current tariff) unless `replace_inline=true`. It always returns `replaced`. The rest of the commercial block is kept (tested: `timezone`).
+  - M3: results overflowed the 4,000-character chat cap.
+    - `list_library_items` is paged (`_paginate`: `items`, `total_count`, `has_more`).
+    - `get_library_item` returns a tariff SUMMARY by default: per item, the kind, unit, periods, windows, tiers, ratchet and rate range. `detail="full"` returns the payload, `item_id` one item.
+    - `attach_tariff` returns a compact receipt `{import_tariff_ref, import_tariff: {id, name, items}, replaced}`.
+  - M4: an OpenEI response with several rates is refused as `urdb_multiple_rates`, listing up to 20 (index, label, name, utility, startdate); `item_index` picks one. An empty `items` is `urdb_upload_unreadable`.
+  - M5: guard coverage.
+    - The argshape scan follows `_route(_h, …)` / `_library_call(_h, …)` delegations, which newly covers every existing `_route` tool; none broke.
+    - The identity suite has the four tools.
+    - A cross-org test: another org's item is invisible, 404.
+    - `AUDIT_TABLE` has `LibraryItemRef` (list and get) and `UrdbImportOut`.
+  - L1: route and binding refusals `{code}` are re-raised under `error_kind` = the code (`_library_call`). URDB refusals are capped at 20, with `refusals_total`, and field names are reduced to identifiers, because they come from an uploaded file.
+  - L2: a REopt scenario with only `urdb_label` is `urdb_upload_unreadable`, naming the label.
+  - L3: nothing reachable; binding fails closed (`library_ref_stale`).
+  - L4: `tariff_id` and `jurisdiction` are exposed; the description says a new version is created on an existing name; the identity is checked before the file is read.
+  - Informational, no action: the write tier of `import_urdb_tariff` marks the project dirty, although only the Library changes.
+  - M1 (the ADR-0002 live probe) stays OWED. The Phase 2 gate must run it: `PYPSA_GUI_TEST_LIVE_ANTHROPIC=1 pytest tests/test_llm_provider_seam.py -k live_probe_anthropic_wire` (or the openai-wire probe), plus one live turn calling the Library tools. This environment has no provider credentials.
+  - `test_chat_tools_library.py` has 12 tests. The chat tool suites give 584 passed.
 
 ## WP2.5 `compute_billing` / `compute_cfe_score` thin results
 

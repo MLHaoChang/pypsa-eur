@@ -95,6 +95,10 @@
       "surface": "banner",
       "why": "The account stopped being active mid-turn. Nothing will work until it is fixed, and a gray tool line truncates that away — this is the correction the whole manifest generalises."
     },
+    "inline_tariff_would_be_replaced": {
+      "surface": "inline",
+      "why": "attach_tariff refused to replace a project's inline import tariff with a different Library tariff. The model asks the user and calls again with replace_inline=true — a question it is already asking in prose."
+    },
     "internal_error": {
       "surface": "inline",
       "why": "An unhandled server failure. It reaches the client on a turn-terminal `error` frame, which the banner renders directly from KIND_COPY — it is not yielded at any `tool_error` site."
@@ -138,6 +142,10 @@
     "no_active_project": {
       "surface": "inline",
       "why": "Most tools need a project; the model recovers by asking which one, in prose, inside the same turn. Promoting it would banner a question the assistant is already asking."
+    },
+    "no_commercial_config": {
+      "surface": "inline",
+      "why": "attach_tariff needs a commercial config with a poc_link first. The model sets it (update_solver_config) and retries within the turn."
     },
     "not_authorized": {
       "surface": "banner",
@@ -223,6 +231,10 @@
       "surface": "inline",
       "why": "A confirm arrived for a token this session does not know — a stale tab or a double-submit, not a user-actionable state."
     },
+    "unknown_library_kind": {
+      "surface": "inline",
+      "why": "A Library tool got a kind other than tariff / contract / connection_agreement. The model corrects the argument and retries, like invalid_tool_args."
+    },
     "unknown_profile_id": {
       "surface": "banner",
       "why": "The selected profile no longer exists — fires for every open chat the moment a super-admin deletes one, and C-4 made it reachable."
@@ -250,6 +262,18 @@
     "upload_quota_exceeded": {
       "surface": "banner",
       "why": "The per-project upload quota is full. The user must delete something."
+    },
+    "urdb_invalid": {
+      "surface": "inline",
+      "why": "The URDB import arguments did not validate (e.g. valid_from not a date). The model corrects and retries."
+    },
+    "urdb_multiple_rates": {
+      "surface": "inline",
+      "why": "The uploaded OpenEI response holds several rates; the error lists them and the model retries with item_index, asking the user which one if unclear."
+    },
+    "urdb_upload_unreadable": {
+      "surface": "inline",
+      "why": "The uploaded file is not a URDB rate the importer can read (not JSON, no rates, a REopt scenario with only a label). The model says so in prose and asks for another file."
     },
     "validation_error": {
       "surface": "inline",

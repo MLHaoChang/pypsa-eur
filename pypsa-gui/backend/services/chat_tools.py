@@ -1332,7 +1332,46 @@ def update_solver_config(partial: dict) -> dict:
 
 # ── Library (4) — Edge Investment Case P2 WP2.4c ────────────────────────────
 # Router handlers called through `_route`, so the acting user's org and the
-# Library ACL apply exactly as over HTTP.
+# Library ACL apply exactly as over HTTP. Results stay compact (the chat's
+# per-result cap): a paged list, a tariff SUMMARY unless asked for the full
+# payload or one item, a small attach receipt (review M3).
+
+_LIBRARY_REFUSALS_SHOWN = 20
+# Route / binding refusals carry `{"code": …}`; the chat's forwarder reads
+# `error_kind`. Library tools re-raise them under their code (review L1).
+_LIBRARY_CODES = {
+    "urdb_refused": "urdb_refused", "urdb_invalid": "urdb_invalid",
+    "library_ref_stale": "library_ref_stale",
+    "import_tariff_ref_conflict": "import_tariff_ref_conflict",
+    "commercial_binding_invalid": "commercial_binding_invalid",
+    "solver_in_flight": "solver_in_flight",
+}
+
+
+def _safe_field(name) -> str:
+    """A refused URDB field name as the model may see it: it comes from an
+    uploaded file, so it is reduced to an identifier (review L1)."""
+    import re as _re
+
+    return _re.sub(r"[^A-Za-z0-9_./]", "_", str(name))[:64]
+
+
+def _library_call(handler, *args, **kwargs):
+    try:
+        return _route(handler, *args, **kwargs)
+    except HTTPException as exc:
+        d = exc.detail
+        if isinstance(d, dict) and d.get("code") in _LIBRARY_CODES:
+            detail = {"error_kind": _LIBRARY_CODES[d["code"]],
+                      "message": str(d.get("message", ""))[:500]}
+            if isinstance(d.get("refusals"), list):
+                refusals = d["refusals"]
+                detail["refusals"] = [
+                    {"field": _safe_field(r.get("field")), "reason": str(r.get("reason"))[:120]}
+                    for r in refusals[:_LIBRARY_REFUSALS_SHOWN] if isinstance(r, dict)]
+                detail["refusals_total"] = len(refusals)
+            raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+        raise
 
 
 def _library_kind(kind: str):
@@ -1346,33 +1385,97 @@ def _library_kind(kind: str):
             "message": f"kind is one of {[k.value for k in ItemKind]}, got {kind!r}"}) from exc
 
 
-def list_library_items(kind: str) -> list[dict]:
+def list_library_items(kind: str, offset: int = 0, limit: int | None = None) -> dict:
     from routers.library import list_items as _h
-    return [r.model_dump(mode="json") for r in _route(_h, _library_kind(kind))]
+    rows = [r.model_dump(mode="json") for r in _library_call(_h, _library_kind(kind))]
+    return _paginate(rows, offset, limit)
 
 
-def get_library_item(kind: str, name: str, version: int | None = None) -> dict:
+def _tariff_summary(payload: dict) -> dict:
+    items = []
+    for it in payload.get("items") or []:
+        periods = it.get("periods") or []
+        rates = [float(p.get("rate", 0.0)) for p in periods]
+        rates += [float(r) for p in periods for r in (p.get("tier_rates") or [])]
+        rates += [float(t.get("rate", 0.0)) for t in it.get("tiers") or []]
+        items.append({"id": it.get("id"), "kind": it.get("kind"), "unit": it.get("unit"),
+                      "periods": len(periods),
+                      "windows": sorted({str(p.get("name")) for p in periods}),
+                      "tiers": len(it.get("tiers") or []),
+                      "ratchet": it.get("ratchet") is not None,
+                      "rate_min": min(rates) if rates else None,
+                      "rate_max": max(rates) if rates else None})
+    return {"id": payload.get("id"), "name": payload.get("name"),
+            "jurisdiction": payload.get("jurisdiction"), "valid_from": payload.get("valid_from"),
+            "valid_to": payload.get("valid_to"),
+            "unsupported_fields": payload.get("unsupported_fields") or [], "items": items}
+
+
+def get_library_item(kind: str, name: str, version: int | None = None,
+                     detail: str = "summary", item_id: str | None = None) -> dict:
     from routers.library import get_item as _h
-    return _route(_h, _library_kind(kind), name, version=version).model_dump(mode="json")
+    out = _library_call(_h, _library_kind(kind), name, version=version).model_dump(mode="json")
+    payload = out["payload"]
+    if item_id is not None:
+        if kind != "tariff":
+            raise HTTPException(status_code=422, detail={
+                "error_kind": "unknown_library_kind",
+                "message": "item_id selects one item of a TARIFF"})
+        match = [i for i in payload.get("items") or [] if i.get("id") == item_id]
+        if not match:
+            raise HTTPException(status_code=404, detail=f"tariff {name!r} has no item {item_id!r}")
+        return {"ref": out["ref"], "meta": out["meta"], "item": match[0]}
+    if kind == "tariff" and detail != "full":
+        return {"ref": out["ref"], "meta": out["meta"], "summary": _tariff_summary(payload)}
+    return out
 
 
-def _urdb_rate(data):
-    """The rate object of an uploaded URDB file: the object itself, the first
-    item of an OpenEI response, or a REopt scenario's `urdb_response`."""
-    if isinstance(data, dict) and isinstance(data.get("items"), list) and data["items"]:
-        return data["items"][0]
-    if isinstance(data, dict) and isinstance(data.get("ElectricTariff"), dict) \
-            and isinstance(data["ElectricTariff"].get("urdb_response"), dict):
-        return data["ElectricTariff"]["urdb_response"]
+def _urdb_rate(data, item_index: int | None = None):
+    """The rate object of an uploaded URDB file: the object itself, one item
+    of an OpenEI response, or a REopt scenario's `urdb_response`."""
+    def unreadable(message: str):
+        return HTTPException(status_code=422, detail={"error_kind": "urdb_upload_unreadable",
+                                                      "message": message})
+
+    if isinstance(data, dict) and isinstance(data.get("items"), list):
+        items = data["items"]
+        if not items:
+            raise unreadable("the OpenEI response lists no rates")
+        if item_index is None and len(items) > 1:
+            # A utility query returns many rates (superseded versions too):
+            # never pick one silently (review M4).
+            listing = [{"index": i, "label": r.get("label"), "name": r.get("name"),
+                        "utility": r.get("utility"), "startdate": r.get("startdate")}
+                       for i, r in enumerate(items[:20]) if isinstance(r, dict)]
+            raise HTTPException(status_code=422, detail={
+                "error_kind": "urdb_multiple_rates",
+                "message": f"the upload holds {len(items)} rates; pass item_index",
+                "rates": listing, "rates_total": len(items)})
+        i = item_index or 0
+        if not 0 <= i < len(items):
+            raise unreadable(f"item_index {i} is outside the {len(items)} rates")
+        return items[i]
+    if isinstance(data, dict) and isinstance(data.get("ElectricTariff"), dict):
+        et = data["ElectricTariff"]
+        if isinstance(et.get("urdb_response"), dict):
+            return et["urdb_response"]
+        label = et.get("urdb_label")
+        raise unreadable(f"the REopt scenario names URDB rate {label!r} but carries no "
+                         "urdb_response; upload the OpenEI rate itself" if label else
+                         "the REopt scenario carries no urdb_response")
     return data
 
 
 def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
-                       accept_partial: bool = False, valid_from: str | None = None) -> dict:
+                       accept_partial: bool = False, valid_from: str | None = None,
+                       item_index: int | None = None, tariff_id: str | None = None,
+                       jurisdiction: str | None = None) -> dict:
     """An UPLOADED URDB JSON file (never an LLM-emitted blob) → a Library tariff."""
     from routers.library import UrdbImportIn, import_urdb as _h
     from services import upload_service
 
+    with _acting():   # identity before the file is read (review L4)
+        pass
     project = _require_active_project()
     blob = upload_service.get_upload_path(project, file_id)
     try:
@@ -1381,40 +1484,63 @@ def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
         raise HTTPException(status_code=422, detail={
             "error_kind": "urdb_upload_unreadable",
             "message": f"upload {file_id!r} is not a JSON file: {type(exc).__name__}"}) from exc
-    rate = _urdb_rate(data)
+    rate = _urdb_rate(data, item_index)
     if not isinstance(rate, dict):
         raise HTTPException(status_code=422, detail={
             "error_kind": "urdb_upload_unreadable",
             "message": "the upload holds no URDB rate object"})
     try:
         body = UrdbImportIn(urdb_response=rate, name=name, cyclic_year=cyclic_year,
-                            accept_partial=accept_partial, valid_from=valid_from)
+                            accept_partial=accept_partial, valid_from=valid_from,
+                            tariff_id=tariff_id, jurisdiction=jurisdiction)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={
             "error_kind": "urdb_invalid", "message": str(exc)[:300]}) from exc
-    return _route(_h, body).model_dump(mode="json")
+    out = _library_call(_h, body).model_dump(mode="json")
+    out["refusals_total"] = len(out.get("refusals") or [])
+    out["refusals"] = [{"field": _safe_field(r.get("field")), "reason": str(r.get("reason"))[:120]}
+                       for r in (out.get("refusals") or [])[:_LIBRARY_REFUSALS_SHOWN]]
+    return out
 
 
-def attach_tariff(name: str, version: int | None = None) -> dict:
+def attach_tariff(name: str, version: int | None = None, replace_inline: bool = False) -> dict:
     """Set `commercial.import_tariff_ref` to a Library tariff through the
-    solver-config route (which resolves and pins it)."""
+    solver-config route (which resolves and pins it). An inline tariff that is
+    not this item is never replaced silently (review M2)."""
     from models.schemas import SolverConfigSchema
     from routers.library import ItemKind, get_item as _get
     from routers.simulation import get_solver_config as _cfg, update_solver_config as _put
 
-    ref = _route(_get, ItemKind.tariff, name, version=version).ref.model_dump(mode="json")
+    ref = _library_call(_get, ItemKind.tariff, name, version=version).ref.model_dump(mode="json")
     commercial = dict((_cfg() or {}).get("commercial") or {})
     if not commercial.get("poc_link"):
         raise HTTPException(status_code=409, detail={
             "error_kind": "no_commercial_config",
             "message": "set the commercial config's poc_link first "
                        "(update_solver_config), then attach the tariff"})
-    # The ref replaces any inline or bare-id tariff: the route resolves it.
+    inline = commercial.get("import_tariff")
+    old_ref = commercial.get("import_tariff_ref")
+    replaced = None
+    if inline is not None or commercial.get("import_tariff_id"):
+        same = isinstance(old_ref, dict) and old_ref.get("hash") == ref["hash"]
+        replaced = {"id": (inline or {}).get("id") or commercial.get("import_tariff_id"),
+                    "name": (inline or {}).get("name"), "had_ref": old_ref is not None}
+        if not same and not replace_inline:
+            raise HTTPException(status_code=409, detail={
+                "error_kind": "inline_tariff_would_be_replaced",
+                "message": (f"the project's import tariff {replaced['id']!r} would be "
+                            f"replaced by Library tariff {name!r}; confirm with the user, "
+                            "then call again with replace_inline=true"),
+                "current": replaced})
     commercial.pop("import_tariff", None)
     commercial.pop("import_tariff_id", None)
     commercial["import_tariff_ref"] = ref
-    out = _route(_put, SolverConfigSchema(commercial=commercial))
-    return {"import_tariff_ref": ref, "commercial": out.get("commercial")}
+    out = _library_call(_put, SolverConfigSchema(commercial=commercial))
+    bound = (out.get("commercial") or {}).get("import_tariff") or {}
+    return {"import_tariff_ref": ref,
+            "import_tariff": {"id": bound.get("id"), "name": bound.get("name"),
+                              "items": len(bound.get("items") or [])},
+            "replaced": replaced}
 
 
 # ── Validation (3) ──────────────────────────────────────────────────────────
