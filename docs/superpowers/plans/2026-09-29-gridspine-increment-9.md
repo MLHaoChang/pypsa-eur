@@ -235,3 +235,56 @@ would have meant re-running the whole study. So:
 - Six mutations, each caught: upsert appending, bundles not updated, bundle
   dropping the file, ledger omitting the rule, the spec entry missing, and
   the search run on the event loop.
+
+## Stage C, and the browser run (2026-09-29)
+
+**Setup.** A "Connection capacity" section in the study panel, shown once a
+study completes:
+- choose the hour (the study's selected hours) and the connection kind;
+- every bus is listed with its capacity, marked `≈` with a "DC est." tag, or
+  exact with an "AC" tag;
+- what binds is said in words: "overload of X after losing Y", "low voltage
+  at Z", or "nothing binds up to the cap", shown as `≥ cap`;
+- "Compute AC" runs the on-demand search for that bus and refreshes the
+  table. It is disabled while the project has a queued or running study.
+
+**Browser run.** Chromium, driving the real app on fresh app data.
+
+*Run 1: a flat hand-written client dispatch.*
+- Every bus read **0.0 MW**, for both load and generation.
+- Checked against that run's own base case rather than taken on trust: the
+  flat 416.9 MW-per-unit dispatch has **3 intact overloads** (worst 160 %) and
+  violations in **44 of 60** N-1 cases. So every direction deepens one of
+  them, and 0 MW is the honest answer for that state. The test data was
+  unrealistic; the rule was not wrong.
+
+*Run 2: a generated 24 h UC study* (study completed in 15 s; hours 3, 17 and
+19 selected).
+- **Generation:** 26 of 39 buses can take more than 0 MW at hour 3, several
+  over 1 GW (BUS_06 ≈1,203 MW, BUS_08 ≈1,196 MW).
+- **Load:** only 4 buses can take any (≈89–92 MW), bound by `BUS_06-BUS_11`
+  after losing `BUS_01-BUS_02`.
+- **AC at BUS_16**, one request of about 1.6–2.0 s across the three hours:
+  13.8 / 3.1 / 6.3 MW.
+- The downloaded `bundle_h3.zip` carries `capacity.csv` (listed in its
+  manifest) with the AC row and its DC estimate beside it, plus the three
+  capacity ledger lines.
+
+**Found and fixed from the browser run:**
+1. **A limit set by an existing overload read as headroom.** BUS_16's
+   13.8 MW at hour 3 is bound by `BUS_02-BUS_03`, already overloaded under
+   N-1 before anything connects. The figure is the 0.5 % worsening tolerance
+   over the bus's distribution factor, not room on the network. Every result
+   now carries `binding_preexisting`, and the panel says "— already
+   overloaded before connection". Re-checked in the browser: hour 3 is
+   flagged; hours 17 and 19, which bind on constraints that were within
+   limits, are not.
+2. **DC and AC disagreed about the rule.** DC gave that row 0.0 because it
+   applied no tolerance at all. It now allows an already-violated flow the
+   same `worsen_tol_pct` of its rating that AC does.
+3. **Layout.** In the narrow panel the Bus and Capacity columns ran together
+   ("BUS_1613.8 MW"), and values and tags wrapped. Those columns no longer
+   wrap; only the binding text does.
+
+All three were fixed test-first, except the layout, which was re-checked by
+screenshot.

@@ -873,9 +873,9 @@ function CapacitySection({ name, locked }: { name: string; locked: boolean }) {
             <table className="w-full text-[12px]">
               <thead>
                 <tr className="text-left text-muted">
-                  <th className="font-normal">Bus</th>
-                  <th className="font-normal">Capacity</th>
-                  <th className="font-normal">Method</th>
+                  <th className="font-normal pr-3 whitespace-nowrap">Bus</th>
+                  <th className="font-normal pr-3 whitespace-nowrap">Capacity</th>
+                  <th className="font-normal pr-3 whitespace-nowrap">Method</th>
                   <th className="font-normal">Binds on</th>
                   <th />
                 </tr>
@@ -885,11 +885,13 @@ function CapacitySection({ name, locked }: { name: string; locked: boolean }) {
                   const busy = compute.isPending && compute.variables === r.bus
                   return (
                     <tr key={r.bus} data-testid={`capacity-row-${r.bus}`} className="border-t border-border">
-                      <td className="py-1">{r.bus}</td>
-                      <td>{capacityText(r)}</td>
-                      <td><Tag tone={r.method === 'ac' ? 'ok' : 'neutral'}>{r.method === 'ac' ? 'AC' : 'DC est.'}</Tag></td>
-                      <td className="text-muted">{bindingText(r)}</td>
-                      <td className="text-right">
+                      <td className="py-1 pr-3 whitespace-nowrap align-top">{r.bus}</td>
+                      <td className="pr-3 whitespace-nowrap align-top tabular-nums">{capacityText(r)}</td>
+                      <td className="pr-3 whitespace-nowrap align-top">
+                        <Tag tone={r.method === 'ac' ? 'ok' : 'neutral'}>{r.method === 'ac' ? 'AC' : 'DC est.'}</Tag>
+                      </td>
+                      <td className="text-muted align-top">{bindingText(r)}</td>
+                      <td className="text-right whitespace-nowrap align-top pl-2">
                         <Btn
                           onClick={() => compute.mutate(r.bus)}
                           disabled={locked || compute.isPending}
