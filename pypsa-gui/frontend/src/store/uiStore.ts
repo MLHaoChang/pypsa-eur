@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { effectiveLockState, type LockState, type ReadOnlyReason } from '../utils/lockState'
 import { readActiveSite } from '../site3d/activeSite'
+import type { SizingMode } from '../site3d/sizing'
 // Floor for the docked comparison rail width — keeps both the rail and the
 // live Results pane usable when the splitter is dragged to an extreme. Single
 // definition, shared with the rail's own width arithmetic: this store and
@@ -423,6 +424,11 @@ interface UIStore {
   setSiteDraft: (d: Array<[number, number]>) => void
   activeSiteId: string | null
   setActiveSiteId: (id: string | null) => void
+  // 3D site view (Phase 2 E6): draw extendable assets at their installed
+  // size or at the optimum. Takes effect only while dispatch is fresh
+  // (site3d/sizing.ts effectiveSizing). A view setting, not a mutation.
+  siteSizing: SizingMode
+  setSiteSizing: (m: SizingMode) => void
   setSlidePanel: (p: SlidePanel | null) => void
   setAssistantDockOpen: (open: boolean) => void
   toggleAssistantDock: () => void
@@ -495,6 +501,7 @@ export const useUIStore = create<UIStore>((set) => ({
   siteDrawMode: 'idle',
   siteDraft: [],
   activeSiteId: readActiveSite(storedCurrentProject()),
+  siteSizing: 'installed',
   activeSlidePanel: null,
   assistantDockOpen: storedAssistantDockOpen(),
   assistantDockWidth: storedAssistantDockWidth(),
@@ -598,6 +605,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setSiteDrawMode: (m) => set({ siteDrawMode: m }),
   setSiteDraft: (d) => set({ siteDraft: d }),
   setActiveSiteId: (id) => set({ activeSiteId: id }),
+  setSiteSizing: (m) => set({ siteSizing: m }),
   setSlidePanel: (p) => set({ activeSlidePanel: p }),
   setAssistantDockOpen: (open) => {
     persistAssistantDockOpen(open)

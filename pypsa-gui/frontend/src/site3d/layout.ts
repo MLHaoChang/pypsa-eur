@@ -23,6 +23,7 @@ import {
   type AssetType, type MatchComponent, type MatchContext, type MatchResult, type PyPSAClass, type Zone,
 } from './assetLibrary'
 import { runTemplate, type Anchors, type Part, type TemplateInput, type TemplateOutput } from './templates'
+import { sizeOf, type SizingMode } from './sizing'
 
 export type { Part, Anchors } from './templates'
 
@@ -82,6 +83,8 @@ export interface SiteInput {
   busCarrier?: (name: string) => string | undefined
   /** The asset library; the default when absent. */
   library?: readonly AssetType[]
+  /** Installed sizes (the default) or, for extendable assets, the optimum (spec E6). */
+  sizing?: SizingMode
 }
 
 export interface SiteLayout {
@@ -102,30 +105,13 @@ export interface SiteLayout {
 
 export const objectKey = (o: Pick<SiteObject, 'type' | 'name'>): string => `${o.type}:${o.name}`
 
-// ── sizing ──────────────────────────────────────────────────────────────────
-
-interface Sized { amount: number; unit: string; mw?: number }
-
-function sizeOf(type: AssetType, cls: PyPSAClass, c: MatchComponent): Sized {
-  const rule = type.size[cls] ?? { param: 'none', unit: '' }
-  const n = (k: string) => Number(c[k] ?? 0) || 0
-  switch (rule.param) {
-    case 'p_nom': return { amount: n('p_nom'), unit: rule.unit }
-    case 'e_nom': return { amount: n('e_nom'), unit: rule.unit }
-    case 's_nom': return { amount: n('s_nom'), unit: rule.unit }
-    case 'p_set': return { amount: Math.abs(n('p_set')), unit: rule.unit }
-    case 'mwh': return { amount: n('p_nom') * (n('max_hours') || 1), unit: rule.unit, mw: n('p_nom') }
-    default: return { amount: 0, unit: '' }
-  }
-}
-
 // ── building objects ────────────────────────────────────────────────────────
 
 interface Candidate { cls: PyPSAClass; comp: MatchComponent; m: MatchResult }
 
-function objectFrom(cls: PyPSAClass, comp: MatchComponent, m: MatchResult, input: Omit<TemplateInput, 'amount'> = {}): { obj: SiteObject; out: TemplateOutput } {
+function objectFrom(cls: PyPSAClass, comp: MatchComponent, m: MatchResult, input: Omit<TemplateInput, 'amount'> = {}, sizing: SizingMode = 'installed'): { obj: SiteObject; out: TemplateOutput } {
   const t = m.type
-  const size = sizeOf(t, cls, comp)
+  const size = sizeOf(comp, t.size[cls] ?? { param: 'none', unit: '' }, sizing)
   const out = runTemplate(t.geometry, { amount: size.amount, ...input })
   const carrier = (comp.carrier as string | undefined) ?? ''
   const obj: SiteObject = {
@@ -135,7 +121,7 @@ function objectFrom(cls: PyPSAClass, comp: MatchComponent, m: MatchResult, input
       cls, name: comp.name, carrier, amount: size.amount, unit: size.unit, count: out.count, each: out.each, areaM2: out.areaM2,
       mw: size.mw, vNom: input.vNom, vHi: comp.v_nom_0 as number | undefined, vLo: comp.v_nom_1 as number | undefined, far: m.far,
       params: t.geometry.params,
-    }),
+    }) + (size.optimised ? ' (optimised)' : ''),
     areaM2: out.areaM2, anchors: out.anchors,
   }
   return { obj, out }
@@ -158,9 +144,9 @@ function packZone(objs: SiteObject[], origin: [number, number], maxRowWidth: num
 }
 
 /** The objects attached to one bus, packed around its yard at `frameOrigin` (site frame). */
-function buildBus(bus: SiteBusInput, candidates: Candidate[], ctx: MatchContext, lib: readonly AssetType[], frameOrigin: [number, number], roofAvailable: boolean): SiteObject[] {
+function buildBus(bus: SiteBusInput, candidates: Candidate[], ctx: MatchContext, lib: readonly AssetType[], frameOrigin: [number, number], roofAvailable: boolean, sizing: SizingMode): SiteObject[] {
   const mine = candidates.filter(c => c.m.owner === bus.name)
-  const objs = mine.map(c => objectFrom(c.cls, c.comp, c.m).obj)
+  const objs = mine.map(c => objectFrom(c.cls, c.comp, c.m, {}, sizing).obj)
   const bays = mine.filter(c => c.m.type.flags?.bay).length
 
   const yardMatch = matchType('Bus', { name: bus.name, carrier: ctx.busCarrier(bus.name) }, ctx, lib)!
@@ -217,7 +203,7 @@ function candidatesFor(input: SiteInput, ctx: MatchContext, lib: readonly AssetT
  * follows a moved hall), re-run on the roof; without a hall it keeps its
  * canopy in the south zone. Exempt from the no-overlap rule: it is on the roof.
  */
-function rooftopPass(objects: SiteObject[], candidates: Candidate[], lib: readonly AssetType[]): void {
+function rooftopPass(objects: SiteObject[], candidates: Candidate[], lib: readonly AssetType[], sizing: SizingMode): void {
   const roofTypes = new Set(lib.filter(t => t.zone === 'roof').map(t => t.id))
   const hallType = lib.find(t => t.geometry.template === 'hall')?.id
   const halls = objects.filter(o => o.kind === hallType)
@@ -233,7 +219,7 @@ function rooftopPass(objects: SiteObject[], candidates: Candidate[], lib: readon
     if (!roofTypes.has(o.kind)) continue
     const c = candidates.find(x => x.cls === o.type && x.comp.name === o.name)
     if (!c) continue
-    const { obj, out } = objectFrom(c.cls, c.comp, c.m, { roof: free })
+    const { obj, out } = objectFrom(c.cls, c.comp, c.m, { roof: free }, sizing)
     if (out.fitsRoof) {
       Object.assign(o, { parts: obj.parts, footprint: obj.footprint, summary: obj.summary, origin: [...hall.origin], heading: hall.heading, elevation: free.h })
     } else {
@@ -255,6 +241,7 @@ export function buildSiteLayout(input: SiteInput): SiteLayout {
   const lib = input.library ?? DEFAULT_LIBRARY
   validateLibrary(lib)
   const placements = input.placements ?? {}
+  const sizing = input.sizing ?? 'installed'
   const members = input.buses.map(b => b.name)
   const ctx: MatchContext = { members, busCarrier: input.busCarrier ?? (() => undefined) }
   const candidates = candidatesFor(input, ctx, lib)
@@ -268,7 +255,7 @@ export function buildSiteLayout(input: SiteInput): SiteLayout {
     const yardKey = `Bus:${bus.name}`
     const yardPlacement = placements[yardKey]
     const frameOrigin: [number, number] = yardPlacement ? [yardPlacement.x, yardPlacement.y] : bus.offset
-    for (const o of buildBus(bus, candidates, ctx, lib, frameOrigin, roofAvailable)) {
+    for (const o of buildBus(bus, candidates, ctx, lib, frameOrigin, roofAvailable, sizing)) {
       const p = placements[objectKey(o)]
       if (p) {
         o.origin = [p.x, p.y]
@@ -278,7 +265,7 @@ export function buildSiteLayout(input: SiteInput): SiteLayout {
       objects.push(o)
     }
   }
-  rooftopPass(objects, candidates, lib)
+  rooftopPass(objects, candidates, lib, sizing)
   // A rooftop object that went onto a hall is not "placed" by its own entry.
   const onRoof = new Set(objects.filter(o => roofTypes.has(o.kind) && o.elevation).map(objectKey))
   const placedOut = placed.filter(k => !onRoof.has(k))

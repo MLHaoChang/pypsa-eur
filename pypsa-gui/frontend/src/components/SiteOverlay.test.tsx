@@ -7,7 +7,7 @@ import type { Site } from '../site3d/types'
 const site: Site = { id: 'a', name: 'Campus', buses: ['B1'], boundary: [[0, 0], [0.01, 0], [0.01, 0.01]], origin: { lng: 0.005, lat: 0.003 }, placements: {} }
 const fit = { landM2: 178_000, plotM2: 113_000, over: true, outside: ['Generator:PV field'] }
 
-beforeEach(() => { useUIStore.setState({ readOnly: false, readOnlyReason: 'writable' }) })
+beforeEach(() => { useUIStore.setState({ readOnly: false, readOnlyReason: 'writable', siteSizing: 'installed' }) })
 
 describe('SiteOverlay', () => {
   it('shows the fit check in red when over, the outside count, and enables Arrange / Reset', () => {
@@ -55,5 +55,44 @@ describe('SiteOverlay — Arrange while loading', () => {
     const b = screen.getByRole('button', { name: 'Arrange' }) as HTMLButtonElement
     expect(b.disabled).toBe(true)
     expect(b.title).toMatch(/load/)
+  })
+
+  describe('Sized: as built / optimised (spec E6)', () => {
+    const renderWith = (dispatchFresh: boolean) => render(
+      <SiteOverlay sites={[site]} site={site} onPickSite={() => {}} assetCount={1} fit={{ ...fit, over: false, outside: [] }} unplacedMembers={[]} selectedPlacedKey={null} canArrange onArrange={() => {}} onResetPlacement={() => {}} dispatchFresh={dispatchFresh} />,
+    )
+    it('is shown only while dispatch is fresh', () => {
+      const { unmount } = renderWith(false)
+      expect(screen.queryByRole('button', { name: /optimised/i })).toBeNull()
+      unmount()
+      renderWith(true)
+      expect(screen.getByRole('button', { name: /optimised/i })).toBeTruthy()
+    })
+    it('toggling sets siteSizing, and the fit line says "(optimised)" in optimised mode', () => {
+      renderWith(true)
+      const optimised = screen.getByRole('button', { name: /optimised/i })
+      expect(optimised.getAttribute('aria-pressed')).toBe('false')
+      expect(screen.getByTestId('fit-status').textContent).not.toContain('(optimised)')
+      fireEvent.click(optimised)
+      expect(useUIStore.getState().siteSizing).toBe('optimised')
+      expect(screen.getByRole('button', { name: /optimised/i }).getAttribute('aria-pressed')).toBe('true')
+      expect(screen.getByTestId('fit-status').textContent).toContain('(optimised)')
+      fireEvent.click(screen.getByRole('button', { name: /as built/i }))
+      expect(useUIStore.getState().siteSizing).toBe('installed')
+    })
+    it('a stale dispatch hides the switch and drops "(optimised)" although siteSizing is still optimised', () => {
+      useUIStore.setState({ siteSizing: 'optimised' })
+      renderWith(false)
+      expect(screen.getByTestId('fit-status').textContent).not.toContain('(optimised)')
+      expect(useUIStore.getState().siteSizing).toBe('optimised')
+    })
+    it('stays enabled when read-only (it changes the view, not the network)', () => {
+      useUIStore.setState({ readOnly: true, readOnlyReason: 'locked-by-user' })
+      renderWith(true)
+      const optimised = screen.getByRole('button', { name: /optimised/i }) as HTMLButtonElement
+      expect(optimised.disabled).toBe(false)
+      fireEvent.click(optimised)
+      expect(useUIStore.getState().siteSizing).toBe('optimised')
+    })
   })
 })

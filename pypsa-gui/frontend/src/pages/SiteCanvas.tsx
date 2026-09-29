@@ -47,6 +47,8 @@ import { matrixFor, placementFromMatrix } from '../site3d/placementMath'
 import { screenToGround, groundToScreen } from '../site3d/raycast'
 import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/dropRegistry'
 import SiteOverlay from '../components/SiteOverlay'
+import { useDispatchFresh } from '../site3d/useDispatchFresh'
+import { effectiveSizing } from '../site3d/sizing'
 import { toScene, fitCamera, chooseSite, unionBounds, halfSizeFor, type Bounds } from '../site3d/scene'
 import { useSitesStore } from '../site3d/sitesStore'
 import { writeActiveSite } from '../site3d/activeSite'
@@ -517,12 +519,18 @@ function SiteCanvas() {
   [site, offsets, buses])
   const unplacedMembers = site ? site.buses.filter(name => offsets[name] == null) : []
 
+  // Sizes: installed, or the optimum while dispatch is fresh and the
+  // overlay's switch says so (spec E6) — an edit falls back at once.
+  const { fresh: dispatchFresh } = useDispatchFresh(currentProject)
+  const siteSizing = useUIStore(s => s.siteSizing)
+  const sizing = effectiveSizing(siteSizing, dispatchFresh)
+
   // The layout is in the SITE frame already: one yard per bus at its
   // offset, placements honoured.
   const layout = useMemo(() => (site && memberInputs.length > 0
-    ? buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, placements: site.placements, busCarrier })
+    ? buildSiteLayout({ buses: memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, placements: site.placements, busCarrier, sizing })
     : null),
-  [site, memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, busCarrier])
+  [site, memberInputs, generators, storageUnits, stores, loads, transformers, lines, links, busCarrier, sizing])
   const objects: SiteObject[] = layout?.objects ?? []
 
   // ── Site context (WP5): the cache first (never an upstream call), then
@@ -812,6 +820,7 @@ function SiteCanvas() {
         assetCount={objects.filter(o => !DEFAULT_LIBRARY.find(t => t.id === o.kind)?.flags?.infrastructure).length}
         fit={fit}
         unplacedMembers={unplacedMembers}
+        dispatchFresh={dispatchFresh}
         selectedPlacedKey={selectedPlacedKey}
         canArrange={allLoaded}
         onArrange={() => arrangeAll(currentProject, site.id, objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading })), layout.orphans)}

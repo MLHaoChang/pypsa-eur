@@ -6,6 +6,7 @@ import { useUIStore } from '../store/uiStore'
 import { readOnlyMessage, READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
 import { formatHa, type FitReport } from '../site3d/fit'
 import type { Site } from '../site3d/types'
+import { effectiveSizing } from '../site3d/sizing'
 
 interface Props {
   sites: Site[]
@@ -20,10 +21,15 @@ interface Props {
   canArrange: boolean
   onArrange: () => void
   onResetPlacement: () => void
+  /** The solver's dispatch matches the network: the as built / optimised switch is offered only then (spec E6). */
+  dispatchFresh?: boolean
 }
 
-export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, unplacedMembers, selectedPlacedKey, canArrange, onArrange, onResetPlacement }: Props) {
+export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, unplacedMembers, selectedPlacedKey, canArrange, onArrange, onResetPlacement, dispatchFresh = false }: Props) {
   const readOnly = useUIStore(s => s.readOnly)
+  const siteSizing = useUIStore(s => s.siteSizing)
+  const setSiteSizing = useUIStore(s => s.setSiteSizing)
+  const optimised = effectiveSizing(siteSizing, dispatchFresh) === 'optimised'
   const readOnlyReason = useUIStore(s => s.readOnlyReason)
   const blocked = readOnly ? (readOnlyMessage(readOnlyReason) ?? READ_ONLY_MUTATION_MESSAGE) : undefined
   return (
@@ -40,11 +46,29 @@ export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, 
         className={fit.over ? 'text-accent font-semibold' : 'text-muted'}
         title="Sum of every asset's land take from its parameters, against the plot area inside the boundary"
       >
-        land {formatHa(fit.landM2)} · plot {formatHa(fit.plotM2)}{fit.over ? ' · does not fit' : ''}
+        land {formatHa(fit.landM2)}{optimised ? ' (optimised)' : ''} · plot {formatHa(fit.plotM2)}{fit.over ? ' · does not fit' : ''}
       </span>
       {fit.outside.length > 0 && <span className="text-accent" title={fit.outside.join(', ')}>· {fit.outside.length} outside</span>}
       {unplacedMembers.length > 0 && (
         <span className="text-accent" title={unplacedMembers.join(', ')}>· {unplacedMembers.length} member bus{unplacedMembers.length === 1 ? '' : 'es'} not placed</span>
+      )}
+      {dispatchFresh && (
+        // A view setting: enabled when read-only too.
+        <span className="inline-flex items-center gap-1" role="group" aria-label="Sized">
+          <span className="text-muted">· Sized:</span>
+          {(['installed', 'optimised'] as const).map(m => (
+            <button
+              key={m}
+              type="button"
+              aria-pressed={siteSizing === m}
+              onClick={() => setSiteSizing(m)}
+              title={m === 'installed' ? 'Draw every asset at its installed size (p_nom, e_nom, s_nom)' : "Draw extendable assets at the last solve's optimum (*_nom_opt)"}
+              className={`px-1.5 py-0.5 rounded border border-border ${siteSizing === m ? 'bg-accent/10 text-text font-semibold' : 'text-muted hover:bg-accent/5'}`}
+            >
+              {m === 'installed' ? 'as built' : 'optimised'}
+            </button>
+          ))}
+        </span>
       )}
       <span className="text-muted">·</span>
       <button

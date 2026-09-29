@@ -36,6 +36,22 @@ describe('buildSiteLayout', () => {
     expect(objects.map(o => o.name).sort()).toEqual(['B', 'mine', 'touching'])
   })
 
+  it('optimised sizing draws an extendable BESS at p_nom_opt (4× the containers) and says so; installed by default', () => {
+    const bess = su({ name: 'BESS 1', p_nom: 10, p_nom_opt: 40, p_nom_extendable: true, max_hours: 4 })
+    const count = (o: { summary: string }) => Number(/in (\d+) containers?/.exec(o.summary)?.[1])
+    const inst = buildSiteLayout({ ...empty, storageUnits: [bess] }).objects[1]
+    const def = buildSiteLayout({ ...empty, storageUnits: [bess], sizing: 'installed' }).objects[1]
+    const opt = buildSiteLayout({ ...empty, storageUnits: [bess], sizing: 'optimised' }).objects[1]
+    expect(inst.summary).toBe(def.summary)
+    expect(inst.summary).not.toMatch(/optimised/)
+    expect(count(opt)).toBe(4 * count(inst))
+    expect(opt.summary).toMatch(/160 MWh \/ 40 MW .*\(optimised\)$/)
+    expect(opt.areaM2).toBeGreaterThan(inst.areaM2)
+    // not extendable: optimised mode keeps the installed size and says nothing
+    const fixed = buildSiteLayout({ ...empty, storageUnits: [{ ...bess, p_nom_extendable: false }], sizing: 'optimised' }).objects[1]
+    expect(fixed.summary).toBe(inst.summary)
+  })
+
   it('a BESS is N containers from its MWh, and the count survives the draw cap', () => {
     const small = buildSiteLayout({ ...empty, storageUnits: [su({ p_nom: 10, max_hours: 4 })] }).objects[1]
     expect(small.kind).toBe('bess')
