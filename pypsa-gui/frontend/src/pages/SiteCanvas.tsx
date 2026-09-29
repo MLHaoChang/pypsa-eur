@@ -187,10 +187,10 @@ function LabelTracker({ keys, refs, results, objects }: {
   const size = useThree(s => s.size)
   const box = useMemo(() => new THREE.Box3(), [])
   const v = useMemo(() => new THREE.Vector3(), [])
-  const cache = useRef<{ r: unknown; visuals: Map<string, Visual> }>({ r: null, visuals: new Map() })
+  const cache = useRef<{ r: unknown; objects: unknown; visuals: Map<string, Visual> }>({ r: null, objects: null, visuals: new Map() })
   useFrame(() => {
     const r = results.get()
-    if (cache.current.r !== r) cache.current = { r, visuals: siteVisuals(r.states, objects) }
+    if (cache.current.r !== r || cache.current.objects !== objects) cache.current = { r, objects, visuals: siteVisuals(r.states, objects) }
     for (const key of keys) {
       const el = refs.current[key]
       if (!el) continue
@@ -401,6 +401,15 @@ function Site3dDebugHook({ objects, site, context, groundMode: mode, heightAt, r
       results: () => { const r = results.get(); return { idx: r.idx, iso: r.iso, states: Object.fromEntries(r.states) } },
       /** What the results layer showed on the last frame for one object: gauge, spin, glow, flow, loading. */
       visual: (key: string) => { const v = eased.current.get(key); return v ? { ...v } : null },
+      /** The emissive the object's materials carry now (the first glowable one; decorations excluded). */
+      glow: (key: string) => {
+        let out: { color: string; intensity: number } | null = null
+        scene.getObjectByName(key)?.traverse(o => {
+          const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined
+          if (!out && !o.userData.site3dDecor && m?.isMeshStandardMaterial) out = { color: `#${m.emissive.getHexString()}`, intensity: +m.emissiveIntensity.toFixed(3) }
+        })
+        return out
+      },
       site: { id: site.id, name: site.name, placements: site.placements },
       context: context ? { buildings: context.buildings.length, lines: context.lines.length, areas: context.areas.length, terrain: !!context.terrain, missingTiles: context.terrain?.missing_tiles ?? null } : null,
       groundMode: mode,
@@ -902,11 +911,12 @@ function SiteCanvas() {
 
         {/* Legend — under the picker; the result bands only while results show. */}
         <SiteLegend entries={legend} results={resultsStore} />
-      </div>
-
-      {/* Results readout — top-right, only while results show (spec §6.4: not hover-only). */}
-      <div className="absolute right-3 top-12 z-[400] w-[min(20rem,40%)]">
-        <SiteResultsReadout store={resultsStore} objects={objects} />
+        {/* Results readout under the legend, only while results show (spec §6.4:
+            not hover-only). In this column it never covers the control strip;
+            collapsed by default in a narrow pane so it does not cover the scene. */}
+        <div className="w-[min(22rem,100%)]">
+          <SiteResultsReadout store={resultsStore} objects={objects} />
+        </div>
       </div>
 
       {/* Attribution — bottom-right above the snapshot bar: required for the

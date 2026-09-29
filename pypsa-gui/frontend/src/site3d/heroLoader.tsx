@@ -147,10 +147,15 @@ export function HeroInstances({ parts, pieces, model, tint, glow }: HeroInstance
         // about its own hub, phased like the parametric rotors. The blades
         // turn about model X, which the 90° yaw points north — the opposite
         // sense to the parametric rotors' scene z — hence −angle.
+        let last = 0
         mesh.userData.setRotorAngle = (angle: number) => {
+          if (angle === last) return          // still (no output, Eye off, reduced motion): no re-upload
+          last = angle
           bases.forEach((b, i) => mesh.setMatrixAt(i, rotorMatrix(b, model, -(angle + i * 0.7), instances[i].rotorScale ?? 1).multiply(p.matrix)))
           mesh.instanceMatrix.needsUpdate = true
         }
+        // The bounds are computed at angle 0; turning tips would leave them.
+        mesh.frustumCulled = false
       }
       mesh.computeBoundingBox()
       mesh.computeBoundingSphere()

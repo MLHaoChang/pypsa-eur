@@ -32,4 +32,19 @@ describe('results store', () => {
     act(() => s.set(r(0)))
     expect(result.current).toBe(false)
   })
+  it('an equal() keeps the previous value (no re-render); a new selector is honoured with the same results', () => {
+    const s = createResultsStore()
+    s.set(r(2))
+    let renders = 0
+    const eq = (a: string[], b: string[]) => a.join() === b.join()
+    const { result, rerender } = renderHook(({ pick }) => { renders++; return useResultsSelector(s, pick, eq) },
+      { initialProps: { pick: (x: typeof s extends { get(): infer R } ? R : never) => [...x.states.keys()].slice(0, 1) } })
+    const first = result.current
+    const base = renders
+    act(() => s.set(r(3)))                        // same first key: equal → same array, no re-render
+    expect(result.current).toBe(first)
+    expect(renders).toBe(base)
+    rerender({ pick: x => [...x.states.keys()] })   // a new selector, same results
+    expect(result.current).toEqual(['G:0', 'G:1', 'G:2'])
+  })
 })

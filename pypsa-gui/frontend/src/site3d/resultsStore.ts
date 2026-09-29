@@ -23,14 +23,15 @@ export function createResultsStore(): ResultsStore {
 
 /** Subscribe to a slice: the host re-renders only when `select` returns a different value (Object.is, or `equal`). */
 export function useResultsSelector<T>(store: ResultsStore, select: (r: SiteResults) => T, equal: (a: T, b: T) => boolean = Object.is): T {
-  const last = useRef<{ r: SiteResults; v: T } | null>(null)
+  const last = useRef<{ r: SiteResults; select: (r: SiteResults) => T; v: T } | null>(null)
   const get = useCallback(() => {
     const r = store.get()
-    if (last.current && last.current.r === r) return last.current.v
+    const prev = last.current
+    if (prev && prev.r === r && prev.select === select) return prev.v
     const v = select(r)
-    if (last.current && equal(last.current.v, v)) { last.current = { r, v: last.current.v }; return last.current.v }
-    last.current = { r, v }
-    return v
+    // An equal value keeps the previous reference, so the host does not re-render.
+    last.current = { r, select, v: prev && equal(prev.v, v) ? prev.v : v }
+    return last.current.v
   }, [store, select, equal])
   return useSyncExternalStore(store.subscribe, get)
 }

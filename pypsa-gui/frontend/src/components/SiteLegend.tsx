@@ -14,22 +14,30 @@ interface Props {
 
 const Swatch = ({ color }: { color: string }) => <span aria-hidden className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: color }} />
 
+const bandsOf = (r: SiteResults) => {
+  let loading = false, soc = false
+  for (const st of r.states.values()) { if (st.kind === 'branch') loading = true; else if (st.kind === 'storage') soc = true }
+  return { loading, soc }
+}
+const sameBands = (a: { loading: boolean; soc: boolean }, b: { loading: boolean; soc: boolean }) => a.loading === b.loading && a.soc === b.soc
+
 export default function SiteLegend({ entries, results }: Props) {
-  const showing = useResultsSelector(results, useCallback((r: SiteResults) => r.states.size > 0, []))
+  // Each band only while results of its kind show (branches, storage).
+  const bands = useResultsSelector(results, useCallback(bandsOf, []), sameBands)
   return (
     <div className="flex max-w-[min(100%,36rem)] flex-wrap gap-x-3 gap-y-1 rounded-md border border-border bg-bg/95 px-2 py-1.5 text-[11px] shadow">
       {entries.map(e => (
         <span key={e.id} className="flex items-center gap-1 text-muted"><Swatch color={e.color} />{e.label}</span>
       ))}
-      {showing && (
-        <>
+      {bands.loading && (
           <span data-testid="legend-loading" className="flex basis-full items-center gap-1 text-muted">
             Loading: <Swatch color={loadingColor(0)} /> &lt; 50 % <Swatch color={loadingColor(50)} /> 50–90 % <Swatch color={loadingColor(90)} /> ≥ 90 % of rating
           </span>
+      )}
+      {bands.soc && (
           <span data-testid="legend-soc" className="flex basis-full items-center gap-1 text-muted">
             SoC / fill: <Swatch color={socColor(0)} /> &lt; 20 % <Swatch color={socColor(20)} /> 20–80 % <Swatch color={socColor(80)} /> ≥ 80 %
           </span>
-        </>
       )}
     </div>
   )

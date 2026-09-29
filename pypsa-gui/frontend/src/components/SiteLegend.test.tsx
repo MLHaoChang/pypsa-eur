@@ -14,6 +14,12 @@ describe('SiteLegend', () => {
     expect(screen.getByText('PV field')).toBeTruthy()
     expect(screen.queryByText(/Loading/)).toBeNull()
     act(() => store.set({ idx: 0, iso: 't', states: new Map([['Generator:PV', { kind: 'output', mw: 1, cap: 2 }]]) }))
+    expect(screen.queryByTestId('legend-loading')).toBeNull()        // no branch, no storage: no bands
+    expect(screen.queryByTestId('legend-soc')).toBeNull()
+    act(() => store.set({ idx: 0, iso: 't', states: new Map<string, never>([
+      ['Line:L1', { kind: 'branch', p0: 1, cap: 2, unit: 'MVA', bus0: 'B', bus1: 'C' } as never],
+      ['StorageUnit:S', { kind: 'storage', mw: 0, energy: 1, energyCap: 2 } as never],
+    ]) }))
     const loading = screen.getByTestId('legend-loading').textContent!
     expect(loading).toMatch(/< ?50 %/); expect(loading).toMatch(/50.90 %/); expect(loading).toMatch(/≥ ?90 %/)
     const soc = screen.getByTestId('legend-soc').textContent!
