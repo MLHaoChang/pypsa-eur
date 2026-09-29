@@ -1995,7 +1995,7 @@ async function phaseP27a(browser) {
       await shot(page, 'p27a-edit-refused-during-sweep')
       refused = true
     }
-    check(refused, 'the browser edit landed while the sweep was running')
+    check(refused, 'the browser save was sent while the sweep ran, and was refused')
 
     step('wait for the sweep; the same edit succeeds')
     const until = Date.now() + 10 * 60_000

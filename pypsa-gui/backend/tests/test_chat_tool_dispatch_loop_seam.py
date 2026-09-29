@@ -341,3 +341,45 @@ def test_save_a_copy_emits_no_rebind(monkeypatch):
                                    args={"name": "a-copy"})], holder=holder)
     assert [p for n_, p in frames if n_ == "project_rebound"] == []
     assert holder[0] == "the-old-one"
+
+
+# Gate finding 3: the network imports swap in a fresh network through
+# `reset_network`, which moves `loaded_project` from the bound name to None.
+_IMPORT_TOOLS = ["import_network_nc", "import_csv_bundle", "import_excel",
+                 "import_matpower"]
+
+
+@pytest.mark.parametrize("tool", _IMPORT_TOOLS)
+def test_a_network_import_announces_the_unbind(monkeypatch, tool):
+    _assert_announced(monkeypatch, tool, "bound-proj", None)
+
+
+@pytest.mark.parametrize("tool", _IMPORT_TOOLS)
+def test_a_second_tool_in_the_same_turn_still_dispatches_after_an_import(
+    monkeypatch, tool
+):
+    from services.pypsa_service import PyPSAService
+
+    _ctx, ran = _rebinding_harness(monkeypatch, start="bound-proj",
+                                   moves_to=None, moving_tool=tool)
+    holder = ["bound-proj"]
+    frames, outcome = _drive(
+        chat_service.ChatSession(),
+        [_tu("t1", name=tool, args={}), _tu("t2")],
+        holder=holder,
+        switched=lambda: PyPSAService.get_active_context().loaded_project != holder[0],
+    )
+    assert ran == ["t1", "t2"], f"only {ran} dispatched"
+    assert outcome.switched_mid_turn is False
+    assert holder[0] is None
+
+
+def test_an_import_that_fails_before_the_swap_emits_nothing(monkeypatch):
+    """Only an actual move is announced (e.g. the import was refused)."""
+    _ctx, _ran = _rebinding_harness(monkeypatch, start="bound-proj",
+                                    moves_to="bound-proj",
+                                    moving_tool="import_network_nc")
+    frames, _outcome = _drive(chat_service.ChatSession(),
+                              [_tu("t1", name="import_network_nc", args={})],
+                              holder=["bound-proj"])
+    assert [p for n_, p in frames if n_ == "project_rebound"] == []

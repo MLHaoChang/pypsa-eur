@@ -139,6 +139,13 @@ PROJECT_REBINDING_TOOLS = frozenset([
     "create_project_from_template",
     "import_project_bundle",
     "save_project",
+    # P27a gate finding 3: the network imports replace the network through
+    # `reset_network`, which UNBINDS it (`loaded_project` X → None). The frame
+    # then carries `to: null`; a later same-turn tool is not a foreign switch.
+    "import_network_nc",
+    "import_csv_bundle",
+    "import_excel",
+    "import_matpower",
 ])
 
 # Default + selectable models: `DEFAULT_MODEL` / `OPUS_MODEL` are imported
@@ -3474,7 +3481,7 @@ def _dispatch_tool_uses(
         # If the agent just dispatched a rebinding tool (activate_project /
         # load_project / save_project_as / rename_project /
         # restore_project_snapshot / create_project_from_template /
-        # import_project_bundle / save_project), refresh the turn-project snapshot so
+        # import_project_bundle / save_project / the network imports), refresh the turn-project snapshot so
         # the guard recognises the new binding as legitimate. We re-read
         # from the live registry rather than guessing from the tool's args
         # because activate_project on a non-resident project takes the
