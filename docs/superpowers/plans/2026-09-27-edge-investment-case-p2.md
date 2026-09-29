@@ -1030,6 +1030,7 @@ the spec text of §15 (and §5.5's cause list) in the same commit.
   - R2: `_tier_allocation_ok` also checks that each record's €/MWh equals the item's rate for its window and tier, and that a month's volume per tier fits the tier's width. What remains is an engine error in the proportional split itself, which no record check can see (disclosed).
   - R3: the legacy fallback (no per-record drift in provenance) no longer relabels the PPA.
   - Test: a TOU edit with the tier record's volume, rate or width corrupted still gates `tiers`. `test_billing_gap.py` has 37 tests.
+- **WP2.3 review round 3 → PASS.** Every LP-record corruption tried now gates: volume, rates, width, and a TOU edit on top. Per-item drift was checked with a non-convex item and a windowed convex item. **Accepted residue:** an engine-side error in the windowed proportional split stays inside `tier_allocation`, because it is not recomputed independently (billed − LP by the plan's definition).
 
 ## WP2.4b-i URDB importer
 
@@ -1166,6 +1167,25 @@ Files: `services/library/series_io.py` (from WP2.4b-0), `routers/library.py` (up
     - export rows;
     - the help;
     - both routes.
+- **WP2.4b-ii review round 1 → FAIL; all findings fixed:**
+  - F1 (HIGH): offset data without a timezone became UTC months. → The meter route needs the site's `timezone` when timestamps carry offsets (422 otherwise). `meter_series` puts everything on the site clock.
+  - F2 (HIGH): three uploads gave a 500. → `csv.Error` becomes a 422; an empty timestamp is refused (`series_from`); month bounds shift forward over a DST change at midnight on the 1st; both upload routes turn anything raised into a 422 (`_refuse_422`).
+  - F3: meter NaN rows were refused at storage. → The history names the month; the stored series drops the empty rows (`empty_rows_not_stored:<n>`). A blank value in a plain series upload is refused with its row.
+  - F4: unit. → A required `unit` form field (kW | W | kWh_per_interval), converted to kW and recorded in the meta (`source_unit`). The help states it.
+  - F5: `label=start|end` (default start). End labels move back one step.
+  - F6: plain local times plus `timezone` are read on the site wall clock for meter data. The repeated fall-back hour follows row order; a nonexistent time is refused. Plain series keep the WP1.1b rule.
+  - F7:
+    - parsing stops at the row cap;
+    - the monthly work is grouped on integer month codes (1M rows: 1.3 s, was 23.5 s);
+    - both routes run their work in the threadpool.
+  - F8: identical data re-uploaded with another settlement, unit or label is 409 `meter_meta_conflict`. `GET /series/{name}` returns `meta` (`series_store.series_meta`).
+  - F9, F13: the help says to import at the tariff's demand settlement, and that export rows count as no import, row by row.
+  - F10: rows that cross a settlement interval (a 10-min meter against 15 min, an off-grid stamp) give energy only (`peaks_not_established:meter_rows_cross_<s>_intervals`).
+  - F11: the step is taken per month; logger jitter within 2% of the step is snapped to the grid (`timestamps_snapped_to_the_step_grid`).
+  - F12: `mostly_negative_rows_check_the_sign_convention` and `month_without_import:<m>`.
+  - F14: upload timestamps must start with an ISO date (a day-first `01/02/2030` is refused). The P1 JSON route's accepted forms are unchanged.
+  - F15: a month missing between the first and the last is named `month_missing:<m>`, and uploads are sorted.
+  - `test_series_io.py` has 25 tests.
 
 ## WP2.4c Library chat tools
 

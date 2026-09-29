@@ -17,6 +17,7 @@ from uuid import UUID
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session as DBSession
 
@@ -117,6 +118,7 @@ class SeriesOut(BaseModel):
     timestamps: list[str]
     values: list[float]
     timezone: str | None
+    meta: dict = Field(default_factory=dict)
 
 
 def _target_org(db: DBSession, user: User, org_id: UUID | None, *, write: bool) -> UUID:
@@ -168,6 +170,14 @@ def _upload_name(name: str) -> str:
                                  "'/', '?' or '#'") from exc
 
 
+def _refuse_422(exc: Exception) -> HTTPException:
+    """Anything an upload raises is the caller's file, never a 500 (review F2)."""
+    if isinstance(exc, HTTPException):
+        return exc
+    msg = str(exc) if isinstance(exc, ValueError) else f"unreadable upload ({type(exc).__name__})"
+    return HTTPException(422, msg[:500])
+
+
 @router.post("/series/upload", response_model=PriceSeriesRef)
 async def upload_series(file: UploadFile = File(...), name: str = Form(...),
                         timezone: str | None = Form(None), source: str = Form("upload"),
@@ -177,34 +187,60 @@ async def upload_series(file: UploadFile = File(...), name: str = Form(...),
     org = _target_org(db, user, org_id, write=True)
     name = _upload_name(name)
     data = await read_capped(file)
-    try:
+
+    def work():
         series = series_io.parse_upload(data, file.filename or "", timezone,
                                         max_points=MAX_POINTS)
         return S.put_series(db, org, name, series, {"source": source}, created_by=user.id)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+
+    try:
+        return await run_in_threadpool(work)   # parsing is CPU work (review F7)
+    except Exception as exc:  # noqa: BLE001
+        raise _refuse_422(exc) from exc
 
 
 @router.post("/meter_data", response_model=MeterDataOut)
 async def upload_meter_data(file: UploadFile = File(...), name: str = Form(...),
-                            settlement: str = Form("15min"), timezone: str | None = Form(None),
+                            unit: str = Form(...), settlement: str = Form("15min"),
+                            label: str = Form("start"), timezone: str | None = Form(None),
                             org_id: UUID | None = None, db: DBSession = Depends(get_db),
                             user: User = Depends(require_user)):
-    """A kW meter file → a Library series (its settlement and notes in the
-    meta) and the monthly history for `meter_history_peaks_kw` /
-    `meter_history_energy_kwh` (P2 WP2.4b-ii)."""
+    """A meter file → a Library series of average kW per interval, labelled by
+    interval start on the site clock (its settlement, unit and notes in the
+    meta), and the monthly history for `meter_history_peaks_kw` /
+    `meter_history_energy_kwh` (P2 WP2.4b-ii). `unit` (kW | W |
+    kWh_per_interval) is required: a kWh file read as kW is 4× low at 15 min."""
     org = _target_org(db, user, org_id, write=True)
     name = _upload_name(name)
     data = await read_capped(file)
+
+    def work():
+        raw = series_io.parse_upload(data, file.filename or "", None, max_points=MAX_POINTS,
+                                     allow_empty=True)
+        series, notes = series_io.meter_series(raw, timezone=timezone, unit=unit, label=label)
+        hist = series_io.meter_history(series, settlement=settlement)
+        hist["notes"] = notes + hist["notes"]
+        stored = series.dropna()
+        if len(stored) < len(series):
+            hist["notes"].append(f"empty_rows_not_stored:{len(series) - len(stored)}")
+        meta = {"source": "meter_data", "unit": "kW", "source_unit": unit, "label": label,
+                "settlement": settlement, "notes": hist["notes"]}
+        ref = S.put_series(db, org, name, stored, meta, created_by=user.id)
+        kept = S.series_meta(db, org, ref)
+        clash = {k: kept.get(k) for k in ("settlement", "source_unit", "label")
+                 if kept.get(k) != meta[k]}
+        if clash:
+            # Identical data is one version; its meta must describe THIS
+            # history (review F8).
+            raise HTTPException(409, {"code": "meter_meta_conflict", "message": (
+                f"series {name!r} already holds this data with {clash}; upload it under "
+                "another name")})
+        return ref, hist
+
     try:
-        series = series_io.parse_upload(data, file.filename or "", timezone,
-                                        max_points=MAX_POINTS)
-        hist = series_io.meter_history(series, settlement=settlement, timezone=timezone)
-        ref = S.put_series(db, org, name, series,
-                           {"source": "meter_data", "unit": "kW", "settlement": settlement,
-                            "notes": hist["notes"]}, created_by=user.id)
-    except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        ref, hist = await run_in_threadpool(work)
+    except Exception as exc:  # noqa: BLE001
+        raise _refuse_422(exc) from exc
     return MeterDataOut(ref=ref, help=series_io.METER_HISTORY_HELP, **hist)
 
 
@@ -224,7 +260,8 @@ def get_series(name: str, version: int | None = None, org_id: UUID | None = None
         raise HTTPException(409, {"code": "library_ref_stale", "message": str(exc)}) from exc
     tz = str(series.index.tz) if series.index.tz is not None else None
     return SeriesOut(ref=ref, timestamps=[t.isoformat() for t in series.index],
-                     values=[float(v) for v in series.to_numpy()], timezone=tz)
+                     values=[float(v) for v in series.to_numpy()], timezone=tz,
+                     meta=S.series_meta(db, org, ref))
 
 
 # ── items: tariffs, contracts, connection agreements (P2 WP2.4a) ───────────

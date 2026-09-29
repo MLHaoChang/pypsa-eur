@@ -67,6 +67,8 @@ class SeriesMeta(BaseModel):
     # the unit, and what the import noted (incomplete months, …).
     settlement: str | None = None
     unit: str | None = None
+    source_unit: str | None = None
+    label: str | None = None
     notes: list[str] = []
 
 
@@ -205,6 +207,14 @@ def _row_for(db: DBSession, org_id: UUID, ref: PriceSeriesRef) -> LibraryItem:
     if row is None:
         raise LibraryRefNotFound(f"no series {ref.id!r} v{ref.version} in this org")
     return row
+
+
+def series_meta(db: DBSession, org_id: UUID, ref: PriceSeriesRef) -> dict:
+    """The stored meta of the version `ref` names (the zone key `tz` left out)."""
+    row = _row_for(db, org_id, ref)
+    meta = json.loads(row.meta_json or "{}")
+    meta.pop("tz", None)
+    return meta
 
 
 def latest_ref(db: DBSession, org_id: UUID, name: str) -> PriceSeriesRef | None:
