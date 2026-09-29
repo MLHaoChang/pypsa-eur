@@ -19,6 +19,10 @@ Two invariants carry the design:
     profile-awareness block) — the ONE allowed difference is the §6.3
     `_EH_GUIDE_CHAINING` sentence for suggest_eh_setup, which exists in both
     modes because the tool does.
+    The tools fixture was re-recorded once, for the report-tool sentence PR #64
+    adds to the study guidance (`generate_report` / `get_report_status`): a
+    prompt change that is not P25's is re-recorded, with the diff checked to be
+    exactly that change, rather than stripped in the test.
 """
 from __future__ import annotations
 

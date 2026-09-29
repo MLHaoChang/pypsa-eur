@@ -20,9 +20,23 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 
 # Per-file kind. `agent_export` files are produced by chat tools (Phase B);
-# everything else is a user upload. The UI uses this to render a different
-# chip + show a download icon for agent_export entries.
-UploadKind = Literal["user_upload", "agent_export"]
+# `report_template` is a Word file the user uploaded as a report template
+# (increment 2 of the study-report plan: `?kind=report_template` on the
+# upload route, the report viewer's template picker lists these);
+# `report_roundtrip` is an exported report the user edited in Word and
+# uploaded to be merged back (increment 3: `?kind=report_roundtrip`, then
+# `POST …/reports/{id}/roundtrip {file_id}`); everything else is a user
+# upload. The UI uses this to render a different chip + show a download icon
+# for agent_export entries.
+UploadKind = Literal["user_upload", "agent_export", "report_template", "report_roundtrip"]
+# The kinds a client may ASK for on upload; `agent_export` is only ever
+# assigned by the tools that produce one.
+UPLOADABLE_KINDS: frozenset[str] = frozenset({"user_upload", "report_template", "report_roundtrip"})
+ALL_UPLOAD_KINDS: frozenset[str] = frozenset(
+    {"user_upload", "agent_export", "report_template", "report_roundtrip"})
+# The kinds a re-upload of the SAME bytes may promote a plain user upload to
+# (dedup is on bytes; a picker that lists one kind must still see the file).
+PROMOTABLE_KINDS: frozenset[str] = frozenset({"report_template", "report_roundtrip"})
 
 
 class UploadMeta(BaseModel):
