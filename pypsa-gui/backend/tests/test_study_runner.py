@@ -503,3 +503,62 @@ def test_a_size_at_its_bound_is_flagged_by_the_shared_classifier(
     assert "size_at_upper_bound:battery" in rec["details"]["bess_1h"]["caveats"]
     assert rec["details"]["bess_1h"]["sizing"]["battery"]["binding_constraint"] == "at_upper_bound"
     assert rec["details"]["none"]["caveats"] == []
+
+
+# ── S4 re-gate binding conditions (BC-S4-v2-1, BC-S4-v2-2) ────────────────
+# A run registers its base project on the study's behalf, exempt from the
+# resident cap. When the run ends (done, refused after registering, or the
+# worker never starting) that registration must be undone: the exemption
+# lifted AND the context dropped, unless a SESSION has the project open.
+# The worker thread inherits the request's context, which is bound to the
+# base, so "open" cannot be read from the request scope.
+
+def _left_behind(registry_key_for, base):
+    key = registry_key_for(base)
+    return {"exempt": key in PyPSAService._study_owned,
+            "resident": key in PyPSAService._contexts}
+
+
+def _user_contexts():
+    return sum(1 for k in PyPSAService._contexts if k not in PyPSAService._study_owned)
+
+
+def test_a_finished_run_leaves_nothing_exempt_or_loaded(
+        client, api_project, studies_on, fake, registry_key_for):
+    sid = _setup(client, api_project, "rel-done")
+    assert client.post(f"/api/projects/rel-done/studies/{sid}/run", json={}).status_code == 202
+    assert wait_run(client, "rel-done", sid)["status"] == "done"
+    assert PyPSAService._study_owned == set(), sorted(PyPSAService._study_owned)
+    assert _left_behind(registry_key_for, "rel-done") == {"exempt": False, "resident": False}
+    assert _user_contexts() <= PyPSAService.RESIDENT_CAP
+
+
+def test_a_run_refused_when_its_campaign_cannot_start_releases_the_base(
+        client, api_project, studies_on, fake, monkeypatch, registry_key_for):
+    sid = _setup(client, api_project, "rel-camp")
+
+    def refuse(*_a, **_k):
+        raise campaign.CampaignError("no campaign today")
+
+    monkeypatch.setattr(campaign, "start", refuse)
+    r = client.post(f"/api/projects/rel-camp/studies/{sid}/run", json={})
+    assert r.status_code == 422, r.text
+    assert fake.calls == []
+    assert _left_behind(registry_key_for, "rel-camp") == {"exempt": False, "resident": False}
+
+
+def test_a_run_whose_worker_cannot_start_releases_the_base(
+        client, api_project, studies_on, fake, monkeypatch, registry_key_for):
+    sid = _setup(client, api_project, "rel-thread")
+    original = threading.Thread.start
+
+    def start(self):
+        if self.name.startswith("decision-study-"):
+            raise RuntimeError("cannot start a thread")
+        return original(self)
+
+    monkeypatch.setattr(threading.Thread, "start", start)
+    with pytest.raises(RuntimeError):
+        client.post(f"/api/projects/rel-thread/studies/{sid}/run", json={})
+    assert fake.calls == []
+    assert _left_behind(registry_key_for, "rel-thread") == {"exempt": False, "resident": False}

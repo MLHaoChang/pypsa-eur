@@ -406,6 +406,7 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
                             f"decision study {study.name!r}: {len(options)} option(s)",
                             budget)
                 except campaign.CampaignError as exc:
+                    _release_base(key, registered)
                     raise RunRefused(422, "campaign_budget_invalid", str(exc)) from None
             try:
                 _on_ctx(ctx, campaign.check, STUDY_KEY, solves)
@@ -422,6 +423,7 @@ def start_study_run(study_id: str, fidelity: Fidelity | str, *, base_row,
                 ctx.solver_state[STUDY_KEY] = None
                 if own:
                     _on_ctx(ctx, campaign.end, "the worker did not start")
+                _release_base(key, registered)
                 raise
             record["campaign"] = _on_ctx(ctx, campaign.record, STUDY_KEY, solves)
     finally:
@@ -458,12 +460,18 @@ def _release_base(key: str, registered: bool) -> None:
     Undo a base registration this run made: drop the context unless a
     session has it open (then it is the user's, and counts against the cap
     like any other), and lift the cap exemption either way.
+
+    "Open" is read from the sessions' durable pointers only. The request
+    scope is NOT evidence: the worker thread runs in a copy of the request's
+    context, which is bound to the base itself, so `get_active_id()` there
+    always answers "the base" and the base was never dropped (S4 re-gate,
+    BC-S4-v2-1) — it stayed loaded as an extra user context, and the next
+    ordinary project open evicted, and so saved, one user project too many.
     """
     if not registered:
         return
     try:
-        in_use = (key in PyPSAService._session_active_keys()
-                  or PyPSAService.get_active_id() == key)
+        in_use = key in PyPSAService._session_active_keys()
     except Exception:  # noqa: BLE001
         in_use = True
     if not in_use:
