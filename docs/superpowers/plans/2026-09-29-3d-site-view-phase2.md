@@ -1,14 +1,16 @@
-# 3D site view — Phase 2 implementation plan (v1)
+# 3D site view — Phase 2 implementation plan (v2)
 
 > **For agentic workers:** implement task-by-task, test first. Every task states its red tests before its green step; a red test that passes before any code is written is a plan defect and must be reported, not "fixed" by weakening the test. Tests marked **(pin)** are characterisation tests expected to pass immediately; they lock a behaviour the feature depends on. Each work package ends with a review gate and an integration commit; the gate is an agent that did not write the code.
 
 **Goal:** Ship the Phase 2 design (`docs/superpowers/specs/2026-09-29-3d-site-view-phase2-design.md`): a table-driven asset library, merged per-object geometry, five CC0 hero models, sizes as built or optimised, and solved results animated in 3D from the existing timeline.
 
-**Architecture:** Six work packages in dependency order. Pure decisions live in `pypsa-gui/frontend/src/site3d/` modules that do **not** import `three` (the library, the templates, the sizing rules, the result mapping); modules that need `three` (geometry merging, hero instancing, the results layer) are imported **only** by `SiteCanvas.tsx` and listed in `bundleBoundary.test.ts`'s `SITECANVAS_ONLY`. No backend change is needed; every endpoint exists (spec §6.1). No WebGL in any unit test.
+**Architecture:** Seven work packages in dependency order (WP0 is groundwork). Pure decisions live in `pypsa-gui/frontend/src/site3d/` modules that do **not** import `three` (library, templates, sizing, hero fitting, result mapping, easing); modules that need `three` (geometry merging, hero instancing, the results layer) are imported only by `SiteCanvas.tsx` **or by another SiteCanvas-only module**, and are listed in `bundleBoundary.test.ts`'s `SITECANVAS_ONLY`. No backend change; every endpoint exists. No WebGL in any unit test. Both `layout.ts` and `SiteOverlay.tsx` are imported only by the lazy `SiteCanvas` chunk (verified: `App.tsx:18`), so the library does not enter the main chunk.
 
-**Tech stack:** React 19 + TypeScript 5.8 strict + vitest 4 + jsdom (`npx vitest run` from `pypsa-gui/frontend`); three 0.186, @react-three/fiber 9.8, @react-three/drei 10.7; `@gltf-transform/cli` 4.5 **run once, offline, not a dependency** (Task 3.1); backend suite unchanged (`/root/.venv-pypsa-gui/bin/python -m pytest -q -p no:warnings` from `pypsa-gui/backend`).
+**Tech stack:** React 19 + TypeScript 5.8 strict + vitest 4 + jsdom (`npx vitest run` from `pypsa-gui/frontend`; `vitest.setup.ts` patches `Element.prototype`, so **no** `@vitest-environment node` files); three 0.186, @react-three/fiber 9.8, @react-three/drei 10.7.9 (`useGLTF(path, useDraco, useMeshopt, extendLoader)`); `@gltf-transform/cli` 4.5.1 **run once, offline, not a dependency**.
 
-**Base:** `3f30cf6`-descendant on `claude/3d-site-visualization-gatc5z` (Phase 1 closed, Phase 2 spec committed).
+**Base:** the Phase 2 spec commit on `claude/3d-site-visualization-gatc5z`.
+
+**v2 (2026-09-29):** revised after two independent reviews (library/rendering/heroes; results/testability). Every finding and where it landed is in the last section.
 
 ---
 
@@ -16,144 +18,212 @@
 
 | Stage | What | Gate |
 |---|---|---|
-| WP1 | Asset library as data; 17 + 4 types; cylinder parts; legend from the library | review agent → fix → commit |
-| WP2 | One merged geometry per object | review agent → fix → commit |
-| WP3 | Hero models (files, loader, instancing, fallback) | review agent → fix → commit |
-| WP4 | Sizes: as built / optimised | review agent → fix → commit |
-| WP5 | Results data: per-asset map, freshness gate, pure result styling | review agent → fix → commit |
-| WP6 | Results rendering: fill, spin, glow, loading, flow, legend, reduced motion | review agent → fix → commit |
+| WP0 | Groundwork: types, bundle guard, palette data, debug hook | review agent → fix → commit |
+| WP1 | Asset library as data; matching; templates; owner-after-match; rooftop pass | review agent → fix → commit |
+| WP2 | One merged geometry per object; rotor per turbine; render isolation | review agent → fix → commit |
+| WP3 | Hero models (files, manifest, fitting, instancing, fallback) | review agent → fix → commit |
+| WP4 | Sizes: as built / optimised, gated on fresh dispatch | review agent → fix → commit |
+| WP5 | Results data: own status poll, freshness rules, per-asset map, denominators, styling | review agent → fix → commit |
+| WP6 | Results rendering: gauges, spin, glow precedence, flow, readout, legend, reduced motion | review agent → fix → commit |
 | QA | Full suites + build + bundle budget + headless run on a solved network; QA note | note in `docs/superpowers/notes/` |
 
-**Per work package, in order:** red (tests fail for the stated reason) → green (smallest implementation) → refactor → `tsc -b`, the touched vitest files, then the **full** frontend suite (and the full backend suite once, at QA, since no backend file changes) → review gate (an agent that did not write the code reads the diff against the spec and this plan; every finding fixed or answered in the commit message) → browser smoke for the WP's visible change (Playwright on SwiftShader, canvas read through `window.__site3d.snapshot()`) → integration commit and push.
+**Per work package, in order:** red (tests fail for the stated reason) → green (smallest implementation) → refactor → `tsc -b`, the touched vitest files, then the **full** frontend suite → review gate (an agent that did not write the code reads the diff against the spec and this plan; every finding fixed or answered in the commit message) → browser smoke for the WP's visible change (Playwright on SwiftShader, canvas read through `window.__site3d.snapshot()`, **on an otherwise idle machine**) → integration commit and push. The full backend suite runs once, at QA (no backend change).
 
-**Never:** skip or weaken a test; mount WebGL in vitest; import `three` from a main-bundle module; fetch a decoder or model from a CDN; commit a model file without its licence recorded; change a backend route.
+**Never:** skip or weaken a test (a Phase 1 assertion that changes because the spec changed it is listed in Task 1.3 with its new value); mount WebGL in vitest; import `three` from a main-bundle module; fetch a decoder or model from a CDN; commit a model file without its licence recorded; change a backend route.
 
 ### Spec decision coverage
 
 | Decision | Task(s) |
 |---|---|
-| E1 library as data | 1.1, 1.2, 1.3 |
-| E2 class + carrier + side matching | 1.2 |
-| E3 the types | 1.2, 1.4 |
-| E4 cylinder + hero shapes | 1.1, 2.1, 3.3 |
-| E5 merged geometry | 2.1, 2.2 |
-| E6 as built / optimised | 4.1, 4.2 |
+| E1 library as data | 1.1, 1.3, 1.5 |
+| E2 rules, far carrier, owner after match | 0.1, 1.2, 1.4 |
+| E3 the types | 1.1, 1.2 |
+| E4 cylinder, axis, heroable | 1.1, 1.3, 2.1 |
+| E5 merged geometry, rotor per turbine | 2.1, 2.2 |
+| E6 as built / optimised, gated on fresh | 4.1, 4.2 |
 | E7 CC0 heroes, no decoder | 3.1, 3.2 |
-| E8 instancing, fallback, no LOD | 3.3, 3.4 |
-| E9 which results | 5.1, 5.2 |
-| E10 how results show | 5.3, 6.1–6.3 |
-| E11 timeline, easing, reduced motion | 6.2, 6.4 |
-| E12 freshness gate | 5.2 |
-| E13 transformer flows | 5.1 |
+| E8 instancing, fit modes, blades, materials, fallback | 3.3, 3.4, 3.5 |
+| E9 which results | 5.3 |
+| E10 how results show | 5.5, 6.2 |
+| E11 timeline, easing, reduced motion | 6.1, 6.5 |
+| E12 freshness | 5.1, 5.2 |
+| E13 transformer flows | 5.3 |
+
+---
+
+## WP0 — Groundwork
+
+### Task 0.1 — API types
+
+**Files:** `api/types.ts`.
+
+**Red:** a type-level test (`api/types.site3d.test.ts`, compiled by `tsc -b`, one runtime assertion so vitest collects it) builds fixtures `{…generator, p_nom_opt: 40}`, `{…storageUnit, p_nom_opt, p_nom_extendable}`, `{…store, e_nom_opt, e_nom_extendable}`, `{…line, s_nom_opt, s_nom_extendable}`, `{…transformer, s_nom_opt, s_nom_extendable}`, `{…link, p_nom_opt, bus2: 'Heat'}` — fails `tsc -b` today on excess properties.
+
+**Green:** optional `p_nom_opt?`, `e_nom_opt?`, `s_nom_opt?`, `*_extendable?` where missing, `bus2?: string` on `Link`. The API already sends them (`network_crud._serialize_component` serialises the whole frame).
+
+### Task 0.2 — Bundle guard for `.tsx` and module chains
+
+**Files:** `site3d/bundleBoundary.test.ts`.
+
+This is a deliberate change to a Phase 1 test, required by the spec (SiteCanvas-only modules may be `.tsx` and may import each other); it is scheduled here so it is not a silent weakening.
+
+**Red (new cases in the same file):** a fixture directory under `site3d/__fixtures__/boundary/` with `a.tsx` (SiteCanvas-only, imports three) imported by `b.ts` (SiteCanvas-only) imported by a fake `SiteCanvas.tsx` → the check accepts it; a main-bundle `c.ts` importing `a.tsx` → rejected. Fails today (the stem strip is `/\.ts$/`, so `.tsx` stems never match and chains are rejected).
+
+**Green:** strip `/\.tsx?$/`; allowed importers = `pages/SiteCanvas.tsx` ∪ `SITECANVAS_ONLY`; the check is a function the real test and the fixture test both call.
+
+### Task 0.3 — Palette data as a module
+
+**Files:** `layout/paletteData.ts` (new: palette ids, labels, sections; each item's PyPSA class and default carrier/ports), `layout/Sidebar.tsx` and `layout/CreationForm.tsx` import from it (no behaviour change).
+
+**Red (`layout/paletteData.test.ts`):** the exported ids equal the ids `Sidebar` renders (render the palette, read the `title`s); for each item, the class and default carrier equal what the creation form submits (render `CreationForm` for the item with a mocked create call; assert the posted class and carrier). **(pin)** the Sidebar and CreationForm suites stay green.
+
+### Task 0.4 — Debug hook fields
+
+**Files:** `pages/SiteCanvas.tsx` (`Site3dDebugHook`).
+
+**Green (browser-verified, no unit test — WebGL):** `objects[]` gains `kind`; `project(key)` is computed from the object's **data** (centre of its first part through the object's origin and heading, lifted by the terrain), not from the first mesh's bounding box (which a merged body or a hero would move into the sky); `calls` = `gl.info.render.calls`; `renders` = a counter per component name (SiteCanvas, each object mesh, the results driver) for WP2/WP6's isolation checks. The Phase 1 e2e script is re-run against it (steps 3–7) to prove `project()` still clicks the right object.
+
+**WP0 gate focus:** no behaviour change; the guard change is exactly the spec's rule.
 
 ---
 
 ## WP1 — Asset library as data
 
-### Task 1.1 — Part shapes and the library types
+### Task 1.1 — Types, library, validation
 
-**Files:** `site3d/assetLibrary.ts` (new, no three), `site3d/layout.ts` (types only in this task).
+**Files:** `site3d/assetLibrary.ts` (new, no three), `site3d/layout.ts` (types).
 
 **Red (`site3d/assetLibrary.test.ts`):**
-- `validateLibrary(DEFAULT_LIBRARY)` passes and the table is frozen (deep: entries and their numbers).
-- Every class in `PLACEABLE_CLASSES` has exactly one fallback entry (no `carrier`), and it is the **last** entry of its class in table order.
-- Ids are unique; every `geometry.template` is one of the known templates; every `hero` ref (none yet in WP1) is known.
-- Rejects, naming the field: a zero unit rating, a NaN size, a duplicate id, a class with no fallback, an unknown template.
-- `Part` accepts `shape: 'box' | 'cylinder'` (default box); a cylinder part's `size` is `[diameter, length, diameter]` with its axis on the part's local up (documented in the type and asserted by a template test in 1.3).
+- `validateLibrary(DEFAULT_LIBRARY)` passes; the table is deep-frozen (entries, numbers, rule arrays).
+- Every class in `PLACEABLE_CLASSES` has **exactly one** fallback rule (no `carrier`), owned by the last type matching that class — including **Bus** (switchyard) and **Load** (data hall).
+- Ids unique; templates known; the ids of unchanged types equal Phase 1's (`switchyard`, `transformer`, `feeder`, `bess`, `pv`, `wind`, `electrolyser`, `h2store`, `load`).
+- Rejects, naming the field: a zero unit rating, NaN, a duplicate id, a class with no fallback, two fallbacks for a class, an unknown template, a regex with the `g` or `y` flag (a frozen global regex throws on `.test`).
+- `Part` accepts `shape: 'box' | 'cylinder'`, `axis: 'up' | 'east' | 'north'` (cylinders), `heroable?: boolean`, `anchor?: 'rotor' | 'fill' | 'emissive' | 'flow'`, `turbine?: number` (rotor parts: which turbine). `size` keeps (east, north, height).
 
-**Green:** the `AssetType`, `SizeRule`, `Template`, `Match` types of spec §4.1; `validateLibrary`; `DEFAULT_LIBRARY` with the entries of spec §4.2 (numbers moved from `assetRules.ts` into the entries that use them). `assetRules.ts` is deleted in Task 1.3 once nothing imports it.
+**Green:** the types of spec §4.1; `validateLibrary`; `DEFAULT_LIBRARY` with the entries of spec §4.2, Phase 1's 13 numbers moved into the entries that use them, carrier regexes anchored (`/^h2$/i` — "H2 pipeline", "H2 fuel cell", "H2 electrolysis" exist and must not collide).
 
 ### Task 1.2 — Matching
 
-**Red (`site3d/assetLibrary.test.ts`, `describe('matchType')`):**
-- A table-driven test **over the palette**: for each palette item id in `layout/Sidebar.tsx`'s `PALETTE_SECTIONS`, build the component its creation form would create (class and default carrier from `layout/CreationForm.tsx`'s `FIELD_MAP`/`COMPONENT_TYPE`; list them in the test as literal fixtures with a comment naming the source line, so a palette change breaks this test visibly) and assert the type id of spec §4.2: bus → switchyard (AC) / manifold (H2, heat); line → feeder; transformer → transformer; thermal (gas) → engine genset; renewable (wind) → wind; electrolyzer (Link H2, bus0 AC, bus1 H2) → electrolyser; fuel_cell (Link H2, bus0 H2, bus1 AC) → fuel cell; power_to_heat (each of the three carriers) → heat pump / e-boiler; chp (Link gas with bus2 heat) → CHP; battery → BESS; psh → pumped hydro; caes → compressed air; flywheel → flywheel; hydrogen (StorageUnit H2) → H₂ storage; thermal_storage (Store heat) → thermal store; load_elec → data hall; load_h2 / load_heat → offtake.
-- Carrier cases beyond the palette: solar → PV ground; solar-rooftop → PV rooftop; CCGT, OCGT → gas turbine; onwind, offwind-ac → wind; diesel, biomass, coal → engine genset **with the carrier in its label** ("coal — generic plant block"); Link `datacenter` → data hall; Link `DC` → feeder; Store `battery` → BESS; Store `H2` → H₂ storage.
-- Side rule: an `H2` Link seen from its **bus1** member is not an electrolyser object (it is drawn once, from bus0 — the Phase 1 invariant); a fuel cell is drawn from its electrical side (bus1).
-- `matchType` is pure and takes `busCarrier: (name) => string | undefined` so the side rule can read the far bus's carrier.
-- **(pin)** the component name never affects the match (same component, two names, same type).
+**Files:** `site3d/assetLibrary.ts`, `site3d/layout.ts` (`SiteInput.busCarrier`), `pages/SiteCanvas.tsx` (both `buildSiteLayout` call sites pass `busCarrier` built from **all** network buses).
 
-**Green:** `matchType(cls, component, memberBus, busCarrier, library)`; first match in table order.
+**Red (`describe('matchType')`):**
+- **Palette-driven** (from `paletteData.ts`, so a palette change is seen): each item's default component maps to its spec type: bus → switchyard (AC) / manifold (H2, heat, gas); line → feeder; transformer → transformer; thermal (gas) → engine genset; renewable (wind) → wind; electrolyzer → electrolyser; fuel_cell → fuel cell; power_to_heat (each carrier) → heat pump; chp → CHP; battery → bess; psh → pumped hydro; caes → compressed air; flywheel → flywheel; hydrogen (StorageUnit H2) → h2store; thermal_storage → thermal store; load_elec → load (data hall); load_h2 / load_heat → offtake.
+- Carriers beyond the palette: solar → pv; solar-rooftop → PV rooftop; CCGT, OCGT → gas turbine; onwind, offwind-ac → wind; diesel, biomass, coal → engine genset whose label names the carrier; Link `datacenter` → load; Link `DC` → feeder; Store `battery` → bess; Store `H2` → h2store; Link `H2 pipeline` → feeder (anchored regex).
+- `farCarrier`: an `H2` Link AC→H2 is an electrolyser; H2→AC is a fuel cell.
+- Unknown bus carrier counts as AC.
+- **(pin)** the component name never affects the match.
 
-### Task 1.3 — Templates and the packer
+### Task 1.3 — Templates and the packer; the Phase 1 assertions that change
 
-**Files:** `site3d/templates.ts` (new, no three), `site3d/layout.ts` (becomes packer + interpreter), `site3d/assetRules.ts` (deleted).
+**Files:** `site3d/templates.ts` (new, no three), `site3d/layout.ts` (packer + interpreter), `site3d/assetRules.ts` + `assetRules.test.ts` (deleted; their cases move to `assetLibrary.test.ts`).
+
+**Phase 1 `layout.test.ts` assertions that change, and their new values** (every other assertion stays as written):
+
+| Line | Today | Becomes | Why |
+|---|---|---|---|
+| 56–64 | `ccgt: 'thermal'` | `ccgt: 'gasTurbine'` | spec §4.2 gives CCGT its own type |
+| 56–64 | `kind` values | unchanged strings for pv, wind, h2store, electrolyser, feeder | ids kept (Task 1.1) |
+| 219–228 | rules object | a copied `bess` entry with half the MWh per container | E1 |
+| 230–232 | `validateRules` throws | `validateLibrary` throws | E1 |
+
+**Red (`site3d/templates.test.ts`):**
+- `tankArray` emits cylinder parts, count `ceil(MWh / unit)`, vertical tanks `[d, d, h]` standing on the ground (centre height = h/2), horizontal bullets `[d, L, d]` with `axis: 'north'`; the packer's row pitch uses `size[0]`/`size[1]` (test on the resulting footprint).
+- `turbineArray`: tower is a cylinder, each turbine's rotor parts carry `anchor: 'rotor'` and a distinct `turbine` index with the hub position recorded; **capped** at 120 turbines drawn (wind was uncapped in Phase 1), summary says "each = N".
+- `unitGrid` emits the per-row extra part; `hall` area ≥ its minimum; `reservoir` land = its basin; every template declares its anchors (fill, emissive, flow) per spec §4.3, asserted per template; heroable units flagged.
+- **Source guards** (comments stripped first): `layout.ts` has no regex literal containing a carrier word, no hex colour, and no top-level `let` (Phase 1's module-global rules `R` is gone).
+
+**Green:** each Phase 1 `build*` becomes a template; `buildBus` asks `matchType`, calls the template, packs by the entry's zone; the switchyard's bay count and the overlay's asset count read `flags.bay` / `flags.infrastructure` instead of naming kinds.
+
+### Task 1.4 — Owner after match, and three-port Links
+
+**Red (`layout.test.ts`, new cases):**
+- Electrolyser with both its AC bus and its H2 bus as site members → one object, drawn from the AC bus; fuel cell likewise from its AC bus (bus1); the Phase 1 invariant "a two-terminal component is drawn once" (lines 165–172) stays green.
+- An electrolyser whose H2 bus is **not** a member → still drawn, from the AC bus.
+- CHP (gas bus0, AC bus1, heat bus2) with only the heat bus as a member → drawn once, from the heat bus; with all three members → from bus0 (its rule's port).
+- `bus2: ''` counts as absent.
+- `SiteObject` gains `bus` (owner) and `far` (the other electrical end for branches), asserted for a line owned through bus1.
+
+### Task 1.5 — Rooftop pass, legend, colours
 
 **Red:**
-- Phase 1's `site3d/layout.test.ts` stays green **unchanged in meaning**: exact BESS part count (10 × 4 MWh → 10 containers + 2 PCS skids = 12), the "each box = N" cap, PV land ≈ 2.5 ha/MWp, wind 3 × 5 MW = 15 parts with 9 `rotN`, transformer and feeder summaries, `{type, name}` on every object, no overlap within a bus, fits the half-size, determinism, multi-bus yards, a two-terminal component drawn once, placements and orphans, yard placement moves its unplaced assets, `objectKey`. Its "rules drive geometry" test is rewritten against a library entry (halving `mwhPerContainer` in a copied BESS entry doubles the containers and leaves PV unchanged), and the invalid-rules test against `validateLibrary`.
-- New template tests (`site3d/templates.test.ts`): `tankArray` emits cylinder parts whose count is `ceil(MWh / unit)`; `turbineArray` marks the rotor parts (`anchor: 'rotor'`) and the tower is a cylinder; `unitGrid` emits the per-row extra part; `hall` returns an area ≥ its minimum; `reservoir` land = its basin; `pvRoof` land = 0 and it sits on the largest hall's roof when one exists in the same site (input: the hall footprints), else on a 4 m canopy.
-- Every template declares its animation anchors (spec §4.3): fill (tanks, containers), rotor (wind), emissive (halls, skids, gensets), flow (bays, transformers) — asserted per template.
-- `buildSiteLayout(input)` takes `library` as an input field and holds **no module-level mutable state** (a test runs two layouts with different libraries interleaved and gets both right).
-- **Guard:** `layout.ts` source contains no carrier regex (`/\/[^/]*(solar|wind|electroly|h2|batter)/i` does not match its source) and no hex colour.
+- Rooftop PV: with a data hall on another member bus, the PV object's origin equals the hall's **final** origin (after its placement is applied), moves with the hall's placement, and is exempt from the no-overlap check (the test states the exemption); without a hall it stands in the south zone on a canopy; land take 0 (`fit.ts` land sum unchanged otherwise — `fit.test.ts` pinned).
+- `legendFor(objects, library)`: one entry per type present, library order, label and colour from the entry; the Generator fallback's label names the carrier.
 
-**Green:** move each `build*` into a template; `buildBus` asks `matchType`, calls the template, packs by the entry's zone.
+**Green:** `KIND_COLOR`/`KIND_LABEL` removed; SiteCanvas renders cylinders (16 segments) — per part until WP2.
 
-### Task 1.4 — Legend, labels and colours from the library; cylinders drawn
-
-**Files:** `pages/SiteCanvas.tsx`, `site3d/layout.ts`.
-
-**Red:** `KIND_COLOR` / `KIND_LABEL` are gone; the legend's entries come from the types present (`legendFor(objects, library)` in `assetLibrary.ts`, tested: order = library order, one entry per type present, label and colour from the entry). `SiteObject.kind` becomes the type id (string); `fit.ts` and the placement code do not read it (pin: `fit.test.ts` unchanged).
-
-**Green:** SiteCanvas renders `shape: 'cylinder'` parts with `cylinderGeometry` (radial segments 16) until WP2 replaces per-part meshes.
-
-**WP1 browser smoke:** the campus fixture plus one of each palette item added on the 33 kV bus (a script that POSTs them through the network API) → every object's `window.__site3d.objects[].kind` equals the spec §4.2 type; `snapshot()` shows tanks as cylinders. **Gate focus:** no palette item falls to a wrong type; the Phase 1 invariants still hold; no three import in the library modules.
+**WP1 browser smoke:** a fixture script creates, via the network API, one component per palette item on the campus, **adding an H2 bus and a heat bus with coordinates and making them site members** (the creation form filters buses by carrier; unplaced buses are dropped). Every object's `window.__site3d.objects[].kind` equals the spec type; `snapshot()` shows cylinders. **Gate focus:** no palette item mis-typed; owner-after-match; Phase 1 invariants; no three in the library modules.
 
 ---
 
-## WP2 — One merged geometry per object
+## WP2 — One merged geometry per object; render isolation
 
 ### Task 2.1 — Merge
 
 **Files:** `site3d/objectGeometry.ts` (new, **three**, SiteCanvas-only).
 
-**Red (`site3d/objectGeometry.test.ts`):** `objectGeometry(parts)` returns one `BufferGeometry` whose vertex count = Σ(box 24 | cylinder 16-segment count) over parts, with a `color` attribute holding each part's colour (part override else object colour), positions transformed by each part's position/rotations (a rotated part's bounding box matches the rotated box — one test per rotation field), and **groups** recording each anchor's vertex range (`anchors: {fill?: [start, count], rotor?: …, emissive?: …}`) so WP6 can drive them. A 120-part object merges in < 30 ms in jsdom (budget, not a benchmark).
+**Red (`site3d/objectGeometry.test.ts`):**
+- `objectGeometry(parts)` merges non-rotor parts into one **indexed** geometry: vertex count = 24 per box + 100 per 16-segment cylinder (measured, three 0.186), `color` attribute per part (override else object colour), positions transformed by each part's position, rotations and cylinder axis (bounding box of a rotated part = the rotated box, one test per rotation field and per axis).
+- Rotor parts are returned separately, **one geometry per turbine**, in hub-local coordinates with the hub position as the group origin (3 turbines → 3 distinct pivots).
+- An empty part list (all parts heroed, WP3) returns `null`, not a `mergeGeometries([])` error.
+- 120 parts merge well within a frame (measured ~1.3 ms; the test asserts < 50 ms).
 
-**Green:** `BoxGeometry`/`CylinderGeometry` per part, `applyMatrix4`, `mergeGeometries` from `three/examples/jsm/utils/BufferGeometryUtils.js`, vertex colours.
-
-### Task 2.2 — Render one mesh per object
+### Task 2.2 — One mesh per object, rotors per turbine, render isolation
 
 **Files:** `pages/SiteCanvas.tsx`.
 
-**Red:** none new in vitest (WebGL); `bundleBoundary.test.ts` lists `objectGeometry.ts` in `SITECANVAS_ONLY` and passes.
+**Green:**
+- `SiteObjectMesh` renders the merged body (`meshStandardMaterial vertexColors`) plus one `<group position={hub}>` + rotor mesh per turbine; geometry memoised on the part list, disposed on change.
+- Selection: with vertex colours, `color '#fff'` no longer whitens the body; selection/hover/outside use **emissive** only, through `emissiveFor(selected, outside, result?)` (pure, in `site3d/resultStyle.ts`; precedence selected > outside > result).
+- Render isolation (**Task 6.0 of the v1 review, moved here**): SiteCanvas subscribes with selectors (no bare `useUIStore()`), `SiteObjectMesh` is `React.memo` with stable callbacks.
 
-**Green:** `SiteObjectMesh` renders `<mesh geometry={objectGeometry(obj.parts)}>` with `meshStandardMaterial vertexColors`; selection/hover/outside tint through the material's `emissive` as today; the geometry is memoised on the object's part list and disposed on change. The rotor parts stay a **separate** child mesh (the merged body excludes them) so WP6 can rotate them.
+**Red:** `resultStyle.test.ts` for `emissiveFor` precedence; `bundleBoundary.test.ts` lists `objectGeometry.ts`.
 
-**WP2 browser smoke:** the debug hook exposes `gl.info.render.calls`; with the campus fixture, calls drop from the Phase 1 count (record both) to ≤ objects + context + 10; click-select, gizmo drag and the outside tint still work (reuse the Phase 1 e2e steps 4 and 7). **Gate focus:** selection and pivot semantics unchanged; geometry disposal; the rotor split.
+**WP2 browser smoke:** at a fixed camera with nothing selected, record `calls` before (Phase 1) and after: expect roughly **2 × (object meshes + rotor meshes) + context + ground** (the shadow pass counts in `info.render.calls`), and a ratio ≤ ⅓ of Phase 1's; click-select, gizmo drag and the outside tint still work (Phase 1 e2e steps 4 and 7); stepping `resultsSnapshotIdx` 10 times leaves the `renders` counters of SiteCanvas and every object mesh unchanged. **Gate focus:** selection and pivot semantics; disposal; render isolation.
 
 ---
 
 ## WP3 — Hero models
 
-### Task 3.1 — Files and provenance
+### Task 3.1 — Files, provenance, manifest
 
-**Files:** `frontend/public/site3d/models/{windmill,shipping-container-a,solar-panel-landscape-group,detail-tank,building-s}.glb` + the shared texture, `frontend/public/site3d/models/README.md`, `frontend/public/site3d/models/LICENSE-Kenney.txt` (verbatim).
+**Files:** `frontend/public/site3d/models/{windmill,shipping-container-a,solar-panel-landscape-group,detail-tank,building-s}.glb`, `models/README.md` (source URL, version, licence, exact command), `models/LICENSE-Kenney.txt` (verbatim), `site3d/heroes.ts` (manifest, no three), `site3d/glbJson.ts` (pure: read a GLB's JSON chunk — header 12 bytes, chunk length + type, then JSON).
 
-**Steps:** download Kenney *City Kit Industrial 2.0*; run `npx -y @gltf-transform/cli@4.5.1 optimize <in> <out> --compress false --texture-compress webp --join-named false --flatten false` per file (the exact command recorded in the README); keep PNG for the texture if WebP decoding cannot be confirmed in Chromium (it can) **and** note the pywebview/WKWebView check as a QA item.
+**Steps:** `npx -y @gltf-transform/cli@4.5.1 optimize <in> <out> --compress false --texture-compress webp --join-named false --flatten false`, recorded in the README. Each GLB then embeds its own 2.6 kB WebP (`EXT_texture_webp`, required); WebP is supported by Chromium and by WKWebView on macOS 14 (the app's minimum, `pypsa-gui.spec`).
 
-**Red (`site3d/heroes.test.ts`, node fs):** each file in the manifest exists, is ≤ 64 kB, starts with the `glTF` magic; the README names the source URL, licence and command; the licence file exists; total ≤ 200 kB raw. `windmill.glb` contains a node named `blades` (parsed with `GLTFLoader.parse` in node — three's loader parses a GLB `ArrayBuffer` without a DOM; if it needs `ImageLoader`, the test stubs texture loading) whose parent chain has no scale ≠ 1 (the meshopt pitfall).
+**Red (`site3d/heroes.test.ts`, node `fs` + `glbJson`, no GLTFLoader — it cannot parse in jsdom):**
+- Each manifest file exists, starts with the `glTF` magic, is ≤ 64 kB; total ≤ 200 kB raw; README and licence present and naming source and command.
+- `windmill.glb` has a node `blades`; its parent chain has scale 1 (the meshopt pitfall); the manifest's hub pivot equals the node translation (1.676 units) and its rotor axis equals the node's local X.
+- For each hero, the manifest's recorded node matrix and native bounds equal what `glbJson` reads (container root scale 0.27 and long axis Z; tank root mirrored `[-1, 1, 1]` and long axis X), so a re-processed file that changes them fails here.
+- URLs are relative to `import.meta.env.BASE_URL`, never absolute or `http`.
 
-### Task 3.2 — Manifest and offline loading
+### Task 3.2 — Offline loading and the no-CDN guard
 
-**Files:** `site3d/heroes.ts` (new, no three: the manifest `{id, url, units: 'm', nativeSize: [w,h,d], anchors}` and `heroFor(typeId)`), `site3d/heroLoader.tsx` (new, three/drei, SiteCanvas-only).
+**Files:** `site3d/heroLoader.tsx` (new, three/drei, SiteCanvas-only), `site3d/noCdn.test.ts`.
 
-**Red:**
-- `heroes.test.ts`: every library entry's `hero` ref is in the manifest; URLs are relative to the app base (`import.meta.env.BASE_URL`), never absolute or `http`.
-- **Guard (`site3d/noCdn.test.ts`):** no source file under `src/` contains `gstatic.com`, `draco/versioned`, `unpkg.com`, `jsdelivr` (outside comments naming the pitfall), and every `useGLTF(` call passes `false` as its second argument (a regex over the source).
+**Red:** the guard fails on a fixture string containing `gstatic.com` / `draco/versioned` / `jsdelivr` / `unpkg` / `.wasm`, and on a `useGLTF(` or `useGLTF.preload(` call whose second argument is not `false` (the fixture proves it red; the real source passes). **Green:** `useHero(id)` = `useGLTF(url, false, false)`; `useGLTF.preload(url, false, false)` on site open.
 
-**Green:** `useHero(id)` = `useGLTF(url, false, false)`; preload on site open.
+### Task 3.3 — Fitting (pure)
 
-### Task 3.3 — Instancing from template units
+**Files:** `site3d/heroes.ts`.
 
-**Files:** `site3d/heroes.ts` (pure: `heroInstances(obj, hero) → Matrix-like {pos, rot, scale}[]` — no three), `site3d/heroLoader.tsx`.
+**Red:** `heroInstances(obj, hero)` returns per-unit transforms **whose world-space boxes** (computed in the test from native bounds × baked node matrix × base rotation × fit) equal the parametric units they replace, within 5 %:
+- container, **long-axis stretch**: a 20 ft unit (east-west in the layout) → box 6.1 × 2.44 × 2.9 m, not mirrored, not 3.7× oversized;
+- turbine, **uniform** scale so the **hub** (1.676 units) lands at the hub height; rotor facing south like the parametric turbine; one blades transform per turbine = instance × blades node × spin;
+- tank, **uniform** scale to the tank length, un-mirrored, long axis north;
+- PV table group and hall, **uniform scale + tiling**: tables tiled along each row (the model is already tilted — the part's `rotX` is not applied twice); a hall tiled to its footprint, height kept plausible (no 14× vertical stretch).
+- Only `heroable` units are instanced; PCS skids, stacks and BoP stay parametric.
 
-**Red (`heroes.test.ts`):** for a 10-container BESS the instance list has 10 entries at the container part centres, scaled so the hero's native size maps onto `container20ft` (per axis), heading applied; a 3-turbine wind object yields 3 towers at the turbine positions scaled to hub height; PV yields one instance per table (≤ the part cap); an H₂ tank array one per tank; a hall one instance scaled to the hall footprint. Units a template marks `heroable: false` (PCS skids, stacks, BoP) are not instanced and stay parametric.
+### Task 3.4 — Instanced rendering and per-object materials
 
-**Green:** `HeroInstances` renders `<instancedMesh>` per mesh of the hero scene (a GLB may hold several meshes/materials), matrices from `heroInstances`; the object's parametric parts that are heroable are **omitted** from the merged geometry while the hero is shown.
+**Green:** `HeroInstances` renders one `<instancedMesh>` per mesh of the hero (baked node matrices), keyed on the instance count (fixed at construction), bounding sphere/box recomputed after matrix updates; the turbine's blades are a second instanced mesh with a pivot per turbine; materials **cloned per object** (tint via `setColorAt` or the clone's colour; selection/outside via the clone's emissive), clones disposed with the object, **cached hero geometry never disposed** by an object. The object's heroable parts are omitted from its merged body while the hero shows.
 
-### Task 3.4 — Fallback and failure
+### Task 3.5 — Fallback and failure
 
-**Red:** the parametric form is what renders while a hero is loading (Suspense fallback) and after a load error (an `ErrorBoundary` whose unit test renders a throwing child and asserts the fallback renders — jsdom, no WebGL, the boundary is plain React); `heroFor` returns `null` for a type without a hero.
+**Files:** `site3d/SceneErrorBoundary.tsx` (new, no three: a class boundary whose `fallback` prop is any React node, so it works inside the r3f tree — the app's DOM `ErrorBoundary` cannot).
 
-**WP3 browser smoke:** snapshot shows the Kenney turbine, containers, tanks, tables and hall on the campus; with the `models/` path blocked (`page.route` abort), the parametric scene renders with no error; the network log shows **zero requests to any host other than the app's** during model load. **Gate focus:** licence and provenance recorded; no CDN; blade node usable; fallback.
+**Red (`SceneErrorBoundary.test.tsx`):** renders `fallback` when a child throws; resets when its `resetKey` changes. **Green:** each hero under `<Suspense fallback={parametric}>` inside `<SceneErrorBoundary fallback={parametric}>`; a failed URL is cleared with `useGLTF.clear` when the site reopens.
+
+**WP3 browser smoke:** snapshot shows the Kenney turbine, containers, tanks, tables and hall at the right scale and orientation; with `**/site3d/models/**` aborted, the parametric scene renders with no page error; **no request** matches `gstatic|draco|jsdelivr|unpkg|\.wasm` and every `.glb` request is same-origin (Esri imagery requests are expected and ignored). **Gate focus:** provenance, fitting, materials not leaking, fallback.
 
 ---
 
@@ -161,89 +231,165 @@
 
 ### Task 4.1 — Sizing rule
 
-**Red (`assetLibrary.test.ts` / `layout.test.ts`):** `sizeOf(component, rule, mode)` returns `p_nom` in `'installed'` mode; in `'optimised'` mode returns `p_nom_opt` **only** when the component is extendable (`p_nom_extendable`, `e_nom_extendable`, `s_nom_extendable`) and `*_nom_opt` is a finite number > 0, else the installed value; StorageUnit MWh = `p_nom(_opt) × max_hours`; the summary says "(optimised)" when the optimised value was used. `buildSiteLayout` takes `sizing` and a BESS with `p_nom 10 → p_nom_opt 40` draws 4× the containers in optimised mode.
+**Red:** `sizeOf(component, rule, mode)`: installed → `*_nom`; optimised → `*_nom_opt` only when extendable and finite > 0 (a myopic heat-pump Link's `-0.0` falls back to installed), else installed; StorageUnit MWh = `p_nom(_opt) × max_hours`; summary says "(optimised)". A BESS `p_nom 10 → p_nom_opt 40` draws 4× the containers in optimised mode.
 
-### Task 4.2 — The switch
+### Task 4.2 — The switch, gated on fresh dispatch
 
-**Files:** `components/SiteOverlay.tsx`, `pages/SiteCanvas.tsx`, `store/uiStore.ts` (`siteSizing: 'installed' | 'optimised'`, per session, default installed).
+**Files:** `site3d/useDispatchFresh.ts` (new: a `useQuery` on `nk(project, 'simulationStatus')`, polling every 3 s while the site view is mounted — the same key the status bar uses; see Task 5.1 for why this owns its own poll), `components/SiteOverlay.tsx` (`dispatchFresh` prop), `store/uiStore.ts` (`siteSizing`), `pages/SiteCanvas.tsx`.
 
-**Red (`SiteOverlay.test.tsx`):** the "Sized: as built / optimised" switch renders **only** when `dispatchFresh` is true; toggling calls `setSiteSizing`; in optimised mode the fit line says "(optimised)". Not a mutation: allowed when read-only (pin).
-
-**WP4 browser smoke:** solve the campus with an extendable BESS; flip the switch; the BESS object's part count changes; fit status updates. **Gate focus:** default unchanged; optimised only when fresh; no write.
+**Red:**
+- `SiteOverlay.test.tsx`: the switch renders only when `dispatchFresh`; toggling calls `setSiteSizing`; "(optimised)" in the fit line in optimised mode; **(pin)** enabled when read-only (not a mutation).
+- `effectiveSizing(siteSizing, dispatchFresh)` = optimised only when both; a test that a stale dispatch draws installed sizes although `siteSizing` is `'optimised'`.
 
 ---
 
 ## WP5 — Results data
 
-### Task 5.1 — Per-asset series
+### Task 5.1 — The 3D view's own status poll
 
-**Files:** `components/CanvasResultsContext.tsx` (export `useChunkedSeries`, no behaviour change), `site3d/useSiteResults.ts` (new, no three), `api/simulation.ts` (a `getTransformerResults` wrapper if absent).
+**Red (`site3d/useDispatchFresh.test.tsx`):** with the simulation store `idle` (a loaded, solved project; or a queue solve), the status is still polled; `dispatch` of `'fresh'`, `'none'`, `'stale'` and `undefined` map to fresh/not; **the status bar shows no toast and does not call `clearResults`** when this hook's polled data arrives while the store is `idle` (render both; spy on `toast` and the store).
 
-**Red (`site3d/useSiteResults.test.tsx`, react-query + mocked `resultsApi`):**
-- For site objects `[Generator:PV, StorageUnit:BESS 1, Store:H2 tank, Load:Hall A, Link:Electrolyser, Line:L1, Transformer:TR1]` and a mocked chunk, the hook returns a `Map<key, AssetState>` for **the current `resultsSnapshotIdx` only**, with MW, share of capacity (denominator `*_nom_opt` else `*_nom`), SoC share for storage, fill share for stores, loading % and direction for branches.
-- Transformers come from the transformer endpoint (the mocked `getTransformerResults` is called; the Lines map is never consulted for a `Transformer:` key — the schematic's bug, pinned as absent here).
-- Only series the site needs are fetched (a site with no Store makes no store calls).
-- Query keys equal the context's (`nk(project,'results',name,source,from)`), so a warm cache from another canvas is reused (assert one fetch across a remount).
-- An object absent from the payload's columns maps to no state (not zero).
+### Task 5.2 — Freshness rules
 
-### Task 5.2 — Freshness gate
+**Files:** `components/CanvasResultsContext.tsx` (export `useChunkedSeries`; add `useChunkedSeriesMeta` returning `{data, dataUpdatedAt, isFetching}` — additive, the context unchanged), `site3d/useSiteResults.ts` (new, no three).
 
-**Red:** the hook returns an **empty** map (and makes no chunk request) when `resultsOverlayEnabled` is false; when `simulationStatus.dispatch !== 'fresh'`; and it drops a populated map on the transition fresh → stale **before** any chunk refetch (test: status query flips, next render is empty with the cached chunk still in the cache).
+**Red (`site3d/useSiteResults.test.tsx`, react-query with an explicit `staleTime`, `vi.mock('../api/simulation')` with a **range-aware** mock: `{from:0,to:0}` returns columns + `range.total`, a chunk returns its `range.from`):**
+- **(pin)** empty map and no chunk request while the Eye is off.
+- Empty map while dispatch is not fresh.
+- **Drop on edit:** a populated map empties as soon as a component list the site reads refetches (simulate: invalidate `nk(p,'generators')`), before the status query answers; **(pin)** a placement write (sites sidecar) keeps the map.
+- **Reject pre-resolve chunks:** seed chunk A, flip status none → fresh with the refetch pending → empty map; when the new chunk lands → filled. On mount with a warm, valid cache and status already fresh → filled from cache (`freshSince` = 0 on mount).
+- Index clamp: an index beyond the horizon uses the last row (the context's rule).
 
-### Task 5.3 — Result styling (pure)
+### Task 5.3 — Per-asset map
 
-**Files:** `site3d/resultStyle.ts` (new, no three).
+**Red (same file):**
+- Inputs: the site objects **and** the component lists SiteCanvas already fetched.
+- For `[Generator:PV, StorageUnit:BESS 1, Store:H2 tank, Load:Hall A, Link:Electrolyser, Line:L1, Transformer:TR1]`, the map for the current snapshot holds MW, share (via the denominator helper, 5.4), SoC/fill share, loading % and direction.
+- Transformers come from `getTransformerResults` (exists, `api/simulation.ts:1071`); the Lines series is never consulted for a `Transformer:` key; **(pin)** the transformer query key does not collide with LoadFlow's.
+- Only series the site needs are fetched (no Store → no store calls).
+- **Cache sharing:** the query keys equal the context's (`qc.getQueryCache().find({queryKey: nk(p,'results','generators','lopf',0)})`); after a remount the map is filled from cache before any mocked promise resolves; the probe is not refetched (`staleTime: Infinity`).
+- An object absent from the columns maps to no state (not zero); a stray `X@2030` column is ignored.
+- **Chunk boundary:** while the next chunk is pending, the last state is held (no flicker to neutral); the next chunk is prefetched near `bounds.to`.
 
-**Red (`resultStyle.test.ts`):** `visualFor(type, state)`: storage → `fill` = SoC, colour band (<20 % red, <80 % amber, else green — the schematic's bands); charging vs discharging in the label; generators → `emissive` = output share, wind → `spin` rpm = rated rpm × output share (0 when output ≤ 0), PV → emissive only; loads → `emissive` = MW / site peak of that load; branches → `color = loadingColor(pct)` (imported from the context — same bands), `flow.dir` from the sign of p0 relative to the object's bus0→bus1, `flow.pct`; the hover label strings ("BESS 1 · discharging 18.2 MW · SoC 64 %", "L1 · 72 % of rating → Campus 33kV"). Nothing colour-only: every coloured state has a number in its label (asserted per branch).
+### Task 5.4 — Denominators
 
-**WP5 gate focus:** cache sharing, freshness, the transformer path; no three import.
+**Files:** `site3d/capacity.ts` (new, pure; the context's `effectiveCapForAsset` and period lookup move here and the context imports them — its behaviour pinned by a characterisation test first).
+
+**Red:** `capOf(c)` = `*_nom_opt` if finite > 0, else `*_nom` if > 0, else `null` (no share); period-effective capacity with a `Solar2@2028` vintage fixture; load share = MW / (profile peak × max scaler) from `networkApi.getLoadProfiles()`, else |p_set|, clamped to [0, 1], with a chunk whose max is below the peak (the chunk max is not used).
+
+### Task 5.5 — Result styling (pure)
+
+**Files:** `site3d/resultStyle.ts` (no three), `components/CanvasResultsContext.tsx` (export `socColor` beside `loadingColor`; the SoC bands inline in `TopologyCanvas.tsx:722–727` move there — pinned first).
+
+**Red (`resultStyle.test.ts`):** `visualFor(type, state, obj)`: storage → gauge share + `socColor` band + "charging"/"discharging"; wind → `spin` = rated rpm (library field on the wind entry) × output share, 0 when ≤ 0; other generators, electrolysers, heat pumps, CHP → emissive = share; Links' label says "MW in"; loads → emissive = load share, label shows MW; branches → `loadingColor(pct)` + `flow.dir = sign(p0) × (obj.bus is bus0 ? 1 : −1)`, label names the destination bus (a line owned through bus1 with p0 > 0 points to the yard); bidirectional DC links and loading > 100 % (ac_pf) handled. Every share's label names its capacity ("SoC 64 % of 160 MWh"); every coloured state carries a number.
+
+**WP5 gate focus:** freshness rules, cache sharing, denominators, no three.
 
 ---
 
 ## WP6 — Results rendering
 
-### Task 6.1 — Anchors driven by refs
+### Task 6.1 — Pure motion
 
-**Files:** `site3d/resultsLayer.tsx` (new, three, SiteCanvas-only), `pages/SiteCanvas.tsx`.
+**Files:** `site3d/motion.ts` (no three).
 
-**Red (`resultsLayer.test.ts`, pure parts only):** `easeTowards(current, target, dtMs, tauMs)` converges and never overshoots; with `reduced = true` it returns the target. `fillPlane(objectBox, share)` returns the level plane's height inside the fill anchor's bounds (0 → bottom, 1 → top).
+**Red:** `easeTowards(current, target, dtMs, tauMs)` converges, never overshoots; `motionFor(reduced)` → no easing and no spin when reduced; `useReducedMotion()` modelled on `hooks/useIsCoarsePointer.ts`: guards a missing `matchMedia`, subscribes to `change` (stubbed `matchMedia` in the test).
 
-**Green:** `ResultsLayer` holds refs to each object's anchors (fill planes, rotor meshes, emissive materials, flow chevrons) and updates them in `useFrame`; the React tree does not re-render per snapshot (the map is read from a ref updated by the hook).
+### Task 6.2 — Driver and layer
 
-### Task 6.2 — Wind, fill, glow, loading, flow
+**Files:** `site3d/resultsLayer.tsx` (three, SiteCanvas-only), `pages/SiteCanvas.tsx`.
 
-**Green:** rotors rotate about the hub axis at `spin`; fill planes (translucent, the band colour) rise inside tanks and a bar along container rows; emissive intensity on halls/skids/gensets; feeders and transformers tinted with the loading colour and carrying chevrons along the flow anchor, pointing downstream, spaced by loading.
+**Green:** `<ResultsDriver>` (a leaf inside the Canvas; r3f bridges the QueryClient context) calls `useSiteResults` and writes the map into a ref — it is the only component that renders per snapshot; `ResultsLayer` reads the ref in `useFrame` and updates: rotor groups / blade instance matrices (spin about each hub), **exterior fill gauges** (own material, beside tank arrays and container rows), emissive via `emissiveFor` on each object's own material (hero clones included), branch tint + chevrons along the flow anchor from `bus` towards `far`.
 
-### Task 6.3 — Labels and legend
+### Task 6.3 — Readout, legend, labels
 
-**Red (`SiteOverlay.test.tsx` / a `ResultsLegend` test):** the legend shows the loading bands and SoC bands **only** when results are shown; the hover label (Phase 1's DOM label) appends the result line from `visualFor`.
+**Files:** `components/SiteLegend.tsx`, `components/SiteResultsReadout.tsx` (new, no three), `pages/SiteCanvas.tsx` (label line updated imperatively like `LabelTracker`).
 
-### Task 6.4 — Reduced motion and the timeline
+**Red:** the legend shows loading and SoC bands **with their thresholds as numbers** only while results show; the readout lists each site object with its current value (timestamp heading), only while results show; the hover label appends `visualFor(…).label`.
 
-**Red:** with `matchMedia('(prefers-reduced-motion: reduce)')` true, `useReducedMotion()` returns true and the layer is created with `reduced`; **(pin)** the 3D view reads `resultsSnapshotIdx` and never writes it (no second timeline).
+### Task 6.4 — Timeline accessibility (in scope: it is the 3D view's only time control)
 
-**WP6 browser smoke:** solve `campus-year`; Eye on; step the picker by 12 h and by one day; `window.__site3d.visual(key)` (new debug field) reports the fill, spin and loading at each step and they change; `snapshot()` at two steps differs; reduced motion (`page.emulateMedia({reducedMotion: 'reduce'})`) → spin 0, instant fill. **Gate focus:** no per-tick React re-render (React profiler count or a render counter in the debug hook stays flat while playing); easing; colour + number everywhere.
+**Files:** `components/SnapshotPicker.tsx`.
+
+**Red (`SnapshotPicker.test.tsx`):** the slider has an `aria-label` and an `aria-valuetext` equal to the timestamp. **(pin)** the 3D view reads `resultsSnapshotIdx` and never writes it.
+
+### Task 6.5 — Reduced motion wired
+
+**Green:** the layer reads `useReducedMotion()`; reduced → instant targets, rotors still (speed shown in the label/readout).
+
+**WP6 browser smoke:** solve `campus-year` (recipe in QA); Eye on; step the picker (`title="Next snapshot"` × 12, then set the range input) — the slider is enabled only with the Eye on; `window.__site3d.visual(key)` (new debug field) reports gauge, spin and loading, which change between steps; `snapshot()` differs; `renders` of SiteCanvas and object meshes flat while playing, the driver's +1 per snapshot, 0 per frame; `page.emulateMedia({reducedMotion: 'reduce'})` → spin 0, instant gauges. **Gate focus:** isolation, anchors, precedence, a11y.
 
 ---
 
 ## QA — end to end
 
-1. Frontend: `tsc -b`, full `vitest`, `npm run build`; `SiteCanvas` chunk separate; main `spa` chunk growth ≤ 5 kB gzipped against the Phase 1 close (825.74 kB); model files present in `dist/site3d/models/`.
-2. Backend: full `pytest` once (no backend change expected; the pre-existing packaging-spec failure is the only allowed failure).
-3. Headless run on an **idle** machine (Phase 1 lesson), auth mode: open the campus site → every palette type present renders as its type → heroes visible, then blocked → parametric fallback, no page error → as built / optimised flip on a solved network → Eye on, play the timeline for 48 snapshots → fills, spin, loading change; hover label shows values → edit a component (results go stale) → the 3D results disappear immediately → reduced motion run.
-4. Packaging: `dist/site3d/models/*.glb` served by the backend's static route (`static_gate.is_static_asset` covers any path with an extension; a backend smoke GET returns 200) — recorded; the macOS build remains a runbook step (WKWebView WebP check).
-5. `docs/superpowers/notes/<date>-3d-site-view-phase2-qa.md`.
+1. Frontend: `tsc -b`, full `vitest`, `npm run build`; `SiteCanvas` chunk separate; main `spa` chunk growth ≤ 5 kB gzipped against the Phase 1 close (825.74 kB); `dist/site3d/models/*.glb` present.
+2. Backend: full `pytest` once; the pre-existing packaging-spec failure is the only allowed failure.
+3. Headless run, auth mode, **idle machine**:
+   - fixture `campus-year` = the campus network with its time series tiled to 8760 hourly snapshots (the Phase 1 recipe, now a script in the QA note's appendix), plus an extendable BESS;
+   - every palette type present renders as its type; heroes visible; heroes blocked → parametric, no page error;
+   - solve **from the header** (Run LOPF); as built / optimised flip;
+   - Eye on, play 48 snapshots → gauges, spin, loading change; readout and labels show values;
+   - **re-solve** → no frame shows the previous solve's values (spec E12 rule 3);
+   - edit a component → results vanish on the component refetch or within one poll (not "immediately");
+   - reload a solved project, edit → results vanish (the store is `idle`: rule 1);
+   - reduced-motion run.
+4. Packaging: `dist/site3d/models/*.glb` served by the backend static route (a smoke GET returns 200); WebP on macOS 14 recorded as satisfied by the minimum OS; the macOS build remains a runbook step.
+5. `docs/superpowers/notes/<date>-3d-site-view-phase2-qa.md`; a `CONTEXT.md` glossary entry for "site results" and the freshness rule.
 
 ---
 
-## Risks
+## Review findings folded into v2
 
-| Risk | Where it bites | Mitigation in this plan |
+Reviewer L = library/rendering/heroes; reviewer R = results/testability.
+
+| Finding | Severity | Where it landed |
 |---|---|---|
-| The layout refactor silently changes Phase 1 geometry | WP1 | Phase 1 layout tests kept unchanged in meaning; exact counts pinned |
-| Palette defaults drift from the matching table | WP1 | the palette-driven test lists fixtures with source-line comments |
-| `mergeGeometries` attribute mismatch (cylinder has different attributes than box) | WP2 | both built as non-indexed with the same attribute set; test on a mixed object |
-| Kenney model axes/units differ per file | WP3 | `nativeSize` measured per file in the manifest; instance test per hero |
-| GLTFLoader in node needs DOM for textures | WP3 | test stubs texture loading or parses JSON chunk only for the node check |
-| Result series cost at 8760 snapshots × many assets | WP5 | the context's chunking reused; only needed series fetched |
-| Per-tick React re-render stutters | WP6 | refs + `useFrame`; render counter in the debug hook |
+| L1 Phase 1 layout assertions cannot stay unchanged | blocker | Task 1.1 (ids kept), Task 1.3 table of changed assertions |
+| L2 GLTFLoader.parse cannot run in jsdom | blocker | Task 3.1 parses the GLB JSON chunk (`glbJson.ts`) |
+| R1 no reliable stale signal | blocker | Spec E12/§6.3; Tasks 5.1, 5.2; QA 3 |
+| L3 H2 side rule inexpressible; ownerBus; CHP; anchored regex; empty bus2 | major | Spec E2; Tasks 1.1, 1.2, 1.4 |
+| L4 layout gets no bus carriers | major | Task 1.2 (`busCarrier` from all buses, both call sites) |
+| L5 one `match` object; fallbacks; frozen `g` regex | major | Spec §4.1 `match: Match[]`; Task 1.1 |
+| L6 cylinder size order | major | Spec E4; Tasks 1.1, 1.3 |
+| L7 hero node transforms, axes, per-axis distortion | major | Spec §5.1, E8; Task 3.3 world-box tests |
+| L8 / R5 rotors per hub; wind uncapped | major | Spec E5; Tasks 1.3, 2.1, 2.2, 3.3, 6.2 |
+| L9 shadow pass doubles draw calls | major | WP2 smoke criterion |
+| L10 debug `project()` after merging | major | Task 0.4 |
+| L11 / R6 shared hero materials; emissive collisions; invisible fill | major | Spec E8, §6.4; Tasks 2.2, 3.4, 6.2 |
+| L12 `dispatchFresh` source; order; sizing after an edit | major | Spec E6; Task 4.2 |
+| L13 `*_nom_opt`, `bus2` missing from types; -0.0 | major | Task 0.1; Task 4.1 |
+| L14 rooftop PV vs per-bus packer | major | Spec §4.2; Task 1.5 |
+| L15 palette drift undetectable | major | Task 0.3 |
+| L16 / R10 bundle guard `.tsx` and chains | major | Task 0.2 |
+| L17 "zero foreign requests" vs Esri | major | WP3 smoke criterion |
+| R2 previous solve shown after re-solve | major | Spec E12 rule 3; Task 5.2 |
+| R3 "one fetch across remount" unsound | major | Task 5.3 cache assertions |
+| R4 per-tick re-render; store subscription | major | Task 2.2 (isolation), Task 6.2 (driver leaf), WP2/WP6 smoke counters |
+| R7 flow has no bus reference | major | Task 1.4 (`bus`, `far`), Task 5.5 |
+| R8 load peak source | major | Task 5.4 |
+| R9 multi-period denominators | major | Task 5.4 |
+| R11 values hover-only; slider a11y | major | Tasks 6.3, 6.4 |
+| L18 merge vertex counts | minor | Task 2.1 (indexed, 24/100) |
+| L19 no-global test not red | minor | Task 1.3 source guard |
+| L20 guard regex too broad | minor | Task 1.3 (comments stripped, literals only) |
+| L21 noCdn is a pin; preload | minor | Task 3.2 (fixture proves red; preload covered) |
+| L22 no shared texture; task order | minor | Spec §5.1; Task 3.1 merges manifest and files |
+| L23 WebP on macOS | minor | Task 3.1, QA 4 |
+| L24 DOM ErrorBoundary in r3f | minor | Task 3.5 `SceneErrorBoundary` |
+| L25 instanced bounds and count | minor | Task 3.4 |
+| L26 selection whitening with vertex colours | minor | Task 2.2 (emissive only) |
+| L27 smoke cannot put every item on 33 kV | minor | WP1 smoke adds H2/heat buses as members |
+| L28 attribution; bay/asset counts; spec contradictions | minor | Task 3.1 README + overlay credit (Task 3.4 renders "Models: Kenney (CC0)" in the attribution line); Task 1.3 flags; spec §1/§7 fixed |
+| L29 bundle/packaging checked OK | — | recorded in Architecture |
+| R12 denominator edge cases; label names capacity | minor | Task 5.4, 5.5 |
+| R13 link semantics (MW in), DC, >100 % | minor | Task 5.5 |
+| R14 `getTransformerResults` exists; LoadFlow key | minor | Task 5.3 |
+| R15 legend/label/reduced-motion testability | minor | Tasks 6.1, 6.3 (extracted components) |
+| R16 Eye-off test is a pin; fresh→none; index clamp | minor | Task 5.2 |
+| R17 chunk-boundary flicker; 9 endpoints | minor | Task 5.3 (hold + prefetch) |
+| R18 campus-year recipe; stepping; solve from header; re-solve | minor | QA 3; WP6 smoke |
+| R19 stale-toast interplay | minor | Task 5.1 |
+| R20 spec defects; `socColor` | minor | spec revised; Task 5.5 |
+| R21 hook inputs | minor | Task 5.3 |
+| R22 docs | minor | QA 5 |
