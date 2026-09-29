@@ -5,7 +5,7 @@ Scope: the QA stage of `docs/superpowers/plans/2026-09-29-3d-site-view-phase1.md
 
 ## 1. Backend
 
-Full `pytest` on a still tree (commit under test: see §6).
+Full `pytest` on a still tree, at the commit that carries the last code change (`3d5d44e`; later commits touch this note only).
 
 _Pending: the full run on the committed tree is in progress._
 
@@ -27,7 +27,31 @@ The main chunk first measured +5.30 kB. What it gained is map-view and form code
 
 Driver: a single Playwright script (kept outside the repo, in the session scratchpad); captures `e2e-*.png` from the canvas.
 
-_Pending: the clean run follows the backend suite (a first run under that suite's CPU load timed out in the browser)._
+**Result: 19 of 19 steps pass; no page errors, no unexpected console errors.** (The chat-settings probes answer 403 to a non-super-admin in auth mode; that is unrelated to this feature and filtered.)
+
+| # | Step (plan §QA-3) | Result | Evidence |
+|---|---|---|---|
+| 1 | Import the fixture campus, save it as `campus` (user A) | pass | import 200, save 200 |
+| 2 | Draw a boundary around the 33 kV bus (double-click close), name it, create | pass | site on the server with both campus buses, 4 vertices; `e2e-2-polygon.png` |
+| 3 | Open in 3D → site context fetched and drawn | pass | status "5 buildings · 4 lines · terrain", ground mode imagery; `e2e-3-site3d.png` |
+| 3b | Context cached on the server | pass | GET `/sites/{id}/context` 200 |
+| 3c | Refresh context | pass | exactly one POST; the scene keeps its context throughout |
+| 4 | Move the BESS with the gizmo | pass | placement x = 228.0 m on the server; `e2e-4-moved.png` |
+| 4b | Reload → still there | pass | the reloaded view reads the same placement |
+| 5 | Create a scenario | pass | 201 |
+| 5b | The scenario carries the site document | pass | same site id in `campus-s1` |
+| 5c | Move the BESS in the scenario → base unchanged | pass | scenario x = 94.6 m, base still 228.0 m |
+| 6a | Drop a battery from the palette onto the ground → form | pass | bus prefilled with the site's primary bus (110 kV), per D16 |
+| 6b | Choose the 33 kV bus, create | pass | storage unit on `Campus 33kV`, placement written at the drop point; `e2e-6-dropped.png` |
+| 7 | Drag the PV field outside the boundary | pass | red outline, status "land 68.1 ha · plot 11.3 ha · does not fit", "1 outside"; `e2e-7-outside.png` |
+| 8 | User B locks the project | pass | 200 |
+| 8b | As user A: read-only | pass | "Read-only" banner naming B, Arrange disabled with the read-only reason, a gizmo drag writes nothing (**zero PUTs**), document unchanged, no new toast; `e2e-8-locked.png` |
+| 9 | The campus over 8760 h, same site | pass | 8760 snapshots |
+| 9b | Start a real LOPF from the header (Run LOPF) | pass | job queued |
+| 9c | While it solves: read-only | pass | "Read-only — this project is solving in the queue", a gizmo drag writes nothing (zero PUTs); `e2e-9-solving.png` |
+| 9d | Solve finishes → writable again | pass | job completed (optimal), Arrange enabled again |
+
+Two earlier runs failed on the harness, not the app, and are recorded because they shaped the procedure. One ran while the backend suite saturated the CPU; the software WebGL renderer then took 27 s to draw the view and navigations timed out. So the headless run needs an otherwise idle machine. The other queued the solve through the API; the header stops polling an idle queue, so it never saw the job. A user starts a solve from the header, which is what the run now does.
 
 ## 4. Packaging (open runbook step)
 
