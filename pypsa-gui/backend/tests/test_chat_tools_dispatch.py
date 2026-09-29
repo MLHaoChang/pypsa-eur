@@ -249,6 +249,32 @@ def test_update_component_rename_via_attrs_name_other_classes(
     assert "C1" not in df.index
 
 
+@pytest.mark.parametrize("component_class,attr,add_kwargs", [
+    ("GlobalConstraint", "global_constraints",
+     {"type": "primary_energy", "sense": "<=", "carrier_attribute": "co2_emissions"}),
+    ("Generator", "generators", {"bus": "B1"}),
+])
+def test_update_component_rename_onto_an_occupied_name_is_refused(
+    install_network, component_class, attr, add_kwargs,
+):
+    """P2 gate assessor round 2: a rename onto an existing name is a 409 and
+    changes nothing. GlobalConstraint removed the source and re-added it
+    under the target, silently replacing the existing constraint."""
+    from fastapi import HTTPException
+    n = _install_minimal_network(install_network)
+    key = "constant" if component_class == "GlobalConstraint" else "p_nom"
+    n.add(component_class, "C1", **add_kwargs, **{key: 5.0})
+    n.add(component_class, "C2", **add_kwargs, **{key: 7.0})
+
+    for kwargs in ({"attrs": {"name": "C2"}}, {"new_name": "C2"}):
+        with pytest.raises(HTTPException) as exc:
+            chat_tools.update_component(component_class, "C1", **kwargs)
+        assert exc.value.status_code == 409, kwargs
+        df = getattr(n, attr)
+        assert {"C1", "C2"} <= set(df.index)
+        assert float(df.at["C1", key]) == 5.0 and float(df.at["C2", key]) == 7.0
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # (b) update_component({Bus, B1, control:'PV'}) — no coord change ⇒ no recompute
 # ─────────────────────────────────────────────────────────────────────────────

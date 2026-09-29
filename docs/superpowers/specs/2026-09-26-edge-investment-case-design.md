@@ -317,7 +317,10 @@ is modelled yet); the history-predicted tier is P2 WP2.1 / WP2.3.
 Input: dispatch at settlement resolution (resampled from LP resolution with a disclosed
 `resampling` note when coarser), the Tariff, meter history for ratchets. Output: a frame
 `(interval, tariff_item, quantity, rate, amount)` and monthly/annual bills. Rules: tiers are
-applied on cumulative monthly volume; demand charges on the maximum of `measured_on` within the
+applied on cumulative monthly volume (an ANNUAL band per connection, such as the NL energy tax, is carried
+as monthly thresholds of band / 12: exact on the annual total only while every month sits in the same band
+position, and the monthly distribution always differs — a seasonal load or an annual volume near a band
+edge diverges; H2 works the condition out, P2 gate); demand charges on the maximum of `measured_on` within the
 period; ratchets on the lookback maximum; fixed items pro-rated. Every amount is exact and
 traceable to one item. The gap between LP cost and billed cost is reported **per item kind** (`energy`,
 `demand`, `tiers`, `capacity`, `fixed`, `contracts`) and per investment period, on the unweighted
