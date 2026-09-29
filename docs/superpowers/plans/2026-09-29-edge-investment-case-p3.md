@@ -669,6 +669,10 @@ with an unknown net are kept first. R2-3 INFO: a CfD's direction in `contract_pa
 nominal (net is null for both either way); a sleeving party is not named on the unsettled line.
 Tested (40 periods × 60 participants × 3,000-character flags).
 
+**WP3.4 review round 3 (b3f6536): PASS.** R2-1 verified (every probe under 3,500 characters, up to
+500 periods and 3,000-character flags; one remaining period always fits) and R2-2 (unknown nets
+kept). **WP3.4 closed** (the ADR-0002 live chat probe stays owed at the gate).
+
 ---
 
 ## WP3.5 Frontend foundation
@@ -799,6 +803,13 @@ ledger defaults it to the site party), CSV text injection-safe, 300 parties / 3,
 - **Carry-forward closed:** per-asset export parts as line metadata — WP3.6 has no per-asset
   drill-down (the table splits by stream); P4 reopens it if the returns need it.
 
+**WP3.6 review round 2 (c2c007c): PASS.** #1–#5 verified by probes (a stale cache re-seeded from the
+fresh read; one PUT on a double click; 2,714 vitest green incl. the shared `csvCell` change).
+Follow-ups taken with WP3.7a: R1 — a model validation error (`value_flows is not valid (<loc>: …)`)
+is routed by its location root; R2 — a hub member whose Link left the group is listed with a Remove;
+R3 — a failed reload says so. Not taken: #8 (`appendContracts` reads twice, LOW) and the
+contracted-MW `min` (the server refuses 0). **WP3.6 closed.**
+
 ---
 
 ## WP3.7a Library browser
@@ -809,6 +820,23 @@ summary); **URDB import** (file → `import_urdb`, `accept_partial`, `cyclic_yea
 unit; `meter_meta_conflict` 409 shown); "attach as import tariff" with the P2 semantics (an inline tariff
 is never replaced silently: a confirm `Dialog`). **Tests:** each flow with mocked API; refusal and conflict
 states; a11y.
+
+**WP3.7a implementation.**
+- `libraryModel.ts` (pure: `urdbRate` — the rate of an upload: the object, one item of an OpenEI
+  response (several → the user picks; never silently), a REopt scenario's `urdb_response`;
+  `pinnedVersion` — the project's import-tariff ref; `replacesInline` — the P2 rule: an inline
+  tariff with no ref, or one that no longer equals its old ref's payload, is replaced only after a
+  confirm) and `LibraryBrowser.tsx` (the Investment tab's Library section): items per kind with a
+  version picker and the project's pin ("a newer version exists"), the item's summary and JSON;
+  "Attach as the import tariff" (a confirm `Dialog` when a hand-made inline tariff would be replaced;
+  saves `import_tariff_ref` through the solver-config route, which resolves it; results and the
+  config invalidated); the URDB import (rate choice, name, valid_from, cyclic_year; `urdb_refused`
+  lists the refused fields and offers the partial import); series (list; upload of a price series or
+  meter data — the unit required, settlement, timestamp label, time zone; `meter_meta_conflict`
+  explained; the monthly peaks and notes shown).
+- Tests: `libraryModel.test.ts` (3), `LibraryBrowser.test.tsx` (5: pin and versions; attach without
+  asking; confirm and cancel; URDB choice → refusals → partial import; meter unit required and the
+  conflict; `expectAllButtonsNamed`).
 
 ## WP3.7b Tariff builder + bill preview
 

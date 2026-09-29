@@ -158,10 +158,14 @@ export default function ParticipantsDesigner() {
   const reload = async () => {
     setStale(false); setProblems([]); setMessage(null)
     // Fetch the CURRENT state (not the cache) and re-seed from it (review #1).
-    const fresh = await qc.fetchQuery({ queryKey: nk(project, 'value_flows', 'state'),
-                                        queryFn: () => commercialApi.getValueFlows(), staleTime: 0 })
-    await qc.invalidateQueries({ queryKey: nk(project, 'value_flows', 'designer') })
-    setCfg(initialConfig(fresh, c)); setDigest(fresh.digest)
+    try {
+      const fresh = await qc.fetchQuery({ queryKey: nk(project, 'value_flows', 'state'),
+                                          queryFn: () => commercialApi.getValueFlows(), staleTime: 0 })
+      await qc.invalidateQueries({ queryKey: nk(project, 'value_flows', 'designer') })
+      setCfg(initialConfig(fresh, c)); setDigest(fresh.digest)
+    } catch {
+      setMessage({ tone: 'error', text: 'The participants could not be reloaded.' })
+    }
   }
   const save = async (value: ValueFlowConfig) => {
     if (saving) return
@@ -355,6 +359,14 @@ export default function ParticipantsDesigner() {
               <button type="button" className="underline" onClick={() => setCfg(clearHub(cfg))}>
                 Remove hub settings</button></p>
           )}
+          {(cfg.hub_members ?? []).filter(m => !c.group_members.includes(m.link)).map(m => (
+            // A member whose Link left the group (review round 2 R2): shown so it can go.
+            <div key={`gone:${m.link}`} className="flex items-center gap-2 text-warn">
+              <span>Link {m.link} (not in the group) → {m.participant}</span>
+              <button type="button" className="underline" aria-label={`Remove hub member ${m.link}`}
+                      onClick={() => setCfg(removeHubMember(cfg, m.link))}>Remove</button>
+            </div>
+          ))}
           {c.group_members.map(link => {
             const m = (cfg.hub_members ?? []).find(x => x.link === link)
             const setMember = (patch: { participant?: string; contracted_mw?: number | null }) => {

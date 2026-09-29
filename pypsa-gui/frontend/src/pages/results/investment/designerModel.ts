@@ -73,7 +73,13 @@ export type Section = 'participants' | 'assets' | 'payees' | 'hub'
  *  server's own phrasing (`participants.value_flows_problems`), so a party or
  *  contract NAME cannot route it (WP3.6 review #7). */
 export function problemSection(problem: string): Section {
-  const p = problem.trim()
+  // A model validation error names its location: route by its root
+  // (`hub_members.0.contracted_mw: …`, WP3.6 review round 2 R1).
+  const p = problem.trim().replace(/^value_flows is not valid \(/, '')
+  const root = /^([a-z_]+)(\.\d+)?[.:\s]/.exec(p)?.[1]
+  if (root === 'hub_members' || root === 'allocation') return 'hub'
+  if (root === 'tariff_payees') return 'payees'
+  if (root === 'asset_owners') return 'assets'
   if (/^tariff payee|^tariff_payees/i.test(p)) return 'payees'
   if (/^(hub member|hub_members|an allocation key|the contracted_capacity key|fixed_shares|the energy_hub template)/i.test(p)) {
     return 'hub'
