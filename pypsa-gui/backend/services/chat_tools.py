@@ -1314,12 +1314,12 @@ def update_solver_config(partial: dict) -> dict:
     from routers.simulation import update_solver_config as _h
     from models.schemas import SolverConfigSchema
     body = SolverConfigSchema(**partial)
-    # The handler's user-code admin gate needs `db` + `actor` (83d50f049).
+    # The handler's user-code admin gate needs `db` + `user` (83d50f049; renamed from `actor` in 3e9f17d).
     # Called bare they were `Depends` sentinels (merge review N6). With no
     # acting identity bound, pass None: the gate then refuses user code
     # (fail closed) and every other knob works as before.
     if acting_user_id() is None:
-        return _h(body, db=None, actor=None)
+        return _h(body, db=None, user=None)
     return _route(_h, body)
 
 
