@@ -65,26 +65,43 @@ def test_pack_mc_draw_budget_matches_engine_cap():
 
 
 def test_mc_certify_is_implemented_in_the_driver():
+    # Merge 2026-09-28: the stage body is the P11 one in the driver's stage
+    # table; eh_stages supplies the fixed-plan fleet it samples.
     from services.adequacy import eh_stages
 
-    assert callable(eh_stages.run_mc_certify_stage)
-    assert callable(eh_stages.certification_verdict)
+    assert callable(S._STAGE_HANDLERS["mc_certify"])
+    assert callable(eh_stages.freeze_fixed_plan)
+    assert callable(S.certification_verdict)
 
 
+# Merge 2026-09-28: the verdict is the P11 rule on the LOLE 95% CI (spec §4
+# amendment, Q1) — pass / fail / inconclusive, none without a target — not a
+# point comparison. Same decision-2 cases, on the CI.
 @pytest.mark.parametrize(
-    "lole,target,expected",
+    "ci,target,floor,expected",
     [
-        (1.0, 3.0, "certified"),
-        (3.0, 3.0, "certified"),
-        (3.5, 3.0, "failed"),
-        (1.0, None, "no_target"),
-        (None, 3.0, "not_established"),
+        ((0.5, 1.5), 3.0, None, "pass"),
+        ((2.0, 3.0), 3.0, None, "pass"),            # upper bound AT target
+        ((3.2, 3.9), 3.0, None, "fail"),
+        ((2.5, 3.5), 3.0, None, "inconclusive"),    # CI straddles
+        ((0.0, 0.1), 3.0, 5.0, "inconclusive"),     # below the resolution floor
+        ((0.5, 1.5), None, None, None),             # no target
     ],
 )
-def test_certification_verdict_rule(lole, target, expected):
-    from services.adequacy.eh_stages import certification_verdict
+def test_certification_verdict_rule(ci, target, floor, expected):
+    verdict, _note = S.certification_verdict(
+        lole_ci=ci, target_h=target, resolution_floor_h=floor)
+    assert verdict == expected
 
-    assert certification_verdict(mc_lole_h=lole, target_lole_h=target) == expected
+
+def test_no_mc_lole_gives_no_verdict():
+    """Master's (None, 3.0) → not_established case, restored (merge review
+    N3): without an MC LOLE there is no verdict; the section itself is
+    not_established (see the no-occurrence test below)."""
+    for ci in (None, (None, None), (float("nan"), 1.0)):
+        verdict, note = S.certification_verdict(lole_ci=ci, target_h=3.0)
+        assert verdict is None
+        assert "not established" in note
 
 
 @pytest.mark.live_solve
@@ -107,7 +124,9 @@ def test_off_grid_pack_certification_fails_on_lole_even_when_ens_met():
     assert report.mc_lole_h is not None and math.isfinite(report.mc_lole_h)
     assert report.mc_lole_h > 3.0
     sec = report.sections["certification"]
-    assert sec.payload["verdict"] == "failed"
+    assert sec.payload["verdict"] == "fail"          # P11 vocabulary
+    assert "decision 2" in (sec.note or "")
+    assert report.certified is False
     assert sec.payload["metric"] == "mc_lole"
     assert sec.payload["target_lole_h"] == 3.0
     assert sec.payload["mc_lole_h"] == report.mc_lole_h
@@ -132,7 +151,8 @@ def test_weak_flexible_default_pipeline_certifies_with_loose_target():
     store: dict = {}
     report = _run(n, pack, stages=None, store=store)
     assert report.completeness["certification"] == "ok"
-    assert report.sections["certification"].payload["verdict"] == "certified"
+    assert report.sections["certification"].payload["verdict"] == "pass"
+    assert report.certified is True
     assert report.mc_lole_h is not None and report.mc_lole_h <= 8760.0
     assert store["eh_reference_design_report"]["mc_lole_h"] == report.mc_lole_h
     mc = next(s for s in report.pipeline.stages if s.stage == "mc_certify")

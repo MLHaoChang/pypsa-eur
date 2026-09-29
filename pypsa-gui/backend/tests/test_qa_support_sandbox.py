@@ -90,14 +90,12 @@ def test_a_file_backed_sandbox_hands_each_thread_its_own_connection():
         try:
             assert isinstance(engine.pool, NullPool)
 
-            seen: list = []
+            # Keep every connection object alive and hold all four sessions
+            # open together: comparing bare `id()`s of connections that were
+            # already closed and freed can collide on a reused address.
+            seen: list[object] = []
             lock = threading.Lock()
-            # All four sessions open AT ONCE, and the connections themselves
-            # kept rather than their id()s. Recording `id(raw)` let a thread
-            # close its connection before the next opened one; CPython then
-            # reuses the freed address, and two distinct connections read as
-            # "the same" — a false StaticPool alarm, seen once in a full run.
-            together = threading.Barrier(4, timeout=30)
+            together = threading.Barrier(4, timeout=10)
 
             def probe():
                 with session_local() as db:

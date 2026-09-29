@@ -631,6 +631,32 @@ export interface EhStudyRequestBody {
   archetype: EhArchetype
   stages?: string[]
   budget_solves?: number
+  /** P13: validated server-side (422 names the field). Omit blank knobs. */
+  pack_overrides?: {
+    ens_cap_permyriad?: number
+    target_lole_h?: number
+    certification_metric?: 'mc_lole' | 'none'
+    import_p_nom_mw?: number
+    import_energy_mwh_per_year?: number
+    mc_certify_required?: boolean
+    frontier_default?: boolean
+    dtc_stress_default?: boolean
+    dtc_planning_default?: boolean
+    levers?: {
+      redundancy?: boolean; import_cap?: boolean; storage_duration?: boolean
+      import_energy?: boolean
+    }
+  }
+  dtc_config?: {
+    critical_bus_ids?: string[]
+    critical_load_ids?: string[]
+    islanding_contingencies: string[]
+    attribution?: 'bus_aggregate_not_per_load' | 'per_load'
+  }
+  dsr_buses?: string[]
+  /** P18: attribution for the DtC config the study derives from tags. */
+  dtc_attribution?: EhDtcAttribution
+  mc?: { draws?: number; seed?: number; cov_target?: number }
 }
 
 export type EhSectionStatus = 'ok' | 'not_established' | 'skipped'
@@ -660,8 +686,13 @@ export interface EhTeaBlock {
   lcoh_note?: string | null
 }
 
-/** MC LOLE certification verdict (spec decision 2). */
+/** MC LOLE certification verdict (spec decision 2, §4 P11 Q1): `pass` iff
+ *  the 95% CI upper bound is within the target, `fail` iff its lower bound
+ *  exceeds it, else `inconclusive`; null = no target. Reports stored by a
+ *  build that used `certified` / `failed` / `no_target` / `not_established`
+ *  are still read (the panel normalises them). */
 export type EhCertificationVerdict =
+  | 'pass' | 'fail' | 'inconclusive'
   | 'certified' | 'failed' | 'no_target' | 'not_established'
 
 /**
@@ -672,16 +703,18 @@ export type EhCertificationVerdict =
  */
 export type EhImportModel =
   | 'sampled_unit' | 'firm_block' | 'islanded' | 'mixed' | 'zonal'
+  /** Not counted in the MC: no outage data of its own (decision 6). */
+  | 'excluded'
 
 export type EhImportFirmness =
   | 'planning_limit_only' | 'outage_sampled' | 'partially_outage_sampled'
   | 'grid_sampled' | 'outage_and_grid_sampled' | 'common_mode_sampled'
-  | 'outage_and_common_mode_sampled'
+  | 'outage_and_common_mode_sampled' | 'not_counted'
 
 /** One import Link in `fleet_scope.import_link_models`. */
 export interface EhImportLinkModel {
   name: string
-  model: 'sampled_unit' | 'firm_block' | 'islanded'
+  model: 'sampled_unit' | 'firm_block' | 'islanded' | 'excluded'
   cap_mw_max: number
   q?: number | null
   mttr_hours?: number | null
@@ -751,7 +784,12 @@ export interface EhFleetScope {
 export interface EhCertificationPayload {
   metric?: string
   target_lole_h?: number | null
+  /** LOLE per YEAR (the report headline). */
   mc_lole_h?: number | null
+  lole_h_per_year?: number | null
+  lole_h_per_horizon?: number | null
+  horizon_years?: number | null
+  target_lole_h_per_horizon?: number | null
   lole_ci?: [number, number] | number[] | null
   eue_mwh?: number | null
   n_samples?: number | null
@@ -765,6 +803,20 @@ export interface EhCertificationPayload {
   import_model?: EhImportModel | null
   import_firmness?: EhImportFirmness | null
   fleet_scope?: EhFleetScope | null
+}
+
+/** `sections.frontier.payload` (the fields the panel reads). The knee needs
+ *  at least 3 solved points (owner's Q3 rule, 2026-09-29); below that
+ *  `knee_index` is null, `knee_status` is `not_established` and `knee_note`
+ *  says why. */
+export interface EhFrontierPayload {
+  points?: EhFrontierPoint[]
+  pack_target_permyriad?: number
+  knee_index?: number | null
+  knee_status?: EhSectionStatus | null
+  knee_note?: string | null
+  period_basis?: string | null
+  warning?: string | null
 }
 
 /** One ε-constraint point in `sections.frontier.payload.points`. */
@@ -807,17 +859,145 @@ export interface EhReferenceDesignReport {
   ens_cap_permyriad?: number | null
   achieved_ens_permyriad?: number | null
   achieved_shed_hours?: number | null
+  /** MC LOLE, hours per YEAR, when the mc_certify stage ran. */
   mc_lole_h?: number | null
+  /** Decision 2: true only on a `pass` verdict; null = not established. */
+  certified?: boolean | null
   cost_at_target_eur?: number | null
   period_basis?: string | null
   excludes_shed_cost?: boolean
   completeness?: Record<string, EhSectionStatus>
   sections?: Record<string, EhSectionState>
   tea?: EhTeaBlock | null
-  pipeline?: { aborted?: boolean; solves_consumed?: number } | null
+  pipeline?: {
+    aborted?: boolean
+    solves_consumed?: number
+    budget_solves?: number
+    stages?: EhPipelineStage[]
+  } | null
   /** Dynamics feasibility gate (SCR → EMT flag). Absent when section skipped. */
   gates?: EhGatesBlock | null
+  /** Study-level disclosures belonging to no single section (e.g. DSR preflight). */
+  notes?: string[]
 }
+
+/** One pipeline stage record (``failed`` = ran, produced no evidence). */
+export interface EhPipelineStage {
+  stage: string
+  status: 'run' | 'skipped' | 'aborted' | 'failed' | 'pending'
+  solves_charged?: number
+  note?: string | null
+}
+
+/** One Class-C stress scenario (`services/adequacy/stress.py`). Fields the
+ * editor does not know (inline series, provenance) round-trip untouched. */
+export interface StressScenario {
+  id: string
+  name?: string
+  kind: 'parametric' | 'profiles'
+  frequency_per_year: number
+  electrical_load_multiplier?: number | null
+  renewable_availability_multiplier?: number | null
+  profile_pack?: string | null
+  [extra: string]: unknown
+}
+
+/** A shipped synthetic profile pack (GET .../stress_profile_packs). */
+export interface StressProfilePack {
+  id: string
+  name?: string
+  frequency_per_year?: number | null
+  snapshots?: number | null
+  loads?: string[]
+  generators?: string[]
+  provenance?: string | null
+  error?: string
+}
+
+export type EhDtcAttribution = 'bus_aggregate_not_per_load' | 'per_load'
+
+/** P19 template metadata (project_templates/<id>/eh_template.json). */
+export interface EhTemplateMeta {
+  id: string
+  name: string
+  description?: string
+  recommended_archetype: EhArchetype
+  pack_overrides?: Record<string, unknown>
+  stages?: string[] | null
+  dtc_attribution?: EhDtcAttribution | null
+  study_notes?: string[]
+  provenance?: string
+}
+
+/** Read-only preflight from GET /results/eh_readiness (P14). */
+export interface EhReadiness {
+  archetype: EhArchetype
+  import: { rule: string; links: string[]; applied: boolean }
+  critical_buses: string[]
+  dtc: { derivable: boolean; reason: string | null }
+  scr: { status: string; note: string | null; min_scr: number | null }
+  storage_units: number
+  class_b: { k: number; closed_import_links: string[]; error: string | null }
+  mc_boundary: { ok: boolean; error: string | null; hub_buses?: string[] }
+  budget_solves: number
+  estimated_solves: number
+  stages: { stage: string; prediction: string; solves: number; basis: string;
+            reason: string | null }[]
+  warnings: string[]
+  // P24 (additive; the Expert panel ignores them): the pack the study would
+  // run after overrides, units with usable outage data, and the import rating.
+  pack_defaults?: {
+    target_lole_h: number | null
+    ens_cap_permyriad: number | null
+    certification_metric: string
+  }
+  outage_units?: {
+    count: number
+    by_class: { Generator: number; Link: number; StorageUnit: number }
+    missing: { class: string; name: string }[]
+  }
+  import_p_nom_mw?: number | null
+}
+
+export type EhReviewSeverity = 'high' | 'medium' | 'low' | 'info'
+
+/** One finding of GET /results/eh_review (same body as review_eh_study). */
+export interface EhReviewFinding {
+  id: string
+  severity: EhReviewSeverity
+  title: string
+  evidence: Record<string, unknown>
+  recommendation: string
+  actions: { tool: string; args: Record<string, unknown>; effect: string }[]
+}
+
+/** GET /results/eh_review (P24). 204 → null (no study, no stored report).
+ * ``stale`` is true when a later solve cleared the stored report and the
+ * study record's copy was reviewed — read the boolean, never ``source``. */
+export type EhReview =
+  | { status: 'running'; message: string }
+  | {
+      status: 'ok'
+      source: string
+      stale: boolean
+      summary: {
+        archetype?: EhArchetype | null
+        certified?: boolean | null
+        verdict?: string | null
+        mc_lole_h_per_year?: number | null
+        target_lole_h?: number | null
+        ens_cap_permyriad?: number | null
+        achieved_ens_permyriad?: number | null
+        cost_at_target_eur?: number | null
+        solves?: string | null
+        completeness?: Record<string, string>
+        template?: string
+        [extra: string]: unknown
+      }
+      findings: EhReviewFinding[]
+      next_steps: string[]
+      how_to_apply?: string
+    }
 
 /** Study lifecycle record from GET /results/eh_study. */
 export interface EhStudyPayload {
@@ -878,6 +1058,10 @@ export interface EhDtcContingency {
   contingency: string
   status: string
   condition?: string | null
+  /** `per_load` only (P16): unserved MWh per critical Load. */
+  critical_unserved_by_load?: Record<string, number> | null
+  critical_loads?: string[]
+  noncritical_loads?: string[]
   critical_unserved_mwh?: number | null
   noncritical_unserved_mwh?: number | null
   cost_at_target_eur?: number | null
@@ -887,6 +1071,14 @@ export interface EhDtcContingency {
 export interface EhDtcStressTable {
   mode?: string
   attribution?: string
+  /** `per_load` only: critical Loads' VOLL premium ε (priority, not a price). */
+  voll_premium_eps?: number | null
+  /** `per_load` only: false where a lossy path can invert the priority. */
+  priority_exact?: boolean
+  priority_caveat_links?: string[]
+  priority_caveat_line_losses?: boolean
+  /** Set when `per_load` refused (no Load-keyed shed data). */
+  refused?: string | null
   contingencies?: EhDtcContingency[]
   honesty_notes?: string[]
   comparable_solved?: number
@@ -1346,14 +1538,35 @@ export const resultsApi = {
   // Energy Hub reference-design study (P1.5 HTTP / P5 panel). 204 = none this
   // session. Poll while status === 'running'; durable report also on
   // getEhReferenceDesign.
-  getEhStudy: () => client.get('/results/eh_study')
+  // `quiet`: no global error toast — the hub-design panel shows its own
+  // error line with Retry (P24-FE re-gate B4). The Expert panel is unchanged.
+  getEhStudy: (opts?: { quiet?: boolean }) => client.get('/results/eh_study',
+    opts?.quiet ? { skipErrorToast: true } : undefined)
     .then(r => (r.status === 204 ? null : r.data as EhStudyPayload)),
   startEhStudy: (body: EhStudyRequestBody) =>
     client.post('/results/eh_study', body).then(r => r.data),
   abortEhStudy: () => client.post('/results/eh_study/abort')
     .then(r => r.data as { status: string; aborting: boolean }),
+  getEhReadiness: (archetype: EhArchetype, budgetSolves?: number,
+    dtcAttribution?: EhDtcAttribution,
+    preview?: { stages?: string[]; pack_overrides?: Record<string, unknown> }) =>
+    client.get('/results/eh_readiness', {
+      params: {
+        archetype,
+        ...(budgetSolves ? { budget_solves: budgetSolves } : {}),
+        ...(dtcAttribution ? { dtc_attribution: dtcAttribution } : {}),
+        // E2E review m3: preview what will actually run.
+        ...(preview?.stages ? { stages: preview.stages.join(',') } : {}),
+        ...(preview?.pack_overrides
+          ? { pack_overrides: JSON.stringify(preview.pack_overrides) } : {}),
+      },
+    }).then(r => r.data as EhReadiness),
   getEhReferenceDesign: () => client.get('/results/eh_reference_design')
     .then(r => (r.status === 204 ? null : r.data as EhReferenceDesignReport)),
+  // P24: the review_eh_study findings as a route (one source). 204 = no study
+  // and no stored report; a running study is 200 {status: 'running'}.
+  getEhReview: () => client.get('/results/eh_review')
+    .then(r => (r.status === 204 ? null : r.data as EhReview)),
   getEhRedundancy: () => client.get('/results/eh_redundancy')
     .then(r => (r.status === 204 ? null : r.data as EhRedundancyTable)),
   getEhLevers: () => client.get('/results/eh_levers')
@@ -1381,6 +1594,19 @@ export const resultsApi = {
     client.post('/results/fmea_sweep', { scenarios }).then(r => r.data),
   getStressScenarios: (project: string) =>
     client.get(`/projects/${encodeURIComponent(project)}/stress_scenarios`).then(r => r.data),
+  // Class-C registry (P15): whole-list replace; the backend's 422 names the
+  // rule a scenario breaks and the editor shows it verbatim.
+  putStressScenarios: (project: string, scenarios: StressScenario[]) =>
+    client.put(`/projects/${encodeURIComponent(project)}/stress_scenarios`,
+      { scenarios }).then(r => r.data as { scenarios: StressScenario[] }),
+  // P19: the EH template a project was created from (204 → null).
+  getEhTemplate: (project: string, opts?: { quiet?: boolean }) =>
+    client.get(`/projects/${encodeURIComponent(project)}/eh_template`,
+      opts?.quiet ? { skipErrorToast: true } : undefined)
+      .then(r => (r.status === 204 ? null : r.data as EhTemplateMeta)),
+  getStressProfilePacks: (project: string) =>
+    client.get(`/projects/${encodeURIComponent(project)}/stress_profile_packs`)
+      .then(r => r.data as { packs: StressProfilePack[] }),
   getLostLoad: (range?: TSRange) => client.get<{
     index: string[]; columns: string[]; data: number[][];
     total_mwh: number; total_cost_eur: number;
