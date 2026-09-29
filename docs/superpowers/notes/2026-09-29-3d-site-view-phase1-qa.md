@@ -7,7 +7,13 @@ Scope: the QA stage of `docs/superpowers/plans/2026-09-29-3d-site-view-phase1.md
 
 Full `pytest` on a still tree, at the commit that carries the last code change (`3d5d44e`; later commits touch this note only).
 
-_Pending: the full run on the committed tree is in progress._
+| Result | Count |
+|---|---|
+| passed | 6184 |
+| skipped | 27 |
+| failed | 1 |
+
+The one failure is `tests/test_packaging_requirements.py::test_the_spec_names_every_gridspine_module_the_backend_guard_imports`: `pypsa-gui.spec` does not name `gridspine.drivers.year_study`. It fails the same way on the base branch, this branch touches neither the spec nor gridspine, and it is queued as a separate task (§6). The pin test in the same file, which this feature's `shapely` and `pillow` pins had to satisfy, passes.
 
 ## 2. Frontend
 
