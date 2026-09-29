@@ -231,4 +231,21 @@ describe('tab / backend project mismatch (A2)', () => {
     await screen.findByTestId('project-mismatch')
     expect(load).not.toHaveBeenCalled()
   })
+
+  // Anchor drift (P27b phase note): on the base, `GET /projects/{name}`
+  // refuses with `refuse_if_study_running("load a project")` — a STRING detail
+  // (the swap sentence), not the `study_in_flight` dict. Both shapes show.
+  it('Reload refused with the swap guard\'s string detail → that sentence under the button', async () => {
+    const sentence = "Cannot load a project while a FMEA sweep is running on 'Y' — wait for it to finish or abort it, then retry."
+    load.mockRejectedValue(Object.assign(new Error('Request failed with status code 409'), {
+      response: { status: 409, data: { detail: sentence } },
+    }))
+    getMeta.mockResolvedValue(meta('Y'))
+    renderApp()
+    await firstSample()
+    await sample()
+    fireEvent.click(await screen.findByTestId('project-mismatch-reload'))
+    expect((await screen.findByTestId('project-mismatch-reload-error')).textContent).toBe(sentence)
+    expect((screen.getByTestId('project-mismatch-switch') as HTMLButtonElement).disabled).toBe(false)
+  })
 })
