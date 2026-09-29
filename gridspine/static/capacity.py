@@ -203,7 +203,7 @@ def _compare(base, trial, crit, scenario, contingency, branch_ids, bus_names):
         labels = branch_ids if name == "thermal" else bus_names
         for i in np.flatnonzero(breach):
             growth = (t[i] - max(b[i], 0.0)) / unit
-            out.append((f"{name}_{scenario}", labels[i], contingency, float(growth)))
+            out.append((f"{name}_{scenario}", labels[i], contingency, float(growth), bool(b[i] > 0)))
     return out
 
 
@@ -215,7 +215,7 @@ def _breaches(base: _State, trial: _State, crit, branch_ids, bus_names):
             continue          # islanding is topology; a base divergence has no level to compare
         t_conv, t_isl, t_ld, t_vm = trial.n1[cid]
         if not t_conv or t_isl:
-            out.append(("n1_divergence", None, cid, math.inf))
+            out.append(("n1_divergence", None, cid, math.inf, False))
             continue
         out += _compare((ld, vm), (t_ld, t_vm), crit, "n1", cid, branch_ids, bus_names)
     return out
@@ -252,13 +252,14 @@ def capacity_ac(net, bus, kind, contingencies, criteria=DEFAULT_CRITERIA, start_
         apply_connection(work, bus, p, kind, pf=crit.load_pf)
         state = _evaluate(work, cset)
         if state is None:
-            return [("ac_divergence", None, None, math.inf)]
+            return [("ac_divergence", None, None, math.inf, False)]
         return _breaches(base, state, crit, branch_ids, bus_names)
 
     def result(cap, binding):
-        kind_, element, contingency, _score = binding
+        kind_, element, contingency, _score, preexisting = binding
         return {"capacity_mw": float(cap), "binding_kind": kind_, "binding_element": element,
-                "binding_contingency": contingency, "evaluations": count}
+                "binding_contingency": contingency, "binding_preexisting": bool(preexisting),
+                "evaluations": count}
 
     lo = 0.0
     hi = float(start_mw) if start_mw and start_mw > crit.tol_mw else 10.0 * crit.tol_mw
@@ -267,7 +268,7 @@ def capacity_ac(net, bus, kind, contingencies, criteria=DEFAULT_CRITERIA, start_
     while not found:
         lo = hi
         if hi >= crit.cap_mw:
-            return result(crit.cap_mw, ("none_up_to_cap", None, None, 0.0))
+            return result(crit.cap_mw, ("none_up_to_cap", None, None, 0.0, False))
         hi = min(2.0 * hi, crit.cap_mw)
         found = trial(hi)
     while hi - lo > crit.tol_mw:
@@ -284,9 +285,12 @@ def capacity_ac(net, bus, kind, contingencies, criteria=DEFAULT_CRITERIA, start_
 # DC
 # ---------------------------------------------------------------------------
 
-def _bound(F, S, R):
-    """Largest P >= 0 with |F + P S| <= max(R, |F|), element-wise; inf where S = 0."""
-    L = np.maximum(R, np.abs(F))
+def _bound(F, S, R, tol_pct):
+    """Largest P >= 0 keeping |F + P S| within its limit, element-wise; inf where
+    S = 0. The limit is the rating, or, for a flow ALREADY over it, that flow
+    plus the same worsening tolerance the AC search allows (``tol_pct`` of the
+    rating), so the two methods apply one definition."""
+    L = np.where(np.abs(F) > R, np.abs(F) + tol_pct / 100.0 * R, R)
     with np.errstate(divide="ignore", invalid="ignore"):
         up = np.where(S > 1e-12, (L - F) / S, np.where(S < -1e-12, (L + F) / -S, np.inf))
     return np.clip(np.nan_to_num(up, nan=np.inf), 0.0, None)
@@ -327,20 +331,21 @@ def capacity_dc(net, buses, kind, criteria=DEFAULT_CRITERIA) -> pd.DataFrame:
         inj = -sign * bal
         inj[pos[b]] += sign
         s = state.ptdf @ inj
-        intact = _bound(F0, s, R)
-        n1 = _bound(Fk, s[:, None] + Lk * s[None, live], R[:, None])
+        tol = criteria.worsen_tol_pct
+        intact = _bound(F0, s, R, tol)
+        n1 = _bound(Fk, s[:, None] + Lk * s[None, live], R[:, None], tol)
         for j, k in enumerate(live):
             n1[k, j] = np.inf            # the outaged branch carries nothing
         best_i = int(np.argmin(intact))
-        best = (intact[best_i], ids[best_i], None)
+        best = (intact[best_i], ids[best_i], None, bool(abs(F0[best_i]) > R[best_i]))
         if n1.size:
             l, j = np.unravel_index(int(np.argmin(n1)), n1.shape)
             if n1[l, j] < best[0]:
-                best = (n1[l, j], ids[l], ids[live[j]])
+                best = (n1[l, j], ids[l], ids[live[j]], bool(abs(Fk[l, j]) > R[l]))
         if not math.isfinite(best[0]) or best[0] >= criteria.cap_mw:
-            best = (criteria.cap_mw, None, None)
+            best = (criteria.cap_mw, None, None, False)
         rows[b] = {"dc_estimate_mw": float(best[0]), "dc_binding_element": best[1],
-                   "dc_binding_contingency": best[2]}
+                   "dc_binding_contingency": best[2], "dc_binding_preexisting": best[3]}
     out = pd.DataFrame.from_dict(rows, orient="index")
     out.index.name = "bus"
     return out
@@ -360,6 +365,7 @@ def dc_rows(net, hour: int, criteria=DEFAULT_CRITERIA) -> pd.DataFrame:
                 "binding_kind": "none_up_to_cap" if capped else (
                     "thermal_n1" if r["dc_binding_contingency"] else "thermal_intact"),
                 "binding_element": r["dc_binding_element"],
-                "binding_contingency": r["dc_binding_contingency"], "method": "dc",
+                "binding_contingency": r["dc_binding_contingency"],
+                "binding_preexisting": bool(r["dc_binding_preexisting"]), "method": "dc",
             })
     return validate_capacity(pd.DataFrame(rows))

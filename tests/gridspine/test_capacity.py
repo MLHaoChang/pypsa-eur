@@ -144,6 +144,30 @@ def test_an_existing_overload_is_not_zeroed_away_but_is_not_allowed_to_deepen():
     assert 200.0 < gen["capacity_mw"] < 260.0
 
 
+def test_a_limit_set_by_an_existing_overload_says_so():
+    # Found in the browser run: at BUS_16 on a real UC hour the AC answer was
+    # 13.8 MW, bound by BUS_02-BUS_03, which was ALREADY overloaded under N-1
+    # before anything connected. That number is the worsening tolerance divided
+    # by the bus's distribution factor, not room on the network, and read as
+    # "13.8 MW available" it misleads. So a result says whether what binds it
+    # was already violated at 0 MW.
+    pre = capacity_ac(parallel(120.0), "BUS_02", "load", _cset(parallel(120.0)))
+    assert pre["binding_preexisting"] is True
+    fresh = capacity_ac(parallel(20.0), "BUS_02", "load", _cset(parallel(20.0)))
+    assert fresh["binding_preexisting"] is False
+    assert capacity_dc(parallel(120.0), ["BUS_02"], "load").loc["BUS_02", "dc_binding_preexisting"]
+    assert not capacity_dc(parallel(20.0), ["BUS_02"], "load").loc["BUS_02", "dc_binding_preexisting"]
+
+
+def test_dc_applies_the_same_worsening_tolerance_as_ac():
+    # One definition, two methods: DC used to allow an existing overload no
+    # growth at all (0.0 MW) where AC allowed its 0.5 % tolerance (13.8 MW on
+    # the same row), so the two columns disagreed about the rule, not the physics.
+    crit = CapacityCriteria()
+    dc = capacity_dc(parallel(120.0), ["BUS_02"], "load", crit).loc["BUS_02", "dc_estimate_mw"]
+    assert dc == pytest.approx(crit.worsen_tol_pct / 100.0 * RATING, rel=1e-6)
+
+
 def test_voltage_binds_on_a_long_line():
     net = long_line()
     r = capacity_ac(net, "BUS_02", "load", _cset(net))
@@ -313,7 +337,7 @@ def _row(**over):
         "bus": "BUS_16", "hour": 0, "kind": "load", "capacity_mw": 412.0,
         "dc_estimate_mw": 455.0, "binding_kind": "thermal_n1",
         "binding_element": "BUS_16-BUS_17-1", "binding_contingency": "BUS_16-BUS_19-1",
-        "method": "ac",
+        "binding_preexisting": False, "method": "ac",
     }
     row.update(over)
     return row
@@ -329,6 +353,7 @@ def test_a_valid_capacity_table_round_trips():
     ({"capacity_mw": -1.0}, "capacity_mw"),
     ({"binding_kind": "vibes"}, "binding_kind"),
     ({"method": "guess"}, "method"),
+    ({"binding_preexisting": "maybe"}, "binding_preexisting"),
 ])
 def test_an_impossible_capacity_row_is_refused(over, match):
     with pytest.raises(ContractError, match=match):

@@ -4,7 +4,11 @@
 worsens no existing one, intact and under N-1 (``static/capacity.py``). It is
 empty where only the DC screen ran (``method == "dc"``). ``dc_estimate_mw`` is
 the closed-form DC answer, kept beside the AC one so the gap stays visible.
-``binding_kind`` names what stopped it. ``none_up_to_cap`` means nothing bound
+``binding_kind`` names what stopped it, and ``binding_preexisting`` says whether
+that constraint was ALREADY violated before anything connected. Such a limit
+is "blocked by an existing overload": its MW figure is the worsening tolerance
+over the bus's distribution factor, not room on the network, and must not be
+read as headroom. ``none_up_to_cap`` means nothing bound
 up to the search cap, so ``capacity_mw`` is that cap and must be read as "at
 least", never as infinity.
 
@@ -26,7 +30,7 @@ BINDING_KINDS = (
 )
 CAPACITY_COLUMNS = (
     "bus", "hour", "kind", "capacity_mw", "dc_estimate_mw",
-    "binding_kind", "binding_element", "binding_contingency", "method",
+    "binding_kind", "binding_element", "binding_contingency", "binding_preexisting", "method",
 )
 
 
@@ -65,6 +69,16 @@ def validate_capacity(df: pd.DataFrame) -> pd.DataFrame:
     ac = out["method"] == "ac"
     if out.loc[ac, "capacity_mw"].isna().any():
         raise ContractError("capacity_mw is required on every row the AC search produced (method 'ac')")
+
+    pre = out["binding_preexisting"].map(
+        lambda v: v if isinstance(v, (bool, np.bool_)) else {"True": True, "False": False}.get(v, v)
+    )
+    bad = ~pre.map(lambda v: isinstance(v, (bool, np.bool_)))
+    if bad.any():
+        raise ContractError(
+            f"binding_preexisting must be a bool, got {out.loc[bad, 'binding_preexisting'].unique().tolist()}"
+        )
+    out["binding_preexisting"] = pre.astype(bool)
 
     for col in ("binding_element", "binding_contingency"):
         out[col] = out[col].astype(object).where(out[col].notna(), None)

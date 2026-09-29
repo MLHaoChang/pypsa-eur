@@ -775,8 +775,17 @@ function SnapshotTable({ rows, name, bundles }: { rows: RankedSnapshot[]; name: 
 
 // ── Connection capacity (increment 9) ─────────────────────────────────────
 
-/** What stopped the capacity, in words an engineer acts on. */
+/** What stopped the capacity, in words an engineer acts on. A limit set by a
+ *  constraint that was ALREADY violated says so: that figure is the worsening
+ *  tolerance, not headroom, and read as "13.8 MW available" it would mislead. */
 function bindingText(r: CapacityRow): string {
+  const base = bindingBase(r)
+  if (!r.binding_preexisting) return base
+  const what = r.binding_kind.startsWith('thermal') ? 'overloaded' : 'outside limits'
+  return `${base} — already ${what} before connection`
+}
+
+function bindingBase(r: CapacityRow): string {
   const after = r.binding_contingency ? ` after losing ${r.binding_contingency}` : ''
   switch (r.binding_kind) {
     case 'thermal_intact': case 'thermal_n1': return `overload of ${r.binding_element}${after}`

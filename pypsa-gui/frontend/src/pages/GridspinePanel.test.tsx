@@ -89,7 +89,7 @@ const config: StudyConfig = {
 const capRow = (over: Partial<CapacityRow>): CapacityRow => ({
   bus: 'BUS_16', hour: 19, kind: 'load', capacity_mw: null, dc_estimate_mw: 455.2,
   binding_kind: 'thermal_n1', binding_element: 'BUS_16-BUS_17-1', binding_contingency: 'BUS_16-BUS_19-1',
-  method: 'dc', ...over,
+  binding_preexisting: false, method: 'dc', ...over,
 })
 
 const capacityTable = (rows?: CapacityRow[]): CapacityTable => {
@@ -562,6 +562,21 @@ describe('connection capacity', () => {
     await waitFor(() => expect(api.computeCapacity).toHaveBeenCalledWith('Study A', 'BUS_16', 'load'))
     const row = await within(section).findByText('412.3 MW')
     expect(row.closest('[data-testid="capacity-row-BUS_16"]')?.textContent).toContain('AC')
+  })
+
+  it('marks a limit set by an existing overload so it is not read as headroom', async () => {
+    // Found in the browser run: 13.8 MW at BUS_16 was the worsening tolerance
+    // over an N-1 overload that existed before anything connected.
+    api.capacity.mockResolvedValue(capacityTable([
+      capRow({ method: 'ac', capacity_mw: 13.8, binding_element: 'BUS_02-BUS_03-1',
+               binding_contingency: 'BUS_25-BUS_26-1', binding_preexisting: true }),
+      capRow({ bus: 'BUS_03', dc_estimate_mw: 90.0 }),
+    ]))
+    renderPanel()
+    const section = await screen.findByTestId('capacity-section')
+    const row = await within(section).findByTestId('capacity-row-BUS_16')
+    expect(row.textContent).toContain('already overloaded before connection')
+    expect(within(section).getByTestId('capacity-row-BUS_03').textContent).not.toContain('already')
   })
 
   it('says why there is no table instead of failing silently', async () => {

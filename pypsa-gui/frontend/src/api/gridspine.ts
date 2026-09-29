@@ -176,6 +176,9 @@ export interface CapacityRow {
   binding_kind: string
   binding_element: string | null
   binding_contingency: string | null
+  /** The binding constraint was already violated before anything connected:
+   *  the figure is then the worsening tolerance, not room on the network. */
+  binding_preexisting: boolean
   method: 'ac' | 'dc'
 }
 export interface CapacityTable { rows: CapacityRow[]; hours: number[]; buses: string[] }

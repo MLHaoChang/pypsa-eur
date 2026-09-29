@@ -88,6 +88,7 @@ def test_ac_on_demand_fills_every_selected_hour_and_is_cached_in_run_and_bundles
     assert sorted(got["hour"]) == hours
     assert (got["method"] == "ac").all() and got["capacity_mw"].notna().all()
     assert got["dc_estimate_mw"].notna().all()            # the DC figure travels with it
+    assert got["binding_preexisting"].dtype == bool
 
     table = capacity_table(out)
     assert len(table) == len(hours) * len(buses) * 2      # replaced, not appended

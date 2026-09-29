@@ -42,7 +42,7 @@ def _read(path: Path) -> pd.DataFrame:
     if not path.is_file():
         return validate_capacity(pd.DataFrame(columns=[
             "bus", "hour", "kind", "capacity_mw", "dc_estimate_mw", "binding_kind",
-            "binding_element", "binding_contingency", "method"]))
+            "binding_element", "binding_contingency", "binding_preexisting", "method"]))
     return validate_capacity(pd.read_csv(path, dtype={"binding_element": object, "binding_contingency": object}))
 
 
@@ -90,7 +90,8 @@ def compute_capacity_ac(run_dir, bus: str, kind: str, criteria=DEFAULT_CRITERIA,
             "bus": bus, "hour": hour, "kind": kind, "capacity_mw": r["capacity_mw"],
             "dc_estimate_mw": start if start is not None else float("nan"),
             "binding_kind": r["binding_kind"], "binding_element": r["binding_element"],
-            "binding_contingency": r["binding_contingency"], "method": "ac",
+            "binding_contingency": r["binding_contingency"],
+            "binding_preexisting": r["binding_preexisting"], "method": "ac",
         })
         if on_hour is not None:
             on_hour(i, len(hours))
