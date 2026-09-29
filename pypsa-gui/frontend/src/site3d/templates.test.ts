@@ -85,7 +85,61 @@ describe('hall, reservoir, pvRoof', () => {
   })
 })
 
+describe('parts stay inside the footprint (WP1 review gate)', () => {
+  it.each(DEFAULT_LIBRARY.map(t => t.id))('%s', id => {
+    for (const amount of [0.5, 10, 400, 5000]) {
+      const out = runTemplate(entry(id).geometry, { amount, bays: 3, vNom: 110 })
+      const [w, d] = out.footprint
+      for (const q of out.parts) {
+        const tol = 0.5
+        expect(Math.abs(q.pos[0]) + q.size[0] / 2, `${id} @ ${amount}: east extent`).toBeLessThanOrEqual(w / 2 + tol)
+        expect(Math.abs(q.pos[1]) + q.size[1] / 2, `${id} @ ${amount}: north extent`).toBeLessThanOrEqual(d / 2 + tol)
+      }
+    }
+  })
+})
+
+describe('Phase 1 geometry kept where the type did not change', () => {
+  it('one H₂ bullet: 3 × 20 m, 60 m², and the Phase 1 summary wording', () => {
+    const one = run('h2store', 20)
+    expect(one.footprint).toEqual([3, 20])
+    expect(one.areaM2).toBe(60)
+    const huge = entry('h2store').summary({ cls: 'Store', name: 'x', carrier: 'H2', amount: 1e5, unit: 'MWh', count: 5000, each: 42, areaM2: 1, params: entry('h2store').geometry.params })
+    expect(huge).toContain('(each = 42)')
+  })
+  it('the wind summary reads the entry\'s own unit rating and sizes', () => {
+    const t = entry('wind')
+    const txt = t.summary({ cls: 'Generator', name: 'w', carrier: 'onwind', amount: 9, unit: 'MW', count: 3, each: 1, areaM2: 1, params: { ...t.geometry.params, per: 3, hubHeight: 80, rotorDiameter: 90 } })
+    expect(txt).toContain('3 × 3 MW, 80 m hub, 90 m rotor')
+  })
+})
+
+describe('reservoir land', () => {
+  it('covers the basin the energy needs, plus the powerhouse', () => {
+    const p = entry('pumpedHydro').geometry.params as Record<string, number>
+    const out = run('pumpedHydro', 600)
+    expect(out.areaM2).toBeGreaterThanOrEqual(600 * p.m2PerMwh + p.powerhouseW * p.powerhouseD)
+    expect(out.areaM2).toBeLessThanOrEqual(out.footprint[0] * out.footprint[1])
+  })
+})
+
 describe('anchors', () => {
+  it('a unit grid provides the anchor its entry asks for', () => {
+    for (const t of DEFAULT_LIBRARY.filter(x => x.geometry.template === 'unitGrid')) {
+      const out = runTemplate(t.geometry, { amount: 10 })
+      if (t.geometry.params.anchor === 'fill') expect(out.anchors.fill, t.id).toBeDefined()
+      if (t.geometry.params.anchor === 'emissive') expect(out.anchors.emissive, t.id).toBe(true)
+    }
+  })
+  it('the fill gauge lies on top of the units, inside the footprint', () => {
+    for (const id of ['bess', 'h2store', 'thermalStore', 'flywheel']) {
+      const out = run(id, 100)
+      const g = out.anchors.fill!
+      expect(Math.abs(g.pos[0]) + g.size[0] / 2, id).toBeLessThanOrEqual(out.footprint[0] / 2)
+      expect(Math.abs(g.pos[1]) + g.size[1] / 2, id).toBeLessThanOrEqual(out.footprint[1] / 2)
+    }
+  })
+
   it('every template declares its animation anchors', () => {
     for (const t of DEFAULT_LIBRARY) {
       const declared = TEMPLATE_ANCHORS[t.geometry.template]
@@ -104,8 +158,8 @@ describe('layout.ts source guards', () => {
     .replace(/\/\*[\s\S]*?\*\//g, '')          // block comments
     .replace(/(^|[^:])\/\/.*$/gm, '$1')         // line comments
   it('names no carrier in a regex literal', () => {
-    const regexLiterals = src.match(/\/(?![*/])(?:\\.|[^/\n])+\/[a-z]*(?=[.,;)\s])/g) ?? []
-    for (const re of regexLiterals) expect(re).not.toMatch(/solar|wind|electroly|h2|hydrogen|batter|pv/i)
+    const regexLiterals = src.match(/\/(?![*/])(?:\\.|[^/\n])+\/[a-z]*(?=[.,;)\]}\s])/g) ?? []
+    for (const re of regexLiterals) expect(re).not.toMatch(/solar|wind|electroly|h2|hydrogen|batter|pv|heat|gas|ccgt|hydro|boiler/i)
   })
   it('holds no colours', () => {
     expect(src).not.toMatch(/#[0-9a-f]{6}\b/i)

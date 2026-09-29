@@ -16,26 +16,11 @@ import { PLACEABLE_CLASSES } from '../site3d/types'
 import toast from 'react-hot-toast'
 import type { Bus, Line, Link, Generator, Load, StorageUnit, Store, Transformer } from '../api/types'
 import { PALETTE_COMPONENT_TYPE } from './paletteData'
+import { carrierMatches, type BusFilter } from '../utils/busCarriers'
 
-// Carrier classification used by the bus-picker filters. Lower-case match.
-const H2_CARRIERS   = new Set(['h2', 'hydrogen', 'h2 pipeline', 'h2_pipeline'])
-const HEAT_CARRIERS = new Set(['heat', 'heat-low', 'heat-high', 'urban heat', 'rural heat',
-  'urban central heat', 'urban decentral heat', 'rural heat'])
-const GAS_CARRIERS  = new Set(['gas', 'natural gas', 'biomass', 'biogas', 'oil', 'fuel'])
-const ELEC_CARRIERS = new Set(['ac', 'dc', 'electricity'])
-
-type BusCarrier = 'h2' | 'non-h2' | 'electricity' | 'heat' | 'gas'
-
-function carrierMatches(busCarrier: string, want: BusCarrier): boolean {
-  const c = (busCarrier ?? '').toLowerCase()
-  switch (want) {
-    case 'h2':           return H2_CARRIERS.has(c)
-    case 'non-h2':       return !H2_CARRIERS.has(c)
-    case 'electricity':  return ELEC_CARRIERS.has(c) || c === '' // unset carrier defaults to AC
-    case 'heat':         return HEAT_CARRIERS.has(c) || c.includes('heat')
-    case 'gas':          return GAS_CARRIERS.has(c) || c.includes('gas') || c.includes('biomass')
-  }
-}
+// Carrier classification used by the bus-picker filters lives in
+// utils/busCarriers.ts (shared with the 3D asset library).
+type BusCarrier = BusFilter
 
 // ── Field definitions ─────────────────────────────────────────────────────────
 

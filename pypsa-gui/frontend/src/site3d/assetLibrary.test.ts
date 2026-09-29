@@ -161,6 +161,30 @@ describe('matchType', () => {
   })
 })
 
+describe('carrier patterns (WP1 review gate)', () => {
+  const at = (cls: string, carrier: string, extra: Record<string, unknown> = {}) =>
+    matchType(cls, { name: 'x', carrier, bus: 'AC bus', bus0: 'AC bus', bus1: 'Heat bus', bus2: '', ...extra }, ctx())?.type.id
+  it.each([
+    ['Store', 'H2 Store', 'h2store'], ['Store', 'H2 storage', 'h2store'], ['Store', 'hydrogen storage', 'h2store'],
+    ['StorageUnit', 'H2 storage', 'h2store'], ['Store', 'H2O', 'store'],
+    ['Generator', 'urban central solar thermal', 'thermal'], ['Generator', 'solar-hsat', 'pv'], ['Generator', 'PV', 'pv'],
+    ['Load', 'urban central heat', 'offtake'], ['Load', 'H2 for industry', 'offtake'], ['Load', 'electricity', 'load'],
+  ])('%s %s → %s', (cls, carrier, id) => { expect(at(cls, carrier)).toBe(id) })
+  it('a gas boiler is not a heat pump, and "biogas to gas" with a co2 bus2 is not a CHP', () => {
+    expect(at('Link', 'urban central gas boiler', { bus0: 'Gas bus' })).toBe('feeder')
+    expect(at('Link', 'biogas to gas', { bus0: 'Gas bus', bus1: 'Gas bus', bus2: 'co2 atmosphere' })).toBe('feeder')
+    expect(at('Link', 'electric boiler')).toBe('heatPump')
+  })
+  it('buses the creation form treats as gas or H₂ are manifolds', () => {
+    for (const carrier of ['natural gas', 'biogas', 'H2 pipeline', 'urban central heat', 'oil']) {
+      expect(matchType('Bus', { name: 'b', carrier }, ctx(['b'], { b: carrier }))?.type.id, carrier).toBe('manifold')
+    }
+  })
+  it('an H2 link into an H2 pipeline bus is an electrolyser', () => {
+    expect(matchType('Link', { name: 'e', carrier: 'H2', bus0: 'AC bus', bus1: 'pipe', bus2: '' }, ctx(['AC bus'], { 'AC bus': 'AC', pipe: 'H2 pipeline' }))?.type.id).toBe('electrolyser')
+  })
+})
+
 describe('legendFor', () => {
   it('lists the types present, in library order, with label and colour from the entry', () => {
     const objs = [{ kind: 'wind', carrier: 'onwind' }, { kind: 'bess', carrier: 'battery' }, { kind: 'wind', carrier: 'offwind-ac' }, { kind: 'thermal', carrier: 'coal' }]

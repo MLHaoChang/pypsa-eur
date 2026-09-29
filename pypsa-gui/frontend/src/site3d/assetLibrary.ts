@@ -12,6 +12,7 @@
 
 import type { Geometry, ParamValue, TemplateId } from './templates'
 import { TEMPLATE_IDS } from './templates'
+import { H2_BUS_RE, HEAT_BUS_RE, GAS_BUS_RE, H2_CARRIER_RE } from '../utils/busCarriers'
 
 export type PyPSAClass = 'Bus' | 'Generator' | 'StorageUnit' | 'Store' | 'Load' | 'Transformer' | 'Line' | 'Link'
 export type Port = 'bus0' | 'bus1' | 'bus2'
@@ -51,6 +52,8 @@ export interface SummaryInfo {
   vLo?: number | null
   /** Branches: the bus at the other end. */
   far?: string
+  /** The entry's template numbers (unit ratings, hub height, …), so a summary never hard-codes them. */
+  params: Record<string, ParamValue>
 }
 
 export interface AssetType {
@@ -76,6 +79,13 @@ export const labelOf = (t: AssetType, carrier: string): string => (typeof t.labe
 // views reads the same colour as the same thing.
 const STEEL = '#e5e7eb'
 const GENSET_CARRIERS = /^(gas|diesel|oil|biogas|biomass)$/i
+const gensetLabel = (c: string) => (GENSET_CARRIERS.test(c) ? `Engine gensets (${c})` : `${c || 'unknown carrier'} — generic plant block`)
+/** Bus carriers drawn as a pipe manifold rather than a switchyard (utils/busCarriers.ts families). */
+const NON_ELECTRICAL_BUS_RE = new RegExp(`${H2_BUS_RE.source}|${HEAT_BUS_RE.source}|${GAS_BUS_RE.source}`, 'i')
+/** Solar PV, not solar thermal: 'solar', 'solar-hsat', 'PV', 'pv utility' … but not 'urban central solar thermal'. */
+const SOLAR_PV_RE = /^(?!.*thermal)(?=.*(solar|(^|[^a-z])pv([^a-z]|$)))/i
+/** A load carrying H₂, heat or gas (an offtake, not a data hall). */
+const OFFTAKE_RE = /(^|[^a-z])(h2|hydrogen)([^a-z]|$)|heat|gas/i
 
 const LIB: AssetType[] = [
   // ── Generators ────────────────────────────────────────────────────────────
@@ -88,7 +98,7 @@ const LIB: AssetType[] = [
   },
   {
     id: 'pv', label: 'PV field', color: '#16a34a', zone: 'south',
-    match: [{ cls: 'Generator', carrier: /solar|pv/i }],
+    match: [{ cls: 'Generator', carrier: SOLAR_PV_RE }],
     size: { Generator: { param: 'p_nom', unit: 'MW' } },
     geometry: { template: 'pvField', params: { haPerMwp: 2.5, minMw: 0.05, rowLength: 30, rowPitch: 6, tableDepth: 2.2, tableGap: 2, tiltDeg: 25, lift: 1.2 } },
     summary: s => `PV field — ${fmt(s.amount, 'MW')} on ~${(s.areaM2 / 10_000).toFixed(1)} ha${eachBox(s.each, 'table')}`,
@@ -98,7 +108,7 @@ const LIB: AssetType[] = [
     match: [{ cls: 'Generator', carrier: /wind/i }],
     size: { Generator: { param: 'p_nom', unit: 'MW' } },
     geometry: { template: 'turbineArray', params: { per: 5, hubHeight: 100, rotorDiameter: 140, spacingD: 4, perRow: 4, towerDiameter: 4, ratedRpm: 12, towerColor: STEEL, bladeColor: '#f3f4f6' } },
-    summary: s => `Wind turbines — ${fmt(s.amount, 'MW')} as ${s.count} × 5 MW, 100 m hub, 140 m rotor${eachBox(s.each, 'turbine')}`,
+    summary: s => `Wind turbines — ${fmt(s.amount, 'MW')} as ${s.count} × ${s.params.per} MW, ${s.params.hubHeight} m hub, ${s.params.rotorDiameter} m rotor${eachBox(s.each, 'turbine')}`,
   },
   {
     id: 'gasTurbine', label: 'Gas turbine plant', color: '#b91c1c', zone: 'west',
@@ -111,11 +121,11 @@ const LIB: AssetType[] = [
     // The Generator fallback: engine gensets for gas, diesel, oil, biogas,
     // biomass; a generic plant block, named by its carrier, for anything else.
     id: 'thermal', color: '#dc2626', zone: 'west',
-    label: c => (GENSET_CARRIERS.test(c) ? `Engine gensets (${c})` : `${c || 'unknown carrier'} — generic plant block`),
+    label: gensetLabel,
     match: [{ cls: 'Generator' }],
     size: { Generator: { param: 'p_nom', unit: 'MW' } },
     geometry: { template: 'unitGrid', params: { unitW: 12.2, unitD: 2.44, unitH: 2.9, per: 2.5, perRow: 6, gap: 3, extra: 'stack', extraColor: '#9ca3af', heroable: true, anchor: 'emissive' } },
-    summary: s => `${GENSET_CARRIERS.test(s.carrier) ? 'Thermal generation' : 'Generic plant block'} (${s.carrier || 'unknown carrier'}) — ${fmt(s.amount, 'MW')} in ${plural(s.count, 'enclosure')}${eachBox(s.each)}`,
+    summary: s => `${gensetLabel(s.carrier)} — ${fmt(s.amount, 'MW')} in ${plural(s.count, 'enclosure')}${eachBox(s.each)}`,
   },
 
   // ── Storage ───────────────────────────────────────────────────────────────
@@ -142,10 +152,10 @@ const LIB: AssetType[] = [
   },
   {
     id: 'h2store', label: 'H₂ storage', color: '#0e7490', zone: 'east',
-    match: [{ cls: 'Store', carrier: /^(h2|hydrogen)$/i }, { cls: 'StorageUnit', carrier: /^(h2|hydrogen)$/i }],
+    match: [{ cls: 'Store', carrier: H2_CARRIER_RE }, { cls: 'StorageUnit', carrier: H2_CARRIER_RE }],
     size: { Store: { param: 'e_nom', unit: 'MWh' }, StorageUnit: { param: 'mwh', unit: 'MWh' } },
     geometry: { template: 'tankArray', params: { diameter: 3, length: 20, axis: 'north', per: 20, perRow: 6, gap: 2, heroable: true } },
-    summary: s => `H₂ storage — ${fmt(s.amount, 'MWh')} in ${plural(s.count, 'bullet tank')}${eachBox(s.each, 'tank')}`,
+    summary: s => `H₂ storage — ${fmt(s.amount, 'MWh')} in ${plural(s.count, 'bullet tank')}${s.each > 1 ? ` (each = ${s.each})` : ''}`,
   },
   {
     id: 'thermalStore', label: 'Thermal store', color: '#ea580c', zone: 'east',
@@ -176,7 +186,7 @@ const LIB: AssetType[] = [
     id: 'electrolyser', label: 'Electrolyser', color: '#0891b2', zone: 'west',
     match: [
       { cls: 'Link', carrier: /electroly/i, port: 'bus0' },
-      { cls: 'Link', carrier: /^h2$/i, farCarrier: { port: 'bus1', carrier: /^(h2|hydrogen)$/i }, port: 'bus0' },
+      { cls: 'Link', carrier: /^h2$/i, farCarrier: { port: 'bus1', carrier: H2_BUS_RE }, port: 'bus0' },
     ],
     size: { Link: { param: 'p_nom', unit: 'MW' } },
     geometry: { template: 'unitGrid', params: { unitW: 12.2, unitD: 2.44, unitH: 2.9, per: 5, perRow: 4, gap: 3, extra: 'bop', extraColor: '#67e8f9', heroable: true, anchor: 'emissive' } },
@@ -186,7 +196,7 @@ const LIB: AssetType[] = [
     id: 'fuelCell', label: 'Fuel cells', color: '#0d9488', zone: 'west',
     match: [
       { cls: 'Link', carrier: /fuel.?cell/i, port: 'bus1' },
-      { cls: 'Link', carrier: /^h2$/i, farCarrier: { port: 'bus0', carrier: /^(h2|hydrogen)$/i }, port: 'bus1' },
+      { cls: 'Link', carrier: /^h2$/i, farCarrier: { port: 'bus0', carrier: H2_BUS_RE }, port: 'bus1' },
     ],
     size: { Link: { param: 'p_nom', unit: 'MW' } },
     geometry: { template: 'unitGrid', params: { unitW: 6.1, unitD: 2.44, unitH: 2.9, per: 2, perRow: 6, gap: 2, heroable: true, anchor: 'emissive' } },
@@ -194,14 +204,14 @@ const LIB: AssetType[] = [
   },
   {
     id: 'heatPump', label: 'Heat pumps / e-boilers', color: '#f97316', zone: 'west',
-    match: [{ cls: 'Link', carrier: /heat.?pump|resistive|boiler/i, port: 'bus0' }],
+    match: [{ cls: 'Link', carrier: /heat.?pump|resistive|electric.?boiler|^e-?boiler$/i, port: 'bus0' }],
     size: { Link: { param: 'p_nom', unit: 'MW' } },
     geometry: { template: 'unitGrid', params: { unitW: 6.1, unitD: 2.44, unitH: 2.9, per: 5, perRow: 6, gap: 2, extra: 'coolers', extraColor: '#cbd5e1', heroable: true, anchor: 'emissive' } },
     summary: s => `${/resistive|boiler/i.test(s.carrier) ? 'Electric boiler' : 'Heat pumps'} (${s.carrier}) — ${fmt(s.amount, 'MW')} in ${plural(s.count, 'skid')}${eachBox(s.each)}`,
   },
   {
     id: 'chp', label: 'CHP plant', color: '#c2410c', zone: 'west',
-    match: [{ cls: 'Link', carrier: /gas|biogas|chp/i, hasBus2: true, port: 'bus1' }],
+    match: [{ cls: 'Link', carrier: /^(gas|biogas|.*\bchp\b.*)$/i, hasBus2: true, port: 'bus1' }],
     size: { Link: { param: 'p_nom', unit: 'MW' } },
     geometry: { template: 'plant', params: { minM2: 300, m2PerMw: 20, hallHeight: 10, extra: 'heatExchanger', extraHeight: 4, extraColor: '#fdba74', stackDiameter: 2, stackHeight: 25, stackColor: '#9ca3af' } },
     summary: s => `CHP plant (${s.carrier}) — ${fmt(s.amount, 'MW')} fuel in`,
@@ -210,7 +220,7 @@ const LIB: AssetType[] = [
   // ── Demand ────────────────────────────────────────────────────────────────
   {
     id: 'offtake', label: 'Offtake (H₂ / heat)', color: '#f59e0b', zone: 'northeast',
-    match: [{ cls: 'Load', carrier: /^(h2|hydrogen|heat|gas)$/i }],
+    match: [{ cls: 'Load', carrier: OFFTAKE_RE }],
     size: { Load: { param: 'p_set', unit: 'MW' } },
     geometry: { template: 'unitGrid', params: { unitW: 6, unitD: 4, unitH: 3, per: 100, perRow: 4, gap: 2, anchor: 'emissive' } },
     summary: s => `Offtake (${s.carrier}) — ${fmt(s.amount, 'MW')} peak`,
@@ -242,7 +252,7 @@ const LIB: AssetType[] = [
   },
   {
     id: 'manifold', label: 'Pipe manifold', color: '#0f766e', zone: 'north', flags: { infrastructure: true },
-    match: [{ cls: 'Bus', carrier: /^(h2|hydrogen|heat|gas|.*heat.*)$/i }],
+    match: [{ cls: 'Bus', carrier: NON_ELECTRICAL_BUS_RE }],
     size: { Bus: { param: 'none', unit: '' } },
     geometry: { template: 'manifold', params: { minWidth: 20, baseWidth: 12, widthPerBay: 6, depth: 10, pipeDiameter: 0.8, rackHeight: 3, pipeColor: '#fbbf24', padColor: '#d6d3d1', steelColor: STEEL } },
     summary: s => `${s.carrier} manifold — bus ${s.name}`,

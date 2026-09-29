@@ -13,7 +13,7 @@ import { join } from 'node:path'
 // Modules only SiteCanvas imports (they may import three). Everything else
 // in this directory is main-bundle by default, so a new file is guarded
 // without anyone remembering to list it.
-const SITECANVAS_ONLY = new Set<string>(['raycast.ts', 'placementMath.ts', 'context.ts'])
+const SITECANVAS_ONLY = new Set<string>(['raycast.ts', 'placementMath.ts', 'context.ts', 'partGeometry.ts'])
 
 const MAIN_BUNDLE_MODULES = readdirSync(__dirname)
   .filter(f => /\.(ts|tsx)$/.test(f) && !/\.test\./.test(f) && !SITECANVAS_ONLY.has(f))

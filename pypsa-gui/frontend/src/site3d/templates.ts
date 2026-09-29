@@ -24,7 +24,11 @@ export interface Part {
   rotZ?: number
   /** Rotation about the east axis, radians (tilted PV tables). */
   rotX?: number
-  /** Rotation about the north axis, radians (turbine blades in the rotor plane). */
+  /**
+   * Rotation about the north axis, radians (turbine blades in the rotor
+   * plane): the part's east axis turns to (cos rotN, −sin rotN) in the
+   * (east, up) plane (partGeometry.ts `partMatrix`).
+   */
   rotN?: number
   /** Optional per-part colour override. */
   color?: string
@@ -41,7 +45,7 @@ export interface Part {
 }
 
 export interface Anchors {
-  /** Where the fill gauge stands (a slim box region beside the units). */
+  /** Where the fill gauge lies: a slim bar across the top of the units; it fills along east. */
   fill?: { pos: [number, number, number]; size: [number, number, number] }
   /** One per drawn turbine: the hub, about which that turbine's rotor parts spin (axis: north). */
   rotors?: { turbine: number; hub: [number, number, number] }[]
@@ -69,8 +73,12 @@ export interface TemplateInput {
   bays?: number
   /** Yards: nominal voltage, kV. */
   vNom?: number
-  /** Rooftop PV: on a hall's roof (true) or on its own canopy. */
-  onRoof?: boolean
+  /**
+   * Rooftop PV: the free part of a hall's roof (width, depth, the free
+   * area's centre north of the hall's origin, the roof height). Absent =
+   * its own canopy.
+   */
+  roof?: { w: number; d: number; cy: number; h: number }
 }
 
 export interface TemplateOutput {
@@ -82,8 +90,8 @@ export interface TemplateOutput {
   /** Units each drawn part stands for (> 1 beyond the draw cap). */
   each: number
   anchors: Anchors
-  /** Hall height, for rooftop PV. */
-  roofHeight?: number
+  /** Rooftop PV: false when not even one table fits the roof (it stays on its canopy). */
+  fitsRoof?: boolean
 }
 
 /** Which anchors each template provides (asserted by templates.test.ts). */
@@ -128,9 +136,9 @@ const num = (p: Record<string, ParamValue>, k: string): number => p[k] as number
 const str = (p: Record<string, ParamValue>, k: string): string => p[k] as string
 const opt = (p: Record<string, ParamValue>, k: string): string | undefined => (typeof p[k] === 'string' ? (p[k] as string) : undefined)
 
-/** A slim gauge region beside the units' east edge. */
-function gaugeBeside(w: number, d: number, h: number): Anchors['fill'] {
-  return { pos: [w / 2 + 1.2, 0, h / 2], size: [0.6, Math.max(d, 2), h] }
+/** A slim gauge bar across the top of the units (inside the footprint; it fills along east). */
+function gaugeAbove(w: number, h: number): Anchors['fill'] {
+  return { pos: [0, 0, h + 1.2], size: [Math.max(w * 0.8, 2), 0.6, 0.6] }
 }
 
 // ── templates ───────────────────────────────────────────────────────────────
@@ -209,7 +217,7 @@ function unitGrid(p: Record<string, ParamValue>, input: TemplateInput): Template
   if (extra === 'pcs') {
     // A PCS / inverter skid per row, on its west side.
     for (let r = 0; r < rows; r++) g.parts.push({ pos: [-g.footprint[0] / 2 - 3, -g.footprint[1] / 2 + unit[1] / 2 + r * (unit[1] + gap), 1.2], size: [2.4, 2.4, 2.4], color: extraColor })
-    anchors.fill = gaugeBeside(g.footprint[0], g.footprint[1], unit[2])
+    anchors.fill = gaugeAbove(g.footprint[0], unit[2])
     g.footprint[0] += 6
   } else if (extra === 'stack') {
     // One exhaust stack per row, on its east side.
@@ -219,12 +227,13 @@ function unitGrid(p: Record<string, ParamValue>, input: TemplateInput): Template
     // Compressor / balance-of-plant building alongside, to the north.
     g.parts.push({ pos: [0, g.footprint[1] / 2 + 8, 3], size: [Math.max(15, g.footprint[0]), 10, 6], color: extraColor })
     g.footprint[1] += 16
+    g.footprint[0] = Math.max(g.footprint[0], 15)
   } else if (extra === 'coolers') {
     // A row of dry coolers to the north.
     g.parts.push({ pos: [0, g.footprint[1] / 2 + 4, 1.5], size: [Math.max(6, g.footprint[0]), 4, 3], color: extraColor })
     g.footprint[1] += 6
   }
-  if (p.anchor === 'fill' && !anchors.fill) anchors.fill = gaugeBeside(g.footprint[0], g.footprint[1], unit[2])
+  if (p.anchor === 'fill' && !anchors.fill) anchors.fill = gaugeAbove(g.footprint[0], unit[2])
   if (p.anchor === 'emissive') anchors.emissive = true
   return { parts: g.parts, footprint: g.footprint, areaM2: g.footprint[0] * g.footprint[1], count: n, each, anchors }
 }
@@ -237,8 +246,8 @@ function tankArray(p: Record<string, ParamValue>, input: TemplateInput): Templat
   const { drawn, each } = capped(n)
   const g = gridParts(drawn, unit, num(p, 'perRow'), num(p, 'gap'), { shape: 'cylinder', axis, heroable: p.heroable === true })
   return {
-    parts: g.parts, footprint: [g.footprint[0] + 2.4, g.footprint[1]], areaM2: (g.footprint[0] + 2.4) * g.footprint[1], count: n, each,
-    anchors: { fill: gaugeBeside(g.footprint[0], g.footprint[1], unit[2]) },
+    parts: g.parts, footprint: g.footprint, areaM2: g.footprint[0] * g.footprint[1], count: n, each,
+    anchors: { fill: gaugeAbove(g.footprint[0], unit[2]) },
   }
 }
 
@@ -262,7 +271,8 @@ function turbineArray(p: Record<string, ParamValue>, input: TemplateInput): Temp
     rotors.push({ turbine: i, hub: hubPos })
     for (let b = 0; b < 3; b++) {                                                                                             // blades, rotor facing south
       const a = b * (2 * Math.PI / 3)
-      parts.push({ pos: [x + Math.cos(a) * rotor / 4, y - 8, hub + Math.sin(a) * rotor / 4], size: [rotor / 2, 0.5, 3], rotN: a, color: blade, anchor: 'rotor', turbine: i })
+      // Radial: the blade's east axis turns to (cos a, sin a) in the (east, up) plane, i.e. rotN = −a.
+      parts.push({ pos: [x + Math.cos(a) * rotor / 4, y - 8, hub + Math.sin(a) * rotor / 4], size: [rotor / 2, 0.5, 3], rotN: -a, color: blade, anchor: 'rotor', turbine: i })
     }
   }
   const footprint: [number, number] = [w + rotor, d + rotor]
@@ -290,21 +300,33 @@ function pvRoof(p: Record<string, ParamValue>, input: TemplateInput): TemplateOu
   const mw = Math.max(input.amount, num(p, 'minMw'))
   const panelM2 = mw * num(p, 'm2PerMwp')
   const rowLength = num(p, 'rowLength'), depth = num(p, 'tableDepth'), gap = num(p, 'tableGap')
-  const side = Math.sqrt(panelM2 * 1.6)
-  const perRow = Math.max(1, Math.round(side / (rowLength + gap)))
   const n = Math.max(1, Math.round(panelM2 / (rowLength * depth)))
-  const { drawn, each } = capped(n)
-  const g = gridParts(drawn, [rowLength, depth, 0.1], perRow, gap, { heroable: true })
-  const lift = input.onRoof ? 0.4 : num(p, 'canopyHeight')
-  for (const part of g.parts) { part.rotX = num(p, 'tiltDeg') * Math.PI / 180; part.pos[2] = lift }
-  if (!input.onRoof) {
-    // A canopy frame: four posts under the corners.
-    const [w, d] = g.footprint
-    for (const [x, y] of [[-w / 2, -d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [w / 2, d / 2]]) {
-      g.parts.push({ pos: [x, y, lift / 2], size: [0.3, 0.3, lift], color: str(p, 'postColor') })
+  const tilt = num(p, 'tiltDeg') * Math.PI / 180
+  if (input.roof) {
+    // As many tables as the free roof holds; beyond that each drawn table stands for several.
+    const perRow = Math.floor((input.roof.w + gap) / (rowLength + gap))
+    const rows = Math.floor((input.roof.d + gap) / (depth + gap))
+    const fit = perRow * rows
+    if (fit >= 1) {
+      const drawn = Math.min(n, fit, MAX_UNITS)
+      const each = Math.ceil(n / drawn)
+      const g = gridParts(drawn, [rowLength, depth, 0.1], perRow, gap, { heroable: true })
+      for (const part of g.parts) { part.rotX = tilt; part.pos[1] += input.roof.cy; part.pos[2] = 0.4 }
+      return { parts: g.parts, footprint: [input.roof.w, input.roof.d], areaM2: 0, count: n, each, anchors: { emissive: true }, fitsRoof: true }
     }
   }
-  return { parts: g.parts, footprint: g.footprint, areaM2: 0, count: n, each, anchors: { emissive: true } }
+  const side = Math.sqrt(panelM2 * 1.6)
+  const perRow = Math.max(1, Math.round(side / (rowLength + gap)))
+  const { drawn, each } = capped(n)
+  const g = gridParts(drawn, [rowLength, depth, 0.1], perRow, gap, { heroable: true })
+  const lift = num(p, 'canopyHeight')
+  for (const part of g.parts) { part.rotX = tilt; part.pos[2] = lift }
+  // A canopy frame: four posts under the corners.
+  const [w, d] = g.footprint
+  for (const [x, y] of [[-w / 2, -d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [w / 2, d / 2]]) {
+    g.parts.push({ pos: [x, y, lift / 2], size: [0.3, 0.3, lift], color: str(p, 'postColor') })
+  }
+  return { parts: g.parts, footprint: g.footprint, areaM2: 0, count: n, each, anchors: { emissive: true }, fitsRoof: input.roof ? false : undefined }
 }
 
 function hall(p: Record<string, ParamValue>, input: TemplateInput): TemplateOutput {
@@ -316,7 +338,7 @@ function hall(p: Record<string, ParamValue>, input: TemplateInput): TemplateOutp
       // Rooftop plant strip so it reads as a building, not a slab.
       { pos: [0, d / 4, h + 1.5], size: [w * 0.6, d * 0.2, 3], color: str(p, 'roofColor') },
     ],
-    footprint: [w, d], areaM2, count: 1, each: 1, anchors: { emissive: true }, roofHeight: h,
+    footprint: [w, d], areaM2, count: 1, each: 1, anchors: { emissive: true },
   }
 }
 
@@ -334,8 +356,9 @@ function reservoir(p: Record<string, ParamValue>, input: TemplateInput): Templat
     { pos: [side / 2 + 4 + ph[0] / 2, 0, ph[2] / 2], size: ph, color: str(p, 'powerhouseColor') },
   ]
   const footprint: [number, number] = [side + 8 + ph[0], side + 4]
+  // Land: the basin inside its embankments, plus the powerhouse.
   return {
-    parts, footprint, areaM2: footprint[0] * footprint[1], count: 1, each: 1,
+    parts, footprint, areaM2: (side + 4) * (side + 4) + ph[0] * ph[1], count: 1, each: 1,
     anchors: { fill: { pos: [0, 0, wall / 2], size: [side - 2, side - 2, wall] } },
   }
 }
@@ -375,7 +398,7 @@ function cube(p: Record<string, ParamValue>, input: TemplateInput): TemplateOutp
   return {
     parts: [{ pos: [0, 0, side / 2], size: [side, side, side] }],
     footprint: [side, side], areaM2: side * side, count: 1, each: 1,
-    anchors: { fill: gaugeBeside(side, side, side) },
+    anchors: { fill: gaugeAbove(side, side) },
   }
 }
 
@@ -383,6 +406,30 @@ const RUN: Record<TemplateId, (p: Record<string, ParamValue>, input: TemplateInp
   yard, manifold, transformer, bay: p => bay(p), unitGrid, tankArray, turbineArray, pvField, pvRoof, hall, reservoir, plant, cube,
 }
 
+/**
+ * Run a template, then centre its parts inside the footprint: some
+ * templates add an extra (a PCS row, a stack, a heat-recovery boiler) on one
+ * side while the footprint grows on both, and a part sticking out of its
+ * footprint cuts into its neighbour (WP1 review gate). Rotations are ignored
+ * for the extent (an over-estimate for tilted or turned parts).
+ */
 export function runTemplate(geometry: Geometry, input: TemplateInput): TemplateOutput {
-  return RUN[geometry.template](geometry.params, input)
+  const out = RUN[geometry.template](geometry.params, input)
+  // Placed on a roof: its offset is the free part of the roof, not a centring error.
+  if (!out.parts.length || out.fitsRoof) return out
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
+  for (const q of out.parts) {
+    if (q.anchor === 'rotor') continue
+    x0 = Math.min(x0, q.pos[0] - q.size[0] / 2); x1 = Math.max(x1, q.pos[0] + q.size[0] / 2)
+    y0 = Math.min(y0, q.pos[1] - q.size[1] / 2); y1 = Math.max(y1, q.pos[1] + q.size[1] / 2)
+  }
+  const dx = -(x0 + x1) / 2, dy = -(y0 + y1) / 2
+  if (Math.abs(dx) < 1e-9 && Math.abs(dy) < 1e-9) return out
+  const shift = (v: [number, number, number]): [number, number, number] => [v[0] + dx, v[1] + dy, v[2]]
+  for (const q of out.parts) q.pos = shift(q.pos)
+  const a = out.anchors
+  if (a.fill) a.fill = { ...a.fill, pos: shift(a.fill.pos) }
+  if (a.flow) a.flow = { from: shift(a.flow.from), to: shift(a.flow.to) }
+  if (a.rotors) a.rotors = a.rotors.map(r => ({ ...r, hub: shift(r.hub) }))
+  return out
 }

@@ -37,6 +37,7 @@ import {
   groundMode, hillshadeCanvas, terrainCellMetres, RIBBON_COLOR, AREA_COLOR, BUILDING_COLOR, OSM_ATTRIBUTION, type HeightAt,
 } from '../site3d/context'
 import { buildSiteLayout, objectKey, type SiteObject, type Part } from '../site3d/layout'
+import { partShape } from '../site3d/partGeometry'
 import { DEFAULT_LIBRARY, legendFor } from '../site3d/assetLibrary'
 import { matrixFor, placementFromMatrix } from '../site3d/placementMath'
 import { screenToGround, groundToScreen } from '../site3d/raycast'
@@ -55,17 +56,15 @@ import type { Site, SiteContext } from '../site3d/types'
 // ── One object = one group of boxes, one click target ────────────────────────
 
 /**
- * One part's geometry. A box is sized (east, height, north) in scene axes; a
- * cylinder keeps the same size order (spec E4) and lies along its axis: three's
- * cylinder stands along scene Y (up), so a north-lying one is turned about X
- * and an east-lying one about Z.
+ * One part's geometry, built once per part shape (partGeometry.ts): the
+ * cylinder's axis is baked in there, not applied by an `onUpdate` callback
+ * (r3f ran it twice at mount, which turned lying cylinders upright again).
  */
 function PartGeometry({ part }: { part: Part }) {
-  if (part.shape !== 'cylinder') return <boxGeometry args={toBoxArgs(part.size)} />
-  const [e, n, h] = part.size
-  if (part.axis === 'north') return <cylinderGeometry args={[e / 2, e / 2, n, 16]} onUpdate={g => g.rotateX(Math.PI / 2)} />
-  if (part.axis === 'east') return <cylinderGeometry args={[n / 2, n / 2, e, 16]} onUpdate={g => g.rotateZ(Math.PI / 2)} />
-  return <cylinderGeometry args={[e / 2, e / 2, h, 16]} />
+  const geometry = useMemo(() => partShape(part),
+    [part.shape, part.axis, part.size[0], part.size[1], part.size[2]]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => geometry.dispose(), [geometry])
+  return <primitive object={geometry} attach="geometry" />
 }
 
 function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSelect }: {
@@ -718,7 +717,8 @@ export default function SiteCanvas() {
           // ground plane, rotate about the vertical, no scaling.
           return (
             <group key={`lift:${key}`} position={[0, lift, 0]}>
-              <SelectedPivot obj={o} enabled={!readOnly}
+              {/* An object on a roof follows its hall; it has no placement of its own to move. */}
+              <SelectedPivot obj={o} enabled={!readOnly && !o.elevation}
                 onCommit={p => setPlacement(currentProject, site.id, key, p)}>
                 {mesh}
               </SelectedPivot>
@@ -762,7 +762,7 @@ export default function SiteCanvas() {
         unplacedMembers={unplacedMembers}
         selectedPlacedKey={selectedPlacedKey}
         canArrange={allLoaded}
-        onArrange={() => arrangeAll(currentProject, site.id, objects.map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading })), layout.orphans)}
+        onArrange={() => arrangeAll(currentProject, site.id, objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading })), layout.orphans)}
         onResetPlacement={() => { if (selectedPlacedKey) removePlacement(currentProject, site.id, selectedPlacedKey) }}
       />
 

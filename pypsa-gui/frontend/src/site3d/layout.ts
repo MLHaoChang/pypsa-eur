@@ -22,7 +22,7 @@ import {
   DEFAULT_LIBRARY, validateLibrary, matchType, labelOf,
   type AssetType, type MatchComponent, type MatchContext, type MatchResult, type PyPSAClass, type Zone,
 } from './assetLibrary'
-import { runTemplate, type Anchors, type Part, type TemplateOutput } from './templates'
+import { runTemplate, type Anchors, type Part, type TemplateInput, type TemplateOutput } from './templates'
 
 export type { Part, Anchors } from './templates'
 
@@ -123,7 +123,7 @@ function sizeOf(type: AssetType, cls: PyPSAClass, c: MatchComponent): Sized {
 
 interface Candidate { cls: PyPSAClass; comp: MatchComponent; m: MatchResult }
 
-function objectFrom(cls: PyPSAClass, comp: MatchComponent, m: MatchResult, input: { bays?: number; vNom?: number; onRoof?: boolean } = {}): { obj: SiteObject; out: TemplateOutput } {
+function objectFrom(cls: PyPSAClass, comp: MatchComponent, m: MatchResult, input: Omit<TemplateInput, 'amount'> = {}): { obj: SiteObject; out: TemplateOutput } {
   const t = m.type
   const size = sizeOf(t, cls, comp)
   const out = runTemplate(t.geometry, { amount: size.amount, ...input })
@@ -134,6 +134,7 @@ function objectFrom(cls: PyPSAClass, comp: MatchComponent, m: MatchResult, input
     summary: t.summary({
       cls, name: comp.name, carrier, amount: size.amount, unit: size.unit, count: out.count, each: out.each, areaM2: out.areaM2,
       mw: size.mw, vNom: input.vNom, vHi: comp.v_nom_0 as number | undefined, vLo: comp.v_nom_1 as number | undefined, far: m.far,
+      params: t.geometry.params,
     }),
     areaM2: out.areaM2, anchors: out.anchors,
   }
@@ -157,7 +158,7 @@ function packZone(objs: SiteObject[], origin: [number, number], maxRowWidth: num
 }
 
 /** The objects attached to one bus, packed around its yard at `frameOrigin` (site frame). */
-function buildBus(bus: SiteBusInput, candidates: Candidate[], ctx: MatchContext, lib: readonly AssetType[], frameOrigin: [number, number]): SiteObject[] {
+function buildBus(bus: SiteBusInput, candidates: Candidate[], ctx: MatchContext, lib: readonly AssetType[], frameOrigin: [number, number], roofAvailable: boolean): SiteObject[] {
   const mine = candidates.filter(c => c.m.owner === bus.name)
   const objs = mine.map(c => objectFrom(c.cls, c.comp, c.m).obj)
   const bays = mine.filter(c => c.m.type.flags?.bay).length
@@ -170,10 +171,16 @@ function buildBus(bus: SiteBusInput, candidates: Candidate[], ctx: MatchContext,
   // Pack each zone against the yard, in the yard's own frame, then shift
   // everything by the yard's position in the site frame. Big things (PV,
   // wind) go south so they never sit between the camera's default vantage
-  // (south, looking north) and the yard. Rooftop PV waits in the south zone
-  // until the rooftop pass puts it on a hall.
+  // (south, looking north) and the yard. Rooftop PV is not packed when the
+  // site has a data hall (the rooftop pass puts it on the roof — packing it
+  // first would leave a hole in the south row); without one it stands on
+  // its canopy in the south zone.
   const zoneOf = new Map(lib.map(t => [t.id, t.zone]))
-  const by = (z: Zone) => objs.filter(o => (zoneOf.get(o.kind) === 'roof' ? 'south' : zoneOf.get(o.kind)) === z)
+  const zone = (o: SiteObject): Zone | null => {
+    const z = zoneOf.get(o.kind) ?? 'south'
+    return z === 'roof' ? (roofAvailable ? null : 'south') : z
+  }
+  const by = (z: Zone) => objs.filter(o => zone(o) === z)
   const M = 12 // margin from the yard
   packZone(by('north'), [-yw / 2, yd / 2 + M], yw, 1)
   packZone(by('west'), [-yw / 2 - M, -yd / 2], 80, 1, -1)
@@ -216,15 +223,23 @@ function rooftopPass(objects: SiteObject[], candidates: Candidate[], lib: readon
   const halls = objects.filter(o => o.kind === hallType)
   if (!halls.length) return
   const hall = halls.reduce((a, b) => (b.areaM2 > a.areaM2 ? b : a))
-  // The hall's body is its first part; its top is the roof.
+  // The hall's body is its first part: its top is the roof. The rooftop
+  // plant strip covers the band 0.15–0.35 of the depth north of centre, so
+  // the panels take the southern part of the roof, 1 m in from every edge.
   const body = hall.parts[0]
-  const roofHeight = body.pos[2] + body.size[2] / 2
+  const [w, d] = hall.footprint
+  const free = { w: w - 2, d: 0.65 * d - 2, cy: body.pos[1] + (-d / 2 + 1 + 0.15 * d - 1) / 2, h: body.pos[2] + body.size[2] / 2 }
   for (const o of objects) {
     if (!roofTypes.has(o.kind)) continue
     const c = candidates.find(x => x.cls === o.type && x.comp.name === o.name)
     if (!c) continue
-    const { obj } = objectFrom(c.cls, c.comp, c.m, { onRoof: true })
-    Object.assign(o, { parts: obj.parts, footprint: obj.footprint, origin: [...hall.origin], heading: hall.heading, elevation: roofHeight })
+    const { obj, out } = objectFrom(c.cls, c.comp, c.m, { roof: free })
+    if (out.fitsRoof) {
+      Object.assign(o, { parts: obj.parts, footprint: obj.footprint, summary: obj.summary, origin: [...hall.origin], heading: hall.heading, elevation: free.h })
+    } else {
+      // Not one table fits the roof: the canopy stands just south of the hall.
+      o.origin = [hall.origin[0], hall.origin[1] - d / 2 - o.footprint[1] / 2 - 8]
+    }
   }
 }
 
@@ -244,6 +259,8 @@ export function buildSiteLayout(input: SiteInput): SiteLayout {
   const ctx: MatchContext = { members, busCarrier: input.busCarrier ?? (() => undefined) }
   const candidates = candidatesFor(input, ctx, lib)
   const roofTypes = new Set(lib.filter(t => t.zone === 'roof').map(t => t.id))
+  const hallType = lib.find(t => t.geometry.template === 'hall')?.id
+  const roofAvailable = candidates.some(c => c.m.type.id === hallType)
   const objects: SiteObject[] = []
   const placed: string[] = []
 
@@ -251,7 +268,7 @@ export function buildSiteLayout(input: SiteInput): SiteLayout {
     const yardKey = `Bus:${bus.name}`
     const yardPlacement = placements[yardKey]
     const frameOrigin: [number, number] = yardPlacement ? [yardPlacement.x, yardPlacement.y] : bus.offset
-    for (const o of buildBus(bus, candidates, ctx, lib, frameOrigin)) {
+    for (const o of buildBus(bus, candidates, ctx, lib, frameOrigin, roofAvailable)) {
       const p = placements[objectKey(o)]
       if (p) {
         o.origin = [p.x, p.y]

@@ -313,6 +313,36 @@ describe('buildSiteLayout — several buses, placements, rules (WP3)', () => {
     // Exempt from the no-overlap rule (it is on the roof), and fit.ts land sum excludes it (areaM2 0).
   })
 
+  it('rooftop PV fits the free part of the roof, clear of the rooftop plant', () => {
+    const { objects } = buildSiteLayout(multi(['B'], {
+      loads: [ld({ name: 'hall', bus: 'B', p_set: 1 })],
+      generators: [gen({ name: 'roof', bus: 'B', carrier: 'solar-rooftop', p_nom: 1 })],
+    }))
+    const hall = objects.find(o => o.name === 'hall')!, roof = objects.find(o => o.name === 'roof')!
+    expect(roof.elevation).toBeGreaterThan(0)
+    expect(roof.footprint[0]).toBeLessThanOrEqual(hall.footprint[0])
+    expect(roof.footprint[1]).toBeLessThanOrEqual(hall.footprint[1])
+    const [w, d] = hall.footprint
+    for (const p of roof.parts) {
+      expect(Math.abs(p.pos[0]) + p.size[0] / 2).toBeLessThanOrEqual(w / 2)
+      expect(p.pos[1] + p.size[1] / 2).toBeLessThanOrEqual(0.15 * d)   // south of the plant strip
+      expect(p.pos[1] - p.size[1] / 2).toBeGreaterThanOrEqual(-d / 2)
+    }
+    expect(roof.summary).toMatch(/each table = \d+|Rooftop PV/)
+  })
+
+  it('rooftop PV on a site with a hall leaves no hole in the south zone', () => {
+    const withRoof = buildSiteLayout(multi(['B'], {
+      loads: [ld({ name: 'hall', bus: 'B', p_set: 5 })],
+      generators: [gen({ name: 'roof', bus: 'B', carrier: 'solar-rooftop', p_nom: 1 }), gen({ name: 'field', bus: 'B', carrier: 'solar', p_nom: 1 })],
+    }))
+    const without = buildSiteLayout(multi(['B'], {
+      loads: [ld({ name: 'hall', bus: 'B', p_set: 5 })],
+      generators: [gen({ name: 'field', bus: 'B', carrier: 'solar', p_nom: 1 })],
+    }))
+    expect(withRoof.objects.find(o => o.name === 'field')!.origin).toEqual(without.objects.find(o => o.name === 'field')!.origin)
+  })
+
   it('rooftop PV without a hall stands on a canopy in the south zone', () => {
     const { objects } = buildSiteLayout({ ...empty, generators: [gen({ name: 'roof', carrier: 'solar-rooftop', p_nom: 1 })] })
     const roof = objects.find(o => o.name === 'roof')!

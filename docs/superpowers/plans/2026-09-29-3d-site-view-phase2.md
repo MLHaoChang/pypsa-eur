@@ -139,7 +139,7 @@ This is a deliberate change to a Phase 1 test, required by the spec (SiteCanvas-
 **Red (`layout.test.ts`, new cases):**
 - Electrolyser with both its AC bus and its H2 bus as site members → one object, drawn from the AC bus; fuel cell likewise from its AC bus (bus1); the Phase 1 invariant "a two-terminal component is drawn once" (lines 165–172) stays green.
 - An electrolyser whose H2 bus is **not** a member → still drawn, from the AC bus.
-- CHP (gas bus0, AC bus1, heat bus2) with only the heat bus as a member → drawn once, from the heat bus; with all three members → from bus0 (its rule's port).
+- CHP (gas bus0, AC bus1, heat bus2) with only the heat bus as a member → drawn once, as a feeder bay from the heat bus (its rule's port, bus1, is not a member); with all three members → a CHP from bus1 (its rule's port; amended in WP1: the plant stands with the electrical assets).
 - `bus2: ''` counts as absent.
 - `SiteObject` gains `bus` (owner) and `far` (the other electrical end for branches), asserted for a line owned through bus1.
 
