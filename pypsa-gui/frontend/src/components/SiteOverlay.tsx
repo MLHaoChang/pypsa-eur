@@ -1,6 +1,7 @@
 // The 3D site view's control strip: site picker, counts, the fit check,
 // Arrange / Reset placement. DOM only (testable in jsdom); the canvas
-// supplies the numbers and the callbacks. Editing controls follow the
+// supplies the numbers and the callbacks, and positions the strip (it
+// stacks the legend under it, so a wrapped strip never hides under the legend). Editing controls follow the
 // app's read-only vocabulary: `disabled` + `title={readOnlyMessage(...)}`.
 import { useUIStore } from '../store/uiStore'
 import { readOnlyMessage, READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
@@ -33,7 +34,7 @@ export default function SiteOverlay({ sites, site, onPickSite, assetCount, fit, 
   const readOnlyReason = useUIStore(s => s.readOnlyReason)
   const blocked = readOnly ? (readOnlyMessage(readOnlyReason) ?? READ_ONLY_MUTATION_MESSAGE) : undefined
   return (
-    <div className="absolute left-3 top-12 z-[400] flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border bg-bg/95 px-2 py-1.5 text-[11px] shadow max-w-[calc(100%-24px)]">
+    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border bg-bg/95 px-2 py-1.5 text-[11px] shadow max-w-full">
       <span className="text-muted">Site</span>
       <select className="bg-transparent text-text outline-none" value={site.id} onChange={e => onPickSite(e.target.value)} aria-label="Site">
         {sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}

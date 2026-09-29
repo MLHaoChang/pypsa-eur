@@ -7,7 +7,8 @@
 // as stale after an edit. Same query key as the status bar, so the two
 // share one request; the status bar toasts only from its own solve
 // states, never from data this poll brings in.
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { simulationApi } from '../api/simulation'
 import type { SimulationStatus } from '../api/types'
 import { nk } from '../utils/queryKeys'
@@ -17,6 +18,8 @@ export const STATUS_POLL_MS = 3000
 export interface DispatchFreshness {
   fresh: boolean
   dispatch: SimulationStatus['dispatch']
+  /** Which solve is fresh (its objective and solve time); null when not fresh, undefined before the first answer. */
+  solveId: string | null | undefined
 }
 
 export function useDispatchFresh(project: string | null): DispatchFreshness {
@@ -29,5 +32,26 @@ export function useDispatchFresh(project: string | null): DispatchFreshness {
     enabled: !!project,
     refetchInterval: STATUS_POLL_MS,
   })
-  return { fresh: data?.dispatch === 'fresh', dispatch: data?.dispatch }
+  const fresh = data?.dispatch === 'fresh'
+  return { fresh, dispatch: data?.dispatch, solveId: !data ? undefined : fresh ? `${data.objective ?? ''}|${data.solve_time ?? ''}` : null }
+}
+
+/**
+ * Refetch the component lists when a new solve turns fresh. A solve writes
+ * `*_nom_opt` into them, and no solve path invalidates them (only results
+ * and status), so optimised sizes would otherwise be the previous solve's.
+ * Not on first sight: the lists were fetched with the view.
+ */
+export function useRefetchOnSolve(project: string | null, solveId: string | null | undefined, lists: readonly string[]): void {
+  const qc = useQueryClient()
+  const seen = useRef<string | null | undefined>(undefined)
+  const listsRef = useRef(lists)
+  listsRef.current = lists
+  useEffect(() => {
+    if (solveId === undefined) return
+    const prev = seen.current
+    seen.current = solveId
+    if (prev === undefined || solveId === null || solveId === prev) return
+    for (const k of listsRef.current) qc.invalidateQueries({ queryKey: nk(project, k) })
+  }, [solveId, project, qc])
 }

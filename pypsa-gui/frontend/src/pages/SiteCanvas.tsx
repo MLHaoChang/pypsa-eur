@@ -47,7 +47,7 @@ import { matrixFor, placementFromMatrix } from '../site3d/placementMath'
 import { screenToGround, groundToScreen } from '../site3d/raycast'
 import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/dropRegistry'
 import SiteOverlay from '../components/SiteOverlay'
-import { useDispatchFresh } from '../site3d/useDispatchFresh'
+import { useDispatchFresh, useRefetchOnSolve } from '../site3d/useDispatchFresh'
 import { effectiveSizing } from '../site3d/sizing'
 import { toScene, fitCamera, chooseSite, unionBounds, halfSizeFor, type Bounds } from '../site3d/scene'
 import { useSitesStore } from '../site3d/sitesStore'
@@ -61,6 +61,9 @@ import type { Site, SiteContext } from '../site3d/types'
 
 /** The one empty list the component queries fall back to (stable identity). */
 const NONE: never[] = []
+
+/** The component lists that carry `*_nom_opt` (a new solve refetches them). */
+const SIZED_LISTS = ['generators', 'storage_units', 'stores', 'links', 'lines', 'transformers'] as const
 
 /** The hero models' credit (CC0 needs none; the spec gives it anyway, §5.1). */
 const MODELS_ATTRIBUTION = 'Models: Kenney (CC0)'
@@ -521,7 +524,8 @@ function SiteCanvas() {
 
   // Sizes: installed, or the optimum while dispatch is fresh and the
   // overlay's switch says so (spec E6) — an edit falls back at once.
-  const { fresh: dispatchFresh } = useDispatchFresh(currentProject)
+  const { fresh: dispatchFresh, solveId } = useDispatchFresh(currentProject)
+  useRefetchOnSolve(currentProject, solveId, SIZED_LISTS)
   const siteSizing = useUIStore(s => s.siteSizing)
   const sizing = effectiveSizing(siteSizing, dispatchFresh)
 
@@ -813,28 +817,32 @@ function SiteCanvas() {
         })}
       </div>
 
-      <SiteOverlay
-        sites={sitesDoc.sites}
-        site={site}
-        onPickSite={id => { setActiveSiteId(id); writeActiveSite(currentProject, id) }}
-        assetCount={objects.filter(o => !DEFAULT_LIBRARY.find(t => t.id === o.kind)?.flags?.infrastructure).length}
-        fit={fit}
-        unplacedMembers={unplacedMembers}
-        dispatchFresh={dispatchFresh}
-        selectedPlacedKey={selectedPlacedKey}
-        canArrange={allLoaded}
-        onArrange={() => arrangeAll(currentProject, site.id, objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading })), layout.orphans)}
-        onResetPlacement={() => { if (selectedPlacedKey) removePlacement(currentProject, site.id, selectedPlacedKey) }}
-      />
+      {/* The control strip with the legend under it, stacked so a wrapped
+          strip (a narrow pane) pushes the legend down instead of hiding under it. */}
+      <div className="absolute left-3 top-12 z-[400] flex max-w-[calc(100%-24px)] flex-col items-start gap-1.5">
+        <SiteOverlay
+          sites={sitesDoc.sites}
+          site={site}
+          onPickSite={id => { setActiveSiteId(id); writeActiveSite(currentProject, id) }}
+          assetCount={objects.filter(o => !DEFAULT_LIBRARY.find(t => t.id === o.kind)?.flags?.infrastructure).length}
+          fit={fit}
+          unplacedMembers={unplacedMembers}
+          dispatchFresh={dispatchFresh}
+          selectedPlacedKey={selectedPlacedKey}
+          canArrange={allLoaded}
+          onArrange={() => arrangeAll(currentProject, site.id, objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading })), layout.orphans)}
+          onResetPlacement={() => { if (selectedPlacedKey) removePlacement(currentProject, site.id, selectedPlacedKey) }}
+        />
 
-      {/* Legend — under the picker. */}
-      <div className="absolute left-3 top-[5.5rem] z-[400] flex flex-wrap gap-x-3 gap-y-1 rounded-md border border-border bg-bg/95 px-2 py-1.5 text-[11px] shadow max-w-[60%]">
-        {legend.map(e => (
-          <span key={e.id} className="flex items-center gap-1 text-muted">
-            <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: e.color }} />
-            {e.label}
-          </span>
-        ))}
+        {/* Legend — under the picker. */}
+        <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-md border border-border bg-bg/95 px-2 py-1.5 text-[11px] shadow max-w-[60%]">
+          {legend.map(e => (
+            <span key={e.id} className="flex items-center gap-1 text-muted">
+              <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: e.color }} />
+              {e.label}
+            </span>
+          ))}
+        </div>
       </div>
 
       {/* Attribution — bottom-right above the snapshot bar: required for the
