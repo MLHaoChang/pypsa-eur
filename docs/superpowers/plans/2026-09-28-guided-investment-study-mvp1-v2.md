@@ -143,7 +143,7 @@ Every phase follows this loop. **Do not start phase N+1 until phase N's gate is 
 
 **TDD evidence.** Red: `SolverConfig has no attribute demand_charge`; red on the binding test before the wrapper exists.
 
-- [ ] Gate S3
+- [x] Gate S3 — **GO WITH BINDING CONDITIONS, re-gated GO on `71eaf67`** (2026-09-29, `docs/superpowers/notes/2026-09-29-mvp1-s3-gate.md`): BC-S3-1 the export-cycling preflight pairs Links first and densifies only pairs; BC-S3-2 a measured capacity charge is refused (the annual-peak basis through another field). Carried to S4–S7: one billing-period helper shared by the LP and the bill with a test that the bill's charge equals the bridge's; the preflight does not see import-to-export cycling across hours through the battery; resampled snapshots (weightings ≠ 1) are neither refused nor flagged; the bridge reads the current config rather than the one the solve used; an inactive import Link is a traceback, not a typed refusal; S6's value streams must cover the bill's six components; S4's intake must refuse a measured capacity charge; the plan's mutation wording "and nothing else" was over-specified (every test that checks the charge binds must go red).
 
 ## S4. Question pack, mutation boundary, option runner
 
