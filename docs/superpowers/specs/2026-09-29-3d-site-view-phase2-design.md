@@ -185,7 +185,7 @@ Three rules, because no existing observer is reliable (the status bar polls `/si
 A `ResultsLayer` inside the Canvas reads the map for the current snapshot and drives each object's anchors in `useFrame`, easing towards the target over ~300 ms; SiteCanvas and the object meshes do not re-render per snapshot (selector subscriptions, memoised meshes; the driver leaf is the only thing that renders per snapshot, nothing renders per frame). With reduced motion, targets apply instantly and rotors hold still (their speed shows in the label).
 
 - **Fill** is an exterior **gauge** (a bar beside the tank array or container row, its own material), not a plane inside an opaque body.
-- **Glow** uses the emissive channel with a fixed precedence: selected > outside the boundary > results.
+- **Glow** uses the emissive channel with a fixed precedence: selected > hovered > outside the boundary > results (hover is transient and its label says "outside the boundary").
 - **Spin**: each turbine's rotor mesh (parametric) or blade instance (hero) rotates about its own hub.
 - **Flow**: `SiteObject` gains `bus` (its owner) and `far` (the other end); the flow anchor is a segment from the owner's yard side to the far side; chevrons point downstream: `sign(p0) × (bus is bus0 ? 1 : −1)`, and the label names the destination bus.
 - **Not colour-only, and not hover-only**: while results are on, the overlay lists the site's objects with their current value (a compact readout), the legend prints the band thresholds, and the timeline's slider gets an accessible name and value text.

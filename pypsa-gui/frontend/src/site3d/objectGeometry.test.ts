@@ -38,6 +38,11 @@ describe('objectGeometry', () => {
       { pos: [10, 20, 3], size: [2, 4, 6] },
       { pos: [0, 0, 1.5], size: [3, 20, 3], shape: 'cylinder', axis: 'north' },
       { pos: [0, 0, 1.2], size: [30, 2.2, 0.1], rotX: 25 * Math.PI / 180 },
+      { pos: [3, -4, 2], size: [8, 1, 2], rotZ: 0.7 },
+      { pos: [0, -8, 100], size: [70, 0.5, 3], rotN: -2 * Math.PI / 3 },
+      { pos: [1, 1, 3], size: [20, 3, 3], shape: 'cylinder', axis: 'east' },
+      { pos: [1, 1, 50], size: [4, 4, 100], shape: 'cylinder', axis: 'up' },
+      { pos: [5, 5, 5], size: [3, 2, 1], rotX: 0.3, rotZ: -0.4, rotN: 1.1 },
     ]
     for (const p of parts) {
       const merged = new Box3().setFromBufferAttribute(objectGeometry([p], '#000').body!.getAttribute('position') as never)
@@ -71,10 +76,10 @@ describe('objectGeometry', () => {
     expect(objectGeometry([], '#000').body).toBeNull()
   })
 
-  it('merges 120 parts quickly', () => {
+  it('merges 120 parts quickly (median of ten runs after a warm-up, so parallel load does not decide it)', () => {
     const parts: Part[] = Array.from({ length: 120 }, (_, i) => ({ pos: [i * 3, 0, 1], size: [2, 2, 2], shape: i % 2 ? 'cylinder' : 'box' }))
-    const t0 = performance.now()
     objectGeometry(parts, '#000')
-    expect(performance.now() - t0).toBeLessThan(50)
+    const times = Array.from({ length: 10 }, () => { const t0 = performance.now(); objectGeometry(parts, '#000'); return performance.now() - t0 }).sort((a, b) => a - b)
+    expect(times[5]).toBeLessThan(50)
   })
 })

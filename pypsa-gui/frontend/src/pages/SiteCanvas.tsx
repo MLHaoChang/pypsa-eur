@@ -54,7 +54,23 @@ import SiteEmptyState from '../components/SiteEmptyState'
 import type { Bus } from '../api/types'
 import type { Site, SiteContext } from '../site3d/types'
 
-// ── One object = one group of boxes, one click target ────────────────────────
+/** The one empty list the component queries fall back to (stable identity). */
+const NONE: never[] = []
+
+/**
+ * What an object's geometry is made of, as a string: the layout returns new
+ * `parts` / `anchors` arrays on every build, so identity says nothing; the
+ * content decides whether the merged geometry (and the memoised mesh) must
+ * change. Cached per object instance.
+ */
+const signatures = new WeakMap<SiteObject, string>()
+function geometrySignature(o: SiteObject): string {
+  let sig = signatures.get(o)
+  if (sig === undefined) { sig = JSON.stringify([o.parts, o.color, o.anchors]); signatures.set(o, sig) }
+  return sig
+}
+
+// ── One object = one merged mesh (plus a rotor per turbine), one click target ─
 
 /**
  * One site object: its merged body (every part except the rotor blades, one
@@ -78,7 +94,9 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
   countRender(`mesh:${obj.type}:${obj.name}`)
   const [ox, oy] = pivot ? [0, 0] : obj.origin
   const heading = pivot ? 0 : obj.heading
-  const geom = useMemo(() => objectGeometry(obj.parts, obj.color, obj.anchors), [obj.parts, obj.color, obj.anchors])
+  const sig = geometrySignature(obj)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const geom = useMemo(() => objectGeometry(obj.parts, obj.color, obj.anchors), [sig])
   useEffect(() => () => { geom.body?.dispose(); for (const r of geom.rotors) r.geometry.dispose() }, [geom])
   const glow = emissiveFor({ selected, hovered, outside }, obj.color)
   const material = (
@@ -97,12 +115,17 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
       {geom.body && <mesh geometry={geom.body} castShadow receiveShadow>{material}</mesh>}
       {geom.rotors.map(r => (
         <group key={r.turbine} name={`rotor:${r.turbine}`} position={r.origin}>
-          <mesh geometry={r.geometry} castShadow>{material}</mesh>
+          <mesh geometry={r.geometry} castShadow receiveShadow>{material}</mesh>
         </group>
       ))}
     </group>
   )
-})
+}, (a, b) =>
+  a.selected === b.selected && a.hovered === b.hovered && a.outside === b.outside && a.pivot === b.pivot &&
+  a.onHover === b.onHover && a.onSelect === b.onSelect &&
+  // The same object if the layout rebuilt it with the same content and place.
+  (a.obj === b.obj || (objectKey(a.obj) === objectKey(b.obj) && a.obj.origin[0] === b.obj.origin[0] && a.obj.origin[1] === b.obj.origin[1] &&
+    a.obj.heading === b.obj.heading && a.obj.elevation === b.obj.elevation && a.obj.summary === b.obj.summary && geometrySignature(a.obj) === geometrySignature(b.obj))))
 
 // ── Hover / selection labels: plain DOM over the canvas ──────────────────────
 //
@@ -417,9 +440,11 @@ function SiteCanvas() {
   const qTr    = useQuery({ queryKey: nk(currentProject, 'transformers'),  queryFn: networkApi.getTransformers })
   const qLine  = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })
   const qLink  = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks })
-  const buses = qBuses.data ?? [], isLoading = qBuses.isLoading
-  const generators = qGen.data ?? [], storageUnits = qSu.data ?? [], stores = qSt.data ?? [], loads = qLoad.data ?? []
-  const transformers = qTr.data ?? [], lines = qLine.data ?? [], links = qLink.data ?? []
+  // A stable empty list while a query loads or fails: a fresh `[]` per
+  // render would rebuild the layout (and re-merge every object) each time.
+  const buses = qBuses.data ?? NONE, isLoading = qBuses.isLoading
+  const generators = qGen.data ?? NONE, storageUnits = qSu.data ?? NONE, stores = qSt.data ?? NONE, loads = qLoad.data ?? NONE
+  const transformers = qTr.data ?? NONE, lines = qLine.data ?? NONE, links = qLink.data ?? NONE
   // Arrange rewrites the placement map from the CURRENT layout; with a
   // component list still loading (or failed) it would write a partial site.
   const allLoaded = [qBuses, qGen, qSu, qSt, qLoad, qTr, qLine, qLink].every(q => q.isSuccess)

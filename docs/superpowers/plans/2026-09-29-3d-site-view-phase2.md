@@ -173,7 +173,7 @@ This is a deliberate change to a Phase 1 test, required by the spec (SiteCanvas-
 
 **Green:**
 - `SiteObjectMesh` renders the merged body (`meshStandardMaterial vertexColors`) plus one `<group position={hub}>` + rotor mesh per turbine; geometry memoised on the part list, disposed on change.
-- Selection: with vertex colours, `color '#fff'` no longer whitens the body; selection/hover/outside use **emissive** only, through `emissiveFor(selected, outside, result?)` (pure, in `site3d/resultStyle.ts`; precedence selected > outside > result).
+- Selection: with vertex colours, `color '#fff'` no longer whitens the body; selection/hover/outside use **emissive** only, through `emissiveFor(selected, hovered, outside, result?)` (pure, in `site3d/resultStyle.ts`; precedence selected > hovered > outside > result — amended after the WP2 gate).
 - Render isolation (**Task 6.0 of the v1 review, moved here**): SiteCanvas subscribes with selectors (no bare `useUIStore()`), `SiteObjectMesh` is `React.memo` with stable callbacks.
 
 **Red:** `resultStyle.test.ts` for `emissiveFor` precedence; `bundleBoundary.test.ts` lists `objectGeometry.ts`.
