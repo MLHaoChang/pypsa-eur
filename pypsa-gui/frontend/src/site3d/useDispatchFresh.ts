@@ -7,7 +7,7 @@
 // as stale after an edit. Same query key as the status bar, so the two
 // share one request; the status bar toasts only from its own solve
 // states, never from data this poll brings in.
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { simulationApi } from '../api/simulation'
 import type { SimulationStatus } from '../api/types'
@@ -36,22 +36,47 @@ export function useDispatchFresh(project: string | null): DispatchFreshness {
   return { fresh, dispatch: data?.dispatch, solveId: !data ? undefined : fresh ? `${data.objective ?? ''}|${data.solve_time ?? ''}` : null }
 }
 
+export interface SolveSettled {
+  /**
+   * The lists were refetched for this fresh solve and still hold that data:
+   * an edit (a list refetch that brings different data) ends it at once,
+   * before the status poll catches up; a refetch with identical data
+   * (structural sharing keeps the reference) does not.
+   */
+  current: boolean
+  /** When this solve was first seen (ms), or 0 when it was already fresh as the view opened (a warm cache is valid). */
+  freshSince: number
+}
+
 /**
- * Refetch the component lists when a new solve turns fresh. A solve writes
- * `*_nom_opt` into them, and no solve path invalidates them (only results
- * and status), so optimised sizes would otherwise be the previous solve's.
- * Not on first sight: the lists were fetched with the view.
+ * Settle the component lists on each fresh solve. A solve writes
+ * `*_nom_opt` into them and no solve path refetches them (only results and
+ * status); an edit refetches them but never the status. So on every solve
+ * seen fresh — the first sight included, since the cached lists may predate
+ * it — the lists are refetched, and the view is current only while they
+ * still hold what that refetch brought. Sizing (E6) and results (E12) both
+ * gate on it.
  */
-export function useRefetchOnSolve(project: string | null, solveId: string | null | undefined, lists: readonly string[]): void {
+export function useSolveSettled(project: string | null, solveId: string | null | undefined, lists: readonly { key: string; data: unknown }[]): SolveSettled {
   const qc = useQueryClient()
-  const seen = useRef<string | null | undefined>(undefined)
-  const listsRef = useRef(lists)
-  listsRef.current = lists
+  const [settled, setSettled] = useState<{ project: string | null; solveId: string; refs: unknown[]; freshSince: number } | null>(null)
+  const seen = useRef<{ project: string | null; any: boolean }>({ project, any: false })
+  const keys = lists.map(l => l.key)
+  const keysRef = useRef(keys)
+  keysRef.current = keys
   useEffect(() => {
-    if (solveId === undefined) return
-    const prev = seen.current
-    seen.current = solveId
-    if (prev === undefined || solveId === null || solveId === prev) return
-    for (const k of listsRef.current) qc.invalidateQueries({ queryKey: nk(project, k) })
-  }, [solveId, project, qc])
+    if (!solveId) return
+    const again = seen.current.project === project && seen.current.any
+    seen.current = { project, any: true }
+    const freshSince = again ? Date.now() : 0
+    let cancelled = false
+    const ks = keysRef.current
+    Promise.all(ks.map(k => qc.refetchQueries({ queryKey: nk(project, k), exact: true }))).then(() => {
+      if (!cancelled) setSettled({ project, solveId, refs: ks.map(k => qc.getQueryData(nk(project, k))), freshSince })
+    }, () => { /* a failed refetch leaves the view not current: installed sizes, no results */ })
+    return () => { cancelled = true }
+  }, [project, solveId, qc])
+  const current = !!settled && !!solveId && settled.project === project && settled.solveId === solveId &&
+    lists.length === settled.refs.length && lists.every((l, i) => l.data === settled.refs[i])
+  return { current, freshSince: current ? settled!.freshSince : 0 }
 }

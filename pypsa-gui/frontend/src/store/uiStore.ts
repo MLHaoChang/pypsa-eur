@@ -717,6 +717,8 @@ export const useUIStore = create<UIStore>((set) => ({
         activeSiteId: readActiveSite(name),
         siteDrawMode: 'idle',
         siteDraft: [],
+        // Optimised sizes are opted into per project, not carried over.
+        siteSizing: 'installed',
       }
       if (name) patch.lastProjectId = preferredId ?? name
       if (name && !s.openTabs.some(t => t.name === name)) {

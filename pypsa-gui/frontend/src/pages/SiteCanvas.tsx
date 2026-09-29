@@ -47,7 +47,7 @@ import { matrixFor, placementFromMatrix } from '../site3d/placementMath'
 import { screenToGround, groundToScreen } from '../site3d/raycast'
 import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/dropRegistry'
 import SiteOverlay from '../components/SiteOverlay'
-import { useDispatchFresh, useRefetchOnSolve } from '../site3d/useDispatchFresh'
+import { useDispatchFresh, useSolveSettled } from '../site3d/useDispatchFresh'
 import { effectiveSizing } from '../site3d/sizing'
 import { toScene, fitCamera, chooseSite, unionBounds, halfSizeFor, type Bounds } from '../site3d/scene'
 import { useSitesStore } from '../site3d/sitesStore'
@@ -61,9 +61,6 @@ import type { Site, SiteContext } from '../site3d/types'
 
 /** The one empty list the component queries fall back to (stable identity). */
 const NONE: never[] = []
-
-/** The component lists that carry `*_nom_opt` (a new solve refetches them). */
-const SIZED_LISTS = ['generators', 'storage_units', 'stores', 'links', 'lines', 'transformers'] as const
 
 /** The hero models' credit (CC0 needs none; the spec gives it anyway, §5.1). */
 const MODELS_ATTRIBUTION = 'Models: Kenney (CC0)'
@@ -508,6 +505,8 @@ function SiteCanvas() {
     return (name: string) => byName.get(name)
   }, [buses])
 
+  // Installed sizes: the default boundary it sizes is persisted, so it must
+  // not follow a solve's optimum.
   const layoutForBus = (busName: string) => {
     const bus = buses.find(b => b.name === busName)
     return buildSiteLayout({ buses: [{ name: busName, v_nom: bus?.v_nom ?? 0, offset: [0, 0] }], generators, storageUnits, stores, loads, transformers, lines, links, busCarrier })
@@ -522,12 +521,18 @@ function SiteCanvas() {
   [site, offsets, buses])
   const unplacedMembers = site ? site.buses.filter(name => offsets[name] == null) : []
 
-  // Sizes: installed, or the optimum while dispatch is fresh and the
-  // overlay's switch says so (spec E6) — an edit falls back at once.
+  // Sizes: installed, or the optimum while this solve is fresh, its lists
+  // are settled and unchanged, and the overlay's switch says so (spec E6) —
+  // an edit (a list that refetches with new data) falls back at once.
   const { fresh: dispatchFresh, solveId } = useDispatchFresh(currentProject)
-  useRefetchOnSolve(currentProject, solveId, SIZED_LISTS)
+  const { current: solveCurrent } = useSolveSettled(currentProject, solveId, [
+    { key: 'buses', data: qBuses.data }, { key: 'generators', data: qGen.data }, { key: 'storage_units', data: qSu.data },
+    { key: 'stores', data: qSt.data }, { key: 'loads', data: qLoad.data }, { key: 'transformers', data: qTr.data },
+    { key: 'lines', data: qLine.data }, { key: 'links', data: qLink.data },
+  ])
+  const solved = dispatchFresh && solveCurrent
   const siteSizing = useUIStore(s => s.siteSizing)
-  const sizing = effectiveSizing(siteSizing, dispatchFresh)
+  const sizing = effectiveSizing(siteSizing, solved)
 
   // The layout is in the SITE frame already: one yard per bus at its
   // offset, placements honoured.
@@ -819,7 +824,7 @@ function SiteCanvas() {
 
       {/* The control strip with the legend under it, stacked so a wrapped
           strip (a narrow pane) pushes the legend down instead of hiding under it. */}
-      <div className="absolute left-3 top-12 z-[400] flex max-w-[calc(100%-24px)] flex-col items-start gap-1.5">
+      <div className="pointer-events-none absolute left-3 top-12 z-[400] flex max-w-[calc(100%-24px)] flex-col items-start gap-1.5 [&>*]:pointer-events-auto">
         <SiteOverlay
           sites={sitesDoc.sites}
           site={site}
@@ -827,7 +832,7 @@ function SiteCanvas() {
           assetCount={objects.filter(o => !DEFAULT_LIBRARY.find(t => t.id === o.kind)?.flags?.infrastructure).length}
           fit={fit}
           unplacedMembers={unplacedMembers}
-          dispatchFresh={dispatchFresh}
+          dispatchFresh={solved}
           selectedPlacedKey={selectedPlacedKey}
           canArrange={allLoaded}
           onArrange={() => arrangeAll(currentProject, site.id, objects.filter(o => !o.elevation).map(o => ({ key: objectKey(o), origin: o.origin, heading: o.heading })), layout.orphans)}
@@ -835,7 +840,7 @@ function SiteCanvas() {
         />
 
         {/* Legend — under the picker. */}
-        <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-md border border-border bg-bg/95 px-2 py-1.5 text-[11px] shadow max-w-[60%]">
+        <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-md border border-border bg-bg/95 px-2 py-1.5 text-[11px] shadow max-w-[min(100%,36rem)]">
           {legend.map(e => (
             <span key={e.id} className="flex items-center gap-1 text-muted">
               <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: e.color }} />

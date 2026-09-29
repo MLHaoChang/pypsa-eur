@@ -310,6 +310,19 @@ describe('buildSiteLayout — several buses, placements, rules (WP3)', () => {
     expect(objects.filter(o => o.type === 'Bus').map(o => [o.name, o.kind])).toEqual([['B', 'switchyard'], ['H', 'manifold']])
   })
 
+  it('rooftop PV in optimised mode: the rooftop pass sizes it at the optimum too', () => {
+    const input = multi(['B', 'Q'], {
+      loads: [ld({ name: 'hall', bus: 'B', p_set: 20 })],
+      generators: [gen({ name: 'roof', bus: 'B', carrier: 'solar-rooftop', p_nom: 0.1, p_nom_opt: 0.4, p_nom_extendable: true })],
+    })
+    const inst = buildSiteLayout(input).objects.find(o => o.name === 'roof')!
+    const opt = buildSiteLayout({ ...input, sizing: 'optimised' }).objects.find(o => o.name === 'roof')!
+    expect(opt.elevation).toBeGreaterThan(0)          // still on the roof
+    expect(opt.summary).toMatch(/0\.4 MW.*\(optimised\)$/)
+    expect(inst.summary).toMatch(/0\.1 MW/)
+    expect(opt.parts.length).toBeGreaterThan(inst.parts.length)
+  })
+
   it('rooftop PV sits on the largest data hall, follows the hall\'s placement, and takes no land', () => {
     const input = multi(['B', 'Q'], {
       loads: [ld({ name: 'hall-small', bus: 'B', p_set: 2 }), ld({ name: 'hall-big', bus: 'B', p_set: 20 })],
