@@ -7,6 +7,7 @@ import {
 import { AlertTriangle, Activity, Square } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
+import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
 import { CHART_GRID, downloadCSV } from './shared'
 
@@ -143,6 +144,7 @@ export function FrontierPanel() {
   })
   const payload = (data ?? null) as FrontierPayload | null
   const running = payload?.status === 'running'
+  useStudyFinishedInvalidation(data === undefined ? undefined : payload?.status ?? null)
 
   const run = useMutation({
     mutationFn: () => resultsApi.startFrontier(),

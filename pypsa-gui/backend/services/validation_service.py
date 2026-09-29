@@ -2007,6 +2007,40 @@ def _check_ens_cap_coherence(solver_config) -> list[Issue]:
     return issues
 
 
+def _check_import_energy_cap(n, solver_config) -> list[Issue]:
+    """EH P17 energy import cap: refuse what the per-period constraint cannot
+    honestly express (spec §6 amendment)."""
+    issues: list[Issue] = []
+    cap = getattr(solver_config, "import_energy_cap_mwh_per_year", None)
+    links = [str(x) for x in
+             (getattr(solver_config, "import_energy_links", None) or [])]
+    if cap is None or not links:
+        return issues
+    strategy = str(getattr(solver_config, "solve_strategy", "full") or "full")
+    if strategy in ("rolling", "myopic"):
+        issues.append(_err(
+            "import_energy_cap_unsupported_strategy", "", "",
+            f"The energy import cap is not supported with the '{strategy}' "
+            "solve strategy: each LP window would need its own share of the "
+            "annual budget. Use the full strategy.",
+        ))
+    from services.adequacy.archetypes import min_p_min_pu
+
+    links_df = getattr(n, "links", None)
+    for lid in links:
+        if links_df is None or lid not in links_df.index:
+            continue
+        lo = min_p_min_pu(n, lid)
+        if lo < 0:
+            issues.append(_err(
+                "import_energy_link_bidirectional", "Link", lid,
+                f"Link '{lid}' is metered by the energy import cap but can run "
+                f"backwards (p_min_pu {lo:g} < 0); capping only its import "
+                "direction is not supported in v1.",
+            ))
+    return issues
+
+
 def _check_reserve_margin(n, solver_config) -> list[Issue]:
     """
     Firm-capacity (reserve-margin) coherence — Phase 8 spec §3.
@@ -2407,6 +2441,7 @@ def validate_for_run(n, solver_config) -> list[Issue]:
     issues += _check_profiled_occurrence_units(n)
     # Reliability-target coherence — pure config checks.
     issues += _check_ens_cap_coherence(solver_config)
+    issues += _check_import_energy_cap(n, solver_config)
     # Demand-response tier coherence (spec §4.4).
     issues += _check_dsr_coherence(n, solver_config)
 

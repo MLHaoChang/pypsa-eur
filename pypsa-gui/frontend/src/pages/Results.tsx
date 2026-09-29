@@ -59,22 +59,29 @@ function loadInitialTab(): ResultsTab {
 
 // `multiOnly` tabs appear only for multi-period results — the Overview
 // consolidates per-period economics / generation mix, which is meaningless
-// on a flat single-period run.
-const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip: string; multiOnly?: boolean }> = [
-  { id: 'overview',   label: 'Overview',           Icon: Layers,           tip: 'Per-period economics, generation mix & storage — the whole horizon at a glance', multiOnly: true },
-  { id: 'capex',      label: 'Capacity Expansion', Icon: TrendingUp,       tip: 'CAPEX, OPEX, sized assets' },
-  { id: 'dispatch',   label: 'Dispatch',           Icon: Activity,         tip: 'Per-snapshot generation, storage, loads' },
-  { id: 'loadflow',   label: 'Load Flow',          Icon: NetworkIcon,      tip: 'Line flows, voltages, losses' },
-  { id: 'prices',     label: 'Prices',             Icon: DollarSign,       tip: 'Marginal prices, duration curve, drivers' },
-  { id: 'economics',  label: 'Economics',          Icon: Wallet,           tip: 'Per-asset revenue, profit, LCOE/LCOS — by group or by individual asset' },
-  { id: 'emissions',  label: 'Emissions',          Icon: Cloud,            tip: 'CO₂ totals, cap shadow price, per-carrier breakdown' },
-  { id: 'curtailment',label: 'Curtailment',        Icon: Scissors,         tip: 'Renewable energy rejected by the LP — total + per-carrier + time series' },
-  { id: 'lostload',   label: 'Lost load',          Icon: AlertTriangle,    tip: 'VOLL slack dispatch (unserved demand) — per-carrier and per-bus breakdown' },
+// on a flat single-period run. `expertOnly` tabs are hidden in Guided mode
+// (guided-mode spec §3.5): Guided keeps adequacy and FMEA, the two the
+// hub-design flow reads.
+const TABS: Array<{ id: ResultsTab; label: string; Icon: typeof TrendingUp; tip: string; multiOnly?: boolean; expertOnly?: boolean }> = [
+  { id: 'overview',   label: 'Overview',           Icon: Layers,           tip: 'Per-period economics, generation mix & storage — the whole horizon at a glance', multiOnly: true, expertOnly: true },
+  { id: 'capex',      label: 'Capacity Expansion', Icon: TrendingUp,       tip: 'CAPEX, OPEX, sized assets', expertOnly: true },
+  { id: 'dispatch',   label: 'Dispatch',           Icon: Activity,         tip: 'Per-snapshot generation, storage, loads', expertOnly: true },
+  { id: 'loadflow',   label: 'Load Flow',          Icon: NetworkIcon,      tip: 'Line flows, voltages, losses', expertOnly: true },
+  { id: 'prices',     label: 'Prices',             Icon: DollarSign,       tip: 'Marginal prices, duration curve, drivers', expertOnly: true },
+  { id: 'economics',  label: 'Economics',          Icon: Wallet,           tip: 'Per-asset revenue, profit, LCOE/LCOS — by group or by individual asset', expertOnly: true },
+  { id: 'emissions',  label: 'Emissions',          Icon: Cloud,            tip: 'CO₂ totals, cap shadow price, per-carrier breakdown', expertOnly: true },
+  { id: 'curtailment',label: 'Curtailment',        Icon: Scissors,         tip: 'Renewable energy rejected by the LP — total + per-carrier + time series', expertOnly: true },
+  { id: 'lostload',   label: 'Lost load',          Icon: AlertTriangle,    tip: 'VOLL slack dispatch (unserved demand) — per-carrier and per-bus breakdown', expertOnly: true },
   { id: 'adequacy',   label: 'Adequacy',           Icon: ShieldCheck,      tip: 'Reliability targets, COPT screening, the cost-vs-availability frontier, sequential Monte Carlo and the reliability-targeted planning loop' },
-  { id: 'storage',    label: 'Storage cycling',    Icon: BatteryCharging,  tip: 'Equivalent full-cycle count per storage unit + carrier rollup' },
+  { id: 'storage',    label: 'Storage cycling',    Icon: BatteryCharging,  tip: 'Equivalent full-cycle count per storage unit + carrier rollup', expertOnly: true },
   { id: 'fmea',       label: 'FMEA',               Icon: ShieldAlert,      tip: 'Failure modes ranked by €/yr criticality — computed rows + expert class-D rows, mitigability, CSV export' },
-  { id: 'asset',      label: 'Asset Detail',       Icon: Crosshair,        tip: 'One asset in full — every applicable result, as numbers or charts, exportable' },
+  { id: 'asset',      label: 'Asset Detail',       Icon: Crosshair,        tip: 'One asset in full — every applicable result, as numbers or charts, exportable', expertOnly: true },
 ]
+
+// The tabs Guided mode shows (every other row is `expertOnly`).
+const GUIDED_TABS: ReadonlySet<ResultsTab> = new Set<ResultsTab>(
+  TABS.filter(t => !t.expertOnly).map(t => t.id),
+)
 
 // Maps the Results tab the user is viewing → the equivalent CompareView tab,
 // so opening the docked comparison rail starts on the same metric. Most IDs
@@ -106,6 +113,16 @@ export default function Results() {
     setTabState(t)
     try { localStorage.setItem(RESULTS_TAB_KEY, t) } catch { /* ignore */ }
   }
+  // The tab most recently asked for EXPLICITLY (asset detail, the
+  // assistant's results_tab, a greeting chip) — as opposed to restored from
+  // storage. Guided honours it even when the tab is hidden, showing it as a
+  // temporary "advanced" tab until the user picks another (guided-mode spec
+  // §10 addendum, gate P23 B3). Cleared by any click on the strip.
+  const [requestedTab, setRequestedTab] = useState<ResultsTab | null>(null)
+  const pickTab = (t: ResultsTab) => {
+    setRequestedTab(null)
+    setTab(t)
+  }
 
   // ── Docked comparison rail ─────────────────────────────────────────────
   // The A-vs-B CompareView coexists on the right; the live Results tabs stay
@@ -123,6 +140,15 @@ export default function Results() {
   const setCompareRailWidth = useUIStore(s => s.setCompareRailWidth)
   const resultsTabRequest = useUIStore(s => s.resultsTabRequest)
   const clearResultsTabRequest = useUIStore(s => s.clearResultsTabRequest)
+  const uiMode = useUIStore(s => s.uiMode)
+  // Guided (spec §3.7): a STORED tab Guided does not show is displayed as
+  // adequacy. Display only — `tab` and `results:active-tab` keep the user's
+  // choice, so switching back to Expert restores it. An explicitly requested
+  // hidden tab is shown (§10 addendum, B3) as `advancedTab`.
+  const advancedTab: ResultsTab | null =
+    (uiMode === 'guided' && requestedTab === tab && !GUIDED_TABS.has(tab)) ? tab : null
+  const effectiveTab: ResultsTab =
+    (uiMode === 'guided' && !GUIDED_TABS.has(tab) && advancedTab == null) ? 'adequacy' : tab
   const splitWrapRef = useRef<HTMLDivElement>(null)
   // `delta` is the pointer's travel, or null if it never moved. `startW` is
   // the on-screen width at mousedown (what the preview follows) and
@@ -146,6 +172,7 @@ export default function Results() {
     const allowed = new Set(TABS.map(x => x.id))
     if (allowed.has(resultsTabRequest as ResultsTab)) {
       setTab(resultsTabRequest as ResultsTab)
+      setRequestedTab(resultsTabRequest as ResultsTab)
     }
     clearResultsTabRequest()
   }, [resultsTabRequest, clearResultsTabRequest])
@@ -499,7 +526,9 @@ export default function Results() {
       <PageHeader
         eyebrow="SIMULATION · RESULTS"
         title="Optimization results"
-        subtitle="Capacity expansion, dispatch, load flow, prices, and emissions from the last solve."
+        subtitle={uiMode === 'guided'
+          ? 'Adequacy and failure-mode (FMEA) risk results for the hub design.'
+          : 'Capacity expansion, dispatch, load flow, prices, and emissions from the last solve.'}
         actions={
           status && (
             <span className="font-mono text-[11px] text-muted">
@@ -511,13 +540,16 @@ export default function Results() {
       />
       {/* ── Tab strip ──────────────────────────────────────────────── */}
       <div className="flex items-center shrink-0 border-b border-border bg-panel px-2 gap-0 overflow-x-auto">
-        {TABS.filter(t => !t.multiOnly || uniquePeriods.length > 0).map(({ id, label, Icon, tip }) => {
-          const active = tab === id
+        {TABS.filter(t => (!t.multiOnly || uniquePeriods.length > 0) && (!t.expertOnly || uiMode === 'expert' || t.id === advancedTab)).map(({ id, label, Icon, tip }) => {
+          const active = effectiveTab === id
+          const advanced = id === advancedTab
           return (
             <button
               key={id}
-              onClick={() => setTab(id)}
-              title={tip}
+              onClick={() => pickTab(id)}
+              title={advanced ? `${tip} — an advanced tab, shown because it was asked for; it leaves the strip when you pick another tab.` : tip}
+              data-testid={`results-tab-${id}`}
+              data-advanced={advanced ? 'true' : undefined}
               className={`h-9 px-3 shrink-0 flex items-center gap-1.5 text-[12px] font-medium border-b-2 -mb-px transition-colors
                 ${active
                   ? 'border-accent text-accent'
@@ -525,6 +557,11 @@ export default function Results() {
             >
               <Icon size={13} />
               {label}
+              {advanced && (
+                <span className="ml-1 px-1 py-px rounded text-[9px] font-mono font-bold uppercase tracking-[0.08em] border border-accent/40">
+                  Advanced
+                </span>
+              )}
             </button>
           )
         })}
@@ -660,7 +697,7 @@ export default function Results() {
             {(() => {
               // Overview is multi-period-only; if it's somehow the active tab on
               // a single-period run, fall back to Dispatch.
-              const t = (tab === 'overview' && uniquePeriods.length === 0) ? 'dispatch' : tab
+              const t = (effectiveTab === 'overview' && uniquePeriods.length === 0) ? 'dispatch' : effectiveTab
               return (
                 <>
                   {t === 'overview'    && <AggregatedResultsBody />}
@@ -708,7 +745,9 @@ export default function Results() {
                 <CompareView
                   embedded
                   onClose={() => setCompareRailOpen(false)}
-                  initialTab={RESULTS_TO_COMPARE_TAB[tab]}
+                  // Seeded from the tab on screen: in Guided a stored hidden
+                  // tab is displayed as adequacy, and the rail must match it.
+                  initialTab={RESULTS_TO_COMPARE_TAB[effectiveTab]}
                 />
               </ErrorBoundary>
             </div>

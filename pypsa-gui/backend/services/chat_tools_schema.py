@@ -70,6 +70,8 @@ SAFETY_PANEL_ENUM = [
     "SolveQueue", "solveQueue",
     "ProjectPicker", "project_picker", "OpenProject",
     "NewProject", "new_project", "NewProjectWizard",
+    # Guided-mode hub-design panel (frontend normalises both to 'hubDesign').
+    "HubDesign", "hubDesign",
 ]
 RESULTS_TAB_ENUM = [
     "overview", "capex", "dispatch", "loadflow", "prices", "economics",
@@ -117,6 +119,7 @@ ADEQUACY_KIND_ENUM = [
     "copt", "fmea_modes", "fmea_sweep", "frontier", "mc",
     "mc_elcc_candidates", "coupling_loop", "margin_loop", "adequacy",
     "reserve_margin", "eh_study", "eh_reference_design",
+    "eh_redundancy", "eh_levers", "eh_dtc", "eh_dtc_planning",
 ]
 # The six kinds that run in a worker thread, i.e. the ones that can be
 # aborted. Read-only surfaces (copt / fmea_modes / adequacy / reserve_margin /
@@ -129,8 +132,18 @@ ADEQUACY_STUDY_ENUM = [
 # Where a reliability loop leaves the network when it finishes: at the base
 # case it started from, or at the final iterate that met the target.
 ADEQUACY_RESTORE_ENUM = ["base", "final"]
+# Engine limits the run_eh_study schema states — imported, never restated.
+from models.energy_hub import MAX_EH_BUDGET_SOLVES as _MAX_EH_BUDGET_SOLVES  # noqa: E402
+from services.adequacy.mc import MAX_DRAWS as _MC_MAX_DRAWS  # noqa: E402
+
 # Energy Hub archetype packs — mirrors models.energy_hub.EnergyHubArchetype.
 EH_ARCHETYPE_ENUM = ["strong_grid", "weak_flexible", "off_grid"]
+# EH pipeline stages — mirrors models.energy_hub.EH_PIPELINE_STAGES (order
+# included). An explicit list must keep apply_pack + ens_solve.
+EH_STAGE_ENUM = [
+    "apply_pack", "ens_solve", "frontier", "mc_certify", "fmea_top",
+    "redundancy", "levers", "dtc_stress", "dtc_planning", "assemble",
+]
 
 # Classes whose nominal capacity the optimiser can size — mirrors
 # services/asset_results/compute._NOM_COL, the map explain_investment reads
@@ -924,6 +937,60 @@ TOOLS: list[dict[str, Any]] = [
         ["name"],
     ),
     _t(
+        "put_stress_scenarios",
+        "Replace a project's class-C stress-scenario registry (WHOLE list: "
+        "read it with get_stress_scenarios, change it, send it back). Each "
+        "scenario: {id [a-z0-9_-], name?, kind: parametric|profiles, "
+        "frequency_per_year in (0,365], electrical_load_multiplier (0,10], "
+        "renewable_availability_multiplier [0,1.5]} or a profile_pack. A 422 "
+        "names the broken rule. Safety: write.",
+        {"name": {"type": "string"},
+         "scenarios": {"type": "array", "items": {"type": "object"}}},
+        ["name", "scenarios"],
+    ),
+    _t(
+        "get_eh_template",
+        "The Energy Hub template a project was created from: recommended "
+        "archetype, pack_overrides, stages, dtc_attribution and study notes "
+        "— pass them to run_eh_study unchanged. no_data for other projects. "
+        "Safety: read.",
+        {"name": {"type": "string"}},
+        ["name"],
+    ),
+    _t(
+        "get_feature_guide",
+        "The in-app Energy Hub / FMEA guide — the SAME wording the GUI's "
+        "guided tours and hover tips show. Use it to explain what a field or "
+        "control does and what to enter. No args: index of tours and fields; "
+        "tour=eh_study|fmea|eh_tagging: its steps; field=<name>: one field's "
+        "help (e.g. eh_poc, dtc_attribution, target_lole_h). Safety: read.",
+        {"tour": {"type": "string"}, "field": {"type": "string"}},
+        [],
+    ),
+    _empty(
+        "review_eh_study",
+        "Analyse the latest Energy Hub study: summary plus findings sorted "
+        "by severity, each with the evidence it read, a recommendation and "
+        "(where fully determined) `actions` — an existing tool and its exact "
+        "args (run_eh_study re-runs, update_solver_config, ...). Present "
+        "findings with their numbers; OFFER actions and run one only when "
+        "the user agrees. Safety: read.",
+    ),
+    _t(
+        "suggest_eh_setup",
+        "Suggest the Energy Hub tags a network that is not tagged yet needs: "
+        "the grid import Link (eh_role = grid_import), the point-of-connection "
+        "bus (eh_poc) and the buses whose load must stay on (eh_critical), each "
+        "with its reason and confidence, plus the units that lack outage data "
+        "(a question for the user — no action). `actions` lists ready "
+        "update_component / bulk_update_components calls; present them and run "
+        "only the ones the user picks (in Guided mode each asks for "
+        "confirmation). Applies nothing. `archetype` only words the reasons. Safety: read.",
+        {"archetype": {"type": "string",
+                       "enum": ["strong_grid", "weak_flexible", "off_grid"]}},
+        [],
+    ),
+    _t(
         "run_fmea_sweep",
         "Start the contingency sweep: class B (every single link outage) plus "
         "any class-C `scenarios` given (get them from get_stress_scenarios). "
@@ -1011,30 +1078,138 @@ TOOLS: list[dict[str, Any]] = [
         "(`strong_grid`, `weak_flexible`, or `off_grid`). Applies the pack, "
         "runs the EH pipeline — ENS-capped plan, ε-constraint frontier "
         "around the target, sequential-MC LOLE certification of the fixed "
-        "plan (verdict certified/failed per spec decision 2; the hub side "
-        "of the import Link, with the Link sampled as a two-state unit when "
-        "it carries outage data and the grid behind it sampled as a second "
-        "area when that side does — one area per grid reached, grid "
-        "storage dispatched grid-first, and a Link's opt-in "
-        "`common_mode_rate` / `common_mode_mttr_hours` taking the Link and "
-        "its grid area down together; `certification.import_model` and "
-        "`fleet_scope.grid_areas` / `import_common_mode` say which applied, "
-        "a firm block at the planning cap otherwise), FMEA top-N "
-        "residual modes (Link-primary Class B + COPT Class A), then any "
-        "enabled redundancy / lever / DtC stages — and persists a "
-        "ReferenceDesignReport whose TEA carries LCOE and, where the network "
+        "plan on the hub side of the import Link (an import Link counts "
+        "only when it carries its own outage data: it is then a two-state "
+        "unit at its hourly planning cap, and the grid behind it is sampled "
+        "as its own area when that side carries outage data too — one area "
+        "per grid reached, grid storage dispatched grid-first, and a Link's "
+        "opt-in `common_mode_rate` / `common_mode_mttr_hours` taking the "
+        "Link and its grid area down together; `certification.import_model`, "
+        "`import_firmness` and `fleet_scope.grid_areas` / "
+        "`import_common_mode` say which applied), FMEA top-N residual modes "
+        "(the Link-primary Class-B ranking, plus a `class_a` COPT screening "
+        "of unit outages on the same plan), then any enabled redundancy / "
+        "lever / DtC stages — and persists a ReferenceDesignReport whose TEA "
+        "carries LCOE and, where the network "
         "has electrolyser Links, LCOH. `archetype` is required; omit "
         "`stages` for the pack's default pipeline, or pass a non-empty list "
-        "to override. `budget_solves` caps LP work inside the study (engine "
-        "default when omitted). Returns {status:'running'} — poll "
+        "to override (it must include apply_pack and ens_solve). "
+        "`frontier` sweeps cost vs ENS target around the pack target (the "
+        "pack's `frontier_ladder` factors, default ×4 ×2 ×1 ×½ ×¼; default "
+        "for strong_grid only, ≤~40% of the budget); `fmea_top` (default for every "
+        "archetype) ranks the top "
+        "5 Class-B Link failure modes on the ENS plan (needs Links with "
+        "outage data; skipped rather than truncated if it does not fit the "
+        "budget). "
+        "`mc_certify` certifies the ENS plan on Monte Carlo LOLE against the "
+        "pack's target_lole_h (h/yr): the report's `certified` is true only "
+        "when the LOLE 95% CI upper bound is within target, false on "
+        "fail/inconclusive even if the ENS target is met, null when there is "
+        "no LOLE target or certification is not established (see the "
+        "`certification` section note). The MC samples the hub side only: "
+        "grid import counts as capacity only when the import Link carries "
+        "its own outage data, so certification is conservative for a "
+        "strong grid. It runs by default for weak_flexible / off_grid and "
+        "costs no LP solve. "
+        "`budget_solves` (1–120, default 30) is a hard ceiling on LP solves "
+        "inside the study — stages that would exceed it are skipped and "
+        "reported not_established. Returns {status:'running'} — poll "
         "get_adequacy_results('eh_study') for status and "
         "get_adequacy_results('eh_reference_design') for the assembled "
         "report. 409 while another study or a foreground solve is running. "
+        "Optional knobs (all validated before anything runs; a bad value is "
+        "a 422 naming the field): `pack_overrides` changes the archetype "
+        "pack (ENS target ‱, LOLE target h/yr, certification metric, import "
+        "cap MW, stage defaults, levers); `dtc_config` names the critical "
+        "buses/loads and islanding Links for DtC; `dsr_buses` opts buses "
+        "into demand response (weak_flexible only); `mc` sets the "
+        "certification draws/seed/cov_target. "
         "Safety: execution.",
         {
             "archetype": {"type": "string", "enum": EH_ARCHETYPE_ENUM},
-            "stages": {"type": "array", "items": {"type": "string"}},
-            "budget_solves": {"type": "integer"},
+            "stages": {"type": "array",
+                       "items": {"type": "string", "enum": EH_STAGE_ENUM}},
+            "budget_solves": {"type": "integer", "minimum": 1,
+                              "maximum": _MAX_EH_BUDGET_SOLVES},
+            "pack_overrides": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "ens_cap_permyriad": {"type": "number",
+                                          "exclusiveMinimum": 0},
+                    "target_lole_h": {"type": "number", "minimum": 0},
+                    "certification_metric": {"type": "string",
+                                             "enum": ["mc_lole", "none"]},
+                    "import_p_nom_mw": {"type": "number",
+                                        "exclusiveMinimum": 0},
+                    "import_energy_mwh_per_year": {
+                        "type": "number", "minimum": 0,
+                        "description": (
+                            "weak_flexible only: annual energy import budget "
+                            "at the hub (MWh/yr), metered as efficiency × p0 "
+                            "on the grid→hub import Links, per year of each "
+                            "investment period.")},
+                    "mc_certify_required": {"type": "boolean"},
+                    "frontier_default": {"type": "boolean"},
+                    "dtc_stress_default": {"type": "boolean"},
+                    "dtc_planning_default": {"type": "boolean"},
+                    "levers": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "redundancy": {"type": "boolean"},
+                            "import_cap": {"type": "boolean"},
+                            "storage_duration": {"type": "boolean"},
+                            "import_energy": {"type": "boolean"},
+                        },
+                    },
+                },
+            },
+            "dtc_config": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "critical_bus_ids": {"type": "array",
+                                         "items": {"type": "string"}},
+                    "critical_load_ids": {"type": "array",
+                                          "items": {"type": "string"}},
+                    "islanding_contingencies": {"type": "array",
+                                                "items": {"type": "string"},
+                                                "minItems": 1},
+                    "attribution": {
+                        "type": "string",
+                        "enum": ["bus_aggregate_not_per_load", "per_load"],
+                        "description": (
+                            "Default bus_aggregate_not_per_load. per_load "
+                            "reports critical unserved by Load, ranking "
+                            "non-critical Loads to shed first via a "
+                            "disclosed 5% critical VOLL premium in the DtC "
+                            "stress re-dispatch only. The ranking is exact "
+                            "on loss-free paths; the result flags "
+                            "priority_exact=false where lossy Links or line "
+                            "losses can invert it.")},
+                },
+                "required": ["islanding_contingencies"],
+            },
+            "dtc_attribution": {
+                "type": "string",
+                "enum": ["bus_aggregate_not_per_load", "per_load"],
+                "description": (
+                    "DtC attribution for the config the study derives from "
+                    "eh_critical tags (or merged onto dtc_config; a "
+                    "conflicting dtc_config.attribution is refused).")},
+            "dsr_buses": {"type": "array", "items": {"type": "string"}},
+            "mc": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "draws": {"type": "integer", "minimum": 1,
+                              "maximum": _MC_MAX_DRAWS},
+                    "seed": {"type": "integer", "minimum": 0},
+                    "cov_target": {"type": "number", "exclusiveMinimum": 0,
+                                   "maximum": 1},
+                },
+            },
         },
         ["archetype"],
     ),
@@ -1331,9 +1506,17 @@ TOOLS: list[dict[str, Any]] = [
     ),
     _t(
         "create_project_from_template",
-        "Scaffold a new project from a built-in template. Safety: destructive.",
+        "Scaffold a new project from a built-in template. Energy Hub "
+        "templates (tagged, with outage data, stress scenarios, VOLL and a "
+        "recommended archetype; read it back with get_eh_template): "
+        "eh_datacenter (weak_flexible), eh_h2_hub (strong_grid), "
+        "eh_microgrid (off_grid). Grid templates: 3bus, ieee14, belgium, "
+        "ieee39. Safety: destructive.",
         {
-            "template_id": {"type": "string"},
+            "template_id": {"type": "string",
+                            "enum": ["3bus", "ieee14", "belgium", "ieee39",
+                                     "eh_datacenter", "eh_h2_hub",
+                                     "eh_microgrid"]},
             "new_name": {"type": "string"},
         },
         ["template_id", "new_name"],
@@ -1512,7 +1695,8 @@ TOOLS: list[dict[str, Any]] = [
         "Results sub-tab (capex, dispatch, economics, …), a bottom asset "
         "table tab (Buses, Generators, …), and/or the A|B compare rail with "
         "scenario picks. Use project_picker when the user wants to browse "
-        "saved projects without naming one. Safety: read.",
+        "saved projects without naming one. hubDesign opens the step-by-step "
+        "Energy Hub design panel (Guided mode's main view). Safety: read.",
         {
             "panel_id": {"type": "string", "enum": SAFETY_PANEL_ENUM},
             "results_tab": {"type": "string", "enum": RESULTS_TAB_ENUM},
@@ -2165,6 +2349,11 @@ TOOL_ROUTES: dict[str, list] = {
     ] + [("GET", "/api/results/mc/elcc_candidates")],
     "get_fmea_worksheet": [("GET", "/api/projects/{name}/worksheet")],
     "get_stress_scenarios": [("GET", "/api/projects/{name}/stress_scenarios")],
+    "put_stress_scenarios": [("PUT", "/api/projects/{name}/stress_scenarios")],
+    "get_eh_template": [("GET", "/api/projects/{name}/eh_template")],
+    "get_feature_guide": [("GET", "/api/guides/{topic}")],
+    "review_eh_study": [("GET", "/api/results/eh_review")],  # P24: one source
+    "suggest_eh_setup": _SERVICE_CALL,  # P25: pure read of the live network
     "run_fmea_sweep": [("POST", "/api/results/fmea_sweep")],
     "run_frontier_study": [("POST", "/api/results/frontier")],
     "run_mc_study": [("POST", "/api/results/mc")],

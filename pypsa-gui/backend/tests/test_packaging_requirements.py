@@ -371,3 +371,58 @@ def test_the_bundle_check_expects_the_pipelines_data_files():
     finally:
         sys.path.pop(0)
     assert {"case39_units.yaml", "case39.json"} <= set(check_bundle.EXPECTED)
+
+
+def _guarded_gridspine_modules() -> set[str]:
+    """Every `gridspine.*` module the backend's import guard names.
+
+    Read out of the source rather than listed here, so the check cannot go
+    stale the way a hand-maintained second copy of the list would — and so a
+    module ADDED to the guard later is covered without anyone remembering to
+    extend this file.
+    """
+    tree = ast.parse(
+        (BACKEND / "services" / "gridspine_service.py").read_text(encoding="utf-8"),
+        filename="gridspine_service.py",
+    )
+    found: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and (node.module or "").startswith(
+            "gridspine."
+        ):
+            found.add(node.module)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.startswith("gridspine."):
+                    found.add(alias.name)
+    assert found, "no gridspine imports found — did gridspine_service move?"
+    return found
+
+
+def test_the_spec_names_every_gridspine_module_the_backend_guard_imports():
+    """
+    The spec states this rule itself: the gridspine entry modules are spelled
+    out "so a future change to that guard cannot drop the package from the
+    bundle without a build error". Nothing was enforcing it, and it was
+    already broken once — `drivers.readback` reached the guard with the
+    PowerFactory read-back and never reached the spec.
+
+    Why it matters even though PyInstaller's analysis follows a try/except
+    import today: `gridspine` is frozen from the repo root through `pathex`,
+    not installed into the build venv, so nothing but that analysis puts it in
+    the bundle. When a module is missed the app still LAUNCHES — the guard
+    catches the ImportError — and every planning→dynamics action answers 503
+    "not available in this build". That reads as a deliberate build variant
+    rather than a packaging bug, which is why it survives a smoke test.
+    """
+    text = SPEC.read_text(encoding="utf-8")
+    missing = sorted(
+        module
+        for module in _guarded_gridspine_modules()
+        if f'"{module}"' not in text
+    )
+    assert not missing, (
+        "pypsa-gui.spec's hiddenimports does not name "
+        f"{missing} — the backend imports them inside the gridspine guard, so "
+        "a bundle built without them answers 503 on every gridspine action"
+    )

@@ -1,0 +1,227 @@
+# Guided mode: deferred items — assessment and plan (P27+)
+
+**Date:** 2026-09-28 (rev 2, after the plan review). **Base:** branch `claude/epic-allen-k2t1c4` at `00a35a5` plus the P26 final-gate fixes in the working tree.
+**Spec (parent):** [`../specs/2026-09-27-guided-mode.md`](../specs/2026-09-27-guided-mode.md). **Spec (this work):** [`../specs/2026-09-28-guided-mode-deferred.md`](../specs/2026-09-28-guided-mode-deferred.md). **Review:** [`../qa/2026-09-28-guided-mode-deferred-plan-review.md`](../qa/2026-09-28-guided-mode-deferred-plan-review.md) (GO-with-conditions).
+**Sources read:** the close-out note, every gate file (P22.9-BE/FE, P23, P24-BE/FE, P25, P26), the spec review, the Expert click-through, spec §1 / §8 / §10, the plan review.
+
+Every file:line below was checked in the tree on 2026-09-28. `FE` = `pypsa-gui/frontend/src`, `BE` = `pypsa-gui/backend`.
+
+## 0. Summary
+
+| Bucket | Open | Already fixed (verified) |
+|---|---|---|
+| Safety and data integrity | A1–A6, A8 (7) | A7 |
+| First-time-user friction | B1–B10 (10) | B11–B16 |
+| Cosmetic and test-only | C1–C6, C10–C13 (10) | C7–C9 |
+| Accepted, not fixed | E1–E2 (2) | — |
+| Non-goals (owner decision) | D1–D3 (3) | — |
+
+27 open items in 9 phases (P27a, P27b, P28–P31 committed; P32 scheduled after P27a per D-8 = (a); P33–P34 optional, not scheduled). 11 owner decisions, §4.
+
+## 1. Already fixed — no work (verified in code)
+
+| # | Item | Where it came from | Evidence now |
+|---|---|---|---|
+| A7 | Unit test for the topology restore did not pin `generators.control` | P22.9-BE minor | `BE/tests/test_live_network_untouched.py:185,196` |
+| B11 | Greeting stuck on "study running" after the hub closes | P26 gate B1 | `FE/components/ChatLaunchGreeting.tsx:135` `refetchInterval: ehStudyRefetchInterval` (`pages/results/ehStudyPoll.ts`) |
+| B12 | Destructive cards hid their target | P26 gate B2 | `FE/components/ChatPanel.tsx:376-455`; Details open for `destructive` (`:684`) |
+| B13 | Greeting chips "Check adequacy" / "Summarize this solve" | P26 gate | working tree `ChatPanel.tsx:1337-1345` |
+| B14 | "outage-driven"; Improve text vs. action; H₂ hub no way to Goal; Goal placeholder | P26 gate | working tree `plainWords.ts:11`, `ImproveCard.tsx:56-60`, `ResultsCard.tsx:56-62` (`hub-results-set-goal`), `GoalCard.tsx:93-99` |
+| B15 | Failed / aborted study read "Not solved yet." | P26 gate note 2 (half) | `ChatLaunchGreeting.tsx:61-63` |
+| B16 | P23 N-R2: a project switch during a tour consumed the new project's auto-open | P23 re-gate | `FE/App.tsx:201` returns before marking |
+| C7 | VOLL / frontier / fmea_top effect not translated | P24-FE re-gate | `plainWords.ts:23-26` |
+| C8 | P24-BE N6 (hook imports a page), N7 (`import_p_nom_mw` non-finite) | P24-BE | `FE/hooks/useStartFmeaSweep.ts:11` imports `utils/blockerMessage`; `BE/services/adequacy/eh_readiness.py:307` `_finite_or_none` |
+| C9 | P25 notes 1–4; P22.9-FE notes 1, 2, 6 | P25 / P22.9-FE | `ChatPanel.tsx:2521-2535` (queue), `:619-620` (deny drops group), `:571-572` (expiry drops group); `chat_service.py:2292-2293` (sanitiser loops); `stub_openai_endpoint.py:120,175` ("finished" for a read) |
+| — | P22.9-BE note 3 "margin loop has no HTTP invariant test" (review §2 item 1) | P22.9-BE / review | **already present:** `test_live_network_untouched.py:243` `test_margin_loop_leaves_the_live_tables_equal`, judged non-vacuous at the P22.9-BE re-gate. A1 keeps it green and adds the lock spy to the same file. |
+| — | Smoke "exits 0 on FAIL" (P26 note 6) | P26 | not reproduced: `scripts/smoke-guided.mjs:133` `check` throws; `:1892-1901` `code = 1`, `process.exit(code)`. |
+
+## 2. Open items
+
+Legend: **Hurts** = first-time user (FTU) / expert / data integrity (DI) / safety. **Size** S ≤ ½ day, M ≤ 2 days, L > 2 days. Contracts, test ids and wording are in the spec; this file carries the assessment.
+
+### A. Safety and data integrity
+
+#### A1. Edits made during a live-network study are reverted; the restore writes outside the lock
+- **Problem.** A user edit to `control` / `sub_network` / `generator` (Bus, Generator, passive branches) or to `*_nom_min/max` made while a sweep / frontier / coupling / margin loop runs on the live network is silently overwritten when the study ends, and the write-back can interleave with an edit. **Hurts:** DI, expert.
+- **Evidence.** `BE/services/adequacy/sweep.py:87-125` `preserve_bus_topology` snapshots on entry and writes back in `finally` with no lock; `freeze_capacities`' `_undo` (`:188-196`) is the same shape. The runners pass `lock` to `_solve_once` (`:279-286` → `run_simulation`), which holds it per solve only, so the `finally` runs unlocked. Call sites: `sweep.py:400-401`, `frontier.py:211`, `coupling_loop_runner.py:625`, `margin_loop_runner.py:962`, `dtc.py:396` (on a copy, no lock). Edit routes take the lock (`BE/services/network_crud.py:211,387,441`) but are never refused during a study; the chat tools reach the same handlers through `_route` (`chat_tools.py:2115-2147`), bypassing `main.py`'s middleware. `/api/network/undo` **is** already refused (`network_undo.py:105` `refuse_if_study_running("undo")`).
+- **Root cause.** Snapshot/put-back outside the lock; no edit refusal during a live-network study.
+- **Options.** (1) Diff-restore under the lock, keeping user edits. (2) Restore under the lock **and** refuse edits during a live-network study with the existing `study_in_flight` 409 shape (`projects.py:1515-1541`).
+- **Recommendation:** 2 (review D-1 agrees). Mechanics per review conditions 2, 3, 7:
+  - `preserve_bus_topology(n, lock)` / `freeze_capacities(n, lock)` acquire the lock the runner **passed in** (the workers run under a copied context: `fmea_sweep_runner.py:56`, `coupling_loop_runner.py:285`, `margin_loop_runner.py:208`, `frontier_loop_runner.py:72`; `PyPSAService.get_lock()` is an `RLock`, `pypsa_service.py:632`, not held when `finally` runs). `dtc.py:396` passes `None` (copy).
+  - Live-network study keys: `fmea_sweep`, `frontier`, `coupling_loop`, `margin_loop`. Not `mc` (`mc_loop_runner.py:66` "never mutates the network"; it snapshots under the lock) and not `eh_study` (`eh_study.py:445,971` `network.copy()`), so Guided tagging edits during a 30-solve EH study stay allowed.
+  - Chokepoints: (i) `main.py:769-800` solver-in-flight branch gains a second check, `_study_in_flight_detail(state, "edit the network")` restricted to the live keys, same prefixes / exemptions; (ii) `network_crud._create_component` / `_update_component` / `_delete_component` (`:204,375,439`) raise the same detail so the chat path is covered; undo is already covered.
+  - Assistant exposure: a routed tool's `HTTPException` with a dict detail reaches the model as `tool_error{error_kind:'study_in_flight', message}` (`chat_service.py:4619-4645`) — reuse. Guided: the Site card's "Fix with the assistant", the Goal card's VOLL button and the Improve "Let the assistant do this" are disabled while an FMEA sweep runs, with one plain title.
+- **Files.** `sweep.py`, `frontier.py`, `coupling_loop_runner.py`, `margin_loop_runner.py`, `dtc.py`, `main.py`, `network_crud.py`, `routers/projects.py` (export `_study_in_flight_detail` or move it to `services/study_state.py`), `FE/pages/hubDesign/shared/CardShell.tsx`, `FE/hooks/useLiveStudyRunning.ts` (new).
+- **Tests.** `BE/tests/test_live_network_untouched.py`: lock spy on the passed lock; edit-during-sweep refused (HTTP and chat tool); edit-during-EH-study allowed; edit after the study kept; the five invariant tests (sweep, abort, frontier, coupling, margin) stay green. FE: `CardShell.test.tsx` / `SiteCard.test.tsx` buttons disabled while the sweep runs.
+- **Size:** M. **Risk:** Expert medium (edits during a sweep now 409 with a plain sentence; one toast). System low.
+- **Owner decision:** D-1.
+
+#### A2. Bug 6: one-off 409 on resume after a backend restart with a stale tab open
+- **Problem.** After a backend restart, a tab still holding `currentProject = X` keeps editing and autosaving while the backend is bound to Y (another tab, resume-on-start). Autosave hits the identity guard (409); **edits from the tab land in Y's live network** (the real hazard, review condition 4). **Hurts:** DI, FTU.
+- **Evidence.** Guard: `BE/routers/projects.py:1686-1694`. Autosave handling: `FE/layout/Sidebar.tsx:846-861`. Recovery: `FE/App.tsx:446-481` reloads only when `bus_count === 0`. `GET /api/network/meta` **already returns `loaded_project`** (`BE/services/network_crud.py:124-141`, route `routers/network.py:601-604`), but the FE type omits it (`FE/api/types.ts:178`) and the effect never compares it. The review's proposed `GET /api/projects/active` is dropped: `GET /{name}` (`projects.py:2476`) would shadow it.
+- **Root cause.** Identity is checked on save only; nothing compares the tab's project with the backend's binding after a reconnect.
+- **Recommendation (D-2, review-amended).** No backend change. The recovery effect reads `meta.loaded_project`; when it is non-null and ≠ `currentProject`, the store enters `projectMismatch`, a blocking banner offers "Reload X" (load X) or "Switch to Y" (adopt), the axios request interceptor refuses every write from the tab with a client-side 409 `{error_kind:'project_mismatch'}` until resolved, and autosave is suspended through `guardProjectMutation`.
+- **Files.** `FE/api/types.ts`, `FE/store/uiStore.ts`, `FE/api/client.ts:130` (request interceptor), `FE/App.tsx`, `FE/layout/Sidebar.tsx`, a new `FE/components/ProjectMismatchBanner.tsx`.
+- **Tests.** New `FE/App.recovery.test.tsx` (mismatch → banner, no load, no autosave; reload / switch paths); `FE/api/client.mismatch.test.ts` (PUT refused client-side while mismatched, GET allowed); `Sidebar.autosave.test.tsx` (new: identity 409 → autosave suspended, one WARN). Smoke: restart uvicorn with the tab open (P27b), assert the banner **and** that a PUT from the stale tab is refused.
+- **Size:** M. **Risk:** Expert: the banner is visible in Expert too (by design). System low.
+- **Owner decision:** D-2.
+
+#### A3. Send gate: the session's bound profile is not exposed to the client
+- **Evidence.** `FE/components/ChatPanel.tsx:1511-1512`; `GET /api/chat/history` (`BE/routers/chat.py:703-800`) resolves `resolved_profile` but returns only `last_session_id` / `bound_project`; `session_init` carries `profile_id` (`chat_service.py:1417-1424`) only once a turn starts. `/chat/health` (`chat.py:122-176`) deliberately excludes a profiles list; `/chat/profiles` (`chat.py:648-667`) is member-level and lists every profile.
+- **Recommendation (D-3, review-amended).** Per-profile `chat_ready` on `GET /chat/profiles` (env-membership only, cheap), `bound_profile_id` on `/history`; `/chat/health` stays byte-stable. FE gate on the effective profile `profileId ?? bound ?? active` with that profile's readiness; the key offer follows the same rule (closes P26 note 5).
+- **Files.** `BE/routers/chat.py`, `FE/api/chat.ts`, `FE/hooks/useChatProfiles.ts`, `ChatPanel.tsx`, `ChatLaunchGreeting.tsx`.
+- **Tests.** BE `test_chat_profiles_readiness.py` (new), `test_history_reports_bound_profile`. FE `ChatPanel.sendGate.test.tsx` "bound to a ready non-active profile after reload → Send enabled"; `ChatLaunchGreeting.test.tsx` "picked ready non-active profile → no key offer"; the three `getChatHealth` mocks are untouched.
+- **Size:** M. **Risk:** Expert low. System low.
+
+#### A4. The greeting ignores study staleness, and the `fresh` fallback sends non-hub re-solves to Hub design
+- **Evidence.** `ChatLaunchGreeting.tsx:64-67` reads `hubStudy === 'done'` and `status.dispatch`; the review's boolean `stale` (`useHubData.ts:50-53`, `EhReview.stale`, `api/simulation.ts:787`) is never read. `:78` sends any `fresh`-no-foreground state to Hub design in Guided, including an Expert-run sweep (P24-FE re-gate 2 note 5; review condition 8).
+- **Fix.** Guided reads `eh_review` on the hub's key (no poll); `stale` → "A study has run, but the network changed since — run it again in Hub design."; the "results are in Hub design" sentence is keyed on the hub study record only; the `fresh`-no-foreground case gets its own Guided sentence ("A calculation has updated this network — see Results.").
+- **Tests.** `ChatLaunchGreeting.solvedState.test.tsx`: stale → stale sentence; `fresh` without a hub study → the new sentence, not "Hub design"; Expert unchanged. **Size:** S.
+
+#### A5. Transient stale FMEA tab after a sweep; leftover state after a project switch
+- **Evidence.** `ImproveCard.tsx:103-115` (poll stops at the first non-`running` sample; `enabled: sweep.isSuccess` is mutation state per mount); `FmeaTab.tsx:60-66` same interval; `useStudyFinishedInvalidation.ts:21` keeps `prev` across a project switch (P22.9-FE note 7, review §2 item 4); smoke settle loop `smoke-guided.mjs:1748-1762`.
+- **Fix.** Shared `fmeaModesRefetchInterval` that polls one extra tick after leaving `running`; `sweep.reset()` on project change; `useStudyFinishedInvalidation` resets `prev` when `currentProject` changes. Fallback (review suggestion): backend `sweep_status: 'finalising'` if the ×10 stress still flakes; the smoke settle loop is reverted only once the counts are stable ten runs in a row.
+- **Tests.** `ImproveCard.test.tsx`, `FmeaTab.test.tsx`, `useStudyFinishedInvalidation.test.ts` (new case). **Size:** S.
+
+#### A6. In-app project switch mid-study not covered end to end
+- **Fix.** P27b smoke step (start a study, attempt a template switch → the plain 409 line, wait, switch, assert the new project's greeting / cards, no cross-project rows) plus a `projectActions.switch.test.ts` case for the hub queries. **Size:** S.
+
+#### A8. Chat-created projects rebind the backend without a `project_rebound` frame
+- **Problem.** `create_project_from_template` and `import_project_bundle` run by the assistant swap and bind the backend, but no `project_rebound` frame is emitted: the tab's `currentProject` stays on the old name (autosave `expect` → identity 409), and **every further tool in the same turn is refused with `project_switched_mid_turn`** (review probe `scratchpad/qadef/test_probe_a8.py`, `switched_mid_turn=True`). **Hurts:** DI.
+- **Evidence.** Template: `BE/routers/projects.py:1264` (declares `session`), `:1342` (bind), `:1351` (pointer); bundle: `chat_tools.py:2354-2371` → `import_bundle`, binds `projects.py:1059`, persists `:1068` / `:1139`; `PROJECT_REBINDING_TOOLS` (`chat_service.py:125-131`) lacks both; `_dispatch_tool_uses` (`:3331-3345`) emits the frame only for that set. `save_project` from an unbound draft also binds (`_save_context`, `:1929`; pointer moved when `was_unbound`, `:1475,1500-1502`) and is not in the set either.
+- **Fix.** Add `create_project_from_template`, `import_project_bundle` **and `save_project`** to `PROJECT_REBINDING_TOOLS`. The frame is emitted only when the binding actually moved (`new_bound != holder`), so a Save-a-Copy (`rebind=False`) emits nothing; the FE handler (`ChatPanel.tsx:2322-2345`) already covers "unbound → open".
+- **Tests.** `BE/tests/test_chat_tool_dispatch_loop_seam.py`: modelled on `:150-190`, for each of the three names: the fake dispatcher moves `loaded_project`, the frame is asserted with `via_tool`, the holder follows, and a **second tool in the same turn dispatches normally** (red today: `project_switched_mid_turn`). Smoke P27a: stub branch "create a template from chat", then one autosave → no 409.
+- **Size:** S. **Risk:** none to Expert.
+
+### B. First-time-user friction
+
+#### B1. Raw tool progress lines in Guided
+- **Evidence.** `ChatPanel.tsx:2196-2216` (`tool_preparing`, `tool_request`), `:2239-2260` (`tool_result` "✓ tool"); `guidedToolLine` `:468-472` covers only the declined lines; render `:3097-3138`.
+- **Fix.** Render-only: Guided maps `… preparing X` → hidden, `→ X` → "Working: <verb phrase>…", `✓ X` → "Done: <verb phrase>", `✗ X` → "Could not: <verb phrase>", raw line under Details; a per-tool verb table beside `GUIDED_CARD_SUMMARY`. Expert unchanged. **Tests.** `ChatPanel.sendRequest.test.tsx`; Expert snapshot. Smoke P26: no Guided `chat-message` contains `→ ` or `preparing`. **Size:** S.
+
+#### B2. The FMEA tab reached from Guided is Expert-styled
+- **Evidence.** `FE/pages/Results.tsx:526-531` (eyebrow / title in both modes); `FmeaTab.tsx:166-171` header prose, `:237,257` class letters, `:258-259` "FOR", `:274` engine badge. `Results.expertUnchanged.test.tsx` snapshots only the tab strip (P23 note 4).
+- **Fix (D-4).** Guided variant of the same tab: header "HUB DESIGN · RESULTS" / "Reliability results"; plain class labels with the letter in a hover; engine as a hover; plain header sentences; "outage rate" for FOR; catalogue keys `fmea_class_a|b|c|d`, `fmea_engine`, `fmea_severity`, `fmea_occurrence` in `eh_fmea_guide.json` (plain, ≤ 30 words, `test_guides.py` `_JARGON`). Expert byte-identical: `FmeaTab.expertUnchanged.test.tsx` snapshot taken on the P28-GO commit **before** any P29 edit. **Size:** M.
+
+#### B3. Bug 5: FMEA rows with severity 0 show `€0.0` with no explanation
+- **Evidence.** `copt.py:1147-1151` (`occ == 0` → 0; `delta_eue == 0` → 0; VOLL clamped), `sweep.py:604-620` (`in_scope == False` → 0 by design; the sweep refuses VOLL ≤ 0 at `:380-384`), `stress.py:644-646`; `copt_endpoint.py:87-90` forwards `delta_eue_mwh` / `note`; `FmeaTab.tsx:260` prints `fmtCurrency` only; FE `WorksheetRow` (`pages/results/fmea.ts:44-61`) has `delta_eue_mwh?` and no reason.
+- **Fix (D-5).** Additive `zero_reason: 'no_shortfall' | 'no_outage_data' | 'unpriced' | 'out_of_scope' | null` on every `per_mode` row, computed by one helper in `BE/services/adequacy/worksheet.py` (existing module; `unpriced` reachable on the copt path only); FE shows the reason instead of `€0.0`; `ResultsCard`'s "no measurable cost" (`ResultsCard.tsx:90`) reads the same field so hub and tab cannot disagree. Exports unchanged. **Size:** M.
+
+#### B4. Obstacle 10: the tour popover covers its target or overflows the viewport
+- **Evidence.** `GuidedTour.tsx:194-206` guessed height (180 / 192 px), fixed width 320, no re-measure. **Fix.** Measure the popover (`ResizeObserver`), place below / above / right / left by fit, clamp to the viewport, never intersect the target, `max-height: calc(100vh - 16px)`. **Tests.** `GuidedTour.test.tsx` with mocked rects. **Size:** S.
+
+#### B5. Obstacle 11: `gen_zero_costs` on the data-center template
+- **Evidence.** `validation_service.py:1749-1764` reads static columns only; `eh_templates.py:112-114` `grid_supply` (static 0 + `generators_t.marginal_cost`), `:140-141` `rooftop_pv` (fixed, marginal 0) — exactly the two flagged. No test pins `gen_zero_costs`.
+- **Fix (D-6, review condition 9).** Exempt (i) generators with a `generators_t.marginal_cost` column and (ii) generators with a `generators_t.p_max_pu` column (variable renewables). Keep the warning for everything else, including fixed dispatchable units at zero marginal cost (still an indeterminate dispatch). **Tests.** `test_validation_gen_costs.py` (new): series marginal cost → no warning; profiled PV → no warning; fixed dispatchable all-zero, no series → warning stays; all three templates → no `gen_zero_costs`. **Size:** S.
+
+#### B6. Obstacle 12: the New-project dialog shows a save path local mode does not use
+- **Evidence.** `NewProjectWizard.tsx:209-211` hard-coded; real root `app_paths.py:67-70`; `GET /api/local-settings` (`local_settings.py:106`, `_state()` `:58-70`) already returns `log_path` and can carry `projects_root`. **Fix (D-7).** `projects_root` on `/local-settings` (local mode only); the wizard shows it, nothing in hosted mode. **Size:** S.
+
+#### B7. The tour drops optional steps for good
+- **Evidence.** `GuidedTour.tsx:104-106,125-127`. **Fix.** Keep all steps; skip an optional step whose target is absent at the moment it would show; "n of m" from currently visible steps. **Size:** S.
+
+#### B8. Hub load-error line names the wrong failure; Run with the default pack; quiet failures unlogged
+- **Evidence.** `HubDesignPanel.tsx:112-116`; `client.ts:202-210` (`skipErrorToast` skips `appLog` too). **Fix.** Name what failed, disable Run study while the template read is in error, log quiet failures at INFO. **Size:** S.
+
+#### B9. Mode switch accessibility — `AppHeader.tsx:1040-1075`, `title` only. **Fix.** `aria-describedby` to a visually hidden sentence per button. **Size:** S.
+
+#### B10. `propertiesEditRequest` is unscoped — `uiStore.ts:426,595,776-777`; consumers `FE/layout/PropertiesPanel.tsx:1195,1644`; pinned in `FE/layout/PropertiesPanel.editRequest.test.tsx`. **Fix.** `{type, name}` and clear on selection change. **Size:** S.
+
+### C. Cosmetic and test-only
+
+| # | Item | Evidence | Fix | Phase | Size |
+|---|---|---|---|---|---|
+| C1 | A reloaded Improve request loses "(step i of N)" | `ChatPanel.tsx:1363-1368` | **Accept** (D-11): recorded as a known cosmetic | — | — |
+| C2 | The "created from template" toast covers Send | `FE/main.tsx:47` bottom-right | `containerStyle` offset while the assistant dock is open | P31 | S |
+| C3 | `fmtEnergy` renders `0.00 kWh` under 1 MWh | `FE/pages/results/shared.tsx:743-749` | below 1 MWh keep MWh (3 decimals), zero → "0 MWh"; unit back in the header | P31 | S |
+| C4 | Vacuous smoke check "no further failing requests" | `smoke-guided.mjs:1162-1164` | `page.on('request')` counter on `/api/results/eh_study` ≥ 500; `--self-test` injects one 500 **after** recovery and expects FAIL | P31 | S |
+| C5 | `/eh_review` docstring 204 wording | `BE/routers/results.py:1523-1526` | correct the docstring | P31 | S |
+| C6 | Guided greeting opens with "Not solved yet." | `ChatLaunchGreeting.tsx:88-89` | Guided: "No study has run yet — start in Hub design."; Expert unchanged | P28 | S |
+| C10 | Multi-tab: no `storage` listener | `uiStore.ts:647-660` | `storage` event → adopt the other tab's explicit choice | P28 | S |
+| C11 | Survived mutants R8 (`dtc_planning` rule) and R15 (header Run/Abort shown in Guided while queued / running); Q3–Q5 (`resultsApi` quiet flag) | P24-FE re-gates | test-only: `plainWords.test.ts`, `AppHeader.uiMode.test.tsx`, `resultsApi.test.ts` (new) | P30 | S |
+| C12 | "Critical demand unserved … keeps MWh"; Goal VOLL line spacing / no hover on "MWh" | P24-FE re-gate | `plainWords` rule for `MWh` in effects; `Term k="mwh"` on the Goal line | P30 | S |
+| C13 | Gate reporting hygiene: the implementer's test-count report named no command (P25 note 5) | P25 | every gate row in every phase note states the exact command and cwd | all | — |
+
+### E. Accepted, not fixed (recorded per §8.3)
+
+| # | Item | Evidence | Why accepted |
+|---|---|---|---|
+| E1 | Same-name re-create latch: a deleted and re-created project keeps the derived store | P24-FE re-gate 2 note 7 | pre-existing guard condition (`storeProject === project`), no Guided path reaches it |
+| E2 | `unpriced` zero reason only on the copt path | B3 | the sweep refuses VOLL ≤ 0 (`sweep.py:380-384`); the helper documents it |
+
+### D. Non-goals (spec §1) — D1 decided and scheduled (P32); D2–D3 optional, not scheduled
+
+#### D1. Chat-created projects do not switch the mode
+- **Evidence.** §10: "the assistant is already the Guided surface". A8 delivers the `project_rebound` frame for the creating tools either way; D1 is only the FE `noteNewProjectCreated('template')` on that frame.
+- **What choosing "yes" means (review condition 11).** (a) Spec §1 (non-goal list) and §3.4 are amended — a §10 addendum is **required**. (b) An implicit-Expert user (an existing user with app keys, §3.2) who asks the assistant for a template is flipped to Guided mid-conversation and loses their open panels (§3.7 hiding). Only an explicit choice is respected.
+- **Options.** (a) yes, via the A8 frame + `noteNewProjectCreated` when `via_tool ∈ {create_project_from_template, import_project_bundle}`; (b) keep the non-goal.
+- **Owner decision:** D-8 — **decided (a), 2026-09-28** (product owner: "Yes"). Projects the assistant creates or imports in chat switch to Guided unless the user made an explicit mode choice. This needs a spec §1/§3.4 amendment (§10 addendum in the deferred spec). P32 is scheduled directly after P27a, because it depends on A8's `project_rebound` frame.
+
+#### D2. Non-EH workflows are Expert-only — keep; a second flow needs its own spec (D-9).
+
+#### D3. Mode stored per browser, not per user — keep for local mode (D-10).
+
+## 3. Phases
+
+Every phase runs the parent spec §8 gate unchanged: row 1 full backend suite (`-m "not slow"`), **row 2 the superset** used by earlier gates (the seven spec files plus `test_eh_review_route.py`, `test_energy_hub_tagging.py`, `test_golden_coverage.py`, `test_results_range.py`, `test_chat_tools_schema_panels.py`, and the phase's own additions named in the spec), row 3 `tsc`, row 4 full vitest, stress ×10 of the touched suites where the phase changes polling / store / chat, row 5 the browser smoke phase named below (each new `--phase` **extends** its base and keeps the base steps), row 6 an independent QA-gate review with verdict GO before the next phase, row 7 the Expert-unchanged check. Every gate row in a phase note states the exact command and cwd (C13).
+
+| Phase | Items | Why this order | Smoke extends | Size |
+|---|---|---|---|---|
+| **P27a — Backend data integrity** | A1 (lock, live-study edit refusal, chat cover), A8 (rebinding tools) | The only phase that changes what the backend writes or refuses | `P27a` = P22.9 + edit-during-sweep (HTTP 409, plain toast) + P25 stub branch "template from chat" then autosave (no 409, second tool in the turn runs) | M |
+| **P27b — Frontend integrity and coverage** | A2 (mismatch banner, client-side write block), A5 (FMEA cache, switch resets), A6 (mid-study switch), A1's Guided button gating | Builds on P27a's refusal shape | `P27b` = P22.9 restart step (banner, stale PUT refused) + P26 mid-study switch + settled FMEA counts | M |
+| **P28 — Honest state** | A3 (profiles readiness, bound profile), A4 (stale review, `fresh` fallback), C6, C10 | The owner's honesty rule; touches the send gate | `P28` = P26 + P22.9 send-gate step (second ready profile, bind by one turn, reload → Send enabled) | M |
+| **P29 — Guided chat and risk table** | B1, B2, B3 | The two Expert surfaces Guided links to | `P29` = P26 (Guided FMEA title, no engine badges, `genset_1` reason text; no raw `→` lines) | M |
+| **P30 — Tours, templates, wizard** | B4, B7, B5, B6, B8, B9, B10, C11, C12 | Friction outside the main loop; all S. If P30 runs long, B5 / B6 / B8 / B9 / B10 move to P31 | `P30` = P24 (tour box ∩ target = ∅, in viewport; templates validate clean) + P22.9 tagging tour (late Link step) | M |
+| **P31 — Cosmetics** | C2, C3, C4, C5 | Lowest value, zero risk | `P31` = P26 (toast ∩ Send = ∅) + `--self-test` | S |
+| **P32 (scheduled after P27a)** | D1 | D-8 = (a); needs the deferred spec's P32 section in full and a §10 addendum | `P32` = P25 | S |
+| **P33 (optional)** | D2 | Needs D-9 and a spec | new | L |
+| **P34 (optional)** | D3 | Needs D-10 | `P34` = P23 | M |
+
+Test-first in every phase: each item's red test is written and seen failing before the fix; changed assertions carry a one-line justification here.
+
+## 4. Owner decisions
+
+| # | Question | Options | Recommendation (author) | Reviewer |
+|---|---|---|---|---|
+| D-1 | A1: edits during a live-network study | (a) refuse with `study_in_flight` 409 + restore under the passed lock; (b) merge-restore | **(a)**, scope = `fmea_sweep`, `frontier`, `coupling_loop`, `margin_loop`; HTTP + chat chokepoints; Guided buttons gated | agrees |
+| D-2 | A2: bound-project mismatch after a restart | (a) blocking banner, client-side write block, reload / adopt; (b) silent auto-reload | **(a)**, `loaded_project` from `/network/meta` (no new route) | agrees |
+| D-3 | A3: bound-profile transport | (a) `bound_profile_id` on `/history`; (b) per-profile `chat_ready` on `/chat/profiles` + (a); `/health` byte-stable | **(b)** | agrees (carrier changed) |
+| D-4 | B2: Guided FMEA tab | (a) Guided variant, Expert snapshot-identical; (b) separate table | **(a)** | agrees |
+| D-5 | B3: zero-severity explanation | (a) backend `zero_reason` + FE text, exports byte-stable; (b) FE inference | **(a)** | agrees |
+| D-6 | B5: `gen_zero_costs` | (a) exempt series marginal cost and profiled renewables only; (b) template costs | **(a)** | agrees (rule narrowed) |
+| D-7 | B6: save path | (a) real root from `/local-settings` in local mode; (b) drop | **(a)** | agrees |
+| D-8 | D1: chat-created projects → Guided | (a) yes (spec §1/§3.4 addendum; implicit-Expert users flip mid-conversation); (b) keep the non-goal | **owner: (a), 2026-09-28** | leaned (b); owner overrode |
+| D-9 | D2: second Guided workflow | (a) not now; (b) spec one | **(a)** | agrees |
+| D-10 | D3: server-side mode preference | (a) keep per-browser; (b) hosted preference | **(a)** | agrees |
+| D-11 | C1: "(step i of N)" after reload | (a) accept; (b) persist `display` | **(a)** | agrees |
+
+## 5. Risks
+
+| Risk | Mitigation |
+|---|---|
+| P27a's edit refusal surprises an Expert user mid-sweep (HTTP or assistant) | one plain sentence ("A risk check is running — wait for it to finish or abort it before changing the network."); `QUIET_TOAST_CODES` keeps it to one toast; the assistant gets the same sentence in `tool_error.message`; Guided buttons are disabled with the same title |
+| P27b's mismatch banner blocks a tab that is right after all | the banner reads `loaded_project` live and clears itself when the backend rebinds to X; "Reload X" is one click; visible in Expert too |
+| P28 loosens the send gate on a wrong readiness answer | readiness comes from the backend per profile; fail-open only when unknown |
+| P29 changes FMEA markup Expert users rely on | `FmeaTab.expertUnchanged` snapshot taken on the P28-GO commit, byte-compared as in the P23 gate |
+| B3 touches three engines | additive field only; invariant suites and golden tests stay green; no number changes |
+| **Prompt cache** | no phase P27–P31 touches `chat_tools_schema.TOOLS`, any tool description, or the system block (`test_guided_mode_prompt.py::test_expert_block_is_byte_equal_to_no_mode` and its siblings stay green). B3 changes tool-result **bodies** only (one additive key, within the per-turn result budget). A8 changes a frozenset in `chat_service.py`, not a prompt. If P32 ever adds a description sentence it costs one cache miss and must say so. |
+| **Packaging** | no new backend module in any phase: B3's helper goes into `services/adequacy/worksheet.py`, B2's keys into the already-rooted `data/guides/eh_fmea_guide.json` (`smoke/check_bundle.py:172` `ROOTED`), B6 reads `app_paths` (packaged), A1's detail helper moves within existing modules. `check_bundle.py` is the gate for any new file. |
+| Smoke growth | phases stay independent (`--phase P27a` runs base + extension); run time recorded per gate |
+
+## 6. Review conditions applied
+
+| # | Condition | Applied where |
+|---|---|---|
+| 1 | A8: `import_project_bundle`, corrected pointers, same-turn red test, `save_project` decision | A8 (all three tools added; frame only on an actual move); spec §1.2 |
+| 2 | A1 lock: the runner's passed lock, five call sites | A1; spec §1.1 |
+| 3 | A1 chokepoint: HTTP + chat, live keys named, undo | A1 (undo already guarded at `network_undo.py:105`); spec §1.1 |
+| 4 | A2: block writes; `loaded_project` on `/network/meta`, no `/projects/active` | A2 (no backend change needed — the field exists); spec §2.1 |
+| 5 | Split P27 → P27a / P27b, row-2 additions | §3; spec §1.5, §2.5 |
+| 6 | Register completeness | C11, C12, C13, E1, A4, A5; §1 last rows (margin-loop test already present) |
+| 7 | A1 assistant and Guided exposure | A1; spec §1.1, §2.4 |
+| 8 | A4 `fresh` fallback | A4; spec §3.2 |
+| 9 | B5 exemption rule | B5; spec §5.3 |
+| 10 | Prompt-cache and packaging rows | §5 |
+| 11 | D-8 presentation | D1 / D-8 |
+
+**Non-binding suggestions:** all adopted (A3 carrier `/chat/profiles`; A2 smoke asserts the refused PUT; A5 `finalising` fallback; B3 helper in `worksheet.py` + hub reads the field; B2 snapshot timing; C4 self-test after recovery; corrected test paths; row-2 superset). **Rejected:** none. **Pushback:** review §2 item 1 (missing margin-loop HTTP test) is already satisfied by `test_live_network_untouched.py:243`.

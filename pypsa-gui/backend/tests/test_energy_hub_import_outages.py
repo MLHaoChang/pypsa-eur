@@ -212,11 +212,13 @@ def test_fmea_top_ranks_the_import_link_once_by_its_class_b_row():
     report = _run(certifiable_weak_network(), _weak_pack(),
                   stages=("apply_pack", "ens_solve", "fmea_top", "assemble"))
     sec = report.sections["fmea_top"].payload
-    link_rows = [m for m in sec["top"] if m["name"] in ("import_poc",
-                                                        "link:import_poc")]
+    # Merge 2026-09-28: Class-B ranking in ``rows``, class A in ``class_a``.
+    modes = sec["rows"] + sec["class_a"]["rows"]
+    link_rows = [m for m in modes if m["name"] in ("import_poc",
+                                                   "link:import_poc")]
     assert len(link_rows) == 1
     assert link_rows[0]["failure_class"] == "B"
-    assert sec["import_link_ranking"] == {"import_poc": "class_b"}
+    assert sec["class_a"]["import_link_ranking"] == {"import_poc": "class_b"}
 
 
 @pytest.mark.live_solve
@@ -225,13 +227,17 @@ def test_fmea_top_keeps_the_class_a_link_row_when_class_b_cannot_run():
                   stages=("apply_pack", "ens_solve", "fmea_top", "assemble"),
                   budget=2)
     sec = report.sections["fmea_top"].payload
-    assert sec["class_b"]["status"] == "skipped"
-    link_rows = [m for m in sec["top"] if m["component_class"] == "Link"]
+    # Merge 2026-09-28: the Class-B sweep that does not fit is withheld (P12,
+    # not_established); the class-A block still ranks the Link — once.
+    assert report.completeness["fmea_top"] == "not_established"
+    assert sec["rows"] == []
+    link_rows = [m for m in sec["class_a"]["rows"]
+                 if m["component_class"] == "Link"]
     assert len(link_rows) == 1
     row = link_rows[0]
     assert row["failure_class"] == "A" and row["name"] == "import_poc"
     assert row["mode_id"] == "link:import_poc:forced_outage"
-    assert sec["import_link_ranking"] == {"import_poc": "class_a"}
+    assert sec["class_a"]["import_link_ranking"] == {"import_poc": "class_a"}
 
 
 @pytest.mark.live_solve
@@ -244,7 +250,7 @@ def test_off_grid_islanded_hub_certification_is_unchanged():
                   stages=("apply_pack", "ens_solve", "mc_certify", "assemble"))
     cert = report.sections["certification"].payload
     assert cert["import_model"] == "islanded"
-    assert cert["verdict"] == "failed"
+    assert cert["verdict"] == "fail"   # P11 vocabulary (merge 2026-09-28)
 
 
 def test_islanded_certify_network_link_has_no_occurrence_data():
