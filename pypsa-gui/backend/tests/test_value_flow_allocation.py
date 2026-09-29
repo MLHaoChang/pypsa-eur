@@ -369,6 +369,24 @@ def test_a_hub_that_no_longer_matches_the_group_is_not_split(links):
     assert P.check_conservation(ledger, inputs, vf).ok is None
 
 
+def test_a_cleared_group_contract_leaves_the_hub_stale_not_silent():
+    """Round 2 R2-1: the group contract cleared after the hub was saved."""
+    from types import SimpleNamespace
+
+    from services.results.value_flows import _hub_inputs
+
+    tariff = Tariff.model_validate(V5["tariff"])
+    parsed = SimpleNamespace(group_members=[], import_tariff=tariff, export_link=None)
+    hub = _hub_inputs(None, parsed, _vf("energy"), None)
+    assert hub is not None and hub.group_links == [] and hub.periods == {}
+    inputs, _g, _hp = _v5_inputs()
+    inputs.hub = hub
+    ledger = P.build_ledger(inputs, _vf("energy"))
+    lines = [ln for ln in ledger.periods["_"] if ln.source == "allocation"]
+    assert lines and all(ln.amount is None for ln in lines)
+    assert all(any(f.endswith(":hub_members_stale") for f in ln.flags) for ln in lines)
+
+
 def test_fixed_shares_on_other_participants_are_stale():
     inputs, _g, _hp = _v5_inputs()
     vf = _vf("fixed_shares", shares=V5["keys"]["fixed_shares"])

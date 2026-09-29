@@ -250,8 +250,11 @@ def _hub_inputs(n, parsed, vf, bill) -> P.HubInputs | None:
     from services.commercial import billing as _billing
     from services.commercial import hub_allocation as _HA
 
-    if vf is None or vf.allocation is None or not vf.hub_members or not parsed.group_members:
+    if vf is None or vf.allocation is None or not vf.hub_members:
         return None
+    # No group left (the contract cleared after the hub was saved): stale, so
+    # the ledger refuses the split — never a silent "no allocation" (WP3.3a
+    # review round 2 R2-1).
     by_link = {m.link: m.participant for m in vf.hub_members}
     members = [(link, by_link[link]) for link in parsed.group_members if link in by_link]
     items = parsed.import_tariff.items if parsed.import_tariff is not None else []
@@ -416,3 +419,100 @@ def value_flow_ledger(n, cfg, *, result_df, lost_load=None):
         return None
     ledger = P.build_ledger(inputs, vf)
     return inputs, vf, ledger, P.check_conservation(ledger, inputs, vf)
+
+
+# ── the payload (WP3.4) ─────────────────────────────────────────────────────
+
+
+def _sankey(lines: list[P.ValueFlowLine], vf) -> tuple[dict, dict[str, int]]:
+    """A bipartite Sankey — payer nodes `p:<id>` on the left, payee nodes
+    `r:<id>` on the right — so it is a DAG by construction (recharts' Sankey
+    recurses without a visited set and crashes on a cycle). Links aggregate
+    lines by (payer, payee, stream); zero and unknown amounts are dropped and
+    counted."""
+    names = {x.id: x.name for x in vf.participants}
+    ids = list(names)
+    known = [*ids, *vf.externals]
+
+    def canon(party: str) -> str:
+        # One node per party however a line spells it (`same_party` matching).
+        return next((k for k in known if P.same_party(party, k)), party)
+
+    agg: dict[tuple[str, str, str], float] = {}
+    dropped = {"unknown": 0, "zero": 0}
+    for ln in lines:
+        if ln.amount is None or ln.payer is None or ln.payee is None:
+            dropped["unknown"] += 1
+            continue
+        if ln.amount == 0:
+            dropped["zero"] += 1
+            continue
+        key = (canon(ln.payer), canon(ln.payee), ln.value_stream)
+        agg[key] = agg.get(key, 0.0) + ln.amount
+    nodes: dict[str, dict] = {}
+
+    def node(party: str, side: str) -> str:
+        nid = f"{'p' if side == 'payer' else 'r'}:{party}"
+        internal = any(P.same_party(party, i) for i in ids)
+        nodes.setdefault(nid, {"id": nid, "label": names.get(party, party), "side": side,
+                               "internal": internal})
+        return nid
+
+    links = [{"source": node(payer, "payer"), "target": node(payee, "payee"),
+              "value": value, "stream": stream}
+             for (payer, payee, stream), value in sorted(agg.items()) if value]
+    return {"nodes": list(nodes.values()), "links": links}, dropped
+
+
+def compute_value_flows(n, cfg, *, result_df, lost_load=None) -> dict | None:
+    """`GET /results/value_flows` (plan WP3.4): the participants' ledger of the
+    last solve per period — its lines, per-participant totals, a bipartite
+    Sankey and the conservation checks. None (the route's 204) without a
+    commercial config or before a solve; `status: "not_established"` without a
+    value-flows config (a 204 would read as "not solved" in chat);
+    `status: "value_flows_invalid"` for a stored value that does not
+    validate. Money is unweighted per period (the `cost_rows` basis)."""
+    from services.commercial import value_flow_templates as T
+    from services.results.billing import _solved
+
+    commercial = getattr(cfg, "commercial", None)
+    if not commercial or not _solved(n):
+        return None
+    parsed = _lp._parse(commercial)
+    try:
+        vf = P.parse_value_flows(parsed.value_flows)
+    except P.ValueFlowsInvalid as exc:
+        return {"status": "value_flows_invalid", "reason": str(exc)[:500]}
+    if vf is None:
+        return {"status": "not_established", "reason": "no_value_flows_config"}
+    inputs = ledger_inputs(n, cfg, result_df=result_df, lost_load=lost_load)
+    if inputs is None:
+        return None
+    ledger = P.build_ledger(inputs, vf)
+    res = P.check_conservation(ledger, inputs, vf)
+    totals = P.by_participant(ledger)
+    template = T.template_status(vf, n, parsed)
+    flags = sorted({*ledger.flags, *res.flags, *template})
+    # The allocation's reasons ride its lines; the payload names them once.
+    flags += sorted({f for lines in ledger.periods.values() for ln in lines
+                     for f in ln.flags if f.startswith("allocation_not_established:")})
+    periods = {}
+    for p in inputs.periods:
+        lines = ledger.periods.get(p, [])
+        sankey, dropped = _sankey(lines, vf)
+        for kind, count in dropped.items():
+            if count:
+                flags.append(f"sankey_dropped_{kind}:{p}:{count}")
+        pc = res.periods[p]
+        periods[p] = {"lines": [asdict(ln) for ln in lines], "by_participant": totals.get(p, {}),
+                      "sankey": sankey, "conservation": {"ok": pc.ok, "checks": pc.checks},
+                      "disclosures": ledger.disclosures.get(p, {})}
+    return {"status": "ok", "participants": [x.model_dump(mode="json") for x in vf.participants],
+            "externals": list(vf.externals), "template": vf.template,
+            "template_version": vf.template_version, "periods": periods,
+            "conservation_ok": res.ok, "flags": sorted(set(flags)), "notes": list(ledger.notes),
+            "provenance": {"tariff_payees": ledger.tariff_payees,
+                           "billing": {"input_flags": list(inputs.input_flags)},
+                           "template": {"name": vf.template, "version": vf.template_version,
+                                        "status": template},
+                           "basis": "unweighted_per_period"}}

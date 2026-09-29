@@ -219,3 +219,12 @@ def test_billing_and_cfe_score_without_a_commercial_config(golden):
                  label="billing")
     _assert_seam(R.get_cfe_score(), compute_cfe_score(golden, _cfg(), result_df=R._result_df),
                  label="cfe_score")
+
+
+def test_value_flows_without_a_commercial_config(golden):
+    """P3 WP3.4: no commercial config — 204 / None on both sides."""
+    from services.results.value_flows import compute_value_flows
+
+    _assert_seam(R.get_value_flows(),
+                 compute_value_flows(golden, _cfg(), result_df=R._result_df),
+                 label="value_flows")

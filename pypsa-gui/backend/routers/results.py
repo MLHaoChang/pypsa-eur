@@ -1802,6 +1802,27 @@ def get_cfe_score():
     return Response(status_code=204) if payload is None else payload
 
 
+@results_router.get("/value_flows")
+def get_value_flows():
+    """The participants' ledger of the last solve: value-flow lines, totals per
+    participant, a bipartite Sankey and the conservation checks (Edge
+    Investment Case P3 WP3.4, `services/results/value_flows.py`). 204 before a
+    solve or without a commercial config; 200 `status: "not_established"`
+    without a value-flows config."""
+    from services.results.value_flows import compute_value_flows
+
+    n = PyPSAService.get_network()
+    if _solver_in_flight():
+        raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                                  "message": "a solve is running; read the value flows after it "
+                                             "ends"})
+    if not _dispatch_ready(n):
+        return Response(status_code=204)
+    payload = compute_value_flows(n, _state["solver_config"], result_df=_result_df,
+                                  lost_load=_state.get("last_lost_load"))
+    return Response(status_code=204) if payload is None else payload
+
+
 @results_router.get("/eh_dtc_planning")
 def get_eh_dtc_planning():
     """Last DtC planning table (Phase 4b). 204 if none."""

@@ -497,3 +497,19 @@ def test_the_blocking_list_is_explicit(flag, blocks):
     inputs = _inputs(input_flags=[flag])
     res = P.check_conservation(P.build_ledger(inputs, VF), inputs, VF)
     assert (res.ok is None) is blocks
+
+
+def test_a_party_with_an_unknown_line_has_unknown_totals():
+    """WP3.1 review #11 (WP3.4): never a partial sum."""
+    led = P.Ledger(periods={"_": [
+        P.ValueFlowLine("_", "site", "retailer", "energy_import", "bill", "e", 100.0),
+        P.ValueFlowLine("_", "site", "dso", "demand_charge", "bill", "d", None),
+        P.ValueFlowLine("_", "developer", "site", "ppa_settlement", "contract", "c", 5.0)]},
+        tariff_payees={}, flags=[], notes=[], disclosures={})
+    tot = P.by_participant(led)["_"]
+    assert tot["site"]["paid"] is None and tot["site"]["net"] is None
+    assert tot["site"]["by_stream"]["demand_charge"] is None
+    assert tot["site"]["by_stream"]["energy_import"] == pytest.approx(-100.0)
+    assert tot["retailer"]["net"] == pytest.approx(100.0)
+    assert tot["developer"]["net"] == pytest.approx(-5.0)
+    assert tot["dso"]["received"] is None

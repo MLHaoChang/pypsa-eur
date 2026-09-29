@@ -184,12 +184,16 @@ export interface ValueFlowsPayload {
   template_version?: string | null
   periods?: Record<string, {
     lines: ValueFlowLine[]
-    by_participant: Record<string, { paid: number; received: number; net: number;
-                                     by_stream: Record<string, number> }>
+    /** Null when the party has a line of unknown amount (never a partial sum). */
+    by_participant: Record<string, { paid: number | null; received: number | null;
+                                     net: number | null;
+                                     by_stream: Record<string, number | null> }>
     sankey: { nodes: Array<{ id: string; label: string; side: 'payer' | 'payee';
                              internal: boolean }>
               links: Array<{ source: string; target: string; value: number; stream: string }> }
     conservation: { ok: boolean | null; checks: ValueFlowCheck[] }
+    /** Model-only amounts shown beside the ledger, never lines (DSR slack, VoLL). */
+    disclosures: Record<string, number | null>
   }>
   conservation_ok?: boolean | null
   flags?: string[]

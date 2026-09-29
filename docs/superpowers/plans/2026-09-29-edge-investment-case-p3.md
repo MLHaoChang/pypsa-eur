@@ -451,6 +451,13 @@ fails on every tampering of an allocation line.
   noted.
 - Tests: +7 (34 in `test_value_flow_allocation.py`).
 
+**WP3.3a review round 2 (83d361f): FAIL, one binding item** — #1–#6 verified closed on the probes
+(35k rows × 6 members 4.05 s → 1.47 s; the ratchet split still matches the independent
+recomputation to the cent). R2-1: clearing the group contract after the hub was saved made
+`_hub_inputs` return None, so the allocation was silently not applied. → it returns a stale
+`HubInputs` (no group links), so every allocation line is None flagged `hub_members_stale` (tested).
+Not binding, taken in WP3.4: the payload's `flags` name the lines' `allocation_not_established:*`.
+
 ---
 
 ## WP3.3b Group net-import LP variable (P2 carry-in)
@@ -554,6 +561,28 @@ Payload:
 
 **Tests:** seam, facade, argshape, endpoint map (31), chat dispatch, manifest, the cap, the Sankey DAG
 assertion, the `not_established` and `value_flows_invalid` payloads.
+
+**WP3.4 implementation, part 1 (route and payload).**
+- `services/results/value_flows.compute_value_flows(n, cfg, *, result_df, lost_load=None)`: None
+  (the route's 204) without a commercial config or a solve; `{status: "not_established", reason:
+  "no_value_flows_config"}`; `{status: "value_flows_invalid", reason}`; else the payload above plus
+  per period `disclosures` (DSR slack, VoLL — never lines) and `provenance.basis =
+  "unweighted_per_period"`, `provenance.template.status` (`template_edited` / `_stale` /
+  `_outdated`, also in `flags`). The allocation (WP3.3a) runs inside `build_ledger`, so the plan's
+  separate `allocate` step is not a call here.
+- `by_participant` totals are `number | null` (a party on a line of unknown amount has null
+  `paid` / `received` / `net` and that stream; WP3.1 review #11). The Sankey canonicalises parties
+  with `same_party` (one node per party) and counts dropped lines in `sankey_dropped_{unknown,zero}:
+  <period>:<n>`.
+- **No cache:** the GET on the P1 15-min fixture (V1) is under 2 s (asserted in the test).
+- Route `GET /api/results/value_flows` (409 `solver_in_flight`, 204); registered in `_RESULTS_ENUM`,
+  `_RESULTS_HANDLER_NAMES`, `RESULTS_ENUM` (31) and the `get_results` description, `_HANDLER_PARAMS`,
+  `_LIFTED`, `ROUTE_SURFACES`, the route inventory, the no-snapshot-series exemption and a seam case.
+  FE type: nullable totals and `disclosures`.
+- Per-asset export parts as line metadata: deferred to WP3.6 (the drill-down is its consumer).
+- Tests: `test_results_value_flows.py` (7: V1 flat and multi-period with the DAG assertion and the
+  2 s bound; not_established; value_flows_invalid; an unlisted party → None; 204 / 409; a money
+  cycle stays bipartite), a ledger test for the null totals.
 
 ---
 

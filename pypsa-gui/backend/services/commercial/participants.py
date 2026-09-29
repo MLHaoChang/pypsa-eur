@@ -905,27 +905,36 @@ def check_conservation(ledger: Ledger, inputs: LedgerInputs,
 
 def by_participant(ledger: Ledger) -> dict[str, dict[str, dict]]:
     """Per period and party (as named on the lines): paid, received, net
-    (received − paid) and the net by stream. Unknown amounts are skipped (the
-    ledger's flags say so)."""
+    (received − paid) and the net by stream. A party on a line of unknown
+    amount has unknown totals — `paid` / `received` / `net` and that stream
+    None, never a partial sum (ADR-0001; WP3.1 review #11, done in WP3.4). A
+    known amount with one party unknown still counts for the named party."""
     out: dict[str, dict[str, dict]] = {}
     for p, lines in ledger.periods.items():
         tab: dict[str, dict] = {}
+        unknown: dict[str, set[str]] = {}
 
         def row(party):
             return tab.setdefault(party, {"paid": 0.0, "received": 0.0, "net": 0.0,
                                           "by_stream": {}})
+
         for ln in lines:
-            if ln.amount is None or ln.payer is None or ln.payee is None:
-                continue
-            payer, payee = row(ln.payer), row(ln.payee)
-            payer["paid"] += ln.amount
-            payee["received"] += ln.amount
-            payer["by_stream"][ln.value_stream] = \
-                payer["by_stream"].get(ln.value_stream, 0.0) - ln.amount
-            payee["by_stream"][ln.value_stream] = \
-                payee["by_stream"].get(ln.value_stream, 0.0) + ln.amount
-        for r in tab.values():
+            for party, sign in ((ln.payer, -1.0), (ln.payee, 1.0)):
+                if party is None:
+                    continue
+                r = row(party)
+                if ln.amount is None:
+                    unknown.setdefault(party, set()).add(ln.value_stream)
+                    continue
+                r["paid" if sign < 0 else "received"] += ln.amount
+                r["by_stream"][ln.value_stream] = \
+                    r["by_stream"].get(ln.value_stream, 0.0) + sign * ln.amount
+        for party, r in tab.items():
             r["net"] = r["received"] - r["paid"]
+            if party in unknown:
+                r["paid"] = r["received"] = r["net"] = None
+                for stream in unknown[party]:
+                    r["by_stream"][stream] = None
         out[p] = tab
     return out
 

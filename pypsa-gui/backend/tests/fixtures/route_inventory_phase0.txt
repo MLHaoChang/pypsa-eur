@@ -267,6 +267,7 @@ GET     /api/results/store_energy                                -> get_store_en
 GET     /api/results/transformer_reactive                        -> get_transformer_reactive_api_results_transformer_reactive_get
 GET     /api/results/transformers                                -> get_transformer_results_api_results_transformers_get
 GET     /api/results/unit_commitment                             -> get_unit_commitment_api_results_unit_commitment_get
+GET     /api/results/value_flows                                 -> get_value_flows_api_results_value_flows_get
 GET     /api/results/voltages                                    -> get_voltages_api_results_voltages_get
 POST    /api/simulation/abort                                    -> abort_api_simulation_abort_post
 GET     /api/simulation/asset_costs                              -> asset_costs_api_simulation_asset_costs_get

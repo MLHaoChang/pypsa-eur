@@ -331,6 +331,8 @@ def test_the_endpoint_list_covers_every_series_endpoint():
         # Edge Investment Case P2 WP2.5 — a bill, settlement lines and a gap;
         # the CFE score's per-period totals. No per-snapshot series.
         "/billing", "/cfe_score",
+        # P3 WP3.4 — ledger lines and totals per period, no snapshot axis.
+        "/value_flows",
         # The ELCC candidate list for the panel's asset picker (Phase 6) — one
         # row per eligible asset with its nameplate, no snapshot axis at all.
         "/mc/elcc_candidates",

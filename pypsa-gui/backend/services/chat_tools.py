@@ -545,7 +545,7 @@ _RESULTS_ENUM = (
     "losses", "carrier_kpis", "emissions", "transformers", "unit_commitment",
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
-    "asset_economics", "billing", "cfe_score",
+    "asset_economics", "billing", "cfe_score", "value_flows",
 )
 
 
@@ -582,6 +582,8 @@ _RESULTS_HANDLER_NAMES: dict[str, str] = {
     # Edge Investment Case P2 WP2.5.
     "billing": "get_billing",
     "cfe_score": "get_cfe_score",
+    # Edge Investment Case P3 WP3.4.
+    "value_flows": "get_value_flows",
 }
 
 
