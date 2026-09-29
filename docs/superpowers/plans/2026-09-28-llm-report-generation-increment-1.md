@@ -292,13 +292,103 @@ red — `test_chat_report_tools.py` 22 failed / 1 passed (the lock-gate test pas
 
 ---
 
-## Increment 2 (outline) — user templates
-Template upload kind `report_template` (upload allowlist unchanged; `kind` on `UploadMeta`); `docx_reader.py` (outline: heading tree with style names, bracketed placeholders, table shapes, header/footer text, Jinja tags); tagged mode (fields + row loops over `doc.tables`, via Jinja2 on run-merged paragraphs; `docxtpl` only if its sub-document support is needed); untagged mode (LLM mapping plan `{keep|rename|drop|insert}` per template heading, body rebuild after the first mapped heading, `w:updateFields` for the TOC); template language detection; `docx-preview` pane in the viewer; `set_report_template` tool.
+## Increment 2 — user templates (phase 4)
 
-## Increment 3 (outline) — round trip and versions
-Upload an edited `.docx` bound to a report; accept tracked changes; match sections by the `sec:<id>` bookmarks (heading text fallback); paragraphs back to blocks; changed table cells turn a `TableRef` into a literal table and mark the section `user_edit`; comments (python-docx 1.2 `document.comments`) as per-section instructions; version diff view; the uploaded file becomes the template for the next export; PDF via `soffice --headless --convert-to pdf` only when found on PATH, with `pdf_not_available` otherwise.
+**Goal.** A user drops a Word file into the project and the report renders
+*into it*: a **tagged** template (`{{ fields }}`, row loops) fills
+deterministically; an **untagged** corporate template (cover page, TOC,
+numbered headings, house styles, header/footer) gets its body rebuilt from a
+mapping plan the model proposes and the user can inspect. The bundled default
+stays the fallback. Template language sets the report language (decision 7).
 
----
+**Pinned interfaces (every package codes against these; change them only by
+editing this section first).**
+
+```python
+# services/reports/docx_reader.py                                    (WP8)
+TemplateMode = Literal["tagged", "untagged"]
+class TemplateHeading(BaseModel):  index: int; level: int; text: str; style: str; is_body_start: bool
+class TemplateTag(BaseModel):      kind: Literal["var", "for", "endfor", "if", "endif", "other"]; text: str; paragraph_index: int
+class TemplatePlaceholder(BaseModel): text: str; paragraph_index: int      # "[Client name]", "<Project>", "XXX"
+class TemplateTable(BaseModel):    index: int; n_rows: int; n_cols: int; header: list[str]; style: str | None
+class TemplateOutline(BaseModel):
+    mode: TemplateMode; language: str | None; headings: list[TemplateHeading]
+    tags: list[TemplateTag]; placeholders: list[TemplatePlaceholder]; tables: list[TemplateTable]
+    header_text: str; footer_text: str; body_start_index: int | None; n_paragraphs: int
+    has_toc: bool; unsupported: list[str]   # "text box", "SmartArt", "content control", …
+def read_template(data: bytes) -> TemplateOutline
+def detect_language(outline: TemplateOutline) -> str | None     # "en" | "de" | … from heading/body words
+def merged_paragraph_text(paragraph) -> str                      # runs joined, the tag-safe read
+
+# services/reports/template_tagged.py                                (WP9)
+class TaggedRenderError(ValueError): ...   # unknown field/table, syntax error — never a crash
+def render_tagged(doc: ReportDocument, template: bytes, *, figure_bytes: dict[str, bytes]) -> bytes
+#   context: fields = {section_id: {"paragraphs": [...], "bullets": [...], "text": "…"}}, headline fields
+#   (every doc.sections[*] Field block key → value), tables = {table_id: {"columns": [...], "rows": [[...]]}},
+#   figures = {figure_id: <inline picture>}, meta = {title, version, evidence_hash, profile_id, model, created_at}.
+#   Jinja2 on run-merged paragraphs (a tag split across runs is joined back), `{% for row in tables.x.rows %}`
+#   over a table row → one row per item, `{{ figures.x }}` → picture, `{{ fields.x.text }}` → paragraphs.
+#   StrictUndefined; unknown names raise TaggedRenderError listing the unknown name and the known names.
+
+# services/reports/template_untagged.py                              (WP10)
+class MappingEntry(BaseModel):   heading_index: int; action: Literal["keep", "rename", "drop"]; new_text: str | None; section_ids: list[str]
+class MappingPlan(BaseModel):    entries: list[MappingEntry]; inserted: list[dict]  # {"after_heading_index": int, "section_id": str, "heading": str}
+                                 placeholders: dict[str, str]                        # "[Client name]" → value
+                                 unmapped_sections: list[str]; notes: list[str]
+def propose_mapping(provider, *, base_request, outline: TemplateOutline, doc: ReportDocument, language: str) -> MappingPlan | SectionFailure
+#   one generation call through generator.py's JSON-in-text path; a failure falls back to default_mapping().
+def default_mapping(outline: TemplateOutline, doc: ReportDocument) -> MappingPlan   # code-only: match by title similarity, else append
+def render_untagged(doc: ReportDocument, template: bytes, plan: MappingPlan, *, figure_bytes) -> bytes
+#   keeps everything before body_start_index untouched (cover, TOC), rebuilds from there with the template's own
+#   Heading n / Normal / List / Table styles (fallback to the report styles when missing), sets w:updateFields in
+#   settings.xml when has_toc, writes sec:<id> bookmarks, appends the "Numbers to check" appendix.
+
+# services/reports/templates.py                                      (WP11)
+def render_with_template(doc: ReportDocument, template: bytes | None, *, figure_bytes, plan: MappingPlan | None = None) -> tuple[bytes, TemplateMode | None]
+#   None → render_document_docx (default); tagged → render_tagged; untagged → render_untagged(plan or default_mapping)
+```
+
+**Storage.** A template is an ordinary project upload (`kind="report_template"`
+on `UploadMeta`; the upload route accepts `.docx` already). `ReportDocument.template_file_id`
+binds a report to it; `ReportMeta.mapping_plan` (dict | None) stores the last
+accepted plan so a re-export does not re-ask the model.
+
+### WP8 — `docx_reader`: outline, mode detection, language
+**Files.** `services/reports/docx_reader.py`, `tests/test_report_docx_reader.py`, fixtures `tests/fixtures/report_templates/{tagged_minimal.docx, corporate_untagged.docx, with_textbox.docx}` **built by a committed script** `tests/fixtures/report_templates/_build.py` (python-docx; no opaque binaries — the test builds them into `tmp_path` and the script exists so a human can regenerate them).
+**Acceptance.** tagged fixture → `mode == "tagged"`, every `{{ }}`/`{% %}` found even when Word split it across runs; untagged fixture → `mode == "untagged"`, headings with levels and style names, `body_start_index` = first Heading 1 after the TOC field (or the first heading), `has_toc` true when a `TOC \o` field exists, placeholders `[…]`/`<…>` listed, tables with header rows, header/footer text; text box → `"text box"` in `unsupported`; `detect_language` says `de` for German headings ("Zusammenfassung", "Einleitung") and `en` for English, `None` when undecidable; a non-docx (a PNG) raises a `ValueError` subclass, never a crash.
+
+### WP9 — tagged rendering (Jinja2 in the document)
+**Files.** `services/reports/template_tagged.py`, `tests/test_report_template_tagged.py`.
+**Acceptance.** `{{ meta.title }}` in a heading renders; a tag split across three runs renders with the first run's formatting; `{% for row in tables.fmea_top.rows %}` in a table row yields N rows; `{{ figures.fmea_pareto }}` yields one inline picture; `{{ fields.fmea_top.text }}` yields the paragraphs; an unknown name → `TaggedRenderError` naming it and listing the known names; header/footer tags render too; a template without tags renders unchanged text (no crash) — the caller decides the mode, not this module.
+
+### WP10 — untagged rendering (mapping plan, body rebuild)
+**Files.** `services/reports/template_untagged.py`, `services/reports/prompts.py` (add `mapping_user_message`), `tests/test_report_template_untagged.py`.
+**Acceptance.** `default_mapping` keeps a template heading whose text matches a section title (case/number-insensitive), renames near matches, drops "Lorem"/placeholder sections, appends unmatched report sections after the last kept heading, never loses a report section (all `section_ids` covered or listed in `unmapped_sections` — the latter only for `skipped` sections); `render_untagged` on the corporate fixture keeps the cover and TOC paragraphs byte-identical, rebuilds the body with the template's `Heading 1` style name, sets `updateFields`, keeps the footer; a `[Client name]` placeholder is filled from the plan; `propose_mapping` with `llm_fake` returning a valid plan → that plan, returning garbage → `default_mapping` with a note; the plan's `heading_index` values are validated against the outline (an out-of-range index → the entry is dropped with a note, never an exception).
+
+### WP11 — routes, upload kind, chat tool, panel, preview
+**Files.** `services/reports/templates.py`, `models/upload_schemas.py` (`kind` literal + `report_template`), `routers/uploads.py` (accept `?kind=report_template` on upload; list filter), `routers/reports.py` (`POST /{name}/reports/{id}/template` `{file_id | null}` → binds, reads the outline, stores `template_file_id`, returns the outline and the detected language; `GET /{name}/reports/{id}/template` → outline + plan; `POST /{name}/reports/{id}/template/plan` → runs `propose_mapping` as a report job kind `"mapping"` (WP3's runner; status/abort reused) and stores `mapping_plan`; `PUT …/template/plan` → a user-edited plan (validated); export honours the bound template and the stored plan), `routers/report_jobs.py` (the `"mapping"` job kind), `services/chat_tools*.py` (`set_report_template(report_id, file_id|null)`, `get_report_template`, `propose_report_mapping`), manifest, CHATBOT.md, frontend: `src/api/reports.ts`, a template picker in `ReportViewer` (choose an upload of kind `report_template` or "none"), an outline/plan panel with per-heading keep/rename/drop editing, a `docx-preview` pane of the exported file (add the dependency ONLY via `npm install docx-preview@<pinned>` with the lockfile committed; if the registry is unreachable from the container, ship the pane behind a dynamic `import()` that renders a "preview unavailable" note and say so), tests for all of it, `tests/qa_reports_phase4.py`.
+**Acceptance.** Upload a tagged fixture as `report_template` → bind → export → the exported file contains the report's numbers in the template's own layout; the corporate fixture → plan (fake provider) → edit one entry via PUT → export → cover/TOC intact, body rebuilt, footer kept, TOC flag set; unbind → default writer again; language: a German template sets `language="de"` on the next generate unless overridden; the chat tools route through the same handlers; the frontend picker, plan editor and preview have vitest coverage; `qa_reports_phase4.py` drives both fixtures end to end over HTTP (real study, fake provider) and re-opens both exports.
+
+## Increment 3 — round trip (phase 5)
+
+**Pinned interfaces.**
+```python
+# services/reports/roundtrip.py                                      (WP12)
+class RoundTripSection(BaseModel): section_id: str | None; heading: str; blocks: list[Block]; changed: bool; comments: list[str]
+class RoundTripResult(BaseModel):  sections: list[RoundTripSection]; unmatched: list[str]; comments_global: list[str]; accepted_tracked_changes: int
+def read_edited_docx(data: bytes, base: ReportDocument) -> RoundTripResult
+#   accept all tracked changes (w:ins kept, w:del dropped), split by sec:<id> bookmarks (heading text fallback),
+#   paragraphs → Paragraph/Bullets blocks (inline markdown back-mapped from bold/italic runs), tables → literal Table
+#   when any cell differs from the referenced table else the original TableRef, comments (python-docx 1.2
+#   `document.comments`, anchored by commentRangeStart) attached to their section.
+def merge_round_trip(base: ReportDocument, result: RoundTripResult) -> ReportDocument
+#   version+1; changed sections get source="user_edit" and their blocks replaced; comments become
+#   `instruction` hints stored on the section (Section.pending_instruction: str | None — additive field);
+#   unchanged sections byte-identical.
+```
+### WP12 — the reader and the merge (`services/reports/roundtrip.py`, `models/report.py` additive field, tests).
+### WP13 — routes + job: `POST /{name}/reports/{id}/roundtrip` `{file_id}` → new version + the result (unmatched content reported); `POST …/sections/{sid}/regenerate` honours `pending_instruction` when `instruction` is omitted; the uploaded file becomes the report's template (`template_file_id`) so styling the user changed survives; a version diff route `GET …/versions/{a}/diff/{b}` (per-section changed/added/removed); opportunistic PDF `POST …/export?format=pdf` → 501 `pdf_not_available` unless `soffice` is on PATH; chat tools `import_edited_report`, `diff_report_versions`; manifest; CHATBOT.md.
+### WP14 — frontend: "Upload edited copy" on the viewer (drag-drop, kind `report_roundtrip`), the merge result panel (changed sections, comments as pending instructions with a "Regenerate with this" button, unmatched content), the version diff view, PDF button shown only when the backend reports the capability; tests; `tests/qa_reports_phase5.py` (export → edit paragraphs + add a comment with python-docx → re-upload → merged version marks `user_edit`, comment becomes the instruction, unmatched content reported → regenerate with the pending instruction → PDF 501 in the container).
 
 ## Verification (end of increment 1)
 - Backend: `python -m pytest -m "not slow"` full pass; new files listed with counts in the findings doc.
