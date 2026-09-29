@@ -236,3 +236,29 @@ def test_the_main_caveat_is_the_demand_charge_foresight_when_that_stream_leads()
     assert v.main_caveat == "demand_charge_perfect_foresight"
     v = F.verdict(atts, rob, streams=streams(1e3, 5e4), fidelity="full_study")
     assert v.main_caveat == "perfect_foresight_dispatch"
+
+
+# ── gate S6 BC-S6-1 / BC-S6-2 ────────────────────────────────────────────
+
+def test_unjudged_options_leave_only_what_the_judged_ones_decide():
+    expected = ["bess_1h", "bess_2h", "bess_4h"]      # bess_4h never solved
+    atts = [_att("bess_1h", 1e5), _att("bess_2h", 3e5)]
+    v = F.verdict(atts, _rob("bess_2h", (4e5, 2e5)), fidelity="full_study", expected=expected)
+    assert (v.status, v.class_) == ("ok", "recommended")
+    assert "options_not_all_judged" in v.reasons
+    v = F.verdict(atts, _rob("bess_2h", (4e5, -2e5)), fidelity="full_study", expected=expected)
+    assert (v.status, v.class_) == ("not_established", None)
+    assert "options_not_all_judged" in v.reasons
+    v = F.verdict([_att("bess_1h", -5.0)], None, fidelity="full_study", expected=expected)
+    assert (v.status, v.class_) == ("not_established", None)
+    # Every option judged: the same inputs decide.
+    v = F.verdict([_att(o, -5.0) for o in expected], None, fidelity="full_study",
+                  expected=expected)
+    assert (v.status, v.class_) == ("ok", "not_recommended")
+
+
+def test_a_money_fact_without_a_currency_year_is_null_with_a_flag():
+    att = _att("bess_2h", 3e4).model_copy(update={"currency_year": None})
+    v = F.verdict([att], _rob("bess_2h", (5e4, 1e4)), fidelity="full_study")
+    npv = v.facts["battery_npv"]
+    assert npv.value is None and npv.unavailable == "currency_year_unknown"

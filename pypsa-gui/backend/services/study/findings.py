@@ -58,7 +58,7 @@ from __future__ import annotations
 import math
 import pathlib
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -619,8 +619,12 @@ def _centre(ctx: TornadoContext, solve: SolveFn | None):
                          {"baseline": ctx.baseline_bill, "option": opt.bill}, oid,
                          asset_economics=opt.asset_economics)
             cases[oid] = case
+        # The year the CASE was built on (`proforma._one_currency_year`: the
+        # ledger's when the tariff states none), never the tariff's optional
+        # field (gate S6 BC-S6-2).
         kw: dict[str, Any] = dict(question=ctx.question, fidelity=ctx.fidelity,
-                                  currency_year=ctx.tariff.currency_year)
+                                  currency_year=(case.currency_year if case is not None
+                                                 else ctx.tariff.currency_year))
         if (has_pv(oid, ctx.question) and p_bat is not None and not is_zero_size(p_bat)
                 and _npv(case) is not None):
             p_pv = pv_size(opt.network)
@@ -785,6 +789,10 @@ def sentence_is_digit_free(sentence: str) -> bool:
 
 def _fig(key, label, value, unit, engine, *, flag=None, basis=None, currency_year=None,
          fidelity=None) -> Figure:
+    if unit == "EUR" and currency_year is None and value is not None:
+        # Gate S6 BC-S6-2: a money figure whose currency year no case states is
+        # null with a flag, never a number without its year (and never a 500).
+        value, flag = None, "currency_year_unknown"
     return Figure(key=key, label=label, value=value, unit=unit, engine=engine,
                   basis=basis, currency_year=currency_year, fidelity=fidelity,
                   unavailable=None if value is not None else (flag or "not_computed"))
@@ -795,19 +803,37 @@ def verdict(attributions: list[BatteryAttribution], robustness: Robustness | Non
             option_networks: Mapping[str, Any] | None = None,
             caveats: Mapping[str, tuple[str, ...]] | None = None,
             question: DecisionQuestion = Q.BESS_AT_SITE,
-            fidelity: Fidelity | None = None) -> Verdict:
+            fidelity: Fidelity | None = None,
+            expected: Sequence[str] | None = None) -> Verdict:
     """
     The verdict from the battery attributions and the tornado (see the
     module docstring for the rule). ``streams`` are the named option's value
     streams (for the main caveat), ``option_networks`` its network (for the
     sizes in the facts), ``caveats`` the run's per-option caveats
     (``size_at_upper_bound:<asset>``).
+
+    ``expected`` names every battery option the run was asked to judge (gate
+    S6 BC-S6-1). One with no ``ok`` or ``skipped`` attribution — pending,
+    failed, never run, changed since the run, or not attributable — is
+    UNJUDGED, and the verdict then states only what the judged options
+    already decide without it: ``recommended`` stands (one judged battery is
+    worth building at the centre and at every bound, whatever the others
+    turn out to be; the reason ``options_not_all_judged`` says the named one
+    may not be the best), while ``marginal`` and ``not_recommended`` become
+    ``not_established`` (an unjudged option could be the robust one, or the
+    one worth building).
     """
     reasons: list[str] = []
     batteries = [a for a in attributions if Q.max_hours(Q.option(question, a.option_id))]
-    unjudged = [a for a in batteries if a.status == "not_established"]
-    for a in unjudged:
-        reasons.extend(c for c in a.notes if c not in reasons)
+    judged = {a.option_id for a in batteries if a.status in ("ok", "skipped")}
+    expected_ids = list(dict.fromkeys(
+        list(expected if expected is not None else []) + [a.option_id for a in batteries]))
+    unjudged = [o for o in expected_ids if o not in judged]
+    for a in batteries:
+        if a.status == "not_established":
+            reasons.extend(c for c in a.notes if c not in reasons)
+    if unjudged:
+        reasons.append("options_not_all_judged")
     cands = _candidates(attributions)
     best = max(cands, key=lambda a: a.battery_npv) if cands else None
     currency_year = next((a.currency_year for a in attributions if a.currency_year), None)
@@ -847,6 +873,10 @@ def verdict(attributions: list[BatteryAttribution], robustness: Robustness | Non
               if v is not None]
     flips = [k for k, v in bounds if v < -NPV_TOL_EUR]
     klass = "marginal" if flips else "recommended"
+    if klass == "marginal" and unjudged:
+        # An unjudged option could be the robust one (BC-S6-1).
+        return Verdict(status="not_established", option_id=best.option_id,
+                       reasons=tuple(reasons))
     n = (option_networks or {}).get(best.option_id)
     pv_mw = pv_size(n) if n is not None else None
     with_pv = (best.method == "battery_removed_same_pv" and pv_mw is not None
@@ -1133,10 +1163,15 @@ def assemble_findings(study, base_dir, db, base_uuid: str) -> Findings:
             notes.append("tornado_stale")
     caveats = {oid: o.caveats for oid, o in ctx.options.items()}
     nets = {oid: o.network for oid, o in ctx.options.items()}
+    # Every battery option the run was asked for (BC-S6-1): pending, failed
+    # or changed ones have no attribution and count as unjudged.
+    expected = [o["option_id"] for o in faux.get("options") or []
+                if Q.max_hours(Q.option(inp.question, o["option_id"]))]
+    judged_rob = robustness if (fresh or tornado is not None) else None
     # The streams of the option the verdict names — the battery's increment
     # over the PV-only reference for a bess_pv option.
-    pre = verdict(attributions, robustness if fresh else None, option_networks=nets,
-                  caveats=caveats, question=inp.question, fidelity=ctx.fidelity)
+    pre = verdict(attributions, judged_rob, option_networks=nets, caveats=caveats,
+                  question=inp.question, fidelity=ctx.fidelity, expected=expected)
     streams_option = pre.option_id or next(
         (a.option_id for a in sorted(_candidates(attributions), key=lambda a: -a.battery_npv)),
         None)
@@ -1153,9 +1188,9 @@ def assemble_findings(study, base_dir, db, base_uuid: str) -> Findings:
             streams_status = "ok"
             if against is not None:
                 notes.append("value_streams_battery_increment_over_pv_only_reference")
-    v = verdict(attributions, robustness if fresh else None, streams=streams,
-                option_networks=nets, caveats=caveats, question=inp.question,
-                fidelity=ctx.fidelity)
+    v = verdict(attributions, judged_rob, streams=streams, option_networks=nets,
+                caveats=caveats, question=inp.question, fidelity=ctx.fidelity,
+                expected=expected)
     if changed and v.status == "ok":
         v = v.model_copy(update={"reasons": tuple(v.reasons) + ("fork_changed_since_run",)})
     explained: list[dict] = []
@@ -1188,8 +1223,9 @@ def assemble_findings(study, base_dir, db, base_uuid: str) -> Findings:
         completeness={"options": faux.get("options_status", "not_established"),
                       "verdict": v.status, "robustness": robustness.status,
                       "value_streams": streams_status,
-                      "battery_attribution": ("ok" if attributions and all(
-                          a.status != "not_established" for a in attributions)
+                      "battery_attribution": ("ok" if expected and all(
+                          any(a.option_id == o and a.status in ("ok", "skipped")
+                              for a in attributions) for o in expected)
                           else "not_established"),
                       "explain": "ok" if explained else "not_established"},
         honesty_notes=_digit_free(notes))

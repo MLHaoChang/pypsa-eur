@@ -309,11 +309,13 @@ def _worker(*, study_id, base_dir, base_row_id, user_id, inp, record, stop_event
             logger.exception("decision study %s: saving the tornado failed", study_id)
             error = error or "saving the tornado failed"
             status = "failed"
-        R._set(ctx, record, status=status, error=error, finished_at=time.time(),
-               current=None, forks_left=left)
         db.close()
+        # Gate S6: release before the terminal status is published (the
+        # runner's rule; a poll reading "done" finds nothing exempt).
         if record.get("registered_base"):
             R._release_base(ctx.registry_key, True)
+        R._set(ctx, record, status=status, error=error, finished_at=time.time(),
+               current=None, forks_left=left)
 
 
 def _save(base_dir, study_id, inp, record, outcome, status, error, left) -> None:

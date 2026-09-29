@@ -191,9 +191,11 @@ class Figure(_Model):
     def _provenance_is_stated(self):
         """
         Gate S1 [S] (enforced from S6): a money figure states its basis and
-        currency year, and a figure a run produced states its fidelity.
+        currency year, and a figure a run produced states its fidelity. A
+        null money figure is exempt: its flag says why there is no number
+        (e.g. ``currency_year_unknown``, gate S6 BC-S6-2).
         """
-        if self.unit.split("/")[0].strip().upper() in _CURRENCIES and (
+        if self.value is not None and self.unit.split("/")[0].strip().upper() in _CURRENCIES and (
                 self.basis is None or self.currency_year is None):
             raise ValueError(
                 f"Figure {self.key!r} is money ({self.unit}) without its basis "

@@ -497,9 +497,13 @@ def _release_base(key: str, registered: bool) -> None:
         in_use = key in PyPSAService._session_active_keys()
     except Exception:  # noqa: BLE001
         in_use = True
+    # Lift the exemption BEFORE the drop (gate S6): once the context is gone a
+    # poll reads the terminal record from disk, and must then find nothing
+    # exempt. Meanwhile the live record still says "running", which keeps
+    # the context protected from eviction for the instant it is counted.
+    PyPSAService.unmark_study_owned(key)
     if not in_use:
         PyPSAService.drop(key)
-    PyPSAService.unmark_study_owned(key)
 
 
 def _set(ctx, record: dict, **kw) -> None:
@@ -625,21 +629,29 @@ def _worker(*, study_id, base_row_id, base_dir, user_id, fidelity, record,
                 _set(ctx, record, campaign=campaign.end(f"decision study run {status}"))
             except campaign.CampaignError:
                 pass
+        # The fork keys are read while the session is open (a delete in
+        # `_finish` commits, which expires the rows).
+        fork_keys = [project_registry.registry_key(row) for _o, row, _c in created]
+        final: dict[str, Any] = {"status": "failed", "finished_at": time.time(),
+                                 "error": error or "finishing the run failed"}
         try:
-            _finish(db, ctx, record, study_id=study_id, base_row_id=base_row_id,
-                    base_dir=base_dir, created=created, outcomes=outcomes,
-                    fidelity=fidelity, status=status, error=error,
-                    run_ledger=ledger, run_intake=intake)
+            final = _finish(db, ctx, record, study_id=study_id, base_row_id=base_row_id,
+                            base_dir=base_dir, created=created, outcomes=outcomes,
+                            fidelity=fidelity, status=status, error=error,
+                            run_ledger=ledger, run_intake=intake)
         except Exception:  # noqa: BLE001
             logger.exception("decision study %s: finishing the run failed", study_id)
-            _set(ctx, record, status="failed", finished_at=time.time(),
-                 error=error or "finishing the run failed")
         finally:
             db.close()
-            for _o, row, _c in created:
-                PyPSAService.unmark_study_owned(project_registry.registry_key(row))
+            # Gate S6: release EVERYTHING before the terminal status is
+            # published — a poll that reads "done" must find no exemption and
+            # no study context left (the release used to follow it, and a slow
+            # release was visible as a leaked `_study_owned` key).
+            for key in fork_keys:
+                PyPSAService.unmark_study_owned(key)
             if record.get("registered_base"):
                 _release_base(ctx.registry_key, True)
+            _set(ctx, record, **final)
 
 
 def _uuid(value):
@@ -648,8 +660,11 @@ def _uuid(value):
 
 
 def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcomes,
-            fidelity, status, error, run_ledger, run_intake) -> None:
-    """Remove unsolved forks, write the findings and the run record."""
+            fidelity, status, error, run_ledger, run_intake) -> dict:
+    """
+    Remove unsolved forks, write the findings and the run record; return the
+    live record's terminal fields, which the worker publishes after release.
+    """
     solved_rows = {o.option_id: r for o, r, _c in created
                    if outcomes.get(o.option_id, {}).get("result") is not None
                    and outcomes[o.option_id]["result"].solve_status == "ok"}
@@ -732,8 +747,9 @@ def _finish(db, ctx, record, *, study_id, base_row_id, base_dir, created, outcom
             "stale": bool(stale_reasons), "stale_reasons": stale_reasons,
             "updated_at": datetime.now(tz=UTC)})
         store.save_study(base_dir, study)
-    _set(ctx, record, status=status, error=error, finished_at=time.time(),
-         current=None, pending=pending, solved=sorted(solved_rows))
+    # The caller publishes this once everything is released (gate S6).
+    return {"status": status, "error": error, "finished_at": time.time(),
+            "current": None, "pending": pending, "solved": sorted(solved_rows)}
 
 
 def get_study_run(study_id: str, *, base_row, base_dir) -> dict | None:

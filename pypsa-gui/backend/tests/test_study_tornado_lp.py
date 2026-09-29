@@ -168,7 +168,20 @@ def test_a_price_bound_recomputes_the_baseline_bill_at_the_perturbed_tariff():
     ledger = sf.site_ledger()
     ctx = _ctx(ledger, {"bess_2h": n}, _question("demand_charge_price"))
     calls = []
-    out = F.run_tornado(ctx, lambda net, cfg, vid: calls.append(cfg) or net)
+    centre = {"storage_units": F.battery_size(n), "generators": F.pv_size(n)}
+
+    def identity(net, cfg, _vid):
+        # BC-S6-3: every sized asset the re-dispatch receives is FIXED at the
+        # centre's size — a variant left extendable would re-optimise it.
+        for comp, name in (("storage_units", "battery"), ("generators", "pv")):
+            df = getattr(net, comp)
+            if name in df.index:
+                assert not bool(df.at[name, "p_nom_extendable"]), name
+                assert float(df.at[name, "p_nom"]) == pytest.approx(centre[comp]), name
+        calls.append(cfg)
+        return net
+
+    out = F.run_tornado(ctx, identity)
     assert out.robustness.status == "ok", out.robustness
     [row] = out.robustness.tornado
     assert row.evaluation == "redispatch"

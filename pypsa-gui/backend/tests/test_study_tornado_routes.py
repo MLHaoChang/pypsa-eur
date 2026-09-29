@@ -155,8 +155,22 @@ def test_the_findings_before_a_tornado_are_not_established_and_name_why(
     assert all(a["method"] == "battery_only" and a["status"] == "ok" for a in atts.values())
 
 
+class PvBestSolver(FakeSolver):
+    """The fake, sizing only the battery that sits beside PV: bess_pv is the best."""
+
+    def __call__(self, config, n, *a, **k):
+        out = super().__call__(config, n, *a, **k)
+        if len(n.storage_units) and "pv" not in n.generators.index:
+            n.storage_units["p_nom_opt"] = 0.0
+        return out
+
+
 def test_a_bess_pv_option_is_attributed_only_after_its_reference_solves(
-        client, api_project, studies_on, fake):
+        client, api_project, studies_on, monkeypatch):
+    from services import solver_service
+
+    fake = PvBestSolver()
+    monkeypatch.setattr(solver_service, "run_simulation", fake)
     intake = {**NO_PV_TOU, "pv": {"enabled": True, "kind": "rooftop"}}
     sid = _run(client, api_project, "tor-pv", intake=intake)
     pre = client.get(f"/api/projects/tor-pv/studies/{sid}/findings").json()
@@ -172,11 +186,20 @@ def test_a_bess_pv_option_is_attributed_only_after_its_reference_solves(
     assert rec["status"] == "done", rec
     ref_call = fake.calls[run_solves]
     assert ref_call[2] == 0, "the reference omits the battery"
+    # BC-S6-3: every PV-only reference re-dispatch (the centre `ref-...` and
+    # each price bound's `...r`) omits the battery; every option one keeps it.
+    storage = {name: s for name, _cfg, s in fake.calls[run_solves:]}
+    variants = {v["fork"]: v["variant"] for v in rec["variants"]}
+    assert len(variants) == 9
+    for fork, variant in variants.items():
+        is_ref = variant.startswith("ref-") or variant.endswith("r")
+        assert storage[fork] == (0 if is_ref else 1), (variant, storage[fork])
     post = client.get(f"/api/projects/tor-pv/studies/{sid}/findings").json()
     pv = next(a for a in post["battery_attribution"] if a["option_id"] == "bess_pv_2h")
     assert pv["status"] == "ok" and pv["method"] == "battery_removed_same_pv"
     assert pv["battery_npv"] == pytest.approx(pv["option_npv"] - pv["reference_npv"])
-    assert rec["solves_charged"] == len(fake.calls) - run_solves
+    assert rec["solves_charged"] == len(fake.calls) - run_solves == 9
+    assert post["verdict"]["option_id"] == "bess_pv_2h"
 
 
 # ── abort mid-tornado ─────────────────────────────────────────────────────
@@ -424,3 +447,122 @@ def test_the_tornado_record_does_not_answer_for_the_run(
         release.set()
     assert wait_tornado(client, "tor-kind", sid)["status"] == "aborted"
     json.dumps(tor)
+
+
+# ── gate S6 binding conditions ───────────────────────────────────────────
+
+class ZeroSolver(FakeSolver):
+    """The fake, sizing every battery to zero."""
+
+    def __call__(self, config, n, *a, **k):
+        out = super().__call__(config, n, *a, **k)
+        if len(n.storage_units):
+            n.storage_units["p_nom_opt"] = 0.0
+        return out
+
+
+def test_an_incomplete_run_is_never_not_recommended(
+        client, api_project, studies_on, monkeypatch, registry_key_for):
+    """
+    BC-S6-1: the run is aborted after `none` and a zero-size `bess_1h`;
+    `bess_2h` and `bess_4h` were never judged, so nothing may say "not
+    recommended" (either could be the one worth building).
+    """
+    from services import solver_service
+
+    def after(k):
+        if k == 2:
+            ctx = PyPSAService.get_context(registry_key_for("inc-run"))
+            ctx.solver_state["decision_study"]["stop_event"].set()
+
+    monkeypatch.setattr(solver_service, "run_simulation", ZeroSolver(on_call=after))
+    api_project("inc-run-src")
+    sid = create_pack_study(client, "inc-run-src", "inc-run", intake=NO_PV_TOU).json()["study_id"]
+    assert client.post(f"/api/projects/inc-run/studies/{sid}/run", json={}).status_code == 202
+    assert wait_run(client, "inc-run", sid)["status"] == "aborted"
+    body = client.get(f"/api/projects/inc-run/studies/{sid}/findings").json()
+    assert body["available"] is False
+    assert body["pending_options"] == ["bess_2h", "bess_4h"]
+    v = body["verdict"]
+    assert v["status"] == "not_established" and v["class"] is None, v
+    assert "options_not_all_judged" in v["reasons"]
+    assert body["completeness"]["battery_attribution"] == "not_established"
+
+
+def test_a_tariff_without_a_currency_year_takes_the_cases_year(
+        client, api_project, studies_on, fake):
+    """BC-S6-2: the money figures carry the year the cases were built on (200, never 500)."""
+    tou = {k: v for k, v in TOU_DC.items() if k != "currency_year"}
+    sid = _run(client, api_project, "cy-none", intake={**NO_PV_TOU, "tariff": {"custom": tou}})
+    assert client.post(f"/api/projects/cy-none/studies/{sid}/findings/tornado",
+                       json={}).status_code == 202
+    assert wait_tornado(client, "cy-none", sid)["status"] == "done"
+    r = client.get(f"/api/projects/cy-none/studies/{sid}/findings")
+    assert r.status_code == 200, r.text[:300]
+    v = r.json()["verdict"]
+    assert v["status"] == "ok"
+    npv = next(f for f in v["headline_kpis"] if f["key"] == "battery_npv")
+    assert npv["currency_year"] == 2020 and npv["basis"] is not None
+
+
+def test_a_tornado_on_an_earlier_run_is_stale(client, api_project, studies_on, fake):
+    """BC-S6-4: a re-run makes new forks; the old tornado no longer describes them."""
+    sid = _run(client, api_project, "tor-stale")
+    assert client.post(f"/api/projects/tor-stale/studies/{sid}/findings/tornado",
+                       json={}).status_code == 202
+    assert wait_tornado(client, "tor-stale", sid)["status"] == "done"
+    assert client.get(f"/api/projects/tor-stale/studies/{sid}/findings").json()[
+        "robustness"]["status"] == "ok"
+    r = client.patch(f"/api/projects/tor-stale/studies/{sid}", json={
+        "intake": {"site": {**NO_PV_TOU["site"], "connection_mw": 3.0}}})
+    assert r.status_code == 200, r.text
+    assert client.post(f"/api/projects/tor-stale/studies/{sid}/run", json={}).status_code == 202
+    assert wait_run(client, "tor-stale", sid)["status"] == "done"
+    body = client.get(f"/api/projects/tor-stale/studies/{sid}/findings").json()
+    assert body["robustness"]["status"] == "not_established"
+    assert body["robustness"]["note"] == "tornado_stale"
+    assert "tornado_stale" in body["honesty_notes"]
+    assert body["verdict"]["status"] == "not_established"
+    assert "tornado_stale" in body["verdict"]["reasons"]
+
+
+def test_a_case_can_be_read_while_a_tornado_runs(client, api_project, studies_on, monkeypatch):
+    """BC-S6-5: the tornado never touches the option forks; a delete still waits."""
+    from services import solver_service
+
+    release = threading.Event()
+    solver = FakeSolver()
+    monkeypatch.setattr(solver_service, "run_simulation", solver)
+    sid = _run(client, api_project, "tor-case")
+    solver.on_call = lambda k: release.wait(30)
+    try:
+        assert client.post(f"/api/projects/tor-case/studies/{sid}/findings/tornado",
+                           json={}).status_code == 202
+        for url in ("case", "case.xlsx"):
+            r = client.get(f"/api/projects/tor-case/studies/{sid}/options/bess_2h/{url}")
+            assert r.status_code == 200, (url, r.text[:200])
+        assert client.delete(f"/api/projects/tor-case/studies/{sid}").status_code == 409
+    finally:
+        client.post(f"/api/projects/tor-case/studies/{sid}/findings/tornado/abort")
+        release.set()
+    assert wait_tornado(client, "tor-case", sid)["status"] == "aborted"
+
+
+def test_a_tornado_reports_done_only_after_it_has_released_everything(
+        client, api_project, studies_on, fake, monkeypatch, registry_key_for):
+    """The tornado's terminal status is published after its release (see the runner's twin)."""
+    import time
+
+    sid = _run(client, api_project, "tor-late")
+    slow = PyPSAService._session_active_keys.__func__
+
+    def probe(cls):
+        time.sleep(1.0)
+        return slow(cls)
+
+    monkeypatch.setattr(PyPSAService, "_session_active_keys", classmethod(probe))
+    assert client.post(f"/api/projects/tor-late/studies/{sid}/findings/tornado",
+                       json={}).status_code == 202
+    assert wait_tornado(client, "tor-late", sid)["status"] == "done"
+    assert PyPSAService._study_owned == set(), sorted(PyPSAService._study_owned)
+    assert registry_key_for("tor-late") not in PyPSAService._contexts

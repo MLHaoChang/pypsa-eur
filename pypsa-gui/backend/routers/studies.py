@@ -453,7 +453,16 @@ def _refuse_undeletable_fork(row, db: DBSession) -> None:
 
 
 def _refuse_if_running(project: AuthorizedProject, db: DBSession,
-                       user: User | None, study_id: str) -> None:
+                       user: User | None, study_id: str, *,
+                       runs_only: bool = False,
+                       message: str = "the study is running; abort it before deleting it",
+                       ) -> None:
+    """
+    409 while this study's run — or, unless ``runs_only``, its tornado —
+    holds the base context. A read of the option forks (the case) passes
+    ``runs_only``: a tornado never touches them (gate S6 BC-S6-5); a delete
+    waits for both.
+    """
     from services.pypsa_service import PyPSAService
 
     ctx = PyPSAService.get_context(project.registry_key)
@@ -461,10 +470,10 @@ def _refuse_if_running(project: AuthorizedProject, db: DBSession,
         return
     with ctx.solver_state_lock:
         rec = ctx.solver_state.get(study_runner.STUDY_KEY)
-        if rec and rec.get("study_id") == study_id and rec.get("status") == "running":
-            raise HTTPException(409, detail={
-                "error_kind": "study_running",
-                "message": "the study is running; abort it before deleting it"})
+        if (rec and rec.get("study_id") == study_id and rec.get("status") == "running"
+                and (not runs_only or rec.get("kind", "run") == "run")):
+            raise HTTPException(409, detail={"error_kind": "study_running",
+                                             "message": message})
 
 
 # ── S4 M0: a question-first study creates its own base project ────────────
@@ -852,7 +861,8 @@ def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
     if not any(o.free_assets for o in question.options if o.option_id == option_id):
         raise HTTPException(422, detail={"error_kind": "baseline_has_no_case", "message": (
             f"{option_id!r} is the baseline every case is measured against")})
-    _refuse_if_running(project, db, user, study_id)
+    _refuse_if_running(project, db, user, study_id, runs_only=True, message=(
+        "the study is running; its cases follow when the run finishes"))
     result = next((o for o in findings.get("options") or []
                    if o.get("option_id") == option_id), None)
     if result is None or result.get("solve_status") != "ok" or not result.get("project_ref"):

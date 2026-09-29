@@ -562,3 +562,27 @@ def test_a_run_whose_worker_cannot_start_releases_the_base(
         client.post(f"/api/projects/rel-thread/studies/{sid}/run", json={})
     assert fake.calls == []
     assert _left_behind(registry_key_for, "rel-thread") == {"exempt": False, "resident": False}
+
+
+def test_a_run_reports_done_only_after_it_has_released_everything(
+        client, api_project, studies_on, fake, monkeypatch, registry_key_for):
+    """
+    Gate S6 (full-suite failure of the test above): the run published its
+    terminal status BEFORE its `finally` released the base, so a poll could
+    read "done" while the base was still exempt from the cap. Widen that
+    window (a slow session probe inside the release) and read at once.
+    """
+    import time
+
+    slow = PyPSAService._session_active_keys.__func__
+
+    def probe(cls):
+        time.sleep(1.0)
+        return slow(cls)
+
+    monkeypatch.setattr(PyPSAService, "_session_active_keys", classmethod(probe))
+    sid = _setup(client, api_project, "rel-late")
+    assert client.post(f"/api/projects/rel-late/studies/{sid}/run", json={}).status_code == 202
+    assert wait_run(client, "rel-late", sid)["status"] == "done"
+    assert PyPSAService._study_owned == set(), sorted(PyPSAService._study_owned)
+    assert _left_behind(registry_key_for, "rel-late") == {"exempt": False, "resident": False}
