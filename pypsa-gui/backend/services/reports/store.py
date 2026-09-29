@@ -121,9 +121,17 @@ def _now_iso() -> str:
 
 # ── meta ────────────────────────────────────────────────────────────────────
 
+# The meta fields that are NOT derived from the document: the job's
+# `generation` (WP3/WP6) and the template binding + mapping plan (WP11). A
+# meta rewrite from a document carries them over; `update_meta` sets them.
+_CARRIED_META_FIELDS = ("generation", "template_mode", "template_language", "mapping_plan")
+
+
 def _meta_from_doc(doc: ReportDocument, *, latest_version: int,
                    created_at: str | None = None,
-                   generation: dict | None = None) -> ReportMeta:
+                   carried: ReportMeta | None = None) -> ReportMeta:
+    extra = ({f: getattr(carried, f) for f in _CARRIED_META_FIELDS}
+             if carried is not None else {})
     return ReportMeta(
         report_id=doc.report_id,
         title=doc.title,
@@ -134,7 +142,7 @@ def _meta_from_doc(doc: ReportDocument, *, latest_version: int,
         evidence_hash=doc.evidence_hash,
         profile_id=doc.profile_id,
         model=doc.model,
-        generation=generation,
+        **extra,
     )
 
 
@@ -157,6 +165,24 @@ def load_meta(project_dir: pathlib.Path, report_id: str) -> ReportMeta:
     if meta is None:
         raise ReportNotFound(f"report {report_id} has an unreadable meta.json")
     return meta
+
+
+def update_meta(project_dir: pathlib.Path, report_id: str, **fields: object) -> ReportMeta:
+    """
+    Set one or more of the carried meta fields (`generation`, `template_mode`,
+    `template_language`, `mapping_plan`) on an existing report and return the
+    new meta. `None` is a value (it clears the field). Any other field name
+    is a `TypeError`: the document-derived fields are rewritten from the
+    document, never patched here.
+    """
+    unknown = sorted(set(fields) - set(_CARRIED_META_FIELDS))
+    if unknown:
+        raise TypeError(f"update_meta: not a carried meta field: {', '.join(unknown)}")
+    rdir = _existing_report_dir(project_dir, report_id)
+    meta = load_meta(project_dir, report_id)
+    updated = meta.model_copy(update={**fields, "updated_at": _now_iso()})
+    _write_meta(rdir, updated)
+    return updated
 
 
 # ── versions ────────────────────────────────────────────────────────────────
@@ -209,11 +235,12 @@ def save_version(project_dir: pathlib.Path, doc: ReportDocument) -> int:
     next_version = max([meta.latest_version, *on_disk]) + 1
     bumped = doc.model_copy(update={"version": next_version})
     _write_version(rdir, bumped)
-    # `generation` is the job's, written after ITS save (WP3); a later version
-    # from any caller keeps it rather than silently dropping it (WP6).
+    # `generation` is the job's, written after ITS save (WP3); the template
+    # binding and the mapping plan are the template routes' (WP11). A later
+    # version from any caller keeps them rather than silently dropping them.
     _write_meta(rdir, _meta_from_doc(
         bumped, latest_version=next_version, created_at=meta.created_at,
-        generation=meta.generation,
+        carried=meta,
     ))
     return next_version
 

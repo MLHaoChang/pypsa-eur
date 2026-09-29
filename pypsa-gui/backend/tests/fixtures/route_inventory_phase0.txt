@@ -154,6 +154,10 @@ GET     /api/projects/{name}/reports/{report_id}                 -> get_report_a
 POST    /api/projects/{name}/reports/{report_id}/export          -> export_report_api_projects__name__reports__report_id__export_post
 GET     /api/projects/{name}/reports/{report_id}/figures/{figure_id} -> get_report_figure_api_projects__name__reports__report_id__figures__figure_id__get
 POST    /api/projects/{name}/reports/{report_id}/sections/{section_id}/regenerate-> regenerate_section_api_projects__name__reports__report_id__sections__section_id__regenerate_post
+GET     /api/projects/{name}/reports/{report_id}/template        -> get_template_api_projects__name__reports__report_id__template_get
+POST    /api/projects/{name}/reports/{report_id}/template        -> bind_template_api_projects__name__reports__report_id__template_post
+POST    /api/projects/{name}/reports/{report_id}/template/plan   -> propose_template_plan_api_projects__name__reports__report_id__template_plan_post
+PUT     /api/projects/{name}/reports/{report_id}/template/plan   -> put_template_plan_api_projects__name__reports__report_id__template_plan_put
 GET     /api/projects/{name}/reports/{report_id}/versions/{version} -> get_report_version_api_projects__name__reports__report_id__versions__version__get
 GET     /api/projects/{name}/results-summary                     -> get_results_summary_api_projects__name__results_summary_get
 GET     /api/projects/{name}/results_bundle                      -> get_results_bundle_api_projects__name__results_bundle_get

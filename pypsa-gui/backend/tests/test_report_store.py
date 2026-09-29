@@ -261,3 +261,46 @@ def test_generation_meta_survives_save_version_and_is_listed(project_dir):
     listed = store.list_reports(project_dir)
     assert listed[0].generation == generation
     assert listed[0].model_dump()["generation"] == generation
+
+
+# ── WP11: the template binding and the mapping plan survive save_version ─────
+
+def test_template_fields_and_mapping_plan_survive_save_version(project_dir):
+    """
+    `ReportMeta.template_mode`, `template_language` and `mapping_plan` are
+    set by the template routes through `update_meta` and, like `generation`,
+    must survive a later `save_version` from any caller (a regenerate, a
+    bind of the same file) rather than be dropped by the meta rewrite.
+    """
+    store.create_report(project_dir, _doc())
+    meta = store.load_meta(project_dir, "0123456789abcdef")
+    assert meta.template_mode is None and meta.template_language is None
+    assert meta.mapping_plan is None
+    plan = {"entries": [{"heading_index": 5, "action": "keep", "new_text": None,
+                         "section_ids": ["s"]}],
+            "inserted": [], "placeholders": {}, "unmapped_sections": [], "notes": []}
+    updated = store.update_meta(project_dir, "0123456789abcdef", template_mode="untagged",
+                                template_language="de", mapping_plan=plan)
+    assert updated.template_mode == "untagged" and updated.template_language == "de"
+    assert updated.mapping_plan == plan
+    assert store.load_meta(project_dir, "0123456789abcdef").mapping_plan == plan
+
+    assert store.save_version(project_dir, _doc()) == 2
+    path = project_dir / "reports" / "0123456789abcdef" / "meta.json"
+    after = json.loads(path.read_text(encoding="utf-8"))
+    assert after["latest_version"] == 2
+    assert after["template_mode"] == "untagged" and after["template_language"] == "de"
+    assert after["mapping_plan"] == plan
+    listed = store.list_reports(project_dir)
+    assert listed[0].mapping_plan == plan and listed[0].template_mode == "untagged"
+
+    # Clearing goes through the same helper and is honoured explicitly (None
+    # is a value here, not "leave as is").
+    cleared = store.update_meta(project_dir, "0123456789abcdef", template_mode=None,
+                                template_language=None, mapping_plan=None)
+    assert cleared.template_mode is None and cleared.mapping_plan is None
+    assert cleared.latest_version == 2
+    with pytest.raises(store.ReportNotFound):
+        store.update_meta(project_dir, "ffffffffffffffff", mapping_plan=plan)
+    with pytest.raises(TypeError):
+        store.update_meta(project_dir, "0123456789abcdef", not_a_field=1)
