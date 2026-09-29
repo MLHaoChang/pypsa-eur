@@ -76,6 +76,7 @@ SAFETY_PANEL_ENUM = [
 RESULTS_TAB_ENUM = [
     "overview", "capex", "dispatch", "loadflow", "prices", "economics",
     "emissions", "curtailment", "lostload", "storage", "asset",
+    "investment",   # IC P3 WP3.4 (the Investment tab, WP3.5)
 ]
 BOTTOM_TAB_ENUM = [
     "Log", "History", "Buses", "Lines", "Transformers", "Generators",
@@ -375,6 +376,9 @@ TOOLS: list[dict[str, Any]] = [
         "value_stream, source, amount, ...}], by_participant: {id: {paid, received, net, "
         "by_stream}}, sankey, conservation: {ok, checks}}}, conservation_ok, flags, notes}. "
         "A null amount or total is unknown, never zero. "
+        "value_flows answers a SUMMARY per period and participant (paid, received, "
+        "net, by_stream; conservation) by default; detail='lines' pages the ledger "
+        "lines with offset/limit. detail is ignored by the other kinds. "
         "Returns {status:'no_data', kind, message} when the underlying endpoint "
         "has nothing to serve — an unsolved or stale network, or a solve that "
         "produced none of this kind (lost_load on a run that shed nothing). "
@@ -383,6 +387,9 @@ TOOLS: list[dict[str, Any]] = [
         {
             "result_kind": {"type": "string", "enum": RESULTS_ENUM},
             "source": {"type": "string", "enum": RESULTS_SOURCE_ENUM},
+            "detail": {"type": "string", "enum": ["summary", "lines"]},
+            "offset": {"type": "integer"},
+            "limit": {"type": "integer"},
         },
         ["result_kind"],
     ),
@@ -2259,6 +2266,29 @@ TOOLS: list[dict[str, Any]] = [
          "replace_inline": {"type": "boolean"}},
         ["name"],
     ),
+    # ── Participants (1) — Edge Investment Case P3 WP3.4 ──────────────────
+    _t(
+        "define_participants",
+        "Set who takes part in the site's money flows and who pays whom: pass "
+        "exactly one of `template` (single_owner, btm_ppa, landlord_tenant, "
+        "dso_developer, energy_hub — built from the network and the contracts), "
+        "`config` (a full value-flow config: participants, externals, "
+        "tariff_payees, asset_owners, hub_members, allocation, export_revenue_to) "
+        "or clear=true. A template that needs a contract the project lacks is NOT "
+        "saved: it returns {saved: false, status: 'drafts_need_pricing', "
+        "draft_contracts} with null money fields — ask the user for them, save the "
+        "contracts with update_solver_config, then call again. An existing, "
+        "different config is refused (value_flows_would_be_replaced) until the "
+        "user confirms and you pass replace=true. Read the result with "
+        "get_results(result_kind='value_flows'). Returns {saved, status, digest, "
+        "template, participants, notes}. Safety: write.",
+        {"template": {"type": "string", "enum": ["single_owner", "btm_ppa",
+                                                 "landlord_tenant", "dso_developer",
+                                                 "energy_hub"]},
+         "config": {"type": "object"}, "clear": {"type": "boolean"},
+         "replace": {"type": "boolean"}},
+        [],
+    ),
 ]
 
 
@@ -2566,6 +2596,9 @@ TOOL_ROUTES: dict[str, list] = {
     "import_urdb_tariff": [("POST", "/api/library/items/tariff/import_urdb")],
     "attach_tariff": [("GET", "/api/library/items/{kind}/{name}"),
                       ("PUT", "/api/simulation/solver_config")],
+    "define_participants": [("POST", "/api/simulation/value_flows/template"),
+                            ("GET", "/api/simulation/commercial/value_flows"),
+                            ("PUT", "/api/simulation/commercial/value_flows")],
 }
 
 

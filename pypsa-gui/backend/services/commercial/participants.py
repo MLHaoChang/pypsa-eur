@@ -1076,3 +1076,41 @@ def is_fuel_supply(n, parsed, generator: str) -> bool:
     if any((links[c].astype(str) == bus).any() for c in outs):
         return False
     return bool((links["bus0"].astype(str) == bus).any()) if not links.empty else False
+
+
+# ── the designer's context (WP3.6) ──────────────────────────────────────────
+
+
+_DESIGNER_FRAMES = (("Generator", "generators"), ("StorageUnit", "storage_units"),
+                    ("Store", "stores"), ("Link", "links"), ("Line", "lines"),
+                    ("Transformer", "transformers"))
+
+
+def designer_context(n, commercial: CommercialConfig) -> dict:
+    """What the participants designer offers (IC P3 WP3.6): every asset with
+    its meter side (only site-side assets are ownable; grid-side ones are the
+    market's), the tariff items with the payee they resolve to by default, the
+    parties the contracts name and the group members."""
+    sides = classify_buses(n, commercial)
+    assets = []
+    for comp, frame in _DESIGNER_FRAMES:
+        df = getattr(n, frame)
+        for name in df.index:
+            side, flags = asset_side(n, comp, str(name), sides)
+            bus = str(df.at[name, "bus"] if "bus" in df.columns else df.at[name, "bus0"])
+            assets.append({"component": comp, "name": str(name), "bus": bus, "side": side,
+                           "ownable": side != "grid", "flags": flags,
+                           "carrier": str(df.at[name, "carrier"]) if "carrier" in df.columns
+                           else ""})
+    retail = [c for c in commercial.contracts if c.type == "retail"]
+    retailer = retail[0].retailer if len(retail) == 1 else None
+    items = {it.id: BillItem(it.id, it.kind, it.measured_on, it.direction)
+             for it in (commercial.import_tariff.items if commercial.import_tariff else [])}
+    defaults = resolve_tariff_payees(items, ValueFlowConfig(), retailer)
+    tariff_items = [{"id": i, "kind": it.kind, "default_payee": defaults[i],
+                     "stream": _item_stream(it, defaults[i])} for i, it in items.items()]
+    parties = sorted({p for c in commercial.contracts for _r, p in _contract_parties(c) if p})
+    return {"site_party": commercial.site_party, "assets": assets,
+            "tariff_items": tariff_items, "contract_parties": parties,
+            "group_members": list(commercial.group_members),
+            "default_externals": list(ValueFlowConfig().externals)}

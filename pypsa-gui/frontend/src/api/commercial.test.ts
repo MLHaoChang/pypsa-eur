@@ -152,12 +152,20 @@ describe('commercialApi results', () => {
       await expect(commercialApi[fn]()).rejects.toBeInstanceOf(SolverInFlightError)
     })
 
-  it('a 404 reads as no result only for the routes not deployed yet', async () => {
+  it('a 404 is a real fault on every deployed result route', async () => {
     const notFound = axiosError(404, 'Not Found')
     get.mockRejectedValue(notFound)
-    await expect(commercialApi.getValueFlowsResult()).resolves.toBeNull()
-    await expect(commercialApi.getBilling()).rejects.toBe(notFound)       // a real fault
+    await expect(commercialApi.getValueFlowsResult()).rejects.toBe(notFound)   // WP3.4 shipped
+    await expect(commercialApi.getBilling()).rejects.toBe(notFound)
     await expect(commercialApi.getCfeScore()).rejects.toBe(notFound)
+  })
+
+  it('reads the designer context quietly and types its 409s', async () => {
+    get.mockResolvedValue({ status: 200, data: { site_party: 'site', assets: [] } })
+    await expect(commercialApi.getDesigner()).resolves.toMatchObject({ site_party: 'site' })
+    expect(get).toHaveBeenCalledWith('/simulation/value_flows/designer', { skipErrorToast: true })
+    get.mockRejectedValue(axiosError(409, { code: 'no_commercial_config', message: 'x' }))
+    await expect(commercialApi.getDesigner()).rejects.toBeInstanceOf(NoCommercialConfigError)
   })
 
   it('previewBilling types its errors too', async () => {

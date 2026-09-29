@@ -3,8 +3,8 @@
 // writes through the solver-config route, and the commercial results.
 import client from './client'
 import type {
-  CommercialConfig, LibraryItemRef, LibraryRef, SolverConfig, Tariff, ValueFlowConfig,
-  ValueFlowsState,
+  AssetOwnership, CommercialConfig, LibraryItemRef, LibraryRef, SolverConfig, Tariff,
+  ValueFlowConfig, ValueFlowsState,
 } from './types'
 
 export type LibraryItemKind = LibraryItemRef['kind']
@@ -84,9 +84,9 @@ function typed(e: unknown): never {
 function resultError(e: unknown): never {
   return typed(e)
 }
-/** The same, but a 404 reads as "no result": for routes that land later in
- *  IC P3 (GET /results/value_flows in WP3.4, POST /results/billing/preview in
- *  WP3.7b). TODO: drop this when both routes ship (a P3 gate item). */
+/** The same, but a 404 reads as "no result": for a route that lands later in
+ *  IC P3 (POST /results/billing/preview in WP3.7b; GET /results/value_flows
+ *  shipped in WP3.4). TODO: drop this when the preview ships (a P3 gate item). */
 function notYetDeployed(e: unknown): null {
   if (detailOf(e).status === 404) return null
   return typed(e)
@@ -200,6 +200,17 @@ export interface ValueFlowsPayload {
   notes?: string[]
   provenance?: Record<string, unknown>
 }
+/** GET /simulation/value_flows/designer (IC P3 WP3.6). */
+export interface DesignerContext {
+  site_party: string
+  assets: Array<{ component: AssetOwnership['component']; name: string; bus: string
+                  side: 'site' | 'grid' | 'unclassified'; ownable: boolean; flags: string[]
+                  carrier: string }>
+  tariff_items: Array<{ id: string; kind: string; default_payee: string; stream: string }>
+  contract_parties: string[]
+  group_members: string[]
+  default_externals: string[]
+}
 export interface TemplateResult {
   config: ValueFlowConfig
   draft_contracts: Array<Record<string, unknown>>
@@ -242,12 +253,23 @@ export const commercialApi = {
     return client.put<SolverConfig>('/simulation/solver_config', { commercial: next })
       .then(r => r.data, typed)
   },
+  /** Append contracts (a template's priced drafts, IC P3 WP3.6) to the LATEST
+   *  stored list, through the solver-config route like `saveCommercial`. */
+  appendContracts: async (contracts: Array<Record<string, unknown>>) => {
+    const current = (await client.get<SolverConfig>('/simulation/solver_config')).data
+    const have = (current.commercial?.contracts ?? []) as unknown[]
+    return commercialApi.saveCommercial({ contracts: [...have, ...contracts] as never })
+  },
   getBilling: () =>
     client.get<BillingPayload>('/results/billing', QUIET).then(orNull, resultError),
   getCfeScore: () =>
     client.get<CfeScorePayload>('/results/cfe_score', QUIET).then(orNull, resultError),
   getValueFlowsResult: () =>
-    client.get<ValueFlowsPayload>('/results/value_flows', QUIET).then(orNull, notYetDeployed),
+    client.get<ValueFlowsPayload>('/results/value_flows', QUIET).then(orNull, resultError),
+  /** What the participants designer offers (IC P3 WP3.6). */
+  getDesigner: () =>
+    client.get<DesignerContext>('/simulation/value_flows/designer', QUIET)
+      .then(r => r.data, typed),
   previewBilling: (tariff: Tariff) =>
     client.post<BillingPayload>('/results/billing/preview', { tariff }, QUIET)
       .then(orNull, notYetDeployed),

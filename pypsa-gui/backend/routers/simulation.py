@@ -655,6 +655,31 @@ def put_value_flows(body: ValueFlowsIn, if_match: str | None = Header(default=No
         return _value_flows_state(merged["commercial"])
 
 
+@router.get("/value_flows/designer")
+def get_value_flow_designer():
+    """What the participants designer offers (IC P3 WP3.6): the assets with
+    their meter side (grid-side ones are not ownable), the tariff items with
+    their default payee, the contracts' parties and the group members.
+    Read-only; 409 like the template route when there is no valid commercial
+    config or a solve is running (its slacks are on the network)."""
+    from models.commercial import CommercialConfig
+    from services.commercial import participants as P
+
+    if _solver_in_flight_ctx(PyPSAService.get_active_context()):
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                  "message": "a solve is running on this project"})
+    commercial = getattr(_state["solver_config"], "commercial", None)
+    if not isinstance(commercial, dict):
+        raise HTTPException(409, {"code": "no_commercial_config",
+                                  "message": "set the commercial config (poc_link) first"})
+    try:
+        bound = CommercialConfig.model_validate(commercial)
+    except ValidationError as exc:
+        raise HTTPException(409, {"code": "commercial_config_invalid",
+                                  "message": exc.errors()[0]["msg"]}) from exc
+    return P.designer_context(PyPSAService.get_network(), bound)
+
+
 class TemplateIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     template: str = Field(min_length=1)

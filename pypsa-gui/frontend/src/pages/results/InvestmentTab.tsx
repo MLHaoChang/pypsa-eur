@@ -11,6 +11,8 @@ import {
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { CompletenessChips, type CompletenessRow } from '../../components/CompletenessChips'
+import { fmtAmount } from './investment/valueFlows'
+import ValueFlowsView from './investment/ValueFlowsView'
 
 const SECTIONS = [
   { id: 'participants', label: 'Participants' },
@@ -21,12 +23,7 @@ const SECTIONS = [
 ] as const
 type SectionId = typeof SECTIONS[number]['id']
 
-/** Money in the tariff's own currency: the payload carries no currency code,
- *  so no symbol is printed (a US tariff is not in euros). */
-export function fmtAmount(v: number | null | undefined): string {
-  if (v == null || !Number.isFinite(v)) return 'not established'
-  return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
+export { fmtAmount }
 
 /** The error a result query ended in, as the user should read it. */
 export function loadFailure(error: unknown): string {
@@ -153,9 +150,11 @@ export default function InvestmentTab() {
           <BillSection billing={billing.data} error={billing.isError ? billing.error : null} />
         )}
         {section === 'participants' && (
-          <p className="text-[11px] text-muted py-2" data-testid="ic-participants-state">
-            {participantsText}
-          </p>
+          flows.data?.status === 'ok' ? <ValueFlowsView payload={flows.data} /> : (
+            <p className="text-[11px] text-muted py-2" data-testid="ic-participants-state">
+              {participantsText}
+            </p>
+          )
         )}
         {(section === 'library' || section === 'tariff' || section === 'contracts') && (
           <p className="text-[11px] text-muted py-2">This section is not available yet.</p>

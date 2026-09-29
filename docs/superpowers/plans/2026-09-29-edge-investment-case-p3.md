@@ -535,6 +535,14 @@ committed) and a re-solve without the item (record cleared, drift flagged); QA d
 - #5 INFO: a scenario network is refused earlier for every commercial term (pre-existing). #6 INFO:
   rolling / myopic objective gaps are pre-existing (last window / period). #7 INFO: confirmed points.
 
+**WP3.3b review round 2 (2b1e175): PASS.** #1–#4 verified: the circulation probe is refused before
+the LP (preflight `commercial.binding_invalid`) while a net revenue item on a single PoC or a
+one-member group is still accepted; the unrated item is refused at config time; no false
+`simultaneous_import_export` on V6 (it still appears for a gross-priced group); the gap keeps the
+committed amount after an edit and attributes the change to `config_changed_since_solve`. 436 tests
+and the three QA drivers green. INFO: tiered / capacity net items on a group are outside the LP
+(`not_in_lp`), never priced twice. **WP3.3b closed.**
+
 ---
 
 ## WP3.4 `/results/value_flows`, chat
@@ -606,6 +614,29 @@ assertion, the `not_established` and `value_flows_invalid` payloads.
   2 s bound; not_established; value_flows_invalid; an unlisted party → None; 204 / 409; a money
   cycle stays bipartite), a ledger test for the null totals.
 
+**WP3.4 implementation, part 2 (chat).**
+- `define_participants(template? | config? | clear, replace=False)` (Safety: write; routes: POST
+  template, GET + PUT value flows — lock-gated by derivation): a template needing contracts the
+  project lacks is NOT saved (`{saved: false, status: "drafts_need_pricing", draft_contracts}` with
+  null money fields); every write sends the digest it read as If-Match; an existing, different config
+  is refused `value_flows_would_be_replaced` until `replace=true` (the `attach_tariff` guard; the same
+  config again needs no confirmation). Route refusals re-raised under fixed kinds
+  (`_VALUE_FLOW_ERROR_KINDS`: `value_flows_invalid` with the problems fitted, `value_flows_changed`,
+  `no_commercial_config`, `commercial_config_invalid`, `solver_in_flight`; `template_*` codes →
+  `template_refused` with the code).
+- `get_results(result_kind, source, detail=None, offset=0, limit=None)`: for `value_flows` the
+  default is a SUMMARY (per period and participant: paid / received / net / by_stream, conservation,
+  line counts; fitted under 3,500 characters by dropping the stream split, then the externals' rows,
+  then the flags — `omitted` says what went); `detail="lines"` pages the lines through `_paginate`.
+  `detail` is ignored by the other kinds (schema and description updated).
+- `RESULTS_TAB_ENUM` gains `investment`; `tool-error-kinds.json` gains five inline kinds
+  (`value_flows_invalid`, `value_flows_changed`, `value_flows_would_be_replaced`,
+  `commercial_config_invalid`, `template_refused`) — the FE manifest test passes unchanged (inline).
+- **ADR-0002: a live chat probe is owed** (with P2's) — a Phase 3 gate checkbox.
+- Tests: `test_chat_value_flows.py` (13: registration and tier; drafts not saved; If-Match digest;
+  the replace guard; problems and template codes; exactly-one-of; no config / in flight; the summary
+  cap on a 60-party three-period ledger; line paging; live V1 summary and lines; not_established).
+
 ---
 
 ## WP3.5 Frontend foundation
@@ -669,6 +700,26 @@ omission, `tsc` clean.
 **Tests:** designer round trip, 422/412 mapping, table sums, the Sankey from a fixture payload **including
 a two-way pair** (dso ↔ developer), conservation states, a11y (`expectAllButtonsNamed`, native checkboxes —
 not `PageKit.Toggle`).
+
+**WP3.6 implementation, part 1 (results views).**
+- `src/pages/results/investment/valueFlows.ts` (pure: `participantRows` — participants first, null
+  totals stay null; `conservationState`; `sankeyData` — ids → recharts indices, dangling links
+  dropped; `csvRows`; `streamLabel` — `capex (annuity)`; `fmtAmount` moved here, re-exported by
+  `InvestmentTab`) and `ValueFlowsView.tsx` (the conservation chip ok / failed naming the check / not
+  established; the per-participant table with a native `<details>` stream split per party,
+  `UnavailableCell` for null, CSV export; a period `<select>` unless the shell's period filter picks
+  one; the Sankey — internal / external colours, a stream-and-amount tooltip, SVG export, a fixed
+  width in tests — drawn ONLY when the period's conservation is ok, else `UnavailableBlock` with the
+  flags). The Investment tab's Participants section renders it when the result is `ok`.
+- `GET /api/simulation/value_flows/designer` (`participants.designer_context`): every asset with its
+  meter side and `ownable` (grid side: never), the tariff items with their default payee and stream,
+  the contracts' parties, the group members, the default externals; 409 like the template route
+  (no / invalid commercial config, solve in flight). Route inventory + `ROUTE_SURFACES`.
+- Client: `getValueFlowsResult` no longer maps a 404 to "no result" (WP3.4 shipped — the gate item,
+  the preview keeps it until WP3.7b); `getDesigner`, `appendContracts`.
+- Tests: `valueFlows.test.ts` (5), `ValueFlowsView.test.tsx` (4: the two-way dso ↔ developer Sankey,
+  an incomplete ledger not drawn, a failed check named, CSV + period pick; `expectAllButtonsNamed`),
+  `test_value_flow_designer.py` (2), client tests.
 
 ---
 

@@ -641,11 +641,14 @@ _RESULTS_NO_DATA_MESSAGE = (
 )
 
 
-def get_results(result_kind: str, source: str = "lopf") -> Any:
+def get_results(result_kind: str, source: str = "lopf", detail: str | None = None,
+                offset: int = 0, limit: int | None = None) -> Any:
     """
     v4-MAJOR-4 dispatcher: every results enum routes through the named
     handler, with ac_pf_status mapped to a distinct path via the lookup dict.
     `source` ('lopf' | 'ac_pf') is forwarded where the handler supports it.
+    `detail` ('summary' | 'lines') with `offset` / `limit` shapes the kinds
+    that have a summary (value_flows, IC P3 WP3.4) and is ignored elsewhere.
     """
     handler = _resolve_results_handler(result_kind)
     # Some handlers take `source` as a query param; pass via kwargs if the
@@ -654,7 +657,90 @@ def get_results(result_kind: str, source: str = "lopf") -> Any:
         result = handler(source=source)
     else:
         result = handler()
-    return _payload_or_no_data(result_kind, result, _RESULTS_NO_DATA_MESSAGE)
+    result = _payload_or_no_data(result_kind, result, _RESULTS_NO_DATA_MESSAGE)
+    if result_kind == "value_flows" and isinstance(result, dict) and result.get("status") == "ok":
+        if detail == "lines":
+            return _value_flow_lines_page(result, offset, limit)
+        return _value_flows_summary(result)
+    return result
+
+
+# ── value flows for the model (IC P3 WP3.4) ────────────────────────────────
+# The ledger is long (a line per bill item, fee, contract and asset cost per
+# period): the default answer is a SUMMARY per participant and stream under
+# the result cap; `detail="lines"` pages the lines.
+
+_VF_SUMMARY_CHARS = 3500
+
+
+def _eur(v):
+    return None if v is None else round(float(v), 2)
+
+
+def _value_flows_summary(payload: dict) -> dict:
+    ids = [x["id"] for x in payload.get("participants") or []]
+    flags = list(payload.get("flags") or [])
+    periods = {}
+    for p, per in (payload.get("periods") or {}).items():
+        lines = per.get("lines") or []
+        parts = {pid: {"paid": _eur(t["paid"]), "received": _eur(t["received"]),
+                       "net": _eur(t["net"]),
+                       "by_stream": {k: _eur(v) for k, v in sorted(t["by_stream"].items())}}
+                 for pid, t in (per.get("by_participant") or {}).items()}
+        checks = (per.get("conservation") or {}).get("checks") or []
+        periods[p] = {"conservation_ok": (per.get("conservation") or {}).get("ok"),
+                      "checks_not_true": [c["name"] for c in checks if c.get("ok") is not True],
+                      "lines": len(lines),
+                      "unknown_lines": sum(1 for ln in lines if ln.get("amount") is None),
+                      "by_participant": parts}
+    out = {"status": "ok", "template": payload.get("template"), "participants": ids,
+           "conservation_ok": payload.get("conservation_ok"), "periods": periods,
+           "flags_total": len(flags), "flags": flags[:15],
+           "basis": "EUR per period-year, unweighted; + received, - paid; null = unknown",
+           "hint": "get_results(result_kind='value_flows', detail='lines', offset, limit) "
+                   "pages the ledger lines"}
+
+    def size() -> int:
+        return len(json.dumps(out, default=str))
+
+    # Fit the cap: drop the stream split first, then the externals' rows, then
+    # the flags — the participants' own totals are the last thing to go.
+    if size() > _VF_SUMMARY_CHARS:
+        for per in periods.values():
+            for row in per["by_participant"].values():
+                row.pop("by_stream", None)
+        out["omitted"] = ["by_stream"]
+    if size() > _VF_SUMMARY_CHARS:
+        for per in periods.values():
+            per["by_participant"] = {k: v for k, v in per["by_participant"].items()
+                                     if any(k.strip().casefold() == i.strip().casefold()
+                                            for i in ids)}
+        out["omitted"].append("externals")
+    if size() > _VF_SUMMARY_CHARS:
+        out["flags"] = flags[:3]
+        out["omitted"].append("flags")
+    return out
+
+
+def _value_flow_lines_page(payload: dict, offset: int, limit: int | None) -> dict:
+    rows = []
+    for p, per in (payload.get("periods") or {}).items():
+        for ln in per.get("lines") or []:
+            row = {"period": p, "payer": ln.get("payer"), "payee": ln.get("payee"),
+                   "stream": ln.get("value_stream"), "amount": _eur(ln.get("amount")),
+                   "source": f"{ln.get('source')}:{ln.get('source_id')}"}
+            for key in ("contract_id", "tariff_item", "asset"):
+                if ln.get(key):
+                    row[key] = ln[key]
+            if ln.get("basis") and ln["basis"] != "cash":
+                row["basis"] = ln["basis"]
+            if ln.get("flags"):
+                row["flags"] = ln["flags"][:4]
+            rows.append(row)
+    page = _paginate(rows, offset, limit)
+    page["status"] = "ok"
+    page["kind"] = "value_flows_lines"
+    return page
 
 
 def results_path_for(result_kind: str) -> str:
@@ -1582,6 +1668,91 @@ def attach_tariff(name: str, version: int | None = None, replace_inline: bool = 
             "import_tariff": {"id": bound.get("id"), "name": bound.get("name"),
                               "items": len(bound.get("items") or [])},
             "replaced": replaced}
+
+
+# ── Participants (IC P3 WP3.4) ─────────────────────────────────────────────
+# `define_participants` drives the template and value-flows routes. Their
+# refusals carry `{"code": …}`; the forwarder reads `error_kind`, so each is
+# re-raised under a fixed kind (written as literals for the manifest guard).
+_VALUE_FLOW_ERROR_KINDS = (
+    {"error_kind": "value_flows_invalid"}, {"error_kind": "value_flows_changed"},
+    {"error_kind": "no_commercial_config"}, {"error_kind": "commercial_config_invalid"},
+    {"error_kind": "solver_in_flight"},
+)
+_VALUE_FLOW_CODES = {d["error_kind"]: d["error_kind"] for d in _VALUE_FLOW_ERROR_KINDS}
+
+
+def _value_flow_call(handler, *args, **kwargs):
+    try:
+        return handler(*args, **kwargs)
+    except HTTPException as exc:
+        d = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+        code = str(d.get("code") or "")
+        message = str(d.get("message", ""))[:500]
+        if code in _VALUE_FLOW_CODES:
+            detail = {"error_kind": _VALUE_FLOW_CODES[code], "message": message}
+            if isinstance(d.get("problems"), list):
+                shown = _fit([str(x)[:200] for x in d["problems"]])
+                detail.update(problems_total=len(d["problems"]), problems=shown)
+        elif code.startswith("template_"):
+            detail = {"error_kind": "template_refused", "code": code, "message": message}
+        else:
+            raise
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+
+
+def define_participants(template: str | None = None, config: dict | None = None,
+                        clear: bool = False, replace: bool = False) -> dict:
+    """Set the project's participants and value-flow assignment. Exactly one
+    of `template` (build it through the template route), `config` (a full
+    value-flow config) or `clear`. A template that needs contracts the project
+    does not have is NOT saved: its unpriced drafts come back for the user to
+    price and save first (never saved silently). A stored config that differs
+    is not replaced (or cleared) until the user confirms and `replace=true`
+    (the `attach_tariff` guard). Every write sends the digest it read as
+    If-Match."""
+    from routers.simulation import (
+        TemplateIn, ValueFlowsIn, build_value_flow_template, get_value_flows as _get,
+        put_value_flows as _put,
+    )
+
+    if sum((template is not None, config is not None, bool(clear))) != 1:
+        raise HTTPException(status_code=422, detail={
+            "error_kind": "value_flows_invalid",
+            "message": "pass exactly one of template, config or clear=true"})
+    notes: list[str] = []
+    if template is not None:
+        built = _value_flow_call(build_value_flow_template, TemplateIn(template=template))
+        notes = list(built.get("notes") or [])
+        if built.get("draft_contracts"):
+            return {"saved": False, "status": "drafts_need_pricing", "template": template,
+                    "draft_contracts": built["draft_contracts"], "notes": _fit(notes),
+                    "config": built["config"],
+                    "message": ("the template needs these contracts, which the project does "
+                                "not have: ask the user for the null fields, save them with "
+                                "update_solver_config, then call define_participants again")}
+        value = built["config"]
+    else:
+        value = None if clear else config
+    state = _value_flow_call(_get)
+    current = state.get("value_flows")
+    if current is not None and current != value and not replace:
+        raise HTTPException(status_code=409, detail={
+            "error_kind": "value_flows_would_be_replaced",
+            "message": ("the project already has a value-flow config "
+                        f"(template {str(current.get('template') if isinstance(current, dict) else None)!r}); "
+                        "confirm with the user, then call again with replace=true"),
+            "current_participants": [str(x.get("id"))[:60] for x in
+                                     (current.get("participants") or [])
+                                     if isinstance(x, dict)][:10]
+            if isinstance(current, dict) else []})
+    out = _value_flow_call(_put, ValueFlowsIn(value_flows=value), if_match=state["digest"])
+    stored = out.get("value_flows") or {}
+    return {"saved": True, "status": out.get("status"), "digest": out.get("digest"),
+            "template": stored.get("template"),
+            "participants": [{"id": x.get("id"), "role": x.get("role")}
+                             for x in stored.get("participants") or []],
+            "notes": _fit(notes)}
 
 
 # ── Validation (3) ──────────────────────────────────────────────────────────
@@ -5008,6 +5179,7 @@ DISPATCHERS: dict[str, Any] = {
     "get_library_item": get_library_item,
     "import_urdb_tariff": import_urdb_tariff,
     "attach_tariff": attach_tariff,
+    "define_participants": define_participants,
     # project_mgmt (21)
     "list_projects": list_projects,
     "load_project": load_project,
