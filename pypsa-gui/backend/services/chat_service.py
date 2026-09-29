@@ -122,12 +122,23 @@ def _is_guided(ui_context: Any) -> bool:
 # against the newly-activated scenario) isn't wrongly blocked as a
 # "switched mid-turn" violation. EXTERNAL switches (another browser tab,
 # autosave) — which are what the guard is meant to catch — still fire.
+#
+# P27a (A8): the creating tools bind too. `create_project_from_template` and
+# `import_project_bundle` swap in the new project and move the session's
+# pointer; `save_project` of an UNBOUND draft binds it (`was_unbound`). Without
+# them here the frontend kept the old name (autosave `expect` → identity 409)
+# and every later tool in the same turn was refused as a mid-turn switch. The
+# frame still fires only on an actual move, so Save-a-Copy (`rebind=False`)
+# and a save of the already-bound project emit nothing.
 PROJECT_REBINDING_TOOLS = frozenset([
     "activate_project",
     "load_project",
     "save_project_as",
     "rename_project",
     "restore_project_snapshot",
+    "create_project_from_template",
+    "import_project_bundle",
+    "save_project",
 ])
 
 # Default + selectable models: `DEFAULT_MODEL` / `OPUS_MODEL` are imported
@@ -3462,7 +3473,8 @@ def _dispatch_tool_uses(
         )
         # If the agent just dispatched a rebinding tool (activate_project /
         # load_project / save_project_as / rename_project /
-        # restore_project_snapshot), refresh the turn-project snapshot so
+        # restore_project_snapshot / create_project_from_template /
+        # import_project_bundle / save_project), refresh the turn-project snapshot so
         # the guard recognises the new binding as legitimate. We re-read
         # from the live registry rather than guessing from the tool's args
         # because activate_project on a non-resident project takes the

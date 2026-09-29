@@ -206,3 +206,138 @@ def test_the_char_budget_is_shared_across_the_step(monkeypatch, tmp_projects_dir
     monkeypatch.setattr(chat_service, "_dispatch_real_tool_call", _fake_dispatch)
     _drive(chat_service.ChatSession(), [_tu("t1"), _tu("t2"), _tu("t3")])
     assert len(set(seen)) == 1, "each tool got its own char budget"
+
+
+# ── P27a (deferred spec 2026-09-28 §1.1, §1.2) ─────────────────────────────
+
+
+def test_a_refused_edit_reaches_the_model_as_study_in_flight(
+    monkeypatch, tmp_projects_dir, install_network
+):
+    """A1: a live-network study refuses an edit with the `study_in_flight`
+    dict; the model must receive that KIND and the sentence, through the
+    existing tool_error path (kills a mutant that stringifies the dict)."""
+    import pypsa
+    from fastapi import HTTPException
+
+    from services import chat_tools
+
+    n = pypsa.Network(); n.add("Bus", "B1"); install_network(n, name=None)
+    sentence = ("Cannot edit the network while an FMEA sweep is running — it "
+                "re-solves the in-memory network between its own iterates.")
+    detail = {"error_kind": "study_in_flight", "study": "fmea_sweep",
+              "message": sentence}
+
+    def _refuse(**_kw):
+        raise HTTPException(status_code=409, detail=detail)
+
+    monkeypatch.setitem(chat_tools.DISPATCHERS, "update_component", _refuse)
+    results: list[dict] = []
+    frames, _outcome = _drive(
+        chat_service.ChatSession(),
+        [_tu("t1", name="update_component",
+             args={"component_class": "Bus", "name": "B1",
+                   "attrs": {"v_nom": 220.0}})],
+        results=results,
+    )
+    errors = [p for n_, p in frames if n_ == "tool_error"]
+    assert len(errors) == 1, frames
+    assert errors[0]["error_kind"] == "study_in_flight", errors[0]
+    assert sentence in errors[0]["message"], errors[0]
+    # What the MODEL gets: the typed kind, then the sentence.
+    assert len(results) == 1 and results[0]["is_error"] is True
+    content = str(results[0]["content"])
+    assert content.startswith("study_in_flight"), content
+    assert sentence in content, content
+
+
+class _MovableCtx:
+    def __init__(self, loaded):
+        self.loaded_project = loaded
+
+
+def _rebinding_harness(monkeypatch, *, start, moves_to, moving_tool):
+    """Fake dispatcher that records what ran and moves the binding DURING the
+    `moving_tool` call; `get_active_context` reads the moved value."""
+    from services.pypsa_service import PyPSAService
+
+    ctx = _MovableCtx(start)
+    ran: list[str] = []
+
+    def _fake_dispatch(session, tu, collector, **kw):
+        ran.append(tu["id"])
+        if tu["name"] == moving_tool:
+            ctx.loaded_project = moves_to
+        collector.append({"type": "tool_result", "tool_use_id": tu["id"],
+                          "content": "ok"})
+        return iter(())
+
+    monkeypatch.setattr(chat_service, "_dispatch_real_tool_call", _fake_dispatch)
+    monkeypatch.setattr(PyPSAService, "get_active_context",
+                        staticmethod(lambda: ctx))
+    return ctx, ran
+
+
+def _assert_announced(monkeypatch, tool, start, to):
+    _ctx, _ran = _rebinding_harness(monkeypatch, start=start, moves_to=to,
+                                    moving_tool=tool)
+    holder = [start]
+    frames, _outcome = _drive(chat_service.ChatSession(),
+                              [_tu("t1", name=tool, args={})], holder=holder)
+    rebound = [p for n_, p in frames if n_ == "project_rebound"]
+    assert rebound == [{"from": start, "to": to, "via_tool": tool}], frames
+    assert holder[0] == to, "the guard's snapshot did not follow the rebind"
+
+
+def test_create_project_from_template_announces_the_rebind(monkeypatch):
+    _assert_announced(monkeypatch, "create_project_from_template",
+                      "the-old-one", "probe-a8")
+
+
+def test_import_project_bundle_announces_the_rebind(monkeypatch):
+    _assert_announced(monkeypatch, "import_project_bundle",
+                      "the-old-one", "probe-a8")
+
+
+def test_save_project_of_an_unbound_draft_announces_the_rebind(monkeypatch):
+    _assert_announced(monkeypatch, "save_project", None, "draft-1")
+
+
+def test_a_second_tool_in_the_same_turn_still_dispatches_after_a_template_create(
+    monkeypatch
+):
+    """The REAL mid-turn-switch closure (never `_drive`'s `lambda: False`,
+    which makes this green whatever the set says), and the binding moves
+    DURING t1 — as the template route does."""
+    from services.pypsa_service import PyPSAService
+
+    _ctx, ran = _rebinding_harness(
+        monkeypatch, start="the-old-one", moves_to="probe-a8",
+        moving_tool="create_project_from_template")
+    holder = ["the-old-one"]
+    frames, outcome = _drive(
+        chat_service.ChatSession(),
+        [_tu("t1", name="create_project_from_template",
+             args={"template_id": "eh_datacenter", "new_name": "probe-a8"}),
+         _tu("t2")],
+        holder=holder,
+        switched=lambda: PyPSAService.get_active_context().loaded_project != holder[0],
+    )
+    assert ran == ["t1", "t2"], f"only {ran} dispatched"
+    assert outcome.switched_mid_turn is False
+    kinds = [p.get("error_kind") for n_, p in frames if n_ == "tool_error"]
+    assert "project_switched_mid_turn" not in kinds, frames
+
+
+def test_save_a_copy_emits_no_rebind(monkeypatch):
+    """Save-a-Copy (`rebind=False`) and a save of the already-bound project
+    leave the binding where it was — no frame (the "only on a move" rule)."""
+    _ctx, _ran = _rebinding_harness(monkeypatch, start="the-old-one",
+                                    moves_to="the-old-one",
+                                    moving_tool="save_project")
+    holder = ["the-old-one"]
+    frames, _outcome = _drive(chat_service.ChatSession(),
+                              [_tu("t1", name="save_project",
+                                   args={"name": "a-copy"})], holder=holder)
+    assert [p for n_, p in frames if n_ == "project_rebound"] == []
+    assert holder[0] == "the-old-one"
