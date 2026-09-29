@@ -94,6 +94,16 @@ def test_certification_verdict_rule(ci, target, floor, expected):
     assert verdict == expected
 
 
+def test_no_mc_lole_gives_no_verdict():
+    """Master's (None, 3.0) → not_established case, restored (merge review
+    N3): without an MC LOLE there is no verdict; the section itself is
+    not_established (see the no-occurrence test below)."""
+    for ci in (None, (None, None), (float("nan"), 1.0)):
+        verdict, note = S.certification_verdict(lole_ci=ci, target_h=3.0)
+        assert verdict is None
+        assert "not established" in note
+
+
 @pytest.mark.live_solve
 def test_off_grid_pack_certification_fails_on_lole_even_when_ens_met():
     """Spec decision 2: LOLE failure fails certification even if ENS is met."""

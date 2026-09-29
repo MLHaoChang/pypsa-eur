@@ -1780,8 +1780,11 @@ describe('merge of master (2026-09-28): one rendering, both payload shapes', () 
           } },
       },
     }
+    // Ranked within each class (owner's Q2 rule, merge review N1).
     expect(fmeaTopModes(report).map(m => [m.rank, m.failure_class, m.name]))
-      .toEqual([[1, 'B', 'feed1'], [2, 'A', 'base']])
+      .toEqual([[1, 'B', 'feed1'], [1, 'A', 'base']])
+    expect(fmeaTopCsvRows(report).map(r => r.slice(0, 2)))
+      .toEqual([[1, 'B'], [1, 'A']])
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
       status: 'done', study: 'eh_study', archetype: 'weak_flexible', report,
     } as never)
@@ -1789,6 +1792,11 @@ describe('merge of master (2026-09-28): one rendering, both payload shapes', () 
     expect((await screen.findByTestId('eh-fmea-top-row-1')).getAttribute('data-class'))
       .toBe('B')
     expect(screen.getByTestId('eh-fmea-top-row-2').getAttribute('data-class')).toBe('A')
+    expect(screen.getByTestId('eh-fmea-top-row-1').getAttribute('data-rank')).toBe('B1')
+    expect(screen.getByTestId('eh-fmea-top-row-2').getAttribute('data-rank')).toBe('A1')
+    expect(screen.getByTestId('eh-fmea-top-row-2').textContent).toMatch(/A1/)
+    expect(screen.getByTestId('eh-fmea-top-engines-note').textContent)
+      .toMatch(/ranked separately/)
     expect(screen.getByTestId('eh-fmea-top-copt-import').textContent)
       .toMatch(/two-state unit/)
     expect(screen.getByTestId('eh-fmea-top-import-ranking').textContent)

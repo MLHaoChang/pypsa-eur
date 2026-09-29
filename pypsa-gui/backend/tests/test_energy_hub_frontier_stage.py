@@ -106,7 +106,7 @@ def test_frontier_stage_fills_points_with_shed_exclusion_and_period_basis():
 
 
 @pytest.mark.live_solve
-def test_frontier_skipped_when_budget_cannot_afford_three_points():
+def test_frontier_skipped_when_budget_cannot_afford_two_points():
     # P12 rule: two points make the minimum curve, so the budget that
     # cannot afford one is 2 (ens_solve takes 1 → 1 left). A requested stage
     # that produced nothing is not_established (spec §4), its record skipped.

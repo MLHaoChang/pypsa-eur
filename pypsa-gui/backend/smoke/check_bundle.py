@@ -174,6 +174,10 @@ ROOTED = (
     "data/eh_class_c/synth_dunkelflaute.json",
     # `services.guides.GUIDE_DIR` = parents[1] of services/guides.py (P21).
     "data/guides/eh_fmea_guide.json",
+    # `routers.projects._PROJECT_TEMPLATES_DIR` = parents[1] of
+    # routers/projects.py; the P19 EH templates are loaded from it BY FILE
+    # PATH (merge review N8) — a basename match elsewhere is not enough.
+    "project_templates/eh_templates.py",
 )
 
 

@@ -456,7 +456,9 @@ export function frontierCsvRows(
 
 /** The ranked residual failure modes from the fmea_top stage: the
  *  Link-primary Class-B ranking (`rows`) first, then the class-A COPT
- *  screening of the same plan (`class_a.rows`), ranked on in that order.
+ *  screening of the same plan (`class_a.rows`). Each class is ranked WITHIN
+ *  itself (B1…, A1…): the two criticalities come from different engines and
+ *  are never one ranking (owner's Q2 rule, merge review N1).
  *  A report stored by a build that merged both into `top` is read as is. */
 export function fmeaTopModes(report: EhReferenceDesignReport): EhFmeaTopMode[] {
   const payload = report.sections?.fmea_top?.payload
@@ -476,7 +478,7 @@ export function fmeaTopModes(report: EhReferenceDesignReport): EhFmeaTopMode[] {
   const classA = (payload as { class_a?: { rows?: unknown } | null }).class_a
   const aRows = Array.isArray(classA?.rows) ? classA!.rows as unknown[] : []
   const a = aRows.filter(isMode).map((r, i) => ({
-    ...r, rank: b.length + i + 1, failure_class: r.failure_class ?? 'A',
+    ...r, rank: i + 1, failure_class: r.failure_class ?? 'A',
   }))
   return [...b, ...a]
 }
@@ -526,7 +528,13 @@ export function fmeaImportRankingNote(report: EhReferenceDesignReport): string |
     + (payload?.import_link_ranking_note ? ` ${payload.import_link_ranking_note}` : '')
 }
 
-/** CSV rows for the FMEA top-N table (the report or its modes). */
+/** True when the table mixes the two engines' classes (per-class ranks). */
+export function fmeaMixesClasses(modes: EhFmeaTopMode[]): boolean {
+  return new Set(modes.map(m => m.failure_class)).size > 1
+}
+
+/** CSV rows for the FMEA top-N table (the report or its modes). `rank` is
+ *  within the row's class — see `fmeaTopModes`. */
 export function fmeaTopCsvRows(
   arg: EhReferenceDesignReport | EhFmeaTopMode[],
 ): unknown[][] {
@@ -1857,6 +1865,13 @@ export function EhReferenceDesignPanel() {
                       )}
                     />
                   </div>
+                  {fmeaMixesClasses(fmeaTop) && (
+                    <p className="text-[10px] text-muted" data-testid="eh-fmea-top-engines-note">
+                      Class B (Link outage, LP re-solve) and class A (unit
+                      outage, COPT screening) are ranked separately: their
+                      criticalities come from different engines.
+                    </p>
+                  )}
                   <div className="overflow-x-auto">
                     <table className="w-full text-[10px]">
                       <thead className="text-muted">
@@ -1870,14 +1885,17 @@ export function EhReferenceDesignPanel() {
                         </tr>
                       </thead>
                       <tbody className="font-mono">
-                        {fmeaTop.map(m => (
+                        {fmeaTop.map((m, i) => (
                           <tr
                             key={`${m.failure_class}:${m.mode_id}`}
                             className="border-t border-border/50"
-                            data-testid={`eh-fmea-top-row-${m.rank}`}
+                            data-testid={`eh-fmea-top-row-${i + 1}`}
+                            data-rank={`${m.failure_class}${m.rank}`}
                             data-class={m.failure_class}
                           >
-                            <td className="py-0.5 pr-3 text-right">{m.rank}</td>
+                            <td className="py-0.5 pr-3 text-right">
+                              {fmeaMixesClasses(fmeaTop) ? `${m.failure_class}${m.rank}` : m.rank}
+                            </td>
                             <td className="py-0.5 pr-3 font-sans"
                                 title={m.failure_class === 'A'
                                   ? 'class A: unit forced outage, COPT screening (no LP solve)'

@@ -371,6 +371,11 @@ def certification_verdict(*, lole_ci, target_h: float | None,
     ``inconclusive``, as is a target below the MC resolution floor. No
     target → no verdict.
     """
+    if lole_ci is None or len(lole_ci) != 2 or any(
+            x is None or not math.isfinite(float(x)) for x in lole_ci):
+        # The MC produced no LOLE: no verdict; the caller marks the section
+        # not_established with the MC's reason.
+        return None, "MC LOLE not established — no verdict"
     if target_h is None:
         return None, "no target_lole_h — LOLE reported, not certified"
     lo, hi = (float(x) for x in lole_ci)
@@ -782,7 +787,12 @@ def _stage_fmea_top(st: _Study) -> None:
         st.solves += charged
         note = f"{FMEA_TOP_LINK_PRIMARY_NOTE}; sweep failed: {exc}"
         st.mark("fmea_top", "failed", note=note, solves_charged=charged)
-        st.sections["fmea_top"] = ("not_established", None, note)
+        # The zero-solve class-A screening does not depend on the sweep
+        # (merge review N2): keep it.
+        st.sections["fmea_top"] = (
+            "not_established",
+            {"rows": [], "top_n": top_n,
+             "class_a": _class_a_block(st, [], top_n)}, note)
         return
     charged = 1 + len(rows)
     st.solves += charged
@@ -791,7 +801,9 @@ def _stage_fmea_top(st: _Study) -> None:
         st.mark("fmea_top", "aborted", solves_charged=charged,
                 note="aborted mid-sweep — partial ranking withheld")
         st.sections["fmea_top"] = (
-            "not_established", None,
+            "not_established",
+            {"rows": [], "top_n": top_n,
+             "class_a": _class_a_block(st, [], top_n)},
             f"{FMEA_TOP_LINK_PRIMARY_NOTE}; aborted mid-sweep — partial "
             "ranking withheld")
         return

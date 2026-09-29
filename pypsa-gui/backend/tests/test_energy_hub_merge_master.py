@@ -217,3 +217,46 @@ def test_the_tea_carries_the_lcoh_flag_on_the_private_copy():
     tea = report.sections["tea"].payload
     assert tea["lcoh_eur_per_kg"] is None
     assert tea["lcoh_status"] == "skipped"
+
+
+# ── merge review N2: class_a survives a failed or aborted sweep ────────────
+
+
+@pytest.mark.live_solve
+def test_class_a_survives_a_failed_class_b_sweep(monkeypatch):
+    from services.adequacy import sweep as SW
+
+    def boom(*a, **k):
+        raise RuntimeError("sweep exploded")
+
+    monkeypatch.setattr(SW, "run_class_b_sweep", boom)
+    pack = default_strong_grid_pack().model_copy(update={
+        "availability": AvailabilityTarget(ens_cap_permyriad=10.0)})
+    report = _run(certifiable_weak_network(), pack,
+                  stages=("apply_pack", "ens_solve", "fmea_top", "assemble"))
+    sec = report.sections["fmea_top"]
+    assert sec.status == "not_established" and "sweep failed" in sec.note
+    assert sec.payload["rows"] == []
+    assert sec.payload["class_a"]["status"] == "ok"
+    assert sec.payload["class_a"]["rows"]
+
+
+@pytest.mark.live_solve
+def test_class_a_survives_an_aborted_class_b_sweep(monkeypatch):
+    from services.adequacy import sweep as SW
+
+    real = SW.run_class_b_sweep
+
+    def aborting(*a, **k):
+        rows, restore = real(*a, **k)
+        return rows, {**restore, "aborted": True}
+
+    monkeypatch.setattr(SW, "run_class_b_sweep", aborting)
+    pack = default_strong_grid_pack().model_copy(update={
+        "availability": AvailabilityTarget(ens_cap_permyriad=10.0)})
+    report = _run(certifiable_weak_network(), pack,
+                  stages=("apply_pack", "ens_solve", "fmea_top", "assemble"))
+    sec = report.sections["fmea_top"]
+    assert report.pipeline.aborted is True
+    assert sec.payload["rows"] == []
+    assert sec.payload["class_a"]["status"] == "ok"

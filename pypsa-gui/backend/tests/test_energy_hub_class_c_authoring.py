@@ -181,6 +181,12 @@ def test_bundle_check_requires_the_pack_at_the_frozen_root(tmp_path):
     guides = root / "data" / "guides"                # the P21 guide is rooted too
     guides.mkdir(parents=True)
     (guides / "eh_fmea_guide.json").write_text("{}")
+    # The P19 EH templates are loaded by file path from the root too (N8).
+    assert any("project_templates/eh_templates.py" in m
+               for m in cb.check_rooted(tmp_path))
+    templates = root / "project_templates"
+    templates.mkdir()
+    (templates / "eh_templates.py").write_text("")
     assert cb.check_rooted(tmp_path) == []
 
 
