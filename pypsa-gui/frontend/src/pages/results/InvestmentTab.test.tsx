@@ -49,7 +49,45 @@ describe('InvestmentTab', () => {
     renderTab()
     await waitFor(() => expect(screen.getByTestId('ic-section-bill').getAttribute('data-status')).toBe('not_established'))
     await waitFor(() => expect(screen.getByTestId('ic-section-participants').getAttribute('data-status')).toBe('not_established'))
-    expect(screen.queryByText(/€\s*0/)).toBeNull()
+  })
+
+  it('shows unknown bill amounts as not established, never 0', async () => {
+    vi.mocked(commercialApi.getBilling).mockResolvedValue({ ...BILLING,
+      summary: { _: { total: null, total_supported: null, per_item: { energy: null } },
+                 '2040': null } } as never)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(FLOWS as never)
+    renderTab()
+    await waitFor(() => expect(screen.getByTestId('ic-section-bill').getAttribute('data-status')).toBe('not_established'))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Bill' }))
+    const table = await screen.findByTestId('ic-bill-table')
+    expect(within(table).getAllByText('not established')).toHaveLength(3)
+    expect(table.textContent).not.toMatch(/€|\b0\.00\b/)
+  })
+
+  it('a bill missing one period is not ok', async () => {
+    vi.mocked(commercialApi.getBilling).mockResolvedValue({ ...BILLING,
+      summary: { '2030': BILLING.summary._, '2040': null } } as never)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(FLOWS as never)
+    renderTab()
+    await waitFor(() => expect(screen.getByTestId('ic-section-bill').getAttribute('title')).toMatch(/2040/))
+    expect(screen.getByTestId('ic-section-bill').getAttribute('data-status')).toBe('not_established')
+  })
+
+  it('says when there is no result, when it failed, and when the config is invalid', async () => {
+    vi.mocked(commercialApi.getBilling).mockResolvedValue(null)
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(null)
+    renderTab()
+    await waitFor(() => expect(screen.getByTestId('ic-participants-state').textContent).toMatch(/solve/))
+    cleanup()
+    vi.mocked(commercialApi.getValueFlowsResult).mockRejectedValue(new Error('boom'))
+    renderTab()
+    await waitFor(() => expect(screen.getByTestId('ic-participants-state').textContent).toMatch(/could not be loaded/))
+    cleanup()
+    vi.mocked(commercialApi.getValueFlowsResult).mockResolvedValue(
+      { status: 'value_flows_invalid', reason: 'participants: not a list' } as never)
+    renderTab()
+    await waitFor(() => expect(screen.getByTestId('ic-section-participants').getAttribute('data-status')).toBe('failed'))
+    expect(screen.getByTestId('ic-participants-state').textContent).toMatch(/do not validate/)
   })
 
   it('names a failed conservation check', async () => {
@@ -78,6 +116,15 @@ describe('InvestmentTab', () => {
     expect(first.getAttribute('aria-selected')).toBe('true')
     fireEvent.keyDown(first, { key: 'ArrowRight' })
     expect(screen.getByRole('tab', { name: 'Bill' }).getAttribute('aria-selected')).toBe('true')
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Bill' }), { key: 'End' })
+    expect(screen.getByRole('tab', { name: 'Contracts' }).getAttribute('aria-selected')).toBe('true')
+    fireEvent.keyDown(screen.getByRole('tab', { name: 'Contracts' }), { key: 'Home' })
+    expect(first.getAttribute('aria-selected')).toBe('true')
+    // aria-controls only on the selected tab: it must point at a panel in the DOM.
+    for (const tab of screen.getAllByRole('tab')) {
+      const id = tab.getAttribute('aria-controls')
+      if (id) expect(document.getElementById(id)).not.toBeNull()
+    }
     expectAllButtonsNamed(container)
   })
 })

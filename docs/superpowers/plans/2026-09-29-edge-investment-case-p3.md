@@ -456,6 +456,22 @@ assertion, the `not_established` and `value_flows_invalid` payloads.
 `resultsTabRequest`, two editors saving different sub-trees in sequence keep both, the SolverSettings
 omission, `tsc` clean.
 
+
+**WP3.5 implementation.**
+- **Review round 1 → PASS WITH CONDITIONS, fixed:**
+  - #1 the result clients map a solve-in-flight 409 to `SolverInFlightError`;
+  - #2 result requests are quiet (`skipErrorToast`) and a 404 (a route not yet deployed) reads as no result;
+  - #3 tests for two editors saving in sequence (both kept, `value_flows` kept) and for the Investment tab reached from a results-tab request (Expert, and Guided's advanced chip);
+  - #4 the "never zero" test renders null cells;
+  - #5 the bill chip is `ok` only when every period has a total (the note names the missing ones);
+  - #6 distinct texts for no result, a failed load and invalid participants (`failed`);
+  - #7 no currency symbol (the payload has no currency);
+  - #8 `aria-controls` only on the selected tab, Home/End, and a focusable panel;
+  - #9 `NoCommercialConfigError`, also for the value-flows route's 409s.
+- **Carried forward:**
+  - #10 `saveCommercial` is GET-then-PUT, and any save re-binds the commercial config: WP3.6/3.7 handle `library_ref_stale` / `import_tariff_ref_conflict`.
+  - #11 WP3.4: `by_participant` sums skip None lines, so its totals should be `number | null` (None when a party has a None line).
+  - #12 WP3.6/3.7 editors invalidate the results queries after a save.
 ---
 
 ## WP3.6 Participants designer, per-participant table, Sankey

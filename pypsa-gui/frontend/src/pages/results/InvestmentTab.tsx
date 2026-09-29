@@ -9,7 +9,6 @@ import { commercialApi, type BillingPayload, type ValueFlowsPayload } from '../.
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
 import { CompletenessChips, type CompletenessRow } from '../../components/CompletenessChips'
-import { fmtCurrency } from './shared'
 
 const SECTIONS = [
   { id: 'participants', label: 'Participants' },
@@ -20,14 +19,27 @@ const SECTIONS = [
 ] as const
 type SectionId = typeof SECTIONS[number]['id']
 
+/** Money in the tariff's own currency: the payload carries no currency code,
+ *  so no symbol is printed (a US tariff is not in euros). */
+export function fmtAmount(v: number | null | undefined): string {
+  if (v == null || !Number.isFinite(v)) return 'not established'
+  return v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
 export function completeness(billing: BillingPayload | null | undefined,
                              flows: ValueFlowsPayload | null | undefined): CompletenessRow[] {
-  const billOk = !!billing && Object.values(billing.summary ?? {}).some(v => v && v.total != null)
-  const participants = flows?.status === 'ok' ? 'ok' : 'not_established'
+  // `ok` only when EVERY period has a total: one missing period of a
+  // multi-period bill is a bill not established (never "ok").
+  const periods = Object.entries(billing?.summary ?? {})
+  const missing = periods.filter(([, v]) => !v || v.total == null).map(([k]) => k)
+  const billOk = !!billing && periods.length > 0 && missing.length === 0
+  const participants = flows?.status === 'ok' ? 'ok'
+    : flows?.status === 'value_flows_invalid' ? 'failed' : 'not_established'
   const cons = flows?.conservation_ok
   return [
     { name: 'bill', status: billOk ? 'ok' : 'not_established',
-      note: billing ? null : 'no bill: solve with a commercial config first' },
+      note: !billing ? 'no bill: solve with a commercial config first'
+        : missing.length ? `not established for ${missing.join(', ')}` : null },
     { name: 'participants', status: participants,
       note: flows?.status === 'ok' ? null : (flows?.reason ?? 'no value-flow result') },
     { name: 'conservation', status: cons === true ? 'ok' : cons === false ? 'failed' : 'not_established' },
@@ -55,13 +67,13 @@ function BillSection({ billing }: { billing: BillingPayload | null | undefined }
             ) : Object.entries(s.per_item).map(([item, v]) => (
               <tr key={item}>
                 <td>{item}</td>
-                <td className="text-right">{v == null ? 'not established' : fmtCurrency(v, 2)}</td>
+                <td className="text-right">{fmtAmount(v)}</td>
               </tr>
             ))}
             {s && (
               <tr className="border-t border-border">
                 <td>Total</td>
-                <td className="text-right">{s.total == null ? 'not established' : fmtCurrency(s.total, 2)}</td>
+                <td className="text-right">{fmtAmount(s.total)}</td>
               </tr>
             )}
           </tbody>
@@ -81,12 +93,25 @@ export default function InvestmentTab() {
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
 
   const onKey = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
-    if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return
+    const last = SECTIONS.length - 1
+    const next = e.key === 'ArrowRight' ? (i + 1) % SECTIONS.length
+      : e.key === 'ArrowLeft' ? (i + last) % SECTIONS.length
+        : e.key === 'Home' ? 0 : e.key === 'End' ? last : null
+    if (next === null) return
     e.preventDefault()
-    const next = (i + (e.key === 'ArrowRight' ? 1 : SECTIONS.length - 1)) % SECTIONS.length
     setSection(SECTIONS[next].id)
     tabs.current[next]?.focus()
   }
+
+  const participantsText = flows.isError
+    ? 'The value-flow result could not be loaded.'
+    : flows.data == null
+      ? 'No value-flow result yet: solve the project with a commercial config.'
+      : flows.data.status === 'ok'
+        ? 'Participants and value flows are set.'
+        : flows.data.status === 'value_flows_invalid'
+          ? `The stored participants do not validate${flows.data.reason ? `: ${flows.data.reason}` : '.'}`
+          : (flows.data.reason ?? 'No participants are set for this project.')
 
   return (
     <div className="space-y-3" data-testid="investment-tab">
@@ -96,20 +121,20 @@ export default function InvestmentTab() {
         {SECTIONS.map((s, i) => (
           <button key={s.id} ref={el => { tabs.current[i] = el }} type="button" role="tab"
                   id={`ic-tab-${s.id}`} aria-selected={section === s.id}
-                  aria-controls={`ic-panel-${s.id}`} tabIndex={section === s.id ? 0 : -1}
+                  aria-controls={section === s.id ? `ic-panel-${s.id}` : undefined}
+                  tabIndex={section === s.id ? 0 : -1}
                   onClick={() => setSection(s.id)} onKeyDown={e => onKey(e, i)}
                   className={`text-[11px] px-2 py-1 ${section === s.id ? 'border-b-2 border-accent' : 'text-muted'}`}>
             {s.label}
           </button>
         ))}
       </div>
-      <div role="tabpanel" id={`ic-panel-${section}`} aria-labelledby={`ic-tab-${section}`}>
+      <div role="tabpanel" id={`ic-panel-${section}`} aria-labelledby={`ic-tab-${section}`}
+           tabIndex={0}>
         {section === 'bill' && <BillSection billing={billing.data} />}
         {section === 'participants' && (
-          <p className="text-[11px] text-muted py-2">
-            {flows.data?.status === 'ok'
-              ? 'Participants and value flows are set.'
-              : (flows.data?.reason ?? 'No participants are set for this project.')}
+          <p className="text-[11px] text-muted py-2" data-testid="ic-participants-state">
+            {participantsText}
           </p>
         )}
         {(section === 'library' || section === 'tariff' || section === 'contracts') && (

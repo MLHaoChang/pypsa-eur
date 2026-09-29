@@ -14,7 +14,7 @@ vi.mock('./client', () => ({
     (typeof d === 'string' ? d : d == null ? fallback : JSON.stringify(d)),
 }))
 
-const { libraryApi, commercialApi, StaleEditError, SolverInFlightError } =
+const { libraryApi, commercialApi, StaleEditError, SolverInFlightError, NoCommercialConfigError } =
   await import('./commercial')
 
 beforeEach(() => { get.mockReset(); post.mockReset(); put.mockReset() })
@@ -108,8 +108,30 @@ describe('commercialApi commercial sub-tree writes', () => {
 
   it('refuses a sub-tree write when there is no commercial config and no poc_link', async () => {
     get.mockResolvedValue({ status: 200, data: { commercial: null } })
-    await expect(commercialApi.saveCommercial({ contracts: [] })).rejects.toThrow(/poc_link/)
+    await expect(commercialApi.saveCommercial({ contracts: [] }))
+      .rejects.toBeInstanceOf(NoCommercialConfigError)
     expect(put).not.toHaveBeenCalled()
+  })
+
+  it('two editors saving different sub-trees in sequence keep both', async () => {
+    let stored: Record<string, unknown> = { poc_link: 'import', contracts: [],
+                                            value_flows: { template: 'custom' } }
+    get.mockImplementation(async () => ({ status: 200, data: { commercial: stored } }))
+    put.mockImplementation(async (_url: string, body: { commercial: Record<string, unknown> }) => {
+      stored = { ...body.commercial, value_flows: stored.value_flows }   // the server keeps it
+      return { status: 200, data: { commercial: stored } }
+    })
+    await commercialApi.saveCommercial({ contracts: [{ type: 'lease', id: 'l1' } as never] })
+    await commercialApi.saveCommercial({ timezone: 'Europe/Berlin' })
+    const last = put.mock.calls[1][1].commercial
+    expect(last.contracts).toEqual([{ type: 'lease', id: 'l1' }])
+    expect(last.timezone).toBe('Europe/Berlin')
+    expect(stored.value_flows).toEqual({ template: 'custom' })
+  })
+
+  it('maps the value-flows route\'s no-commercial-config 409 to its error', async () => {
+    put.mockRejectedValue(axiosError(409, { code: 'no_commercial_config', message: 'no' }))
+    await expect(commercialApi.putValueFlows({}, 'd')).rejects.toBeInstanceOf(NoCommercialConfigError)
   })
 })
 
@@ -118,17 +140,32 @@ describe('commercialApi results', () => {
     ['getBilling', '/results/billing'],
     ['getCfeScore', '/results/cfe_score'],
     ['getValueFlowsResult', '/results/value_flows'],
-  ] as const)('%s maps 204 to null', async (fn, path) => {
+  ] as const)('%s maps 204 to null, quietly', async (fn, path) => {
     get.mockResolvedValue({ status: 204, data: '' })
     await expect(commercialApi[fn]()).resolves.toBeNull()
-    expect(get).toHaveBeenCalledWith(path)
+    expect(get).toHaveBeenCalledWith(path, { skipErrorToast: true })
+  })
+
+  it.each(['getBilling', 'getCfeScore', 'getValueFlowsResult'] as const)(
+    '%s turns a solve-in-flight 409 into its error and a 404 into null', async (fn) => {
+      get.mockRejectedValue(axiosError(409, { code: 'solver_in_flight', message: 'busy' }))
+      await expect(commercialApi[fn]()).rejects.toBeInstanceOf(SolverInFlightError)
+      get.mockRejectedValue(axiosError(404, 'Not Found'))
+      await expect(commercialApi[fn]()).resolves.toBeNull()
+    })
+
+  it('previewBilling types its errors too', async () => {
+    post.mockRejectedValue(axiosError(409, { code: 'solver_in_flight', message: 'busy' }))
+    await expect(commercialApi.previewBilling({ id: 't', name: 't', jurisdiction: 'US',
+      valid_from: '2030-01-01', items: [] })).rejects.toBeInstanceOf(SolverInFlightError)
   })
 
   it('previews a draft tariff\'s bill', async () => {
     post.mockResolvedValue({ status: 200, data: { summary: {} } })
     await commercialApi.previewBilling({ id: 't', name: 't', jurisdiction: 'US', valid_from: '2030-01-01', items: [] })
     expect(post).toHaveBeenCalledWith('/results/billing/preview',
-      { tariff: { id: 't', name: 't', jurisdiction: 'US', valid_from: '2030-01-01', items: [] } })
+      { tariff: { id: 't', name: 't', jurisdiction: 'US', valid_from: '2030-01-01', items: [] } },
+      { skipErrorToast: true })
   })
 
   it('builds a template without saving it', async () => {

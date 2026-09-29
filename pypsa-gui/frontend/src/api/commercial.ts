@@ -53,6 +53,10 @@ export class StaleEditError extends Error {
 export class SolverInFlightError extends Error {
   constructor(message: string) { super(message); this.name = 'SolverInFlightError' }
 }
+/** No (valid) commercial config yet: set it up (poc_link) before editing its parts. */
+export class NoCommercialConfigError extends Error {
+  constructor(message: string) { super(message); this.name = 'NoCommercialConfigError' }
+}
 
 function detailOf(e: unknown): { status?: number; code?: string; message?: string } {
   const r = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
@@ -68,8 +72,20 @@ function typed(e: unknown): never {
   if (status === 409 && code === 'solver_in_flight') {
     throw new SolverInFlightError(message ?? 'a solve is running')
   }
+  if (status === 409 && (code === 'no_commercial_config' || code === 'commercial_config_invalid')) {
+    throw new NoCommercialConfigError(message ?? 'set up the commercial config first')
+  }
   throw e
 }
+
+/** A result GET: 404 (a route this server does not have yet) reads as "no
+ *  result", like a 204; 409 and the rest become the typed errors. The tab
+ *  shows the state itself, so these requests never toast. */
+function resultError(e: unknown): null {
+  if (detailOf(e).status === 404) return null
+  return typed(e)
+}
+const QUIET = { skipErrorToast: true } as const
 
 const enc = encodeURIComponent
 
@@ -198,6 +214,11 @@ export const commercialApi = {
    * Replace commercial sub-trees (tariff, contracts, connection, …) on the
    * LATEST stored config. `value_flows` is never sent: the server keeps the
    * stored value, so a concurrent participants edit is not lost (IC P3 C7).
+   * The GET and the PUT are two requests, not one step: two editors saving
+   * different sub-trees at the same instant can still race (accepted by the
+   * plan); every save re-binds the whole commercial config, so any editor can
+   * meet `library_ref_stale` / `import_tariff_ref_conflict` 409s. Callers
+   * invalidate the results queries after a save.
    */
   saveCommercial: async (patch: Partial<Omit<CommercialConfig, 'value_flows'>>) => {
     const current = (await client.get<SolverConfig>('/simulation/solver_config')).data
@@ -206,14 +227,18 @@ export const commercialApi = {
     const next = { ...base, ...patch } as Partial<CommercialConfig>
     delete (next as { value_flows?: unknown }).value_flows
     if (!next.poc_link) {
-      throw new Error('set the commercial config’s poc_link before editing its parts')
+      throw new NoCommercialConfigError('set the commercial config’s poc_link before editing its parts')
     }
     return client.put<SolverConfig>('/simulation/solver_config', { commercial: next })
       .then(r => r.data, typed)
   },
-  getBilling: () => client.get<BillingPayload>('/results/billing').then(orNull),
-  getCfeScore: () => client.get<CfeScorePayload>('/results/cfe_score').then(orNull),
-  getValueFlowsResult: () => client.get<ValueFlowsPayload>('/results/value_flows').then(orNull),
+  getBilling: () =>
+    client.get<BillingPayload>('/results/billing', QUIET).then(orNull, resultError),
+  getCfeScore: () =>
+    client.get<CfeScorePayload>('/results/cfe_score', QUIET).then(orNull, resultError),
+  getValueFlowsResult: () =>
+    client.get<ValueFlowsPayload>('/results/value_flows', QUIET).then(orNull, resultError),
   previewBilling: (tariff: Tariff) =>
-    client.post<BillingPayload>('/results/billing/preview', { tariff }).then(orNull),
+    client.post<BillingPayload>('/results/billing/preview', { tariff }, QUIET)
+      .then(orNull, resultError),
 }
