@@ -312,3 +312,102 @@ Two points give one segment, which is a valid, if coarse, cost–availability tr
 A knee, though, is where the *marginal* cost crosses VOLL × marginal ENS avoided. With one segment, `knee_index` can only answer "is the single step worth buying", and the answer is reported as a point on the curve. The review then turns it into an actionable "re-plan at the knee target".
 
 Three points are the minimum for a crossing to lie *between* two alternatives. Below three the knee must be `not_established` with the reason, as B2 specifies.
+
+---
+
+## Re-review (2026-09-29, HEAD `8be85408f`, fixes `1990303f6..HEAD`)
+
+### Verdict: **GO to merge into master.**
+
+Both blockers are fixed. Each fix is pinned by tests, and mutation shows those tests can fail. Every re-run check is green.
+
+| Commit | What it fixes |
+|---|---|
+| `5f11b76f1` | B1 and N6 |
+| `1f12c821a` | B2 |
+| `19e94601a` | N1, N2, N3 and N8 |
+| `8be85408f` | Docs only |
+
+### 1. My repros against HEAD
+
+| Repro | Result on `f44ae8f33` | Result on HEAD |
+|---|---|---|
+| `test_repro_chat_stress_lock.py` (B1) | 2 failed | 3 passed |
+| `test_repro_knee_rule.py` (B2) | 2 failed | 2 passed |
+
+### 2. Checks re-run on HEAD
+
+| Check | Result |
+|---|---|
+| Targeted EH, chat, Guided, security and packaging set | 118 files: 2201 passed, 2 skipped, 0 failed. This is the §5 set plus the new `test_chat_tools_handler_dependencies.py`. |
+| `tsc --noEmit` | clean |
+| `vitest run` | 234 files, 2612 tests passed |
+
+I did not re-run the full backend suite, the QA driver or the P26 smoke. The merger reports them green: 6580 passed, 111/111 and PASS. The fixes touch only the files the targeted set covers.
+
+### 3. Mutation checks
+
+Each mutant was a fresh `git archive` of HEAD with one `sed` edit. No repository file was touched. Every mutant was killed.
+
+**B1 and N6** (`tests/test_chat_tools_handler_dependencies.py`):
+
+| Mutant | Result |
+|---|---|
+| `_route` no longer injects `actor` | 3 failed |
+| `put_stress_scenarios` reverted to a direct `_h(body=…, project=…)` | 3 failed (the scan, the holder test and the 409 test) |
+| `update_solver_config` reverted to bare `_h(body)` (bound user) | 3 failed |
+| The unbound branch reverted to bare `_h(body)` | 2 failed |
+| The scan blinded (never reports a missing `Depends`) | 1 failed (its self-test) |
+| The scan treats every parameter as given | 1 failed (its self-test) |
+
+**B2, backend** (`test_energy_hub_frontier_stage.py`, `test_energy_hub_review.py`, `-k knee`):
+
+| Mutant | Result |
+|---|---|
+| Stage threshold → `n_ok >= 2` | killed |
+| Stage always computes the knee | killed |
+| Stage threshold → 4 (upper bound) | killed |
+| `eh_review` guard removed | killed |
+| `eh_review` guard `>= 2` | killed |
+| `MIN_EH_FRONTIER_KNEE_POINTS = 2` | killed (2 tests) |
+
+**B2 and N1, panel** (vitest, `EhReferenceDesignPanel.test.tsx`; the unmutated control passes 103/103):
+
+| Mutant | Result |
+|---|---|
+| `MIN_KNEE_POINTS = 2` | 2 failed |
+| Knee guard removed | 2 failed |
+| Knee note suppressed | 2 failed |
+| Class-A rank continued after Class B (the old joint rank) | 1 failed |
+
+The QA driver adds one step that asserts the knee is reported only with `knee_status == "ok"` and at least 3 OK points, or is `not_established` with a note.
+
+### 4. `update_solver_config` in local (desktop) mode
+
+This was checked with a scratch test at `scratchpad/qamerge/test_local_mode_solver_config.py` under `PYPSAGUI_LOCAL_MODE=1`. All 4 cases pass:
+
+| Case | Result |
+|---|---|
+| No acting user: `voll` and `discount_rate` | Set normally. The unbound branch calls `_h(body, db=None, actor=None)`, and `_gate_user_code` returns before touching `db` or `actor` whenever no code is being set. |
+| No acting user: clearing `extra_functionality_code` | Works. |
+| No acting user: setting `extra_functionality_code` | Accepted. This is master's deliberate desktop exemption (`local_mode` returns early, one identity and no tenant), unchanged by the fix. The "fails closed" behaviour applies in server mode, where the new test confirms a 403. |
+| Seeded user bound (the normal desktop chat path) | Ordinary knobs work through `_route`. |
+
+**Verdict on item 4:** safe. Ordinary settings through chat are unaffected in both modes.
+
+### 5. Other fixes checked
+
+| Note | Fix | Assessment |
+|---|---|---|
+| N1 | Ranks restart per class and the table shows `B1…`/`A1…` with an engines note. The row testid is now positional (`eh-fmea-top-row-{i}`), and `data-rank` carries the class rank. | Correct. |
+| N2 | `class_a` is kept on a failed or aborted sweep, and two live tests pin it. | Correct. |
+| N3 | The `(None, target)` case is restored as `test_no_mc_lole_gives_no_verdict`, and the decisions doc is completed. | Correct. `certification_verdict` now returns `None` with a reason for a missing or non-finite CI instead of raising. The caller already marks the section `not_established`, so this is additive. |
+| N8 | `project_templates/eh_templates.py` is added to `ROOTED`, with a test. | Correct. |
+
+### Remaining (non-blocking, recorded in the decisions doc)
+
+- **N4:** a 1-factor ladder is accepted.
+- **N7:** EUE is shown without a basis label.
+- **N5:** a master-side issue (EH abort under the foreign-lock gate), to be raised on master.
+
+No processes are left running. Scratch mutants were removed.
