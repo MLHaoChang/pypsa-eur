@@ -178,3 +178,107 @@ def test_a_scenario_fork_inherits_both(client, api_project, project_storage_dir)
     assert client.put(f"/api/projects/{child}/worksheet",
                       json={"manual_rows": [], "overlays": {}}).status_code == 200
     assert _rows(client, name)[0] == ["manual:1"]
+
+
+# ── Decision studies (guided investment study MVP-1, S1; review v2 BC-4) ────
+#
+# A study is a DIRECTORY of sidecars, `studies/<study_id>.json`, so it rides
+# `_BUNDLE_DIRS` (walked recursively by `_copy_bundle_dirs` and the bundle
+# export), not `_BUNDLE_FILES`, whose every consumer calls `read_bytes()` on
+# each entry and would fail on a directory.
+
+def _save_study(project_dir, name="Site A"):
+    from datetime import UTC, datetime
+
+    from models.study import DecisionStudy
+    from services.study import store
+
+    now = datetime(2026, 9, 28, tzinfo=UTC)
+    s = DecisionStudy(study_id=store.new_study_id(), name=name,
+                      question_id="bess_site", base_project="p",
+                      created_at=now, updated_at=now,
+                      intake={"site": {"connection_mw": 5.0}})
+    store.save_study(project_dir, s)
+    return s
+
+
+def test_every_study_sidecar_dir_is_in_the_bundle_dirs():
+    """
+    Same walk as the adequacy one, over `services/study/`.
+
+    A module that declares a SIDECAR_DIR is carried by `_BUNDLE_DIRS` or this
+    fails.
+    """
+    import importlib
+    import pkgutil
+
+    import services.study as study_pkg
+    from routers.projects import _BUNDLE_DIRS
+
+    declared = {}
+    for module in pkgutil.iter_modules(study_pkg.__path__):
+        mod = importlib.import_module(f"services.study.{module.name}")
+        d = getattr(mod, "SIDECAR_DIR", None)
+        if d:
+            declared[module.name] = d
+
+    assert declared, "no study sidecar dirs found — has the package moved?"
+    missing = {m: d for m, d in declared.items() if d not in _BUNDLE_DIRS}
+    assert not missing, f"study sidecar dir(s) not in _BUNDLE_DIRS: {missing}"
+    # …and never in the FILES tuple, whose consumers read bytes.
+    assert not set(declared.values()) & set(_BUNDLE_FILES)
+
+
+def test_bundle_includes_studies_dir(client, api_project, project_storage_dir):
+    """
+    ★ The zip carries `studies/<id>.json`.
+
+    Importing it under a new name gives a project whose study loads back equal.
+    """
+    from services.study import store
+
+    name = api_project("studybundle")
+    s = _save_study(project_storage_dir(name))
+    r = client.get(f"/api/projects/{name}/bundle")
+    assert r.status_code == 200
+    names = set(zipfile.ZipFile(io.BytesIO(r.content)).namelist())
+    assert f"studies/{s.study_id}.json" in names, sorted(names)
+
+    r = client.post("/api/projects/import_bundle?name=studybundle_imported",
+                    files={"file": ("sb.pypsaproj.zip", r.content,
+                                    "application/zip")})
+    assert r.status_code in (200, 201), r.text
+    imported = (r.json().get("imported") or r.json().get("name")
+                or "studybundle_imported")
+    assert store.load_study(project_storage_dir(imported), s.study_id) == s
+
+
+def test_snapshot_restore_brings_a_study_directory_back(
+        client, api_project, project_storage_dir):
+    """
+    ★ A snapshot copies `studies/`, and restore brings it back.
+
+    Deleting the live study and restoring the snapshot puts it back, and a
+    study created after the snapshot is dropped (restore replaces the
+    directory, it does not merge).
+    """
+    from services.study import store
+
+    name = api_project("studysnap")
+    d = project_storage_dir(name)
+    s = _save_study(d)
+    r = client.post(f"/api/projects/{name}/snapshots", json={"label": "v1"})
+    assert r.status_code in (200, 201), r.text
+    snap_id = r.json()["id"]
+    snap_dirs = [p for p in (d / "snapshots").iterdir() if p.is_dir()]
+    assert any((p / "studies" / f"{s.study_id}.json").is_file()
+               for p in snap_dirs), [sorted(x.name for x in p.iterdir())
+                                     for p in snap_dirs]
+
+    store.delete_study(d, s.study_id)
+    later = _save_study(d, name="after the snapshot")
+    r = client.post(f"/api/projects/{name}/snapshots/{snap_id}/restore")
+    assert r.status_code == 200, r.text
+    assert store.load_study(d, s.study_id) == s
+    with pytest.raises(store.StudyNotFound):
+        store.load_study(d, later.study_id)

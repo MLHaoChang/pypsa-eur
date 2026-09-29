@@ -106,7 +106,13 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
 # because the source and destination ARE the same dir. The legacy bundle-file
 # loop already handles the small files; bundling dirs separately keeps it
 # robust to growth (e.g. agent_export PNGs accumulating in uploads/).
-_BUNDLE_DIRS = ("uploads",)
+#
+# `studies/` holds the decision-study sidecars, `studies/<study_id>.json`
+# (`services/study/store.py`). A DIRECTORY, so it belongs here and never in
+# `_BUNDLE_FILES`, whose every consumer reads bytes (review v2 BC-4). Bundles,
+# Save-As and snapshots carry it; the study option forks of S4 do not — see the
+# note in `_create_scenario_db`.
+_BUNDLE_DIRS = ("uploads", "studies")
 
 # Cap on the serialized blank-canvas layout document. Even a large network's
 # schematic is a few hundred KB of coordinates; 4 MB bounds a malformed or
@@ -2725,6 +2731,11 @@ def _create_scenario_db(db, user, base: str, req: CreateScenarioRequest) -> Proj
             src_file = base_dir / fname
             if src_file.exists():
                 atomic_write_bytes(child_dir / fname, src_file.read_bytes())
+        # A user-created scenario is a whole copy of its base, studies/
+        # included. S4's study option forks (`services/study/forks.py`) must
+        # NOT copy this way: they walk the bundle themselves and SKIP
+        # `studies/` and `results_state.pkl`, or every option fork would
+        # carry the study that owns it (review v1 B7, review v2 BC-4).
         _copy_bundle_dirs(base_dir, child_dir)
 
         # Keep metadata.json's NAME pointer in sync with the DB parent id so

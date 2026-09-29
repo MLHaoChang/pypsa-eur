@@ -88,6 +88,7 @@ from routers import (
     simulation,
     snapshots,
     solve_queue,
+    studies,
     uploads,
     vintage,
 )
@@ -308,6 +309,38 @@ _SOLVER_BLOCKING_EXEMPT: set[str] = set()
 # middleware 409 fires first and the user can't leave a solving project — the
 # whole point of the resident multi-project work.
 _SOLVER_BLOCKING_EXEMPT_SUFFIXES = ("/activate",)
+# Pattern-exempt routes: the regex variant the comment on
+# `_SOLVER_BLOCKING_EXEMPT` anticipates, built the way
+# `_FOREIGN_LOCK_GATE_EXEMPT_PATTERNS` is (compiled, anchored, `.match`).
+#
+#   * `/api/projects/{name}/studies[/...]` — the decision-study routes
+#     (`routers/studies.py`, guided investment study S1; review v2 BC-3). They
+#     read and write one JSON sidecar under the PATH project's `studies/` dir
+#     and never touch the resident network, so there is nothing for the LP
+#     worker to race. Without this, every study write 409s while the ACTIVE
+#     project solves — which need not even be the project the study belongs
+#     to. The routes carry their own authorisation (`ProjectAccessDep`) and
+#     their own foreign-lock check against the PATH project; neither prefix
+#     list names them, because both match with `startswith` and a templated
+#     segment cannot be expressed there.
+#
+# Anchored at the start and closed by `(/|$)`, so `/studiesX` or a `studies`
+# segment deeper in some other route does not ride the exemption. A route that
+# is added under `studies/` and DOES mutate the network (S4's run) must take
+# its own `_solver_in_flight_ctx` check against the context it solves.
+_SOLVER_BLOCKING_EXEMPT_PATTERNS = (
+    re.compile(r"^/api/projects/[^/]+/studies(/|$)"),
+)
+
+
+def _solver_blocking_exempt(path: str) -> bool:
+    """True iff `path` is exempt from the solver-in-flight gate below."""
+    if path in _SOLVER_BLOCKING_EXEMPT:
+        return True
+    if any(path.endswith(s) for s in _SOLVER_BLOCKING_EXEMPT_SUFFIXES):
+        return True
+    return any(p.match(path) for p in _SOLVER_BLOCKING_EXEMPT_PATTERNS)
+
 
 # Exempt from the SHUTTING-DOWN gate. `/api/simulation/abort` is step 4's own
 # mechanism, and step 1 closes the gate before step 4 runs — so without this
@@ -800,8 +833,7 @@ async def undo_snapshot_middleware(request: Request, call_next):
     # catch-all for everything else.
     if (is_write
             and any(path.startswith(p) for p in _SOLVER_BLOCKING_PREFIXES)
-            and path not in _SOLVER_BLOCKING_EXEMPT
-            and not any(path.endswith(s) for s in _SOLVER_BLOCKING_EXEMPT_SUFFIXES)):
+            and not _solver_blocking_exempt(path)):
         from routers.simulation import _solver_in_flight
         if _solver_in_flight():
             return JSONResponse(
@@ -1143,6 +1175,17 @@ _projects_router_guard = [Depends(fs_permission.require_file_access)]
 app.include_router(
     adequacy_worksheet.router, prefix="/api/projects", tags=["adequacy"],
     dependencies=_projects_router_guard,
+)
+# Decision studies (guided investment study MVP-1, S1). Path-scoped under the
+# project so `ProjectAccessDep` authorises `{name}` from the PATH and a study id
+# resolves only inside that project's `studies/` directory (review v1 B7).
+# Registered before projects.router like the worksheet; exempt from the
+# solver-in-flight gate by `_SOLVER_BLOCKING_EXEMPT_PATTERNS`, in neither prefix
+# list (review v2 BC-3). In auth mode every route refuses until OPEN-ITEMS 1
+# closes (BC-6); the refusal is the router's own dependency.
+app.include_router(
+    studies.router, prefix="/api/projects/{name}/studies",
+    tags=["decision-studies"], dependencies=_projects_router_guard,
 )
 app.include_router(
     projects.router, prefix="/api/projects", tags=["projects"],
