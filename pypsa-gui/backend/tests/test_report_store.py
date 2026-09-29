@@ -71,6 +71,21 @@ def test_the_id_errors_are_value_errors_the_router_can_map():
     assert issubclass(store.ReportNotFound, ValueError)
 
 
+def test_an_accepted_id_is_rebuilt_from_the_alphabet_and_equals_the_input():
+    """CodeQL `py/path-injection` (PR #64): the string that names a directory
+    is re-spelled from `_ID_ALPHABET`, and that re-spelling is the identity
+    for every id the regexes accept — the fix must not rename anything."""
+    for rid in ("0123456789abcdef", "ffffffffffffffff", "00000000deadbeef"):
+        out = store.validate_report_id(rid)
+        assert out == rid and out is not rid
+    for fid in ("fmea_pareto", "Frontier-2", "a", "Z" * 64, "_-_"):
+        out = store.validate_figure_id(fid)
+        assert out == fid and out is not fid
+    assert set("0123456789abcdef") <= set(store._ID_ALPHABET)
+    assert set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") \
+        <= set(store._ID_ALPHABET)
+
+
 # ── create / save / load ────────────────────────────────────────────────────
 
 def test_create_writes_meta_and_v1(project_dir):

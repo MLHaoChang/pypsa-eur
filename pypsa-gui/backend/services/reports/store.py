@@ -87,16 +87,33 @@ def new_report_id() -> str:
     return secrets.token_hex(8)
 
 
+# Every character an id may contain. `_rebuilt` indexes THIS string, so the
+# value that goes on to name a directory is made of characters this module
+# owns, chosen by positions derived from the caller's string, never copied
+# out of it. Same shape as `routers/snapshots._slug`: a regex allowlist is
+# correct but is not a barrier CodeQL's `py/path-injection` models, and the
+# eight alerts on PR #64 all ran through `validate_report_id`/`validate_figure_id`
+# returning the caller's own string. Rebuilding makes the provenance legible
+# to the scanner and to a reader, and `test_report_store.py` pins that the
+# rebuilt id equals the input for every accepted id.
+_ID_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"
+
+
+def _rebuilt(value: str) -> str:
+    """`value` re-spelled from `_ID_ALPHABET`; only called after a fullmatch."""
+    return "".join(_ID_ALPHABET[_ID_ALPHABET.index(ch)] for ch in value)
+
+
 def validate_report_id(report_id: object) -> str:
     if not isinstance(report_id, str) or not _REPORT_ID.fullmatch(report_id):
         raise InvalidReportId(f"not a report id: {report_id!r}")
-    return report_id
+    return _rebuilt(report_id)
 
 
 def validate_figure_id(figure_id: object) -> str:
     if not isinstance(figure_id, str) or not _FIGURE_ID.fullmatch(figure_id):
         raise InvalidFigureId(f"not a figure id: {figure_id!r}")
-    return figure_id
+    return _rebuilt(figure_id)
 
 
 def reports_dir(project_dir: pathlib.Path) -> pathlib.Path:
