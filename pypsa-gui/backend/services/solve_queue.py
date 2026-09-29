@@ -1346,8 +1346,14 @@ class SolveQueue:
                         # does not restore `user_ts.json`), and persisting an empty
                         # store would replace a good file with the netcdf-derived
                         # backup. Leaving it False leaves the on-disk profiles
-                        # intact, which is correct today. Tracked in
-                        # `docs/superpowers/OPEN-ITEMS.md`.
+                        # intact, which is correct today — for a reason that has
+                        # nothing to do with `_active`, which is why this is now
+                        # the LAST caller still asking that question. The other
+                        # two (the desktop shutdown flush, the resident-cap
+                        # eviction) moved to `project_context.holds_user_series`;
+                        # this one waits on OPEN-ITEMS 13, because a hydrated
+                        # context's store only becomes faithful once
+                        # `_hydrate_context_from_disk` restores the sidecar.
                         persist_user_ts=(ctx is PyPSAService._active),
                         storage_dir=(
                             pathlib.Path(job.storage_dir) if job.storage_dir else None

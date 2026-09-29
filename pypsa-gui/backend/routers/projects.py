@@ -1967,10 +1967,11 @@ def _save_context(
         #
         # `persist_user_ts` is therefore no longer what PREVENTS a cross-project
         # clobber — it is now only a caller's choice about whether this save
-        # rewrites `user_ts.json` at all. Its remaining `False` callers
-        # (`solve_queue`, the desktop shutdown flush, eviction) predate the
-        # per-context store and are tracked in `docs/superpowers/OPEN-ITEMS.md`;
-        # their values are deliberately unchanged here.
+        # rewrites `user_ts.json` at all. The shutdown flush and the resident-cap
+        # eviction have since stopped answering it with `ctx is
+        # PyPSAService._active` and now ask `project_context.holds_user_series`;
+        # `solve_queue` is the last caller still on the old predicate, for a
+        # reason recorded in `docs/superpowers/OPEN-ITEMS.md` (item 13).
         if persist_user_ts:
             _backup_network_ts_to_user_ts(n, store=ctx.user_ts)
             _reapply_user_ts_to_network(n, store=ctx.user_ts)

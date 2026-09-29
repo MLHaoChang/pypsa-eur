@@ -287,8 +287,9 @@ def flush_all(
     than surprising — it is still reported, because the point is to tell the
     user what was not written.
     """
-    from services.project_context import holds_user_series
     from fastapi import HTTPException
+
+    from services.project_context import holds_user_series
 
     problems: list[str] = []
 
