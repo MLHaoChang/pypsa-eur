@@ -495,17 +495,6 @@ def test_save_during_a_sweep_still_gets_the_save_sentence(client, api_project,
 # study record installed on the context THAT call resolves (outside a request:
 # the active context, the same one `PyPSAService.get_network()` returns).
 
-_CHAT_WRITES = [
-    ("create_component", ("Bus", "B9", {"v_nom": 110.0}), {}),
-    ("update_component", ("Bus", "B1"), {"attrs": {"v_nom": 220.0}}),
-    ("bulk_update_components", ("Bus", ["B1"], {"v_nom": 220.0}), {}),
-    ("delete_component", ("Bus", "B3"), {}),
-    ("cascade_delete_bus", ("B2",), {}),
-    ("batch_delete_components", ("Bus", ["B3"]), {}),
-    ("undo_last", (), {}),
-]
-
-
 def _net_fingerprint(n):
     return (sorted(n.buses.index), sorted(n.lines.index),
             n.buses["v_nom"].to_dict())
@@ -541,17 +530,222 @@ def test_edit_during_a_sweep_is_refused_from_the_chat_tool(install_network):
     assert err.detail["message"].startswith("Cannot edit the network")
 
 
-@pytest.mark.parametrize("tool,args,kwargs", _CHAT_WRITES,
-                         ids=[t[0] for t in _CHAT_WRITES])
-def test_every_chat_network_write_is_refused_during_a_sweep(
-        install_network, tool, args, kwargs):
-    err = _chat_refusal(install_network, tool, args, kwargs)
-    assert err.status_code == 409, (tool, err.detail)
-    if tool == "undo_last":
-        # Undo keeps the swap sentence (a string), over all STUDY_KEYS.
-        return
+# ── Every chat tool that reaches a network write, DERIVED (gate B1) ─────────
+#
+# The chat tools call their handlers in process, so the middleware never sees
+# them; the three CRUD handlers are only part of the surface. The set is
+# derived from the same rule as the dispatch seam's foreign-lock gate
+# (`chat_tools._lock_gated_tool_names()`: every non-read tool that maps to a
+# write route, plus the routeless mutators), narrowed to the study gate's
+# prefixes, minus the tools that SWAP the network and keep their own guard.
+# A tool added later against an `/api/network/*` route lands in this list —
+# and fails below until it is refused — with nothing to remember.
+
+_STUDY_PREFIXES = ("/api/network/", "/api/io/")
+# Replace the whole network: `reset_network` (imports) and the re-cluster
+# path refuse with the swap sentence over every study (Phase 11).
+_SWAP_TOOLS = frozenset({"import_network_nc", "import_csv_bundle", "import_excel",
+                         "import_matpower", "cluster_network"})
+
+
+def _derived_chat_writes() -> list[str]:
+    from services import chat_tools
+    from services.chat_tools_schema import TOOL_ROUTES
+
+    out = set()
+    for name in chat_tools._lock_gated_tool_names():
+        if name in _SWAP_TOOLS:
+            continue
+        if name in chat_tools._LOCK_GATE_SERVICE_CALL_MUTATORS:
+            out.add(name)
+            continue
+        for route in TOOL_ROUTES.get(name, ()):
+            if (isinstance(route, tuple) and route[0].upper() != "GET"
+                    and route[1].startswith(_STUDY_PREFIXES)):
+                out.add(name)
+                break
+    return sorted(out)
+
+
+def _rich_net():
+    """The gate reviewer's probe network: a day of hours, a load and an
+    extendable generator, so the time-axis and profile tools have a target."""
+    import pandas as pd
+    import pypsa
+
+    n = pypsa.Network()
+    n.set_snapshots(pd.date_range("2025-01-01", periods=24, freq="h"))
+    n.add("Carrier", "AC")
+    n.add("Bus", "B1", v_nom=380.0, carrier="AC", x=0, y=0)
+    n.add("Bus", "B2", v_nom=380.0, carrier="AC", x=10, y=10)
+    n.add("Bus", "B3", v_nom=380.0, carrier="AC", x=2, y=2)
+    n.add("Line", "L1", bus0="B1", bus1="B2", x=0.1, r=0.01, s_nom=100.0, length=5)
+    n.add("Generator", "G1", bus="B1", p_nom=100, p_nom_extendable=True, carrier="AC")
+    n.add("Link", "K1", bus0="B1", bus1="B3", p_nom=10, carrier="AC")
+    n.add("Load", "D1", bus="B2", p_set=50)
+    n.add("GlobalConstraint", "CO2", type="primary_energy", sense="<=",
+          constant=500.0, carrier_attribute="co2_emissions")
+    return n
+
+
+def _rich_fingerprint(n):
+    import pickle
+
+    return pickle.dumps((
+        n.buses.to_dict(), n.lines.to_dict(), n.generators.to_dict(),
+        n.links.to_dict(), n.loads.to_dict(), n.carriers.to_dict(),
+        n.global_constraints.to_dict(), list(n.snapshots),
+        n.snapshot_weightings.to_dict(), list(n.investment_periods),
+        {k: v.to_dict() for k, v in n.loads_t.items() if not v.empty},
+        {k: v.to_dict() for k, v in n.generators_t.items() if not v.empty},
+        {k: v.to_dict() for k, v in n.links_t.items() if not v.empty},
+        getattr(n, "name", None)))
+
+
+def _csv(n, col):
+    import pandas as pd
+    return pd.DataFrame({col: [0.42] * len(n.snapshots)}, index=n.snapshots).to_csv()
+
+
+def _b64(text):
+    import base64
+    return base64.b64encode(text.encode()).decode()
+
+
+# Real arguments per tool (the reviewer's probes, `qa27a/probe/`), so a tool
+# that is NOT refused actually changes the network rather than failing on
+# its arguments. The refusal happens before the handler, so after the fix
+# the arguments no longer matter.
+_WRITE_ARGS = {
+    "create_component": lambda n: (("Bus", "B9", {"v_nom": 110.0}), {}),
+    "create_carrier": lambda n: (("wind",), {}),
+    "batch_create_components": lambda n: (("Bus", [{"name": "B9", "v_nom": 110.0}]), {}),
+    "update_component": lambda n: (("Bus", "B1"), {"attrs": {"v_nom": 220.0}}),
+    "bulk_update_components": lambda n: (("Bus", ["B1"], {"v_nom": 220.0}), {}),
+    "delete_component": lambda n: (("Bus", "B3"), {}),
+    "cascade_delete_bus": lambda n: (("B3",), {}),
+    "batch_delete_components": lambda n: (("Bus", ["B3"]), {}),
+    "undo_last": lambda n: ((), {}),
+    "update_meta": lambda n: (("renamed",), {}),
+    "recalculate_line_lengths": lambda n: ((), {}),
+    "set_snapshots": lambda n: (("2025-01-01", "2025-01-02"), {}),
+    "set_snapshot_weightings": lambda n: (({n.snapshots[0].isoformat(): {"objective": 2.0}},), {}),
+    "upload_snapshot_weightings_csv": lambda n: ((_b64(
+        __import__("pandas").DataFrame(
+            {"objective": [2.0] * len(n.snapshots), "stores": [2.0] * len(n.snapshots),
+             "generators": [2.0] * len(n.snapshots)}, index=n.snapshots).to_csv()),), {}),
+    "sample_representative_weeks": lambda n: ((1,), {}),
+    "set_multi_period_snapshots": lambda n: (([2030], "2025-01-01", "2025-01-02"), {}),
+    "set_investment_periods": lambda n: (([2030],), {}),
+    "set_investment_period_weightings": lambda n: (({"2030": {"objective": 2.0}},), {}),
+    "set_vintage_bounds": lambda n: (("Generator", "G1", {"2030": {"p_nom_max": 5.0}}), {}),
+    "delete_vintage_bounds": lambda n: (("Generator", "G1"), {}),
+    "cleanup_orphan_vintages": lambda n: ((), {}),
+    "upload_timeseries": lambda n: (("loads", "D1", "p_set", _csv(n, "D1")), {}),
+    "generate_exemplary_timeseries": lambda n: (("loads", "D1", "p_set"), {}),
+    "delete_timeseries": lambda n: (("loads", "D1", "p_set"), {}),
+    "upload_load_profile": lambda n: ((_b64(_csv(n, "D1")),), {}),
+    "upload_generator_profile": lambda n: ((_b64(_csv(n, "G1")),), {}),
+    "upload_link_profile": lambda n: ((_b64(_csv(n, "K1")),), {"attribute": "p_max_pu"}),
+    # Routeless mutators: their inputs are uploads this fixture has none of;
+    # the refusal must come before any of that is read.
+    "apply_demand_from_excel": lambda n: (("no-such-file", "t", "v", "D1"), {}),
+    "reconstruct_network_from_image": lambda n: (("no-such-file",), {}),
+}
+
+# Tools whose effect needs something to act on first (outside the sweep).
+_WRITE_SETUP = {
+    "delete_timeseries": lambda: __import__("services.chat_tools", fromlist=["x"])
+        .upload_timeseries("loads", "D1", "p_set", _csv(
+            __import__("services.pypsa_service", fromlist=["x"])
+            .PyPSAService.get_network(), "D1")),
+}
+
+
+def test_the_derived_chat_write_list_has_arguments_for_every_tool():
+    """A tool added to the derived set must bring its own case here."""
+    assert set(_derived_chat_writes()) == set(_WRITE_ARGS)
+
+
+@pytest.mark.parametrize("tool", _derived_chat_writes())
+def test_every_chat_network_write_is_refused_during_a_sweep(install_network, tool):
+    """Through `chat_tools.DISPATCHERS` — the seam chat_service dispatches
+    through — with the record on the ctx the tool resolves."""
+    from fastapi import HTTPException
+
+    from services import chat_tools
+    from services.project_context import running_study_key
+    from services.pypsa_service import PyPSAService
+
+    n = install_network(_rich_net(), name=None)
+    assert PyPSAService.get_network() is n
+    if tool in _WRITE_SETUP:
+        _WRITE_SETUP[tool]()
+    args, kwargs = _WRITE_ARGS[tool](n)
+    before = _rich_fingerprint(PyPSAService.get_network())
+    with _LiveRecord(PyPSAService.get_solver_state(), "fmea_sweep"):
+        assert running_study_key(PyPSAService.get_solver_state()) == "fmea_sweep"
+        err = None
+        try:
+            chat_tools.DISPATCHERS[tool](*args, **kwargs)
+        except HTTPException as e:
+            err = e
+        changed = _rich_fingerprint(PyPSAService.get_network()) != before
+    assert not changed, f"{tool} changed the live network during a sweep"
+    assert err is not None, f"{tool} was not refused during a sweep"
+    assert err.status_code == 409, (tool, err.status_code, err.detail)
     assert isinstance(err.detail, dict), (tool, err.detail)
     assert err.detail["error_kind"] == "study_in_flight", (tool, err.detail)
+    assert err.detail["study"] == "fmea_sweep"
+
+
+def test_the_seam_study_gate_is_exactly_the_derived_set():
+    from services import chat_tools
+
+    assert chat_tools._study_gated_tool_names() == frozenset(_derived_chat_writes())
+
+
+def test_read_tools_are_not_gated_and_still_answer_during_a_sweep(install_network):
+    from services import chat_tools
+    from services.chat_tools_schema import safety_tier_for
+    from services.pypsa_service import PyPSAService
+
+    gated = set(_derived_chat_writes())
+    reads = {t for t in chat_tools.DISPATCHERS if safety_tier_for(t) == "read"}
+    assert reads and not (reads & gated)
+    assert not (reads & chat_tools._study_gated_tool_names())
+    install_network(_rich_net(), name=None)
+    with _LiveRecord(PyPSAService.get_solver_state(), "fmea_sweep"):
+        buses = chat_tools.DISPATCHERS["list_components"]("Bus")
+        assert "B1" in str(buses)
+        assert chat_tools.DISPATCHERS["get_component"]("Bus", "B1")
+        assert chat_tools.DISPATCHERS["get_meta"]() is not None
+
+
+def test_swap_tools_keep_their_own_guard(install_network):
+    """The imports and the re-cluster replace the whole network; they stay out
+    of the edit gate and are refused by the swap guard's sentence instead."""
+    import base64
+    import tempfile
+
+    from fastapi import HTTPException
+
+    from services import chat_tools
+    from services.pypsa_service import PyPSAService
+
+    assert not (_SWAP_TOOLS & set(_derived_chat_writes()))
+    assert not (_SWAP_TOOLS & chat_tools._study_gated_tool_names())
+    n = install_network(_rich_net(), name=None)
+    with tempfile.NamedTemporaryFile(suffix=".nc") as f:
+        _topology_network().export_to_netcdf(f.name)
+        data = base64.b64encode(open(f.name, "rb").read()).decode()
+    with _LiveRecord(PyPSAService.get_solver_state(), "fmea_sweep"):
+        with pytest.raises(HTTPException) as exc:
+            chat_tools.DISPATCHERS["import_network_nc"](data)
+    assert exc.value.status_code == 409
+    assert isinstance(exc.value.detail, str), exc.value.detail   # the swap sentence
+    assert "an FMEA sweep" in exc.value.detail
+    assert PyPSAService.get_network() is n
 
 
 @pytest.mark.live_solve
@@ -596,3 +790,60 @@ def test_dtc_freezes_its_private_copy_without_the_lock():
     for c in calls:
         assert len(c.args) == 1 and not c.keywords, (
             f"dtc.py:{c.lineno} passes a lock to {c.func.id} on its private copy")
+
+
+def test_the_live_study_call_sites_pass_the_runners_lock():
+    """Gate finding 1: the four studies that solve the LIVE network hand
+    their captured lock to the restore (spec §1.1 "Call sites"). The spy
+    tests cover the functions; this pins the call sites, like the dtc pin."""
+    import ast
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parents[1] / "services" / "adequacy"
+    want = {"sweep.py": {"preserve_bus_topology": 1, "freeze_capacities": 1},
+            "frontier.py": {"preserve_bus_topology": 1},
+            "coupling_loop_runner.py": {"preserve_bus_topology": 1},
+            "margin_loop_runner.py": {"preserve_bus_topology": 1}}
+    for fname, funcs in want.items():
+        tree = ast.parse((root / fname).read_text(encoding="utf-8"))
+        seen = {f: 0 for f in funcs}
+        for c in ast.walk(tree):
+            if isinstance(c, ast.Call) and getattr(c.func, "id", None) in funcs:
+                seen[c.func.id] += 1
+                assert len(c.args) == 2 and isinstance(c.args[1], ast.Name) \
+                    and c.args[1].id == "lock", (
+                        f"{fname}:{c.lineno} calls {c.func.id} without the runner's lock")
+        assert seen == funcs, (fname, seen)
+
+
+# Gate finding 2: the handler-level chokepoints the seam gate now shadows —
+# bare `chat_tools.*` calls (in-process callers that bypass DISPATCHERS) still
+# meet them: the global-constraint handlers, the bus cascade / rename and bulk.
+_HANDLER_WRITES = [
+    ("create_component", ("GlobalConstraint", "CO3"),
+     {"attrs": {"type": "primary_energy", "sense": "<=", "constant": 1.0}}),
+    ("update_component", ("GlobalConstraint", "CO2"), {"attrs": {"constant": 100.0}}),
+    ("delete_component", ("GlobalConstraint", "CO2"), {}),
+    ("update_component", ("Bus", "B1"), {"new_name": "B1_renamed"}),
+    ("cascade_delete_bus", ("B3",), {}),
+    ("bulk_update_components", ("Bus", ["B1"], {"v_nom": 220.0}), {}),
+]
+
+
+@pytest.mark.parametrize("tool,args,kwargs", _HANDLER_WRITES,
+                         ids=[f"{t}-{a[0]}" for t, a, _ in _HANDLER_WRITES])
+def test_the_handler_chokepoints_refuse_a_bare_call_during_a_sweep(
+        install_network, tool, args, kwargs):
+    from fastapi import HTTPException
+
+    from services import chat_tools
+    from services.pypsa_service import PyPSAService
+
+    install_network(_rich_net(), name=None)
+    before = _rich_fingerprint(PyPSAService.get_network())
+    with _LiveRecord(PyPSAService.get_solver_state(), "fmea_sweep"):
+        with pytest.raises(HTTPException) as exc:
+            getattr(chat_tools, tool)(*args, **kwargs)
+        assert _rich_fingerprint(PyPSAService.get_network()) == before
+    assert exc.value.status_code == 409
+    assert exc.value.detail["error_kind"] == "study_in_flight"

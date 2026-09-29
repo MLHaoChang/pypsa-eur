@@ -4990,3 +4990,67 @@ DISPATCHERS.update({
     name: _lock_gated(name, DISPATCHERS[name])
     for name in _lock_gated_tool_names()
 })
+
+
+# ── Live-network study gate at the same seam (P27a, gate B1) ────────────────
+#
+# `main.py` refuses every `/api/network/*` and `/api/io/*` write while a
+# live-network study (sweep, frontier, coupling / margin loop) runs, because
+# the study re-solves the user's own network between its iterates. The chat
+# tools call their handlers in process and never meet that middleware, so the
+# same refusal is applied here, to the same DERIVED set the foreign-lock gate
+# uses, narrowed to those two prefixes (plus the routeless mutators). A tool
+# added later against an `/api/network/*` route is gated the day it lands.
+#
+# Left out on purpose: the tools that REPLACE the whole network. The imports
+# go through `reset_network` and the re-cluster through its own swap path,
+# both of which refuse over every study with the swap sentence (Phase 11) —
+# the stricter guard, since a swap detaches even an `mc` / `eh_study` run.
+# Read tools are never gated (`_lock_gated_tool_names` skips them).
+_STUDY_GATE_PREFIXES = ("/api/network/", "/api/io/")
+_STUDY_GATE_SWAP_TOOLS = frozenset({
+    "import_network_nc", "import_csv_bundle", "import_excel", "import_matpower",
+    "cluster_network",
+})
+
+
+def _study_gated_tool_names() -> frozenset[str]:
+    """The chat tools a running live-network study refuses (derived)."""
+    from services.chat_tools_schema import TOOL_ROUTES
+
+    gated: set[str] = set()
+    for name in _lock_gated_tool_names():
+        if name in _STUDY_GATE_SWAP_TOOLS:
+            continue
+        if name in _LOCK_GATE_SERVICE_CALL_MUTATORS:
+            gated.add(name)
+            continue
+        for route in TOOL_ROUTES.get(name, ()):
+            if not isinstance(route, tuple):
+                continue
+            method, path = route
+            if (method.upper() in _LOCK_GATE_WRITE_METHODS
+                    and any(path.startswith(p) for p in _STUDY_GATE_PREFIXES)):
+                gated.add(name)
+                break
+    return frozenset(gated)
+
+
+def _study_gated(tool_name: str, handler):
+    """Wrap one dispatcher with the live-network study refusal."""
+    import functools
+
+    from services.study_state import refuse_edit_during_live_study
+
+    @functools.wraps(handler)
+    def _wrapped(*args, **kwargs):
+        refuse_edit_during_live_study()
+        return handler(*args, **kwargs)
+
+    return _wrapped
+
+
+DISPATCHERS.update({
+    name: _study_gated(name, DISPATCHERS[name])
+    for name in _study_gated_tool_names()
+})
