@@ -1378,6 +1378,14 @@ Files: `services/results/billing.py`, `services/results/cfe_score.py`, `routers/
 6. **Chat bug. Fixed** by #63 (9aa87f8, merged into this branch while the gate was open): `update_component` with `attrs["name"]` raised a TypeError on every class (`_get_schema(...)(name=name, **attrs)`). The schema is now built with the target name, so the PUT handler renames through `_rename_component_safely` with its guards; dispatch tests cover the Bus rename, the reserved `ic:` refusal and the other classes. The chat tests pass on the rebased head (454). It is a chat change, so the ADR-0002 probe owed above covers it too.
 7. **Carried into P4:** decide whether the DSR slack cost is a cash flow (the site pays) or an opportunity cost (a value of shed load) before it becomes a cost row; the WP2.3 accepted residue (the engine's proportional windowed-tier split is not independently recomputed — H3 now pins it by hand for one tariff, but `tier_allocation` still takes the engine's split as truth).
 
+**Gate assessor verdict (round 2, on dfe4017): PASS WITH CONDITIONS.** Driver 49/49, QA drivers 24/24 on the rebased head, 1,352 tests, `tsc` clean; H1–H3 rebuilt independently interval by interval with 0 mismatches. Round-1 conditions 1, 3, 4, 5 closed; 7 carried. Round-2 conditions:
+
+1. **ADR-0002 live probe — owed.** It blocks calling the chat surface (WP2.4c, #63) done, not P3. The procedure in the findings note now has a rename turn for #63.
+2. **#63 left GlobalConstraint renames unguarded** (MEDIUM): a rename onto an existing name returned 200 and replaced the other constraint. **Fixed:** a 409 in `apply_update_global_constraint` before the remove; dispatch tests for GlobalConstraint and Generator via `attrs.name` and `new_name`. A pure Transformer rename without buses still raises a pydantic error (pre-existing, LOW, recorded).
+3. **Annual bands on monthly tiers** (LOW) — recorded in spec §5.5 and the findings note.
+
+**Phase 2 closed for the billing pass and contracts; P3 may start. The chat surface stays not done until the ADR-0002 probe is recorded.**
+
 ---
 
 ## Scope boundaries (not P2)
