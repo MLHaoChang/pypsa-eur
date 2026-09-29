@@ -27,23 +27,39 @@
 // no `GET …/evidence_hash` route yet (the plan names one); comparing against
 // the newest evidence-only document is the phase-3 approximation and a
 // dedicated route that hashes the session's live evidence is a follow-up.
-import { useState } from 'react'
+//
+// WP11 — templates: the header holds `TemplatePicker` (bind one of the
+// Project's `report_template` uploads, or the built-in default) and the
+// body the outline summary; `GET …/{id}/template` is one query here
+// (`REPORT_TEMPLATE_KEY`) that the picker and the plan editor share. An
+// untagged template gets the `MappingPlanEditor` below the header; the
+// export button names the template in effect. After an export the upload
+// meta is kept so the "Preview of the exported file" panel can render it
+// with docx-preview (`DocxPreview`, collapsed until asked) or download it
+// again. A `mapping` job's strip is the editor's; the viewer's `onFinished`
+// only toasts it.
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { AlertTriangle, ArrowLeft, FileDown } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, ChevronDown, ChevronRight, Download, Eye, FileDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   exportReport,
   getReport,
+  getReportTemplate,
   reportErrorMessage,
   reportJobErrorMessage,
+  templateErrorMessage,
   type ReportDocument,
   type ReportMeta,
 } from '../../api/reports'
 import { getUploadBlobUrl, type UploadMeta } from '../../api/uploads'
 import { Btn, PageSection, Tag } from '../../components/PageKit'
+import { DocxPreview } from './DocxPreview'
+import { MappingPlanEditor } from './MappingPlanEditor'
 import { ReportJobStrip } from './ReportJobStrip'
 import { SectionCard } from './SectionCard'
-import { useReportJob } from './useReportJob'
+import { TemplateOutlineSummary, TemplatePicker, useReportTemplates } from './TemplatePicker'
+import { REPORT_TEMPLATE_KEY, useReportJob } from './useReportJob'
 
 export const REPORT_DOC_KEY = (project: string, reportId: string, version: number | null) =>
   ['reports', 'doc', project, reportId, version] as const
@@ -82,10 +98,20 @@ export function ReportViewer({
   // A finished job whose outcome should stay visible here (a failure, or
   // sections the model could not write); a clean `done` is a toast.
   const [outcomeVisible, setOutcomeVisible] = useState(false)
+  // WP11: the last export of this visit, for the preview panel.
+  const [lastExport, setLastExport] = useState<UploadMeta | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   const job = useReportJob(project, {
     onFinished: (record) => {
       if (record.report_id !== meta.report_id) return
+      if (record.mode === 'mapping') {
+        // The editor shows the strip and the hook re-reads the plan.
+        if (record.status === 'done') toast.success('Mapping plan proposed — review it below')
+        else if (record.status === 'aborted') toast('Mapping proposal stopped')
+        else toast.error(`Mapping proposal failed: ${record.error ?? 'unknown error'}`)
+        return
+      }
       setVersion(null)
       const keep = record.status !== 'done' || record.prose_failures.length > 0
       setOutcomeVisible(keep)
@@ -112,6 +138,24 @@ export function ReportViewer({
   const sectionTitles = doc.data
     ? Object.fromEntries(doc.data.sections.map(s => [s.section_id, s.heading]))
     : undefined
+  const sectionChoices = useMemo(
+    () => doc.data?.sections.map(s => ({ id: s.section_id, title: s.heading })) ?? [],
+    [doc.data],
+  )
+
+  // WP11: the template binding (+ stored plan) and the Project's templates.
+  const template = useQuery({
+    queryKey: REPORT_TEMPLATE_KEY(project, meta.report_id),
+    queryFn: () => getReportTemplate(project, meta.report_id),
+    retry: false,
+  })
+  const templates = useReportTemplates(project)
+  const boundTemplate = template.data?.template_file_id
+    ? templates.data?.find(t => t.file_id === template.data?.template_file_id) ?? null
+    : null
+  const templateLabel = template.data?.template_file_id
+    ? (boundTemplate?.filename ?? template.data.template_file_id)
+    : 'built-in default'
 
   async function regenerate(sectionId: string, instruction: string) {
     try {
@@ -132,9 +176,10 @@ export function ReportViewer({
     mutationFn: () => exportReport(project, meta.report_id, { version: shownVersion }),
     onSuccess: (upload) => {
       downloadExport(project, upload)
+      setLastExport(upload)
       toast.success(`Exported ${upload.filename} — it is also in the Project's files`)
     },
-    onError: (e) => toast.error(`Could not export the report: ${reportErrorMessage(e)}`),
+    onError: (e) => toast.error(`Could not export the report: ${templateErrorMessage(e)}`),
   })
 
   const versions = Array.from({ length: meta.latest_version }, (_, i) => meta.latest_version - i)
@@ -185,14 +230,21 @@ export function ReportViewer({
                 </select>
               </label>
             )}
+            <TemplatePicker
+              project={project}
+              reportId={meta.report_id}
+              binding={template.data}
+              disabled={exportDocx.isPending}
+            />
             <Btn
               variant="primary"
               onClick={() => exportDocx.mutate()}
               disabled={!doc.data || exportDocx.isPending}
-              title="Render this version to Word and download it"
+              title={`Render this version to Word (${templateLabel}) and download it`}
               data-testid="report-export"
             >
               <FileDown size={12} /> {exportDocx.isPending ? 'Exporting…' : 'Export .docx'}
+              <span className="font-normal opacity-80" data-testid="report-export-template">· {templateLabel}</span>
             </Btn>
             {onBack && (
               <Btn onClick={onBack} title="Back to the list of reports" data-testid="report-back">
@@ -207,18 +259,74 @@ export function ReportViewer({
             {reportErrorMessage(doc.error, 'Could not load the report')}
           </p>
         ) : doc.data ? (
-          <p className="text-[11px] text-muted">
-            {doc.data.sections.length} section{doc.data.sections.length === 1 ? '' : 's'} ·{' '}
-            {Object.keys(doc.data.tables).length} table{Object.keys(doc.data.tables).length === 1 ? '' : 's'} ·{' '}
-            {Object.keys(doc.data.figures).length} figure{Object.keys(doc.data.figures).length === 1 ? '' : 's'}
-            {' · '}evidence <span className="font-mono">{doc.data.evidence_hash.slice(0, 12)}</span>
-          </p>
+          <div className="flex flex-col gap-1.5">
+            <p className="text-[11px] text-muted">
+              {doc.data.sections.length} section{doc.data.sections.length === 1 ? '' : 's'} ·{' '}
+              {Object.keys(doc.data.tables).length} table{Object.keys(doc.data.tables).length === 1 ? '' : 's'} ·{' '}
+              {Object.keys(doc.data.figures).length} figure{Object.keys(doc.data.figures).length === 1 ? '' : 's'}
+              {' · '}evidence <span className="font-mono">{doc.data.evidence_hash.slice(0, 12)}</span>
+            </p>
+            <TemplateOutlineSummary binding={template.data} />
+          </div>
         ) : (
           <p className="text-[12px] text-muted">Loading…</p>
         )}
       </PageSection>
 
-      {job.record && (job.isRunning || (outcomeVisible && job.record.report_id === meta.report_id)) && (
+      {template.data?.mode === 'untagged' && template.data.outline && (
+        <MappingPlanEditor
+          project={project}
+          reportId={meta.report_id}
+          outline={template.data.outline}
+          plan={template.data.plan}
+          language={template.data.language}
+          sections={sectionChoices}
+          job={job}
+          onExport={() => exportDocx.mutate()}
+          exportPending={exportDocx.isPending}
+        />
+      )}
+
+      {lastExport && (
+        <div data-testid="export-preview-panel">
+        <PageSection
+          title="Preview of the exported file"
+          hint={<span className="font-mono">{lastExport.filename}</span>}
+          right={
+            <div className="flex items-center gap-2">
+              <Btn
+                onClick={() => setPreviewOpen(o => !o)}
+                title={previewOpen ? 'Hide the preview' : 'Render the exported file here (docx-preview; the download is the authority)'}
+                data-testid="export-preview-toggle"
+                aria-expanded={previewOpen}
+              >
+                {previewOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                <Eye size={12} /> Preview
+              </Btn>
+              <Btn
+                onClick={() => downloadExport(project, lastExport)}
+                title="Download the exported file again"
+                data-testid="export-download"
+              >
+                <Download size={12} /> Download
+              </Btn>
+            </div>
+          }
+          bodyClassName={previewOpen ? 'p-4' : 'px-4 py-2'}
+        >
+          {previewOpen ? (
+            <DocxPreview url={getUploadBlobUrl(project, lastExport.file_id)} filename={lastExport.filename} />
+          ) : (
+            <p className="text-[11px] text-muted">
+              Exported with {templateLabel}. Preview renders the file in the browser; the download is the authority.
+            </p>
+          )}
+        </PageSection>
+        </div>
+      )}
+
+      {job.record && job.record.mode !== 'mapping'
+        && (job.isRunning || (outcomeVisible && job.record.report_id === meta.report_id)) && (
         <ReportJobStrip
           record={job.record}
           titles={sectionTitles}

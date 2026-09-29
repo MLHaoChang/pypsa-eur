@@ -14,6 +14,17 @@ import { DEFAULT_SECTION_CHOICES, GenerateReportDialog } from './GenerateReportD
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 vi.mock('react-hot-toast', () => ({ default: toast }))
 
+const uploads = vi.hoisted(() => ({ listUploads: vi.fn() }))
+vi.mock('../../api/uploads', async () => {
+  const real = await vi.importActual<typeof import('../../api/uploads')>('../../api/uploads')
+  return { ...real, ...uploads }
+})
+
+const TEMPLATE_UPLOAD = {
+  schema_version: 1, file_id: 'f1', filename: 'corporate.docx', mime: 'application/x', size: 1, sha256: 'a',
+  kind: 'report_template' as const, uploaded_at: 1_790_000_000, blob_ready: true, version: 1,
+}
+
 function renderDialog(over: Partial<React.ComponentProps<typeof GenerateReportDialog>> = {}) {
   const onGenerate = vi.fn().mockResolvedValue({ status: 'running', report_id: 'a1b2c3d4e5f60718' })
   const onClose = vi.fn()
@@ -26,6 +37,7 @@ function renderDialog(over: Partial<React.ComponentProps<typeof GenerateReportDi
 beforeEach(() => {
   toast.success.mockReset()
   toast.error.mockReset()
+  uploads.listUploads.mockReset().mockResolvedValue([TEMPLATE_UPLOAD])
 })
 
 afterEach(() => cleanup())
@@ -113,5 +125,57 @@ describe('GenerateReportDialog', () => {
     await user.click(screen.getByText('Cancel'))
     expect(onClose).toHaveBeenCalled()
     expect(onGenerate).not.toHaveBeenCalled()
+  })
+})
+
+describe('GenerateReportDialog — template (WP11)', () => {
+  it('offers no template select without a project and sends no template_file_id', async () => {
+    const user = userEvent.setup()
+    const { onGenerate } = renderDialog()
+    expect(screen.queryByLabelText('Template')).toBeNull()
+    expect(uploads.listUploads).not.toHaveBeenCalled()
+    await user.click(screen.getByTestId('generate-submit'))
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith({ language: 'en' }))
+  })
+
+  it('lists the Project\'s report templates after "Built-in default" and sends the chosen template_file_id', async () => {
+    const user = userEvent.setup()
+    const { onGenerate } = renderDialog({ project: 'Demo' })
+    const select = await screen.findByLabelText('Template') as HTMLSelectElement
+    await waitFor(() => expect(select.options).toHaveLength(2))
+    expect(uploads.listUploads).toHaveBeenCalledWith('Demo', 'report_template')
+    expect(select.options[0].textContent).toBe('Built-in default')
+    expect(select.options[1].value).toBe('f1')
+    expect(select.options[1].textContent).toContain('corporate.docx')
+    await user.selectOptions(select, 'f1')
+    // no language known for it → the language stays as it was
+    expect((screen.getByLabelText('Language') as HTMLInputElement).value).toBe('en')
+    await user.click(screen.getByTestId('generate-submit'))
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith({ language: 'en', template_file_id: 'f1' }))
+  })
+
+  it('pre-fills the language from the template\'s detected language once known, and keeps it when going back to the default', async () => {
+    const user = userEvent.setup()
+    const { onGenerate } = renderDialog({ project: 'Demo', templateLanguages: { f1: 'de' } })
+    const select = await screen.findByLabelText('Template') as HTMLSelectElement
+    await waitFor(() => expect(select.options).toHaveLength(2))
+    await user.selectOptions(select, 'f1')
+    const lang = screen.getByLabelText('Language') as HTMLInputElement
+    expect(lang.value).toBe('de')
+    await user.selectOptions(select, '')
+    expect(lang.value).toBe('de')
+    await user.click(screen.getByTestId('generate-submit'))
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith({ language: 'de' }))
+  })
+
+  it('still generates when the template list cannot be read', async () => {
+    uploads.listUploads.mockRejectedValue(new Error('offline'))
+    const user = userEvent.setup()
+    const { onGenerate } = renderDialog({ project: 'Demo' })
+    const select = await screen.findByLabelText('Template') as HTMLSelectElement
+    await waitFor(() => expect(uploads.listUploads).toHaveBeenCalled())
+    expect(select.options).toHaveLength(1)
+    await user.click(screen.getByTestId('generate-submit'))
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith({ language: 'en' }))
   })
 })

@@ -23,9 +23,12 @@ import {
   abortGenerate,
   generateReport,
   getGenerateStatus,
+  proposeMappingPlan,
   regenerateSection,
   type GenerateReportOptions,
   type GenerateReportResponse,
+  type ProposeMappingOptions,
+  type ProposeMappingResponse,
   type RegenerateSectionOptions,
   type RegenerateSectionResponse,
   type ReportJobRecord,
@@ -35,6 +38,9 @@ export const REPORT_JOB_KEY = (project: string) => ['reports', 'job', project] a
 /** Prefix of every version of one report's document query (`REPORT_DOC_KEY`). */
 const REPORT_DOC_PREFIX = (project: string, reportId: string) => ['reports', 'doc', project, reportId] as const
 const REPORTS_LIST_KEY = (project: string) => ['reports', 'list', project] as const
+/** One report's template binding + stored plan (`GET …/{id}/template`, WP11). */
+export const REPORT_TEMPLATE_KEY = (project: string, reportId: string) =>
+  ['reports', 'template', project, reportId] as const
 
 export const REPORT_JOB_POLL_MS = 1500
 
@@ -58,6 +64,8 @@ export interface ReportJobApi {
     sectionId: string,
     opts?: RegenerateSectionOptions,
   ) => Promise<RegenerateSectionResponse>
+  /** WP11: ask the model for a mapping plan (a `mode: "mapping"` job). */
+  proposeMapping: (reportId: string, opts?: ProposeMappingOptions) => Promise<ProposeMappingResponse>
   statusError: unknown
 }
 
@@ -96,6 +104,10 @@ export function useReportJob(project: string | null, options: UseReportJobOption
     setAborting(false)
     qc.invalidateQueries({ queryKey: REPORTS_LIST_KEY(project) })
     qc.invalidateQueries({ queryKey: REPORT_DOC_PREFIX(project, record.report_id) })
+    // A mapping job writes the stored plan, not a document version.
+    if (record.mode === 'mapping') {
+      qc.invalidateQueries({ queryKey: REPORT_TEMPLATE_KEY(project, record.report_id) })
+    }
     onFinishedRef.current?.(record)
   }, [record, project, qc])
 
@@ -120,6 +132,12 @@ export function useReportJob(project: string | null, options: UseReportJobOption
     onSuccess: () => { setAborting(false); void refreshStatus() },
   })
 
+  const proposeMutation = useMutation({
+    mutationFn: (args: { reportId: string; opts?: ProposeMappingOptions }) =>
+      proposeMappingPlan(project as string, args.reportId, args.opts),
+    onSuccess: () => { setAborting(false); void refreshStatus() },
+  })
+
   const start = useCallback(
     (opts: GenerateReportOptions = {}) => startMutation.mutateAsync(opts),
     [startMutation],
@@ -130,16 +148,21 @@ export function useReportJob(project: string | null, options: UseReportJobOption
       regenerateMutation.mutateAsync({ reportId, sectionId, opts }),
     [regenerateMutation],
   )
+  const proposeMapping = useCallback(
+    (reportId: string, opts?: ProposeMappingOptions) => proposeMutation.mutateAsync({ reportId, opts }),
+    [proposeMutation],
+  )
 
   return {
     record,
     isRunning,
     progressPct: progressPercent(record),
     aborting: aborting && isRunning,
-    isStarting: startMutation.isPending || regenerateMutation.isPending,
+    isStarting: startMutation.isPending || regenerateMutation.isPending || proposeMutation.isPending,
     start,
     abort,
     regenerate,
+    proposeMapping,
     statusError: status.error,
   }
 }

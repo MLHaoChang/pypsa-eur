@@ -66,7 +66,9 @@ export function ReportJobStrip({
   const { done, total, current } = record.progress ?? { done: 0, total: 0, current: null }
   const what = record.mode === 'regenerate'
     ? `Rewriting "${sectionTitle(record.section, titles)}"`
-    : 'Writing the report'
+    : record.mode === 'mapping'
+      ? 'Proposing the mapping plan'
+      : 'Writing the report'
   const writer = [record.profile_id, record.model].filter(Boolean).join(' · ')
 
   return (
@@ -127,7 +129,11 @@ export function ReportJobStrip({
           <CheckCircle2 size={13} className={`shrink-0 mt-0.5 ${record.status === 'done' ? 'text-success' : 'text-warn'}`} aria-hidden="true" />
           <span>
             <span className="font-semibold">
-              {record.status === 'aborted' ? 'Stopped' : record.mode === 'regenerate' ? 'Section rewritten' : 'Report written'}
+              {record.status === 'aborted'
+                ? 'Stopped'
+                : record.mode === 'regenerate'
+                  ? 'Section rewritten'
+                  : record.mode === 'mapping' ? 'Mapping plan proposed' : 'Report written'}
             </span>
             {record.version != null && <span className="font-mono"> v{record.version}</span>}
             {record.status === 'aborted' && <span className="text-muted"> (partial — the sections not reached are stated as not established)</span>}

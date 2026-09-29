@@ -14,10 +14,20 @@
 // `services/reports/docx_writer.py`, preceded by the executive summary
 // (`services/reports/assemble.py::EXECUTIVE_SUMMARY_ID`). Nothing checked
 // means "all sections" (the backend's default set).
+//
+// WP11 — template: with a `project`, the dialog lists the Project's
+// `report_template` uploads (plain `listUploads`, no query client needed
+// here) after "Built-in default" and sends the choice as `template_file_id`.
+// The template's detected language is known only once a report has been
+// bound to it (`GET …/{id}/template`), so the caller passes what it knows
+// as `templateLanguages` (file_id → language) and the dialog pre-fills the
+// language field from it when a template is picked; the field stays
+// editable, and switching back to the default keeps what is typed.
 import { useEffect, useId, useState, type FormEvent } from 'react'
 import { Sparkles } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { reportJobErrorMessage, type GenerateReportOptions } from '../../api/reports'
+import { listUploads, type UploadMeta } from '../../api/uploads'
 import { Dialog } from '../../components/Dialog'
 import { Btn } from '../../components/PageKit'
 
@@ -42,8 +52,13 @@ export const DEFAULT_SECTION_CHOICES: readonly SectionChoice[] = [
 
 const INPUT = 'w-full px-2 py-1 text-[12px] border border-border rounded bg-bg text-text'
 
+function formatTemplateOption(t: UploadMeta): string {
+  const d = new Date(t.uploaded_at * 1000)
+  return Number.isNaN(d.getTime()) ? t.filename : `${t.filename} · ${d.toLocaleDateString()}`
+}
+
 export function GenerateReportDialog({
-  open, onClose, onGenerate, sectionChoices, defaultTitle,
+  open, onClose, onGenerate, sectionChoices, defaultTitle, project, templateLanguages,
 }: {
   open: boolean
   onClose: () => void
@@ -51,12 +66,18 @@ export function GenerateReportDialog({
   onGenerate: (opts: GenerateReportOptions) => Promise<unknown>
   sectionChoices?: readonly SectionChoice[] | null
   defaultTitle?: string
+  /** WP11: the Project whose `report_template` uploads the template select lists. */
+  project?: string | null
+  /** WP11: template `file_id` → detected language, when the caller knows it. */
+  templateLanguages?: Record<string, string> | null
 }) {
   const ids = useId()
   const [title, setTitle] = useState(defaultTitle ?? '')
   const [language, setLanguage] = useState('en')
   const [picked, setPicked] = useState<string[]>([])
   const [instruction, setInstruction] = useState('')
+  const [templateId, setTemplateId] = useState('')
+  const [templates, setTemplates] = useState<UploadMeta[]>([])
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -67,9 +88,27 @@ export function GenerateReportDialog({
     setLanguage('en')
     setPicked([])
     setInstruction('')
+    setTemplateId('')
     setError(null)
     setPending(false)
   }, [open, defaultTitle])
+
+  // The Project's templates, read on every open; a failed read leaves the
+  // built-in default as the only choice (the dialog still generates).
+  useEffect(() => {
+    if (!open || !project) { setTemplates([]); return }
+    let cancelled = false
+    listUploads(project, 'report_template')
+      .then(list => { if (!cancelled) setTemplates(list) })
+      .catch(() => { if (!cancelled) setTemplates([]) })
+    return () => { cancelled = true }
+  }, [open, project])
+
+  function pickTemplate(id: string) {
+    setTemplateId(id)
+    const known = id ? templateLanguages?.[id] : undefined
+    if (known) setLanguage(known)
+  }
 
   const choices = sectionChoices && sectionChoices.length > 0 ? sectionChoices : DEFAULT_SECTION_CHOICES
 
@@ -90,6 +129,7 @@ export function GenerateReportDialog({
     const ordered = choices.map(c => c.id).filter(id => picked.includes(id))
     if (ordered.length > 0) opts.sections = ordered
     if (instruction.trim()) opts.instruction = instruction.trim()
+    if (templateId) opts.template_file_id = templateId
     setPending(true)
     setError(null)
     try {
@@ -134,6 +174,25 @@ export function GenerateReportDialog({
             disabled={pending}
           />
         </div>
+
+        {project && (
+          <div className="flex flex-col gap-1">
+            <label htmlFor={`${ids}-template`} className="text-[10.5px] font-medium text-muted">Template</label>
+            <select
+              id={`${ids}-template`}
+              className={INPUT}
+              value={templateId}
+              onChange={e => pickTemplate(e.target.value)}
+              disabled={pending}
+              title="The Word file the report renders into; upload templates from an open report's viewer"
+            >
+              <option value="">Built-in default</option>
+              {templates.map(t => (
+                <option key={t.file_id} value={t.file_id}>{formatTemplateOption(t)}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         <div className="flex flex-col gap-1">
           <label htmlFor={`${ids}-language`} className="text-[10.5px] font-medium text-muted">Language</label>

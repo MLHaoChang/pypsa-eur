@@ -121,7 +121,8 @@ export interface DeleteReportResponse { deleted: boolean; report_id: string }
 // ── the generation job (WP3 / WP7b) ─────────────────────────────────────────
 
 export type ReportJobStatus = 'running' | 'done' | 'failed' | 'aborted'
-export type ReportJobMode = 'generate' | 'regenerate'
+/** `mapping` (WP11): the model proposes a mapping plan for an untagged template. */
+export type ReportJobMode = 'generate' | 'regenerate' | 'mapping'
 
 /** One section the model could not write: stated in the document as
  *  `not_established` with the reason, and listed on the job record. */
@@ -159,6 +160,8 @@ export interface GenerateReportOptions {
   /** Section ids to write; omitted = the backend's default set. */
   sections?: string[]
   instruction?: string
+  /** A `report_template` upload the new report is bound to (WP11). */
+  template_file_id?: string
 }
 
 export interface RegenerateSectionOptions {
@@ -169,6 +172,94 @@ export interface RegenerateSectionOptions {
 export interface GenerateReportResponse { status: 'running'; report_id: string }
 export interface AbortGenerateResponse { status: ReportJobStatus; aborting: boolean }
 export interface RegenerateSectionResponse { status: 'running'; report_id: string; version: number }
+
+// ── templates (WP11, Increment 2) ───────────────────────────────────────────
+// Mirrors `services/reports/docx_reader.py::TemplateOutline` and
+// `services/reports/template_untagged.py::MappingPlan` one to one (the plan's
+// pinned interfaces).
+
+export type TemplateMode = 'tagged' | 'untagged'
+
+export interface TemplateHeading {
+  index: number
+  level: number
+  text: string
+  style: string
+  is_body_start: boolean
+}
+
+export interface TemplateTag {
+  kind: 'var' | 'for' | 'endfor' | 'if' | 'endif' | 'other'
+  text: string
+  /** `-1` for a tag in the header or footer. */
+  paragraph_index: number
+}
+
+export interface TemplatePlaceholder { text: string; paragraph_index: number }
+
+export interface TemplateTable {
+  index: number
+  n_rows: number
+  n_cols: number
+  header: string[]
+  style: string | null
+}
+
+export interface TemplateOutline {
+  mode: TemplateMode
+  language: string | null
+  headings: TemplateHeading[]
+  tags: TemplateTag[]
+  placeholders: TemplatePlaceholder[]
+  tables: TemplateTable[]
+  header_text: string
+  footer_text: string
+  body_start_index: number | null
+  n_paragraphs: number
+  has_toc: boolean
+  /** "text box", "SmartArt", "content control", … — kept where the writer does not touch them. */
+  unsupported: string[]
+}
+
+export type MappingAction = 'keep' | 'rename' | 'drop'
+
+export interface MappingEntry {
+  heading_index: number
+  action: MappingAction
+  new_text: string | null
+  section_ids: string[]
+}
+
+export interface MappingInsert {
+  after_heading_index: number
+  section_id: string
+  heading: string
+}
+
+export interface MappingPlan {
+  entries: MappingEntry[]
+  inserted: MappingInsert[]
+  /** `"[Client name]"` → value. */
+  placeholders: Record<string, string>
+  unmapped_sections: string[]
+  notes: string[]
+}
+
+/** `POST …/{id}/template` — the binding and the outline the reader produced. */
+export interface ReportTemplateBinding {
+  template_file_id: string | null
+  mode: TemplateMode | null
+  language: string | null
+  outline: TemplateOutline | null
+}
+
+/** `GET …/{id}/template` — the binding plus the stored plan (all null when unbound). */
+export interface ReportTemplateState extends ReportTemplateBinding {
+  plan: MappingPlan | null
+}
+
+export interface ProposeMappingOptions { language?: string }
+export interface ProposeMappingResponse { status: 'running'; report_id: string }
 
 // ── errors ──────────────────────────────────────────────────────────────────
 
@@ -193,6 +284,14 @@ export type ReportErrorKind =
   | 'no_evidence'
   | 'missing_api_key'
   | 'sdk_not_installed'
+  // the template routes (WP11)
+  | 'upload_not_found'
+  | 'template_not_a_template'
+  | 'template_unreadable'
+  | 'no_template'
+  | 'template_not_untagged'
+  | 'invalid_mapping_plan'
+  | 'tagged_render_error'
 
 export interface ReportErrorDetail {
   error_kind: ReportErrorKind | string
@@ -242,6 +341,35 @@ export function reportJobErrorMessage(e: unknown, fallback = 'Request failed'): 
         return e.detail.message || 'The Project is being edited by another user.'
       default:
         return e.detail.message || fallback
+    }
+  }
+  return reportErrorMessage(e, fallback)
+}
+
+/**
+ * The toast copy for a refused template bind / plan / templated export
+ * (WP11). The plan and job kinds fall through to `reportJobErrorMessage`,
+ * so an in-flight job or a missing LLM profile reads the same everywhere.
+ */
+export function templateErrorMessage(e: unknown, fallback = 'Request failed'): string {
+  if (isReportError(e)) {
+    switch (e.detail.error_kind) {
+      case 'upload_not_found':
+        return `No such upload in this Project — refresh the template list. (${e.detail.message})`
+      case 'template_not_a_template':
+        return `That upload is not a Word template (.docx). (${e.detail.message})`
+      case 'template_unreadable':
+        return `The template could not be read as a Word file. (${e.detail.message})`
+      case 'no_template':
+        return 'Bind a template first — a mapping plan needs an untagged template.'
+      case 'template_not_untagged':
+        return 'A tagged template fills itself from its {{ tags }}; a mapping plan is only for an untagged one.'
+      case 'invalid_mapping_plan':
+        return `The plan was refused: ${e.detail.message}`
+      case 'tagged_render_error':
+        return `The template's tags could not be rendered: ${e.detail.message}`
+      default:
+        return reportJobErrorMessage(e, fallback)
     }
   }
   return reportErrorMessage(e, fallback)
@@ -389,6 +517,7 @@ export async function generateReport(
   if (opts.title != null && opts.title.trim()) body.title = opts.title.trim()
   if (opts.sections && opts.sections.length > 0) body.sections = opts.sections
   if (opts.instruction != null && opts.instruction.trim()) body.instruction = opts.instruction.trim()
+  if (opts.template_file_id) body.template_file_id = opts.template_file_id
   return _json<GenerateReportResponse>(await _postJson(`${base(projectName)}/generate`, body))
 }
 
@@ -426,4 +555,70 @@ export async function regenerateSection(
     `${base(projectName)}/${encodeURIComponent(reportId)}/sections/${encodeURIComponent(sectionId)}/regenerate`,
     body,
   ))
+}
+
+// ── templates (WP11) ────────────────────────────────────────────────────────
+
+function templateUrl(projectName: string, reportId: string): string {
+  return `${base(projectName)}/${encodeURIComponent(reportId)}/template`
+}
+
+/**
+ * `POST /{name}/reports/{id}/template` with `{file_id}` — bind a
+ * `report_template` upload to the report (`null` unbinds → the built-in
+ * writer). The backend reads the outline and detects the language.
+ * Refusals: `report_not_found` / `upload_not_found` (404),
+ * `template_not_a_template` / `template_unreadable` (400), `project_locked` (409).
+ */
+export async function setReportTemplate(
+  projectName: string,
+  reportId: string,
+  fileId: string | null,
+): Promise<ReportTemplateBinding> {
+  return _json<ReportTemplateBinding>(await _postJson(templateUrl(projectName, reportId), { file_id: fileId }))
+}
+
+/** `GET /{name}/reports/{id}/template` — the binding, the outline and the stored plan. */
+export async function getReportTemplate(
+  projectName: string,
+  reportId: string,
+): Promise<ReportTemplateState> {
+  return _json<ReportTemplateState>(await fetch(templateUrl(projectName, reportId)))
+}
+
+/**
+ * `POST /{name}/reports/{id}/template/plan` — ask the model for a mapping
+ * plan (an untagged template only); runs as a report job with
+ * `mode: "mapping"`, so `getGenerateStatus` / `abortGenerate` apply.
+ * Refusals: `no_template` / `template_not_untagged` (400),
+ * `report_job_in_flight` (409), `missing_api_key` / `sdk_not_installed` (400).
+ */
+export async function proposeMappingPlan(
+  projectName: string,
+  reportId: string,
+  opts: ProposeMappingOptions = {},
+): Promise<ProposeMappingResponse> {
+  const body: ProposeMappingOptions = {}
+  if (opts.language != null && opts.language.trim()) body.language = opts.language.trim()
+  return _json<ProposeMappingResponse>(await _postJson(`${templateUrl(projectName, reportId)}/plan`, body))
+}
+
+/**
+ * `PUT /{name}/reports/{id}/template/plan` — store a user-edited plan; the
+ * backend validates it and answers with the stored plan. `strict: true`
+ * turns every validation note into an `invalid_mapping_plan` refusal.
+ */
+export async function putMappingPlan(
+  projectName: string,
+  reportId: string,
+  plan: MappingPlan,
+  opts: { strict?: boolean } = {},
+): Promise<MappingPlan> {
+  const body: MappingPlan & { strict?: boolean } = { ...plan }
+  if (opts.strict) body.strict = true
+  return _json<MappingPlan>(await fetch(`${templateUrl(projectName, reportId)}/plan`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...rawFetchHeaders('PUT') },
+    body: JSON.stringify(body),
+  }))
 }

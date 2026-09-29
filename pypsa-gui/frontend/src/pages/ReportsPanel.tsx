@@ -302,6 +302,7 @@ function ReportsList({ project }: { project: string }) {
         onClose={() => setGenOpen(false)}
         onGenerate={(opts) => job.start(opts)}
         sectionChoices={sectionChoices}
+        project={project}
       />
 
       <ConfirmDialog

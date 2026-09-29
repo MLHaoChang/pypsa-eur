@@ -15,13 +15,14 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import type { ReportJobRecord } from '../../api/reports'
-import { REPORT_JOB_KEY, useReportJob } from './useReportJob'
+import { REPORT_JOB_KEY, REPORT_TEMPLATE_KEY, useReportJob } from './useReportJob'
 
 const api = vi.hoisted(() => ({
   getGenerateStatus: vi.fn(),
   generateReport: vi.fn(),
   abortGenerate: vi.fn(),
   regenerateSection: vi.fn(),
+  proposeMappingPlan: vi.fn(),
 }))
 vi.mock('../../api/reports', async () => {
   const real = await vi.importActual<typeof import('../../api/reports')>('../../api/reports')
@@ -65,6 +66,7 @@ beforeEach(() => {
   api.generateReport.mockReset().mockResolvedValue({ status: 'running', report_id: ID })
   api.abortGenerate.mockReset().mockResolvedValue({ status: 'running', aborting: true })
   api.regenerateSection.mockReset().mockResolvedValue({ status: 'running', report_id: ID, version: 1 })
+  api.proposeMappingPlan.mockReset().mockResolvedValue({ status: 'running', report_id: ID })
 })
 
 afterEach(() => {
@@ -190,6 +192,29 @@ describe('useReportJob', () => {
     expect(api.regenerateSection).toHaveBeenCalledWith('Demo', ID, 'cost', { instruction: 'Shorter.' })
     await waitFor(() => expect(result.current.isRunning).toBe(true))
     expect(result.current.record?.section).toBe('cost')
+  })
+
+  it('proposeMapping posts to the plan route, polls the mapping job and invalidates the template state when it finishes (WP11)', async () => {
+    const client = makeClient()
+    const spy = vi.spyOn(client, 'invalidateQueries')
+    api.getGenerateStatus
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(record({ mode: 'mapping', progress: { done: 0, total: 1, current: null } }))
+      .mockResolvedValue(record({ mode: 'mapping', status: 'done', progress: { done: 1, total: 1, current: null } }))
+    const onFinished = vi.fn()
+    const { result } = renderHook(() => useReportJob('Demo', { onFinished }), { wrapper: wrapper(client) })
+    await waitFor(() => expect(api.getGenerateStatus).toHaveBeenCalledTimes(1))
+    let out: unknown
+    await act(async () => { out = await result.current.proposeMapping(ID, { language: 'de' }) })
+    expect(out).toEqual({ status: 'running', report_id: ID })
+    expect(api.proposeMappingPlan).toHaveBeenCalledWith('Demo', ID, { language: 'de' })
+    await waitFor(() => expect(result.current.isRunning).toBe(true))
+    expect(result.current.record?.mode).toBe('mapping')
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_500) })
+    await waitFor(() => expect(result.current.record?.status).toBe('done'))
+    expect(spy).toHaveBeenCalledWith({ queryKey: REPORT_TEMPLATE_KEY('Demo', ID) })
+    expect(onFinished).toHaveBeenCalledTimes(1)
+    expect(onFinished.mock.calls[0][0].mode).toBe('mapping')
   })
 
   it('start rejects with the backend error and leaves the record alone', async () => {

@@ -10,7 +10,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import type { ReportDocument, ReportJobRecord, ReportMeta } from '../../api/reports'
+import type {
+  ReportDocument, ReportJobRecord, ReportMeta, ReportTemplateState, TemplateOutline,
+} from '../../api/reports'
+import type { UploadMeta } from '../../api/uploads'
 import { ReportViewer } from './ReportViewer'
 
 const api = vi.hoisted(() => ({
@@ -19,12 +22,26 @@ const api = vi.hoisted(() => ({
   getGenerateStatus: vi.fn(),
   regenerateSection: vi.fn(),
   abortGenerate: vi.fn(),
+  // WP11
+  getReportTemplate: vi.fn(),
+  setReportTemplate: vi.fn(),
+  putMappingPlan: vi.fn(),
+  proposeMappingPlan: vi.fn(),
 }))
 
 vi.mock('../../api/reports', async () => {
   const real = await vi.importActual<typeof import('../../api/reports')>('../../api/reports')
   return { ...real, ...api }
 })
+
+const uploads = vi.hoisted(() => ({ listUploads: vi.fn(), uploadFile: vi.fn() }))
+vi.mock('../../api/uploads', async () => {
+  const real = await vi.importActual<typeof import('../../api/uploads')>('../../api/uploads')
+  return { ...real, ...uploads }
+})
+
+const docx = vi.hoisted(() => ({ renderAsync: vi.fn() }))
+vi.mock('docx-preview', () => ({ renderAsync: docx.renderAsync }))
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 vi.mock('react-hot-toast', () => ({ default: toast }))
@@ -145,12 +162,44 @@ function job(over: Partial<ReportJobRecord> = {}): ReportJobRecord {
   }
 }
 
+const UNBOUND: ReportTemplateState = { template_file_id: null, mode: null, language: null, outline: null, plan: null }
+
+const OUTLINE: TemplateOutline = {
+  mode: 'untagged',
+  language: 'de',
+  headings: [
+    { index: 0, level: 0, text: 'Bericht', style: 'Title', is_body_start: false },
+    { index: 5, level: 1, text: 'Zusammenfassung', style: 'Heading 1', is_body_start: true },
+  ],
+  tags: [],
+  placeholders: [],
+  tables: [],
+  header_text: '',
+  footer_text: '',
+  body_start_index: 5,
+  n_paragraphs: 16,
+  has_toc: true,
+  unsupported: [],
+}
+
+const TEMPLATE_UPLOAD: UploadMeta = {
+  schema_version: 1, file_id: 'f1', filename: 'corporate.docx', mime: 'application/x', size: 1, sha256: 'a',
+  kind: 'report_template', uploaded_at: 1_790_000_000, blob_ready: true, version: 1,
+}
+
 beforeEach(() => {
   api.getReport.mockReset().mockResolvedValue(FIXTURE)
   api.exportReport.mockReset()
   api.getGenerateStatus.mockReset().mockResolvedValue(null)
   api.regenerateSection.mockReset().mockResolvedValue({ status: 'running', report_id: REPORT_ID, version: 1 })
   api.abortGenerate.mockReset().mockResolvedValue({ status: 'running', aborting: true })
+  api.getReportTemplate.mockReset().mockResolvedValue(UNBOUND)
+  api.setReportTemplate.mockReset()
+  api.putMappingPlan.mockReset()
+  api.proposeMappingPlan.mockReset()
+  uploads.listUploads.mockReset().mockResolvedValue([TEMPLATE_UPLOAD])
+  uploads.uploadFile.mockReset()
+  docx.renderAsync.mockReset().mockResolvedValue(undefined)
   toast.success.mockReset()
   toast.error.mockReset()
 })
@@ -362,5 +411,112 @@ describe('ReportViewer — regenerate and evidence status (WP7b)', () => {
     renderViewer(META)
     await screen.findAllByTestId('report-section')
     expect(screen.queryByTestId('evidence-changed')).toBeNull()
+  })
+})
+
+describe('ReportViewer — templates and the export preview (WP11)', () => {
+  it('shows the template picker in the header and names the built-in default on the export button when unbound', async () => {
+    renderViewer()
+    await screen.findAllByTestId('report-section')
+    expect(await screen.findByLabelText('Template')).toBeTruthy()
+    await waitFor(() => expect(api.getReportTemplate).toHaveBeenCalledWith('Demo', REPORT_ID))
+    const button = screen.getByTestId('report-export')
+    await waitFor(() => expect(button.textContent).toMatch(/built-in default/i))
+    expect(screen.queryByTestId('template-outline')).toBeNull()
+    expect(screen.queryByTestId('mapping-table')).toBeNull()
+  })
+
+  it('names the bound template on the export button, shows its outline, and the plan editor for an untagged one', async () => {
+    api.getReportTemplate.mockResolvedValue({
+      template_file_id: 'f1', mode: 'untagged', language: 'de', outline: OUTLINE, plan: null,
+    })
+    renderViewer()
+    await screen.findAllByTestId('report-section')
+    await waitFor(() => expect(screen.getByTestId('report-export').textContent).toContain('corporate.docx'))
+    expect((await screen.findByTestId('template-outline')).textContent).toMatch(/16 paragraphs/)
+    const table = await screen.findByTestId('mapping-table')
+    expect(within(table).getAllByTestId(/^mapping-row-/)).toHaveLength(2)
+    // the editor's multi-select offers the open document's sections
+    const multi = within(table).getByLabelText('Sections for heading 5') as HTMLSelectElement
+    expect(Array.from(multi.options).map(o => o.value)).toEqual(['summary', 'frontier', 'gates'])
+  })
+
+  it('shows no plan editor for a tagged template', async () => {
+    api.getReportTemplate.mockResolvedValue({
+      template_file_id: 'f1', mode: 'tagged', language: 'en',
+      outline: { ...OUTLINE, mode: 'tagged', language: 'en' }, plan: null,
+    })
+    renderViewer()
+    await screen.findByTestId('template-outline')
+    expect(screen.queryByTestId('mapping-table')).toBeNull()
+  })
+
+  it('after an export, keeps the upload and offers Preview (docx-preview) and Download', async () => {
+    api.exportReport.mockResolvedValue({
+      file_id: 'f7', filename: 'report_v1.docx', kind: 'agent_export', mime: 'application/x',
+    })
+    const clicked: HTMLAnchorElement[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push(this)
+    })
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(new Response(new Uint8Array([1]), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+    renderViewer()
+    await screen.findAllByTestId('report-section')
+    expect(screen.queryByTestId('export-preview-panel')).toBeNull()
+    await user.click(screen.getByTestId('report-export'))
+    const panel = await screen.findByTestId('export-preview-panel')
+    expect(panel.textContent).toMatch(/preview of the exported file/i)
+    expect(panel.textContent).toContain('report_v1.docx')
+    expect(clicked).toHaveLength(1) // the download anchor, as before
+    // collapsed until asked: no render yet
+    expect(docx.renderAsync).not.toHaveBeenCalled()
+    await user.click(within(panel).getByTestId('export-preview-toggle'))
+    await waitFor(() => expect(docx.renderAsync).toHaveBeenCalledTimes(1))
+    expect(fetchMock).toHaveBeenCalledWith('/api/projects/Demo/uploads/f7/blob')
+    expect(within(panel).getByTestId('docx-preview-container')).toBeTruthy()
+    await user.click(within(panel).getByTestId('export-download'))
+    expect(clicked).toHaveLength(2)
+    expect(clicked[1].getAttribute('href')).toBe('/api/projects/Demo/uploads/f7/blob')
+    vi.unstubAllGlobals()
+  })
+
+  it('toasts the template copy when a templated export is refused (tagged_render_error)', async () => {
+    const { ReportsError } = await vi.importActual<typeof import('../../api/reports')>('../../api/reports')
+    api.exportReport.mockRejectedValueOnce(new ReportsError(
+      { error_kind: 'tagged_render_error', message: "unknown name 'fields.nope'" }, 400,
+    ))
+    const user = userEvent.setup()
+    renderViewer()
+    await screen.findAllByTestId('report-section')
+    await user.click(screen.getByTestId('report-export'))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
+    expect(String(toast.error.mock.calls[0][0])).toMatch(/tags could not be rendered.*fields\.nope/)
+    expect(screen.queryByTestId('export-preview-panel')).toBeNull()
+  })
+
+  it('a finished mapping job is a toast, not a version switch', async () => {
+    api.getReportTemplate.mockResolvedValue({
+      template_file_id: 'f1', mode: 'untagged', language: 'de', outline: OUTLINE, plan: null,
+    })
+    api.proposeMappingPlan.mockResolvedValue({ status: 'running', report_id: REPORT_ID })
+    api.getGenerateStatus
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(job({ mode: 'mapping', section: null, progress: { done: 0, total: 1, current: null } }))
+      .mockResolvedValue(job({ mode: 'mapping', section: null, status: 'done', progress: { done: 1, total: 1, current: null } }))
+    const user = userEvent.setup()
+    renderViewer()
+    await screen.findByTestId('mapping-table')
+    await user.click(screen.getByTestId('mapping-propose'))
+    await waitFor(() => expect(api.proposeMappingPlan).toHaveBeenCalledWith('Demo', REPORT_ID, { language: 'de' }))
+    // exactly one strip (the editor's), saying what runs
+    const strips = await screen.findAllByTestId('report-job-strip')
+    expect(strips).toHaveLength(1)
+    expect(strips[0].textContent).toMatch(/proposing the mapping plan/i)
+    await waitFor(() => expect(toast.success).toHaveBeenCalled(), { timeout: 4000 })
+    expect(String(toast.success.mock.calls[0][0])).toMatch(/mapping plan proposed/i)
+    await waitFor(() => expect(api.getReportTemplate).toHaveBeenCalledTimes(2))
+    expect(api.getReport).toHaveBeenLastCalledWith('Demo', REPORT_ID, undefined)
   })
 })

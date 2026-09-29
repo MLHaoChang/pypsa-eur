@@ -17,16 +17,23 @@ import {
   generateReport,
   getGenerateStatus,
   getReport,
+  getReportTemplate,
   getReportVersion,
   isReportError,
   listReports,
+  proposeMappingPlan,
+  putMappingPlan,
   regenerateSection,
   reportErrorMessage,
   reportFigureUrl,
   reportJobErrorMessage,
   ReportsError,
+  setReportTemplate,
+  templateErrorMessage,
+  type MappingPlan,
   type ReportJobRecord,
   type ReportMeta,
+  type TemplateOutline,
 } from './reports'
 
 const META: ReportMeta = {
@@ -302,5 +309,123 @@ describe('reports api — generation job (WP7b)', () => {
     // Unknown kinds fall back to the backend message; a plain Error keeps its text.
     expect(reportJobErrorMessage(new ReportsError({ error_kind: 'weird', message: 'odd' }, 500))).toBe('odd')
     expect(reportJobErrorMessage(new Error('network down'))).toBe('network down')
+  })
+})
+
+// ── WP11: templates (backend `routers/reports.py`, Increment 2) ─────────────
+
+const OUTLINE: TemplateOutline = {
+  mode: 'untagged',
+  language: 'de',
+  headings: [
+    { index: 0, level: 0, text: 'Bericht', style: 'Title', is_body_start: false },
+    { index: 5, level: 1, text: 'Zusammenfassung', style: 'Heading 1', is_body_start: true },
+  ],
+  tags: [],
+  placeholders: [{ text: '[Client name]', paragraph_index: 2 }],
+  tables: [{ index: 0, n_rows: 3, n_cols: 2, header: ['Point', 'Cost'], style: 'Table Grid' }],
+  header_text: 'ACME',
+  footer_text: 'page',
+  body_start_index: 5,
+  n_paragraphs: 16,
+  has_toc: true,
+  unsupported: ['text box'],
+}
+
+const PLAN: MappingPlan = {
+  entries: [{ heading_index: 5, action: 'rename', new_text: 'Summary', section_ids: ['summary'] }],
+  inserted: [{ after_heading_index: 5, section_id: 'frontier', heading: 'Frontier' }],
+  placeholders: { '[Client name]': 'ACME' },
+  unmapped_sections: [],
+  notes: ['renamed 1'],
+}
+
+describe('reports api — templates (WP11)', () => {
+  it('binds a template with POST …/{id}/template {file_id} + CSRF and returns the outline', async () => {
+    const resp = { template_file_id: 'f1', mode: 'untagged', language: 'de', outline: OUTLINE }
+    fetchMock.mockResolvedValueOnce(jsonResponse(resp))
+    const out = await setReportTemplate('My Project', META.report_id, 'f1')
+    expect(out).toEqual(resp)
+    const { url, init } = lastCall()
+    expect(url).toBe(`/api/projects/My%20Project/reports/${META.report_id}/template`)
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toEqual({ file_id: 'f1' })
+    expect((init?.headers as Record<string, string>)[CSRF_HEADER]).toBe('tok')
+    expect((init?.headers as Record<string, string>)['Content-Type']).toBe('application/json')
+  })
+
+  it('unbinds with {file_id: null}', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ template_file_id: null, mode: null, language: null, outline: null }))
+    const out = await setReportTemplate('Demo', META.report_id, null)
+    expect(out.template_file_id).toBeNull()
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ file_id: null })
+  })
+
+  it('reads the binding + plan from GET …/{id}/template', async () => {
+    const resp = { template_file_id: 'f1', mode: 'untagged', language: 'de', outline: OUTLINE, plan: PLAN }
+    fetchMock.mockResolvedValueOnce(jsonResponse(resp))
+    const out = await getReportTemplate('Demo', META.report_id)
+    expect(out).toEqual(resp)
+    const { url, init } = lastCall()
+    expect(url).toBe(`/api/projects/Demo/reports/${META.report_id}/template`)
+    expect(init?.method ?? 'GET').toBe('GET')
+  })
+
+  it('proposes a plan with POST …/template/plan (language optional) + CSRF', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ status: 'running', report_id: META.report_id }))
+    const out = await proposeMappingPlan('Demo', META.report_id)
+    expect(out).toEqual({ status: 'running', report_id: META.report_id })
+    let { url, init } = lastCall()
+    expect(url).toBe(`/api/projects/Demo/reports/${META.report_id}/template/plan`)
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toEqual({})
+    expect((init?.headers as Record<string, string>)[CSRF_HEADER]).toBe('tok')
+    await proposeMappingPlan('Demo', META.report_id, { language: ' de ' })
+    ;({ url, init } = lastCall())
+    expect(JSON.parse(String(init?.body))).toEqual({ language: 'de' })
+  })
+
+  it('saves a plan with PUT …/template/plan (the plan as the body, strict only when asked)', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(PLAN))
+    const out = await putMappingPlan('Demo', META.report_id, PLAN)
+    expect(out).toEqual(PLAN)
+    let { url, init } = lastCall()
+    expect(url).toBe(`/api/projects/Demo/reports/${META.report_id}/template/plan`)
+    expect(init?.method).toBe('PUT')
+    expect(JSON.parse(String(init?.body))).toEqual(PLAN)
+    expect((init?.headers as Record<string, string>)[CSRF_HEADER]).toBe('tok')
+    await putMappingPlan('Demo', META.report_id, PLAN, { strict: true })
+    ;({ url, init } = lastCall())
+    expect(JSON.parse(String(init?.body))).toEqual({ ...PLAN, strict: true })
+  })
+
+  it('generate carries template_file_id when given', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ status: 'running', report_id: META.report_id }))
+    await generateReport('Demo', { language: 'de', template_file_id: 'f1' })
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ language: 'de', template_file_id: 'f1' })
+  })
+
+  it('maps the template error kinds with their toast copy', async () => {
+    const cases: Array<[string, number, RegExp]> = [
+      ['upload_not_found', 404, /no such upload/i],
+      ['template_not_a_template', 400, /not a word template/i],
+      ['template_unreadable', 400, /could not be read/i],
+      ['project_locked', 409, /being edited by another user/i],
+      ['no_template', 400, /bind a template first/i],
+      ['template_not_untagged', 400, /tagged template/i],
+      ['invalid_mapping_plan', 400, /heading 99 is out of range/i],
+      ['tagged_render_error', 400, /tags could not be rendered/i],
+    ]
+    for (const [kind, status, copy] of cases) {
+      fetchMock.mockResolvedValueOnce(jsonResponse(
+        { detail: { error_kind: kind, message: "backend: 'Demo' is being edited by another user; heading 99 is out of range" } }, status,
+      ))
+      const err = await setReportTemplate('Demo', META.report_id, 'f1').catch(e => e)
+      expect(err).toBeInstanceOf(ReportsError)
+      expect(err.status).toBe(status)
+      expect(isReportError(err, kind as never)).toBe(true)
+      expect(templateErrorMessage(err)).toMatch(copy)
+    }
+    expect(templateErrorMessage(new Error('network down'))).toBe('network down')
   })
 })
