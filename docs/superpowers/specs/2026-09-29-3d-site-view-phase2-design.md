@@ -27,8 +27,8 @@ The decisions below are this design's. The owner has not been asked about them; 
 | E4 | Geometry vocabulary | Parts gain a **shape**: box (today), **cylinder** (tanks, towers, stacks, silos), and **hero** (a model reference with a box fallback). Templates stay parametric. | Tanks and towers as boxes read wrong; a cylinder is one more three.js primitive. |
 | E5 | Draw performance | **One merged geometry per object** (all its box/cylinder parts, vertex-coloured), not one mesh per part. Selection, hover and the outside-the-boundary tint stay per object. The per-object part cap (120) stays for the packer's summary, not for the renderer. | A campus is ~40 objects × up to 120 parts = several thousand draw calls today. Merging keeps selection semantics (one object = one mesh) without instancing bookkeeping. |
 | E6 | Sizes: installed or optimised? | **Installed (`p_nom`, `e_nom`, `s_nom`) by default; a "Sized: as built / optimised" switch** in the site overlay when a solve is fresh, which sizes extendable assets from `*_nom_opt`. **Owner check.** | "Investment decision" use wants to see what the optimiser built; the default must not change geometry behind the user's back after every solve. |
-| E7 | Hero models: which and how many | **Up to 8**, CC0 preferred, CC-BY only with the credit shown in the attribution line; bundled with the app (no CDN), compressed, **≤ 3 MB gzipped in total**. Sources and licences in §5. A type with no acceptable model stays parametric. | §8a Q9; offline desktop build. |
-| E8 | Level of detail | **Two levels**: hero model near the camera, the parametric form beyond a distance (drei `Detailed`), and the parametric form always when the hero fails to load. One hero instance per *unit* (a container, a turbine), the rest of a row's units reuse it (instanced). | Keeps the 1000-container BESS drawable; a failed download never leaves a hole. |
+| E7 | Hero models: which and how many | **Five hero models, all CC0, from one pack** (Kenney *City Kit Industrial 2.0*): wind turbine, shipping container, PV table group, bullet tank, industrial hall. Bundled with the app as static files (no CDN), **no Draco/meshopt** (so no decoder to ship or fetch), ~83 kB gzipped in total. The transformer, switchgear and dry coolers stay parametric. Details §5. **Owner check** (low-poly style). | §8a Q9 asked for 5–8 CC0/CC-BY models; the only CC-BY transformer candidates cannot be downloaded without a Sketchfab account, and nothing acceptable exists for switchgear. One pack = one consistent style and no attribution burden. |
+| E8 | Level of detail | **No distance LOD.** A hero is drawn **instanced**, one instance per unit (container, turbine, table, tank), one draw call per hero type per object; the packer's existing cap (≤ 120 units drawn per object, the rest summarised) bounds the instance count. The parametric form is drawn while the model loads and **whenever it fails to load**. | Measured sizes make LOD unnecessary: the worst case (120 containers × 402 triangles) is ~50k triangles in one call. The assessment's LOD line assumed heavier models. |
 | E9 | Which results animate | Per asset, at the selected snapshot: **storage state of charge** (fill level), **output as a share of capacity** (generators, electrolysers, heat pumps, CHP), **load** (halls, offtakes), **loading and flow direction** (lines, transformers, DC links). Bus prices, voltages, curtailment and unit commitment are **not** drawn in Phase 2 (they stay in the Results tabs). | The four quantities a customer reads off a moving site; everything else is a table. |
 | E10 | How each result is shown | Fill level = a translucent level plane inside tanks and a bar on container rows; output = emissive intensity plus **wind rotors turning** at a speed ∝ output; loading = the existing red/amber/green `loadingColor` bands **plus** the percentage in the label (never colour only); direction = chevrons on feeders and transformers pointing downstream. | Reuses the canvases' conventions (`loadingColor`, SoC bands) so the 3D view reads like the other two. |
 | E11 | Timeline | **Reuse `SnapshotPicker` and `resultsSnapshotIdx`** (already shown over the 3D view). No second timeline. Values ease between snapshots over ~300 ms; **`prefers-reduced-motion` turns easing and rotor spin off**. | One time control for the whole app. |
@@ -116,7 +116,32 @@ Phase 1's layout tests stay green unchanged in meaning (they may move files): ex
 
 ## 5. Hero models
 
-_To be completed from the model research (sources, licences, sizes, tooling)._
+### 5.1 The set
+
+Source: Kenney, *City Kit (Industrial) 2.0*, https://kenney.nl/assets/city-kit-industrial. Licence (verbatim, `License.txt`): *"Creative Commons Zero, CC0 … You can use this content for personal, educational, and commercial purposes. Support by crediting 'Kenney' or 'www.kenney.nl' (this is not a requirement)."* The app credits it anyway, in the attribution line, as "Models: Kenney (CC0)".
+
+| Hero | File | Used by types | Triangles | Size (gz) | Notes |
+|---|---|---|---|---|---|
+| Wind turbine | `windmill.glb` | Wind | 456 | 12 kB | 2.31 units tall → scaled to the hub height; the `blades` node has its pivot at the hub (rotor animation, §6.4). |
+| Container | `shipping-container-a.glb` | BESS, engine genset, electrolyser, fuel cell, heat pump skids | 402 | 8.6 kB | ≈ 20 ft proportions; 40 ft = scaled on the long axis; tinted per type. |
+| PV table | `solar-panel-landscape-group.glb` | PV (ground, rooftop) | 976 | 17 kB | Tilted tables; one instance per table. |
+| Bullet tank | `detail-tank.glb` | H₂ storage | 310 | 8 kB | Horizontal on saddles; scaled to the tank length. |
+| Hall | `building-s.glb` | Data hall, electrolyser BoP building | ~1–2k | 10–28 kB | Long low shed; scaled to the hall footprint. |
+
+Every file shares one 512² colour-map texture (12 kB). Measured by download and `gltf-transform inspect`; total ≈ 83 kB gzipped.
+
+### 5.2 Processing and loading
+
+- Files are processed once, offline, with `@gltf-transform/cli` and committed under `frontend/public/site3d/models/`: `optimize --compress false --texture-compress webp --join-named false --flatten false` (**not** meshopt: it rewrites node transforms and made the blade node wobble; **not** Draco: it would need a decoder shipped or fetched). The shared texture is kept as PNG if WebP cannot be confirmed in the packaged webview.
+- A `models/README.md` records source URL, licence, version and the exact command, so a file can be regenerated.
+- Loading: `useGLTF(url, false, false)` — drei's default fetches the Draco decoder from a Google CDN, which the offline desktop app must never do. Loaded under `<Suspense>` per object with the parametric form as the fallback; an `ErrorBoundary` keeps the parametric form on failure.
+- Vite copies `public/` into `dist/`, which the desktop build already bundles; nothing in the JS chunks grows.
+
+### 5.3 Rejected
+
+- **CC-BY transformer models** (e.g. "Oil-immersed transformer (TMG)", iwan306, CC BY 4.0): downloadable only with a Sketchfab account, 73k faces before simplification, and they would carry an attribution and "modified" notice in the app. Revisit in Phase 3 if the parametric transformer reads poorly.
+- **Poly Pizza**: its catalogue could not be reached from the build environment (Cloudflare challenge), so no licence could be verified.
+- **Poly Haven air-conditioning unit** as a dry cooler: a split-AC unit, not a dry cooler, and 135 kB for one prop; the parametric fan box stays.
 
 ## 6. Results in 3D
 
