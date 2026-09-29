@@ -534,6 +534,10 @@ function ConfirmationCard() {
   const sessionId = useChatStore((s) => s.sessionId)
   const appendMessage = useChatStore((s) => s.appendMessage)
   const uiMode = useUIStore((s) => s.uiMode)
+  // P27b gate note 6: approving runs the write on the BACKEND's project — while
+  // this tab and the backend disagree, Approve waits (Deny writes nothing).
+  const projectMismatch = useUIStore((s) => s.projectMismatch)
+  const mismatchLine = projectMismatch ? mismatchSentence(projectMismatch) : null
   const [secondsLeft, setSecondsLeft] = useState<number>(0)
   const [typedConfirmation, setTypedConfirmation] = useState<string>('')
   const timerRef = useRef<number | null>(null)
@@ -597,6 +601,7 @@ function ConfirmationCard() {
 
   const onApprove = useCallback(async () => {
     if (!pending || !sessionId) return
+    if (useUIStore.getState().projectMismatch) return
     const token = pending.confirmation_token
     try {
       await postChatConfirm(sessionId, {
@@ -714,11 +719,15 @@ function ConfirmationCard() {
           />
         </div>
       )}
+      {mismatchLine && (
+        <div className="mb-2 text-[11px] text-warn" data-testid="chat-confirm-mismatch">{mismatchLine}</div>
+      )}
       <div className="flex items-center gap-2">
         <button
           className="px-2 py-1 text-xs rounded bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 disabled:opacity-40 disabled:cursor-not-allowed"
           onClick={onApprove}
-          disabled={!typedSatisfied}
+          disabled={!typedSatisfied || !!mismatchLine}
+          title={mismatchLine ?? undefined}
           data-testid="chat-confirm-approve"
         >
           Approve
