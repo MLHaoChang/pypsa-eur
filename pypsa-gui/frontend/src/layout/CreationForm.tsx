@@ -9,6 +9,9 @@ import { useCatalog } from '../hooks/useCatalog'
 import { creationScope, loadExtras, saveExtras } from '../utils/extrasStore'
 import { nk } from '../utils/queryKeys'
 import BusAutocomplete from '../components/BusAutocomplete'
+import { useSitesStore } from '../site3d/sitesStore'
+import { primaryBus } from '../site3d/siteModel'
+import { fromLocal } from '../site3d/geo'
 import toast from 'react-hot-toast'
 import type { Bus, Line, Link, Generator, Load, StorageUnit, Store, Transformer } from '../api/types'
 
@@ -379,6 +382,11 @@ const DEPENDENT_DEFAULTS: Record<string, (key: string, value: string) => Partial
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function CreationForm({ item }: { item: CreationRequest }) {
+  // A drop onto the 3D site view (D16): the site restricts the terminal
+  // bus to its members, prefills the primary one, seeds a dropped bus's
+  // coordinates from the ground point, and the created asset is placed
+  // there. Resolved once; a site deleted mid-form degrades to a plain drop.
+  const dropSite = useSitesStore(s => (item.dropSite ? s.siteById(useUIStore.getState().currentProject, item.dropSite.siteId) : null))
   const { setCreationItem, setSelectedComponent, setPendingNodePosition } = useUIStore()
   const currentProject = useUIStore(s => s.currentProject)
   const qc = useQueryClient()
@@ -428,6 +436,26 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
       const spec = fields.find(f => f.key === terminal) as BusFieldSpec | undefined
       if (spec && filteredBusNames(spec.busCarrierFilter).includes(item.dropBusName)) {
         init[terminal] = item.dropBusName
+      }
+    }
+    if (dropSite && item.dropSite) {
+      // Site drop: the primary bus first, else the first member that passes
+      // the field's carrier filter; nothing if none does (the mismatch line
+      // explains, as for a bus drop).
+      if (terminal) {
+        const spec = fields.find(f => f.key === terminal) as BusFieldSpec | undefined
+        const allowed = spec ? filteredBusNames(spec.busCarrierFilter) : []
+        const candidates = [primaryBus(dropSite), ...dropSite.buses].filter((b): b is string => !!b)
+        const pick = candidates.find(b => allowed.includes(b))
+        if (pick) init[terminal] = pick
+      }
+      // A dropped BUS is placed on the map where it landed: the ground point
+      // is a real geographic position (metres from the site origin), unlike
+      // a schematic drop's flow-space pixels (D28).
+      if (item.id === 'bus') {
+        const ll = fromLocal(dropSite.origin, item.dropSite.ground)
+        init.x = String(Math.round(ll.lng * 1e6) / 1e6)
+        init.y = String(Math.round(ll.lat * 1e6) / 1e6)
       }
     }
     return init
@@ -519,6 +547,19 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
       if (item.dropPosition && item.id === 'bus') {
         setPendingNodePosition({ name, position: item.dropPosition })
       }
+      // Site drop (D16): place the new asset where it landed. An orphan for
+      // the instant before the query refetches is harmless (D14). A new bus
+      // also joins the site.
+      if (item.dropSite) {
+        const { siteId, ground } = item.dropSite
+        const cls = COMPONENT_TYPE[item.id] ?? item.id
+        const store = useSitesStore.getState()
+        store.setPlacement(proj, siteId, `${cls}:${name}`, { x: ground.x, y: ground.y, heading: 0 })
+        if (item.id === 'bus') {
+          const site = store.siteById(proj, siteId)
+          if (site && !site.buses.includes(name)) store.setSiteBuses(proj, siteId, [...site.buses, name])
+        }
+      }
       setCreationItem(null)
       setSelectedComponent({ type: COMPONENT_TYPE[item.id] ?? item.id, name })
       toast.success(`${item.label} "${name}" added`)
@@ -575,7 +616,10 @@ export default function CreationForm({ item }: { item: CreationRequest }) {
 
             if (f.type === 'bus') {
               const bf = f as BusFieldSpec
-              const availBuses = filteredBusNames(bf.busCarrierFilter)
+              // A site drop offers only the site's own buses (D16).
+              const availBuses = dropSite
+                ? filteredBusNames(bf.busCarrierFilter).filter(b => dropSite.buses.includes(b))
+                : filteredBusNames(bf.busCarrierFilter)
               const noMatch = bf.busCarrierFilter !== undefined && availBuses.length === 0
               const warnLabel = ({
                 'h2': 'H₂', 'non-h2': 'non-H₂', 'electricity': 'electricity',

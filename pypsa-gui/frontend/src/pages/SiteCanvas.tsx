@@ -33,6 +33,8 @@ import { tileRangeAround, mosaicExtent, zoomFor, tileCount, type LngLat, type Lo
 import { buildGroundMosaic, ESRI_ATTRIBUTION } from '../site3d/imagery'
 import { buildSiteLayout, objectKey, KIND_COLOR, KIND_LABEL, type SiteObject, type SiteKind } from '../site3d/layout'
 import { matrixFor, placementFromMatrix } from '../site3d/placementMath'
+import { screenToGround, groundToScreen } from '../site3d/raycast'
+import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/dropRegistry'
 import SiteOverlay from '../components/SiteOverlay'
 import { toScene, toBoxArgs, fitCamera, chooseSite, unionBounds, halfSizeFor, type Bounds } from '../site3d/scene'
 import { useSitesStore } from '../site3d/sitesStore'
@@ -200,6 +202,23 @@ function Site3dDebugHook({ objects, site }: { objects: SiteObject[]; site: Site 
     ;(window as unknown as { __site3d?: unknown }).__site3d = hook
     return () => { delete (window as unknown as { __site3d?: unknown }).__site3d }
   }, [camera, scene, gl, size, objects, site])
+  return null
+}
+
+// ── Drop target: offer the ground plane to the palette drag (D16) ────────────
+
+function DropTargetRegistrar({ siteId }: { siteId: string }) {
+  const camera = useThree(s => s.camera)
+  const gl = useThree(s => s.gl)
+  useEffect(() => {
+    const target = {
+      siteId,
+      screenToGround: (cx: number, cy: number) => screenToGround(camera, gl.domElement.getBoundingClientRect(), cx, cy),
+      groundToScreen: (x: number, y: number) => groundToScreen(camera, gl.domElement.getBoundingClientRect(), x, y),
+    }
+    registerSiteDropTarget(target)
+    return () => unregisterSiteDropTarget(target)
+  }, [siteId, camera, gl])
   return null
 }
 
@@ -448,6 +467,7 @@ export default function SiteCanvas() {
           enableDamping
         />
         <FitCamera bounds={plotExtent} />
+        <DropTargetRegistrar siteId={site.id} />
         {DEBUG_ENABLED && <Site3dDebugHook objects={objects} site={site} />}
       </Canvas>
 

@@ -27,6 +27,11 @@ export interface CreationRequest {
   // canvas — dropping onto nothing must stay exactly as permissive as it is
   // today, so this is optional and never validated here.
   dropBusName?: string
+  // A drop onto the 3D site view (design D16): which site, and where on its
+  // ground (metres east/north of the site origin). CreationForm restricts
+  // the terminal bus to the site's members, prefills the primary one, and
+  // writes the placement at this point on success.
+  dropSite?: { siteId: string; ground: { x: number; y: number } }
 }
 // pendingNodePosition is a one-shot handoff used by the drag-drop flow.
 // CreationForm sets it after a successful create; TopologyCanvas reads it
