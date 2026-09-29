@@ -146,6 +146,15 @@ beforeEach(() => {
 
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
+describe('Reports button (WP7a)', () => {
+  it('navigates to the Reports panel from the reference-design panel', async () => {
+    useUIStore.setState({ activeSlidePanel: null })
+    const user = await openPanel()
+    await user.click(screen.getByTestId('eh-open-reports'))
+    expect(useUIStore.getState().activeSlidePanel).toBe('reports')
+  })
+})
+
 describe('completenessRows', () => {
   it('keeps REPORT_SECTIONS order and appends unknowns', () => {
     const rows = completenessRows({

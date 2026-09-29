@@ -96,7 +96,7 @@ RESULTS_ENUM = [
     "losses", "carrier_kpis", "emissions", "transformers", "unit_commitment",
     "line_duals", "voltages", "line_reactive", "transformer_reactive",
     "prices", "price_drivers", "curtailment", "lost_load", "loads",
-    "asset_economics",
+    "asset_economics", "billing", "cfe_score",
 ]
 RESULTS_SOURCE_ENUM = ["lopf", "ac_pf"]
 # Task 14 — per-asset results chat tools (get_asset_results /
@@ -364,6 +364,13 @@ TOOLS: list[dict[str, Any]] = [
         "forwarded where the underlying handler accepts it. "
         "Returns (dispatch kinds): {index:[iso], columns:[name], data:[[float]]}; "
         "(cost_breakdown): {total, capex, opex, by_component, by_carrier, by_period}. "
+        "(billing): {per_period: {'_'|period: {per_item, per_item_sampled, total, "
+        "flags, monthly, demand_lines, fixed_lines}}, flags, contracts: {lines: "
+        "[{period, contract_id, payer, payee, value_stream, quantity_mwh, amount, "
+        "flags}], flags}, gap: {periods, gates, ...}, provenance}; "
+        "(cfe_score): {per_period: {'_'|period: {score, load_mwh, clean_mwh, "
+        "matched_mwh, ...}}, flags, notes}. A null amount or total is unknown, "
+        "never zero. "
         "Returns {status:'no_data', kind, message} when the underlying endpoint "
         "has nothing to serve — an unsolved or stale network, or a solve that "
         "produced none of this kind (lost_load on a run that shed nothing). "
@@ -409,7 +416,9 @@ TOOLS: list[dict[str, Any]] = [
         "(coord-change line-length recompute); Transformer → "
         "update_transformer (voltage validation); GlobalConstraint → "
         "update_global_constraint (dedicated partial-PUT mitigation); other "
-        "7 classes → generic _update_component. Safety: write.",
+        "7 classes → generic _update_component. To rename any class, pass "
+        "new_name or attrs.name (bus names starting 'ic:' are reserved). "
+        "Safety: write.",
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
             "name": {"type": "string"},
@@ -1918,6 +1927,321 @@ TOOLS: list[dict[str, Any]] = [
         },
         [],
     ),
+    _t(
+        "export_eh_report_docx",
+        "Render the stored Energy Hub ReferenceDesignReport (the last "
+        "run_eh_study) as a Word .docx in the active project's uploads/ dir "
+        "— headline results, completeness, one section per report section "
+        "(an unestablished section says so), the FMEA top-N table with a "
+        "criticality chart, the analyst's worksheet rows and the study "
+        "pipeline. Every number is the assembler's own; nothing is "
+        "narrated. 404 eh_report_not_found when no EH study has been stored "
+        "— run run_eh_study first. `filename` (optional) overrides "
+        "eh_reference_design_<ts>.docx. The file appears in the chat "
+        "panel's file strip with a download button. Safety: write.",
+        {"filename": {"type": "string"}},
+        [],
+    ),
+
+    # ── Reports (9) — WP6: the generated study report ───────────────────────
+    # The routes are WP1/WP3/WP5's (`routers/reports.py`,
+    # `routers/report_jobs.py`); each tool calls its handler in-process for
+    # the ACTIVE project. Tables and figures are the software's, never the
+    # model's; prose is written per section by the active LLM profile and
+    # every number in it is audited against the evidence.
+    _t(
+        "generate_report",
+        "Start writing the client report of the active project from "
+        "everything this session established (the Energy Hub reference "
+        "design, the adequacy surfaces, the FMEA worksheet) on the ACTIVE LLM "
+        "profile: one section at a time, prose between the software's own "
+        "tables and figures, every number audited against the evidence. "
+        "Takes minutes and spends model tokens; ONE job at a time — 409 "
+        "report_job_in_flight while another runs (abort_report_generation "
+        "stops it). `sections` (optional) names the section ids to write; "
+        "omit it for the executive summary plus every section the evidence "
+        "established. `language` defaults to the template's detected language "
+        "when `template_file_id` names one (an upload of kind "
+        "report_template, see list_report_templates), else 'en'; "
+        "`instruction` is free text the writer follows. 400 no_evidence when "
+        "the session has nothing to report on (run a study first). Returns "
+        "{status:'running', report_id} — poll get_report_status until "
+        "done/aborted/failed, then read it with get_report. Only call this "
+        "when the user asks for a report or a document; build_study_report "
+        "is the in-chat summary. Safety: execution.",
+        {
+            "title": {"type": "string"},
+            "language": {"type": "string"},
+            "sections": {"type": "array", "items": {"type": "string"}},
+            "instruction": {"type": "string"},
+            "template_file_id": {"type": "string"},
+        },
+        [],
+    ),
+    _t(
+        "get_report_status",
+        "The report generation job of this session: {status: running|done|"
+        "aborted|failed, report_id, version, mode, section, progress{done, "
+        "total, current}, repairs, prose_failures, error, profile_id, model, "
+        "started_at, finished_at}. `prose_failures` names the sections the "
+        "model could not write (they keep their tables, stated as 'prose not "
+        "established'). {status:'no_data'} when no generation has run yet. "
+        "Safety: read.",
+        {},
+    ),
+    _t(
+        "abort_report_generation",
+        "Stop the running report job after its current section. The sections "
+        "already written are kept and the partial report is saved as a "
+        "version (status 'aborted'); the rest stay code-only. IDEMPOTENT and "
+        "200 after the job finished; 404 report_job_not_found when no "
+        "generation ever ran in this session. Safety: destructive.",
+        {},
+    ),
+    _t(
+        "list_reports",
+        "Every study report of the active project, newest first: [{report_id, "
+        "title, created_at, updated_at, latest_version, mode "
+        "(evidence_only|generated), evidence_hash, profile_id, model, "
+        "generation}]. Safety: read.",
+        {},
+    ),
+    _t(
+        "get_report",
+        "Read one study report of the active project (the newest when "
+        "`report_id` is omitted; the latest version unless `version` is "
+        "given). Sections come back with their paragraphs, bullets and "
+        "callouts (disclosures, gaps, not-established statements) intact, "
+        "each table as {table_id, columns, n_rows, caption} — rows through "
+        "get_report_table — and each figure as its id and caption. Every "
+        "section carries `audit`: `unverified` are numbers the prose states "
+        "that the evidence does not contain (relay them as numbers to "
+        "check), `verified` the ones it does. A report whose prose would not "
+        "fit one result comes back as an outline (`outline: true`, one row "
+        "per section with counts) — pass `section_id` to read one section in "
+        "full. 404 report_not_found when the project has no report yet "
+        "(generate_report writes one). Never re-type a report's numbers into "
+        "chat as new findings; the document is the deliverable. "
+        "Safety: read.",
+        {
+            "report_id": {"type": "string"},
+            "version": {"type": "integer"},
+            "section_id": {"type": "string"},
+        },
+        [],
+    ),
+    _t(
+        "get_report_table",
+        "The rows of one table of a report version, paginated: {table_id, "
+        "columns, caption, source_path, items (rows as lists in `columns` "
+        "order), total_count, offset, returned, has_more}. `table_id` is one "
+        "the document's table blocks named. 404 report_table_not_found "
+        "lists the ids the report has. Safety: read.",
+        {
+            "report_id": {"type": "string"},
+            "table_id": {"type": "string"},
+            "version": {"type": "integer"},
+            "offset": {"type": "integer"},
+            "limit": {"type": "integer"},
+        },
+        ["report_id", "table_id"],
+    ),
+    _t(
+        "regenerate_report_section",
+        "Write ONE section of a report again on the active LLM profile, "
+        "optionally under an `instruction` ('one paragraph', 'stress the "
+        "import dependency'), from the report's latest version; the result "
+        "is saved as the next version with every other section unchanged. "
+        "Same job slot as generate_report (409 report_job_in_flight while a "
+        "job runs); poll get_report_status. 404 report_section_not_found for "
+        "an id the report does not have. Safety: execution.",
+        {
+            "report_id": {"type": "string"},
+            "section_id": {"type": "string"},
+            "instruction": {"type": "string"},
+            "language": {"type": "string"},
+        },
+        ["report_id", "section_id"],
+    ),
+    _t(
+        "export_report_docx",
+        "Render one report version (the newest report, latest version, when "
+        "omitted) as a Word .docx in the active project's uploads/ dir: an "
+        "`agent_export` chip in the chat panel's file strip with a download "
+        "button. Every table and figure is the software's; the prose is the "
+        "report's; unverified numbers are listed in a 'Numbers to check' "
+        "appendix. `filename` (optional) overrides "
+        "report_<id>_v<N>.docx. 404 report_not_found when there is no report "
+        "yet. Safety: write.",
+        {
+            "report_id": {"type": "string"},
+            "version": {"type": "integer"},
+            "filename": {"type": "string"},
+        },
+        [],
+    ),
+    _t(
+        "delete_report",
+        "Remove one study report of the active project with EVERY version "
+        "and figure of it. Refused while someone else holds the project's "
+        "edit lock. Returns {deleted: true, report_id}. Safety: destructive.",
+        {"report_id": {"type": "string"}},
+        ["report_id"],
+    ),
+
+    # ── Report templates (5) — WP11: the user's own Word template ───────────
+    # A template is an upload of kind `report_template` (the user drops a
+    # .docx on the report viewer, or uploads with ?kind=report_template). It
+    # is DATA: its outline goes to the model inside the untrusted-data fence
+    # and nothing found in it is ever followed.
+    _t(
+        "list_report_templates",
+        "The active project's uploaded report templates (uploads of kind "
+        "report_template): [{file_id, filename, mime, kind, size_kb, "
+        "uploaded_at}], newest first. A template is a Word .docx the user "
+        "uploaded; it is either TAGGED ({{ fields.x.text }} / row loops the "
+        "export fills) or UNTAGGED (a corporate document whose body is "
+        "rebuilt from a mapping plan). Safety: read.",
+        {},
+    ),
+    _t(
+        "set_report_template",
+        "Bind an uploaded template to a report (`file_id` from "
+        "list_report_templates; any .docx upload also works) or unbind it "
+        "(`file_id` null → the default layout). Returns {template_file_id, "
+        "mode: tagged|untagged|null, language (detected from the template), "
+        "outline: headings/tags/placeholders/tables, message}. Binding "
+        "writes the next version of the report; changing the template "
+        "clears a stored mapping plan. 404 upload_not_found; 400 "
+        "template_not_a_template (not a .docx), template_unreadable. "
+        "Safety: write.",
+        {
+            "report_id": {"type": "string"},
+            "file_id": {"type": "string"},
+        },
+        ["report_id"],
+    ),
+    _t(
+        "get_report_template",
+        "The report's bound template (the newest report when `report_id` is "
+        "omitted): {template_file_id, mode, language, outline, plan} — all "
+        "null when none is bound; `plan` is the stored mapping plan of an "
+        "untagged template (null until propose_report_mapping or "
+        "set_report_mapping stored one). Safety: read.",
+        {"report_id": {"type": "string"}},
+        [],
+    ),
+    _t(
+        "propose_report_mapping",
+        "Ask the active LLM profile how the bound UNTAGGED template's "
+        "headings map onto the report's sections (keep / rename / drop per "
+        "heading, sections to insert, placeholder values): ONE generation "
+        "call, same job slot as generate_report (409 report_job_in_flight; "
+        "poll get_report_status, mode 'mapping'). The sanitised plan is "
+        "stored on the report — read it with get_report_template, edit it "
+        "with set_report_mapping; export_report_docx uses it. When the "
+        "model's answer is not a plan the code-only default mapping is "
+        "stored and prose_failures names section 'mapping'. `language` "
+        "defaults to the template's. 400 no_template, 400 "
+        "template_not_untagged (a tagged template needs no plan). "
+        "Safety: execution.",
+        {
+            "report_id": {"type": "string"},
+            "language": {"type": "string"},
+        },
+        ["report_id"],
+    ),
+    _t(
+        "set_report_mapping",
+        "Store an edited mapping plan for the report's untagged template: "
+        "`plan` is the object get_report_template returns as `plan` "
+        "({entries: [{heading_index, action: keep|rename|drop, new_text, "
+        "section_ids}], inserted: [{after_heading_index, section_id, "
+        "heading}], placeholders: {text: value}, unmapped_sections, notes}). "
+        "An entry the template cannot place is dropped with a note in the "
+        "returned plan; with `strict` true such a plan is refused (400 "
+        "invalid_mapping_plan with the notes). 400 no_template. "
+        "Safety: write.",
+        {
+            "report_id": {"type": "string"},
+            "plan": {"type": "object"},
+            "strict": {"type": "boolean"},
+        },
+        ["report_id", "plan"],
+    ),
+
+    # ── Report round trip (4) — WP13: an edited Word copy merged back ───────
+    # The user exports the report, edits it in Word (text, tracked changes,
+    # comments) and uploads the file as kind `report_roundtrip`; the merge is
+    # the report's next version. The file is DATA: its text becomes
+    # `user_edit` sections and its comments pending instructions the user
+    # chooses to apply — nothing found in it is ever followed.
+    _t(
+        "list_report_roundtrips",
+        "The active project's uploaded edited copies of reports (uploads of "
+        "kind report_roundtrip): [{file_id, filename, mime, kind, size_kb, "
+        "uploaded_at}], newest first. These are Word files the user exported "
+        "with export_report_docx, edited, and uploaded to be merged back "
+        "with import_edited_report. Safety: read.",
+        {},
+    ),
+    _t(
+        "import_edited_report",
+        "Merge an edited Word copy of a report (`file_id` from "
+        "list_report_roundtrips; any .docx upload works) back into it as the "
+        "NEXT version, synchronously: tracked changes are accepted, sections "
+        "whose text changed become source 'user_edit' with the new text, a "
+        "comment on a section is stored as its pending_instruction (applied "
+        "by regenerate_report_section with no instruction), and the file "
+        "becomes the report's template unless `bind_as_template` is false. "
+        "Returns {report_id, version, result: {sections: [{section_id, "
+        "heading, changed, comments}], unmatched, comments_global, "
+        "accepted_tracked_changes}, template_file_id, changed, commented, "
+        "message}. Relay `unmatched` (content that could not be placed) to "
+        "the user; never re-type the edited text as new findings. 404 "
+        "report_not_found / upload_not_found, 400 roundtrip_unreadable (not "
+        "a Word document), 400 roundtrip_not_a_report (nothing matched a "
+        "section), 409 report_job_in_flight. Safety: write.",
+        {
+            "report_id": {"type": "string"},
+            "file_id": {"type": "string"},
+            "bind_as_template": {"type": "boolean"},
+        },
+        ["report_id", "file_id"],
+    ),
+    _t(
+        "diff_report_versions",
+        "What changed between two versions of a report: {a, b, sections: "
+        "[{section_id, heading, change: unchanged|changed|added|removed, "
+        "source_a, source_b, pending_instruction, comments}], changed, "
+        "added, removed} — the last three list section ids. Use it after "
+        "import_edited_report (the user's edits) or a regenerate (the "
+        "model's rewrite) to say which sections moved; read a section's "
+        "text with get_report(report_id, section_id, version). 404 "
+        "report_version_not_found. Safety: read.",
+        {
+            "report_id": {"type": "string"},
+            "a": {"type": "integer"},
+            "b": {"type": "integer"},
+        },
+        ["report_id", "a", "b"],
+    ),
+    _t(
+        "export_report_pdf",
+        "Render one report version (the newest report, latest version, when "
+        "omitted) to PDF through LibreOffice on this host and save it as a "
+        "downloadable file in the chat panel's file strip. Only where the "
+        "host has LibreOffice: 501 pdf_not_available otherwise — then offer "
+        "export_report_docx, which always works; 500 pdf_conversion_failed "
+        "(the message carries LibreOffice's reason) when the conversion "
+        "fails. `filename` overrides report_<id>_v<N>.pdf. Safety: write.",
+        {
+            "report_id": {"type": "string"},
+            "version": {"type": "integer"},
+            "filename": {"type": "string"},
+        },
+        [],
+    ),
 
     # ── LLM provider switching (1) — Task 10 ────────────────────────────────
     _t(
@@ -2255,6 +2579,83 @@ TOOLS: list[dict[str, Any]] = [
         },
         ["project_id", "hour", "name"],
     ),
+
+    # ── Library (4) — Edge Investment Case P2 WP2.4c ─────────────────────
+    _t(
+        "list_library_items",
+        "List the latest version of every Library item of one kind in the "
+        "user's organization: tariffs, contract templates or connection "
+        "agreements. Paged: {items: [{kind, id, version, hash}], total_count, "
+        "offset, returned, has_more}; `id` is the item's name. Safety: read.",
+        {
+            "kind": {"type": "string", "enum": ["tariff", "contract", "connection_agreement"]},
+            "offset": {"type": "integer"},
+            "limit": {"type": "integer"},
+        },
+        ["kind"],
+    ),
+    _t(
+        "get_library_item",
+        "Read one Library item: {ref: {kind, id, version, hash}, meta, ...}. meta "
+        "says where it came from (source, provider, notes such as an importer's "
+        "assumptions). For a tariff the default is a SUMMARY (per item: kind, "
+        "unit, periods, windows, tiers, ratchet, rate range); detail='full' "
+        "returns the whole payload, item_id one item in full. Contract templates "
+        "and connection agreements always return the payload. `version` defaults "
+        "to the latest. Safety: read.",
+        {
+            "kind": {"type": "string", "enum": ["tariff", "contract", "connection_agreement"]},
+            "name": {"type": "string"},
+            "version": {"type": "integer"},
+            "detail": {"type": "string", "enum": ["summary", "full"]},
+            "item_id": {"type": "string"},
+        },
+        ["kind", "name"],
+    ),
+    _t(
+        "import_urdb_tariff",
+        "Import a URDB (OpenEI Utility Rate Database) rate the user UPLOADED "
+        "as a JSON file into the Library as tariff `name` (an existing name "
+        "gets a new version). `file_id` is the upload's id (list_uploads); "
+        "never paste rate JSON into the call. Accepts one rate object, an "
+        "OpenEI response {items: [...]} (several rates: refused with a list "
+        "unless item_index picks one) or a REopt scenario "
+        "(ElectricTariff.urdb_response). Fields the importer cannot map are "
+        "refused by name (urdb_refused, with refusals) unless "
+        "accept_partial=true, which stores them in the tariff's "
+        "unsupported_fields and bills it as incomplete. cyclic_year makes a "
+        "range-mode ratchet wrap within the rate year. valid_from (YYYY-MM-DD) "
+        "is required when the rate has no startdate; tariff_id and "
+        "jurisdiction (default US) set the tariff's own id and country. "
+        "Returns {ref, notes, refusals, refusals_total, unsupported_fields}. "
+        "Safety: write.",
+        {
+            "file_id": {"type": "string"},
+            "name": {"type": "string"},
+            "cyclic_year": {"type": "boolean"},
+            "accept_partial": {"type": "boolean"},
+            "valid_from": {"type": "string"},
+            "item_index": {"type": "integer"},
+            "tariff_id": {"type": "string"},
+            "jurisdiction": {"type": "string"},
+        },
+        ["file_id", "name"],
+    ),
+    _t(
+        "attach_tariff",
+        "Make Library tariff `name` (latest, or `version`) the project's import "
+        "tariff: sets commercial.import_tariff_ref through the solver-config "
+        "route, which resolves it into the inline tariff the solve uses and "
+        "pins it. This REPLACES the current import tariff: when the project "
+        "has an inline tariff that is not this item, the call is refused "
+        "(inline_tariff_would_be_replaced) until the user confirms and you "
+        "pass replace_inline=true. Needs a commercial config with poc_link "
+        "already set. Returns {import_tariff_ref, import_tariff: {id, name, "
+        "items}, replaced}. Safety: write.",
+        {"name": {"type": "string"}, "version": {"type": "integer"},
+         "replace_inline": {"type": "boolean"}},
+        ["name"],
+    ),
 ]
 
 
@@ -2522,6 +2923,40 @@ TOOL_ROUTES: dict[str, list] = {
     "export_to_csv": _SERVICE_CALL,
     "export_preview_png": _SERVICE_CALL,
     "export_chat_summary": _SERVICE_CALL,
+    # reports (1) — WP0 spike: in-process render + agent-export save
+    "export_eh_report_docx": _SERVICE_CALL,
+    # reports (9) — WP6: the WP1/WP3/WP5 routes, called in-process for the
+    # active project. `get_report_table` reads the same document GET and
+    # pages one of its tables; the rest are one route each.
+    "generate_report": [("POST", "/api/projects/{name}/reports/generate")],
+    "get_report_status": [("GET", "/api/projects/{name}/reports/generate/status")],
+    "abort_report_generation": [("POST", "/api/projects/{name}/reports/generate/abort")],
+    "list_reports": [("GET", "/api/projects/{name}/reports")],
+    "get_report": [("GET", "/api/projects/{name}/reports/{report_id}")],
+    "get_report_table": [("GET", "/api/projects/{name}/reports/{report_id}")],
+    "regenerate_report_section": [
+        ("POST", "/api/projects/{name}/reports/{report_id}/sections/{section_id}/regenerate"),
+    ],
+    "export_report_docx": [("POST", "/api/projects/{name}/reports/{report_id}/export")],
+    "delete_report": [("DELETE", "/api/projects/{name}/reports/{report_id}")],
+    # report templates (5) — WP11: the template routes, called in-process;
+    # `list_report_templates` is the uploads list filtered to one kind.
+    "list_report_templates": [("GET", "/api/projects/{name}/uploads")],
+    "set_report_template": [("POST", "/api/projects/{name}/reports/{report_id}/template")],
+    "get_report_template": [("GET", "/api/projects/{name}/reports/{report_id}/template")],
+    "propose_report_mapping": [
+        ("POST", "/api/projects/{name}/reports/{report_id}/template/plan"),
+    ],
+    "set_report_mapping": [("PUT", "/api/projects/{name}/reports/{report_id}/template/plan")],
+    # report round trip (4) — WP13: the round-trip routes, called in-process;
+    # `list_report_roundtrips` is the uploads list filtered to one kind and
+    # `export_report_pdf` is the export route with `format: pdf`.
+    "list_report_roundtrips": [("GET", "/api/projects/{name}/uploads")],
+    "import_edited_report": [("POST", "/api/projects/{name}/reports/{report_id}/roundtrip")],
+    "diff_report_versions": [
+        ("GET", "/api/projects/{name}/reports/{report_id}/versions/{a}/diff/{b}"),
+    ],
+    "export_report_pdf": [("POST", "/api/projects/{name}/reports/{report_id}/export")],
     "clear_uploads": _SERVICE_CALL,
     # asset_results (3) — Task 14. Real HTTP routes DO exist
     # (routers/asset_results.py, mounted at /api/results/asset in main.py)
@@ -2559,6 +2994,13 @@ TOOL_ROUTES: dict[str, list] = {
     "gridspine_compute_capacity": _SERVICE_CALL,
     "gridspine_get_connection_assessments": _SERVICE_CALL,
     "gridspine_assess_connection": _SERVICE_CALL,
+    # Library (4) — P2 WP2.4c: router handlers, called in process with the
+    # acting user (the Library ACL is the org's).
+    "list_library_items": [("GET", "/api/library/items/{kind}")],
+    "get_library_item": [("GET", "/api/library/items/{kind}/{name}")],
+    "import_urdb_tariff": [("POST", "/api/library/items/tariff/import_urdb")],
+    "attach_tariff": [("GET", "/api/library/items/{kind}/{name}"),
+                      ("PUT", "/api/simulation/solver_config")],
 }
 
 

@@ -7,6 +7,8 @@ import { useUIStore } from '../store/uiStore'
 // base commit's strip — same tabs, same order, same markup. The snapshot was
 // recorded before P23 touched Results.tsx; the `results-tab-<id>` test ids
 // (§3.5) are the only allowed difference and are stripped before comparing.
+// Re-recorded once for a deliberate addition: the Expert-only Investment tab
+// (Edge Investment Case P3 WP3.5), between FMEA and Asset Detail.
 const NEW_TEST_IDS = /\s?data-testid="results-tab-[a-z]+"/g
 function normalise(html: string): string {
   return html.replace(NEW_TEST_IDS, '')
@@ -29,6 +31,7 @@ vi.mock('./results/AdequacyTab', () => stub('adequacy-stub'))
 vi.mock('./results/FmeaTab', () => stub('fmea-stub'))
 vi.mock('./results/StorageCycling', () => stub('storage-stub'))
 vi.mock('./results/asset/AssetDetail', () => stub('asset-stub'))
+vi.mock('./results/InvestmentTab', () => stub('investment-stub'))
 vi.mock('./CompareView', () => ({ default: () => <div data-testid="compare-stub" /> }))
 
 vi.mock('../api/simulation', () => ({

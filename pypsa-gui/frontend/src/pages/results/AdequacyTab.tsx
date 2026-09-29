@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { FileText } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { nk } from '../../utils/queryKeys'
@@ -45,6 +46,8 @@ import { EhReferenceDesignPanel } from './EhReferenceDesignPanel'
 
 export default function AdequacyTab() {
   const currentProject = useUIStore(s => s.currentProject)
+  const setSlidePanel = useUIStore(s => s.setSlidePanel)
+  const requestReportGenerate = useUIStore(s => s.requestReportGenerate)
   // Achieved-vs-target readout (adequacy plan Phase 1 Task 5). 204 → null.
   // Same query keys McPanel and LoopPanel use, so the three surfaces share one
   // round-trip per project rather than issuing their own.
@@ -64,9 +67,23 @@ export default function AdequacyTab() {
   return (
     <div className="flex flex-col h-full overflow-auto p-4 gap-4">
       <header>
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
-          Adequacy
-        </h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+            Adequacy
+          </h3>
+          {/* WP7b: the studies on this tab are the report's evidence. Same
+              control as the EH panel's, but "pre-armed": the Reports panel
+              opens with the Generate dialog already up. */}
+          <button
+            type="button"
+            onClick={() => { requestReportGenerate(); setSlidePanel('reports') }}
+            data-testid="adequacy-open-reports"
+            title="Open the Reports panel and generate a report from these studies"
+            className="ml-auto inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent"
+          >
+            <FileText size={10} /> Reports
+          </button>
+        </div>
         <p className="text-[11px] text-muted mt-1">
           Reliability targets, screening, the cost-vs-availability frontier,
           sequential Monte Carlo, the planning loops that couple them, and the

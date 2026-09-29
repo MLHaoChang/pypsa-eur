@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import { confirmToast } from '../utils/toasts'
 import { networkApi } from '../api/network'
+import { formatApiDetail } from '../api/client'
 import { simulationApi } from '../api/simulation'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
@@ -11,8 +12,7 @@ import type { Load } from '../api/types'
 import {
   resolutionLabel, horizonRangeLabel,
   visibleSteps, isHorizonUnset, stepSummary,
-  type WeightingRow, type HorizonStepId, type HorizonSummaryContext,
-} from './modelHorizonModel'
+  type WeightingRow, type HorizonStepId, type HorizonSummaryContext, stepHoursForFreq} from './modelHorizonModel'
 import { StepShell, STEP_LABELS } from './modelHorizon/StepShell'
 import { HorizonSummary } from './modelHorizon/HorizonSummary'
 import { StepMode } from './modelHorizon/StepMode'
@@ -519,8 +519,10 @@ export default function ModelHorizon() {
         )
       }
     },
-    onError: (e: { response?: { data?: { detail?: string } } }) =>
-      toast.error(e.response?.data?.detail ?? 'Failed to sample representative weeks'),
+    // `detail` may be an object ({code, message}) — formatApiDetail reads
+    // `message` from it; a raw object is not a valid toast (WP1.0 review).
+    onError: (e: { response?: { data?: { detail?: unknown } } }) =>
+      toast.error(formatApiDetail(e.response?.data?.detail, 'Failed to sample representative weeks')),
   })
   const onSampleWeeks = () => {
     const nw = parseInt(sampleNWeeks, 10)
@@ -686,14 +688,17 @@ export default function ModelHorizon() {
   // Read straight off `snap.weightings` — the FULL set, not the paginated
   // `weightingRows` slice — so the summary sentence is correct even when a
   // custom weight lives on a page the user hasn't scrolled to.
+  // "Default" = the backend's default for this axis: the step length in hours
+  // (15-min → 0.25, 3-hourly → 3, daily → 24), not a hard-coded 1 (WP1.0).
   const weightsAreDefault = useMemo(() => {
     const rows = (snap?.weightings ?? []) as WeightingRow[]
+    const expected = stepHoursForFreq(snap?.freq) ?? 1
     return rows.every(r => {
       const raw = r.objective
       const n = typeof raw === 'number' ? raw : Number(raw)
-      return !Number.isFinite(n) || n === 1
+      return !Number.isFinite(n) || Math.abs(n - expected) < 1e-9
     })
-  }, [snap?.weightings])
+  }, [snap?.weightings, snap?.freq])
 
   // Feeds BOTH the StatCard strip above and the summary/rail below — same
   // `isMultiPeriod` / `periods` / `snap?.count` / `snap?.freq` / `rangeStr`
@@ -707,6 +712,7 @@ export default function ModelHorizon() {
     rangeLabel: rangeStr,
     canSampleWeeks: Boolean(snap?.can_sample_weeks),
     weightsAreDefault,
+    sampleWeeksReason: snap?.sample_weeks_reason ?? null,
   }
 
   // Content for StepShell's `advanced` disclosure, per current step. Only
@@ -969,6 +975,7 @@ export default function ModelHorizon() {
       {view === 'sampling' && (
         <StepSampling
           canSampleWeeks={Boolean(snap?.can_sample_weeks)}
+          sampleWeeksReason={snap?.sample_weeks_reason ?? null}
           sampleNWeeks={sampleNWeeks}
           onSampleNWeeksChange={setSampleNWeeks}
           sampleSeed={sampleSeed}
