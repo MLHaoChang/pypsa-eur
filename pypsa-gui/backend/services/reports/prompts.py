@@ -18,13 +18,17 @@ in the codebase.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from services.chat_service import (
     _UNTRUSTED_CLOSE,
     _UNTRUSTED_OPEN,
     _neutralise_untrusted_delimiters,
 )
+
+if TYPE_CHECKING:  # pragma: no cover
+    from models.report import ReportDocument
+    from services.reports.docx_reader import TemplateOutline
 
 # The exact object the model must return. Shown verbatim in every user
 # message; validated by `generator.SectionDraft`.
@@ -90,4 +94,81 @@ def section_user_message(section_id: str, title: str, slice: dict[str, Any], *,
         f"Language: {language}.\n"
         f"Return only this JSON object, with \"section_id\" set to "
         f"{json.dumps(section_id)}:\n{shape}"
+    )
+
+
+# ── WP10: the mapping plan for an untagged template ─────────────────────────
+
+# The exact object the model must return for a mapping plan. Validated by
+# `template_untagged.MappingPlan`, then sanitised against the outline.
+MAPPING_SHAPE = (
+    '{"entries": [{"heading_index": <index from the outline>, '
+    '"action": "keep" | "rename" | "drop", '
+    '"new_text": "<new heading text, only for rename>" | null, '
+    '"section_ids": ["<section id>", "..."]}, "..."], '
+    '"inserted": [{"after_heading_index": <index of a kept heading, or -1 for '
+    'the start of the body>, "section_id": "<section id>", '
+    '"heading": "<heading text>"}, "..."], '
+    '"placeholders": {"<placeholder>": "<value>"}, '
+    '"unmapped_sections": ["<section id>", "..."], '
+    '"notes": ["<short note>", "..."]}'
+)
+
+
+def _outline_payload(outline: TemplateOutline) -> dict[str, Any]:
+    seen: list[str] = []
+    for p in outline.placeholders:
+        if p.text not in seen:
+            seen.append(p.text)
+    return {
+        "body_start_index": outline.body_start_index,
+        "has_toc": outline.has_toc,
+        "headings": [{"index": h.index, "level": h.level, "text": h.text,
+                      "style": h.style} for h in outline.headings],
+        "placeholders": seen,
+        "header_text": outline.header_text,
+        "footer_text": outline.footer_text,
+    }
+
+
+def mapping_user_message(outline: TemplateOutline, doc: ReportDocument, *,
+                         language: str, shape: str = MAPPING_SHAPE) -> str:
+    """
+    The user message asking for a mapping plan: the template's outline
+    (headings with index/level/text/style, placeholders, TOC flag, body
+    start) and the report's sections (id, title, status) as compact JSON
+    inside the fence — heading texts came from a file the user uploaded —
+    then the rules, the language and the exact shape to return.
+    """
+    template = _outline_payload(outline)
+    report = {"title": doc.title,
+              "sections": [{"id": s.section_id, "title": s.heading,
+                            "status": s.status} for s in doc.sections]}
+    payload = json.dumps({"template": template, "report": report},
+                         ensure_ascii=False, separators=(",", ":"), default=str)
+    return (
+        "Map the headings of a Word template to the sections of the report "
+        "so the report can be written into the template. Headings before "
+        "body_start_index (cover page, table of contents) are kept as they "
+        "are and must not appear in entries.\n"
+        f"{_fenced('template outline and report sections:', payload)}\n"
+        "Rules:\n"
+        "1. One entry per heading at or after body_start_index, in order. "
+        "\"keep\" writes the heading as it is; \"rename\" writes new_text "
+        "instead; \"drop\" removes the heading. section_ids lists the "
+        "report sections written under that heading (may be empty for a "
+        "chapter the report has nothing for, such as an introduction).\n"
+        "2. Drop headings that are placeholders or sample text (\"Lorem "
+        "ipsum\", \"[Chapter title]\", \"Sample\").\n"
+        "3. Every report section whose status is not \"skipped\" must appear "
+        "exactly once: in one section_ids list, or in inserted with the "
+        "index of the kept heading it follows (-1 for the start of the "
+        "body) and a heading text in the template's language. Skipped "
+        "sections go to unmapped_sections.\n"
+        "4. placeholders maps each placeholder text (client name, date, "
+        "project) to the value to write; leave out what you cannot fill.\n"
+        "5. Use only the ids and indices given. Do not invent headings "
+        "for sections that have a matching heading already.\n"
+        f"Language: {language}.\n"
+        f"Return only this JSON object:\n{shape}"
     )

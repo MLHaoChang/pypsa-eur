@@ -123,19 +123,15 @@ def extract_json_object(text: str) -> dict | None:
     return None
 
 
-def _validate(text: str, section_id: str) -> tuple[SectionDraft | None, str]:
-    """`(draft, "")` or `(None, error)` for one raw answer."""
+def _validate_json[T: BaseModel](text: str, model_cls: type[T]) -> tuple[T | None, str]:
+    """`(instance, "")` or `(None, error)` for one raw answer."""
     obj = extract_json_object(text)
     if obj is None:
         return None, "no JSON object found in the answer"
     try:
-        draft = SectionDraft.model_validate(obj)
+        return model_cls.model_validate(obj), ""
     except (ValidationError, ValueError) as exc:
         return None, _short_error(exc)
-    # The job knows which section it asked for; a mangled id is not a reason
-    # to burn the repair turn.
-    draft.section_id = section_id
-    return draft, ""
 
 
 def _short_error(exc: Exception) -> str:
@@ -193,12 +189,40 @@ def generate_section(provider: Any, *, base_request: Mapping[str, Any],
     with a cache has nothing to invalidate) and no history anchor: every
     section is its own single-turn conversation.
     """
+    result = generate_json(
+        provider, base_request=base_request,
+        user_message=prompts.section_user_message(
+            section_id, title, slice, language=language, instruction=instruction),
+        model_cls=SectionDraft, stop_event=stop_event)
+    if isinstance(result, SectionFailure):
+        return result
+    draft, repairs = result
+    # The job knows which section it asked for; a mangled id is not a reason
+    # to burn the repair turn.
+    draft.section_id = section_id
+    draft.repairs = repairs
+    return draft
+
+
+def generate_json[T: BaseModel](provider: Any, *, base_request: Mapping[str, Any],
+                                user_message: str, model_cls: type[T],
+                                stop_event: threading.Event | None = None,
+                                ) -> tuple[T, int] | SectionFailure:
+    """
+    One JSON object of shape `model_cls` from `provider`, as
+    `(instance, repairs)`, or the `SectionFailure` saying why there is none.
+
+    The JSON-in-text contract `generate_section` is built on, for any
+    pydantic shape: the answer's first balanced object is validated, repaired
+    ONCE with the validation error, else failed with the raw head. The
+    request carries the stable system block (from `base_request` or the
+    section guide), no tools and no history anchor.
+    """
     if stop_event is not None and stop_event.is_set():
         return SectionFailure("aborted")
 
     system_blocks = list(base_request.get("system_blocks") or prompts.system_blocks())
-    messages: list[dict[str, Any]] = [_user(prompts.section_user_message(
-        section_id, title, slice, language=language, instruction=instruction))]
+    messages: list[dict[str, Any]] = [_user(user_message)]
 
     def request() -> LLMRequest:
         return LLMRequest(
@@ -223,10 +247,9 @@ def generate_section(provider: Any, *, base_request: Mapping[str, Any],
         if text is None:
             return SectionFailure("aborted", raw[:RAW_HEAD_CHARS], repairs=attempt)
         raw = text
-        draft, error = _validate(raw, section_id)
-        if draft is not None:
-            draft.repairs = attempt
-            return draft
+        instance, error = _validate_json(raw, model_cls)
+        if instance is not None:
+            return instance, attempt
         if attempt == 0:
             messages.append(_assistant(raw))
             messages.append(_user(REPAIR_MESSAGE.format(error=error)))
