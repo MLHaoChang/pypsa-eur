@@ -3063,6 +3063,14 @@ def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> Projec
         raise HTTPException(409, f"Project '{new_name}' already exists")
 
     children = project_registry.direct_children(db, project)
+    # Captured BEFORE the registry call. `rename_project` rebinds resident
+    # contexts (it must: otherwise every rename leaves the context on the old
+    # name and the next save 409s), which sets `ctx.loaded_project` to the NEW
+    # name — so a `get_loaded_project() == old_name` test after the call is
+    # always False and the in-memory `n.name` update below silently stopped
+    # happening. Caught by `tests/qa_rename_project.py` and by nothing in the
+    # unit suite.
+    was_active = PyPSAService.get_loaded_project() in (old_name, new_name)
     project = project_registry.rename_project(db, project, new_name)
 
     # Sync metadata.json name pointer on the renamed project + parent pointer
@@ -3087,7 +3095,7 @@ def _rename_project_db(db, user, name: str, req: RenameProjectRequest) -> Projec
                 pass
 
     with PyPSAService.get_lock():
-        if PyPSAService.get_loaded_project() == old_name:
+        if was_active:
             n = PyPSAService.get_network()
             try:
                 n.name = new_name
