@@ -344,3 +344,54 @@ def test_a_representative_week_keeps_its_ledger(reset_backend):
     inputs, vf, ledger, res = _ledger(n, cfg)
     assert res.periods["_"].ok is True, _checks(res, "_")
     assert "demand_months_not_established" in ledger.flags
+
+
+@pytest.mark.live_solve
+def test_the_export_split_counts_electric_generation_not_fuel(reset_backend):
+    """IC P3 gate condition 2: a gas supply behind a CHP Link is fuel, not
+    generation — its MW of gas never dilute the export split, and the CHP's
+    electric output (bus1) counts, keyed by the Link. The `as_consumed_btm`
+    PPA's share uses the same definition (`lp_bindings.site_generators` +
+    `site_generating_links`)."""
+    from services.commercial import lp_bindings as _lp
+    from models.commercial import CommercialConfig
+
+    n = _network()
+    n.add("Bus", "gas", carrier="gas")
+    n.add("Generator", "gas_supply", bus="gas", carrier="gas", p_nom=100.0, marginal_cost=2.0)
+    n.add("Link", "chp", bus0="gas", bus1="site", carrier="CHP", p_nom=40.0, efficiency=0.4)
+    btm = {"type": "ppa", "id": "btm", "kind": "as_consumed_btm", "price": 20.0,
+           "tenor_years": 10, "seller": "developer", "buyer": "site", "asset_ids": ["pv"]}
+    vf = {**copy.deepcopy(VF), "export_revenue_to": "asset_owner",
+          "participants": [{"id": "site", "name": "Site", "role": "offtaker"},
+                           {"id": "developer", "name": "Dev", "role": "developer"}],
+          "asset_owners": [{"asset_id": "pv", "component": "Generator",
+                            "owner": "developer"}]}
+    n, cfg = _solve(n, _commercial(vf, contracts=[LEASE, btm]))
+    parsed = CommercialConfig.model_validate(cfg.commercial)
+    assert "gas_supply" not in _lp.site_generators(n, parsed)
+    assert _lp.site_generating_links(n, parsed) == ["chp"]
+    inputs, _vf, ledger, res = _ledger(n, cfg)
+    assert res.periods["_"].ok is True, _checks(res, "_")
+
+    w = n.snapshot_weightings.objective.to_numpy(float)
+    exp_mw = n.links_t.p0["export"].to_numpy(float)
+    price = n.links_t["ic_export_price"]["export"].to_numpy(float)
+    pv = np.clip(n.generators_t.p["pv"].to_numpy(float), 0, None)
+    chp = np.clip(-n.links_t.p1["chp"].to_numpy(float), 0, None)
+    tot = pv + chp
+    share = np.where(tot > 0, pv / np.where(tot > 0, tot, 1.0), 0.0)
+    both = (exp_mw > 1e-6) & (pv > 1e-6) & (chp > 1e-6)
+    assert both.sum() > 10                                  # the case really arises
+    hand = float((w * exp_mw * price * share).sum())
+    lines = ledger.periods["_"]
+    got = sum(ln.amount for ln in lines if ln.source == "export_price" and ln.payee == "developer")
+    assert got == pytest.approx(hand, abs=0.005)
+    # The CHP's part is the site's (it owns the Link), keyed by the Link.
+    site_part = sum(ln.amount for ln in lines if ln.source == "export_price" and ln.payee == "site")
+    assert site_part == pytest.approx(float((w * exp_mw * price).sum()) - hand, abs=0.005)
+
+    # The PPA: pv's consumed MWh = pv − its share of the export, × 20.
+    hand_ppa = 20.0 * float((w * (pv - np.minimum(pv, np.clip(exp_mw, 0, None) * share))).sum())
+    ppa = [ln for ln in lines if ln.contract_id == "btm"]
+    assert ppa and sum(ln.amount for ln in ppa) == pytest.approx(hand_ppa, abs=0.005)

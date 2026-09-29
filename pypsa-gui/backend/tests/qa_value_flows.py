@@ -283,6 +283,9 @@ def _four_checks(label: str, client, n, cfg, payload: dict) -> None:
     if payload.get("status") != "ok":
         return
     need = ("double_entry", "internal_nets_to_zero", "coverage", "reconciliation")
+    # `check_conservation` is ok over no periods: never pass on an empty ledger.
+    _step(f"{label}: the ledger has periods with lines", bool(payload["periods"]) and all(
+        per.get("lines") for per in payload["periods"].values()))
     for p, per in payload["periods"].items():
         checks = {c["name"]: c for c in per["conservation"]["checks"]}
         bad = {k: checks.get(k, {}).get("detail") for k in need
@@ -497,9 +500,12 @@ def scenario_b() -> None:
               {ln["asset"] for ln in costs} == {"pv", "bess"}
               and all(ln["payer"] == "SunCo" for ln in costs),
               f"{sorted({(ln['asset'], ln['payer']) for ln in costs})}")
-        pv2 = [ln for ln in lines if ln["source"] == "asset" and ln["asset"] == "pv2"]
-        _step("B: the site's own PV (pv2) stays with the site",
-              all(ln["payer"] == "site" for ln in pv2))
+        # pv2 has no cost lines (no capital or marginal cost); what it owns is
+        # its export share, which goes to the site (never vacuous: > 0).
+        to_site = sum(ln["amount"] for ln in lines if ln["source"] == "export_price"
+                      and ln["payee"] == "site")
+        _step("B: the site's own PV (pv2) earns its export share for the site",
+              to_site > 1.0, f"{to_site:.2f}")
         imports = [ln for ln in lines if ln["source"] == "bill" and ln["tariff_item"] != "feed_in"]
         _step("B: the site pays every import bill line",
               bool(imports) and all(ln["payer"] == "site" for ln in imports))

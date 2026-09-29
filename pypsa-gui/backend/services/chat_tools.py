@@ -758,19 +758,25 @@ def _value_flows_summary(payload: dict) -> dict:
 
 
 def _value_flow_lines_page(payload: dict, offset: int, limit: int | None) -> dict:
+    # Party ids, asset / contract names and flags are user text of any length:
+    # cut so one row always fits a page (the summary's 160-character rule;
+    # IC P3 gate note).
+    def cut(v, n: int = 80):
+        return None if v is None else str(v)[:n]
+
     rows = []
     for p, per in (payload.get("periods") or {}).items():
         for ln in per.get("lines") or []:
-            row = {"period": p, "payer": ln.get("payer"), "payee": ln.get("payee"),
+            row = {"period": p, "payer": cut(ln.get("payer")), "payee": cut(ln.get("payee")),
                    "stream": ln.get("value_stream"), "amount": _eur(ln.get("amount")),
-                   "source": f"{ln.get('source')}:{ln.get('source_id')}"}
+                   "source": cut(f"{ln.get('source')}:{ln.get('source_id')}", 120)}
             for key in ("contract_id", "tariff_item", "asset"):
                 if ln.get(key):
-                    row[key] = ln[key]
+                    row[key] = cut(ln[key])
             if ln.get("basis") and ln["basis"] != "cash":
                 row["basis"] = ln["basis"]
             if ln.get("flags"):
-                row["flags"] = ln["flags"][:4]
+                row["flags"] = [cut(f, 160) for f in ln["flags"][:4]]
             rows.append(row)
     page = _paginate(rows, offset, limit)
     page["status"] = "ok"

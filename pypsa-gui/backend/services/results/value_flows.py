@@ -192,10 +192,24 @@ def _export_revenue(n, parsed) -> tuple[dict[str, float | None], dict | None]:
 
 def _export_split(n, parsed, sides, bill, export_intervals, flags: list[str]) -> dict | None:
     """Per period and source, the export revenue split pro rata to each site-side
-    generator's output per interval (key (component, name)); intervals with no
-    site generation go to key None."""
-    gens = [g for g in n.generators.index if str(n.generators.at[g, "bus"]) in sides.site]
-    gp = n.generators_t.p.reindex(columns=gens).to_numpy(dtype=float) if gens else None
+    generator's ELECTRIC output per interval (key (component, name)); intervals
+    with no site generation go to key None. Generation is one definition with
+    the `as_consumed_btm` PPA's share (IC P3 gate, condition 2): the site's
+    Generators without fuel supplies (`lp_bindings.site_generators`) and the
+    bus1 output of its converting Links (`site_generating_links`, a CHP).
+    Storage discharge is not generation: its export stays the site's."""
+    from services.commercial import lp_bindings as _lp
+
+    gens = _lp.site_generators(n, parsed)
+    links = _lp.site_generating_links(n, parsed)
+    keys = [("Generator", g) for g in gens] + [("Link", k) for k in links]
+    cols = []
+    if gens:
+        cols.append(n.generators_t.p.reindex(columns=gens).to_numpy(dtype=float))
+    if links:
+        p1 = n.links_t.p1.reindex(columns=links).to_numpy(dtype=float)
+        cols.append(-p1)
+    gp = np.hstack(cols) if cols else None
     rev_items = [it.id for it in (parsed.import_tariff.items if parsed.import_tariff else [])
                  if it.kind == "energy" and (it.direction == "revenue"
                                              or it.measured_on == "export")]
@@ -228,10 +242,10 @@ def _export_split(n, parsed, sides, bill, export_intervals, flags: list[str]) ->
                 tot = g.sum(axis=1)
                 has = tot > 0
                 share = np.where(has[:, None], g / np.where(has, tot, 1.0)[:, None], 0.0)
-                for j, name in enumerate(gens):
+                for j, key in enumerate(keys):
                     v = float((vals * share[:, j]).sum())
                     if v:
-                        parts[("Generator", str(name))] = v
+                        parts[key] = v
                 rest = float(vals[~has].sum())
             else:
                 rest = float(vals.sum())

@@ -10,7 +10,7 @@
 |---|---|---|
 | 3.0 | Value-flow config (participants, externals, assignments, allocation key), its route with If-Match, hashing, FE types | conditions → **PASS** |
 | 3.1 | The ledger: sources with legs, lines, coverage, the four conservation checks, reconciliation to `cost_breakdown` through the bridge terms | conditions → conditions → **PASS** (round 3) |
-| 3.2 | Templates (`single_owner`, `btm_ppa`, `landlord_tenant`, `dso_developer`, `energy_hub`), drafts with open money fields, edited / stale / outdated status | FAIL → conditions → **PASS** (closed) |
+| 3.2 | Templates (`single_owner`, `btm_ppa`, `landlord_tenant`, `dso_developer`, `energy_hub`), drafts with open money fields, edited / stale / outdated status | FAIL → **PASS WITH CONDITIONS**, closed (binding #10 fixed and tested; no reviewer round 3) |
 | 3.3a | Energy-hub allocation: metered energy per member, peak items, the four keys, floor source month | conditions → FAIL → **PASS** (round 3) |
 | 3.3b | Group net-import LP variable (P2 carry-in): a net cost energy item priced on net import | conditions → **PASS** |
 | 3.4 | `GET /api/results/value_flows` (the 31st result kind); chat `get_results` detail / paging and `define_participants`; five error kinds | conditions → FAIL → **PASS** (round 3); **ADR-0002 live probe owed** |
@@ -26,7 +26,7 @@ Each round's findings, and what was done about them, are in the plan under the W
 
 | Check | Result |
 |---|---|
-| `tests/qa_value_flows.py` | **222/222** (35 s). See "The driver" below. |
+| `tests/qa_value_flows.py` | **235/235** (33 s) after the assessor's hardening (222/222 at bfb5bef). See "The driver" below. |
 | All QA drivers (`tests/run_qa_drivers.py`) | **25/25 passed** (includes `qa_value_flows`, `qa_billing_contracts`, `qa_commercial_lp`) |
 | Full backend suite (`-m "not slow"`, Python 3.12 venv) | _pending_ |
 | Frontend `vitest run` (on 2b908e3) | **248 files, 2,753 tests passed** |
@@ -39,7 +39,12 @@ solver-config route → PUT value flows (If-Match) → solve → GET `/api/resul
 asserts status ok, `conservation_ok` True, all four checks in every period, the route's reconciliation
 difference under a cent, and an independent reconciliation the driver rebuilds from
 `/results/cost_breakdown`, the LP rows, `/results/billing` and the network's export revenue — equal to both
-the ledger side and the route's bridge figure.
+the ledger side and the route's bridge figure. That bridge is independent of the ledger's own
+reconciliation in how each party is classed (participant or external), in the `cost_breakdown` total and
+in the export revenue (computed from the network's arrays); it SHARES the bill, the settlement and
+`commercial_cost_terms` with the product, so an error there would pass both sides alike (P2's gate owns
+those). Every case also asserts the ledger has periods with lines (the conservation check is ok over no
+periods; assessor note).
 
 - **A. V1 `single_owner`:** the grid-supply commodity line = Σ w·p·mc (114,451.41); the fee line = the
   `network_capacity` row (30,636.99).
@@ -52,8 +57,10 @@ the ledger side and the route's bridge figure.
 - **D. V4 `dso_developer`:** DSR dispatches 437.5 MWh; DSO → developer availability (38.36) and activation
   (43,750.00) equal the hand formula.
 - **E. `energy_hub`** under each of the four keys (switched through the route, no re-solve): the checks
-  and the rebuilt reconciliation hold, every shared item is split in full, each line's method is right,
-  keyed shares = amount × key / Σ key to the cent.
+  and the rebuilt reconciliation hold, every shared item is split in full, each line's method is right
+  (metered, peak or keyed). Hand shares (amount × key / Σ key, to the cent) are asserted through the
+  routes for `contracted_capacity` and `fixed_shares` only; the `energy` and `peak_contribution` hand
+  shares are F's, on the V5 fixture's `LedgerInputs` (not through the routes).
 - **F. V5 fixture:** the group bill and per-member metered energy match the worked arithmetic; all 21
   hand shares to the cent under each key; the ledger passes every check.
 - **G. V6 group net import:** the `energy_net_group` row = the billed `net_energy` (1,240,541.71); the
@@ -62,19 +69,64 @@ the ledger side and the route's bridge figure.
   dropped BESS cost source each turn coverage, reconciliation and `ok` False.
 - **I. Bundle round trip** of the V2 project: after save → load and after bundle export → import,
   `value_flows`, the ledger (18 lines) and the flags are identical.
+- **V1b** (every costed asset in the ledger — a costed Line, a Transformer, an island bus) is covered by the
+  suite, not the driver: `test_value_flow_reconciliation.py::test_v1b_*`, flat and multi-period. Its "bus
+  without a price column" leg does not apply to the ledger, which lists assets from `n.statistics`, not
+  `asset_economics`.
 
 ## Findings and carried items
 
 - **ADR-0002 live-API probe: NOT RUN (owed, with P2's).** This environment has no provider credentials
   (no Anthropic key, no local Ollama). P3's chat changes (`get_results` with `result_kind="value_flows"`,
   `detail` / `offset` / `limit`; `define_participants`) are exercised in process through `DISPATCHERS` and
-  the guard suites, not against a live API. Before the chat surface is called done, someone with
-  credentials runs the P2 procedure (findings `2026-09-29-ic-p2-billing-contracts.md`) plus one P3 turn:
-  on a solved project with a commercial config, ask the assistant to set up participants from the
-  `single_owner` template and then show the value flows; expected calls `define_participants`
-  (`template`) and `get_results` (`value_flows`); expected result a stored config (the value-flows route
-  reads status ok) and a summary under 4,000 characters. Record probe name, date, model and outcome here
-  and in the plan.
+  the guard suites, not against a live API. **The chat surface is not done until this is run.** Someone
+  with credentials runs, at a head that includes P3, and records (probe name, date, model, the expected
+  and actual calls, the outcome and the transcript) here and in the plan:
+  1. **The manifest probe** (P2 step 1, findings `2026-09-29-ic-p2-billing-contracts.md`) — it now carries
+     `define_participants` and `get_results`' `detail` / `offset` / `limit`; a vendor rejecting that schema
+     breaks every `get_results` call. Then P2's steps 2 (Library tools) and 3 (the rename turns).
+  2. **Template turn:** on a solved project with a commercial config (`poc_link` set), ask the assistant
+     to set up participants from the `single_owner` template and show the value flows. Expected:
+     `define_participants(template="single_owner")` → saved; `get_results("value_flows")` → status ok,
+     a summary under 4,000 characters.
+  3. **Drafts turn:** on a project with no PPA, ask for the `btm_ppa` template. Expected:
+     `{saved: false, status: "drafts_need_pricing"}`, nothing stored (the value-flows route unchanged),
+     and the assistant asking for the missing prices rather than inventing them.
+  4. **Replace-guard turn:** with `single_owner` stored, ask to switch to `landlord_tenant`. Expected:
+     `value_flows_would_be_replaced`, the assistant asking the user; on "yes", the call again with
+     `replace=true`.
+  5. **Lines turn:** ask for the value-flow lines. Expected: `get_results("value_flows", detail="lines")`,
+     then a second page with the returned `next_offset`.
+- **The export split's generation rule (gate condition 2, fixed).** Under `export_revenue_to=
+  "asset_owner"` the export revenue is split per interval pro rata to the ELECTRIC generation behind the
+  meter: the site's Generators without fuel supplies (`lp_bindings.site_generators`, which now excludes
+  `participants.is_fuel_supply`) plus the bus1 output of its converting Links (`site_generating_links`: a
+  CHP or fuel cell — bus0 not electric, bus1 electric, both site-side), keyed by the Link. Storage
+  discharge is not generation: its export share stays the site's (an EaaS BESS's export goes to the
+  site). The `as_consumed_btm` PPA's share (P2) uses the same definition. Before the fix a gas supply
+  behind a CHP was weighted by its MW of gas and the CHP's output ignored — the assessor's probe gave the
+  developer 21,825.92 instead of 26,368.16 with `conservation_ok` True (internal payees; checks 3–4
+  cannot see it). Test: `test_value_flow_reconciliation.py::test_the_export_split_counts_electric_
+  generation_not_fuel` (fails on the old code). The same `site_generators` feeds the preflight, the CFE
+  score and the dispatch-PPA check: a fuel supply is no longer "on-site generation" there either.
+- **Accepted residues and deviations (from the WP records):**
+  - WP3.1 R4: with a meter bypass every asset carries `meter_bypass` (placement right, preflight warns;
+    noise only).
+  - WP3.2 INFO: `_contract_parties`, `same_party` and the models are outside the templates' `code_sha`.
+  - WP3.2 M5 deviation: `btm_ppa` drafts no EaaS (the developer owns only the PPA's assets).
+  - WP3.3a deviations: per-kWh import levies and certificates are metered like energy items; every group
+    member must be a hub member when a key is set; a hub member that is `site_party` gets no line to itself.
+  - WP3.3b INFO: tiered and capacity net items on a group are outside the LP (`not_in_lp`), never priced
+    twice; a net revenue item on a group is refused.
+  - WP3.4 R2-3: a CfD's direction is nominal (net is null either way); the sleeving party is not named
+    on an unsettled line.
+  - Per-asset export parts as line metadata: deferred (WP3.4 → WP3.6 → P4 if the returns need them).
+  - WP3.6: the contracted-MW input has no `min` (the server refuses 0).
+  - WP3.7b round 3 LOW: tariff rows are keyed by index (a removed period's invalid text can show on the
+    next row; Save stays blocked).
+  - The template and designer routes check "solve in flight" without the lock (WP3.2, accepted).
+  - Chat lines paging: party ids, asset / contract names and flags are cut (80 / 160 characters) so one
+    row always fits a page (assessor note, fixed and tested).
 - **Recorded follow-ups (not blocking):**
   - `replacesInline` trusts the solver-config PUT's ref check; a hand-edited `solver_config.json` is not
     re-checked on load (WP3.7a round 2 INFO) — P4 hygiene.

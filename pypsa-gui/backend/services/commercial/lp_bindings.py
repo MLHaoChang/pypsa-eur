@@ -557,10 +557,45 @@ def _meter_sides(n, cfg: CommercialConfig) -> tuple[set[str], set[str]]:
 
 
 def site_generators(n, cfg: CommercialConfig) -> list[str]:
-    """The Generators BEHIND the commercial meter (`_meter_sides`). One
-    definition for the preflight and the settlement inputs (review 2.2c #3)."""
+    """The Generators BEHIND the commercial meter (`_meter_sides`) that make
+    ELECTRICITY. One definition for the preflight, the settlement inputs and
+    the ledger's export split (review 2.2c #3). A fuel supply (gas behind a CHP
+    Link, `participants.is_fuel_supply`) is not generation: its MW are fuel
+    (IC P3 gate, condition 2); the Link it feeds is (`site_generating_links`)."""
+    from services.commercial.participants import is_fuel_supply
+
     seen, _ = _meter_sides(n, cfg)
-    return [str(g) for g in n.generators.index if str(n.generators.at[g, "bus"]) in seen]
+    return [str(g) for g in n.generators.index if str(n.generators.at[g, "bus"]) in seen
+            and not is_fuel_supply(n, cfg, str(g))]
+
+
+def site_generating_links(n, cfg: CommercialConfig) -> list[str]:
+    """Links behind the meter that CONVERT a non-electric input into site
+    electricity (a CHP or fuel cell: bus0 not electric, bus1 electric, both on
+    the site side). Their bus1 output counts as site generation beside
+    `site_generators`; an electric-to-electric Link (a feeder, the PoC) does not.
+    Storage is never generation here: a StorageUnit or Store discharging moves
+    energy the site already had (IC P3 gate, condition 2)."""
+    from services.commercial.participants import _ELECTRIC
+
+    seen, _ = _meter_sides(n, cfg)
+    meter = set(import_links(cfg)) | ({cfg.export_link} if cfg.export_link else set())
+    carriers = n.buses["carrier"] if "carrier" in n.buses.columns else None
+    poc_bus = str(n.links.at[cfg.poc_link, "bus1"]) if cfg.poc_link in n.links.index else None
+    site_carrier = str(carriers.get(poc_bus, "")) if (carriers is not None and poc_bus) else ""
+
+    def electric(bus: str) -> bool:
+        c = str(carriers.get(bus, "")) if carriers is not None else ""
+        return c.strip().casefold() in _ELECTRIC or c == site_carrier
+
+    out = []
+    for name in n.links.index:
+        if name in meter:
+            continue
+        b0, b1 = str(n.links.at[name, "bus0"]), str(n.links.at[name, "bus1"])
+        if b0 in seen and b1 in seen and not electric(b0) and electric(b1):
+            out.append(str(name))
+    return out
 
 
 def meter_bypass_buses(n, cfg: CommercialConfig) -> list[str]:

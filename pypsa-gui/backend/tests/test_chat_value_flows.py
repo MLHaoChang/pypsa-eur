@@ -235,6 +235,20 @@ def test_the_lines_are_paged_under_the_cap():
     assert nxt["items"]
 
 
+def test_a_line_with_huge_ids_and_flags_still_fits_a_page():
+    """IC P3 gate note: party ids and flags are unbounded user text; a single
+    row is cut so a page never degrades to a preview."""
+    payload = _payload(n_lines=3)
+    for ln in payload["periods"]["_"]["lines"]:
+        ln.update(payer="p" * 5000, payee="q" * 5000, asset="a" * 5000,
+                  flags=["f" * 5000] * 6)
+    page = chat_tools._value_flow_lines_page(payload, 0, None)
+    row = page["items"][0]
+    assert page["returned"] >= 2 and len(json.dumps(page, default=str)) < _CAP
+    assert len(row["payer"]) == 80 and len(row["asset"]) == 80
+    assert len(row["flags"]) == 4 and all(len(f) == 160 for f in row["flags"])
+
+
 @pytest.mark.live_solve
 def test_get_results_value_flows_on_a_solved_site(reset_backend):
     from tests.test_value_flow_reconciliation import _commercial, _network, _solve
