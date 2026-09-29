@@ -908,6 +908,12 @@ tariff flags `preview_contract_problem:commercial.contract_tariff_mismatch`; not
   stable id with the current label for the banner (tested).
 - R2 #3 (taken): "tier rates per period" cannot be turned off while the periods' rates differ
   (tested on H3). R2 #4 (taken): preview notes carry their period and are de-duplicated.
+
+**WP3.7b review round 3 (14b7974): PASS.** R2 #1–#4 verified (live: an in-flight solve → 409 in
+0.0 s; a held lock without a solve → 409 after the 2 s wait; the lock released after 200 / 422 /
+409; a re-entrant call → 200). LOW notes: the disabled "tier rates per period" now says why
+(`aria-describedby`); a removed period's invalid text can show on the next row (Save stays blocked;
+rows are keyed by index — left). **WP3.7b closed.**
 ## WP3.7c Contracts and connection-agreement editors
 
 Typed forms per contract type (P2 models, allowed pricing combinations; party pickers from participants +
@@ -916,6 +922,27 @@ builder's item editor, `available_from`, group); Library pins shown. **Tests:** 
 P2 model; invalid combinations surface the 422; a11y.
 
 ---
+
+**WP3.7c implementation.**
+- `contractModel.ts`: `CONTRACT_FIELDS` — one field spec per P2 type (ppa, cfd, dr, lease, eaas,
+  retail: kind, parties, assets / loads, prices, pricing mode, reference series, indexation, floor /
+  cap, volume cap, baseload MW, sleeving, DR limits, fees, retail tariff id, base year), with `when`
+  for fields a mode enables (the premium under `market_plus_premium`, sleeving under `sleeved`,
+  baseload MW under `baseload`); `blankContract` (the site party as buyer / lessee / customer),
+  `setField` (a cleared optional field is removed — the model's default), `nextContractId`,
+  `contractErrors` (a solver-config 422 by the contract index its `loc` names).
+- `ContractsEditor.tsx` (the Investment tab's Contracts section): a generated form per contract (party
+  pickers: a `datalist` of the site party, participants, externals and every contract party; series
+  pickers from the Library; id lists), add / remove, "Save the contracts" through the solver-config
+  route (results, config and value flows invalidated); the Library pin shown ("copied from Library
+  item … v…"); the connection agreement — kind, import / export caps, envelope series, curtailment
+  hours and compensation, available_from, group, the capacity fee through the tariff builder's
+  `ItemEditor` — saved or removed. Allowed combinations are the server's to judge (its 422 at the
+  contract).
+- Tests: `ContractsEditor.test.tsx` (5: all six types round-trip unchanged with the pin shown and
+  mode-dependent fields; an edit writes the field and a cleared optional one is removed; add a
+  contract; a 422 at its contract only; the connection agreement with its capacity fee and envelope;
+  `expectAllButtonsNamed`). Full vitest 2,734 passed.
 
 ## Phase 3 e2e QA gate
 

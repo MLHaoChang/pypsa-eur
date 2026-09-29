@@ -16,6 +16,7 @@ import ValueFlowsView from './investment/ValueFlowsView'
 import ParticipantsDesigner from './investment/ParticipantsDesigner'
 import TariffBuilder from './investment/TariffBuilder'
 import LibraryBrowser from './investment/LibraryBrowser'
+import ContractsEditor from './investment/ContractsEditor'
 import { blankTariff } from './investment/tariffModel'
 
 const SECTIONS = [
@@ -198,9 +199,7 @@ export default function InvestmentTab() {
         )}
         {section === 'tariff' && <TariffSection />}
         {section === 'library' && <LibraryBrowser />}
-        {section === 'contracts' && (
-          <p className="text-[11px] text-muted py-2">This section is not available yet.</p>
-        )}
+        {section === 'contracts' && <ContractsEditor />}
       </div>
     </div>
   )

@@ -143,7 +143,7 @@ function PeriodRow({ p, i, label, windowed, set, remove }: {
   )
 }
 
-function ItemEditor({ item, idx, set, remove, errors }: {
+export function ItemEditor({ item, idx, set, remove, errors }: {
   item: Item; idx: number; set: (it: Item) => void; remove: () => void; errors: string[]
 }) {
   const label = `Item ${item.id || idx + 1}`
@@ -225,10 +225,10 @@ function ItemEditor({ item, idx, set, remove, errors }: {
               periods: item.periods.map(p => (p.tier_rates ? { ...p, tier_rates: [...p.tier_rates, 0] } : p)) })}>
               Add tier to {label}</button>
             {tiers.length > 0 && (
-              <label className="flex items-center gap-1"
-                     title={windowed && !sameTierRates(item) ? 'The periods have different tier rates; make them equal before using one set' : undefined}>
+              <label className="flex items-center gap-1">
                 <input type="checkbox" checked={windowed} aria-label={`${label} tier rates per period`}
                        disabled={windowed && !sameTierRates(item)}
+                       aria-describedby={windowed && !sameTierRates(item) ? `${label}-tr-why` : undefined}
                        onChange={e => {
                          if (e.target.checked) {
                            set({ ...item, periods: item.periods.map(p => ({ ...p, tier_rates: tiers.map(t => t.rate) })),
@@ -241,6 +241,10 @@ function ItemEditor({ item, idx, set, remove, errors }: {
                          }
                        }} />
                 tier rates per period
+                {windowed && !sameTierRates(item) && (
+                  <span id={`${label}-tr-why`} className="text-muted">
+                    (the periods' tier rates differ; make them equal to use one set)</span>
+                )}
               </label>
             )}
           </div>
