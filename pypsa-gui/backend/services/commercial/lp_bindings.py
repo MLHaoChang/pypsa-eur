@@ -479,13 +479,18 @@ def same_party(a: str | None, b: str | None) -> bool:
     return a is not None and b is not None and a.strip().casefold() == b.strip().casefold()
 
 
-def site_generators(n, cfg: CommercialConfig) -> list[str]:
-    """The Generators BEHIND the commercial meter: on buses reachable from the
-    import members' site side (bus1) without crossing an import or export
-    Link (lines, transformers and other Links connect). One definition for
-    the preflight and the settlement inputs (review 2.2c #3)."""
+def _meter_sides(n, cfg: CommercialConfig) -> tuple[set[str], set[str]]:
+    """(site-side buses, grid-side buses reached from them). The search runs
+    from the import members' site side (bus1) over lines, transformers and
+    Links other than the meter's; the meter's grid side (import members' bus0,
+    the export Link's bus1) is never entered (review 2.2c round 2 #2). A
+    grid-side bus the search reaches is a connection that bypasses the meter."""
     meter = set(import_links(cfg)) | ({cfg.export_link} if cfg.export_link else set())
     starts = [str(n.links.at[m, "bus1"]) for m in import_links(cfg) if m in n.links.index]
+    grid = {str(n.links.at[m, "bus0"]) for m in import_links(cfg) if m in n.links.index}
+    if cfg.export_link and cfg.export_link in n.links.index:
+        grid.add(str(n.links.at[cfg.export_link, "bus1"]))
+    grid -= set(starts)
     edges: dict[str, set[str]] = {}
 
     def join(a, b):
@@ -503,14 +508,29 @@ def site_generators(n, cfg: CommercialConfig) -> list[str]:
             buses = [str(row[c]).strip() for c in cols if str(row[c]).strip()]
             for x in buses[1:]:
                 join(buses[0], x)
-    seen, todo = set(), list(starts)
+    seen, bypass, todo = set(), set(), list(starts)
     while todo:
         b = todo.pop()
-        if b in seen:
+        if b in seen or b in bypass:
+            continue
+        if b in grid:
+            bypass.add(b)
             continue
         seen.add(b)
         todo.extend(edges.get(b, ()))
+    return seen, bypass
+
+
+def site_generators(n, cfg: CommercialConfig) -> list[str]:
+    """The Generators BEHIND the commercial meter (`_meter_sides`). One
+    definition for the preflight and the settlement inputs (review 2.2c #3)."""
+    seen, _ = _meter_sides(n, cfg)
     return [str(g) for g in n.generators.index if str(n.generators.at[g, "bus"]) in seen]
+
+
+def meter_bypass_buses(n, cfg: CommercialConfig) -> list[str]:
+    """Grid-side buses reachable from the site side without the meter."""
+    return sorted(_meter_sides(n, cfg)[1])
 
 
 def contract_problems(n, cfg: CommercialConfig) -> list[tuple[str, str, bool]]:

@@ -25,6 +25,8 @@ stated before any solver time is spent.
     investment period's year) outside the tariff's `valid_from` / `valid_to`.
   * `commercial.group_fee_bypass` (warning): a capacity fee on `poc_link`
     while another group member is extendable (it takes capacity fee-free).
+  * `commercial.meter_bypass` (warning, P2 WP2.2c round 2): a grid-side bus
+    of the meter is reachable from the site without the import or export Link.
   * `commercial.preflight_incomplete` (warning): a check after binding raised;
     validation still returns, the solve applies its own checks.
 
@@ -170,6 +172,15 @@ def _contract_warnings(n, cfg, dsr: dict) -> list[tuple[str, str, str, str, str]
     WP1.8's deviation): settlement-only contracts naming what the network
     cannot settle (warnings here, refused at binding), and double counts."""
     out: list[tuple[str, str, str, str, str]] = []
+    bypass = _lp.meter_bypass_buses(n, cfg)
+    if bypass:
+        # Power through such a connection is neither billed nor settled, and
+        # the grid side's generators are not on-site (review 2.2c round 2 #2).
+        out.append(("warning", "commercial.meter_bypass", "Bus", bypass[0],
+                    f"Bus(es) {bypass} on the grid side of the commercial meter are reachable "
+                    "from the site without passing the import or export Link: power through "
+                    "that connection is not billed, and generators beyond it are not treated "
+                    "as on-site."))
     for code, msg, dispatch in _lp.contract_problems(n, cfg):
         if not dispatch:
             out.append(("warning", code, "", "", f"{msg}: its settlement is not established"))

@@ -882,6 +882,9 @@ Files: `models/commercial.py` (`CommercialConfig.contracts: list[Contract]` disc
   8. LOW: retail with no import tariff passed. → `contract_tariff_mismatch`.
 
   Regression: 548 passed across the commercial, contract, library, LP, reconciliation and validation suites.
+- **WP2.2c review round 2 → PASS WITH CONDITIONS; both conditions fixed:**
+  1. MEDIUM (latent): `contracts_state` compared under the current hash recipe, not the record's. → `contracts_record(cfg, version)` hashes under recipe `version`, and `contracts_state` uses `version_of(record)`. Tested: a recipe-1 record matches its config, and a recipe-2 hash stamped v1 is drift.
+  2. LOW/MEDIUM: `site_generators` walked through any unmetered connection into the grid side. → `_meter_sides` never enters the meter's grid-side buses (import members' bus0, the export Link's bus1). The new `meter_bypass_buses` names the grid-side buses it reached, and preflight warns `commercial.meter_bypass`. Tested with a site–grid Line.
 
 ## WP2.2d `changes_dispatch` PPA in the LP (buyer case only)
 

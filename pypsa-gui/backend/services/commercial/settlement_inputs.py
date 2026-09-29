@@ -200,14 +200,17 @@ install_log_filter()  # every loader (compare, projects, the runtime path) from 
 META_CONTRACTS = "ic_contracts"   # legacy key of the pre-review solve record
 
 
-def contracts_record(cfg) -> dict:
-    """The contracts' content hash — order-insensitive (sorted by id) and with
-    `site_party` (it decides DR's payee) — and their ids."""
+def contracts_record(cfg, version: int | None = None) -> dict:
+    """The contracts' content hash under hash recipe `version` (default: the
+    current one) — order-insensitive (sorted by id) and with `site_party` (it
+    decides DR's payee) — and their ids."""
     from services.commercial import hashing as _H
 
+    version = _H.HASH_VERSION if version is None else int(version)
     ordered = sorted(cfg.contracts, key=lambda c: c.id)
-    payload = {"contracts": _H.canonical(ordered), "site_party": cfg.site_party}
-    return {"hash": _H.digest(payload), "hash_version": _H.HASH_VERSION,
+    payload = {"contracts": _H.canonical(ordered, version=version),
+               "site_party": cfg.site_party}
+    return {"hash": _H.digest(payload, version=version), "hash_version": version,
             "ids": [c.id for c in ordered]}
 
 
@@ -215,6 +218,11 @@ def contracts_state(record: dict | None, cfg) -> str | None:
     """None — `record` (a settlement's) is the config's contracts; "config" —
     they changed since (`config_changed_since_solve` on that settlement);
     "not_recorded" — no record while the config names contracts."""
+    from services.commercial import hashing as _H
+
     if not record:
         return "not_recorded" if cfg.contracts else None
-    return None if record.get("hash") == contracts_record(cfg)["hash"] else "config"
+    # Compared under the recipe the record was made with (review 2.2c round 2
+    # #1): a recipe bump must not turn every stored settlement into drift.
+    wanted = contracts_record(cfg, _H.version_of(record))["hash"]
+    return None if record.get("hash") == wanted else "config"

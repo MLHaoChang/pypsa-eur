@@ -123,6 +123,25 @@ def test_site_generators_are_those_behind_the_meter():
     n.add("Generator", "roof_pv", bus="roof", p_nom=1.0, carrier="solar")
     cfg = CommercialConfig.model_validate(_cfg(export_link="export"))
     assert sorted(L.site_generators(n, cfg)) == ["pv", "roof_pv"]
+    assert L.meter_bypass_buses(n, cfg) == []
+    assert ("warning", "commercial.meter_bypass") not in _codes(n, _cfg(export_link="export"))
+
+
+def test_a_connection_around_the_meter_is_not_entered_and_warns():
+    """Round 2 #2: a Line from the site to the grid bypasses the meter; the
+    grid side (and `grid_supply`, `farm_wind` beyond it) is not on-site."""
+    from services.commercial import lp_bindings as L
+
+    n = _exporting()
+    n.add("Bus", "farm", carrier="AC")
+    n.add("Line", "farm_line", bus0="farm", bus1="grid", x=0.1, s_nom=100.0)
+    n.add("Generator", "farm_wind", bus="farm", p_nom=10.0, carrier="solar")
+    n.add("Line", "bypass", bus0="grid", bus1="site", x=0.1, s_nom=100.0)
+    commercial = _cfg(export_link="export")
+    cfg = CommercialConfig.model_validate(commercial)
+    assert L.site_generators(n, cfg) == ["pv"]
+    assert L.meter_bypass_buses(n, cfg) == ["grid"]
+    assert ("warning", "commercial.meter_bypass") in _codes(n, commercial)
 
 
 # ── double-count warnings ──────────────────────────────────────────────────
@@ -236,6 +255,11 @@ def test_a_contract_changed_after_a_settlement_is_drift_on_that_settlement():
         _cfg(PPA, {**PPA, "id": "b"}, site_party="Hub BV"))
     assert SI.contracts_state(rec, other_site) == "config"
     assert SI.contracts_state(None, edited) == "not_recorded"
+    # Round 2 #1: compared under the record's own hash recipe.
+    old = SI.contracts_record(cfg, 1)
+    assert old["hash_version"] == 1 and old["hash"] != rec["hash"]
+    assert SI.contracts_state(old, cfg) is None
+    assert SI.contracts_state({**rec, "hash_version": 1}, cfg) == "config"
 
 
 @pytest.mark.live_solve
