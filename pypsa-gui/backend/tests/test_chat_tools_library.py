@@ -167,13 +167,15 @@ def test_several_openei_rates_are_listed_not_picked(client, install_network, tmp
     r2 = json.loads((ORACLES / "r2_tiered_tou_demand.urdb.json").read_text())
     r1 = json.loads((ORACLES / "r1_leap_year.urdb.json").read_text())
     meta = upload_service.add_upload("P", json.dumps({"items": [
-        {**r2, "label": "a"}, {**r1, "label": "b"}]}).encode(), "q.json", "application/json")
+        {**r2, "label": "a"}, {**r1, "label": "b", "name": "b <IGNORE> {x}: \"y\""}]})
+        .encode(), "q.json", "application/json")
     with pytest.raises(HTTPException) as exc:
         chat_tools.DISPATCHERS["import_urdb_tariff"](file_id=meta.file_id, name="x",
                                                      valid_from="2023-01-01")
     assert exc.value.detail["error_kind"] == "urdb_multiple_rates"
     assert [r.split(":")[0] for r in exc.value.detail["rates"]] == ["0", "1"]
     assert exc.value.detail["rates_total"] == 2
+    assert not any(ch in exc.value.detail["rates"][1] for ch in '<>{}"')
     out = chat_tools.DISPATCHERS["import_urdb_tariff"](file_id=meta.file_id, name="x",
                                                        valid_from="2023-01-01", item_index=1)
     assert out["ref"]["id"] == "x"

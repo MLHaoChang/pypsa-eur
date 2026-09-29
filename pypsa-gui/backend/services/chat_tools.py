@@ -1351,6 +1351,14 @@ _LIBRARY_ERROR_KINDS = (
 _LIBRARY_CODES = {d["error_kind"]: d["error_kind"] for d in _LIBRARY_ERROR_KINDS}
 
 
+def _safe_text(value, limit: int = 60) -> str:
+    """Free text from an uploaded file (a rate's name) as the model may see it
+    in an error: printable word characters and spaces only (round 3)."""
+    import re as _re
+
+    return _re.sub(r"[^\w .,()/-]", "_", str(value))[:limit]
+
+
 def _fit(entries: list[str], budget: int = _LIBRARY_ERROR_BUDGET) -> list[str]:
     out, used = [], 0
     for e in entries:
@@ -1460,7 +1468,7 @@ def _urdb_rate(data, item_index: int | None = None):
         if item_index is None and len(items) > 1:
             # A utility query returns many rates (superseded versions too):
             # never pick one silently (review M4).
-            listing = _fit([f"{i}: {str(r.get('name') or r.get('label'))[:60]} "
+            listing = _fit([f"{i}: {_safe_text(r.get('name') or r.get('label'))} "
                             f"({r.get('startdate')})"
                             for i, r in enumerate(items) if isinstance(r, dict)])
             raise HTTPException(status_code=422, detail={

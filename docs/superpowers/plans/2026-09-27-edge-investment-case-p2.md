@@ -1264,6 +1264,7 @@ routes; ADR-0002 live-API probe recorded.
     Opt-in `detail=full` on a single huge item can still hit the result cap (accepted).
   - M1 (live probe) stays a Phase 2 gate item.
   - `test_chat_tools_library.py` has 14 tests.
+- **WP2.4c review round 3 → PASS.** Probes: all six mapped kinds are derived and declared; a 40-rate listing is 799 characters and 31 refusals 941, both whole; the L5 switch and the L6 items hold. The LOW residual, rate names from the upload reaching the error unsanitized, is fixed (`_safe_text`, tested). **M1 (the ADR-0002 live probe) remains owed at the Phase 2 gate.**
 
 ## WP2.5 `compute_billing` / `compute_cfe_score` thin results
 
