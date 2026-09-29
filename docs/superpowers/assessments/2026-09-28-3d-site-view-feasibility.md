@@ -123,7 +123,7 @@ None of these is hard individually. Together they are the part of the work that 
 
 ## 8. Questions that change the design
 
-These are the decisions only the owner can make. Each one materially changes the spec.
+These are the decisions only the owner can make. Each one materially changes the spec. **Answered — see §8a.**
 
 1. **What is the 3D view *for* in an investment decision?** (a) Communicating the proposal to a customer; (b) checking physical feasibility — does 200 MWh of BESS fit on this plot next to the GIS hall; (c) an engineering hand-off. (a) needs looks; (b) needs correct footprints per MW and a boundary polygon, and is the only reading where 3D changes a number in the study; (c) is out of reach for a planning tool and is what Bentley sells. Which of the three is the acceptance test?
 2. **What is a campus in PyPSA terms?** One bus with everything attached, or a cluster (HV bus, MV bus, H2 bus, heat bus) that the site groups? And where does the boundary come from — user-drawn on the map, or seeded from OSM landuse / `power=substation` polygons?
@@ -136,6 +136,37 @@ These are the decisions only the owner can make. Each one materially changes the
 9. **Who owns the asset library and its fidelity?** Generic boxes labelled "BESS", or product-faithful Hitachi Energy transformers and GIS? The latter needs someone in the business to supply or approve models and raises the cost per asset type from hours to days.
 10. **Multi-user persistence.** The map view's layout is localStorage-only today, a known deferred item. The 3D placement must live server-side in the project bundle from day one. Agreed?
 11. **Priority against gridspine.** Is this a customer-date demo, or a product feature? A spike (§10, Phase 0) can be done in 1–2 weeks and answers half of these questions with something on screen.
+
+## 8a. Decisions (owner, 2026-09-28)
+
+The eleven questions above were put to the owner the same day, each with a
+recommended answer, and the recommendation was taken in every case. These are
+now inputs to the spike and the spec, not open items.
+
+| # | Decision |
+|---|---|
+| 1 | Purpose: **physical fit + communication.** The boundary polygon and a footprint-per-MW table drive a fits-or-not check on plot area; the same view is the customer visual. Engineering hand-off is out of scope. |
+| 2 | Campus: **a cluster of buses** (HV, MV, H2, heat) grouped by a site whose boundary the **user draws** on the Leaflet map; an OSM landuse / substation polygon may be offered as a starting shape. |
+| 3 | Transition: **portal.** Leaflet stays; a site polygon opens a self-contained three.js scene with a fly-in. Continuous zoom is not a requirement. |
+| 4 | Realism: **open data by default** (Overture / OSM / national LiDAR footprints on the Esri imagery already in use); Google photoreal tiles are a later, online-only, paid add-on. |
+| 5 | "Operate": **edit parameters + animate solved results** over snapshots via the existing `PropertiesPanel` and `CanvasResultsContext`. Nothing live or control-like. |
+| 6 | Placement: **fit check from footprints; positions cosmetic in v1**, stored server-side so cable lengths and constraints can be added later without a migration. |
+| 7 | Offline: **online-first, degraded offline.** Terrain and footprints are cached per project and shown on a plain ground; the Esri imagery texture is not cached (free-tier terms). |
+| 8 | Licences: **no paid services in v1.** Open data, Esri free-tier imagery with attribution, MIT/Apache libraries. (Whether Hitachi Energy holds an ArcGIS Online subscription was not confirmed; it would only matter for full-offline imagery.) |
+| 9 | Asset library: **parametric geometry from PyPSA parameters, plus 5–8 curated CC0/CC-BY hero models.** No product-faithful equipment, no business sign-off in the loop. |
+| 10 | Persistence: **server-side in the project bundle from day one**, with `layout.json`'s guarantees (versioned, carried by scenario copies, shared between users). |
+| 11 | Kick-off: **two-week spike, then spec.** |
+
+### Spike scope implied by the decisions
+
+Phase 0 in §10, made concrete by the answers above:
+
+- A fourth `CanvasView` value and a fourth switcher segment; the 3D canvas is the first `React.lazy` canvas, in its own Vite chunk (three, R3F, drei only — no Cesium, no MapLibre).
+- One hard-coded site: a bbox around one bus of a fixture project, a ground plane textured with the Esri World Imagery tiles the map already uses, no terrain, no footprints yet.
+- Parametric boxes for every component attached to that bus (BESS from `e_nom`, generators from `p_nom` by carrier, a transformer bay from `s_nom`), laid out on a grid — enough to see that the parameter → geometry table works.
+- Click → `setSelectedComponent({type, name})`; the existing `PropertiesPanel` opens; a parameter edit re-generates the geometry.
+- Runs in the packaged pywebview build.
+- Not in the spike: the site entity, the boundary polygon, the placement sidecar, drag-from-palette, the backend site-context service, results animation, hero models, offline. Those are Phase 1–2 and belong in the spec the spike informs.
 
 ## 9. Research detail
 
