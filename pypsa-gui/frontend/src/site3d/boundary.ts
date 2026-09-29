@@ -125,9 +125,16 @@ export function isValidBoundary(boundary: LngLatTuple[]): boolean {
     if (!Array.isArray(v) || v.length !== 2 || !Number.isFinite(v[0]) || !Number.isFinite(v[1])) return false
     if (v[0] < -180 || v[0] > 180 || v[1] < -90 || v[1] > 90) return false
     const next = boundary[(i + 1) % boundary.length]
-    if (v[0] === next[0] && v[1] === next[1]) return false
+    if (sameVertex(v, next)) return false
   }
   return true
+}
+
+/** ~1 cm at the equator: two clicks a pixel apart at any zoom are "the same corner". */
+export const VERTEX_EPS_DEG = 1e-7
+
+export function sameVertex(a: LngLatTuple, b: LngLatTuple, eps = VERTEX_EPS_DEG): boolean {
+  return Math.abs(a[0] - b[0]) <= eps && Math.abs(a[1] - b[1]) <= eps
 }
 
 /**
@@ -136,11 +143,20 @@ export function isValidBoundary(boundary: LngLatTuple[]): boolean {
  */
 export function dedupeTrailing(vertices: LngLatTuple[]): LngLatTuple[] {
   const out = vertices.slice()
-  while (out.length >= 2) {
-    const a = out[out.length - 1], b = out[out.length - 2]
-    if (a[0] === b[0] && a[1] === b[1]) out.pop()
-    else break
+  while (out.length >= 2 && sameVertex(out[out.length - 1], out[out.length - 2])) out.pop()
+  return out
+}
+
+/**
+ * Collapse consecutive duplicates ANYWHERE (a stray double-click mid-draft
+ * leaves them in the middle), and a closing vertex equal to the first.
+ */
+export function collapseDuplicateVertices(vertices: LngLatTuple[]): LngLatTuple[] {
+  const out: LngLatTuple[] = []
+  for (const v of vertices) {
+    if (out.length === 0 || !sameVertex(out[out.length - 1], v)) out.push(v)
   }
+  while (out.length >= 2 && sameVertex(out[0], out[out.length - 1])) out.pop()
   return out
 }
 

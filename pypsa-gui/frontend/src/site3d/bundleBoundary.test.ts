@@ -5,19 +5,25 @@
 // `@react-three/*`. A module that needs three (raycast, placement math,
 // context geometry) is imported by SiteCanvas only and is not on this list.
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-const MAIN_BUNDLE_MODULES = [
-  'activeSite.ts', 'boundary.ts', 'fit.ts', 'geo.ts', 'imagery.ts', 'layout.ts',
-  'scene.ts', 'siteModel.ts', 'sitesStore.ts', 'types.ts', 'useSiteDraw.ts',
-]
+// Modules only SiteCanvas imports (they may import three). Everything else
+// in this directory is main-bundle by default, so a new file is guarded
+// without anyone remembering to list it.
+const SITECANVAS_ONLY = new Set<string>(['raycast.ts', 'placementMath.ts', 'context.ts'])
+
+const MAIN_BUNDLE_MODULES = readdirSync(__dirname)
+  .filter(f => /\.(ts|tsx)$/.test(f) && !/\.test\./.test(f) && !SITECANVAS_ONLY.has(f))
 
 describe('site3d bundle boundary', () => {
+  it('covers the modules that exist', () => {
+    expect(MAIN_BUNDLE_MODULES.length).toBeGreaterThanOrEqual(11)
+  })
   it.each(MAIN_BUNDLE_MODULES)('%s does not import three', file => {
     const src = readFileSync(join(__dirname, file), 'utf8')
-    expect(src).not.toMatch(/from ['"]three['"]/)
+    expect(src).not.toMatch(/from ['"]three(\/|['"])/)
     expect(src).not.toMatch(/from ['"]@react-three\//)
-    expect(src).not.toMatch(/import\(['"]three['"]\)/)
+    expect(src).not.toMatch(/import\(['"]three(\/|['"])/)
   })
 })

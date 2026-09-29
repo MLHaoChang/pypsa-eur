@@ -7,6 +7,7 @@ import { useSitesStore } from '../site3d/sitesStore'
 import { busesInside } from '../site3d/boundary'
 import { defaultSiteName, newSite } from '../site3d/siteModel'
 import { writeActiveSite } from '../site3d/activeSite'
+import { isPlaced } from '../utils/geo'
 import { readOnlyMessage, READ_ONLY_MUTATION_MESSAGE } from '../utils/mutationGuard'
 import type { LngLatTuple, Site } from '../site3d/types'
 import type { Bus } from '../api/types'
@@ -31,7 +32,7 @@ export default function SiteDraftPanel({ boundary, existing, buses, onDone }: Pr
   const inside = useMemo(() => busesInside(buses, boundary), [buses, boundary])
   const [name, setName] = useState(existing?.name ?? defaultSiteName(doc))
   const [checked, setChecked] = useState<Set<string>>(() => new Set(existing ? existing.buses : inside))
-  const placed = buses.filter(b => !(Number(b.x) === 0 && Number(b.y) === 0))
+  const placed = buses.filter(isPlaced)
 
   const toggle = (n: string) => setChecked(prev => {
     const next = new Set(prev)
@@ -42,8 +43,13 @@ export default function SiteDraftPanel({ boundary, existing, buses, onDone }: Pr
   const submit = () => {
     if (readOnly) return
     const trimmed = name.trim() || defaultSiteName(doc)
-    // Keep the given order of buses (the first is the primary bus).
-    const chosen = placed.map(b => b.name).filter(n => checked.has(n))
+    // Membership order matters: the FIRST bus is the primary one (the yard
+    // the layout packs around, the creation form's default). Existing
+    // members keep their order; new ones append in API order.
+    const placedNames = placed.map(b => b.name)
+    const kept = (existing?.buses ?? []).filter(n => checked.has(n) && placedNames.includes(n))
+    const added = placedNames.filter(n => checked.has(n) && !kept.includes(n))
+    const chosen = existing ? [...kept, ...added] : (inside.filter(n => checked.has(n)).concat(placedNames.filter(n => checked.has(n) && !inside.includes(n))))
     const site: Site = existing
       ? { ...existing, name: trimmed, buses: chosen }
       : newSite({ name: trimmed, boundary, buses: chosen })
@@ -85,6 +91,7 @@ export default function SiteDraftPanel({ boundary, existing, buses, onDone }: Pr
           <label key={b.name} className="flex items-center gap-2">
             <input type="checkbox" checked={checked.has(b.name)} onChange={() => toggle(b.name)} />
             <span className="font-mono text-text truncate">{b.name}</span>
+            {existing?.buses[0] === b.name && <span className="text-[10px] text-accent">primary</span>}
             {inside.includes(b.name) && <span className="text-[10px] text-muted">inside</span>}
           </label>
         ))}

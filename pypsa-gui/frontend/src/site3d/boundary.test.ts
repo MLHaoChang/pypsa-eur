@@ -97,3 +97,13 @@ describe('isValidBoundary / dedupeTrailing', () => {
     expect(dedupeTrailing([[1, 1]])).toEqual([[1, 1]])
   })
 })
+
+describe('collapseDuplicateVertices', () => {
+  it('collapses consecutive duplicates anywhere, drops a closing duplicate of the first, and tolerates sub-centimetre drift', async () => {
+    const { collapseDuplicateVertices } = await import('./boundary')
+    const r = rect()
+    const jitter: LngLatTuple = [r[1][0] + 2e-8, r[1][1] - 2e-8]
+    expect(collapseDuplicateVertices([r[0], r[0], r[0], r[1], jitter, r[2], r[3], r[0]])).toEqual([r[0], r[1], r[2], r[3]])
+    expect(collapseDuplicateVertices([])).toEqual([])
+  })
+})

@@ -34,7 +34,7 @@ import { buildGroundMosaic, ESRI_ATTRIBUTION } from '../site3d/imagery'
 import { buildSiteLayout, KIND_COLOR, KIND_LABEL, type SiteObject, type SiteKind } from '../site3d/layout'
 import { toScene, toBoxArgs, fitCamera, chooseSite, unionBounds, halfSizeFor, type Bounds } from '../site3d/scene'
 import { useSitesStore } from '../site3d/sitesStore'
-import { readActiveSite, writeActiveSite } from '../site3d/activeSite'
+import { writeActiveSite } from '../site3d/activeSite'
 import { boundaryToLocal } from '../site3d/boundary'
 import { busOffsets, primaryBus, siteBounds } from '../site3d/siteModel'
 import { fitReport, formatHa, type FitObject } from '../site3d/fit'
@@ -212,14 +212,16 @@ export default function SiteCanvas() {
   const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })
   const { data: links = [] }        = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks })
 
-  // The remembered site for this project seeds the choice once per project.
+  // uiStore restores the remembered site on every project switch; here we
+  // only clear an id whose site no longer exists (deleted elsewhere), so the
+  // picker and the store never disagree.
+  const sitesLoaded = useSitesStore(s => !!s.loaded[currentProject ?? '__local__'])
   useEffect(() => {
-    if (!activeSiteId) {
-      const stored = readActiveSite(currentProject)
-      if (stored) setActiveSiteId(stored)
+    if (sitesLoaded && activeSiteId && !sitesDoc.sites.some(x => x.id === activeSiteId)) {
+      setActiveSiteId(null)
+      writeActiveSite(currentProject, null)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentProject])
+  }, [sitesLoaded, activeSiteId, sitesDoc, currentProject, setActiveSiteId])
 
   const selectedBus = selectedComponent?.type === 'Bus' ? selectedComponent.name : null
   const site = useMemo(() => chooseSite(sitesDoc, activeSiteId, selectedBus), [sitesDoc, activeSiteId, selectedBus])

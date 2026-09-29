@@ -60,22 +60,28 @@ describe('SiteDraftPanel', () => {
     expect(useSitesStore.getState().docFor('p').sites).toHaveLength(0)
   })
 
-  it('edit mode keeps the id and origin and updates name and buses', () => {
+  it('edit mode keeps the id, origin and placements, updates name and buses, and keeps the member order (primary first)', () => {
     render(<SiteDraftPanel boundary={boundary} buses={buses} onDone={() => {}} />)
     fireEvent.click(screen.getByRole('button', { name: 'Create' }))
+    const created0 = useSitesStore.getState().docFor('p').sites[0]
+    // Seed a placement and a member order that differs from API order.
+    useSitesStore.getState().setPlacement('p', created0.id, 'Generator:G1', { x: 1, y: 2, heading: 3 })
+    useSitesStore.getState().setSiteBuses('p', created0.id, ['outside-bus', 'inside-bus'])
     const created = useSitesStore.getState().docFor('p').sites[0]
     const onDone = vi.fn()
     render(<SiteDraftPanel boundary={created.boundary} existing={created} buses={buses} onDone={onDone} />)
     const inputs = screen.getAllByRole('textbox')
     fireEvent.change(inputs[inputs.length - 1], { target: { value: 'Renamed' } })
-    fireEvent.click(screen.getAllByRole('checkbox', { name: /outside-bus/ }).at(-1)!)
+    expect(screen.getByText('primary').closest('label')?.textContent).toContain('outside-bus')
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     const doc = useSitesStore.getState().docFor('p')
     expect(doc.sites).toHaveLength(1)
     expect(doc.sites[0].id).toBe(created.id)
     expect(doc.sites[0].name).toBe('Renamed')
-    expect(doc.sites[0].buses).toEqual(['inside-bus', 'outside-bus'])
+    // Existing order kept: the primary bus is still the first member.
+    expect(doc.sites[0].buses).toEqual(['outside-bus', 'inside-bus'])
     expect(doc.sites[0].origin).toEqual(created.origin)
+    expect(doc.sites[0].placements).toEqual({ 'Generator:G1': { x: 1, y: 2, heading: 3 } })
   })
 
   it('Cancel reports null and writes nothing', () => {

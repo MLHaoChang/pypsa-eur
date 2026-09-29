@@ -1,8 +1,6 @@
 // The few pure decisions the 3D canvas makes, kept out of the component so
 // they are testable without WebGL (jsdom has none — see the assessment §7).
 
-import type { Bus } from '../api/types'
-import { isPlaced } from '../utils/geo'
 import type { Site, SitesDocument } from './types'
 
 /** Local (east, north, up) metres → three.js (x, y, z) with Y up and north = −Z. */
@@ -76,7 +74,7 @@ export function unionBounds(a: Bounds, b: Bounds): Bounds {
   return { x0: Math.min(a.x0, b.x0), x1: Math.max(a.x1, b.x1), y0: Math.min(a.y0, b.y0), y1: Math.max(a.y1, b.y1) }
 }
 
-/** Half-size of the square about the frame origin that contains `b` (min 250 m, 50 m steps). */
+/** Half-size of the square about the frame origin that contains `b`: reach × 1.15, rounded up to 50 m (so never under 300 m). */
 export function halfSizeFor(b: Bounds): number {
   const reach = Math.max(250, Math.abs(b.x0), Math.abs(b.x1), Math.abs(b.y0), Math.abs(b.y1))
   return Math.ceil((reach * 1.15) / 50) * 50

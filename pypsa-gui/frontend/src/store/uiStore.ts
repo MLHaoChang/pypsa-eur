@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { effectiveLockState, type LockState, type ReadOnlyReason } from '../utils/lockState'
+import { readActiveSite } from '../site3d/activeSite'
 // Floor for the docked comparison rail width — keeps both the rail and the
 // live Results pane usable when the splitter is dragged to an extreme. Single
 // definition, shared with the rail's own width arithmetic: this store and
@@ -488,7 +489,7 @@ export const useUIStore = create<UIStore>((set) => ({
   canvasView: storedCanvasView(),
   siteDrawMode: 'idle',
   siteDraft: [],
-  activeSiteId: null,
+  activeSiteId: readActiveSite(storedCurrentProject()),
   activeSlidePanel: null,
   assistantDockOpen: storedAssistantDockOpen(),
   assistantDockWidth: storedAssistantDockWidth(),
@@ -697,6 +698,12 @@ export const useUIStore = create<UIStore>((set) => ({
         // an instant switch lands on the source the user last picked there.
         // Defaults to 'lopf' for a never-visited / fresh project.
         resultSource: name ? (s.resultSourceByProject[name] ?? 'lopf') : 'lopf',
+        // The 3D site view is per project too: restore the new project's
+        // remembered site and drop any boundary being drawn for the old
+        // one (a draft panel left open would otherwise create A's site in B).
+        activeSiteId: readActiveSite(name),
+        siteDrawMode: 'idle',
+        siteDraft: [],
       }
       if (name) patch.lastProjectId = preferredId ?? name
       if (name && !s.openTabs.some(t => t.name === name)) {

@@ -23,7 +23,7 @@ import { ingestRescale } from '../utils/rescaleActions'
 import { useRescaleStore } from '../store/rescaleStore'
 import UnplacedBusesPanel from '../components/UnplacedBusesPanel'
 import SiteDraftPanel from '../components/SiteDraftPanel'
-import { useSiteDraw } from '../site3d/useSiteDraw'
+import { useSiteDraw, newSiteButtonVisible } from '../site3d/useSiteDraw'
 import { useSitesStore } from '../site3d/sitesStore'
 import { readActiveSite, writeActiveSite } from '../site3d/activeSite'
 import type { LngLatTuple, Site } from '../site3d/types'
@@ -689,10 +689,16 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   const [editSite, setEditSite] = useState<Site | null>(null)
   // Popover on a clicked site polygon, in container pixels.
   const [sitePopover, setSitePopover] = useState<{ id: string; x: number; y: number } | null>(null)
-  // Keyboard while drawing: Enter closes, Escape cancels.
+  // A project switch drops any site UI left open for the previous project
+  // (the store already resets the draft itself).
+  useEffect(() => { setDraftBoundary(null); setEditSite(null); setSitePopover(null) }, [currentProject])
+  // Keyboard while drawing: Enter closes, Escape cancels. Not while the user
+  // is typing somewhere else, and not while a panel hides the map.
   useEffect(() => {
-    if (!draw.drawing) return
+    if (!draw.drawing || !placementUiAllowed) return
     const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return
       if (e.key === 'Escape') { e.preventDefault(); draw.cancel() }
       else if (e.key === 'Enter') {
         e.preventDefault()
@@ -703,7 +709,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [draw])
+  }, [draw, placementUiAllowed])
   const openIn3D = (site: Site) => {
     setActiveSiteId(site.id)
     writeActiveSite(currentProject, site.id)
@@ -1028,9 +1034,18 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
             bubblingMouseEvents={false}
             pathOptions={{ color: '#b3261e', weight: 2, fillColor: '#b3261e', fillOpacity: 0.08, dashArray: undefined }}
             eventHandlers={{
+              // While drawing, a click over an existing site is still a
+              // corner (overlapping and nested sites are legitimate); the
+              // polygon swallows the event, so forward it.
               click: (e) => {
-                if (draw.drawing) return
+                if (draw.drawing) { draw.addVertex(e.latlng.lng, e.latlng.lat); return }
                 setSitePopover({ id: site.id, x: e.containerPoint.x, y: e.containerPoint.y })
+              },
+              dblclick: (e) => {
+                if (!draw.drawing) return
+                const r = draw.closeByDoubleClick(e.latlng.lng, e.latlng.lat)
+                if (r.status === 'closed') setDraftBoundary(r.boundary)
+                else toast.error('A site needs at least three corners')
               },
             }}
           >
@@ -1283,7 +1298,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           higher-priority z-[500]/z-[300] overlays and the panel's z-[900]
           would otherwise float on top of them (same guard MapModeSwitcher
           applies for the same reason). */}
-      {placementUiAllowed && (
+      {placementUiAllowed && !draw.drawing && (
         <UnplacedBusesPanel
           unplacedCount={unplaced.length}
           totalCount={(buses as Bus[]).length}
@@ -1294,7 +1309,7 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
 
       {/* New site (WP2). Same visibility rule as the unplaced-buses panel;
           hidden while placing, since placement owns the map's clicks. */}
-      {placementUiAllowed && !placing && !draw.drawing && !draftBoundary && !editSite && (
+      {newSiteButtonVisible({ activeSlidePanel, paletteMode, placing, drawing: draw.drawing, draftOpen: !!(draftBoundary || editSite) }) && (
         <button
           type="button"
           onClick={() => { if (!draw.start()) toast.error(readOnly ? 'Project is read-only' : 'Finish placing buses first') }}

@@ -10,10 +10,10 @@
 //
 // Pure functions first, hook second. Main bundle; no Leaflet, no three.
 
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useUIStore } from '../store/uiStore'
 import { useRescaleStore } from '../store/rescaleStore'
-import { dedupeTrailing, isValidBoundary } from './boundary'
+import { collapseDuplicateVertices, isValidBoundary, sameVertex } from './boundary'
 import type { LngLatTuple } from './types'
 
 export type SiteDrawMode = 'idle' | 'drawing'
@@ -27,11 +27,26 @@ export function mapClickOwner(s: { placementActive: boolean; siteDrawMode: SiteD
 
 export type CloseResult = { status: 'too_few' } | { status: 'closed'; boundary: LngLatTuple[] }
 
-/** Close a draft: drop the double-click's trailing duplicates, require three vertices. */
+/**
+ * Close a draft: collapse consecutive duplicates anywhere (a stray
+ * double-click leaves them mid-list, not only at the end), drop a closing
+ * vertex equal to the first, require three vertices.
+ */
 export function closeDraft(draft: LngLatTuple[]): CloseResult {
-  const boundary = dedupeTrailing(draft)
+  const boundary = collapseDuplicateVertices(draft)
   if (boundary.length < 3 || !isValidBoundary(boundary)) return { status: 'too_few' }
   return { status: 'closed', boundary }
+}
+
+/** Whether the map's "New site" control is offered right now. */
+export function newSiteButtonVisible(s: {
+  activeSlidePanel: unknown
+  paletteMode: unknown
+  placing: boolean
+  drawing: boolean
+  draftOpen: boolean
+}): boolean {
+  return !s.activeSlidePanel && s.paletteMode === null && !s.placing && !s.drawing && !s.draftOpen
 }
 
 export function useSiteDraw() {
@@ -45,6 +60,13 @@ export function useSiteDraw() {
   const owner = mapClickOwner({ placementActive, siteDrawMode: mode })
   const drawing = owner === 'draw'
 
+  // Placement started while a boundary was being drawn: the draft is
+  // abandoned, visibly, rather than suspended and resumed unannounced when
+  // placement ends.
+  useEffect(() => {
+    if (placementActive && mode === 'drawing') { setDraft([]); setMode('idle') }
+  }, [placementActive, mode, setDraft, setMode])
+
   const start = useCallback((): boolean => {
     if (readOnly || placementActive) return false
     setDraft([])
@@ -56,7 +78,12 @@ export function useSiteDraw() {
 
   const addVertex = useCallback((lng: number, lat: number) => {
     if (owner !== 'draw' || readOnly) return
-    setDraft([...useUIStore.getState().siteDraft, [lng, lat]])
+    const cur = useUIStore.getState().siteDraft
+    const last = cur[cur.length - 1]
+    // A repeat of the last vertex (the second click of a double-click, a
+    // jitter) adds nothing.
+    if (last && sameVertex(last, [lng, lat])) return
+    setDraft([...cur, [lng, lat]])
   }, [owner, readOnly, setDraft])
 
   // Both close paths leave the hook in `idle` on success and untouched on
@@ -70,12 +97,17 @@ export function useSiteDraw() {
 
   const closeByDoubleClick = useCallback((lng: number, lat: number): CloseResult => {
     if (owner !== 'draw' || readOnly) return { status: 'too_few' }
-    // Leaflet fires click, click, dblclick: the two clicks already added the
-    // point (twice). Add it once more so a draft that never received them
-    // (a synthetic dblclick) still closes on the same vertex, then dedupe.
-    setDraft([...useUIStore.getState().siteDraft, [lng, lat]])
-    const result = closeDraft([...useUIStore.getState().siteDraft])
+    // Leaflet fires click, click, dblclick: the clicks already added the
+    // point (once — `addVertex` drops the repeat). Add it here only if a
+    // synthetic dblclick arrived without them, then close.
+    const cur = useUIStore.getState().siteDraft
+    const last = cur[cur.length - 1]
+    const withPoint = last && sameVertex(last, [lng, lat]) ? cur : [...cur, [lng, lat] as LngLatTuple]
+    const result = closeDraft(withPoint)
     if (result.status === 'closed') { setDraft([]); setMode('idle') }
+    // Keep the CLEANED draft so a stray double-click never wedges the
+    // session in a state Enter can never close.
+    else setDraft(collapseDuplicateVertices(withPoint))
     return result
   }, [owner, readOnly, setDraft, setMode])
 
