@@ -117,6 +117,17 @@ def test_duplicate_assets_and_a_non_datetime_axis_are_refused():
         L.materialise_poc_prices(n, {"poc_link": "import", "contracts": [PPA]})
 
 
+def test_periods_that_are_not_years_are_refused_for_an_indexed_price():
+    """Round 2 #1."""
+    n = _site()
+    n.set_investment_periods([1, 2])
+    ppa = {**PPA, "indexation_pct_per_year": 2.0, "base_year": 2030}
+    with pytest.raises(L.CommercialBindingError, match="not years"):
+        L.materialise_poc_prices(n, _commercial(ppa))
+    applied = L.materialise_poc_prices(n, _commercial(PPA))    # no indexation: fine
+    applied.undo()
+
+
 def test_the_modelled_year_is_on_the_site_clock():
     """Review #6: two days either side of New Year in Berlin — the objective-
     weighted majority year on the SITE clock, as `contracts.modelled_year`."""

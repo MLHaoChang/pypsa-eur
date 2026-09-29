@@ -926,6 +926,11 @@ an asset not a Generator.
   6. LOW: the LP took the modelled year from UTC snapshot years. → The site clock, as `contracts.modelled_year`. WP2.5 should settle a dispatch PPA from the committed `ic_ppa_price` so the line equals the row by construction (carried to WP2.5).
   7. LOW: after a current-recipe solve without the PPA, the rows lacked the bill's drift flag. → The rows now add `config_changed_since_solve`.
   8. Docs: this plan text is updated. `test_lp_ppa_dispatch.py` has 20 tests.
+- **WP2.2d review round 2 → PASS WITH CONDITIONS; fixed:**
+  - Probes: the objective coefficients read 90 = 30 + 50 CO2 + 10 PPA, and 141.046 in 2040 with per-period CO2 and indexation. Rolling horizon: 7 windows, row = settlement line. Myopic: row = settlement line per period. The flat, representative-day, multi-period and export cases reconcile; netCDF, clear and infeasible-solve behaviour are correct.
+  - #1 (LOW, the condition): investment periods that are not years compounded an indexed price to about 0. → Refused when `base_year` and indexation are set and a period is outside 1900–2200.
+  - #2 (LOW, recommended): the term ignored scenario probabilities. → `add_ppa_terms` refuses a stochastic network. It is unreachable today: binding already refuses such networks, for another reason.
+  - `test_lp_ppa_dispatch.py` has 21 tests.
 
 ## WP2.3 Billing vs LP gap per item kind, with causes
 

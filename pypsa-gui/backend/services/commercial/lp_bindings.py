@@ -1667,6 +1667,10 @@ def add_ppa_terms(n) -> None:
     spec = getattr(n, PPA_SPEC_ATTR, None)
     if not spec:
         return
+    if getattr(n, "has_scenarios", False):
+        # Scenario probabilities would have to weight the term (round 2 #2).
+        raise CommercialBindingError("a changes_dispatch PPA is not supported on a stochastic "
+                                     "(scenario) network")
     m = n.model
     gens = sorted(spec)
     p = m["Generator-p"].sel(name=gens)
@@ -1714,6 +1718,12 @@ def _ppa_dispatch_spec(n, cfg: CommercialConfig) -> dict[str, np.ndarray] | None
             why = "an asset is listed twice (its output would be settled twice)"
         elif inv is None and not isinstance(pd.Index(n.snapshots), pd.DatetimeIndex):
             why = "the snapshots are not dates, so the price has no year to index to"
+        elif inv is not None and c.indexation_pct_per_year and c.base_year is not None and \
+                any(not (1900 <= int(p) <= 2200) for p in set(inv)):
+            # Periods numbered 1, 2, … are not years: an indexed price would
+            # compound over two millennia (WP2.2d review round 2 #1).
+            why = ("the investment periods are not years, so the indexed price has no year "
+                   "to index to")
         if why is None:
             for a in c.asset_ids:
                 if a not in n.generators.index:
