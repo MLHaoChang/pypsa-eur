@@ -4,7 +4,7 @@
 // the last solve's bill under it, and save it to the Library or as the
 // project's tariff. The server is the source of truth: its 422s are shown at
 // the fields they name.
-import { useState } from 'react'
+import { createContext, useContext, useEffect, useId, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { commercialApi, libraryApi, type BillingPayload } from '../../../api/commercial'
 import type { Tariff, TariffRatchet } from '../../../api/types'
@@ -24,18 +24,42 @@ function Errors({ list }: { list: string[] }) {
     {list.map(e => <li key={e}>{e}</li>)}</ul>
 }
 
-/** A comma list edited as text; committed on blur when it parses. */
+/** The list fields that do not parse: Preview and Save wait for them. */
+const InvalidLists = createContext<(label: string, bad: boolean) => void>(() => {})
+
+/** A comma list edited as text; committed on blur when it parses. The text
+ *  follows the value whenever the field is not being edited (a removed row
+ *  or an added tier re-renders it, review #1); a list that does not parse is
+ *  named beside the field and blocks Preview / Save (review #2). */
 function ListInput({ label, value, onChange, parse }: {
   label: string; value: number[] | null | undefined
   onChange: (v: number[] | undefined) => void
   parse: (t: string) => number[] | undefined | null
 }) {
-  const [text, setText] = useState(listText(value))
+  const shown = listText(value)
+  const [text, setText] = useState(shown)
+  const [focused, setFocused] = useState(false)
   const [bad, setBad] = useState(false)
+  const report = useContext(InvalidLists)
+  const errId = useId()
+  useEffect(() => {
+    if (!focused) { setText(shown); setBad(false); report(label, false) }
+  }, [shown]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => report(label, false), [label, report])
   return (
-    <input aria-label={label} aria-invalid={bad} className={`${input} w-28`} value={text}
-           onChange={e => setText(e.target.value)}
-           onBlur={() => { const v = parse(text); setBad(v === null); if (v !== null) onChange(v) }} />
+    <span>
+      <input aria-label={label} aria-invalid={bad} aria-describedby={bad ? errId : undefined}
+             className={`${input} w-28 ${bad ? 'border-danger' : ''}`} value={text}
+             onFocus={() => setFocused(true)}
+             onChange={e => setText(e.target.value)}
+             onBlur={() => {
+               setFocused(false)
+               const v = parse(text)
+               setBad(v === null); report(label, v === null)
+               if (v !== null) onChange(v)
+             }} />
+      {bad && <span id={errId} role="alert" className="text-danger ml-1">not a list of numbers</span>}
+    </span>
   )
 }
 
@@ -130,7 +154,13 @@ function ItemEditor({ item, idx, set, remove, errors }: {
         <label>id <input aria-label={`${label} id`} className={`${input} w-24`} value={item.id}
                          onChange={e => set({ ...item, id: e.target.value })} /></label>
         <label>kind <select aria-label={`${label} kind`} className={input} value={item.kind}
-                            onChange={e => set({ ...item, kind: e.target.value as Item['kind'] })}>
+                            onChange={e => {
+                              // A kind change keeps nothing another kind cannot carry (review #8).
+                              const kind = e.target.value as Item['kind']
+                              const next: Item = { ...item, kind, unit: blankItem(kind, item.id).unit }
+                              if (kind !== 'demand') delete next.ratchet
+                              set(next)
+                            }}>
           {KINDS.map(k => <option key={k} value={k}>{k}</option>)}</select></label>
         <label>unit <select aria-label={`${label} unit`} className={input} value={item.unit}
                             onChange={e => set({ ...item, unit: e.target.value as Item['unit'] })}>
@@ -194,9 +224,18 @@ function ItemEditor({ item, idx, set, remove, errors }: {
               Add tier to {label}</button>
             {tiers.length > 0 && (
               <label className="flex items-center gap-1">
-                <input type="checkbox" checked={windowed} onChange={e => set({ ...item,
-                  periods: item.periods.map(p => ({ ...p, tier_rates: e.target.checked ? tiers.map(t => t.rate) : null })),
-                  tiers: e.target.checked ? tiers.map(t => ({ ...t, rate: 0 })) : tiers })} />
+                <input type="checkbox" checked={windowed} aria-label={`${label} tier rates per period`}
+                       onChange={e => {
+                         if (e.target.checked) {
+                           set({ ...item, periods: item.periods.map(p => ({ ...p, tier_rates: tiers.map(t => t.rate) })),
+                                 tiers: tiers.map(t => ({ ...t, rate: 0 })) })
+                         } else {
+                           // Back to one set of tier rates: the first period's (review #5).
+                           const first = item.periods.find(p => p.tier_rates)?.tier_rates ?? []
+                           set({ ...item, periods: item.periods.map(p => ({ ...p, tier_rates: null })),
+                                 tiers: tiers.map((t, k) => ({ ...t, rate: first[k] ?? t.rate })) })
+                         }
+                       }} />
                 tier rates per period
               </label>
             )}
@@ -227,11 +266,19 @@ function Preview({ bill }: { bill: BillingPayload }) {
                   <tr key={k}><td>{k}</td><td className="text-right">{fmtAmount(v)}</td></tr>))}
                 <tr className="border-t border-border"><td>Total</td>
                   <td className="text-right">{fmtAmount(s.total)}</td></tr>
+                {s.total == null && s.total_supported != null && (
+                  <tr><td>Total of the items it could bill</td>
+                    <td className="text-right">{fmtAmount(s.total_supported)}</td></tr>
+                )}
               </>
             )}
           </tbody>
         </table>
       ))}
+      {Object.entries(bill.per_period ?? {}).flatMap(([, v]) =>
+        Object.entries(((v ?? {}) as { notes?: Record<string, string[]> }).notes ?? {})
+          .map(([item, notes]) => `${item}: ${notes.join(', ')}`)).slice(0, 12).map(n => (
+        <p key={n} className="text-muted" data-testid="tb-preview-note">{n}</p>))}
       {bill.flags.filter(f => f !== 'preview_dispatch_not_optimised_for_draft').length > 0 && (
         <p className="text-warn">Flags: {bill.flags.filter(f => f !== 'preview_dispatch_not_optimised_for_draft').join(', ')}</p>
       )}
@@ -256,17 +303,33 @@ export default function TariffBuilder({ initial, onSaved }: {
     if (r?.status === 422) {
       const byField = errorsByField(r.data?.detail)
       setErrors(byField)
-      const d = r.data?.detail as { message?: string } | undefined
+      const d = r.data?.detail
+      // A Library 422's detail is a plain string (review #4).
+      const why = typeof d === 'string' ? d : (d as { message?: string } | undefined)?.message
       setMessage({ tone: 'error', text: Object.keys(byField).length
-        ? `${what}: the server refused some fields (shown below).` : `${what}: ${d?.message ?? 'refused'}` })
+        ? `${what}: the server refused some fields (shown below).` : `${what}: ${why ?? 'refused'}` })
       return
     }
-    setMessage({ tone: 'error', text: `${what} failed.` })
+    // A typed error (a solve running, no commercial config) says why (review #7).
+    const detail = (r?.data?.detail as { message?: string } | undefined)?.message
+    setMessage({ tone: 'error', text: `${what} failed${detail ? `: ${detail}`
+      : e instanceof Error && !r ? `: ${e.message}` : '.'}` })
   }
+  const [invalid, setInvalid] = useState<Set<string>>(new Set())
+  const reportList = useState(() => (label: string, bad: boolean) => setInvalid(prev => {
+    if (prev.has(label) === bad) return prev
+    const next = new Set(prev)
+    if (bad) next.add(label); else next.delete(label)
+    return next
+  }))[0]
+  const blocked = invalid.size > 0
   const draft = () => normaliseTariff(t)
 
   return (
+    <InvalidLists.Provider value={reportList}>
     <div className="space-y-3 text-[11px]" data-testid="tariff-builder">
+      {blocked && <p role="alert" className="text-danger" data-testid="tb-blocked">
+        Fix the lists that are not numbers ({[...invalid].join(', ')}) before previewing or saving.</p>}
       <div className="flex flex-wrap gap-2 items-center">
         <label>id <input aria-label="Tariff id" className={`${input} w-28`} value={t.id}
                          onChange={e => setT({ ...t, id: e.target.value })} /></label>
@@ -277,8 +340,8 @@ export default function TariffBuilder({ initial, onSaved }: {
         <label>valid from <input type="date" aria-label="Valid from" className={input} value={t.valid_from}
                                  onChange={e => setT({ ...t, valid_from: e.target.value })} /></label>
       </div>
-      <Errors list={['id', 'name', 'jurisdiction', 'valid_from', 'items'].flatMap(k =>
-        (errors[k] ?? []).map(m => `${k}: ${m}`))} />
+      <Errors list={Object.entries(errors).filter(([k]) => !/^items\.\d+/.test(k))
+        .flatMap(([k, msgs]) => msgs.map(m => `${k || 'tariff'}: ${m}`))} />
       {t.items.map((item, i) => (
         <ItemEditor key={i} item={item} idx={i} set={it => setItem(i, it)}
                     remove={() => setT({ ...t, items: t.items.filter((_, j) => j !== i) })}
@@ -287,14 +350,15 @@ export default function TariffBuilder({ initial, onSaved }: {
       <div className="flex flex-wrap gap-2">
         {KINDS.map(k => (
           <button key={k} type="button" className="underline"
-                  onClick={() => setT({ ...t, items: [...t.items, blankItem(k, `${k}_${t.items.length + 1}`)] })}>
+                  onClick={() => setT({ ...t, items: [...t.items, blankItem(k, nextId(t, k))] })}>
             Add {k.replace('_', ' ')} item</button>
         ))}
       </div>
       {message && <p role="status" className={message.tone === 'ok' ? 'text-success' : 'text-danger'}>
         {message.text}</p>}
       <div className="flex flex-wrap gap-2 items-center">
-        <button type="button" className="px-2 py-1 rounded border border-border" onClick={async () => {
+        <button type="button" className="px-2 py-1 rounded border border-border" disabled={blocked}
+                onClick={async () => {
           setMessage(null); setErrors({})
           try {
             const bill = await commercialApi.previewBilling(draft())
@@ -304,7 +368,8 @@ export default function TariffBuilder({ initial, onSaved }: {
         }}>Preview the bill</button>
         <label>Library name <input aria-label="Library name" className={`${input} w-28`} value={libName}
                                    onChange={e => setLibName(e.target.value)} /></label>
-        <button type="button" className="px-2 py-1 rounded border border-border" disabled={!libName.trim()}
+        <button type="button" className="px-2 py-1 rounded border border-border"
+                disabled={!libName.trim() || blocked}
                 onClick={async () => {
                   setMessage(null); setErrors({})
                   try {
@@ -314,7 +379,8 @@ export default function TariffBuilder({ initial, onSaved }: {
                     onSaved?.('library')
                   } catch (e) { fail(e, 'Saving to the Library') }
                 }}>Save to Library</button>
-        <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent" onClick={async () => {
+        <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent disabled:opacity-50"
+                disabled={blocked} onClick={async () => {
           setMessage(null); setErrors({})
           try {
             // Inline: the draft replaces the project's tariff and any Library
@@ -322,11 +388,21 @@ export default function TariffBuilder({ initial, onSaved }: {
             await commercialApi.saveCommercial({ import_tariff: draft(), import_tariff_ref: null } as never)
             setMessage({ tone: 'ok', text: 'Saved as the project\'s import tariff. Re-solve for a new dispatch.' })
             await qc.invalidateQueries({ queryKey: nk(project, 'results') })
+            await qc.invalidateQueries({ queryKey: nk(project, 'commercial') })
             onSaved?.('project')
           } catch (e) { fail(e, 'Saving as the project tariff') }
         }}>Save as the project tariff</button>
       </div>
       {preview && <Preview bill={preview} />}
     </div>
+    </InvalidLists.Provider>
   )
+}
+
+/** The next unused `<kind>_<n>` item id (review #6). */
+function nextId(t: Tariff, kind: string): string {
+  const taken = new Set(t.items.map(i => i.id))
+  let n = t.items.length + 1
+  while (taken.has(`${kind}_${n}`)) n += 1
+  return `${kind}_${n}`
 }

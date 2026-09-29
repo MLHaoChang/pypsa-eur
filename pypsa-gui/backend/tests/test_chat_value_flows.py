@@ -187,6 +187,20 @@ def test_the_summary_fits_even_with_many_internal_participants():
         chat_tools._VF_SUMMARY_CHARS
 
 
+def test_the_summary_fits_with_long_flags_and_many_periods_and_keeps_unknowns():
+    """Review R2-1 / R2-2."""
+    payload = _payload(n_parties=60, periods=tuple(str(2030 + i) for i in range(40)))
+    payload["participants"] = [{"id": f"party_{i}", "name": "n", "role": "other"}
+                               for i in range(60)]
+    payload["flags"] = ["contract_not_settled:x:" + "a" * 3000] * 3
+    for per in payload["periods"].values():
+        per["by_participant"]["party_59"]["net"] = None
+    out = chat_tools._value_flows_summary(payload)
+    assert len(json.dumps(out, default=str)) <= chat_tools._VF_SUMMARY_CHARS
+    first = next(iter(out["periods"].values()))["by_participant"]
+    assert "party_59" in first and first["party_59"]["net"] is None
+
+
 def test_a_drafts_answer_stays_small_on_a_big_site(client, install_network):
     """Review #2: the answer carries no config and fits the draft's id lists."""
     n = build_edge_15min()

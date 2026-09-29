@@ -78,7 +78,11 @@ export const listText = (v: number[] | null | undefined) => (v ?? []).join(', ')
 export function fieldKey(loc: Array<string | number>): string {
   const i = loc.findIndex(x => x === 'items' || x === 'id' || x === 'name'
     || x === 'jurisdiction' || x === 'valid_from')
-  return (i < 0 ? loc : loc.slice(i)).join('.')
+  if (i >= 0) return loc.slice(i).join('.')
+  // A tariff-level error (`['import_tariff']`, `['body', 'tariff']`, a model
+  // validator) is the tariff's (review #3).
+  const t = loc.findIndex(x => x === 'import_tariff' || x === 'tariff' || x === 'payload')
+  return t >= 0 ? 'tariff' : (loc.join('.') || 'tariff')
 }
 
 /** The server's validation errors (preview 422 `errors`, or FastAPI's list) by field key. */

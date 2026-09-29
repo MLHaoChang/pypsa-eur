@@ -679,7 +679,9 @@ def _eur(v):
 
 def _value_flows_summary(payload: dict) -> dict:
     ids = [x["id"] for x in payload.get("participants") or []]
-    flags = list(payload.get("flags") or [])
+    # A flag can carry a long reason (a contract naming every missing asset):
+    # each is shortened, so none can outgrow the cap (WP3.4 review R2-1).
+    flags = [str(f)[:160] for f in payload.get("flags") or []]
     periods = {}
     for p, per in (payload.get("periods") or {}).items():
         lines = per.get("lines") or []
@@ -730,8 +732,10 @@ def _value_flows_summary(payload: dict) -> dict:
     while size() > _VF_SUMMARY_CHARS and keep > 1:
         keep = max(1, keep // 2)
         for per in periods.values():
+            # Unknown nets first — the rows ADR-0001 most wants seen (R2-2).
             rows = sorted(per["by_participant"].items(),
-                          key=lambda kv: -abs(kv[1].get("net") or 0.0))
+                          key=lambda kv: (kv[1].get("net") is not None,
+                                          -abs(kv[1].get("net") or 0.0)))
             if len(rows) > keep:
                 per["participants_omitted"] = len(rows) - keep + per.get(
                     "participants_omitted", 0)
@@ -741,6 +745,15 @@ def _value_flows_summary(payload: dict) -> dict:
         out["participants"] = out["participants"][:len(out["participants"]) // 2]
         for per in periods.values():
             per["by_participant"] = {k[:60]: v for k, v in per["by_participant"].items()}
+    # Last resorts: no flags, then only as many periods as fit.
+    if size() > _VF_SUMMARY_CHARS:
+        out["flags"] = []
+        out["omitted"].append("flags_all")
+    if size() > _VF_SUMMARY_CHARS:
+        keys = list(periods)
+        out["periods_total"] = len(keys)
+        while size() > _VF_SUMMARY_CHARS and len(out["periods"]) > 1:
+            out["periods"].pop(keys.pop())
     return out
 
 

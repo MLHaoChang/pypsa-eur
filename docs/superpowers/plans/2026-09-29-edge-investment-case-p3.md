@@ -660,6 +660,15 @@ stored state, the problems budget, every error kind in the manifest, lock-gated,
   minimums for offset / limit. #9: the guard's message for an invalid stored value. #11: the timing
   bound is 2 s for both. #12: the roles and the config's keys are in the tool description.
 
+**WP3.4 review round 2 (ec79a0f): FAIL, one binding item** — #1–#12 verified closed (the summary
+2.7–3.5 k characters up to 200 participants × 300-character ids × 10 periods; the drafts answer
+~0.7–0.8 k at 300 extra generators; spellings merged; unsettled parties null; 1,166 tests green).
+R2-1: a long FLAG string still overflowed the summary. → every flag is cut to 160 characters, then
+(last resorts) no flags, then only as many periods as fit (`periods_total`). R2-2 (taken): rows
+with an unknown net are kept first. R2-3 INFO: a CfD's direction in `contract_payer_payee` is
+nominal (net is null for both either way); a sleeving party is not named on the unsettled line.
+Tested (40 periods × 60 participants × 3,000-character flags).
+
 ---
 
 ## WP3.5 Frontend foundation
@@ -838,6 +847,28 @@ drift flags, 409; FE preview rendering.
   409 / 204 through the route), `tariffModel.test.ts` (4: H3 exact), `TariffBuilder.test.tsx` (4:
   H3 saved unchanged inline and to the Library, a windowed tiered item built through the form, the
   preview rendered, a 422 at its item; `expectAllButtonsNamed`).
+
+**WP3.7b review round 1 (86a116f): PASS WITH CONDITIONS** — binding #1–#5; #6–#8, #9, #10, #11 and
+the #12 lock note taken. Confirmed on a live heavy draft: no state written (every component table and
+`_t` frame, `n.meta`, `_ic*` attributes, result state, the stored config and `GET /results/billing`
+byte-identical), the 422 codes, multi-period and timezone networks, a stored ref / id dropped
+cleanly, the H3 inline save accepted by the solver-config route, the lock re-entrant, no
+`bind_commercial`.
+- #1 HIGH: list fields kept stale text after a row was removed or a tier added, and a blur saved it.
+  → `ListInput` follows its value whenever it is not being edited (tested: remove a period, blur,
+  save).
+- #2: an unparsable list was ignored silently. → named beside the field (`aria-describedby`) and
+  Preview / Save are disabled while any list is invalid (tested).
+- #3: tariff-level 422s (`loc` `['import_tariff']`, `['body', 'tariff']`) were shown nowhere. →
+  `fieldKey` maps them to `tariff`; the header lists every error not under an item (tested).
+- #4: a Library 422's string detail was lost → shown (tested). #5: turning per-period tier rates off
+  zeroed the tiers → the first period's rates come back (tested).
+- #6: new item ids are the next unused. #7: a typed error says why. #8: a kind change resets the unit
+  and drops a ratchet; the checkbox is named per item. #9: `preview_contract_problem:<code>` flags a
+  contract the save would refuse. #10: the preview shows the total of the billable items and the
+  per-item notes when the total is not established. #11: a failed tariff read shows an error, not a
+  blank builder; a Library-ref tariff says an inline save detaches it; the save invalidates the
+  commercial config. #12: the preview checks the solve and the config under the lock.
 ## WP3.7c Contracts and connection-agreement editors
 
 Typed forms per contract type (P2 models, allowed pricing combinations; party pickers from participants +

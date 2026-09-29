@@ -49,7 +49,7 @@ describe('TariffBuilder', () => {
     fireEvent.click(within(item).getByRole('button', { name: 'Add tier to Item energy' }))
     fireEvent.click(within(item).getByRole('button', { name: 'Add tier to Item energy' }))
     fireEvent.change(within(item).getByLabelText('Item energy tier 2 threshold'), { target: { value: '100000' } })
-    fireEvent.click(within(item).getByLabelText('tier rates per period'))
+    fireEvent.click(within(item).getByLabelText('Item energy tier rates per period'))
     const rates = within(item).getByLabelText('Item energy period 1 tier rates')
     fireEvent.change(rates, { target: { value: '0.2, 0.23' } })
     fireEvent.blur(rates)
@@ -82,5 +82,68 @@ describe('TariffBuilder', () => {
     const item = screen.getByTestId('tb-item-1')
     expect((await within(item).findByRole('alert')).textContent).toContain('exactly one of')
     expect(screen.queryByTestId('tb-preview')).toBeNull()
+  })
+})
+
+describe('TariffBuilder — review round 1', () => {
+  const two = () => ({ ...blankTariff(), items: [{ id: 'e', kind: 'energy' as const, unit: 'per_kwh' as const,
+    periods: [{ name: 'summer', rate: 0.2, months: [6, 7, 8] }, { name: 'winter', rate: 0.1, months: [1, 2] }] }] })
+
+  it('a list field follows its row after a removal (#1)', async () => {
+    api.saveCommercial.mockResolvedValue({} as never)
+    renderBuilder(two())
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Item e period 1' }))
+    const months = screen.getByLabelText('Item e period 1 months') as HTMLInputElement
+    expect(months.value).toBe('1, 2')
+    fireEvent.focus(months); fireEvent.blur(months)
+    fireEvent.click(screen.getByRole('button', { name: 'Save as the project tariff' }))
+    await waitFor(() => expect(api.saveCommercial).toHaveBeenCalled())
+    const saved = (api.saveCommercial.mock.calls[0][0] as { import_tariff: typeof H3 }).import_tariff
+    expect(saved.items[0].periods).toEqual([{ name: 'winter', rate: 0.1, months: [1, 2] }])
+  })
+
+  it('names a list that does not parse and blocks preview and save (#2)', () => {
+    renderBuilder(two())
+    const months = screen.getByLabelText('Item e period 1 months')
+    fireEvent.focus(months)
+    fireEvent.change(months, { target: { value: '6, 7, x' } })
+    fireEvent.blur(months)
+    expect(months.getAttribute('aria-describedby')).toBeTruthy()
+    expect(screen.getByTestId('tb-blocked').textContent).toContain('Item e period 1 months')
+    for (const name of ['Preview the bill', 'Save to Library', 'Save as the project tariff']) {
+      expect(screen.getByRole('button', { name }).hasAttribute('disabled')).toBe(true)
+    }
+  })
+
+  it('shows a tariff-level 422 in the header (#3)', async () => {
+    api.previewBilling.mockRejectedValue(Object.assign(new Error('422'), { response: { status: 422,
+      data: { detail: { code: 'tariff_invalid', message: 'x',
+                        errors: [{ loc: ['import_tariff'], msg: 'tariff item ids must be unique' }] } } } }))
+    renderBuilder()
+    fireEvent.click(screen.getByRole('button', { name: 'Preview the bill' }))
+    const alerts = await screen.findAllByRole('alert')
+    expect(alerts.some(a => a.textContent?.includes('tariff: tariff item ids must be unique'))).toBe(true)
+  })
+
+  it('shows the Library 422 reason (#4)', async () => {
+    lib.putItem.mockRejectedValue(Object.assign(new Error('422'), { response: { status: 422,
+      data: { detail: 'invalid tariff: Value error, tariff item ids must be unique' } } }))
+    renderBuilder()
+    fireEvent.click(screen.getByRole('button', { name: 'Save to Library' }))
+    expect((await screen.findByRole('status')).textContent).toContain('tariff item ids must be unique')
+  })
+
+  it('turning per-period tier rates off keeps the rates (#5)', async () => {
+    api.saveCommercial.mockResolvedValue({} as never)
+    renderBuilder({ ...blankTariff(), items: [{ id: 'e', kind: 'energy', unit: 'per_kwh',
+      periods: [{ name: 'all', rate: 0 }], tiers: [{ threshold: 0, rate: 0.1 }, { threshold: 1000, rate: 0.2 }] }] })
+    const box = screen.getByLabelText('Item e tier rates per period')
+    fireEvent.click(box)
+    fireEvent.click(box)
+    fireEvent.click(screen.getByRole('button', { name: 'Save as the project tariff' }))
+    await waitFor(() => expect(api.saveCommercial).toHaveBeenCalled())
+    const saved = (api.saveCommercial.mock.calls[0][0] as { import_tariff: typeof H3 }).import_tariff
+    expect(saved.items[0].tiers).toEqual([{ threshold: 0, rate: 0.1 }, { threshold: 1000, rate: 0.2 }])
+    expect(saved.items[0].periods).toEqual([{ name: 'all', rate: 0 }])
   })
 })

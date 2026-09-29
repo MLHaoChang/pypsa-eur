@@ -104,12 +104,24 @@ function TariffSection() {
   const current = useQuery({ queryKey: nk(project, 'commercial', 'config'),
                              queryFn: () => commercialApi.getCommercial() })
   if (current.isPending) return <p className="text-[11px] text-muted py-2">Loading the tariff…</p>
+  // A failed read must not open a blank builder whose save would replace the
+  // real tariff (WP3.7b review #11).
+  if (current.isError) {
+    return <p className="text-[11px] text-warn py-2" data-testid="ic-tariff-error">
+      The project's tariff could not be read; reload before editing it.</p>
+  }
   const tariff = current.data?.import_tariff
+  const ref = current.data?.import_tariff_ref
   return (
     <div className="space-y-2">
       <p className="text-[11px] text-muted">
         {tariff ? `Editing the project's import tariff ${tariff.id}.`
           : 'The project has no import tariff: build one.'}</p>
+      {ref && (
+        <p className="text-[11px] text-warn" data-testid="ic-tariff-library-ref">
+          This tariff is Library item {ref.id} v{ref.version}. Saving it as the project tariff
+          detaches it from the Library (the project keeps your edited copy).</p>
+      )}
       <TariffBuilder key={tariff?.id ?? 'new'} initial={tariff ?? blankTariff()} />
     </div>
   )

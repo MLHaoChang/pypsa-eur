@@ -355,7 +355,12 @@ def compute_billing_preview(n, cfg, tariff) -> dict | None:
     if "not_solved" in bill.flags:
         return None
     drift, _solve = _billing._drift_flags(n, parsed)
-    flags = sorted({f for f in bill.flags if f not in set(drift)} | {PREVIEW_FLAG})
+    flags = {f for f in bill.flags if f not in set(drift)} | {PREVIEW_FLAG}
+    # A contract the SAVE would refuse with this tariff (a retail contract
+    # naming another tariff id) is said here, not only at save (review #9).
+    flags |= {f"preview_contract_problem:{code}"
+              for code, _msg, _dispatch in _lp.contract_problems(n, parsed)}
+    flags = sorted(flags)
     per_period = {_key(p): _period_payload(r) for p, r in bill.per_period.items()}
     provenance = {k: v for k, v in bill.provenance.items()
                   if k not in ("drift", "recipe_changed")}

@@ -1803,14 +1803,16 @@ def preview_billing(body: BillingPreviewIn):
     from services.commercial.lp_bindings import CommercialBindingError
     from services.results.billing import compute_billing_preview
 
-    if _solver_in_flight():
-        raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
-                                  "message": "a solve is running; preview the bill after it ends"})
-    cfg = _state["solver_config"]
-    if not getattr(cfg, "commercial", None):
-        raise HTTPException(409, {"code": "no_commercial_config",
-                                  "message": "set the commercial config (poc_link) first"})
     with PyPSAService.get_lock():
+        # Checked under the lock, so a solve cannot start in between (review #12).
+        if _solver_in_flight():
+            raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                                      "message": "a solve is running; preview the bill after it "
+                                                 "ends"})
+        cfg = _state["solver_config"]
+        if not getattr(cfg, "commercial", None):
+            raise HTTPException(409, {"code": "no_commercial_config",
+                                      "message": "set the commercial config (poc_link) first"})
         n = PyPSAService.get_network()
         if not _dispatch_ready(n):
             return Response(status_code=204)
