@@ -1282,7 +1282,13 @@ def update_solver_config(partial: dict) -> dict:
     from routers.simulation import update_solver_config as _h
     from models.schemas import SolverConfigSchema
     body = SolverConfigSchema(**partial)
-    return _h(body)
+    # The handler's user-code admin gate needs `db` + `actor` (83d50f049).
+    # Called bare they were `Depends` sentinels (merge review N6). With no
+    # acting identity bound, pass None: the gate then refuses user code
+    # (fail closed) and every other knob works as before.
+    if acting_user_id() is None:
+        return _h(body, db=None, actor=None)
+    return _route(_h, body)
 
 
 # ── Validation (3) ──────────────────────────────────────────────────────────
@@ -1520,8 +1526,11 @@ def put_stress_scenarios(name: str, scenarios: list) -> dict:
         StressScenariosPut,
     )
     from routers.adequacy_worksheet import put_stress_scenarios as _h
-    return _h(body=StressScenariosPut(scenarios=scenarios),
-              project=_authorized_project(name))
+    # Through `_route`: master's sidecar lock gate (68e5f62c3) declares `db`
+    # and `user`; called bare they arrived as `Depends` sentinels and every
+    # real (uuid-bearing) project crashed in server mode (merge review B1).
+    return _route(_h, body=StressScenariosPut(scenarios=scenarios),
+                  project=_authorized_project(name))
 
 
 def get_eh_template(name: str) -> dict:
@@ -2083,7 +2092,8 @@ def _route(handler, *args, **kwargs):
         # signature because handlers reached here declare different subsets and
         # would raise TypeError on an unexpected keyword — `reset_network`
         # (`routers/network.py:1898`) declares `db` and `session` but no `user`.
-        injected = {n: v for n, v in (("db", db), ("user", user)) if n in params}
+        injected = {n: v for n, v in (("db", db), ("user", user),
+                                      ("actor", user)) if n in params}
         if "session" in params and "session" not in kwargs:
             injected["session"] = _acting_session(db)
         # `_route`'s contract is "resolve whatever the target declares", and
@@ -2100,7 +2110,7 @@ def _route(handler, *args, **kwargs):
                     f"_route() cannot satisfy dependency {name!r} of "
                     f"{getattr(handler, '__module__', '?')}."
                     f"{getattr(handler, '__qualname__', handler)}: it supplies only "
-                    f"db/user/session. Resolve it at the call site or extend _route()."
+                    f"db/user/actor/session. Resolve it at the call site or extend _route()."
                 )
         return handler(*args, **{**injected, **kwargs})
 

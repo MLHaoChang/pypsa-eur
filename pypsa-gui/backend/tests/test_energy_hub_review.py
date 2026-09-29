@@ -236,7 +236,10 @@ def test_get_eh_template_and_put_stress_scenarios_via_chat(tmp_path, monkeypatch
     import eh_templates as TPL
     # An AuthorizedProject carries a uuid; master's sidecar lock gate
     # (68e5f62c3) reads it. "u-1" is not a real uuid → no lock row, exactly
-    # as master's own worksheet/stress handler tests construct it.
+    # as master's own worksheet/stress handler tests construct it. This is
+    # the no-lock-row CONTROL only: the real-uuid variants (holder writes,
+    # non-holder gets 409 project_locked) are in
+    # tests/test_chat_tools_handler_dependencies.py (merge review B1).
     proj = types.SimpleNamespace(directory=tmp_path, name="p", uuid="u-1")
     monkeypatch.setattr(T, "_authorized_project", lambda name: proj)
     assert T.get_eh_template("p")["status"] == "no_data"
