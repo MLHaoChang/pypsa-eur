@@ -118,6 +118,42 @@ page-layout look at a generated `.docx`. A `GET …/reports/evidence_hash`
 route is a follow-up (the viewer compares against the newest evidence-only
 report's hash meanwhile).
 
+## §4 — Templates (WP8, WP9, WP10, WP11), 2026-09-29
+
+**Merged:** WP9 `adf28f7` (tagged rendering), WP8 `5515092` (template reader,
+mode, language), WP11 frontend `f0b10ea` (picker, plan editor, `docx-preview`
+0.4.1 pinned), WP11 backend `b15f32e` (upload kind, template routes, mapping
+job, five chat tools, `qa_reports_phase4.py`), WP10 `9e5d37a` (mapping plan,
+untagged body rebuild). **Phase 4 gate: GREEN.**
+
+| Tier | Command | Result |
+|---|---|---|
+| Unit | `test_report_docx_reader.py` 29, `test_report_template_tagged.py` 16, `test_report_template_untagged.py` 25, `test_report_templates_routes.py` 28, `test_chat_report_template_tools.py` 12, `test_report_prompts.py` 7 (+2), plus every other `test_report_*`, `test_chat_report_*`, `test_chat_uploads.py`, parity/manifest/packaging | 425 passed (one run on the merged tree) |
+| Regression | chunk 1 (`tests/test_chat_*.py` + manifest + packaging) | 1255 passed, 2 skipped |
+| Regression | chunk 2a (`tests/test_upload*.py tests/test_desktop*.py tests/test_project*.py`) | 242 passed, 1 skipped |
+| Regression | chunk 2b (`tests/test_energy_hub_*.py` / `tests/test_adequacy_*.py`) | Energy Hub: 308 passed; adequacy: _(run in progress at commit time; filled in the next commit)_ |
+| Regression | remainder (four groups) | unchanged since §1: phase 4 touches no file those groups import; re-run owed before merge to `master` |
+| Regression | frontend `npx vitest run` + `npx tsc -b` (after `npm ci` with the new lockfile) | 187 files, 2104 tests passed; tsc clean |
+| Integration | `test_report_templates_routes.py` (bind/unbind, GET, mapping job with the fake provider, PUT strict/non-strict, tagged export on the real fixture, untagged export, generate with `template_file_id` defaulting the language, every error kind) | 28 passed (counted above) |
+| End-to-end QA | `tests/qa_reports_phase4.py` (real study → both fixtures uploaded as `report_template` → tagged bind → export with the title, looped FMEA rows, evidence hash in the footer, no `{{` left → corporate bind → mapping job on the fake provider → GET plan → PUT an edited plan → export with cover and "Confidential" footer intact, renamed heading, `updateFields` set, `sec:fmea_top` bookmark → generate on the German template → `language == "de"` → unbind → default writer) | 47/47 PASS, 0 skipped |
+| End-to-end QA | drivers 0–2 re-run on this tree | phase 0 18/18; phases 1–2 _(run in progress at commit time; filled in the next commit)_ |
+
+**Recorded corrections.** The two WP11 halves were built in parallel against
+one route contract stated identically to both; they merged without a single
+contract mismatch, and WP10's mapping-plan envelope matched what the WP11
+backend's job expected on the first full driver run (the backend author had
+flagged that as the likely integration risk). Word splits Jinja tags across
+runs; both the reader and the tagged renderer merge runs before matching, so
+a tag typed in Word renders (a tag inside a hyperlink does not — documented).
+Bookmark names keep the `sec:` colon (Word's dialog hides them, the XML is
+what the round trip matches). The WP11 frontend copied `node_modules` into
+its worktree rather than symlinking, because `npm install` through a symlink
+would have mutated the main checkout.
+
+**Owed from a workstation.** Open a tagged and an untagged export in Word
+(TOC refresh prompt on the untagged one), and the `docx-preview` pane in the
+desktop shell.
+
 ## Increment 1 — status
 
 Phases 0–3 delivered on `claude/fmea-llm-reporting-feasibility-jtm6w1`. Not
