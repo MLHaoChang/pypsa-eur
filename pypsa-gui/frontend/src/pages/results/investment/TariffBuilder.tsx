@@ -147,6 +147,7 @@ export function ItemEditor({ item, idx, set, remove, errors }: {
   item: Item; idx: number; set: (it: Item) => void; remove: () => void; errors: string[]
 }) {
   const label = `Item ${item.id || idx + 1}`
+  const whyId = useId()   // an IDREF with no spaces (a label has them; WP3.7c review #13)
   const windowed = isWindowed(item)
   const tiers = item.tiers ?? []
   return (
@@ -228,7 +229,7 @@ export function ItemEditor({ item, idx, set, remove, errors }: {
               <label className="flex items-center gap-1">
                 <input type="checkbox" checked={windowed} aria-label={`${label} tier rates per period`}
                        disabled={windowed && !sameTierRates(item)}
-                       aria-describedby={windowed && !sameTierRates(item) ? `${label}-tr-why` : undefined}
+                       aria-describedby={windowed && !sameTierRates(item) ? whyId : undefined}
                        onChange={e => {
                          if (e.target.checked) {
                            set({ ...item, periods: item.periods.map(p => ({ ...p, tier_rates: tiers.map(t => t.rate) })),
@@ -242,7 +243,7 @@ export function ItemEditor({ item, idx, set, remove, errors }: {
                        }} />
                 tier rates per period
                 {windowed && !sameTierRates(item) && (
-                  <span id={`${label}-tr-why`} className="text-muted">
+                  <span id={whyId} className="text-muted">
                     (the periods' tier rates differ; make them equal to use one set)</span>
                 )}
               </label>

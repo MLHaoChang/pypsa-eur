@@ -13,12 +13,11 @@ import { nk } from '../../../utils/queryKeys'
 import { ItemEditor } from './TariffBuilder'
 import { blankItem } from './tariffModel'
 import {
-  blankContract, CONTRACT_FIELDS, contractErrors, nextContractId, setField,
-  type ContractType, type FieldSpec,
+  blankContract, CONNECTION, CONTRACT_FIELDS, CONTRACT_TYPES, contractErrors, contractType,
+  missingRequired, nextContractId, setField, type ContractType, type FieldSpec,
 } from './contractModel'
 
 const input = 'border border-border rounded px-1 py-0.5 text-[11px] bg-bg'
-const TYPES: ContractType[] = ['ppa', 'cfd', 'dr', 'lease', 'eaas', 'retail']
 
 function Errors({ list }: { list: string[] }) {
   if (!list.length) return null
@@ -43,19 +42,38 @@ function IdsInput({ label, value, onChange }: {
 
 const seriesKey = (r: LibraryRef) => `${r.id}@${r.version}`
 
+/** A Library series picker; a stored ref the Library no longer lists (an older
+ *  version) stays shown as such — never as "none" (WP3.7c review #3). */
+function SeriesSelect({ label, value, series, onChange }: {
+  label: string; value: LibraryRef | null; series: LibraryRef[]; onChange: (r: LibraryRef | null) => void
+}) {
+  const listed = !value || series.some(r => seriesKey(r) === seriesKey(value))
+  return (
+    <select aria-label={label} className={input} value={value ? seriesKey(value) : ''}
+            onChange={e => onChange(e.target.value === '' ? null
+              : series.find(r => seriesKey(r) === e.target.value) ?? value)}>
+      <option value="">none</option>
+      {series.map(r => <option key={seriesKey(r)} value={seriesKey(r)}>{r.id} v{r.version}</option>)}
+      {!listed && <option value={seriesKey(value!)}>{value!.id} v{value!.version} (not listed)</option>}
+    </select>
+  )
+}
+
 function Field({ spec, contract, label, parties, series, set }: {
   spec: FieldSpec; contract: Record<string, unknown>; label: string; parties: string
   series: LibraryRef[]; set: (value: unknown) => void
 }) {
   const v = contract[spec.key]
   const name = `${label} ${spec.label}`
-  const num = (text: string, int: boolean) => (text === '' ? null : int ? parseInt(text, 10) : Number(text))
+  // An integer field sends what was typed: 2.5 is the server's to refuse,
+  // never truncated to 2 (WP3.7c review #6).
+  const num = (text: string) => (text === '' ? null : Number(text))
   let control
   switch (spec.kind) {
     case 'number': case 'int':
       control = <input type="number" step={spec.kind === 'int' ? 1 : 'any'} aria-label={name}
                        className={`${input} w-28`} value={v == null ? '' : String(v)}
-                       onChange={e => set(num(e.target.value, spec.kind === 'int'))} />
+                       onChange={e => set(num(e.target.value))} />
       break
     case 'select':
       control = <select aria-label={name} className={input} value={String(v ?? '')}
@@ -72,15 +90,8 @@ function Field({ spec, contract, label, parties, series, set }: {
       control = <IdsInput label={name} value={(v as string[] | undefined) ?? []} onChange={set} />
       break
     case 'series':
-      control = <select aria-label={name} className={input}
-                        value={v ? seriesKey(v as LibraryRef) : ''}
-                        onChange={e => set(series.find(r => seriesKey(r) === e.target.value) ?? null)}>
-        <option value="">none</option>
-        {series.map(r => <option key={seriesKey(r)} value={seriesKey(r)}>{r.id} v{r.version}</option>)}
-        {!!v && !series.some(r => seriesKey(r) === seriesKey(v as LibraryRef)) && (
-          <option value={seriesKey(v as LibraryRef)}>{(v as LibraryRef).id} v{(v as LibraryRef).version} (not listed)</option>
-        )}
-      </select>
+      control = <SeriesSelect label={name} value={(v as LibraryRef | null | undefined) ?? null}
+                              series={series} onChange={set} />
       break
     default:
       control = <input aria-label={name} className={`${input} w-40`} value={String(v ?? '')}
@@ -94,18 +105,21 @@ function Field({ spec, contract, label, parties, series, set }: {
   )
 }
 
-function ConnectionEditor({ current, series, onSave }: {
-  current: ConnectionAgreement | null | undefined; series: LibraryRef[]
-  onSave: (c: ConnectionAgreement | null) => Promise<void>
+function ConnectionEditor({ current, series, errors, onSave }: {
+  current: ConnectionAgreement | null | undefined; series: LibraryRef[]; errors: string[]
+  onSave: (c: ConnectionAgreement | null) => Promise<boolean>
 }) {
   const [c, setC] = useState<ConnectionAgreement | null>(current ?? null)
   const set = (patch: Partial<ConnectionAgreement>) => setC(prev => ({ ...(prev as ConnectionAgreement), ...patch }))
   const num = (t: string) => (t === '' ? null : Number(t))
+  // No cap until one is typed: a firm 0 MW import cap is never a default
+  // (the server refuses a missing cap; WP3.7c review #11).
+  const noCap = null as unknown as number
   if (!c) {
     return (
       <div className="space-y-1">
         <p className="text-muted">No connection agreement: the import link is uncapped by a contract.</p>
-        <button type="button" className="underline" onClick={() => setC({ kind: 'firm', import_cap_mw: 0,
+        <button type="button" className="underline" onClick={() => setC({ kind: 'firm', import_cap_mw: noCap,
           available_from: `${new Date().getFullYear()}-01-01` })}>Add a connection agreement</button>
       </div>
     )
@@ -123,17 +137,14 @@ function ConnectionEditor({ current, series, onSave }: {
           <option value="fca">flexible connection (FCA)</option></select></label>
       <label className="flex items-center gap-2"><span className="w-48">import cap (MW)</span>
         <input type="number" step="any" min={0} aria-label="Import cap (MW)" className={`${input} w-28`}
-               value={c.import_cap_mw} onChange={e => set({ import_cap_mw: Number(e.target.value) })} /></label>
+               value={c.import_cap_mw ?? ''}
+               onChange={e => set({ import_cap_mw: e.target.value === '' ? noCap : Number(e.target.value) })} /></label>
       <label className="flex items-center gap-2"><span className="w-48">export cap (MW, optional)</span>
         <input type="number" step="any" min={0} aria-label="Export cap (MW)" className={`${input} w-28`}
                value={c.export_cap_mw ?? ''} onChange={e => set({ export_cap_mw: num(e.target.value) })} /></label>
       <label className="flex items-center gap-2"><span className="w-48">envelope series</span>
-        <select aria-label="Envelope series" className={input}
-                value={c.envelope ? seriesKey(c.envelope) : ''}
-                onChange={e => set({ envelope: series.find(r => seriesKey(r) === e.target.value) ?? null })}>
-          <option value="">none</option>
-          {series.map(r => <option key={seriesKey(r)} value={seriesKey(r)}>{r.id} v{r.version}</option>)}
-        </select></label>
+        <SeriesSelect label="Envelope series" value={c.envelope ?? null} series={series}
+                      onChange={r => set({ envelope: r })} /></label>
       <label className="flex items-center gap-2"><span className="w-48">curtailment hours a year</span>
         <input type="number" step="any" min={0} aria-label="Curtailment hours a year" className={`${input} w-28`}
                value={c.curtailment_hours_per_year ?? ''}
@@ -149,17 +160,23 @@ function ConnectionEditor({ current, series, onSave }: {
         <input aria-label="Connection group" className={input} value={c.group ?? ''}
                onChange={e => set({ group: e.target.value || null })} /></label>
       {c.capacity_fee ? (
-        <ItemEditor item={c.capacity_fee} idx={0} set={it => set({ capacity_fee: it })}
-                    remove={() => set({ capacity_fee: null })} errors={[]} />
+        <>
+          <p className="text-muted">The capacity fee is a capacity item: its kind stays “capacity”.</p>
+          <ItemEditor item={c.capacity_fee} idx={0} set={it => set({ capacity_fee: { ...it, kind: 'capacity' } })}
+                      remove={() => set({ capacity_fee: null })} errors={[]} />
+        </>
       ) : (
         <button type="button" className="underline"
                 onClick={() => set({ capacity_fee: { ...blankItem('capacity', 'capacity_fee') } })}>
           Add a capacity fee</button>
       )}
+      <Errors list={errors} />
       <div className="flex gap-2">
         <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent"
-                onClick={() => onSave(c)}>Save the connection agreement</button>
-        <button type="button" className="underline" onClick={async () => { setC(null); await onSave(null) }}>
+                onClick={() => { void onSave(c) }}>Save the connection agreement</button>
+        {/* Removed only once the server has removed it (WP3.7c review #4). */}
+        <button type="button" className="underline"
+                onClick={async () => { if (await onSave(null)) setC(null) }}>
           Remove the connection agreement</button>
       </div>
     </fieldset>
@@ -177,6 +194,9 @@ export default function ContractsEditor() {
   const series = useQuery({ queryKey: nk(project, 'library', 'series'),
                             queryFn: () => libraryApi.listSeries(), retry: false })
   const [contracts, setContracts] = useState<CommercialContract[] | null>(null)
+  // The stored list the edits started from: a save over a list changed since
+  // (the assistant, a template's drafts) is refused, never overwritten (review #10).
+  const [baseline, setBaseline] = useState<string | null>(null)
   const [errors, setErrors] = useState<Map<number, string[]>>(new Map())
   const [message, setMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null)
   const [newType, setNewType] = useState<ContractType>('ppa')
@@ -184,6 +204,7 @@ export default function ContractsEditor() {
   useEffect(() => {
     if (commercial.data !== undefined && contracts === null && !commercial.isFetching) {
       setContracts(structuredClone(commercial.data?.contracts ?? []))
+      setBaseline(JSON.stringify(commercial.data?.contracts ?? []))
     }
   }, [commercial.data, commercial.isFetching, contracts])
 
@@ -204,7 +225,7 @@ export default function ContractsEditor() {
                                  .filter((x): x is string => typeof x === 'string' && !!x))])]
   const refs = series.data ?? []
 
-  const save = async (patch: Partial<CommercialConfig>, what: string) => {
+  const save = async (patch: Partial<CommercialConfig>, what: string): Promise<boolean> => {
     setMessage(null); setErrors(new Map())
     try {
       await commercialApi.saveCommercial(patch as never)
@@ -212,12 +233,54 @@ export default function ContractsEditor() {
       await qc.invalidateQueries({ queryKey: nk(project, 'commercial') })
       await qc.invalidateQueries({ queryKey: nk(project, 'results') })
       await qc.invalidateQueries({ queryKey: nk(project, 'value_flows') })
+      return true
     } catch (e) {
       const r = (e as { response?: { status?: number; data?: { detail?: unknown } } })?.response
-      const byContract = contractErrors(r?.data?.detail ?? (e instanceof Error ? e.message : null))
-      setErrors(byContract)
+      setErrors(contractErrors(r?.data?.detail ?? (e instanceof Error ? e.message : null), contracts))
       setMessage({ tone: 'error', text: `${what} not saved: the server refused it (see below).` })
+      return false
     }
+  }
+  const saveContracts = async () => {
+    // A blank required party or id is refused here (the model takes '').
+    const blank = new Map(contracts.map((c, i) => [i, missingRequired(c)] as const).filter(([, m]) => m.length))
+    if (blank.size) {
+      setErrors(blank)
+      setMessage({ tone: 'error', text: 'The contracts not saved: fill in the required fields (see below).' })
+      return
+    }
+    try {
+      const stored = await commercialApi.getCommercial()
+      if (JSON.stringify(stored?.contracts ?? []) !== baseline) {
+        setErrors(new Map())
+        setMessage({ tone: 'error', text: 'The contracts not saved: the project\'s contracts changed since they were loaded (the assistant or a template may have added some). Reload them, then redo the edits.' })
+        return
+      }
+    } catch (e) {
+      setMessage({ tone: 'error', text: `The contracts not saved: the project could not be read (${e instanceof Error ? e.message : 'error'}).` })
+      return
+    }
+    // After a save the stored form (the server may tag or normalise) is the
+    // new baseline; the form keeps its state (the connection editor's included).
+    if (await save({ contracts }, 'The contracts')) {
+      try { setBaseline(JSON.stringify((await commercialApi.getCommercial())?.contracts ?? [])) }
+      catch { setBaseline(null) }                      // unknown: the next save asks for a reload
+    }
+  }
+  const reload = async () => {
+    setMessage(null); setErrors(new Map())
+    try {
+      const fresh = (await commercialApi.getCommercial())?.contracts ?? []
+      setContracts(structuredClone(fresh)); setBaseline(JSON.stringify(fresh))
+      await qc.invalidateQueries({ queryKey: nk(project, 'commercial') })
+    } catch (e) {
+      setMessage({ tone: 'error', text: `The contracts could not be reloaded (${e instanceof Error ? e.message : 'error'}).` })
+    }
+  }
+  const edit = (next: CommercialContract[], clearErrors = false) => {
+    setContracts(next)
+    // Errors are by position: an added or removed contract moves them (review #7).
+    if (clearErrors) setErrors(new Map())
   }
 
   return (
@@ -229,17 +292,22 @@ export default function ContractsEditor() {
       {contracts.map((c, i) => {
         const label = `Contract ${c.id || i + 1}`
         const rec = c as unknown as Record<string, unknown>
+        // An untagged (P0-era) contract by its fields; an unknown tag is shown
+        // read-only and kept unchanged (WP3.7c review #5).
+        const type = contractType(c)
         return (
           <fieldset key={i} className="border border-border rounded p-2 space-y-1" data-testid={`ce-contract-${i}`}>
-            <legend className="font-semibold">{c.type.toUpperCase()} {c.id}</legend>
+            <legend className="font-semibold">{type ? type.toUpperCase() : String(rec.type ?? 'contract')} {c.id}</legend>
             {c.library_ref && <p className="text-muted">Copied from Library item {c.library_ref.id} v{c.library_ref.version}.</p>}
-            {CONTRACT_FIELDS[c.type].filter(f => !f.when || f.when(rec)).map(f => (
+            {type ? CONTRACT_FIELDS[type].filter(f => !f.when || f.when(rec)).map(f => (
               <Field key={f.key} spec={f} contract={rec} label={label} parties={datalist} series={refs}
-                     set={v => setContracts(contracts.map((x, j) => (j === i ? setField(x, f, v) : x)))} />
-            ))}
+                     set={v => edit(contracts.map((x, j) => (j === i ? setField(x, f, v, type) : x)))} />
+            )) : (
+              <p className="text-muted">A contract type this editor does not know: kept as stored.</p>
+            )}
             <Errors list={errors.get(i) ?? []} />
             <button type="button" className="underline" aria-label={`Remove ${label}`}
-                    onClick={() => setContracts(contracts.filter((_, j) => j !== i))}>Remove</button>
+                    onClick={() => edit(contracts.filter((_, j) => j !== i), true)}>Remove</button>
           </fieldset>
         )
       })}
@@ -247,13 +315,15 @@ export default function ContractsEditor() {
         <label>Add a{' '}
           <select aria-label="New contract type" className={input} value={newType}
                   onChange={e => setNewType(e.target.value as ContractType)}>
-            {TYPES.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}</select></label>
-        <button type="button" className="underline" onClick={() => setContracts([...contracts,
-          blankContract(newType, nextContractId(contracts, newType), site)])}>Add contract</button>
+            {CONTRACT_TYPES.map(t => <option key={t} value={t}>{t.toUpperCase()}</option>)}</select></label>
+        <button type="button" className="underline" onClick={() => edit([...contracts,
+          blankContract(newType, nextContractId(contracts, newType), site)], true)}>Add contract</button>
         <button type="button" className="px-2 py-1 rounded bg-accent text-on-accent"
-                onClick={() => save({ contracts }, 'The contracts')}>Save the contracts</button>
+                onClick={() => { void saveContracts() }}>Save the contracts</button>
+        <button type="button" className="underline" onClick={() => { void reload() }}>
+          Reload the contracts</button>
       </div>
-      <ConnectionEditor current={cfg.connection} series={refs}
+      <ConnectionEditor current={cfg.connection} series={refs} errors={errors.get(CONNECTION) ?? []}
                         onSave={conn => save({ connection: conn }, 'The connection agreement')} />
     </div>
   )

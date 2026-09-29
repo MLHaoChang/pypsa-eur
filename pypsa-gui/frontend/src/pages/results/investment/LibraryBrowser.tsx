@@ -115,8 +115,10 @@ function UrdbImport({ onDone }: { onDone: () => void }) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
+  // A new rate is a new import: the last one's refusals never carry over to
+  // it ("Import without them" consents only to refusals shown; round 2 R2-1).
   const pick = (data: unknown, i?: number) => {
-    setIndex(i); setChoice(urdbRate(data, i))
+    setIndex(i); setChoice(urdbRate(data, i)); setRefusals([]); setError(null); setResult(null)
   }
   const run = async (acceptPartial: boolean) => {
     if (choice?.kind !== 'rate') return
@@ -260,7 +262,7 @@ function SeriesPanel() {
                                         onChange={e => setSettlement(e.target.value)}>
                 <option value="15min">15 min</option><option value="30min">30 min</option>
                 <option value="h">hourly</option></select></label>
-              <label>timestamps label <select aria-label="Timestamp label" className={input} value={label}
+              <label>timestamps label <select className={input} value={label}
                                               onChange={e => setLabel(e.target.value)}>
                 <option value="start">interval start</option><option value="end">interval end</option></select></label>
             </>

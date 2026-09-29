@@ -857,6 +857,14 @@ Tests: `libraryModel.test.ts` 4, `LibraryBrowser.test.tsx` 9 (+ Library switch w
 failed read, 422 list, contract pin and summary; the picker stays after a pick), `commercial.test.ts`
 quiet calls.
 
+**WP3.7a review round 2 — FAIL (1 binding, a regression of the #2 fix); fixed.** R2-1: with the
+picker now kept, switching the rate after a refusal left the old refusals on screen and "Import
+without them" imported the NEW rate partially without its own refusals ever shown → `pick()` clears
+refusals, error and result (a new rate is a new import); the URDB test switches the rate after a
+refusal and re-imports. Optional: the timestamps-label select is named by its visible label. INFO (not
+taken): a hand-edited `solver_config.json` could carry an inline tariff that does not hash to its ref
+(`replacesInline` trusts the PUT check) — the load path does not re-check; noted for P4 hygiene.
+
 ## WP3.7b Tariff builder + bill preview
 
 Items / periods / tiers (per-period `tier_rates` for windowed items) / ratchets (range, cyclic, months) /
@@ -962,6 +970,29 @@ P2 model; invalid combinations surface the 422; a11y.
   mode-dependent fields; an edit writes the field and a cleared optional one is removed; add a
   contract; a 422 at its contract only; the connection agreement with its capacity fee and envelope;
   `expectAllButtonsNamed`). Full vitest 2,734 passed.
+
+**WP3.7c review round 1 — PASS WITH CONDITIONS (7 binding: #1–#7); fixed, with the optional ones.**
+1. Hidden `when` fields were still sent after a kind / pricing change (a stale `sleeving_party`
+   then failed the value-flows party check, unfixable from the form) → `setField` removes every
+   field whose `when` no longer holds; floor and cap now show (and live) only under
+   `market_plus_premium` (P2 settlement applies them there only).
+2. A blank required party saved as `''` → `missingRequired` refuses a blank required text / party
+   field before the server, at its contract.
+3. A stale envelope ref showed "none" but was saved → one `SeriesSelect` for contracts and the
+   envelope: a ref the Library no longer lists shows "(not listed)", "none" clears it.
+4. Removing the connection hid it before the server confirmed → removed only when the save succeeds.
+5. An untagged P0-era contract crashed the panel (`c.type.toUpperCase()`) → `contractType` mirrors
+   `_contract_type_from_shape`; an unknown tag is shown read-only and saved unchanged.
+6. Integer fields were truncated by `parseInt` → `Number(text)`, the server judges.
+7. Positional errors outlived add / remove → cleared on both.
+Optional taken: #8 a `connection` 422 is shown at the connection agreement (prefix `body.commercial.`
+dropped); #9 a binding refusal naming `contract '<id>'` is shown at that contract; #10 the contracts
+save compares the stored list with the one the edits started from and refuses a changed one ("Reload
+the contracts"; the form keeps its state after a save, the stored form is the new baseline); #11 a new
+agreement starts with no import cap (a cleared cap is `null`, the server refuses it); #12 the capacity
+fee's kind stays `capacity` (stated); #13 the TariffBuilder's `aria-describedby` IDREF from `useId`;
+#14 DR `asset_ids` labelled as refused until DR on assets ships; the test's no-op `.replace` removed.
+Tests: `ContractsEditor.test.tsx` 15 (+10, one per finding), `contractModel.test.ts` 4 (new).
 
 ## Phase 3 e2e QA gate
 

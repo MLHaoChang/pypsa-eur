@@ -37,8 +37,9 @@ export const CONTRACT_FIELDS: Record<ContractType, FieldSpec[]> = {
       when: c => c.pricing === 'market_plus_premium' },
     { key: 'reference_price', label: 'reference price series', kind: 'series' },
     { key: 'indexation_pct_per_year', label: 'indexation (% a year)', kind: 'number' },
-    { key: 'floor', label: 'floor', kind: 'number' },
-    { key: 'cap', label: 'cap', kind: 'number' },
+    // A floor and a cap bound the market price plus premium only (P2 settlement).
+    { key: 'floor', label: 'floor', kind: 'number', when: c => c.pricing === 'market_plus_premium' },
+    { key: 'cap', label: 'cap', kind: 'number', when: c => c.pricing === 'market_plus_premium' },
     { key: 'volume_cap_mwh_per_year', label: 'volume cap (MWh a year)', kind: 'number' },
     { key: 'baseload_mw', label: 'baseload (MW)', kind: 'number', when: c => c.kind === 'baseload' },
     { key: 'sleeving_party', label: 'sleeving party', kind: 'party', when: c => c.kind === 'sleeved' },
@@ -60,7 +61,7 @@ export const CONTRACT_FIELDS: Record<ContractType, FieldSpec[]> = {
   dr: common([
     { key: 'counterparty', label: 'counterparty (pays)', kind: 'party' },
     { key: 'load_ids', label: 'loads', kind: 'ids' },
-    { key: 'asset_ids', label: 'assets', kind: 'ids' },
+    { key: 'asset_ids', label: 'assets (refused until DR on assets ships)', kind: 'ids' },
     { key: 'contracted_mw', label: 'contracted MW', kind: 'number' },
     { key: 'availability_eur_per_mw_year', label: 'availability (per MW-year)', kind: 'number', required: true },
     { key: 'activation_eur_per_mwh', label: 'activation (per MWh)', kind: 'number', required: true },
@@ -91,6 +92,22 @@ export const CONTRACT_FIELDS: Record<ContractType, FieldSpec[]> = {
   ]),
 }
 
+export const CONTRACT_TYPES = Object.keys(CONTRACT_FIELDS) as ContractType[]
+
+/** The contract's type; an untagged P0-era payload by its fields, as the
+ *  server's `_contract_type_from_shape` does (a stored config is returned raw);
+ *  null for a tag this editor does not know (shown read-only, kept as is). */
+export function contractType(c: CommercialContract): ContractType | null {
+  const r = c as unknown as Record<string, unknown>
+  if (r.type != null) return CONTRACT_TYPES.includes(r.type as ContractType) ? r.type as ContractType : null
+  if ('strike' in r) return 'cfd'
+  if ('availability_eur_per_mw_year' in r) return 'dr'
+  if ('annual_payment' in r) return 'lease'
+  if ('fee_eur_per_mwh' in r || 'fee_eur_per_year' in r) return 'eaas'
+  if ('tariff_id' in r) return 'retail'
+  return 'ppa'
+}
+
 export function blankContract(type: ContractType, id: string, site: string): CommercialContract {
   switch (type) {
     case 'ppa': return { type, id, kind: 'pay_as_produced', price: 0, tenor_years: 10,
@@ -105,14 +122,32 @@ export function blankContract(type: ContractType, id: string, site: string): Com
   }
 }
 
-/** Set a field; a cleared optional field is removed (the model's default). */
-export function setField(c: CommercialContract, spec: FieldSpec, value: unknown): CommercialContract {
+/** Set a field; a cleared optional field is removed (the model's default).
+ *  A field hidden by the change (a sleeving party once the PPA is no longer
+ *  sleeved, a premium once the pricing is fixed) is removed too: it would be
+ *  sent and judged while the form cannot show or clear it (WP3.7c review #1). */
+export function setField(c: CommercialContract, spec: FieldSpec, value: unknown,
+                         type: ContractType | null = contractType(c)): CommercialContract {
   const out = { ...c } as Record<string, unknown>
   const empty = value === '' || value === null || value === undefined
     || (typeof value === 'number' && Number.isNaN(value))
   if (empty && !spec.required) delete out[spec.key]
   else out[spec.key] = empty ? (spec.kind === 'ids' ? [] : value === '' ? '' : null) : value
+  for (const f of type ? CONTRACT_FIELDS[type] : []) if (f.when && !f.when(out)) delete out[f.key]
   return out as unknown as CommercialContract
+}
+
+/** Required text and party fields left blank: the P2 model takes `''` for a
+ *  party, which then settles against no one — refused here before the save
+ *  (WP3.7c review #2). */
+export function missingRequired(c: CommercialContract): string[] {
+  const type = contractType(c)
+  if (!type) return []
+  const r = c as unknown as Record<string, unknown>
+  return CONTRACT_FIELDS[type]
+    .filter(f => f.required && (f.kind === 'text' || f.kind === 'party') && (!f.when || f.when(r)))
+    .filter(f => typeof r[f.key] !== 'string' || !(r[f.key] as string).trim())
+    .map(f => `${f.label}: required`)
 }
 
 export function nextContractId(contracts: CommercialContract[], type: ContractType): string {
@@ -122,22 +157,32 @@ export function nextContractId(contracts: CommercialContract[], type: ContractTy
   return `${type}_${n}`
 }
 
-/** A 422 of the solver-config route by contract index (its `loc` names
- *  `contracts, <i>, …`), the rest under -1. */
-export function contractErrors(detail: unknown): Map<number, string[]> {
+/** Where a refusal belongs: a contract's index, the connection agreement
+ *  (CONNECTION), or the page (-1). */
+export const CONNECTION = -2
+
+/** A refusal of the solver-config route by where it belongs: a 422 list by its
+ *  `loc` (`contracts, <i>, …` or `connection, …`); a binding refusal
+ *  (`{code, message}`) by the contract its message names (`contract '<id>'`,
+ *  WP3.7c review #9) or the connection agreement; the rest under -1. */
+export function contractErrors(detail: unknown, contracts: CommercialContract[] = []): Map<number, string[]> {
   const out = new Map<number, string[]>()
+  const add = (k: number, m: string) => out.set(k, [...(out.get(k) ?? []), m])
   const list = Array.isArray(detail) ? detail as Array<{ loc?: Array<string | number>; msg?: string }> : []
   for (const e of list) {
-    const loc = e.loc ?? []
+    const loc = (e.loc ?? []).filter(x => x !== 'body' && x !== 'commercial')
     const i = loc.indexOf('contracts')
     const idx = i >= 0 && typeof loc[i + 1] === 'number' ? loc[i + 1] as number : -1
-    const where = (idx >= 0 ? loc.slice(i + 2) : loc).join('.')
-    const msg = `${where ? `${where}: ` : ''}${e.msg ?? 'invalid'}`
-    out.set(idx, [...(out.get(idx) ?? []), msg])
+    const conn = idx < 0 && loc[0] === 'connection'
+    const where = (idx >= 0 ? loc.slice(i + 2) : conn ? loc.slice(1) : loc).join('.')
+    add(idx >= 0 ? idx : conn ? CONNECTION : -1, `${where ? `${where}: ` : ''}${e.msg ?? 'invalid'}`)
   }
   if (!list.length && detail != null) {
     const d = detail as { message?: string }
-    out.set(-1, [typeof detail === 'string' ? detail : String(d.message ?? 'refused')])
+    const text = typeof detail === 'string' ? detail : String(d.message ?? 'refused')
+    const named = /contract '([^']+)'/.exec(text)?.[1]
+    const idx = named != null ? contracts.findIndex(c => c.id === named) : -1
+    add(idx >= 0 ? idx : /connection/i.test(text) && !/contract/i.test(text) ? CONNECTION : -1, text)
   }
   return out
 }

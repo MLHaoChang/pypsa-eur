@@ -87,6 +87,8 @@ describe('LibraryBrowser', () => {
     lib.importUrdb
       .mockRejectedValueOnce(Object.assign(new Error('422'), { response: { status: 422, data: { detail: {
         code: 'urdb_refused', message: 'refused', refusals: [{ field: 'mincharge', reason: 'not supported' }] } } } }))
+      .mockRejectedValueOnce(Object.assign(new Error('422'), { response: { status: 422, data: { detail: {
+        code: 'urdb_refused', message: 'refused', refusals: [{ field: 'mincharge', reason: 'not supported' }] } } } }))
       .mockResolvedValueOnce({ ref: { ...REF, id: 'imp', version: 1 }, notes: ['n1'], refusals: [],
                                unsupported_fields: ['mincharge'] })
     renderBrowser()
@@ -109,9 +111,17 @@ describe('LibraryBrowser', () => {
     expect(refusals.textContent).toContain('mincharge: not supported')
     expect(lib.importUrdb.mock.calls[0][0]).toMatchObject({ urdb_response: { name: 'New' },
       accept_partial: false, name: 'imp' })
-    fireEvent.click(within(refusals).getByRole('button', { name: /Import without them/ }))
+    // Another rate is another import: the refusals shown were for 'New' (R2-1).
+    fireEvent.change(screen.getByLabelText('Rate'), { target: { value: '0' } })
+    await waitFor(() => expect(screen.queryByTestId('lib-urdb-refusals')).toBeNull())
+    fireEvent.change(screen.getByLabelText('Rate'), { target: { value: '1' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Import' }))
+    await waitFor(() => expect(lib.importUrdb).toHaveBeenCalledTimes(2))
+    fireEvent.click(within(await screen.findByTestId('lib-urdb-refusals'))
+      .getByRole('button', { name: /Import without them/ }))
     expect((await screen.findByTestId('lib-urdb-done')).textContent).toContain('not imported: mincharge')
-    expect(lib.importUrdb.mock.calls[1][0]).toMatchObject({ accept_partial: true })
+    expect(lib.importUrdb.mock.calls[1][0]).toMatchObject({ urdb_response: { name: 'New' }, accept_partial: false })
+    expect(lib.importUrdb.mock.calls[2][0]).toMatchObject({ urdb_response: { name: 'New' }, accept_partial: true })
   })
 
   it('attaches without asking on a switch between Library tariffs (the inline copy is the ref\'s)', async () => {
