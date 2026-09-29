@@ -876,6 +876,23 @@ an asset not a Generator.
   stays 0; the settlement line equals the LP row on the same dispatch; undo restores `marginal_cost`; drift on a
   price change; reconciliation case `ppa_changes_dispatch` before and after save → load.
 
+- **As implemented:**
+  - **`lp_bindings._ppa_dispatch_spec`** is run by `validate_for_network`, so it refuses at binding, at solve time and in preflight. It binds a `changes_dispatch` PPA only when it is a fixed-price `pay_as_produced` PPA on ON-SITE Generators (bus ≠ the PoC's grid bus) with `buyer == site_party` and no volume cap. Every other shape is refused with its reason: the seller case, another kind, `market_plus_premium`, a cap, a grid-side or non-Generator asset, or a Generator in two dispatch PPAs.
+  - **The adder** is price_y indexed to the modelled year (per investment period on a multi-period axis), applied as a transient `generators_t.marginal_cost` adder and undone after the solve.
+  - **Commit.** It writes `generators_t["ic_ppa_price"]` and `meta["ic_ppa"] = {contracts, generators, hash, hash_version}`, and clears both after a solve without one. `LP_RECIPE = 5`; `facts.ppa_dispatch`.
+  - **Rows.** `ppa_settlement` is Σ w_obj × p_gen × the committed €/MWh per period, ADDED like the energy rows (in the objective, out of the statistics).
+  - **Drift and recipe.** A hash mismatch is `config_changed_since_solve`. With no record while one is wanted: `ppa_settlement_not_established`, plus `ppa_recipe_changed` for a solve under an older recipe. `billing._drift_flags` does the same.
+  - **Tests:** `tests/test_lp_ppa_dispatch.py` has 12 tests:
+    - the refusals;
+    - the indexed adder and undo;
+    - the PV curtails when the price exceeds its value (imports at 20 €/MWh instead);
+    - rows and gap 0, with the `settle` line equal to the row;
+    - drift and the recipe change, in the rows and on the bill;
+    - two periods indexed per period;
+    - preflight and binding refusals.
+
+    Reconciliation gate case `ppa_changes_dispatch` (18 cases), compared across save → load.
+
 ## WP2.3 Billing vs LP gap per item kind, with causes
 
 Files: `backend/services/commercial/gap.py` (new, pure), `test_billing_gap.py`.

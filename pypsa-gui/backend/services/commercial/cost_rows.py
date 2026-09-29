@@ -225,6 +225,37 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
         if _lp.capacity_all_newly_bound(n.meta.get(_lp.META_LINKS)):
             flags.append("capacity_recipe_changed")  # the solve's recipe bound none
 
+    # changes_dispatch PPAs (P2 WP2.2d): Σ w × p_gen × the committed €/MWh,
+    # per period — in the objective, out of the statistics (the adder was
+    # undone), so ADDED like the energy rows.
+    ppa = n.meta.get(_lp.META_PPA)
+    wanted_ppa = _lp.ppa_dispatch_hash(cfg_now) if cfg_now is not None else None
+    if ppa:
+        frame = n.generators_t.get(_lp.PPA_PRICE_ATTR)
+        gens = ppa.get("generators") or []
+        p = n.generators_t.p
+        if frame is None or any(g not in frame.columns or g not in p.columns for g in gens) \
+                or frame[gens].isna().any().any():
+            block["ppa_settlement"] = None
+            flags.append("ppa_settlement_not_established")
+        else:
+            amount = (n.snapshot_weightings.objective * (p[gens] * frame[gens]).sum(axis=1))
+            per = (amount.groupby(level=0).sum().items()
+                   if isinstance(n.snapshots, pd.MultiIndex) else [(None, amount.sum())])
+            for period, v in per:
+                items.append(("ppa_settlement", None if period is None else int(period), 0.0,
+                              float(v)))
+            block["ppa_settlement"] = weighted("ppa_settlement")
+        if ppa.get("hash") != (_lp.ppa_dispatch_hash(cfg_now, _H.version_of(ppa))
+                               if cfg_now is not None else None):
+            drifted()
+    elif wanted_ppa is not None:
+        block["ppa_settlement"] = None
+        flags.append("ppa_settlement_not_established")
+        rec = n.meta.get(_lp.META_LINKS) or {}
+        if rec and int(rec.get("lp_recipe") or 1) < _lp.PPA_DISPATCH_RECIPE:
+            flags.append("ppa_recipe_changed")  # the solve's recipe bound no dispatch PPA
+
     # Energy-hub group contract (WP1.6): no money of its own; the members'
     # shares of the group's import energy are reported (allocation is P3).
     def comparable(spec: dict | None) -> dict | None:

@@ -10,12 +10,12 @@ recomputes the rows after a reload with no solver state at all, and
 `_HANDLER_PARAMS` is unchanged (no new route argument; plan deviation from the
 `commercial_terms=` keyword, recorded in the plan).
 
-Seventeen cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
+Eighteen cases: energy only; + capacity fee; + demand charge; + ratchet; + convex
 tiers; + group cap; a representative-weeks axis; two investment periods (TOU +
 demand + fee); a two-period group whose demand is metered on the group; annual FOM on the extendable assets; capex and FOM on a fee-bearing PoC Link (WP2.0);
 rising demand tiers, a designated-month and a cyclic ratchet (WP2.1c-i); convex
 windowed energy tiers (WP2.1c-ii); tariff capacity, contracted and measured-peak
-(WP2.1c-iii).
+(WP2.1c-iii); a changes_dispatch PPA (WP2.2d).
 After the reload the gap must still be computed (never None), and the flags,
 the not-established months and the group record must be the same.
 """
@@ -58,6 +58,10 @@ WINDOWED_TIERS = {"id": "wtiers", "kind": "energy", "unit": "per_kwh", "measured
 TARIFF_CAP = {"id": "cap", "kind": "capacity", "unit": "per_kw_year",
               "periods": [{"name": "all", "rate": 400.0}]}
 LEISTUNG = {**TARIFF_CAP, "id": "lp", "measured_on": "peak_import"}
+# WP2.2d: a pay-as-produced PPA the site buys, in the LP as a PV marginal cost.
+PPA_DISPATCH = {"type": "ppa", "id": "ppa1", "kind": "pay_as_produced", "price": 15.0,
+                "tenor_years": 10, "seller": "Solar BV", "buyer": "site", "asset_ids": ["pv"],
+                "changes_dispatch": True}
 RATCHET_MONTHS = {**DEMAND, "ratchet": {"months": [1], "share": 0.95}}
 RATCHET_CYCLIC = {**DEMAND, "ratchet": {"lookback_months": 1, "share": 0.9,
                                         "cyclic_year": True}}
@@ -165,6 +169,7 @@ CASES = {
     "windowed_tiers": (_edge, {"import_tariff": _tariff(WINDOWED_TIERS)}),
     "tariff_capacity": (_extendable_poc, {"import_tariff": _tariff(TOU, TARIFF_CAP)}),
     "tariff_capacity_peak": (_edge, {"import_tariff": _tariff(TOU, LEISTUNG)}),
+    "ppa_changes_dispatch": (_edge, {"import_tariff": _tariff(TOU), "contracts": [PPA_DISPATCH]}),
     "ratchet_designated": (_jan_feb, {"import_tariff": _tariff(TOU, RATCHET_MONTHS)}),
     "ratchet_cyclic": (_jan_feb, {"import_tariff": _tariff(TOU, RATCHET_CYCLIC),
                                   "meter_history_peaks_kw": {"2030-12": 60_000.0}}),
@@ -227,7 +232,7 @@ def test_rows_reconcile_before_and_after_a_save_and_load(case, client, install_n
     dec2, cb2 = _gap_and_rows(reloaded.network, cfg2)
     after = cb2["commercial"]
     for key in ("energy_import", "energy_export", "demand_charge", "energy_tiers",
-                "network_capacity", "tariff_capacity"):
+                "network_capacity", "tariff_capacity", "ppa_settlement"):
         if before.get(key) is None:
             continue
         assert after.get(key) == pytest.approx(before[key], rel=1e-9), (case, key)

@@ -174,6 +174,16 @@ def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
             # This recipe binds them, yet the solve wrote no record (an
             # unreadable peak): not established, as in the rows (review #5).
             flags.append("tariff_capacity_not_established")
+    # changes_dispatch PPAs (WP2.2d) shape the dispatch too.
+    ppa_rec = n.meta.get(_lp.META_PPA)
+    if ppa_rec is not None:
+        if ppa_rec.get("hash") != _lp.ppa_dispatch_hash(cfg, _H.version_of(ppa_rec)):
+            changed = True
+    elif _lp.ppa_dispatch_hash(cfg) is not None:
+        if rec and int(rec.get("lp_recipe") or 1) < _lp.PPA_DISPATCH_RECIPE:
+            flags.append("ppa_recipe_changed")
+        else:
+            changed = True
     if not rec:
         flags.append("solve_provenance_unknown")
     if changed:

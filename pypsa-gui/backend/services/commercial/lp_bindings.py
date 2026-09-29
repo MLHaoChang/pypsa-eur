@@ -123,6 +123,8 @@ DEMAND_BUILT_ATTR = "_ic_demand_built"  # transient: set by the LP wrapper
 META_TIERS = "ic_tier_volumes"
 META_GROUP = "ic_group"
 META_CAPACITY = "ic_tariff_capacity"
+META_PPA = "ic_ppa"                    # the dispatch PPAs a solve bound (WP2.2d)
+PPA_PRICE_ATTR = "ic_ppa_price"        # generators_t: €/MWh added per Generator
 CAPACITY_SPEC_ATTR = "_ic_capacity_spec"   # transient: set by apply, read by the LP wrapper
 CAPACITY_BUILT_ATTR = "_ic_capacity_built"  # transient: set by the LP wrapper
 GROUP_SPEC_ATTR = "_ic_group_spec"      # transient: set by apply, read by the LP wrapper
@@ -256,8 +258,10 @@ def _side(item: TariffItem) -> str:
 #   3 — windowed energy tiers bound (convex: LP terms; non-convex: adders at
 #       the predicted tier), the energy history prices non-convex tiers
 #       (WP2.1c-ii).
-#   4 — tariff capacity items bound (WP2.1c-iii).
-LP_RECIPE = 4
+#   4 — tariff capacity items bound (WP2.1c-iii);
+#   5 — changes_dispatch PPAs bound (WP2.2d).
+LP_RECIPE = 5
+PPA_DISPATCH_RECIPE = 5
 WINDOWED_TIERS_RECIPE = 3
 CAPACITY_RECIPE = 4
 
@@ -528,6 +532,7 @@ def validate_for_network(n, cfg: CommercialConfig | dict) -> None:
             "commercial.capacity_double_count: the import tariff has a capacity item and the "
             "connection agreement a capacity_fee on the same PoC; keep one")
     _validate_contracts(n, cfg)
+    _ppa_dispatch_spec(n, cfg)   # a dispatch PPA that cannot bind is refused here too
     if cfg.demand_items:
         # Not implemented in P1: every demand item of the tariff is charged, so
         # a selection would be silently ignored (Phase 1 gate finding #4).
@@ -1558,6 +1563,70 @@ def circulation_risk_snapshots(n, cfg: CommercialConfig, adders: dict[str, np.nd
     return int(((imp + exp) < -1e-9).sum())
 
 
+# ── changes_dispatch PPAs (P2 WP2.2d) ──────────────────────────────────────
+
+
+def dispatch_ppas(cfg: CommercialConfig) -> list:
+    return [c for c in cfg.contracts if c.type == "ppa" and c.changes_dispatch]
+
+
+def ppa_dispatch_hash(cfg: CommercialConfig, version: int = _H.HASH_VERSION) -> str | None:
+    ppas = dispatch_ppas(cfg)
+    return _H.digest(ppas, version=version) if ppas else None
+
+
+def _ppa_dispatch_spec(n, cfg: CommercialConfig) -> dict[str, np.ndarray] | None:
+    """{generator: €/MWh adder per snapshot} for the dispatch PPAs, or None.
+    v1 binds a fixed-price pay-as-produced PPA on ON-SITE Generators with the
+    site as the BUYER: the site pays price_y for every MWh produced, a marginal
+    cost of the asset. Everything else is refused with its reason (an annual
+    cap is not a marginal cost; the seller's revenue is not the site's cost)."""
+    from services.commercial.contracts import indexed
+
+    ppas = dispatch_ppas(cfg)
+    if not ppas:
+        return None
+    grid_bus = str(n.links.at[cfg.poc_link, "bus0"]) if cfg.poc_link in n.links.index else None
+    inv = (np.asarray(n.snapshots.get_level_values(0)) if isinstance(n.snapshots, pd.MultiIndex)
+           else None)
+    out: dict[str, np.ndarray] = {}
+    for c in ppas:
+        why = None
+        if c.buyer != cfg.site_party:
+            why = (f"the site ({cfg.site_party!r}) is not the buyer; only the buyer case "
+                   "changes dispatch in P2")
+        elif c.kind != "pay_as_produced":
+            why = f"kind {c.kind!r}: only pay_as_produced changes dispatch in P2"
+        elif c.pricing != "fixed":
+            why = "pricing market_plus_premium: only a fixed price changes dispatch in P2"
+        elif c.volume_cap_mwh_per_year is not None:
+            why = "a volume cap is an annual limit, not a marginal cost"
+        if why is None:
+            for a in c.asset_ids:
+                if a not in n.generators.index:
+                    why = f"asset {a!r} is not a Generator"
+                elif str(n.generators.at[a, "bus"]) == grid_bus:
+                    why = f"asset {a!r} is not on-site (it sits on the PoC's grid bus)"
+                elif a in out:
+                    why = f"asset {a!r} is in two changes_dispatch PPAs"
+                if why:
+                    break
+        if why is not None:
+            raise CommercialBindingError(
+                f"changes_dispatch PPA {c.id!r} cannot bind: {why}")
+        if inv is None:
+            w = n.snapshot_weightings.objective.to_numpy(dtype=float)
+            years = pd.Series(w, index=pd.DatetimeIndex(n.snapshots).year).groupby(level=0).sum()
+            price = np.full(len(n.snapshots), indexed(c.price, c.indexation_pct_per_year,
+                                                      c.base_year, int(years.idxmax())))
+        else:
+            price = np.array([indexed(c.price, c.indexation_pct_per_year, c.base_year, int(p))
+                              for p in inv], dtype=float)
+        for a in c.asset_ids:
+            out[a] = price
+    return out
+
+
 # ── materialisation (transient, committed on success) ──────────────────────
 
 
@@ -1585,6 +1654,9 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
             n.meta.pop(META_TIERS, None)
             n.meta.pop(META_GROUP, None)
             n.meta.pop(META_CAPACITY, None)
+            n.meta.pop(META_PPA, None)
+            if n.generators_t.get(PPA_PRICE_ATTR) is not None:
+                n.generators_t[PPA_PRICE_ATTR] = pd.DataFrame(index=n.snapshots)
 
         applied._commit.append(clear)
         return applied
@@ -1597,6 +1669,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
     tier_spec, tiered_items, nonconvex_items = _tier_spec(n, cfg)
     capacity = _capacity_spec(n, cfg)
     refuse_windowed_terms(demand, tier_spec, solve_strategy, multi_period, capacity)
+    ppa_adders = _ppa_dispatch_spec(n, cfg) or {}
     has_price = cfg.export_price_ref is not None
     price = _export_price(n, cfg) if has_price else None
     risk = circulation_risk_snapshots(n, cfg, adders, price)
@@ -1626,6 +1699,22 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
                 n.links_t.marginal_cost = live.drop(columns=[link])
 
         applied._undo.append(undo)
+
+    gmc = n.generators_t.marginal_cost
+    for gen, add in ppa_adders.items():
+        had = gen in gmc.columns
+        old = gmc[gen].copy() if had else None
+        base = old.to_numpy(dtype=float) if had else float(n.generators.at[gen, "marginal_cost"])
+        gmc[gen] = base + add
+
+        def undo_gen(gen=gen, had=had, old=old) -> None:
+            live = n.generators_t.marginal_cost
+            if had:
+                live[gen] = old
+            elif gen in live.columns:
+                n.generators_t.marginal_cost = live.drop(columns=[gen])
+
+        applied._undo.append(undo_gen)
 
     solved_peaks: dict = {}
     if demand is not None:
@@ -1711,6 +1800,15 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
             n.meta[_SI.META_CONTRACTS] = _SI.contracts_record(cfg)
         else:
             n.meta.pop(_SI.META_CONTRACTS, None)
+        if ppa_adders:
+            n.generators_t[PPA_PRICE_ATTR] = pd.DataFrame(ppa_adders, index=n.snapshots)
+            n.meta[META_PPA] = {"contracts": [c.id for c in dispatch_ppas(cfg)],
+                                "generators": sorted(ppa_adders),
+                                "hash": ppa_dispatch_hash(cfg), "hash_version": _H.HASH_VERSION}
+        else:
+            if n.generators_t.get(PPA_PRICE_ATTR) is not None:
+                n.generators_t[PPA_PRICE_ATTR] = pd.DataFrame(index=n.snapshots)
+            n.meta.pop(META_PPA, None)
         if "v" in solved_peaks:
             n.meta[META_DEMAND] = solved_peaks["v"]
             n.meta[META_DEMAND_INFO] = demand["info"]
@@ -1733,6 +1831,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
         "tiered_items": tiered_items, "nonconvex_tier_items": nonconvex_items,
         "nonconvex_tier_predicted": predicted_tiers(n, cfg),
         "capacity_items": [i.id for i in capacity_lp_items(cfg)],
+        "ppa_dispatch": {c.id: list(c.asset_ids) for c in dispatch_ppas(cfg)},
         "not_in_lp": not_in_lp, "notes": notes, "timezone": cfg.timezone,
         "simultaneous_flow_risk_snapshots": risk,
         "export_price_ref": (cfg.export_price_ref.model_dump(mode="json")
