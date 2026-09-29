@@ -394,3 +394,30 @@ def test_a_real_zero_stays_zero():
     data, _ = _roundtrip(_ledger_row(value=0.0))
     assert data["value"] == 0.0
     assert data["unavailable"] == {}
+
+
+# ── Gate S1 SB-1: the fields the later phases name exist as typed ──────────
+
+def test_later_phase_fields_exist_as_typed():
+    from models.study import (
+        CashFlowYear, CaseKpis, DecisionReport, Findings, FindingsHashes,
+        InvestmentCase, Robustness,
+    )
+
+    assert "salvage" in CashFlowYear.model_fields
+    assert "salvage_eur" in CaseKpis.model_fields
+    assert "salvage_basis" in InvestmentCase.model_fields
+    assert {"pending", "note"} <= set(Robustness.model_fields)
+    assert {"options_status", "pending_options", "hashes"} <= set(Findings.model_fields)
+    assert {"stale", "stale_reasons", "hashes_at_findings"} <= set(DecisionReport.model_fields)
+    h = FindingsHashes(ledger_hash="abc", option_network_hashes={"u1": "h1"})
+    assert h.model_dump()["option_network_hashes"] == {"u1": "h1"}
+
+
+def test_findings_completeness_names_the_options_section():
+    from models.study import BaselineResult, Findings
+
+    f = Findings(baseline=BaselineResult(bill=None, unavailable={"bill": "not_run"}),
+                 options_status="not_established", pending_options=["bess_2h"])
+    assert f.completeness["options"] == "not_established"
+    assert f.pending_options == ["bess_2h"]

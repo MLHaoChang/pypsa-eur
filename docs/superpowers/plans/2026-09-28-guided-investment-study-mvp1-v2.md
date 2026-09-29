@@ -99,7 +99,7 @@ Every phase follows this loop. **Do not start phase N+1 until phase N's gate is 
 
 **TDD evidence.** `ModuleNotFoundError: models.study` → green; `test_bundle_includes_studies_dir` red on the missing name; the route-inventory test red on a handler without the dependency (add one deliberately, then remove).
 
-- [ ] Gate S1
+- [x] Gate S1 — **GO WITH BINDING CONDITIONS** (2026-09-29, `docs/superpowers/notes/2026-09-29-mvp1-s1-gate.md`): SB-1 later-phase fields typed (`salvage`, `salvage_eur`, `salvage_basis`, `Robustness.pending/note`, `Findings.options_status/pending_options/hashes`, `DecisionReport.stale/stale_reasons/hashes_at_findings`); SB-2 traversal-id tests that go red without the id check; SB-3 the refusal repeated inside every handler, with a direct-call test; SB-4 a copied record drops its origin's fork references and S4 must verify fork ownership server-side. Carried to later gates: S3 refuses `annual_peak` and `ratchet` demand-charge bases and pins band precedence (first match wins) and export pricing as one-or-the-other; S4/S6/S7 routes that touch the network take their own in-flight check; a study attached to an existing user project is never run with a pack; `StudyBudget.solves_max` is derived from `campaign.estimate_solves` in S4; `Figure` provenance is enforced at the S6 and S7 gates.
 
 ## S2. Assumptions library and ledger
 

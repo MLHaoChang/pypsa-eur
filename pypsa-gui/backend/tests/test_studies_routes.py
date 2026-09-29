@@ -45,6 +45,9 @@ def studies_on(monkeypatch):
     monkeypatch.setenv("PYPSAGUI_DECISION_STUDIES", "1")
     dep = studies_router.require_decision_studies_enabled
     main.app.dependency_overrides[dep] = lambda: None
+    # The in-handler repeat of the same check (SB-3) looks the function up on
+    # the module at call time; `Depends` captured the original above.
+    monkeypatch.setattr(studies_router, "require_decision_studies_enabled", lambda: None)
     try:
         yield
     finally:
@@ -432,3 +435,61 @@ def test_local_mode_without_the_flag_refuses(local_client, install_network,
     for r in _all_routes(local_client, name):
         assert r.status_code == 404, (r.request.method, r.status_code, r.text)
         assert r.json()["detail"]["code"] == "decision_studies_disabled"
+
+
+# ── Gate S1 binding conditions ─────────────────────────────────────────────
+
+def test_a_handler_called_as_a_plain_function_still_refuses_in_auth_mode(monkeypatch):
+    """
+    SB-3. Router dependencies protect HTTP only; a handler called directly
+    (a chat tool, a script) skips them. The refusal is repeated inside every
+    handler, before any project or study is touched.
+    """
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    monkeypatch.setattr(local_mode, "is_local_mode", lambda: False)
+    monkeypatch.setenv("PYPSAGUI_DECISION_STUDIES", "1")
+    project = SimpleNamespace(uuid=str(_uuid.uuid4()), name="p", directory=None)
+    calls = {
+        "list": lambda: studies_router.list_studies(project=project),
+        "get": lambda: studies_router.get_study("x", project=project),
+        "create": lambda: studies_router.create_study(
+            studies_router.StudyCreate(**BODY), project=project, db=None, user=None),
+        "patch": lambda: studies_router.patch_study(
+            "x", studies_router.StudyPatch(name="n"), project=project, db=None, user=None),
+        "delete": lambda: studies_router.delete_study("x", project=project, db=None, user=None),
+    }
+    for label, call in calls.items():
+        with pytest.raises(HTTPException) as exc:
+            call()
+        assert exc.value.status_code == 404, label
+        assert exc.value.detail["code"] == "decision_studies_unavailable", label
+
+
+def test_a_copied_record_drops_its_origin_fork_references(
+        client, api_project, studies_on, project_storage_dir):
+    """
+    SB-4. `option_projects` rides along with every copy of the sidecar
+    (Save-As, scenarios, snapshots, bundle import). A record whose stored
+    `base_project` is not the containing project is a copy, and a copy owns
+    no forks: the routes answer with the containing project and an empty
+    fork list.
+    """
+    from models.study import DecisionStudy
+    from services.study import store
+
+    name = api_project("copied")
+    now = datetime.now(tz=UTC)
+    s = DecisionStudy(study_id=store.new_study_id(), name="Origin's study",
+                      question_id="bess_site", base_project="not-this-project",
+                      option_projects=["fork-a", "fork-b"],
+                      created_at=now, updated_at=now)
+    store.save_study(project_storage_dir(name), s)
+    r = client.get(f"/api/projects/{name}/studies/{s.study_id}")
+    assert r.status_code == 200, r.text
+    assert r.json()["option_projects"] == []
+    assert r.json()["base_project"] != "not-this-project"
+    listed = client.get(f"/api/projects/{name}/studies/").json()
+    assert [x["option_projects"] for x in listed if x["study_id"] == s.study_id] == [[]]

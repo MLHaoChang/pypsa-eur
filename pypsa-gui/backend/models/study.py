@@ -6,7 +6,8 @@ Plan: docs/superpowers/plans/2026-09-28-guided-investment-study-mvp1-v2.md (S1)
 
 Shapes only. Later phases FILL these (S2 the ledger and maturity, S3 the
 tariff, S4 the options, S5 the case, S6 the findings, S7 the report); they do
-not renegotiate the names. Field names follow the spec's proposals; where the
+only add fields, never rename or retype the ones here; a field a later phase
+needs and cannot find is added by that phase, with its test. Field names follow the spec's proposals; where the
 spec names a field `class`, the Python attribute is `class_` and the wire
 name stays `class` (serialise with ``by_alias=True``).
 
@@ -94,6 +95,7 @@ SolveStatus = Literal[
 Provenance = Literal["library", "user", "imported", "measured"]
 LedgerStatus = Literal["default", "customised", "needs_attention"]
 MaturityClass = Literal["screening", "feasibility", "design"]
+SalvageBasis = Literal["annuity_pv", "straight_line"]
 
 
 # ── shared building blocks ────────────────────────────────────────────────
@@ -551,6 +553,8 @@ class CashFlowYear(_FigureBlock):
     tax: float | None
     depreciation: float | None
     debt_service: float | None
+    # Residual value at horizon end, non-zero only in the last year (S5).
+    salvage: float = 0.0
     net_cash_flow: float
     discounted_cash_flow: float
     cumulative_discounted: float
@@ -571,6 +575,7 @@ class CaseKpis(_FigureBlock):
     lcoh: float | None
     dscr_min: float | None
     capex_total: float
+    salvage_eur: float = 0.0
 
 
 class ValueStream(_FigureBlock):
@@ -609,6 +614,9 @@ class InvestmentCase(_Model):
     discount_rate: float
     wacc: float | None = None
     inflation: float | None = None
+    # How residual value was valued (spec §5, BC-7): the present value of the
+    # remaining annuities keeps one basis with the LP; straight line does not.
+    salvage_basis: SalvageBasis | None = None
     years: list[CashFlowYear] = Field(default_factory=list)
     kpis: CaseKpis | None = None
     value_streams: list[ValueStream] = Field(default_factory=list)
@@ -686,10 +694,31 @@ class Robustness(_Model):
     breakevens: list[Breakeven] = Field(default_factory=list)
     option_map: OptionMap | None = None
     dotplot: Dotplot | None = None
+    # When `status` is not `ok`: the ledger keys the tornado never reached
+    # (an abort, a budget) — named, so "not established" says what is missing.
+    pending: list[str] = Field(default_factory=list)
+    note: str | None = None
+
+
+class FindingsHashes(_Model):
+    """
+    What the findings were computed from, recorded at findings time so the
+    report can say `stale` when any of it changes (S7). Option keys are the
+    fork uuids.
+    """
+
+    ledger_hash: str | None = None
+    base_network_hash: str | None = None
+    option_network_hashes: dict[str, str] = Field(default_factory=dict)
 
 
 class Findings(_Model):
     options: list[OptionResult] = Field(default_factory=list)
+    # `not_established` when a run stopped before every option solved;
+    # `pending_options` then names the option ids never reached (S4).
+    options_status: SectionStatus = "not_established"
+    pending_options: list[str] = Field(default_factory=list)
+    hashes: FindingsHashes = Field(default_factory=FindingsHashes)
     baseline: BaselineResult
     verdict: Verdict = Field(default_factory=Verdict)
     robustness: Robustness = Field(default_factory=Robustness)
@@ -699,7 +728,8 @@ class Findings(_Model):
 
     @model_validator(mode="after")
     def _completeness_matches_sections(self):
-        sections = {"verdict": self.verdict.status,
+        sections = {"options": self.options_status,
+                    "verdict": self.verdict.status,
                     "robustness": self.robustness.status}
         if not self.completeness:
             self.completeness = dict(sections)
@@ -738,6 +768,11 @@ class DecisionReport(_Model):
     maturity: StudyMaturity = Field(default_factory=StudyMaturity)
     sections: dict[str, ReportSection] = Field(default_factory=dict)
     completeness: dict[str, SectionStatus] = Field(default_factory=dict)
+    # The hashes the findings were computed from; `stale` when the ledger or
+    # an option fork's network no longer matches them (S7).
+    hashes_at_findings: FindingsHashes | None = None
+    stale: bool = False
+    stale_reasons: list[str] = Field(default_factory=list)
     honesty_notes: tuple[str, ...] = ()
 
     @model_validator(mode="after")

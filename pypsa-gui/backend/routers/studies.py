@@ -87,6 +87,17 @@ def require_decision_studies_enabled() -> None:
 
 router = APIRouter(dependencies=[Depends(require_decision_studies_enabled)])
 
+
+def _refuse_unless_enabled() -> None:
+    """
+    The same refusal, repeated inside every handler. House rule (see
+    `_enforce_project_lock` and `chat_tools._route`): a handler called as a
+    plain function skips its router dependencies, so the dependency alone
+    protects HTTP and nothing else. Looked up on the module at call time so a
+    test may replace it; `Depends` above captured the original.
+    """
+    require_decision_studies_enabled()
+
 # Load-modify-save of one sidecar is not atomic across the threadpool; two
 # per-step PATCHes to the same study must not drop each other's answers.
 _WRITE_LOCK = threading.Lock()
@@ -166,9 +177,13 @@ def _load(project: AuthorizedProject, study_id: str) -> DecisionStudy:
             "message": "The study record on disk cannot be read.",
         }) from None
     # The containing project is the study's base project: a copy carried by a
-    # bundle import or a Save-As must not answer with its origin's uuid.
+    # bundle import, a Save-As, a user scenario or a snapshot must not answer
+    # with its origin's uuid — nor with its origin's option forks, which the
+    # copy does not own. S4 verifies fork ownership server-side on top of
+    # this (review gate S1 SB-4).
     if study.base_project != project.uuid:
-        study = study.model_copy(update={"base_project": project.uuid})
+        study = study.model_copy(update={"base_project": project.uuid,
+                                         "option_projects": []})
     return study
 
 
@@ -208,8 +223,11 @@ def _refuse_outside_mvp1(settings: StudySettingsPatch | None) -> None:
 
 @router.get("/")
 def list_studies(project: AuthorizedProject = ProjectAccessDep) -> list[dict]:
+    _refuse_unless_enabled()
     return [
-        _out(s.model_copy(update={"base_project": project.uuid}))
+        _out(s.model_copy(update={"base_project": project.uuid,
+                                  "option_projects": []})
+             if s.base_project != project.uuid else s)
         for s in store.list_studies(_project_dir(project))
     ]
 
@@ -225,6 +243,7 @@ def create_study(body: StudyCreate,
     S1 creates the record only. The question-first flow that builds its own
     base project (M0) is S4.
     """
+    _refuse_unless_enabled()
     _check_lock(db, project, user)
     now = _now()
     try:
@@ -245,6 +264,7 @@ def create_study(body: StudyCreate,
 @router.get("/{study_id}")
 def get_study(study_id: str,
               project: AuthorizedProject = ProjectAccessDep) -> dict:
+    _refuse_unless_enabled()
     return _out(_load(project, study_id))
 
 
@@ -253,6 +273,7 @@ def patch_study(study_id: str, body: StudyPatch,
                 project: AuthorizedProject = ProjectAccessDep,
                 db: DBSession = Depends(get_db),
                 user: User | None = Depends(optional_user)) -> dict:
+    _refuse_unless_enabled()
     _check_lock(db, project, user)
     _refuse_outside_mvp1(body.settings)
     if body.step is not None:
@@ -285,10 +306,14 @@ def delete_study(study_id: str,
                  db: DBSession = Depends(get_db),
                  user: User | None = Depends(optional_user)) -> Response:
     """
-    Delete the study record. S4 extends this to cascade to the study-owned
-    option forks named in ``option_projects``; in S1 no route can set that
-    list, so there is nothing to cascade yet.
+    Delete the study record. S4 extends this to cascade to the option forks
+    the study OWNS — verified server-side (each fork's metadata names this
+    study and this base project as its owner), never by trusting
+    ``option_projects`` alone: that list is copied by Save-As, user scenarios,
+    snapshots and bundle import, and `_load` drops it on a copied record. In
+    S1 no route can set the list, so there is nothing to cascade yet.
     """
+    _refuse_unless_enabled()
     _check_lock(db, project, user)
     with _WRITE_LOCK:
         _load(project, study_id)  # 404 before touching anything

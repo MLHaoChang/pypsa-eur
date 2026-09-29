@@ -117,3 +117,39 @@ def test_an_oversized_study_is_refused_and_the_old_file_survives(tmp_path):
     with pytest.raises(store.StudyTooLarge):
         store.save_study(tmp_path, big)
     assert store.load_study(tmp_path, s.study_id) == s
+
+
+# ── The id is the only client input that reaches a path (gate S1 SB-2) ─────
+# With the check in `store._path` removed, every other test in this file
+# stays green; these do not.
+
+TRAVERSAL_IDS = ["../metadata", "../../x", "STUDY-ID", "0123456789ABCDEF0123456789abcdef",
+                 "0123456789abcdef0123456789abcde", "", "a" * 33, "0123456789abcdef0123456789abcdef/x"]
+
+
+@pytest.mark.parametrize("bad", TRAVERSAL_IDS)
+def test_a_malformed_id_is_not_found_before_the_disk_is_touched(tmp_path, bad):
+    (tmp_path / "metadata.json").write_text("{}")
+    with pytest.raises(store.StudyNotFound):
+        store.load_study(tmp_path, bad)
+    with pytest.raises(store.StudyNotFound):
+        store.delete_study(tmp_path, bad)
+    assert not (tmp_path / "studies").exists()
+
+
+def test_a_traversal_id_cannot_delete_a_project_file(tmp_path):
+    """`delete_study(dir, "../metadata")` must not unlink `metadata.json`."""
+    meta = tmp_path / "metadata.json"
+    meta.write_text('{"name": "p"}')
+    (tmp_path / "studies").mkdir()
+    with pytest.raises(store.StudyNotFound):
+        store.delete_study(tmp_path, "../metadata")
+    assert meta.is_file() and meta.read_text() == '{"name": "p"}'
+
+
+def test_a_traversal_id_cannot_write_outside_the_studies_dir(tmp_path):
+    s = _study()
+    object.__setattr__(s, "study_id", "../escaped")
+    with pytest.raises(store.StudyNotFound):
+        store.save_study(tmp_path, s)
+    assert not (tmp_path / "escaped.json").exists()
