@@ -114,6 +114,11 @@ _BUNDLE_FILES = ("network.nc", "user_ts.json", "solver_config.json", "metadata.j
 # note in `_create_scenario_db`.
 _BUNDLE_DIRS = ("uploads", "studies")
 
+# The metadata keys a decision-study option fork carries (S4). Literals, like
+# `_BUNDLE_FILES`, to keep the router free of a services.study import;
+# `tests/test_study_forks.py` pins them equal to `forks.OWNER_KEYS`.
+_STUDY_FORK_META_KEYS = ("owner_study_id", "owner_base_project", "owner_option_id")
+
 # Cap on the serialized blank-canvas layout document. Even a large network's
 # schematic is a few hundred KB of coordinates; 4 MB bounds a malformed or
 # abusive payload without ever clipping a legitimate one.
@@ -2069,6 +2074,12 @@ def _save_context(
             "parent_project": new_parent,
             "scenario_description": new_desc,
             "scenario_type": new_type,
+            # Decision-study fork ownership (S4, `services/study/forks.py`):
+            # round-tripped from THIS directory's metadata only, so a fork's
+            # own saves (the queue's post-solve save above all) keep it, and
+            # a save into another directory (Save-As, a copy) never gains it.
+            **{k: existing_meta[k] for k in _STUDY_FORK_META_KEYS
+               if k in existing_meta},
         })
     ts_columns_saved = len(user_ts_data) if isinstance(user_ts_data, dict) else 0
     # Flat-count the leaves of the nested {comp: {attr: {col: ...}}} structure.

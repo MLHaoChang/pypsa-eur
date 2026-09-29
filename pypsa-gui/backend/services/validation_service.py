@@ -1752,10 +1752,19 @@ def _check_lopf(n, solver_config) -> list[Issue]:
             oc = n.generators["overnight_cost"].fillna(0) \
                 if "overnight_cost" in n.generators.columns \
                 else pd.Series(0.0, index=n.generators.index)
+            # Decision study S4 (review v2 N2-v2): a site's grid supply is a
+            # zero-cost Generator BY DESIGN — the tariff is priced on the
+            # import/export Links — so a Generator tagged
+            # `eh_role=grid_supply` is not an indeterminate cost-less unit.
+            grid_supply = (
+                n.generators["eh_role"].astype(str) == "grid_supply"
+                if "eh_role" in n.generators.columns
+                else pd.Series(False, index=n.generators.index))
             zero_cost = n.generators[
                 (n.generators["capital_cost"].fillna(0) == 0)
                 & (n.generators["marginal_cost"].fillna(0) == 0)
                 & (oc == 0)
+                & ~grid_supply
             ]
             if len(zero_cost) > 0:
                 out.append(_warn("gen_zero_costs", "Generator",

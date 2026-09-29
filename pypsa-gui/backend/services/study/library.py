@@ -53,9 +53,10 @@ __all__ = [
 LIBRARY_VERSION = "technology-data v0.14.0"
 LIBRARY_DIR = pathlib.Path(__file__).resolve().parents[2] / "study_library"
 
-# The BESS question's key drivers (plan S4, `BESS_AT_SITE.key_drivers`). The
-# question template itself is S4 (`services/study/questions.py`); until it
-# lands this is the stand-in the routes seed with.
+# The BESS question's key drivers. S4's template
+# (`services/study/questions.py::BESS_AT_SITE.key_drivers`) is THE list and
+# the routes seed from it; this alias is kept for the S2 tests and held equal
+# to the template by `tests/test_study_questions.py` (gate S2 carry).
 BESS_KEY_DRIVERS: tuple[str, ...] = (
     "battery_storage_eur_per_kwh", "battery_inverter_eur_per_kw",
     "demand_charge_price", "energy_price_level", "discount_rate",
@@ -84,7 +85,9 @@ _TECH_KEYS: dict[tuple[str, str], tuple[str, str, str]] = {
         "fom_cost (share of investment per year)"),
     ("battery inverter", "efficiency"): (
         "battery_inverter_efficiency", "Battery inverter efficiency (one way)",
-        "efficiency_store, efficiency_dispatch"),
+        # Gate S2 [S10]: the pack reads the round-trip row (sqrt(rte) on each
+        # side); this row only feeds it while that row is a library default.
+        "input to battery_round_trip_efficiency (the pack reads that row)"),
     ("battery inverter", "lifetime"): (
         "battery_inverter_lifetime_years", "Battery inverter lifetime",
         "lifetime (inverter annuity; replacement interval)"),
@@ -97,7 +100,7 @@ _TECH_KEYS: dict[tuple[str, str], tuple[str, str, str]] = {
         "lifetime (storage annuity; pro forma horizon)"),
     ("battery", "round-trip efficiency"): (
         "battery_round_trip_efficiency", "Battery round-trip efficiency",
-        "efficiency_store x efficiency_dispatch"),
+        "efficiency_store = efficiency_dispatch = sqrt(value)"),
     ("battery storage", "degradation calendar"): (
         "battery_storage_degradation_calendar_pct_per_year",
         "Battery capacity fade per year (not modelled in MVP-1)", "-"),
@@ -129,6 +132,29 @@ DERIVED: Mapping[str, tuple[tuple[str, ...], Callable[..., float]]] = MappingPro
 })
 
 NOT_USED = "not_used_in_mvp1"
+
+# One meaning for `energy_price_level` (gate S2 [S8], pinned in S4): a
+# dimensionless multiplier on the tariff's ENERGY BANDS around their
+# time-weighted mean over the modelled snapshots,
+#     band_price' = mean + level x (band_price - mean),
+# so 1.0 is the tariff as written, 0 would flatten every band to the mean and
+# 2 doubles each band's distance from it. It changes the time-of-use spread,
+# not the average price, and is therefore a no-op on a single-band (flat)
+# tariff. Per-MWh network charges, the demand charge and the export credit are
+# NOT scaled. Applied in one place, `services/study/tariff.py::
+# tariff_from_ledger`, which the pack, the LP config and the bill all read.
+ENERGY_PRICE_LEVEL_LABEL = (
+    "Energy price level (multiplier on the tariff's energy bands around "
+    "their time-weighted mean)")
+ENERGY_PRICE_LEVEL_TECHNICAL = (
+    "links_t.marginal_cost on grid_import: band = mean + value x (band - mean); "
+    "network charges, demand charge and export credit unscaled")
+ENERGY_PRICE_LEVEL_HELP = (
+    "Dimensionless, default 1.0 (the tariff as written). Scales each energy "
+    "band's distance from the bands' time-weighted mean, so it widens (above "
+    "1) or narrows (below 1) the time-of-use spread without moving the average "
+    "energy price; on a single-band tariff it changes nothing. Network "
+    "charges, the demand charge and the export price are not scaled.")
 
 
 class LibraryError(ValueError):
@@ -462,8 +488,8 @@ def _tariff_rows(tariff: Tariff, provenance: str) -> list[dict[str, Any]]:
         demand.update(value=dc.price_per_mw_per_period,
                       range=_assumed_30(dc.price_per_mw_per_period), **who)
     level = dict(
-        key="energy_price_level", label="Energy price level (multiplier on the tariff's bands)",
-        technical_name="links_t.marginal_cost scale on grid_import",
+        key="energy_price_level", label=ENERGY_PRICE_LEVEL_LABEL,
+        technical_name=ENERGY_PRICE_LEVEL_TECHNICAL, help=ENERGY_PRICE_LEVEL_HELP,
         value=1.0, unit="multiplier",
         # The multiplier scales the tariff's prices, so it carries their year.
         currency_year=tariff.currency_year, source=tariff_source,
@@ -473,10 +499,36 @@ def _tariff_rows(tariff: Tariff, provenance: str) -> list[dict[str, Any]]:
     return [descriptor, demand, level]
 
 
+def _sizing_row(library: Library) -> dict[str, Any] | None:
+    """
+    The sizing limit (plan S4, review v2 BC-2): every extendable asset's
+    ``p_nom_max`` is the connection limit times this multiple. From the
+    finance file, because ``_TECH_KEYS`` admits technology rows only.
+    """
+    spec = library.finance.get("sizing_limit")
+    if not spec:
+        return None
+    rng = spec.get("range") or {}
+    return dict(
+        key=spec["key"],
+        label="Sizing limit for every extendable asset (multiple of the connection limit)",
+        technical_name="p_nom_max = connection_mw x value (battery StorageUnit, PV Generator)",
+        help=("Upper bound on the battery's MW and the PV's MW, as a multiple of "
+              "the site's connection limit. A size at this bound is not an "
+              "optimum: the verdict names it (size_at_upper_bound)."),
+        value=float(spec["value"]), unit=spec["unit"], basis="real",
+        currency_year=None, source=spec["source"].strip(),
+        source_year=int(spec["source_year"]),
+        range=_range(rng.get("low"), rng.get("high"), rng.get("source")),
+        domain=LedgerDomain.parse(spec["domain"]),
+    )
+
+
 def _finance_rows(library: Library) -> list[dict[str, Any]]:
     dr = library.finance["discount_rate"]
     rng = dr.get("range") or {}
-    return [dict(
+    sizing = _sizing_row(library)
+    return ([sizing] if sizing else []) + [dict(
         key="discount_rate", label="Discount rate (real, pre-tax)",
         technical_name="discount_rate", value=float(dr["value"]),
         unit=dr["unit"], basis=dr["basis"],

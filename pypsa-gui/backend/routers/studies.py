@@ -29,7 +29,7 @@ runs before the project is resolved and cannot serve as an existence oracle.
 """
 from __future__ import annotations
 
-import threading
+import re
 import uuid
 from datetime import datetime, UTC
 from types import SimpleNamespace
@@ -47,14 +47,20 @@ from models.study import (
     MVP1_BASIS,
     MVP1_PERSPECTIVES,
     DecisionStudy,
+    Fidelity,
     FinancialBasis,
     Perspective,
+    StudyBudget,
 )
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from services.http_filenames import content_disposition
 from services.study import FLAG_ENV, flag_set, store
 from services.study import ledger as study_ledger
 from services.study import library as study_library
+from services.study import forks as study_forks
+from services.study import packs
+from services.study import questions as study_questions
+from services.study import runner as study_runner
 
 OPEN_ITEMS_1 = (
     "OPEN-ITEMS 1 (docs/superpowers/OPEN-ITEMS.md, item 1: the user-timeseries "
@@ -102,16 +108,38 @@ def _refuse_unless_enabled() -> None:
     require_decision_studies_enabled()
 
 # Load-modify-save of one sidecar is not atomic across the threadpool; two
-# per-step PATCHes to the same study must not drop each other's answers.
-_WRITE_LOCK = threading.Lock()
+# per-step PATCHes to the same study must not drop each other's answers. The
+# S4 runner's worker writes the same sidecar, so both take the store's lock.
+_WRITE_LOCK = store.WRITE_LOCK
 
 
 class StudyCreate(BaseModel):
+    """
+    ``question_id`` naming a question TEMPLATE (``services/study/questions``)
+    creates the study's own base project (S4 M0), named ``project_name``
+    (default: the study's name); any other id attaches a record to the path
+    project and runs no pack.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     question_id: str
     name: str = Field(min_length=1, max_length=120)
     intake: dict[str, Any] = Field(default_factory=dict)
+    project_name: str | None = Field(default=None, min_length=1, max_length=64)
+
+
+class RunRequest(BaseModel):
+    """
+    ``fidelity`` is recorded on every figure; both are 8760 h of one year in
+    MVP-1 (spec decision 14 amended), the field exists for MVP-2.
+    ``budget_solves`` caps the run's own campaign when none is open.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    fidelity: Fidelity = Fidelity.quick_screen
+    budget_solves: int | None = Field(default=None, ge=1, le=120)
 
 
 class StudySettingsPatch(BaseModel):
@@ -179,15 +207,30 @@ def _load(project: AuthorizedProject, study_id: str) -> DecisionStudy:
             "code": "study_unreadable",
             "message": "The study record on disk cannot be read.",
         }) from None
-    # The containing project is the study's base project: a copy carried by a
-    # bundle import, a Save-As, a user scenario or a snapshot must not answer
-    # with its origin's uuid — nor with its origin's option forks, which the
-    # copy does not own. S4 verifies fork ownership server-side on top of
-    # this (review gate S1 SB-4).
-    if study.base_project != project.uuid:
-        study = study.model_copy(update={"base_project": project.uuid,
-                                         "option_projects": []})
-    return study
+    return _adopt(study, project)
+
+
+_COPIED_FINDINGS = "copied_record_findings_computed_on_the_origin_forks"
+
+
+def _adopt(study: DecisionStudy, project: AuthorizedProject) -> DecisionStudy:
+    """
+    The containing project is the study's base project: a copy carried by a
+    bundle import, a Save-As, a user scenario or a snapshot must not answer
+    with its origin's uuid — nor with its origin's option forks, which the
+    copy does not own (fork ownership is verified server-side too,
+    `services/study/forks.py`; gate S1 SB-4). A copy's findings and report
+    were computed on the origin's forks, so they are marked stale (gate S1
+    re-gate carry); the first write persists the adoption. `pack_project`
+    is left as it was, so a copy never runs the origin's pack.
+    """
+    if study.base_project == project.uuid:
+        return study
+    update: dict[str, Any] = {"base_project": project.uuid, "option_projects": []}
+    if study.findings_ref or study.report_ref:
+        update["stale"] = True
+        update["stale_reasons"] = sorted(set(study.stale_reasons) | {_COPIED_FINDINGS})
+    return study.model_copy(update=update)
 
 
 def _save(project: AuthorizedProject, study: DecisionStudy) -> dict:
@@ -227,12 +270,7 @@ def _refuse_outside_mvp1(settings: StudySettingsPatch | None) -> None:
 @router.get("/")
 def list_studies(project: AuthorizedProject = ProjectAccessDep) -> list[dict]:
     _refuse_unless_enabled()
-    return [
-        _out(s.model_copy(update={"base_project": project.uuid,
-                                  "option_projects": []})
-             if s.base_project != project.uuid else s)
-        for s in store.list_studies(_project_dir(project))
-    ]
+    return [_out(_adopt(s, project)) for s in store.list_studies(_project_dir(project))]
 
 
 @router.post("/", status_code=201)
@@ -241,12 +279,18 @@ def create_study(body: StudyCreate,
                  db: DBSession = Depends(get_db),
                  user: User | None = Depends(optional_user)) -> dict:
     """
-    Create the study record on the named base project.
+    Create a study.
 
-    S1 creates the record only. The question-first flow that builds its own
-    base project (M0) is S4.
+    * A question TEMPLATE id (S4 M0): a NEW base project is created for the
+      study (`_create_pack_study`), holding the question pack's baseline
+      network and the sidecar; the path project — the caller's current one —
+      is only the authorisation and is never written.
+    * Any other id: the record is attached to the path project (S1). Such a
+      record runs no pack and cannot be run.
     """
     _refuse_unless_enabled()
+    if study_questions.get_question(body.question_id) is not None:
+        return _create_pack_study(body, project, db, user)
     _check_lock(db, project, user)
     now = _now()
     try:
@@ -300,6 +344,20 @@ def patch_study(study_id: str, body: StudyPatch,
         except ValidationError as exc:
             raise HTTPException(422, exc.errors(include_url=False,
                                                 include_context=False)) from None
+        if body.intake is not None and "tariff" in body.intake:
+            _refuse_bad_tariff(updated.intake)
+            if updated.ledger is not None:
+                # Gate S2 [S9]: a tariff change re-seeds the stored ledger, so
+                # its tariff rows (the demand-charge price, the energy level)
+                # follow the new tariff; a user value that no longer applies
+                # is flagged `needs_attention`, and the run refuses it.
+                try:
+                    updated = updated.model_copy(update={
+                        "ledger": study_ledger.reseed_ledger(
+                            updated.ledger, _key_drivers(updated), updated.intake,
+                            _library_or_500())})
+                except study_library.LibraryError as exc:
+                    raise HTTPException(422, str(exc)) from None
         if updated.ledger is not None:
             # S2: the badge reads the intake's load too, so an intake step
             # (e.g. a meter upload) moves it without waiting for a ledger PUT.
@@ -315,22 +373,293 @@ def delete_study(study_id: str,
                  db: DBSession = Depends(get_db),
                  user: User | None = Depends(optional_user)) -> Response:
     """
-    Delete the study record. S4 extends this to cascade to the option forks
-    the study OWNS — verified server-side (each fork's metadata names this
-    study and this base project as its owner), never by trusting
-    ``option_projects`` alone: that list is copied by Save-As, user scenarios,
-    snapshots and bundle import, and `_load` drops it on a copied record. In
-    S1 no route can set the list, so there is nothing to cascade yet.
+    Delete the study record and cascade to the option forks the study OWNS
+    (S4) — verified server-side for every candidate (`forks.is_study_owned`:
+    the fork's metadata names this study and this base project AND its row's
+    parent is this base project), never by trusting ``option_projects``: that
+    list is copied by Save-As, user scenarios, snapshots and bundle import.
+    Refused (409) while the study is running or while an owned fork cannot
+    be removed (an active queue job, or a project branched from it); nothing
+    is deleted then.
     """
     _refuse_unless_enabled()
     _check_lock(db, project, user)
     with _WRITE_LOCK:
-        _load(project, study_id)  # 404 before touching anything
+        study = _load(project, study_id)  # 404 before touching anything
+        forks = _owned_fork_rows(study, project, db, user)
+        _refuse_if_running(project, db, user, study_id)
+        for row in forks:
+            _refuse_undeletable_fork(row, db)
+        for row in forks:
+            try:
+                study_forks.delete_fork(db, row, study_id=study_id,
+                                        base_uuid=project.uuid)
+            except study_forks.ForkError as exc:
+                raise HTTPException(exc.status, detail={
+                    "error_kind": exc.code, "message": exc.message}) from None
         try:
             store.delete_study(_project_dir(project), study_id)
         except store.StudyNotFound:
             raise HTTPException(404, "Study not found") from None
     return Response(status_code=204)
+
+
+def _base_row(project: AuthorizedProject, db: DBSession, user: User | None):
+    from services import project_registry
+
+    if user is None:
+        return None
+    return project_registry.find_project(db, user, project.uuid)
+
+
+def _owned_fork_rows(study: DecisionStudy, project: AuthorizedProject,
+                     db: DBSession, user: User | None) -> list:
+    """
+    Candidates from the study's list AND from the base's children — every
+    one verified by `forks.is_study_owned`, so the list alone never deletes.
+    """
+    from db.models import Project
+
+    base = _base_row(project, db, user)
+    if base is None:
+        return []
+    rows = {str(r.id): r for r in study_forks.owned_forks(db, base, study.study_id)}
+    for ref in study.option_projects:
+        try:
+            row = db.get(Project, uuid.UUID(str(ref)))
+        except (TypeError, ValueError):
+            continue
+        if row is not None and study_forks.is_study_owned(
+                row, study_id=study.study_id, base_uuid=project.uuid):
+            rows[str(row.id)] = row
+    return list(rows.values())
+
+
+def _refuse_undeletable_fork(row, db: DBSession) -> None:
+    from services import project_registry
+    from services.solve_queue import solve_queue
+
+    key = project_registry.registry_key(row)
+    if any(j.get("project_key") == key and j.get("status") in ("queued", "running")
+           for j in solve_queue.list_jobs()):
+        raise HTTPException(409, detail={
+            "error_kind": "fork_solving",
+            "message": f"the study fork '{row.name}' has an active solve-queue job"})
+    if project_registry.direct_children(db, row):
+        raise HTTPException(409, detail={
+            "error_kind": "fork_has_children",
+            "message": (f"a project was branched from the study fork '{row.name}'; "
+                        "delete or move it first")})
+
+
+def _refuse_if_running(project: AuthorizedProject, db: DBSession,
+                       user: User | None, study_id: str) -> None:
+    from services.pypsa_service import PyPSAService
+
+    ctx = PyPSAService.get_context(project.registry_key)
+    if ctx is None:
+        return
+    with ctx.solver_state_lock:
+        rec = ctx.solver_state.get(study_runner.STUDY_KEY)
+        if rec and rec.get("study_id") == study_id and rec.get("status") == "running":
+            raise HTTPException(409, detail={
+                "error_kind": "study_running",
+                "message": "the study is running; abort it before deleting it"})
+
+
+# ── S4 M0: a question-first study creates its own base project ────────────
+
+_BASE_NAME_RE = re.compile(r"^[A-Za-z0-9_\-. ]{1,48}$")
+
+
+def _refuse_bad_tariff(intake: dict[str, Any]) -> None:
+    """Gate S3 N7 / N-v2-2: the tariff the engine would refuse, refused now."""
+    try:
+        packs.intake_tariff(intake, _library_or_500())
+    except packs.PackError as exc:
+        raise HTTPException(422, detail={"error_kind": exc.code,
+                                         "message": exc.message}) from None
+
+
+def _create_pack_study(body: StudyCreate, project: AuthorizedProject,
+                       db: DBSession, user: User | None) -> dict:
+    """
+    M0 (plan S4, review v2 BC-5): ``project_registry.create_root`` →
+    ``ensure_project_dir`` → ``PyPSAService.build_context()`` →
+    ``_save_context(ctx, name, project_row=row, storage_dir=dir,
+    persist_user_ts=False, db, user)``, the first-save claim made inside
+    ``PyPSAService.hydrate_or_adopt(key)``. The request's slot, the path
+    project and every other project are untouched: the pack is built off to
+    the side, the new directory is the only one written, and the process
+    `_user_ts` is never read or written (OPEN-ITEMS 1).
+    """
+    from routers.projects import _save_context
+    from services import project_registry
+    from services.adequacy import campaign
+    from services.pypsa_service import PyPSAService
+
+    project_registry.require_user(user)
+    question = study_questions.get_question(body.question_id)
+    base_name = (body.project_name or body.name).strip()
+    if not _BASE_NAME_RE.fullmatch(base_name):
+        raise HTTPException(422, (
+            "the study's base project name must be 1-48 letters, digits, spaces, "
+            "'_', '-' or '.' (its option forks append '-opt-<option>')"))
+    if project_registry.find_project(db, user, base_name) is not None:
+        raise HTTPException(409, f"Project '{base_name}' already exists")
+    library = _library_or_500()
+    _refuse_bad_tariff(body.intake)
+
+    def resolve_upload(file_id: str) -> bytes:
+        from services import upload_service
+        return upload_service.get_upload_bytes(project.name, file_id,
+                                               project_dir=project.directory)
+
+    try:
+        ledger = study_library.seed_ledger(question, body.intake, library)
+        network = packs.build_site_network(body.intake, ledger, "none",
+                                           library=library, question=question,
+                                           resolve_upload=resolve_upload)
+        tariff = packs.effective_tariff(body.intake, ledger, library, network.snapshots)
+        cfg = packs.option_solver_config(ledger, tariff)
+    except (packs.PackError, study_library.LibraryError) as exc:
+        code = getattr(exc, "code", "intake_invalid")
+        raise HTTPException(422, detail={"error_kind": code, "message": str(exc)}) from None
+    options = study_questions.options_for(question, body.intake)
+    solves = campaign.estimate_solves(None, study_runner.STUDY_KEY,
+                                      options=[o.option_id for o in options])
+
+    row = project_registry.create_root(db, user, base_name)
+    base_dir = project_registry.ensure_project_dir(row)
+    key = project_registry.registry_key(row)
+    try:
+        with PyPSAService.hydrate_or_adopt(key) as resident:
+            if resident is not None:  # a fresh uuid cannot be resident
+                raise HTTPException(409, f"Project '{base_name}' is already open")
+            ctx = PyPSAService.build_context()
+            ctx.network = network
+            ctx.solver_state["solver_config"] = cfg
+            _save_context(ctx, row.name, project_row=row, storage_dir=base_dir,
+                          persist_user_ts=False, db=db, user=user)
+        load = body.intake.get("load") if isinstance(body.intake, dict) else None
+        if isinstance(load, dict) and load.get("upload_id"):
+            _copy_upload(project, base_dir, str(load["upload_id"]))
+        now = _now()
+        study = DecisionStudy(
+            study_id=store.new_study_id(), name=body.name,
+            question_id=body.question_id, base_project=str(row.id),
+            pack_project=str(row.id), intake=body.intake,
+            ledger=ledger, ledger_version=ledger.ledger_version,
+            maturity=study_ledger.maturity_from_ledger(
+                ledger, study_ledger.load_provenance(body.intake)),
+            budget=StudyBudget(solves_max=solves),
+            currency_year=int(library.finance["currency_year"]),
+            created_by=str(user.id), created_at=now, updated_at=now,
+        )
+        with _WRITE_LOCK:
+            store.save_study(base_dir, study)
+    except BaseException:
+        from routers.projects import _force_rmtree
+        try:
+            PyPSAService.drop(key)
+            project_registry.delete_project_row(db, row)
+            _force_rmtree(base_dir)
+        except Exception:  # noqa: BLE001
+            pass
+        raise
+    return {**_out(study), "base_project_name": row.name}
+
+
+def _copy_upload(project: AuthorizedProject, base_dir, file_id: str) -> None:
+    """Carry the intake's load upload into the new base project's uploads/."""
+    import shutil
+
+    src = project.directory / "uploads" / file_id
+    if not re.fullmatch(r"[A-Za-z0-9_\-]{1,128}", file_id) or not src.is_dir():
+        return
+    shutil.copytree(str(src), str(base_dir / "uploads" / file_id), dirs_exist_ok=True)
+
+
+# ── S4 M1: run, status, abort ─────────────────────────────────────────────
+
+def _run_error(exc: study_runner.RunRefused) -> HTTPException:
+    return HTTPException(exc.status, detail=exc.detail)
+
+
+@router.post("/{study_id}/run", status_code=202)
+def run_study(study_id: str, body: RunRequest | None = None,
+              project: AuthorizedProject = ProjectAccessDep,
+              db: DBSession = Depends(get_db),
+              user: User | None = Depends(optional_user)) -> dict:
+    """
+    Solve every option of a question-pack study on study-owned forks.
+
+    The middleware's solver-in-flight exemption covers this route (BC-3), so
+    the handler takes its own, context-parameterised check: the study mesh
+    and the in-flight test run against the STUDY'S base context, claimed
+    under its locks (`runner.start_study_run`). 409 while any study or a
+    solve holds the base project, and for a record that must not run a
+    pack; 409 naming the shortfall when the campaign budget is too small.
+    """
+    from routers.projects import _enforce_project_lock
+
+    _refuse_unless_enabled()
+    body = body or RunRequest()
+    base = _base_row(project, db, user)
+    if base is None:
+        raise HTTPException(404, f"Project '{project.name}' not found")
+    _enforce_project_lock(db, base, user)
+    _load(project, study_id)
+    try:
+        return study_runner.start_study_run(
+            study_id, body.fidelity, base_row=base, user_id=user.id,
+            budget_solves=body.budget_solves)
+    except study_runner.RunRefused as exc:
+        raise _run_error(exc) from None
+
+
+@router.get("/{study_id}/run")
+def get_study_run(study_id: str,
+                  project: AuthorizedProject = ProjectAccessDep,
+                  db: DBSession = Depends(get_db),
+                  user: User | None = Depends(optional_user)) -> dict:
+    _refuse_unless_enabled()
+    _load(project, study_id)
+    base = _base_row(project, db, user)
+    if base is None:
+        raise HTTPException(404, f"Project '{project.name}' not found")
+    rec = study_runner.get_study_run(study_id, base_row=base,
+                                     base_dir=_project_dir(project))
+    if rec is None:
+        raise HTTPException(404, detail={"error_kind": "study_never_run",
+                                         "message": "this study has not been run"})
+    return rec
+
+
+@router.post("/{study_id}/run/abort")
+def abort_study_run(study_id: str,
+                    project: AuthorizedProject = ProjectAccessDep,
+                    db: DBSession = Depends(get_db),
+                    user: User | None = Depends(optional_user)) -> dict:
+    """
+    Ask a running study to stop: the running option's queue job is aborted,
+    no further option starts, unsolved forks are removed and the options
+    never reached are named (`pending_options`). Idempotent, 200 on a
+    finished run; 404 when the study was never run.
+    """
+    from routers.projects import _enforce_project_lock
+
+    _refuse_unless_enabled()
+    base = _base_row(project, db, user)
+    if base is None:
+        raise HTTPException(404, f"Project '{project.name}' not found")
+    _enforce_project_lock(db, base, user)
+    _load(project, study_id)
+    try:
+        return study_runner.abort_study_run(study_id, base_row=base,
+                                            base_dir=_project_dir(project))
+    except study_runner.RunRefused as exc:
+        raise _run_error(exc) from None
 
 
 # ── S2: the assumptions ledger ────────────────────────────────────────────
@@ -373,9 +702,13 @@ class LedgerPut(BaseModel):
 
 
 def _key_drivers(study: DecisionStudy) -> tuple[str, ...]:
-    # S4 replaces this with the question template's `key_drivers`
-    # (`services/study/questions.py`). MVP-1 has one template, the BESS one.
-    return study_library.BESS_KEY_DRIVERS
+    """
+    The question template's key drivers (gate S2 carry: the template's list,
+    not the library stand-in). A custom question has no template; MVP-1 has
+    one, the BESS one, and seeds such a record with its drivers.
+    """
+    question = study_questions.get_question(study.question_id) or study_questions.BESS_AT_SITE
+    return tuple(question.key_drivers)
 
 
 def _library_or_500() -> study_library.Library:

@@ -254,7 +254,7 @@ RESULT_STATE_KEYS = (
 # so `pypsa_service` cannot import `study_state`, but it already imports this
 # module.
 STUDY_KEYS = ("fmea_sweep", "frontier", "mc", "coupling_loop", "margin_loop",
-             "eh_study")
+             "eh_study", "decision_study")
 
 # What each study is called in a refusal. A user who is told "a study is
 # running" cannot act; one who is told WHICH can go and deal with it.
@@ -265,6 +265,9 @@ STUDY_LABELS = {
     "coupling_loop": "a coupling-loop study",
     "margin_loop": "a margin-loop study",
     "eh_study": "an Energy Hub study",
+    # S4: the guided investment study's option runner. It solves study-owned
+    # forks through the queue, and holds its BASE project while it does.
+    "decision_study": "a decision study",
 }
 
 # The studies a user can actually STOP.
@@ -280,11 +283,12 @@ STUDY_LABELS = {
 # Pinned by a test against the routes that actually exist, so this cannot
 # drift the day someone REMOVES an abort.
 ABORTABLE_STUDIES = ("coupling_loop", "margin_loop", "mc", "frontier",
-                     "fmea_sweep", "eh_study")
+                     "fmea_sweep", "eh_study", "decision_study")
 
 
 def record_is_running(record) -> bool:
-    """True while a study record's worker thread is genuinely alive.
+    """
+    True while a study record's worker thread is genuinely alive.
 
     ONE definition, called by `study_state.study_running` (the 409 mesh) and by
     `PyPSAService.reset_network` (which must not clear a live study out from
@@ -323,7 +327,8 @@ def record_is_running(record) -> bool:
 
 
 def running_study_key(state) -> str | None:
-    """The key of the first live study in ``state``, or None.
+    """
+    The key of the first live study in ``state``, or None.
 
     Pure: takes the state dict rather than reaching for the active project, so
     `pypsa_service` can call it without importing `study_state` (which imports
@@ -341,7 +346,8 @@ def running_study_key(state) -> str | None:
 
 
 def study_swap_refusal(state, action: str) -> str | None:
-    """The 409 detail for an action that would REPLACE the network, or None.
+    """
+    The 409 detail for an action that would REPLACE the network, or None.
 
     ``action`` is what the user was trying to do ("load a project", "undo",
     "restore a snapshot"), because a refusal that does not say what it refused
@@ -451,6 +457,7 @@ class ProjectSolverState:
     coupling_loop: Any = None
     margin_loop: Any = None
     eh_study: Any = None
+    decision_study: Any = None
 
     def as_dict(self) -> dict[str, Any]:
         """A plain dict with the same keys/values — the legacy `_state` shape."""

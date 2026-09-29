@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import threading
 import uuid
 
 from pydantic import ValidationError
@@ -33,6 +34,16 @@ SIDECAR_DIR = "studies"
 # live in the network and in uploads/). 1 MB bounds a malformed or abusive
 # payload without clipping a real one.
 MAX_STUDY_BYTES = 1024 * 1024
+
+# Load-modify-save of one sidecar is not atomic across threads: the routes
+# (`routers/studies.py`) and the S4 runner's worker both take this lock.
+WRITE_LOCK = threading.RLock()
+
+# S4: auxiliary records beside the study, `studies/<study_id>.<kind>.json` —
+# the option results (`findings`, a `models.study.Findings`) and the last
+# run's record (`run`). Their stems are not bare ids, so `list_studies` skips
+# them; they are deleted with the study.
+AUX_KINDS = ("findings", "run")
 
 
 class StudyNotFound(LookupError):
@@ -112,9 +123,46 @@ def save_study(project_dir: pathlib.Path, study: DecisionStudy) -> DecisionStudy
     return study
 
 
+def _aux_path(project_dir: pathlib.Path, study_id: str, kind: str) -> pathlib.Path:
+    if kind not in AUX_KINDS:
+        raise ValueError(f"unknown study record kind {kind!r}")
+    return _path(project_dir, study_id).with_name(f"{study_id}.{kind}.json")
+
+
+def aux_ref(study_id: str, kind: str) -> str:
+    """The project-relative reference stored on the study (`findings_ref`)."""
+    if kind not in AUX_KINDS or not STUDY_ID_RE.fullmatch(study_id):
+        raise ValueError(kind)
+    return f"{SIDECAR_DIR}/{study_id}.{kind}.json"
+
+
+def save_aux(project_dir: pathlib.Path, study_id: str, kind: str, payload: dict) -> None:
+    path = _aux_path(project_dir, study_id, kind)
+    text = json.dumps(payload, indent=2, sort_keys=True, default=str)
+    if len(text.encode("utf-8")) > MAX_STUDY_BYTES:
+        raise StudyTooLarge(f"study {study_id} {kind} is larger than {MAX_STUDY_BYTES} bytes")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(path, text)
+
+
+def load_aux(project_dir: pathlib.Path, study_id: str, kind: str) -> dict | None:
+    path = _aux_path(project_dir, study_id, kind)
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise StudyUnreadable(f"{path.name}: {exc}") from exc
+
+
 def delete_study(project_dir: pathlib.Path, study_id: str) -> None:
     path = _path(project_dir, study_id)
     try:
         path.unlink()
     except FileNotFoundError:
         raise StudyNotFound(study_id) from None
+    for kind in AUX_KINDS:
+        try:
+            _aux_path(project_dir, study_id, kind).unlink()
+        except FileNotFoundError:
+            pass

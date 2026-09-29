@@ -275,6 +275,9 @@ class LedgerRow(_FigureBlock):
     key: str
     label: str
     technical_name: str | None = None
+    # S4: one plain sentence on what the value means and what it moves (the
+    # guided flow shows it beside the input; e.g. `energy_price_level`).
+    help: str | None = None
     value: float | None
     unit: str
     basis: Basis = Basis.real
@@ -509,6 +512,14 @@ class StudyMaturity(_FigureBlock):
 # ── 4.1 Study ─────────────────────────────────────────────────────────────
 
 class StudyBudget(_Model):
+    """
+    The solve budget of ONE run. S4: a question-pack study derives
+    ``solves_max`` from ``campaign.estimate_solves("decision_study", ...)``
+    (one solve per option) at creation; the 12 below is only the record
+    default of an attached record, which is never run. ``solves_used`` is
+    what the last run charged.
+    """
+
     solves_max: int = Field(default=12, ge=0)
     solves_used: int = Field(default=0, ge=0)
 
@@ -544,6 +555,12 @@ class DecisionStudy(_Model):
     maturity: StudyMaturity = Field(default_factory=StudyMaturity)
     findings_ref: str | None = None
     report_ref: str | None = None
+    # S4 (M0): the uuid of the base project the question pack CREATED for this
+    # study. A run is allowed only when it equals the containing project's
+    # uuid, so a record attached to an existing user project (None), or one
+    # copied into another project by Save-As, a scenario, a snapshot or a
+    # bundle (the origin's uuid), is never run with a pack.
+    pack_project: str | None = None
     created_by: str | None = None
     created_at: datetime
     updated_at: datetime

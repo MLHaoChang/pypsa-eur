@@ -62,3 +62,26 @@ replacement_rules:
 # Degradation is deferred (plan, honest scope); the ledger carries the
 # placeholder rows marked not_used_in_mvp1.
 degradation: not_used_in_mvp1
+
+# Sizing limit (plan S4, review v2 BC-2): preflight errors on an extendable
+# asset with `p_nom_max = inf`, so every extendable asset the pack writes (the
+# battery StorageUnit and the PV Generator) is bounded by the site's
+# connection limit times this multiple. A stated assumption, not a source
+# figure: a battery or PV array larger than twice what the connection can
+# carry has nowhere to send its power (import and export both pass the one
+# connection). When the bound binds, the LP's size is not an optimum and the
+# verdict must say so (`size_at_upper_bound`, S6).
+sizing_limit:
+  key: sizing_limit_connection_multiple
+  value: 2.0
+  unit: multiple of connection limit
+  source: >-
+    Assumed (guided investment study plan v2, S4 / review v2 BC-2): two
+    connection limits bound what import plus export can carry through the
+    site connection
+  source_year: 2026
+  range:
+    low: 1.0
+    high: 4.0
+    source: assumed
+  domain: "(0, inf)"

@@ -402,13 +402,13 @@ def maturity_from_ledger(ledger: AssumptionsLedger,
 # ── CSV ───────────────────────────────────────────────────────────────────
 
 CSV_COLUMNS = (
-    "key", "label", "technical_name", "value", "unit", "basis",
+    "key", "label", "technical_name", "help", "value", "unit", "basis",
     "currency_year", "source", "source_year", "source_url", "range_low",
     "range_high", "range_source", "domain", "provenance", "status", "sensitivity_flag",
     "changed_by", "changed_at", "unavailable",
 )
 _TEXT_COLUMNS = frozenset({
-    "key", "label", "technical_name", "unit", "basis", "source", "source_url",
+    "key", "label", "technical_name", "help", "unit", "basis", "source", "source_url",
     "range_source", "domain", "provenance", "status", "changed_by", "unavailable",
 })
 # A spreadsheet evaluates a cell that starts with one of these as a formula
@@ -440,6 +440,7 @@ def ledger_to_csv(ledger: AssumptionsLedger) -> str:
     for r in ledger.rows:
         cells = {
             "key": r.key, "label": r.label, "technical_name": r.technical_name or "",
+            "help": r.help or "",
             "value": _num(r.value), "unit": r.unit, "basis": r.basis.value,
             "currency_year": _num(r.currency_year), "source": r.source,
             "source_year": _num(r.source_year), "source_url": r.source_url or "",
@@ -492,6 +493,7 @@ def ledger_rows_from_csv(text: str) -> list[LedgerRow]:
             rows.append(LedgerRow(
                 key=cell["key"], label=cell["label"],
                 technical_name=cell["technical_name"] or None,
+                help=cell["help"] or None,
                 value=_csv_num(cell["value"], float, where), unit=cell["unit"],
                 basis=cell["basis"],
                 currency_year=_csv_num(cell["currency_year"], int, where),

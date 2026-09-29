@@ -178,7 +178,7 @@ class DemandChargeRefused(ValidationRefused):
     stable: `demand_charge_strategy_{myopic,rolling}`, `demand_charge_sclopf`,
     `demand_charge_multi_period`, `demand_charge_snapshots_not_flat`,
     `demand_charge_basis_{annual_peak,ratchet}`, `demand_charge_invalid`,
-    `demand_charge_unknown_import_link`.
+    `demand_charge_unknown_import_link`, `demand_charge_inactive_import_link`.
     """
 
     def __init__(self, code: str, message: str):
@@ -258,6 +258,15 @@ def _wrap_with_demand_charge(network: "pypsa.Network", user_fn, cfg, log_queue=N
     if missing:
         _refuse("demand_charge_unknown_import_link",
                 f"import link(s) {missing} are not in the network.")
+    # Gate S3 N5 (carried to S4): an inactive Link has no `Link-p` variable,
+    # so the constraint below would raise a KeyError traceback. Typed instead.
+    if "active" in network.links.columns:
+        inactive = [ln for ln in spec.import_links
+                    if not bool(network.links.at[ln, "active"])]
+        if inactive:
+            _refuse("demand_charge_inactive_import_link",
+                    f"import link(s) {inactive} are inactive (active=False), "
+                    "so the LP carries no flow on them to charge.")
 
     price = spec.price_per_mw_per_period
 

@@ -57,8 +57,9 @@ __all__ = [
     "Bill", "BillCalculator", "BillComponents", "DemandChargeSpec",
     "ExportPricingError", "REFUSED_DEMAND_CHARGE_BASES", "TariffError",
     "UnpricedHoursError", "UnsupportedTariffError", "band_prices",
-    "billing_period_labels", "demand_charge_eur_from_network",
-    "parse_demand_charge_config", "write_tariff_prices",
+    "billing_period_labels", "demand_charge_config",
+    "demand_charge_eur_from_network", "parse_demand_charge_config",
+    "tariff_from_ledger", "validate_tariff_intake", "write_tariff_prices",
 ]
 
 REFUSED_DEMAND_CHARGE_BASES = ("annual_peak", "ratchet")
@@ -540,3 +541,112 @@ def demand_charge_eur_from_network(n, raw) -> float | None:
     total, _ = BillCalculator.demand_charge(
         import_mw, spec.price_per_mw_per_period, spec.billing_period)
     return total
+
+
+# ── S4: the one tariff the pack, the LP and the bill all read ─────────────
+
+def validate_tariff_intake(tariff: Tariff) -> None:
+    """
+    Refuse at intake what the engine would refuse at run time (gate S3 N7,
+    N-v2-2): a `measured` capacity charge, an `annual_peak` or `ratchet`
+    demand charge, an export given as both a price and a series, an export
+    cap, and a network-charge basis MVP-1 does not price. Typed
+    (`TariffError` and subclasses), so the route answers 422 with the code.
+    """
+    _refuse_measured_capacity(tariff)
+    if tariff.demand_charge is not None:
+        _refuse_basis(tariff.demand_charge.basis)
+    if tariff.export.price_per_mwh is not None and tariff.export.series_ref is not None:
+        raise ExportPricingError(
+            "export compensation gives both price_per_mwh and series_ref; "
+            "it is one or the other")
+    if tariff.export.cap_mw is not None:
+        raise UnsupportedTariffError(
+            "export compensation cap_mw is not modelled in MVP-1",
+            code="export_cap_unsupported")
+    for nc in tariff.network_charges:
+        if nc.basis not in _NETWORK_CHARGE_BASES:
+            raise UnsupportedTariffError(
+                f"network charge {nc.label!r} has basis {nc.basis!r}; MVP-1 "
+                f"prices {', '.join(_NETWORK_CHARGE_BASES)}",
+                code="network_charge_basis_unsupported")
+
+
+def _ledger_value(ledger, key: str) -> float | None:
+    for row in ledger.rows:
+        if row.key == key:
+            return row.value
+    raise TariffError(f"the ledger has no {key!r} row", code="ledger_row_missing")
+
+
+def tariff_from_ledger(tariff: Tariff, ledger, snapshots,
+                       snapshot_weightings=None) -> Tariff:
+    """
+    The tariff every S4+ engine prices with: the chosen tariff's structure
+    (bands, billing period, bases) with the LEDGER's numbers for the two key
+    drivers the ledger owns (gate S2 [S8], [S9]):
+
+    * **demand charge price** — `demand_charge_price` replaces the tariff's
+      own figure (the ledger is the single source; a tariff without a demand
+      charge keeps none, whatever the row says — a stale user value there is
+      `needs_attention` and refused before this is reached);
+    * **energy price level** — each energy band's price becomes
+      ``m + level x (p - m)``, where ``m`` is the bands' time-weighted mean
+      over ``snapshots`` (weighted by ``snapshot_weightings``, default 1). The
+      average energy price is unchanged; the time-of-use spread scales. A
+      single-band tariff is unchanged. Network charges, the demand charge and
+      the export credit are not scaled.
+
+    Returns a new `Tariff`; the input is not modified. The pack
+    (`write_tariff_prices`), the LP (`demand_charge_config`) and the bill
+    (`BillCalculator.bill`) all take THIS object, so they cannot disagree.
+    """
+    validate_tariff_intake(tariff)
+    idx = _require_datetime_index(pd.Index(snapshots) if not isinstance(
+        snapshots, pd.DatetimeIndex) else snapshots, "tariff_from_ledger")
+    data = tariff.model_dump()
+    if tariff.demand_charge is not None:
+        price = _ledger_value(ledger, "demand_charge_price")
+        if price is None:
+            raise TariffError(
+                "the tariff has a demand charge but the ledger's "
+                "demand_charge_price row has no value", code="ledger_row_missing")
+        data["demand_charge"]["price_per_mw_per_period"] = float(price)
+    level = _ledger_value(ledger, "energy_price_level")
+    level = 1.0 if level is None else float(level)
+    if not math.isfinite(level) or level <= 0.0:
+        raise TariffError(f"energy_price_level must be > 0, got {level!r}",
+                          code="energy_price_level_invalid")
+    if level != 1.0 and tariff.energy_bands:
+        prices = band_prices(idx, tariff.energy_bands)
+        if snapshot_weightings is None:
+            w = pd.Series(1.0, index=idx)
+        else:
+            w = _weights(snapshot_weightings).reindex(idx).fillna(0.0)
+        mean = float((prices * w).sum() / w.sum()) if float(w.sum()) > 0 else float(prices.mean())
+        for band in data["energy_bands"]:
+            band["price_per_mwh"] = mean + level * (float(band["price_per_mwh"]) - mean)
+        data["honesty_notes"] = [*data.get("honesty_notes", []),
+                                 "energy_bands_scaled_by_energy_price_level"]
+    return Tariff.model_validate(data)
+
+
+def demand_charge_config(tariff: Tariff, import_links) -> dict | None:
+    """
+    `SolverConfig.demand_charge` from the (ledger-applied) tariff, or None
+    when it has no demand charge. The ONE place the LP's billing period is
+    set, and it is the tariff's own `billing_period` — the field the bill
+    calculator reads (gate S3 [S4]: one billing-period source). Both then
+    label snapshots with :func:`billing_period_labels`.
+    """
+    dc = tariff.demand_charge
+    if dc is None:
+        return None
+    _refuse_basis(dc.basis)
+    links = [str(x) for x in (import_links or [])]
+    if not links:
+        raise TariffError("a demand charge needs at least one import link",
+                          code="demand_charge_invalid")
+    return {"price_per_mw_per_period": float(dc.price_per_mw_per_period),
+            "basis": dc.basis, "billing_period": tariff.billing_period,
+            "import_links": links}

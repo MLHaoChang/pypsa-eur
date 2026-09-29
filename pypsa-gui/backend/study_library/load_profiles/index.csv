@@ -1,0 +1,3 @@
+profile_id,label,source,synthetic,note
+commercial_office,Commercial office (synthetic shape),"synthetic: guided investment study S4, a stated shape (weekday 08-18 plateau, night and weekend base, summer cooling uplift), not a measurement",true,Scaled to the intake's annual MWh; replace with a metered load to leave screening maturity.
+industrial_two_shift,"Industrial, two shifts (synthetic shape)","synthetic: guided investment study S4, a stated shape (weekday 06-22 two shifts, night and weekend base, August and December shutdown dips), not a measurement",true,Scaled to the intake's annual MWh; replace with a metered load to leave screening maturity.
