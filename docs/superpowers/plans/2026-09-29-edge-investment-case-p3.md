@@ -1030,6 +1030,28 @@ backend follow-up). **WP3.7c closed.**
 - [ ] `notYetDeployed` (frontend `api/commercial.ts`) removed once `/results/value_flows` and
   `/results/billing/preview` ship (WP3.5 review round 2 B).
 
+**Gate assessor round 1 (bfb5bef): PASS WITH CONDITIONS.** It re-ran the driver (222/222), all QA
+drivers (25/25), 855 targeted tests (one red: the hourly audit), the investment vitest and `tsc`,
+re-derived V2 (export-price and feed-in shares, PPA, EaaS) by a per-interval loop and V4 (DSR 437.5 MWh,
+activation 43,750.00, availability 38.356) analytically, and probed the export split. Conditions and
+what was done (e27fe5d):
+1. **The hourly-assumption audit was red** (the energy-hub adequacy sites from the master merge
+   e364837, before WP3.0) → each reviewed: all year conversions weighted by Σ w, listed with reasons.
+   The first full run also failed `test_openpyxl_parses_uploads_with_defusedxml_in_this_environment`:
+   the local venv lacked the pinned `defusedxml==0.7.1` (an environment gap, not code) — installed.
+2. **The export split weighted a fuel supply behind a CHP by its MW of gas and ignored the CHP's
+   output** (MEDIUM, silent: 21,825.92 vs 26,368.16 with `conservation_ok` True) → one definition of
+   site electric generation for the split and the `as_consumed_btm` share: `site_generators` without
+   fuel supplies plus `site_generating_links` (bus1 output of a converting Link, keyed by the Link);
+   storage is not generation. Test fails on the old code.
+3. **Findings note corrected:** the WP3.2 verdict, scenario E's hand-share scope, V1b (suite, not
+   driver), the bridge's limited independence, the accepted residues and deviations.
+4. **ADR-0002 procedure extended** (manifest at a P3 head; template, drafts, replace-guard and lines
+   turns). Still owed; the chat surface is not done.
+Notes taken: the driver asserts non-empty ledgers and replaces the vacuous pv2 check (235/235); chat
+value-flow line rows cut (ids 80, flags 160 characters) so one always fits a page. Not taken: the
+Sankey test's loose link count; the unlocked in-flight checks (accepted in WP3.2).
+
 ## Scope boundaries (not P3)
 
 - Annual cashflows, escalation, degradation, debt, tax, incentives, returns — P4 (mapping pinned in WP3.1).
