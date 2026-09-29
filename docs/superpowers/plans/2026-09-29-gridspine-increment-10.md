@@ -181,3 +181,43 @@ centre with a 100 MW BESS at BUS_16.
 | load trip | **fails**. The step at the POC is only +0.69 %, but losing 300 MW with the BESS still exporting pushes BUS_19, BUS_22 and BUS_26 above 1.05 pu. This is the data-centre load-loss effect, and it would be missed by looking only at the POC. |
 | reactive range | fails injecting 144 Mvar; passes absorbing |
 | SCR | 90 and 29.4, reported |
+
+## Stages B and C, as built (2026-09-29)
+
+**Stage B.** `drivers/connection.py` assesses a facility at every selected hour
+of a screened run, on the same rebuilt hour state the handoff pass used. The
+minimum Sk'' at the POC comes from that hour's bundle (`fault_levels.csv`).
+The rows are stored in `connection.csv`, in the run and in each bundle, keyed
+by a stable `assessment_id`, so assessing the same facility again replaces
+its rows. The backend has `GET`/`POST /api/gridspine/{name}/connection`: 409
+while a study is queued or running, 404 before a screened run, 422 for a bad
+facility. There are two chat tools, `gridspine_assess_connection` (write) and
+`gridspine_get_connection_assessments` (read). The write tool's description
+says the assessment is a screen, not a compliance certificate.
+
+**Stage C.** The panel has a *Connection-point assessment* section. Each
+capacity row has an *Assess* button that fills in the facility bus. Each
+check shows:
+- the result;
+- the value;
+- the limit it was held to (≤ for a step or for the injecting end, ≥ for the
+  absorbing end);
+- the detail;
+- the clause, with its `code`/`assumed` tag.
+
+The section says in its body, not only in its hint, that it is not a
+compliance certificate. Eight mutations were run and all eight were caught.
+One of them, removing the lock, first survived, because an empty form also
+disables *Assess*. The test now fills the form first.
+
+**Browser run** (case39 UC study, hours 3, 17 and 19): a 300 MW data centre
+with a 100 MW BESS at BUS_16 took 2.4 s for the three hours. The stored
+assessments survive a fresh page. A second facility adds a picker, and an
+unknown bus is refused inline.
+
+**A bug the run found.** An absorbing end that passes on a POC that was
+already above the band (for example BUS_04 at 1.061 pu) was reported as
+"within 0.9-1.05 pu". Under the no-new-no-worse rule it does pass, because
+absorbing pulls the voltage down. But the wording was false. It now reads
+"outside 0.9-1.05 pu already, not worsened", pinned by a test in both
+directions.
