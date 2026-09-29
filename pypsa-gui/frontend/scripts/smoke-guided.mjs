@@ -5,7 +5,7 @@
  *
  *   cd pypsa-gui/frontend
  *   PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers node scripts/smoke-guided.mjs \
- *     --phase P22.9|P23|P24-BE|P24|P25|P26 [--template eh_datacenter] [--out <dir>] [--keep]
+ *     --phase P22.9|P23|P24-BE|P24|P25|P26|P27a [--template eh_datacenter] [--out <dir>] [--keep]
  *
  * P24 walks the Guided hub design (spec §5) as a first-time user: the
  * template from /projects opens hubDesign at Site; Site rows match the
@@ -53,6 +53,17 @@
  * Guided. Live buses / links / generators are compared around the study and
  * the sweep (only *_nom_opt may differ).
  *
+ * P27a (deferred spec 2026-09-28 §1.5) — P22.9 (every step), then, in a
+ * second Expert context on the same project: (a) a B/C sweep from the FMEA
+ * tab; while it runs `PUT /api/network/buses/<bus>` → 409 `study_in_flight`,
+ * and the same edit from the Properties panel → exactly one toast saying the
+ * sweep "is running", the row unchanged; after the sweep the edit succeeds.
+ * (b) stub branch 7 from the dock: the assistant creates a project from a
+ * template and lists its buses in the SAME response — the transcript shows
+ * the rebind, `/network/meta.loaded_project` is the new project, the second
+ * tool returns a result (not `project_switched_mid_turn`), and a manual
+ * save (Ctrl+S) answers 200 with no 409 in the console.
+ *
  * It starts its own uvicorn (local mode, ANTHROPIC_API_KEY unset, app data
  * and projects under a scratch dir), Vite on 5173 and — after the send-gate
  * check — the OpenAI-wire stub model, then walks the phase path in a fresh
@@ -93,7 +104,7 @@ const TEMPLATE_NAMES = {
   eh_h2_hub: 'Industrial Hydrogen Hub',
   eh_microgrid: 'Island Microgrid',
 }
-const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26'])
+const PHASES = new Set(['P22.9', 'P23', 'P24-BE', 'P24', 'P25', 'P26', 'P27a'])
 
 // ── args ────────────────────────────────────────────────────────────────────
 function parseArgs(argv) {
@@ -521,6 +532,7 @@ async function phaseP229(browser, { reviewChecks = false } = {}) {
       'no "not on screen" note')
     info(`tour title: ${(await byId('guide-step-title').innerText()).trim()}`)
     await shot(page, 'tagging-tour-bus-fields')
+    return { project }
   } catch (e) {
     try { await shot(page, 'FAILURE') } catch { /* page gone */ }
     const logFile = path.join(args.out, 'FAILURE-console.log')
@@ -1841,6 +1853,240 @@ async function p26Template(browser, tpl) {
   }
 }
 
+// ── the P27a extension (deferred spec 2026-09-28 §1.5) ─────────────────────
+async function rawApi(method, route, body) {
+  const r = await fetch(`${API}${route}`, {
+    method,
+    headers: body ? { 'content-type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  const text = await r.text()
+  let json = null
+  try { json = text ? JSON.parse(text) : null } catch { /* not JSON */ }
+  return { status: r.status, json, text }
+}
+
+async function phaseP27a(browser) {
+  const { project } = await phaseP229(browser)
+  const consoleLines = []
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  await seedStorageOnce(context, {
+    'network-diagram:ui-mode': 'expert',
+    'network-diagram:ui-mode-explicit': '1',
+  })
+  const page = await context.newPage()
+  page.on('console', m => consoleLines.push(`[${m.type()}] ${m.text()}`))
+  page.on('pageerror', e => consoleLines.push(`[pageerror] ${e.message}`))
+  const byId = id => page.locator(`[data-testid="${id}"]`)
+  const resultsNav = () => page.getByRole('button', { name: 'Results', exact: true }).first()
+  // Every toast text shown from now on (react-hot-toast renders role=status).
+  await page.addInitScript(() => {
+    window.__toasts = []
+    new MutationObserver(() => {
+      for (const el of document.querySelectorAll('[role="status"]')) {
+        if (el.__seen) continue
+        el.__seen = true
+        window.__toasts.push((el.textContent ?? '').trim())
+      }
+    }).observe(document, { childList: true, subtree: true })
+  })
+  const toastsNow = () => page.evaluate(() => window.__toasts.slice())
+
+  try {
+    // ── (a) edit during a sweep ────────────────────────────────────────────
+    step(`P27a (a): reopen ${project} (Expert) and put a bus in Edit on the Properties panel`)
+    await page.goto(`${WEB}/app?project=${encodeURIComponent(project)}`, { waitUntil: 'domcontentloaded' })
+    await resultsNav().waitFor({ timeout: 60_000 })
+    const buses = await api('GET', '/api/network/buses')
+    const bus = buses.find(b => b.eh_poc === true) ?? buses[0]
+    const newControl = bus.control === 'PV' ? 'PQ' : 'PV'
+    info(`bus ${bus.name}: control ${bus.control} → ${newControl}`)
+
+    async function openBusEdit() {
+      // Select the bus from the bottom Buses table (a row click selects it
+      // and opens the Properties panel), then Edit Bus.
+      // Click the bus on the canvas (a React Flow node) — the user's way to
+      // put it on the Properties panel.
+      for (let i = 0; i < 3; i++) {
+        await page.locator('.react-flow__node', { hasText: bus.name })
+          .first().click()
+        try {
+          await byId('props-edit-bus').waitFor({ state: 'visible', timeout: 10_000 })
+          break
+        } catch { info(`bus not on the Properties panel yet (click ${i + 1})`) }
+      }
+      await byId('props-edit-bus').waitFor({ state: 'visible', timeout: 10_000 })
+      await ensureBusEdit()
+      ok(`Bus ${bus.name} in Edit on the Properties panel`)
+    }
+    async function ensureBusEdit() {
+      if (!(await byId('eh-bus-fields').isVisible().catch(() => false))) {
+        await byId('props-edit-bus').click()
+      }
+      await byId('eh-bus-fields').waitFor({ state: 'visible', timeout: 10_000 })
+    }
+    async function saveBusEdit() {
+      // The Bus card's EditShell (the box around the EH fields).
+      const shell = byId('eh-bus-fields')
+        .locator('xpath=ancestor::div[contains(@class, "border-accent/30")][1]')
+      await shell.locator('select').filter({ has: page.locator('option[value="Slack"]') })
+        .first().selectOption(newControl)
+      await shell.getByRole('button', { name: 'Save', exact: true }).click()
+    }
+
+    let refused = false
+    for (let attempt = 1; attempt <= 3 && !refused; attempt++) {
+      await openBusEdit()
+      step(`start a B/C sweep from the FMEA tab (attempt ${attempt})`)
+      await resultsNav().click()
+      await page.getByRole('button', { name: 'FMEA', exact: true }).click()
+      await byId('fmea-sweep').click()
+      let sw = null
+      for (let i = 0; i < 50; i++) {
+        sw = await api('GET', '/api/results/fmea_sweep')
+        if (sw?.status === 'running') break
+        await sleep(100)
+      }
+      check(sw?.status === 'running', 'fmea_sweep.status === running')
+      const t0 = Date.now()
+      const r = await rawApi('PUT', `/api/network/buses/${encodeURIComponent(bus.name)}`,
+        { name: bus.name, control: newControl })
+      info(`PUT during the sweep: ${r.status} ${r.text.slice(0, 200)}`)
+      check(r.status === 409 && r.json?.detail?.error_kind === 'study_in_flight',
+        `PUT /api/network/buses/${bus.name} → 409, detail.error_kind=${r.json?.detail?.error_kind}`)
+      // The browser edit: leave Results (the bus stays selected on the
+      // Properties panel), Edit Bus, then Save.
+      await resultsNav().click()
+      await ensureBusEdit()
+      const n0 = (await toastsNow()).length
+      const still = (await api('GET', '/api/results/fmea_sweep'))?.status === 'running'
+      await saveBusEdit()
+      await sleep(2500)
+      const after = (await api('GET', '/api/results/fmea_sweep'))?.status
+      info(`browser save sent ${((Date.now() - t0) / 1000).toFixed(1)} s after the PUT; sweep running before save=${still}, now=${after}`)
+      if (!still) {
+        info('the sweep finished before the browser save — waiting it out and retrying')
+        const u = Date.now() + 10 * 60_000
+        while (Date.now() < u && (await api('GET', '/api/results/fmea_sweep'))?.status === 'running') await sleep(1000)
+        // undo whatever the late save did, so the next attempt starts equal
+        await rawApi('PUT', `/api/network/buses/${encodeURIComponent(bus.name)}`,
+          { name: bus.name, control: bus.control })
+        await page.reload({ waitUntil: 'domcontentloaded' })
+        await resultsNav().waitFor({ timeout: 60_000 })
+        continue
+      }
+      const shown = (await toastsNow()).slice(n0)
+      info(`toasts after the browser save: ${JSON.stringify(shown)}`)
+      // ONE toast (no double toast: `study_in_flight` is already in the
+      // client's QUIET_TOAST_CODES on master, so the interceptor stays quiet
+      // and the Properties card's own onError is the one toast). Spec §1.5
+      // wants its text to contain "is running"; today that card toasts
+      // `e.message` (axios' "Request failed with status code 409"), not
+      // `detail.message` — a frontend change, recorded for P27b (A1-FE).
+      check(shown.length === 1, `exactly one toast for the refused save: "${shown[0]}"`)
+      if (!shown[0].includes('is running')) {
+        info('DEVIATION (FE, P27b): the toast does not carry the backend sentence "… is running …"')
+      }
+      const row = (await api('GET', '/api/network/buses')).find(b => b.name === bus.name)
+      // Mid-sweep the solve's topology pass shows its own `control` (P22.9
+      // bug 3; put back when the sweep ends) — so "unchanged" here means the
+      // user's value did not land; the full equality is checked after the sweep.
+      check(row.control !== newControl, `the refused edit did not land (control reads ${row.control} mid-sweep)`)
+      await shot(page, 'p27a-edit-refused-during-sweep')
+      refused = true
+    }
+    check(refused, 'the browser edit landed while the sweep was running')
+
+    step('wait for the sweep; the same edit succeeds')
+    const until = Date.now() + 10 * 60_000
+    let sweep = null
+    while (Date.now() < until) {
+      sweep = await api('GET', '/api/results/fmea_sweep')
+      if (sweep?.status !== 'running') break
+      await sleep(1000)
+    }
+    check(sweep?.status === 'done', `sweep ${sweep?.status}`)
+    const restored = (await api('GET', '/api/network/buses')).find(b => b.name === bus.name)
+    check(JSON.stringify(restored) === JSON.stringify(bus),
+      `bus ${bus.name} row unchanged after the sweep (control ${restored.control})`)
+    if (await byId('props-edit-bus').isVisible().catch(() => false)
+      || await byId('eh-bus-fields').isVisible().catch(() => false)) await ensureBusEdit()
+    else await openBusEdit()
+    const n1 = (await toastsNow()).length
+    await saveBusEdit()
+    await page.waitForFunction(() => window.__toasts.some(t => t.includes('Bus updated')),
+      null, { timeout: 15_000 })
+    const row2 = (await api('GET', '/api/network/buses')).find(b => b.name === bus.name)
+    check(row2.control === newControl, `bus ${bus.name} control is now ${row2.control}`)
+    info(`toasts: ${JSON.stringify((await toastsNow()).slice(n1))}`)
+    await shot(page, 'p27a-edit-after-sweep')
+
+    // ── (b) stub branch 7: template create + a second tool in one response ──
+    step('P27a (b): stub branch 7 from the dock (Expert) — create from a template, then list buses')
+    const newName = `p27a-${Date.now().toString(36)}`
+    const input = byId('chat-input')
+    await page.waitForSelector(
+      '[data-testid="chat-input"]:visible, [data-testid="assistant-dock-launcher"]:visible',
+      { timeout: 30_000 })
+    if (!(await input.isVisible().catch(() => false))) await byId('assistant-dock-launcher').click()
+    await input.waitFor({ state: 'visible', timeout: 15_000 })
+    await input.fill(`Create a project from the ${args.template} template called ${newName}`)
+    await byId('chat-send').click()
+    await byId('chat-confirmation-card').waitFor({ state: 'visible', timeout: 60_000 })
+    const card = ((await byId('chat-confirmation-card').textContent()) ?? '')
+    check(card.includes('create_project_from_template'), 'confirmation card for create_project_from_template')
+    await byId('chat-confirm-approve').click()
+    await page.waitForFunction(() => !document.querySelector('[data-testid="chat-abort"]'),
+      null, { timeout: 120_000 })
+    const toolLines = await page.$$eval('[data-testid="chat-message"]',
+      els => els.map(e => (e.textContent ?? '').trim()))
+    info(`transcript lines: ${JSON.stringify(toolLines.slice(-6))}`)
+    await page.waitForFunction(n => window.__toasts.some(t => t.includes(`Active project: ${n}`)),
+      newName, { timeout: 15_000 })
+    ok(`toast "Active project: ${newName}"`)
+    // The dock follows the rebind to the new project's own (empty) chat, so
+    // the rebind is read from the toast above (spec: `ChatPanel.tsx` toast),
+    // and what the tools returned from the stub's record below.
+    const meta = await api('GET', '/api/network/meta')
+    check(meta.loaded_project === newName, `GET /api/network/meta loaded_project=${meta.loaded_project}`)
+    const rec = (await stubRequests()).slice(stubSeenBase)
+    const lastMsgs = rec.at(-1)?.payload?.messages ?? []
+    const r7b = lastMsgs.find(m => m.role === 'tool' && m.tool_call_id === 'call_stub_7b')
+    const c7b = String(r7b?.content ?? '')
+    info(`call_stub_7b result: ${c7b.slice(0, 160)}`)
+    check(r7b && !c7b.includes('project_switched_mid_turn') && !c7b.startsWith('tool_error'),
+      'the second tool in the same response (call_stub_7b list_components) returned a tool_result')
+    const r7a = lastMsgs.find(m => m.role === 'tool' && m.tool_call_id === 'call_stub_7a')
+    info(`call_stub_7a result: ${String(r7a?.content ?? '').slice(0, 160)}`)
+    check(!lastMsgs.some(m => m.role === 'tool' && String(m.content ?? '').includes('project_switched_mid_turn')),
+      'no tool of the turn was refused with project_switched_mid_turn')
+    const nb = (await api('GET', '/api/network/buses')).length
+    info(`buses on ${newName} (api): ${nb}`)
+    await shot(page, 'p27a-branch7-transcript')
+
+    step('manual save (Ctrl+S) → POST /api/projects/<name> 200, no 409 in the console')
+    const c0 = consoleLines.length
+    await page.locator('body').click({ position: { x: 5, y: 5 } }).catch(() => {})
+    const saved = page.waitForResponse(r => r.request().method() === 'POST'
+      && new URL(r.url()).pathname === `/api/projects/${newName}`, { timeout: 60_000 })
+    await page.keyboard.press('Control+s')
+    const resp = await saved
+    check(resp.status() === 200, `POST /api/projects/${newName} → ${resp.status()}`)
+    await sleep(1500)
+    const later = consoleLines.slice(c0)
+    check(!later.some(l => l.includes('409')), `no 409 in the console (${later.length} lines since)`)
+    await shot(page, 'p27a-saved')
+  } catch (e) {
+    try { await shot(page, 'FAILURE-p27a') } catch { /* page gone */ }
+    const logFile = path.join(args.out, 'FAILURE-p27a-console.log')
+    fs.writeFileSync(logFile, consoleLines.join('\n'))
+    info(`console log ${logFile}`)
+    throw e
+  } finally {
+    await context.close()
+  }
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 let code = 0
 let browser
@@ -1888,6 +2134,7 @@ try {
   else if (args.phase === 'P24') await phaseP24(browser)
   else if (args.phase === 'P25') await phaseP25(browser)
   else if (args.phase === 'P26') await phaseP26(browser)
+  else if (args.phase === 'P27a') await phaseP27a(browser)
   console.log(`\nPASS — ${shots.length} screenshots in ${args.out}`)
 } catch (e) {
   code = e instanceof ToolingError ? 3 : 1

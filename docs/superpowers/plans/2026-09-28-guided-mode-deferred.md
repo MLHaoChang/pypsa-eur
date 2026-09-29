@@ -179,6 +179,27 @@ Every phase runs the parent spec §8 gate unchanged: row 1 full backend suite (`
 
 Test-first in every phase: each item's red test is written and seen failing before the fix; changed assertions carry a one-line justification here.
 
+### P27a phase note (implementation, 2026-09-29, base `4d7cfbb86`)
+
+**Anchor drift** (spec §1 anchors were taken before the PR #60 merge; re-verified on `4d7cfbb86`):
+
+| Spec anchor | On `4d7cfbb86` |
+|---|---|
+| `sweep.py:87-125, 188-196, 279-286, 400-401`; `frontier.py:211`; `coupling_loop_runner.py:625` (lock `:285`); `margin_loop_runner.py:962` (lock `:208`); `dtc.py:396`; `pypsa_service.py:632`; `project_context.py:256, 325, 343`; `network_crud.py:204, 375, 439`; `network_undo.py:105`; `chat_service.py:125-131` | unchanged |
+| `routers/projects.py:1515` `_study_in_flight_detail`, callers `:1547`, `:2377` | `:1554`, `:1586`, `:2416` |
+| `main.py:267` `_SOLVER_BLOCKING_PREFIXES`, `:642` `is_write`, `:733` bind, `:769-800` solver gate | `:293`, `:668`, `:759`, `:794-826` |
+| `chat_service.py:3331-3345` emission; `:4589-4592` contextvars copy; `:4619-4645` dict → `tool_error` | `:3471-3485`; `:4753`; `:4786-4806` |
+| `chat_tools.py:2115-2147` `_route`; `:2354-2371` bundle / template tools | `:2082`; `import_project_bundle` `:2322-2339`, `create_project_from_template` `:2342-2347` |
+| `projects.py` template `:1264/1342/1351`; bundle `:1059/1068/1139`; save `:1475, 1500-1502`; `_save_context` `:1929` | `create_from_template` `:1298` (session `:1303`, pointer `:1390/:1437`); `import_bundle` `:941` (pointer `:1081/:1174`); `save_project` `:1460`, `was_unbound` `:1514`, pointer `:1540-1541`; `_save_context` `:1798` |
+| `eh_study.py:445, 971` (`network.copy()`) | `:554`, `:1189` |
+| `ChatPanel.tsx:2340` rebind toast | `:2342` (handler `:2322-2350`) |
+
+**Mechanism drift found while implementing.** (1) `cascade_delete_bus`, `bulk_update_components`, the Bus rename and the GlobalConstraint handlers do **not** route through the three `network_crud` handlers (`network_buses.py` `apply_delete_bus_cascade` / `apply_rename_bus`, `network_bulk.py` `apply_bulk_update`, `network_global_constraints.py`), so each calls `study_state.refuse_edit_during_live_study()` itself — without that, the spec's parametrised chat test stays red for those two tools. (2) `list_components` requires `component_class`, so stub branch 7's second call is `list_components {"component_class": "Bus"}` (the spec's `{}` would come back as a `tool_error`). (3) `QUIET_TOAST_CODES` in `FE/api/client.ts` **already** contains `study_in_flight` on master, so the interceptor never toasts the sentence; the Properties card's own `onError` toasts `Update failed: ${e.message}` (axios' "Request failed with status code 409"). The smoke therefore shows exactly one toast, but not the "is running" sentence — a frontend change, handed to P27b (A1-FE). (4) The `tool_error` frame's `message` is `str(detail)` (it contains the sentence); the model-facing `tool_result` content is `study_in_flight` + the fenced sentence (`_error_result_content`). The seam test asserts both. (5) `dtc.py` has a `lock` in scope, so "passing the lock" is no signature error and no DTC test sees it: pinned structurally instead (`test_dtc_freezes_its_private_copy_without_the_lock`).
+
+**Changed assertions (one line each).** `test_adequacy_study_swap_guard.py::test_the_refusal_names_the_study_and_only_offers_a_real_remedy`: for the four live-network keys `POST /api/network/reset` now meets the middleware's `study_in_flight` dict before the swap guard's string (spec §1.1 "HTTP chokepoint", stated for undo; reset is the same prefix) — the test reads `detail.message` when the detail is a dict. `test_edit_after_a_sweep_is_kept`: "dispatch reads as before" is asserted as "every other bus / link / generator row reads as right after the sweep"; `/simulation/status.dispatch` goes `fresh` → `none` after any `/api/network/*` write (the undo middleware invalidates it), with or without a sweep.
+
+**Smoke P27a** (`scripts/smoke-guided.mjs --phase P27a`, base P22.9): after P22.9, a second Expert context puts the bus in Edit from the canvas, starts the B/C sweep from the FMEA tab, `PUT /api/network/buses/<bus>` → 409 `study_in_flight`; Save in the Properties card → exactly one toast (text: see drift 3), the user's value does not land (mid-sweep the row shows the solve's own `control`, P22.9 bug 3), and after the sweep the row equals the pre-sweep row and the same edit succeeds ("Bus updated"). Branch 7: confirmation card → approve → toast `Active project: <name>`, `meta.loaded_project === <name>`, `call_stub_7b` returned a result, no `project_switched_mid_turn`, Ctrl+S → `POST /api/projects/<name>` 200, no 409 in the console. The dock follows the rebind to the new project's own (empty) chat, so the rebind is read from the toast, not the transcript.
+
 ## 4. Owner decisions
 
 | # | Question | Options | Recommendation (author) | Reviewer |
