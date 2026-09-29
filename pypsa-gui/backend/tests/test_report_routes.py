@@ -492,3 +492,88 @@ def test_export_of_an_unknown_report_or_version_is_404(client, api_project):
     bad = client.post(f"/api/projects/{name}/reports/not-an-id/export", json={})
     assert bad.status_code == 400
     assert bad.json()["detail"]["error_kind"] == "invalid_report_id"
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Follow-up — GET /{name}/reports/evidence_hash (the viewer's staleness badge)
+# ═════════════════════════════════════════════════════════════════════════
+#
+# The badge "evidence changed since vN" compares a document's `evidence_hash`
+# against the CURRENT session evidence, not against the newest evidence-only
+# report. The route hashes exactly what the evidence-only POST would store,
+# never answers 204 (the empty evidence has a hash too) and is declared before
+# `/{report_id}` so its literal segment is not parsed as a report id.
+
+
+def test_evidence_hash_route_never_204s_and_is_not_a_report_id(client, api_project):
+    name = api_project("rep-ehash-empty")
+    r = client.get(f"/api/projects/{name}/reports/evidence_hash")
+    assert r.status_code == 200, r.text[:300]
+    body = r.json()
+    assert body.get("detail", {}).get("error_kind") != "invalid_report_id"
+    assert isinstance(body["evidence_hash"], str) and len(body["evidence_hash"]) == 64
+    # No EH report stored and no worksheet rows: every EH section is stated as
+    # not established (the installed network alone may still yield the COPT
+    # screening, so `sections_ok` is bounded, not zero).
+    assert 0 <= body["sections_ok"] <= body["sections_total"]
+    assert body["sections_total"] >= len(REPORT_SECTIONS)
+    assert body["sections_ok"] < len(REPORT_SECTIONS)
+    # The same evidence hashes the same way twice.
+    assert client.get(f"/api/projects/{name}/reports/evidence_hash").json() == body
+
+
+def test_evidence_hash_equals_what_the_evidence_only_post_stores(
+        client, api_project, session_state):
+    name = api_project("rep-ehash-post")
+    _store_eh_report(session_state(client))
+    before = client.get(f"/api/projects/{name}/reports/evidence_hash").json()
+    assert before["sections_ok"] >= 1
+    assert before["sections_total"] >= before["sections_ok"]
+
+    created = client.post(f"/api/projects/{name}/reports",
+                          json={"mode": "evidence_only"}).json()
+    assert created["evidence_hash"] == before["evidence_hash"]
+    assert created["document"]["evidence_hash"] == before["evidence_hash"]
+    # Storing a report does not change the session evidence.
+    after = client.get(f"/api/projects/{name}/reports/evidence_hash").json()
+    assert after == before
+
+
+def test_evidence_hash_changes_when_the_session_eh_report_changes(
+        client, api_project, session_state):
+    name = api_project("rep-ehash-change")
+    empty = client.get(f"/api/projects/{name}/reports/evidence_hash").json()
+    _store_eh_report(session_state(client))
+    seeded = client.get(f"/api/projects/{name}/reports/evidence_hash").json()
+    assert seeded["evidence_hash"] != empty["evidence_hash"]
+    assert seeded["sections_ok"] > empty["sections_ok"]
+
+    # One number moves → the hash moves with it (the collector's canonical form).
+    sections = empty_section_map(default="skipped")
+    sections["fmea_top"] = SectionState(status="ok", payload={
+        "top": [{"rank": 1, "mode_id": "gen:g:forced_outage",
+                 "component_class": "Generator", "name": "g",
+                 "failure_class": "A", "occurrence_per_year": 2.0,
+                 "occurrence_basis": "FOR", "severity_eur": 10.0,
+                 "criticality_eur_per_year": 20.0, "delta_eue_mwh": 0.5,
+                 "engine": "copt", "fidelity": "analytic_convolution"}],
+        "classes_included": ["A"], "note": "Link-primary residual risk",
+    })
+    R.store_eh_report(session_state(client), ReferenceDesignReport(
+        archetype="strong_grid", pack_hash="p", assumptions_hash="a",
+        sections=sections, ens_cap_permyriad=10.0,
+    ))
+    moved = client.get(f"/api/projects/{name}/reports/evidence_hash").json()
+    assert moved["evidence_hash"] != seeded["evidence_hash"]
+    assert moved["sections_ok"] == seeded["sections_ok"]
+
+
+def test_evidence_hash_is_project_scoped_404_for_another_org(
+        client, other_org_client, api_project):
+    name = api_project("rep-ehash-tenant")
+    assert client.get(f"/api/projects/{name}/reports/evidence_hash").status_code == 200
+    hit = other_org_client.get(f"/api/projects/{name}/reports/evidence_hash")
+    missing = other_org_client.get("/api/projects/NoSuchProject/reports/evidence_hash")
+    assert hit.status_code == 404, hit.text[:200]
+    assert missing.status_code == 404
+    assert hit.content == missing.content, "the 404 body must not leak existence"

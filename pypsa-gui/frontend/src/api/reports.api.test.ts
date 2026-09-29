@@ -15,6 +15,7 @@ import {
   deleteReport,
   exportReport,
   generateReport,
+  getEvidenceHash,
   getGenerateStatus,
   getReport,
   getReportCapabilities,
@@ -529,6 +530,15 @@ describe('reports api — round trip (WP14)', () => {
     expect(await getReportCapabilities('My Project')).toEqual({ pdf: true })
     const { url, init } = lastCall()
     expect(url).toBe('/api/projects/My%20Project/reports/capabilities')
+    expect(init?.method ?? 'GET').toBe('GET')
+  })
+
+  it('reads the current evidence hash from GET …/reports/evidence_hash (the staleness badge)', async () => {
+    const body = { evidence_hash: 'a'.repeat(64), sections_ok: 3, sections_total: 21 }
+    fetchMock.mockResolvedValueOnce(jsonResponse(body))
+    expect(await getEvidenceHash('My Project')).toEqual(body)
+    const { url, init } = lastCall()
+    expect(url).toBe('/api/projects/My%20Project/reports/evidence_hash')
     expect(init?.method ?? 'GET').toBe('GET')
   })
 
