@@ -17,7 +17,7 @@ import { Download, Play, RefreshCw, FlaskConical, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   gridspineApi, isNotAStudy, STAGES,
-  type DispatchSource, type FigureName, type RankedSnapshot, type ReadbackShort, type StageState, type StageStatus,
+  type CapacityKind, type CapacityRow, type DispatchSource, type FigureName, type RankedSnapshot, type ReadbackShort, type StageState, type StageStatus,
   type StudyConfig, type StudyConfigPatch,
 } from '../api/gridspine'
 import { projectsApi } from '../api/projects'
@@ -31,6 +31,7 @@ export const SNAPSHOTS_KEY = (name: string) => ['gridspine', 'snapshots', name] 
 export const LEDGER_KEY = (name: string) => ['gridspine', 'ledger', name] as const
 export const CONFIG_KEY = (name: string) => ['gridspine', 'config', name] as const
 export const FIGURE_KEY = (name: string, hour: number, figure: FigureName) => ['gridspine', 'figure', name, hour, figure] as const
+export const CAPACITY_KEY = (name: string) => ['gridspine', 'capacity', name] as const
 
 const STAGE_LABEL: Record<string, string> = {
   ingest: 'Ingest', dispatch: 'Unit commitment', ranking: 'Ranking (AC N-1 at every hour)',
@@ -197,6 +198,10 @@ function StudyView({ name }: { name: string }) {
             <p className="text-[12px] text-muted">{snapshots.isError ? errorText(snapshots.error) : 'Loading…'}</p>
           )}
         </PageSection>
+      )}
+
+      {done && (
+        <CapacitySection name={name} locked={activeJob != null || status.data?.status === 'running'} />
       )}
 
       {ledger.data && (
@@ -763,6 +768,136 @@ function SnapshotTable({ rows, name, bundles }: { rows: RankedSnapshot[]; name: 
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+
+// ── Connection capacity (increment 9) ─────────────────────────────────────
+
+/** What stopped the capacity, in words an engineer acts on. */
+function bindingText(r: CapacityRow): string {
+  const after = r.binding_contingency ? ` after losing ${r.binding_contingency}` : ''
+  switch (r.binding_kind) {
+    case 'thermal_intact': case 'thermal_n1': return `overload of ${r.binding_element}${after}`
+    case 'v_low_intact': case 'v_low_n1': return `low voltage at ${r.binding_element}${after}`
+    case 'v_high_intact': case 'v_high_n1': return `high voltage at ${r.binding_element}${after}`
+    case 'n1_divergence': return `no load-flow solution${after}`
+    case 'ac_divergence': return 'no load-flow solution'
+    case 'none_up_to_cap': return 'nothing binds up to the cap'
+    default: return r.binding_kind
+  }
+}
+
+function capacityText(r: CapacityRow): string {
+  const capped = r.binding_kind === 'none_up_to_cap'
+  const v = r.method === 'ac' ? r.capacity_mw : r.dc_estimate_mw
+  if (v == null) return '—'
+  if (capped) return `≥ ${fmt(v)} MW`
+  return r.method === 'ac' ? `${fmt(v)} MW` : `≈ ${fmt(v)} MW`
+}
+
+function CapacitySection({ name, locked }: { name: string; locked: boolean }) {
+  const qc = useQueryClient()
+  const [kind, setKind] = useState<CapacityKind>('load')
+  const [hour, setHour] = useState<number | null>(null)
+  const table = useQuery({
+    queryKey: CAPACITY_KEY(name),
+    queryFn: () => gridspineApi.capacity(name),
+    retry: false,
+  })
+  const compute = useMutation({
+    mutationFn: (bus: string) => gridspineApi.computeCapacity(name, bus, kind),
+    onSuccess: async (_r, bus) => {
+      await qc.invalidateQueries({ queryKey: CAPACITY_KEY(name) })
+      toast.success(`AC capacity at ${bus} (${kind}) computed for every selected hour`)
+    },
+    onError: (e) => toast.error(`Could not compute capacity: ${errorText(e)}`),
+  })
+
+  const hours = table.data?.hours ?? []
+  const shownHour = hour ?? hours[0]
+  const rows = (table.data?.rows ?? [])
+    .filter(r => r.hour === shownHour && r.kind === kind)
+    .sort((a, b) => a.bus.localeCompare(b.bus))
+
+  return (
+    <div data-testid="capacity-section">
+      <PageSection
+        title="Connection capacity"
+        hint="MW that can connect at each bus with no new or worsened violation, intact and under N-1"
+      >
+        {table.isError ? (
+          <p className="text-[12px] text-muted">{errorText(table.error)}</p>
+        ) : !table.data ? (
+          <p className="text-[12px] text-muted">Loading…</p>
+        ) : (
+          <>
+            <div className="flex items-center gap-3 mb-2 text-[12px]">
+              <label className="flex items-center gap-1">
+                Hour
+                <select
+                  aria-label="Capacity hour"
+                  className="bg-transparent border border-border rounded px-1"
+                  value={shownHour ?? ''}
+                  onChange={e => setHour(Number(e.target.value))}
+                >
+                  {hours.map(h => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </label>
+              <label className="flex items-center gap-1">
+                Connecting
+                <select
+                  aria-label="Connection kind"
+                  className="bg-transparent border border-border rounded px-1"
+                  value={kind}
+                  onChange={e => setKind(e.target.value as CapacityKind)}
+                >
+                  <option value="load">load (pf 0.98)</option>
+                  <option value="generation">generation</option>
+                </select>
+              </label>
+              <span className="text-[11px] text-muted">
+                ≈ DC estimate · AC is exact to 1 MW · balanced pro-rata over committed units
+              </span>
+            </div>
+            <table className="w-full text-[12px]">
+              <thead>
+                <tr className="text-left text-muted">
+                  <th className="font-normal">Bus</th>
+                  <th className="font-normal">Capacity</th>
+                  <th className="font-normal">Method</th>
+                  <th className="font-normal">Binds on</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(r => {
+                  const busy = compute.isPending && compute.variables === r.bus
+                  return (
+                    <tr key={r.bus} data-testid={`capacity-row-${r.bus}`} className="border-t border-border">
+                      <td className="py-1">{r.bus}</td>
+                      <td>{capacityText(r)}</td>
+                      <td><Tag tone={r.method === 'ac' ? 'ok' : 'neutral'}>{r.method === 'ac' ? 'AC' : 'DC est.'}</Tag></td>
+                      <td className="text-muted">{bindingText(r)}</td>
+                      <td className="text-right">
+                        <Btn
+                          onClick={() => compute.mutate(r.bus)}
+                          disabled={locked || compute.isPending}
+                          aria-label={`Compute AC capacity at ${r.bus}`}
+                          title={locked ? 'A study for this project is queued or running' : 'Exact AC capacity at every selected hour (a few seconds)'}
+                        >
+                          {busy ? 'Computing…' : 'Compute AC'}
+                        </Btn>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </>
+        )}
+      </PageSection>
     </div>
   )
 }
