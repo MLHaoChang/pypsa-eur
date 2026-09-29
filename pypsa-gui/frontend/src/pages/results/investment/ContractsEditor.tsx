@@ -161,8 +161,9 @@ function ConnectionEditor({ current, series, errors, onSave }: {
                onChange={e => set({ group: e.target.value || null })} /></label>
       {c.capacity_fee ? (
         <>
-          <p className="text-muted">The capacity fee is a capacity item: its kind stays “capacity”.</p>
-          <ItemEditor item={c.capacity_fee} idx={0} set={it => set({ capacity_fee: { ...it, kind: 'capacity' } })}
+          <p className="text-muted">The capacity fee is a capacity item, per kW-year or kW-month.</p>
+          <ItemEditor item={c.capacity_fee} idx={0} set={it => set({ capacity_fee: it })}
+                      kinds={['capacity']} units={['per_kw_year', 'per_kw_month']}
                       remove={() => set({ capacity_fee: null })} errors={[]} />
         </>
       ) : (
@@ -182,6 +183,12 @@ function ConnectionEditor({ current, series, errors, onSave }: {
     </fieldset>
   )
 }
+
+/** The form's copy: an untagged P0-era contract gets the type its fields give
+ *  (as the server tags it on save), so clearing a field never turns it into
+ *  another type mid-edit (WP3.7c round 2). */
+const tagged = (list: CommercialContract[]) => structuredClone(list).map(c => (
+  (c as { type?: unknown }).type == null ? { ...c, type: contractType(c) } as CommercialContract : c))
 
 export default function ContractsEditor() {
   const project = useUIStore(s => s.currentProject)
@@ -203,7 +210,7 @@ export default function ContractsEditor() {
 
   useEffect(() => {
     if (commercial.data !== undefined && contracts === null && !commercial.isFetching) {
-      setContracts(structuredClone(commercial.data?.contracts ?? []))
+      setContracts(tagged(commercial.data?.contracts ?? []))
       setBaseline(JSON.stringify(commercial.data?.contracts ?? []))
     }
   }, [commercial.data, commercial.isFetching, contracts])
@@ -271,7 +278,7 @@ export default function ContractsEditor() {
     setMessage(null); setErrors(new Map())
     try {
       const fresh = (await commercialApi.getCommercial())?.contracts ?? []
-      setContracts(structuredClone(fresh)); setBaseline(JSON.stringify(fresh))
+      setContracts(tagged(fresh)); setBaseline(JSON.stringify(fresh))
       await qc.invalidateQueries({ queryKey: nk(project, 'commercial') })
     } catch (e) {
       setMessage({ tone: 'error', text: `The contracts could not be reloaded (${e instanceof Error ? e.message : 'error'}).` })

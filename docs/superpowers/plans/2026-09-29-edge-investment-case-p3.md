@@ -998,6 +998,18 @@ fee's kind stays `capacity` (stated); #13 the TariffBuilder's `aria-describedby`
 #14 DR `asset_ids` labelled as refused until DR on assets ships; the test's no-op `.replace` removed.
 Tests: `ContractsEditor.test.tsx` 15 (+10, one per finding), `contractModel.test.ts` 4 (new).
 
+**WP3.7c review round 2 — PASS WITH CONDITIONS (1 binding, a regression of optional #12); fixed.**
+Forcing the fee's kind back to `capacity` kept the unit the kind change had set (`per_kwh`): saved
+with 200, refused only at the solve (`fee_eur_per_mw_year`) → `ItemEditor` takes `kinds` / `units`
+(offered options; a stored other value stays shown) and the connection passes `['capacity']` and
+`['per_kw_year', 'per_kw_month']`; no forcing. Low, taken: the form's copy tags an untagged P0-era
+contract with its derived type (clearing a field no longer turns an EaaS into a PPA mid-edit).
+Low, not taken (follow-up): the staleness baseline is the raw stored list, so a P0-era untagged list
+normalised by the editor's own connection save reads as "changed" once (a reload recovers it);
+the pre-save read and the save are two requests (a narrow race, accepted). Backend follow-up (P4
+hygiene): the PUT's binding step should run `fee_eur_per_mw_year` so an unsupported fee unit is a 422
+at save. Tests: `ContractsEditor.test.tsx` 16.
+
 ## Phase 3 e2e QA gate
 
 - [ ] `backend/tests/qa_value_flows.py` (auto-discovered): V1–V4 through the routes (template → drafts

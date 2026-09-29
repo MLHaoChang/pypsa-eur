@@ -143,8 +143,11 @@ function PeriodRow({ p, i, label, windowed, set, remove }: {
   )
 }
 
-export function ItemEditor({ item, idx, set, remove, errors }: {
+export function ItemEditor({ item, idx, set, remove, errors, kinds = KINDS, units = UNITS }: {
   item: Item; idx: number; set: (it: Item) => void; remove: () => void; errors: string[]
+  /** The kinds and units offered (a connection's capacity fee: capacity only,
+   *  per kW-year or kW-month — WP3.7c round 2); a stored other value stays shown. */
+  kinds?: Item['kind'][]; units?: Item['unit'][]
 }) {
   const label = `Item ${item.id || idx + 1}`
   const whyId = useId()   // an IDREF with no spaces (a label has them; WP3.7c review #13)
@@ -164,10 +167,10 @@ export function ItemEditor({ item, idx, set, remove, errors }: {
                               if (kind !== 'demand') delete next.ratchet
                               set(next)
                             }}>
-          {KINDS.map(k => <option key={k} value={k}>{k}</option>)}</select></label>
+          {[...new Set([...kinds, item.kind])].map(k => <option key={k} value={k}>{k}</option>)}</select></label>
         <label>unit <select aria-label={`${label} unit`} className={input} value={item.unit}
                             onChange={e => set({ ...item, unit: e.target.value as Item['unit'] })}>
-          {UNITS.map(k => <option key={k} value={k}>{k}</option>)}</select></label>
+          {[...new Set([...units, item.unit])].map(k => <option key={k} value={k}>{k}</option>)}</select></label>
         <label>measured on <select aria-label={`${label} measured on`} className={input}
                                    value={item.measured_on ?? 'import'}
                                    onChange={e => set({ ...item, measured_on: e.target.value as Item['measured_on'] })}>

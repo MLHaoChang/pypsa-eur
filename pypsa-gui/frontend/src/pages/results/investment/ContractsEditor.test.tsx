@@ -188,7 +188,8 @@ describe('ContractsEditor', () => {
     expect((within(first).getByLabelText('Contract old_cfd strike (per MWh)') as HTMLInputElement).value).toBe('55')
     expect(screen.getByTestId('ce-contract-1').textContent).toContain('kept as stored')
     fireEvent.click(screen.getByRole('button', { name: 'Save the contracts' }))
-    await waitFor(() => expect(api.saveCommercial).toHaveBeenCalledWith({ contracts: [legacy, odd] }))
+    await waitFor(() => expect(api.saveCommercial).toHaveBeenCalledWith(
+      { contracts: [{ ...legacy, type: 'cfd' }, odd] }))
   })
 
   it('sends an integer field as typed, never truncated (#6)', async () => {
@@ -242,7 +243,7 @@ describe('ContractsEditor', () => {
     await waitFor(() => expect(api.saveCommercial).toHaveBeenCalledTimes(1))
   })
 
-  it('starts a new agreement with no import cap and keeps its fee a capacity item (#11, #12)', async () => {
+  it('starts a new agreement with no import cap and offers its fee only as a capacity item (#11, #12)', async () => {
     api.getCommercial.mockResolvedValue({ poc_link: 'import', site_party: 'site', contracts: [] } as never)
     renderEditor()
     fireEvent.click(await screen.findByRole('button', { name: 'Add a connection agreement' }))
@@ -250,12 +251,26 @@ describe('ContractsEditor', () => {
     expect((within(conn).getByLabelText('Import cap (MW)') as HTMLInputElement).value).toBe('')
     fireEvent.click(within(conn).getByRole('button', { name: 'Add a capacity fee' }))
     const kind = within(conn).getByLabelText('Item capacity_fee kind') as HTMLSelectElement
-    fireEvent.change(kind, { target: { value: 'energy' } })
+    const unit = within(conn).getByLabelText('Item capacity_fee unit') as HTMLSelectElement
+    // Only what the connection's fee supports (a per_kwh unit failed at the solve; round 2).
+    expect([...kind.options].map(o => o.value)).toEqual(['capacity'])
+    expect([...unit.options].map(o => o.value)).toEqual(['per_kw_year', 'per_kw_month'])
+    fireEvent.change(unit, { target: { value: 'per_kw_month' } })
     fireEvent.click(within(conn).getByRole('button', { name: 'Save the connection agreement' }))
     await waitFor(() => expect(api.saveCommercial).toHaveBeenCalled())
     const saved = (api.saveCommercial.mock.calls[0][0] as { connection: { import_cap_mw: unknown;
-      capacity_fee: { kind: string } } }).connection
+      capacity_fee: { kind: string; unit: string } } }).connection
     expect(saved.import_cap_mw).toBeNull()
-    expect(saved.capacity_fee.kind).toBe('capacity')
+    expect(saved.capacity_fee).toMatchObject({ kind: 'capacity', unit: 'per_kw_month' })
+  })
+
+  it('keeps an untagged contract its type while a field is cleared (round 2)', async () => {
+    api.getCommercial.mockResolvedValue({ poc_link: 'import', site_party: 'site', contracts: [
+      { id: 'old', provider: 'Heat Co', customer: 'site', fee_eur_per_mwh: 12, tenor_years: 8,
+        asset_ids: ['bess'] }] } as never)
+    renderEditor()
+    const box = await screen.findByTestId('ce-contract-0')
+    fireEvent.change(within(box).getByLabelText('Contract old fee (per MWh)'), { target: { value: '' } })
+    expect(screen.getByTestId('ce-contract-0').querySelector('legend')!.textContent).toBe('EAAS old')
   })
 })

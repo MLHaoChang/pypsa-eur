@@ -145,9 +145,11 @@ def _export_price_ref(client, tag: str, n) -> dict | None:
 def _through_routes(label: str, tag: str, n, commercial: dict, template: str, *,
                     solver: dict | None = None, n_drafts: int | None = None,
                     fill: dict | None = None, edit=None):
-    """template → drafts priced and confirmed → value-flows route → solve →
+    """
+    Template → drafts priced and confirmed → value-flows route → solve →
     `/results/value_flows`. Returns (network, cfg, payload, template body) or
-    None when a route refused (already a FAIL)."""
+    None when a route refused (already a FAIL).
+    """
     from tests.test_value_flow_templates import FILL
 
     fill = fill or FILL
@@ -206,10 +208,12 @@ def _through_routes(label: str, tag: str, n, commercial: dict, template: str, *,
 
 
 def _independent_bridge(client, n, cfg, payload, p: str = "_") -> tuple[float, float, dict]:
-    """(ledger side, bridge side, terms) of check 4, rebuilt from the routes on a
+    """
+    (ledger side, bridge side, terms) of check 4, rebuilt from the routes on a
     flat network: participants' net outflow to externals = cost_breakdown total
     − every commercial_cost_terms item + external bill items + external
-    connection fees + one-external contract lines − export-price revenue."""
+    connection fees + one-external contract lines − export-price revenue.
+    """
     ids = [x["id"] for x in payload["participants"]]
     ext = payload["externals"]
 
@@ -268,8 +272,10 @@ def _independent_bridge(client, n, cfg, payload, p: str = "_") -> tuple[float, f
 
 
 def _four_checks(label: str, client, n, cfg, payload: dict) -> None:
-    """Status ok; every period's four checks True; reconciliation to the cent by
-    the route's check and by the driver's own bridge."""
+    """
+    Status ok; every period's four checks True; reconciliation to the cent by
+    the route's check and by the driver's own bridge.
+    """
     _step(f"{label}: status ok, conservation_ok True",
           payload.get("status") == "ok" and payload.get("conservation_ok") is True,
           f"status {payload.get('status')}, ok {payload.get('conservation_ok')}, "
