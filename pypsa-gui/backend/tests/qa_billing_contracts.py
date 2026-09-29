@@ -15,7 +15,11 @@ P2 plan, "Phase 2 e2e QA gate").
      cent; the gap per item kind is fully attributed.
   D. A `changes_dispatch` PPA with a Library tariff (`import_tariff_ref`) and a
      CfD on a Library reference price reconciles (gap 0) before and after
-     save → load, and after bundle export → import with the Library pins.
+     save → load, and after bundle export → import with the Library pins; the
+     PPA line equals its hand formula, and the billing gap per item kind stays
+     fully attributed after each round trip.
+  E. The H1–H3 hand-rated bills (DE, NL, US C&I; fixtures/investment_case/bills,
+     arithmetic in `h_bills_arithmetic.py`, stdlib only) rated to the cent.
 
 Run: python tests/qa_billing_contracts.py   (from pypsa-gui/backend; also run
 by tests/run_qa_drivers.py).
@@ -72,6 +76,19 @@ def _cent(a, b) -> bool:
 
 def _json(name: str) -> dict:
     return json.loads((ORACLES / name).read_text())
+
+
+def _gap_attributed(bill: dict, kinds: set[str]) -> tuple[bool, str]:
+    """The billing gap per item kind is non-empty, holds `kinds`, raises no
+    gate and leaves nothing unattributed (never vacuous on an empty gap)."""
+    periods = (bill.get("gap") or {}).get("periods") or {}
+    seen = {k for per in periods.values() for k in per}
+    unexplained = [(p, k, v["unattributed_pct"]) for p, per in periods.items()
+                   for k, v in per.items()
+                   if v["unattributed_pct"] is None or v["unattributed_pct"] > 1e-6]
+    gates = (bill.get("gap") or {}).get("gates")
+    ok = bool(periods) and kinds <= seen and gates == [] and not unexplained
+    return ok, f"kinds {sorted(seen)}, gates {gates}, unexplained {unexplained}"
 
 
 def _hourly(year: int, kw: np.ndarray) -> pd.DataFrame:
@@ -290,6 +307,8 @@ def scenario_c() -> None:
         lines.setdefault((ln["contract_id"], ln["value_stream"]), []).append(ln)
     w = n.snapshot_weightings.objective.to_numpy(dtype=float)
     pv = n.generators_t.p["pv"].to_numpy(dtype=float)
+    _step("C: the PV runs (Σ w·pv > 0)", float((w * pv).sum()) > 1.0,
+          f"{float((w * pv).sum()):.3f} MWh")
     (ppa,) = [x for (cid, _), v in lines.items() if cid == "ppa" for x in v]
     _step("C: PPA = price × Σ w·pv to the cent", _cent(ppa["amount"], 32.0 * float((w * pv).sum())),
           f"{ppa['amount']}")
@@ -310,12 +329,11 @@ def scenario_c() -> None:
           bool(act) and dsr is not None and _cent(act[0]["amount"],
                                                   300.0 * float((w * dsr).sum())),
           f"{act[0]['amount'] if act else None}; DSR MWh {float((w * dsr).sum()) if dsr is not None else None}")
-    gates = out["gap"]["gates"]
-    unexplained = [(p, k, v["unattributed_pct"]) for p, per in out["gap"]["periods"].items()
-                   for k, v in per.items()
-                   if v["unattributed_pct"] is None or v["unattributed_pct"] > 1e-6]
-    _step("C: the gap per item kind is fully attributed", not gates and not unexplained,
-          f"{unexplained}")
+    _step("C: the DSR dispatches (Σ w·DSR > 0)",
+          dsr is not None and float((w * dsr).sum()) > 1.0,
+          f"{float((w * dsr).sum()) if dsr is not None else None} MWh")
+    ok, detail = _gap_attributed(out, {"energy", "demand", "contracts"})
+    _step("C: the gap per item kind (energy, demand, contracts) is fully attributed", ok, detail)
     # The DSR slack is a transient LP term like a VOLL slack: its cost is the
     # objective decomposition's documented residual, not a cost row. The
     # residual must be exactly that cost (price × Σ w·DSR) and nothing else.
@@ -359,6 +377,15 @@ def scenario_d() -> None:
     (line,) = [ln for ln in bill["contracts"]["lines"] if ln["contract_id"] == "ppa"]
     _step("D: the dispatch PPA's line equals its row", _cent(line["amount"], row),
           f"{line['amount']} vs {row}")
+    w = n.snapshot_weightings.objective.to_numpy(dtype=float)
+    pv = n.generators_t.p["pv"].to_numpy(dtype=float)
+    hand = 20.0 * float((w * pv).sum())
+    _step("D: the PPA line = price × Σ w·pv to the cent (hand formula)",
+          float((w * pv).sum()) > 1.0 and _cent(line["amount"], hand),
+          f"{line['amount']} vs {hand}")
+    ok, detail = _gap_attributed(bill, {"energy", "demand", "contracts"})
+    _step("D: the billing gap per item kind is fully attributed", ok, detail)
+    kinds_before = {p: sorted(per) for p, per in bill["gap"]["periods"].items()}
 
     qa_support.save_project(PROJECTS[2])
     r = client.get(f"/api/projects/{PROJECTS[2]}")
@@ -368,6 +395,11 @@ def scenario_d() -> None:
     _step("D: gap 0 after reload", gap2 is not None and abs(gap2) < 1e-6, f"{gap2}")
     _step("D: ppa_settlement identical after reload",
           _cent((cb2["commercial"] or {}).get("ppa_settlement"), row))
+    bill2 = client.get("/api/results/billing").json()
+    ok, detail = _gap_attributed(bill2, {"energy", "demand", "contracts"})
+    _step("D: billing gap per item kind attributed after reload", ok, detail)
+    _step("D: the same gap kinds after reload",
+          {p: sorted(per) for p, per in bill2["gap"]["periods"].items()} == kinds_before)
 
     r = client.get(f"/api/projects/{PROJECTS[2]}/bundle")
     _step("D: bundle exported", r.status_code == 200)
@@ -387,10 +419,35 @@ def scenario_d() -> None:
     gap3, _ = _gap(ctx.network, cfg3)
     _step("D: gap 0 after the bundle round trip", gap3 is not None and abs(gap3) < 1e-6,
           f"{gap3}")
+    bill3 = client.get("/api/results/billing").json()
+    ok, detail = _gap_attributed(bill3, {"energy", "demand", "contracts"})
+    _step("D: billing gap per item kind attributed after the bundle round trip", ok, detail)
+    (line3,) = [ln for ln in bill3["contracts"]["lines"] if ln["contract_id"] == "ppa"]
+    _step("D: the PPA line is unchanged after the bundle round trip",
+          _cent(line3["amount"], line["amount"]), f"{line3['amount']} vs {line['amount']}")
+
+
+# ── E ──────────────────────────────────────────────────────────────────────
+
+
+def scenario_e() -> None:
+    print("\n[E] H1–H3 hand-rated bills (DE, NL, US C&I) to the cent")
+    from tests.test_tariff_engine_core import _load
+
+    for name in ("h1_de_rlm.json", "h2_nl_business.json", "h3_us_ci.json"):
+        raw, tariff, df = _load(name)
+        res = rate(df, tariff, step_hours=raw["step_hours"], timezone=raw["timezone"],
+                   meter_history=raw.get("meter_history"))
+        exp = raw["expected"]
+        bad = {k: (res.per_item.get(k), v) for k, v in exp["per_item"].items()
+               if not _cent(res.per_item.get(k), v)}
+        _step(f"E: {name} complete, every item and the total to the cent",
+              res.complete and not bad and _cent(res.total, exp["total"]),
+              f"total {res.total} vs {exp['total']}; off {bad}; flags {res.flags}")
 
 
 def main() -> int:
-    for fn in (scenario_a, scenario_b, scenario_c, scenario_d):
+    for fn in (scenario_a, scenario_b, scenario_c, scenario_d, scenario_e):
         try:
             fn()
         except Exception as exc:  # noqa: BLE001 — a crashed scenario is a failure

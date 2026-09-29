@@ -1391,6 +1391,7 @@ def _safe_text(value, limit: int = 60) -> str:
 def _fit(entries: list[str], budget: int = _LIBRARY_ERROR_BUDGET) -> list[str]:
     out, used = [], 0
     for e in entries:
+        e = e[:budget]   # the first entry is always admitted: never oversized (P2 gate)
         if out and used + len(e) + 4 > budget:
             break
         out.append(e)
@@ -1498,7 +1499,7 @@ def _urdb_rate(data, item_index: int | None = None):
             # A utility query returns many rates (superseded versions too):
             # never pick one silently (review M4).
             listing = _fit([f"{i}: {_safe_text(r.get('name') or r.get('label'))} "
-                            f"({r.get('startdate')})"
+                            f"({_safe_text(r.get('startdate'), 24)})"
                             for i, r in enumerate(items) if isinstance(r, dict)])
             raise HTTPException(status_code=422, detail={
                 "error_kind": "urdb_multiple_rates", "rates_total": len(items),
@@ -1515,7 +1516,8 @@ def _urdb_rate(data, item_index: int | None = None):
         if isinstance(et.get("urdb_response"), dict):
             return et["urdb_response"]
         label = et.get("urdb_label")
-        raise unreadable(f"the REopt scenario names URDB rate {label!r} but carries no "
+        raise unreadable(f"the REopt scenario names URDB rate {_safe_text(label, 40)!r} "
+                         "but carries no "
                          "urdb_response; upload the OpenEI rate itself" if label else
                          "the REopt scenario carries no urdb_response")
     return data
@@ -1550,11 +1552,11 @@ def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
                             tariff_id=tariff_id, jurisdiction=jurisdiction)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail={
-            "error_kind": "urdb_invalid", "message": str(exc)[:300]}) from exc
+            "error_kind": "urdb_invalid", "message": _safe_text(exc, 300)}) from exc
     out = _library_call(_h, body).model_dump(mode="json")
     refusals = out.get("refusals") or []
     out["refusals_total"] = len(refusals)
-    out["refusals"] = _fit([f"{_safe_field(r.get('field'))}: {str(r.get('reason'))[:60]}"
+    out["refusals"] = _fit([f"{_safe_field(r.get('field'))}: {_safe_text(r.get('reason'))}"
                             for r in refusals])
     fields = out.get("unsupported_fields") or []
     out["unsupported_fields"] = _fit([_safe_field(f) for f in fields])
