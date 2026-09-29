@@ -13,8 +13,9 @@
  */
 import { rawFetchHeaders } from './csrf'
 
-/** `report_template` (WP11): a Word file a report renders into. */
-export type UploadKind = 'user_upload' | 'agent_export' | 'report_template'
+/** `report_template` (WP11): a Word file a report renders into.
+ *  `report_roundtrip` (WP14): an edited export of a report, uploaded to be merged back. */
+export type UploadKind = 'user_upload' | 'agent_export' | 'report_template' | 'report_roundtrip'
 
 export interface UploadMeta {
   schema_version: number
@@ -78,7 +79,8 @@ async function _parseError(resp: Response): Promise<UploadError> {
 export async function uploadFile(
   projectName: string,
   file: File,
-  /** `report_template` stores the file as a report template (WP11); omitted = `user_upload`. */
+  /** `report_template` stores the file as a report template (WP11), `report_roundtrip`
+   *  as an edited copy of a report (WP14); omitted = `user_upload`. */
   kind?: UploadKind,
 ): Promise<UploadMeta> {
   const form = new FormData()

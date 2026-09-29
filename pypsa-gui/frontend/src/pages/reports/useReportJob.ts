@@ -35,9 +35,10 @@ import {
 } from '../../api/reports'
 
 export const REPORT_JOB_KEY = (project: string) => ['reports', 'job', project] as const
-/** Prefix of every version of one report's document query (`REPORT_DOC_KEY`). */
-const REPORT_DOC_PREFIX = (project: string, reportId: string) => ['reports', 'doc', project, reportId] as const
-const REPORTS_LIST_KEY = (project: string) => ['reports', 'list', project] as const
+/** Prefix of every version of one report's document query (`REPORT_DOC_KEY`);
+ *  exported for the viewer's round trip (WP14), which writes a version without a job. */
+export const REPORT_DOC_PREFIX = (project: string, reportId: string) => ['reports', 'doc', project, reportId] as const
+export const REPORTS_LIST_KEY = (project: string) => ['reports', 'list', project] as const
 /** One report's template binding + stored plan (`GET …/{id}/template`, WP11). */
 export const REPORT_TEMPLATE_KEY = (project: string, reportId: string) =>
   ['reports', 'template', project, reportId] as const

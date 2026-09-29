@@ -17,8 +17,11 @@ import {
   generateReport,
   getGenerateStatus,
   getReport,
+  getReportCapabilities,
   getReportTemplate,
   getReportVersion,
+  getVersionDiff,
+  importRoundTrip,
   isReportError,
   listReports,
   proposeMappingPlan,
@@ -28,12 +31,16 @@ import {
   reportFigureUrl,
   reportJobErrorMessage,
   ReportsError,
+  roundTripErrorMessage,
   setReportTemplate,
   templateErrorMessage,
+  uploadRoundTrip,
   type MappingPlan,
   type ReportJobRecord,
   type ReportMeta,
+  type RoundTripResult,
   type TemplateOutline,
+  type VersionDiff,
 } from './reports'
 
 const META: ReportMeta = {
@@ -427,5 +434,136 @@ describe('reports api — templates (WP11)', () => {
       expect(templateErrorMessage(err)).toMatch(copy)
     }
     expect(templateErrorMessage(new Error('network down'))).toBe('network down')
+  })
+})
+
+// ── WP14: the round trip (Increment 3, the pinned route contract) ───────────
+
+const ROUNDTRIP: RoundTripResult = {
+  sections: [
+    { section_id: 'summary', heading: 'Executive summary', blocks: [{ type: 'paragraph', md: 'Edited.' }], changed: true, comments: ['Shorter.'] },
+    { section_id: 'cost', heading: 'Cost', blocks: [], changed: false, comments: [] },
+  ],
+  unmatched: ['A paragraph nobody owns.'],
+  comments_global: ['Nice report.'],
+  accepted_tracked_changes: 3,
+}
+
+const DIFF: VersionDiff = {
+  a: 1,
+  b: 2,
+  sections: [
+    { section_id: 'summary', heading: 'Executive summary', change: 'changed', source_a: 'llm', source_b: 'user_edit', pending_instruction: 'Shorter.', comments: ['Shorter.'] },
+    { section_id: 'cost', heading: 'Cost', change: 'unchanged', source_a: 'code', source_b: 'code', pending_instruction: null, comments: [] },
+  ],
+}
+
+describe('reports api — round trip (WP14)', () => {
+  it('imports an edited copy with POST …/{id}/roundtrip {file_id, bind_as_template} + CSRF', async () => {
+    const resp = { report_id: META.report_id, version: 2, result: ROUNDTRIP, template_file_id: 'f3' }
+    fetchMock.mockResolvedValueOnce(jsonResponse(resp))
+    const out = await importRoundTrip('My Project', META.report_id, 'f3')
+    expect(out).toEqual(resp)
+    const { url, init } = lastCall()
+    expect(url).toBe(`/api/projects/My%20Project/reports/${META.report_id}/roundtrip`)
+    expect(init?.method).toBe('POST')
+    expect(JSON.parse(String(init?.body))).toEqual({ file_id: 'f3', bind_as_template: true })
+    expect((init?.headers as Record<string, string>)[CSRF_HEADER]).toBe('tok')
+    expect((init?.headers as Record<string, string>)['Content-Type']).toBe('application/json')
+  })
+
+  it('bind_as_template: false is sent explicitly', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ report_id: META.report_id, version: 2, result: ROUNDTRIP, template_file_id: null }))
+    await importRoundTrip('Demo', META.report_id, 'f3', false)
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ file_id: 'f3', bind_as_template: false })
+  })
+
+  it('uploadRoundTrip uploads with kind=report_roundtrip (multipart, CSRF) and then posts the round trip', async () => {
+    const meta = { file_id: 'f9', filename: 'edited.docx', kind: 'report_roundtrip' }
+    const resp = { report_id: META.report_id, version: 2, result: ROUNDTRIP, template_file_id: 'f9' }
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(meta))
+      .mockResolvedValueOnce(jsonResponse(resp))
+    const file = new File(['PK'], 'edited.docx')
+    const out = await uploadRoundTrip('My Project', META.report_id, file)
+    expect(out).toEqual(resp)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    const [uploadUrl, uploadInit] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(uploadUrl).toBe('/api/projects/My%20Project/uploads?kind=report_roundtrip')
+    expect(uploadInit.method).toBe('POST')
+    expect(uploadInit.body).toBeInstanceOf(FormData)
+    expect((uploadInit.body as FormData).get('file')).toBe(file)
+    expect((uploadInit.headers as Record<string, string>)[CSRF_HEADER]).toBe('tok')
+    expect((uploadInit.headers as Record<string, string>)['Content-Type']).toBeUndefined()
+    const { url, init } = lastCall()
+    expect(url).toBe(`/api/projects/My%20Project/reports/${META.report_id}/roundtrip`)
+    expect(JSON.parse(String(init?.body))).toEqual({ file_id: 'f9', bind_as_template: true })
+  })
+
+  it('uploadRoundTrip passes bind_as_template through and stops at a failed upload', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ file_id: 'f9' }))
+      .mockResolvedValueOnce(jsonResponse({ report_id: META.report_id, version: 2, result: ROUNDTRIP, template_file_id: null }))
+    await uploadRoundTrip('Demo', META.report_id, new File(['PK'], 'e.docx'), false)
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ file_id: 'f9', bind_as_template: false })
+
+    fetchMock.mockReset()
+    fetchMock.mockResolvedValueOnce(jsonResponse({ detail: { error_kind: 'unsupported_upload_kind', message: 'nope' } }, 400))
+    const err = await uploadRoundTrip('Demo', META.report_id, new File(['PK'], 'e.docx')).catch(e => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err.detail.error_kind).toBe('unsupported_upload_kind')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(roundTripErrorMessage(err)).toBe('nope')
+  })
+
+  it('reads a version diff from GET …/versions/{a}/diff/{b}', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(DIFF))
+    const out = await getVersionDiff('My Project', META.report_id, 1, 2)
+    expect(out).toEqual(DIFF)
+    const { url, init } = lastCall()
+    expect(url).toBe(`/api/projects/My%20Project/reports/${META.report_id}/versions/1/diff/2`)
+    expect(init?.method ?? 'GET').toBe('GET')
+  })
+
+  it('reads the capabilities from GET …/reports/capabilities', async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ pdf: true }))
+    expect(await getReportCapabilities('My Project')).toEqual({ pdf: true })
+    const { url, init } = lastCall()
+    expect(url).toBe('/api/projects/My%20Project/reports/capabilities')
+    expect(init?.method ?? 'GET').toBe('GET')
+  })
+
+  it('export carries format only when given ("pdf" / "docx")', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ file_id: 'f1', filename: 'r.pdf', kind: 'agent_export' }))
+    await exportReport('Demo', META.report_id, { version: 2, format: 'pdf' })
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ version: 2, format: 'pdf' })
+    await exportReport('Demo', META.report_id, { format: 'docx' })
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ format: 'docx' })
+    await exportReport('Demo', META.report_id, { version: 1 })
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({ version: 1 })
+  })
+
+  it('maps the round-trip, diff and PDF error kinds with their toast copy', async () => {
+    const cases: Array<[string, number, RegExp]> = [
+      ['roundtrip_unreadable', 400, /could not be read as a word file/i],
+      ['roundtrip_not_a_report', 400, /does not look like an export of this report/i],
+      ['upload_not_found', 404, /no such upload/i],
+      ['report_not_found', 404, /backend:/],
+      ['report_job_in_flight', 409, /already being written/i],
+      ['project_locked', 409, /being edited by another user/i],
+      ['report_version_not_found', 404, /no such version/i],
+      ['pdf_not_available', 501, /libreoffice/i],
+      ['pdf_conversion_failed', 500, /pdf conversion failed.*soffice exited 1/i],
+    ]
+    for (const [kind, status, copy] of cases) {
+      fetchMock.mockResolvedValueOnce(jsonResponse(
+        { detail: { error_kind: kind, message: "backend: 'Demo' is being edited by another user; soffice exited 1" } }, status,
+      ))
+      const err = await importRoundTrip('Demo', META.report_id, 'f3').catch(e => e)
+      expect(err).toBeInstanceOf(ReportsError)
+      expect(err.status).toBe(status)
+      expect(isReportError(err, kind as never)).toBe(true)
+      expect(roundTripErrorMessage(err)).toMatch(copy)
+    }
+    expect(roundTripErrorMessage(new Error('network down'))).toBe('network down')
   })
 })

@@ -17,9 +17,15 @@
  * `routers/report_jobs.py`): `generateReport`, `getGenerateStatus` (204 →
  * `null`, polled by `pages/reports/useReportJob.ts`), `abortGenerate` and
  * `regenerateSection`.
+ *
+ * Increment 3 (WP14, backend `routers/reports.py` per the plan's pinned
+ * route contract): the round trip (`uploadRoundTrip` = a `report_roundtrip`
+ * upload followed by `POST …/{id}/roundtrip`), the version diff, the
+ * capabilities probe and `exportReport`'s `format` ("pdf" only when the
+ * capability is there).
  */
 import { rawFetchHeaders } from './csrf'
-import type { UploadMeta } from './uploads'
+import { uploadFile, type UploadMeta } from './uploads'
 
 // ── blocks ──────────────────────────────────────────────────────────────────
 
@@ -62,6 +68,11 @@ export interface Section {
   blocks: Block[]
   note?: string | null
   audit: SectionAudit
+  /** WP14: a Word comment the round trip attached; the next regenerate
+   *  without an instruction of its own uses it and clears it. */
+  pending_instruction?: string | null
+  /** WP14: the comments the round trip found on this section. */
+  comments?: string[]
 }
 
 // ── tables and figures ──────────────────────────────────────────────────────
@@ -261,6 +272,60 @@ export interface ReportTemplateState extends ReportTemplateBinding {
 export interface ProposeMappingOptions { language?: string }
 export interface ProposeMappingResponse { status: 'running'; report_id: string }
 
+// ── the round trip (WP14, Increment 3) ──────────────────────────────────────
+// Mirrors `services/reports/roundtrip.py::RoundTripSection` /
+// `RoundTripResult` and the diff / capabilities routes of the plan's pinned
+// route contract one to one.
+
+export interface RoundTripSection {
+  /** `null` when the heading matched no section of the base document. */
+  section_id: string | null
+  heading: string
+  blocks: Block[]
+  changed: boolean
+  comments: string[]
+}
+
+export interface RoundTripResult {
+  sections: RoundTripSection[]
+  /** Content that matched no section — reported, never merged. */
+  unmatched: string[]
+  comments_global: string[]
+  accepted_tracked_changes: number
+}
+
+/** `POST …/{id}/roundtrip` — the merged version and what the reader found. */
+export interface RoundTripResponse {
+  report_id: string
+  version: number
+  result: RoundTripResult
+  template_file_id: string | null
+}
+
+export type VersionChange = 'unchanged' | 'changed' | 'added' | 'removed'
+
+export interface VersionDiffSection {
+  section_id: string
+  heading: string
+  change: VersionChange
+  source_a: SectionSource | string | null
+  source_b: SectionSource | string | null
+  pending_instruction: string | null
+  comments: string[]
+}
+
+/** `GET …/{id}/versions/{a}/diff/{b}`. */
+export interface VersionDiff {
+  a: number
+  b: number
+  sections: VersionDiffSection[]
+}
+
+/** `GET /{name}/reports/capabilities` — `pdf` is `soffice` on the server's PATH. */
+export interface ReportCapabilities { pdf: boolean }
+
+export type ExportFormat = 'docx' | 'pdf'
+
 // ── errors ──────────────────────────────────────────────────────────────────
 
 /**
@@ -292,6 +357,12 @@ export type ReportErrorKind =
   | 'template_not_untagged'
   | 'invalid_mapping_plan'
   | 'tagged_render_error'
+  // the round trip, diff and PDF routes (WP14)
+  | 'roundtrip_unreadable'
+  | 'roundtrip_not_a_report'
+  | 'report_version_not_found'
+  | 'pdf_not_available'
+  | 'pdf_conversion_failed'
 
 export interface ReportErrorDetail {
   error_kind: ReportErrorKind | string
@@ -370,6 +441,32 @@ export function templateErrorMessage(e: unknown, fallback = 'Request failed'): s
         return `The template's tags could not be rendered: ${e.detail.message}`
       default:
         return reportJobErrorMessage(e, fallback)
+    }
+  }
+  return reportErrorMessage(e, fallback)
+}
+
+/**
+ * The toast copy for a refused round trip, version diff or PDF export
+ * (WP14). The upload's own refusal (`UploadError`) carries the same
+ * `{error_kind, message}` shape and falls through to its message; every
+ * other kind falls through to the template / job copy.
+ */
+export function roundTripErrorMessage(e: unknown, fallback = 'Request failed'): string {
+  if (isReportError(e)) {
+    switch (e.detail.error_kind) {
+      case 'roundtrip_unreadable':
+        return `The edited copy could not be read as a Word file. (${e.detail.message})`
+      case 'roundtrip_not_a_report':
+        return `This file does not look like an export of this report — nothing to merge. (${e.detail.message})`
+      case 'report_version_not_found':
+        return `No such version of this report. (${e.detail.message})`
+      case 'pdf_not_available':
+        return `PDF export needs LibreOffice on the server. (${e.detail.message})`
+      case 'pdf_conversion_failed':
+        return `PDF conversion failed: ${e.detail.message}`
+      default:
+        return templateErrorMessage(e, fallback)
     }
   }
   return reportErrorMessage(e, fallback)
@@ -470,19 +567,30 @@ export async function createEvidenceOnlyReport(
   }))
 }
 
+export interface ExportReportOptions {
+  version?: number
+  filename?: string
+  /** WP14: `"pdf"` converts the rendered `.docx` with LibreOffice — 501
+   *  `pdf_not_available` unless `getReportCapabilities().pdf`. Omitted =
+   *  the backend's default (`docx`). */
+  format?: ExportFormat
+}
+
 /**
- * `POST /{name}/reports/{id}/export` — renders one version to `.docx` and
- * stores it as an `agent_export` upload of the Project. The returned
- * `UploadMeta.file_id` feeds `getUploadBlobUrl` for the download.
+ * `POST /{name}/reports/{id}/export` — renders one version to `.docx` (or,
+ * with `format: "pdf"`, converts it) and stores it as an `agent_export`
+ * upload of the Project. The returned `UploadMeta.file_id` feeds
+ * `getUploadBlobUrl` for the download.
  */
 export async function exportReport(
   projectName: string,
   reportId: string,
-  opts: { version?: number; filename?: string } = {},
+  opts: ExportReportOptions = {},
 ): Promise<UploadMeta> {
-  const body: { version?: number; filename?: string } = {}
+  const body: ExportReportOptions = {}
   if (opts.version != null) body.version = opts.version
   if (opts.filename) body.filename = opts.filename
+  if (opts.format) body.format = opts.format
   return _json<UploadMeta>(await fetch(
     `${base(projectName)}/${encodeURIComponent(reportId)}/export`,
     {
@@ -621,4 +729,59 @@ export async function putMappingPlan(
     headers: { 'Content-Type': 'application/json', ...rawFetchHeaders('PUT') },
     body: JSON.stringify(body),
   }))
+}
+
+// ── the round trip, the diff and the capabilities (WP14) ────────────────────
+
+/**
+ * `POST /{name}/reports/{id}/roundtrip` with `{file_id, bind_as_template}` —
+ * merge a `report_roundtrip` upload into the report as its next version
+ * (synchronous, no job). With `bind_as_template` (the default) the uploaded
+ * file also becomes the report's template, so the styling the user changed
+ * survives the next export. Refusals: `report_not_found` / `upload_not_found`
+ * (404), `roundtrip_unreadable` / `roundtrip_not_a_report` (400),
+ * `project_locked` / `report_job_in_flight` (409).
+ */
+export async function importRoundTrip(
+  projectName: string,
+  reportId: string,
+  fileId: string,
+  bindAsTemplate = true,
+): Promise<RoundTripResponse> {
+  return _json<RoundTripResponse>(await _postJson(
+    `${base(projectName)}/${encodeURIComponent(reportId)}/roundtrip`,
+    { file_id: fileId, bind_as_template: bindAsTemplate },
+  ))
+}
+
+/**
+ * The viewer's "Upload edited copy": `uploadFile(project, file,
+ * 'report_roundtrip')` (the upload's own `UploadError` on refusal) followed
+ * by `importRoundTrip` on the new upload.
+ */
+export async function uploadRoundTrip(
+  projectName: string,
+  reportId: string,
+  file: File,
+  bindAsTemplate = true,
+): Promise<RoundTripResponse> {
+  const meta = await uploadFile(projectName, file, 'report_roundtrip')
+  return importRoundTrip(projectName, reportId, meta.file_id, bindAsTemplate)
+}
+
+/** `GET /{name}/reports/{id}/versions/{a}/diff/{b}` — per-section change between two versions. */
+export async function getVersionDiff(
+  projectName: string,
+  reportId: string,
+  a: number,
+  b: number,
+): Promise<VersionDiff> {
+  return _json<VersionDiff>(await fetch(
+    `${base(projectName)}/${encodeURIComponent(reportId)}/versions/${encodeURIComponent(String(a))}/diff/${encodeURIComponent(String(b))}`,
+  ))
+}
+
+/** `GET /{name}/reports/capabilities` — what this server can do beyond `.docx` (`pdf`). */
+export async function getReportCapabilities(projectName: string): Promise<ReportCapabilities> {
+  return _json<ReportCapabilities>(await fetch(`${base(projectName)}/capabilities`))
 }

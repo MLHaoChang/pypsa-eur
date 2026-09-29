@@ -11,7 +11,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type {
-  ReportDocument, ReportJobRecord, ReportMeta, ReportTemplateState, TemplateOutline,
+  ReportDocument, ReportJobRecord, ReportMeta, ReportTemplateState, RoundTripResponse, TemplateOutline,
 } from '../../api/reports'
 import type { UploadMeta } from '../../api/uploads'
 import { ReportViewer } from './ReportViewer'
@@ -27,6 +27,10 @@ const api = vi.hoisted(() => ({
   setReportTemplate: vi.fn(),
   putMappingPlan: vi.fn(),
   proposeMappingPlan: vi.fn(),
+  // WP14
+  getReportCapabilities: vi.fn(),
+  getVersionDiff: vi.fn(),
+  uploadRoundTrip: vi.fn(),
 }))
 
 vi.mock('../../api/reports', async () => {
@@ -197,6 +201,9 @@ beforeEach(() => {
   api.setReportTemplate.mockReset()
   api.putMappingPlan.mockReset()
   api.proposeMappingPlan.mockReset()
+  api.getReportCapabilities.mockReset().mockResolvedValue({ pdf: false })
+  api.getVersionDiff.mockReset()
+  api.uploadRoundTrip.mockReset()
   uploads.listUploads.mockReset().mockResolvedValue([TEMPLATE_UPLOAD])
   uploads.uploadFile.mockReset()
   docx.renderAsync.mockReset().mockResolvedValue(undefined)
@@ -518,5 +525,142 @@ describe('ReportViewer — templates and the export preview (WP11)', () => {
     expect(String(toast.success.mock.calls[0][0])).toMatch(/mapping plan proposed/i)
     await waitFor(() => expect(api.getReportTemplate).toHaveBeenCalledTimes(2))
     expect(api.getReport).toHaveBeenLastCalledWith('Demo', REPORT_ID, undefined)
+  })
+})
+
+// ── WP14: the round trip, the version diff and the PDF button ───────────────
+
+const ROUNDTRIP: RoundTripResponse = {
+  report_id: REPORT_ID,
+  version: 2,
+  template_file_id: 'f9',
+  result: {
+    sections: [
+      { section_id: 'summary', heading: 'Executive summary', blocks: [], changed: true, comments: ['Shorter.'] },
+    ],
+    unmatched: [],
+    comments_global: [],
+    accepted_tracked_changes: 1,
+  },
+}
+
+describe('ReportViewer — round trip, diff and PDF (WP14)', () => {
+  it('hides the PDF button when the backend cannot convert and says why on the .docx button', async () => {
+    renderViewer()
+    await screen.findAllByTestId('report-section')
+    await waitFor(() => expect(api.getReportCapabilities).toHaveBeenCalledWith('Demo'))
+    expect(screen.queryByTestId('report-export-pdf')).toBeNull()
+    await waitFor(() => expect(screen.getByTestId('report-export').getAttribute('title')).toMatch(/PDF export needs LibreOffice on the server/))
+  })
+
+  it('shows "Export PDF" when the capability is there and downloads the PDF through the export route with format=pdf', async () => {
+    api.getReportCapabilities.mockResolvedValue({ pdf: true })
+    api.exportReport.mockResolvedValue({
+      file_id: 'f2', filename: 'report_v1.pdf', kind: 'agent_export', mime: 'application/pdf',
+    })
+    const clicked: HTMLAnchorElement[] = []
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      clicked.push(this)
+    })
+    const user = userEvent.setup()
+    renderViewer()
+    await screen.findAllByTestId('report-section')
+    const pdf = await screen.findByTestId('report-export-pdf')
+    expect(pdf.textContent).toMatch(/export pdf/i)
+    expect(screen.getByTestId('report-export').getAttribute('title')).not.toMatch(/LibreOffice/)
+    await user.click(pdf)
+    await waitFor(() => expect(api.exportReport).toHaveBeenCalledWith('Demo', REPORT_ID, { version: 1, format: 'pdf' }))
+    await waitFor(() => expect(clicked).toHaveLength(1))
+    expect(clicked[0].getAttribute('href')).toBe('/api/projects/Demo/uploads/f2/blob')
+    expect(clicked[0].getAttribute('download')).toBe('report_v1.pdf')
+    expect(toast.success).toHaveBeenCalled()
+    // a PDF is not previewed with docx-preview
+    expect(screen.queryByTestId('export-preview-panel')).toBeNull()
+  })
+
+  it('toasts pdf_not_available and pdf_conversion_failed with their message', async () => {
+    const { ReportsError } = await vi.importActual<typeof import('../../api/reports')>('../../api/reports')
+    api.getReportCapabilities.mockResolvedValue({ pdf: true })
+    api.exportReport
+      .mockRejectedValueOnce(new ReportsError({ error_kind: 'pdf_not_available', message: 'soffice is not on PATH' }, 501))
+      .mockRejectedValueOnce(new ReportsError({ error_kind: 'pdf_conversion_failed', message: 'soffice exited 1: boom' }, 500))
+    const user = userEvent.setup()
+    renderViewer()
+    const pdf = await screen.findByTestId('report-export-pdf')
+    await user.click(pdf)
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1))
+    expect(String(toast.error.mock.calls[0][0])).toMatch(/LibreOffice.*soffice is not on PATH/)
+    await user.click(pdf)
+    await waitFor(() => expect(toast.error).toHaveBeenCalledTimes(2))
+    expect(String(toast.error.mock.calls[1][0])).toMatch(/PDF conversion failed.*soffice exited 1: boom/)
+  })
+
+  it('offers "Compare…" next to the version switcher and opens the diff of previous → latest', async () => {
+    api.getReport.mockResolvedValue({ ...FIXTURE, version: 3 })
+    api.getVersionDiff.mockResolvedValue({
+      a: 2, b: 3,
+      sections: [{ section_id: 'summary', heading: 'Executive summary', change: 'changed', source_a: 'llm', source_b: 'user_edit', pending_instruction: null, comments: [] }],
+    })
+    const user = userEvent.setup()
+    renderViewer({ ...META, latest_version: 3 })
+    await screen.findAllByTestId('report-section')
+    expect(screen.queryByTestId('version-diff')).toBeNull()
+    await user.click(screen.getByTestId('report-compare'))
+    const view = await screen.findByTestId('version-diff')
+    await waitFor(() => expect(api.getVersionDiff).toHaveBeenCalledWith('Demo', REPORT_ID, 2, 3))
+    expect(within(view).getByTestId('diff-row-summary').dataset.change).toBe('changed')
+    await user.click(within(view).getByTestId('version-diff-close'))
+    expect(screen.queryByTestId('version-diff')).toBeNull()
+  })
+
+  it('has no Compare control with a single version', async () => {
+    renderViewer()
+    await screen.findAllByTestId('report-section')
+    expect(screen.queryByTestId('report-compare')).toBeNull()
+  })
+
+  it('uploads an edited copy through the panel, then switches to the merged version', async () => {
+    api.uploadRoundTrip.mockResolvedValue(ROUNDTRIP)
+    api.getReport.mockResolvedValue({ ...FIXTURE, version: 2 })
+    const user = userEvent.setup({ applyAccept: false })
+    const { rerender } = renderViewer({ ...META, latest_version: 2 })
+    // the user is looking at v1 explicitly
+    await user.selectOptions(await screen.findByLabelText('Version'), '1')
+    await waitFor(() => expect(api.getReport).toHaveBeenLastCalledWith('Demo', REPORT_ID, 1))
+    const file = new File(['PK'], 'edited.docx')
+    await user.upload(screen.getByTestId('roundtrip-file-input'), file)
+    await waitFor(() => expect(api.uploadRoundTrip).toHaveBeenCalledWith('Demo', REPORT_ID, file, true))
+    expect((await screen.findByTestId('roundtrip-result')).textContent).toMatch(/v2/)
+    // the merged version is the latest: the viewer re-reads it and the template binding
+    await waitFor(() => expect(api.getReport).toHaveBeenLastCalledWith('Demo', REPORT_ID, undefined))
+    await waitFor(() => expect(api.getReportTemplate).toHaveBeenCalledTimes(2))
+    rerender({ ...META, latest_version: 2 })
+    await waitFor(() => expect((screen.getByLabelText('Version') as HTMLSelectElement).value).toBe('2'))
+  })
+
+  it('"Regenerate with this" on a merge comment posts a regenerate with no instruction (the pending one is used)', async () => {
+    api.uploadRoundTrip.mockResolvedValue(ROUNDTRIP)
+    const user = userEvent.setup({ applyAccept: false })
+    renderViewer()
+    await screen.findAllByTestId('report-section')
+    await user.upload(screen.getByTestId('roundtrip-file-input'), new File(['PK'], 'edited.docx'))
+    const result = await screen.findByTestId('roundtrip-result')
+    api.getGenerateStatus.mockResolvedValue(job())
+    await user.click(within(result).getByRole('button', { name: /regenerate with this/i }))
+    await waitFor(() => expect(api.regenerateSection).toHaveBeenCalledWith('Demo', REPORT_ID, 'summary', {}))
+    await screen.findByTestId('report-job-strip')
+  })
+
+  it('a section with a pending instruction offers the same button on its card', async () => {
+    api.getReport.mockResolvedValue({
+      ...FIXTURE,
+      sections: [{ ...FIXTURE.sections[0], source: 'user_edit', pending_instruction: 'Shorter.', comments: ['Shorter.'] }, ...FIXTURE.sections.slice(1)],
+    })
+    const user = userEvent.setup()
+    renderViewer()
+    const sections = await screen.findAllByTestId('report-section')
+    expect(within(sections[0]).getByTestId('section-edited').textContent).toMatch(/edited by you/i)
+    await user.click(within(within(sections[0]).getByTestId('section-pending')).getByRole('button', { name: /regenerate with this/i }))
+    await waitFor(() => expect(api.regenerateSection).toHaveBeenCalledWith('Demo', REPORT_ID, 'summary', {}))
   })
 })

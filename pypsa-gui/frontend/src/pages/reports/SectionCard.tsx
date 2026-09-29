@@ -17,8 +17,14 @@
 // posts `POST …/sections/{id}/regenerate`. Offered for every section the
 // document has (the backend rewrites any of them from the latest version)
 // and disabled while a job runs.
+//
+// WP14: a section merged from an edited copy (`source: user_edit`) is tagged
+// "edited by you"; a `pending_instruction` (a Word comment the round trip
+// turned into an instruction) is a chip with "Regenerate with this", which
+// hands an EMPTY instruction to the viewer so the backend uses the pending
+// one; the section's `comments` are listed under the header.
 import { useId, useMemo, useState, type FormEvent } from 'react'
-import { AlertTriangle, CircleSlash, Info, RefreshCw } from 'lucide-react'
+import { AlertTriangle, CircleSlash, Info, MessageSquare, RefreshCw } from 'lucide-react'
 import type { Options } from 'react-markdown'
 import ChatMarkdown from '../../components/ChatMarkdown'
 import { Tag } from '../../components/PageKit'
@@ -44,10 +50,10 @@ const STATUS_TONE: Record<SectionStatus, 'ok' | 'warn' | 'neutral'> = {
   skipped: 'neutral',
 }
 
-const SOURCE_LABEL: Record<SectionSource, string> = {
+export const SOURCE_LABEL: Record<SectionSource, string> = {
   llm: 'model prose',
   code: 'from evidence',
-  user_edit: 'edited',
+  user_edit: 'edited by you',
 }
 
 const CALLOUT: Record<CalloutKind, { label: string; icon: React.ReactNode; className: string }> = {
@@ -197,6 +203,8 @@ export function SectionCard({
   regenerateDisabled?: boolean
 }) {
   const unverified = section.audit?.unverified ?? []
+  const comments = section.comments ?? []
+  const pending = section.pending_instruction?.trim() || null
   const inputId = useId()
   const [regenOpen, setRegenOpen] = useState(false)
   const [instruction, setInstruction] = useState('')
@@ -230,7 +238,13 @@ export function SectionCard({
         <span data-testid="section-status">
           <Tag tone={STATUS_TONE[section.status] ?? 'neutral'}>{STATUS_LABEL[section.status] ?? section.status}</Tag>
         </span>
-        <span className="text-[10.5px] text-muted">{SOURCE_LABEL[section.source] ?? section.source}</span>
+        {section.source === 'user_edit' ? (
+          <span data-testid="section-edited" title="This section's text came from an edited copy you uploaded">
+            <Tag tone="purple">{SOURCE_LABEL.user_edit}</Tag>
+          </span>
+        ) : (
+          <span className="text-[10.5px] text-muted">{SOURCE_LABEL[section.source] ?? section.source}</span>
+        )}
         {unverified.length > 0 && (
           <span className="text-[10.5px] text-warn ml-auto" data-testid="section-unverified-count">
             {unverified.length} number{unverified.length === 1 ? '' : 's'} not found in the evidence
@@ -285,6 +299,38 @@ export function SectionCard({
             Cancel
           </button>
         </form>
+      )}
+      {pending && (
+        <div
+          className="flex items-center gap-2 px-4 py-2 border-b border-border bg-purple/5 text-[11.5px]"
+          data-testid="section-pending"
+        >
+          <MessageSquare size={12} className="shrink-0 text-purple" aria-hidden="true" />
+          <span className="text-muted shrink-0">Pending instruction:</span>
+          <span className="text-text flex-1 min-w-0 truncate" title={pending}>{pending}</span>
+          {onRegenerate && (
+            <button
+              type="button"
+              onClick={() => { void onRegenerate(section.section_id, '') }}
+              disabled={regenerateDisabled}
+              title={regenerateDisabled
+                ? 'A report job is running'
+                : 'Write this section again using the pending instruction (a comment from your edited copy)'}
+              className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10.5px] text-text hover:border-accent hover:text-accent disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <RefreshCw size={10} /> Regenerate with this
+            </button>
+          )}
+        </div>
+      )}
+      {comments.length > 0 && (
+        <ul
+          className="flex flex-col gap-0.5 px-4 py-2 border-b border-border text-[11px] text-muted list-disc pl-8"
+          data-testid="section-comments"
+          aria-label="Comments from the edited copy"
+        >
+          {comments.map((c, i) => <li key={i}>{c}</li>)}
+        </ul>
       )}
       <div className="p-4 flex flex-col gap-2.5">
         {section.status !== 'ok' && section.note && (

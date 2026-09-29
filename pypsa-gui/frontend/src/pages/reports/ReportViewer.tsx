@@ -38,28 +38,52 @@
 // with docx-preview (`DocxPreview`, collapsed until asked) or download it
 // again. A `mapping` job's strip is the editor's; the viewer's `onFinished`
 // only toasts it.
+//
+// WP14 — the round trip: `RoundTripPanel` (below the header) uploads an
+// edited export and merges it as the next version WITHOUT a job, so the
+// viewer itself does what the hook does on a finished job — switch to the
+// latest version and invalidate the document, the list and the template
+// binding (the upload may have become the template). "Regenerate with
+// this" (on the panel's comments and on a section's pending-instruction
+// chip) posts a regenerate with an EMPTY body: the backend then uses the
+// section's `pending_instruction` and clears it. "Compare…" next to the
+// version switcher opens `VersionDiffView`. The PDF button exists only when
+// `GET …/reports/capabilities` says `pdf: true` (LibreOffice on the
+// server); a PDF export downloads but is not previewed (docx-preview reads
+// Word files only).
 import { useMemo, useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
-import { AlertTriangle, ArrowLeft, ChevronDown, ChevronRight, Download, Eye, FileDown } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  AlertTriangle, ArrowLeft, ChevronDown, ChevronRight, Download, Eye, FileDown, FileText, GitCompareArrows,
+} from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   exportReport,
   getReport,
+  getReportCapabilities,
   getReportTemplate,
   reportErrorMessage,
   reportJobErrorMessage,
+  roundTripErrorMessage,
   templateErrorMessage,
   type ReportDocument,
   type ReportMeta,
+  type RoundTripResponse,
 } from '../../api/reports'
 import { getUploadBlobUrl, type UploadMeta } from '../../api/uploads'
 import { Btn, PageSection, Tag } from '../../components/PageKit'
 import { DocxPreview } from './DocxPreview'
 import { MappingPlanEditor } from './MappingPlanEditor'
 import { ReportJobStrip } from './ReportJobStrip'
+import { RoundTripPanel } from './RoundTripPanel'
 import { SectionCard } from './SectionCard'
 import { TemplateOutlineSummary, TemplatePicker, useReportTemplates } from './TemplatePicker'
-import { REPORT_TEMPLATE_KEY, useReportJob } from './useReportJob'
+import { VersionDiffView } from './VersionDiffView'
+import { REPORT_DOC_PREFIX, REPORT_TEMPLATE_KEY, REPORTS_LIST_KEY, useReportJob } from './useReportJob'
+
+/** `GET …/reports/capabilities` — one query per Project (WP14). */
+export const REPORT_CAPABILITIES_KEY = (project: string) => ['reports', 'capabilities', project] as const
+export const PDF_UNAVAILABLE_HINT = 'PDF export needs LibreOffice on the server'
 
 export const REPORT_DOC_KEY = (project: string, reportId: string, version: number | null) =>
   ['reports', 'doc', project, reportId, version] as const
@@ -101,6 +125,9 @@ export function ReportViewer({
   // WP11: the last export of this visit, for the preview panel.
   const [lastExport, setLastExport] = useState<UploadMeta | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  // WP14: the version comparison, opened from the version switcher.
+  const [diffOpen, setDiffOpen] = useState(false)
+  const qc = useQueryClient()
 
   const job = useReportJob(project, {
     onFinished: (record) => {
@@ -157,14 +184,36 @@ export function ReportViewer({
     ? (boundTemplate?.filename ?? template.data.template_file_id)
     : 'built-in default'
 
+  // An empty instruction sends `{}`: the backend then uses the section's
+  // `pending_instruction` when it has one (WP14), else rewrites as before.
   async function regenerate(sectionId: string, instruction: string) {
     try {
       setOutcomeVisible(false)
-      await job.regenerate(meta.report_id, sectionId, { instruction })
+      const text = instruction.trim()
+      await job.regenerate(meta.report_id, sectionId, text ? { instruction: text } : {})
     } catch (e) {
       toast.error(`Could not regenerate the section: ${reportJobErrorMessage(e)}`)
     }
   }
+
+  // WP14: the merged version arrived without a job — do what the hook does
+  // on a finished one.
+  function onMerged(resp: RoundTripResponse) {
+    setVersion(null)
+    setOutcomeVisible(false)
+    void qc.invalidateQueries({ queryKey: REPORT_DOC_PREFIX(project, resp.report_id) })
+    void qc.invalidateQueries({ queryKey: REPORTS_LIST_KEY(project) })
+    void qc.invalidateQueries({ queryKey: REPORT_TEMPLATE_KEY(project, resp.report_id) })
+  }
+
+  // WP14: what the server can convert to.
+  const capabilities = useQuery({
+    queryKey: REPORT_CAPABILITIES_KEY(project),
+    queryFn: () => getReportCapabilities(project),
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  })
+  const pdfAvailable = capabilities.data?.pdf === true
 
   const evidenceChanged =
     doc.data != null
@@ -182,6 +231,16 @@ export function ReportViewer({
     onError: (e) => toast.error(`Could not export the report: ${templateErrorMessage(e)}`),
   })
 
+  const exportPdf = useMutation({
+    mutationFn: () => exportReport(project, meta.report_id, { version: shownVersion, format: 'pdf' }),
+    onSuccess: (upload) => {
+      downloadExport(project, upload)
+      toast.success(`Exported ${upload.filename} — it is also in the Project's files`)
+    },
+    onError: (e) => toast.error(`Could not export the PDF: ${roundTripErrorMessage(e)}`),
+  })
+
+  const exporting = exportDocx.isPending || exportPdf.isPending
   const versions = Array.from({ length: meta.latest_version }, (_, i) => meta.latest_version - i)
 
   return (
@@ -230,22 +289,43 @@ export function ReportViewer({
                 </select>
               </label>
             )}
+            {meta.latest_version > 1 && (
+              <Btn
+                onClick={() => setDiffOpen(o => !o)}
+                title="Compare two versions section by section"
+                data-testid="report-compare"
+                aria-expanded={diffOpen}
+              >
+                <GitCompareArrows size={12} /> Compare…
+              </Btn>
+            )}
             <TemplatePicker
               project={project}
               reportId={meta.report_id}
               binding={template.data}
-              disabled={exportDocx.isPending}
+              disabled={exporting}
             />
             <Btn
               variant="primary"
               onClick={() => exportDocx.mutate()}
-              disabled={!doc.data || exportDocx.isPending}
-              title={`Render this version to Word (${templateLabel}) and download it`}
+              disabled={!doc.data || exporting}
+              title={`Render this version to Word (${templateLabel}) and download it${
+                capabilities.data && !pdfAvailable ? ` · ${PDF_UNAVAILABLE_HINT}` : ''}`}
               data-testid="report-export"
             >
               <FileDown size={12} /> {exportDocx.isPending ? 'Exporting…' : 'Export .docx'}
               <span className="font-normal opacity-80" data-testid="report-export-template">· {templateLabel}</span>
             </Btn>
+            {pdfAvailable && (
+              <Btn
+                onClick={() => exportPdf.mutate()}
+                disabled={!doc.data || exporting}
+                title={`Render this version to Word (${templateLabel}), convert it to PDF with LibreOffice and download it`}
+                data-testid="report-export-pdf"
+              >
+                <FileText size={12} /> {exportPdf.isPending ? 'Converting…' : 'Export PDF'}
+              </Btn>
+            )}
             {onBack && (
               <Btn onClick={onBack} title="Back to the list of reports" data-testid="report-back">
                 <ArrowLeft size={12} /> Reports
@@ -273,6 +353,15 @@ export function ReportViewer({
         )}
       </PageSection>
 
+      {diffOpen && meta.latest_version > 1 && (
+        <VersionDiffView
+          project={project}
+          reportId={meta.report_id}
+          latestVersion={meta.latest_version}
+          onClose={() => setDiffOpen(false)}
+        />
+      )}
+
       {template.data?.mode === 'untagged' && template.data.outline && (
         <MappingPlanEditor
           project={project}
@@ -286,6 +375,15 @@ export function ReportViewer({
           exportPending={exportDocx.isPending}
         />
       )}
+
+      <RoundTripPanel
+        project={project}
+        reportId={meta.report_id}
+        disabled={exporting || job.isRunning || job.isStarting}
+        onMerged={onMerged}
+        onRegenerateWith={(sectionId) => regenerate(sectionId, '')}
+        regenerateDisabled={job.isRunning || job.isStarting}
+      />
 
       {lastExport && (
         <div data-testid="export-preview-panel">
