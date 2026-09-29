@@ -11,7 +11,7 @@ import { Download, Plus, RefreshCw, Square, Trash2 } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
-import { useStartFmeaSweep } from '../../hooks/useStartFmeaSweep'
+import { fmeaModesRefetchInterval, useStartFmeaSweep } from '../../hooks/useStartFmeaSweep'
 import { nk } from '../../utils/queryKeys'
 import { downloadCSV, fmtCurrency } from './shared'
 import { blockerMessage } from './McPanel'
@@ -60,9 +60,9 @@ export default function FmeaTab() {
   const { data: modes, refetch: refetchModes } = useQuery({
     queryKey: nk(currentProject, 'results', 'fmea_modes'),
     queryFn: () => resultsApi.getFmeaModes(),
-    refetchInterval: q =>
-      (q.state.data as { sweep_status?: string } | null)?.sweep_status === 'running'
-        ? 2000 : false,
+    // One extra read after the sweep leaves `running` (A5): the first
+    // non-running sample can still carry the partial rows.
+    refetchInterval: fmeaModesRefetchInterval,
   })
   // The sweep's closing base re-solve leaves fresh dispatch: re-read status.
   useStudyFinishedInvalidation(modes === undefined ? undefined

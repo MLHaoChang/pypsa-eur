@@ -17,6 +17,7 @@ import { buildEhStudyBody, ehStudyQueryKeys } from '../../results/EhReferenceDes
 import { useHubDesignStore } from '../hubDesignStore'
 import { VOLL_TEXT } from '../delegate'
 import { CardShell, DelegateButton } from '../shared/CardShell'
+import { LIVE_STUDY_EDIT, useLiveStudyRunning } from '../../../hooks/useLiveStudyRunning'
 import { Term } from '../shared/Term'
 import {
   templateForm, useHubReadiness, useHubSolverConfig, useHubStudy, useHubTemplate,
@@ -29,6 +30,7 @@ export function GoalCard() {
   const { template, isPending: templatePending, isError: templateError,
     refetch: refetchTemplate } = useHubTemplate()
   const { readiness } = useHubReadiness(template, running, !studyPending && !templatePending)
+  const liveStudy = useLiveStudyRunning()
   const { data: solverConfig } = useHubSolverConfig()
   const archetype = useHubDesignStore(s => s.archetype)
   const loleTarget = useHubDesignStore(s => s.loleTarget)
@@ -128,7 +130,8 @@ export function GoalCard() {
             <>
               <span className="text-warn">not set — the study needs a price above zero</span>
               <DelegateButton testId="hub-goal-voll-fix" text={VOLL_TEXT}
-                label="Let the assistant set it" />
+                label="Let the assistant set it"
+                disabled={liveStudy} disabledTitle={LIVE_STUDY_EDIT} />
             </>
           ) : <span className="text-text">€{voll.toLocaleString('en-US')} per MWh</span>}
       </div>
