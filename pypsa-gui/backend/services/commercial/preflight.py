@@ -69,6 +69,21 @@ def _max_step_h(snapshots: pd.Index) -> float | None:
     return min(positive) if positive else None
 
 
+def demand_resolution_warnings(n, cfg) -> list[tuple[str, str]]:
+    """(item id, message) for each demand item whose settlement interval is
+    finer than the axis step — shared with the billing gap's `resolution_risk`
+    (P2 WP2.3)."""
+    step_h = _max_step_h(n.snapshots)
+    items = cfg.import_tariff.items if cfg.import_tariff is not None else []
+    return [(item.id,
+             f"Demand item {item.id!r} is measured on {item.settlement} intervals but "
+             f"part of the axis is {step_h:g} h apart: the peak within an interval is "
+             "not resolved, so the modelled demand charge can understate the bill.")
+            for item in items
+            if _lp._is_demand(item) and step_h is not None
+            and step_h > _SETTLE_H[item.settlement] + 1e-9]
+
+
 def commercial_findings(n, commercial, *, solve_strategy: str = "full",
                         multi_period: bool = False, dsr: dict | None = None
                         ) -> list[tuple[str, str, str, str, str]]:
@@ -129,15 +144,8 @@ def _warnings(n, cfg, adders, price, demand) -> list[tuple[str, str, str, str, s
                         f"extendable group member(s) {free} can take capacity without it. "
                         "Fix their capacity or model their fee on the Link's capital_cost."))
 
-    step_h = _max_step_h(n.snapshots)
-    items = cfg.import_tariff.items if cfg.import_tariff is not None else []
-    for item in items:
-        if _lp._is_demand(item) and step_h is not None and \
-                step_h > _SETTLE_H[item.settlement] + 1e-9:
-            out.append(("warning", "commercial.demand_resolution", "", item.id,
-                        f"Demand item {item.id!r} is measured on {item.settlement} intervals but "
-                        f"part of the axis is {step_h:g} h apart: the peak within an interval is "
-                        "not resolved, so the modelled demand charge can understate the bill."))
+    for item_id, msg in demand_resolution_warnings(n, cfg):
+        out.append(("warning", "commercial.demand_resolution", "", item_id, msg))
     partial = (demand or {}).get("info", {}).get("partial_months", [])
     if partial:
         out.append(("warning", "commercial.demand_partial_months", "", "",

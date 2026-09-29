@@ -885,6 +885,7 @@ Files: `models/commercial.py` (`CommercialConfig.contracts: list[Contract]` disc
 - **WP2.2c review round 2 → PASS WITH CONDITIONS; both conditions fixed:**
   1. MEDIUM (latent): `contracts_state` compared under the current hash recipe, not the record's. → `contracts_record(cfg, version)` hashes under recipe `version`, and `contracts_state` uses `version_of(record)`. Tested: a recipe-1 record matches its config, and a recipe-2 hash stamped v1 is drift.
   2. LOW/MEDIUM: `site_generators` walked through any unmetered connection into the grid side. → `_meter_sides` never enters the meter's grid-side buses (import members' bus0, the export Link's bus1). The new `meter_bypass_buses` names the grid-side buses it reached, and preflight warns `commercial.meter_bypass`. Tested with a site–grid Line.
+- **WP2.2c review round 3 → PASS** (no residue). Probes: v1 and v2 records each match their config and are drift under the other version; a multi-port Link (bus2 = grid) and an export-side bypass are both caught; NaN ports are skipped.
 
 ## WP2.2d `changes_dispatch` PPA in the LP (buyer case only)
 
@@ -945,6 +946,51 @@ the spec text of §15 (and §5.5's cause list) in the same commit.
 - [ ] Red: on every **LP** fixture (the reconciliation cases) `unattributed_pct < 1e-6`; a monkeypatched adder
   mismatch ⇒ unattributed gap + warn gate; an edited tariff ⇒ cause `config_changed_since_solve`, no warn;
   windowed tiers ⇒ `tier_allocation` equals engine − LP.
+
+- **As implemented:**
+  - **Signature.** `gap.billing_vs_lp_gap(n, commercial, site_bill, *, settlement_lines=None, threshold_pct=5.0)` returns `{periods: {period: {kind: {lp, billed, gap, gap_pct, causes, unattributed, unattributed_pct, flags, items}}}, flags, gates, threshold_pct, resolution_risk}`.
+    - Kinds come from `item_kind`: fixed, then capacity, then demand, then tiered, then energy.
+    - `items` gives the LP and billed amounts per item, or per contract.
+  - **The LP side, from the committed records:**
+    - `energy` is Σ w × p0 × `ic_energy_price` on the priced Links.
+      - The export price is added back, because the committed export adder was tariff − price and the bill holds no market price.
+      - The non-convex tiers' predicted-tier adders are taken out; they are recomputed and belong to the `tiers` kind.
+    - The per-item energy breakdown is recomputed from each item's rates, on the side the LP charges it.
+    - `demand` is `demand_amount` per `ic_demand_peaks` record.
+    - `tiers`: convex tiers are rate × q per `ic_tier_volumes` record.
+    - `capacity` is €/MW × `p_nom_opt` for contracted items, plus €/MW × peak for peak items.
+    - `contracts`: dispatch PPAs are Σ w × p_gen × `ic_ppa_price`; every other contract is 0.
+  - **The billed side:**
+    - Tariff items use `per_item_sampled`.
+    - Contracts use the settlement lines from the site's view:
+      - the site pays: +;
+      - the site is paid: −;
+      - a line between two other parties: 0, flagged `third_party_lines_excluded:<id>`;
+      - a party not established: None.
+    - With no lines given, the `contracts` kind is billed None with the flag `settlement_not_provided`.
+  - **Causes.** They are as planned. Added: `net_split_by_direction` (billed − LP of a net item: the LP charges it on one side, the meter nets per interval) and `lp_recipe_changed` (the whole difference, like `config_changed_since_solve`).
+    - `months_not_established` and `partial_months` are disclosures with amount 0 and the months listed, because both sides compare the same sampled months.
+    - `ratchet_seed` has amount None plus `ratchet_seed_missing`.
+    - A fixed-PoC capacity item is `not_in_lp` with reason `fixed_poc_not_in_lp`.
+  - **Percentages and the gate.**
+    - `gap_pct` is (billed − LP) / |LP|. It is None for an LP of 0 with a bill.
+    - `unattributed_pct` is |unattributed| / max(|LP|, |billed|).
+    - The gate `billing_gap_unexplained` fires when `unattributed_pct` > threshold AND |unattributed| > €0.01.
+    - A kind with an unknown side gets `lp_not_established` / `billed_not_established`, has no gap, and raises no gate.
+  - **Resolution risk.** `preflight.demand_resolution_warnings(n, cfg)` is shared by preflight and the gap's `resolution_risk`.
+  - **Spec.** §5.5's cause list and §15's "billed ≥ LP − tol on convex tariffs" are rewritten in this commit.
+  - **Tests:** `tests/test_billing_gap.py` has 28 tests:
+    - all 18 reconciliation fixtures are fully attributed (`windowed_tiers` checks `tier_allocation` = billed − Σ rate × q; `rep_weeks` has 10 months not established, amount 0; the PPA contract's LP equals the settlement);
+    - the adder mismatch ×1.25 gives 20 % unattributed and the gate, and the threshold is configurable;
+    - the edited tariff is `config_changed_since_solve` with no gate;
+    - fixed and per-kVA `not_in_lp`;
+    - `nonconvex_tier`;
+    - a lease is `settlement_only`, and without lines it is None;
+    - simultaneous flows on a net item give `net_split_by_direction`;
+    - a missing committed price gives `lp_not_established`;
+    - unsolved;
+    - resolution risk;
+    - the percentage definitions.
 
 ## WP2.4b-i URDB importer
 

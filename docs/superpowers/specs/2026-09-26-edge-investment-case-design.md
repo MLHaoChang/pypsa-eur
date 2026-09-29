@@ -319,12 +319,21 @@ Input: dispatch at settlement resolution (resampled from LP resolution with a di
 `(interval, tariff_item, quantity, rate, amount)` and monthly/annual bills. Rules: tiers are
 applied on cumulative monthly volume; demand charges on the maximum of `measured_on` within the
 period; ratchets on the lookback maximum; fixed items pro-rated. Every amount is exact and
-traceable to one item. The gap between LP cost and billed cost is reported **per item kind** as
-`billing_vs_lp_gap_pct[item_kind]` with an attributed cause: `resolution` (LP resolution coarser than
-settlement flattens peaks, billed ≤ LP), `nonconvex_tier` (billed may be below the LP rate), `fixed`
-(fixed items are not in the LP, billed > LP), `ratchet_seed` (history-seeded ratchets). Gaps with a
-disclosed cause are reported; a gap above the threshold (default 5 %) with **no** attributable cause raises
-the `warn` gate. There is no general "billed ≥ LP" invariant.
+traceable to one item. The gap between LP cost and billed cost is reported **per item kind** (`energy`,
+`demand`, `tiers`, `capacity`, `fixed`, `contracts`) and per investment period, on the unweighted
+period-year amounts, by `services/commercial/gap.py` (P2 WP2.3). The LP side is recomputed from the solve's
+committed records on the same dispatch. Each explained difference is a cause with a **computed** amount:
+`fixed` and `not_in_lp` (the billed amount of an item the LP leaves out); `nonconvex_tier` (billed − LP
+for an item priced at one predicted tier); `tier_allocation` (windowed tiers: the engine's proportional
+allocation − the LP's optimal one); `net_split_by_direction` (a net item the LP charges on one side);
+`settlement_only` (a contract with no LP term); `months_not_established` and `partial_months`
+(disclosures, amount 0: both sides compare the same sampled months); `ratchet_seed` (amount `null` plus a
+flag); and `config_changed_since_solve` / `lp_recipe_changed` (the whole difference). **`resolution` is
+a disclosed risk, not a computed cause**: the LP and the bill read the same dispatch at the same
+resolution, so a finer real load cannot show as a gap. When the axis is coarser than a demand item's
+settlement, the payload carries `resolution_risk` with the preflight warning. What no cause explains is
+`unattributed`. Above the threshold (default 5 %, configurable) it raises the `billing_gap_unexplained`
+warn gate. There is no general "billed ≥ LP" invariant.
 
 ---
 
@@ -535,7 +544,9 @@ hand-built; `eu_nl`/`ca_federal` follow in WP4.3b). **MVP-B** = + P5 + P6. **v1*
 - **Provenance**: every report field resolvable to a pack hash, a library item version, a
   dispatch mode and a seed; `null`+flag over 0.
 - **Monotonicity & conservation invariants**: PF revenue ≥ realistic mean; participants' internal
-  streams sum to zero; billed cost ≥ dispatch-grade cost minus tolerance on convex tariffs.
+  streams sum to zero; on every LP fixture the billing-vs-LP gap is fully attributed to computed causes
+  (`unattributed_pct` < 1e-6, §5.5), replacing "billed ≥ dispatch-grade cost minus tolerance on convex
+  tariffs".
 - **CI**: backend pytest (`gui-tests`), qa drivers (`gui-qa-drivers`), frontend vitest +
   typecheck; new fixtures under `tests/fixtures/investment_case/`.
 
