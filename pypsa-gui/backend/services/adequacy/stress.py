@@ -41,6 +41,7 @@ availability is a fleet statistic, not a weather year.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import pathlib
 import re
@@ -57,12 +58,33 @@ VALID_KINDS = ("parametric", "profiles")
 # they are a procurement follow-up. P15: the packs ship in ``backend/data``
 # (never the tests tree, which a frozen build does not bundle); the spec
 # writes the directory to the same relative place under _MEIPASS.
+logger = logging.getLogger("pypsa_gui.adequacy.stress")
+
 PROFILE_PACK_DIR: pathlib.Path = (
     pathlib.Path(__file__).resolve().parents[2] / "data" / "eh_class_c")
 
 
 class StressValidationError(ValueError):
-    pass
+    """A refusal authored by this module. Its message is always one of this
+    module's own sentences — never an OS or parser exception's text — so the
+    routes may show it to the caller (CodeQL py/stack-trace-exposure, PR #60).
+    """
+
+
+def _read_failure(what: str, exc: Exception) -> str:
+    """A caller-safe reason a JSON file could not be read, with the real
+    exception logged server-side.
+
+    ``OSError`` text carries the server file path, so it becomes a fixed
+    phrase; a ``JSONDecodeError`` keeps only its line and column, which is
+    what someone fixing the file needs. The "unreadable" wording is load-
+    bearing: the P15 editor and the sweep refusal key on it.
+    """
+    logger.warning("%s unreadable", what, exc_info=exc)
+    if isinstance(exc, json.JSONDecodeError):
+        return (f"{what} unreadable: not valid JSON "
+                f"(line {exc.lineno}, column {exc.colno})")
+    return f"{what} unreadable: could not be read"
 
 
 def load_synthetic_profile_pack(pack_id: str) -> dict:
@@ -77,7 +99,7 @@ def load_synthetic_profile_pack(pack_id: str) -> dict:
             raw = json.loads(path.read_text())
         except (OSError, json.JSONDecodeError) as exc:
             raise StressValidationError(
-                f"profile_pack '{sid}' unreadable: {exc}") from exc
+                _read_failure(f"profile_pack '{sid}'", exc)) from exc
         if not isinstance(raw, dict):
             raise StressValidationError(
                 f"profile_pack '{sid}' must be a JSON object")
@@ -109,6 +131,8 @@ def list_profile_packs() -> list[dict]:
         try:
             raw = load_synthetic_profile_pack(sid)
         except StressValidationError as exc:
+            # Only our own typed refusal is shown: an OS/parser failure was
+            # already reduced to a fixed phrase by ``_read_failure``.
             out.append({"id": sid, "error": str(exc)})
             continue
         loads = _series_map(raw.get("loads_p_set")) or {}
@@ -302,7 +326,7 @@ def load_scenarios_checked(project_dir: pathlib.Path) -> tuple[list[dict], str |
     try:
         raw = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as exc:
-        return [], f"stress-scenario registry unreadable: {exc}"
+        return [], _read_failure("stress-scenario registry", exc)
     if not isinstance(raw, dict):
         return [], "stress-scenario registry unreadable: not a JSON object"
     if raw.get("__schema__") != SCHEMA:

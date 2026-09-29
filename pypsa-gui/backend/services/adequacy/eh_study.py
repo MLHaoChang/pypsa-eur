@@ -63,6 +63,8 @@ __all__ = [
     "default_stages_for",
     "frontier_targets",
     "run_eh_study",
+    "StageSelectionError",
+    "readiness_refusal_classes",
     "validate_stages",
 ]
 
@@ -110,6 +112,11 @@ DEFAULT_MC_SEED = 0
 DEFAULT_MC_COV_TARGET = 0.05
 
 
+class StageSelectionError(ValueError):
+    """``validate_stages``' refusal of a caller's stage list (a ``ValueError``
+    so existing ``except ValueError`` callers keep working)."""
+
+
 def validate_stages(stages: Iterable[str] | None) -> tuple[str, ...] | None:
     """Refuse unknown stage names and lists that drop a required stage.
 
@@ -120,15 +127,15 @@ def validate_stages(stages: Iterable[str] | None) -> tuple[str, ...] | None:
         return None
     requested = tuple(str(s) for s in stages)
     if not requested:
-        raise ValueError("stages, when set, must be a non-empty list")
+        raise StageSelectionError("stages, when set, must be a non-empty list")
     unknown = [s for s in requested if s not in EH_PIPELINE_STAGES]
     if unknown:
-        raise ValueError(
+        raise StageSelectionError(
             f"unknown EH pipeline stage(s) {unknown}; expected a subset of "
             f"{list(EH_PIPELINE_STAGES)}")
     missing = [s for s in REQUIRED_STAGES if s not in requested]
     if missing:
-        raise ValueError(
+        raise StageSelectionError(
             f"stages must include {list(REQUIRED_STAGES)} (only stages after "
             f"ens_solve may be skipped); missing {missing}")
     return requested
@@ -908,6 +915,13 @@ def _refusal_classes() -> tuple[type[Exception], ...]:
     return (levers.LeverScenarioError, redundancy.RedundancyScenarioError,
             dtc.DtcStressError, dtc.DtcPlanningError, dtc.DtcConfigError,
             a.ArchetypePackError, a.HubBoundaryError)
+
+
+def readiness_refusal_classes() -> tuple[type[Exception], ...]:
+    """The typed refusals whose message ``/results/eh_readiness`` may show:
+    the engines' config refusals plus a bad stage list. Any other
+    ``ValueError`` is an internal failure and is not echoed."""
+    return (*_refusal_classes(), StageSelectionError)
 
 
 def _stage_exception(st: _Study, stage: str, section: str,

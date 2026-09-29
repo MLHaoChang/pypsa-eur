@@ -1501,7 +1501,17 @@ def get_eh_readiness(archetype: str, budget_solves: int | None = None,
             voll=getattr(cfg, "voll", None) if cfg is not None else None,
             dtc_attribution=dtc_attribution)
     except ValueError as exc:
-        raise HTTPException(422, str(exc)) from exc
+        from services.adequacy.eh_study import readiness_refusal_classes
+        if isinstance(exc, readiness_refusal_classes()):
+            # The repo's OWN typed refusals: their messages are authored
+            # here and tell the caller what to change.
+            raise HTTPException(422, str(exc)) from exc
+        # Anything else (a numpy/pandas ValueError from deep in the walk)
+        # is an internal failure: log it, and do not echo its text
+        # (CodeQL py/stack-trace-exposure, PR #60).
+        logger.exception("eh_readiness failed for archetype %s", archetype)
+        raise HTTPException(
+            422, "readiness could not be computed for this network") from exc
 
 
 @results_router.get("/eh_reference_design")
