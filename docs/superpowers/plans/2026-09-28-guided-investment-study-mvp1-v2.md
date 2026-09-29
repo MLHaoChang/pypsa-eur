@@ -116,7 +116,7 @@ Every phase follows this loop. **Do not start phase N+1 until phase N's gate is 
 
 **TDD evidence.** Red: `seed_ledger` missing; red: maturity stays `screening` after edits.
 
-- [ ] Gate S2
+- [x] Gate S2 — **GO WITH BINDING CONDITIONS, re-gated GO on `650f213`** (2026-09-29, `docs/superpowers/notes/2026-09-29-mvp1-s2-gate.md`): BC-S2-1 a library or illustrative tariff holds screening; BC-S2-2 not-used and inapplicable rows refused, `needs_attention` on reseed with `reset_rows`; BC-S2-3 a physical domain per row; BC-S2-4 currency-year mismatch refused; BC-S2-5 the 2030 projection labelled. Carried to S4: the pack and the tornado refuse to run while any row is `needs_attention`; a tariff-change re-seed test; one meaning for `energy_price_level`; the ledger is the single source for the demand-charge price and the round-trip efficiency; the sizing-limit (`p_nom_max` multiple) row; the question template's key drivers replace the stand-in list with an equality test; the intake refuses a measured capacity charge. Carried to S5: a second currency year is refused or converted explicitly. Carried to S6: a customised value outside its range. Untested branches for the next ledger PR: reset clearing the note, an illustrative user tariff, the re-seed price filter. S9: `study_library/` into the packaging list.
 
 ## S3. Tariff prices as network data, demand-charge constraint, bill calculator
 
