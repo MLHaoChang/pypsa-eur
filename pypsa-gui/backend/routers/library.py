@@ -11,6 +11,7 @@ store is `services/library/series_store.py`.
 """
 from __future__ import annotations
 
+from datetime import date
 from enum import Enum
 from uuid import UUID
 
@@ -27,6 +28,7 @@ from services import library_acl
 from services.library import items as I
 from services.library import series_io
 from services.library import series_store as S
+from services.library import urdb as U
 
 router = APIRouter()
 
@@ -77,6 +79,27 @@ class ItemIn(BaseModel):
 class ItemOut(BaseModel):
     ref: LibraryItemRef
     payload: dict
+    meta: dict = Field(default_factory=dict)
+
+
+class UrdbImportIn(BaseModel):
+    """A URDB rate (the `items[0]` object of an OpenEI response, or a REopt
+    `urdb_response`) to store as a Library tariff (P2 WP2.4b-i)."""
+
+    urdb_response: dict
+    name: str = Field(min_length=1, max_length=128)
+    cyclic_year: bool = False
+    accept_partial: bool = False
+    valid_from: date | None = None
+    tariff_id: str | None = None
+    jurisdiction: str | None = Field(default=None, min_length=2)
+
+
+class UrdbImportOut(BaseModel):
+    ref: LibraryItemRef
+    notes: list[str]
+    refusals: list[dict]
+    unsupported_fields: list[str]
 
 
 class SeriesOut(BaseModel):
@@ -193,4 +216,32 @@ def get_item(kind: ItemKind, name: str, version: int | None = None,
         raise HTTPException(404, str(exc)) from exc
     except S.LibraryRefStale as exc:
         raise HTTPException(409, {"code": "library_ref_stale", "message": str(exc)}) from exc
-    return ItemOut(ref=ref, payload=payload)
+    return ItemOut(ref=ref, payload=payload, meta=I.item_meta(db, org, ref))
+
+
+@router.post("/items/tariff/import_urdb", response_model=UrdbImportOut)
+def import_urdb(body: UrdbImportIn, org_id: UUID | None = None,
+                db: DBSession = Depends(get_db), user: User = Depends(require_user)):
+    """Refusals ⇒ 422 listing them, unless `accept_partial` (then stored with
+    `unsupported_fields`; the engine flags `tariff_incomplete`)."""
+    org = _target_org(db, user, org_id, write=True)
+    name = _item_name(body.name)
+    try:
+        tariff, refusals, notes = U.urdb_to_tariff(
+            body.urdb_response, name=name, cyclic_year=body.cyclic_year,
+            accept_partial=body.accept_partial, tariff_id=body.tariff_id,
+            jurisdiction=body.jurisdiction, valid_from=body.valid_from)
+    except U.UrdbRefused as exc:
+        raise HTTPException(422, {"code": "urdb_refused", "message": str(exc),
+                                  "refusals": exc.refusals}) from exc
+    except ValueError as exc:
+        raise HTTPException(422, {"code": "urdb_invalid", "message": str(exc)}) from exc
+    meta = {"source": "urdb", "provider": "OpenEI URDB", "notes": notes,
+            "description": str(body.urdb_response.get("label") or "")[:500] or None}
+    try:
+        ref = I.put_item(db, org, "tariff", name, tariff.model_dump(mode="json"), meta,
+                         created_by=user.id)
+    except ValueError as exc:
+        raise HTTPException(422, {"code": "urdb_invalid", "message": str(exc)}) from exc
+    return UrdbImportOut(ref=ref, notes=notes, refusals=refusals,
+                         unsupported_fields=tariff.unsupported_fields)

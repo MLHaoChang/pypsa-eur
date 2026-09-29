@@ -30,7 +30,7 @@
    "id": "demand",
    "kind": "demand",
    "unit": "per_kw_month",
-   "settlement": "h",
+   "settlement": "15min",
    "periods": [
     {
      "name": "0",

@@ -20,6 +20,9 @@ hourly and 15-min peak). Files here are marked:
 
 | File | Kind | Source | Expected value |
 |---|---|---|---|
+| `r1_leap_year.reopt.json` | verbatim | `test/scenarios/leap_year.json` (at this commit the 12×24 schedules are JSON arrays, not strings; the importer accepts both) | runtests.jl L4143–4210: a 10 kW load at hour 31·24+29·24+3·24+16: 2023 energy `0.28 × 10`, demand `18.05 × 10`; 2024 energy `0.36 × 10`, demand `(18.05 + 10) × 10` |
+| `r1_leap_year.urdb.json` | derived (the `urdb_response` sub-object extracted and re-indented; content-equal) | same | — |
+| `r1_leap_year.tariff.json` | derived (hand translation by the WP2.4b-i mapping rules: URDB period `k` → period name `str(k)` fragments; facility demand `demand`, TOU demand `demand_tou`; `demandwindow` absent ⇒ `15min`; `$/day` fixed ⇒ `per_day`, a documented deviation from REopt's × 30.4375) | same | same |
 | `r2_tiered_tou_demand.reopt.json` | verbatim | `test/scenarios/tiered_tou_demand.json` | the R2 test reads `max`, the tier rates and `annual_kwh` from it |
 | `r2_tiered_tou_demand.urdb.json` | derived (the `urdb_response` sub-object extracted and re-indented; content-equal) | same | — |
 | `r3_case2.tariff.json` | derived (inputs from the test body) | "Lookback Demand Charges" case 2, runtests.jl L1911–1932: `monthly_demand_rates`, `demand_lookback_percent` 0.75, `demand_lookback_months` Jan/Apr/Dec; load 100 kW (2022) with 200 kW at hour 21 (Jan), 400 at 2402 (Apr), 500 at 4087 (Jun), 300 at 8332 (Dec), 0-based | `Σ monthly_peaks × monthly_demand_rates`, `monthly_peaks = [300,300,300,400,300,500,300,…,300]` |
@@ -32,3 +35,8 @@ hourly and 15-min peak). Files here are marked:
 
 The URDB `max` of a tier is cumulative (URDB definition); REopt reads it as a
 width. The readings agree for two tiers, the only tier cases pinned here.
+
+`r2_tiered_tou_demand.tariff.json`: the demand item's `settlement` is `15min`
+since WP2.4b-i (the URDB rate has no `demandwindow`, and the importer's rule
+assumes 15 min and says so). It was `h` before. On REopt's hourly axis both bill
+the same peak.

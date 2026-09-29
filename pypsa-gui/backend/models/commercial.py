@@ -308,6 +308,9 @@ class Tariff(BaseModel):
     valid_to: date | None = None
     items: list[TariffItem] = Field(min_length=1)
     pack_hash: str | None = None
+    # URDB fields a partial import could not map (P2 WP2.4b-i): the engine
+    # bills the rest and flags `tariff_incomplete` with `total = None`.
+    unsupported_fields: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _unique_item_ids(self) -> "Tariff":

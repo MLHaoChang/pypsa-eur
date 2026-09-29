@@ -890,6 +890,11 @@ def rate(dispatch: pd.DataFrame, tariff: Tariff, *, step_hours, timezone: str | 
     # A ratchet whose lookback reaches unknown months bills a lower bound.
     seed_missing = any("ratchet_seed_missing" in v for v in notes.values())
     total = None if (unsupported or partial_energy or seed_missing) else total_supported
+    if tariff.unsupported_fields:
+        # A partial URDB import (P2 WP2.4b-i): charges it could not map are
+        # missing, so the bill is no total (ADR-0001).
+        flags["_tariff"] = [f"tariff_incomplete:{','.join(tariff.unsupported_fields)}"]
+        total = None
     demand_lines = pd.DataFrame(demand_rows, columns=["month", "tariff_item", "period",
                                                       "peak_kw", "billed_kw", "rate", "amount"])
     return RatingResult(lines=lines, fixed_lines=fixed_lines, monthly=monthly, annual=annual,

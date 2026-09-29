@@ -1020,6 +1020,53 @@ values other than 15/30/60.
   each refused field listed; 422 without `accept_partial`; a partial tariff bills with `tariff_incomplete` and
   `total = None`.
 
+- **As implemented:**
+  - **`services/library/urdb.urdb_to_tariff(urdb, *, name, cyclic_year=False, accept_partial=False, tariff_id=None, jurisdiction=None, valid_from=None) -> (Tariff, refusals, notes)`.** Deviation: a 3-tuple. The notes (`demandwindow_absent_assumed_15min`, `cyclic_year_set_by_importer`, `fixedchargeunits_absent_assumed_per_month`, `<field>.last_tier_max_ignored`) go into the Library item's meta (`ItemMeta.notes`, new).
+    - Refusals without `accept_partial` raise `UrdbRefused`, which the route turns into its 422.
+    - Nothing mappable is always refused.
+    - `valid_from` comes from the argument, else from `startdate` (epoch), else it is a `ValueError`. `enddate` sets `valid_to`.
+    - `tariff_id` defaults to a slug of `name`, and `jurisdiction` to "US".
+  - **Mapping rules** (in the module docstring):
+    - URDB period `k` becomes period name `str(k)`. Its fragments are month groups with one daily pattern × Mon–Fri / Sat–Sun (merged when equal) × hour runs; a period covering everything has no window.
+    - Energy settlement is `h`.
+    - Items are ordered `energy`, then the TOU demand item (`demand`, or `demand_tou` beside a facility item), then facility `demand` (months with equal rates merged, period name `facility`), then `fixed`.
+    - The rate is `rate + adj`. The cumulative `max` gives the thresholds.
+    - A catch-all tiered item keeps its rates on the tiers; a windowed one gets per-period `tier_rates`.
+    - Periods whose tier `max` or tier count differ are refused (`energyratestructure.max`, the WP2.1a-ii carried item).
+  - **Refusals, by field name:**
+    - `mincharge`, `annualmincharge`, `coincident*`;
+    - demand units other than kW, and tier units other than kWh / kW (`<structure>.unit`);
+    - `sell` tiers, and unknown tier keys;
+    - a `demandwindow` other than 15/30/60;
+    - both lookback modes set (`lookbackrange/lookbackmonths`);
+    - a ratchet with no facility item;
+    - fixed units other than $/month, $/day or $/year;
+    - any other non-empty field that is neither mapped nor in `_METADATA` (e.g. `demandratchetpercentage`, `energyattrs`, `dgrules`).
+    - 0, an empty value and an all-zero list are not refused.
+  - **Model and engine.**
+    - `Tariff.unsupported_fields: list[str] = []` is registered in `FIELDS_AFTER_V1` and mirrored in `types.ts`.
+    - The engine flags `_tariff: ["tariff_incomplete:<fields>"]` and sets `total = None`; `total_supported` stays.
+  - **Route.** `POST /api/library/items/tariff/import_urdb` with `{urdb_response, name, cyclic_year, accept_partial, valid_from?, tariff_id?, jurisdiction?}`.
+    - Deviation: the URDB JSON goes in the body instead of an upload id, because no upload store exists.
+    - Refused: 422 `{code: urdb_refused, refusals}`.
+    - Otherwise the tariff is stored with meta `{source: urdb, provider, notes, description: label}` and the route returns `{ref, notes, refusals, unsupported_fields}`.
+    - `GET /items/{kind}/{name}` now also returns `meta` (`items.item_meta`).
+  - **Oracles.** R1 is added: `r1_leap_year.reopt.json` (verbatim; at the pinned commit its schedules are arrays), `.urdb.json` and a hand-translated `.tariff.json`. The R2 hand translation's demand settlement is now `15min` (no `demandwindow`: the importer's rule). The engine's R2 oracle is unchanged on its hourly axis. PROVENANCE is updated.
+  - **Tests:** `tests/test_urdb_import.py` has 32 tests:
+    - R1, R2 and R3′ imported exactly as hand-translated, with their notes;
+    - JSON-string schedules;
+    - R1 bills REopt's 2023/2024 energy and demand cases;
+    - `adj`;
+    - windowed and cumulative tiers;
+    - fixed units and precedence;
+    - ratchet modes;
+    - TOU and facility demand as two items;
+    - 12 refusals by name, 422 and partial;
+    - zero fields not refused;
+    - `startdate`;
+    - partial ⇒ `tariff_incomplete` and `total` None;
+    - the route's 422, partial import and meta notes.
+
 ## WP2.4b-ii Series and meter-data import
 
 Files: `services/library/series_io.py` (from WP2.4b-0), `routers/library.py` (upload endpoints, thin),

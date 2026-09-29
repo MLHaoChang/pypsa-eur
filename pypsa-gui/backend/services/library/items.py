@@ -62,6 +62,9 @@ class ItemMeta(BaseModel):
     source: str = "user"
     provider: str | None = None
     description: str | None = None
+    # Disclosures of how the item was made (P2 WP2.4b-i: the URDB importer's
+    # assumptions, e.g. `cyclic_year_set_by_importer`).
+    notes: list[str] = []
 
 
 def _default_root() -> Path:
@@ -258,6 +261,17 @@ def resolve(db: DBSession, org_id: UUID, ref: M.LibraryItemRef, *,
     if hashlib.sha256(data).hexdigest() != row.hash:
         raise LibraryRefStale(f"Library file for {label} was modified")
     return json.loads(data)
+
+
+def item_meta(db: DBSession, org_id: UUID, ref: M.LibraryItemRef) -> dict:
+    """The stored meta of the version `ref` names ({} when absent)."""
+    row = db.scalars(select(LibraryItem).where(
+        LibraryItem.org_id == org_id, LibraryItem.kind == ref.kind,
+        LibraryItem.name == ref.id, LibraryItem.version == ref.version)).first()
+    try:
+        return json.loads(row.meta_json) if row is not None and row.meta_json else {}
+    except (TypeError, ValueError):
+        return {}
 
 
 def list_items(db: DBSession, org_id: UUID, kind: str) -> list[M.LibraryItemRef]:

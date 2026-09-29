@@ -341,6 +341,8 @@ export interface Tariff {
   valid_from: string; valid_to?: string | null
   items: TariffItem[]
   pack_hash?: string | null
+  // URDB fields a partial import could not map (P2 WP2.4b-i)
+  unsupported_fields?: string[]
 }
 /** A pinned Library item version (IC P2 WP2.4a); `hash` is the item's canonical-JSON sha256. */
 export interface LibraryItemRef {
