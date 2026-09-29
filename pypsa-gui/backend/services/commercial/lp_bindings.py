@@ -125,6 +125,7 @@ META_GROUP = "ic_group"
 META_CAPACITY = "ic_tariff_capacity"
 META_PPA = "ic_ppa"                    # the dispatch PPAs a solve bound (WP2.2d)
 PPA_PRICE_ATTR = "ic_ppa_price"        # generators_t: €/MWh added per Generator
+PPA_SPEC_ATTR = "_ic_ppa_spec"          # transient: set by apply, read by the LP wrapper
 CAPACITY_SPEC_ATTR = "_ic_capacity_spec"   # transient: set by apply, read by the LP wrapper
 CAPACITY_BUILT_ATTR = "_ic_capacity_built"  # transient: set by the LP wrapper
 GROUP_SPEC_ATTR = "_ic_group_spec"      # transient: set by apply, read by the LP wrapper
@@ -1641,8 +1642,40 @@ def dispatch_ppas(cfg: CommercialConfig) -> list:
 
 
 def ppa_dispatch_hash(cfg: CommercialConfig, version: int = _H.HASH_VERSION) -> str | None:
-    ppas = dispatch_ppas(cfg)
-    return _H.digest(ppas, version=version) if ppas else None
+    """Order-insensitive (sorted by id) and with `site_party`, which decides
+    whether the PPA binds at all (WP2.2d review #5)."""
+    ppas = sorted(dispatch_ppas(cfg), key=lambda c: c.id)
+    if not ppas:
+        return None
+    return _H.digest({"ppas": _H.canonical(ppas, version=version),
+                      "site_party": cfg.site_party}, version=version)
+
+
+def add_ppa_terms(n) -> None:
+    """objective += Σ_t w_t · price_t · p_gen,t for the dispatch PPAs, weighted
+    as PyPSA weights a marginal cost: the snapshot's objective weight, times
+    its period's objective weight in a multi-invest solve. Over the snapshots
+    the LP holds (a rolling window, a myopic period)."""
+    import xarray as xr
+
+    spec = getattr(n, PPA_SPEC_ATTR, None)
+    if not spec:
+        return
+    m = n.model
+    gens = sorted(spec)
+    p = m["Generator-p"].sel(name=gens)
+    snaps = p.indexes["snapshot"]
+    pos = n.snapshots.get_indexer(snaps)
+    if (pos < 0).any():
+        raise CommercialBindingError("the LP's snapshots are not on the network's axis")
+    w = n.snapshot_weightings.objective.to_numpy(dtype=float)[pos]
+    if getattr(n, "_multi_invest", False):
+        periods = n.snapshots.get_level_values(0)[pos]
+        w = w * n.investment_period_weightings["objective"].reindex(periods).to_numpy(dtype=float)
+    coef = np.column_stack([np.asarray(spec[g], dtype=float)[pos] for g in gens]) * w[:, None]
+    da = xr.DataArray(coef, coords={"snapshot": p.coords["snapshot"], "name": gens},
+                      dims=("snapshot", "name"))
+    m.objective += (p * da).sum()
 
 
 def _ppa_dispatch_spec(n, cfg: CommercialConfig) -> dict[str, np.ndarray] | None:
@@ -1671,6 +1704,10 @@ def _ppa_dispatch_spec(n, cfg: CommercialConfig) -> dict[str, np.ndarray] | None
             why = "pricing market_plus_premium: only a fixed price changes dispatch in P2"
         elif c.volume_cap_mwh_per_year is not None:
             why = "a volume cap is an annual limit, not a marginal cost"
+        elif len(set(c.asset_ids)) != len(c.asset_ids):
+            why = "an asset is listed twice (its output would be settled twice)"
+        elif inv is None and not isinstance(pd.Index(n.snapshots), pd.DatetimeIndex):
+            why = "the snapshots are not dates, so the price has no year to index to"
         if why is None:
             for a in c.asset_ids:
                 if a not in n.generators.index:
@@ -1685,8 +1722,11 @@ def _ppa_dispatch_spec(n, cfg: CommercialConfig) -> dict[str, np.ndarray] | None
             raise CommercialBindingError(
                 f"changes_dispatch PPA {c.id!r} cannot bind: {why}")
         if inv is None:
+            # The modelled year on the SITE clock, objective-weighted — the
+            # rule of `contracts.modelled_year` (WP2.2d review #6).
             w = n.snapshot_weightings.objective.to_numpy(dtype=float)
-            years = pd.Series(w, index=pd.DatetimeIndex(n.snapshots).year).groupby(level=0).sum()
+            local = _local_clock(n.snapshots, cfg.timezone)
+            years = pd.Series(w, index=local.year).groupby(level=0).sum()
             price = np.full(len(n.snapshots), indexed(c.price, c.indexation_pct_per_year,
                                                       c.base_year, int(years.idxmax())))
         else:
@@ -1771,21 +1811,17 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
 
         applied._undo.append(undo)
 
-    gmc = n.generators_t.marginal_cost
-    for gen, add in ppa_adders.items():
-        had = gen in gmc.columns
-        old = gmc[gen].copy() if had else None
-        base = old.to_numpy(dtype=float) if had else float(n.generators.at[gen, "marginal_cost"])
-        gmc[gen] = base + add
+    if ppa_adders:
+        # An objective term, not a marginal-cost adder: a CO2 price (or any
+        # other writer of `marginal_cost`) cannot clobber it, nor it them
+        # (WP2.2d review #1).
+        setattr(n, PPA_SPEC_ATTR, ppa_adders)
 
-        def undo_gen(gen=gen, had=had, old=old) -> None:
-            live = n.generators_t.marginal_cost
-            if had:
-                live[gen] = old
-            elif gen in live.columns:
-                n.generators_t.marginal_cost = live.drop(columns=[gen])
+        def undo_ppa() -> None:
+            if hasattr(n, PPA_SPEC_ATTR):
+                delattr(n, PPA_SPEC_ATTR)
 
-        applied._undo.append(undo_gen)
+        applied._undo.append(undo_ppa)
 
     solved_peaks: dict = {}
     if demand is not None:
@@ -1929,6 +1965,7 @@ def _wrap_with_commercial_bindings(network, user_fn, cfg, log_queue=None):
         add_demand_terms(n)
         add_tier_terms(n)
         add_group_terms(n)
+        add_ppa_terms(n)
 
     return fn
 

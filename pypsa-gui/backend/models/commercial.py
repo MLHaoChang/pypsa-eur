@@ -15,7 +15,7 @@ import math
 from datetime import date
 from typing import Annotated, Literal, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AfterValidator, BaseModel, Field, model_validator
 
 # ------------------------------------------------------------------ enums
 
@@ -354,6 +354,18 @@ class ConnectionAgreement(BaseModel):
 # ------------------------------------------------------------------ contracts
 
 
+def _unique_ids(v: list[str]) -> list[str]:
+    """A contract names each asset or load once: a repeated id would settle
+    its output twice (WP2.2d review #2)."""
+    dup = sorted({x for x in v if v.count(x) > 1})
+    if dup:
+        raise ValueError(f"ids listed more than once: {dup}")
+    return v
+
+
+UniqueIds = Annotated[list[str], AfterValidator(_unique_ids)]
+
+
 class PpaContract(BaseModel):
     # The discriminator of `CommercialConfig.contracts` (P2 WP2.2-0), with a
     # per-class default so `PpaContract(...)` without it still constructs.
@@ -368,7 +380,7 @@ class PpaContract(BaseModel):
     tenor_years: int = Field(ge=1)
     seller: str
     buyer: str
-    asset_ids: list[str] = Field(min_length=1)
+    asset_ids: UniqueIds = Field(min_length=1)
     reference_price: TimeSeriesRef | None = None
     changes_dispatch: bool = False
     # P2 WP2.2a (every field optional or defaulted: P0 JSON stays valid).
@@ -405,7 +417,7 @@ class CfdContract(BaseModel):
     strike: float = Field(ge=0)
     reference_price: TimeSeriesRef | None = None
     tenor_years: int = Field(ge=1)
-    asset_ids: list[str] = Field(min_length=1)
+    asset_ids: UniqueIds = Field(min_length=1)
     # P2 WP2.2a (optional or defaulted).
     base_year: int | None = None
     library_ref: LibraryItemRef | None = None
@@ -426,8 +438,8 @@ class DrContract(BaseModel):
     max_events: int | None = Field(default=None, ge=0)
     max_duration_h: float | None = Field(default=None, gt=0)
     notice_h: float | None = Field(default=None, ge=0)
-    asset_ids: list[str] = Field(default_factory=list)
-    load_ids: list[str] = Field(default_factory=list)
+    asset_ids: UniqueIds = Field(default_factory=list)
+    load_ids: UniqueIds = Field(default_factory=list)
     # P2 WP2.2b (optional): the payer of availability and activation, and the
     # contracted MW availability is paid on (absent ⇒ not established).
     counterparty: str | None = None
@@ -451,7 +463,7 @@ class LeaseContract(BaseModel):
     lessee: str
     annual_payment: float = Field(ge=0)
     tenor_years: int = Field(ge=1)
-    asset_ids: list[str] = Field(min_length=1)
+    asset_ids: UniqueIds = Field(min_length=1)
     base_year: int | None = None                  # P2: all contracts (P4 escalates)
     library_ref: LibraryItemRef | None = None
 
@@ -466,7 +478,7 @@ class EaasContract(BaseModel):
     fee_eur_per_mwh: float | None = Field(default=None, ge=0)
     fee_eur_per_year: float | None = Field(default=None, ge=0)
     tenor_years: int = Field(ge=1)
-    asset_ids: list[str] = Field(min_length=1)
+    asset_ids: UniqueIds = Field(min_length=1)
     base_year: int | None = None
     library_ref: LibraryItemRef | None = None
 

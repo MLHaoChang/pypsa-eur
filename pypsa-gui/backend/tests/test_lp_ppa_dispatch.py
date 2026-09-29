@@ -93,14 +93,56 @@ def test_a_generator_in_two_dispatch_ppas_is_refused():
         L.materialise_poc_prices(_site(), _commercial(PPA, {**PPA, "id": "ppa2"}))
 
 
-def test_the_adder_is_the_indexed_price_and_undo_restores_the_cost():
+def test_the_term_is_the_indexed_price_and_marginal_cost_is_untouched():
+    """Review #1: an objective term (`add_ppa_terms`), never a marginal-cost
+    adder that a CO2 price could clobber."""
     n = _site()
     ppa = {**PPA, "indexation_pct_per_year": 2.0, "base_year": 2028}
     applied = L.materialise_poc_prices(n, _commercial(ppa))
-    assert np.allclose(n.generators_t.marginal_cost["pv"], 100.0 * 1.02 ** 2)
+    assert np.allclose(getattr(n, L.PPA_SPEC_ATTR)["pv"], 100.0 * 1.02 ** 2)
+    assert "pv" not in n.generators_t.marginal_cost.columns
     assert applied.facts["ppa_dispatch"] == {"ppa1": ["pv"]}
     applied.undo()
-    assert "pv" not in n.generators_t.marginal_cost.columns
+    assert not hasattr(n, L.PPA_SPEC_ATTR)
+
+
+def test_duplicate_assets_and_a_non_datetime_axis_are_refused():
+    """Review #2 (an asset listed twice would settle twice) and #3 (no year to
+    index to)."""
+    with pytest.raises(ValueError, match="more than once"):
+        CommercialConfig.model_validate(_commercial({**PPA, "asset_ids": ["pv", "pv"]}))
+    n = _site()
+    n.set_snapshots(pd.RangeIndex(len(n.snapshots)))
+    with pytest.raises(L.CommercialBindingError, match="not dates"):
+        L.materialise_poc_prices(n, {"poc_link": "import", "contracts": [PPA]})
+
+
+def test_the_modelled_year_is_on_the_site_clock():
+    """Review #6: two days either side of New Year in Berlin — the objective-
+    weighted majority year on the SITE clock, as `contracts.modelled_year`."""
+    n = _site()
+    idx = pd.date_range("2029-12-31 00:00", periods=len(n.snapshots), freq="15min")
+    n.set_snapshots(idx[:192])
+    n.snapshot_weightings.loc[:, :] = 0.25
+    shifted = pd.date_range("2029-12-30 23:00", periods=192, freq="15min")   # UTC
+    n.set_snapshots(shifted)
+    n.snapshot_weightings.loc[:, :] = 0.25
+    ppa = {**PPA, "indexation_pct_per_year": 10.0, "base_year": 2029}
+    cfg = {**_commercial(ppa), "timezone": "Europe/Berlin"}
+    spec = L._ppa_dispatch_spec(n, CommercialConfig.model_validate(cfg))
+    local = L._local_clock(n.snapshots, "Europe/Berlin")
+    year = pd.Series(0.25, index=local.year).groupby(level=0).sum().idxmax()
+    assert spec["pv"][0] == pytest.approx(100.0 * 1.1 ** (year - 2029))
+
+
+def test_the_hash_ignores_order_and_includes_the_site_party():
+    """Review #5."""
+    a = CommercialConfig.model_validate(_commercial(PPA, {**PPA, "id": "b", "asset_ids": ["x"]}))
+    b = CommercialConfig.model_validate(_commercial({**PPA, "id": "b", "asset_ids": ["x"]}, PPA))
+    c = CommercialConfig.model_validate({**_commercial(PPA), "site_party": "Hub"})
+    assert L.ppa_dispatch_hash(a) == L.ppa_dispatch_hash(b)
+    assert L.ppa_dispatch_hash(c) != L.ppa_dispatch_hash(
+        CommercialConfig.model_validate(_commercial(PPA)))
 
 
 # ── LP ─────────────────────────────────────────────────────────────────────
@@ -152,6 +194,67 @@ def test_a_ppa_price_changed_after_the_solve_is_drift_in_the_rows_and_on_the_bil
     flags = commercial_cost_terms(n, commercial)["flags"]
     assert {"ppa_settlement_not_established", "ppa_recipe_changed"} <= set(flags)
     assert "config_changed_since_solve" not in flags
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("co2", ["uniform", "per_period"])
+def test_a_co2_price_and_the_ppa_both_reach_the_lp(co2):
+    """Review #1 (HIGH): on an emitting on-site generator the LP sees BOTH the
+    CO2 price and the PPA price. The merit order proves it: the CHP costs
+    30 + 0.2/0.4 × 100 = 80 €/MWh with CO2, 90 with the PPA as well; an 85 €/MWh
+    backup beats it only when both are in the objective (the CO2 price alone
+    leaves the CHP at 80, the PPA alone at 40)."""
+    def build():
+        n = _site()
+        n.add("Carrier", "gas", co2_emissions=0.2)
+        n.add("Generator", "chp", bus="site", carrier="gas", p_nom=20.0, marginal_cost=30.0,
+              efficiency=0.4)
+        n.add("Generator", "backup", bus="site", carrier="grid", p_nom=200.0,
+              marginal_cost=85.0)
+        n.generators.loc["grid_supply", "marginal_cost"] = 300.0
+        kw = {"co2_price": 100.0}
+        if co2 == "per_period":
+            n.set_investment_periods([2030, 2040])
+            n.investment_period_weightings["years"] = 10.0
+            n.investment_period_weightings["objective"] = 10.0
+            kw = {"co2_price_per_period": {2030: 100.0, 2040: 100.0},
+                  "multi_investment_periods": True}
+        return n, kw
+
+    ppa = {**PPA, "id": "chp_ppa", "price": 10.0, "asset_ids": ["chp"]}
+    control, kw = build()
+    _solve(control, _commercial(), **kw)
+    bound, kw = build()
+    _solve(bound, _commercial(ppa), **kw)
+    w = control.snapshot_weightings.objective
+    assert float((w * control.generators_t.p["chp"]).sum()) > 1.0     # 80 < 85: it runs
+    assert float((w * bound.generators_t.p["chp"]).sum()) == pytest.approx(0.0, abs=1e-6)
+    assert float((w * bound.generators_t.p["backup"]).sum()) > 1.0
+    assert "chp" not in bound.generators_t.marginal_cost.columns or \
+        not np.allclose(bound.generators_t.marginal_cost["chp"], 90.0)
+
+
+@pytest.mark.live_solve
+def test_nan_output_makes_the_row_not_established():
+    """Review #4."""
+    n = _site()
+    cfg = _solve(n, _commercial({**PPA, "price": 10.0}))
+    n.generators_t.p.iloc[:20, n.generators_t.p.columns.get_loc("pv")] = np.nan
+    _, rows = _rows(n, cfg)
+    assert rows["ppa_settlement"] is None
+    assert "ppa_settlement_not_established" in rows["flags"]
+
+
+@pytest.mark.live_solve
+def test_a_ppa_added_after_a_current_recipe_solve_is_drift_in_rows_and_bill():
+    """Review #7: the rows say what the bill says."""
+    from services.commercial.cost_rows import commercial_cost_terms
+
+    n = _site()
+    _solve(n, _commercial())
+    later = _commercial({**PPA, "price": 10.0})
+    assert "config_changed_since_solve" in commercial_cost_terms(n, later)["flags"]
+    assert "config_changed_since_solve" in B.bill_site(n, later).flags
 
 
 @pytest.mark.live_solve

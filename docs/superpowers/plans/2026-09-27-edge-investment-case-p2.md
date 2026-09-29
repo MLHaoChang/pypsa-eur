@@ -902,8 +902,8 @@ an asset not a Generator.
   price change; reconciliation case `ppa_changes_dispatch` before and after save → load.
 
 - **As implemented:**
-  - **`lp_bindings._ppa_dispatch_spec`** is run by `validate_for_network`, so it refuses at binding, at solve time and in preflight. It binds a `changes_dispatch` PPA only when it is a fixed-price `pay_as_produced` PPA on ON-SITE Generators (bus ≠ the PoC's grid bus) with `buyer == site_party` and no volume cap. Every other shape is refused with its reason: the seller case, another kind, `market_plus_premium`, a cap, a grid-side or non-Generator asset, or a Generator in two dispatch PPAs.
-  - **The adder** is price_y indexed to the modelled year (per investment period on a multi-period axis), applied as a transient `generators_t.marginal_cost` adder and undone after the solve.
+  - **`lp_bindings._ppa_dispatch_spec`** is run by `validate_for_network`, so it refuses at binding, at solve time and in preflight. It binds a `changes_dispatch` PPA only when it is a fixed-price `pay_as_produced` PPA on ON-SITE Generators (`site_generators`: behind the meter, WP2.2c) with `same_party(buyer, site_party)`, no volume cap, a datetime axis, and no asset listed twice. Every other shape is refused with its reason: the seller case, another kind, `market_plus_premium`, a cap, a grid-side or non-Generator asset, or a Generator in two dispatch PPAs.
+  - **The term** is price_y indexed to the modelled year: per investment period on a multi-period axis, else the objective-weighted majority year on the SITE clock, as `contracts.modelled_year`. Since review round 1 it is an LP objective term (`add_ppa_terms`, transient spec `_ic_ppa_spec`), weighted as PyPSA weights a marginal cost. It is no longer a `marginal_cost` adder.
   - **Commit.** It writes `generators_t["ic_ppa_price"]` and `meta["ic_ppa"] = {contracts, generators, hash, hash_version}`, and clears both after a solve without one. `LP_RECIPE = 5`; `facts.ppa_dispatch`.
   - **Rows.** `ppa_settlement` is Σ w_obj × p_gen × the committed €/MWh per period, ADDED like the energy rows (in the objective, out of the statistics).
   - **Drift and recipe.** A hash mismatch is `config_changed_since_solve`. With no record while one is wanted: `ppa_settlement_not_established`, plus `ppa_recipe_changed` for a solve under an older recipe. `billing._drift_flags` does the same.
@@ -917,6 +917,15 @@ an asset not a Generator.
     - preflight and binding refusals.
 
     Reconciliation gate case `ppa_changes_dispatch` (18 cases), compared across save → load.
+- **WP2.2d review round 1 → FAIL; all findings fixed:**
+  1. HIGH: the `marginal_cost` adder and the CO2 price overwrote each other on an emitting on-site generator. The uniform CO2 price was ignored under the time-varying column; the per-period CO2 price overwrote the adder. → The PPA is now an objective term, `add_ppa_terms` in `_wrap_with_commercial_bindings` (every solve path passes `extra_fn`), and `marginal_cost` is untouched. Test: the CHP is 80 €/MWh with CO2 and 90 with the PPA as well. An 85 €/MWh backup wins only when both costs are in the LP, with a uniform price and per period. (The rows' pre-existing CO2 gap is outside WP2.2d.)
+  2. MEDIUM: an asset listed twice was settled twice. → Contract `asset_ids` / `load_ids` must be unique (`UniqueIds`, model validator), and `_ppa_dispatch_spec` refuses a duplicate too.
+  3. MEDIUM: on a non-datetime flat axis the price was indexed to 1970. → Refused: "the snapshots are not dates".
+  4. LOW: a NaN output gave a partial row. → `ppa_settlement_not_established`.
+  5. LOW: the hash depended on contract order and missed `site_party`. → Sorted by id, with `site_party`. The hash changes for WP2.2d records, which exist only on this branch.
+  6. LOW: the LP took the modelled year from UTC snapshot years. → The site clock, as `contracts.modelled_year`. WP2.5 should settle a dispatch PPA from the committed `ic_ppa_price` so the line equals the row by construction (carried to WP2.5).
+  7. LOW: after a current-recipe solve without the PPA, the rows lacked the bill's drift flag. → The rows now add `config_changed_since_solve`.
+  8. Docs: this plan text is updated. `test_lp_ppa_dispatch.py` has 20 tests.
 
 ## WP2.3 Billing vs LP gap per item kind, with causes
 

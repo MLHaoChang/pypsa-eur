@@ -235,7 +235,7 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
         gens = ppa.get("generators") or []
         p = n.generators_t.p
         if frame is None or any(g not in frame.columns or g not in p.columns for g in gens) \
-                or frame[gens].isna().any().any():
+                or frame[gens].isna().any().any() or p[gens].isna().any().any():
             block["ppa_settlement"] = None
             flags.append("ppa_settlement_not_established")
         else:
@@ -255,6 +255,8 @@ def commercial_cost_terms(n, commercial: dict | None, *, years=None) -> dict:
         rec = n.meta.get(_lp.META_LINKS) or {}
         if rec and int(rec.get("lp_recipe") or 1) < _lp.PPA_DISPATCH_RECIPE:
             flags.append("ppa_recipe_changed")  # the solve's recipe bound no dispatch PPA
+        elif rec:
+            drifted()  # this recipe binds it, so the PPA came after the solve (review #7)
 
     # Energy-hub group contract (WP1.6): no money of its own; the members'
     # shares of the group's import energy are reported (allocation is P3).
