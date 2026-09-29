@@ -16,7 +16,7 @@ from enum import Enum
 from uuid import UUID
 
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session as DBSession
 
@@ -29,6 +29,7 @@ from services.library import items as I
 from services.library import series_io
 from services.library import series_store as S
 from services.library import urdb as U
+from services.upload_guard import read_capped
 
 router = APIRouter()
 
@@ -102,6 +103,15 @@ class UrdbImportOut(BaseModel):
     unsupported_fields: list[str]
 
 
+class MeterDataOut(BaseModel):
+    ref: PriceSeriesRef
+    meter_history_peaks_kw: dict[str, float]
+    meter_history_energy_kwh: dict[str, float]
+    settlement: str
+    notes: list[str]
+    help: str
+
+
 class SeriesOut(BaseModel):
     ref: PriceSeriesRef
     timestamps: list[str]
@@ -148,6 +158,54 @@ def put_series(body: SeriesIn, org_id: UUID | None = None, db: DBSession = Depen
         return S.put_series(db, org, body.name, series, body.meta, created_by=user.id)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+
+
+def _upload_name(name: str) -> str:
+    try:
+        return SeriesIn.model_validate({"name": name, "timestamps": ["x"], "values": [0.0]}).name
+    except ValueError as exc:
+        raise HTTPException(422, "name must be printable, not '.' or '..', and contain no "
+                                 "'/', '?' or '#'") from exc
+
+
+@router.post("/series/upload", response_model=PriceSeriesRef)
+async def upload_series(file: UploadFile = File(...), name: str = Form(...),
+                        timezone: str | None = Form(None), source: str = Form("upload"),
+                        org_id: UUID | None = None, db: DBSession = Depends(get_db),
+                        user: User = Depends(require_user)):
+    """A `timestamp,value` CSV or xlsx as a Library series (P2 WP2.4b-ii)."""
+    org = _target_org(db, user, org_id, write=True)
+    name = _upload_name(name)
+    data = await read_capped(file)
+    try:
+        series = series_io.parse_upload(data, file.filename or "", timezone,
+                                        max_points=MAX_POINTS)
+        return S.put_series(db, org, name, series, {"source": source}, created_by=user.id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.post("/meter_data", response_model=MeterDataOut)
+async def upload_meter_data(file: UploadFile = File(...), name: str = Form(...),
+                            settlement: str = Form("15min"), timezone: str | None = Form(None),
+                            org_id: UUID | None = None, db: DBSession = Depends(get_db),
+                            user: User = Depends(require_user)):
+    """A kW meter file → a Library series (its settlement and notes in the
+    meta) and the monthly history for `meter_history_peaks_kw` /
+    `meter_history_energy_kwh` (P2 WP2.4b-ii)."""
+    org = _target_org(db, user, org_id, write=True)
+    name = _upload_name(name)
+    data = await read_capped(file)
+    try:
+        series = series_io.parse_upload(data, file.filename or "", timezone,
+                                        max_points=MAX_POINTS)
+        hist = series_io.meter_history(series, settlement=settlement, timezone=timezone)
+        ref = S.put_series(db, org, name, series,
+                           {"source": "meter_data", "unit": "kW", "settlement": settlement,
+                            "notes": hist["notes"]}, created_by=user.id)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return MeterDataOut(ref=ref, help=series_io.METER_HISTORY_HELP, **hist)
 
 
 @router.get("/series/{name}", response_model=SeriesOut)

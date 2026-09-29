@@ -931,6 +931,7 @@ an asset not a Generator.
   - #1 (LOW, the condition): investment periods that are not years compounded an indexed price to about 0. → Refused when `base_year` and indexation are set and a period is outside 1900–2200.
   - #2 (LOW, recommended): the term ignored scenario probabilities. → `add_ppa_terms` refuses a stochastic network. It is unreachable today: binding already refuses such networks, for another reason.
   - `test_lp_ppa_dispatch.py` has 21 tests.
+- **WP2.2d review round 3 → PASS** (no residue). Probes: periods [1, 2] with indexation are refused; unindexed, or no `base_year`, still binds; [2030, 2040] binds with 10 and 12.19; a scenario network is refused at the term.
 
 ## WP2.3 Billing vs LP gap per item kind, with causes
 
@@ -1125,6 +1126,34 @@ Files: `services/library/series_io.py` (from WP2.4b-0), `routers/library.py` (up
   energy → `meter_history_energy_kwh`.
 
 - [ ] Red: round-trips; DST-day rows; a meter file at 5-min averaged to the stated settlement.
+
+- **As implemented:**
+  - **`series_io.parse_upload(data, filename, timezone=None)`:**
+    - `.csv` (UTF-8, BOM tolerated) and `.xlsx`/`.xlsm` (the first sheet; datetime cells are read as ISO) with the header `timestamp,value`, under `series_from`'s timestamp and zone rules.
+    - Refused, each with a reason (the route's 422): a wrong header, extra columns, a non-numeric value, no rows, and any other file type. An empty value is NaN.
+  - **`series_io.meter_history(series, *, settlement="15min", timezone=None)`** returns `{meter_history_peaks_kw, meter_history_energy_kwh, settlement, notes}` on the site clock:
+    - A tz-aware series is converted to `timezone`. A naive series is wall-clock time, and a `timezone` with it is refused.
+    - Peaks are the highest duration-weighted settlement-interval mean of each month (`tariff_engine.interval_key`, fall-back safe). Energy is Σ kW × h.
+    - Only COMPLETE months are history. A month with missing coverage (against its real hours, 743/745 in DST months), a NaN or a gap is named `month_incomplete:<m>`.
+    - A meter coarser than the settlement gives energy but no peaks (`peaks_not_established:meter_step_<x>h_coarser_than_settlement_<s>`).
+    - Negative rows are export (`negative_rows_read_as_export:<n>`).
+    - The settlement is one of 15min / 30min / h.
+  - **`METER_HISTORY_HELP`** carries the WP2.1a-iii sentence (history resolves cyclic and months-mode ratchets only for a metered rate year; for a future year use non-cyclic range with history, or `cyclic_year`). The meter route returns it.
+  - **Routes (thin):**
+    - `POST /api/library/series/upload` (multipart `file`, `name`, `timezone`, `source`) → a Library series.
+    - `POST /api/library/meter_data` (multipart `file`, `name`, `settlement`, `timezone`) → the series stored with meta `{source: meter_data, unit: kW, settlement, notes}` (new optional `SeriesMeta` fields), plus the history dicts ready for `CommercialConfig` and the help.
+    - Both use `read_capped`, the write ACL and the series name rules.
+  - **Tests:** `tests/test_series_io.py` has 14 tests:
+    - CSV round trips on the Berlin DST days (92 and 100 quarter hours);
+    - naive xlsx;
+    - malformed uploads;
+    - 5-min data averaged to 15 min and to h;
+    - incomplete months;
+    - a coarser meter;
+    - site clock and DST-month hours;
+    - export rows;
+    - the help;
+    - both routes.
 
 ## WP2.4c Library chat tools
 

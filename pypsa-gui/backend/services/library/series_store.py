@@ -63,6 +63,11 @@ class SeriesMeta(BaseModel):
     vintage_year: int | None = None
     provider: str | None = None
     description: str | None = None
+    # Meter data (P2 WP2.4b-ii): the settlement its peaks were measured on,
+    # the unit, and what the import noted (incomplete months, …).
+    settlement: str | None = None
+    unit: str | None = None
+    notes: list[str] = []
 
 
 _PUT_RETRIES = 5
