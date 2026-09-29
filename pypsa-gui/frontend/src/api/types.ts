@@ -496,7 +496,12 @@ export interface ValueFlowConfig {
   allocation?: AllocationKey | null
   export_revenue_to?: 'site_party' | 'asset_owner'
 }
-/** GET/PUT /api/simulation/commercial/value_flows (IC P3 WP3.0). Send `digest` back as If-Match. */
+/**
+ * GET/PUT /api/simulation/commercial/value_flows (IC P3 WP3.0). Send `digest` back as
+ * If-Match (always). The stored value is raw: trust `value_flows`' shape only when
+ * `status === 'ok'` (a hand-edited file can hold any JSON; the status is then
+ * `value_flows_invalid`).
+ */
 export interface ValueFlowsState {
   value_flows: ValueFlowConfig | null
   digest: string

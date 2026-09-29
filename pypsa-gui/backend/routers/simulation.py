@@ -624,7 +624,8 @@ def put_value_flows(body: ValueFlowsIn, if_match: str | None = Header(default=No
             raise HTTPException(409, {"code": "no_commercial_config",
                                       "message": "set the commercial config (poc_link) first"})
         current = commercial.get("value_flows")
-        if if_match is not None and _entity_tag(if_match) != P.value_flows_digest(current):
+        tag = _entity_tag(if_match)
+        if tag is not None and tag != "*" and tag != P.value_flows_digest(current):
             raise HTTPException(412, {"code": "value_flows_changed",
                                       "message": "the value-flow config changed since it was "
                                                  "read; reload and re-apply the edit"})

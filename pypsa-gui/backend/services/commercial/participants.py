@@ -47,7 +47,7 @@ def parse_value_flows(raw) -> ValueFlowConfig | None:
     except ValidationError as exc:
         first = exc.errors()[0] if exc.errors() else {}
         where = ".".join(str(p) for p in first.get("loc", ()))
-        raise ValueFlowsInvalid(f"value_flows is not valid ({where}: "
+        raise ValueFlowsInvalid(f"value_flows is not valid ({where or 'value_flows'}: "
                                 f"{first.get('msg', str(exc))})") from exc
 
 

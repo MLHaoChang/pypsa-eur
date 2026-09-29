@@ -342,7 +342,7 @@ def test_a_misshaped_body_is_422_never_a_silent_clear(site, body):
 def test_a_quoted_or_weak_if_match_is_the_same_token(site):
     """#6: HTTP clients may quote an entity tag."""
     d = _get(site)["digest"]
-    for header in (f'"{d}"', f'W/"{d}"'):
+    for header in (f'"{d}"', f'W/"{d}"', "*"):
         r = site.put("/api/simulation/commercial/value_flows", json={"value_flows": None},
                      headers={"If-Match": header})
         assert r.status_code == 200, (header, r.text)

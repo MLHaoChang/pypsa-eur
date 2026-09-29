@@ -199,6 +199,7 @@ disjointness, stale party at ledger time → flag, not an invalid config); `If-M
   - #6 `If-Match` accepts quoted and weak tags;
   - #7 `attach_tariff` strips `value_flows` before its PUT;
   - #8 a live solve, then a value-flows edit, then billing and `cost_breakdown`, shows no `config_changed_since_solve`.
+- **Review round 2 → PASS.** Notes applied: `If-Match: *` matches any current value; `types.ts` says a reader trusts the shape only when `status === 'ok'`; the parse error names `value_flows` for a non-object root. **For WP3.3a:** the route now refuses `contracted_capacity` without every `contracted_mw` and a participant on two hub links; the ledger-time `allocation_not_established` stays for configs that became stale after saving.
 - The WP3.5 editor and the WP3.4 chat tool must always send `If-Match`. Chat errors from the new 422s arrive as the generic `tool_error` kind, like the existing binding refusals (INFO).
 ---
 
