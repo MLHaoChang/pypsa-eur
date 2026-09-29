@@ -141,3 +141,54 @@ The choice is ledgered on every capacity result. It also means the DC
 sensitivity is to a **distributed** balancing vector, not to the reference
 bus: the PTDF column for B minus the headroom-weighted sum of the committed
 units' columns, re-derived per hour because commitment changes by hour.
+
+## Stage A, as built (2026-09-29)
+
+`static/capacity.py` (`capacity_dc`, `capacity_ac`, `apply_connection`) and
+`schema/capacity.py`. The N-1 screen's per-contingency loop was split into
+`_branch_outcomes` / `_unit_outcomes`, which return the raw loading and
+voltage arrays, and a summary step. The capacity search compares those arrays
+element by element. The screen's own 94 tests pass unchanged on the refactor.
+
+**Measured on the hand-built grids**, each as worked out on paper:
+
+| grid | kind | DC (MW) | AC (MW) | binds |
+|---|---|---|---|---|
+| radial, 95.3 MVA line, 30 MW existing | load | 65.3 | 62.2 | that line, intact (AC carries Q at pf 0.98, plus losses) |
+| parallel pair, 20 MW existing | load | 75.3 | 72.9 | the surviving circuit under N-1 |
+| parallel pair, 120 MW existing (N-1 already at ~126 %) | load | 0.0 | 0.0 | the existing overload may not deepen |
+| same | generation | 240.0 | 240.9 | relieves it, until the reversed flow reaches the same level |
+| 200 km line, rated far above flow | load | 1900.3 | 27.8 | **voltage**, which DC cannot see |
+
+**What case39 says, and why it is not a bug.** On native case39 at its stored
+operating point, **every** load bus reads about 3 MW. The chain:
+- `BUS_02-BUS_03` is already at **111.7 %** after losing `BUS_26-BUS_27`;
+- pro-rata balancing puts about **72 %** of any new load on G_BUS_30, which
+  holds 790 of the 1,101 MW of committed upward headroom;
+- G_BUS_30's power crosses that branch, so every load bus has a
+  post-contingency distribution factor of **9–76 %** on it.
+
+A 5 % distribution-factor threshold (the PJM/MISO convention for holding a
+new connection responsible for an existing constraint) was checked and
+changes nothing: all 39 buses exceed it. The answer is a true property of
+this operating point combined with the owner's balancing rule.
+
+Generation discriminates as expected, because it relieves that branch:
+
+| bus | DC (MW) | AC (MW) | binds |
+|---|---|---|---|
+| BUS_03 | 906.5 | 942.8 | a new N-1 overload on `BUS_03-BUS_04` |
+| BUS_08 | 240.4 | 196.2 | AC below DC: the known DC blind spot |
+
+The study's own hours, with their unit commitment and RES, will read
+differently. That is what stage B runs.
+
+**Verification.**
+- 22 tests, including a pandapower-only oracle. It re-solves at the answer
+  and at the answer + 2 MW, with no capacity code in the loop, for one
+  worsened-existing case and one new-violation case.
+- Nine mutations were each caught by the test written for them: existing
+  violations allowed to deepen; N-1 ignored; slack-only balancing; headroom
+  not capped; power factor ignored; DC N-1 ignored; voltage not checked; the
+  cap reported as infinity; decommitted units given a share.
+- Cost: about 0.3–0.7 s per AC search on case39 (5–12 evaluations).
