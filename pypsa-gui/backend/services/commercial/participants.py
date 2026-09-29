@@ -79,6 +79,25 @@ def _contract_parties(contract) -> list[tuple[str, str | None]]:
     return []
 
 
+# Who pays whom under each contract type (the payer first), for a line whose
+# amount is unknown (an unsettled contract).
+_PAYER_PAYEE = {"ppa": ("buyer", "seller"), "cfd": ("counterparty", "generator_owner"),
+                "dr": ("counterparty", None), "lease": ("lessee", "lessor"),
+                "eaas": ("customer", "provider"), "retail": ("customer", "retailer")}
+
+
+def contract_payer_payee(contract, site_party: str) -> tuple[str | None, str | None]:
+    """(payer, payee) a contract's money usually runs; a DR contract pays the
+    site (its counterparty is the payer)."""
+    roles = _PAYER_PAYEE.get(contract.type)
+    if roles is None:
+        return None, None
+    named = dict(_contract_parties(contract))
+    payer = named.get(roles[0]) if roles[0] else None
+    payee = named.get(roles[1]) if roles[1] else site_party
+    return payer, payee
+
+
 def _in(name: str, pool) -> bool:
     return any(same_party(name, p) for p in pool)
 
@@ -332,6 +351,8 @@ class LedgerInputs:
     input_flags: list[str] = field(default_factory=list)
     # (contract id, reason) of contracts that did not settle: a None line each.
     unsettled_contracts: list[tuple[str, str]] = field(default_factory=list)
+    # contract id → (payer, payee) of an unsettled contract (None when unnamed).
+    unsettled_parties: dict[str, tuple[str | None, str | None]] = field(default_factory=dict)
     # `cost_breakdown["curtailment_cost"]` (years-weighted, horizon): a penalty
     # term outside every total, disclosed like DSR and VoLL.
     curtailment_penalty: float | None = None
@@ -508,7 +529,10 @@ def _sources(inputs: LedgerInputs, vf: ValueFlowConfig, p: str) -> list[_Source]
             src.flags.append(f"unmapped_stream:{s.get('value_stream')}")
         out.append(src)
     for cid, reason in inputs.unsettled_contracts:
-        out.append(_Source("contract", f"{cid}:unsettled", "other", legs=[(None, None, None)],
+        # Its parties' money is unknown too (WP3.4 review #4): the leg names
+        # them when the contract does, so their totals are null, not numbers.
+        payer, payee = inputs.unsettled_parties.get(cid, (None, None))
+        out.append(_Source("contract", f"{cid}:unsettled", "other", legs=[(payer, payee, None)],
                            meta={"contract_id": cid},
                            flags=[f"contract_not_settled:{reason}"[:200]]))
     for a in inputs.assets:
@@ -903,37 +927,53 @@ def check_conservation(ledger: Ledger, inputs: LedgerInputs,
     return ConservationResult(ok=overall, periods=out, flags=flags)
 
 
-def by_participant(ledger: Ledger) -> dict[str, dict[str, dict]]:
-    """Per period and party (as named on the lines): paid, received, net
-    (received − paid) and the net by stream. A party on a line of unknown
-    amount has unknown totals — `paid` / `received` / `net` and that stream
-    None, never a partial sum (ADR-0001; WP3.1 review #11, done in WP3.4). A
-    known amount with one party unknown still counts for the named party."""
+def canonical_party(party: str, vf: ValueFlowConfig | None) -> str:
+    """One name per party however a line spells it: the participant's or
+    external's id it `same_party`-matches, else the name as written."""
+    if vf is None:
+        return party
+    return next((k for k in (*[x.id for x in vf.participants], *vf.externals)
+                 if same_party(party, k)), party)
+
+
+def by_participant(ledger: Ledger, vf: ValueFlowConfig | None = None) -> dict[str, dict[str, dict]]:
+    """Per period and party (canonical names with `vf`, WP3.4 review #3):
+    paid, received, net (received − paid) and the net by stream. A party on a
+    line of unknown amount has that SIDE unknown — `paid` (as payer) or
+    `received` (as payee), `net` and that stream None, never a partial sum
+    (ADR-0001; WP3.1 review #11, review #7). A known amount with one party
+    unknown still counts for the named party."""
     out: dict[str, dict[str, dict]] = {}
     for p, lines in ledger.periods.items():
         tab: dict[str, dict] = {}
-        unknown: dict[str, set[str]] = {}
+        unknown: dict[str, dict[str, set]] = {}
 
         def row(party):
             return tab.setdefault(party, {"paid": 0.0, "received": 0.0, "net": 0.0,
                                           "by_stream": {}})
 
         for ln in lines:
-            for party, sign in ((ln.payer, -1.0), (ln.payee, 1.0)):
+            for party, side, sign in ((ln.payer, "paid", -1.0), (ln.payee, "received", 1.0)):
                 if party is None:
                     continue
+                party = canonical_party(party, vf)
                 r = row(party)
                 if ln.amount is None:
-                    unknown.setdefault(party, set()).add(ln.value_stream)
+                    u = unknown.setdefault(party, {"sides": set(), "streams": set()})
+                    u["sides"].add(side)
+                    u["streams"].add(ln.value_stream)
                     continue
-                r["paid" if sign < 0 else "received"] += ln.amount
+                r[side] += ln.amount
                 r["by_stream"][ln.value_stream] = \
                     r["by_stream"].get(ln.value_stream, 0.0) + sign * ln.amount
         for party, r in tab.items():
             r["net"] = r["received"] - r["paid"]
-            if party in unknown:
-                r["paid"] = r["received"] = r["net"] = None
-                for stream in unknown[party]:
+            u = unknown.get(party)
+            if u:
+                for side in u["sides"]:
+                    r[side] = None
+                r["net"] = None
+                for stream in u["streams"]:
                     r["by_stream"][stream] = None
         out[p] = tab
     return out

@@ -65,7 +65,8 @@ def test_define_participants_is_a_write_tool_on_its_routes():
 def test_a_template_without_drafts_is_saved_with_if_match(site):
     out = _define(template="btm_ppa")
     assert out["saved"] is True and out["template"] == "btm_ppa"
-    assert {p["id"] for p in out["participants"]} == {"site", "Solar BV"}
+    assert set(out["participants"]) == {"site (offtaker)", "Solar BV (developer)"}
+    assert out["participants_total"] == 2
     assert _stored(site)["digest"] == out["digest"]
 
 
@@ -166,6 +167,49 @@ def test_the_summary_fits_the_cap_whatever_the_ledger():
     assert len(json.dumps(big, default=str)) <= chat_tools._VF_SUMMARY_CHARS
     assert big["omitted"][:2] == ["by_stream", "externals"]
     assert set(big["periods"]["2030"]["by_participant"]) == {"party_0"}   # participants kept
+
+
+def test_the_summary_fits_even_with_many_internal_participants():
+    """Review #1: 60 PARTICIPANTS (not externals) × 3 periods, and long ids."""
+    payload = _payload(n_parties=60, periods=("2030", "2040", "2050"))
+    payload["participants"] = [{"id": f"party_{i}", "name": f"P{i}", "role": "other"}
+                               for i in range(60)]
+    out = chat_tools._value_flows_summary(payload)
+    assert len(json.dumps(out, default=str)) <= chat_tools._VF_SUMMARY_CHARS
+    assert out["periods"]["2030"]["participants_omitted"] > 0
+    long_ids = _payload(n_parties=10)
+    long_ids["participants"] = [{"id": "x" * 200 + str(i), "name": "n", "role": "other"}
+                                for i in range(10)]
+    long_ids["periods"]["_"]["by_participant"] = {
+        "x" * 200 + str(i): v for i, v in enumerate(
+            long_ids["periods"]["_"]["by_participant"].values())}
+    assert len(json.dumps(chat_tools._value_flows_summary(long_ids), default=str)) <= \
+        chat_tools._VF_SUMMARY_CHARS
+
+
+def test_a_drafts_answer_stays_small_on_a_big_site(client, install_network):
+    """Review #2: the answer carries no config and fits the draft's id lists."""
+    n = build_edge_15min()
+    for i in range(80):
+        n.add("Generator", f"pv_{i}", bus="site", carrier="solar", p_nom=1.0)
+    install_network(n, name="chat_vf_big")
+    chat_tools.DISPATCHERS["update_solver_config"](partial={"commercial": {
+        "poc_link": "import", "import_tariff": TARIFF}})
+    out = _define(template="landlord_tenant")
+    assert out["saved"] is False and "config" not in out
+    assert out["asset_owners_total"] > 80
+    (draft,) = out["draft_contracts"]
+    assert len(draft["asset_ids"]) == 10 and draft["asset_ids_total"] > 80
+    assert len(json.dumps(out, default=str)) < 2500
+
+
+def test_the_same_raw_config_twice_needs_no_confirmation(site):
+    """Review #5: compared as the server stores it."""
+    raw = {"participants": [{"id": "site", "name": "Site", "role": "site_owner"}],
+           "externals": ["retailer", "dso", "tso", "market", "tax_authority",
+                         "capex_supplier", "om_contractor", "Solar BV"]}
+    assert _define(config=raw)["saved"] is True
+    assert _define(config=raw)["saved"] is True
 
 
 def test_the_lines_are_paged_under_the_cap():

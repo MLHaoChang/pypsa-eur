@@ -637,6 +637,29 @@ assertion, the `not_established` and `value_flows_invalid` payloads.
   the replace guard; problems and template codes; exactly-one-of; no config / in flight; the summary
   cap on a 60-party three-period ledger; line paging; live V1 summary and lines; not_established).
 
+**WP3.4 review round 1 (fa2aabc + 96dea5e): PASS WITH CONDITIONS** — binding #1–#4; #5–#8, #11, #12
+taken; #9 taken; #10 INFO (pre-existing pattern). Confirmed: the Sankey a DAG on flat / multi-period
+/ hub networks and a money cycle, spellings canonicalised, template status in the flags, the GET
+0.4 s flat / 0.8 s multi (payload 10–20 KB — no cache), paging edges, the If-Match race, the invalid
+stored state, the problems budget, every error kind in the manifest, lock-gated, ADR-0002 recorded.
+- #1: the chat summary overflowed with many INTERNAL participants. → after the existing steps it keeps
+  only `net`, then the largest rows by |net| per period (`participants_omitted`), then fewer ids
+  (`participants_total`) — always under 3,500 characters (tested: 60 participants × 3 periods, and
+  200-character ids).
+- #2: the `drafts_need_pricing` answer carried the whole config. → no config: `participants`
+  (fitted), `asset_owners_total`, drafts with id lists fitted (first 10 + `<key>_total`); the saved
+  answer's participants fitted too (tested on an 80-generator site).
+- #3: `by_participant` keyed rows by each line's spelling while the Sankey merged them. →
+  `participants.canonical_party` (shared with the Sankey); `by_participant(ledger, vf)`.
+- #4: an unsettled contract's line had no parties, so their totals stayed numbers. →
+  `LedgerInputs.unsettled_parties` (`contract_payer_payee`: buyer→seller, lessee→lessor,
+  customer→provider / retailer, counterparty→generator owner, DR counterparty→site party); the
+  line names them and their totals are null.
+- #5: the same raw config twice was refused → compared as stored (`model_dump`). #6: the argshape
+  guard binds `_value_flow_call`. #7: only the side a party is on goes null (plus `net`). #8: schema
+  minimums for offset / limit. #9: the guard's message for an invalid stored value. #11: the timing
+  bound is 2 s for both. #12: the roles and the config's keys are in the tool description.
+
 ---
 
 ## WP3.5 Frontend foundation

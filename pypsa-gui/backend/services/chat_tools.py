@@ -719,6 +719,28 @@ def _value_flows_summary(payload: dict) -> dict:
     if size() > _VF_SUMMARY_CHARS:
         out["flags"] = flags[:3]
         out["omitted"].append("flags")
+    # Many participants (WP3.4 review #1): keep only `net`, then the largest
+    # rows by |net| per period, then fewer ids — until it fits, always.
+    if size() > _VF_SUMMARY_CHARS:
+        for per in periods.values():
+            per["by_participant"] = {k: {"net": v.get("net")}
+                                     for k, v in per["by_participant"].items()}
+        out["omitted"].append("paid_received")
+    keep = max((len(per["by_participant"]) for per in periods.values()), default=0)
+    while size() > _VF_SUMMARY_CHARS and keep > 1:
+        keep = max(1, keep // 2)
+        for per in periods.values():
+            rows = sorted(per["by_participant"].items(),
+                          key=lambda kv: -abs(kv[1].get("net") or 0.0))
+            if len(rows) > keep:
+                per["participants_omitted"] = len(rows) - keep + per.get(
+                    "participants_omitted", 0)
+                per["by_participant"] = dict(rows[:keep])
+    while size() > _VF_SUMMARY_CHARS and out["participants"]:
+        out["participants_total"] = len(ids)
+        out["participants"] = out["participants"][:len(out["participants"]) // 2]
+        for per in periods.values():
+            per["by_participant"] = {k[:60]: v for k, v in per["by_participant"].items()}
     return out
 
 
@@ -1725,9 +1747,15 @@ def define_participants(template: str | None = None, config: dict | None = None,
         built = _value_flow_call(build_value_flow_template, TemplateIn(template=template))
         notes = list(built.get("notes") or [])
         if built.get("draft_contracts"):
+            # Compact (WP3.4 review #2): the model re-calls with the template,
+            # so the config itself is not needed — its parties and sizes are.
+            cfg = built["config"]
             return {"saved": False, "status": "drafts_need_pricing", "template": template,
-                    "draft_contracts": built["draft_contracts"], "notes": _fit(notes),
-                    "config": built["config"],
+                    "draft_contracts": [_compact_draft(d) for d in built["draft_contracts"]],
+                    "participants": _fit([f"{x.get('id')} ({x.get('role')})"
+                                          for x in cfg.get("participants") or []]),
+                    "asset_owners_total": len(cfg.get("asset_owners") or []),
+                    "notes": _fit(notes),
                     "message": ("the template needs these contracts, which the project does "
                                 "not have: ask the user for the null fields, save them with "
                                 "update_solver_config, then call define_participants again")}
@@ -1736,23 +1764,50 @@ def define_participants(template: str | None = None, config: dict | None = None,
         value = None if clear else config
     state = _value_flow_call(_get)
     current = state.get("value_flows")
-    if current is not None and current != value and not replace:
+    if current is not None and _vf_normal(current) != _vf_normal(value) and not replace:
         raise HTTPException(status_code=409, detail={
             "error_kind": "value_flows_would_be_replaced",
-            "message": ("the project already has a value-flow config "
-                        f"(template {str(current.get('template') if isinstance(current, dict) else None)!r}); "
-                        "confirm with the user, then call again with replace=true"),
+            "message": ((f"the project already has a value-flow config (template "
+                         f"{str(current.get('template'))!r}); "
+                         if state.get("status") == "ok" and isinstance(current, dict) else
+                         "the project holds a stored value-flow config that does not "
+                         "validate; ")
+                        + "confirm with the user, then call again with replace=true"),
             "current_participants": [str(x.get("id"))[:60] for x in
                                      (current.get("participants") or [])
                                      if isinstance(x, dict)][:10]
             if isinstance(current, dict) else []})
     out = _value_flow_call(_put, ValueFlowsIn(value_flows=value), if_match=state["digest"])
     stored = out.get("value_flows") or {}
+    parts = stored.get("participants") or []
     return {"saved": True, "status": out.get("status"), "digest": out.get("digest"),
-            "template": stored.get("template"),
-            "participants": [{"id": x.get("id"), "role": x.get("role")}
-                             for x in stored.get("participants") or []],
+            "template": stored.get("template"), "participants_total": len(parts),
+            "participants": _fit([f"{x.get('id')} ({x.get('role')})" for x in parts]),
             "notes": _fit(notes)}
+
+
+def _vf_normal(value):
+    """A value-flow config as the server stores it (so the same config sent
+    twice is not a replacement, WP3.4 review #5); the raw value when it does
+    not validate."""
+    from services.commercial import participants as P
+
+    try:
+        parsed = P.parse_value_flows(value)
+    except P.ValueFlowsInvalid:
+        return value
+    return None if parsed is None else parsed.model_dump(mode="json")
+
+
+def _compact_draft(d: dict) -> dict:
+    """A draft contract with its id lists fitted (a site with many assets)."""
+    out = dict(d)
+    for key in ("asset_ids", "load_ids"):
+        ids = out.get(key)
+        if isinstance(ids, list) and len(ids) > 10:
+            out[key] = ids[:10]
+            out[f"{key}_total"] = len(ids)
+    return out
 
 
 # ── Validation (3) ──────────────────────────────────────────────────────────

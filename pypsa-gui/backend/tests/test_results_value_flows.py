@@ -57,7 +57,7 @@ def test_v1_value_flows_payload(reset_backend, multi):
     assert out["provenance"]["basis"] == "unweighted_per_period"
     assert out["provenance"]["tariff_payees"]
     # WP3.4: no cache unless the GET measures over 2 s on the P1 fixture.
-    assert elapsed < 2.0 * (2 if multi else 1), elapsed
+    assert elapsed < 2.0, elapsed
 
 
 @pytest.mark.live_solve

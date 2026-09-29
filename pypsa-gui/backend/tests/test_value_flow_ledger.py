@@ -513,3 +513,31 @@ def test_a_party_with_an_unknown_line_has_unknown_totals():
     assert tot["retailer"]["net"] == pytest.approx(100.0)
     assert tot["developer"]["net"] == pytest.approx(-5.0)
     assert tot["dso"]["received"] is None
+
+
+def test_totals_are_keyed_by_the_party_however_a_line_spells_it():
+    """WP3.4 review #3: one row per party, as the Sankey has one node."""
+    vf = P.parse_value_flows({"participants": [{"id": "site", "name": "Site",
+                                                "role": "site_owner"}],
+                              "externals": ["Solar BV"]})
+    led = P.Ledger(periods={"_": [
+        P.ValueFlowLine("_", "site", "Solar BV", "ppa_settlement", "contract", "a", 10.0),
+        P.ValueFlowLine("_", "SITE", "solar bv ", "ppa_settlement", "contract", "b", 5.0)]},
+        tariff_payees={}, flags=[], notes=[], disclosures={})
+    tot = P.by_participant(led, vf)["_"]
+    assert set(tot) == {"site", "Solar BV"}
+    assert tot["site"]["net"] == pytest.approx(-15.0)
+    assert tot["Solar BV"]["received"] == pytest.approx(15.0)
+
+
+def test_an_unsettled_contract_makes_its_parties_totals_null():
+    """WP3.4 review #4: the unsettled line names the contract's parties."""
+    inputs = _inputs()
+    inputs.unsettled_contracts = [("ppa2", "no_price")]
+    inputs.unsettled_parties = {"ppa2": ("site", "developer")}
+    led = P.build_ledger(inputs, VF)
+    tot = P.by_participant(led, VF)["_"]
+    assert tot["site"]["paid"] is None and tot["site"]["net"] is None
+    assert tot["developer"]["received"] is None
+    assert tot["developer"]["paid"] is not None           # its known side stays known (#7)
+    assert P.check_conservation(led, inputs, VF).ok is None

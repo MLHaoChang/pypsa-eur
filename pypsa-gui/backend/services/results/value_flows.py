@@ -364,10 +364,14 @@ def ledger_inputs(n, cfg, *, result_df, lost_load=None) -> P.LedgerInputs | None
     lines, contract_flags = settlement_lines(n, parsed, pq)
     settlement = [{**asdict(ln), "period": _key(ln.period)} for ln in lines]
     unsettled = []
+    unsettled_parties = {}
+    by_id = {c.id: c for c in parsed.contracts}
     for f in [*contract_flags, *retail_flags]:
         if f.startswith("contract_not_settled:"):
             cid, _, reason = f[len("contract_not_settled:"):].partition(":")
             unsettled.append((cid, reason))
+            if cid in by_id:
+                unsettled_parties[cid] = P.contract_payer_payee(by_id[cid], parsed.site_party)
     from services.commercial.cost_rows import commercial_cost_terms
 
     input_flags += [*contract_flags, *retail_flags,
@@ -399,6 +403,7 @@ def ledger_inputs(n, cfg, *, result_df, lost_load=None) -> P.LedgerInputs | None
         lp_commercial=_lp_commercial(n, commercial),
         disclosures=_disclosures(n, cfg, lost_load),
         input_flags=sorted(set(input_flags)), unsettled_contracts=unsettled,
+        unsettled_parties=unsettled_parties,
         curtailment_penalty=_fin((cb or {}).get("curtailment_cost")),
         external_ppa_assets=external_ppa, hub=_hub_inputs(n, parsed, vf, bill))
 
@@ -432,11 +437,10 @@ def _sankey(lines: list[P.ValueFlowLine], vf) -> tuple[dict, dict[str, int]]:
     counted."""
     names = {x.id: x.name for x in vf.participants}
     ids = list(names)
-    known = [*ids, *vf.externals]
 
     def canon(party: str) -> str:
-        # One node per party however a line spells it (`same_party` matching).
-        return next((k for k in known if P.same_party(party, k)), party)
+        # One node per party however a line spells it (as `by_participant`).
+        return P.canonical_party(party, vf)
 
     agg: dict[tuple[str, str, str], float] = {}
     dropped = {"unknown": 0, "zero": 0}
@@ -490,7 +494,7 @@ def compute_value_flows(n, cfg, *, result_df, lost_load=None) -> dict | None:
         return None
     ledger = P.build_ledger(inputs, vf)
     res = P.check_conservation(ledger, inputs, vf)
-    totals = P.by_participant(ledger)
+    totals = P.by_participant(ledger, vf)
     template = T.template_status(vf, n, parsed)
     flags = sorted({*ledger.flags, *res.flags, *template})
     # The allocation's reasons ride its lines; the payload names them once.

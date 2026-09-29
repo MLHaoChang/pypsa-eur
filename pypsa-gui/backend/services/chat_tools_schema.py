@@ -388,8 +388,8 @@ TOOLS: list[dict[str, Any]] = [
             "result_kind": {"type": "string", "enum": RESULTS_ENUM},
             "source": {"type": "string", "enum": RESULTS_SOURCE_ENUM},
             "detail": {"type": "string", "enum": ["summary", "lines"]},
-            "offset": {"type": "integer"},
-            "limit": {"type": "integer"},
+            "offset": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1},
         },
         ["result_kind"],
     ),
@@ -2272,11 +2272,16 @@ TOOLS: list[dict[str, Any]] = [
         "Set who takes part in the site's money flows and who pays whom: pass "
         "exactly one of `template` (single_owner, btm_ppa, landlord_tenant, "
         "dso_developer, energy_hub — built from the network and the contracts), "
-        "`config` (a full value-flow config: participants, externals, "
-        "tariff_payees, asset_owners, hub_members, allocation, export_revenue_to) "
+        "`config` (a full value-flow config: participants [{id, name, role}] with "
+        "role one of site_owner, developer, investor, lender, tax_equity, dso, tso, "
+        "retailer, tenant, landlord, hub_member, offtaker, other; externals; "
+        "tariff_payees [{item_id | kind, payee}]; asset_owners [{asset_id, component, "
+        "owner}]; hub_members [{link, participant, contracted_mw}]; allocation {basis}; "
+        "export_revenue_to) "
         "or clear=true. A template that needs a contract the project lacks is NOT "
         "saved: it returns {saved: false, status: 'drafts_need_pricing', "
-        "draft_contracts} with null money fields — ask the user for them, save the "
+        "draft_contracts, participants, asset_owners_total} with null money fields — "
+        "ask the user for them, save the "
         "contracts with update_solver_config, then call again. An existing, "
         "different config is refused (value_flows_would_be_replaced) until the "
         "user confirms and you pass replace=true. Read the result with "
