@@ -161,7 +161,7 @@ function ConnectionEditor({ current, series, errors, onSave }: {
                onChange={e => set({ group: e.target.value || null })} /></label>
       {c.capacity_fee ? (
         <>
-          <p className="text-muted">The capacity fee is a capacity item, per kW-year or kW-month.</p>
+          <p className="text-muted">The capacity fee is a capacity item, per kW-year or kW-month, with a single all-year period (no windows or tiers).</p>
           <ItemEditor item={c.capacity_fee} idx={0} set={it => set({ capacity_fee: it })}
                       kinds={['capacity']} units={['per_kw_year', 'per_kw_month']}
                       remove={() => set({ capacity_fee: null })} errors={[]} />

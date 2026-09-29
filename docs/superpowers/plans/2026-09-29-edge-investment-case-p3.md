@@ -1010,6 +1010,11 @@ the pre-save read and the save are two requests (a narrow race, accepted). Backe
 hygiene): the PUT's binding step should run `fee_eur_per_mw_year` so an unsupported fee unit is a 422
 at save. Tests: `ContractsEditor.test.tsx` 16.
 
+**WP3.7c review round 3 (26c4378) — PASS.** The fee's kinds / units props and the tagged form copy
+verified; the TariffBuilder's own use unchanged. INFO taken: the fee note says "a single all-year period
+(no windows or tiers)" — a windowed or multi-period fee is still refused only at the solve (the same
+backend follow-up). **WP3.7c closed.**
+
 ## Phase 3 e2e QA gate
 
 - [ ] `backend/tests/qa_value_flows.py` (auto-discovered): V1–V4 through the routes (template → drafts

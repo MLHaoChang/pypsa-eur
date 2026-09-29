@@ -18,7 +18,7 @@
 | 3.6 | Participants designer, the per-participant table, the Sankey | FAIL → **PASS** |
 | 3.7a | Library browser (items, versions, pins, URDB import with refusals, series and meter uploads, attach) | FAIL → FAIL → **PASS** (round 3) |
 | 3.7b | Tariff builder and the bill preview route (`POST /api/results/billing/preview`) | conditions → FAIL → **PASS** (round 3) |
-| 3.7c | Contracts and connection-agreement editors | conditions → conditions → see the plan for round 3 |
+| 3.7c | Contracts and connection-agreement editors | conditions → conditions → **PASS** (round 3) |
 
 Each round's findings, and what was done about them, are in the plan under the WP.
 
@@ -78,8 +78,9 @@ the ledger side and the route's bridge figure.
 - **Recorded follow-ups (not blocking):**
   - `replacesInline` trusts the solver-config PUT's ref check; a hand-edited `solver_config.json` is not
     re-checked on load (WP3.7a round 2 INFO) — P4 hygiene.
-  - The capacity fee's unit is checked (`fee_eur_per_mw_year`) at the solve, not at the PUT (WP3.7c
-    round 2) — the editor now offers only the supported units; the PUT check is P4 hygiene.
+  - The capacity fee's shape (unit, a single all-year period) is checked (`fee_eur_per_mw_year`) at the
+    solve, not at the PUT (WP3.7c rounds 2–3) — the editor offers only the supported kind and units and
+    states the one-period rule; the PUT check is P4 hygiene.
   - The contracts editor's staleness baseline is the raw stored list: a P0-era untagged list normalised by
     the editor's own connection save reads as "changed" once (a reload recovers it); the pre-save read
     and the save are two requests (WP3.7c round 2, accepted).
