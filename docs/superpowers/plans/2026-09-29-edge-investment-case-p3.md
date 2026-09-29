@@ -457,6 +457,30 @@ P1 refuses a `measured_on="net"` energy item on a multi-member group with an exp
 `test_commercial_objective_reconciliation.py`); negative-rate refusal; revenue-direction behaviour; the
 removal from adders (no double pricing); reload; P1 and P2 drivers green.
 
+**WP3.3b implementation.**
+- `lp_bindings`: `group_net_items(cfg)` (net cost, non-demand, untiered energy items on a ≥2-member
+  group with an export Link), `group_net_hash`, `_group_net_spec` (Σ of their rates, €/MWh per
+  snapshot), `add_group_net_terms` (the two variables, the balance equality, objective += Σ w·price·
+  net_import weighted as a marginal cost over the snapshots the LP holds), `group_net_amounts` (the
+  record's amount from the dispatch, max(0, Σ members − export)). `_adders` skips the items (never on
+  members or export); `validate_for_network` replaces the P1 refusal with the negative-rate refusal
+  (naming the item); a net REVENUE item keeps gross-export pricing and its `net_split_by_direction`
+  cause. `LP_RECIPE` 6 (`GROUP_NET_RECIPE`). Commit: `n.meta["ic_group_net"]` (items, members,
+  export, link, items_hash, hash_version, lp_recipe) and `links_t["ic_group_net_price"]` (column = the
+  PoC); cleared by a solve without it. Scenario networks refuse the term (as the dispatch PPA).
+- `cost_rows`: label `energy_net_group` (→ the `cost_breakdown` "Commercial" rows and horizon total),
+  drift on `items_hash`, `energy_net_group_not_established` (blocking in the ledger). `gap`: the item's
+  LP side is the record's net-import amount, joined to the energy kind's LP total; no
+  `net_split_by_direction` cause for it. The energy record's hash still lists the item (drift is
+  flagged by both records). `bill_site` unchanged (asserted: the bill = the engine on Σ members −
+  export).
+- Strategies: no strategy refuses group terms, so none refuses this one; rolling (per window) and
+  myopic (per period) are tested to bill = row. The P1 refusal test now asserts the net pricing and the
+  negative-rate refusal.
+- Tests: `test_group_net_import.py` (9; V6 = three members, the third a must-run PV exporting through
+  the group's export Link, so the group nets and net-exports), the V6 case in
+  `test_commercial_objective_reconciliation.py` (save → load) and so in `test_billing_gap.py`.
+
 ---
 
 ## WP3.4 `/results/value_flows`, chat

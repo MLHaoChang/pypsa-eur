@@ -130,6 +130,10 @@ CAPACITY_SPEC_ATTR = "_ic_capacity_spec"   # transient: set by apply, read by th
 CAPACITY_BUILT_ATTR = "_ic_capacity_built"  # transient: set by the LP wrapper
 GROUP_SPEC_ATTR = "_ic_group_spec"      # transient: set by apply, read by the LP wrapper
 TIER_SPEC_ATTR = "_ic_tier_spec"        # transient: set by apply, read by the LP wrapper
+META_GROUP_NET = "ic_group_net"         # the group net-import term a solve bound (P3 WP3.3b)
+GROUP_NET_PRICE_ATTR = "ic_group_net_price"   # links_t: €/MWh on net import, column = PoC
+GROUP_NET_SPEC_ATTR = "_ic_group_net_spec"    # transient: set by apply, read by the LP wrapper
+GROUP_NET_BUILT_ATTR = "_ic_group_net_built"  # transient: set by the LP wrapper
 TIER_BUILT_ATTR = "_ic_tier_built"
 _KWH_PER_MWH = 1000.0
 
@@ -261,8 +265,11 @@ def _side(item: TariffItem) -> str:
 #       (WP2.1c-ii).
 #   4 — tariff capacity items bound (WP2.1c-iii);
 #   5 — changes_dispatch PPAs bound (WP2.2d).
-LP_RECIPE = 5
+#   6 — a net cost energy item on a multi-member group with an export Link
+#       priced once on the group's net import (P3 WP3.3b; refused before).
+LP_RECIPE = 6
 PPA_DISPATCH_RECIPE = 5
+GROUP_NET_RECIPE = 6
 WINDOWED_TIERS_RECIPE = 3
 CAPACITY_RECIPE = 4
 
@@ -306,6 +313,28 @@ def group_spec(cfg: CommercialConfig) -> dict | None:
         return None
     return {"name": cfg.group_contract, "members": list(cfg.group_members),
             "cap_mw": float(cfg.group_cap_mw)}
+
+
+def group_net_items(cfg: CommercialConfig) -> list:
+    """The net COST energy items a multi-member group with an export Link
+    prices on its net import (P3 WP3.3b): the group meter nets Σ members −
+    export per interval, which per-member adders (gross import) cannot."""
+    if len(cfg.group_members) < 2 or cfg.export_link is None or cfg.import_tariff is None:
+        return []
+    return [i for i in cfg.import_tariff.items
+            if i.measured_on == "net" and i.direction == "cost" and not _is_demand(i)
+            and i.kind != "capacity" and not i.tiers and _lp_reason(i) is None]
+
+
+def group_net_hash(cfg: CommercialConfig, version: int = _H.HASH_VERSION) -> str | None:
+    """What the group net-import term binds (drift check): its items, the
+    members, the export Link and the site clock."""
+    items = group_net_items(cfg)
+    if not items:
+        return None
+    return _H.digest({"items": _H.canonical(items, version=version),
+                      "members": sorted(cfg.group_members), "export": cfg.export_link,
+                      "timezone": cfg.timezone}, version=version)
 
 
 def import_links(cfg: CommercialConfig) -> list[str]:
@@ -354,10 +383,15 @@ def _adders(n, cfg: CommercialConfig) -> tuple[dict[str, np.ndarray], list[str],
     energy_items: list[str] = []
     not_in_lp: dict[str, str] = {}
     notes: list[str] = []
+    net_group = {i.id for i in group_net_items(cfg)}
     for item in (cfg.import_tariff.items if cfg.import_tariff is not None else []):
         reason = _lp_reason(item)
         if reason is not None:
             not_in_lp[item.id] = reason
+            continue
+        if item.id in net_group:
+            # Priced once on the group's net import (`_group_net_spec`), never
+            # on the member or export adders (P3 WP3.3b).
             continue
         if item.kind == "capacity":
             if item.periods[0].rate < 0:
@@ -648,15 +682,17 @@ def validate_for_network(n, cfg: CommercialConfig | dict, *,
                 f"group_members must include poc_link {cfg.poc_link!r}: the group's tariff "
                 "is the PoC's")
         grid_bus = n.links.at[cfg.poc_link, "bus0"]
-        net = [i.id for i in (cfg.import_tariff.items if cfg.import_tariff is not None else [])
-               if i.measured_on == "net" and not _is_demand(i)]
-        if net and cfg.export_link is not None and len(cfg.group_members) > 1:
-            # The bill nets the group's import against its export on the group
-            # meter; per-member adders charge each member's gross import.
-            raise CommercialBindingError(
-                f"energy items measured on net ({net}) on a multi-member group with an export "
-                "Link would charge gross member import the group meter nets out; not supported "
-                "in P1 (price them on import and export separately)")
+        # A net COST item on a multi-member group with an export Link is priced
+        # on the group's net import (P3 WP3.3b; P1 refused it); a net REVENUE
+        # item keeps the gross-export pricing with its `net_split_by_direction`
+        # gap cause, as on a single PoC. A negative rate would pay the LP to
+        # import: refused, naming the item.
+        for item in group_net_items(cfg):
+            neg = [p.name for p in item.periods if p.rate < 0]
+            if neg:
+                raise CommercialBindingError(
+                    f"net energy item {item.id!r} on the group has a negative rate in "
+                    f"period(s) {neg}; the group's net import is priced only at rates >= 0")
         for member in cfg.group_members:
             _require_link(n, member, "group_members")
             _require_one_way(n, member, "group_members")
@@ -1549,6 +1585,92 @@ def add_group_terms(n) -> None:
     n.model.add_constraints(flow <= float(spec["cap_mw"]), name="ic_group_cap")
 
 
+def _group_net_spec(n, cfg: CommercialConfig) -> dict | None:
+    """The group net-import term (P3 WP3.3b): €/MWh per snapshot (Σ of the
+    net cost items' rates), the members and the export Link, or None."""
+    items = group_net_items(cfg)
+    if not items:
+        return None
+    local = _local_clock(n.snapshots, cfg.timezone)
+    price = np.zeros(len(n.snapshots))
+    for item in items:
+        r = _rates(item, local)
+        if np.isnan(r).any():
+            raise CommercialBindingError(
+                f"tariff item {item.id!r} has no period covering {int(np.isnan(r).sum())} "
+                "snapshot(s); add a catch-all period")
+        price += r * _KWH_PER_MWH
+    return {"items": [i.id for i in items], "members": list(cfg.group_members),
+            "export": cfg.export_link, "link": cfg.poc_link, "price": price,
+            "items_hash": group_net_hash(cfg), "hash_version": _H.HASH_VERSION}
+
+
+def add_group_net_terms(n) -> None:
+    """ic_group_net_import[t], ic_group_net_export[t] ≥ 0 with
+    net_import − net_export = Σ_members p[t] − p_export[t], and objective +=
+    Σ_t w_t · price_t · net_import[t], weighted as a marginal cost (the
+    snapshot's objective weight, times its period's in a multi-invest solve),
+    over the snapshots the LP holds (a rolling window, a myopic period). No
+    capacity bounds: members or the PoC may be extendable. With rates ≥ 0 the
+    split is bounded; where a rate is 0 it is degenerate, so the record and the
+    rows use max(0, Σ p_member − p_export) from the dispatch, never the
+    variables."""
+    import xarray as xr
+
+    spec = getattr(n, GROUP_NET_SPEC_ATTR, None)
+    if not spec:
+        return
+    if getattr(n, "has_scenarios", False):
+        raise CommercialBindingError("a net energy item on a group is not supported on a "
+                                     "stochastic (scenario) network")
+    m = n.model
+    flow = (m["Link-p"].sel(name=spec["members"]).sum("name")
+            - m["Link-p"].sel(name=spec["export"]))
+    snaps = m["Link-p"].indexes["snapshot"]
+    pos = n.snapshots.get_indexer(snaps)
+    if (pos < 0).any():
+        raise CommercialBindingError("the LP's snapshots are not on the network's axis")
+    coord = m["Link-p"].coords["snapshot"]
+    zero = xr.DataArray(np.zeros(len(pos)), coords={"snapshot": coord}, dims="snapshot")
+    net_imp = m.add_variables(lower=zero, name="ic_group_net_import")
+    net_exp = m.add_variables(lower=zero, name="ic_group_net_export")
+    m.add_constraints(net_imp - net_exp - flow == 0, name="ic_group_net_balance")
+    w = n.snapshot_weightings.objective.to_numpy(dtype=float)[pos]
+    if getattr(n, "_multi_invest", False):
+        periods = n.snapshots.get_level_values(0)[pos]
+        w = w * n.investment_period_weightings["objective"].reindex(periods).to_numpy(dtype=float)
+    coef = xr.DataArray(np.asarray(spec["price"], dtype=float)[pos] * w,
+                        coords={"snapshot": coord}, dims="snapshot")
+    m.objective += (net_imp * coef).sum()
+    setattr(n, GROUP_NET_BUILT_ATTR, True)
+
+
+def group_net_amounts(n) -> dict | None:
+    """{period (None flat): €} the committed group net-import term charged,
+    unweighted per period, from the dispatch: Σ w · price · max(0, Σ p_member
+    − p_export). None when the record or its inputs are gone."""
+    rec = n.meta.get(META_GROUP_NET) if hasattr(n, "meta") else None
+    if not rec:
+        return None
+    prices = _frame(n, GROUP_NET_PRICE_ATTR)
+    p0 = getattr(n.links_t, "p0", None)
+    links = [*rec.get("members", []), rec.get("export")]
+    if rec.get("link") not in prices.columns or p0 is None or \
+            any(link not in p0.columns for link in links):
+        return None
+    price = prices[rec["link"]].to_numpy(dtype=float)
+    flow = (np.sum([p0[m].to_numpy(dtype=float) for m in rec["members"]], axis=0)
+            - p0[rec["export"]].to_numpy(dtype=float))
+    if np.isnan(price).any() or np.isnan(flow).any():
+        return None
+    amount = n.snapshot_weightings.objective.to_numpy(dtype=float) * price * \
+        np.clip(flow, 0.0, None)
+    if isinstance(n.snapshots, pd.MultiIndex):
+        s = pd.Series(amount, index=n.snapshots).groupby(level=0).sum()
+        return {int(p): float(v) for p, v in s.items()}
+    return {None: float(amount.sum())}
+
+
 def _group_shares(n, spec: dict) -> dict | None:
     """Each member's share of the group's import energy (cost allocation is P3)."""
     p0 = n.links_t.p0
@@ -1781,6 +1903,9 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
             n.meta.pop(META_GROUP, None)
             n.meta.pop(META_CAPACITY, None)
             n.meta.pop(META_PPA, None)
+            n.meta.pop(META_GROUP_NET, None)
+            if hasattr(n.links_t, "get") and n.links_t.get(GROUP_NET_PRICE_ATTR) is not None:
+                n.links_t[GROUP_NET_PRICE_ATTR] = pd.DataFrame(index=n.snapshots)
             n.meta.pop("ic_contracts", None)   # the pre-review solve record (WP2.2c #2)
             if n.generators_t.get(PPA_PRICE_ATTR) is not None:
                 n.generators_t[PPA_PRICE_ATTR] = pd.DataFrame(index=n.snapshots)
@@ -1795,6 +1920,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
     notes = notes + [x for x in demand_notes if x not in notes]
     tier_spec, tiered_items, nonconvex_items = _tier_spec(n, cfg)
     capacity = _capacity_spec(n, cfg)
+    group_net = _group_net_spec(n, cfg)
     refuse_windowed_terms(demand, tier_spec, solve_strategy, multi_period, capacity)
     ppa_adders = _ppa_dispatch_spec(n, cfg) or {}
     has_price = cfg.export_price_ref is not None
@@ -1864,6 +1990,19 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
 
         applied._undo.append(undo_group)
 
+    built_net: dict = {}
+    if group_net is not None:
+        setattr(n, GROUP_NET_SPEC_ATTR, group_net)
+
+        def undo_group_net() -> None:
+            if getattr(n, GROUP_NET_BUILT_ATTR, False):
+                built_net["v"] = True        # read BEFORE the flags go: commit runs after undo
+            for attr in (GROUP_NET_SPEC_ATTR, GROUP_NET_BUILT_ATTR):
+                if hasattr(n, attr):
+                    delattr(n, attr)
+
+        applied._undo.append(undo_group_net)
+
     solved_capacity: dict = {}
     if capacity is not None:
         setattr(n, CAPACITY_SPEC_ATTR, capacity)
@@ -1897,6 +2036,16 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
             n.meta[META_GROUP] = {**group, "energy_share": _group_shares(n, group)}
         else:
             n.meta.pop(META_GROUP, None)
+        if built_net:
+            n.links_t[GROUP_NET_PRICE_ATTR] = pd.DataFrame(
+                {group_net["link"]: group_net["price"]}, index=n.snapshots)
+            n.meta[META_GROUP_NET] = {k: group_net[k] for k in (
+                "items", "members", "export", "link", "items_hash", "hash_version")}
+            n.meta[META_GROUP_NET]["lp_recipe"] = GROUP_NET_RECIPE
+        else:
+            n.meta.pop(META_GROUP_NET, None)
+            if hasattr(n.links_t, "get") and n.links_t.get(GROUP_NET_PRICE_ATTR) is not None:
+                n.links_t[GROUP_NET_PRICE_ATTR] = pd.DataFrame(index=n.snapshots)
         if "v" in solved_tiers:
             n.meta[META_TIERS] = solved_tiers["v"]
         else:
@@ -1951,6 +2100,7 @@ def materialise_poc_prices(n, commercial: dict | CommercialConfig | None,
         "tiered_items": tiered_items, "nonconvex_tier_items": nonconvex_items,
         "nonconvex_tier_predicted": predicted_tiers(n, cfg),
         "capacity_items": [i.id for i in capacity_lp_items(cfg)],
+        "group_net_items": (group_net or {}).get("items", []),
         "ppa_dispatch": {c.id: list(c.asset_ids) for c in dispatch_ppas(cfg)},
         "not_in_lp": not_in_lp, "notes": notes, "timezone": cfg.timezone,
         "simultaneous_flow_risk_snapshots": risk,
@@ -1981,6 +2131,7 @@ def _wrap_with_commercial_bindings(network, user_fn, cfg, log_queue=None):
         add_demand_terms(n)
         add_tier_terms(n)
         add_group_terms(n)
+        add_group_net_terms(n)
         add_ppa_terms(n)
 
     return fn

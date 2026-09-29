@@ -246,6 +246,7 @@ _DEFAULT_PAYEE = {"energy": "retailer", "fixed": "retailer", "certificate": "ret
 _BLOCKING_EXACT = frozenset({
     "config_changed_since_solve", "config_cleared_since_solve", "not_solved",
     "demand_charge_not_established", "energy_tiers_not_established",
+    "energy_net_group_not_established",
     "network_capacity_not_established", "ppa_settlement_not_established",
     "tariff_capacity_not_established"})
 _BLOCKING_PREFIXES = ("tariff_incomplete", "period_not_billed:", "contract_not_settled:",
