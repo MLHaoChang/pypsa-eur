@@ -5,11 +5,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
 import {
+  buildEhStudyBody,
   COMPLETENESS_ORDER,
+  EMPTY_PACK_FORM,
   certificationPayload,
   completenessRows,
   dtcPlanningCsvRows,
   dtcStressCsvRows,
+  reportSummaryCsvRows,
+  formFromTemplate,
+  leverKeysFor,
   EhReferenceDesignPanel,
   fmeaImportRankingNote,
   fmeaTopCsvRows,
@@ -23,20 +28,22 @@ import {
   coptImportSummary,
   fmeaCoptNotes,
   importModelLabel,
+  normalisedVerdict,
   lcohChip,
   leverCsvRows,
   multiEnergyCarrierEntries,
   multiEnergyLoadEntries,
+  notEstablishedNotes,
   redundancyCsvRows,
   scrTone,
   statusTone,
   verdictTone,
 } from './EhReferenceDesignPanel'
-import { downloadCSV } from './shared'
+import { downloadCSV, downloadJSON } from './shared'
 
 vi.mock('./shared', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./shared')>()
-  return { ...actual, downloadCSV: vi.fn() }
+  return { ...actual, downloadCSV: vi.fn(), downloadJSON: vi.fn() }
 })
 
 vi.mock('../../api/simulation', async (importOriginal) => {
@@ -53,6 +60,8 @@ vi.mock('../../api/simulation', async (importOriginal) => {
       getEhLevers: vi.fn(),
       getEhDtc: vi.fn(),
       getEhDtcPlanning: vi.fn(),
+      getEhReadiness: vi.fn(),
+      getEhTemplate: vi.fn(),
     },
   }
 })
@@ -80,6 +89,25 @@ const REPORT = {
     multi_energy: 'skipped' as const,
   },
   tea: { lcoe_eur_per_mwh: 42, lcoh_eur_per_kg: null, notes: null },
+}
+
+const READINESS = {
+  archetype: 'weak_flexible',
+  import: { rule: 'eh_role', links: ['import'], applied: true },
+  critical_buses: ['hub'],
+  dtc: { derivable: true, reason: null },
+  scr: { status: 'not_established', note: null, min_scr: null },
+  storage_units: 1,
+  class_b: { k: 5, closed_import_links: [], error: null },
+  mc_boundary: { ok: false, error: 'tag eh_role/eh_poc to certify' },
+  budget_solves: 30,
+  estimated_solves: 14,
+  stages: [
+    { stage: 'fmea_top', prediction: 'skipped_budget', solves: 0, basis: 'exact',
+      reason: 'needs 21 solves, 9 left' },
+    { stage: 'ens_solve', prediction: 'run', solves: 1, basis: 'exact', reason: null },
+  ],
+  warnings: [],
 }
 
 function renderPanel() {
@@ -110,7 +138,10 @@ beforeEach(() => {
   vi.mocked(resultsApi.getEhLevers).mockReset().mockResolvedValue(null)
   vi.mocked(resultsApi.getEhDtc).mockReset().mockResolvedValue(null)
   vi.mocked(resultsApi.getEhDtcPlanning).mockReset().mockResolvedValue(null)
+  vi.mocked(resultsApi.getEhReadiness).mockReset().mockResolvedValue(READINESS as never)
+  vi.mocked(resultsApi.getEhTemplate).mockReset().mockResolvedValue(null)
   vi.mocked(downloadCSV).mockReset()
+  vi.mocked(downloadJSON).mockReset()
 })
 
 afterEach(() => { cleanup(); vi.clearAllMocks() })
@@ -136,9 +167,152 @@ describe('completenessRows', () => {
   })
 
   it('tones ok / skipped / not_established differently', () => {
-    expect(statusTone('ok')).toContain('accent')
+    // Guided-mode spec §2.9: 'ok' moved from the brand accent to the success token.
+    expect(statusTone('ok')).toContain('success')
     expect(statusTone('skipped')).toContain('muted')
     expect(statusTone('not_established')).toContain('warn')
+  })
+})
+
+describe('frontier / fmea CSV rows', () => {
+  it('flattens frontier points and FMEA rows', () => {
+    const rep = {
+      ...REPORT,
+      sections: {
+        frontier: { status: 'ok' as const, note: null, payload: { points: [
+          { target_permyriad: 10, status: 'ok',
+            point: { total_system_cost_eur: 1500, achieved_ens_mwh: 2 } },
+          { target_permyriad: 5, status: 'infeasible', point: null },
+        ] } },
+        fmea_top: { status: 'ok' as const, note: null, payload: { rows: [
+          { mode_id: 'a', name: 'a', criticality_eur_per_year: 9,
+            occurrence_per_year: 1, severity_eur: 9, delta_eue_mwh: 1 },
+        ] } },
+      },
+    }
+    // Merge 2026-09-28: the CSVs carry master's decision-3 columns (shed h,
+    // binding, period basis, excl. shed) and the FMEA class / component, now
+    // that class-A rows sit beside the Class-B ranking.
+    expect(frontierCsvRows(rep as never)).toEqual([
+      [10, 'ok', 1500, 2, '', '', '', 'yes'],
+      [5, 'infeasible', '', '', '', '', '', 'yes'],
+    ])
+    expect(fmeaTopCsvRows(rep as never)).toEqual(
+      [[1, 'B', 'Link', 'a', 9, 1, 1, 9, '']])
+  })
+})
+
+describe('buildEhStudyBody', () => {
+  it('sends only the archetype when the form is blank', () => {
+    expect(buildEhStudyBody('strong_grid', EMPTY_PACK_FORM))
+      .toEqual({ body: { archetype: 'strong_grid' }, error: null })
+  })
+
+  it('omits blank fields and nests the rest', () => {
+    const { body, error } = buildEhStudyBody('weak_flexible', {
+      ...EMPTY_PACK_FORM,
+      ensCap: '5000', loleTarget: ' ', importMw: '80', budget: '12',
+      draws: '300', seed: '', dsrBuses: 'flex, crit ', importEnergy: '0',
+    })
+    expect(error).toBeNull()
+    expect(body).toEqual({
+      archetype: 'weak_flexible',
+      budget_solves: 12,
+      pack_overrides: { ens_cap_permyriad: 5000, import_p_nom_mw: 80,
+        import_energy_mwh_per_year: 0 },
+      mc: { draws: 300 },
+      dsr_buses: ['flex', 'crit'],
+    })
+  })
+
+  it('ignores weak-only knobs for other archetypes', () => {
+    const { body } = buildEhStudyBody('off_grid', {
+      ...EMPTY_PACK_FORM, importMw: '80', dsrBuses: 'flex', importEnergy: '1000',
+    })
+    expect(body).toEqual({ archetype: 'off_grid' })
+  })
+
+  it('sends a custom stage list that always keeps the required stages', () => {
+    const { body } = buildEhStudyBody('strong_grid', {
+      ...EMPTY_PACK_FORM, stages: ['frontier'],
+    })
+    expect(body?.stages).toEqual(['apply_pack', 'ens_solve', 'frontier', 'assemble'])
+  })
+
+  it.each([
+    ['ensCap', '0', /ENS target/],
+    ['ensCap', 'abc', /ENS target/],
+    ['loleTarget', '-1', /LOLE target/],
+    ['budget', '0', /budget/],
+    ['budget', '121', /budget/],
+    ['budget', '2.5', /budget/],
+    ['draws', '5000', /draws/],
+    ['seed', '-3', /seed/],
+  ])('rejects %s=%s', (field, value, msg) => {
+    const { body, error } = buildEhStudyBody('strong_grid', {
+      ...EMPTY_PACK_FORM, [field]: value,
+    })
+    expect(body).toBeNull()
+    expect(error).toMatch(msg)
+  })
+
+  it('rejects a negative import energy budget on weak_flexible', () => {
+    const { body, error } = buildEhStudyBody('weak_flexible', {
+      ...EMPTY_PACK_FORM, importEnergy: '-5',
+    })
+    expect(body).toBeNull()
+    expect(error).toMatch(/import energy budget/)
+  })
+
+  it('rejects a zero import cap on weak_flexible', () => {
+    const { body, error } = buildEhStudyBody('weak_flexible', {
+      ...EMPTY_PACK_FORM, importMw: '0',
+    })
+    expect(body).toBeNull()
+    expect(error).toMatch(/import cap/)
+  })
+
+  it.each([
+    ['draws', '0', /draws/],
+  ])('rejects %s=%s', (field, value, msg) => {
+    const { body, error } = buildEhStudyBody('strong_grid', {
+      ...EMPTY_PACK_FORM, [field]: value,
+    })
+    expect(body).toBeNull()
+    expect(error).toMatch(msg)
+  })
+})
+
+describe('verdictTone', () => {
+  it('tones pass / fail / inconclusive', () => {
+    expect(verdictTone('pass')).toContain('accent')
+    expect(verdictTone('fail')).toContain('danger')
+    expect(verdictTone('inconclusive')).toContain('warn')
+  })
+})
+
+describe('notEstablishedNotes', () => {
+  it('lists not_established sections with notes, except gates / multi_energy', () => {
+    const rows = notEstablishedNotes({
+      ...REPORT,
+      completeness: {
+        target: 'not_established', levers: 'not_established', dtc: 'skipped',
+        gates: 'not_established', multi_energy: 'not_established',
+        cost: 'not_established',
+      },
+      sections: {
+        target: { status: 'not_established', note: 'infeasible' },
+        levers: { status: 'not_established', note: 'budget_solves exhausted' },
+        dtc: { status: 'skipped', note: 'not requested' },
+        gates: { status: 'not_established', note: 'x' },
+        multi_energy: { status: 'not_established', note: 'y' },
+        cost: { status: 'not_established', note: null },
+      },
+    })
+    expect(rows).toEqual([
+      { name: 'target', note: 'infeasible' },
+      { name: 'levers', note: 'budget_solves exhausted' },
+    ])
   })
 })
 
@@ -153,6 +327,78 @@ describe('EhReferenceDesignPanel', () => {
     await user.selectOptions(screen.getByTestId('eh-archetype'), 'off_grid')
     expect((screen.getByTestId('eh-archetype') as HTMLSelectElement).value)
       .toBe('off_grid')
+  })
+
+  it('sends pack settings and blocks Run on an invalid value', async () => {
+    const user = await openPanel()
+    await user.selectOptions(screen.getByTestId('eh-archetype'), 'weak_flexible')
+    await user.click(screen.getByTestId('eh-pack-settings-toggle'))
+    await user.type(screen.getByTestId('eh-pack-ens-cap'), '0')
+    const run = screen.getByTestId('eh-run') as HTMLButtonElement
+    expect(run.disabled).toBe(true)
+    expect(run.getAttribute('title')).toMatch(/ENS target/)
+    await user.clear(screen.getByTestId('eh-pack-ens-cap'))
+    await user.type(screen.getByTestId('eh-pack-ens-cap'), '5000')
+    expect(screen.getByTestId('eh-pack-lole-target').closest('label')?.textContent)
+      .toMatch(/h\/yr/)
+    await user.click(run)
+    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
+      archetype: 'weak_flexible',
+      pack_overrides: { ens_cap_permyriad: 5000 },
+    }))
+  })
+
+  it('shows readiness for the selected archetype before Run', async () => {
+    const user = await openPanel()
+    await user.selectOptions(screen.getByTestId('eh-archetype'), 'weak_flexible')
+    const box = await screen.findByTestId('eh-readiness')
+    expect(box.textContent).toMatch(/import/)
+    expect(screen.getByTestId('eh-readiness-solves').textContent).toMatch(/14 \/ 30/)
+    expect(screen.getByTestId('eh-readiness-boundary').textContent).toMatch(/eh_role/)
+    expect(screen.getByTestId('eh-readiness-skipped').textContent)
+      .toMatch(/fmea_top — skipped \(budget\): needs 21 solves/)
+    await waitFor(() => expect(resultsApi.getEhReadiness)
+      .toHaveBeenCalledWith('weak_flexible', undefined, undefined, {}))
+  })
+
+  it('labels every non-run prediction, including may-skip after an estimate', async () => {
+    vi.mocked(resultsApi.getEhReadiness).mockResolvedValue({
+      ...READINESS,
+      stages: [
+        { stage: 'apply_pack', prediction: 'run', solves: 0, basis: 'exact', reason: null },
+        { stage: 'redundancy', prediction: 'run', solves: 4, basis: 'upper_bound', reason: null },
+        { stage: 'levers', prediction: 'may_skip_budget', solves: 0, basis: 'exact',
+          reason: 'budget_solves exhausted before this stage' },
+        { stage: 'dtc_stress', prediction: 'not_reached', solves: 0, basis: 'exact',
+          reason: 'apply_pack fails' },
+      ],
+    } as never)
+    await openPanel()
+    const list = await screen.findByTestId('eh-readiness-skipped')
+    expect(list.textContent).toMatch(/levers — may skip \(budget\)/)
+    expect(list.textContent).toMatch(/dtc_stress — not reached: apply_pack fails/)
+    expect(list.textContent).not.toMatch(/redundancy/)
+  })
+
+  it('does not ask for readiness while a study runs', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue(
+      { status: 'running', study: 'eh_study', archetype: 'strong_grid' } as never)
+    await openPanel()
+    await waitFor(() => expect(resultsApi.getEhStudy).toHaveBeenCalled())
+    await new Promise(r => setTimeout(r, 50))
+    expect(resultsApi.getEhReadiness).not.toHaveBeenCalled()
+  })
+
+  it('debounces the budget before asking for readiness', async () => {
+    const user = await openPanel()
+    await waitFor(() => expect(resultsApi.getEhReadiness)
+      .toHaveBeenCalledWith('strong_grid', undefined, undefined, {}))
+    await user.click(screen.getByTestId('eh-pack-settings-toggle'))
+    await user.type(screen.getByTestId('eh-pack-budget'), '25')
+    await waitFor(() => expect(resultsApi.getEhReadiness)
+      .toHaveBeenCalledWith('strong_grid', 25, undefined, {}), { timeout: 2000 })
+    expect(resultsApi.getEhReadiness).not.toHaveBeenCalledWith(
+      'strong_grid', 2, undefined, {})
   })
 
   it('starts a study with the selected archetype', async () => {
@@ -198,6 +444,171 @@ describe('EhReferenceDesignPanel', () => {
       .toBe('skipped')
     expect(screen.getByTestId('eh-section-gates').getAttribute('data-status'))
       .toBe('not_established')
+  })
+
+  it('shows a failed study error beside its partial report, with reasons', async () => {
+    const why = "ens_solve warning:infeasible — the pack's ENS target cannot be met"
+    const failedReport = {
+      ...REPORT,
+      achieved_ens_permyriad: null,
+      cost_at_target_eur: null,
+      tea: null,
+      completeness: { ...REPORT.completeness, target: 'not_established' as const },
+      sections: {
+        target: { status: 'not_established' as const, note: why },
+        gates: { status: 'not_established' as const, note: 'gates own note' },
+      },
+      pipeline: { aborted: false, solves_consumed: 1, budget_solves: 30 },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'failed', study: 'eh_study', archetype: 'weak_flexible',
+      report: failedReport, error: why,
+    } as never)
+    await openPanel()
+    expect((await screen.findByTestId('eh-error')).textContent).toMatch(/infeasible/)
+    expect(screen.queryByTestId('eh-aborted')).toBeNull()
+    expect(screen.getByTestId('eh-section-note-target').textContent).toMatch(/infeasible/)
+    expect(screen.queryByTestId('eh-section-note-gates')).toBeNull()
+    expect(screen.getByTestId('eh-section-target').getAttribute('title')).toBe(why)
+    expect(screen.getByTestId('eh-report-solves').textContent).toMatch(/1 \/ 30/)
+  })
+
+  it('shows MC LOLE per year with its CI and the certification verdict', async () => {
+    const certReport = {
+      ...REPORT,
+      mc_lole_h: 12.5,
+      certified: false,
+      completeness: { ...REPORT.completeness, certification: 'ok' as const },
+      sections: {
+        certification: {
+          status: 'ok' as const,
+          note: null,
+          payload: {
+            verdict: 'fail', horizon_years: 0.5, lole_h_per_year: 12.5,
+            lole_ci: [5.0, 7.5], target_lole_h: 3,
+          },
+        },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'off_grid', report: certReport,
+    } as never)
+    await openPanel()
+    const lole = await screen.findByTestId('eh-report-lole')
+    // CI is per horizon on the wire; shown per year (÷ horizon_years).
+    expect(lole.textContent).toMatch(/12\.50 h\/yr/)
+    expect(lole.textContent).toMatch(/10\.00.15\.00/)
+    const verdict = screen.getByTestId('eh-certification-verdict')
+    expect(verdict.getAttribute('data-verdict')).toBe('fail')
+    expect(verdict.textContent).toMatch(/not certified/i)
+    expect(verdict.textContent).toMatch(/3 h\/yr/)
+    expect(screen.getByTestId('eh-section-certification').getAttribute('data-status'))
+      .toBe('ok')
+  })
+
+  it('shows no LOLE block when certification did not run', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report: REPORT,
+    } as never)
+    await openPanel()
+    await screen.findByTestId('eh-report')
+    expect(screen.queryByTestId('eh-report-lole')).toBeNull()
+    expect(screen.queryByTestId('eh-certification-verdict')).toBeNull()
+  })
+
+  it('renders the frontier and FMEA top-N tables with CSV export', async () => {
+    const rep = {
+      ...REPORT,
+      completeness: { ...REPORT.completeness, frontier: 'ok' as const, fmea_top: 'ok' as const },
+      sections: {
+        frontier: {
+          status: 'ok' as const, note: null,
+          payload: {
+            pack_target_permyriad: 10,
+            knee_index: 0,
+            points: [
+              { target_permyriad: 20, status: 'ok',
+                point: { total_system_cost_eur: 1000, achieved_ens_mwh: 5 } },
+              { target_permyriad: 10, status: 'ok',
+                point: { total_system_cost_eur: 1500, achieved_ens_mwh: 2 } },
+              { target_permyriad: 5, status: 'infeasible', point: null },
+            ],
+          },
+        },
+        fmea_top: {
+          status: 'ok' as const, note: 'Link-primary residual risk',
+          payload: {
+            k_links: 3,
+            unsolved: [{ id: 'feed2', status: 'infeasible' }],
+            rows: [
+              { mode_id: 'feed1', name: 'feed1', criticality_eur_per_year: 900,
+                occurrence_per_year: 7.3, severity_eur: 123, delta_eue_mwh: 4 },
+            ],
+          },
+        },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report: rep,
+    } as never)
+    const user = await openPanel()
+    const fr = await screen.findByTestId('eh-frontier')
+    expect(fr.textContent).toMatch(/infeasible/)
+    expect(screen.getByTestId('eh-frontier-row-1').getAttribute('data-pack-target'))
+      .toBe('true')
+    expect(screen.getByTestId('eh-fmea-top').textContent).toMatch(/feed1/)
+    expect(screen.getByTestId('eh-fmea-unsolved').textContent).toMatch(/feed2 \(infeasible\)/)
+    // Owner's Q3 rule (2026-09-29): this fixture has only TWO solved points,
+    // so its stored knee_index 0 is not a knee — no row is marked and the
+    // knee note says why. (Before the rule this pinned a 2-point knee.)
+    expect(screen.queryByTestId('eh-frontier-knee')).toBeNull()
+    expect(screen.getByTestId('eh-frontier-row-0').getAttribute('data-knee')).toBe('false')
+    expect(screen.getByTestId('eh-frontier-knee-note').textContent)
+      .toMatch(/needs at least 3 solved points/)
+    await user.click(screen.getByTestId('eh-frontier-csv'))
+    await user.click(screen.getByTestId('eh-fmea-top-csv'))
+    expect(downloadCSV).toHaveBeenCalledWith(
+      'eh-frontier.csv', expect.any(Array), frontierCsvRows(rep as never))
+    expect(downloadCSV).toHaveBeenCalledWith(
+      'eh-fmea-top.csv', expect.any(Array), fmeaTopCsvRows(rep as never))
+  })
+
+  it('shows study-level notes (e.g. the DSR preflight)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible',
+      report: { ...REPORT, notes: ['DSR stays OFF (never applied globally)'] },
+    } as never)
+    await openPanel()
+    expect((await screen.findByTestId('eh-report-notes')).textContent)
+      .toMatch(/DSR stays OFF/)
+  })
+
+  it('renders no notes block when the report has none', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid',
+      report: { ...REPORT, notes: [] },
+    } as never)
+    await openPanel()
+    await screen.findByTestId('eh-report')
+    expect(screen.queryByTestId('eh-report-notes')).toBeNull()
+  })
+
+  it('hides the previous report and tables while a new study runs', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValueOnce({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report: null,
+    } as never).mockResolvedValue({
+      status: 'running', study: 'eh_study', archetype: 'off_grid', report: null,
+    } as never)
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(REPORT as never)
+    vi.mocked(resultsApi.getEhLevers).mockResolvedValue({
+      kind: 'storage_duration', options: [{ kind: 'storage_duration', value: 4, status: 'ok' }],
+    } as never)
+    const user = await openPanel()
+    expect(await screen.findByTestId('eh-report')).toBeTruthy()
+    await user.click(screen.getByTestId('eh-run'))
+    await screen.findByTestId('eh-abort')
+    expect(screen.queryByTestId('eh-report')).toBeNull()
+    expect(screen.queryByTestId('eh-levers')).toBeNull()
   })
 
   it('says a stopped study is stopped', async () => {
@@ -416,6 +827,73 @@ describe('EhReferenceDesignPanel — sibling tables', () => {
     expect(screen.getByTestId('eh-dtc-planning')).toBeTruthy()
   })
 
+  it('shows per-Load DtC results with the disclosed VOLL premium (P16)', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report: REPORT,
+    } as never)
+    vi.mocked(resultsApi.getEhDtc).mockResolvedValue({
+      attribution: 'per_load', voll_premium_eps: 0.05,
+      contingencies: [{
+        contingency: 'grid_import', status: 'optimal',
+        critical_unserved_mwh: 40, noncritical_unserved_mwh: 100,
+        critical_unserved_by_load: { hospital: 40, pump: 0 },
+        critical_loads: ['hospital', 'pump'], noncritical_loads: ['offices'],
+      }],
+    } as never)
+    await openPanel()
+    const chip = await screen.findByTestId('eh-dtc-attribution')
+    expect(chip.textContent).toBe('per_load · critical VOLL +5% priority')
+    expect(screen.queryByTestId('eh-dtc-priority-caveat')).toBeNull()
+    expect(screen.getByTestId('eh-dtc-by-load-grid_import').textContent)
+      .toBe('hospital=40; pump=0')
+    expect(screen.getByText(/Critical by Load/)).toBeTruthy()
+    expect(dtcStressCsvRows({
+      contingencies: [{ contingency: 'x', status: 'ok',
+        critical_unserved_by_load: { hospital: 1.23456 } }],
+    })[0][5]).toBe('hospital=1.235')
+  })
+
+  it('warns when a lossy path can invert the per-Load priority', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report: REPORT,
+    } as never)
+    vi.mocked(resultsApi.getEhDtc).mockResolvedValue({
+      attribution: 'per_load', voll_premium_eps: 0.05, priority_exact: false,
+      priority_caveat_links: ['feeder'], priority_caveat_line_losses: false,
+      contingencies: [{ contingency: 'grid_import', status: 'optimal',
+        critical_unserved_mwh: 60, noncritical_unserved_mwh: 20,
+        critical_unserved_by_load: { hospital: 60 } }],
+    } as never)
+    await openPanel()
+    expect((await screen.findByTestId('eh-dtc-priority-caveat')).textContent)
+      .toMatch(/lossy Links feeder can invert the priority/)
+  })
+
+  it('shows a per_load refusal', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report: REPORT,
+    } as never)
+    vi.mocked(resultsApi.getEhDtc).mockResolvedValue({
+      attribution: 'per_load', voll_premium_eps: 0.05,
+      refused: 'per_load attribution needs Load-keyed shed data',
+      contingencies: [{ contingency: 'grid_import', status: 'refused' }],
+    } as never)
+    await openPanel()
+    expect((await screen.findByTestId('eh-dtc-refused')).textContent)
+      .toMatch(/Load-keyed/)
+  })
+
+  it('keeps the bus-aggregate table without a per-Load column', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report: REPORT,
+    } as never)
+    vi.mocked(resultsApi.getEhDtc).mockResolvedValue(DTC as never)
+    await openPanel()
+    expect((await screen.findByTestId('eh-dtc-attribution')).textContent)
+      .toBe('bus_aggregate_not_per_load')
+    expect(screen.queryByText(/Critical by Load/)).toBeNull()
+  })
+
   it('exports CSV for each sibling table', async () => {
     vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
       status: 'done', study: 'eh_study', archetype: 'weak_flexible', report: REPORT,
@@ -575,6 +1053,254 @@ describe('P6b per-Load multi-energy disclosure', () => {
 })
 
 
+describe('P18 — pipeline table and whole-report export', () => {
+  const STAGES = [
+    { stage: 'apply_pack', status: 'run', solves_charged: 0, note: null },
+    { stage: 'ens_solve', status: 'run', solves_charged: 1, note: null },
+    { stage: 'frontier', status: 'skipped', solves_charged: 0,
+      note: 'frontier not requested' },
+    { stage: 'mc_certify', status: 'failed', solves_charged: 0,
+      note: 'MC certification failed: boom' },
+    { stage: 'levers', status: 'aborted', solves_charged: 2, note: 'stopped' },
+    { stage: 'dtc_stress', status: 'pending', note: null },
+    { stage: 'assemble', status: 'run', solves_charged: 0, note: null },
+  ]
+  const WITH_PIPE = {
+    ...REPORT, certified: false, mc_lole_h: 4.2,
+    pipeline: { aborted: false, solves_consumed: 3, budget_solves: 30, stages: STAGES },
+    sections: { gates: { status: 'not_established', note: 'no SCR data' } },
+    notes: ['DSR preflight: bus flex hosts a battery'],
+  }
+
+  function done() {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report: WITH_PIPE,
+    } as never)
+  }
+
+  it('renders every stage with its status, solves and note', async () => {
+    done()
+    const user = await openPanel()
+    const toggle = await screen.findByTestId('eh-pipeline-toggle')
+    expect(toggle.textContent).toMatch(/7 stages/)
+    expect(screen.queryByTestId('eh-pipeline-table')).toBeNull()   // collapsed
+    await user.click(toggle)
+    for (const st of STAGES) {
+      const row = screen.getByTestId(`eh-pipeline-row-${st.stage}`)
+      expect(row.querySelector('[data-status]')?.getAttribute('data-status'))
+        .toBe(st.status)
+      expect(row.textContent).toContain(String(st.solves_charged ?? 0))
+      if (st.note) expect(row.textContent).toContain(st.note)
+    }
+  })
+
+  it('downloads the stored export body as JSON', async () => {
+    done()
+    const exportBody = { ...WITH_PIPE, pack_hash: '0123456789abcdef' }
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(exportBody as never)
+    const user = await openPanel()
+    await user.click(await screen.findByTestId('eh-report-json'))
+    await waitFor(() => expect(downloadJSON).toHaveBeenCalledWith(
+      'eh-reference-design-strong_grid-01234567.json', exportBody))
+  })
+
+  it('refuses both exports together when the stored report was cleared', async () => {
+    // A later foreground solve clears the stored report while the study
+    // record keeps its copy: the panel still shows it, but neither export
+    // may disagree with GET /eh_reference_design.
+    done()
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(null)
+    await openPanel()
+    expect((await screen.findByTestId('eh-report-not-stored')).textContent)
+      .toMatch(/cleared by a later solve/)
+    expect((screen.getByTestId('eh-report-json') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByTestId('eh-report-summary-csv') as HTMLButtonElement).disabled)
+      .toBe(true)
+  })
+
+  it('says so if the stored report vanished between render and click', async () => {
+    done()
+    vi.mocked(resultsApi.getEhReferenceDesign)
+      .mockResolvedValueOnce(WITH_PIPE as never).mockResolvedValue(null)
+    const user = await openPanel()
+    const btn = await screen.findByTestId('eh-report-json')
+    await waitFor(() => expect((btn as HTMLButtonElement).disabled).toBe(false))
+    await user.click(btn)
+    expect((await screen.findByTestId('eh-report-json-error')).textContent)
+      .toMatch(/No stored reference design/)
+    expect(downloadJSON).not.toHaveBeenCalled()
+  })
+
+  it('exports a flat summary CSV of headline, completeness and notes', async () => {
+    done()
+    vi.mocked(resultsApi.getEhReferenceDesign).mockResolvedValue(WITH_PIPE as never)
+    const user = await openPanel()
+    const btn = await screen.findByTestId('eh-report-summary-csv')
+    await waitFor(() => expect((btn as HTMLButtonElement).disabled).toBe(false))
+    await user.click(btn)
+    expect(downloadCSV).toHaveBeenCalledWith(
+      'eh-reference-design-strong_grid.csv', ['group', 'key', 'value'],
+      expect.any(Array))
+    const rows = reportSummaryCsvRows(WITH_PIPE as never)
+    expect(rows).toContainEqual(['headline', 'certified', false])
+    expect(rows).toContainEqual(['headline', 'solves_consumed', 3])
+    expect(rows).toContainEqual(['completeness', 'gates', 'not_established: no SCR data'])
+    expect(rows).toContainEqual(['note', '1', 'DSR preflight: bus flex hosts a battery'])
+    expect(rows.every(r => r.length === 3)).toBe(true)
+  })
+})
+
+
+describe('P18 — DtC attribution choice', () => {
+  it('sends dtc_attribution only when chosen', () => {
+    expect(buildEhStudyBody('weak_flexible', EMPTY_PACK_FORM).body)
+      .toEqual({ archetype: 'weak_flexible' })
+    expect(buildEhStudyBody('weak_flexible', {
+      ...EMPTY_PACK_FORM, dtcAttribution: 'per_load' }).body)
+      .toEqual({ archetype: 'weak_flexible', dtc_attribution: 'per_load' })
+  })
+
+  it('asks readiness for the chosen attribution and runs with it', async () => {
+    const user = await openPanel()
+    await user.click(screen.getByTestId('eh-pack-settings-toggle'))
+    await user.selectOptions(screen.getByTestId('eh-pack-dtc-attribution'), 'per_load')
+    await waitFor(() => expect(resultsApi.getEhReadiness)
+      .toHaveBeenCalledWith('strong_grid', undefined, 'per_load', {}))
+    await user.click(screen.getByTestId('eh-run'))
+    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
+      archetype: 'strong_grid', dtc_attribution: 'per_load' }))
+  })
+})
+
+
+describe('P19 — EH template banner', () => {
+  const META = {
+    id: 'eh_datacenter', name: 'Data Center Energy Hub',
+    recommended_archetype: 'weak_flexible',
+    pack_overrides: { import_p_nom_mw: 40 }, stages: null,
+    dtc_attribution: 'per_load',
+    study_notes: ['IT load is critical (it_bus); cooling and offices are not.'],
+    provenance: 'synthetic illustrative data',
+  }
+
+  it('maps template metadata onto the pack form', () => {
+    expect(formFromTemplate(META as never)).toEqual({
+      ...EMPTY_PACK_FORM, importMw: '40', dtcAttribution: 'per_load' })
+    expect(formFromTemplate({ ...META, stages: ['frontier', 'bogus', 'levers'] } as never)
+      .stages).toEqual(['frontier', 'levers'])
+  })
+
+  it('offers and applies the recommended settings', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue(META as never)
+    const user = await openPanel()
+    const banner = await screen.findByTestId('eh-template-banner')
+    expect(banner.textContent).toMatch(/Data Center Energy Hub template/)
+    expect(banner.textContent).toMatch(/IT load is critical/)
+    await user.click(screen.getByTestId('eh-template-apply'))
+    expect((screen.getByTestId('eh-archetype') as HTMLSelectElement).value)
+      .toBe('weak_flexible')
+    await user.click(screen.getByTestId('eh-run'))
+    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
+      archetype: 'weak_flexible', pack_overrides: { import_p_nom_mw: 40 },
+      dtc_attribution: 'per_load' }))
+  })
+
+  it('shows no banner for a project not made from an EH template', async () => {
+    await openPanel()
+    await waitFor(() => expect(resultsApi.getEhTemplate).toHaveBeenCalled())
+    expect(screen.queryByTestId('eh-template-banner')).toBeNull()
+  })
+})
+
+
+describe('E2E review — panel fixes', () => {
+  it('certifies a LOLE target with the MC (strong_grid factory metric is none)', () => {
+    expect(buildEhStudyBody('strong_grid', { ...EMPTY_PACK_FORM, loleTarget: '3' }).body)
+      .toEqual({ archetype: 'strong_grid',
+        pack_overrides: { target_lole_h: 3, certification_metric: 'mc_lole' } })
+  })
+
+  it('sends only the lever flags the user set, per archetype', () => {
+    const form = { ...EMPTY_PACK_FORM,
+      levers: { import_energy: 'on' as const, redundancy: 'off' as const } }
+    expect(buildEhStudyBody('weak_flexible', form).body?.pack_overrides)
+      .toEqual({ levers: { import_energy: true, redundancy: false } })
+    // import_energy is weak_flexible only — never sent for strong_grid
+    expect(buildEhStudyBody('strong_grid', form).body?.pack_overrides)
+      .toEqual({ levers: { redundancy: false } })
+    expect(leverKeysFor('off_grid')).not.toContain('import_cap')
+  })
+
+  it('previews the stages and overrides that will run', async () => {
+    const user = await openPanel()
+    await user.click(screen.getByTestId('eh-pack-settings-toggle'))
+    await user.type(screen.getByTestId('eh-pack-lole-target'), '3')
+    await waitFor(() => expect(resultsApi.getEhReadiness).toHaveBeenCalledWith(
+      'strong_grid', undefined, undefined,
+      { pack_overrides: { target_lole_h: 3, certification_metric: 'mc_lole' } }),
+    { timeout: 2000 })
+  })
+})
+
+it('offers the study and tagging walkthroughs (P21)', async () => {
+  await openPanel()
+  expect(screen.getByTestId('eh-guide-button').textContent).toMatch(/Guide/)
+  expect(screen.getByTestId('eh-tagging-guide-button').textContent)
+    .toMatch(/How to tag the network/)
+})
+
+
+it('opens the assistant with a review request prefilled, not sent (P22)', async () => {
+  const { useChatStore } = await import('../../store/chatStore')
+  vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+    status: 'done', study: 'eh_study', archetype: 'strong_grid', report: REPORT,
+  } as never)
+  useUIStore.setState({ assistantDockOpen: false })
+  const user = await openPanel()
+  const btn = await screen.findByTestId('eh-ask-assistant')
+  expect(btn.textContent).toMatch(/review/)
+  await user.click(btn)
+  expect(useUIStore.getState().assistantDockOpen).toBe(true)
+  expect(useChatStore.getState().composerSeed).toMatch(/Review my latest Energy Hub study/)
+  useChatStore.getState().seedComposer(null)
+})
+
+describe('P19–P22 gate — panel', () => {
+  it('shows catalogue hover help on the pack controls (BINDING 4)', async () => {
+    const { guidesApi } = await import('../../components/GuidedTour')
+    vi.spyOn(guidesApi, 'getGuide').mockResolvedValue({
+      version: 1, tours: {},
+      fields: { ens_cap_permyriad: 'ENS target — the share of energy demand allowed unserved.' },
+    } as never)
+    const user = await openPanel()
+    await user.click(screen.getByTestId('eh-pack-settings-toggle'))
+    const label = screen.getByTestId('eh-pack-ens-cap-label')
+    const trigger = await waitFor(() => {
+      const t = label.querySelector('[tabindex="0"]')
+      if (!t) throw new Error('help icon not rendered yet')
+      return t
+    })
+    await user.hover(trigger)
+    expect(await screen.findByText(/share of energy demand allowed unserved/)).toBeTruthy()
+  })
+
+  it('preselects the template recommendation so Run runs the right pack', async () => {
+    vi.mocked(resultsApi.getEhTemplate).mockResolvedValue({
+      id: 'eh_datacenter', name: 'Data Center Energy Hub',
+      recommended_archetype: 'weak_flexible',
+      pack_overrides: { import_p_nom_mw: 40 }, stages: null,
+      dtc_attribution: 'per_load',
+    } as never)
+    const user = await openPanel()
+    await waitFor(() => expect(
+      (screen.getByTestId('eh-archetype') as HTMLSelectElement).value).toBe('weak_flexible'))
+    await user.click(screen.getByTestId('eh-run'))
+    await waitFor(() => expect(resultsApi.startEhStudy).toHaveBeenCalledWith({
+      archetype: 'weak_flexible', pack_overrides: { import_p_nom_mw: 40 },
+      dtc_attribution: 'per_load' }))
+  })
+})
+
 describe('wired stages — certification / frontier / fmea_top / LCOH (2026-09-26)', () => {
   const CERT = {
     metric: 'mc_lole', target_lole_h: 3, mc_lole_h: 1.25, lole_ci: [0.9, 1.6],
@@ -677,10 +1403,12 @@ describe('wired stages — certification / frontier / fmea_top / LCOH (2026-09-2
     } as never)
     const user = await openPanel()
     expect(await screen.findByTestId('eh-report')).toBeTruthy()
-    expect(screen.getByTestId('eh-report-mc-lole').textContent).toMatch(/1\.25 h/)
-    expect(screen.getByTestId('eh-report-mc-lole').textContent).toMatch(/target 3 h/)
-    const verdict = screen.getByTestId('eh-report-verdict')
-    expect(verdict.getAttribute('data-verdict')).toBe('certified')
+    // Merge 2026-09-28: one headline — the P11 LOLE chip and verdict chip
+    // (a stored `certified` verdict is read as `pass`).
+    expect(screen.getByTestId('eh-report-lole').textContent).toMatch(/1\.25 h/)
+    const verdict = screen.getByTestId('eh-certification-verdict')
+    expect(verdict.textContent).toMatch(/3 h\/yr/)
+    expect(verdict.getAttribute('data-verdict')).toBe('pass')
     expect(verdict.className).toContain('accent')
     expect(screen.getByTestId('eh-report-lcoh').textContent).toMatch(/€4\.87\/kg/)
     expect(screen.queryByTestId('eh-report-lcoh-flag')).toBeNull()
@@ -729,8 +1457,8 @@ describe('wired stages — certification / frontier / fmea_top / LCOH (2026-09-2
       status: 'done', study: 'eh_study', archetype: 'off_grid', report,
     } as never)
     await openPanel()
-    const verdict = await screen.findByTestId('eh-report-verdict')
-    expect(verdict.getAttribute('data-verdict')).toBe('failed')
+    const verdict = await screen.findByTestId('eh-certification-verdict')
+    expect(verdict.getAttribute('data-verdict')).toBe('fail')
     expect(verdict.className).toContain('danger')
     expect(screen.getByTestId('eh-certification-note').textContent).toMatch(/decision 2/)
   })
@@ -769,7 +1497,7 @@ describe('wired stages — certification / frontier / fmea_top / LCOH (2026-09-2
     } as never)
     await openPanel()
     expect(await screen.findByTestId('eh-certification')).toBeTruthy()
-    expect(screen.queryByTestId('eh-report-mc-lole')).toBeNull()
+    expect(screen.queryByTestId('eh-report-lole')).toBeNull()
     expect(screen.queryByTestId('eh-certification-lole')).toBeNull()
     expect(screen.getByTestId('eh-certification-note').textContent).toMatch(/occurrence/)
   })
@@ -783,7 +1511,7 @@ describe('wired stages — certification / frontier / fmea_top / LCOH (2026-09-2
     expect(screen.queryByTestId('eh-certification')).toBeNull()
     expect(screen.queryByTestId('eh-frontier')).toBeNull()
     expect(screen.queryByTestId('eh-fmea-top')).toBeNull()
-    expect(screen.queryByTestId('eh-report-mc-lole')).toBeNull()
+    expect(screen.queryByTestId('eh-report-lole')).toBeNull()
     expect(screen.queryByTestId('eh-report-lcoh')).toBeNull()
     expect(screen.queryByTestId('eh-report-lcoh-flag')).toBeNull()
   })
@@ -1023,5 +1751,144 @@ describe('review of WP5: labels that do not hide an event or a firm Link', () =>
       .toMatch(/MIXED exactly/)
     expect(screen.getByTestId('eh-fmea-top-copt-import').textContent)
       .toMatch(/common-mode events mixed exactly/)
+  })
+})
+
+describe('merge of master (2026-09-28): one rendering, both payload shapes', () => {
+  it('normalises a stored certified/failed verdict to the P11 vocabulary', () => {
+    expect(normalisedVerdict('certified')).toBe('pass')
+    expect(normalisedVerdict('failed')).toBe('fail')
+    expect(normalisedVerdict('no_target')).toBeNull()
+    expect(normalisedVerdict('not_established')).toBeNull()
+    expect(normalisedVerdict('inconclusive')).toBe('inconclusive')
+    expect(normalisedVerdict(undefined)).toBeNull()
+  })
+
+  it('labels an import the P11 boundary did not count', () => {
+    expect(importModelLabel({ metric: 'mc_lole', import_model: 'excluded',
+      import_firmness: 'not_counted', fleet_scope: { mode: 'hub_side' } }))
+      .toMatch(/not counted in the MC.*decision 6/)
+  })
+
+  it('lists the Class-B ranking first, then the class-A screening block', async () => {
+    const report = {
+      ...REPORT,
+      completeness: { ...REPORT.completeness, fmea_top: 'ok' as const },
+      sections: {
+        fmea_top: { status: 'ok' as const, note: 'Link-primary residual risk',
+          payload: {
+            rows: [{ mode_id: 'link:feed1:forced_outage', name: 'feed1',
+              component_class: 'Link', failure_class: 'B',
+              criticality_eur_per_year: 900, delta_eue_mwh: 4 }],
+            class_a: { status: 'ok', rows: [{ rank: 1,
+              mode_id: 'generator:base:forced_outage', component_class: 'Generator',
+              name: 'base', failure_class: 'A', criticality_eur_per_year: 300 }],
+              fleet_scope: { mode: 'hub_side', copt_import_model: 'two_state' },
+              import_link_ranking: { import_poc: 'class_b' },
+              import_link_ranking_note: 'ranked ONCE' },
+          } },
+      },
+    }
+    // Ranked within each class (owner's Q2 rule, merge review N1).
+    expect(fmeaTopModes(report).map(m => [m.rank, m.failure_class, m.name]))
+      .toEqual([[1, 'B', 'feed1'], [1, 'A', 'base']])
+    expect(fmeaTopCsvRows(report).map(r => r.slice(0, 2)))
+      .toEqual([[1, 'B'], [1, 'A']])
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'weak_flexible', report,
+    } as never)
+    await openPanel()
+    expect((await screen.findByTestId('eh-fmea-top-row-1')).getAttribute('data-class'))
+      .toBe('B')
+    expect(screen.getByTestId('eh-fmea-top-row-2').getAttribute('data-class')).toBe('A')
+    expect(screen.getByTestId('eh-fmea-top-row-1').getAttribute('data-rank')).toBe('B1')
+    expect(screen.getByTestId('eh-fmea-top-row-2').getAttribute('data-rank')).toBe('A1')
+    expect(screen.getByTestId('eh-fmea-top-row-2').textContent).toMatch(/A1/)
+    expect(screen.getByTestId('eh-fmea-top-engines-note').textContent)
+      .toMatch(/ranked separately/)
+    expect(screen.getByTestId('eh-fmea-top-copt-import').textContent)
+      .toMatch(/two-state unit/)
+    expect(screen.getByTestId('eh-fmea-top-import-ranking').textContent)
+      .toMatch(/import_poc: Class-B row/)
+  })
+
+  it('says why the class-A screening is missing, never inventing rows', async () => {
+    const report = {
+      ...REPORT,
+      completeness: { ...REPORT.completeness, fmea_top: 'ok' as const },
+      sections: {
+        fmea_top: { status: 'ok' as const, note: null,
+          payload: {
+            rows: [{ mode_id: 'link:feed1:forced_outage', name: 'feed1',
+              criticality_eur_per_year: 900 }],
+            class_a: { status: 'not_established', rows: [],
+              reason: 'nothing to sample: no electrical generator carries resolvable occurrence data' },
+          } },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report,
+    } as never)
+    await openPanel()
+    expect((await screen.findByTestId('eh-fmea-class-a-reason')).textContent)
+      .toMatch(/occurrence data/)
+    expect(screen.queryByTestId('eh-fmea-top-row-2')).toBeNull()
+  })
+
+  it('shows the per-year LOLE with the CI on the same basis', async () => {
+    const report = {
+      ...REPORT,
+      mc_lole_h: 12.5,
+      completeness: { ...REPORT.completeness, certification: 'ok' as const },
+      sections: {
+        certification: { status: 'ok' as const, note: null, payload: {
+          metric: 'mc_lole', verdict: 'fail', horizon_years: 0.5,
+          lole_h_per_year: 12.5, mc_lole_h: 12.5, lole_ci: [5.0, 7.5],
+          target_lole_h: 3 } },
+      },
+    }
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'off_grid', report,
+    } as never)
+    await openPanel()
+    const line = await screen.findByTestId('eh-certification-lole')
+    expect(line.textContent).toMatch(/12\.50 h\/yr \[10\.00, 15\.00\]/)
+  })
+})
+
+describe("owner's Q3 rule: the knee needs three solved points", () => {
+  const frontier = (n: number, extra: Record<string, unknown> = {}) => ({
+    ...REPORT,
+    completeness: { ...REPORT.completeness, frontier: 'ok' as const },
+    sections: { frontier: { status: 'ok' as const, note: null, payload: {
+      knee_index: 0, ...extra,
+      points: [[40, 1000, 9], [20, 1500, 5], [10, 9000, 2]].slice(0, n).map(
+        ([t, c, e]) => ({ target_permyriad: t, status: 'ok',
+          point: { total_system_cost_eur: c, achieved_ens_mwh: e } })),
+    } } },
+  })
+
+  it('does not mark a knee with fewer than three solved points', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid',
+      report: frontier(2, { knee_status: 'not_established',
+        knee_note: 'a knee needs at least 3 solved points; 2 solved' }),
+    } as never)
+    await openPanel()
+    await screen.findByTestId('eh-frontier')
+    expect(screen.queryByTestId('eh-frontier-knee')).toBeNull()
+    expect(screen.getByTestId('eh-frontier-knee-note').textContent)
+      .toMatch(/Knee not established: a knee needs at least 3 solved points; 2 solved/)
+  })
+
+  it('marks the knee from three solved points', async () => {
+    vi.mocked(resultsApi.getEhStudy).mockResolvedValue({
+      status: 'done', study: 'eh_study', archetype: 'strong_grid', report: frontier(3),
+    } as never)
+    await openPanel()
+    await screen.findByTestId('eh-frontier')
+    expect(screen.getByTestId('eh-frontier-knee')).toBeTruthy()
+    expect(screen.getByTestId('eh-frontier-row-0').getAttribute('data-knee')).toBe('true')
+    expect(screen.queryByTestId('eh-frontier-knee-note')).toBeNull()
   })
 })

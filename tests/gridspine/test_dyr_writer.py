@@ -55,20 +55,28 @@ def _raw_machines(text):
     return out
 
 
-_RECORD = re.compile(r"^\s*(\d+)\s+'([A-Z]+)'\s+'(.{2})'\s+(.*?)\s*/\s*$")
+_RECORD = re.compile(r"^\s*(\d+)\s+'([A-Z0-9]+)'\s+'(.{2})'\s+(.*?)\s*/\s*$")
 
 
 def _dyr_records(text):
-    """(bus_number, model, machine_id, [cons]) per record. The ID is the RAW's
-    2-char quoted field ('1 '), so it is matched by width, not split on space."""
-    out = []
+    """(bus_number, model, machine_id, [values]) per record. A record ends at
+    its '/', so a wrapped record (the converter models) is joined first. The
+    ID is the RAW's 2-char quoted field ('1 '), so it is matched by width, not
+    split on space. Values are ICONs then CONs, as written."""
+    out, pending = [], []
     for ln in text.splitlines():
         if not ln.strip():
             continue
-        m = _RECORD.match(ln)
-        assert m, ln
+        pending.append(ln)
+        if not ln.rstrip().endswith("/"):
+            continue
+        record = " ".join(pending)
+        pending = []
+        m = _RECORD.match(record)
+        assert m, record
         bus, model, mid, tail = int(m[1]), m[2], m[3].strip(), m[4]
         out.append((bus, model, mid, [float(t) for t in tail.split()]))
+    assert not pending, f"unterminated record: {pending}"
     return out
 
 
@@ -221,9 +229,10 @@ def test_case39_records_come_in_raw_machine_order(tmp_path):
 
 
 def test_inverters_get_no_record_and_are_not_in_the_return(tmp_path):
-    """No IBR dynamic model is in scope (REGC/REEC are later). They are left
-    out of the .dyr, not silently given a synchronous record — and the caller
-    can see the omission because they are absent from the return."""
+    """Without an ``ibr`` frame (or for an inverter not in it) there is no
+    converter record. They are left out of the .dyr, not silently given a
+    synchronous record — and the caller can see the omission because they are
+    absent from the return."""
     net = load_case39_res()
     written = write_dyr(net, load_unit_params(), tmp_path / "c39.dyr")
     text = (tmp_path / "c39.dyr").read_text()
@@ -262,6 +271,202 @@ def test_a_missing_con_raises_rather_than_writing_zero(tmp_path):
     params.loc["G_BUS_02", "xq_p"] = float("nan")
     with pytest.raises(ContractError, match="xq_p"):
         write_dyr(_toy_net(), params, tmp_path / "x.dyr")
+
+
+# --------------------------------------------------------------------------
+# Increment 8: converter records — REGCA1 + REECA1 per inverter
+# --------------------------------------------------------------------------
+
+from gridspine.templates.unit_params import ibr_params, load_unit_templates
+
+N_RES = 5
+
+_IBR = {
+    "regc_lvplsw": 1, "regc_tg": 0.02, "regc_rrpwr": 10.0, "regc_brkpt": 0.9,
+    "regc_zerox": 0.4, "regc_lvpl1": 1.22, "regc_volim": 1.2, "regc_lvpnt1": 0.8,
+    "regc_lvpnt0": 0.4, "regc_iolim": -1.3, "regc_tfltr": 0.02, "regc_khv": 0.7,
+    "regc_iqrmax": 99.0, "regc_iqrmin": -99.0, "regc_accel": 0.7,
+    "reec_pfflag": 0, "reec_vflag": 1, "reec_qflag": 0, "reec_pflag": 0,
+    "reec_pqflag": 1,
+    "reec_vdip": 0.9, "reec_vup": 1.1, "reec_trv": 0.02, "reec_dbd1": -0.05,
+    "reec_dbd2": 0.05, "reec_kqv": 2.0, "reec_iqh1": 1.05, "reec_iql1": -1.05,
+    "reec_vref0": 0.0, "reec_iqfrz": 0.0, "reec_thld": 0.0, "reec_thld2": 0.0,
+    "reec_tp": 0.02, "reec_qmax": 0.436, "reec_qmin": -0.436, "reec_vmax": 1.1,
+    "reec_vmin": 0.9, "reec_kqp": 0.0, "reec_kqi": 0.1, "reec_kvp": 0.0,
+    "reec_kvi": 40.0, "reec_vbias": 0.0, "reec_tiq": 0.02, "reec_dpmax": 99.0,
+    "reec_dpmin": -99.0, "reec_pmax": 1.0, "reec_pmin": 0.0, "reec_imax": 1.1,
+    "reec_tpord": 0.02,
+    "reec_vq1": 0.2, "reec_iq1": 1.1, "reec_vq2": 0.5, "reec_iq2": 1.1,
+    "reec_vq3": 0.8, "reec_iq3": 1.1, "reec_vq4": 1.0, "reec_iq4": 1.1,
+    "reec_vp1": 0.2, "reec_ip1": 1.1, "reec_vp2": 0.5, "reec_ip2": 1.0,
+    "reec_vp3": 0.8, "reec_ip3": 1.1, "reec_vp4": 1.0, "reec_ip4": 1.2,
+}
+
+
+def _toy_net_with_inverter():
+    """The toy plus a 50 MVA inverter on BUS_02, which already carries the
+    gen — so its machine ID is the RAW counter's second, '2 '."""
+    net = _toy_net()
+    pp.create_sgen(net, bus=1, p_mw=20.0, sn_mva=50.0, q_mvar=0.0, name="W_BUS_02")
+    return net
+
+
+def _toy_templates(tmp_path, mbase=50.0, ibr=_IBR):
+    units = dict(TOY_UNITS)
+    units["W_BUS_02"] = {
+        "model": "inverter", "mbase_mva": mbase, "include_in_inertia": False,
+        "params": {"k_sc": _p(1.2, "assumed"), "rx_sc": _p(0.1, "assumed"),
+                   **{k: _p(v, "assumed") for k, v in ibr.items()}},
+    }
+    f = tmp_path / "toy_ibr.yaml"
+    f.write_text(yaml.safe_dump({"units": units}, sort_keys=False))
+    return load_unit_params(f), load_unit_templates(f)
+
+
+# Hand-written from the PSS/E library layout, not from the writer's tuples:
+# REGCA1 = ICON Lvplsw; CONs Tg Rrpwr Brkpt Zerox Lvpl1 Volim Lvpnt1 Lvpnt0
+#   Iolim Tfltr Khv Iqrmax Iqrmin Accel.
+# REECA1 = ICONs BUSR PFFLAG VFLAG QFLAG PFLAG PQFLAG; CONs Vdip Vup Trv dbd1
+#   dbd2 Kqv Iqh1 Iql1 Vref0 Iqfrz Thld Thld2 Tp QMax QMin VMAX VMIN Kqp Kqi
+#   Kvp Kvi Vbias Tiq dPmax dPmin PMAX PMIN Imax Tpord, then the VDL1 pairs
+#   Vq1 Iq1 .. Vq4 Iq4, then VDL2 Vp1 Ip1 .. Vp4 Ip4.
+# This pins the text, not every position: many fields share a value (0.02,
+# 0.0, 1.1). `test_every_converter_field_sits_at_its_library_position` pins
+# the positions.
+EXPECTED_TOY_IBR = (
+    "     2 'REGCA1' '2 '     1\n"
+    "     0.02000  10.00000   0.90000   0.40000   1.22000\n"
+    "     1.20000   0.80000   0.40000  -1.30000   0.02000\n"
+    "     0.70000  99.00000 -99.00000   0.70000 /\n"
+    "     2 'REECA1' '2 '     0     0     1     0     0     1\n"
+    "     0.90000   1.10000   0.02000  -0.05000   0.05000\n"
+    "     2.00000   1.05000  -1.05000   0.00000   0.00000\n"
+    "     0.00000   0.00000   0.02000   0.43600  -0.43600\n"
+    "     1.10000   0.90000   0.00000   0.10000   0.00000\n"
+    "    40.00000   0.00000   0.02000  99.00000 -99.00000\n"
+    "     1.00000   0.00000   1.10000   0.02000   0.20000\n"
+    "     1.10000   0.50000   1.10000   0.80000   1.10000\n"
+    "     1.00000   1.10000   0.20000   1.10000   0.50000\n"
+    "     1.00000   0.80000   1.10000   1.00000   1.20000 /\n"
+)
+
+
+def test_toy_inverter_records_match_the_hand_written_text(tmp_path):
+    params, templates = _toy_templates(tmp_path)
+    out = write_dyr(_toy_net_with_inverter(), params, tmp_path / "t.dyr", ibr=ibr_params(templates))
+    # Synchronous records unchanged, converter records after them (RAW order).
+    assert (tmp_path / "t.dyr").read_text() == EXPECTED_TOY_DYR + EXPECTED_TOY_IBR
+    assert out == {"G_BUS_02": 2, "SLK_BUS_01": 1, "W_BUS_02": 2}
+
+
+# The PSS/E library layout typed out again, independently of the writer's
+# tuples, in the library's own names (lower-cased).
+_REGCA1_BY_HAND = ["lvplsw", "tg", "rrpwr", "brkpt", "zerox", "lvpl1", "volim",
+                   "lvpnt1", "lvpnt0", "iolim", "tfltr", "khv", "iqrmax",
+                   "iqrmin", "accel"]
+_REECA1_BY_HAND = ["pfflag", "vflag", "qflag", "pflag", "pqflag",
+                   "vdip", "vup", "trv", "dbd1", "dbd2", "kqv", "iqh1", "iql1",
+                   "vref0", "iqfrz", "thld", "thld2", "tp", "qmax", "qmin",
+                   "vmax", "vmin", "kqp", "kqi", "kvp", "kvi", "vbias", "tiq",
+                   "dpmax", "dpmin", "pmax", "pmin", "imax", "tpord",
+                   "vq1", "iq1", "vq2", "iq2", "vq3", "iq3", "vq4", "iq4",
+                   "vp1", "ip1", "vp2", "ip2", "vp3", "ip3", "vp4", "ip4"]
+
+
+def test_every_converter_field_sits_at_its_library_position(tmp_path):
+    """Every field gets a DISTINCT value, so any transposition shows. The frame
+    is built by hand, not loaded: distinct values are not a possible
+    converter, and the writer's job here is placement only."""
+    names = ["regc_" + n for n in _REGCA1_BY_HAND] + ["reec_" + n for n in _REECA1_BY_HAND]
+    value = {n: float(k + 2) for k, n in enumerate(names)}      # 2, 3, 4, ... (ICONs too)
+    ibr = pd.DataFrame([{"mbase_mva": 50.0, **value}], index=pd.Index(["W_BUS_02"], name="unit_id"))
+    params, _t = _toy_templates(tmp_path)
+    write_dyr(_toy_net_with_inverter(), params, tmp_path / "t.dyr", ibr=ibr)
+    recs = {m: v for _b, m, _i, v in _dyr_records((tmp_path / "t.dyr").read_text())}
+    assert recs["REGCA1"] == [value["regc_" + n] for n in _REGCA1_BY_HAND]
+    assert recs["REECA1"] == [0.0] + [value["reec_" + n] for n in _REECA1_BY_HAND]
+
+
+def test_converter_record_counts_are_the_library_layout(tmp_path):
+    params, templates = _toy_templates(tmp_path)
+    write_dyr(_toy_net_with_inverter(), params, tmp_path / "t.dyr", ibr=ibr_params(templates))
+    recs = {m: v for _b, m, _i, v in _dyr_records((tmp_path / "t.dyr").read_text())}
+    assert len(recs["REGCA1"]) == 1 + 14
+    assert len(recs["REECA1"]) == 6 + 45
+    assert recs["REECA1"][0] == 0, "BUSR: the unit's own terminal"
+
+
+def test_no_dyr_line_is_longer_than_80_characters(tmp_path):
+    # GENROU's single line is ~170 chars and has always been accepted; the
+    # converter records are wrapped so REECA1's 51 values do not become one
+    # 520-character line for an importer with a line buffer to overflow.
+    params, templates = _toy_templates(tmp_path)
+    write_dyr(_toy_net_with_inverter(), params, tmp_path / "t.dyr", ibr=ibr_params(templates))
+    ibr_text = (tmp_path / "t.dyr").read_text().split(EXPECTED_TOY_DYR, 1)[1]
+    assert max(len(ln) for ln in ibr_text.splitlines()) <= 80
+
+
+def test_case39_every_machine_has_a_record_and_the_ids_match_the_raw(tmp_path):
+    """THE cross-module contract, now over all 15 machines: parsed off both
+    files. Bus 33 carries G_BUS_33 and W_BUS_33, so the wind farm's records
+    must say '2 ' — a writer that restarted the counter for sgens gets the
+    bus right and the ID wrong."""
+    net = load_case39_res()
+    t = load_unit_templates()
+    write_raw(net, tmp_path / "c39.raw", f_hz=60.0)
+    written = write_dyr(net, load_unit_params(), tmp_path / "c39.dyr", ibr=ibr_params(t))
+    raw = _raw_machines((tmp_path / "c39.raw").read_text())
+    dyr = _dyr_records((tmp_path / "c39.dyr").read_text())
+    sync = [(b, i) for b, m, i, _v in dyr if m.startswith("GEN")]
+    regc = [(b, i) for b, m, i, _v in dyr if m == "REGCA1"]
+    reec = [(b, i) for b, m, i, _v in dyr if m == "REECA1"]
+    assert sync == [(b, i) for b, i, _mb in raw[:N_SYNC]]
+    assert regc == reec == [(b, i) for b, i, _mb in raw[N_SYNC:]]
+    assert len(regc) == N_RES and len(written) == N_SYNC + N_RES
+    assert (33, "2") in regc
+
+
+def test_case39_converter_base_is_the_installed_rating_after_a_snapshot(tmp_path):
+    """The bug this increment found: the RAW's MBASE for an inverter followed
+    the hour's dispatch. With the rating on the net as ``sn_mva``, an hour
+    that dispatches 33 MW from a 600 MW farm still agrees with the template."""
+    net = load_case39_res()
+    net.sgen["p_mw"] = 33.186
+    write_dyr(net, load_unit_params(), tmp_path / "c39.dyr",
+              ibr=ibr_params(load_unit_templates()))
+
+
+def test_a_converter_template_on_another_base_is_refused(tmp_path):
+    params, templates = _toy_templates(tmp_path, mbase=20.0)   # RAW says 50
+    with pytest.raises(ContractError, match="W_BUS_02.*mbase"):
+        write_dyr(_toy_net_with_inverter(), params, tmp_path / "t.dyr",
+                  ibr=ibr_params(templates))
+
+
+def test_an_inverter_outside_the_ibr_frame_is_omitted_and_the_rest_written(tmp_path):
+    net = load_case39_res()
+    ibr = ibr_params(load_unit_templates()).drop(index="S_BUS_36")
+    written = write_dyr(net, load_unit_params(), tmp_path / "c39.dyr", ibr=ibr)
+    assert "S_BUS_36" not in written
+    assert {u for u in written if u.startswith(("W_", "S_"))} == set(ibr.index)
+
+
+def test_a_curtailed_inverter_still_gets_its_records(tmp_path):
+    """Offline units are STAT=0 in the RAW, not omitted, and the .dyr follows:
+    a curtailed converter is still a machine the engineer may switch in."""
+    net = _toy_net_with_inverter()
+    net.sgen["in_service"] = False
+    params, templates = _toy_templates(tmp_path)
+    out = write_dyr(net, params, tmp_path / "t.dyr", ibr=ibr_params(templates))
+    assert "W_BUS_02" in out
+
+
+def test_a_missing_converter_value_raises_rather_than_writing_zero(tmp_path):
+    params, templates = _toy_templates(tmp_path)
+    ibr = ibr_params(templates)
+    ibr.loc["W_BUS_02", "reec_imax"] = float("nan")
+    with pytest.raises(ContractError, match="reec_imax"):
+        write_dyr(_toy_net_with_inverter(), params, tmp_path / "t.dyr", ibr=ibr)
 
 
 def test_writer_imports_no_engine():

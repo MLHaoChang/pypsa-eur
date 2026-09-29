@@ -104,7 +104,13 @@ def test_fmea_top_ranks_the_link_when_the_hub_has_no_sampled_unit():
         budget_solves=30)
     sec = report.sections["fmea_top"]
     assert report.completeness["fmea_top"] == "ok", sec.note
-    top = sec.payload["top"]
+    # Merge 2026-09-28: the Class-B ranking is ``rows``. Under the P11
+    # boundary (decision 6) a Link whose data cannot build a chain (no MTTR)
+    # is not counted, so no grid area is built either and the class-A block
+    # has nothing to screen — it says so instead of ranking anything.
+    top = sec.payload["rows"]
     assert [m["failure_class"] for m in top] == ["B"]
     assert top[0]["name"] == "import_poc"
-    assert "COPT screening skipped" in (sec.payload.get("copt_error") or "")
+    class_a = sec.payload["class_a"]
+    assert class_a["status"] == "not_established" and class_a["rows"] == []
+    assert "occurrence" in (class_a["reason"] or "")

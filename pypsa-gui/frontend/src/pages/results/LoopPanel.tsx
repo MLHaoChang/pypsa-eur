@@ -7,6 +7,7 @@ import type {
   CouplingMcBlock, McStatus,
 } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
+import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
 import { nk } from '../../utils/queryKeys'
 import { basisSuffix, type CoptPayload } from './adequacy'
 import { blockerMessage, ciRange, trim } from './McPanel'
@@ -306,6 +307,7 @@ export function LoopPanel() {
         ? 2000 : false,
   })
   const payload = (data ?? null) as CouplingLoopPayload | null
+  useStudyFinishedInvalidation(data === undefined ? undefined : payload?.status ?? null)
   const running = payload?.status === 'running'
 
   // Same query keys McPanel and AdequacyTab use, so this reads the cache the

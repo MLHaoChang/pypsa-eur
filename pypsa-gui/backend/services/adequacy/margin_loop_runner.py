@@ -7,6 +7,7 @@ module never imports ``routers.*``.
 """
 from __future__ import annotations
 
+import contextlib
 import contextvars as _contextvars
 import logging
 import math
@@ -119,7 +120,7 @@ def start_margin_loop(
         snapshot_inputs,
     )
     from services.adequacy.metrics import horizon_years, resolve_time_basis
-    from services.adequacy.sweep import _solve_once
+    from services.adequacy.sweep import _solve_once, preserve_bus_topology
     from services.solver_service import _prm_margin, reserve_margin_facts
     from services.validation_service import (
         _check_nonfinite_bounds,
@@ -864,7 +865,7 @@ def start_margin_loop(
         return ("The study did not complete. The iterates recorded below are "
                 "what it managed before it stopped.")
 
-    def worker():
+    def _worker(topology) -> None:
         res: dict | None = None
         err: str | None = None
         try:
@@ -904,6 +905,10 @@ def start_margin_loop(
             except BaseException:                             # noqa: BLE001
                 logger.exception("margin loop: the restore itself raised")
                 base_restored = False
+            # P22.9 bug 3: every solve of this study ran on the LIVE network,
+            # the closing one included — put the Bus topology columns back
+            # now, BEFORE the record below tells a poller the study is over.
+            topology.close()
 
             src_rows = (res or {}).get("iterations")
             if src_rows is None:
@@ -950,6 +955,13 @@ def start_margin_loop(
     # inherit it, so without this the closing restore's `state_update` and
     # the `restore="final"` config write would land in the PROCESS foreground
     # — a different project's state from the one the caller is polling.
+    def worker():
+        # The outer stack is the every-path guarantee (a raise before the
+        # explicit close in `_worker`); closing it twice is a no-op.
+        with contextlib.ExitStack() as topology:
+            topology.enter_context(preserve_bus_topology(n))
+            _worker(topology)
+
     _ctx = _contextvars.copy_context()
     t = _threading.Thread(target=lambda: _ctx.run(worker), daemon=True,
                           name="adequacy-margin-loop")

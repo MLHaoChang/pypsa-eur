@@ -367,7 +367,13 @@ function DispatchSourcePicker({ name, config, locked }: { name: string; config: 
     // Inline as well as a toast: the producer's refusal names the units or the
     // columns that disagree, and the engineer reads it against their own file.
     // A toast that vanishes is the wrong home for a list of ids.
-    onError: (e) => { setRefusal(errorText(e)); toast.error('That dispatch could not be read') },
+    // A 413 is refused before the server reads a byte, so "could not be read"
+    // would send the engineer looking for a fault in their files.
+    onError: (e) => {
+      setRefusal(errorText(e))
+      const status = (e as { response?: { status?: number } } | null)?.response?.status
+      toast.error(status === 413 ? 'Those files are too large to upload' : 'That dispatch could not be read')
+    },
   })
 
   return (

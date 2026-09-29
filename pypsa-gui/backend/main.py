@@ -79,6 +79,7 @@ from routers import (
     adequacy_worksheet,
     compare,
     gridspine,
+    guides,
     io,
     local_settings,
     network,
@@ -1181,6 +1182,8 @@ app.include_router(uploads.router, prefix="/api/projects", tags=["uploads"])
 # confirmation card lifecycle + abort endpoint. The router is mounted under
 # /api/chat; Phase 3 wires the real LLM call without changing route shapes.
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
+# In-app guides (P21): static tour / field-help catalogue, read-only.
+app.include_router(guides.router, prefix="/api/guides", tags=["guides"])
 # Desktop-only. Every route 404s in web mode; see routers/local_settings.py.
 app.include_router(
     local_settings.router, prefix="/api/local-settings", tags=["local-settings"],

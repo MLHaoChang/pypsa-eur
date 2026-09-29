@@ -10,9 +10,13 @@ import toast from 'react-hot-toast'
 import { Download, Plus, RefreshCw, Square, Trash2 } from 'lucide-react'
 import { resultsApi } from '../../api/simulation'
 import { useUIStore } from '../../store/uiStore'
+import { useStudyFinishedInvalidation } from '../../hooks/useStudyFinishedInvalidation'
+import { useStartFmeaSweep } from '../../hooks/useStartFmeaSweep'
 import { nk } from '../../utils/queryKeys'
-import { downloadCSV } from './shared'
+import { downloadCSV, fmtCurrency } from './shared'
 import { blockerMessage } from './McPanel'
+import StressScenarioEditor from './StressScenarioEditor'
+import { GuideButton } from '../../components/GuidedTour'
 import { SortHeader, TableSearchBox, useFilterableTable } from './useFilterableTable'
 import {
   buildManualRow,
@@ -60,6 +64,9 @@ export default function FmeaTab() {
       (q.state.data as { sweep_status?: string } | null)?.sweep_status === 'running'
         ? 2000 : false,
   })
+  // The sweep's closing base re-solve leaves fresh dispatch: re-read status.
+  useStudyFinishedInvalidation(modes === undefined ? undefined
+    : (modes as { sweep_status?: string | null } | null)?.sweep_status ?? null)
   const sidecarKey = nk(currentProject, 'adequacy', 'worksheet')
   const { data: sidecar } = useQuery({
     queryKey: sidecarKey,
@@ -87,19 +94,9 @@ export default function FmeaTab() {
       queryKey: nk(currentProject, 'results', 'fmea_modes') }),
   })
 
-  const sweep = useMutation({
-    mutationFn: async () => {
-      const reg = currentProject
-        ? await resultsApi.getStressScenarios(currentProject).catch(() => null)
-        : null
-      return resultsApi.postFmeaSweep(reg?.scenarios ?? [])
-    },
-    onSuccess: () => { void refetchModes() },
-    // The backend's own sentence (a 409 names the study that blocks the
-    // sweep; a 422 names the missing VOLL), not axios' status-code line —
-    // the other panels already read it through `blockerMessage` (M11).
-    onError: (e: unknown) => toast.error(`Sweep failed to start: ${blockerMessage(e)}`),
-  })
+  // Shared with the hub-design Improve card (P24): registry first, an
+  // unreadable registry refuses, the backend's sentence on a refused start.
+  const sweep = useStartFmeaSweep({ onStarted: () => { void refetchModes() } })
   const sweepRunning =
     (modes as ModesPayload | null | undefined)?.sweep_status === 'running' ||
     sweep.isPending
@@ -160,9 +157,12 @@ export default function FmeaTab() {
   return (
     <div className="flex flex-col h-full overflow-auto p-4 gap-3">
       <header>
-        <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
-          FMEA worksheet
-        </h3>
+        <div className="flex items-center gap-2">
+          <h3 className="text-[12.5px] font-semibold text-text tracking-[-0.005em]">
+            FMEA worksheet
+          </h3>
+          <GuideButton tourId="fmea" testId="fmea-guide-button" />
+        </div>
         <p className="text-[11px] text-muted mt-1">
           Failure modes ranked by €/yr criticality — engine-computed rows
           regenerate on every view; expert rows and mitigability notes persist
@@ -181,6 +181,7 @@ export default function FmeaTab() {
       <div className="flex items-center gap-2">
         <TableSearchBox value={search} onChange={setSearch} placeholder="Filter modes…" />
         <button onClick={() => sweep.mutate()} disabled={sweepRunning}
+          data-testid="fmea-sweep"
           title="Re-solves each eligible link outage (class B) and each stress scenario (class C) with capacities frozen — several LP solves; the network ends back in its base state."
           className="inline-flex items-center gap-1 px-2 py-1 border border-border rounded text-[10px] text-muted hover:border-accent hover:text-accent transition-colors disabled:opacity-50">
           <RefreshCw size={11} className={sweepRunning ? 'animate-spin' : ''} />
@@ -229,7 +230,7 @@ export default function FmeaTab() {
         </p>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-[10.5px]">
+          <table className="w-full text-[10.5px]" data-testid="fmea-table">
             <thead>
               <tr className="text-left text-muted border-b border-border">
                 <SortHeader label="Mode" columnKey="name" sortKey={sortKey} sortDir={sortDir} onClick={onSortClick("name")} />
@@ -256,8 +257,8 @@ export default function FmeaTab() {
                   <td className="py-1 pr-2">{r.failure_class}</td>
                   <td className="py-1 pr-2 font-mono">{r.occurrence_per_year.toFixed(2)}
                     <span className="text-muted"> {r.occurrence_basis}</span></td>
-                  <td className="py-1 pr-2 font-mono">{r.severity_eur.toFixed(0)}</td>
-                  <td className="py-1 pr-2 font-mono font-semibold">{r.criticality_eur_per_year.toFixed(0)}</td>
+                  <td className="py-1 pr-2 font-mono">{fmtCurrency(r.severity_eur, 1)}</td>
+                  <td className="py-1 pr-2 font-mono font-semibold">{fmtCurrency(r.criticality_eur_per_year, 1)}</td>
                   <td className="py-1 pr-2">
                     <input
                       className="bg-bg border border-border rounded px-1.5 py-0.5 text-[10px] w-44 focus:outline-none focus:border-accent"
@@ -286,7 +287,7 @@ export default function FmeaTab() {
         </div>
       )}
 
-      <div className="border border-border rounded p-2 mt-1">
+      <div className="border border-border rounded p-2 mt-1" data-testid="fmea-expert-form">
         <p className="text-[10px] font-semibold text-muted uppercase tracking-wide mb-1.5">
           Add expert failure mode (class D)
         </p>
@@ -313,6 +314,8 @@ export default function FmeaTab() {
           their own provenance badge and never impersonate an engine.
         </p>
       </div>
+
+      <StressScenarioEditor project={currentProject} />
     </div>
   )
 }

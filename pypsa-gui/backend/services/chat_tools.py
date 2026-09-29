@@ -1282,7 +1282,13 @@ def update_solver_config(partial: dict) -> dict:
     from routers.simulation import update_solver_config as _h
     from models.schemas import SolverConfigSchema
     body = SolverConfigSchema(**partial)
-    return _h(body)
+    # The handler's user-code admin gate needs `db` + `actor` (83d50f049).
+    # Called bare they were `Depends` sentinels (merge review N6). With no
+    # acting identity bound, pass None: the gate then refuses user code
+    # (fail closed) and every other knob works as before.
+    if acting_user_id() is None:
+        return _h(body, db=None, actor=None)
+    return _route(_h, body)
 
 
 # ── Validation (3) ──────────────────────────────────────────────────────────
@@ -1383,6 +1389,12 @@ _ADEQUACY_HANDLER_NAMES: dict[str, str] = {
     "reserve_margin": "get_reserve_margin",
     "eh_study": "get_eh_study",
     "eh_reference_design": "get_eh_reference_design",
+    # EH sibling tables (E2E review m5): the report summarises them; these
+    # are the per-option / per-contingency rows behind each section.
+    "eh_redundancy": "get_eh_redundancy",
+    "eh_levers": "get_eh_levers",
+    "eh_dtc": "get_eh_dtc",
+    "eh_dtc_planning": "get_eh_dtc_planning",
 }
 
 # Why each kind can be empty. Surfaced verbatim on the no_data result so the
@@ -1415,6 +1427,10 @@ _ADEQUACY_NO_DATA_HINTS: dict[str, str] = {
         "no Energy Hub ReferenceDesignReport has been stored — run "
         "run_eh_study first"
     ),
+    "eh_redundancy": "no EH study with the redundancy stage has run",
+    "eh_levers": "no EH study with the levers stage has run",
+    "eh_dtc": "no EH study with the dtc_stress stage has run",
+    "eh_dtc_planning": "no EH study with the dtc_planning stage has run",
 }
 
 # Path outlier, same shape as get_results' ac_pf_status (v4-MAJOR-4): eleven of
@@ -1500,6 +1516,82 @@ def get_stress_scenarios(name: str) -> dict:
     """The per-project class-C stress-scenario registry."""
     from routers.adequacy_worksheet import get_stress_scenarios as _h
     return _h(project=_authorized_project(name))
+
+
+def put_stress_scenarios(name: str, scenarios: list) -> dict:
+    """Replace the per-project class-C registry (whole list; 422 names the
+    rule a scenario breaks). P22: lets the assistant apply a recommended
+    scenario — read the registry first and send it back with the change."""
+    from routers.adequacy_worksheet import (
+        StressScenariosPut,
+    )
+    from routers.adequacy_worksheet import put_stress_scenarios as _h
+    # Through `_route`: master's sidecar lock gate (68e5f62c3) declares `db`
+    # and `user`; called bare they arrived as `Depends` sentinels and every
+    # real (uuid-bearing) project crashed in server mode (merge review B1).
+    return _route(_h, body=StressScenariosPut(scenarios=scenarios),
+                  project=_authorized_project(name))
+
+
+def get_eh_template(name: str) -> dict:
+    """The Energy Hub template a project was created from (P19): recommended
+    archetype, pack overrides, stages, DtC attribution and study notes."""
+    from routers.adequacy_worksheet import get_eh_template as _h
+    out = _h(project=_authorized_project(name))
+    if not isinstance(out, dict):
+        return {"status": "no_data",
+                "message": f"project {name!r} was not created from an Energy "
+                           "Hub template"}
+    return out
+
+
+def get_feature_guide(tour: str | None = None, field: str | None = None) -> dict:
+    """The in-app guide (P21) the GUI's tours and hover tips show — the same
+    wording, so explanations match the screen. ``tour`` returns one tour's
+    steps; ``field`` one field's help; neither returns the index."""
+    from services.guides import load_guide
+    guide = load_guide("eh_fmea")
+    if field is not None:
+        text = guide["fields"].get(field)
+        if text is None:
+            raise HTTPException(
+                404, f"no guide entry for field {field!r}; known: "
+                f"{sorted(guide['fields'])}")
+        return {"field": field, "help": text}
+    if tour is not None:
+        t = guide["tours"].get(tour)
+        if t is None:
+            raise HTTPException(
+                404, f"no tour {tour!r}; known: {sorted(guide['tours'])}")
+        return {"tour": tour, **t}
+    return {"tours": {k: {"title": v["title"], "intro": v.get("intro"),
+                          "steps": len(v["steps"])}
+                      for k, v in guide["tours"].items()},
+            "fields": sorted(guide["fields"])}
+
+
+def review_eh_study() -> dict:
+    """Analyse the latest Energy Hub study (P22): findings with evidence,
+    recommendations and exact tool actions the user may choose to apply.
+    One source with ``GET /api/results/eh_review`` (P24):
+    ``eh_review.review_latest``."""
+    from routers import results as R
+    from services.adequacy.eh_review import review_latest
+
+    record = R.get_eh_study()
+    return review_latest(
+        R._state, record if isinstance(record, dict) else None,
+        no_data_message=_ADEQUACY_NO_DATA_HINTS["eh_reference_design"])
+
+
+def suggest_eh_setup(archetype: str | None = None) -> dict:
+    """Suggested Energy Hub tags for the live network (P25): the grid import
+    Link, the point-of-connection bus, critical buses, and units without
+    outage data — each with a reason and a ready update_component /
+    bulk_update_components action. READ: nothing is applied; the write tools
+    confirm whatever the user picks."""
+    from services.adequacy.eh_setup import suggest_eh_setup as _suggest
+    return _suggest(PyPSAService.get_network(), archetype=archetype)
 
 
 def _campaign_gated(study: str, start, **estimate_kwargs):
@@ -1667,6 +1759,11 @@ def run_eh_study(
     archetype: str,
     stages: list | None = None,
     budget_solves: int | None = None,
+    pack_overrides: dict | None = None,
+    dtc_config: dict | None = None,
+    dsr_buses: list | None = None,
+    mc: dict | None = None,
+    dtc_attribution: str | None = None,
 ) -> dict:
     """
     Start the Energy Hub reference-design study for one archetype pack.
@@ -1682,6 +1779,11 @@ def run_eh_study(
             archetype=archetype,
             stages=stages,
             budget_solves=budget_solves,
+            pack_overrides=pack_overrides,
+            dtc_config=dtc_config,
+            dtc_attribution=dtc_attribution,
+            dsr_buses=dsr_buses,
+            mc=mc,
         )),
         budget_solves=budget_solves)
 
@@ -1990,7 +2092,8 @@ def _route(handler, *args, **kwargs):
         # signature because handlers reached here declare different subsets and
         # would raise TypeError on an unexpected keyword — `reset_network`
         # (`routers/network.py:1898`) declares `db` and `session` but no `user`.
-        injected = {n: v for n, v in (("db", db), ("user", user)) if n in params}
+        injected = {n: v for n, v in (("db", db), ("user", user),
+                                      ("actor", user)) if n in params}
         if "session" in params and "session" not in kwargs:
             injected["session"] = _acting_session(db)
         # `_route`'s contract is "resolve whatever the target declares", and
@@ -2007,7 +2110,7 @@ def _route(handler, *args, **kwargs):
                     f"_route() cannot satisfy dependency {name!r} of "
                     f"{getattr(handler, '__module__', '?')}."
                     f"{getattr(handler, '__qualname__', handler)}: it supplies only "
-                    f"db/user/session. Resolve it at the call site or extend _route()."
+                    f"db/user/actor/session. Resolve it at the call site or extend _route()."
                 )
         return handler(*args, **{**injected, **kwargs})
 
@@ -5164,6 +5267,11 @@ DISPATCHERS: dict[str, Any] = {
     "get_asset_health": get_asset_health,
     "record_asset_health": record_asset_health,
     "get_stress_scenarios": get_stress_scenarios,
+    "put_stress_scenarios": put_stress_scenarios,
+    "get_eh_template": get_eh_template,
+    "get_feature_guide": get_feature_guide,
+    "review_eh_study": review_eh_study,
+    "suggest_eh_setup": suggest_eh_setup,
     "run_fmea_sweep": run_fmea_sweep,
     "run_frontier_study": run_frontier_study,
     "run_mc_study": run_mc_study,
