@@ -189,6 +189,35 @@ commands now use absolute paths.
 **Owed from a workstation.** A real LibreOffice PDF export; opening a
 round-tripped document in Word; the desktop drop-zone for the edited copy.
 
+## §6 — Pre-merge gate on the `master`-merged tree, 2026-09-29
+
+`origin/master` (29 commits ahead of the branch base) merged in at `df8642e`
+(one conflict, two imports in `App.tsx`, both kept). Follow-up: the
+evidence-hash route (`4555600`). Ported: `gridspine.drivers.year_study`
+into the spec's hidden imports (`50f32bb`; the packaging test was red on
+`master` itself since #58). PR #64.
+
+| Tier | Command | Result |
+|---|---|---|
+| Unit + integration | report, chat-tool, parity, manifest, packaging files | 481 passed (after the spec fix) |
+| Regression | chat chunk | 1284 passed, 2 skipped |
+| Regression | uploads / desktop / projects | 242 passed, 1 skipped |
+| Regression | Energy Hub | 308 passed (re-run; 2 one-time failures on the first concurrent run, both pass in isolation; `master` alone 308) |
+| Regression | adequacy | 663 passed (re-run; 3 one-time failures on the first concurrent run, each passes in isolation; `master` alone 663) |
+| Regression | remainder, four groups | 620, 785 (+7 skipped), 1079 (+21 skipped), 1224 — all green |
+| Regression | frontend `vitest` + `tsc` | 191 files, 2168 tests passed; tsc clean |
+| End-to-end QA | drivers 0, 1, 2, 4, 5 | 18/18, 38/38, 47/47, 47/47, 37/37 |
+
+**Recorded.** The one-time failures were all source-inspection tests
+(`claim wipe includes … keys`, `abortable studies match the routes`, `loops
+read the condition`) during a run where three chunks started at the same
+moment; the repo's conftest documents that these misreport under concurrent
+activity. Each passed in isolation, on a full re-run of its chunk, and on a
+worktree of `origin/master`. One frontend test
+(`BottomPanel.test.tsx › select-all past the cap`) sits at the edge of the
+5 s default timeout on this box under full-suite load; it passes alone and
+with `--testTimeout=20000`, which the gate run used.
+
 ## Increment 1 — status
 
 Phases 0–5 delivered on `claude/fmea-llm-reporting-feasibility-jtm6w1`
