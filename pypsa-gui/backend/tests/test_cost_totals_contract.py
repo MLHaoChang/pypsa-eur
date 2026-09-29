@@ -149,7 +149,12 @@ def test_uneven_period_weights_are_actually_applied(install_network):
     cfg = SolverConfig(multi_investment_periods=True, investment_periods=PERIODS)
 
     total = horizon_system_cost(n, cfg)
-    unweighted = float(n.statistics().sum().sum())
+    # Same basis as `total`: statistics read inside the periodized-cost fill
+    # (annual capital_cost / fom_cost scaled to the modelled share of a year),
+    # just without the per-period years multiplier.
+    from services.solver_service import with_periodized_cost_defaults
+    with with_periodized_cost_defaults(n, cfg):
+        unweighted = float(n.statistics().sum().sum())
     assert total > unweighted * 2.0, (
         f"years-weighting looks absent: total={total:,.0f} vs raw sum "
         f"{unweighted:,.0f}"

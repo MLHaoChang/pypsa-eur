@@ -145,3 +145,32 @@ def is_period_only(x: Any) -> bool:
     """
     s = str(x).strip()
     return s.isdigit() and 1900 <= int(s) <= 2200
+
+
+def active_period_years(n, component_class: str) -> pd.DataFrame | None:
+    """
+    Years each asset of ``component_class`` is charged fixed cost for, per
+    investment period: ``years[p]`` where PyPSA considers the asset active in
+    ``p`` (``n.get_active_assets``, i.e. ``build_year <= p < build_year +
+    lifetime``), else 0. Index = asset names, columns = periods.
+
+    Returns ``None`` on a flat network, where activity has no period to apply
+    to and every asset is charged once.
+
+    This is the rule the LP uses (it multiplies each extendable's capacity
+    cost by its per-period activity) and the rule PyPSA's statistics use for
+    `cost_breakdown`'s installed CAPEX. Every surface that turns an annual
+    fixed cost into a horizon figure uses it, so an asset retired after its
+    first period is not charged for the rest of the horizon on one tab and
+    only for its life on another.
+    """
+    if not is_multi_period(n):
+        return None
+    static = n.c[component_class].static
+    years_map = period_years_map(n)
+    periods = [p for p in n.investment_periods]
+    out = pd.DataFrame(0.0, index=static.index, columns=periods)
+    for p in periods:
+        active = n.get_active_assets(component_class, p).reindex(static.index).fillna(False).astype(bool)
+        out.loc[active, p] = years_for_period(years_map, p)
+    return out

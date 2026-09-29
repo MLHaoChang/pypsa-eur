@@ -9,6 +9,7 @@ FILL fields; they do not renegotiate this module's names or completeness enum.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -70,8 +71,39 @@ EHPipelineStage = Literal[
 DEFAULT_EH_BUDGET_SOLVES = 30
 MAX_EH_BUDGET_SOLVES = 120
 
+# mc_certify draw budget per pack. The engine's own product cap is
+# ``services.adequacy.mc.MAX_DRAWS`` (2000); the literal here keeps this
+# contract module free of service imports and is asserted equal in tests.
+# 500 = the P11/P13 study default (``eh_study.DEFAULT_MC_DRAWS``); a request's
+# ``mc.draws`` overrides the pack (merge 2026-09-28).
+DEFAULT_EH_MC_DRAWS = 500
+MAX_EH_MC_DRAWS = 2000
+
+# Frontier stage defaults (plan eh-wire-skipped-stages WP2). Factors on the
+# pack's ``ens_cap_permyriad``, loosest first; ×1 is the report's own point.
+# The ceiling mirrors ``services.adequacy.frontier.MAX_FRONTIER_POINTS`` (12),
+# asserted equal in tests so this contract module stays free of services.
+DEFAULT_EH_FRONTIER_LADDER: tuple[float, ...] = (4.0, 2.0, 1.0, 0.5, 0.25)
+MAX_EH_FRONTIER_POINTS = 12
+# Ranked residual failure modes kept in ``fmea_top`` (spec §9 P12 amendment:
+# top-5 Class-B Link modes; the class-A COPT screening block uses the same N).
+DEFAULT_EH_FMEA_TOP_N = 5
+MAX_EH_FMEA_TOP_N = 50
+
+# Certification verdict (spec decision 2, §4 P11 amendment Q1): ``pass`` iff
+# the LOLE 95% CI upper bound is within the target, ``fail`` iff its lower
+# bound exceeds it, else ``inconclusive`` (also below the resolution floor).
+# No target → no verdict (null); an MC that cannot run → the section is
+# ``not_established`` with the reason. LOLE failure fails certification even
+# when ENS is met.
+CertificationVerdict = Literal["pass", "fail", "inconclusive"]
+
 REPORT_SECTIONS: tuple[str, ...] = (
     "target",
+    # MC LOLE certification of the fixed plan (spec decisions 1–2); filled by
+    # the ``mc_certify`` stage, ``skipped`` when not requested, and
+    # ``not_established`` with the reason when required but not run.
+    "certification",
     "cost",
     "frontier",
     "sizing",
@@ -82,12 +114,12 @@ REPORT_SECTIONS: tuple[str, ...] = (
     "tea",
     "gates",
     "multi_energy",
-    "certification",
 )
 
 
 class AvailabilityTarget(BaseModel):
-    """Planning + certification targets (spec decisions 1–2).
+    """
+    Planning + certification targets (spec decisions 1–2).
 
     Planning always uses ENS when ``ens_cap_permyriad`` is set. MC LOLE is the
     acceptance metric when loops are run. If both are set, LOLE failure fails
@@ -180,6 +212,36 @@ class ArchetypePack(BaseModel):
     frontier_default: bool = False
     # DSR: weak_flexible may suggest opt-in; never silently global (decision 15).
     dsr_opt_in: bool = False
+    # mc_certify draw budget (sequential MC solves nothing; this bounds the
+    # arithmetic, not the LP budget). Seed + CoV target are the engine's
+    # defaults so a pack certifies reproducibly.
+    mc_draws: int = Field(default=DEFAULT_EH_MC_DRAWS, ge=1, le=MAX_EH_MC_DRAWS)
+    mc_seed: int = 0
+    mc_cov_target: float = Field(default=0.05, gt=0)
+    # Frontier stage: factors on ens_cap_permyriad (each a full expansion
+    # solve, trimmed to the remaining budget keeping the points nearest ×1).
+    frontier_ladder: tuple[float, ...] = DEFAULT_EH_FRONTIER_LADDER
+    # fmea_top: how many ranked residual failure modes the report keeps.
+    fmea_top_n: int = Field(default=DEFAULT_EH_FMEA_TOP_N, ge=1,
+                            le=MAX_EH_FMEA_TOP_N)
+
+    @model_validator(mode="after")
+    def _frontier_ladder_is_usable(self) -> ArchetypePack:
+        ladder = self.frontier_ladder
+        if not ladder:
+            raise ValueError("frontier_ladder needs at least one factor")
+        if len(ladder) > MAX_EH_FRONTIER_POINTS:
+            raise ValueError(
+                f"frontier_ladder has {len(ladder)} factors; the frontier "
+                f"engine's budget is {MAX_EH_FRONTIER_POINTS} points")
+        if len(set(ladder)) != len(ladder):
+            raise ValueError("frontier_ladder factors must be distinct")
+        for f in ladder:
+            if not (math.isfinite(f) and f > 0):
+                raise ValueError(
+                    f"frontier_ladder factor {f!r} must be a positive finite "
+                    "multiple of ens_cap_permyriad")
+        return self
 
 
 class PipelineStageRecord(BaseModel):
@@ -214,6 +276,11 @@ class TeaBlock(BaseModel):
     lcoe_eur_per_mwh: float | None = None
     lcoh_eur_per_kg: float | None = None
     notes: str | None = None
+    # LCOH completeness (ADR-0001: an unresolvable number is null + a flag,
+    # never 0). ``skipped`` = no electrolyser Links; ``not_established`` =
+    # Links exist but produced no H₂ / the engine could not price them.
+    lcoh_status: SectionStatus | None = None
+    lcoh_note: str | None = None
 
 
 class GatesBlock(BaseModel):

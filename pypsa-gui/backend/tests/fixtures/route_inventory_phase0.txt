@@ -41,6 +41,7 @@ GET     /api/gridspine/{name}/bundles/{hour}                     -> export_hando
 GET     /api/gridspine/{name}/config                             -> get_config_api_gridspine__name__config_get
 PUT     /api/gridspine/{name}/config                             -> update_config_api_gridspine__name__config_put
 POST    /api/gridspine/{name}/dispatch-source                    -> set_dispatch_source_api_gridspine__name__dispatch_source_post
+POST    /api/gridspine/{name}/dispatch-source/external           -> upload_external_dispatch_api_gridspine__name__dispatch_source_external_post
 GET     /api/gridspine/{name}/figures/{hour}/{figure}            -> fetch_result_figure_api_gridspine__name__figures__hour___figure__get
 GET     /api/gridspine/{name}/ledger                             -> get_assumption_ledger_api_gridspine__name__ledger_get
 GET     /api/gridspine/{name}/readback                           -> get_readback_api_gridspine__name__readback_get

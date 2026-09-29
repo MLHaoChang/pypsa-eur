@@ -234,7 +234,10 @@ def test_get_eh_template_and_put_stress_scenarios_via_chat(tmp_path, monkeypatch
     import types
     sys.path.insert(0, str(BACKEND / "project_templates"))
     import eh_templates as TPL
-    proj = types.SimpleNamespace(directory=tmp_path, name="p")
+    # An AuthorizedProject carries a uuid; master's sidecar lock gate
+    # (68e5f62c3) reads it. "u-1" is not a real uuid → no lock row, exactly
+    # as master's own worksheet/stress handler tests construct it.
+    proj = types.SimpleNamespace(directory=tmp_path, name="p", uuid="u-1")
     monkeypatch.setattr(T, "_authorized_project", lambda name: proj)
     assert T.get_eh_template("p")["status"] == "no_data"
     TPL.write_sidecars(tmp_path, "eh_microgrid")

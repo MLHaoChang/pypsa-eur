@@ -16,6 +16,11 @@
       "payload": null,
       "note": null
     },
+    "certification": {
+      "status": "not_established",
+      "payload": null,
+      "note": null
+    },
     "cost": {
       "status": "not_established",
       "payload": null,
@@ -65,15 +70,11 @@
       "status": "not_established",
       "payload": null,
       "note": null
-    },
-    "certification": {
-      "status": "not_established",
-      "payload": null,
-      "note": null
     }
   },
   "completeness": {
     "target": "not_established",
+    "certification": "not_established",
     "cost": "not_established",
     "frontier": "not_established",
     "sizing": "not_established",
@@ -83,8 +84,7 @@
     "fmea_top": "not_established",
     "tea": "not_established",
     "gates": "not_established",
-    "multi_energy": "not_established",
-    "certification": "not_established"
+    "multi_energy": "not_established"
   },
   "pipeline": {
     "stages": [

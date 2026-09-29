@@ -46,7 +46,15 @@ against live numbers).
 
 ## S1 — Capacity tab omits link CAPEX that Economics counts (Task 14)
 
-**Status: CONFIRMED, escalated — awaiting a product decision. No fix applied.**
+**Status: FIXED — verified 2026-09-12.** The two aggregations were unified into
+`services/economics.py::annuitised_capex_by_carrier`, which takes
+`(generators, storage_units, stores, links, lines, transformers)` — Link is walked,
+and so are lines and transformers. `tests/test_compare_link_capex_parity.py` pins the
+Capacity/Economics agreement, including the narrower follow-on defect that the walk
+had restricted links to extendable ones. The analysis below is the original and is
+unchanged.
+
+**Original status at time of writing: CONFIRMED, escalated — awaiting a product decision. No fix applied.**
 
 `_compute_total_annuitised_capex` (`routers/compare.py`) walks only
 Generator, StorageUnit and Store. `_compute_economics_summary` walks those
@@ -529,7 +537,14 @@ cost pressure to sit idle.)
 
 ## Frontend defect: Curtailment tab renders an absent payload as zero (Tasks 17–18, NOT FIXED)
 
-**Status: CONFIRMED, deliberately NOT fixed.** Documented via a failing test
+**Status: FIXED — verified 2026-09-12.** `CompareView.tsx:1992` now guards with
+`if (!hasAnyA || !hasAnyB)` (an OR, matching `EmissionsTab`) and names the missing
+side, so an absent payload no longer renders as a fabricated `-100%`. The standing
+`it.fails` in `CompareView.test.tsx` was retired as this finding instructed — the
+comment at line 341 records that it used to document this defect. The section below
+is the original analysis and is unchanged.
+
+**Original status at time of writing: CONFIRMED, deliberately NOT fixed.** Documented via a failing test
 (`it.fails`) rather than a code change — this examination's scope was to
 find defects, and changing frontend behaviour is a separate product/eng
 decision from measuring it.

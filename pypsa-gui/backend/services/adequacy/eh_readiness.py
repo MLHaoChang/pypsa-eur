@@ -46,7 +46,8 @@ def _stage_estimate(stage: str, net, pack: ArchetypePack, ctx: dict) -> tuple[
         n = S.frontier_point_count(ctx["remaining"], ctx["budget"])
         if n < 2:
             return 0, "exact", "budget leaves room for fewer than two points"
-        return (len(S.frontier_targets(pack.availability.ens_cap_permyriad, n)),
+        return (len(S.frontier_targets(pack.availability.ens_cap_permyriad, n,
+                                       ladder=tuple(pack.frontier_ladder))),
                 "exact", None)
     if stage == "fmea_top":
         k = ctx["class_b"]["k"]

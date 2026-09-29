@@ -276,6 +276,10 @@ def get_objective_decomposition():
                                    either no scaling or rescale already reverted).
       • `cost_breakdown_total`   — computed live via the same path the GUI shows.
       • `gap_eur` and `gap_pct`  — difference between LP total and statistics total.
+      • bridge: `nonextendable_fixed_cost_eur` (fixed cost the LP never sees),
+        `period_weighting_adjustment_eur` (objective vs years period weights),
+        `lp_basis_total` and `residual_gap_eur` / `residual_gap_pct` — what is
+        left unexplained. ~0 on a plain solve.
 
     Intended use: one-shot diagnosis, not a routine endpoint. Safe on any state.
     """
@@ -287,7 +291,7 @@ def get_objective_decomposition():
         cb = get_cost_breakdown()
     except Exception:
         cb = None
-    return compute_objective_decomposition(n, cb)
+    return compute_objective_decomposition(n, cb, _state.get('solver_config'))
 
 
 @results_router.get("/economics_by_carrier")
@@ -432,11 +436,15 @@ def get_lcoh():
                / H2 produced
 
     Where:
-      * annuitised CAPEX = capital_cost × p_nom_opt (annual €). PyPSA's
-        `capital_cost` is already annualised — if the user supplied only
-        `overnight_cost`, ``with_periodized_cost_defaults`` derives the
-        annualised value from ``overnight × annuity(dr, lt)`` so we read
-        `n.c['Link'].capital_cost` (the same accessor `n.statistics()` uses).
+      * annuitised CAPEX = (capital_cost + fom_cost) × p_nom_opt (annual €),
+        i.e. the asset's fixed cost — PyPSA's `periodized_cost`, what the LP
+        objective paid per MW. PyPSA's `capital_cost` is already annualised —
+        if the user supplied only `overnight_cost`,
+        ``with_periodized_cost_defaults`` derives the annualised value from
+        ``overnight × annuity(dr, lt)`` so we read `n.c['Link'].capital_cost`
+        (the same accessor `n.statistics()` uses) and add the `fom_cost`
+        column, which that accessor leaves out. The response field keeps its
+        `capex_eur_per_year` name (API); `fom_eur_per_year` is the O&M share.
       * variable OPEX = ``Σ |p0| × marginal_cost × weights``. Skipped for
         links that don't carry a positive marginal_cost.
       * electricity input cost = ``Σ p0_positive × bus0_marginal_price ×
@@ -1718,10 +1726,12 @@ def get_asset_economics():
     For each asset, computes:
       • revenue       = Σ_t p_t × price_t × weight_t      (€)
       • vom_cost      = Σ_t |p_t| × marginal_cost × weight_t  (€)
-      • fixed_cost    = capital_cost × p_nom_opt          (€/yr; already
-                        annualised by PyPSA's annuity machinery)
-      • fom_cost      = fom_cost × p_nom_opt              (informational
-                        breakdown of fixed_cost when the user typed FOM)
+      • fixed_cost    = (capital_cost + fom_cost) × p_nom_opt × Σ years
+                        (capital_cost already annuitised by PyPSA; the sum
+                        is PyPSA's periodized_cost — what the LP objective
+                        paid per MW)
+      • fom_cost      = fom_cost × p_nom_opt × Σ years    (the FOM share of
+                        fixed_cost, broken out on the same basis)
       • net_profit    = revenue − (fixed_cost + vom_cost)
       • LCOE / LCOS   = (fixed_cost + vom_cost [+ charge_cost]) / energy
 

@@ -6,6 +6,15 @@ order → assemble. Optional stages may be skipped; required-but-missing stages
 surface as ``not_established`` / pipeline notes.
 
 Report emission: ``assemble_reference_design_report`` only (spec decision 16).
+
+Merge of master (2026-09-28; decisions in
+docs/superpowers/qa/2026-09-28-merge-master-decisions.md): the stage bodies
+stay here (P11/P12 contract); master's PR #53/#55 capabilities come in
+through ``eh_stages`` — the sampled import Link (hourly cap), the zonal grid
+areas with grid storage and common-mode events for ``mc_certify``, the
+class-A COPT screening block of ``fmea_top``, and the pack's
+``frontier_ladder`` / ``fmea_top_n`` / ``mc_*`` fields; LCOH comes from
+``compute_tea(network=…)``.
 """
 from __future__ import annotations
 
@@ -20,6 +29,9 @@ from typing import Any, Iterable
 
 from models.energy_hub import (
     DEFAULT_EH_BUDGET_SOLVES,
+    DEFAULT_EH_FMEA_TOP_N,
+    DEFAULT_EH_FRONTIER_LADDER,
+    DEFAULT_EH_MC_DRAWS,
     EH_PIPELINE_STAGES,
     MAX_EH_BUDGET_SOLVES,
     ArchetypePack,
@@ -28,18 +40,14 @@ from models.energy_hub import (
 )
 from services.adequacy import archetypes as arch
 from services.adequacy import eh_report as report_mod
+from services.adequacy import eh_stages as stages_mod
+# Spec decision 14 / P2 — the note is owned by ``eh_stages`` and re-exported
+# here for the tests and callers that import it from the driver.
+from services.adequacy.eh_stages import FMEA_TOP_LINK_PRIMARY_NOTE
 
 logger = logging.getLogger("pypsa_gui.eh_study")
 
 DEFAULT_STAGES = EH_PIPELINE_STAGES
-
-# Spec decision 14 / P2: FMEA top-N from the EH study is Link-primary Class-B
-# residual risk. AC Line/Transformer N-1 stays on SCLOPF and is omitted from
-# the FMEA ranking unless a future product decision merges them.
-FMEA_TOP_LINK_PRIMARY_NOTE = (
-    "Link-primary residual risk (Class-B Link sweep); "
-    "AC Line/Transformer N-1 remains on SCLOPF and is omitted from FMEA ranking"
-)
 
 # Re-export for tests / callers.
 __all__ = [
@@ -50,6 +58,7 @@ __all__ = [
     "REQUIRED_STAGES",
     "SIBLING_STORE_KEYS",
     "ZERO_SOLVE_STAGES",
+    "certification_verdict",
     "certification_wanted",
     "default_stages_for",
     "frontier_targets",
@@ -83,8 +92,9 @@ _STAGE_SECTION = {
     "fmea_top": "fmea_top",
 }
 
-# fmea_top: how many ranked Class-B modes the report carries.
-FMEA_TOP_N = 5
+# fmea_top: how many ranked modes the report carries by default (the pack's
+# ``fmea_top_n`` decides per study).
+FMEA_TOP_N = DEFAULT_EH_FMEA_TOP_N
 # frontier: share of the study budget it may take by default (plan B8).
 FRONTIER_BUDGET_SHARE = 0.4
 
@@ -93,8 +103,9 @@ FRONTIER_BUDGET_SHARE = 0.4
 ZERO_SOLVE_STAGES: frozenset[str] = frozenset(
     {"apply_pack", "mc_certify", "assemble"})
 
-# MC certification defaults (the /mc study's defaults; P13 exposes them).
-DEFAULT_MC_DRAWS = 500
+# MC certification defaults (the /mc study's defaults; P13 exposes them as
+# the request's ``mc`` options, which override the pack's ``mc_*`` fields).
+DEFAULT_MC_DRAWS = DEFAULT_EH_MC_DRAWS
 DEFAULT_MC_SEED = 0
 DEFAULT_MC_COV_TARGET = 0.05
 
@@ -259,6 +270,9 @@ def _stage_ens_solve(st: _Study) -> None:
         demand = float(cap_mwh) / (float(ens_cap) / 1e4)
         st.achieved_ens_permyriad = (
             float(ens_mwh) / demand * 1e4 if demand else None)
+        # Planning metric met? Carried on the certification payload; never
+        # part of the verdict (decision 2). Master PR #53.
+        st.ens_met = float(ens_mwh) <= float(cap_mwh) * (1.0 + 1e-4)
     st.sections["target"] = (
         "ok", {"binding": tgt.get("binding"), "system": system,
                "metrics": metrics}, None)
@@ -284,8 +298,11 @@ def _stage_ens_solve(st: _Study) -> None:
             and cap_mwh and float(cap_mwh) > 0 and ens_mwh is not None:
         demand = float(cap_mwh) / (float(ens_cap) / 1e4)
         served = max(0.0, demand - float(ens_mwh))
+    # LCOH (master PR #53): priced on the solved private copy, flagged —
+    # never zeroed — when there is no electrolyser or it never ran.
     tea_block = report_mod.compute_tea(
-        cost_eur=st.cost_at_target, served_energy_mwh=served)
+        cost_eur=st.cost_at_target, served_energy_mwh=served,
+        network=network, cfg=cfg)
     if tea_block.lcoe_eur_per_mwh is not None:
         st.sections["tea"] = ("ok", tea_block.model_dump(mode="json"), None)
     else:
@@ -301,17 +318,95 @@ def _stage_ens_solve(st: _Study) -> None:
         network, capture)
 
 
+def _fixed_plan(st: _Study):
+    """The hub boundary + the fleet of the ENS plan, computed once.
+
+    Returns ``(boundary_info, FixedPlanSnapshot)``; raises
+    ``HubBoundaryError`` when the P11 boundary cannot be established. The
+    boundary (``archetypes.hub_boundary_copy``) decides the sides and which
+    import Links count (decision 6); ``eh_stages.freeze_fixed_plan`` then
+    builds the MC inputs with master's PR #55 import model — each counted
+    Link a two-state unit at its HOURLY planning cap, the grid behind it a
+    zonal area when its fleet carries occurrence data (grid storage and
+    common-mode events included) — and the class-A COPT screening of that
+    same fleet. ``st.network`` is the study's private copy and every stage
+    before this one left its plan untouched (frontier runs on its own copy).
+    """
+    cached = getattr(st, "fixed_plan", None)
+    if cached is not None:
+        return cached
+    _mc_net, boundary = arch.hub_boundary_copy(st.network, st.pack)
+    frozen = stages_mod.freeze_fixed_plan(
+        st.network, st.cfg, st.lock, overlay=st.pack.import_overlay,
+        boundary=boundary)
+    st.fixed_plan = (boundary, frozen)
+    return st.fixed_plan
+
+
+def _max_mttr(frozen) -> float:
+    """Largest repair time the MC samples: hub units, grid-area units and
+    common-mode events (a zonal area repairs on its own clock too)."""
+    mttrs: list[float] = []
+    units = list(getattr(frozen.mc_inputs, "units", None) or [])
+    zonal = frozen.zonal_inputs
+    for area in (getattr(zonal, "areas", None) or ()):
+        if area.grid is not None:
+            units += list(area.grid.units)
+        mttrs += [float(c.mttr_hours) for c in area.common_mode]
+    mttrs += [float(u.mttr_hours) for u in units]
+    mttrs = [m for m in mttrs if math.isfinite(m)]
+    return max(mttrs) if mttrs else 0.0
+
+
+def certification_verdict(*, lole_ci, target_h: float | None,
+                          resolution_floor_h: float | None = None,
+                          n_samples=None, ens_met: bool | None = None,
+                          ) -> tuple[str | None, str | None]:
+    """The P11 verdict rule (spec §4 amendment, Q1; decision 2) →
+    ``(verdict, note)``.
+
+    ``target_h`` is the target over the modelled horizon (h/yr ×
+    horizon_years). ``pass`` iff the LOLE CI upper bound ≤ target; ``fail``
+    iff its lower bound > target — even when the ENS target is met; else
+    ``inconclusive``, as is a target below the MC resolution floor. No
+    target → no verdict.
+    """
+    if target_h is None:
+        return None, "no target_lole_h — LOLE reported, not certified"
+    lo, hi = (float(x) for x in lole_ci)
+    if resolution_floor_h is not None and target_h < float(resolution_floor_h):
+        return "inconclusive", (
+            f"target {target_h:g} h over the horizon is below the MC "
+            f"resolution floor {float(resolution_floor_h):g} h at "
+            f"{n_samples} draws — more draws needed")
+    if hi <= target_h:
+        return "pass", None
+    if lo > target_h:
+        return "fail", ("LOLE fails the target although the ENS target is "
+                        "met (spec decision 2)" if ens_met else None)
+    return "inconclusive", "the LOLE 95% CI straddles the target"
+
+
 def _stage_mc_certify(st: _Study) -> None:
     """MC LOLE certification of the ENS plan (spec decisions 1–2, §4 P11).
 
-    Samples the SOLVED plan (extendables at ``p_nom_opt``) on a hub-boundary
-    copy — the MC is copper-plate, so the far side of the import Links must
-    not count as local capacity. Charges no LP solve. Verdict (Q1): pass iff
-    CI upper ≤ target, fail iff CI lower > target, else inconclusive; target
-    below the resolution floor → inconclusive. Target basis (Q2): h/yr ×
-    horizon_years, refused when the horizon is shorter than the largest MTTR.
+    Samples the SOLVED plan (extendables at ``p_nom_opt``) on the hub side
+    of the import boundary — the MC is copper-plate, so the far side of the
+    import Links must not count as local capacity. Charges no LP solve.
+    Verdict (Q1): pass iff CI upper ≤ target, fail iff CI lower > target,
+    else inconclusive; target below the resolution floor → inconclusive.
+    Target basis (Q2): h/yr × horizon_years, refused when the horizon is
+    shorter than the largest MTTR.
+
+    Import (merge of master PR #55, within decision 6): a counted import
+    Link is a two-state unit at its hourly cap; when the grid behind it
+    carries occurrence data the two-area engine (``mc_zonal``) bounds the
+    import by the grid's own surplus each hour, with grid storage and
+    opt-in common-mode events. ``import_model`` / ``import_firmness`` /
+    ``fleet_scope`` disclose which applied.
     """
     from services.adequacy import mc as mc_mod
+    from services.adequacy import mc_zonal as zonal_mod
 
     pack = st.pack
     target = pack.availability.target_lole_h
@@ -321,55 +416,61 @@ def _stage_mc_certify(st: _Study) -> None:
         st.sections["certification"] = ("not_established", payload, reason)
 
     try:
-        mc_net, boundary = arch.hub_boundary_copy(st.network, pack)
+        boundary, frozen = _fixed_plan(st)
     except arch.HubBoundaryError as exc:
         return _not_established(str(exc))
     except Exception as exc:  # noqa: BLE001 — degrade like every other stage
         logger.exception("MC hub boundary failed")
         return _not_established(f"MC certification failed: {exc}")
-    try:
-        with st.lock:
-            inputs = mc_mod.snapshot_inputs(mc_net, cfg=st.cfg)
-    except Exception as exc:  # noqa: BLE001 — ValueError is the documented refusal
-        if not isinstance(exc, ValueError):
-            logger.exception("MC snapshot failed")
-        return _not_established(f"MC snapshot refused: {exc}",
-                                {"fleet_boundary": boundary})
-    if not inputs.units:
+    scope = frozen.scope or {}
+    disclosure = {
+        "fleet_boundary": boundary,
+        "fleet_scope": frozen.scope,
+        "import_model": scope.get("import_model"),
+        "import_firmness": scope.get("import_firmness"),
+    }
+    if frozen.mc_inputs is None:
         return _not_established(
-            "nothing to sample: no hub-side electrical generator carries "
-            "resolvable occurrence data (unavailability + MTTR) — an empty "
-            "fleet says nothing about the system", {"fleet_boundary": boundary})
-    for u in inputs.units:
+            frozen.mc_error or "MC inputs unavailable", dict(disclosure))
+    inputs = frozen.mc_inputs
+    zonal = frozen.zonal_inputs
+    sampled = list(inputs.units)
+    for area in (getattr(zonal, "areas", None) or ()):
+        if area.grid is not None:
+            sampled += list(area.grid.units)
+    for u in sampled:
         try:
             mc_mod.transition_probs(u.q, u.mttr_hours, name=u.name)
         except ValueError as exc:
-            return _not_established(str(exc), {"fleet_boundary": boundary})
+            return _not_established(str(exc), dict(disclosure))
     horizon_years = float(inputs.nyears)
     if not horizon_years > 0:
         return _not_established(
             "horizon_years ≤ 0 — the modelled horizon has no length, so no "
-            "annual LOLE can be stated", {"fleet_boundary": boundary})
+            "annual LOLE can be stated", dict(disclosure))
     modelled_h = horizon_years * 8760.0
-    mttrs = [float(u.mttr_hours) for u in inputs.units
-             if math.isfinite(float(u.mttr_hours))]
-    max_mttr = max(mttrs) if mttrs else 0.0
+    max_mttr = _max_mttr(frozen)
     if modelled_h < max_mttr:
         return _not_established(
             f"modelled horizon {modelled_h:g} h is shorter than the largest "
             f"unit MTTR ({max_mttr:g} h): one repair outlasts the study, so "
             "its LOLE cannot stand for annual adequacy (decision Q2)",
-            {"fleet_boundary": boundary, "horizon_years": horizon_years,
+            {**disclosure, "horizon_years": horizon_years,
              "max_mttr_hours": max_mttr})
 
     try:
-        res = mc_mod.mc_adequacy(
-            inputs, draws=st.mc_draws, seed=st.mc_seed,
-            cov_target=st.mc_cov_target, stop_event=st.stop_event)
+        if zonal is not None:
+            res = zonal_mod.zonal_mc_adequacy(
+                zonal, draws=st.mc_draws, seed=st.mc_seed,
+                cov_target=st.mc_cov_target, stop_event=st.stop_event)
+        else:
+            res = mc_mod.mc_adequacy(
+                inputs, draws=st.mc_draws, seed=st.mc_seed,
+                cov_target=st.mc_cov_target, stop_event=st.stop_event)
     except Exception as exc:  # noqa: BLE001 — degrade like every other stage
         logger.exception("MC certification failed")
         return _not_established(f"MC certification failed: {exc}",
-                                {"fleet_boundary": boundary})
+                                dict(disclosure))
     if st.stop_event.is_set():
         st.aborted = True
         st.mark("mc_certify", "aborted", note="MC stopped by abort — no verdict")
@@ -380,36 +481,27 @@ def _stage_mc_certify(st: _Study) -> None:
     lole = float(res["lole_hours"])
     lo, hi = (float(x) for x in res["lole_ci"])
     floor = res.get("resolution_floor_h")
-    verdict = met = confident = target_h = None
-    note = None
+    met = confident = target_h = None
     if target is not None:
         target_h = float(target) * horizon_years
         met = lole <= target_h
         confident = hi <= target_h
-        if floor is not None and target_h < float(floor):
-            verdict = "inconclusive"
-            note = (f"target {target_h:g} h over the horizon is below the MC "
-                    f"resolution floor {float(floor):g} h at "
-                    f"{res['n_samples']} draws — more draws needed")
-        elif hi <= target_h:
-            verdict = "pass"
-        elif lo > target_h:
-            verdict = "fail"
-        else:
-            verdict = "inconclusive"
-            note = "the LOLE 95% CI straddles the target"
-    else:
-        note = "no target_lole_h — LOLE reported, not certified"
+    verdict, note = certification_verdict(
+        lole_ci=(lo, hi), target_h=target_h, resolution_floor_h=floor,
+        n_samples=res.get("n_samples"), ens_met=st.ens_met)
     dsr_on = bool(getattr(st.cfg, "dsr_buses", None)) and float(
         getattr(st.cfg, "dsr_price_eur_per_mwh", 0.0) or 0.0) > 0
     payload = {
         "metric": "mc_lole",
+        "certification_metric": pack.availability.certification_metric,
         "target_lole_h": target,
         "target_basis": "h_per_year",
         "target_lole_h_per_horizon": target_h,
         "horizon_years": horizon_years,
         "lole_h_per_horizon": lole,
         "lole_h_per_year": lole / horizon_years,
+        # Report headline (h/yr) — the same number as ``report.mc_lole_h``.
+        "mc_lole_h": lole / horizon_years,
         "lole_ci": [lo, hi],
         "eue_mwh": res.get("eue_mwh"),
         "eue_ci": list(res.get("eue_ci") or []),
@@ -417,15 +509,20 @@ def _stage_mc_certify(st: _Study) -> None:
         "n_samples": res.get("n_samples"),
         "converged": res.get("converged"),
         "draws": st.mc_draws,
+        "draws_requested": st.mc_draws,
         "seed": st.mc_seed,
         "cov_target": st.mc_cov_target,
         "resolution_floor_h": floor,
         "time_basis": res.get("time_basis"),
-        "warning": res.get("warning"),
-        "fleet_boundary": boundary,
+        "warning": res.get("warning") or mc_mod.MC_WARNING_V1,
+        "engine": "mc_zonal" if zonal is not None else "mc",
+        "fidelity": ("sequential_mc_two_area" if zonal is not None
+                     else "sequential_mc"),
+        **disclosure,
         "verdict": verdict,
         "met_on_mean": met,
         "confident": confident,
+        "ens_met": st.ens_met,
         "dsr_note": (
             "the LP plan uses demand response but the MC does not model it — "
             "this LOLE is pessimistic relative to the plan" if dsr_on else None),
@@ -454,12 +551,21 @@ def _vintage_bounds_active(network) -> bool:
     return bool(bucket) and isinstance(network.snapshots, pd.MultiIndex)
 
 
-def frontier_targets(pack_cap: float, n_points: int) -> list[float]:
-    """The pack cap, then the default targets nearest to it (log distance),
-    ``n_points`` in total — ``run_frontier_sweep`` orders them loosest first."""
-    from services.adequacy.frontier import DEFAULT_TARGETS_PERMYRIAD
+def frontier_targets(pack_cap: float, n_points: int, *,
+                     ladder: Iterable[float] = DEFAULT_EH_FRONTIER_LADDER,
+                     ) -> list[float]:
+    """The pack cap, then the ladder points nearest to it (log distance,
+    ties towards the looser side), ``n_points`` in total —
+    ``run_frontier_sweep`` orders them loosest first.
+
+    ``ladder`` is the pack's ``frontier_ladder`` (master PR #53): factors on
+    the pack cap, so the curve is always AROUND the report's own target. The
+    pack cap itself is always a point (×1), whether or not the ladder lists
+    it. The budget rule stays the P12 one (``frontier_point_count``).
+    """
     cap = float(pack_cap)
-    others = sorted((t for t in DEFAULT_TARGETS_PERMYRIAD if t != cap),
+    points = {cap * float(f) for f in ladder}
+    others = sorted((t for t in points if not math.isclose(t, cap)),
                     key=lambda t: (abs(math.log(t / cap)), -t))
     return [cap] + others[:max(0, n_points - 1)]
 
@@ -484,7 +590,8 @@ def _stage_frontier(st: _Study) -> None:
         return _not_established(
             f"not run: budget_solves leaves {st.remaining()} solve(s) — a "
             "frontier needs at least two points")
-    targets = frontier_targets(st.ens_cap, n_points)
+    targets = frontier_targets(st.ens_cap, n_points,
+                               ladder=tuple(st.pack.frontier_ladder))
     try:
         result = fr.run_frontier_sweep(
             _private_copy(st.network), st.lock, st.cfg, targets,
@@ -502,7 +609,8 @@ def _stage_frontier(st: _Study) -> None:
         st.sections["frontier"] = ("not_established", None,
                                    f"frontier failed: {exc}")
         return
-    points = result["points"]
+    # Decision 3: every cost field states that it excludes shed (master PR #53).
+    points = [{**pt, "excludes_shed_cost": True} for pt in result["points"]]
     st.solves += len(points)
     ok_points = [pt for pt in points if pt.get("status") == "ok"]
     payload = {
@@ -515,6 +623,10 @@ def _stage_frontier(st: _Study) -> None:
         "warning": result.get("warning"),
         "aborted": bool(result.get("aborted")),
         "restore_skipped_on_private_copy": True,
+        "voll_eur_per_mwh": float(st.cfg.voll or 0.0),
+        "ladder": [float(f) for f in st.pack.frontier_ladder],
+        "n_ok": len(ok_points),
+        "engine": "lp_proxy",
         "excludes_shed_cost": True,
         "period_basis": next((pt.get("period_basis") for pt in ok_points), None),
         "solves_charged": len(points),
@@ -550,6 +662,60 @@ def _closed_import_links(network, pack) -> list[str]:
     return out
 
 
+def _class_a_block(st: _Study, class_b_rows: list[dict], top_n: int) -> dict:
+    """Class-A (unit forced-outage) screening of the same fixed plan.
+
+    Master PR #53/#55, added to ``fmea_top`` ALONGSIDE the P12 Class-B
+    ranking (merge 2026-09-28): the COPT screening of the hub-side fleet
+    ``mc_certify`` samples (zero LP solves). A sampled import Link is ranked
+    ONCE — dropped here when the Class-B sweep ranked it, otherwise relabelled
+    as the Link (``eh_stages.IMPORT_LINK_RANKING_NOTE``). Never part of the
+    section's status: the Link-primary Class-B ranking (decision 14) is.
+    """
+    def _no(reason: str) -> dict:
+        return {"status": "not_established", "reason": reason, "rows": [],
+                "top_n": int(top_n), "n_modes": 0, "engine": "copt",
+                "solves_charged": 0}
+
+    try:
+        _boundary, frozen = _fixed_plan(st)
+    except arch.HubBoundaryError as exc:
+        return _no(str(exc))
+    except Exception as exc:  # noqa: BLE001 — a disclosure, never fatal
+        logger.exception("fmea_top class-A screening failed")
+        return _no(f"class-A screening failed: {exc}")
+    modes = [dict(r) for r in frozen.copt_rows if r.get("failure_mode")]
+    b_modes = [{"failure_mode": {**r, "failure_class": "B"}}
+               for r in class_b_rows]
+    ranked, link_ranking = stages_mod._rank_import_links_once(
+        modes + b_modes, frozen.scope)
+    modes = [r for r in ranked
+             if (r.get("failure_mode") or {}).get("failure_class") != "B"]
+    modes.sort(key=lambda r: (
+        -float((r.get("failure_mode") or {}).get(
+            "criticality_eur_per_year", 0.0) or 0.0),
+        str((r.get("failure_mode") or {}).get("mode_id", ""))))
+    block = {
+        "status": "ok" if modes else "not_established",
+        "reason": None if modes else (
+            frozen.copt_error or "no class-A mode could be ranked"),
+        "rows": [stages_mod._flatten_mode(r, rank=i + 1)
+                 for i, r in enumerate(modes[:int(top_n)])],
+        "top_n": int(top_n),
+        "n_modes": len(modes),
+        "engine": "copt",
+        "copt_metrics": frozen.copt_metrics,
+        "copt_error": frozen.copt_error,
+        "copt_fidelity_note": frozen.copt_fidelity_note,
+        "fleet_scope": frozen.scope,
+        "import_link_ranking": link_ranking,
+        "import_link_ranking_note": (stages_mod.IMPORT_LINK_RANKING_NOTE
+                                     if link_ranking else None),
+        "solves_charged": 0,
+    }
+    return block
+
+
 def _stage_fmea_top(st: _Study) -> None:
     """Top-N Class-B Link failure modes on the pack-applied ENS plan (P12b).
 
@@ -557,13 +723,22 @@ def _stage_fmea_top(st: _Study) -> None:
     skipped, Q4). No partial sweep: a partial ranking is misleading, so a
     sweep that does not fit the remaining budget is skipped, not truncated.
     Every frontier point getting its own ranking is deferred (spec §9).
+
+    ``top_n`` is the pack's ``fmea_top_n``. The payload also carries the
+    class-A COPT screening of the same plan (``class_a``, zero solves; see
+    ``_class_a_block``) — it never decides the section's status.
     """
     from services.adequacy import sweep as sw
+
+    top_n = int(getattr(st.pack, "fmea_top_n", FMEA_TOP_N) or FMEA_TOP_N)
 
     def _not_established(reason: str, status: str = "skipped") -> None:
         note = f"{FMEA_TOP_LINK_PRIMARY_NOTE}; {reason}"
         st.mark("fmea_top", status, note=note)
-        st.sections["fmea_top"] = ("not_established", None, note)
+        st.sections["fmea_top"] = (
+            "not_established",
+            {"rows": [], "top_n": top_n, "class_a": _class_a_block(
+                st, [], top_n)}, note)
 
     fcopy = _private_copy(st.network)
     closed = _closed_import_links(fcopy, st.pack)
@@ -618,10 +793,11 @@ def _stage_fmea_top(st: _Study) -> None:
         notes.append(
             "multi-period vintage bounds re-expand extendables after the "
             "capacity freeze — this ranking may understate severity")
+    class_b_rows = [r["failure_mode"] | {"delta_eue_mwh": r["delta_eue_mwh"]}
+                    for r in ranked]
     payload = {
-        "rows": [r["failure_mode"] | {"delta_eue_mwh": r["delta_eue_mwh"]}
-                 for r in ranked[:FMEA_TOP_N]],
-        "top_n": FMEA_TOP_N,
+        "rows": class_b_rows[:top_n],
+        "top_n": top_n,
         "k_links": k,
         "ranked": len(ranked),
         "unsolved": unsolved,
@@ -633,6 +809,7 @@ def _stage_fmea_top(st: _Study) -> None:
         "excluded_closed_import_links": closed,
         "basis": "pack_applied_ens_plan",
         "solves_charged": charged,
+        "class_a": _class_a_block(st, class_b_rows, top_n),
     }
     note = "; ".join(notes)
     status = "ok" if ranked else "not_established"
@@ -910,9 +1087,9 @@ def run_eh_study(
     dtc_config=None,
     dtc_attribution: str | None = None,
     dsr_buses: list[str] | None = None,
-    mc_draws: int = DEFAULT_MC_DRAWS,
-    mc_seed: int = DEFAULT_MC_SEED,
-    mc_cov_target: float = DEFAULT_MC_COV_TARGET,
+    mc_draws: int | None = None,
+    mc_seed: int | None = None,
+    mc_cov_target: float | None = None,
 ) -> ReferenceDesignReport:
     """Synchronous EH study driver (HTTP worker: ``eh_study_runner``).
 
@@ -996,14 +1173,23 @@ def run_eh_study(
         log_queue=log_queue, store=store, dtc_config=dtc_config,
         dtc_attribution=dtc_attribution,
         requested=requested, records=records, budget_solves=budget_solves,
-        pack_notes=pack_notes, mc_draws=int(mc_draws), mc_seed=int(mc_seed),
-        mc_cov_target=float(mc_cov_target),
+        pack_notes=pack_notes,
+        # The request's ``mc`` options win; else the pack's ``mc_*`` fields
+        # (master PR #53), whose defaults are the P13 study defaults.
+        mc_draws=int(mc_draws if mc_draws is not None
+                     else getattr(pack, "mc_draws", DEFAULT_MC_DRAWS)),
+        mc_seed=int(mc_seed if mc_seed is not None
+                    else getattr(pack, "mc_seed", DEFAULT_MC_SEED)),
+        mc_cov_target=float(mc_cov_target if mc_cov_target is not None
+                            else getattr(pack, "mc_cov_target",
+                                         DEFAULT_MC_COV_TARGET)),
         sections={}, solves=0, aborted=False, failed_reason=None,
         undo=lambda: None, pack_h=arch.pack_hash(pack),
         ens_cap=pack.availability.ens_cap_permyriad,
         achieved_ens_permyriad=None, achieved_shed_hours=None,
         cost_at_target=None, period_basis=None, adequacy_report=None,
-        mc_lole_h=None, certified=None, executed=[],
+        mc_lole_h=None, certified=None, executed=[], ens_met=None,
+        fixed_plan=None,
     )
     sections = st.sections
     gates_obj = None

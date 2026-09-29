@@ -7,8 +7,12 @@ import {
   type EhReadiness,
   type EhDtcAttribution,
   type EhTemplateMeta,
+  type EhCertificationPayload,
+  type EhFleetScope,
   type EhDtcPlanningTable,
   type EhDtcStressTable,
+  type EhFmeaTopMode,
+  type EhFrontierPoint,
   type EhLeverTable,
   type EhPipelineStage,
   type EhRedundancyTable,
@@ -182,8 +186,8 @@ export function buildEhStudyBody(
 
 /** Stable display order for completeness chips (matches REPORT_SECTIONS). */
 export const COMPLETENESS_ORDER = [
-  'target', 'cost', 'frontier', 'sizing', 'redundancy', 'levers', 'dtc',
-  'fmea_top', 'tea', 'gates', 'multi_energy', 'certification',
+  'target', 'certification', 'cost', 'frontier', 'sizing', 'redundancy',
+  'levers', 'dtc', 'fmea_top', 'tea', 'gates', 'multi_energy',
 ] as const
 
 export function completenessRows(
@@ -225,11 +229,23 @@ export function notEstablishedNotes(
     .map(({ name }) => ({ name, note: String(report.sections![name].note) }))
 }
 
-/** Tone for the MC certification verdict (P11). */
-export function verdictTone(verdict: string): string {
-  if (verdict === 'pass') return 'text-accent'
-  if (verdict === 'fail') return 'text-danger'
+/** Tone for the MC certification verdict (P11 vocabulary `pass` / `fail` /
+ *  `inconclusive`; a report stored by a build that used `certified` /
+ *  `failed` / `no_target` is toned the same way — merge 2026-09-28). */
+export function verdictTone(verdict: string | null | undefined): string {
+  if (verdict === 'pass' || verdict === 'certified') return 'text-accent'
+  if (verdict === 'fail' || verdict === 'failed') return 'text-danger'
+  if (verdict === 'no_target') return 'text-muted'
   return 'text-warn'
+}
+
+/** A verdict in the P11 vocabulary; `null` = no verdict (no target, or not
+ *  established). Older stored reports used certified / failed / no_target. */
+export function normalisedVerdict(verdict: unknown): string | null {
+  if (verdict === 'certified') return 'pass'
+  if (verdict === 'failed') return 'fail'
+  if (verdict === 'no_target' || verdict === 'not_established') return null
+  return typeof verdict === 'string' ? verdict : null
 }
 
 /** What to do after each verdict (spec §2.9); null when nothing is owed. */
@@ -249,14 +265,20 @@ export function certificationHeadline(report: EhReferenceDesignReport): {
 } | null {
   const payload = report.sections?.certification?.payload as
     | Record<string, unknown> | null | undefined
-  if (!payload || typeof payload.lole_h_per_year !== 'number') return null
-  const years = typeof payload.horizon_years === 'number' ? payload.horizon_years : null
+  if (!payload) return null
+  // A report stored by a build without `lole_h_per_year` carried the LOLE as
+  // `mc_lole_h` on a one-year basis (merge 2026-09-28).
+  const perYear = typeof payload.lole_h_per_year === 'number'
+    ? payload.lole_h_per_year
+    : typeof payload.mc_lole_h === 'number' ? payload.mc_lole_h : null
+  if (perYear == null) return null
+  const years = typeof payload.horizon_years === 'number' ? payload.horizon_years : 1
   const raw = Array.isArray(payload.lole_ci) ? payload.lole_ci : null
-  const ci = raw && years && years > 0
+  const ci = raw && years > 0
     && typeof raw[0] === 'number' && typeof raw[1] === 'number'
     ? [raw[0] / years, raw[1] / years] as [number, number]
     : null
-  const verdict = typeof payload.verdict === 'string' ? payload.verdict : null
+  const verdict = normalisedVerdict(payload.verdict)
   // No target (the study reports LOLE but certifies nothing) and the 'none'
   // metric both leave the verdict empty: the next step is to set a target.
   const next = verdict === 'fail' ? CERTIFICATION_NEXT.fail
@@ -265,7 +287,7 @@ export function certificationHeadline(report: EhReferenceDesignReport): {
         : (verdict == null || verdict === 'none' || payload.metric === 'none')
           ? CERTIFICATION_NEXT.noTarget : null
   return {
-    perYear: payload.lole_h_per_year,
+    perYear,
     ci,
     verdict,
     target: typeof payload.target_lole_h === 'number' ? payload.target_lole_h : null,
@@ -278,6 +300,258 @@ export function scrTone(scr: EhScrVerdict): string {
   if (scr === 'pass') return 'text-accent'
   if (scr === 'fail') return 'text-danger'
   return 'text-warn'
+}
+
+/** The certification payload when the mc_certify stage produced one. */
+export function certificationPayload(
+  report: EhReferenceDesignReport,
+): EhCertificationPayload | null {
+  const section = report.sections?.certification
+  const payload = section?.payload
+  if (!payload || typeof payload !== 'object') return null
+  return payload as EhCertificationPayload
+}
+
+/**
+ * One line saying how the import entered the certification fleet, or null
+ * when the payload says nothing about it (whole-network scope, or a report
+ * without a hub-side scope). A report from before 2026-09-27 carries a
+ * `fleet_scope` with `import_firmness: planning_limit_only` and no
+ * `import_model` — that was a firm block.
+ */
+export function importModelLabel(payload: EhCertificationPayload | null): string | null {
+  if (!payload) return null
+  const scope = payload.fleet_scope ?? null
+  const model = payload.import_model ?? scope?.import_model
+    ?? (scope?.mode === 'hub_side' ? 'firm_block' : null)
+  const cap = scope?.import_cap_mw_max ?? scope?.import_firm_mw_max
+  const capText = cap != null ? ` (cap ${Number(cap).toFixed(0)} MW)` : ''
+  const firmness = payload.import_firmness ?? scope?.import_firmness
+  if (firmness === 'common_mode_sampled') {
+    return `firm block; common-mode event sampled (Link and grid down together)${capText}`
+  }
+  if (firmness === 'outage_and_common_mode_sampled') {
+    return `Link outages + common-mode event sampled (Link and grid down together)${capText}`
+  }
+  switch (model) {
+    case 'zonal':
+      return firmness === 'grid_sampled'
+        ? `grid-side surplus sampled; Links firm at their planning cap (two-area MC)${capText}`
+        : `Link outages + grid-side surplus sampled (two-area MC)${capText}`
+    case 'sampled_unit':
+      return `Link outages sampled (two-state unit at its planning cap)${capText}`
+    case 'mixed':
+      return `partly sampled: Links without outage data counted firm${capText}`
+    case 'islanded':
+      return 'islanded (0 MW)'
+    case 'excluded':
+      return 'not counted in the MC (no outage data of its own — decision 6)'
+    case 'firm_block':
+      return `firm at the planning limit (no Link outage data)${capText}`
+    default:
+      return null
+  }
+}
+
+/** `copt_metrics.import_exact` — the analytic LOLE with the import mixed in. */
+export interface EhImportExact {
+  lole_hours?: number | null
+  eue_mwh?: number | null
+  delta_mw?: number
+  levels?: number
+  note?: string
+}
+
+/** One line on the grid area(s) behind the hub, or null when not zonal. */
+export function gridAreasSummary(scope: EhFleetScope | null | undefined): string | null {
+  const areas = scope?.grid_areas ?? []
+  if (areas.length === 0) return null
+  const sampled = areas.filter(a => a.sampled)
+  const parts = [`${areas.length} grid area${areas.length === 1 ? '' : 's'}, ${sampled.length} sampled`]
+  const stores = sampled.flatMap(a => (a.storage_dispatched ? a.storage : []))
+  if (stores.length > 0) parts.push(`grid storage dispatched: ${stores.join(', ')}`)
+  for (const a of areas.filter(x => !x.sampled)) {
+    parts.push(`${a.links.join(', ')}: unbounded (v1)${a.reason ? ` — ${a.reason}` : ''}`)
+  }
+  return parts.join('; ')
+}
+
+/** One line per common-mode event (applied, or why not). */
+export function commonModeLines(scope: EhFleetScope | null | undefined): string[] {
+  return (scope?.import_common_mode ?? []).map(e => (e.applied
+    ? (e.rate > 0
+      ? `${e.link}: common-mode q=${e.rate} (${e.basis}), MTTR ${e.mttr_hours} h — Link and grid area down together`
+      : `${e.link}: common-mode q=0 — no effect`)
+    : `${e.link}: common-mode data not applied — ${e.reason ?? 'no reason given'}`))
+}
+
+/** How the COPT screening holds the import, plus the exact import LOLE. */
+export function coptImportSummary(
+  scope: EhFleetScope | null | undefined,
+  coptMetrics: { import_exact?: EhImportExact | null } | null | undefined,
+): string | null {
+  const model = scope?.copt_import_model
+  if (!model) return null
+  const label = model === 'expected_surplus_profile'
+    ? 'COPT screening: import Link scaled by the expected grid surplus (ranking only)'
+    : model === 'two_state'
+      ? 'COPT screening: import Link as a two-state unit'
+      : 'COPT screening: import as a firm block at the planning limit'
+  const withEvents = scope?.copt_common_mode === 'event_mixture'
+    ? `${label}; common-mode events mixed exactly`
+    : label
+  const exact = coptMetrics?.import_exact?.lole_hours
+  if (exact == null) return withEvents
+  const delta = coptMetrics?.import_exact?.delta_mw
+  const rounding = delta != null && delta > 1
+    ? `, import rounded down to ${Number(delta).toFixed(0)} MW levels`
+    : ''
+  return `${withEvents}; exact import LOLE ${Number(exact).toFixed(2)} h (analytic, no storage${rounding})`
+}
+
+/** True when there is a certification verdict or an honest reason to show. */
+export function hasCertificationBlock(report: EhReferenceDesignReport): boolean {
+  const section = report.sections?.certification
+  if (!section) return report.mc_lole_h != null
+  if (section.status === 'skipped') return false
+  return report.mc_lole_h != null || Boolean(section.note)
+    || certificationPayload(report) != null
+}
+
+/** The frontier points (loosest first, as the engine orders them). */
+export function frontierPoints(report: EhReferenceDesignReport): EhFrontierPoint[] {
+  const payload = report.sections?.frontier?.payload
+  if (!payload || typeof payload !== 'object') return []
+  const pts = (payload as { points?: unknown }).points
+  if (!Array.isArray(pts)) return []
+  return pts.filter(
+    (p): p is EhFrontierPoint =>
+      Boolean(p) && typeof p === 'object'
+      && typeof (p as EhFrontierPoint).target_permyriad === 'number',
+  )
+}
+
+/** CSV rows for the frontier table — cost is ex-shed by construction.
+ *  Takes the report or its points (both call shapes survive the merge). */
+export function frontierCsvRows(
+  arg: EhReferenceDesignReport | EhFrontierPoint[],
+): unknown[][] {
+  const points = Array.isArray(arg) ? arg : frontierPoints(arg)
+  return points.map(p => [
+    p.target_permyriad,
+    p.status,
+    p.point?.total_system_cost_eur ?? '',
+    p.point?.achieved_ens_mwh ?? '',
+    p.point?.achieved_shed_hours ?? '',
+    p.binding ?? '',
+    p.period_basis ?? '',
+    p.excludes_shed_cost === false ? 'no' : 'yes',
+  ])
+}
+
+/** The ranked residual failure modes from the fmea_top stage: the
+ *  Link-primary Class-B ranking (`rows`) first, then the class-A COPT
+ *  screening of the same plan (`class_a.rows`), ranked on in that order.
+ *  A report stored by a build that merged both into `top` is read as is. */
+export function fmeaTopModes(report: EhReferenceDesignReport): EhFmeaTopMode[] {
+  const payload = report.sections?.fmea_top?.payload
+  if (!payload || typeof payload !== 'object') return []
+  const isMode = (m: unknown): m is EhFmeaTopMode =>
+    Boolean(m) && typeof m === 'object'
+    && typeof (m as EhFmeaTopMode).mode_id === 'string'
+  const top = (payload as { top?: unknown }).top
+  if (Array.isArray(top)) return top.filter(isMode)
+  const b = fmeaTopRows(report).filter(isMode).map((r, i) => ({
+    ...r,
+    rank: i + 1,
+    failure_class: (r as Partial<EhFmeaTopMode>).failure_class ?? 'B',
+    component_class: (r as Partial<EhFmeaTopMode>).component_class ?? 'Link',
+    name: r.name ?? r.mode_id,
+  } as EhFmeaTopMode))
+  const classA = (payload as { class_a?: { rows?: unknown } | null }).class_a
+  const aRows = Array.isArray(classA?.rows) ? classA!.rows as unknown[] : []
+  const a = aRows.filter(isMode).map((r, i) => ({
+    ...r, rank: b.length + i + 1, failure_class: r.failure_class ?? 'A',
+  }))
+  return [...b, ...a]
+}
+
+/** The class-A COPT screening block of `fmea_top` (merge 2026-09-28): the
+ *  payload's `class_a`, or the payload itself on a report that carried the
+ *  COPT fields at the top level. */
+export function fmeaClassA(report: EhReferenceDesignReport): {
+  status?: string
+  reason?: string | null
+  rows?: EhFmeaTopMode[]
+  fleet_scope?: EhFleetScope | null
+  copt_metrics?: { import_exact?: EhImportExact | null } | null
+  copt_fidelity_note?: string | null
+  import_link_ranking?: Record<string, string>
+  import_link_ranking_note?: string | null
+} | null {
+  const payload = report.sections?.fmea_top?.payload as
+    | Record<string, unknown> | null | undefined
+  if (!payload || typeof payload !== 'object') return null
+  const block = payload.class_a
+  if (block && typeof block === 'object') return block as never
+  return payload as never
+}
+
+/** The fmea_top payload's COPT import line (see ``coptImportSummary``). */
+export function fmeaCoptImportSummary(report: EhReferenceDesignReport): string | null {
+  const payload = fmeaClassA(report)
+  return coptImportSummary(payload?.fleet_scope, payload?.copt_metrics)
+}
+
+/** The COPT caveat and fidelity notes carried on the fmea_top payload. */
+export function fmeaCoptNotes(report: EhReferenceDesignReport): string[] {
+  const payload = fmeaClassA(report)
+  return [payload?.fleet_scope?.copt_import_note, payload?.copt_fidelity_note]
+    .filter((x): x is string => typeof x === 'string' && x.length > 0)
+}
+
+/** How a sampled import Link is ranked in fmea_top (once: B, else A). */
+export function fmeaImportRankingNote(report: EhReferenceDesignReport): string | null {
+  const payload = fmeaClassA(report)
+  const ranking = payload?.import_link_ranking
+  if (!ranking || Object.keys(ranking).length === 0) return null
+  const parts = Object.entries(ranking).map(
+    ([link, view]) => `${link}: ${view === 'class_b' ? 'Class-B row' : 'class-A row'}`)
+  return `Import Link ranked once — ${parts.join(', ')}.`
+    + (payload?.import_link_ranking_note ? ` ${payload.import_link_ranking_note}` : '')
+}
+
+/** CSV rows for the FMEA top-N table (the report or its modes). */
+export function fmeaTopCsvRows(
+  arg: EhReferenceDesignReport | EhFmeaTopMode[],
+): unknown[][] {
+  const modes = Array.isArray(arg) ? arg : fmeaTopModes(arg)
+  return modes.map(m => [
+    m.rank,
+    m.failure_class,
+    m.component_class,
+    m.name,
+    m.criticality_eur_per_year ?? '',
+    m.delta_eue_mwh ?? '',
+    m.occurrence_per_year ?? '',
+    m.severity_eur ?? '',
+    m.engine ?? '',
+  ])
+}
+
+/** LCOH headline: the number when established, else the flag to show. */
+export function lcohChip(
+  report: EhReferenceDesignReport,
+): { value: number | null; status: EhSectionStatus | null; note: string | null } | null {
+  const tea = report.tea
+  if (!tea) return null
+  if (tea.lcoh_eur_per_kg != null) {
+    return { value: tea.lcoh_eur_per_kg, status: tea.lcoh_status ?? 'ok', note: tea.lcoh_note ?? null }
+  }
+  if (tea.lcoh_status) {
+    return { value: null, status: tea.lcoh_status, note: tea.lcoh_note ?? null }
+  }
+  return null
 }
 
 /** True when the report carries SCR/EMT values or an honest gates note. */
@@ -335,11 +609,6 @@ export function multiEnergyLoadEntries(
     .map(([load, mwh]) => ({ load, mwh: Number(mwh) }))
 }
 
-type FrontierPoint = {
-  target_permyriad: number
-  status: string
-  point?: { total_system_cost_eur?: number; achieved_ens_mwh?: number } | null
-}
 type FmeaRow = {
   mode_id: string
   name?: string
@@ -349,36 +618,10 @@ type FmeaRow = {
   delta_eue_mwh?: number | null
 }
 
-/** Frontier points from the report's `frontier` section (P12). */
-export function frontierPoints(report: EhReferenceDesignReport): FrontierPoint[] {
-  const payload = report.sections?.frontier?.payload as { points?: unknown } | null | undefined
-  return Array.isArray(payload?.points) ? (payload!.points as FrontierPoint[]) : []
-}
-
 /** Ranked FMEA rows from the report's `fmea_top` section (P12). */
 export function fmeaTopRows(report: EhReferenceDesignReport): FmeaRow[] {
   const payload = report.sections?.fmea_top?.payload as { rows?: unknown } | null | undefined
   return Array.isArray(payload?.rows) ? (payload!.rows as FmeaRow[]) : []
-}
-
-export function frontierCsvRows(report: EhReferenceDesignReport): unknown[][] {
-  return frontierPoints(report).map(p => [
-    p.target_permyriad,
-    p.status,
-    p.point?.total_system_cost_eur ?? '',
-    p.point?.achieved_ens_mwh ?? '',
-  ])
-}
-
-export function fmeaTopCsvRows(report: EhReferenceDesignReport): unknown[][] {
-  return fmeaTopRows(report).map(r => [
-    r.mode_id,
-    r.name ?? '',
-    r.criticality_eur_per_year ?? '',
-    r.occurrence_per_year ?? '',
-    r.severity_eur ?? '',
-    r.delta_eue_mwh ?? '',
-  ])
 }
 
 /** CSV rows for the redundancy comparison table. */
@@ -865,7 +1108,6 @@ export function EhReferenceDesignPanel() {
   const frPoints = report ? frontierPoints(report) : []
   const frPayload = report?.sections?.frontier?.payload as
     | { pack_target_permyriad?: number; knee_index?: number | null } | null | undefined
-  const fmeaRows = report ? fmeaTopRows(report) : []
   const fmeaUnsolved = ((report?.sections?.fmea_top?.payload as
     | { unsolved?: { id: string; status: string }[] } | null | undefined)
     ?.unsolved) ?? []
@@ -875,6 +1117,12 @@ export function EhReferenceDesignPanel() {
     ? okFr[frPayload.knee_index]?.target_permyriad : undefined
   const meCarriers = report ? multiEnergyCarrierEntries(report) : []
   const meLoads = report ? multiEnergyLoadEntries(report) : []
+  const certification = report ? certificationPayload(report) : null
+  const fmeaTop = report ? fmeaTopModes(report) : []
+  const fmeaClassABlock = report ? fmeaClassA(report) : null
+  const fmeaClassAReason = fmeaClassABlock?.status === 'not_established'
+    ? (fmeaClassABlock.reason ?? null) : null
+  const lcoh = report ? lcohChip(report) : null
 
   const selected = ARCHETYPES.find(a => a.id === archetype)!
   const selectedId = redTable?.selection?.selected_id ?? null
@@ -926,8 +1174,8 @@ export function EhReferenceDesignPanel() {
           </div>
           <p className="text-[11px] text-muted">
             Runs an Energy Hub archetype pack through the reference-design
-            pipeline (apply pack → ENS solve → assemble, plus any levers the
-            pack enables). Produces one{' '}
+            pipeline (apply pack → ENS solve → frontier → MC LOLE certify →
+            FMEA top-N → assemble, plus any levers the pack enables). Produces one{' '}
             <code className="font-mono">ReferenceDesignReport</code> linking
             availability and cost. Sibling tables (redundancy, levers, DtC)
             appear when those stages ran. Shares the study mesh — one study at
@@ -1249,6 +1497,25 @@ export function EhReferenceDesignPanel() {
                     </span>
                   </span>
                 )}
+                {lcoh && lcoh.value != null && (
+                  <span data-testid="eh-report-lcoh">
+                    <span className="text-muted">LCOH </span>
+                    <span className="text-text font-mono">
+                      €{lcoh.value.toFixed(2)}/kg
+                    </span>
+                  </span>
+                )}
+                {lcoh && lcoh.value == null && lcoh.status && (
+                  <span
+                    data-testid="eh-report-lcoh-flag"
+                    data-status={lcoh.status}
+                    className={statusTone(lcoh.status)}
+                    title={lcoh.note ?? undefined}
+                  >
+                    <span className="text-muted">LCOH </span>
+                    {lcoh.status === 'skipped' ? 'n/a (no electrolyser)' : 'not established'}
+                  </span>
+                )}
               </div>
 
               {cert?.next && (
@@ -1329,6 +1596,91 @@ export function EhReferenceDesignPanel() {
                 </ul>
               )}
 
+              {hasCertificationBlock(report) && (
+                <div
+                  className="flex flex-col gap-1 border-t border-border/50 pt-2"
+                  data-testid="eh-certification"
+                >
+                  <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted">
+                    MC LOLE certification
+                  </h4>
+                  {certification && certification.mc_lole_h != null && (
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px]">
+                      <span data-testid="eh-certification-lole">
+                        <span className="text-muted">LOLE </span>
+                        <span className="text-text font-mono">
+                          {Number(certification.mc_lole_h).toFixed(2)} h
+                          {certification.horizon_years != null ? '/yr' : ''}
+                          {cert?.ci
+                            ? ` [${cert.ci[0].toFixed(2)}, ${cert.ci[1].toFixed(2)}]`
+                            : ''}
+                        </span>
+                      </span>
+                      {certification.eue_mwh != null && (
+                        <span data-testid="eh-certification-eue">
+                          <span className="text-muted">EUE </span>
+                          <span className="text-text font-mono">
+                            {Number(certification.eue_mwh).toFixed(2)} MWh
+                          </span>
+                        </span>
+                      )}
+                      {certification.n_samples != null && (
+                        <span data-testid="eh-certification-samples">
+                          <span className="text-muted">draws </span>
+                          <span className="text-text font-mono">
+                            {certification.n_samples}
+                            {certification.converged === false ? ' (not converged)' : ''}
+                          </span>
+                        </span>
+                      )}
+                      {certification.ens_met != null && (
+                        <span data-testid="eh-certification-ens">
+                          <span className="text-muted">ENS target </span>
+                          <span className="text-text">{certification.ens_met ? 'met' : 'missed'}</span>
+                        </span>
+                      )}
+                      {importModelLabel(certification) && (
+                        <span
+                          data-testid="eh-certification-import"
+                          data-import-model={certification.import_model
+                            ?? certification.fleet_scope?.import_model ?? 'firm_block'}
+                        >
+                          <span className="text-muted">import </span>
+                          <span className="text-text">{importModelLabel(certification)}</span>
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {gridAreasSummary(certification?.fleet_scope) && (
+                    <p className="text-[10px] text-muted" data-testid="eh-certification-grid-areas">
+                      {gridAreasSummary(certification?.fleet_scope)}
+                    </p>
+                  )}
+                  {commonModeLines(certification?.fleet_scope).length > 0 && (
+                    <ul className="text-[10px] text-muted" data-testid="eh-certification-common-mode">
+                      {commonModeLines(certification?.fleet_scope).map(line => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  )}
+                  {certification?.fleet_scope?.note && (
+                    <p className="text-[10px] text-muted" data-testid="eh-certification-scope-note">
+                      {certification.fleet_scope.note}
+                    </p>
+                  )}
+                  {report.sections?.certification?.note && (
+                    <p className="text-[10px] text-muted" data-testid="eh-certification-note">
+                      {report.sections.certification.note}
+                    </p>
+                  )}
+                  {certification?.warning && (
+                    <p className="text-[10px] text-muted" data-testid="eh-certification-warning">
+                      {certification.warning}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {hasGatesBlock(report) && (
                 <div
                   className="flex flex-col gap-1 border-t border-border/50 pt-2"
@@ -1390,41 +1742,57 @@ export function EhReferenceDesignPanel() {
                 >
                   <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-                      Cost vs ENS target (frontier, cost excl. shed)
+                      Cost vs ENS target (frontier)
                     </h4>
+                    <span className="text-[10px] text-muted" data-testid="eh-frontier-basis">
+                      cost excl. shed
+                      {typeof report.sections?.frontier?.payload?.period_basis === 'string'
+                        ? ` · ${String(report.sections.frontier.payload.period_basis)}`
+                        : ''}
+                    </span>
                     <CsvButton
                       testId="eh-frontier-csv"
                       label="CSV"
                       onClick={() => downloadCSV(
                         'eh-frontier.csv',
-                        ['target_permyriad', 'status', 'cost_eur', 'achieved_ens_mwh'],
+                        ['target_permyriad', 'status', 'total_system_cost_eur_ex_shed',
+                         'achieved_ens_mwh', 'achieved_shed_hours', 'binding',
+                         'period_basis', 'excludes_shed_cost'],
                         frontierCsvRows(report),
                       )}
                     />
                   </div>
+                  {typeof report.sections?.frontier?.payload?.warning === 'string' && (
+                    <p className="text-[10px] text-warn" data-testid="eh-frontier-warning">
+                      {String(report.sections.frontier.payload.warning)}
+                    </p>
+                  )}
                   <div className="overflow-x-auto">
                     <table className="w-full text-[10px]">
                       <thead className="text-muted">
                         <tr>
                           <th className="text-right font-medium py-1 pr-3">Target ‱</th>
                           <th className="text-left font-medium py-1 pr-3">Status</th>
-                          <th className="text-right font-medium py-1 pr-3">Cost</th>
-                          <th className="text-right font-medium py-1">ENS</th>
+                          <th className="text-right font-medium py-1 pr-3">Cost (ex-shed)</th>
+                          <th className="text-right font-medium py-1 pr-3">ENS</th>
+                          <th className="text-right font-medium py-1">Shed h</th>
                         </tr>
                       </thead>
                       <tbody className="font-mono">
                         {frPoints.map((p, i) => {
                           const isPack = p.target_permyriad === frPayload?.pack_target_permyriad
+                          const isKnee = p.target_permyriad === kneeTarget && p.status === 'ok'
                           return (
                             <tr
                               key={`${p.target_permyriad}:${i}`}
                               className={`border-t border-border/50 ${isPack ? 'text-accent' : ''}`}
                               data-testid={`eh-frontier-row-${i}`}
                               data-pack-target={isPack ? 'true' : 'false'}
+                              data-knee={isKnee ? 'true' : 'false'}
                             >
                               <td className="py-0.5 pr-3 text-right">
                                 {p.target_permyriad}
-                                {p.target_permyriad === kneeTarget && p.status === 'ok' && (
+                                {isKnee && (
                                   <span className="text-warn font-sans" data-testid="eh-frontier-knee"> knee</span>
                                 )}
                               </td>
@@ -1433,8 +1801,11 @@ export function EhReferenceDesignPanel() {
                                 {p.point?.total_system_cost_eur != null
                                   ? eur(p.point.total_system_cost_eur) : '—'}
                               </td>
-                              <td className="py-0.5 text-right">
+                              <td className="py-0.5 pr-3 text-right">
                                 {cellNum(p.point?.achieved_ens_mwh, 'mwh')}
+                              </td>
+                              <td className="py-0.5 text-right">
+                                {cell(p.point?.achieved_shed_hours)}
                               </td>
                             </tr>
                           )
@@ -1442,25 +1813,30 @@ export function EhReferenceDesignPanel() {
                       </tbody>
                     </table>
                   </div>
+                  {report.sections?.frontier?.note && (
+                    <p className="text-[10px] text-muted" data-testid="eh-frontier-note">
+                      {report.sections.frontier.note}
+                    </p>
+                  )}
                 </div>
               )}
 
-              {fmeaRows.length > 0 && (
+              {fmeaTop.length > 0 && (
                 <div
                   className="flex flex-col gap-1 border-t border-border/50 pt-2"
                   data-testid="eh-fmea-top"
                 >
                   <div className="flex items-center gap-2 flex-wrap">
                     <h4 className="text-[10px] font-semibold uppercase tracking-wide text-muted">
-                      Top Class-B failure modes (ENS plan)
+                      Residual failure modes (ENS plan)
                     </h4>
                     <CsvButton
                       testId="eh-fmea-top-csv"
                       label="CSV"
                       onClick={() => downloadCSV(
                         'eh-fmea-top.csv',
-                        ['mode_id', 'name', 'criticality_eur_per_year',
-                         'occurrence_per_year', 'severity_eur', 'delta_eue_mwh'],
+                        ['rank', 'class', 'component', 'name', 'criticality_eur_per_year',
+                         'delta_eue_mwh', 'occurrence_per_year', 'severity_eur', 'engine'],
                         fmeaTopCsvRows(report),
                       )}
                     />
@@ -1469,25 +1845,42 @@ export function EhReferenceDesignPanel() {
                     <table className="w-full text-[10px]">
                       <thead className="text-muted">
                         <tr>
-                          <th className="text-left font-medium py-1 pr-3">Link</th>
+                          <th className="text-right font-medium py-1 pr-3">#</th>
+                          <th className="text-left font-medium py-1 pr-3">Class</th>
+                          <th className="text-left font-medium py-1 pr-3">Component</th>
                           <th className="text-right font-medium py-1 pr-3">Criticality €/yr</th>
                           <th className="text-right font-medium py-1 pr-3">Occ./yr</th>
                           <th className="text-right font-medium py-1">ΔEUE</th>
                         </tr>
                       </thead>
                       <tbody className="font-mono">
-                        {fmeaRows.map((r, i) => (
-                          <tr key={r.mode_id} className="border-t border-border/50"
-                              data-testid={`eh-fmea-row-${i}`}>
-                            <td className="py-0.5 pr-3 font-sans">{r.name ?? r.mode_id}</td>
-                            <td className="py-0.5 pr-3 text-right">
-                              {r.criticality_eur_per_year != null ? eur(r.criticality_eur_per_year) : '—'}
+                        {fmeaTop.map(m => (
+                          <tr
+                            key={`${m.failure_class}:${m.mode_id}`}
+                            className="border-t border-border/50"
+                            data-testid={`eh-fmea-top-row-${m.rank}`}
+                            data-class={m.failure_class}
+                          >
+                            <td className="py-0.5 pr-3 text-right">{m.rank}</td>
+                            <td className="py-0.5 pr-3 font-sans"
+                                title={m.failure_class === 'A'
+                                  ? 'class A: unit forced outage, COPT screening (no LP solve)'
+                                  : 'Class B: Link outage, LP re-solve on the frozen plan'}>
+                              {m.failure_class}
+                            </td>
+                            <td className="py-0.5 pr-3 font-sans">
+                              {m.component_class} {m.name ?? m.mode_id}
                             </td>
                             <td className="py-0.5 pr-3 text-right">
-                              {r.occurrence_per_year?.toFixed(2) ?? '—'}
+                              {m.criticality_eur_per_year != null
+                                ? eur(m.criticality_eur_per_year) : '—'}
+                            </td>
+                            <td className="py-0.5 pr-3 text-right">
+                              {m.occurrence_per_year != null
+                                ? Number(m.occurrence_per_year).toFixed(2) : '—'}
                             </td>
                             <td className="py-0.5 text-right">
-                              {cellNum(r.delta_eue_mwh, 'mwh')}
+                              {cellNum(m.delta_eue_mwh, 'mwh')}
                             </td>
                           </tr>
                         ))}
@@ -1501,7 +1894,29 @@ export function EhReferenceDesignPanel() {
                     </p>
                   )}
                   {report.sections?.fmea_top?.note && (
-                    <p className="text-[10px] text-muted">{report.sections.fmea_top.note}</p>
+                    <p className="text-[10px] text-muted" data-testid="eh-fmea-top-note">
+                      {report.sections.fmea_top.note}
+                    </p>
+                  )}
+                  {fmeaClassAReason && (
+                    <p className="text-[10px] text-muted" data-testid="eh-fmea-class-a-reason">
+                      Class-A screening not established: {fmeaClassAReason}
+                    </p>
+                  )}
+                  {fmeaCoptImportSummary(report) && (
+                    <p className="text-[10px] text-muted" data-testid="eh-fmea-top-copt-import">
+                      {fmeaCoptImportSummary(report)}
+                    </p>
+                  )}
+                  {fmeaCoptNotes(report).length > 0 && (
+                    <div className="text-[10px] text-muted" data-testid="eh-fmea-top-copt-notes">
+                      {fmeaCoptNotes(report).map(line => <p key={line}>{line}</p>)}
+                    </div>
+                  )}
+                  {fmeaImportRankingNote(report) && (
+                    <p className="text-[10px] text-muted" data-testid="eh-fmea-top-import-ranking">
+                      {fmeaImportRankingNote(report)}
+                    </p>
                   )}
                 </div>
               )}

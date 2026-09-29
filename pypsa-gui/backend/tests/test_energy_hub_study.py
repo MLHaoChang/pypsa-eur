@@ -133,6 +133,10 @@ def test_default_stages_never_leave_unimplemented_pending():
     assert report.completeness["frontier"] == "ok"
     fr = report.sections["frontier"].payload
     assert 1000.0 in [pt["target_permyriad"] for pt in fr["points"]]
+    # Master 2026-09-26 (eh-wire-skipped-stages WP2): the stage RUNS on the
+    # default pipeline — it is never skipped there.
+    frontier = next(s for s in report.pipeline.stages if s.stage == "frontier")
+    assert frontier.status == "run"
     assert report.completeness["cost"] == "ok"
 
 

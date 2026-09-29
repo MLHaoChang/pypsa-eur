@@ -89,9 +89,15 @@ def _run(n, pack, *, stages=None, cfg=None, **kw):
 
 
 def test_frontier_targets_keep_the_pack_cap_and_its_neighbours():
-    t = S.frontier_targets(7.0, 3)
+    # Merge 2026-09-28: candidates come from the pack's frontier_ladder
+    # (factors on the cap, master PR #53); the P12 selection rule is kept —
+    # the cap first, then its nearest points in log distance.
+    from services.adequacy.frontier import DEFAULT_TARGETS_PERMYRIAD
+    t = S.frontier_targets(7.0, 3, ladder=[x / 7.0 for x in DEFAULT_TARGETS_PERMYRIAD])
     assert t[0] == 7.0 and len(t) == 3
-    assert set(t[1:]) == {5.0, 10.0}          # nearest in log distance
+    assert sorted(t[1:]) == pytest.approx([5.0, 10.0])  # nearest in log distance
+    t = S.frontier_targets(7.0, 3)                     # the default ladder
+    assert t[0] == 7.0 and t[1:] == pytest.approx([14.0, 3.5])
 
 
 @pytest.mark.live_solve

@@ -50,6 +50,11 @@ _FACADE_ORIGINS: dict[str, str | None] = {
     "fill_periodized_cost_defaults": "services.solver.periodized_costs",
     "with_periodized_cost_defaults": "services.solver.periodized_costs",
     "periodized_capital_costs": "services.solver.periodized_costs",
+    # FOM annual -> per-horizon scaling (2026-09-27): results surfaces read
+    # these through the facade so they scale exactly as the solve did.
+    "fom_horizon_factor": "services.solver.periodized_costs",
+    "fom_is_scaled": "services.solver.periodized_costs",
+    "fom_per_horizon": "services.solver.periodized_costs",
 
     # ── Task 4 → services/solver/diagnostics.py ──────────────────────────────
     "_diagnose_infeasibility": "services.solver.diagnostics",

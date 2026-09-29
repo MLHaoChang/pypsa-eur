@@ -123,6 +123,12 @@ Electricity-only adequacy remains the default until the multi-energy phase.
 - An import Link enters the MC fleet only when it carries its own outage data (decision 6). It then becomes one two-state unit of its hub-side capacity.
 - Carrier-only Link selection (§6 rule 3), or a hub side that can't be told apart from the far side, is `not_established` with the instruction "tag `eh_role`/`eh_poc`".
 
+**Amendment (2026-09-28, merge of master PR #53/#55 — decisions in [`qa/2026-09-28-merge-master-decisions.md`](../qa/2026-09-28-merge-master-decisions.md)):**
+- The hub boundary and decision 6 above stay normative. Within them, a counted import Link is a two-state unit at its **hourly** hub-side cap (not the horizon mean), and when the grid behind it carries occurrence data that grid is sampled as its own area (two-area MC, `mc_zonal`), with grid storage and opt-in Link `common_mode_rate` / `common_mode_mttr_hours` events.
+- A Link that is not counted (no outage data of its own, no finite MTTR, or an energy-limited import) is `excluded` — never a firm block at its planning cap. Its common-mode data is disclosed as not applied.
+- The payload discloses `fleet_scope`, `import_model` (`zonal` / `sampled_unit` / `mixed` / `excluded` / `islanded`), `import_firmness` (… / `not_counted`), `engine`, `ens_met` and `mc_lole_h` (h/yr) beside the P11 fields. The verdict vocabulary stays `pass` / `fail` / `inconclusive`.
+- MC draws / seed / CoV come from the pack's `mc_*` fields (defaults = the P13 study defaults) unless the request's `mc` options override them.
+
 ---
 
 ## 5. Study pipeline (normative)
@@ -201,6 +207,10 @@ Solution FMEA remains the **diagnostic** under a single plan. The EH reference d
 - **Per-frontier-point FMEA is deferred.** In v1 the EH study ranks **only the ENS plan**. `fmea_top` is the top-5 Class-B Link modes on the pack-applied `ens_solve` plan, frozen.
 - **Frontier scope.** The `frontier` stage sweeps the pack target and its nearest default targets. It runs by default only for `strong_grid` (pack flag `frontier_default`) and takes at most ~40% of `budget_solves`.
 - **Closing re-solves are skipped.** Both stages run on disposable private copies, so they skip the engines' closing re-solve (decision Q4). HTTP routes always restore.
+
+**Amendment (2026-09-28, merge of master PR #53):**
+- The frontier's candidate targets are the pack's `frontier_ladder` (factors on the pack cap, default ×4 ×2 ×1 ×½ ×¼); the P12 budget rule (≤ ~40 %, ≥ 2 points, private copy, no closing restore) selects from them.
+- `fmea_top` keeps the Class-B Link ranking above as the section's evidence (`rows`, `top_n` = the pack's `fmea_top_n`, default 5). Beside it, `class_a` carries the zero-solve COPT screening of the same hub-side fleet the certification samples (unit forced outages, common-mode events as their own modes; a sampled import Link ranked once). `class_a` never decides the section status.
 
 ## 10. DtC planning spike (P4b) — decision recorded
 

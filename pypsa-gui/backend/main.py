@@ -127,7 +127,22 @@ _UNDO_EXCLUDE = {"/api/network/undo", "/api/network/undo/info"}
 # `_SOLVER_BLOCKING_PREFIXES` (below) while absent here, so the uploads
 # endpoints are guarded against a solve-in-flight but not against another
 # user's edit lock. Reading any one guard makes coverage look complete.
-_FOREIGN_LOCK_GATE_PREFIXES = _UNDO_PREFIXES + ("/api/simulation/",)
+# `/api/results/` carries exactly ten write routes: the five adequacy-study
+# STARTS (frontier, mc, fmea_sweep, margin_loop, coupling_loop) and their five
+# aborts, which are exempted above. The starts belong here because each takes
+# `PyPSAService.get_network()` — the SHARED resident network — and re-solves it
+# in a worker thread, and `routers/results.py` carries no holder check of its
+# own. `_refuse_if_mesh_busy` / `_publish_study` are NOT this control: they
+# serialise studies against each other under the PyPSA mutation lock, which is
+# thread safety, not authorization. Without this a non-holder who activated the
+# same project re-solved the holder's plan and the holder's next autosave
+# persisted it — the same class of defect as the requeue cross-user overwrite
+# (`docs/superpowers/findings/2026-08-27-requeue-is-a-cross-user-overwrite.md`),
+# and found by the per-route authorization audit
+# (`docs/superpowers/assessments/2026-09-12-per-route-authorization-audit.md`,
+# finding 1). Gated here rather than in the route bodies so there is one
+# emitter of the `project_locked` shape for this surface rather than a third.
+_FOREIGN_LOCK_GATE_PREFIXES = _UNDO_PREFIXES + ("/api/simulation/", "/api/results/")
 
 # Paths exempt from the gate above. The rule is NOT "everything under
 # `/api/simulation/queue/`" — it is an explicit allowlist: a queue route is
@@ -200,6 +215,17 @@ _FOREIGN_LOCK_GATE_EXEMPT_EXACT = frozenset({
     "/api/simulation/queue/resume",
     "/api/simulation/queue/cancel_queued",
     "/api/simulation/preflight",
+    # The five adequacy-study ABORTS. Gated prefix `/api/results/` below covers
+    # the study STARTS, which re-solve the shared network; an abort only ever
+    # STOPS a running study, so it writes nothing and needs no holder check —
+    # the same reason `queue/{id}/abort` and `dismiss` are exempt. Gating an
+    # abort would be actively harmful: a foreign lock acquired while a study
+    # runs would trap it with no way to stop it.
+    "/api/results/frontier/abort",
+    "/api/results/mc/abort",
+    "/api/results/fmea_sweep/abort",
+    "/api/results/margin_loop/abort",
+    "/api/results/coupling_loop/abort",
 })
 #
 # The job-scoped patterns are anchored to the canonical dashed-UUID shape, not
@@ -1244,11 +1270,26 @@ def _entry_under(root: Path, relative: str) -> Path | None:
     `_DistAssets` mount above, so this path handles only the shallow root files
     (`favicon.ico`, `manifest.json`, and friends).
 
-    A symlink inside `dist` is followed, exactly as before: the old check
-    called `resolve()` on both sides, so a link pointing outside `dist` failed
-    `is_relative_to` and 404'd. Here it never matches an entry name in the
-    first place unless it IS a real child, and following a child of the build
-    output is the intended behaviour for a build output.
+    SYMLINKS NEED THE CONTAINMENT CHECK BACK, and this is the one place it is
+    load-bearing rather than decorative. An earlier version of this function
+    dropped it, reasoning that a traversing segment "never matches an entry
+    name in the first place". That is true of `..`; it is FALSE of a symlink.
+    `iterdir()` yields a symlink as an ordinary child, so it matches by name,
+    and `is_file()` follows it — so `dist/escape.css -> /etc/passwd` was
+    matched, opened and served, where the code this replaced resolved it,
+    failed `is_relative_to`, and 404'd. A regression, shipped, and caught by an
+    independent review rather than by the tests here.
+
+    So the walk establishes "every segment names a real entry", and the resolve
+    below establishes "and the thing it finally names is still inside `dist`".
+    Both are needed; neither subsumes the other. A symlink pointing WITHIN
+    `dist` still resolves and is still served, which is what the old code did
+    too.
+
+    This does not reintroduce the `py/path-injection` flow. The value being
+    checked comes from `iterdir()`, not from the request — the containment test
+    is confirming a property of a path this function built, not laundering a
+    tainted one.
     """
     current = root
     segments = [seg for seg in relative.split("/") if seg]
@@ -1267,7 +1308,13 @@ def _entry_under(root: Path, relative: str) -> Path | None:
         if match is None:
             return None
         current = match
-    return current if current.is_file() else None
+    try:
+        resolved = current.resolve()
+        if not resolved.is_relative_to(root.resolve()):
+            return None          # a symlink out of the tree
+    except (OSError, ValueError):
+        return None
+    return resolved if resolved.is_file() else None
 
 
 app.mount("/assets", _DistAssets(check_dir=False), name="assets")
