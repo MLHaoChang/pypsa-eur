@@ -1,5 +1,5 @@
-import { createContext, useContext, useMemo, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { networkApi } from '../api/network'
@@ -7,6 +7,7 @@ import { resultsApi, type TSRange, type ResultSource } from '../api/simulation'
 import { chooseChunk, chunkBounds, horizonOf, localRow } from '../pages/results/chunking'
 import type { Generator, Load, Line as LineT, Link as LinkT, StorageUnit, Store } from '../api/types'
 import { isRenewableCarrier, type TSPayload } from '../pages/results/shared'
+import { periodAt, periodEffectiveCap, type VintageResults } from '../site3d/capacity'
 
 // ── Per-snapshot results overlay context ──────────────────────────────────────
 // One provider, one shape, two consumers (BusNode and EditableEdge).
@@ -131,17 +132,12 @@ const PROBE: TSRange = { from: 0, to: 0 }
  * `generators`, and one shared size would size every request by whichever
  * series happened to be probed first.
  */
-function useChunkedSeries(
+function useChunkedSeriesQuery(
   name: string,
   fetch: (source: ResultSource, range?: TSRange) => Promise<TSPayload | null>,
-  opts: {
-    project: string | null
-    source: ResultSource
-    idx: number
-    enabled: boolean
-  },
-): TSPayload | null | undefined {
-  const { project, source, idx, enabled } = opts
+  opts: ChunkedSeriesOpts,
+) {
+  const { project, source, idx, enabled, prefetchNext = false } = opts
 
   const { data: probe } = useQuery({
     queryKey: nk(project, 'results', name, source, 'probe'),
@@ -186,14 +182,65 @@ function useChunkedSeries(
     return chunkBounds(clampedIdx, chunk, total)
   }, [idx, chunk, total])
 
-  const { data } = useQuery({
-    // `bounds.from` is what makes the cache work: identical for every index
-    // inside a chunk, different across a boundary.
-    queryKey: nk(project, 'results', name, source, bounds.from),
+  // `bounds.from` is what makes the cache work: identical for every index
+  // inside a chunk, different across a boundary.
+  const queryKey = nk(project, 'results', name, source, bounds.from)
+  const query = useQuery({
+    queryKey,
     queryFn: () => fetch(source, bounds),
     enabled: enabled && total > 0,
   })
-  return data
+
+  // Opt-in (the 3D view): fetch the next chunk while the scrubber is in the
+  // last tenth of this one, so playback does not stall at the boundary.
+  const qc = useQueryClient()
+  const nearEnd = prefetchNext && enabled && total > 0 && bounds.to < total - 1 &&
+    Math.max(0, Math.min(idx, total - 1)) >= bounds.to - Math.max(1, Math.floor((bounds.to - bounds.from + 1) / 10))
+  useEffect(() => {
+    if (!nearEnd) return
+    const next = chunkBounds(bounds.to + 1, chunk, total)
+    void qc.prefetchQuery({ queryKey: nk(project, 'results', name, source, next.from), queryFn: () => fetch(source, next) })
+  }, [nearEnd, bounds.to, chunk, total, project, name, source, fetch, qc])
+  return { query, queryKey, bounds, total }
+}
+
+interface ChunkedSeriesOpts {
+  project: string | null
+  source: ResultSource
+  idx: number
+  enabled: boolean
+  /** Prefetch the next chunk near this one's end (default off: the schematic's behaviour is unchanged). */
+  prefetchNext?: boolean
+}
+
+/** One result series' chunk around the scrubber (the canvases' overlay). Reads only `data`, so a fetch-state change does not re-render the caller. */
+export function useChunkedSeries(
+  name: string,
+  fetch: (source: ResultSource, range?: TSRange) => Promise<TSPayload | null>,
+  opts: ChunkedSeriesOpts,
+): TSPayload | null | undefined {
+  return useChunkedSeriesQuery(name, fetch, opts).query.data
+}
+
+export interface ChunkedSeriesMeta {
+  data: TSPayload | null | undefined
+  /** When the chunk was fetched (ms); 0 before. */
+  dataUpdatedAt: number
+  isFetching: boolean
+  queryKey: unknown[]
+  bounds: { from: number; to: number }
+  /** The series' horizon (0 before the probe answers). */
+  total: number
+}
+
+/** The same chunk and cache, plus when it was fetched (the 3D view rejects chunks older than a re-solve, spec §6.3). */
+export function useChunkedSeriesMeta(
+  name: string,
+  fetch: (source: ResultSource, range?: TSRange) => Promise<TSPayload | null>,
+  opts: ChunkedSeriesOpts,
+): ChunkedSeriesMeta {
+  const { query, queryKey, bounds, total } = useChunkedSeriesQuery(name, fetch, opts)
+  return { data: query.data, dataUpdatedAt: query.dataUpdatedAt, isFetching: query.isFetching, queryKey, bounds, total }
 }
 
 export function CanvasResultsProvider({ children }: { children: ReactNode }) {
@@ -523,33 +570,11 @@ export function CanvasResultsProvider({ children }: { children: ReactNode }) {
     // see shared.tsx), but PyPSA's own convention is year-as-int, and
     // `ts_payload` always emits ints when it can parse them. Cast rather
     // than re-litigate the union here.
-    const periodFromIso: number | null = (
-      tsAny?.periods && tsAnyLocalIdx >= 0 && tsAnyLocalIdx < tsAny.periods.length
-        ? (tsAny.periods[tsAnyLocalIdx] as number)
-        : null
-    )
-    const vrAll = (vintageResultsRaw?.results ?? {}) as Record<string, Record<string, {
-      initial_capacity: number
-      periods: Array<{ build_year: number; p_nom_opt: number }>
-    }>>
-    const effectiveCapForAsset = (cls: string, name: string, fallback: number): number => {
-      const entry = vrAll?.[cls]?.[name]
-      if (!entry) return fallback
-      const initial = entry.initial_capacity ?? fallback
-      if (periodFromIso == null) {
-        // Single-period or flat — sum every vintage on top of initial.
-        return (entry.periods ?? []).reduce(
-          (s, p) => s + (p.p_nom_opt ?? 0), initial,
-        )
-      }
-      let total = initial
-      for (const p of entry.periods ?? []) {
-        if (p.build_year != null && p.build_year <= periodFromIso) {
-          total += p.p_nom_opt ?? 0
-        }
-      }
-      return total
-    }
+    const periodFromIso = periodAt(tsAny, tsAnyLocalIdx)
+    const vrAll = vintageResultsRaw?.results as VintageResults | undefined
+    // The period-effective rule lives in site3d/capacity.ts (shared with the 3D view).
+    const effectiveCapForAsset = (cls: string, name: string, fallback: number): number =>
+      periodEffectiveCap(vrAll, cls, name, periodFromIso, fallback)
 
     const byAssetGroupCapacity = new Map<string, number>()
     const bumpCap = (busName: string, category: string, mw: number) => {
@@ -609,5 +634,13 @@ export function fmtMW(mw: number, digits = 1): string {
 export function loadingColor(pct: number): string {
   if (pct >= 90) return '#dc2626'
   if (pct >= 50) return '#d97706'
+  return '#16a34a'
+}
+
+// Color band for storage state of charge (%): red below 20, amber below 80,
+// green above — the BESS health bands the schematic's storage cards use.
+export function socColor(pct: number): string {
+  if (pct < 20) return '#dc2626'
+  if (pct < 80) return '#d97706'
   return '#16a34a'
 }

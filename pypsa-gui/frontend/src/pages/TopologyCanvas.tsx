@@ -32,7 +32,7 @@ import { getCarrierBadge, type BadgeDef } from '../utils/carrierBadges'
 import CarrierSelect from '../components/CarrierSelect'
 import { Dialog } from '../components/Dialog'
 import {
-  CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor,
+  CanvasResultsProvider, useCanvasResults, fmtMW, loadingColor, socColor,
 } from '../components/CanvasResultsContext'
 import type { Bus, Generator, Line, Load, StorageUnit, Store, Transformer } from '../api/types'
 import { safeMinMax } from '../utils/numeric'
@@ -721,10 +721,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
     : undefined
   // Tier colour for the SoC indicator: red below 20 %, amber 20–80 %, green above.
   // Matches the standard BESS health bands used in dispatch dashboards.
-  const socColor = socPct == null ? color
-    : socPct < 20 ? '#dc2626'
-    : socPct < 80 ? '#d97706'
-    : '#16a34a'
+  const socTint = socPct == null ? color : socColor(socPct)
   // Sign convention by category:
   //   Thermal / Renewables → positive = injection (↑ arrow)
   //   Load                 → always consumption (↓ arrow); value treated as |v|
@@ -837,7 +834,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
           style={{
             fontSize: 8,
             fontWeight: 500,
-            color: socColor,
+            color: socTint,
             marginTop: 1,
             textAlign: 'center',
             lineHeight: 1.15,
@@ -865,7 +862,7 @@ function AssetGroupNode({ id, data, selected }: NodeProps) {
                 display: 'block',
                 height: '100%',
                 width: `${Math.max(0, Math.min(100, socPct))}%`,
-                background: socColor,
+                background: socTint,
               }}
             />
           </span>

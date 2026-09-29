@@ -79,15 +79,39 @@ describe('useSolveSettled', () => {
     const s = useSolveSettled(project, f.solveId, [{ key: 'generators', data: q.data }])
     return { ...s, fresh: f.fresh, data: q.data }
   }
-  beforeEach(() => { gens = [{ name: 'g', p_nom_opt: 1 }]; getGens.mockClear() })
+  beforeEach(() => { gens = [{ name: 'g', p_nom_opt: 1 }]; getGens.mockReset().mockImplementation(async () => gens) })
 
   it('refetches the lists on first sight of a fresh solve, then is current', async () => {
     vi.mocked(simulationApi.getStatus).mockResolvedValue(st('fresh', 10) as never)
     const { result } = renderHook(() => host(), { wrapper })
-    expect(result.current.current).toBe(false)
+    expect(result.current.current).toBe(false)            // no status yet
     await waitFor(() => expect(result.current.current).toBe(true))
-    expect(getGens).toHaveBeenCalledTimes(2)              // mount + the settle refetch
+    await waitFor(() => expect(getGens).toHaveBeenCalledTimes(2))   // mount + the settle refetch
+    expect(result.current.current).toBe(true)
     expect(result.current.freshSince).toBe(0)             // first sight: a warm cache is valid
+  })
+  it('on first sight with a warm cache it is current at once, before any request answers (plan Task 5.2)', () => {
+    qc.setQueryData(nk('p', 'simulationStatus'), st('fresh', 10))
+    qc.setQueryData(nk('p', 'generators'), gens)
+    vi.mocked(simulationApi.getStatus).mockReturnValue(new Promise(() => {}) as never)
+    getGens.mockReturnValue(new Promise(() => {}) as never)
+    const { result } = renderHook(() => host(), { wrapper })
+    expect(result.current.current).toBe(true)
+    expect(result.current.freshSince).toBe(0)
+  })
+  it('a later solve is not current until its lists are refetched', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    vi.mocked(simulationApi.getStatus).mockResolvedValue(st('fresh', 10) as never)
+    const { result } = renderHook(() => host(), { wrapper })
+    await waitFor(() => expect(getGens).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.current).toBe(true))
+    let release!: () => void
+    getGens.mockImplementationOnce(() => new Promise(r => { release = () => r(gens) }))
+    vi.mocked(simulationApi.getStatus).mockResolvedValue(st('fresh', 12, 2) as never)
+    await act(async () => { await vi.advanceTimersByTimeAsync(STATUS_POLL_MS + 50) })
+    expect(result.current.current).toBe(false)
+    await act(async () => { release() })
+    await waitFor(() => expect(result.current.current).toBe(true))
   })
   it('an edit (the list changes) ends "current" at once, before the status poll says so', async () => {
     vi.mocked(simulationApi.getStatus).mockResolvedValue(st('fresh', 10) as never)

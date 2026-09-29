@@ -20,7 +20,7 @@
 // This module is loaded lazily (App.tsx) and is the only importer of three.js
 // (and of the site3d modules that import it).
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { OrbitControls, Line, PivotControls } from '@react-three/drei'
@@ -48,6 +48,7 @@ import { screenToGround, groundToScreen } from '../site3d/raycast'
 import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/dropRegistry'
 import SiteOverlay from '../components/SiteOverlay'
 import { useDispatchFresh, useSolveSettled } from '../site3d/useDispatchFresh'
+import { useSiteResults, type SiteComponents, type SiteResultObject, type SiteResults } from '../site3d/useSiteResults'
 import { effectiveSizing } from '../site3d/sizing'
 import { toScene, fitCamera, chooseSite, unionBounds, halfSizeFor, type Bounds } from '../site3d/scene'
 import { useSitesStore } from '../site3d/sitesStore'
@@ -343,7 +344,7 @@ function countRender(name: string): void {
   if (DEBUG_ENABLED) renderCounts[name] = (renderCounts[name] ?? 0) + 1
 }
 
-function Site3dDebugHook({ objects, site, context, groundMode: mode, heightAt }: { objects: SiteObject[]; site: Site; context: SiteContext | null; groundMode: string; heightAt: HeightAt }) {
+function Site3dDebugHook({ objects, site, context, groundMode: mode, heightAt, results }: { objects: SiteObject[]; site: Site; context: SiteContext | null; groundMode: string; heightAt: HeightAt; results: React.MutableRefObject<SiteResults> }) {
   const camera = useThree(s => s.camera)
   const scene = useThree(s => s.scene)
   const gl = useThree(s => s.gl)
@@ -375,6 +376,8 @@ function Site3dDebugHook({ objects, site, context, groundMode: mode, heightAt }:
       /** Instanced hero meshes in the scene (0 while loading or after a failed load). */
       heroMeshes: () => { let n = 0; scene.traverse(o => { if (o.name === 'hero' || o.name === 'hero-rotor') n++ }); return n },
       renders: () => ({ ...renderCounts }),
+      /** The results map the driver last wrote (spec §6.1): snapshot, timestamp, per-object state. */
+      results: () => ({ idx: results.current.idx, iso: results.current.iso, states: Object.fromEntries(results.current.states) }),
       site: { id: site.id, name: site.name, placements: site.placements },
       context: context ? { buildings: context.buildings.length, lines: context.lines.length, areas: context.areas.length, terrain: !!context.terrain, missingTiles: context.terrain?.missing_tiles ?? null } : null,
       groundMode: mode,
@@ -382,9 +385,30 @@ function Site3dDebugHook({ objects, site, context, groundMode: mode, heightAt }:
     }
     ;(window as unknown as { __site3d?: unknown }).__site3d = hook
     return () => { delete (window as unknown as { __site3d?: unknown }).__site3d }
-  }, [camera, scene, gl, size, objects, site, context, mode, heightAt])
+  }, [camera, scene, gl, size, objects, site, context, mode, heightAt, results])
   return null
 }
+
+// ── Results driver (spec §6.1) ───────────────────────────────────────────────
+
+/**
+ * The only component that renders per snapshot: it reads the timeline and
+ * the Eye from the store and writes the snapshot's results map into `out`,
+ * which the scene reads per frame — SiteCanvas and the meshes never
+ * re-render for a snapshot step.
+ */
+const SiteResultsDriver = React.memo(function SiteResultsDriver({ out, project, current, freshSince, objects, components }: {
+  out: React.MutableRefObject<SiteResults>; project: string | null; current: boolean; freshSince: number
+  objects: readonly SiteResultObject[]; components: SiteComponents
+}) {
+  countRender('results-driver')
+  const enabled = useUIStore(s => s.resultsOverlayEnabled)
+  const idx = useUIStore(s => s.resultsSnapshotIdx)
+  const source = useUIStore(s => s.resultSource)
+  const results = useSiteResults({ project, enabled, current, freshSince, idx, source, objects, components })
+  useLayoutEffect(() => { out.current = results }, [out, results])
+  return null
+})
 
 // ── Drop target: offer the ground plane to the palette drag (D16) ────────────
 
@@ -525,12 +549,16 @@ function SiteCanvas() {
   // are settled and unchanged, and the overlay's switch says so (spec E6) —
   // an edit (a list that refetches with new data) falls back at once.
   const { fresh: dispatchFresh, solveId } = useDispatchFresh(currentProject)
-  const { current: solveCurrent } = useSolveSettled(currentProject, solveId, [
+  const { current: solveCurrent, freshSince } = useSolveSettled(currentProject, solveId, [
     { key: 'buses', data: qBuses.data }, { key: 'generators', data: qGen.data }, { key: 'storage_units', data: qSu.data },
     { key: 'stores', data: qSt.data }, { key: 'loads', data: qLoad.data }, { key: 'transformers', data: qTr.data },
     { key: 'lines', data: qLine.data }, { key: 'links', data: qLink.data },
   ])
   const solved = dispatchFresh && solveCurrent
+  const components = useMemo<SiteComponents>(() => ({ generators, storageUnits, stores, loads, transformers, lines, links }),
+    [generators, storageUnits, stores, loads, transformers, lines, links])
+  // The results driver writes the snapshot's map here; the scene reads it per frame (WP6).
+  const resultsRef = useRef<SiteResults>({ states: new Map(), idx: 0, iso: '' })
   const siteSizing = useUIStore(s => s.siteSizing)
   const sizing = effectiveSizing(siteSizing, solved)
 
@@ -804,7 +832,8 @@ function SiteCanvas() {
         <FitCamera bounds={plotExtent} />
         <DropTargetRegistrar siteId={site.id} />
         <LabelTracker keys={labelObjects.map(objectKey)} refs={labelRefs} />
-        {DEBUG_ENABLED && <Site3dDebugHook objects={objects} site={site} context={context} groundMode={mode} heightAt={heightAt} />}
+        {DEBUG_ENABLED && <Site3dDebugHook objects={objects} site={site} context={context} groundMode={mode} heightAt={heightAt} results={resultsRef} />}
+        <SiteResultsDriver out={resultsRef} project={currentProject} current={solved} freshSince={freshSince} objects={objects} components={components} />
       </Canvas>
 
       {/* Hover / selection labels (LabelTracker positions them every frame). */}

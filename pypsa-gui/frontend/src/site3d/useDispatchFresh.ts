@@ -60,15 +60,16 @@ export interface SolveSettled {
 export function useSolveSettled(project: string | null, solveId: string | null | undefined, lists: readonly { key: string; data: unknown }[]): SolveSettled {
   const qc = useQueryClient()
   const [settled, setSettled] = useState<{ project: string | null; solveId: string; refs: unknown[]; freshSince: number } | null>(null)
-  const seen = useRef<{ project: string | null; any: boolean }>({ project, any: false })
+  // The first solve seen for this project (set once the effect ran).
+  const first = useRef<{ project: string | null; solveId: string | null }>({ project, solveId: null })
   const keys = lists.map(l => l.key)
   const keysRef = useRef(keys)
   keysRef.current = keys
   useEffect(() => {
     if (!solveId) return
-    const again = seen.current.project === project && seen.current.any
-    seen.current = { project, any: true }
-    const freshSince = again ? Date.now() : 0
+    if (first.current.project !== project || first.current.solveId === null) first.current = { project, solveId }
+    // A later solve than the first: its chunks must postdate it (spec §6.3 rule 3).
+    const freshSince = first.current.solveId !== solveId ? Date.now() : 0
     let cancelled = false
     const ks = keysRef.current
     Promise.all(ks.map(k => qc.refetchQueries({ queryKey: nk(project, k), exact: true }))).then(() => {
@@ -76,7 +77,14 @@ export function useSolveSettled(project: string | null, solveId: string | null |
     }, () => { /* a failed refetch leaves the view not current: installed sizes, no results */ })
     return () => { cancelled = true }
   }, [project, solveId, qc])
-  const current = !!settled && !!solveId && settled.project === project && settled.solveId === solveId &&
-    lists.length === settled.refs.length && lists.every((l, i) => l.data === settled.refs[i])
-  return { current, freshSince: current ? settled!.freshSince : 0 }
+  if (!solveId) return { current: false, freshSince: 0 }
+  if (settled && settled.project === project && settled.solveId === solveId) {
+    const current = lists.length === settled.refs.length && lists.every((l, i) => l.data === settled.refs[i])
+    return { current, freshSince: current ? settled.freshSince : 0 }
+  }
+  // Not settled yet. The first solve seen as the view opens is trusted at
+  // once (a warm cache opens filled; the settle refetch follows); a later
+  // solve waits for its lists.
+  const firstSight = first.current.project !== project || first.current.solveId === null || first.current.solveId === solveId
+  return { current: firstSight, freshSince: 0 }
 }
