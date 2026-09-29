@@ -14,8 +14,10 @@ export type HeroState<T> =
 export interface HeroCache<T> {
   /** The url's state; the same object until it changes. */
   get(url: string): HeroState<T>
-  /** Start loading the url unless it already is (or was). */
+  /** Start loading the url unless it is loading or loaded (a failure stays failed until retryFailed). */
   load(url: string): void
+  /** Forget failures, so the next load tries again (the site reopens; the network may be back). */
+  retryFailed(): void
   subscribe(listener: () => void): () => void
 }
 
@@ -39,6 +41,9 @@ export function createHeroCache<T>(loader: (url: string) => Promise<T>): HeroCac
           set(url, FAILED)
         },
       )
+    },
+    retryFailed() {
+      for (const [url, st] of states) if (st.status === 'failed') states.delete(url)
     },
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } },
   }

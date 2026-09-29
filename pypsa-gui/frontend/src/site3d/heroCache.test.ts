@@ -54,4 +54,18 @@ describe('createHeroCache', () => {
     cache.load('/d.glb'); await flush()
     expect(seen).not.toHaveBeenCalled()
   })
+  it('retryFailed lets a failed url load again (the site reopens), and leaves loaded ones alone', async () => {
+    let fail = true
+    const load = vi.fn(async (url: string) => { if (fail && url === '/x.glb') throw new Error('offline'); return url })
+    const cache = createHeroCache(load)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    cache.load('/x.glb'); cache.load('/y.glb'); await flush()
+    expect(cache.get('/x.glb')).toEqual({ status: 'failed' })
+    fail = false
+    cache.retryFailed()
+    cache.load('/x.glb'); cache.load('/y.glb'); await flush()
+    expect(cache.get('/x.glb')).toEqual({ status: 'ready', value: '/x.glb' })
+    expect(load.mock.calls.map(c => c[0])).toEqual(['/x.glb', '/y.glb', '/x.glb'])
+    warn.mockRestore()
+  })
 })

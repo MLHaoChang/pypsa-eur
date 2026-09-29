@@ -36,8 +36,15 @@ export interface Part {
   shape?: Shape
   /** A cylinder's axis; default up. */
   axis?: Axis
-  /** A unit a hero model can stand in for (a container, a turbine tower, a tank, a table, a hall). */
-  heroable?: boolean
+  /**
+   * `true`: a unit a hero model stands in for (a container, a turbine tower,
+   * a tank, a table, a hall). `'hide'`: not a unit, but dropped when the
+   * hero draws (a nacelle; a flat-roof plant strip a pitched hero roof
+   * would leave floating).
+   */
+  heroable?: boolean | 'hide'
+  /** Heroes: the height the unit's hero stands on, metres up (default 0: the ground; a PV canopy's deck). */
+  base?: number
   /** The animation anchor this part belongs to. */
   anchor?: AnchorKind
   /** Rotor parts: which turbine of the object. */
@@ -265,14 +272,14 @@ function turbineArray(p: Record<string, ParamValue>, input: TemplateInput): Temp
   for (let i = 0; i < drawn; i++) {
     const c = i % perRow, r = Math.floor(i / perRow)
     const x = -w / 2 + c * spacing, y = -d / 2 + r * spacing
-    parts.push({ pos: [x, y, hub / 2], size: [td, td, hub], shape: 'cylinder', axis: 'up', color: tower, heroable: true })   // tower
-    parts.push({ pos: [x, y - 3, hub], size: [4, 10, 4], color: tower, heroable: true })                                      // nacelle
+    parts.push({ pos: [x, y, hub / 2], size: [td, td, hub], shape: 'cylinder', axis: 'up', color: tower, heroable: true, turbine: i }) // tower
+    parts.push({ pos: [x, y - 3, hub], size: [4, 10, 4], color: tower, heroable: 'hide' })                                              // nacelle
     const hubPos: [number, number, number] = [x, y - 8, hub]
     rotors.push({ turbine: i, hub: hubPos })
     for (let b = 0; b < 3; b++) {                                                                                             // blades, rotor facing south
       const a = b * (2 * Math.PI / 3)
       // Radial: the blade's east axis turns to (cos a, sin a) in the (east, up) plane, i.e. rotN = −a.
-      parts.push({ pos: [x + Math.cos(a) * rotor / 4, y - 8, hub + Math.sin(a) * rotor / 4], size: [rotor / 2, 0.5, 3], rotN: -a, color: blade, anchor: 'rotor', turbine: i, heroable: true })
+      parts.push({ pos: [x + Math.cos(a) * rotor / 4, y - 8, hub + Math.sin(a) * rotor / 4], size: [rotor / 2, 0.5, 3], rotN: -a, color: blade, anchor: 'rotor', turbine: i, heroable: 'hide' })
     }
   }
   const footprint: [number, number] = [w + rotor, d + rotor]
@@ -320,7 +327,7 @@ function pvRoof(p: Record<string, ParamValue>, input: TemplateInput): TemplateOu
   const { drawn, each } = capped(n)
   const g = gridParts(drawn, [rowLength, depth, 0.1], perRow, gap, { heroable: true })
   const lift = num(p, 'canopyHeight')
-  for (const part of g.parts) { part.rotX = tilt; part.pos[2] = lift }
+  for (const part of g.parts) { part.rotX = tilt; part.pos[2] = lift; part.base = lift }
   // A canopy frame: four posts under the corners.
   const [w, d] = g.footprint
   for (const [x, y] of [[-w / 2, -d / 2], [w / 2, -d / 2], [-w / 2, d / 2], [w / 2, d / 2]]) {
@@ -335,8 +342,9 @@ function hall(p: Record<string, ParamValue>, input: TemplateInput): TemplateOutp
   return {
     parts: [
       { pos: [0, 0, h / 2], size: [w, d, h], heroable: true },
-      // Rooftop plant strip so it reads as a building, not a slab.
-      { pos: [0, d / 4, h + 1.5], size: [w * 0.6, d * 0.2, 3], color: str(p, 'roofColor') },
+      // Rooftop plant strip so it reads as a building, not a slab (a hero
+      // hall's pitched roof has no flat top for it).
+      { pos: [0, d / 4, h + 1.5], size: [w * 0.6, d * 0.2, 3], color: str(p, 'roofColor'), heroable: 'hide' },
     ],
     footprint: [w, d], areaM2, count: 1, each: 1, anchors: { emissive: true },
   }
