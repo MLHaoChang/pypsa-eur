@@ -63,7 +63,10 @@ def compute_cfe_score(n, cfg, *, result_df: Callable[..., Any] | None = None,
     load_mw = np.zeros(len(sns))
     for l in loads:
         if served is not None and l in served.columns:
-            load_mw += served[l].reindex(sns).to_numpy(dtype=float)
+            col = served[l].reindex(sns).to_numpy(dtype=float)
+            if np.isnan(col).any():
+                flags.append(f"load_not_established:{l}")   # never a silent 0 (F12)
+            load_mw += np.nan_to_num(col)
         else:
             ps = _frame(n, "loads_t", "p_set")
             load_mw += (ps[l].reindex(sns).to_numpy(dtype=float) if ps is not None
@@ -89,7 +92,20 @@ def compute_cfe_score(n, cfg, *, result_df: Callable[..., Any] | None = None,
         return out
 
     onsite = _lp.site_generators(n, c)
-    onsite_clean = [g for g in onsite if str(n.generators.at[g, "carrier"]) in clean]
+    # An on-site asset whose output the site SELLS under a PPA carries its
+    # clean attribute away with it (review F12).
+    sold = {a for k in c.contracts if k.type == "ppa" and _lp.same_party(k.seller, c.site_party)
+            for a in k.asset_ids}
+    onsite_clean = [g for g in onsite if str(n.generators.at[g, "carrier"]) in clean
+                    and g not in sold]
+    if sold & set(onsite):
+        notes.append(f"onsite_output_sold_under_ppa_not_credited:{','.join(sorted(sold))}")
+    if clean_carriers is None:
+        zero = sorted({str(n.generators.at[g, "carrier"]) for g in onsite_clean})
+        if zero:
+            # PyPSA's default co2_emissions is 0: say which carriers counted as
+            # clean on that basis, so a gas unit left at the default shows (F8).
+            flags.append(f"clean_by_zero_co2_emissions:{','.join(zero)}")
     total_site = gen(onsite)
     clean_site = gen(onsite_clean)
     p0 = _frame(n, "links_t", "p0")
@@ -154,8 +170,9 @@ def compute_cfe_score(n, cfg, *, result_df: Callable[..., Any] | None = None,
         key = "_" if p_key is None else str(int(p_key))
         if load_total <= 0:
             flags.append(f"no_site_load:{key}")
+        unknown_load = any(f.startswith("load_not_established:") for f in flags)
         per_period[key] = {
-            "score": None if load_total <= 0 else matched / load_total,
+            "score": None if load_total <= 0 or unknown_load else matched / load_total,
             "load_mwh": load_total, "clean_mwh": float(clean_h.sum()),
             "matched_mwh": matched,
             "onsite_clean_consumed_mwh": float(hourly["onsite"].sum()),

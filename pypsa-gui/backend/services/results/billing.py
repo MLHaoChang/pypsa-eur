@@ -95,6 +95,38 @@ def _rows(frame, sel, index) -> pd.DataFrame | None:
     return out
 
 
+def _raw_frames(n, result_df) -> dict:
+    """Generator output, StorageUnit discharge and Link output at bus1 as
+    SOLVED — NaN kept (the seam's intervals zero-fill, which would settle an
+    unknown hour confidently; review F5). A Store is not an EaaS asset, so
+    only StorageUnits discharge here (F4: no name collisions)."""
+    sns = n.snapshots
+
+    def frame(attr, col, names):
+        df = result_df(n, attr, col, "lopf")
+        cols = set(getattr(df, "columns", []))
+        return pd.DataFrame({str(c): (df[c].reindex(sns).astype(float) if c in cols
+                                      else pd.Series(np.nan, index=sns)) for c in names},
+                            index=sns)
+
+    gens = frame("generators_t", "p", list(n.generators.index))
+    su = frame("storage_units_t", "p", list(n.storage_units.index))
+    p1 = result_df(n, "links_t", "p1", "lopf")
+    p0 = result_df(n, "links_t", "p0", "lopf")
+    eff = n.links["efficiency"].fillna(1.0) if "efficiency" in n.links.columns else None
+    link_out = {}
+    for c in n.links.index:
+        if p1 is not None and c in p1.columns:
+            link_out[str(c)] = -p1[c].reindex(sns).astype(float)
+        elif p0 is not None and c in p0.columns:
+            link_out[str(c)] = p0[c].reindex(sns).astype(float) * float(
+                1.0 if eff is None else eff.get(c, 1.0))
+        else:
+            link_out[str(c)] = pd.Series(np.nan, index=sns)
+    return {"generators": gens, "storage_discharge": su.clip(lower=0.0),
+            "link_output": pd.DataFrame(link_out, index=sns)}
+
+
 def settlement_lines(n, cfg, pq: dict) -> tuple[list[_K.Line], list[str]]:
     """Every contract's lines, per investment period, and the flags of the
     contracts that could not settle (`contract_not_settled:<id>:<reason>`)."""
@@ -105,9 +137,11 @@ def settlement_lines(n, cfg, pq: dict) -> tuple[list[_K.Line], list[str]]:
     periods = list(n.snapshots.get_level_values(0).unique()) if multi else [None]
     w_all = n.snapshot_weightings.objective.to_numpy(dtype=float)
     meter = pq.get("commercial_meter") or {}
-    exp_all = meter.get("export_mw")
-    storage = [f for f in (iv.get("storage_units_discharge"), iv.get("stores_discharge"))
-               if f is not None]
+    # No export Link: the site cannot export, so export is KNOWN to be 0
+    # (review F6); a Link without its flow stays unknown.
+    exp_all = meter.get("export_mw") if cfg.export_link else \
+        pd.Series(0.0, index=n.snapshots)
+    raw = _raw_frames(n, pq["result_df"])
     dsr = _SI.dsr_activation(n)
     refs = {c.id: _SI.reference_price(n, c) for c in cfg.contracts}
     site = _lp.site_generators(n, cfg)
@@ -115,6 +149,13 @@ def settlement_lines(n, cfg, pq: dict) -> tuple[list[_K.Line], list[str]]:
     ppa_rec = n.meta.get(_lp.META_PPA) or {}
     ppa_frame = n.generators_t.get(_lp.PPA_PRICE_ATTR) if hasattr(n.generators_t, "get") \
         else None
+    # The committed price stands for a PPA only while it is still a dispatch
+    # PPA AND the record's hash is the config's (review F3).
+    from services.commercial import hashing as _H
+
+    current = {c.id for c in _lp.dispatch_ppas(cfg)}
+    committed_ids = current if ppa_rec and ppa_rec.get("hash") == _lp.ppa_dispatch_hash(
+        cfg, _H.version_of(ppa_rec)) else set()
     lines: list[_K.Line] = []
     flags: list[str] = []
     for p in periods:
@@ -135,7 +176,7 @@ def settlement_lines(n, cfg, pq: dict) -> tuple[list[_K.Line], list[str]]:
         dsr_frame, dsr_flags = dsr
         inputs = _K.SettlementInputs(
             period=None if p is None else int(p), index=index, weights=w_all[sel],
-            generators=cut_frame(iv.get("generators")),
+            generators=cut_frame(raw["generators"]),
             export_mw=cut(exp_all), references={
                 cid: ((None if s is None else pd.Series(np.asarray(s, dtype=float)[sel],
                                                         index=index)), f)
@@ -143,8 +184,8 @@ def settlement_lines(n, cfg, pq: dict) -> tuple[list[_K.Line], list[str]]:
             modelled_year=None if p is None else int(p),
             loads=cut_frame(iv.get("loads")), load_bus=load_bus,
             dsr=(cut_frame(dsr_frame), dsr_flags),
-            storage_discharge=(cut_frame(pd.concat(storage, axis=1)) if storage else None),
-            link_output=cut_frame(iv.get("links_p1_output")),
+            storage_discharge=cut_frame(raw["storage_discharge"]),
+            link_output=cut_frame(raw["link_output"]),
             site_party=cfg.site_party, site_generators=site)
         for c in cfg.contracts:
             try:
@@ -152,8 +193,14 @@ def settlement_lines(n, cfg, pq: dict) -> tuple[list[_K.Line], list[str]]:
             except _K.ContractError as exc:
                 flags.append(f"contract_not_settled:{c.id}:{str(exc)[:160]}")
                 continue
-            if c.id in (ppa_rec.get("contracts") or []) and c.type == "ppa":
+            if c.id in committed_ids:
                 got = _committed_ppa(n, c, got, sel, w_all, ppa_frame)
+            elif c.id in (ppa_rec.get("contracts") or []):
+                # Bound at the solve, changed since (review F3): settled on the
+                # current terms, and said so.
+                got = [_K.Line(**{**asdict(ln), "flags": sorted(set(ln.flags)
+                                                              | {"ppa_changed_since_solve"})})
+                       for ln in got]
             lines.extend(got)
     return lines, flags
 
@@ -175,7 +222,7 @@ def _committed_ppa(n, c, got, sel, w_all, frame) -> list[_K.Line]:
         amount = float((w_all[sel][:, None] * mw * price).sum())
     out = []
     for ln in got:
-        if ln.value_stream == "ppa_energy":
+        if ln.value_stream == "ppa_energy" and ln.amount is not None:
             out.append(_K.Line(**{**asdict(ln), "amount": amount,
                                   "flags": sorted(set(ln.flags) | {"ppa_price_committed"})}))
         else:
@@ -205,17 +252,50 @@ def _period_payload(res) -> dict | None:
     }
 
 
+def _retail(parsed) -> tuple[dict, list[str]]:
+    out, flags = {}, []
+    for c in parsed.contracts:
+        if c.type != "retail":
+            continue
+        try:
+            out[c.id] = _K.retail_parties(c, parsed.import_tariff)
+        except (_K.ContractError, TypeError, ValueError) as exc:     # review F1
+            out[c.id] = None
+            flags.append(f"contract_not_settled:{c.id}:{str(exc)[:160]}")
+    return out, flags
+
+
+def _gap_summary(gap: dict) -> dict:
+    """What the chat must see first (review F7): the gates, and per period and
+    kind the LP, billed and unattributed amounts."""
+    return {"gates": gap.get("gates") or [],
+            "periods": {p: {k: {"lp": v.get("lp"), "billed": v.get("billed"),
+                                "unattributed_pct": v.get("unattributed_pct")}
+                            for k, v in per.items()}
+                        for p, per in (gap.get("periods") or {}).items()}}
+
+
 def compute_billing(n, cfg, *, state: dict | None = None,
                     result_df: Callable[..., Any]) -> dict | None:
     commercial = getattr(cfg, "commercial", None)
     if not commercial or not _solved(n):
         return None
     parsed = _lp._parse(commercial)
+    if parsed.import_tariff is None and not parsed.contracts:
+        return None                                   # nothing to bill (review F13)
     bill = _billing.bill_site(n, commercial)
     if "not_solved" in bill.flags:
         return None
+    flags = list(bill.flags)
+    if parsed.import_tariff is None:
+        # No bill, so `bill_site` compared no records: the contracts' drift
+        # (a dispatch PPA edited since the solve) is still stated (F3).
+        drift, _ = _billing._drift_flags(n, parsed)
+        flags += [f for f in drift if f != "solve_provenance_unknown"]
     pq = physical_quantities(n, cfg, result_df=result_df)
+    pq["result_df"] = result_df
     lines, contract_flags = settlement_lines(n, parsed, pq)
+    retail, retail_flags = _retail(parsed)
     gap = _gap.billing_vs_lp_gap(n, commercial, bill,
                                  settlement_lines=lines if parsed.contracts else None)
     if state is not None:
@@ -223,13 +303,19 @@ def compute_billing(n, cfg, *, state: dict | None = None,
 
         store_billing_frames(state, _billing.compact_frames(bill))
     record = _SI.contracts_record(parsed)
+    per_period = {_key(p): _period_payload(r) for p, r in bill.per_period.items()}
+    # Summary first, detail last: a chat reads the head of the payload (F7).
     return _json({
-        "per_period": {_key(p): _period_payload(r) for p, r in bill.per_period.items()},
-        "flags": sorted(set(bill.flags)),
+        "summary": {k: (None if v is None else {"total": v["total"],
+                                                "total_supported": v["total_supported"],
+                                                "per_item": v["per_item"]})
+                    for k, v in per_period.items()},
+        "flags": sorted(set(flags)),
         "contracts": {"lines": [asdict(ln) for ln in lines],
-                      "flags": sorted(set(contract_flags)),
-                      "retail": {c.id: _K.retail_parties(c) for c in parsed.contracts
-                                 if c.type == "retail"}},
+                      "flags": sorted(set(contract_flags + retail_flags)),
+                      "retail": retail},
+        "gap_summary": _gap_summary(gap),
+        "per_period": per_period,
         "gap": gap,
         "provenance": {**bill.provenance, "contracts": record},
     })

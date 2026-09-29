@@ -1670,6 +1670,10 @@ def get_billing():
     from services.results.billing import compute_billing
 
     n = PyPSAService.get_network()
+    if _solver_in_flight():
+        # The network carries the LP transforms mid-solve (review F9).
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                   "message": "a solve is running; read the bill after it ends"})
     if not _dispatch_ready(n):
         return Response(status_code=204)
     payload = compute_billing(n, _state["solver_config"], state=_state, result_df=_result_df)
@@ -1684,6 +1688,10 @@ def get_cfe_score():
     from services.results.cfe_score import compute_cfe_score
 
     n = PyPSAService.get_network()
+    if _solver_in_flight():
+        # The network carries the LP transforms mid-solve (review F9).
+        raise HTTPException(409, {"code": "solver_in_flight",
+                                   "message": "a solve is running; read the bill after it ends"})
     if not _dispatch_ready(n):
         return Response(status_code=204)
     payload = compute_cfe_score(n, _state["solver_config"], result_df=_result_df)

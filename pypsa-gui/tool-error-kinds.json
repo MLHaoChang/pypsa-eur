@@ -51,6 +51,10 @@
       "surface": "banner",
       "why": "The profile cannot do what the turn needs (vision, tools). A configuration problem only the user can fix, and the turn is over. It already had KIND_COPY and did not route — the same unreachable-copy shape as inactive_acting_user."
     },
+    "commercial_binding_invalid": {
+      "surface": "inline",
+      "why": "The commercial config cannot bind to this network (a missing Link, an unrated snapshot, ...). The model reads the message and fixes the config within the turn."
+    },
     "confirmation_denied": {
       "surface": "inline",
       "why": "The user denied the card. Their own decision, already visible on the card."
@@ -91,6 +95,10 @@
       "surface": "banner",
       "why": "Attachment rejected against the 10 MB multimodal cap."
     },
+    "import_tariff_ref_conflict": {
+      "surface": "inline",
+      "why": "The project's inline tariff differs from the Library item its ref names. The model explains and asks which to keep; a binding code surfaced by attach_tariff."
+    },
     "inactive_acting_user": {
       "surface": "banner",
       "why": "The account stopped being active mid-turn. Nothing will work until it is fixed, and a gray tool line truncates that away — this is the correction the whole manifest generalises."
@@ -126,6 +134,10 @@
     "invalid_transcript": {
       "surface": "inline",
       "why": "Raised by POST /chat/import validating a pasted transcript. Route-only — no tool imports transcripts."
+    },
+    "library_ref_stale": {
+      "surface": "inline",
+      "why": "A Library reference no longer matches its item (edited or removed). The model re-reads the Library and retries or asks; a route code surfaced by attach_tariff."
     },
     "load_not_found": {
       "surface": "banner",
@@ -270,6 +282,10 @@
     "urdb_multiple_rates": {
       "surface": "inline",
       "why": "The uploaded OpenEI response holds several rates; the error lists them and the model retries with item_index, asking the user which one if unclear."
+    },
+    "urdb_refused": {
+      "surface": "inline",
+      "why": "A URDB import refused fields by name (the route's 422). The model lists them and asks whether to import partially (accept_partial) — a question in prose, within the turn."
     },
     "urdb_upload_unreadable": {
       "surface": "inline",

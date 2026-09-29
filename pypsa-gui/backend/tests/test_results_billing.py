@@ -243,3 +243,94 @@ def test_cfe_hand_fixture_with_a_grid_share_and_an_offsite_ppa():
     assert per["offsite_ppa_mwh"] == pytest.approx(float((wind * 0.25).sum()), abs=1e-9)
     assert per["grid_clean_mwh"] == pytest.approx(float((imp * share * 0.25).sum()), abs=1e-9)
     assert "grid_cfe_share_missing" not in out["flags"]
+
+
+# ── review round 1 ─────────────────────────────────────────────────────────
+
+
+RETAIL = {"type": "retail", "id": "r1", "retailer": "Energy Co", "customer": "site",
+          "tariff_id": "t", "tenor_years": 3}
+
+
+@pytest.mark.live_solve
+def test_retail_contracts_and_the_payload_order(reset_backend):
+    """F1 (retail crashed the payload) and F7 (the summary comes first)."""
+    import routers.results as R
+
+    commercial = {**_commercial(), "contracts": [LEASE, RETAIL]}
+    _solved(commercial)
+    out = R.get_billing()
+    assert out["contracts"]["retail"]["r1"] is not None
+    assert list(out)[:4] == ["summary", "flags", "contracts", "gap_summary"]
+    assert out["summary"]["_"]["total"] == out["per_period"]["_"]["total"]
+    # A retail contract naming another tariff is not settled, and says so.
+    bad = {**commercial, "contracts": [LEASE, {**RETAIL, "tariff_id": "other"}]}
+    import routers.simulation as sim_router
+    sim_router._state["solver_config"].commercial = bad
+    out = R.get_billing()
+    assert out["contracts"]["retail"]["r1"] is None
+    assert any(f.startswith("contract_not_settled:r1:") for f in out["contracts"]["flags"])
+
+
+@pytest.mark.live_solve
+def test_a_dispatch_ppa_edited_after_the_solve_settles_on_its_current_terms(reset_backend):
+    """F3: the committed price stands only while the record matches."""
+    import routers.results as R
+    import routers.simulation as sim_router
+
+    n, cfg = _solved(_commercial())
+    edited = copy.deepcopy(cfg.commercial)
+    edited["contracts"][1]["price"] = 99.0
+    sim_router._state["solver_config"].commercial = edited
+    out = R.get_billing()
+    (line,) = [ln for ln in out["contracts"]["lines"] if ln["contract_id"] == "ppa1"]
+    w = n.snapshot_weightings.objective.to_numpy(dtype=float)
+    assert line["amount"] == pytest.approx(99.0 * float((w * n.generators_t.p["pv"]).sum()))
+    assert "ppa_changed_since_solve" in line["flags"]
+    assert "config_changed_since_solve" in out["flags"]
+
+
+@pytest.mark.live_solve
+def test_nan_output_and_no_export_link_are_handled_honestly(reset_backend):
+    """F5 (NaN output is unknown, never 0) and F6 (no export Link ⇒ export 0)."""
+    import routers.results as R
+    import routers.simulation as sim_router
+
+    btm = {"type": "ppa", "id": "btm", "kind": "as_consumed_btm", "price": 30.0,
+           "tenor_years": 10, "seller": "Solar BV", "buyer": "site", "asset_ids": ["pv"]}
+    lease_only = {"poc_link": "import", "import_tariff": _tariff(TOU), "contracts": [btm]}
+    n, cfg = _solved(lease_only)
+    (line,) = R.get_billing()["contracts"]["lines"]
+    assert line["amount"] is not None and line["amount"] > 0          # export is 0, known
+    n.generators_t.p.iloc[40, n.generators_t.p.columns.get_loc("pv")] = np.nan
+    (line,) = R.get_billing()["contracts"]["lines"]
+    assert line["amount"] is None and "generation_not_established" in line["flags"]
+
+
+def test_the_routes_refuse_during_a_solve(reset_backend, monkeypatch):
+    """F9: mid-solve the network carries the LP transforms."""
+    import routers.results as R
+    from fastapi import HTTPException as _E
+
+    monkeypatch.setattr(R, "_solver_in_flight", lambda: True)
+    for handler in (R.get_billing, R.get_cfe_score):
+        with pytest.raises(_E) as exc:
+            handler()
+        assert exc.value.status_code == 409
+
+
+def test_cfe_discloses_zero_co2_carriers_and_excludes_output_it_sells():
+    """F8 / F12."""
+    from services.results.cfe_score import compute_cfe_score
+
+    n, pv, gas, imp, exp = _cfe_site()
+    out = compute_cfe_score(n, _cfg())
+    assert "clean_by_zero_co2_emissions:solar" in out["flags"]
+    sold = {"type": "ppa", "id": "sold", "kind": "pay_as_produced", "price": 40.0,
+            "tenor_years": 10, "seller": "site", "buyer": "Offtaker", "asset_ids": ["pv"]}
+    out = compute_cfe_score(n, _cfg(contracts=[sold]))
+    assert out["per_period"]["_"]["onsite_clean_consumed_mwh"] == 0.0
+    n.loads_t.p.iloc[3, 0] = np.nan
+    out = compute_cfe_score(n, _cfg())
+    assert out["per_period"]["_"]["score"] is None
+    assert "load_not_established:site_load" in out["flags"]

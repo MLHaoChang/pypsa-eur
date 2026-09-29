@@ -91,7 +91,8 @@ def test_import_reads_an_uploaded_file_by_id(client, install_network, tmp_projec
                                                      valid_from="2017-01-01")
     assert exc.value.status_code == 422
     assert exc.value.detail["error_kind"] == "urdb_refused"          # the route code (L1)
-    assert [r["field"] for r in exc.value.detail["refusals"]] == ["mincharge"]
+    assert [r.split(":")[0] for r in exc.value.detail["refusals"]] == ["mincharge"]
+    assert len(str(exc.value.detail)) < 1000                          # fits the chat (N2)
     part = chat_tools.DISPATCHERS["import_urdb_tariff"](
         file_id=bad.file_id, name="r2", valid_from="2017-01-01", accept_partial=True)
     assert part["unsupported_fields"] == ["mincharge"]
@@ -171,7 +172,8 @@ def test_several_openei_rates_are_listed_not_picked(client, install_network, tmp
         chat_tools.DISPATCHERS["import_urdb_tariff"](file_id=meta.file_id, name="x",
                                                      valid_from="2023-01-01")
     assert exc.value.detail["error_kind"] == "urdb_multiple_rates"
-    assert [r["label"] for r in exc.value.detail["rates"]] == ["a", "b"]
+    assert [r.split(":")[0] for r in exc.value.detail["rates"]] == ["0", "1"]
+    assert exc.value.detail["rates_total"] == 2
     out = chat_tools.DISPATCHERS["import_urdb_tariff"](file_id=meta.file_id, name="x",
                                                        valid_from="2023-01-01", item_index=1)
     assert out["ref"]["id"] == "x"
@@ -202,8 +204,9 @@ def test_refusals_reach_the_model_capped_and_as_identifiers(client, install_netw
         chat_tools.DISPATCHERS["import_urdb_tariff"](file_id=meta.file_id, name="r",
                                                      valid_from="2017-01-01")
     d = exc.value.detail
-    assert d["refusals_total"] == 30 and len(d["refusals"]) == 20
-    assert all(" " not in r["field"] for r in d["refusals"])
+    assert d["refusals_total"] == 30 and d["refusals_shown"] == len(d["refusals"]) < 30
+    assert all(" " not in r.split(":")[0] for r in d["refusals"])
+    assert len(str(d)) < 1000                                            # N2
 
 
 def test_another_orgs_library_is_invisible_to_the_tools(client, other_org_client):
@@ -213,3 +216,27 @@ def test_another_orgs_library_is_invisible_to_the_tools(client, other_org_client
     with pytest.raises(HTTPException) as exc:
         chat_tools.DISPATCHERS["get_library_item"](kind="tariff", name="theirs")
     assert exc.value.status_code == 404
+
+
+def test_switching_between_library_tariffs_needs_no_confirmation(
+        client, install_network, tmp_projects_dir):
+    """Round 2 L5: the inline copy of the old ref is the Library's own."""
+    _put(client)
+    _put(client, name="other", payload={**TARIFF, "id": "other-tou", "name": "Other"})
+    _project(install_network, tmp_projects_dir)
+    chat_tools.DISPATCHERS["update_solver_config"](partial={"commercial": {
+        "poc_link": "import"}})
+    chat_tools.DISPATCHERS["attach_tariff"](name="nl")
+    out = chat_tools.DISPATCHERS["attach_tariff"](name="other")
+    assert out["import_tariff"]["id"] == "other-tou"
+    assert out["replaced"]["id"] == "nl-tou" and out["replaced"]["had_ref"] is True
+
+
+def test_the_mapped_route_codes_are_in_the_manifest():
+    """Round 2 N1: the manifest guard sees the kinds the Library tools map."""
+    import json as _json
+    from pathlib import Path
+
+    kinds = _json.loads((Path(__file__).resolve().parents[2] / "tool-error-kinds.json")
+                        .read_text())["kinds"]
+    assert set(chat_tools._LIBRARY_CODES) <= set(kinds)

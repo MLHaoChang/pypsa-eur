@@ -169,6 +169,10 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/results.py", "get_eh_dtc_planning"):             frozenset(),
     ("routers/results.py", "get_load_results"):                frozenset(),
     ("routers/results.py", "get_asset_economics"):             frozenset({"asset_economics"}),
+    # P2 WP2.5 — commercial results; the golden network has no commercial
+    # config (204), covered by tests/test_results_billing.py instead.
+    ("routers/results.py", "get_billing"):                     frozenset(),
+    ("routers/results.py", "get_cfe_score"):                   frozenset(),
     # ── routers/simulation.py ───────────────────────────────────────────
     ("routers/simulation.py", "get_solver_config"):    frozenset(),
     ("routers/simulation.py", "update_solver_config"):  frozenset(),

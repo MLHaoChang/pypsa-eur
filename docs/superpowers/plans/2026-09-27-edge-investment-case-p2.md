@@ -1251,6 +1251,19 @@ routes; ADR-0002 live-API probe recorded.
   - Informational, no action: the write tier of `import_urdb_tariff` marks the project dirty, although only the Library changes.
   - M1 (the ADR-0002 live probe) stays OWED. The Phase 2 gate must run it: `PYPSA_GUI_TEST_LIVE_ANTHROPIC=1 pytest tests/test_llm_provider_seam.py -k live_probe_anthropic_wire` (or the openai-wire probe), plus one live turn calling the Library tools. This environment has no provider credentials.
   - `test_chat_tools_library.py` has 12 tests. The chat tool suites give 584 passed.
+- **WP2.4c review round 2 → PASS WITH CONDITIONS; fixed:**
+  - Probes: every round-1 fix was checked. The 60-item list is paged (3.1 k characters), a 61-period summary is 770 characters, cross-org access is 404, every tool is 401 without a user, and the argshape scan sees all nine delegations.
+  - N1: the route codes the tools map (`urdb_refused`, `library_ref_stale`, `import_tariff_ref_conflict`, `commercial_binding_invalid`) were invisible to the manifest guard. → They are written as `{"error_kind": "..."}` literals (`_LIBRARY_ERROR_KINDS`) and classified inline in the manifest. A test ties `_LIBRARY_CODES` to the manifest.
+  - N2: error listings were cut by the chat's 1,000-character error body. → Compact strings (`field: reason`, `i: name (startdate)`), as many as fit in 700 characters, with `*_total` / `*_shown` first. Tested: under 1,000 characters.
+  - L5: switching between Library tariffs needs no confirmation when the inline copy's digest is the old ref's hash.
+  - L6:
+    - the summary carries `direction`;
+    - `item_index` on a single rate is refused;
+    - `unsupported_fields` in the result is compact and sanitized, with a total.
+
+    Opt-in `detail=full` on a single huge item can still hit the result cap (accepted).
+  - M1 (live probe) stays a Phase 2 gate item.
+  - `test_chat_tools_library.py` has 14 tests.
 
 ## WP2.5 `compute_billing` / `compute_cfe_score` thin results
 
@@ -1290,7 +1303,7 @@ Files: `services/results/billing.py`, `services/results/cfe_score.py`, `routers/
   - **Frames.** The compact frames go to `state` (`store_billing_frames`). Interval lines are in those frames, not in the payload (deviation from "lines" in the payload: a 15-min year × items is too large for JSON).
   - **`services/results/cfe_score.compute_cfe_score(n, cfg, *, result_df=None, clean_carriers=None)`** implements the plan's formula:
     - the site is `_meter_sides`; loads are behind the meter; clean = `co2_emissions == 0`, or the override;
-    - the on-site clean share of export is pro rata to all on-site output;
+    - the on-site clean share of export is pro rata to on-site GENERATOR output (the WP2.2a rule; storage discharge is not credited);
     - off-site PPAs count when the site buys them and every asset is clean (baseload uses `baseload_mw`; `as_consumed_btm` is skipped; a volume cap is noted);
     - grid × `ic_grid_cfe_share`, else `grid_cfe_share_missing`;
     - energy per row is MW × the objective weighting, grouped into local hours per period;
@@ -1302,6 +1315,27 @@ Files: `services/results/billing.py`, `services/results/cfe_score.py`, `routers/
     - `tests/test_results_billing.py` (8): the payload bills, settles and reconciles (PPA line = row, gap attributed, contracts record, frames stored, JSON with `allow_nan=False`); two periods; 204s; the handler equals compute; chat `get_results`; two CFE hand fixtures to 1e-9 (no grid share; grid share plus an off-site PPA).
     - The seam test gains the no-config case.
     - Regression: 773 passed.
+- **WP2.5 review round 1 → FAIL; all findings fixed:**
+  - F1 (HIGH): a retail contract crashed the payload (`retail_parties(c)` was missing its tariff). → `retail_parties(c, import_tariff)`; a mismatch is None + `contract_not_settled:<id>:…`.
+  - F2 (HIGH): two route registries (`test_results_range` aggregates, `test_golden_coverage.ROUTE_SURFACES`) lacked the new routes. → Added.
+  - F3 (HIGH): the dispatch-PPA override followed the solve record, not the current contract. → The committed price stands only for a CURRENT dispatch PPA whose record hash matches the config. A changed one settles on its current terms, flagged `ppa_changed_since_solve`. A None amount is never overridden. With no import tariff, the payload still carries the drift flags.
+  - F4: the storage discharge frames collided on names. → StorageUnits only; a Store is not an EaaS asset.
+  - F5: the seam zero-filled a NaN dispatch. → The settlement inputs read the solved frames directly (`_raw_frames`), NaN kept; `generation_not_established` as `settle` intends.
+  - F6: `as_consumed_btm` without an export Link was None. → With no export Link, export is 0.
+  - F7: the chat cut off contracts and the gap. → The summary comes first (`summary`, `flags`, `contracts`, `gap_summary`), then the detail (`per_period`, `gap`, `provenance`).
+  - F8: CFE flags `clean_by_zero_co2_emissions:<carriers>` (PyPSA's default is 0).
+  - F9: both routes answer 409 `solver_in_flight` during a solve.
+  - F10: the plan text now says export is attributed pro rata among on-site GENERATORS (the WP2.2a rule; storage discharge is not credited).
+  - F12:
+    - a NaN served load gives score None + `load_not_established:<load>`;
+    - on-site output the site sells under a PPA is not credited (noted);
+    - baseload volume is noted (spec).
+  - F13: no tariff and no contracts is a 204.
+  - Recorded, no action:
+    - F11 (a few readers use the live frames rather than `result_df`, equal after an LOPF);
+    - F13's `contracts_state` is recomputed per call (the stored settlement record is P4's);
+    - line `period` keys stay None/int beside the payload's "_"/string keys.
+  - Tests: `test_results_billing.py` has 13 tests (retail and payload order; PPA drift; NaN; no export Link; 409; CFE flags). The registries pass.
 
 ---
 

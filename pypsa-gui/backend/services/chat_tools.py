@@ -1336,16 +1336,29 @@ def update_solver_config(partial: dict) -> dict:
 # per-result cap): a paged list, a tariff SUMMARY unless asked for the full
 # payload or one item, a small attach receipt (review M3).
 
-_LIBRARY_REFUSALS_SHOWN = 20
+# The chat forwards at most ~1000 characters of an error: the listings are
+# compact strings, as many as fit, with the totals stated first (round 2 N2).
+_LIBRARY_ERROR_BUDGET = 700
 # Route / binding refusals carry `{"code": …}`; the chat's forwarder reads
 # `error_kind`. Library tools re-raise them under their code (review L1).
-_LIBRARY_CODES = {
-    "urdb_refused": "urdb_refused", "urdb_invalid": "urdb_invalid",
-    "library_ref_stale": "library_ref_stale",
-    "import_tariff_ref_conflict": "import_tariff_ref_conflict",
-    "commercial_binding_invalid": "commercial_binding_invalid",
-    "solver_in_flight": "solver_in_flight",
-}
+# Written as `error_kind` literals so the manifest guard sees every kind
+# (round 2 N1).
+_LIBRARY_ERROR_KINDS = (
+    {"error_kind": "urdb_refused"}, {"error_kind": "urdb_invalid"},
+    {"error_kind": "library_ref_stale"}, {"error_kind": "import_tariff_ref_conflict"},
+    {"error_kind": "commercial_binding_invalid"}, {"error_kind": "solver_in_flight"},
+)
+_LIBRARY_CODES = {d["error_kind"]: d["error_kind"] for d in _LIBRARY_ERROR_KINDS}
+
+
+def _fit(entries: list[str], budget: int = _LIBRARY_ERROR_BUDGET) -> list[str]:
+    out, used = [], 0
+    for e in entries:
+        if out and used + len(e) + 4 > budget:
+            break
+        out.append(e)
+        used += len(e) + 4
+    return out
 
 
 def _safe_field(name) -> str:
@@ -1365,11 +1378,13 @@ def _library_call(handler, *args, **kwargs):
             detail = {"error_kind": _LIBRARY_CODES[d["code"]],
                       "message": str(d.get("message", ""))[:500]}
             if isinstance(d.get("refusals"), list):
-                refusals = d["refusals"]
-                detail["refusals"] = [
-                    {"field": _safe_field(r.get("field")), "reason": str(r.get("reason"))[:120]}
-                    for r in refusals[:_LIBRARY_REFUSALS_SHOWN] if isinstance(r, dict)]
-                detail["refusals_total"] = len(refusals)
+                refusals = [r for r in d["refusals"] if isinstance(r, dict)]
+                shown = _fit([f"{_safe_field(r.get('field'))}: {str(r.get('reason'))[:60]}"
+                              for r in refusals])
+                detail = {"error_kind": detail["error_kind"],
+                          "refusals_total": len(refusals), "refusals_shown": len(shown),
+                          "refusals": shown,
+                          "message": detail["message"][:200]}
             raise HTTPException(status_code=exc.status_code, detail=detail) from exc
         raise
 
@@ -1399,6 +1414,7 @@ def _tariff_summary(payload: dict) -> dict:
         rates += [float(r) for p in periods for r in (p.get("tier_rates") or [])]
         rates += [float(t.get("rate", 0.0)) for t in it.get("tiers") or []]
         items.append({"id": it.get("id"), "kind": it.get("kind"), "unit": it.get("unit"),
+                      "direction": it.get("direction", "cost"),
                       "periods": len(periods),
                       "windows": sorted({str(p.get("name")) for p in periods}),
                       "tiers": len(it.get("tiers") or []),
@@ -1444,17 +1460,19 @@ def _urdb_rate(data, item_index: int | None = None):
         if item_index is None and len(items) > 1:
             # A utility query returns many rates (superseded versions too):
             # never pick one silently (review M4).
-            listing = [{"index": i, "label": r.get("label"), "name": r.get("name"),
-                        "utility": r.get("utility"), "startdate": r.get("startdate")}
-                       for i, r in enumerate(items[:20]) if isinstance(r, dict)]
+            listing = _fit([f"{i}: {str(r.get('name') or r.get('label'))[:60]} "
+                            f"({r.get('startdate')})"
+                            for i, r in enumerate(items) if isinstance(r, dict)])
             raise HTTPException(status_code=422, detail={
-                "error_kind": "urdb_multiple_rates",
-                "message": f"the upload holds {len(items)} rates; pass item_index",
-                "rates": listing, "rates_total": len(items)})
+                "error_kind": "urdb_multiple_rates", "rates_total": len(items),
+                "rates_shown": len(listing), "rates": listing,
+                "message": f"the upload holds {len(items)} rates; pass item_index"})
         i = item_index or 0
         if not 0 <= i < len(items):
             raise unreadable(f"item_index {i} is outside the {len(items)} rates")
         return items[i]
+    if item_index not in (None, 0):
+        raise unreadable("item_index applies to an OpenEI response with several rates")
     if isinstance(data, dict) and isinstance(data.get("ElectricTariff"), dict):
         et = data["ElectricTariff"]
         if isinstance(et.get("urdb_response"), dict):
@@ -1497,9 +1515,13 @@ def import_urdb_tariff(file_id: str, name: str, cyclic_year: bool = False,
         raise HTTPException(status_code=422, detail={
             "error_kind": "urdb_invalid", "message": str(exc)[:300]}) from exc
     out = _library_call(_h, body).model_dump(mode="json")
-    out["refusals_total"] = len(out.get("refusals") or [])
-    out["refusals"] = [{"field": _safe_field(r.get("field")), "reason": str(r.get("reason"))[:120]}
-                       for r in (out.get("refusals") or [])[:_LIBRARY_REFUSALS_SHOWN]]
+    refusals = out.get("refusals") or []
+    out["refusals_total"] = len(refusals)
+    out["refusals"] = _fit([f"{_safe_field(r.get('field'))}: {str(r.get('reason'))[:60]}"
+                            for r in refusals])
+    fields = out.get("unsupported_fields") or []
+    out["unsupported_fields"] = _fit([_safe_field(f) for f in fields])
+    out["unsupported_fields_total"] = len(fields)
     return out
 
 
@@ -1523,6 +1545,17 @@ def attach_tariff(name: str, version: int | None = None, replace_inline: bool = 
     replaced = None
     if inline is not None or commercial.get("import_tariff_id"):
         same = isinstance(old_ref, dict) and old_ref.get("hash") == ref["hash"]
+        if not same and isinstance(old_ref, dict) and inline is not None:
+            # The inline copy IS the old Library item (unedited): a plain
+            # switch between Library tariffs, nothing hand-made is lost (L5).
+            from models.commercial import Tariff
+            from services.commercial import hashing as _H
+
+            try:
+                same = _H.library_item_digest(Tariff.model_validate(inline)) == \
+                    old_ref.get("hash")
+            except ValueError:
+                same = False
         replaced = {"id": (inline or {}).get("id") or commercial.get("import_tariff_id"),
                     "name": (inline or {}).get("name"), "had_ref": old_ref is not None}
         if not same and not replace_inline:
