@@ -1375,10 +1375,8 @@ Files: `services/results/billing.py`, `services/results/cfe_score.py`, `routers/
    - Driver: **49/49**.
 4. **Upload text only partly sanitized. Done:** the listing's `startdate`, the REopt label, the `urdb_invalid` message and refusal reasons pass through `_safe_text`; `_fit` truncates every entry to the budget (the first one was admitted whatever its length). Test: an injected 5,000-character `startdate` and label.
 5. **Note and plan corrections. Done:** WP2.1a-ii's real record (above); H1–H3 status; the openai-wire probe counts only with a `tools=True` profile; the `objective_decomposition` docstring now names the DSR slack; this checklist and verdict.
-6. **Chat bug tracked. Done** as a P3 carry item (below): `update_component` with `attrs["name"]` raises a TypeError for Bus, Transformer and GlobalConstraint (`services/chat_tools.py`, `_get_schema(...)(name=name, **attrs)`).
+6. **Chat bug. Fixed** by #63 (9aa87f8, merged into this branch while the gate was open): `update_component` with `attrs["name"]` raised a TypeError on every class (`_get_schema(...)(name=name, **attrs)`). The schema is now built with the target name, so the PUT handler renames through `_rename_component_safely` with its guards; dispatch tests cover the Bus rename, the reserved `ic:` refusal and the other classes. The chat tests pass on the rebased head (454). It is a chat change, so the ADR-0002 probe owed above covers it too.
 7. **Carried into P4:** decide whether the DSR slack cost is a cash flow (the site pays) or an opportunity cost (a value of shed load) before it becomes a cost row; the WP2.3 accepted residue (the engine's proportional windowed-tier split is not independently recomputed — H3 now pins it by hand for one tariff, but `tier_allocation` still takes the engine's split as truth).
-
-**Carry items (P3):** fix `update_component(…, attrs={"name": …})` for Bus / Transformer / GlobalConstraint (drop or reject `name` in `attrs`, with a test per class); it is a chat change, so ADR-0002 applies.
 
 ---
 
