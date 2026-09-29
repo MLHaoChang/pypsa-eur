@@ -121,32 +121,6 @@ sink. `services/upload_service.py`'s `_FILE_ID_RE` shows the right pattern,
 anchored and narrow, and it is not applied to names generally. Source: gap 3 of
 `assessments/2026-09-10-backend-hardening-assessment.md`.
 
-### 13. A cold-activated project still ignores its own `user_ts.json` **(2026-09-28)**
-
-`routers/projects._hydrate_context_from_disk` deliberately does not restore
-`user_ts.json`, and says why: the store was a process global belonging to the
-foreground, so restoring a background project's profiles into it would clobber
-the foreground's. That reason is gone — the store is per-`ProjectContext` and
-`_restore_user_ts` takes a `store=` — and the docstring's own parenthesis
-("when per-ctx `_user_ts` lands in a later phase this can reapply safely")
-names this as the follow-up.
-
-Consequence today: a project reached by a COLD activate (or by the per-session
-resolver hydrating it) has an empty store, so the timeseries GET falls back to
-the netCDF-baked `_t` tables, and the next save rebuilds `user_ts.json` from
-those rather than from the file on disk. Values normally match, because the save
-path reapplies before exporting; what is lost is any part of a series that lies
-outside the saved snapshot range. Not fixed here because it changes what a cold
-activate serves, which wants its own tests rather than a line inside the tenancy
-fix. Background: the same 2026-09-12 finding, "what a fix has to establish".
-
-Two things wait on this. `services/solve_queue.py` still passes
-`ctx is PyPSAService._active` for queue saves — the last holdout of a predicate
-retired everywhere else (`findings/2026-09-28-every-shutdown-flush-saves-with-persist-user-ts-false.md`)
-— and "should a background solve rewrite the sidecar at all" is only answerable
-once a hydrated context's store is faithful. Until then its `False` is correct
-for the wrong reason.
-
 ### 14. An adequacy-sweep guard is pinned by a test that cannot fail for it **(2026-09-28)**
 
 `tests/test_adequacy_stress.py::test_contingency_mutation_survives_the_user_ts_reapply`

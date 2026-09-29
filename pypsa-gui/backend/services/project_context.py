@@ -335,13 +335,24 @@ def holds_user_series(ctx: Any) -> bool:
     both paths silently stopped writing `user_ts.json`. See
     `docs/superpowers/findings/2026-09-28-every-shutdown-flush-saves-with-persist-user-ts-false.md`.
 
-    ★ NOT simply `True`. A save with `persist_user_ts=True` serialises this
-    context's store, and `_save_context` UNLINKS `user_ts.json` when that store is
-    empty. A context hydrated from disk HAS an empty store — `_hydrate_context_from_disk`
-    does not restore the sidecar (OPEN-ITEMS 13) — so `True` for everything would
-    delete a good file for any project the user merely opened, and after
-    representative-week sampling would replace a full-year series on disk with the
-    168-row `_t` view. Asking what the context actually holds gets both halves right.
+    ★ NOT simply `True`, though the reason is narrower than it was. A save with
+    `persist_user_ts=True` serialises this context's store, and `_save_context`
+    UNLINKS `user_ts.json` when that store is empty. That used to be sharp: a
+    context hydrated from disk had an EMPTY store, so `True` would delete a good
+    sidecar for any project the user merely opened, and after representative-week
+    sampling would replace a full-year series on disk with the 168-row `_t` view.
+    `_hydrate_context_from_disk` restores the sidecar now, so a hydrated context's
+    store is faithful and `True` would agree with this predicate in the ordinary
+    case.
+
+    What survives is the case where the sidecar cannot be READ. A corrupt or
+    unreadable `user_ts.json` is TOLERATED by the hydrate (it must be — that path
+    runs twice per authenticated request, and raising would 500 every route), and
+    it leaves the store empty. `True` would then reconstruct a narrower sidecar
+    from the `_t` tables and write it over the file, destroying the only copy of
+    whatever was in it; asking what the context holds leaves the bytes on disk for
+    a human to recover. It also keeps an unattended save from CREATING a sidecar
+    for a project that never had one.
 
     KNOWN RESIDUAL: a user who deletes every uploaded series and then quits
     without saving keeps a stale `user_ts.json`, because an empty store is

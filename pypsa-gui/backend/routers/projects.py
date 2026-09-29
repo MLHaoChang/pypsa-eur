@@ -1971,7 +1971,7 @@ def _save_context(
         # eviction have since stopped answering it with `ctx is
         # PyPSAService._active` and now ask `project_context.holds_user_series`;
         # `solve_queue` is the last caller still on the old predicate, for a
-        # reason recorded in `docs/superpowers/OPEN-ITEMS.md` (item 13).
+        # reason recorded beside `project_context.holds_user_series`.
         if persist_user_ts:
             _backup_network_ts_to_user_ts(n, store=ctx.user_ts)
             _reapply_user_ts_to_network(n, store=ctx.user_ts)
@@ -2312,15 +2312,34 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
       * restore the ``results_state.pkl`` side-results into ``ctx.solver_state``;
       * set ``ctx.network.name`` + ``ctx.loaded_project`` to ``name``.
 
-    Deliberately does NOT touch the module-global ``_user_ts`` store: that store
-    belongs to the FOREGROUND ctx, and ``_restore_user_ts`` REPLACES it wholesale
-    — hydrating a background project's profiles into it would clobber the
-    foreground's. The netcdf already carries every ``*_t`` profile (the save path
-    reapplies ``_user_ts`` onto the network BEFORE export), so the imported
-    network is solve-ready as-is; the only thing a ``user_ts.json`` reapply would
-    add is re-expanding a series the saved netcdf truncated — a rare edge case
-    not worth a cross-project clobber. (When per-ctx ``_user_ts`` lands in a later
-    phase this can reapply safely; today the netcdf-baked profiles are correct.)
+      * restore ``user_ts.json`` into ``ctx.user_ts``.
+
+    That last one used to be the documented exception: the store was a module
+    global belonging to the foreground and ``_restore_user_ts`` REPLACES a store
+    wholesale, so hydrating a background project's profiles into it would clobber
+    the foreground's. The store is per-``ProjectContext`` now and
+    ``_restore_user_ts`` takes ``store=``, so it writes only into the context
+    being hydrated — which is what this comment used to promise for "a later
+    phase".
+
+    It is not cosmetic, because the sidecar can hold MORE than the netcdf does.
+    ``network.nc`` carries each ``_t`` table at exactly ``n.snapshots``, while
+    ``user_ts.json`` carries the uploaded series at its own length; the two
+    diverge the moment snapshots are narrowed, which is exactly what
+    ``sample_weeks`` does (upload a year, sample a few representative weeks — the
+    store keeps the full year, and ``_annual_hourly_reference`` later reads it).
+    With an empty store the next save ran ``_backup_network_ts_to_user_ts``,
+    ingested the NARROW ``_t`` columns and serialised them over the wider series
+    on disk: opening a project and saving it destroyed data nobody touched.
+
+    RESTORE-OR-CLEAR, mirroring ``load_project``: a project with no sidecar
+    leaves the store EMPTY rather than whatever the caller happened to pass in,
+    so a hydrated context always describes the project on disk and nothing else.
+
+    Does NOT reapply onto the network. The netcdf is already solve-ready (the
+    save path reapplies before exporting), and the reapply would align the
+    restored series down to the current snapshots — throwing away the very rows
+    this restore exists to preserve. The save path reapplies when it matters.
     """
     from services.solver_service import SolverConfig
 
@@ -2329,6 +2348,31 @@ def _hydrate_context_from_disk(ctx, src: pathlib.Path, name: str) -> None:
         with PyPSAService.get_netcdf_io_lock():
             PyPSAService.import_network_from_netcdf(ctx.network, nc_path)
         ctx.loaded_project = name
+
+    # User-uploaded series for THIS project, into THIS context's store.
+    #
+    # Tolerant of a broken sidecar rather than fatal: this function runs on the
+    # per-session resolver, i.e. TWICE per authenticated request on every route,
+    # so a corrupt `user_ts.json` that raised here would 500 the whole app rather
+    # than one project. The netcdf still carries the baked profiles, so an empty
+    # store degrades to exactly the old behaviour. Same tolerance, and the same
+    # changelog channel, as the `results_state.pkl` restore below.
+    from routers.network import _restore_user_ts
+
+    user_ts_path = src / "user_ts.json"
+    user_ts_data: dict = {}
+    if user_ts_path.exists():
+        try:
+            user_ts_data = json.loads(user_ts_path.read_text())
+        except Exception as exc:  # noqa: BLE001 — a corrupt sidecar is not fatal
+            change_log_service.log(
+                "warn", "Project", name,
+                f"Couldn't read user_ts.json ({type(exc).__name__}: {exc}). The "
+                f"netcdf still carries the profiles; only series longer than the "
+                f"saved snapshot range are affected.",
+            )
+            user_ts_data = {}
+    _restore_user_ts(user_ts_data, store=ctx.user_ts)
 
     # Solver config (legacy-tolerant; default when absent).
     #

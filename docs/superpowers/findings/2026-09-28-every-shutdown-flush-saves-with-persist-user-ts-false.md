@@ -108,14 +108,24 @@ opened, and after representative-week sampling would replace a full-year series
 on disk with the 168-row `_t` view. That is the mutation the empty-store test
 exists to catch, and it does.
 
-### Still open
+### The third call site, closed the day after
 
-`services/solve_queue.py` passes `ctx is PyPSAService._active` for queue saves.
-Deliberately unchanged: its dispatcher thread hydrates a context from disk, so
-that context's store is empty for the reason above, and `holds_user_series`
-would correctly answer False for it — but "should a background solve rewrite the
-sidecar at all" is a different question from this one, and it becomes tractable
-only once OPEN-ITEMS 13 lands.
+`services/solve_queue.py` was left on `ctx is PyPSAService._active` because a
+dispatcher-hydrated context had an empty store, so moving it would have made a
+queue save replace a good sidecar with the netcdf-derived backup. Once
+`_hydrate_context_from_disk` began restoring `user_ts.json` (OPEN-ITEMS 13,
+fixed 2026-09-29) that objection went away and it moved to `holds_user_series`
+with the other two.
+
+Stated honestly, because it differs from the other two call sites: **no
+data-loss scenario was identified for this one.** With the old predicate a queue
+save simply left `user_ts.json` untouched, which is lossless for a project that
+already had one. What the change buys is that the queue stops depending on a
+predicate that is False by accident rather than by meaning — a value that would
+flip, unpredictably and in favour of whichever project happened to occupy the
+bootstrap slot, the day anything writes `_active` again. Pinned by
+`tests/test_solve_queue_persists_user_ts.py`, which fails on the old predicate
+because a queue-solved project is then left with no sidecar describing it.
 
 ## The step not observed
 
