@@ -148,3 +148,36 @@ at each selected hour:
    MVA, and over the load's MVA (converter-fed data-centre load). This is
    reported against the existing bands, not gated, in line with
    `static/strength.py`.
+
+## Stage A, as built (2026-09-29)
+
+`templates/grid_codes.py` and `templates/data/grid_codes.yaml` hold the
+profile: every limit has a clause and a `code`/`assumed` tag, bands may not
+overlap, and an unknown profile or a missing limit is refused.
+`static/connection.py` and `schema/connection.py` hold the eight checks.
+They reuse increment 9's solve path, its no-new/no-worse comparison and its
+pro-rata balancing, with the profile's per-bus voltage band in place of the
+screen's generic one.
+
+**Tests.** 26 tests: every voltage step against pandapower solved directly,
+plus the profile's validation. Seven mutations were run and six were caught
+at once. The seventh, **energisation re-dispatching the fleet, survived**,
+because none of the hand-built grids had a generator to re-dispatch. A grid
+with one was added, and the step is now pinned to the instantaneous value
+(the slack takes it all).
+
+**A hand estimate corrected.** The 50 MW trip was estimated at about 2.7 %.
+The engine and pandapower agreed on 3.24 %, because the estimate ignored the
+5 MW already at the bus and the non-linearity. The passing case was re-sized
+to 40 MW.
+
+**On case39** (all 345 kV, so the 0.90–1.05 pu band applies): a 300 MW data
+centre with a 100 MW BESS at BUS_16.
+
+| check | result |
+|---|---|
+| connection | **fails**: it deepens the known `BUS_02-BUS_03` N-1 overload |
+| energisation | passes: −0.73 % step at the POC |
+| load trip | **fails**. The step at the POC is only +0.69 %, but losing 300 MW with the BESS still exporting pushes BUS_19, BUS_22 and BUS_26 above 1.05 pu. This is the data-centre load-loss effect, and it would be missed by looking only at the POC. |
+| reactive range | fails injecting 144 Mvar; passes absorbing |
+| SCR | 90 and 29.4, reported |
