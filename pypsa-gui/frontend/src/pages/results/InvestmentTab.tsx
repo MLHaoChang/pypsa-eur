@@ -13,6 +13,7 @@ import { nk } from '../../utils/queryKeys'
 import { CompletenessChips, type CompletenessRow } from '../../components/CompletenessChips'
 import { fmtAmount } from './investment/valueFlows'
 import ValueFlowsView from './investment/ValueFlowsView'
+import ParticipantsDesigner from './investment/ParticipantsDesigner'
 
 const SECTIONS = [
   { id: 'participants', label: 'Participants' },
@@ -103,6 +104,7 @@ export default function InvestmentTab() {
   const flows = useQuery({ queryKey: nk(project, 'results', 'value_flows'),
                            queryFn: () => commercialApi.getValueFlowsResult() })
   const [section, setSection] = useState<SectionId>('participants')
+  const [designing, setDesigning] = useState(false)
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
 
   const onKey = (e: KeyboardEvent<HTMLButtonElement>, i: number) => {
@@ -150,11 +152,18 @@ export default function InvestmentTab() {
           <BillSection billing={billing.data} error={billing.isError ? billing.error : null} />
         )}
         {section === 'participants' && (
-          flows.data?.status === 'ok' ? <ValueFlowsView payload={flows.data} /> : (
-            <p className="text-[11px] text-muted py-2" data-testid="ic-participants-state">
-              {participantsText}
-            </p>
-          )
+          <div className="space-y-3">
+            {flows.data?.status === 'ok' ? <ValueFlowsView payload={flows.data} /> : (
+              <p className="text-[11px] text-muted py-2" data-testid="ic-participants-state">
+                {participantsText}
+              </p>
+            )}
+            <button type="button" className="text-[11px] underline" aria-expanded={designing}
+                    onClick={() => setDesigning(d => !d)}>
+              {designing ? 'Close the participants designer' : 'Define participants'}
+            </button>
+            {designing && <ParticipantsDesigner />}
+          </div>
         )}
         {(section === 'library' || section === 'tariff' || section === 'contracts') && (
           <p className="text-[11px] text-muted py-2">This section is not available yet.</p>

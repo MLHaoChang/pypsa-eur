@@ -721,6 +721,25 @@ not `PageKit.Toggle`).
   an incomplete ledger not drawn, a failed check named, CSV + period pick; `expectAllButtonsNamed`),
   `test_value_flow_designer.py` (2), client tests.
 
+**WP3.6 implementation, part 2 (designer).**
+- `designerModel.ts` (pure: `initialConfig` — the stored config only when it validates, else the
+  site party as `site_owner` with the default externals; `setOwner` / `setPayee` / `update` — a hand
+  edit KEEPS the template stamp so the server discloses `template_edited`; `draftNeeds` / `fillDraft`
+  — a draft is saveable only when every null money field is a number ≥ 0; `problemSection`).
+- `ParticipantsDesigner.tsx` ("Define participants" in the Participants section): template picker →
+  `TemplateDialog` (the config's participants, notes, and an input per null field of each draft;
+  "Save contracts and use" appends the priced drafts through the solver-config route, then loads the
+  config into the editor — the value flows are saved only by the user's Save); participants table
+  (id / name / role; the site party cannot be removed), externals (add / remove; the contracts'
+  parties listed), asset owners grouped by bus (grid-side: "grid side (market)", no control), tariff
+  payees per item (the resolved default shown), `export_revenue_to`, the energy hub (member per group
+  Link, contracted MW, allocation key, fixed shares). Save sends the digest it read; 422 problems are
+  shown (role="alert") beside the section they name; 412 → "changed elsewhere … Reload"; results and
+  the state are invalidated after a save.
+- Tests: `designerModel.test.ts` (4), `ParticipantsDesigner.test.tsx` (5: round trip with the digest,
+  422 per section, 412 reload, drafts priced before saving and nothing saved on Use, no commercial
+  config; `expectAllButtonsNamed`). Full vitest 2695 passed; tsc clean.
+
 ---
 
 ## WP3.7a Library browser
