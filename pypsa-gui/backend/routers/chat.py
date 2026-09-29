@@ -821,25 +821,43 @@ def chat_history(limit: int = 200,
             # last turn); blocks that wire can't replay (thinking /
             # redacted_thinking / image / document) are dropped here rather
             # than sent and rejected.
+            # NOT while a turn is in flight. The profile guard above reasons
+            # about exactly this race ("a GET /history racing a same-wire
+            # rebind mid-turn — two tabs sharing a session_id, or a reload")
+            # and was applied to the three profile lines only; the message
+            # rebuild below is the destructive half. A live turn has already
+            # appended its user message and the assistant's `tool_use`, and is
+            # about to append the matching `tool_result` — clearing in between
+            # drops the `tool_use` and leaves an ORPHAN `tool_result`, which
+            # `_sanitise_history_message` does not catch (it drops malformed
+            # thinking blocks, not orphan results), so every later turn of that
+            # session is rejected by the provider.
+            #
+            # The transcript is also the wrong source mid-turn: it holds only
+            # COMPLETED turns, so rebuilding from it discards the in-flight one
+            # wholesale even when the clear itself is survivable.
             with sess._lock:
-                sess.messages.clear()
-                for rec in turns:
-                    user_text = rec.get("user")
-                    assistant_blocks = rec.get("assistant")
-                    if user_text is not None:
-                        sess.append_history_message({
-                            "role": "user",
-                            "content": chat_service._filter_non_portable_blocks(
-                                user_text, resolved_profile.wire,
-                            ),
-                        })
-                    if isinstance(assistant_blocks, list):
-                        sess.append_history_message({
-                            "role": "assistant",
-                            "content": chat_service._filter_non_portable_blocks(
-                                assistant_blocks, resolved_profile.wire,
-                            ),
-                        })
+                turn_in_flight = sess._turn_in_flight
+            if not turn_in_flight:
+                with sess._lock:
+                    sess.messages.clear()
+                    for rec in turns:
+                        user_text = rec.get("user")
+                        assistant_blocks = rec.get("assistant")
+                        if user_text is not None:
+                            sess.append_history_message({
+                                "role": "user",
+                                "content": chat_service._filter_non_portable_blocks(
+                                    user_text, resolved_profile.wire,
+                                ),
+                            })
+                        if isinstance(assistant_blocks, list):
+                            sess.append_history_message({
+                                "role": "assistant",
+                                "content": chat_service._filter_non_portable_blocks(
+                                    assistant_blocks, resolved_profile.wire,
+                                ),
+                            })
 
     return {
         "turns": turns,

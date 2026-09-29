@@ -1763,6 +1763,7 @@ def _save_context(
     db: DBSession | None = None,
     user: User | None = None,
     project_row=None,
+    solver_config_override=None,
 ):
     """
     Persist `ctx`'s in-memory network to ``projects/<name>/``.
@@ -1930,8 +1931,24 @@ def _save_context(
             except Exception:
                 pass
 
-    # Save solver config if present
-    cfg = ctx.solver_state.get("solver_config")
+    # Save solver config if present.
+    #
+    # `solver_config_override` is the config that ACTUALLY produced this save,
+    # passed by the solve queue. A queued job deliberately solves with the
+    # config snapshotted at enqueue rather than whatever the context holds now
+    # (see the comment at the head of `services/solve_queue.py`: a
+    # `PUT /solver_config` after enqueue used to change the solve silently) —
+    # but this write used the CONTEXT's config regardless, so `network.nc` held
+    # one solve and the `solver_config.json` beside it described another. The
+    # original defect was not closed, it moved from the solve to the record of
+    # the solve.
+    #
+    # An override rather than writing the snapshot back into the live context:
+    # the user may have edited their config after enqueueing, and that edit is
+    # theirs to keep. Only the FILE has to match the solve.
+    cfg = solver_config_override if solver_config_override is not None else (
+        ctx.solver_state.get("solver_config")
+    )
     if cfg is not None:
         _atomic_write_text(dest / "solver_config.json", json.dumps(asdict(cfg), indent=2))
 

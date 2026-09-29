@@ -1328,6 +1328,11 @@ class SolveQueue:
                     # already correct, so we leave user_ts.json untouched there.
                     _save_context(
                         ctx, project_id, expect=project_id,
+                        # THIS job's config — the snapshot it actually solved
+                        # with — so `solver_config.json` describes the solve
+                        # that `network.nc` holds. Without it the two files
+                        # disagreed whenever the context's config had moved on.
+                        solver_config_override=config,
                         # `_user_ts` is still a module GLOBAL belonging to the
                         # process foreground. Persist it only when the context
                         # being solved IS that foreground; for anything else,
