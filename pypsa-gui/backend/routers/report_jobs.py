@@ -6,6 +6,12 @@ Report generation routes (WP3) — `/api/projects/{name}/reports/generate…`.
   POST /{name}/reports/generate/abort                           set the stop event (idempotent; 404 never run)
   POST /{name}/reports/{report_id}/sections/{section_id}/regenerate
                                                                 one section again → version+1
+  POST /{name}/reports/{report_id}/template/plan                the "mapping" job (WP11): propose how an
+                                                                untagged template's headings map onto the report
+
+`POST …/generate` takes `template_file_id` (WP11): the new report is bound to
+that upload and, when `language` is omitted, the template's detected
+language is the report's (else "en").
 
 Mounted under `/api/projects` right after `routers/reports.py` (WP1/WP5),
 with the same `ProjectAccessDep` and the same edit-lock check as the
@@ -38,17 +44,22 @@ from db.session import get_db
 from deps import optional_user
 from routers.deps import AuthorizedProject, ProjectAccessDep
 from routers.reports import (
+    _bound,
     _check_lock,
     _current_eh_report,
     _current_study_report,
     _http,
+    _latest_or_404,
     _render_figures,
+    _resolve_template,
+    _template_not_untagged,
 )
 from services.pypsa_service import PyPSAService
-from services.reports import store
+from services.reports import store, templates
 from services.reports.report_job import (
     ReportJobInFlight,
     public_record,
+    start_mapping_job,
     start_report_job,
 )
 
@@ -61,9 +72,17 @@ JOB_KEY = "report_job"
 class GenerateReportBody(BaseModel):
     model_config = ConfigDict(extra="ignore")
     title: str | None = None
-    language: str = "en"
+    # None → the template's detected language when one is given, else "en".
+    language: str | None = None
     sections: list[str] | None = Field(default=None, min_length=1)
     instruction: str | None = None
+    template_file_id: str | None = None
+
+
+class ProposeMappingBody(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    # None → the template's detected language, else the report's, else "en".
+    language: str | None = None
 
 
 class RegenerateSectionBody(BaseModel):
@@ -138,17 +157,21 @@ def _evidence_for(project: AuthorizedProject):
     return evidence, _render_figures(eh_report)
 
 
+def _in_flight(exc: Exception) -> HTTPException:
+    return HTTPException(409, {
+        "error_kind": "report_job_in_flight",
+        "message": "A report is already being generated — wait for it to "
+                   "finish or abort it.",
+    })
+
+
 def _start(project: AuthorizedProject, **kwargs: Any) -> str:
     try:
         return start_report_job(
             project_name=project.name, project_dir=project.directory,
             lock=PyPSAService.get_solver_state_lock(), state=_state(), **kwargs)
     except ReportJobInFlight as exc:
-        raise HTTPException(409, {
-            "error_kind": "report_job_in_flight",
-            "message": "A report is already being generated — wait for it to "
-                       "finish or abort it.",
-        }) from exc
+        raise _in_flight(exc) from exc
     except KeyError as exc:
         raise HTTPException(404, {
             "error_kind": "report_section_not_found",
@@ -170,13 +193,67 @@ def generate_report(body: GenerateReportBody,
     through `GET /{name}/reports/{report_id}` once `done` or `aborted`.
     """
     _check_lock(project, db, user)
+    template_kwargs: dict[str, Any] = {}
+    language = body.language
+    if body.template_file_id is not None:
+        # Resolved BEFORE the provider and the evidence: a bad template is a
+        # 4xx with nothing claimed, as an unknown section is.
+        _data, outline = _resolve_template(project, body.template_file_id)
+        template_kwargs = {
+            "template_file_id": body.template_file_id,
+            "meta_updates": {"template_mode": outline.mode,
+                             "template_language": outline.language},
+        }
+        language = language or outline.language
     profile = _resolve_profile()
     provider = _provider_or_400(profile)
     evidence, figure_pngs = _evidence_for(project)
     report_id = _start(
         project, evidence=evidence, figure_pngs=figure_pngs, profile=profile,
-        provider=provider, language=body.language or "en",
-        sections=body.sections, instruction=body.instruction, title=body.title)
+        provider=provider, language=language or "en",
+        sections=body.sections, instruction=body.instruction, title=body.title,
+        **template_kwargs)
+    return {"status": "running", "report_id": report_id}
+
+
+@router.post("/{name}/reports/{report_id}/template/plan")
+def propose_template_plan(report_id: str, body: ProposeMappingBody,
+                          project: AuthorizedProject = ProjectAccessDep,
+                          db: DBSession = Depends(get_db),
+                          user: User | None = Depends(optional_user)) -> dict:
+    """
+    Start the mapping job for the report's bound UNTAGGED template: one
+    generation call on the active LLM profile proposes how the template's
+    headings map onto the report's sections; the sanitised plan lands in the
+    report's meta (`GET …/template` shows it, `PUT …/template/plan` edits
+    it, the export uses it). Same slot as generate: `GET …/generate/status`
+    (`mode: "mapping"`) and `POST …/generate/abort` cover it.
+    """
+    doc = _latest_or_404(project, report_id)
+    _check_lock(project, db, user)
+    _data, outline = _bound(project, doc)
+    if outline.mode != "untagged":
+        raise _template_not_untagged(outline.mode)
+    try:
+        # Through the accessor, so a checkout without WP10's module answers
+        # here, before anything is claimed, and a test's fake is honoured.
+        templates._propose_mapping()
+    except ImportError as exc:
+        raise HTTPException(500, {
+            "error_kind": "tool_error",
+            "message": "Untagged templates are not available in this build "
+                       "(services.reports.template_untagged is missing).",
+        }) from exc
+    profile = _resolve_profile()
+    provider = _provider_or_400(profile)
+    language = body.language or outline.language or doc.language or "en"
+    try:
+        start_mapping_job(
+            project_name=project.name, project_dir=project.directory,
+            document=doc, outline=outline, profile=profile, provider=provider,
+            language=language, lock=PyPSAService.get_solver_state_lock(), state=_state())
+    except ReportJobInFlight as exc:
+        raise _in_flight(exc) from exc
     return {"status": "running", "report_id": report_id}
 
 

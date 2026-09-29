@@ -126,6 +126,9 @@ class Figure(_Model):
 # ── the document ────────────────────────────────────────────────────────────
 
 ReportMode = Literal["evidence_only", "generated"]
+# Increment 2: how a bound user template renders (`docx_reader.TemplateMode`,
+# repeated here so the model does not import the reader).
+TemplateMode = Literal["tagged", "untagged"]
 
 
 class ReportDocument(_Model):
@@ -141,7 +144,8 @@ class ReportDocument(_Model):
     profile_id: str | None = None
     model: str | None = None
     mode: ReportMode
-    # Increment 2: the upload id of a user template. Always None until then.
+    # Increment 2: the upload id of a user template (`kind="report_template"`),
+    # bound through `POST …/reports/{id}/template`; None → the default writer.
     template_file_id: str | None = None
     sections: list[Section] = PField(default_factory=list)
     tables: dict[str, Table] = PField(default_factory=dict)
@@ -164,3 +168,11 @@ class ReportMeta(_Model):
     # here after the save; the store carries it through a later `save_version`
     # (WP6). Free-form on purpose: the job record is the authority on its shape.
     generation: dict | None = None
+    # Increment 2 (WP11): the bound template's mode and detected language,
+    # set when the template is bound, and the last accepted mapping plan of
+    # an untagged template (`template_untagged.MappingPlan` as a dict) so a
+    # re-export does not re-ask the model. All three are carried through a
+    # later `save_version` exactly as `generation` is, and cleared on unbind.
+    template_mode: TemplateMode | None = None
+    template_language: str | None = None
+    mapping_plan: dict | None = None

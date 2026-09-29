@@ -353,7 +353,10 @@ def add_upload(
     safe_name = safe_upload_filename(filename, ext=pathlib.Path(filename).suffix.lstrip("."))
 
     with _project_upload_lock(name):
-        # Dedup hit: existing meta + ready blob → return as-is.
+        # Dedup hit: existing meta + ready blob → return as-is — except that a
+        # user upload re-sent AS A TEMPLATE is promoted to the template kind,
+        # so the report viewer's picker (which lists `report_template` only)
+        # shows it. Never the other direction: a template stays a template.
         existing = _read_meta(meta_path)
         if existing is not None and existing.blob_ready:
             if existing.sha256 != sha256_full:
@@ -368,6 +371,9 @@ def add_upload(
                         ),
                     },
                 )
+            if kind == "report_template" and existing.kind == "user_upload":
+                existing = existing.model_copy(update={"kind": kind})
+                _atomic_write_meta(meta_path, existing)
             return existing
 
         # Quota check — only on a fresh upload (dedup hit doesn't grow disk).
@@ -425,12 +431,14 @@ def add_upload(
         return meta
 
 
-def list_uploads(name: str, *, project_dir: pathlib.Path | None = None) -> list[UploadMeta]:
+def list_uploads(name: str, *, project_dir: pathlib.Path | None = None,
+                 kind: UploadKind | None = None) -> list[UploadMeta]:
     """
     Return all blob_ready=true uploads for `name`, newest first by
-    uploaded_at. Missing uploads/ dir → []. Holds the per-project lock
-    for the read so a concurrent delete can't surface a half-removed
-    entry.
+    uploaded_at — only those of `kind` when one is given (the report
+    viewer's template picker asks for `report_template`). Missing uploads/
+    dir → []. Holds the per-project lock for the read so a concurrent
+    delete can't surface a half-removed entry.
     """
     paths = _resolve_paths(name, project_dir)
     if not paths.uploads_dir.exists():
@@ -449,6 +457,8 @@ def list_uploads(name: str, *, project_dir: pathlib.Path | None = None) -> list[
             if not (sub / "blob").exists():
                 # Meta is committed but blob vanished — skip gracefully,
                 # leave the dir for prune_orphans to clean up.
+                continue
+            if kind is not None and meta.kind != kind:
                 continue
             out.append(meta)
         out.sort(key=lambda m: m.uploaded_at, reverse=True)

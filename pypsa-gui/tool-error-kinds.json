@@ -123,6 +123,10 @@
       "surface": "inline",
       "why": "One image failed to decode in one tool call."
     },
+    "invalid_mapping_plan": {
+      "surface": "inline",
+      "why": "PUT /{name}/reports/{id}/template/plan (or set_report_mapping) received a body that is not a mapping plan, or a plan that needs sanitising under strict mode; the detail carries the sanitiser's notes naming the heading or section that does not exist. Per-call: the model (or the plan editor) corrects the plan within the turn, as with invalid_tool_args."
+    },
     "invalid_report_id": {
       "surface": "inline",
       "why": "A report id that is not 16 lowercase hex characters, refused at the store boundary before any path is joined. Route-only in WP1; when WP6's report tools pass a model-typed id, the model sees the message and corrects within the turn, as with invalid_tool_args."
@@ -158,6 +162,10 @@
     "no_evidence": {
       "surface": "inline",
       "why": "POST /{name}/reports/generate found no Energy Hub reference design, no reliability surface and no worksheet rows: there is nothing a model may narrate. The evidence-only POST still produces a document that states every section as not established; generation refuses. The message names the remedy (run a study) and the model relays it."
+    },
+    "no_template": {
+      "surface": "inline",
+      "why": "A mapping plan was proposed or stored (POST/PUT …/template/plan, propose_report_mapping, set_report_mapping) for a report that has no template bound. The message names the remedy (bind one with set_report_template) and the model relays it within the turn."
     },
     "not_authorized": {
       "surface": "banner",
@@ -239,6 +247,22 @@
       "surface": "inline",
       "why": "An adequacy study is running and a save/queue was refused. Deliberately QUIET on the client (`QUIET_TOAST_CODES` in api/client.ts): it is a standing condition the caller handles, and one toast per autosave tick would bury the workbench."
     },
+    "tagged_render_error": {
+      "surface": "inline",
+      "why": "POST …/reports/{id}/export (export_report_docx) with a TAGGED template whose tag the document cannot fill (an unknown field, table or figure id, or a Jinja syntax error); the message quotes the paragraph and lists the known names. Per-call: the user fixes the template or binds another, and the model relays the message rather than retrying."
+    },
+    "template_not_a_template": {
+      "surface": "inline",
+      "why": "set_report_template / POST …/template (or generate_report with template_file_id) named an upload that is neither of kind report_template nor a .docx by MIME. The message names the file and the remedy (upload a .docx with ?kind=report_template); the model corrects the file id within the turn, as with invalid_tool_args."
+    },
+    "template_not_untagged": {
+      "surface": "inline",
+      "why": "A mapping plan was proposed or stored for a TAGGED template, which fills its own tags and needs no plan. Per-call; the message says so and the model relays it (export_report_docx is the next step)."
+    },
+    "template_unreadable": {
+      "surface": "inline",
+      "why": "The bound template's bytes could not be opened as a Word document (docx_reader.TemplateReadError: a renamed zip, a truncated file) on bind, GET, plan or export. The message names the reason; the user must supply a real .docx, and the model relays it rather than retrying."
+    },
     "time_column_parse_error": {
       "surface": "banner",
       "why": "The time column could not be parsed as datetimes; the user must fix the input."
@@ -290,6 +314,10 @@
     "unsupported_mime": {
       "surface": "banner",
       "why": "Upload rejected on type. The user must supply something else."
+    },
+    "unsupported_upload_kind": {
+      "surface": "inline",
+      "why": "POST or GET /{name}/uploads with a ?kind= that is not one a client may ask for (user_upload or report_template on upload; any known kind on list). Route-only today (no tool passes a kind); classified so a typo in a client cannot silently file a template as a plain upload or list nothing. The message lists the accepted kinds."
     },
     "upload_not_found": {
       "surface": "banner",

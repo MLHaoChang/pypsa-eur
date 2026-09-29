@@ -89,6 +89,10 @@ class ReportJob:
     # True when the job creates `reports/<id>/` (v1); False when it appends
     # a version to an existing report (regenerate, or a base document).
     new_report: bool = True
+    # WP11: the carried meta fields (`template_mode`, `template_language`) a
+    # generate with `template_file_id` sets after ITS save — the document
+    # itself carries `template_file_id`.
+    meta_updates: dict[str, Any] = field(default_factory=dict)
     stop_event: threading.Event = field(default_factory=threading.Event)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -121,10 +125,14 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
                        instruction: str | None = None,
                        base_document: ReportDocument | None = None,
                        regenerate_section: str | None = None,
-                       title: str | None = None) -> ReportJob:
+                       title: str | None = None,
+                       template_file_id: str | None = None,
+                       meta_updates: dict[str, Any] | None = None) -> ReportJob:
     """
     Everything `run_report_job` needs, validated, with the record it will
     publish. Raises `KeyError` for a section id the document does not have.
+    `template_file_id` (WP11) binds a NEW report to a template; a base
+    document keeps its own binding.
     """
     new_report = base_document is None
     if base_document is not None:
@@ -135,6 +143,8 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
         document = evidence_only_document(
             evidence, title=(title or "").strip() or f"{DEFAULT_TITLE} — {project_name}",
             report_id=report_id, figure_pngs=figure_pngs)
+        if template_file_id is not None:
+            document = document.model_copy(update={"template_file_id": template_file_id})
     known = {s.section_id for s in document.sections}
     if regenerate_section is not None:
         wanted = [regenerate_section]
@@ -173,6 +183,7 @@ def prepare_report_job(*, project_name: str, project_dir: pathlib.Path,
         instruction=instruction, document=document,
         regenerate_section=regenerate_section, report_id=report_id,
         record=record, new_report=new_report,
+        meta_updates=dict(meta_updates or {}),
     )
     record["stop_event"] = job.stop_event
     return job
@@ -352,6 +363,8 @@ def run_report_job(job: ReportJob) -> ReportDocument:
             version = 1
         else:
             version = store.save_version(job.project_dir, doc)
+        if job.meta_updates:
+            store.update_meta(job.project_dir, job.report_id, **job.meta_updates)
         saved = store.load_report(job.project_dir, job.report_id, version)
         _set(job, status="aborted" if aborted else "done", version=version,
              error=None, finished_at=time.time())
@@ -359,6 +372,112 @@ def run_report_job(job: ReportJob) -> ReportDocument:
         return saved
     except Exception as exc:
         _set(job, status="failed", error=str(exc), finished_at=time.time())
+        raise
+
+
+# ── the mapping job (WP11) ──────────────────────────────────────────────────
+#
+# The second job kind the slot serves: ONE generation call that proposes how
+# an untagged template's headings map onto the report's sections
+# (`template_untagged.propose_mapping`, reached through the accessors in
+# `services/reports/templates.py`). It writes no version — the plan goes to
+# `ReportMeta.mapping_plan` — and its record has `mode: "mapping"`, so the
+# status and abort routes cover it unchanged. A `SectionFailure` from the
+# proposal is not a failed job: the code-only `default_mapping` is stored and
+# the failure is recorded in `prose_failures` as section `"mapping"`.
+
+MAPPING_SECTION_ID = "mapping"
+
+
+@dataclass
+class MappingJob:
+    project_name: str
+    project_dir: pathlib.Path
+    report_id: str
+    document: ReportDocument
+    outline: Any                      # docx_reader.TemplateOutline
+    profile_id: str
+    model: str
+    max_tokens: int
+    provider: Any
+    language: str
+    record: dict[str, Any]
+    stop_event: threading.Event = field(default_factory=threading.Event)
+    lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+def prepare_mapping_job(*, project_name: str, project_dir: pathlib.Path,
+                        document: ReportDocument, outline: Any, profile: Any,
+                        provider: Any, language: str) -> MappingJob:
+    profile_id = str(getattr(profile, "id", "") or "")
+    model = str(getattr(profile, "model", "") or "")
+    max_tokens = int(getattr(profile, "max_output_tokens", None) or SECTION_MAX_TOKENS)
+    record: dict[str, Any] = {
+        "status": "running",
+        "report_id": document.report_id,
+        "version": document.version,
+        "mode": "mapping",
+        "section": None,
+        "progress": {"done": 0, "total": 1, "current": MAPPING_SECTION_ID},
+        "repairs": 0,
+        "prose_failures": [],
+        "error": None,
+        "started_at": time.time(),
+        "finished_at": None,
+        "thread": None,
+        "stop_event": None,
+        "profile_id": profile_id,
+        "model": model,
+    }
+    job = MappingJob(
+        project_name=project_name, project_dir=pathlib.Path(project_dir),
+        report_id=document.report_id, document=document, outline=outline,
+        profile_id=profile_id, model=model, max_tokens=max_tokens,
+        provider=provider, language=language, record=record,
+    )
+    record["stop_event"] = job.stop_event
+    return job
+
+
+def run_mapping_job(job: MappingJob) -> dict[str, Any] | None:
+    """
+    The worker body: propose, sanitise, store on the meta, publish the
+    outcome. Returns the stored plan (None when aborted before the call).
+    """
+    from services.reports import templates
+
+    try:
+        if job.stop_event.is_set():
+            with job.lock:
+                job.record.update(status="aborted", finished_at=time.time(),
+                                  progress={"done": 0, "total": 1, "current": None})
+            return None
+        base = {"model": job.model, "max_tokens": job.max_tokens,
+                "system_blocks": system_blocks()}
+        result = templates._propose_mapping()(
+            job.provider, base_request=base, outline=job.outline,
+            doc=job.document, language=job.language)
+        repairs = int(getattr(result, "repairs", 0) or 0)
+        with job.lock:
+            job.record["repairs"] += repairs
+        if isinstance(result, SectionFailure):
+            with job.lock:
+                job.record["prose_failures"].append({
+                    "section_id": MAPPING_SECTION_ID, "reason": result.reason,
+                    "raw_head": result.raw_head, "repairs": repairs})
+            proposed = templates._default_mapping()(job.outline, job.document)
+        else:
+            proposed = result
+        raw = proposed.model_dump() if hasattr(proposed, "model_dump") else dict(proposed)
+        plan, _notes = templates.sanitise_plan(raw, job.outline, job.document)
+        store.update_meta(job.project_dir, job.report_id, mapping_plan=plan)
+        with job.lock:
+            job.record.update(status="done", error=None, finished_at=time.time(),
+                              progress={"done": 1, "total": 1, "current": None})
+        return plan
+    except Exception as exc:
+        with job.lock:
+            job.record.update(status="failed", error=str(exc), finished_at=time.time())
         raise
 
 
@@ -377,36 +496,25 @@ def record_is_running(record: dict[str, Any] | None) -> bool:
     return t.ident is None or t.is_alive()
 
 
-def start_report_job(*, project_name: str, project_dir: pathlib.Path,
-                     evidence: Evidence, figure_pngs: dict[str, bytes],
-                     profile: Any, provider: Any, language: str = "en",
-                     sections: list[str] | None = None,
-                     instruction: str | None = None,
-                     base_document: ReportDocument | None = None,
-                     regenerate_section: str | None = None,
-                     title: str | None = None,
-                     lock: threading.Lock, state: dict[str, Any]) -> str:
+def _launch(*, prepare, run, lock: threading.Lock, state: dict[str, Any]) -> str:
     """
-    Publish the record under `state["report_job"]` and start the daemon
-    thread, under ONE hold of `lock` so the claim is a claim. One job per
-    process: a second start while one runs raises `ReportJobInFlight`.
-    Raises `KeyError` for an unknown section id, before anything is claimed.
+    Claim the slot and start the daemon thread for one job, under ONE hold of
+    `lock` so the claim is a claim: `prepare()` builds the job (its record is
+    published under `state["report_job"]`), `run(job)` is the worker body.
+    One job per process: a second start while one runs raises
+    `ReportJobInFlight`. `prepare()`'s own exceptions (a `KeyError` for an
+    unknown section) propagate before anything is claimed.
     """
     global _ACTIVE
     with lock:
         with _SLOT_LOCK:
             if record_is_running(state.get("report_job")) or record_is_running(_ACTIVE):
                 raise ReportJobInFlight("a report is already being generated")
-            job = prepare_report_job(
-                project_name=project_name, project_dir=project_dir,
-                evidence=evidence, figure_pngs=figure_pngs, profile=profile,
-                provider=provider, language=language, sections=sections,
-                instruction=instruction, base_document=base_document,
-                regenerate_section=regenerate_section, title=title)
+            job = prepare()
 
             def worker() -> None:
                 try:
-                    run_report_job(job)
+                    run(job)
                 except Exception:  # noqa: BLE001 — recorded on the job
                     logger.exception("report job %s failed", job.report_id)
 
@@ -423,6 +531,45 @@ def start_report_job(*, project_name: str, project_dir: pathlib.Path,
                 _ACTIVE = None
                 raise
     return job.report_id
+
+
+def start_report_job(*, project_name: str, project_dir: pathlib.Path,
+                     evidence: Evidence, figure_pngs: dict[str, bytes],
+                     profile: Any, provider: Any, language: str = "en",
+                     sections: list[str] | None = None,
+                     instruction: str | None = None,
+                     base_document: ReportDocument | None = None,
+                     regenerate_section: str | None = None,
+                     title: str | None = None,
+                     template_file_id: str | None = None,
+                     meta_updates: dict[str, Any] | None = None,
+                     lock: threading.Lock, state: dict[str, Any]) -> str:
+    """
+    Publish the record under `state["report_job"]` and start the daemon
+    thread (see `_launch`). Raises `KeyError` for an unknown section id,
+    before anything is claimed.
+    """
+    return _launch(
+        prepare=lambda: prepare_report_job(
+            project_name=project_name, project_dir=project_dir,
+            evidence=evidence, figure_pngs=figure_pngs, profile=profile,
+            provider=provider, language=language, sections=sections,
+            instruction=instruction, base_document=base_document,
+            regenerate_section=regenerate_section, title=title,
+            template_file_id=template_file_id, meta_updates=meta_updates),
+        run=run_report_job, lock=lock, state=state)
+
+
+def start_mapping_job(*, project_name: str, project_dir: pathlib.Path,
+                      document: ReportDocument, outline: Any, profile: Any,
+                      provider: Any, language: str,
+                      lock: threading.Lock, state: dict[str, Any]) -> str:
+    """The mapping kind on the same slot: `state["report_job"]["mode"] == "mapping"`."""
+    return _launch(
+        prepare=lambda: prepare_mapping_job(
+            project_name=project_name, project_dir=project_dir, document=document,
+            outline=outline, profile=profile, provider=provider, language=language),
+        run=run_mapping_job, lock=lock, state=state)
 
 
 def public_record(record: dict[str, Any] | None) -> dict[str, Any] | None:
