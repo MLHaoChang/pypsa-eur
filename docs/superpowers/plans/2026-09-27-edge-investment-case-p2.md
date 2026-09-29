@@ -1347,6 +1347,7 @@ Files: `services/results/billing.py`, `services/results/cfe_score.py`, `routers/
     - `clean_by_zero_co2_emissions` moves to `notes`;
     - in `contracts.py`, an EaaS delivery with NaN is None + `delivery_not_established`, and `as_consumed_btm` sums site generators without skipping NaN (None + `generation_not_established`).
   - `test_results_billing.py` has 15 tests.
+- **WP2.5 review round 3 → PASS** (no residue). Probes: live contracts-only PPA drift attributed (0% unattributed); the 409 carries `error_kind`; the per-period NaN load; baseload sold output kept; EaaS and as-consumed NaN give None; the clean runs are unchanged; payloads are JSON with `allow_nan=False`. Related suites: 265 passed.
 
 ---
 
