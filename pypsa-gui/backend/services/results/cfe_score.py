@@ -61,11 +61,13 @@ def compute_cfe_score(n, cfg, *, result_df: Callable[..., Any] | None = None,
     loads = [str(l) for l in n.loads.index if str(n.loads.at[l, "bus"]) in site_buses]
     served = _frame(n, "loads_t", "p")
     load_mw = np.zeros(len(sns))
+    load_nan = np.zeros(len(sns), dtype=bool)
     for l in loads:
         if served is not None and l in served.columns:
             col = served[l].reindex(sns).to_numpy(dtype=float)
             if np.isnan(col).any():
                 flags.append(f"load_not_established:{l}")   # never a silent 0 (F12)
+                load_nan |= np.isnan(col)
             load_mw += np.nan_to_num(col)
         else:
             ps = _frame(n, "loads_t", "p_set")
@@ -95,6 +97,7 @@ def compute_cfe_score(n, cfg, *, result_df: Callable[..., Any] | None = None,
     # An on-site asset whose output the site SELLS under a PPA carries its
     # clean attribute away with it (review F12).
     sold = {a for k in c.contracts if k.type == "ppa" and _lp.same_party(k.seller, c.site_party)
+            and k.kind != "baseload"   # a financial baseload PPA sells no output (R2-3)
             for a in k.asset_ids}
     onsite_clean = [g for g in onsite if str(n.generators.at[g, "carrier"]) in clean
                     and g not in sold]
@@ -105,7 +108,7 @@ def compute_cfe_score(n, cfg, *, result_df: Callable[..., Any] | None = None,
         if zero:
             # PyPSA's default co2_emissions is 0: say which carriers counted as
             # clean on that basis, so a gas unit left at the default shows (F8).
-            flags.append(f"clean_by_zero_co2_emissions:{','.join(zero)}")
+            notes.append(f"clean_by_zero_co2_emissions:{','.join(zero)}")
     total_site = gen(onsite)
     clean_site = gen(onsite_clean)
     p0 = _frame(n, "links_t", "p0")
@@ -158,7 +161,7 @@ def compute_cfe_score(n, cfg, *, result_df: Callable[..., Any] | None = None,
                                  - local.tz_localize(None).floor("h").asi8))
     multi = isinstance(sns, pd.MultiIndex)
     period = np.asarray(sns.get_level_values(0)) if multi else np.full(len(sns), None)
-    frame = pd.DataFrame({"p": period, "h": hour, "load": load_mw * w,
+    frame = pd.DataFrame({"p": period, "h": hour, "load": load_mw * w, "nan": load_nan,
                           "onsite": consumed * w, "offsite": offsite * w, "grid": grid * w})
     per_period: dict = {}
     groups = list(frame.groupby("p", sort=True)) if multi else [(None, frame)]
@@ -170,7 +173,7 @@ def compute_cfe_score(n, cfg, *, result_df: Callable[..., Any] | None = None,
         key = "_" if p_key is None else str(int(p_key))
         if load_total <= 0:
             flags.append(f"no_site_load:{key}")
-        unknown_load = any(f.startswith("load_not_established:") for f in flags)
+        unknown_load = bool(part["nan"].any())      # per period (R2-3)
         per_period[key] = {
             "score": None if load_total <= 0 or unknown_load else matched / load_total,
             "load_mwh": load_total, "clean_mwh": float(clean_h.sum()),

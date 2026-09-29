@@ -188,7 +188,9 @@ def _ppa(contract, inputs: SettlementInputs) -> list[Line]:
         if not site or any(g not in inputs.generators.columns for g in site):
             return [line("ppa_energy", None, None, ["site_generators_not_established"])]
         # Export is attributed among the generators BEHIND the meter only.
-        total = inputs.generators[list(site)].sum(axis=1).to_numpy(dtype=float)
+        total = inputs.generators[list(site)].sum(axis=1, skipna=False).to_numpy(dtype=float)
+        if np.isnan(total).any():
+            return [line("ppa_energy", None, None, ["generation_not_established"])]
         share = np.divide(gen, total, out=np.zeros_like(gen), where=total > 0)
         attributed = np.minimum(gen, np.clip(exp, 0.0, None) * share)
         mw = gen - attributed
@@ -424,7 +426,11 @@ def _eaas(contract, inputs: SettlementInputs) -> list[Line]:
         if src is None:
             raise ContractError(f"EaaS contract {contract.id!r}: asset {a!r} is not a Generator, "
                                 "StorageUnit or Link of this network")
-        delivered += src[a].reindex(inputs.index).fillna(0.0).to_numpy(dtype=float)
+        delivered += src[a].reindex(inputs.index).to_numpy(dtype=float)
+    if np.isnan(delivered).any():
+        # An unknown delivery is not a zero one (ADR-0001; WP2.5 review R2-3).
+        return [Line(inputs.period, contract.id, contract.customer, contract.provider,
+                     "eaas_fee", None, None, ["delivery_not_established"])]
     mwh = float((delivered * w).sum())
     amount = 0.0
     if contract.fee_eur_per_mwh is not None:

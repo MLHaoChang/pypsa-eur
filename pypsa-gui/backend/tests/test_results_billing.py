@@ -325,7 +325,7 @@ def test_cfe_discloses_zero_co2_carriers_and_excludes_output_it_sells():
 
     n, pv, gas, imp, exp = _cfe_site()
     out = compute_cfe_score(n, _cfg())
-    assert "clean_by_zero_co2_emissions:solar" in out["flags"]
+    assert "clean_by_zero_co2_emissions:solar" in out["notes"]
     sold = {"type": "ppa", "id": "sold", "kind": "pay_as_produced", "price": 40.0,
             "tenor_years": 10, "seller": "site", "buyer": "Offtaker", "asset_ids": ["pv"]}
     out = compute_cfe_score(n, _cfg(contracts=[sold]))
@@ -334,3 +334,32 @@ def test_cfe_discloses_zero_co2_carriers_and_excludes_output_it_sells():
     out = compute_cfe_score(n, _cfg())
     assert out["per_period"]["_"]["score"] is None
     assert "load_not_established:site_load" in out["flags"]
+
+
+@pytest.mark.live_solve
+def test_an_edited_dispatch_ppa_without_a_tariff_is_the_change_not_a_gate(reset_backend):
+    """Round 2 R2-1."""
+    import routers.results as R
+    import routers.simulation as sim_router
+
+    n, cfg = _solved({"poc_link": "import", "contracts": [PPA]})
+    edited = copy.deepcopy(cfg.commercial)
+    edited["contracts"][0]["price"] = 99.0
+    sim_router._state["solver_config"].commercial = edited
+    out = R.get_billing()
+    assert "config_changed_since_solve" in out["flags"]
+    assert out["gap_summary"]["gates"] == []
+    causes = out["gap"]["periods"]["_"]["contracts"]["causes"]
+    assert [c["cause"] for c in causes] == ["config_changed_since_solve"]
+
+
+def test_the_in_flight_refusal_carries_an_error_kind(reset_backend, monkeypatch):
+    """Round 2 R2-2."""
+    import routers.results as R
+    from fastapi import HTTPException as _E
+
+    monkeypatch.setattr(R, "_solver_in_flight", lambda: True)
+    with pytest.raises(_E) as exc:
+        R.get_cfe_score()
+    assert exc.value.detail["error_kind"] == "solver_in_flight"
+    assert "score" in exc.value.detail["message"]

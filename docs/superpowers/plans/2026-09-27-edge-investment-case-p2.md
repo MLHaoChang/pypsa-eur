@@ -1337,6 +1337,16 @@ Files: `services/results/billing.py`, `services/results/cfe_score.py`, `routers/
     - F13's `contracts_state` is recomputed per call (the stored settlement record is P4's);
     - line `period` keys stay None/int beside the payload's "_"/string keys.
   - Tests: `test_results_billing.py` has 13 tests (retail and payload order; PPA drift; NaN; no export Link; 409; CFE flags). The registries pass.
+- **WP2.5 review round 2 → PASS WITH CONDITIONS; fixed:**
+  - Probes verified every round-1 fix: C1 matches `settle` in 13 lines (flat, two-period, timezone), the committed-price path is checked against a real record hash, and the related suites give 1,254 passed.
+  - R2-1 (the condition): with no import tariff, an edited dispatch PPA raised a false `billing_gap_unexplained`. → The `_drift_flags` states go into the bill handed to the gap (flags and per-record drift), so the contract's change is `config_changed_since_solve`. Tested live.
+  - R2-2: the 409 carries `error_kind: solver_in_flight` for the chat; the CFE message says "score".
+  - R2-3:
+    - a NaN load voids only its own period's score;
+    - a financial baseload PPA the site sells does not remove the asset's output from the CFE;
+    - `clean_by_zero_co2_emissions` moves to `notes`;
+    - in `contracts.py`, an EaaS delivery with NaN is None + `delivery_not_established`, and `as_consumed_btm` sums site generators without skipping NaN (None + `generation_not_established`).
+  - `test_results_billing.py` has 15 tests.
 
 ---
 

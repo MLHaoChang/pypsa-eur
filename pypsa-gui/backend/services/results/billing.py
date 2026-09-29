@@ -290,8 +290,13 @@ def compute_billing(n, cfg, *, state: dict | None = None,
     if parsed.import_tariff is None:
         # No bill, so `bill_site` compared no records: the contracts' drift
         # (a dispatch PPA edited since the solve) is still stated (F3).
-        drift, _ = _billing._drift_flags(n, parsed)
+        drift, solve = _billing._drift_flags(n, parsed)
         flags += [f for f in drift if f != "solve_provenance_unknown"]
+        # …and the gap sees it too, so an edited dispatch PPA is the change's,
+        # not an unexplained gap (round 2 R2-1).
+        bill.flags = sorted(set(bill.flags) | set(flags))
+        bill.provenance = {**bill.provenance, "drift": solve["drift"],
+                           "recipe_changed": solve["recipe_changed"]}
     pq = physical_quantities(n, cfg, result_df=result_df)
     pq["result_df"] = result_df
     lines, contract_flags = settlement_lines(n, parsed, pq)
