@@ -47,7 +47,7 @@ from db.models import LibraryItem
 from models import commercial as M
 from services.commercial import hashing as H
 from services.library.series_store import LibraryRefNotFound, LibraryRefStale
-from services.storage_paths import library_dir
+from services.storage_paths import library_file
 
 KINDS = ("tariff", "contract", "connection_agreement")
 CONTRACT_TYPES: dict[str, type[BaseModel]] = {
@@ -202,7 +202,7 @@ def put_item(db: DBSession, org_id: UUID, kind: str, name: str, payload: dict,
     data = _canonical_bytes(kind, model, payload)
     digest = hashlib.sha256(data).hexdigest()
     rel = Path("items") / kind / f"{_slug(name)}-{digest[:16]}.json"
-    _write(library_dir(root or _default_root(), org_id) / rel, data, digest)
+    _write(library_file(root or _default_root(), org_id, rel), data, digest)
     meta_json = json.dumps(meta_ok.model_dump(), sort_keys=True)
     for _ in range(_PUT_RETRIES):
         latest = _latest_row(db, org_id, kind, name)
@@ -247,10 +247,10 @@ def resolve(db: DBSession, org_id: UUID, ref: M.LibraryItemRef, *,
         raise LibraryRefNotFound(f"no {label} in this org")
     if ref.hash != row.hash:
         raise LibraryRefStale(f"ref hash for {label} does not match the Library")
-    base = library_dir(root or _default_root(), org_id).resolve()
-    path = (base / row.path).resolve()
-    if not path.is_relative_to(base):
-        raise LibraryRefStale(f"Library path for {label} points outside the org's Library")
+    try:
+        path = library_file(root or _default_root(), org_id, row.path)
+    except ValueError as exc:
+        raise LibraryRefStale(f"Library path for {label} points outside the org's Library") from exc
     try:
         data = path.read_bytes()
     except FileNotFoundError as exc:

@@ -18,6 +18,7 @@ The org segment is a **parameter**, not a constant — see `use_org_segment`.
 """
 from __future__ import annotations
 
+import os
 import uuid
 from pathlib import Path, PurePosixPath
 from typing import Iterable
@@ -181,3 +182,18 @@ def library_dir(root: Path, org_id: uuid.UUID) -> Path:
     two orgs can never share a Library directory even in local mode.
     """
     return Path(root) / ".library" / str(org_id)
+
+
+def library_file(root: Path, org_id: uuid.UUID, rel: str | Path) -> Path:
+    """
+    `rel` inside the org's Library directory, refused if it resolves outside.
+
+    Names are slugged and kinds allow-listed before they reach a path, so this
+    is the backstop: symlinks and `..` are resolved (`realpath`) and the result
+    must still sit under the org's directory, on both the write and read side.
+    """
+    base = os.path.realpath(library_dir(root, org_id))
+    full = os.path.realpath(os.path.join(base, rel))
+    if not full.startswith(base + os.sep):
+        raise ValueError("Library path points outside the org's Library directory")
+    return Path(full)

@@ -142,6 +142,15 @@ def write_pins(project_dir: Path, refs: Iterable[Any]) -> None:
     atomic_write_text(target, body)
 
 
+def _unreadable(label: str, exc: Exception) -> str:
+    """A fixed message per refusal class. The issue goes back in the open and
+    import responses, so it names the pin, never the exception's own text."""
+    if isinstance(exc, S.LibraryRefNotFound):
+        return f"Library {label} is not in this organization's Library"
+    return (f"Library {label} does not match its stored payload (hash mismatch, "
+            "or the file is missing or unreadable)")
+
+
 def _issue(reason: str, pin: dict | None, message: str) -> dict:
     pin = pin or {}
     return {"code": ISSUE_CODE, "reason": reason, "kind": pin.get("kind"), "id": pin.get("id"),
@@ -227,7 +236,7 @@ def check_pins(db: DBSession, org_id: UUID, project_dir: Path | None, *, config:
                                                  hash=pin["hash"], source=current.source),
                       root=root)
         except (S.LibraryRefStale, S.LibraryRefNotFound) as exc:
-            issues.append(_issue("payload_unreadable", pin, str(exc)))
+            issues.append(_issue("payload_unreadable", pin, _unreadable(f"series {label}", exc)))
         except Exception as exc:  # noqa: BLE001 — this check must never break an open
             issues.append(_issue("payload_unreadable", pin,
                                  f"Library series {label} could not be read "
@@ -248,7 +257,7 @@ def _check_item_pin(db: DBSession, org_id: UUID, pin: dict, root: Path | None) -
     try:
         I.resolve(db, org_id, current, root=root)
     except (S.LibraryRefStale, S.LibraryRefNotFound) as exc:
-        return [_issue("payload_unreadable", pin, str(exc))]
+        return [_issue("payload_unreadable", pin, _unreadable(label, exc))]
     except Exception as exc:  # noqa: BLE001 — this check must never break an open
         return [_issue("payload_unreadable", pin,
                        f"Library {label} could not be read ({type(exc).__name__})")]

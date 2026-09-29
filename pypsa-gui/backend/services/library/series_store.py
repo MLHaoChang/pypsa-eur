@@ -39,7 +39,7 @@ from sqlalchemy.orm import Session as DBSession
 
 from db.models import LibraryItem
 from models.commercial import PriceSeriesRef
-from services.storage_paths import library_dir  # noqa: F401  (re-exported for callers)
+from services.storage_paths import library_dir, library_file  # noqa: F401  (library_dir re-exported for callers)
 
 KIND = "series"
 _NAME_MAX = 128
@@ -177,7 +177,7 @@ def put_series(db: DBSession, org_id: UUID, name: str, series: pd.Series, meta: 
     data, tz = _canonical(series)
     digest = hashlib.sha256(data).hexdigest()
     rel = Path("series") / f"{_slug(name)}-{digest[:16]}.csv.gz"
-    _write_payload(library_dir(root or _default_root(), org_id) / rel, data, digest)
+    _write_payload(library_file(root or _default_root(), org_id, rel), data, digest)
     meta_json = json.dumps({**meta_ok.model_dump(), "tz": tz}, sort_keys=True)
 
     for _ in range(_PUT_RETRIES):
@@ -236,11 +236,11 @@ def resolve(db: DBSession, org_id: UUID, ref: PriceSeriesRef, *, root: Path | No
     row = _row_for(db, org_id, ref)
     if ref.hash != row.hash:
         raise LibraryRefStale(f"ref hash for {ref.id!r} v{ref.version} does not match the Library")
-    base = library_dir(root or _default_root(), org_id).resolve()
-    path = (base / row.path).resolve()
-    if not path.is_relative_to(base):
+    try:
+        path = library_file(root or _default_root(), org_id, row.path)
+    except ValueError as exc:
         raise LibraryRefStale(f"Library path for {ref.id!r} v{ref.version} points outside "
-                              "the org's Library directory")
+                              "the org's Library directory") from exc
     try:
         data = gzip.decompress(path.read_bytes())
     except FileNotFoundError as exc:
