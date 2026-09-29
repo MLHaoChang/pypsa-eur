@@ -11,6 +11,7 @@ store is `services/library/series_store.py`.
 """
 from __future__ import annotations
 
+import logging
 from datetime import date
 from enum import Enum
 from uuid import UUID
@@ -170,12 +171,26 @@ def _upload_name(name: str) -> str:
                                  "'/', '?' or '#'") from exc
 
 
+def _parsed(fn, *args, **kwargs):
+    """Run a PARSE step: anything it raises is the caller's file — a 422,
+    never a 500 (review F2). Storage faults are not parse steps (round 2 N1)."""
+    try:
+        return fn(*args, **kwargs)
+    except (ValueError, HTTPException):
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise series_io.SeriesInputError(f"unreadable upload ({type(exc).__name__})") from exc
+
+
 def _refuse_422(exc: Exception) -> HTTPException:
-    """Anything an upload raises is the caller's file, never a 500 (review F2)."""
+    """A refused upload (a `ValueError`, from parsing or the store's own
+    validation) is a 422; anything else is a server fault: logged, 500."""
     if isinstance(exc, HTTPException):
         return exc
-    msg = str(exc) if isinstance(exc, ValueError) else f"unreadable upload ({type(exc).__name__})"
-    return HTTPException(422, msg[:500])
+    if isinstance(exc, ValueError):
+        return HTTPException(422, str(exc)[:500])
+    logging.getLogger(__name__).exception("library upload failed")
+    return HTTPException(500, "the upload could not be stored")
 
 
 @router.post("/series/upload", response_model=PriceSeriesRef)
@@ -189,8 +204,8 @@ async def upload_series(file: UploadFile = File(...), name: str = Form(...),
     data = await read_capped(file)
 
     def work():
-        series = series_io.parse_upload(data, file.filename or "", timezone,
-                                        max_points=MAX_POINTS)
+        series = _parsed(series_io.parse_upload, data, file.filename or "", timezone,
+                         max_points=MAX_POINTS)
         return S.put_series(db, org, name, series, {"source": source}, created_by=user.id)
 
     try:
@@ -215,10 +230,11 @@ async def upload_meter_data(file: UploadFile = File(...), name: str = Form(...),
     data = await read_capped(file)
 
     def work():
-        raw = series_io.parse_upload(data, file.filename or "", None, max_points=MAX_POINTS,
-                                     allow_empty=True)
-        series, notes = series_io.meter_series(raw, timezone=timezone, unit=unit, label=label)
-        hist = series_io.meter_history(series, settlement=settlement)
+        raw = _parsed(series_io.parse_upload, data, file.filename or "", None,
+                      max_points=MAX_POINTS, allow_empty=True)
+        series, notes = _parsed(series_io.meter_series, raw, timezone=timezone, unit=unit,
+                                label=label)
+        hist = _parsed(series_io.meter_history, series, settlement=settlement)
         hist["notes"] = notes + hist["notes"]
         stored = series.dropna()
         if len(stored) < len(series):

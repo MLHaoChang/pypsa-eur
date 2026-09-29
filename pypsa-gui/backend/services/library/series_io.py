@@ -151,7 +151,9 @@ def parse_upload(data: bytes, filename: str, timezone: str | None = None, *,
             raise SeriesInputError(f"row {i}: timestamp {stamp!r} does not start with an ISO "
                                    "date (YYYY-MM-DD)")
         stamps.append(stamp)
-    return series_from(stamps, values, timezone, max_points=max_points).sort_index()
+    # Stable: plain local times keep the file order of a repeated fall-back
+    # hour, which decides its zone (round 2 C1).
+    return series_from(stamps, values, timezone, max_points=max_points).sort_index(kind="stable")
 
 
 # ── meter data → monthly history (P2 WP2.4b-ii) ──────────────────────────────
@@ -209,7 +211,7 @@ def meter_series(series: pd.Series, *, timezone: str | None, unit: str = "kW",
     if label not in LABELS:
         raise SeriesInputError(f"label is one of {', '.join(LABELS)}, got {label!r}")
     notes: list[str] = []
-    s = series.sort_index()
+    s = series.sort_index(kind="stable")
     idx = pd.DatetimeIndex(s.index)
     if idx.tz is not None:
         if timezone is None:
@@ -229,6 +231,8 @@ def meter_series(series: pd.Series, *, timezone: str | None, unit: str = "kW",
             raise SeriesInputError(f"the local times cannot be placed on {timezone}: "
                                    f"{str(exc)[:200]}") from exc
         notes.append("local_times_read_on_the_site_clock")
+    s = pd.Series(s.to_numpy(dtype=float), index=idx).sort_index(kind="stable")   # by instant
+    idx = pd.DatetimeIndex(s.index)
     if idx.has_duplicates:
         raise SeriesInputError("meter timestamps repeat")
     if len(idx) < 2:
@@ -236,8 +240,14 @@ def meter_series(series: pd.Series, *, timezone: str | None, unit: str = "kW",
     months = np.asarray(idx.year * 100 + idx.month)
     dur, step = _durations(idx, months)
     if label == "end":
-        idx = idx - pd.to_timedelta(step, unit="h")
-        months = np.asarray(idx.year * 100 + idx.month)
+        # An end-labelled row covers the gap to the PREVIOUS row (round 2 N3),
+        # and a row stamped on a month start closes the month before; the
+        # shift is in whole seconds (C2: float hours are not storable).
+        before = idx - pd.Timedelta(1, unit="ns")
+        _, step = _durations(idx, np.asarray(before.year * 100 + before.month))
+        prev = np.insert(np.diff(idx.asi8) / 3.6e12, 0, np.nan)
+        dur = np.where(np.isfinite(prev) & (prev <= 1.5 * step), prev, step)
+        idx = idx - pd.to_timedelta(np.rint(dur * 3600.0).astype("int64"), unit="s")
     v = s.to_numpy(dtype=float)
     if unit == "W":
         v = v / 1000.0
@@ -260,7 +270,7 @@ def meter_history(series: pd.Series, *, settlement: str = "15min",
     if settlement not in SETTLEMENTS:
         raise SeriesInputError(f"settlement is one of {', '.join(SETTLEMENTS)}, "
                                f"got {settlement!r}")
-    s = series.sort_index()
+    s = series.sort_index(kind="stable")
     if s.index.has_duplicates:
         raise SeriesInputError("meter timestamps repeat")
     idx = pd.DatetimeIndex(s.index)
@@ -324,21 +334,26 @@ def meter_history(series: pd.Series, *, settlement: str = "15min",
     for m in complete:
         if energy[key(m)] == 0.0 and neg:
             notes.append(f"month_without_import:{key(m)}")
-    peaks: dict[str, float] = {}
+    # Peaks per MONTH (round 2 N2): a month whose meter is coarser than the
+    # settlement, or whose rows cross an interval boundary, has no peak.
     settle_h = SETTLEMENTS[settlement]
-    coarse = float(np.max(step)) > settle_h * (1 + _STEP_TOL)
     ikey = interval_key(idx, {"15min": "15min", "30min": "30min", "h": "h"}[settlement])
     offset_h = (idx.asi8 - ikey) / 3.6e12
-    crosses = bool((offset_h + dur > settle_h * (1 + _STEP_TOL)).any())
-    if coarse:
-        notes.append(f"peaks_not_established:meter_step_{float(np.max(step)):g}h_coarser_than_"
-                     f"settlement_{settlement}")
-    elif crosses:
-        notes.append(f"peaks_not_established:meter_rows_cross_{settlement}_intervals")
-    else:
-        per = pd.DataFrame({"key": ikey, "e": imp * dur, "dur": dur, "m": code}) \
-            .groupby("key").agg(e=("e", "sum"), dur=("dur", "sum"), m=("m", "first"))
-        top = (per["e"] / per["dur"]).groupby(per["m"]).max()
-        peaks = {key(m): float(top[m]) for m in complete if m in top.index}
+    rowflags = pd.DataFrame({"m": code, "coarse": step > settle_h * (1 + _STEP_TOL),
+                             "cross": offset_h + dur > settle_h * (1 + _STEP_TOL)}) \
+        .groupby("m")[["coarse", "cross"]].any()
+    per = pd.DataFrame({"key": ikey, "e": imp * dur, "dur": dur, "m": code}) \
+        .groupby("key").agg(e=("e", "sum"), dur=("dur", "sum"), m=("m", "first"))
+    top = (per["e"] / per["dur"]).groupby(per["m"]).max()
+    peaks: dict[str, float] = {}
+    for m in complete:
+        if rowflags.at[m, "coarse"]:
+            notes.append(f"peaks_not_established:{key(m)}:meter_step_coarser_than_"
+                         f"settlement_{settlement}")
+        elif rowflags.at[m, "cross"]:
+            notes.append(f"peaks_not_established:{key(m)}:meter_rows_cross_{settlement}_"
+                         "intervals")
+        elif m in top.index:
+            peaks[key(m)] = float(top[m])
     return {"meter_history_peaks_kw": peaks, "meter_history_energy_kwh": energy,
             "settlement": settlement, "notes": notes}

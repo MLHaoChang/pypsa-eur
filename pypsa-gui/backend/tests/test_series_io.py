@@ -108,7 +108,7 @@ def test_a_meter_coarser_than_the_settlement_gives_energy_but_no_peaks():
     h = SIO.meter_history(_month(freq="h"), settlement="15min")
     assert h["meter_history_peaks_kw"] == {}
     assert h["meter_history_energy_kwh"] == {"2030-01": pytest.approx(300.0 * 744)}
-    assert "peaks_not_established:meter_step_1h_coarser_than_settlement_15min" in h["notes"]
+    assert "peaks_not_established:2030-01:meter_step_coarser_than_settlement_15min" in h["notes"]
 
 
 def test_months_are_on_the_site_clock_and_dst_months_have_their_real_hours():
@@ -270,7 +270,7 @@ def test_rows_that_do_not_fit_the_settlement_intervals_give_no_peaks():
     """F10: a 10-min meter against 15-min intervals."""
     h = SIO.meter_history(_month(freq="10min"), settlement="15min")
     assert h["meter_history_peaks_kw"] == {}
-    assert "peaks_not_established:meter_rows_cross_15min_intervals" in h["notes"]
+    assert "peaks_not_established:2030-01:meter_rows_cross_15min_intervals" in h["notes"]
     assert h["meter_history_energy_kwh"] == {"2030-01": pytest.approx(300.0 * 744)}
 
 
@@ -290,3 +290,71 @@ def test_mixed_steps_jitter_missing_months_and_negative_files_are_handled():
     neg = SIO.meter_history(-_month())
     assert "mostly_negative_rows_check_the_sign_convention" in neg["notes"]
     assert "month_without_import:2030-01" in neg["notes"]
+
+
+# ── review round 2 ─────────────────────────────────────────────────────────
+
+
+def test_a_fall_back_month_of_plain_local_times_goes_through_the_route(client):
+    """C1: file order decides the repeated hour; the stored series is in time
+    order; a spike in the SECOND 02:00–03:00 (winter time) keeps its value."""
+    idx = pd.date_range("2030-10-01", "2030-11-01", freq="5min", tz="Europe/Berlin",
+                        inclusive="left")
+    v = 100.0 + np.arange(len(idx)) % 7                         # distinct values
+    naive = idx.tz_localize(None)
+    spike = int(np.flatnonzero(naive == pd.Timestamp("2030-10-27 02:30"))[1])  # winter time
+    v[spike:spike + 3] = 900.0                                  # the 02:30 quarter, second pass
+    body = ("timestamp,value\n" + "\n".join(f"{t.isoformat()},{x}" for t, x in zip(naive, v))
+            + "\n").encode()
+    r = _post_meter(client, body, name="oct", timezone="Europe/Berlin")
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["meter_history_peaks_kw"]["2030-10"] == pytest.approx(900.0)
+    assert out["meter_history_energy_kwh"]["2030-10"] == pytest.approx(
+        float((v * 5 / 60).sum()))
+    stored = client.get("/api/library/series/oct").json()
+    got = pd.Series(stored["values"], index=pd.to_datetime(stored["timestamps"], utc=True))
+    assert got.index.is_monotonic_increasing and len(got) == len(idx)
+    assert np.allclose(got.to_numpy(), v)
+
+
+def test_end_labelled_five_minute_data_goes_through_the_route(client):
+    """C2: the end-label shift is in whole seconds."""
+    idx = pd.date_range("2030-01-01 00:05", "2030-02-01 00:00", freq="5min")
+    body = _csv(idx, np.full(len(idx), 300.0))
+    r = _post_meter(client, body, name="end5", label="end")
+    assert r.status_code == 200, r.text
+    assert r.json()["meter_history_energy_kwh"] == {"2030-01": pytest.approx(300.0 * 744)}
+    assert not any(n.startswith("timestamps_snapped") for n in r.json()["notes"])
+
+
+def test_a_storage_fault_is_a_500_not_a_422(client, monkeypatch):
+    """N1: the caller's file is a 422; the server's disk is not."""
+    from services.library import series_store as S
+
+    def boom(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(S, "put_series", boom)
+    body = _csv(_month().index, _month().to_numpy())
+    r = _post_meter(client, body, name="fault")
+    assert r.status_code == 500
+
+
+def test_one_coarse_month_does_not_cost_the_others_their_peaks():
+    """N2."""
+    s = pd.concat([_month(freq="15min"), _month(freq="h", start="2030-02-01")])
+    h = SIO.meter_history(s)
+    assert set(h["meter_history_peaks_kw"]) == {"2030-01"}
+    assert set(h["meter_history_energy_kwh"]) == {"2030-01", "2030-02"}
+    assert "peaks_not_established:2030-02:meter_step_coarser_than_settlement_15min" in h["notes"]
+
+
+def test_end_labelled_kwh_uses_the_interval_before_each_row():
+    """N3: at a step change the end-labelled row covers the gap behind it."""
+    a = pd.date_range("2030-01-01 00:15", "2030-02-01 00:00", freq="15min")
+    b = pd.date_range("2030-02-01 00:05", "2030-03-01 00:00", freq="5min")
+    kwh = pd.Series(np.r_[np.full(len(a), 25.0), np.full(len(b), 25.0 / 3)],
+                    index=a.append(b))                           # 100 kW throughout
+    s, _ = SIO.meter_series(kwh, timezone=None, unit="kWh_per_interval", label="end")
+    assert np.allclose(s.to_numpy(), 100.0)

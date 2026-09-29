@@ -1186,6 +1186,13 @@ Files: `services/library/series_io.py` (from WP2.4b-0), `routers/library.py` (up
   - F14: upload timestamps must start with an ISO date (a day-first `01/02/2030` is refused). The P1 JSON route's accepted forms are unchanged.
   - F15: a month missing between the first and the last is named `month_missing:<m>`, and uploads are sorted.
   - `test_series_io.py` has 25 tests.
+- **WP2.4b-ii review round 2 → PASS WITH CONDITIONS; fixed:**
+  - C1 (HIGH): the fall-back hour was sorted by wall time before it was localized (unstable sort, out of time order, negative durations). → Every sort is stable; `meter_series` localizes in file order and then sorts by instant before durations and units. Route test: Berlin October at 5 min with distinct values and a spike in the second 02:30. The stored series is in time order and the peak is 900.
+  - C2: the end-label shift was in float hours, which cannot be stored. → Whole seconds. Route test: 5-min end-labelled data.
+  - N1: `_refuse_422` hid server faults. → Parse steps (`_parsed`) are 422; a store `ValueError` is 422; anything else is logged and a 500.
+  - N2: peak decisions are per month (`peaks_not_established:<m>:<why>`).
+  - N3: an end-labelled row's duration is the gap to the previous row, and a row stamped on a month start takes the step of the month it closes.
+  - `test_series_io.py` has 30 tests.
 
 ## WP2.4c Library chat tools
 
