@@ -262,6 +262,28 @@ phantom internal party, a mis-resolved payee); V1 and V1b reconciliation to the 
 flat and multi-period; a tariff export item **and** `export_price_ref` together (no double count); an
 internal DSO (V4) closes; the DSR / VoLL disclosures when they dispatch.
 
+
+**WP3.1 implementation (f66173b).**
+- **Review round 1 → PASS WITH CONDITIONS, fixed.** The reviewer's probes closed check 4 on:
+  - tariff capacity items (extendable and fixed PoC);
+  - the firm and fixed connection fees;
+  - DSR and VoLL;
+  - activity masking;
+  - the export split across DST;
+  - a 35,040-snapshot year (ledger in 2.9 s, no cache needed).
+
+  Fixes:
+  - **H1:** an unsettled contract (or a retail contract on another tariff) is a None line plus a blocking flag, never a vanished contract.
+  - **H2:** the bill's, the cost terms' and the settlement's flags reach `LedgerInputs.input_flags`. Drift, a partial import, an unsettled contract, a term not established and an unbilled period make every period None through a fifth check, `inputs_established`. Per-period bill flags are disclosed.
+  - **#3:** a single `_sources` definition gives each source's expected legs (debtor, creditor, signed value) and stream. The builder emits them; coverage compares payer AND payee (`same_party`), signed sums and the stream, so a moved payer, a moved capex payer, a relabelled stream and a line contradicting its source all fail. What check 4 can and cannot see is documented; check 2 is documented as a bookkeeping identity.
+  - **#4:** `ValueFlowConfig.connection_fee_payee` replaces the unsaveable `connection_fee` payee rule.
+  - **#5:** `classify_buses` runs two searches (site, grid). A bus both reach is behind a meter bypass: flagged, on the nearer side, a tie on the site side. A site-side Generator on a bus of another carrier is a `fuel_supply_generator` (opex → market, stream `fuel`). Eight classifier unit tests.
+  - **#6:** `same_party` everywhere.
+  - **#7:** a capacity item on `peak_import` is `network_capacity`.
+  - **#8:** None disclosures are flagged; sub-cent disclosures are LP noise; the curtailment penalty is disclosed; NaN→0 in `_per_asset` is documented; the per-period total is guarded.
+  - **#9:** skipped export-split sources are flagged; bill items split at any sign; `asset_under_external_ppa` notes.
+  - **#10:** imports moved to the top, and the `build_ledger` docstring written. The plan's `site_party` argument is `inputs.site_party`.
+  - **#11:** V1b is multi-period too; live DSR/VoLL (VoLL equals the lost-load capture's cost); live unsettled and dead-retail contracts, drift, partial import; the export split by hand with two site generators whose shares vary; the phantom-party cases split (a stale party in a source → None, a line contradicting its source → coverage fails).
 ---
 
 ## WP3.2 Templates

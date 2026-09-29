@@ -17,7 +17,7 @@ import copy
 
 import pytest
 
-from models.commercial import ValueFlowConfig
+from models.commercial import TariffPayeeRule, ValueFlowConfig
 from services.commercial import participants as P
 
 VF = ValueFlowConfig.model_validate({
@@ -101,8 +101,8 @@ def test_a_negative_cost_item_is_reversed_not_absolute_valued():
 
 def test_payee_precedence_rule_then_retail_contract_then_default():
     vf = VF.model_copy(update={"tariff_payees": [
-        P.TariffPayeeRule(item_id="demand", payee="retailer"),
-        P.TariffPayeeRule(kind="energy", payee="dso")]})
+        TariffPayeeRule(item_id="demand", payee="retailer"),
+        TariffPayeeRule(kind="energy", payee="dso")]})
     led = P.build_ledger(_inputs(retailer="Big Utility"), vf.model_copy(update={
         "externals": [*vf.externals, "Big Utility"]}))
     assert led.tariff_payees["demand"] == "retailer"          # item rule
@@ -212,7 +212,8 @@ def test_the_fixture_ledger_passes_every_check():
     res = P.check_conservation(P.build_ledger(inputs, VF), inputs, VF)
     assert res.ok is True, res.periods["_"].checks
     assert [c["name"] for c in res.periods["_"].checks] == \
-        ["double_entry", "internal_nets_to_zero", "coverage", "reconciliation"]
+        ["double_entry", "internal_nets_to_zero", "coverage", "reconciliation",
+         "inputs_established"]
 
 
 def _corrupt(fn):
@@ -249,7 +250,7 @@ def test_an_amount_off_by_a_cent_fails():
     assert not _check(res, "coverage")["ok"]
 
 
-def test_a_phantom_internal_party_fails_double_entry():
+def test_a_line_paying_itself_fails_double_entry():
     def phantom(lines):
         ln = next(l for l in lines if l.contract_id == "ppa1")
         ln.payee = ln.payer
@@ -331,3 +332,129 @@ def test_participant_and_stream_totals():
     assert dev["paid"] == pytest.approx(55.0)
     assert dev["net"] == pytest.approx(-15.0)
     assert dev["by_stream"]["ppa_settlement"] == pytest.approx(40.0)
+
+
+# ── WP3.1 review round 1 ───────────────────────────────────────────────────
+
+
+def test_a_party_neither_participant_nor_external_makes_the_result_none():
+    """#11: a stale party in a SOURCE (a contract edited after the config was
+    saved) is unknown money — None, never a confident True. (A line whose party
+    contradicts its source is corruption: coverage fails, see above.)"""
+    settlement = [{"period": "_", "contract_id": "ppa1", "payer": "site",
+                   "payee": "Phantom Ltd", "value_stream": "ppa_energy", "amount": 40.0,
+                   "quantity_mwh": 1.0, "flags": []}]
+    inputs = _inputs(settlement=settlement)
+    res = P.check_conservation(P.build_ledger(inputs, VF), inputs, VF)
+    assert res.ok is None
+    assert _check(res, "coverage")["ok"] is True
+
+
+def test_a_line_whose_party_contradicts_its_source_fails_coverage():
+    inputs = _inputs()
+    led = P.build_ledger(inputs, VF)
+    next(l for l in led.periods["_"] if l.contract_id == "ppa1").payee = "Phantom Ltd"
+    assert _check(P.check_conservation(led, inputs, VF), "coverage")["ok"] is False
+
+
+def test_a_moved_payer_fails_coverage():
+    """#3: the energy bill paid by the developer instead of the site."""
+    res = _corrupt(lambda lines: setattr(
+        next(l for l in lines if l.tariff_item == "energy"), "payer", "developer"))
+    assert not _check(res, "coverage")["ok"]
+
+
+def test_a_moved_capex_payer_fails_coverage():
+    res = _corrupt(lambda lines: setattr(
+        next(l for l in lines if l.asset == "pv" and l.value_stream == "capex"), "payer", "site"))
+    assert not _check(res, "coverage")["ok"]
+
+
+def test_a_relabelled_stream_fails_coverage():
+    res = _corrupt(lambda lines: setattr(
+        next(l for l in lines if l.tariff_item == "demand"), "value_stream", "retail_fixed"))
+    assert not _check(res, "coverage")["ok"]
+
+
+def test_a_recased_party_is_the_same_party():
+    """#6: parties compare with same_party everywhere."""
+    def recase(lines):
+        next(l for l in lines if l.contract_id == "ppa1").payee = "DEVELOPER"
+        next(l for l in lines if l.tariff_item == "energy").payer = "Site"
+    res = _corrupt(recase)
+    assert _check(res, "coverage")["ok"] is True
+
+
+@pytest.mark.parametrize("flag", [
+    "config_changed_since_solve", "tariff_incomplete:demandratchet",
+    "contract_not_settled:ppa2:no asset", "network_capacity_not_established",
+    "lp_recipe_changed", "period_not_billed:_"])
+def test_an_input_that_makes_money_unknown_makes_the_result_none(flag):
+    """#2: drift, a partial import, an unsettled contract or an unestablished
+    cost term is never a confident True."""
+    inputs = _inputs(input_flags=[flag])
+    res = P.check_conservation(P.build_ledger(inputs, VF), inputs, VF)
+    assert res.ok is None
+    assert _check(res, "inputs_established")["ok"] is None
+    assert f"input_not_established:{flag}" in res.flags
+
+
+def test_a_disclosure_flag_does_not_block():
+    inputs = _inputs(input_flags=["demand_partial_months"])
+    res = P.check_conservation(P.build_ledger(inputs, VF), inputs, VF)
+    assert res.ok is True
+    assert "demand_partial_months" in P.build_ledger(inputs, VF).flags
+
+
+def test_an_unsettled_contract_is_a_none_line():
+    """#1: a contract that did not settle never vanishes."""
+    inputs = _inputs(unsettled_contracts=[("ppa2", "names ghost")],
+                     input_flags=["contract_not_settled:ppa2:names ghost"])
+    led = P.build_ledger(inputs, VF)
+    (line,) = _lines(led, contract_id="ppa2")
+    assert line.amount is None and any("contract_not_settled" in f for f in line.flags)
+    assert P.check_conservation(led, inputs, VF).ok is None
+
+
+def test_the_connection_fee_payee_field():
+    """#4: who is paid the fee is its own field (a payee rule cannot name it)."""
+    vf = VF.model_copy(update={"connection_fee_payee": "tso"})
+    led = P.build_ledger(_inputs(), vf)
+    (fee,) = _lines(led, source="connection")
+    assert fee.payee == "tso"
+    assert P.check_conservation(led, _inputs(), vf).ok is True
+
+
+def test_a_capacity_item_on_peak_import_is_a_network_capacity_charge():
+    """#7."""
+    items = {**_inputs().bill_items,
+             "leistung": P.BillItem("leistung", "capacity", "peak_import", "cost")}
+    bill = {"_": {**_inputs().bill["_"], "leistung": 9.0}}
+    led = P.build_ledger(_inputs(bill_items=items, bill=bill), VF)
+    (cap,) = _lines(led, tariff_item="leistung")
+    assert cap.value_stream == "network_capacity"
+
+
+def test_a_fuel_supply_generator_buys_from_the_market():
+    """#5: gas behind a CHP Link is a fuel purchase, not O&M."""
+    assets = [*_inputs().assets,
+              P.AssetCost("Generator", "gas_supply", "site", ["fuel_supply_generator"],
+                          {"_": 0.0}, {"_": 0.0}, {"_": 7.0})]
+    inputs = _inputs(assets=assets, cost_breakdown_total={"_": 290.0})
+    led = P.build_ledger(inputs, VF)
+    (gas,) = _lines(led, asset="gas_supply")
+    assert (gas.payee, gas.value_stream) == ("market", "fuel")
+    assert P.check_conservation(led, inputs, VF).ok is True
+
+
+def test_unknown_disclosures_and_the_curtailment_penalty_are_flagged():
+    """#8."""
+    led = P.build_ledger(_inputs(disclosures={"_": {"dsr_slack": None, "voll": 0.0}},
+                                 curtailment_penalty=12.0), VF)
+    assert "dsr_slack_not_established" in led.flags
+    assert "curtailment_penalty_not_a_cash_flow" in led.flags
+
+
+def test_bill_flags_reach_the_ledger():
+    led = P.build_ledger(_inputs(bill_flags={"_": ["demand:demand_on_partial_month"]}), VF)
+    assert "bill:_:demand:demand_on_partial_month" in led.flags

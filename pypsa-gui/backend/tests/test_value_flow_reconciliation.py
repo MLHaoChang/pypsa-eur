@@ -94,27 +94,29 @@ def _commercial(vf=VF, **extra):
     return out
 
 
-def _solve(n, commercial, *, multi=False):
+def _solve(n, commercial, *, multi=False, state=None, **kw):
     from services.pypsa_service import PyPSAService
     from services.solver_service import SolverConfig, run_simulation
     import routers.simulation as sim_router
     from tests.conftest import install_network_into_backend
 
     install_network_into_backend(n)
-    cfg = SolverConfig(commercial=commercial, multi_investment_periods=multi)
+    cfg = SolverConfig(commercial=commercial, multi_investment_periods=multi, **kw)
     sim_router._state["solver_config"] = cfg
     n = PyPSAService.get_network()
     status, cond = run_simulation(cfg, n, PyPSAService.get_lock(), threading.Event(),
-                                  queue.SimpleQueue(), state_update=lambda **k: None)
+                                  queue.SimpleQueue(),
+                                  state_update=lambda **k: None if state is None
+                                  else state.update(k))
     assert status in ("ok", "optimal"), (status, cond)
     return n, cfg
 
 
-def _ledger(n, cfg):
+def _ledger(n, cfg, lost_load=None):
     import routers.results as R
     from services.results.value_flows import value_flow_ledger
 
-    got = value_flow_ledger(n, cfg, result_df=R._result_df)
+    got = value_flow_ledger(n, cfg, result_df=R._result_df, lost_load=lost_load)
     assert got is not None
     return got
 
@@ -151,15 +153,17 @@ def test_v1_single_owner_reconciles_to_cost_breakdown_to_the_cent(reset_backend,
 
 
 @pytest.mark.live_solve
-def test_v1b_every_costed_asset_is_in_the_ledger_and_it_still_closes(reset_backend):
-    n, cfg = _solve(_network(extras=True), _commercial())
+@pytest.mark.parametrize("multi", [False, True], ids=["flat", "multi"])
+def test_v1b_every_costed_asset_is_in_the_ledger_and_it_still_closes(reset_backend, multi):
+    n, cfg = _solve(_network(extras=True, multi=multi), _commercial(), multi=multi)
     inputs, vf, ledger, res = _ledger(n, cfg)
-    assert res.periods["_"].ok is True, _checks(res, "_")
+    for p in inputs.periods:
+        assert res.periods[p].ok is True, _checks(res, p)
     by_asset = {(a.component, a.name): a for a in inputs.assets}
     assert by_asset[("Line", "feeder")].side == "site"
     assert by_asset[("Transformer", "tx")].side == "site"
     assert by_asset[("Generator", "island_gen")].side == "unclassified"
-    lines = ledger.periods["_"]
+    lines = ledger.periods[inputs.periods[0]]
     assert any(ln.asset == "feeder" and ln.value_stream == "capex" for ln in lines)
     assert any(ln.asset == "tx" for ln in lines)
     island = [ln for ln in lines if ln.asset == "island_gen"]
@@ -213,3 +217,101 @@ def test_a_corrupted_value_flows_means_no_ledger_but_a_named_error(reset_backend
     n, cfg = _solve(_network(), _commercial({"participants": "x"}))
     with pytest.raises(ValueFlowsInvalid):
         value_flow_ledger(n, cfg, result_df=R._result_df)
+
+
+# ── WP3.1 review round 1 ───────────────────────────────────────────────────
+
+
+@pytest.mark.live_solve
+def test_dsr_and_voll_are_disclosed_and_it_still_closes(reset_backend):
+    n = _network()
+    n.links.loc["import", "p_nom_extendable"] = False
+    n.links.loc["import", "p_nom"] = 1.0                   # scarce enough to shed
+    n.generators.loc["pv", "p_nom_extendable"] = False
+    n.generators.loc["pv", "p_nom"] = 5.0
+    commercial = _commercial()
+    commercial.pop("connection")      # a firm agreement's import cap would lift the Link's
+    state: dict = {}
+    n, cfg = _solve(n, commercial, state=state, dsr_price_eur_per_mwh=40.0,
+                    dsr_share_of_load=0.1, dsr_buses=["site"], voll=1000.0)
+    inputs, vf, ledger, res = _ledger(n, cfg, lost_load=state.get("last_lost_load"))
+    assert res.periods["_"].ok is True, _checks(res, "_")
+    d = ledger.disclosures["_"]
+    assert d["dsr_slack"] and d["dsr_slack"] > 0
+    ll = state["last_lost_load"]
+    assert d["voll"] == pytest.approx(ll["lost_load_cost_eur"], rel=1e-9) and d["voll"] > 0
+    assert {"dsr_slack_not_a_cash_flow", "voll_not_a_cash_flow"} <= set(ledger.flags)
+
+
+@pytest.mark.live_solve
+def test_an_unsettled_contract_or_a_dead_retail_contract_makes_the_result_none(reset_backend):
+    """#1: a PPA on a missing asset and a retail contract on another tariff
+    never vanish — the ledger says it cannot be established."""
+    ghost = {**PPA, "id": "ppa2", "asset_ids": ["ghost"], "changes_dispatch": False}
+    retail = {"type": "retail", "id": "r1", "retailer": "retailer", "customer": "site",
+              "tariff_id": "not_this_one", "tenor_years": 5}
+    n, cfg = _solve(_network(), _commercial(contracts=[PPA, LEASE, ghost, retail]))
+    inputs, vf, ledger, res = _ledger(n, cfg)
+    assert res.ok is None
+    assert any(ln.contract_id == "ppa2" and ln.amount is None for ln in ledger.periods["_"])
+    assert any(f.startswith("input_not_established:contract_not_settled:ppa2") for f in res.flags)
+    assert any("contract_not_settled:r1" in f for f in res.flags)
+
+
+@pytest.mark.live_solve
+def test_a_tariff_edited_after_the_solve_makes_the_result_none(reset_backend):
+    """#2 probe A: the bill is re-rated on a tariff the solve never saw."""
+    n, cfg = _solve(_network(), _commercial())
+    edited = copy.deepcopy(cfg.commercial)
+    edited["import_tariff"]["items"][0]["periods"][1]["rate"] = 0.45
+    cfg.commercial = edited
+    inputs, vf, ledger, res = _ledger(n, cfg)
+    assert res.ok is None
+    assert "input_not_established:config_changed_since_solve" in res.flags
+
+
+@pytest.mark.live_solve
+def test_a_partial_tariff_import_makes_the_result_none(reset_backend):
+    """#2 probe B: charges the import could not map are missing money."""
+    commercial = _commercial()
+    commercial["import_tariff"]["unsupported_fields"] = ["demandratchetpercentage"]
+    n, cfg = _solve(_network(), commercial)
+    inputs, vf, ledger, res = _ledger(n, cfg)
+    assert res.ok is None
+    assert any("tariff_incomplete" in f for f in res.flags)
+
+
+@pytest.mark.live_solve
+def test_the_export_split_by_hand_with_two_site_generators(reset_backend):
+    """#11: pv (developer) and pv2 (site) with different profiles share every
+    interval's export revenue — the export price AND the feed-in item — pro
+    rata to their output in that interval."""
+    n = _network()
+    prof = 0.5 + 0.5 * np.cos(np.arange(len(n.snapshots)) / 96 * 2 * np.pi)
+    n.add("Generator", "pv2", bus="site", carrier="solar", p_nom=15.0,
+          p_max_pu=pd.Series(np.clip(prof, 0, 1), index=n.snapshots), marginal_cost=0.0)
+    vf = {**copy.deepcopy(VF), "export_revenue_to": "asset_owner",
+          "participants": [{"id": "site", "name": "Site", "role": "offtaker"},
+                           {"id": "developer", "name": "Dev", "role": "developer"}],
+          "asset_owners": [{"asset_id": "pv", "component": "Generator",
+                            "owner": "developer"}]}
+    n, cfg = _solve(n, _commercial(vf))
+    inputs, _vf, ledger, res = _ledger(n, cfg)
+    assert res.periods["_"].ok is True, _checks(res, "_")
+    w = n.snapshot_weightings.objective.to_numpy(float)
+    exp_mw = n.links_t.p0["export"].to_numpy(float)
+    price = n.links_t["ic_export_price"]["export"].to_numpy(float)
+    g1 = np.clip(n.generators_t.p["pv"].to_numpy(float), 0, None)
+    g2 = np.clip(n.generators_t.p["pv2"].to_numpy(float), 0, None)
+    tot = g1 + g2
+    share = np.where(tot > 0, g1 / np.where(tot > 0, tot, 1.0), 0.0)
+    assert 0.05 < share[tot > 0].mean() < 0.95             # the shares really vary
+    hand_price = float((w * exp_mw * price * share).sum())
+    hand_feed_in = float((w * exp_mw * 1000.0 * 0.01 * share).sum())
+    lines = ledger.periods["_"]
+    got_price = sum(ln.amount for ln in lines if ln.source == "export_price"
+                    and ln.payee == "developer")
+    got_feed_in = sum(ln.amount for ln in lines if ln.tariff_item == "feed_in"
+                      and ln.payee == "developer")
+    assert got_price == pytest.approx(hand_price, abs=0.005)
+    assert got_feed_in == pytest.approx(hand_feed_in, abs=0.005)

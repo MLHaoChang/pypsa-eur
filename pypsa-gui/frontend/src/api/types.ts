@@ -495,6 +495,8 @@ export interface ValueFlowConfig {
   hub_members?: HubMember[]
   allocation?: AllocationKey | null
   export_revenue_to?: 'site_party' | 'asset_owner'
+  /** Who is paid the connection agreement's fees; null = "dso". */
+  connection_fee_payee?: string | null
 }
 /**
  * GET/PUT /api/simulation/commercial/value_flows (IC P3 WP3.0). Send `digest` back as

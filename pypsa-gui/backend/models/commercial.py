@@ -131,6 +131,8 @@ class ValueFlowConfig(BaseModel):
     hub_members: list[HubMember] = Field(default_factory=list)
     allocation: AllocationKey | None = None
     export_revenue_to: Literal["site_party", "asset_owner"] = "site_party"
+    # Who is paid the connection agreement's fees; None = `dso` (WP3.1 review #4).
+    connection_fee_payee: str | None = None
 
 
 # ------------------------------------------------------------------ series refs
