@@ -645,3 +645,43 @@ def test_put_sites_409s_under_a_foreign_lock(session_local):
         assert get_sites(project.name, db=db, user=db.get(User, user_a.id)) == {"version": 1, "sites": []}
         # And the write never became the lock holder.
         assert project_locks.get_lock(db, project.id).holder_user_id == user_b.id
+
+
+def test_site_context_writes_409_under_a_foreign_lock(session_local, monkeypatch):
+    """POST/DELETE `/sites/{id}/context` are lock-CHECKED like `put_sites`; GET is not."""
+    from fastapi import HTTPException
+
+    from routers.projects import delete_site_context, fetch_site_context, get_site_context, put_sites
+    from services import project_locks, site_context as sc
+
+    doc = {
+        "version": 1,
+        "sites": [{
+            "id": "s1", "name": "S", "buses": [],
+            "boundary": [[0.0, 0.0], [0.01, 0.0], [0.01, 0.01]],
+            "origin": {"lng": 0.005, "lat": 0.003}, "placements": {},
+        }],
+    }
+    calls = []
+    monkeypatch.setattr(sc, "fetch_context", lambda boundary, **kw: calls.append(boundary) or {"version": 1})
+    org = _create_org(session_local)
+    user_a = _create_user(session_local, email="a@example.com")
+    user_b = _create_user(session_local, email="b@example.com")
+    _add_membership(session_local, user_id=user_a.id, org_id=org.id, role="admin")
+    _add_membership(session_local, user_id=user_b.id, org_id=org.id, role="admin")
+    project = _create_project(session_local, org=org, creator=user_a, name="Alpha")
+
+    with session_local() as db:
+        a = db.get(User, user_a.id)
+        put_sites(project.name, doc, db=db, user=a)
+        assert project_locks.acquire_lock(db, project.id, user_b.id) is not None
+        for handler in (fetch_site_context, delete_site_context):
+            with pytest.raises(HTTPException) as exc:
+                handler(project.name, "s1", db=db, user=a)
+            assert exc.value.status_code == 409
+            assert exc.value.detail["error_kind"] == "project_locked"
+        assert calls == []
+        with pytest.raises(HTTPException) as exc:
+            get_site_context(project.name, "s1", db=db, user=a)
+        assert exc.value.status_code == 404  # a cache miss, not a lock
+        assert project_locks.get_lock(db, project.id).holder_user_id == user_b.id

@@ -38,3 +38,55 @@ export const PLACEABLE_CLASSES = new Set(['Bus', 'Generator', 'StorageUnit', 'St
 export const placementKey = (cls: string, name: string): string => `${cls}:${name}`
 
 export const emptySitesDocument = (): SitesDocument => ({ version: 1, sites: [] })
+
+// ── Site context (WP5): OSM footprints + terrain, mirrored from
+// backend/services/site_context.py (`context.json`, schema version 1). ──────
+
+export type ContextLineKind = 'road' | 'rail' | 'fence' | 'power_line'
+export type ContextAreaKind = 'power_substation' | 'landuse' | 'water'
+
+export interface ContextBuilding {
+  id: number
+  /** WGS84 ring, implicitly closed. */
+  polygon: LngLatTuple[]
+  height_m: number
+  height_source: 'tag' | 'levels' | 'landuse' | 'default'
+  tags: Record<string, string>
+}
+
+export interface ContextLine {
+  id: number
+  kind: ContextLineKind
+  points: LngLatTuple[]
+  tags: Record<string, string>
+}
+
+export interface ContextArea {
+  id: number
+  kind: ContextAreaKind
+  polygon: LngLatTuple[]
+  tags: Record<string, string>
+}
+
+export interface TerrainGrid {
+  z: number
+  /** Samples per side; `heights_m` has grid² entries, row 0 = north, column 0 = west. */
+  grid: number
+  /** [min_lng, min_lat, max_lng, max_lat] the samples span (row/column 0 on the max_lat / min_lng edge). */
+  bbox: [number, number, number, number]
+  heights_m: number[]
+  source: string
+  missing_tiles: number
+}
+
+export interface SiteContext {
+  version: 1
+  source: string
+  fetched_at: string
+  bbox: [number, number, number, number]
+  buildings: ContextBuilding[]
+  lines: ContextLine[]
+  areas: ContextArea[]
+  terrain: TerrainGrid | null
+  attribution: string[]
+}

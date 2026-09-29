@@ -309,3 +309,152 @@ def test_rename_hook_failure_never_fails_the_rename(client, api_project, monkeyp
     r = client.put("/api/network/generators/gas", json={"name": "gas_still_renamed", "bus": "B1"})
     assert r.status_code == 200, r.text
     assert "gas_still_renamed" in [g["name"] for g in client.get("/api/network/generators").json()]
+
+
+# ── site context routes (WP5, Task 5.3) ─────────────────────────────────────
+
+CONTEXT_DOC = {
+    "version": 1, "source": "overpass", "fetched_at": "2026-09-29T00:00:00Z",
+    "bbox": [6.82, 53.42, 6.85, 53.45], "buildings": [], "lines": [], "areas": [],
+    "terrain": None, "attribution": ["© OpenStreetMap contributors (ODbL)"],
+}
+
+
+def _stub_fetch(monkeypatch, result=None, error=None):
+    """Replace the wire with a counter; the wire itself is tests/test_site_context.py."""
+    from services import site_context as sc
+
+    calls = []
+
+    def fake(boundary, **kw):
+        calls.append(boundary)
+        if error is not None:
+            raise error
+        return copy.deepcopy(result if result is not None else CONTEXT_DOC)
+
+    monkeypatch.setattr(sc, "fetch_context", fake)
+    return calls
+
+
+def test_context_get_404_on_cache_miss_without_touching_upstream(client, api_project, monkeypatch):
+    calls = _stub_fetch(monkeypatch)
+    name = api_project("ctxmiss")
+    assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+    r = client.get(f"/api/projects/{name}/sites/site_a/context")
+    assert r.status_code == 404, r.text
+    assert calls == []
+
+
+def test_context_post_fetches_caches_and_get_serves_the_cache(client, api_project, project_storage_dir, monkeypatch):
+    calls = _stub_fetch(monkeypatch)
+    name = api_project("ctxpost")
+    assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+    r = client.post(f"/api/projects/{name}/sites/site_a/context")
+    assert r.status_code == 200, r.text
+    assert r.json()["attribution"] == CONTEXT_DOC["attribution"]
+    assert calls == [DOC["sites"][0]["boundary"]]
+    cached = project_storage_dir(name) / ss.SITES_DIR / "site_a" / "context.json"
+    assert json.loads(cached.read_text())["version"] == 1
+    # GET now serves the cache with zero upstream calls.
+    assert client.get(f"/api/projects/{name}/sites/site_a/context").json() == r.json()
+    assert len(calls) == 1
+
+
+def test_context_delete_clears_the_cache(client, api_project, monkeypatch):
+    _stub_fetch(monkeypatch)
+    name = api_project("ctxdel")
+    assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+    assert client.post(f"/api/projects/{name}/sites/site_a/context").status_code == 200
+    assert client.delete(f"/api/projects/{name}/sites/site_a/context").json() == {"cleared": True}
+    assert client.get(f"/api/projects/{name}/sites/site_a/context").status_code == 404
+    assert client.delete(f"/api/projects/{name}/sites/site_a/context").json() == {"cleared": False}
+
+
+def test_context_unknown_site_404(client, api_project, monkeypatch):
+    calls = _stub_fetch(monkeypatch)
+    name = api_project("ctxunknown")
+    assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+    for method in ("get", "post", "delete"):
+        assert getattr(client, method)(f"/api/projects/{name}/sites/nope/context").status_code == 404
+    assert calls == []
+
+
+@pytest.mark.parametrize("bad", ["%2E%2E", "..%2F..%2Fetc", "a%2Fb", "x" * 65, "sp%20ace", "a.b"])
+def test_context_route_rejects_traversal_id(client, api_project, project_storage_dir, monkeypatch, bad):
+    """
+    Refused before any I/O: nothing appears on disk and the wire is never
+    called. An id whose decoded form carries a slash never reaches the
+    handler (the router answers 404/405 for the extra segments); every other
+    shape reaches `_site_context_dir` and is 404 from `site_dir`'s check.
+    """
+    calls = _stub_fetch(monkeypatch)
+    name = api_project("ctxtrav")
+    assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+    before = sorted(p.as_posix() for p in project_storage_dir(name).rglob("*"))
+    for method in ("get", "post", "delete"):
+        r = getattr(client, method)(f"/api/projects/{name}/sites/{bad}/context")
+        assert r.status_code in ((404, 405) if "%2F" in bad else (404,)), (method, bad, r.status_code)
+    assert sorted(p.as_posix() for p in project_storage_dir(name).rglob("*")) == before
+    assert calls == []
+
+
+def test_context_post_502_carries_the_upstream_message(client, api_project, project_storage_dir, monkeypatch):
+    from services import site_context as sc
+
+    _stub_fetch(monkeypatch, error=sc.SiteContextUnavailable("Overpass at X answered HTTP 429 (rate limited); set PYPSAGUI_OVERPASS_URL"))
+    name = api_project("ctx502")
+    assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+    r = client.post(f"/api/projects/{name}/sites/site_a/context")
+    assert r.status_code == 502, r.text
+    assert "429" in r.json()["detail"] and "PYPSAGUI_OVERPASS_URL" in r.json()["detail"]
+    assert not (project_storage_dir(name) / ss.SITES_DIR / "site_a" / "context.json").exists()
+
+
+def test_context_post_returns_the_document_when_the_cache_cannot_be_written(client, api_project, monkeypatch):
+    from services import site_context as sc
+
+    _stub_fetch(monkeypatch)
+    name = api_project("ctxnocache")
+    assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+
+    def boom(*a, **k):
+        raise OSError("read-only volume")
+
+    monkeypatch.setattr(sc, "write_cached", boom)
+    r = client.post(f"/api/projects/{name}/sites/site_a/context")
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/projects/{name}/sites/site_a/context").status_code == 404
+
+
+def test_context_post_409_while_solving(client, api_project, session_ctx, monkeypatch):
+    """(pin) the context routes sit under `/api/projects/` too."""
+    calls = _stub_fetch(monkeypatch)
+    name = api_project("ctxsolving")
+    assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+    started, release = threading.Event(), threading.Event()
+
+    def _spin():
+        started.set()
+        release.wait(timeout=5)
+
+    t = threading.Thread(target=_spin, daemon=True)
+    t.start()
+    started.wait(timeout=5)
+    session_ctx(client).solver_state["thread"] = t
+    try:
+        r = client.post(f"/api/projects/{name}/sites/site_a/context")
+        assert r.status_code == 409, r.text
+        assert r.json().get("code") == "solver_in_flight"
+        assert calls == []
+    finally:
+        release.set()
+        t.join(timeout=5)
+
+
+def test_context_other_org_cannot_read_write_or_clear(client, other_org_client, api_project, monkeypatch):
+    _stub_fetch(monkeypatch)
+    name = api_project("ctxorg")
+    assert client.put(f"/api/projects/{name}/sites", json=DOC).status_code == 200
+    assert client.post(f"/api/projects/{name}/sites/site_a/context").status_code == 200
+    for method in ("get", "post", "delete"):
+        assert getattr(other_org_client, method)(f"/api/projects/{name}/sites/site_a/context").status_code == 404

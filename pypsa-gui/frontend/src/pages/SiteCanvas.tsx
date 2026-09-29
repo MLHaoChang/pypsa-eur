@@ -29,8 +29,13 @@ import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 import { networkApi } from '../api/network'
 import { busLatLng } from '../utils/geo'
-import { tileRangeAround, mosaicExtent, zoomFor, tileCount, type LngLat, type LocalExtent } from '../site3d/geo'
+import { tileRangeAround, mosaicExtent, zoomFor, tileCount, fromLocal, type LngLat, type LocalExtent } from '../site3d/geo'
 import { buildGroundMosaic, ESRI_ATTRIBUTION } from '../site3d/imagery'
+import { sitesApi, contextErrorMessage } from '../api/sites'
+import {
+  buildingsGeometry, linesToRibbons, areasGeometry, heightmapToDisplacement, terrainSampler, groundHeightAt,
+  groundMode, hillshadeCanvas, terrainCellMetres, RIBBON_COLOR, AREA_COLOR, BUILDING_COLOR, type HeightAt,
+} from '../site3d/context'
 import { buildSiteLayout, objectKey, KIND_COLOR, KIND_LABEL, type SiteObject, type SiteKind } from '../site3d/layout'
 import { matrixFor, placementFromMatrix } from '../site3d/placementMath'
 import { screenToGround, groundToScreen } from '../site3d/raycast'
@@ -44,7 +49,7 @@ import { busOffsets, siteBounds } from '../site3d/siteModel'
 import { fitReport, type FitObject } from '../site3d/fit'
 import SiteEmptyState from '../components/SiteEmptyState'
 import type { Bus } from '../api/types'
-import type { Site } from '../site3d/types'
+import type { Site, SiteContext } from '../site3d/types'
 
 // ── One object = one group of boxes, one click target ────────────────────────
 
@@ -112,23 +117,45 @@ function SiteObjectMesh({ obj, selected, hovered, outside, pivot, onHover, onSel
 // objects' shadows still land on it through a second, transparent
 // ShadowMaterial plane a hair above — three.js's standard shadow-catcher.
 
-function Ground({ extent, texture, onMiss }: { extent: LocalExtent; texture: THREE.Texture | null; onMiss: () => void }) {
+function Ground({ extent, texture, textureKind, geometry, onMiss }: {
+  extent: LocalExtent
+  texture: THREE.Texture | null
+  /** Part of the material key: a hillshade and a photo must never share a compiled material. */
+  textureKind: 'imagery' | 'hillshade'
+  /** The terrain-displaced ground (WP5); a flat plane over `extent` when null. */
+  geometry: THREE.BufferGeometry | null
+  onMiss: () => void
+}) {
   const w = extent.east - extent.west
   const d = extent.north - extent.south
   const cx = (extent.east + extent.west) / 2
   const cy = (extent.north + extent.south) / 2
   const flat: [number, number, number] = [-Math.PI / 2, 0, 0]
+  /* Keyed so the textured material is a NEW material, not the grey one with
+     `map` patched in: a material compiled without a map keeps its mapless
+     program when `map` is assigned later, and under some drivers that
+     renders black rather than white. */
+  const material = texture
+    ? <meshBasicMaterial key={textureKind} map={texture} toneMapped={false} />
+    : <meshBasicMaterial key="flat" color="#6b7280" />
+  if (geometry) {
+    // Already in the scene frame (heights relative to the site origin); the
+    // shadow catcher is the same surface a hair above, so shadows follow
+    // the slope instead of floating over a hollow.
+    return (
+      <group>
+        <mesh geometry={geometry} position={[0, -0.05, 0]} onClick={onMiss}>{material}</mesh>
+        <mesh geometry={geometry} receiveShadow>
+          <shadowMaterial transparent opacity={0.35} />
+        </mesh>
+      </group>
+    )
+  }
   return (
     <group>
       <mesh position={toScene(cx, cy, -0.05)} rotation={flat} onClick={onMiss}>
         <planeGeometry args={[w, d]} />
-        {/* Keyed so the textured material is a NEW material, not the grey
-            one with `map` patched in: a material compiled without a map
-            keeps its mapless program when `map` is assigned later, and
-            under some drivers that renders black rather than white. */}
-        {texture
-          ? <meshBasicMaterial key="imagery" map={texture} toneMapped={false} />
-          : <meshBasicMaterial key="flat" color="#6b7280" />}
+        {material}
       </mesh>
       <mesh position={toScene(cx, cy, 0)} rotation={flat} receiveShadow>
         <planeGeometry args={[w, d]} />
@@ -138,13 +165,61 @@ function Ground({ extent, texture, onMiss }: { extent: LocalExtent; texture: THR
   )
 }
 
+// ── Site context: OSM footprints, lines and areas on the terrain (WP5) ───────
+//
+// Static scenery: no pointer handlers, so r3f never raycasts it and a click
+// on a building counts as a miss (deselect), exactly like the ground.
+
+function ContextScenery({ context, origin, heightAt }: { context: SiteContext; origin: LngLat; heightAt: HeightAt }) {
+  // Drape to the terrain's cell size; with no terrain the ground is flat and nothing needs densifying.
+  const cell = context.terrain ? terrainCellMetres(context.terrain) : Infinity
+  const buildings = useMemo(() => buildingsGeometry(context.buildings, origin, heightAt), [context, origin, heightAt])
+  const ribbons = useMemo(() => linesToRibbons(context.lines, origin, heightAt, cell), [context, origin, heightAt, cell])
+  const areas = useMemo(() => areasGeometry(context.areas, origin, heightAt, cell), [context, origin, heightAt, cell])
+  useEffect(() => () => {
+    buildings.dispose()
+    ribbons.forEach(r => r.geometry.dispose())
+    areas.forEach(a => a.geometry.dispose())
+  }, [buildings, ribbons, areas])
+  return (
+    <group name="site-context">
+      {areas.map(a => (
+        <mesh key={`area:${a.kind}`} geometry={a.geometry}>
+          <meshStandardMaterial color={AREA_COLOR[a.kind]} roughness={a.kind === 'water' ? 0.35 : 0.9} metalness={0} />
+        </mesh>
+      ))}
+      {ribbons.map(r => (
+        <mesh key={`line:${r.kind}`} geometry={r.geometry} receiveShadow>
+          <meshStandardMaterial color={RIBBON_COLOR[r.kind]} roughness={1} metalness={0} />
+        </mesh>
+      ))}
+      {buildings.getAttribute('position')?.count > 0 && (
+        <mesh geometry={buildings} castShadow receiveShadow>
+          <meshStandardMaterial color={BUILDING_COLOR} roughness={0.9} metalness={0} />
+        </mesh>
+      )}
+    </group>
+  )
+}
+
+/** A failed fetch is not retried for this long: a rate-limited Overpass must not be hit on every view switch. */
+const CONTEXT_RETRY_MS = 5 * 60_000
+const contextFailures = new Map<string, { at: number; message: string }>()
+
+/** One line for the status strip: what the context holds. */
+function contextSummary(c: SiteContext): string {
+  const parts = [`${c.buildings.length} building${c.buildings.length === 1 ? '' : 's'}`, `${c.lines.length} line${c.lines.length === 1 ? '' : 's'}`]
+  if (c.terrain) parts.push(c.terrain.missing_tiles ? `terrain (${c.terrain.missing_tiles} tile${c.terrain.missing_tiles === 1 ? '' : 's'} missing)` : 'terrain')
+  return parts.join(' · ')
+}
+
 // ── Boundary ribbon on the ground ────────────────────────────────────────────
 
-function BoundaryRibbon({ site }: { site: Site }) {
+function BoundaryRibbon({ site, heightAt }: { site: Site; heightAt: HeightAt }) {
   const points = useMemo(() => {
-    const pts = boundaryToLocal(site.boundary, site.origin).map(p => toScene(p.x, p.y, 0.4))
+    const pts = boundaryToLocal(site.boundary, site.origin).map(p => toScene(p.x, p.y, heightAt(p.x, p.y) + 0.4))
     return [...pts, pts[0]]
-  }, [site])
+  }, [site, heightAt])
   return <Line points={points} color="#b3261e" lineWidth={2} />
 }
 
@@ -176,7 +251,7 @@ function FitCamera({ bounds }: { bounds: Bounds }) {
 
 const DEBUG_ENABLED = import.meta.env.DEV || (typeof location !== 'undefined' && location.search.includes('site3dDebug'))
 
-function Site3dDebugHook({ objects, site }: { objects: SiteObject[]; site: Site }) {
+function Site3dDebugHook({ objects, site, context, groundMode: mode }: { objects: SiteObject[]; site: Site; context: SiteContext | null; groundMode: string }) {
   const camera = useThree(s => s.camera)
   const scene = useThree(s => s.scene)
   const gl = useThree(s => s.gl)
@@ -197,11 +272,13 @@ function Site3dDebugHook({ objects, site }: { objects: SiteObject[]; site: Site 
       project,
       objects: objects.map(o => ({ key: `${o.type}:${o.name}`, origin: o.origin, heading: o.heading, parts: o.parts.length, summary: o.summary })),
       site: { id: site.id, name: site.name, placements: site.placements },
+      context: context ? { buildings: context.buildings.length, lines: context.lines.length, areas: context.areas.length, terrain: !!context.terrain, missingTiles: context.terrain?.missing_tiles ?? null } : null,
+      groundMode: mode,
       snapshot: () => { gl.render(scene, camera); return gl.domElement.toDataURL('image/png') },
     }
     ;(window as unknown as { __site3d?: unknown }).__site3d = hook
     return () => { delete (window as unknown as { __site3d?: unknown }).__site3d }
-  }, [camera, scene, gl, size, objects, site])
+  }, [camera, scene, gl, size, objects, site, context, mode])
   return null
 }
 
@@ -326,6 +403,58 @@ export default function SiteCanvas() {
   [site, memberInputs, generators, storageUnits, stores, loads, transformers, lines, links])
   const objects: SiteObject[] = layout?.objects ?? []
 
+  // ── Site context (WP5): the cache first (never an upstream call), then
+  // one fetch when online; a failure is shown, not retried in a loop. ──────
+  const [context, setContext] = useState<SiteContext | null>(null)
+  const [contextStatus, setContextStatus] = useState<string>('')
+  const siteId = site?.id ?? null
+  useEffect(() => {
+    setContext(null)
+    if (!siteId) { setContextStatus(''); return }
+    if (!currentProject) { setContextStatus('site context needs a saved project'); return }
+    let cancelled = false
+    const key = `${currentProject}/${siteId}`
+    setContextStatus('reading site context…')
+    ;(async () => {
+      try {
+        let doc = await sitesApi.getContext(currentProject, siteId)
+        if (!doc) {
+          if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+            if (!cancelled) setContextStatus('offline: no cached site context')
+            return
+          }
+          const failed = contextFailures.get(key)
+          if (failed && Date.now() - failed.at < CONTEXT_RETRY_MS) {
+            if (!cancelled) setContextStatus(`site context unavailable: ${failed.message}`)
+            return
+          }
+          // Checked before the upstream call too: a StrictMode double-mount
+          // or a quick site switch must not spend two Overpass calls.
+          if (cancelled) return
+          setContextStatus('fetching site context (OpenStreetMap + terrain)…')
+          doc = await sitesApi.fetchContext(currentProject, siteId)
+          contextFailures.delete(key)
+        }
+        if (cancelled) return
+        setContext(doc)
+        setContextStatus(contextSummary(doc))
+      } catch (err: unknown) {
+        const message = contextErrorMessage(err)
+        contextFailures.set(key, { at: Date.now(), message })
+        if (!cancelled) setContextStatus(`site context unavailable: ${message}`)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [currentProject, siteId])
+
+  // Heights relative to the site origin: the origin stays at y = 0 (the
+  // packed layout, placements and the drop plane all live there) and the
+  // rest of the ground rises and falls around it.
+  const terrain = context?.terrain ?? null
+  const siteOrigin: LngLat | null = site ? site.origin : null
+  const baseHeight = useMemo(() => (terrain && siteOrigin ? groundHeightAt(terrain, siteOrigin) : 0), [terrain, siteOrigin])
+  const heightAt: HeightAt = useMemo(() => (terrain && siteOrigin ? terrainSampler(terrain, siteOrigin, baseHeight) : () => 0), [terrain, siteOrigin, baseHeight])
+
   // Two extents. The CAMERA frames the plot (spec §6.2: fit to the boundary,
   // not to the assets — a wind farm packed outside the fence must not shrink
   // the site to a speck); the ground mosaic and the shadow frustum cover the
@@ -359,13 +488,23 @@ export default function SiteCanvas() {
 
   const [texture, setTexture] = useState<THREE.CanvasTexture | null>(null)
   const [tileStatus, setTileStatus] = useState<string>('')
+  // 'failed' when the mosaic rejected OR not one tile arrived (offline):
+  // the ground then falls back to the terrain hillshade (Task 5.6).
+  const [imageryState, setImageryState] = useState<'loading' | 'ok' | 'failed'>('loading')
   useEffect(() => {
     if (!ground) return
     let cancelled = false
     setTexture(null)
+    setImageryState('loading')
     setTileStatus(`fetching ${tileCount(ground.range)} tiles at z${ground.z}…`)
     buildGroundMosaic(ground.range).then(({ canvas, missing }) => {
       if (cancelled) return
+      if (missing >= tileCount(ground.range)) {
+        setImageryState('failed')
+        setTileStatus('imagery unavailable: no tile loaded')
+        return
+      }
+      setImageryState('ok')
       const t = new THREE.CanvasTexture(canvas)
       t.colorSpace = THREE.SRGBColorSpace
       t.anisotropy = 8
@@ -373,11 +512,40 @@ export default function SiteCanvas() {
       setTileStatus(`${tileCount(ground.range)} tiles at z${ground.z}${missing ? ` · ${missing} missing` : ''}`)
     }).catch((err: unknown) => {
       if (cancelled) return
+      setImageryState('failed')
       setTileStatus(`imagery unavailable: ${err instanceof Error ? err.message : String(err)}`)
     })
     return () => { cancelled = true }
   }, [ground])
   useEffect(() => () => { texture?.dispose() }, [texture])
+  const imageryFailed = imageryState === 'failed'
+
+  // The ground surface follows the terrain once the context is in.
+  const groundGeometry = useMemo(() => (terrain && siteOrigin && ground
+    ? heightmapToDisplacement(terrain, siteOrigin, ground.extent, baseHeight)
+    : null), [terrain, siteOrigin, ground, baseHeight])
+  useEffect(() => () => { groundGeometry?.dispose() }, [groundGeometry])
+
+  // Offline degrade (Task 5.6): no imagery → a hillshade of the cached
+  // terrain, mapped onto the ground extent through the texture transform
+  // (the grid spans the padded boundary bbox, the ground the union extent;
+  // clamped at the edges like groundHeightAt).
+  const mode = groundMode(context, !imageryFailed)
+  const hillshadeTexture = useMemo(() => {
+    if (mode !== 'hillshade' || !terrain || !siteOrigin || !ground || typeof document === 'undefined') return null
+    const t = new THREE.CanvasTexture(hillshadeCanvas(terrain))
+    const [minLng, minLat, maxLng, maxLat] = terrain.bbox
+    const sw = fromLocal(siteOrigin, { x: ground.extent.west, y: ground.extent.south })
+    const ne = fromLocal(siteOrigin, { x: ground.extent.east, y: ground.extent.north })
+    t.wrapS = THREE.ClampToEdgeWrapping
+    t.wrapT = THREE.ClampToEdgeWrapping
+    t.offset.set((sw.lng - minLng) / (maxLng - minLng || 1), (sw.lat - minLat) / (maxLat - minLat || 1))
+    t.repeat.set((ne.lng - sw.lng) / (maxLng - minLng || 1), (ne.lat - sw.lat) / (maxLat - minLat || 1))
+    t.colorSpace = THREE.SRGBColorSpace
+    return t
+  }, [mode, terrain, siteOrigin, ground])
+  useEffect(() => () => { hillshadeTexture?.dispose() }, [hillshadeTexture])
+  const groundTexture = mode === 'imagery' ? texture : mode === 'hillshade' ? hillshadeTexture : null
 
   const [hovered, setHovered] = useState<string | null>(null)
 
@@ -431,8 +599,15 @@ export default function SiteCanvas() {
           shadow-normalBias={1.5}
           shadow-bias={-0.0002}
         />
-        <Ground extent={ground.extent} texture={texture} onMiss={() => setSelectedComponent(null)} />
-        <BoundaryRibbon site={site} />
+        <Ground
+          extent={ground.extent}
+          texture={groundTexture}
+          textureKind={mode === 'hillshade' ? 'hillshade' : 'imagery'}
+          geometry={groundGeometry}
+          onMiss={() => setSelectedComponent(null)}
+        />
+        {context && <ContextScenery context={context} origin={site.origin} heightAt={heightAt} />}
+        <BoundaryRibbon site={site} heightAt={heightAt} />
         {objects.map(o => {
           const key = objectKey(o)
           const isSelected = key === selectedKey
@@ -448,15 +623,20 @@ export default function SiteCanvas() {
               onSelect={obj => setSelectedComponent({ type: obj.type, name: obj.name })}
             />
           )
-          if (!isSelected) return mesh
+          // Each object stands at the ground height under its origin; the
+          // lift is a translation-only parent, so the pivot's LOCAL matrix
+          // still holds exactly the placement (x, heading, z).
+          const lift = heightAt(o.origin[0], o.origin[1])
+          if (!isSelected) return <group key={`lift:${key}`} position={[0, lift, 0]}>{mesh}</group>
           // The selected object carries the gizmo (D7): translate in the
-          // ground plane, rotate about the vertical, no scaling. The pivot
-          // sits at scene root, so its local matrix IS the world matrix.
+          // ground plane, rotate about the vertical, no scaling.
           return (
-            <SelectedPivot key={`pivot:${key}`} obj={o} enabled={!readOnly}
-              onCommit={p => setPlacement(currentProject, site.id, key, p)}>
-              {mesh}
-            </SelectedPivot>
+            <group key={`lift:${key}`} position={[0, lift, 0]}>
+              <SelectedPivot obj={o} enabled={!readOnly}
+                onCommit={p => setPlacement(currentProject, site.id, key, p)}>
+                {mesh}
+              </SelectedPivot>
+            </group>
           )
         })}
         <OrbitControls
@@ -468,7 +648,7 @@ export default function SiteCanvas() {
         />
         <FitCamera bounds={plotExtent} />
         <DropTargetRegistrar siteId={site.id} />
-        {DEBUG_ENABLED && <Site3dDebugHook objects={objects} site={site} />}
+        {DEBUG_ENABLED && <Site3dDebugHook objects={objects} site={site} context={context} groundMode={mode} />}
       </Canvas>
 
       <SiteOverlay
@@ -494,9 +674,13 @@ export default function SiteCanvas() {
         ))}
       </div>
 
-      {/* Attribution — bottom-right above the snapshot bar, required for the Esri tiles. */}
+      {/* Attribution — bottom-right above the snapshot bar: required for the
+          Esri tiles, and ODbL requires the OSM credit whenever its data is
+          drawn (the context scenery). */}
       <div className="absolute right-3 bottom-12 z-[400] max-w-[45%] rounded bg-bg/80 px-1.5 py-0.5 text-right text-[10px] text-muted">
-        {tileStatus ? `${tileStatus} · ` : ''}{ESRI_ATTRIBUTION}
+        {tileStatus ? `${tileStatus} · ` : ''}
+        {contextStatus ? <span data-testid="context-status">{contextStatus} · </span> : null}
+        {[ESRI_ATTRIBUTION, ...(context?.attribution ?? [])].join(' · ')}
       </div>
     </div>
   )

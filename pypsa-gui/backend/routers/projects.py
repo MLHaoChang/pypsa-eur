@@ -3431,6 +3431,102 @@ def put_sites(
     return {"saved": name, "sites": len(sites["sites"])}
 
 
+def _site_context_dir(dest: pathlib.Path, site_id: str) -> tuple[pathlib.Path, dict]:
+    """
+    `<project>/sites/<id>` for a site that is in the document. An id that
+    fails `site_dir`'s containment check is 404 BEFORE any I/O, the same
+    answer as an unknown id, so a traversal probe learns nothing.
+    """
+    from services import site_service
+
+    try:
+        target = site_service.site_dir(dest, site_id)
+    except site_service.SitesInvalid as exc:
+        raise HTTPException(404, f"Site '{site_id}' not found") from exc
+    doc = site_service.read_sites(dest)
+    for site in doc["sites"]:
+        if site.get("id") == site_id:
+            return target, site
+    raise HTTPException(404, f"Site '{site_id}' not found")
+
+
+@router.get("/{name}/sites/{site_id}/context")
+def get_site_context(
+    name: str,
+    site_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    The cached site context (OSM footprints + terrain) for one site. Never
+    fetches: 404 on a cache miss, so the canvas decides when to spend the
+    upstream call (POST below). Reads are never lock-gated.
+    """
+    from services import site_context
+
+    src, name = _resolve_project_src(name, db, user)
+    if not src.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    target, _site = _site_context_dir(src, site_id)
+    doc = site_context.read_cached(target)
+    if doc is None:
+        raise HTTPException(404, f"No cached context for site '{site_id}'")
+    return doc
+
+
+@router.post("/{name}/sites/{site_id}/context")
+def fetch_site_context(
+    name: str,
+    site_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """
+    Fetch the context for the site's boundary from Overpass + the terrain
+    tiles, cache it as `sites/<id>/context.json` and return it. 502 with the
+    upstream's actionable message when a source refuses; lock-CHECKED like
+    every other project-dir write (409, never acquiring).
+    """
+    from services import project_registry, site_context
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    lock_project = project_registry.find_project(db, user, name)
+    _check_project_lock(db, lock_project, user)
+    target, site = _site_context_dir(dest, site_id)
+    try:
+        doc = site_context.fetch_context(site["boundary"])
+    except site_context.SiteContextUnavailable as exc:
+        raise HTTPException(502, str(exc)) from exc
+    try:
+        site_context.write_cached(target, doc)
+    except OSError:
+        # The document is in hand; a cache that cannot be written costs the
+        # next open another fetch, not this one its answer.
+        logger.warning("site context: cache write failed for %s/%s", name, site_id, exc_info=True)
+    return doc
+
+
+@router.delete("/{name}/sites/{site_id}/context")
+def delete_site_context(
+    name: str,
+    site_id: str,
+    db: DBSession = Depends(get_db),
+    user: User | None = Depends(optional_user),
+) -> dict:
+    """Drop the cached context so the next open refetches (lock-CHECKED)."""
+    from services import project_registry, site_context
+
+    dest, name = _resolve_project_src(name, db, user)
+    if not dest.exists():
+        raise HTTPException(404, f"Project '{name}' not found")
+    lock_project = project_registry.find_project(db, user, name)
+    _check_project_lock(db, lock_project, user)
+    target, _site = _site_context_dir(dest, site_id)
+    return {"cleared": site_context.clear_cached(target)}
+
+
 def _project_bundle_bytes(name: str, src: pathlib.Path | None = None) -> bytes:
     """
     Materialise a zipped project bundle (.pypsaproj.zip) as bytes.
