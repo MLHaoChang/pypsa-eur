@@ -218,6 +218,28 @@ def _version_numbers(rdir: pathlib.Path) -> list[int]:
     return sorted(out)
 
 
+def _version_file(rdir: pathlib.Path, version: int) -> pathlib.Path | None:
+    """
+    The existing ``v<version>.json`` of a report, found by matching the real
+    directory entries rather than by spelling a file name from the caller's
+    number. The caller's ``version`` (a route's query parameter) is used only
+    in an equality comparison; the path handed back is one ``iterdir()``
+    yielded. Same shape as ``routers/snapshots._existing_snapshot_dir``, for
+    the same reason: CodeQL's ``py/path-injection`` (PR #64) does not model
+    an ``isinstance``/range check on an int as a barrier, and a reader should
+    not have to re-derive that an int cannot traverse.
+    """
+    try:
+        entries = list(rdir.iterdir())
+    except OSError:
+        return None
+    for p in entries:
+        m = _VERSION_FILE.fullmatch(p.name)
+        if m and int(m.group(1)) == version and p.is_file():
+            return p
+    return None
+
+
 def _write_version(rdir: pathlib.Path, doc: ReportDocument) -> None:
     path = rdir / f"v{doc.version}.json"
     # Never overwrite: `os.replace` would, so the check is explicit.
@@ -272,8 +294,8 @@ def load_report(project_dir: pathlib.Path, report_id: str,
         version = meta.latest_version
     if not isinstance(version, int) or version < 1:
         raise ReportNotFound(f"report {report_id} has no version {version!r}")
-    path = rdir / f"v{version}.json"
-    if not path.is_file():
+    path = _version_file(rdir, version)
+    if path is None:
         raise ReportNotFound(f"report {report_id} has no version {version}")
     try:
         return ReportDocument.model_validate_json(path.read_text(encoding="utf-8"))
