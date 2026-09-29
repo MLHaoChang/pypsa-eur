@@ -64,10 +64,63 @@ round trip must match on the XML, not the dialog.
 **Owed from a workstation (unchanged).** Desktop download-and-open-in-Word;
 page-layout check of the generated `.docx`.
 
-## §2 — Generation (WP3, WP6)
+## §2 — Generation (WP3, WP6), 2026-09-28
 
-_(pending)_
+**Merged:** WP3 `1457614` (prompts, generator, number audit, job, `routers/report_jobs.py`),
+WP6 `678694d` (nine chat tools, `ReportMeta.generation` durability, CHATBOT.md,
+`qa_reports_phase2.py`), writer fix `aa2c725`, manifest fix `5311ab6`.
+**Phase 2 gate: GREEN.**
 
-## §3 — Reading and export in the app (WP7)
+| Tier | Command | Result |
+|---|---|---|
+| Unit | `tests/test_report_prompts.py` 5, `test_number_audit.py` 28, `test_report_generator.py` 12, `test_report_job.py` 9, `test_chat_report_tools.py` 23, `test_report_store.py` 34 (+1), `test_report_docx_writer.py` 27 (+2), all other `test_report_*` + parity/manifest/packaging + `test_chat_adequacy_tools.py` | 315 passed (one run on the merged tree) |
+| Regression | chunk 1 (`tests/test_chat_*.py` + manifest + packaging) | 1229 passed, 2 skipped |
+| Regression | chunk 2a (`tests/test_upload*.py tests/test_desktop*.py tests/test_project*.py`) | 242 passed, 1 skipped |
+| Regression | chunk 2b (`tests/test_energy_hub_*.py` / `tests/test_adequacy_*.py`) | Energy Hub: 308 passed in 256.54s (0:04:16); adequacy: 663 passed, 11 deselected in 353.13s (0:05:53) (run as two halves; the combined chunk overran the container ceiling only while the QA drivers were competing for the CPU) |
+| Regression | remainder (four groups) | unchanged since §1: WP3/WP6 touch no file those groups import; re-run owed before merge to `master` |
+| Integration | `tests/test_report_job_http.py` 9 (generate → running → done, 409 in flight, abort → aborted, regenerate → v2, `no_evidence` 400, readable through WP1 GET, exportable through WP5 POST) | passed (counted above) |
+| End-to-end QA | `tests/qa_reports_phase2.py` (real study → `generate_report` on the scripted fake provider with one repair and one failure → audit flags the planted `99.9 h/yr` and verifies the copied number → `get_report` under the 4000-char cap (3611 measured) → `get_report_table` pages → regenerate one section → v2 with the others byte-identical → abort mid-run → partial version → export with the "Numbers to check" appendix → second generate while running → 409) | 47/47 PASS |
+| End-to-end QA | live openai-wire probe (`PYPSA_GUI_TEST_LIVE_OPENAI_PROFILE`) | **UNPROBED** here (no local model); the driver says so rather than passing |
 
-_(pending)_
+**Recorded corrections.** `repairs` counts repair *turns*, so a garbage
+section's failed repair is one — 2 in the phase-2 driver, not 1. A loaded
+network already yields an `ok` COPT surface, so `no_evidence` means "no
+write-up at all", not "no EH study". `get_report` degrades per section to
+stay under the chat result cap: a real 16-section document is 8.5 kB even
+with tables collapsed, so the tool returns an outline plus as many full prose
+sections as fit, and `section_id` reads any one section in full. The job
+writes `prose not established: <reason> (profile …, model …)` on a section
+whose evidence is fine; the writer stated notes only on non-ok sections, so
+the `.docx` silently dropped it — fixed in `aa2c725` with two tests. WP3
+classified `missing_api_key` as `inline` in the manifest while the chat
+panel routes it to the key-entry banner; the frontend contract test caught
+it on the merged tree (WP7b) — fixed in `5311ab6`.
+
+## §3 — Reading and export in the app (WP7a, WP7b), 2026-09-28
+
+**Merged:** WP7a `c128080` (Reports panel, viewer, section cards, unverified-number
+marks, export download), WP7b `b3888f8` (generate dialog, job hook with 1.5 s
+polling, progress/abort strip, per-section regenerate, "evidence changed since
+vN" badge, Adequacy-tab button, `scripts/smoke-reports.mjs`).
+**Phase 3 gate: GREEN on the evidence-only path; the generated path of the
+smoke is coded but unexercised here (no LLM key in the container).**
+
+| Tier | Command | Result |
+|---|---|---|
+| Unit | `reports.api.test.ts` 22, `ReportsPanel.test.tsx` 18, `ReportViewer.test.tsx` 14, `GenerateReportDialog.test.tsx` 11, `useReportJob.test.tsx` 8, `highlightUnverified.test.ts` 8, `AdequacyTab` +1, `EhReferenceDesignPanel` +1 | 126 passed in the touched files |
+| Regression | `npx vitest run` (whole frontend) + `npx tsc -b` | 183 files, 2059 tests passed; tsc clean |
+| Integration | `ChatPanel.manifest.test.tsx` against the shared manifest (after `5311ab6`) | 100 passed |
+| End-to-end QA | `node scripts/smoke-reports.mjs --browser` against uvicorn on :8765 with the built SPA (sign-in, fixture network, real `strong_grid` study, evidence-only report, generate → `missing_api_key` reported and skipped, viewer shows 17 sections, per-section Regenerate control, export → `.docx` blob starts `PK`, cleanup) | 27/27 PASS, generation path SKIPPED |
+
+**Owed from a workstation.** The generated/regenerate legs of the smoke on a
+profile with a key; the macOS desktop download-and-open-in-Word check; a
+page-layout look at a generated `.docx`. A `GET …/reports/evidence_hash`
+route is a follow-up (the viewer compares against the newest evidence-only
+report's hash meanwhile).
+
+## Increment 1 — status
+
+Phases 0–3 delivered on `claude/fmea-llm-reporting-feasibility-jtm6w1`. Not
+done: increment 2 (templates) and increment 3 (round trip), and the
+workstation checks above. `export_eh_report_docx` (WP0) remains alongside
+`export_report_docx`; keep as the no-LLM shortcut or remove in review.
