@@ -101,6 +101,12 @@ class Section(_Model):
     blocks: list[Block] = PField(default_factory=list)
     note: str | None = None
     audit: SectionAudit = PField(default_factory=SectionAudit)
+    # Increment 3 (WP12, additive): a Word comment the reviewer left on this
+    # section becomes the instruction the next regenerate uses when none is
+    # given explicitly (the job clears it on the new version); `comments`
+    # keeps every comment verbatim so the viewer can show them.
+    pending_instruction: str | None = None
+    comments: list[str] = PField(default_factory=list)
 
 
 # ── tables and figures (rendered by code, referenced by blocks) ─────────────
@@ -176,3 +182,6 @@ class ReportMeta(_Model):
     template_mode: TemplateMode | None = None
     template_language: str | None = None
     mapping_plan: dict | None = None
+    # Increment 3 (WP12/WP13, additive): the upload id (`kind="report_roundtrip"`)
+    # of the last edited copy merged into this report, None until one was.
+    roundtrip_file_id: str | None = None
