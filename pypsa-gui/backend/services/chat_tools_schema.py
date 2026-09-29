@@ -403,7 +403,9 @@ TOOLS: list[dict[str, Any]] = [
         "(coord-change line-length recompute); Transformer → "
         "update_transformer (voltage validation); GlobalConstraint → "
         "update_global_constraint (dedicated partial-PUT mitigation); other "
-        "7 classes → generic _update_component. Safety: write.",
+        "7 classes → generic _update_component. To rename any class, pass "
+        "new_name or attrs.name (bus names starting 'ic:' are reserved). "
+        "Safety: write.",
         {
             "component_class": {"type": "string", "enum": COMPONENT_CLASS_ENUM},
             "name": {"type": "string"},

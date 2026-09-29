@@ -147,8 +147,12 @@ def _validated_update_payload(
     schema_name = _COMPONENT_CREATE_SCHEMAS[component_class]
     Schema = _get_schema(schema_name)
     prefill = _identity_prefill(component_class, name)
-    # Prefill first; agent attrs win on conflict.
-    instance = Schema(name=name, **{**prefill, **attrs})
+    # Prefill first; agent attrs win on conflict. A `name` among the attrs is
+    # a rename (as in the PUT body): it replaces the schema's `name` rather
+    # than being passed a second time, and stays in the payload so
+    # `_update_component` pops it and renames.
+    fields = {**prefill, **attrs}
+    instance = Schema(name=fields.pop("name", name), **fields)
     dumped = instance.model_dump()
     return {k: dumped[k] for k in attrs if k in dumped}
 
@@ -749,38 +753,63 @@ def update_component(
     """
     v6 F1/F2/F3 dispatcher with EXPLICIT routing:
 
-      Bus + new_name → rename_bus  (n.rename_component_names preserves dependent
-                                    bus0/bus1 refs on lines/links/transformers)
-      Bus, no new_name → update_bus  (coord-change line-length recompute)
+      Bus + new_name, no attrs → rename_bus  (n.rename_component_names
+                                    preserves dependent bus0/bus1 refs)
+      Bus otherwise → update_bus  (coord-change line-length recompute; a
+                                   rename via attrs["name"] or new_name goes
+                                   through the PUT rename path)
       Transformer → update_transformer  (voltage validation + type sanitise)
       GlobalConstraint → update_global_constraint  (partial-PUT mitigation;
                                                    NOT in _COMPONENT_ATTRS)
       Other 7 classes (Carrier/Line/Link/Generator/StorageUnit/Store/Load/
                        ShuntImpedance) → _update_component direct
+
+    On every class, attrs["name"] (or new_name) renames, as the PUT body does.
     """
     attrs = dict(attrs or {})
 
-    # F1: Bus rename has its own endpoint
-    if component_class == "Bus" and new_name:
+    # F1: a bare Bus rename has its own endpoint
+    if component_class == "Bus" and new_name and not attrs:
         from routers.network import rename_bus
         return rename_bus(name, {"new_name": new_name})
 
-    # Bus non-rename: dedicated handler preserves coord-change recompute
+    # A rename can also arrive as attrs["name"], exactly as in the PUT body.
+    # Every path below builds the Create schema with the TARGET name and never
+    # passes `name` a second time (`Schema(name=name, **attrs)` with a `name`
+    # among the attrs was a TypeError on every class); the PUT handler then
+    # pops it from the merged row and renames under its own guards (404, 409
+    # on an occupied name, the reserved `ic:` bus prefix) and re-points
+    # dependents via `_rename_component_safely`.
+    if new_name:
+        if "name" in attrs and attrs["name"] != new_name:
+            raise HTTPException(
+                400,
+                f"new_name {new_name!r} and attrs.name {attrs['name']!r} "
+                "name different targets",
+            )
+        attrs["name"] = new_name
+    if "name" in attrs and not str(attrs["name"] or "").strip():
+        raise HTTPException(400, "new name cannot be empty")
+
+    # Bus: dedicated handler preserves coord-change recompute
     if component_class == "Bus":
         from routers.network import update_bus
-        bus = _get_schema("BusCreate")(name=name, **attrs)
+        target = attrs.pop("name", name)
+        bus = _get_schema("BusCreate")(name=target, **attrs)
         return update_bus(name, bus)
 
     # F2: Transformer needs voltage validation
     if component_class == "Transformer":
         from routers.network import update_transformer
-        tr = _get_schema("TransformerCreate")(name=name, **attrs)
+        target = attrs.pop("name", name)
+        tr = _get_schema("TransformerCreate")(name=target, **attrs)
         return update_transformer(name, tr)
 
     # F3: GlobalConstraint dedicated CRUD
     if component_class == "GlobalConstraint":
         from routers.network import update_global_constraint
-        gc = _get_schema("GlobalConstraintCreate")(name=name, **attrs)
+        target = attrs.pop("name", name)
+        gc = _get_schema("GlobalConstraintCreate")(name=target, **attrs)
         return update_global_constraint(name, gc)
 
     # Bare passthrough classes — direct _update_component
