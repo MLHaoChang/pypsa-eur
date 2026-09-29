@@ -963,8 +963,14 @@ def _demand_spec(n, cfg: CommercialConfig) -> tuple[dict | None, list[str], list
             elif history_ok and m in cfg.meter_history_peaks_kw:
                 ratchets.append({"key": k["key"], "share": r.share,
                                  "floor_mw": cfg.meter_history_peaks_kw[m] / _KWH_PER_MWH})
-            elif "ratchet_seed_missing" not in notes:
-                notes.append("ratchet_seed_missing")
+            else:
+                # Tagged per investment period too, so the billing gap
+                # attributes it to the period it arises in (WP2.3 review L5).
+                for note in ("ratchet_seed_missing",
+                             *(() if k["inv_period"] is None
+                               else (f"ratchet_seed_missing:{k['inv_period']}",))):
+                    if note not in notes:
+                        notes.append(note)
     notes += [x for x in tier_notes if x not in notes]
     floors = {k["key"]: cfg.initial_peak_lower_bound[k["month"]] for k in keys
               if k["month"] in cfg.initial_peak_lower_bound}

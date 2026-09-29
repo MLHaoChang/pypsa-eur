@@ -123,17 +123,26 @@ def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
     not shape the dispatch: editing them changes the bill but not what it
     rates, so it is not flagged here; the bill uses their current values."""
     flags: list[str] = []
+    # Which record drifted, and which kind's recipe changed (WP2.3 review M2):
+    # the billing gap scopes `config_changed_since_solve` to those kinds.
+    drift = {"energy": False, "demand": False, "tiers": False, "capacity": False, "ppa": False}
+    recipes: dict[str, list[str]] = {}
+
+    def recipe(kind: str, flag: str) -> None:
+        flags.append(flag)
+        recipes.setdefault(kind, []).append(flag)
+
     rec = n.meta.get(_lp.META_LINKS) or {}
     info = n.meta.get(_lp.META_DEMAND_INFO) or {}
     tiers = n.meta.get(_lp.META_TIERS) or {}
     solve = {"energy_hash": rec.get("energy_hash"), "energy_hash_version": _H.version_of(rec),
              "demand_hash": info.get("items_hash"), "demand_hash_version": _H.version_of(info)}
-    changed = False
     state = _lp.energy_record_state(n, cfg, rec)
     if state == "config":
-        changed = True
+        drift["energy"] = True
     elif state == "recipe":
-        flags.append("energy_recipe_changed")  # re-solve: windowed tiers bound since
+        recipe("energy", "energy_recipe_changed")  # re-solve: windowed tiers bound since
+        recipes.setdefault("tiers", []).append("energy_recipe_changed")
     items = _lp.demand_lp_items(cfg)
     if info:
         if sorted(info.get("items", [])) != sorted(i.id for i in items) or (
@@ -142,34 +151,34 @@ def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
             if _lp.demand_only_newly_bound(n, info, items, cfg):
                 # The config is unchanged; WP2.1c-i's recipe binds more of it
                 # (as `cost_rows`): re-solve.
-                flags.append("demand_recipe_changed")
+                recipe("demand", "demand_recipe_changed")
             else:
-                changed = True
+                drift["demand"] = True
     elif items:
         if _lp.demand_all_newly_bound(rec, items):
-            flags.append("demand_recipe_changed")  # the old recipe bound none of them
+            recipe("demand", "demand_recipe_changed")  # the old recipe bound none of them
         else:
-            changed = True  # demand terms added after the solve
+            drift["demand"] = True  # demand terms added after the solve
     tier_rec = next(iter(tiers.values()), None)
     solve["tier_hash"] = (tier_rec or {}).get("items_hash")
     solve["tier_hash_version"] = _H.version_of(tier_rec)
-    recipe = _lp.energy_recipe_of(rec)
+    lp_recipe = _lp.energy_recipe_of(rec)
     if tier_rec is not None:
         if tier_rec.get("items_hash") is not None and tier_rec["items_hash"] != \
-                _lp.tier_items_hash(cfg, _H.version_of(tier_rec), recipe=recipe):
-            changed = True
-    elif _lp.tier_items_hash(cfg, recipe=recipe) is not None:
-        changed = True  # convex tiers added after the solve
+                _lp.tier_items_hash(cfg, _H.version_of(tier_rec), recipe=lp_recipe):
+            drift["tiers"] = True
+    elif _lp.tier_items_hash(cfg, recipe=lp_recipe) is not None:
+        drift["tiers"] = True  # convex tiers added after the solve
     # Tariff capacity items (WP2.1c-iii) size the PoC / shave the annual peak.
     cap_rec = n.meta.get(_lp.META_CAPACITY)
     solve["capacity_hash"] = (cap_rec or {}).get("items_hash")
     solve["capacity_hash_version"] = _H.version_of(cap_rec)
     if cap_rec is not None:
         if cap_rec.get("items_hash") != _lp.capacity_items_hash(cfg, _H.version_of(cap_rec)):
-            changed = True
+            drift["capacity"] = True
     elif _lp.capacity_items_hash(cfg) is not None:
         if _lp.capacity_all_newly_bound(rec):
-            flags.append("capacity_recipe_changed")  # the old recipe bound none
+            recipe("capacity", "capacity_recipe_changed")  # the old recipe bound none
         else:
             # This recipe binds them, yet the solve wrote no record (an
             # unreadable peak): not established, as in the rows (review #5).
@@ -178,16 +187,18 @@ def _drift_flags(n, cfg: CommercialConfig) -> tuple[list[str], dict]:
     ppa_rec = n.meta.get(_lp.META_PPA)
     if ppa_rec is not None:
         if ppa_rec.get("hash") != _lp.ppa_dispatch_hash(cfg, _H.version_of(ppa_rec)):
-            changed = True
+            drift["ppa"] = True
     elif _lp.ppa_dispatch_hash(cfg) is not None:
         if rec and int(rec.get("lp_recipe") or 1) < _lp.PPA_DISPATCH_RECIPE:
-            flags.append("ppa_recipe_changed")
+            recipe("contracts", "ppa_recipe_changed")
         else:
-            changed = True
+            drift["ppa"] = True
     if not rec:
         flags.append("solve_provenance_unknown")
-    if changed:
+    if any(drift.values()):
         flags.append("config_changed_since_solve")
+    solve["drift"] = drift
+    solve["recipe_changed"] = recipes
     return flags, solve
 
 

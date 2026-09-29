@@ -113,6 +113,11 @@ def test_every_lp_fixture_is_fully_attributed(case):
         causes = {c["cause"]: c for c in per["demand"]["causes"]}
         assert len(causes["months_not_established"]["months"]) == 10
         assert causes["months_not_established"]["amount"] == 0.0   # sampled to sampled
+    if isinstance(n.snapshots, pd.MultiIndex):
+        # Disclosures belong to their own period (review L5).
+        for p, per in gap["periods"].items():
+            for c in (per.get("demand") or {}).get("causes", []):
+                assert all(m.startswith(f"{p}:") for m in c.get("months", [])), (p, c)
     if case == "ppa_changes_dispatch":
         (per,) = gap["periods"].values()
         c = per["contracts"]
@@ -291,3 +296,116 @@ def test_the_gap_percentages_are_defined_on_known_amounts():
     assert G._gap_pct(0.0, 5.0) is None      # an LP of 0 with a bill: undefined
     assert G._gap_pct(0.0, 0.0) == 0.0
     assert G._gap_pct(100.0, 110.0) == pytest.approx(10.0)
+
+
+# ── review round 1 ─────────────────────────────────────────────────────────
+
+
+FIT = {"id": "fit", "kind": "energy", "unit": "per_kwh", "measured_on": "export",
+       "direction": "revenue", "periods": [{"name": "day", "rate": 0.08, "start_hour": 8,
+                                            "end_hour": 18}, {"name": "rest", "rate": 0.03}]}
+
+
+@pytest.mark.live_solve
+def test_export_revenue_on_a_site_clock_is_fully_attributed():
+    """L9: export items with TOU windows on Europe/Berlin."""
+    n = _edge()
+    n.add("Link", "export", bus0="poc", bus1="grid", p_nom=80.0, carrier="AC")
+    n.generators.loc["pv", "p_nom"] = 400.0      # a winter week with midday surplus
+    n.add("Generator", "grid_sink", bus="grid", carrier="grid", p_nom=500.0, p_min_pu=-1.0,
+          p_max_pu=0.0)                           # the grid takes the export
+    commercial = {"poc_link": "import", "export_link": "export", "timezone": "Europe/Berlin",
+                  "import_tariff": _tariff(TOU, FIT)}
+    _solve(n, commercial)
+    assert float(n.links_t.p0["export"].sum()) > 0
+    gap = G.billing_vs_lp_gap(n, commercial, B.bill_site(n, commercial))
+    energy = gap["periods"][None]["energy"]
+    assert energy["unattributed_pct"] < 1e-6 and gap["gates"] == []
+    assert energy["items"]["fit"]["billed"] < 0
+    assert energy["items"]["fit"]["lp"] == pytest.approx(energy["items"]["fit"]["billed"],
+                                                         rel=1e-9)
+
+
+@pytest.mark.live_solve
+def test_a_nonconvex_tier_without_its_committed_record_is_not_established():
+    """M1: the predicted-tier charge rode `ic_energy_price`."""
+    n = _edge()
+    commercial = {"poc_link": "import", "import_tariff": _tariff(NONCONVEX)}
+    _solve(n, commercial)
+    n.links_t[L.ENERGY_PRICE_ATTR] = n.links_t[L.ENERGY_PRICE_ATTR].drop(columns=["import"])
+    gap = G.billing_vs_lp_gap(n, commercial, B.bill_site(n, commercial))
+    tiers = gap["periods"][None]["tiers"]
+    assert tiers["lp"] is None and "lp_not_established" in tiers["flags"]
+    assert gap["gates"] == []
+
+
+@pytest.mark.live_solve
+def test_a_config_change_is_scoped_to_the_kinds_whose_record_drifted():
+    """M2: an edited TOU rate does not hide a demand-record mismatch, nor
+    relabel the fixed item or a settlement-only contract."""
+    n = _edge()
+    demand = {"id": "demand", "kind": "demand", "unit": "per_kw_month",
+              "periods": [{"name": "all", "rate": 12.0}], "measured_on": "import"}
+    commercial = {"poc_link": "import", "import_tariff": _tariff(TOU, demand, FIXED),
+                  "contracts": [LEASE]}
+    _solve(n, commercial)
+    for v in n.meta[L.META_DEMAND].values():
+        v["billed_mw"] = float(v.get("billed_mw", v["peak_mw"])) * 0.7   # an LP-record bug
+    edited = copy.deepcopy(commercial)
+    edited["import_tariff"]["items"][0]["periods"][2]["rate"] = 0.30
+    bill = B.bill_site(n, edited)
+    assert bill.provenance["drift"]["energy"] and not bill.provenance["drift"]["demand"]
+    gap = G.billing_vs_lp_gap(n, edited, bill, settlement_lines=_lines(n, edited))
+    per = gap["periods"][None]
+    assert per["energy"]["causes"][-1]["cause"] == "config_changed_since_solve"
+    assert per["demand"]["unattributed_pct"] > 5.0
+    assert (None, "demand") in {(g["period"], g["kind"]) for g in gap["gates"]}
+    assert [c["cause"] for c in per["fixed"]["causes"]] == ["fixed"]
+    assert [c["cause"] for c in per["contracts"]["causes"]] == ["settlement_only"]
+
+
+@pytest.mark.live_solve
+def test_a_tier_record_that_does_not_match_the_dispatch_is_unattributed():
+    """M3: `tier_allocation` is billed − LP only when the LP record is
+    consistent (segment volumes = the window's metered energy)."""
+    build, extra = CASES["windowed_tiers"]
+    n = build()
+    commercial = {"poc_link": "import", **copy.deepcopy(extra)}
+    _solve(n, commercial)
+    for v in n.meta[L.META_TIERS].values():
+        v["q_mwh"] = float(v["q_mwh"]) * 0.5
+    gap = G.billing_vs_lp_gap(n, commercial, B.bill_site(n, commercial))
+    tiers = gap["periods"][None]["tiers"]
+    (cause,) = tiers["causes"]
+    assert cause["amount"] is None
+    assert any(f.startswith("tier_allocation_not_established:wtiers:") for f in tiers["flags"])
+    assert (None, "tiers") in {(g["period"], g["kind"]) for g in gap["gates"]}
+
+
+@pytest.mark.live_solve
+def test_a_contract_without_settlement_lines_is_unknown_not_zero():
+    """M4."""
+    n = _edge()
+    commercial = {"poc_link": "import", "import_tariff": _tariff(TOU), "contracts": [LEASE]}
+    _solve(n, commercial)
+    gap = G.billing_vs_lp_gap(n, commercial, B.bill_site(n, commercial), settlement_lines=[])
+    c = gap["periods"][None]["contracts"]
+    assert c["billed"] is None and "settlement_lines_missing:lease1" in c["flags"]
+
+
+@pytest.mark.live_solve
+def test_contracts_compare_without_an_import_tariff():
+    """L6: a dispatch PPA's LP row against its settlement, no tariff."""
+    n = _edge()
+    ppa = {"type": "ppa", "id": "ppa1", "kind": "pay_as_produced", "price": 10.0,
+           "tenor_years": 10, "seller": "Solar BV", "buyer": "site", "asset_ids": ["pv"],
+           "changes_dispatch": True}
+    n.generators.loc["grid_supply", "marginal_cost"] = 50.0   # the PV runs at 10
+    commercial = {"poc_link": "import", "contracts": [ppa]}
+    _solve(n, commercial)
+    bill = B.bill_site(n, commercial)
+    assert bill.per_period == {}
+    gap = G.billing_vs_lp_gap(n, commercial, bill, settlement_lines=_lines(n, commercial))
+    c = gap["periods"][None]["contracts"]
+    assert c["lp"] > 0 and c["lp"] == pytest.approx(c["billed"], rel=1e-9)
+    assert set(gap["periods"][None]) == {"contracts"}

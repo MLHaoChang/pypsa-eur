@@ -1000,6 +1000,24 @@ the spec text of §15 (and §5.5's cause list) in the same commit.
     - unsolved;
     - resolution risk;
     - the percentage definitions.
+- **WP2.3 review round 1 → PASS WITH CONDITIONS; all findings fixed:**
+  - M1: a non-convex tier's LP stayed established without its record. → It is None when `ic_energy_price` or `ic_poc_links` is gone (`lp_not_established`).
+  - M2: one global drift flag relabelled every kind's causes. → `billing._drift_flags` records per-record `drift` and `recipe_changed` in the bill's provenance, and the gap scopes the change per kind:
+    - energy → `energy`, plus the `tiers` non-convex part;
+    - tiers → `tiers`;
+    - demand → `demand`;
+    - capacity → `capacity`;
+    - the PPA → the dispatch-PPA contracts, per contract;
+    - never `fixed` or settlement-only contracts.
+
+    Within a changed kind, the independent causes stay. The billed − LP ones (`nonconvex_tier`, `tier_allocation`) are dropped, and the remainder is `config_changed_since_solve` / `lp_recipe_changed`.
+  - M3: `tier_allocation` absorbed any disagreement. → It is computed only when the LP record is consistent: per (month, window), the segment volumes equal the metered Σ w·p, and the amount is ≥ −tol, since proportional ≥ optimal. Otherwise the amount is None with `tier_allocation_not_established:<item>:<why>`, and the gate fires. `net_split_by_direction` is now computed independently from the dispatch: Σ w·r·(clip(imp − exp, 0) − imp), mirrored for revenue.
+  - M4: a contract with no lines was billed 0. → None, with `settlement_lines_missing:<id>`. Retail is exempt.
+  - L5: disclosures now belong to their own period. The demand record tags `ratchet_seed_missing:<period>` beside the plain note, and months are filtered by their `<p>:` prefix.
+  - L6: contracts are compared without an import tariff, over the axis periods.
+  - L7 (a kind with one unknown item has no gap): no action. ADR-0001, and the per-item `items` rows show which item is unknown.
+  - L8 (period keys None / int): carried to WP2.5, which serialises the payload.
+  - L9: new tests cover export revenue on Europe/Berlin, M1, M2, M3, M4, L6, and per-period months in the fixture test. `test_billing_gap.py` now has 34 tests.
 
 ## WP2.4b-i URDB importer
 
