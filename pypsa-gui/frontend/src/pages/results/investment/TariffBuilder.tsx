@@ -25,7 +25,7 @@ function Errors({ list }: { list: string[] }) {
 }
 
 /** The list fields that do not parse: Preview and Save wait for them. */
-const InvalidLists = createContext<(label: string, bad: boolean) => void>(() => {})
+const InvalidLists = createContext<(key: string, label: string | null) => void>(() => {})
 
 /** A comma list edited as text; committed on blur when it parses. The text
  *  follows the value whenever the field is not being edited (a removed row
@@ -42,10 +42,12 @@ function ListInput({ label, value, onChange, parse }: {
   const [bad, setBad] = useState(false)
   const report = useContext(InvalidLists)
   const errId = useId()
+  const key = useId()   // stable across a rename of its item (review round 2 #2)
   useEffect(() => {
-    if (!focused) { setText(shown); setBad(false); report(label, false) }
+    if (!focused) { setText(shown); setBad(false); report(key, null) }
   }, [shown]) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => () => report(label, false), [label, report])
+  useEffect(() => { if (bad) report(key, label) }, [label, bad, key, report])
+  useEffect(() => () => report(key, null), [key, report])
   return (
     <span>
       <input aria-label={label} aria-invalid={bad} aria-describedby={bad ? errId : undefined}
@@ -55,7 +57,7 @@ function ListInput({ label, value, onChange, parse }: {
              onBlur={() => {
                setFocused(false)
                const v = parse(text)
-               setBad(v === null); report(label, v === null)
+               setBad(v === null); report(key, v === null ? label : null)
                if (v !== null) onChange(v)
              }} />
       {bad && <span id={errId} role="alert" className="text-danger ml-1">not a list of numbers</span>}
@@ -223,8 +225,10 @@ function ItemEditor({ item, idx, set, remove, errors }: {
               periods: item.periods.map(p => (p.tier_rates ? { ...p, tier_rates: [...p.tier_rates, 0] } : p)) })}>
               Add tier to {label}</button>
             {tiers.length > 0 && (
-              <label className="flex items-center gap-1">
+              <label className="flex items-center gap-1"
+                     title={windowed && !sameTierRates(item) ? 'The periods have different tier rates; make them equal before using one set' : undefined}>
                 <input type="checkbox" checked={windowed} aria-label={`${label} tier rates per period`}
+                       disabled={windowed && !sameTierRates(item)}
                        onChange={e => {
                          if (e.target.checked) {
                            set({ ...item, periods: item.periods.map(p => ({ ...p, tier_rates: tiers.map(t => t.rate) })),
@@ -275,10 +279,11 @@ function Preview({ bill }: { bill: BillingPayload }) {
           </tbody>
         </table>
       ))}
-      {Object.entries(bill.per_period ?? {}).flatMap(([, v]) =>
+      {[...new Set(Object.entries(bill.per_period ?? {}).flatMap(([p, v]) =>
         Object.entries(((v ?? {}) as { notes?: Record<string, string[]> }).notes ?? {})
-          .map(([item, notes]) => `${item}: ${notes.join(', ')}`)).slice(0, 12).map(n => (
-        <p key={n} className="text-muted" data-testid="tb-preview-note">{n}</p>))}
+          .map(([item, notes]) => `${p === '_' ? '' : `${p} `}${item}: ${notes.join(', ')}`)))]
+        .slice(0, 12).map(n => (
+          <p key={n} className="text-muted" data-testid="tb-preview-note">{n}</p>))}
       {bill.flags.filter(f => f !== 'preview_dispatch_not_optimised_for_draft').length > 0 && (
         <p className="text-warn">Flags: {bill.flags.filter(f => f !== 'preview_dispatch_not_optimised_for_draft').join(', ')}</p>
       )}
@@ -315,11 +320,12 @@ export default function TariffBuilder({ initial, onSaved }: {
     setMessage({ tone: 'error', text: `${what} failed${detail ? `: ${detail}`
       : e instanceof Error && !r ? `: ${e.message}` : '.'}` })
   }
-  const [invalid, setInvalid] = useState<Set<string>>(new Set())
-  const reportList = useState(() => (label: string, bad: boolean) => setInvalid(prev => {
-    if (prev.has(label) === bad) return prev
-    const next = new Set(prev)
-    if (bad) next.add(label); else next.delete(label)
+  // key → the field's current label, while it does not parse.
+  const [invalid, setInvalid] = useState<Map<string, string>>(new Map())
+  const reportList = useState(() => (key: string, label: string | null) => setInvalid(prev => {
+    if ((prev.get(key) ?? null) === label) return prev
+    const next = new Map(prev)
+    if (label) next.set(key, label); else next.delete(key)
     return next
   }))[0]
   const blocked = invalid.size > 0
@@ -329,7 +335,7 @@ export default function TariffBuilder({ initial, onSaved }: {
     <InvalidLists.Provider value={reportList}>
     <div className="space-y-3 text-[11px]" data-testid="tariff-builder">
       {blocked && <p role="alert" className="text-danger" data-testid="tb-blocked">
-        Fix the lists that are not numbers ({[...invalid].join(', ')}) before previewing or saving.</p>}
+        Fix the lists that are not numbers ({[...invalid.values()].join(', ')}) before previewing or saving.</p>}
       <div className="flex flex-wrap gap-2 items-center">
         <label>id <input aria-label="Tariff id" className={`${input} w-28`} value={t.id}
                          onChange={e => setT({ ...t, id: e.target.value })} /></label>
@@ -397,6 +403,12 @@ export default function TariffBuilder({ initial, onSaved }: {
     </div>
     </InvalidLists.Provider>
   )
+}
+
+/** Every period carries the same tier rates (one set can replace them). */
+function sameTierRates(item: Item): boolean {
+  const sets = item.periods.map(p => JSON.stringify(p.tier_rates ?? null))
+  return sets.every(x => x === sets[0])
 }
 
 /** The next unused `<kind>_<n>` item id (review #6). */

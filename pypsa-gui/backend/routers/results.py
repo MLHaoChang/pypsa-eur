@@ -1785,6 +1785,9 @@ def get_billing():
     return Response(status_code=204) if payload is None else payload
 
 
+_PREVIEW_LOCK_WAIT_S = 2.0
+
+
 class BillingPreviewIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     tariff: dict
@@ -1803,12 +1806,22 @@ def preview_billing(body: BillingPreviewIn):
     from services.commercial.lp_bindings import CommercialBindingError
     from services.results.billing import compute_billing_preview
 
-    with PyPSAService.get_lock():
-        # Checked under the lock, so a solve cannot start in between (review #12).
+    busy = HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                               "message": "a solve is running; preview the bill after it ends"})
+    if _solver_in_flight():
+        raise busy
+    # A solve holds this lock for its whole run: never wait out a solve — a
+    # 409, as during a solve (WP3.7b review round 2 #1). A short wait lets a
+    # quick network edit finish; the in-flight check is repeated under the
+    # lock, so a solve cannot start in between.
+    lock = PyPSAService.get_lock()
+    if not lock.acquire(timeout=_PREVIEW_LOCK_WAIT_S):
+        raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
+                                  "message": "the network is busy (a solve or an edit); preview "
+                                             "the bill again in a moment"})
+    try:
         if _solver_in_flight():
-            raise HTTPException(409, {"code": "solver_in_flight", "error_kind": "solver_in_flight",
-                                      "message": "a solve is running; preview the bill after it "
-                                                 "ends"})
+            raise busy
         cfg = _state["solver_config"]
         if not getattr(cfg, "commercial", None):
             raise HTTPException(409, {"code": "no_commercial_config",
@@ -1827,6 +1840,8 @@ def preview_billing(body: BillingPreviewIn):
         except CommercialBindingError as exc:
             raise HTTPException(422, {"code": "tariff_not_bindable",
                                       "message": str(exc)[:500]}) from exc
+    finally:
+        lock.release()
     return Response(status_code=204) if payload is None else payload
 
 

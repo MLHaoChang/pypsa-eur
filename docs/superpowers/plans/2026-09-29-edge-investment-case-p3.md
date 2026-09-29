@@ -897,6 +897,17 @@ cleanly, the H3 inline save accepted by the solver-config route, the lock re-ent
   per-item notes when the total is not established. #11: a failed tariff read shows an error, not a
   blank builder; a Library-ref tariff says an inline save detaches it; the save invalidates the
   commercial config. #12: the preview checks the solve and the config under the lock.
+
+**WP3.7b review round 2 (b3f6536): FAIL** — #1–#11 verified (a retail contract naming another
+tariff flags `preview_contract_problem:commercial.contract_tariff_mismatch`; nothing written).
+- R2 #1 HIGH: taking the network lock before the in-flight check made a preview WAIT out a whole
+  solve (the solve holds the lock). → the fast in-flight check first, then the lock with a 2 s
+  timeout (a quick edit may finish; a solve cannot be waited out) → 409, and the check repeated under
+  the lock (tested: a held lock is a prompt 409).
+- R2 #2: invalid lists were tracked by label, so renaming the item cleared the block. → tracked by a
+  stable id with the current label for the banner (tested).
+- R2 #3 (taken): "tier rates per period" cannot be turned off while the periods' rates differ
+  (tested on H3). R2 #4 (taken): preview notes carry their period and are de-duplicated.
 ## WP3.7c Contracts and connection-agreement editors
 
 Typed forms per contract type (P2 models, allowed pricing combinations; party pickers from participants +

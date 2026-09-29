@@ -75,3 +75,37 @@ def test_409_during_a_solve_or_without_a_config_and_204_before_a_solve(
     monkeypatch.setattr(R, "_solver_in_flight", lambda: True)
     r = client.post("/api/results/billing/preview", json={"tariff": DRAFT})
     assert r.status_code == 409 and r.json()["detail"]["code"] == "solver_in_flight"
+
+
+def test_a_held_network_lock_is_a_prompt_409_not_a_wait(client, install_network, monkeypatch,
+                                                         session_ctx):
+    """Review round 2 #1: a solve holds the lock for its whole run."""
+    import threading
+    import time
+
+    import routers.results as R
+    from tests.fixtures.investment_case.edge_15min import build_edge_15min
+
+    install_network(build_edge_15min(), name="preview_lock")
+    client.put("/api/simulation/solver_config", json={"commercial": {"poc_link": "import"}})
+    monkeypatch.setattr(R, "_PREVIEW_LOCK_WAIT_S", 0.2)
+    held, release = threading.Event(), threading.Event()
+
+    lock = session_ctx(client).mutation_lock      # the lock the request's context holds
+
+    def hold():
+        with lock:
+            held.set()
+            release.wait(10)
+
+    t = threading.Thread(target=hold)
+    t.start()
+    held.wait(5)
+    try:
+        t0 = time.perf_counter()
+        r = client.post("/api/results/billing/preview", json={"tariff": DRAFT})
+        assert r.status_code == 409 and r.json()["detail"]["code"] == "solver_in_flight"
+        assert time.perf_counter() - t0 < 2.0
+    finally:
+        release.set()
+        t.join()

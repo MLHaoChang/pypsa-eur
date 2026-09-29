@@ -146,4 +146,22 @@ describe('TariffBuilder — review round 1', () => {
     expect(saved.items[0].tiers).toEqual([{ threshold: 0, rate: 0.1 }, { threshold: 1000, rate: 0.2 }])
     expect(saved.items[0].periods).toEqual([{ name: 'all', rate: 0 }])
   })
+
+  it('a bad list stays blocking when its item is renamed (round 2 #2)', () => {
+    renderBuilder(two())
+    const months = screen.getByLabelText('Item e period 1 months')
+    fireEvent.focus(months)
+    fireEvent.change(months, { target: { value: '6, x' } })
+    fireEvent.blur(months)
+    fireEvent.change(screen.getByLabelText('Item e id'), { target: { value: 'e2' } })
+    expect(screen.getByTestId('tb-blocked').textContent).toContain('Item e2 period 1 months')
+    expect(screen.getByRole('button', { name: 'Save as the project tariff' }).hasAttribute('disabled'))
+      .toBe(true)
+  })
+
+  it('one set of tier rates cannot silently replace different ones (round 2 #3)', () => {
+    renderBuilder()
+    const box = screen.getByLabelText('Item energy tier rates per period')
+    expect(box.hasAttribute('disabled')).toBe(true)      // H3's peak and off-peak rates differ
+  })
 })
