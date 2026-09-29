@@ -16,6 +16,7 @@ import UserMenu from './UserMenu'
 import type { Bus, FailureInfo, Generator, Line, Link, Load, StorageUnit } from '../api/types'
 import toast from 'react-hot-toast'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
+import { flushPendingSitesToServer } from '../site3d/sitesStore'
 
 // ── Status indicators ──────────────────────────────────────────────────────────
 const STATUS_DOT: Record<string, string> = {
@@ -409,7 +410,6 @@ export default function AppHeader() {
       // The 3D site sidecar flushes beside the layout, same reasons, same
       // debounce: a Save-As re-homes the pending document to the new name.
       try {
-        const { flushPendingSitesToServer } = await import('../site3d/sitesStore')
         const sr = await flushPendingSitesToServer(result.saved, { previousProject: currentProject })
         if (sr.status === 'local') appLog('WARN', 'Sites server write failed — kept the site document in localStorage')
       } catch (e) {

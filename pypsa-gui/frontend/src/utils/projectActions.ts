@@ -9,6 +9,7 @@ import { authEnabled } from '../auth/config'
 import { lockStateFromAcquire, WRITABLE, type LockInfo, type LockAcquireOutcome } from './lockState'
 import { nk } from './queryKeys'
 import { flushPendingEdgeDeletes } from './pendingEdgeDeletes'
+import { flushPendingSitesToServer } from '../site3d/sitesStore'
 
 // Query keys invalidated by any operation that swaps the underlying PyPSA
 // network in memory (load, restore, import). Includes:
@@ -576,7 +577,6 @@ export async function saveProjectQuietly(name: string, clearUndo = false): Promi
     // The 3D site sidecar flushes beside the layout, same reasons, same
     // debounce: a Save-As re-homes the pending document to the new name.
     try {
-      const { flushPendingSitesToServer } = await import('../site3d/sitesStore')
       const sr = await flushPendingSitesToServer(name, { previousProject: name })
       if (sr.status === 'local') appLog('WARN', 'Sites server write failed — kept the site document in localStorage')
     } catch (e) {

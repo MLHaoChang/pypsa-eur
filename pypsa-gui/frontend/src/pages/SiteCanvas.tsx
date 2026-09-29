@@ -1,23 +1,29 @@
-// 3D site view — the spike from
-// docs/superpowers/assessments/2026-09-28-3d-site-view-feasibility.md §8a.
+// 3D site view.
 //
-// One bus, everything attached to it, as parametric boxes on a ground plane
-// textured with the Esri imagery the map view already draws. Clicking a box
-// selects the component exactly as the other two canvases do
+// Phase 1 (docs/superpowers/specs/2026-09-29-3d-site-view-phase1-design.md):
+// a SITE — a user-drawn boundary grouping one or more buses — opened as a
+// portal from the map. Every component attached to the site's primary bus
+// is drawn as parametric boxes on a ground plane textured with the Esri
+// imagery the map view already uses; the boundary is a ribbon on the
+// ground; the status line says whether the plan fits the plot (D9).
+//
+// Clicking a box selects the component exactly as the other two canvases do
 // (`setSelectedComponent({type, name})`), so the properties panel opens and
 // an edit there re-generates the geometry through the normal query
 // invalidation — the scene holds no state of its own beyond hover and camera.
 //
-// Deliberately NOT in the spike (they are Phase 1–2 of the assessment): a site
-// entity or boundary, terrain, building footprints, drag-from-palette, moving
-// objects, results animation, hero models, offline caching.
+// Frames. Everything in the scene is metres east/north of the SITE ORIGIN
+// (the boundary's stored centroid). The packed layout is computed about the
+// primary bus and shifted by that bus's offset from the origin
+// (`busOffsets`). WP3 replaces the single-bus layout with one yard per bus.
 //
-// This module is loaded lazily (App.tsx) and is the only importer of three.js.
+// This module is loaded lazily (App.tsx) and is the only importer of three.js
+// (and of the site3d modules that import it).
 
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Canvas, useThree, type ThreeEvent } from '@react-three/fiber'
-import { OrbitControls, Html } from '@react-three/drei'
+import { OrbitControls, Html, Line } from '@react-three/drei'
 import * as THREE from 'three'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
@@ -26,24 +32,38 @@ import { busLatLng } from '../utils/geo'
 import { tileRangeAround, mosaicExtent, zoomFor, tileCount, type LngLat, type LocalExtent } from '../site3d/geo'
 import { buildGroundMosaic, ESRI_ATTRIBUTION } from '../site3d/imagery'
 import { buildSiteLayout, KIND_COLOR, KIND_LABEL, type SiteObject, type SiteKind } from '../site3d/layout'
-import { toScene, toBoxArgs, chooseSiteBus, fitCamera, type Bounds } from '../site3d/scene'
+import { toScene, toBoxArgs, fitCamera, chooseSite, unionBounds, halfSizeFor, type Bounds } from '../site3d/scene'
+import { useSitesStore } from '../site3d/sitesStore'
+import { readActiveSite, writeActiveSite } from '../site3d/activeSite'
+import { boundaryToLocal } from '../site3d/boundary'
+import { busOffsets, primaryBus, siteBounds } from '../site3d/siteModel'
+import { fitReport, formatHa, type FitObject } from '../site3d/fit'
+import SiteEmptyState from '../components/SiteEmptyState'
+import type { Bus } from '../api/types'
+import type { Site } from '../site3d/types'
 
 // ── One object = one group of boxes, one click target ────────────────────────
 
-function SiteObjectMesh({ obj, selected, hovered, onHover, onSelect }: {
+function SiteObjectMesh({ obj, selected, hovered, outside, onHover, onSelect }: {
   obj: SiteObject
   selected: boolean
   hovered: boolean
+  /** Sticks out of the site boundary (fit check, D9). */
+  outside: boolean
   onHover: (name: string | null) => void
   onSelect: (obj: SiteObject) => void
 }) {
   const [ox, oy] = obj.origin
   const tint = selected ? '#ffffff' : hovered ? '#fde68a' : undefined
+  const emissive = selected ? obj.color : outside ? '#dc2626' : '#000000'
+  const emissiveIntensity = selected ? 0.6 : outside ? 0.45 : 0
   const top = Math.max(...obj.parts.map(p => p.pos[2] + p.size[2] / 2), 2)
   return (
     <group
       name={`${obj.type}:${obj.name}`}
       position={toScene(ox, oy, 0)}
+      // Heading is clockwise from north; a rotation about the up axis by −heading.
+      rotation={[0, (-obj.heading * Math.PI) / 180, 0]}
       onClick={(e: ThreeEvent<MouseEvent>) => { e.stopPropagation(); onSelect(obj) }}
       onPointerOver={(e: ThreeEvent<PointerEvent>) => { e.stopPropagation(); onHover(obj.name) }}
       onPointerOut={() => onHover(null)}
@@ -52,8 +72,6 @@ function SiteObjectMesh({ obj, selected, hovered, onHover, onSelect }: {
         <mesh
           key={i}
           position={toScene(p.pos[0], p.pos[1], p.pos[2])}
-          // Local (east, north, up) rotations → scene axes: about up = about Y,
-          // about east = about X, about north = about −Z.
           rotation={[p.rotX ?? 0, p.rotZ ?? 0, -(p.rotN ?? 0)]}
           castShadow
           receiveShadow
@@ -61,8 +79,8 @@ function SiteObjectMesh({ obj, selected, hovered, onHover, onSelect }: {
           <boxGeometry args={toBoxArgs(p.size)} />
           <meshStandardMaterial
             color={tint ?? p.color ?? obj.color}
-            emissive={selected ? obj.color : '#000000'}
-            emissiveIntensity={selected ? 0.6 : 0}
+            emissive={emissive}
+            emissiveIntensity={emissiveIntensity}
             roughness={0.7}
             metalness={0.1}
           />
@@ -71,7 +89,7 @@ function SiteObjectMesh({ obj, selected, hovered, onHover, onSelect }: {
       {(selected || hovered) && (
         <Html position={toScene(0, 0, top + 4)} center zIndexRange={[200, 100]} style={{ pointerEvents: 'none' }}>
           <div className="whitespace-nowrap rounded bg-bg/95 border border-border px-2 py-1 text-[11px] text-text shadow">
-            <div className="font-semibold">{obj.name}</div>
+            <div className="font-semibold">{obj.name}{outside ? <span className="ml-2 text-[10px] text-accent">outside the boundary</span> : null}</div>
             <div className="text-muted">{obj.summary}</div>
           </div>
         </Html>
@@ -92,8 +110,6 @@ function Ground({ extent, texture, onMiss }: { extent: LocalExtent; texture: THR
   const d = extent.north - extent.south
   const cx = (extent.east + extent.west) / 2
   const cy = (extent.north + extent.south) / 2
-  // A plane rotated −90° about X has its +Y (image top) along −Z, which is
-  // north in this frame — so the mosaic needs no flip.
   const flat: [number, number, number] = [-Math.PI / 2, 0, 0]
   return (
     <group>
@@ -101,9 +117,8 @@ function Ground({ extent, texture, onMiss }: { extent: LocalExtent; texture: THR
         <planeGeometry args={[w, d]} />
         {/* Keyed so the textured material is a NEW material, not the grey
             one with `map` patched in: a material compiled without a map
-            keeps its mapless program when `map` is assigned later (the
-            program cache key is only re-read on `needsUpdate`), and under
-            some drivers that renders black rather than white. */}
+            keeps its mapless program when `map` is assigned later, and
+            under some drivers that renders black rather than white. */}
         {texture
           ? <meshBasicMaterial key="imagery" map={texture} toneMapped={false} />
           : <meshBasicMaterial key="flat" color="#6b7280" />}
@@ -116,14 +131,22 @@ function Ground({ extent, texture, onMiss }: { extent: LocalExtent; texture: THR
   )
 }
 
-// ── Camera: fit the packed site once per mount (the Canvas is keyed on the bus) ──
+// ── Boundary ribbon on the ground ────────────────────────────────────────────
+
+function BoundaryRibbon({ site }: { site: Site }) {
+  const points = useMemo(() => {
+    const pts = boundaryToLocal(site.boundary, site.origin).map(p => toScene(p.x, p.y, 0.4))
+    return [...pts, pts[0]]
+  }, [site])
+  return <Line points={points} color="#b3261e" lineWidth={2} />
+}
+
+// ── Camera: fit the packed site once per mount (the Canvas is keyed on the site) ──
 
 function FitCamera({ bounds }: { bounds: Bounds }) {
   const camera = useThree(s => s.camera)
   const controls = useThree(s => s.controls) as { target: THREE.Vector3; update: () => void } | null
   const size = useThree(s => s.size)
-  // Once, with the size at mount: refitting on every resize would yank the
-  // camera away from wherever the user orbited it each time a panel opens.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const cam = camera as THREE.PerspectiveCamera
@@ -137,10 +160,48 @@ function FitCamera({ bounds }: { bounds: Bounds }) {
   return null
 }
 
+// ── Debug hook (permanent, gated) — how a browser test drives this view ──────
+//
+// `page.screenshot` blanks large textured planes under SwiftShader (spike
+// note), so a test reads the canvas through `snapshot()`; and it needs each
+// object's screen position to click it. Only in dev builds, or when the URL
+// carries `site3dDebug`.
+
+const DEBUG_ENABLED = import.meta.env.DEV || (typeof location !== 'undefined' && location.search.includes('site3dDebug'))
+
+function Site3dDebugHook({ objects, site }: { objects: SiteObject[]; site: Site }) {
+  const camera = useThree(s => s.camera)
+  const scene = useThree(s => s.scene)
+  const gl = useThree(s => s.gl)
+  const size = useThree(s => s.size)
+  useEffect(() => {
+    const project = (key: string) => {
+      const o = scene.getObjectByName(key)
+      if (!o) return null
+      const v = new THREE.Vector3()
+      o.getWorldPosition(v).project(camera)
+      const rect = gl.domElement.getBoundingClientRect()
+      return { x: rect.left + ((v.x + 1) / 2) * rect.width, y: rect.top + ((1 - v.y) / 2) * rect.height }
+    }
+    const hook = {
+      project,
+      objects: objects.map(o => ({ key: `${o.type}:${o.name}`, origin: o.origin, heading: o.heading, parts: o.parts.length, summary: o.summary })),
+      site: { id: site.id, name: site.name, placements: site.placements },
+      snapshot: () => { gl.render(scene, camera); return gl.domElement.toDataURL('image/png') },
+    }
+    ;(window as unknown as { __site3d?: unknown }).__site3d = hook
+    return () => { delete (window as unknown as { __site3d?: unknown }).__site3d }
+  }, [camera, scene, gl, size, objects, site])
+  return null
+}
+
 // ── The view ──────────────────────────────────────────────────────────────────
 
 export default function SiteCanvas() {
   const { currentProject, selectedComponent, setSelectedComponent } = useUIStore()
+  const activeSiteId = useUIStore(s => s.activeSiteId)
+  const setActiveSiteId = useUIStore(s => s.setActiveSiteId)
+  const sitesDoc = useSitesStore(s => s.docFor(currentProject))
 
   const { data: buses = [], isLoading } = useQuery({ queryKey: nk(currentProject, 'buses'), queryFn: networkApi.getBuses })
   const { data: generators = [] }   = useQuery({ queryKey: nk(currentProject, 'generators'),    queryFn: networkApi.getGenerators })
@@ -151,35 +212,56 @@ export default function SiteCanvas() {
   const { data: lines = [] }        = useQuery({ queryKey: nk(currentProject, 'lines'),         queryFn: networkApi.getLines })
   const { data: links = [] }        = useQuery({ queryKey: nk(currentProject, 'links'),         queryFn: networkApi.getLinks })
 
-  // Which bus is the site. The initial choice follows the current selection;
-  // afterwards the picker overlay owns it. Session state only — the spike has
-  // no site entity to persist (assessment §6).
-  const [siteBusName, setSiteBusName] = useState<string | null>(null)
-  const siteBus = useMemo(
-    () => chooseSiteBus(buses, siteBusName ? null : selectedComponent, siteBusName),
-    // The selection only seeds the FIRST choice; later selections (clicking a
-    // box) must not swing the view to another bus.
+  // The remembered site for this project seeds the choice once per project.
+  useEffect(() => {
+    if (!activeSiteId) {
+      const stored = readActiveSite(currentProject)
+      if (stored) setActiveSiteId(stored)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [buses, siteBusName],
-  )
-  const bus = buses.find(b => b.name === siteBus) ?? null
-  const placedBuses = buses.filter(b => busLatLng(b) !== null)
+  }, [currentProject])
 
-  const layout = useMemo(() => bus
-    ? buildSiteLayout({ bus: { name: bus.name, v_nom: bus.v_nom }, generators, storageUnits, stores, loads, transformers, lines, links })
-    : null,
-  [bus, generators, storageUnits, stores, loads, transformers, lines, links])
+  const selectedBus = selectedComponent?.type === 'Bus' ? selectedComponent.name : null
+  const site = useMemo(() => chooseSite(sitesDoc, activeSiteId, selectedBus), [sitesDoc, activeSiteId, selectedBus])
 
-  // Ground: tile range around the bus sized to the layout, stitched once per
-  // (bus, size). The texture is disposed when replaced.
-  const origin: LngLat | null = useMemo(() => {
-    const ll = bus ? busLatLng(bus) : null
-    return ll ? { lat: ll[0], lng: ll[1] } : null
-  }, [bus])
-  // Keyed on the quantised half-size, not the layout object: a parameter
-  // edit rebuilds the layout every time, and refetching 36 tiles because a
-  // genset gained an enclosure is the one thing this must not do.
-  const halfSizeM = layout?.halfSizeM ?? 0
+  const layoutForBus = (busName: string) => {
+    const bus = buses.find(b => b.name === busName)
+    return buildSiteLayout({ bus: { name: busName, v_nom: bus?.v_nom ?? 0 }, generators, storageUnits, stores, loads, transformers, lines, links })
+  }
+
+  const primary = site ? primaryBus(site) : null
+  const offsets = useMemo(() => (site ? busOffsets(site, buses as Bus[]) : {}), [site, buses])
+  const busOff: [number, number] = (primary && offsets[primary]) || [0, 0]
+
+  const layout = useMemo(() => (primary ? layoutForBus(primary) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [primary, buses, generators, storageUnits, stores, loads, transformers, lines, links])
+
+  // Objects in the SITE frame: the packed layout shifted by the primary bus's offset.
+  const objects: SiteObject[] = useMemo(() => layout
+    ? layout.objects.map(o => ({ ...o, origin: [o.origin[0] + busOff[0], o.origin[1] + busOff[1]] as [number, number] }))
+    : [], [layout, busOff[0], busOff[1]]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const siteExtent: Bounds | null = useMemo(() => {
+    if (!site || !layout) return null
+    const shifted = { x0: layout.bounds.x0 + busOff[0], x1: layout.bounds.x1 + busOff[0], y0: layout.bounds.y0 + busOff[1], y1: layout.bounds.y1 + busOff[1] }
+    return unionBounds(siteBounds(site), shifted)
+  }, [site, layout, busOff[0], busOff[1]]) // eslint-disable-line react-hooks/exhaustive-deps
+  const halfSizeM = siteExtent ? halfSizeFor(siteExtent) : 0
+
+  const fit = useMemo(() => {
+    if (!site) return null
+    const fo: FitObject[] = objects.map(o => ({ key: `${o.type}:${o.name}`, origin: o.origin, footprint: o.footprint, heading: o.heading, areaM2: o.areaM2 }))
+    return fitReport(fo, site)
+  }, [objects, site])
+  const outsideSet = useMemo(() => new Set(fit?.outside ?? []), [fit])
+
+  // Ground: tile range around the SITE origin sized to the extent, stitched
+  // once per (site, size). Keyed on the quantised half-size, not the layout
+  // object: a parameter edit rebuilds the layout every time, and refetching
+  // 36 tiles because a genset gained an enclosure is the one thing this
+  // must not do.
+  const origin: LngLat | null = site ? site.origin : null
   const ground = useMemo(() => {
     if (!origin || !halfSizeM) return null
     const z = zoomFor(origin.lat, halfSizeM)
@@ -215,27 +297,30 @@ export default function SiteCanvas() {
   if (isLoading) {
     return <div className="flex h-full items-center justify-center text-[12px] text-muted">Loading network…</div>
   }
-  if (!bus || !layout || !ground || !origin) {
+  if (!site) {
+    return <SiteEmptyState buses={buses as Bus[]} boundsFor={name => layoutForBus(name).bounds} />
+  }
+  if (!layout || !ground || !siteExtent || !fit) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-2 text-center px-8">
-        <div className="text-[13px] font-medium text-text">No placed bus to build a site from</div>
-        <div className="text-[12px] text-muted max-w-md">
-          The 3D site view is built around a bus with coordinates. Switch to the Satellite view and place a bus on the map, then come back.
-        </div>
+        <div className="text-[13px] font-medium text-text">{site.name} has no placed bus</div>
+        <div className="text-[12px] text-muted max-w-md">Add a placed bus to this site (Satellite view → click the boundary → Edit buses).</div>
       </div>
     )
   }
 
-  const kindsPresent = Array.from(new Set(layout.objects.map(o => o.kind))) as SiteKind[]
+  const kindsPresent = Array.from(new Set(objects.map(o => o.kind))) as SiteKind[]
   const selectedName = selectedComponent?.name ?? null
   const selectedType = selectedComponent?.type ?? null
+  const primaryPlaced = primary != null && offsets[primary] != null
 
   return (
     <div className="relative h-full w-full bg-canvas">
-      {/* key: a new bus gets a fresh camera; a parameter edit does not. */}
+      {/* key: a new site gets a fresh camera; a parameter edit does not. */}
       <Canvas
-        key={bus.name}
-        shadows={false}
+        key={site.id}
+        className="site3d-canvas"
+        shadows
         dpr={[1, 2]}
         camera={{ fov: 45, near: 1, far: 50_000 }}
         onPointerMissed={() => setSelectedComponent(null)}
@@ -243,29 +328,28 @@ export default function SiteCanvas() {
         <color attach="background" args={['#cfd8e3']} />
         <hemisphereLight args={['#ffffff', '#8a9bb0', 0.6]} />
         <directionalLight
-          position={toScene(-layout.halfSizeM, -layout.halfSizeM * 0.6, layout.halfSizeM * 1.4)}
+          position={toScene(-halfSizeM, -halfSizeM * 0.6, halfSizeM * 1.4)}
           intensity={1.6}
           castShadow
           shadow-mapSize={[2048, 2048]}
-          shadow-camera-left={-layout.halfSizeM}
-          shadow-camera-right={layout.halfSizeM}
-          shadow-camera-top={layout.halfSizeM}
-          shadow-camera-bottom={-layout.halfSizeM}
+          shadow-camera-left={-halfSizeM}
+          shadow-camera-right={halfSizeM}
+          shadow-camera-top={halfSizeM}
+          shadow-camera-bottom={-halfSizeM}
           shadow-camera-near={1}
-          shadow-camera-far={layout.halfSizeM * 5}
-          // A 2048² map over a km-wide site is ~1 m per texel; without a
-          // normal-offset bias the ground self-shadows everywhere and renders
-          // black (seen under SwiftShader, and on integrated GPUs).
+          shadow-camera-far={halfSizeM * 5}
           shadow-normalBias={1.5}
           shadow-bias={-0.0002}
         />
         <Ground extent={ground.extent} texture={texture} onMiss={() => setSelectedComponent(null)} />
-        {layout.objects.map(o => (
+        <BoundaryRibbon site={site} />
+        {objects.map(o => (
           <SiteObjectMesh
             key={`${o.type}:${o.name}`}
             obj={o}
             selected={o.type === selectedType && o.name === selectedName}
             hovered={o.name === hovered}
+            outside={outsideSet.has(`${o.type}:${o.name}`)}
             onHover={setHovered}
             onSelect={obj => setSelectedComponent({ type: obj.type, name: obj.name })}
           />
@@ -274,35 +358,41 @@ export default function SiteCanvas() {
           makeDefault
           maxPolarAngle={Math.PI / 2 - 0.05}
           minDistance={20}
-          maxDistance={layout.halfSizeM * 8}
+          maxDistance={halfSizeM * 8}
           enableDamping
         />
-        <FitCamera bounds={layout.bounds} />
+        <FitCamera bounds={siteExtent} />
+        {DEBUG_ENABLED && <Site3dDebugHook objects={objects} site={site} />}
       </Canvas>
 
-      {/* Site picker — top-left, BELOW the switcher's row so the two never
-          collide when the canvas column is narrow (assistant dock + tab
-          panel open leave it ~440 px). Under the switcher's z band. */}
+      {/* Site picker + fit check — top-left, BELOW the switcher's row. */}
       <div className="absolute left-3 top-12 z-[400] flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-border bg-bg/95 px-2 py-1.5 text-[11px] shadow max-w-[calc(100%-24px)]">
         <span className="text-muted">Site</span>
         <select
           className="bg-transparent text-text outline-none"
-          value={bus.name}
-          onChange={e => setSiteBusName(e.target.value)}
-          aria-label="Site bus"
+          value={site.id}
+          onChange={e => { setActiveSiteId(e.target.value); writeActiveSite(currentProject, e.target.value) }}
+          aria-label="Site"
         >
-          {placedBuses.map(b => <option key={b.name} value={b.name}>{b.name}</option>)}
+          {sitesDoc.sites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
         </select>
         <span className="text-muted">·</span>
-        <span className="text-muted">{layout.objects.length - 1} asset{layout.objects.length === 2 ? '' : 's'}</span>
+        <span className="text-muted">{objects.length - 1} asset{objects.length === 2 ? '' : 's'}</span>
         <span className="text-muted">·</span>
-        <span className="text-muted" title="Sum of every asset's land take from its parameters">
-          land ≈ {(layout.totalAreaM2 / 10_000).toFixed(1)} ha
+        <span
+          data-testid="fit-status"
+          className={fit.over ? 'text-accent font-semibold' : 'text-muted'}
+          title="Sum of every asset's land take from its parameters, against the plot area inside the boundary"
+        >
+          land {formatHa(fit.landM2)} · plot {formatHa(fit.plotM2)}{fit.over ? ' · does not fit' : ''}
         </span>
+        {fit.outside.length > 0 && (
+          <span className="text-accent" title={fit.outside.join(', ')}>· {fit.outside.length} outside</span>
+        )}
+        {!primaryPlaced && <span className="text-accent">· primary bus not placed</span>}
       </div>
 
-      {/* Legend — top-left, under the picker. The bottom edge belongs to
-          the snapshot picker bar (centre) and the attribution (right). */}
+      {/* Legend — under the picker. */}
       <div className="absolute left-3 top-[5.5rem] z-[400] flex flex-wrap gap-x-3 gap-y-1 rounded-md border border-border bg-bg/95 px-2 py-1.5 text-[11px] shadow max-w-[60%]">
         {kindsPresent.map(k => (
           <span key={k} className="flex items-center gap-1 text-muted">
@@ -312,7 +402,7 @@ export default function SiteCanvas() {
         ))}
       </div>
 
-      {/* Attribution — bottom-right, required for the Esri tiles. */}
+      {/* Attribution — bottom-right above the snapshot bar, required for the Esri tiles. */}
       <div className="absolute right-3 bottom-12 z-[400] max-w-[45%] rounded bg-bg/80 px-1.5 py-0.5 text-right text-[10px] text-muted">
         {tileStatus ? `${tileStatus} · ` : ''}{ESRI_ATTRIBUTION}
       </div>

@@ -48,6 +48,8 @@ export interface SiteObject {
   kind: SiteKind
   /** Object origin on the tangent plane, metres (east, north). */
   origin: [number, number]
+  /** Degrees clockwise from north. Packed objects face north (0); a placement sets it (WP3). */
+  heading: number
   /** Footprint envelope (east extent, north extent), metres — what `packZone` packs. */
   footprint: [number, number]
   parts: Part[]
@@ -141,7 +143,7 @@ function bessObject(type: 'StorageUnit' | 'Store', name: string, mwh: number, mw
   }
   g.footprint[0] += 6
   return {
-    type, name, kind: 'bess', origin: [0, 0], footprint: g.footprint, parts: g.parts,
+    type, name, kind: 'bess', origin: [0, 0], heading: 0, footprint: g.footprint, parts: g.parts,
     color: KIND_COLOR.bess,
     summary: `${KIND_LABEL.bess} — ${fmt(mwh, 'MWh')}${mw != null ? ` / ${fmt(mw, 'MW')}` : ''} in ${n} container${n === 1 ? '' : 's'}${each > 1 ? ` (each box = ${each})` : ''}`,
     areaM2: g.footprint[0] * g.footprint[1],
@@ -153,7 +155,7 @@ function h2StoreObject(name: string, mwh: number): SiteObject {
   const { drawn, each } = capped(n)
   const g = gridParts(drawn, [3, 20, 3], 6, 2)
   return {
-    type: 'Store', name, kind: 'h2store', origin: [0, 0], footprint: g.footprint, parts: g.parts,
+    type: 'Store', name, kind: 'h2store', origin: [0, 0], heading: 0, footprint: g.footprint, parts: g.parts,
     color: KIND_COLOR.h2store,
     summary: `${KIND_LABEL.h2store} — ${fmt(mwh, 'MWh')} in ${n} bullet tank${n === 1 ? '' : 's'}${each > 1 ? ` (each = ${each})` : ''}`,
     areaM2: g.footprint[0] * g.footprint[1],
@@ -164,7 +166,7 @@ function genericStoreObject(name: string, carrier: string, mwh: number): SiteObj
   // A tank whose volume grows with the energy — anything not battery or H₂.
   const side = Math.max(4, Math.cbrt(Math.max(mwh, 1)) * 2)
   return {
-    type: 'Store', name, kind: 'store', origin: [0, 0], footprint: [side, side],
+    type: 'Store', name, kind: 'store', origin: [0, 0], heading: 0, footprint: [side, side],
     parts: [{ pos: [0, 0, side / 2], size: [side, side, side] }],
     color: KIND_COLOR.store,
     summary: `${KIND_LABEL.store} (${carrier || 'unknown carrier'}) — ${fmt(mwh, 'MWh')}`,
@@ -186,7 +188,7 @@ function pvObject(name: string, mw: number): SiteObject {
   for (const p of g.parts) { p.rotX = 25 * Math.PI / 180; p.pos[2] = 1.2 }
   g.footprint[1] = Math.max(g.footprint[1], rows * PV_ROW_PITCH)
   return {
-    type: 'Generator', name, kind: 'pv', origin: [0, 0], footprint: g.footprint, parts: g.parts,
+    type: 'Generator', name, kind: 'pv', origin: [0, 0], heading: 0, footprint: g.footprint, parts: g.parts,
     color: KIND_COLOR.pv,
     summary: `${KIND_LABEL.pv} — ${fmt(mw, 'MW')} on ~${(areaM2 / 10_000).toFixed(1)} ha${each > 1 ? ` (each table = ${each})` : ''}`,
     areaM2,
@@ -215,7 +217,7 @@ function windObject(name: string, mw: number): SiteObject {
   }
   const footprint: [number, number] = [w + rotor, d + rotor]
   return {
-    type: 'Generator', name, kind: 'wind', origin: [0, 0], footprint, parts,
+    type: 'Generator', name, kind: 'wind', origin: [0, 0], heading: 0, footprint, parts,
     color: KIND_COLOR.wind,
     summary: `${KIND_LABEL.wind} — ${fmt(mw, 'MW')} as ${n} × ${MW_PER_TURBINE} MW, ${hub} m hub, ${rotor} m rotor`,
     areaM2: footprint[0] * footprint[1],
@@ -233,7 +235,7 @@ function thermalObject(name: string, carrier: string, mw: number): SiteObject {
   }
   g.footprint[0] += 4
   return {
-    type: 'Generator', name, kind: 'thermal', origin: [0, 0], footprint: g.footprint, parts: g.parts,
+    type: 'Generator', name, kind: 'thermal', origin: [0, 0], heading: 0, footprint: g.footprint, parts: g.parts,
     color: KIND_COLOR.thermal,
     summary: `${KIND_LABEL.thermal} (${carrier || 'unknown carrier'}) — ${fmt(mw, 'MW')} in ${n} enclosure${n === 1 ? '' : 's'}${each > 1 ? ` (each box = ${each})` : ''}`,
     areaM2: g.footprint[0] * g.footprint[1],
@@ -248,7 +250,7 @@ function electrolyserObject(name: string, mw: number): SiteObject {
   g.parts.push({ pos: [0, g.footprint[1] / 2 + 8, 3], size: [Math.max(15, g.footprint[0]), 10, 6], color: '#67e8f9' })
   g.footprint[1] += 16
   return {
-    type: 'Link', name, kind: 'electrolyser', origin: [0, 0], footprint: g.footprint, parts: g.parts,
+    type: 'Link', name, kind: 'electrolyser', origin: [0, 0], heading: 0, footprint: g.footprint, parts: g.parts,
     color: KIND_COLOR.electrolyser,
     summary: `${KIND_LABEL.electrolyser} — ${fmt(mw, 'MW')} in ${n} skid${n === 1 ? '' : 's'}${each > 1 ? ` (each box = ${each})` : ''}`,
     areaM2: g.footprint[0] * g.footprint[1],
@@ -259,7 +261,7 @@ function loadObject(name: string, carrier: string, mw: number): SiteObject {
   const areaM2 = Math.max(200, Math.abs(mw) * DATAHALL_M2_PER_MW)
   const w = Math.sqrt(areaM2 * 1.6), d = areaM2 / w, h = 12
   return {
-    type: 'Load', name, kind: 'load', origin: [0, 0], footprint: [w, d],
+    type: 'Load', name, kind: 'load', origin: [0, 0], heading: 0, footprint: [w, d],
     parts: [
       { pos: [0, 0, h / 2], size: [w, d, h] },
       // Rooftop plant strip so it reads as a building, not a slab.
@@ -276,7 +278,7 @@ function transformerObject(name: string, mva: number, vHi: number | null | undef
   const s = Math.max(1, Math.cbrt(Math.max(mva, 1)))
   const tank: [number, number, number] = [2.3 * s, 1.4 * s, 1.6 * s]
   return {
-    type: 'Transformer', name, kind: 'transformer', origin: [0, 0], footprint: [tank[0] + 4, tank[1] + 4],
+    type: 'Transformer', name, kind: 'transformer', origin: [0, 0], heading: 0, footprint: [tank[0] + 4, tank[1] + 4],
     parts: [
       { pos: [0, 0, tank[2] / 2], size: tank },
       { pos: [-tank[0] / 2 - 0.6, 0, tank[2] / 2], size: [1.2, tank[1] * 0.8, tank[2] * 0.9], color: '#93c5fd' }, // radiators
@@ -293,7 +295,7 @@ function transformerObject(name: string, mva: number, vHi: number | null | undef
 
 function feederObject(type: 'Line' | 'Link', name: string, other: string, rating: number, unit: string): SiteObject {
   return {
-    type, name, kind: 'feeder', origin: [0, 0], footprint: [6, 4],
+    type, name, kind: 'feeder', origin: [0, 0], heading: 0, footprint: [6, 4],
     parts: [
       { pos: [0, 0, 0.15], size: [6, 4, 0.3], color: '#94a3b8' },          // bay slab
       { pos: [-2, 0, 3], size: [0.3, 0.3, 6] }, { pos: [2, 0, 3], size: [0.3, 0.3, 6] }, // gantry legs
@@ -308,7 +310,7 @@ function feederObject(type: 'Line' | 'Link', name: string, other: string, rating
 function switchyardObject(bus: string, vNom: number, bays: number): SiteObject {
   const w = Math.max(30, 12 + bays * 8), d = Math.max(20, 10 + Math.min(vNom, 400) / 10)
   return {
-    type: 'Bus', name: bus, kind: 'switchyard', origin: [0, 0], footprint: [w, d],
+    type: 'Bus', name: bus, kind: 'switchyard', origin: [0, 0], heading: 0, footprint: [w, d],
     parts: [
       { pos: [0, 0, 0.15], size: [w, d, 0.3], color: '#cbd5e1' },              // gravel pad
       { pos: [0, d / 4, 5], size: [w - 4, 0.4, 0.4], color: '#e5e7eb' },       // busbar

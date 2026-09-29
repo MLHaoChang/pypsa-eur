@@ -410,6 +410,13 @@ interface UIStore {
   setPendingNodePosition: (p: PendingNodePosition | null) => void
   setCanvasMode: (mode: CanvasMode) => void
   setCanvasView: (view: CanvasView) => void
+  // 3D site view (WP2): drawing a boundary on the map, and the active site.
+  siteDrawMode: 'idle' | 'drawing'
+  siteDraft: Array<[number, number]>
+  setSiteDrawMode: (m: 'idle' | 'drawing') => void
+  setSiteDraft: (d: Array<[number, number]>) => void
+  activeSiteId: string | null
+  setActiveSiteId: (id: string | null) => void
   setSlidePanel: (p: SlidePanel | null) => void
   setAssistantDockOpen: (open: boolean) => void
   toggleAssistantDock: () => void
@@ -479,6 +486,9 @@ export const useUIStore = create<UIStore>((set) => ({
   pendingNodePosition: null,
   canvasMode: 'select',
   canvasView: storedCanvasView(),
+  siteDrawMode: 'idle',
+  siteDraft: [],
+  activeSiteId: null,
   activeSlidePanel: null,
   assistantDockOpen: storedAssistantDockOpen(),
   assistantDockWidth: storedAssistantDockWidth(),
@@ -579,6 +589,9 @@ export const useUIStore = create<UIStore>((set) => ({
     try { localStorage.setItem(CANVAS_VIEW_KEY, view) } catch { /* noop */ }
     set({ canvasView: view })
   },
+  setSiteDrawMode: (m) => set({ siteDrawMode: m }),
+  setSiteDraft: (d) => set({ siteDraft: d }),
+  setActiveSiteId: (id) => set({ activeSiteId: id }),
   setSlidePanel: (p) => set({ activeSlidePanel: p }),
   setAssistantDockOpen: (open) => {
     persistAssistantDockOpen(open)

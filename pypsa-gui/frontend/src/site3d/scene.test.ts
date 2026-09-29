@@ -1,31 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { toScene, toBoxArgs, chooseSiteBus, fitCamera } from './scene'
-import type { Bus } from '../api/types'
+import { toScene, toBoxArgs, fitCamera, chooseSite, unionBounds, halfSizeFor } from './scene'
+import type { Site, SitesDocument } from './types'
 
-const bus = (name: string, x: number, y: number): Bus => ({ name, x, y } as Bus)
 
 describe('frame mapping', () => {
   it('north is −Z and up is +Y', () => {
     expect(toScene(1, 2, 3)).toEqual([1, 3, -2])
     expect(toBoxArgs([6.1, 2.44, 2.9])).toEqual([6.1, 2.9, 2.44])
-  })
-})
-
-describe('chooseSiteBus', () => {
-  const buses = [bus('unplaced', 0, 0), bus('A', 4.9, 52.4), bus('B', 4.95, 52.41)]
-
-  it('is null when no bus is placed', () => {
-    expect(chooseSiteBus([bus('unplaced', 0, 0)], { type: 'Bus', name: 'unplaced' }, 'unplaced')).toBeNull()
-  })
-
-  it('prefers the selected bus, then the previous one, then the first placed', () => {
-    expect(chooseSiteBus(buses, { type: 'Bus', name: 'B' }, 'A')).toBe('B')
-    expect(chooseSiteBus(buses, { type: 'Generator', name: 'g' }, 'B')).toBe('B')
-    expect(chooseSiteBus(buses, null, null)).toBe('A')
-  })
-
-  it('never picks an unplaced bus even when it is selected or was previous', () => {
-    expect(chooseSiteBus(buses, { type: 'Bus', name: 'unplaced' }, 'unplaced')).toBe('A')
   })
 })
 
@@ -61,5 +42,29 @@ describe('fitCamera', () => {
         expect(Math.abs(Math.atan2(dx, forward))).toBeLessThan(Math.atan(Math.tan(halfFov) * aspect))
       }
     }
+  })
+})
+
+describe('chooseSite', () => {
+  const mk = (id: string, buses: string[]): Site => ({ id, name: id, buses, boundary: [[0, 0], [0.01, 0], [0.01, 0.01]], origin: { lng: 0.005, lat: 0.003 }, placements: {} })
+  const doc: SitesDocument = { version: 1, sites: [mk('a', ['B1']), mk('b', ['B2', 'B3'])] }
+
+  it('prefers the active id, then the selected bus\'s site, then the first', () => {
+    expect(chooseSite(doc, 'b', 'B1')?.id).toBe('b')
+    expect(chooseSite(doc, 'missing', 'B3')?.id).toBe('b')
+    expect(chooseSite(doc, null, 'nope')?.id).toBe('a')
+    expect(chooseSite(doc, null, null)?.id).toBe('a')
+  })
+  it('is null with no sites', () => {
+    expect(chooseSite({ version: 1, sites: [] }, 'a', 'B1')).toBeNull()
+  })
+})
+
+describe('unionBounds / halfSizeFor', () => {
+  it('union contains both and halfSize rounds up in 50 m steps with a 250 m floor', () => {
+    const u = unionBounds({ x0: -10, x1: 20, y0: -5, y1: 5 }, { x0: 0, x1: 400, y0: -300, y1: 1 })
+    expect(u).toEqual({ x0: -10, x1: 400, y0: -300, y1: 5 })
+    expect(halfSizeFor({ x0: -1, x1: 1, y0: -1, y1: 1 })).toBe(300)
+    expect(halfSizeFor(u)).toBe(500)
   })
 })

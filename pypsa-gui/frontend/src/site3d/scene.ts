@@ -3,6 +3,7 @@
 
 import type { Bus } from '../api/types'
 import { isPlaced } from '../utils/geo'
+import type { Site, SitesDocument } from './types'
 
 /** Local (east, north, up) metres → three.js (x, y, z) with Y up and north = −Z. */
 export function toScene(east: number, north: number, up: number): [number, number, number] {
@@ -12,25 +13,6 @@ export function toScene(east: number, north: number, up: number): [number, numbe
 /** Box size (east extent, north extent, height) → boxGeometry args (width x, height y, depth z). */
 export function toBoxArgs(size: [number, number, number]): [number, number, number] {
   return [size[0], size[2], size[1]]
-}
-
-/**
- * Which bus the site view shows. Preference order: the bus the user already
- * has selected (if it is placed), the bus shown last time, then the first
- * placed bus. Returns null when nothing is placed — the view then explains
- * itself instead of rendering Null Island.
- */
-export function chooseSiteBus(
-  buses: Bus[],
-  selected: { type: string; name: string } | null,
-  previous: string | null,
-): string | null {
-  const placed = buses.filter(isPlaced)
-  if (placed.length === 0) return null
-  const has = (n: string) => placed.some(b => b.name === n)
-  if (selected?.type === 'Bus' && has(selected.name)) return selected.name
-  if (previous && has(previous)) return previous
-  return placed[0].name
 }
 
 export interface Bounds { x0: number; x1: number; y0: number; y1: number }
@@ -65,4 +47,37 @@ export function fitCamera(bounds: Bounds, aspect: number, fovDeg = 45, tiltDeg =
     target: toScene(cx, cy, 0),
     far: Math.max(dist * 20, 5000),
   }
+}
+
+/**
+ * Which site the 3D view shows: the one the user chose, else the site that
+ * contains the selected component's bus, else the first. `null` with no
+ * sites — the view then offers to create one.
+ */
+export function chooseSite(
+  doc: SitesDocument,
+  activeSiteId: string | null,
+  selectedBus: string | null,
+): Site | null {
+  if (doc.sites.length === 0) return null
+  if (activeSiteId) {
+    const s = doc.sites.find(x => x.id === activeSiteId)
+    if (s) return s
+  }
+  if (selectedBus) {
+    const s = doc.sites.find(x => x.buses.includes(selectedBus))
+    if (s) return s
+  }
+  return doc.sites[0]
+}
+
+/** The smallest bounds containing both. */
+export function unionBounds(a: Bounds, b: Bounds): Bounds {
+  return { x0: Math.min(a.x0, b.x0), x1: Math.max(a.x1, b.x1), y0: Math.min(a.y0, b.y0), y1: Math.max(a.y1, b.y1) }
+}
+
+/** Half-size of the square about the frame origin that contains `b` (min 250 m, 50 m steps). */
+export function halfSizeFor(b: Bounds): number {
+  const reach = Math.max(250, Math.abs(b.x0), Math.abs(b.x1), Math.abs(b.y0), Math.abs(b.y1))
+  return Math.ceil((reach * 1.15) / 50) * 50
 }

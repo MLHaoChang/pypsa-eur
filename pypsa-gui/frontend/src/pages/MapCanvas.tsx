@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { MapContainer, TileLayer, Marker, Polyline, Tooltip, useMap, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Polyline, Polygon, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import toast from 'react-hot-toast'
@@ -22,6 +22,11 @@ import { nextBusToPlace, canSkip } from '../utils/placement'
 import { ingestRescale } from '../utils/rescaleActions'
 import { useRescaleStore } from '../store/rescaleStore'
 import UnplacedBusesPanel from '../components/UnplacedBusesPanel'
+import SiteDraftPanel from '../components/SiteDraftPanel'
+import { useSiteDraw } from '../site3d/useSiteDraw'
+import { useSitesStore } from '../site3d/sitesStore'
+import { readActiveSite, writeActiveSite } from '../site3d/activeSite'
+import type { LngLatTuple, Site } from '../site3d/types'
 
 /**
  * HTML-attribute escaping for the divIcon's `html` string. The marker markup
@@ -285,6 +290,30 @@ function ClickToPlace({ onPick }: { onPick: (lat: number, lng: number) => void }
     const previous = el.style.cursor
     el.style.cursor = 'crosshair'
     return () => { el.style.cursor = previous }
+  }, [map])
+  return null
+}
+
+// Site boundary drawing (WP2, design D5). Mounted inside <MapContainer> only
+// while the draw hook owns the map's clicks — never alongside ClickToPlace,
+// which `mapClickOwner` guarantees. Double-click zoom is off for the
+// duration so the closing double-click does not also zoom the map.
+function SiteDrawLayer({
+  onVertex, onDoubleClick,
+}: {
+  onVertex: (lng: number, lat: number) => void
+  onDoubleClick: (lng: number, lat: number) => void
+}) {
+  const map = useMapEvents({
+    click: (e) => onVertex(e.latlng.lng, e.latlng.lat),
+    dblclick: (e) => onDoubleClick(e.latlng.lng, e.latlng.lat),
+  })
+  useEffect(() => {
+    map.doubleClickZoom.disable()
+    const el = map.getContainer()
+    const previous = el.style.cursor
+    el.style.cursor = 'crosshair'
+    return () => { map.doubleClickZoom.enable(); el.style.cursor = previous }
   }, [map])
   return null
 }
@@ -648,6 +677,47 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
   // and by FitToNetwork's `suspended` prop.
   const [placing, setPlacing] = useState(false)
 
+  // ── Sites (WP2) ────────────────────────────────────────────────────────────
+  const draw = useSiteDraw()
+  const sitesDoc = useSitesStore(s => s.docFor(currentProject))
+  const removeSite = useSitesStore(s => s.removeSite)
+  const setActiveSiteId = useUIStore(s => s.setActiveSiteId)
+  const setCanvasView = useUIStore(s => s.setCanvasView)
+  const readOnly = useUIStore(s => s.readOnly)
+  // The boundary just closed, awaiting a name; or the site being edited.
+  const [draftBoundary, setDraftBoundary] = useState<LngLatTuple[] | null>(null)
+  const [editSite, setEditSite] = useState<Site | null>(null)
+  // Popover on a clicked site polygon, in container pixels.
+  const [sitePopover, setSitePopover] = useState<{ id: string; x: number; y: number } | null>(null)
+  // Keyboard while drawing: Enter closes, Escape cancels.
+  useEffect(() => {
+    if (!draw.drawing) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { e.preventDefault(); draw.cancel() }
+      else if (e.key === 'Enter') {
+        e.preventDefault()
+        const r = draw.finish()
+        if (r.status === 'closed') setDraftBoundary(r.boundary)
+        else toast.error('A site needs at least three corners')
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [draw])
+  const openIn3D = (site: Site) => {
+    setActiveSiteId(site.id)
+    writeActiveSite(currentProject, site.id)
+    setSitePopover(null)
+    setCanvasView('site')
+  }
+  const deleteSite = (site: Site) => {
+    setSitePopover(null)
+    confirmToast(`Delete site "${site.name}"? Its boundary and placements are removed; the network is untouched.`, () => {
+      removeSite(currentProject, site.id)
+      if (readActiveSite(currentProject) === site.id) { writeActiveSite(currentProject, null); setActiveSiteId(null) }
+    }, { confirmLabel: 'Delete' })
+  }
+
   // Mirror `placing` into the shared rescale store so RescaleDialogHost (at
   // App.tsx level, see store/rescaleStore.ts) knows to withhold the modal
   // while click-to-place is running — a Dialog stealing focus mid-click
@@ -949,6 +1019,41 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           }} />
         )}
 
+        {/* Site boundaries (WP2). `bubblingMouseEvents={false}` so a click on a
+            polygon never reaches the map's own click consumers. */}
+        {sitesDoc.sites.map(site => (
+          <Polygon
+            key={site.id}
+            positions={site.boundary.map(([lng, lat]) => [lat, lng] as [number, number])}
+            bubblingMouseEvents={false}
+            pathOptions={{ color: '#b3261e', weight: 2, fillColor: '#b3261e', fillOpacity: 0.08, dashArray: undefined }}
+            eventHandlers={{
+              click: (e) => {
+                if (draw.drawing) return
+                setSitePopover({ id: site.id, x: e.containerPoint.x, y: e.containerPoint.y })
+              },
+            }}
+          >
+            <Tooltip sticky>{site.name} · {site.buses.length} bus{site.buses.length === 1 ? '' : 'es'}</Tooltip>
+          </Polygon>
+        ))}
+        {draw.drawing && placementUiAllowed && (
+          <SiteDrawLayer
+            onVertex={(lng, lat) => draw.addVertex(lng, lat)}
+            onDoubleClick={(lng, lat) => {
+              const r = draw.closeByDoubleClick(lng, lat)
+              if (r.status === 'closed') setDraftBoundary(r.boundary)
+              else toast.error('A site needs at least three corners')
+            }}
+          />
+        )}
+        {draw.drawing && draw.draft.length > 0 && (
+          <Polyline
+            positions={draw.draft.map(([lng, lat]) => [lat, lng] as [number, number])}
+            pathOptions={{ color: '#b3261e', weight: 2, dashArray: '6 6' }}
+          />
+        )}
+
         {/* Lines — colour by the lower of the two bus voltages. Routable. */}
         {(lines as LineT[]).map(line => {
           const b0 = busByName.get(line.bus0)
@@ -1186,6 +1291,60 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
           onStartPlacing={() => setPlacing(true)}
         />
       )}
+
+      {/* New site (WP2). Same visibility rule as the unplaced-buses panel;
+          hidden while placing, since placement owns the map's clicks. */}
+      {placementUiAllowed && !placing && !draw.drawing && !draftBoundary && !editSite && (
+        <button
+          type="button"
+          onClick={() => { if (!draw.start()) toast.error(readOnly ? 'Project is read-only' : 'Finish placing buses first') }}
+          disabled={readOnly}
+          title={readOnly ? 'Project is read-only' : 'Draw a site boundary: click corners, double-click or Enter to close'}
+          className="absolute z-[900] flex items-center gap-1.5 px-2.5 py-1.5 bg-bg border border-border rounded-md shadow text-[11px] font-medium text-text hover:bg-accent/5 disabled:opacity-50"
+          // Right of Leaflet's zoom control (top-left, ~34 px wide), not on top of it.
+          style={{ top: 12, left: 54 }}
+        >
+          + New site
+        </button>
+      )}
+      {draw.drawing && placementUiAllowed && (
+        <div
+          className="absolute z-[900] left-1/2 -translate-x-1/2 flex items-center gap-3 px-3 py-2 bg-bg border border-border rounded-lg shadow-lg text-xs"
+          style={{ bottom: 24 }}
+        >
+          <span className="text-text">
+            Drawing a site — click the corners
+            <span className="text-muted"> ({draw.draft.length} so far) · double-click or Enter to close · Esc to cancel</span>
+          </span>
+          <button type="button" onClick={() => draw.cancel()} className="px-2 py-0.5 border border-border rounded text-muted hover:text-text">Cancel</button>
+        </div>
+      )}
+      {placementUiAllowed && (draftBoundary || editSite) && (
+        <SiteDraftPanel
+          boundary={editSite ? editSite.boundary : draftBoundary!}
+          existing={editSite}
+          buses={buses as Bus[]}
+          onDone={() => { setDraftBoundary(null); setEditSite(null) }}
+        />
+      )}
+      {sitePopover && (() => {
+        const site = sitesDoc.sites.find(x => x.id === sitePopover.id)
+        if (!site) return null
+        return (
+          <div
+            role="menu"
+            aria-label={`Site ${site.name}`}
+            className="absolute z-[900] flex flex-col min-w-[10rem] rounded-md border border-border bg-bg shadow-lg text-[12px] overflow-hidden"
+            style={{ left: sitePopover.x + 8, top: sitePopover.y + 8 }}
+          >
+            <div className="px-2.5 py-1.5 border-b border-border font-semibold text-text truncate">{site.name}</div>
+            <button type="button" role="menuitem" onClick={() => openIn3D(site)} className="text-left px-2.5 py-1.5 hover:bg-accent/5 text-text">Open in 3D</button>
+            <button type="button" role="menuitem" disabled={readOnly} onClick={() => { setSitePopover(null); setEditSite(site) }} className="text-left px-2.5 py-1.5 hover:bg-accent/5 text-text disabled:opacity-50">Edit buses…</button>
+            <button type="button" role="menuitem" disabled={readOnly} onClick={() => deleteSite(site)} className="text-left px-2.5 py-1.5 hover:bg-accent/5 text-accent disabled:opacity-50">Delete site</button>
+            <button type="button" role="menuitem" onClick={() => setSitePopover(null)} className="text-left px-2.5 py-1.5 hover:bg-accent/5 text-muted border-t border-border">Close</button>
+          </div>
+        )
+      })()}
 
       {/* The rescale consent dialog used to render here. It's now a single
           app-wide instance (RescaleDialogHost, mounted once in App.tsx) so

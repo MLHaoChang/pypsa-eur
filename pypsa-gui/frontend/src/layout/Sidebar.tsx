@@ -40,6 +40,7 @@ import { useLLMSettingsAvailable } from '../hooks/useLLMSettings'
 import { isActive } from '../api/solveQueue'
 import { evaluateMutation } from '../utils/mutationGuard'
 import { flushPendingEdgeDeletes } from '../utils/pendingEdgeDeletes'
+import { flushPendingSitesToServer } from '../site3d/sitesStore'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 const SIDEBAR_EXPANDED_W = 240
@@ -801,7 +802,6 @@ function ProjectSectionContent({
       // The 3D site sidecar flushes beside the layout, same reasons, same
       // debounce: a Save-As re-homes the pending document to the new name.
       try {
-        const { flushPendingSitesToServer } = await import('../site3d/sitesStore')
         const sr = await flushPendingSitesToServer(result.saved, { previousProject: cur })
         if (sr.status === 'local') appLog('WARN', 'Sites server write failed — kept the site document in localStorage')
       } catch (e) {
