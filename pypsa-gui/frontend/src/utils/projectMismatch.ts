@@ -35,7 +35,8 @@ function apiPath(url: string | undefined): string {
 /**
  * Whether a request may leave while the tab is mismatched. Reads always may.
  * Writes only on the way out (`POST /projects/<x>/activate`: the Switch
- * button and `switchToProject`), to the chat / local-settings / auth routes
+ * button and `switchToProject`), the edit-lock routes (acquire / release /
+ * heartbeat — lease metadata), to the chat / local-settings / auth routes
  * (the chat's own Send is gated in ChatPanel — its stream is a raw fetch),
  * and the tab's own layout sidecar (`PUT /projects/<tab>/layout` targets the
  * tab's project by name, not the backend's live network).
@@ -49,6 +50,11 @@ export function mismatchAllows(method: string | undefined, url: string | undefin
   if (p.startsWith('/chat/') || p === '/chat') return true
   if (p.startsWith('/local-settings/') || p === '/local-settings') return true
   if (p.startsWith('/auth/')) return true
+  // P27b gate B1 — the multi-user edit lock (auth mode, the default build):
+  // acquire / release / heartbeat move lease metadata, not the live network.
+  // Refusing them left Switch read-only and cost a mismatched tab its lock.
+  if ((verb === 'post' || verb === 'delete') && /^\/projects\/[^/]+\/lock\/?$/.test(p)) return true
+  if (verb === 'post' && /^\/projects\/[^/]+\/lock\/heartbeat\/?$/.test(p)) return true
   if (verb === 'put' && p === `/projects/${encodeURIComponent(m.tab)}/layout`) return true
   return false
 }

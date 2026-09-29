@@ -100,6 +100,25 @@ describe('the client-side write block while the tab and the backend disagree', (
     expect(adapter).toHaveBeenCalledTimes(1)
   })
 
+  // P27b gate B1: the multi-user edit-lock routes move lease metadata, not the
+  // live network. Refusing them left the banner's Switch read-only in auth
+  // mode (acquire refused → "locked-by-user") and cost a mismatched tab its
+  // lock at the next 45 s heartbeat.
+  it.each([
+    ['post', '/projects/Y/lock'],
+    ['delete', '/projects/X/lock'],
+    ['post', '/projects/X/lock/heartbeat'],
+    ['post', '/projects/My%20Project/lock'],
+  ] as const)('%s %s passes (the edit lock, B1)', async (m, url) => {
+    await expect((client[m] as (u: string) => Promise<unknown>)(url)).resolves.toBeTruthy()
+    expect(adapter).toHaveBeenCalledTimes(1)
+  })
+
+  it('a lock-looking route with more segments is still refused', async () => {
+    const err = await client.post('/projects/X/lock/steal').catch(e => e)
+    expect(refusal(err)?.data?.detail?.error_kind).toBe('project_mismatch')
+  })
+
   it('without a mismatch every write passes', async () => {
     useUIStore.setState({ projectMismatch: null })
     await expect(client.put('/network/buses/a', {})).resolves.toBeTruthy()

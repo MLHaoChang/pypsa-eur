@@ -16,7 +16,10 @@ import { projectsApi } from '../api/projects'
 import { useUIStore } from '../store/uiStore'
 import { appLog } from '../store/simulationStore'
 import { blockerMessage } from '../utils/blockerMessage'
-import { invalidateNetworkQueries, switchToProject } from '../utils/projectActions'
+import {
+  acquireProjectLock, invalidateNetworkQueries, lastHeldLockProject, switchToProject,
+} from '../utils/projectActions'
+import { authEnabled } from '../auth/config'
 import { mismatchSentence } from '../utils/projectMismatch'
 import { nk } from '../utils/queryKeys'
 
@@ -34,6 +37,11 @@ export default function ProjectMismatchBanner() {
     try {
       await projectsApi.load(tab)
       useUIStore.getState().setProjectMismatch(null)
+      // Auth mode (P27b gate B1): take back the edit lock this tab held on
+      // its project — a mismatch can outlive the lock (it expires, or a
+      // heartbeat was lost). Acquire is idempotent for the holder; a lock
+      // another user took meanwhile leaves the tab read-only, as it should.
+      if (authEnabled && lastHeldLockProject() === tab) await acquireProjectLock(tab)
       invalidateNetworkQueries(qc, tab)
       void qc.invalidateQueries({ queryKey: nk(tab, 'results') })
       appLog('INFO', `Reloaded '${tab}' — the backend was on '${backend}'`)

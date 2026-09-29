@@ -309,6 +309,14 @@ function startLockHeartbeat(projectId: string): void {
 // ACTIVATED for viewing but the workbench drops into read-only mode. Returns
 // the resulting `readOnly` flag. A no-op returning false when auth is disabled
 // — the legacy single-user workbench is always writable.
+/** The project whose edit lock this tab last acquired and has not released
+ *  on purpose — kept when a heartbeat loses it, so the mismatch banner's
+ *  Reload can take it back (P27b gate B1). */
+let _lastHeldLockProject: string | null = null
+export function lastHeldLockProject(): string | null {
+  return _lastHeldLockProject
+}
+
 export async function acquireProjectLock(projectId: string): Promise<boolean> {
   if (!authEnabled) {
     useUIStore.getState().setLockState(WRITABLE)
@@ -317,6 +325,7 @@ export async function acquireProjectLock(projectId: string): Promise<boolean> {
   try {
     const res = await projectsApi.acquireLock(projectId)
     _applyLock({ ok: true, lock: res.lock })
+    _lastHeldLockProject = projectId
     startLockHeartbeat(projectId)
     return false
   } catch (e) {
@@ -340,6 +349,7 @@ export async function acquireProjectLock(projectId: string): Promise<boolean> {
 export async function releaseProjectLock(projectId: string): Promise<void> {
   if (!authEnabled) return
   if (_heartbeatProject === projectId) stopLockHeartbeat()
+  if (_lastHeldLockProject === projectId) _lastHeldLockProject = null
   try {
     await projectsApi.releaseLock(projectId)
   } catch { /* best effort — the TTL reclaims it anyway */ }
