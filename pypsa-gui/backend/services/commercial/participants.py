@@ -771,6 +771,25 @@ class MeterSides:
     meter_links: set[str]
 
 
+def branch_edges(n, exclude=()) -> dict[str, set[str]]:
+    """Bus adjacency over Lines, Transformers and Links (every bus of a
+    multi-output Link), leaving out the Links in `exclude` (the meter)."""
+    edges: dict[str, set[str]] = {}
+    for comp, ends in (("lines", ("bus0", "bus1")), ("transformers", ("bus0", "bus1")),
+                       ("links", ("bus0", "bus1", "bus2", "bus3", "bus4"))):
+        df = getattr(n, comp)
+        cols = [c for c in ends if c in df.columns]
+        for name, row in df[cols].iterrows():
+            if comp == "links" and name in exclude:
+                continue
+            buses = [str(row[c]).strip() for c in cols
+                     if str(row[c]).strip() and str(row[c]).strip() != "nan"]
+            for x in buses[1:]:
+                edges.setdefault(buses[0], set()).add(x)
+                edges.setdefault(x, set()).add(buses[0])
+    return edges
+
+
 def _bfs(starts, edges) -> dict[str, int]:
     dist = {b: 0 for b in starts}
     frontier = list(starts)
@@ -804,19 +823,7 @@ def classify_buses(n, commercial: CommercialConfig) -> MeterSides:
     if commercial.export_link and commercial.export_link in n.links.index:
         grid_starts.add(str(n.links.at[commercial.export_link, "bus1"]))
     grid_starts -= site_starts
-    edges: dict[str, set[str]] = {}
-    for comp, ends in (("lines", ("bus0", "bus1")), ("transformers", ("bus0", "bus1")),
-                       ("links", ("bus0", "bus1", "bus2", "bus3", "bus4"))):
-        df = getattr(n, comp)
-        cols = [c for c in ends if c in df.columns]
-        for name, row in df[cols].iterrows():
-            if comp == "links" and name in meter:
-                continue
-            buses = [str(row[c]).strip() for c in cols
-                     if str(row[c]).strip() and str(row[c]).strip() != "nan"]
-            for x in buses[1:]:
-                edges.setdefault(buses[0], set()).add(x)
-                edges.setdefault(x, set()).add(buses[0])
+    edges = branch_edges(n, meter)
     ds, dg = _bfs(site_starts, edges), _bfs(grid_starts, edges)
     site, grid, bypass = set(), set(), set()
     for b in set(ds) | set(dg):
@@ -856,3 +863,37 @@ def asset_side(n, component: str, name: str, sides: MeterSides) -> tuple[str, li
     if on_grid:
         return "grid", flags
     return "unclassified", flags
+
+
+# Electric bus carriers (PyPSA and PyPSA-Eur conventions): a generator on one of
+# these is never a fuel supply, whatever the PoC bus's own carrier.
+_ELECTRIC = frozenset({"ac", "dc", "low voltage", "lv", "mv", "hv", "electricity", ""})
+
+
+def is_fuel_supply(n, parsed, generator: str) -> bool:
+    """A site-side Generator whose output is a FUEL bought for conversion (gas
+    behind a CHP Link), not electricity (WP3.1 review round 2 #3): its bus
+    carries a non-electric carrier different from the PoC's site bus, no Load,
+    and feeds the rest of the site only as the INPUT (bus0) of Links — no Line,
+    no Transformer, no Link delivering into it."""
+    if generator not in n.generators.index:
+        return False
+    bus = str(n.generators.at[generator, "bus"])
+    carriers = n.buses["carrier"] if "carrier" in n.buses.columns else None
+    carrier = str(carriers.get(bus, "")) if carriers is not None else ""
+    poc_bus = str(n.links.at[parsed.poc_link, "bus1"]) if parsed.poc_link in n.links.index \
+        else None
+    site_carrier = str(carriers.get(poc_bus, "")) if (carriers is not None and poc_bus) else ""
+    if carrier.strip().casefold() in _ELECTRIC or carrier == site_carrier:
+        return False
+    if not n.loads.empty and (n.loads["bus"].astype(str) == bus).any():
+        return False
+    for comp in ("lines", "transformers"):
+        df = getattr(n, comp)
+        if not df.empty and ((df["bus0"].astype(str) == bus) | (df["bus1"].astype(str) == bus)).any():
+            return False
+    links = n.links
+    outs = [c for c in ("bus1", "bus2", "bus3", "bus4") if c in links.columns]
+    if any((links[c].astype(str) == bus).any() for c in outs):
+        return False
+    return bool((links["bus0"].astype(str) == bus).any()) if not links.empty else False

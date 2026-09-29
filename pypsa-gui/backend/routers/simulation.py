@@ -655,6 +655,41 @@ def put_value_flows(body: ValueFlowsIn, if_match: str | None = Header(default=No
         return _value_flows_state(merged["commercial"])
 
 
+class TemplateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    template: str = Field(min_length=1)
+
+
+@router.post("/value_flows/template")
+def build_value_flow_template(body: TemplateIn):
+    """Build a participants template for the current network and commercial
+    config (IC P3 WP3.2). Nothing is saved: the answer is the config, the
+    unsaved draft contracts it needs and notes; the client saves them through
+    the value-flows and solver-config routes."""
+    from dataclasses import asdict as _asdict
+
+    from models.commercial import CommercialConfig
+    from services.commercial import value_flow_templates as T
+
+    commercial = getattr(_state["solver_config"], "commercial", None)
+    if not isinstance(commercial, dict):
+        raise HTTPException(409, {"code": "no_commercial_config",
+                                  "message": "set the commercial config (poc_link) first"})
+    try:
+        bound = CommercialConfig.model_validate(commercial)
+    except ValidationError as exc:
+        raise HTTPException(409, {"code": "commercial_config_invalid",
+                                  "message": exc.errors()[0]["msg"]}) from exc
+    try:
+        result = T.build(body.template, PyPSAService.get_network(), bound)
+    except T.TemplateRefused as exc:
+        raise HTTPException(422 if exc.code == "template_unknown" else 409,
+                            {"code": exc.code, "message": str(exc)}) from exc
+    out = _asdict(result)
+    out["config"] = result.config.model_dump(mode="json")
+    return out
+
+
 @router.get("/check_solvers")
 def check_solvers():
     return check_solver_availability()

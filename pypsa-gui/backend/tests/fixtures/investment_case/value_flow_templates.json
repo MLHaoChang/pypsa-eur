@@ -1,0 +1,22 @@
+{
+ "single_owner": {
+  "version": "1",
+  "source_sha": "821be986faf00d83"
+ },
+ "btm_ppa": {
+  "version": "1",
+  "source_sha": "9ace4f83ddbaecee"
+ },
+ "landlord_tenant": {
+  "version": "1",
+  "source_sha": "7e2f8b304bd39ea3"
+ },
+ "dso_developer": {
+  "version": "1",
+  "source_sha": "d223188edf03c9a3"
+ },
+ "energy_hub": {
+  "version": "1",
+  "source_sha": "72faeb960e93ffc9"
+ }
+}

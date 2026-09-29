@@ -124,6 +124,9 @@ class ValueFlowConfig(BaseModel):
                       "energy_hub", "custom"] = "custom"
     template_version: str | None = None
     built_digest: str | None = None
+    # The site-side assets the template builder saw (WP3.2): `template_stale`
+    # when the network's differ.
+    built_assets_digest: str | None = None
     participants: list[Participant] = Field(default_factory=list)
     externals: list[str] = Field(default_factory=lambda: list(DEFAULT_EXTERNALS))
     tariff_payees: list[TariffPayeeRule] = Field(default_factory=list)

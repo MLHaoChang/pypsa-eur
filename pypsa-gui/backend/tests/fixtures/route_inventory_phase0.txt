@@ -295,3 +295,4 @@ POST    /api/simulation/run_ac_pf                                -> run_ac_pf_ap
 GET     /api/simulation/solver_config                            -> get_solver_config_api_simulation_solver_config_get
 PUT     /api/simulation/solver_config                            -> update_solver_config_api_simulation_solver_config_put
 GET     /api/simulation/status                                   -> get_status_api_simulation_status_get
+POST    /api/simulation/value_flows/template                     -> build_value_flow_template_api_simulation_value_flows_template_post

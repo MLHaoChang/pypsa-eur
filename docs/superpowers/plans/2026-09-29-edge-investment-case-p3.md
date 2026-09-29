@@ -290,6 +290,7 @@ internal DSO (V4) closes; the DSR / VoLL disclosures when they dispatch.
   - **R3:** `is_fuel_supply` requires a non-electric bus carrier (AC, DC, low voltage, … never qualify), no Load, and a bus that feeds the site only as Link input. Tests: PV on LV and DC buses, gas behind a CHP, a heat bus fed by a Link.
   - **R4 (LOW, accepted):** with a bypass, both searches reach the whole connected network, so every asset carries `meter_bypass`. Placement is right and preflight warns; noise only.
   - **R5:** check 2 stays a documented identity.
+- **Review round 3 → PASS.** R1–R3 closed, no regressions in probes 1–9. **Note for WP3.4/WP3.6:** merged export-split legs give one line per (owner, source); if the Sankey or drill-down needs per-asset shares, carry the unmerged parts as line metadata.
 ---
 
 ## WP3.2 Templates
@@ -312,6 +313,13 @@ save contracts: a missing one is returned as an **unsaved draft** for the user t
 template on its fixture; drafts for missing contracts; `template_version` pinned in
 `tests/fixtures/investment_case/value_flow_templates.json`; `template_edited` / `template_stale`.
 
+
+**WP3.2 implementation.**
+- `services/commercial/value_flow_templates.py` (five builders, `build`, `template_status`, `config_digest`, `assets_digest`, `source_sha`) and `POST /api/simulation/value_flows/template` (409 `no_commercial_config` / `commercial_config_invalid` / a template refusal; 422 `template_unknown`).
+- `template_version` = `<name>@<version>`; the fixture pins version and builder source hash.
+- `ValueFlowConfig.built_assets_digest` added (for `template_stale`).
+- Meter Links and network branches stay with `site_party` in every template (the connection is the site's).
+- `is_fuel_supply` moved beside the classifier (`participants`), and `branch_edges` extracted.
 ---
 
 ## WP3.3a Energy hub: allocation

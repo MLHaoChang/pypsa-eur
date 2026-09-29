@@ -181,6 +181,7 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     # IC P3 WP3.0: participants and value-flow assignment; config, reports no figures.
     ("routers/simulation.py", "get_value_flows"):       frozenset(),
     ("routers/simulation.py", "put_value_flows"):       frozenset(),
+    ("routers/simulation.py", "build_value_flow_template"): frozenset(),
     ("routers/simulation.py", "check_solvers"):         frozenset(),
     ("routers/simulation.py", "capabilities"):          frozenset(),
     ("routers/simulation.py", "asset_costs"):           frozenset({"asset_costs"}),
