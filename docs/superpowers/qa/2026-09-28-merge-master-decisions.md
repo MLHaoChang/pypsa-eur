@@ -151,3 +151,11 @@ Left open, as non-blocking review notes:
 
 - **N4:** a pack ladder of `(1.0,)` passes the validator and sweeps a single point.
 - **N7:** the certification block shows EUE per horizon without a basis label.
+
+Verification after the follow-up, on `19e94601a`:
+
+- Backend full suite (`-m "not slow"`): 6580 passed, 31 skipped, 0 failed.
+- `tsc --noEmit`: clean.
+- vitest: 234 files, 2612 tests passed.
+- EH QA driver: 111/111 (new step: a knee only from 3 or more points; the 5-point run reports `knee_status: ok`).
+- P26 smoke: PASS. The verdicts are unchanged: datacenter `fail`, h2_hub none, microgrid `inconclusive`.
