@@ -14,6 +14,7 @@
 import { useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { networkApi } from '../api/network'
+import type { NetworkMeta } from '../api/types'
 import { useUIStore } from '../store/uiStore'
 import { nk } from '../utils/queryKeys'
 
@@ -36,7 +37,16 @@ export function useProjectMismatchDetection(isStudy: boolean): void {
     queryKey: key,
     queryFn: networkApi.getMeta,
     enabled: !!currentProject,
-    refetchInterval: () => pending.current ? mismatchPoll.confirmMs : mismatchPoll.idleMs,
+    // Re-sample quickly while an unconfirmed disagreeing sample waits. Read
+    // from the sample itself: React Query computes the interval when the data
+    // lands, before this hook's effect has recorded it as pending.
+    refetchInterval: (q) => {
+      const backend = (q.state.data as NetworkMeta | undefined)?.loaded_project ?? null
+      const ui = useUIStore.getState()
+      const suspect = backend != null && ui.currentProject != null
+        && backend !== ui.currentProject && ui.projectMismatch == null
+      return suspect ? mismatchPoll.confirmMs : mismatchPoll.idleMs
+    },
     // Every sample must re-render this hook, even one equal to the last
     // (structural sharing would hand back the same object and, within one
     // millisecond, an identical result — the sample would be missed).

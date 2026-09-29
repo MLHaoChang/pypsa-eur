@@ -55,10 +55,11 @@ vi.mock('./utils/projectActions', () => ({
 import App from './App'
 import { mismatchPoll } from './hooks/useProjectMismatchDetection'
 
+// (2 ** 30 ms: below the 2 ** 31 timer limit, past which Node fires at once.)
 // The test drives every sample itself (`sample()`); the hook's own poll would
 // add samples at wall-clock times and make "one sample" / "two samples" racy.
 const POLL = { ...mismatchPoll }
-beforeAll(() => { mismatchPoll.idleMs = 1e9; mismatchPoll.confirmMs = 1e9 })
+beforeAll(() => { mismatchPoll.idleMs = 2 ** 30; mismatchPoll.confirmMs = 2 ** 30 })
 afterAll(() => { Object.assign(mismatchPoll, POLL) })
 
 const SENTENCE = 'This tab shows X, but the app is now on Y. Changes from this tab are paused.'
@@ -247,5 +248,22 @@ describe('tab / backend project mismatch (A2)', () => {
     fireEvent.click(await screen.findByTestId('project-mismatch-reload'))
     expect((await screen.findByTestId('project-mismatch-reload-error')).textContent).toBe(sentence)
     expect((screen.getByTestId('project-mismatch-switch') as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  // Smoke finding (P27b): the 1 s confirmation interval was read before the
+  // effect recorded the first disagreeing sample, so the second sample came
+  // on the 5 s idle poll and the banner took ~10 s. The interval now reads
+  // the sample itself.
+  it('a first disagreeing sample is re-checked on the short confirm interval, not the idle poll', async () => {
+    mismatchPoll.confirmMs = 50
+    try {
+      getMeta.mockResolvedValue(meta('Y'))
+      renderApp()
+      await firstSample()
+      // no manual second sample: the confirm poll takes it
+      expect(await screen.findByTestId('project-mismatch', {}, { timeout: 2000 })).toBeTruthy()
+    } finally {
+      mismatchPoll.confirmMs = 2 ** 30
+    }
   })
 })
