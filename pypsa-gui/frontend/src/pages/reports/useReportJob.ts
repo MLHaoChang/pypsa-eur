@@ -42,6 +42,10 @@ export const REPORTS_LIST_KEY = (project: string) => ['reports', 'list', project
 /** One report's template binding + stored plan (`GET …/{id}/template`, WP11). */
 export const REPORT_TEMPLATE_KEY = (project: string, reportId: string) =>
   ['reports', 'template', project, reportId] as const
+/** The session's live evidence hash (`GET …/reports/evidence_hash`) — what the
+ *  viewer's "evidence changed since vN" badge compares a document against.
+ *  Read by the panel on mount and re-read when a job leaves `running`. */
+export const REPORT_EVIDENCE_HASH_KEY = (project: string) => ['reports', 'evidence_hash', project] as const
 
 export const REPORT_JOB_POLL_MS = 1500
 
@@ -105,6 +109,9 @@ export function useReportJob(project: string | null, options: UseReportJobOption
     setAborting(false)
     qc.invalidateQueries({ queryKey: REPORTS_LIST_KEY(project) })
     qc.invalidateQueries({ queryKey: REPORT_DOC_PREFIX(project, record.report_id) })
+    // The evidence may have moved while the job ran; the badge compares
+    // against the live hash, so re-read it with the list.
+    qc.invalidateQueries({ queryKey: REPORT_EVIDENCE_HASH_KEY(project) })
     // A mapping job writes the stored plan, not a document version.
     if (record.mode === 'mapping') {
       qc.invalidateQueries({ queryKey: REPORT_TEMPLATE_KEY(project, record.report_id) })

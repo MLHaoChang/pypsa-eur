@@ -31,6 +31,7 @@ const api = vi.hoisted(() => ({
   generateReport: vi.fn(),
   abortGenerate: vi.fn(),
   regenerateSection: vi.fn(),
+  getEvidenceHash: vi.fn(),
 }))
 vi.mock('../api/reports', async () => {
   const real = await vi.importActual<typeof import('../api/reports')>('../api/reports')
@@ -104,6 +105,8 @@ beforeEach(() => {
   api.generateReport.mockReset().mockResolvedValue({ status: 'running', report_id: ID_B })
   api.abortGenerate.mockReset().mockResolvedValue({ status: 'running', aborting: true })
   api.regenerateSection.mockReset()
+  // The route's hash matches the fixture document by default: no badge.
+  api.getEvidenceHash.mockReset().mockResolvedValue({ evidence_hash: 'deadbeef', sections_ok: 1, sections_total: 21 })
   store.reportGenerateRequest = false
   store.clearReportGenerateRequest.mockReset()
   toast.success.mockReset()
@@ -239,6 +242,38 @@ describe('ReportsPanel', () => {
     expect(api.getReport).toHaveBeenCalledWith('Demo', ID_A, undefined)
     await user.click(screen.getByTestId('report-back'))
     expect(await screen.findAllByTestId('report-row')).toHaveLength(1)
+  })
+
+  it('reads the current evidence hash from the route when the panel mounts', async () => {
+    api.listReports.mockResolvedValue([META_A])
+    renderPanel()
+    await screen.findAllByTestId('report-row')
+    await waitFor(() => expect(api.getEvidenceHash).toHaveBeenCalledWith('Demo'))
+  })
+
+  it('the viewer badge compares against the route hash, not the newest evidence-only report', async () => {
+    // The newest evidence-only report carries the SAME hash as the opened
+    // document (`deadbeef`): the old derivation would show no badge. The
+    // route says the live evidence differs → the badge shows.
+    api.listReports.mockResolvedValue([META_A])
+    api.getEvidenceHash.mockResolvedValue({ evidence_hash: 'cafebabe', sections_ok: 2, sections_total: 21 })
+    const user = userEvent.setup()
+    renderPanel()
+    const row = (await screen.findAllByTestId('report-row'))[0]
+    await user.click(within(row).getByTestId('report-open'))
+    await screen.findAllByTestId('report-section')
+    const badge = await screen.findByTestId('evidence-changed')
+    expect(badge.textContent).toMatch(/evidence changed since v2/i)
+    cleanup()
+
+    // Equal hashes → no badge.
+    api.getEvidenceHash.mockResolvedValue({ evidence_hash: 'deadbeef', sections_ok: 2, sections_total: 21 })
+    renderPanel()
+    const row2 = (await screen.findAllByTestId('report-row'))[0]
+    await user.click(within(row2).getByTestId('report-open'))
+    await screen.findAllByTestId('report-section')
+    await waitFor(() => expect(api.getEvidenceHash).toHaveBeenCalledTimes(2))
+    expect(screen.queryByTestId('evidence-changed')).toBeNull()
   })
 
   it('shows the list error inline rather than a blank panel', async () => {

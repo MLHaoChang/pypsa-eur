@@ -22,6 +22,7 @@ import toast from 'react-hot-toast'
 import {
   createEvidenceOnlyReport,
   deleteReport,
+  getEvidenceHash,
   getReport,
   listReports,
   reportErrorMessage,
@@ -34,7 +35,7 @@ import { useUIStore } from '../store/uiStore'
 import { GenerateReportDialog } from './reports/GenerateReportDialog'
 import { ReportJobStrip } from './reports/ReportJobStrip'
 import { REPORT_DOC_KEY, ReportViewer } from './reports/ReportViewer'
-import { useReportJob } from './reports/useReportJob'
+import { REPORT_EVIDENCE_HASH_KEY, useReportJob } from './reports/useReportJob'
 
 export const REPORTS_KEY = (project: string) => ['reports', 'list', project] as const
 
@@ -79,8 +80,9 @@ export default function ReportsPanel() {
 }
 
 /** The newest evidence-only report: the skeleton a generated report is
- *  written into, and the closest thing to "the session's current evidence"
- *  until a dedicated evidence-hash route exists (see ReportViewer). */
+ *  written into — its sections are the dialog's section choices. (The
+ *  staleness badge no longer reads its hash: `GET …/evidence_hash` hashes
+ *  the session's live evidence, see `currentEvidenceHash` below.) */
 export function newestEvidenceOnly(reports: ReportMeta[] | undefined): ReportMeta | null {
   if (!reports) return null
   return reports
@@ -128,6 +130,16 @@ function ReportsList({ project }: { project: string }) {
         toast.error(`Generation failed: ${record.error ?? 'unknown error'}`)
       }
     },
+  })
+
+  // The session's live evidence hash, for the viewer's "evidence changed
+  // since vN" badge: read when the panel mounts and re-read by `useReportJob`
+  // when a job leaves `running`. A failure leaves the hash unknown (no badge)
+  // rather than blocking the panel.
+  const evidenceHash = useQuery({
+    queryKey: REPORT_EVIDENCE_HASH_KEY(project),
+    queryFn: () => getEvidenceHash(project),
+    retry: false,
   })
 
   const evidenceMeta = newestEvidenceOnly(list.data)
@@ -186,7 +198,7 @@ function ReportsList({ project }: { project: string }) {
           project={project}
           meta={selectedMeta}
           onBack={() => setSelected(null)}
-          currentEvidenceHash={evidenceMeta?.evidence_hash ?? null}
+          currentEvidenceHash={evidenceHash.data?.evidence_hash ?? null}
         />
       </PageBody>
     )

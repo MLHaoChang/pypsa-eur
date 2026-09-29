@@ -21,10 +21,22 @@ plus an id the store validated against an anchored regex.
   POST   /{name}/reports/{report_id}/roundtrip             an edited Word copy merged back as the
                                                            next version (WP13; synchronous)
   GET    /{name}/reports/{report_id}/versions/{a}/diff/{b} per-section change between two versions
+  GET    /{name}/reports/evidence_hash                     {evidence_hash, sections_ok,
+                                                           sections_total} of the CURRENT session
+                                                           evidence (the viewer's staleness badge)
 
 The mapping job (`POST …/template/plan`) lives in `routers/report_jobs.py`
-with the other job routes. `capabilities` is declared BEFORE the
-`/{report_id}` routes: a literal segment must win over the id parameter.
+with the other job routes. `capabilities` and `evidence_hash` are declared
+BEFORE the `/{report_id}` routes: a literal segment must win over the id
+parameter.
+
+`evidence_hash` (the follow-up the plan's WP7 recorded) hashes exactly the
+evidence the evidence-only POST would store right now — the same collector
+over the same session state — so the viewer's "evidence changed since vN"
+compares a document against the live evidence rather than against the
+newest evidence-only report. It never answers 204: with nothing established
+the empty evidence still has a hash, and a document written from it is
+current until something is measured.
 
 Increment 3 (WP13): the export body takes `format: "docx"|"pdf"` — a PDF is
 LibreOffice's headless conversion of the rendered `.docx` (501
@@ -60,7 +72,7 @@ import logging
 import uuid
 from types import SimpleNamespace
 
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
@@ -75,6 +87,9 @@ from routers.deps import AuthorizedProject, ProjectAccessDep
 from services.http_filenames import content_disposition
 from services.reports import pdf, roundtrip_service, store, templates
 from services.reports.docx_reader import TemplateOutline
+
+if TYPE_CHECKING:
+    from services.reports.evidence import Evidence
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -130,6 +145,28 @@ def get_report_capabilities(project: AuthorizedProject = ProjectAccessDep) -> di
     before the `/{report_id}` routes so the literal segment wins.
     """
     return {"pdf": pdf.pdf_available()}
+
+
+@router.get("/{name}/reports/evidence_hash")
+def get_evidence_hash(project: AuthorizedProject = ProjectAccessDep) -> dict:
+    """
+    The hash of the session's CURRENT evidence — what the evidence-only POST
+    would store as `evidence_hash` right now — plus how many sections are
+    established (`sections_ok` of `sections_total`). The viewer compares a
+    document's `evidence_hash` against it for "evidence changed since vN".
+    Never 204: the empty evidence hashes too. Declared before the
+    `/{report_id}` routes so the literal segment wins (`evidence_hash` is not
+    16 hex characters, and must never be answered as `invalid_report_id`).
+    """
+    from services.reports.evidence import evidence_hash
+
+    evidence, _eh_report = _current_evidence(project)
+    sections = list(evidence.sections.values())
+    return {
+        "evidence_hash": evidence_hash(evidence),
+        "sections_ok": sum(1 for s in sections if s.status == "ok"),
+        "sections_total": len(sections),
+    }
 
 
 @router.get("/{name}/reports/{report_id}")
@@ -281,6 +318,25 @@ def _render_figures(eh_report: dict | None) -> dict[str, bytes]:
     return out
 
 
+def _current_evidence(project: AuthorizedProject) -> tuple[Evidence, dict | None]:
+    """
+    The session's current evidence — the EH reference design (204 → None),
+    the adequacy study report and the project's FMEA worksheet through
+    `collect_evidence` — plus the raw EH report the figure renderer reads.
+    ONE reader for the evidence-only POST and `GET …/evidence_hash`, so the
+    hash the badge compares against is the hash a report made now would carry.
+    """
+    from services.adequacy.worksheet import load_worksheet
+    from services.reports.evidence import collect_evidence
+
+    eh_report = _current_eh_report()
+    study_report = _current_study_report()
+    worksheet = load_worksheet(project.directory)
+    evidence = collect_evidence(study_report=study_report, eh_report=eh_report,
+                                worksheet=worksheet)
+    return evidence, eh_report
+
+
 @router.post("/{name}/reports")
 def create_report(body: CreateReportBody,
                   project: AuthorizedProject = ProjectAccessDep,
@@ -290,9 +346,7 @@ def create_report(body: CreateReportBody,
     Build and store the evidence-only report (v1) from the session's current
     result state. Returns the `ReportMeta` fields plus `document`.
     """
-    from services.adequacy.worksheet import load_worksheet
     from services.reports.assemble import DEFAULT_TITLE, evidence_only_document
-    from services.reports.evidence import collect_evidence
 
     if body.mode != "evidence_only":
         raise HTTPException(400, {
@@ -302,11 +356,7 @@ def create_report(body: CreateReportBody,
         })
     _check_lock(project, db, user)
 
-    eh_report = _current_eh_report()
-    study_report = _current_study_report()
-    worksheet = load_worksheet(project.directory)
-    evidence = collect_evidence(study_report=study_report, eh_report=eh_report,
-                                worksheet=worksheet)
+    evidence, eh_report = _current_evidence(project)
     figure_pngs = _render_figures(eh_report)
     title = (body.title or "").strip() or f"{DEFAULT_TITLE} — {project.name}"
     doc = evidence_only_document(evidence, title=title,

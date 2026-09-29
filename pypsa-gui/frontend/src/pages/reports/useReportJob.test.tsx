@@ -15,7 +15,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import type { ReportJobRecord } from '../../api/reports'
-import { REPORT_JOB_KEY, REPORT_TEMPLATE_KEY, useReportJob } from './useReportJob'
+import { REPORT_EVIDENCE_HASH_KEY, REPORT_JOB_KEY, REPORT_TEMPLATE_KEY, useReportJob } from './useReportJob'
 
 const api = vi.hoisted(() => ({
   getGenerateStatus: vi.fn(),
@@ -120,6 +120,10 @@ describe('useReportJob', () => {
     expect(result.current.progressPct).toBe(100)
     expect(spy).toHaveBeenCalledWith({ queryKey: ['reports', 'list', 'Demo'] })
     expect(spy).toHaveBeenCalledWith({ queryKey: ['reports', 'doc', 'Demo', ID] })
+    // The staleness badge compares against the live evidence hash; a finished
+    // job may have been written from evidence that changed since the panel read it.
+    expect(spy).toHaveBeenCalledWith({ queryKey: REPORT_EVIDENCE_HASH_KEY('Demo') })
+    expect(REPORT_EVIDENCE_HASH_KEY('Demo')).toEqual(['reports', 'evidence_hash', 'Demo'])
     expect(onFinished).toHaveBeenCalledTimes(1)
     expect(onFinished.mock.calls[0][0].status).toBe('done')
 

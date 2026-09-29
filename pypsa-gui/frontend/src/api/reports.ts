@@ -324,6 +324,19 @@ export interface VersionDiff {
 /** `GET /{name}/reports/capabilities` — `pdf` is `soffice` on the server's PATH. */
 export interface ReportCapabilities { pdf: boolean }
 
+/**
+ * `GET /{name}/reports/evidence_hash` — the hash of the session's CURRENT
+ * evidence (what an evidence-only report made now would carry as
+ * `evidence_hash`), plus how many sections are established. The viewer's
+ * "evidence changed since vN" badge compares a document against it. Never
+ * 204: the empty evidence has a hash too.
+ */
+export interface EvidenceHashStatus {
+  evidence_hash: string
+  sections_ok: number
+  sections_total: number
+}
+
 export type ExportFormat = 'docx' | 'pdf'
 
 // ── errors ──────────────────────────────────────────────────────────────────
@@ -784,4 +797,9 @@ export async function getVersionDiff(
 /** `GET /{name}/reports/capabilities` — what this server can do beyond `.docx` (`pdf`). */
 export async function getReportCapabilities(projectName: string): Promise<ReportCapabilities> {
   return _json<ReportCapabilities>(await fetch(`${base(projectName)}/capabilities`))
+}
+
+/** `GET /{name}/reports/evidence_hash` — the live evidence's hash for the staleness badge. */
+export async function getEvidenceHash(projectName: string): Promise<EvidenceHashStatus> {
+  return _json<EvidenceHashStatus>(await fetch(`${base(projectName)}/evidence_hash`))
 }

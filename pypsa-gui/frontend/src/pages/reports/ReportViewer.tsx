@@ -21,12 +21,12 @@
 // latest version (`version = null`) — the bumped `latest_version` arrives
 // through the panel's refreshed list meta.
 //
-// WP7b — "evidence changed since v{N}": the panel passes the evidence hash of
-// the NEWEST evidence-only report as `currentEvidenceHash`, and the header
-// says so when this document was written from different evidence. There is
-// no `GET …/evidence_hash` route yet (the plan names one); comparing against
-// the newest evidence-only document is the phase-3 approximation and a
-// dedicated route that hashes the session's live evidence is a follow-up.
+// WP7b — "evidence changed since v{N}": the panel passes the hash of the
+// session's LIVE evidence (`GET …/reports/evidence_hash`, the follow-up the
+// plan's WP7 recorded; read on mount and re-read when a job finishes) as
+// `currentEvidenceHash`, and the header says so when this document was
+// written from different evidence. The viewer only compares: the hash and
+// the document are both the backend's.
 //
 // WP11 — templates: the header holds `TemplatePicker` (bind one of the
 // Project's `report_template` uploads, or the built-in default) and the
@@ -115,7 +115,7 @@ export function ReportViewer({
   project: string
   meta: ReportMeta
   onBack?: () => void
-  /** The newest evidence-only report's `evidence_hash` (see the header comment). */
+  /** The session's live evidence hash from `GET …/evidence_hash` (see the header comment). */
   currentEvidenceHash?: string | null
 }) {
   const [version, setVersion] = useState<number | null>(null)
@@ -262,7 +262,7 @@ export function ReportViewer({
               <span
                 className="inline-flex items-center gap-1 text-warn"
                 data-testid="evidence-changed"
-                title="The session's evidence (the newest evidence-only report) has a different hash than the evidence this version was written from"
+                title="The session's current evidence has a different hash than the evidence this version was written from"
               >
                 <AlertTriangle size={11} aria-hidden="true" /> evidence changed since v{shownVersion}
               </span>

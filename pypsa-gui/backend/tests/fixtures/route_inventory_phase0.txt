@@ -160,6 +160,7 @@ POST    /api/projects/{name}/reports/{report_id}/template/plan   -> propose_temp
 PUT     /api/projects/{name}/reports/{report_id}/template/plan   -> put_template_plan_api_projects__name__reports__report_id__template_plan_put
 GET     /api/projects/{name}/reports/{report_id}/versions/{version} -> get_report_version_api_projects__name__reports__report_id__versions__version__get
 GET     /api/projects/{name}/reports/capabilities                -> get_report_capabilities_api_projects__name__reports_capabilities_get
+GET     /api/projects/{name}/reports/evidence_hash                -> get_evidence_hash_api_projects__name__reports_evidence_hash_get
 POST    /api/projects/{name}/reports/{report_id}/roundtrip       -> roundtrip_report_api_projects__name__reports__report_id__roundtrip_post
 GET     /api/projects/{name}/reports/{report_id}/versions/{a}/diff/{b} -> diff_report_versions_api_projects__name__reports__report_id__versions__a__diff__b__get
 GET     /api/projects/{name}/results-summary                     -> get_results_summary_api_projects__name__results_summary_get
