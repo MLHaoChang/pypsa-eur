@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { Fragment, Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { MapContainer, TileLayer, Marker, Polyline, Polygon, Tooltip, useMap, useMapEvents } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
@@ -22,7 +22,9 @@ import { nextBusToPlace, canSkip } from '../utils/placement'
 import { ingestRescale } from '../utils/rescaleActions'
 import { useRescaleStore } from '../store/rescaleStore'
 import UnplacedBusesPanel from '../components/UnplacedBusesPanel'
-import SiteDraftPanel from '../components/SiteDraftPanel'
+// Lazy: the panel is needed only once a boundary has been drawn, and it
+// keeps the main chunk within the 3D site view's size budget (plan §QA-2).
+const SiteDraftPanel = lazy(() => import('../components/SiteDraftPanel'))
 import { useSiteDraw, newSiteButtonVisible } from '../site3d/useSiteDraw'
 import { useSitesStore } from '../site3d/sitesStore'
 import { readActiveSite, writeActiveSite } from '../site3d/activeSite'
@@ -1335,12 +1337,14 @@ function MapCanvasInner({ mode }: MapCanvasProps) {
         </div>
       )}
       {placementUiAllowed && (draftBoundary || editSite) && (
-        <SiteDraftPanel
-          boundary={editSite ? editSite.boundary : draftBoundary!}
-          existing={editSite}
-          buses={buses as Bus[]}
-          onDone={() => { setDraftBoundary(null); setEditSite(null) }}
-        />
+        <Suspense fallback={null}>
+          <SiteDraftPanel
+            boundary={editSite ? editSite.boundary : draftBoundary!}
+            existing={editSite}
+            buses={buses as Bus[]}
+            onDone={() => { setDraftBoundary(null); setEditSite(null) }}
+          />
+        </Suspense>
       )}
       {sitePopover && (() => {
         const site = sitesDoc.sites.find(x => x.id === sitePopover.id)
