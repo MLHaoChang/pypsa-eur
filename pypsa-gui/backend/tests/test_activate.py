@@ -96,6 +96,9 @@ def test_activate_resident_swaps_active(
         "activated": "B",
         "evicted": [],
         "lock": {"holder_email": "tester@example.com", "yours": True},
+        # Edge Investment Case WP1.1c: a resident swap re-checks no Library
+        # pins (they were checked when the project was opened).
+        "library_issues": [],
     }
 
     # Active flipped to B; the swap reused the SAME resident ctx (no re-hydrate).

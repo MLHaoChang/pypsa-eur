@@ -32,7 +32,7 @@ describe('resolveScenType', () => {
   it('shows no badge for a category this build does not know', () => {
     // The set can grow server-side without a frontend release. An unknown
     // value must degrade to "no badge", never render raw or throw.
-    expect(resolveScenType({ scenario_type: 'sensitivity', scenario_description: 'x' }))
+    expect(resolveScenType({ scenario_type: 'exotic', scenario_description: 'x' }))
       .toEqual({ type: null, text: 'x' })
   })
 
@@ -110,5 +110,21 @@ describe('SCEN_TYPE_LABEL', () => {
     for (const type of SCEN_TYPES) {
       expect(SCEN_TYPE_LABEL[type]).toBeTruthy()
     }
+  })
+})
+
+
+describe('sensitivity (Edge Investment Case, scenario matrix)', () => {
+  it('is a known category with a label', () => {
+    expect(SCEN_TYPES).toContain('sensitivity')
+    expect(SCEN_TYPE_LABEL.sensitivity).toMatch(/sensitivity/i)
+  })
+
+  it('resolves from the real field and from the legacy tag', () => {
+    expect(resolveScenType({ scenario_type: 'sensitivity', scenario_description: 'capex +20%' }))
+      .toEqual({ type: 'sensitivity', text: 'capex +20%' })
+    expect(parseScenType('[sensitivity] capex +20%'))
+      .toEqual({ type: 'sensitivity', text: 'capex +20%' })
+    expect(scenDescriptionText('[sensitivity]')).toBe('')
   })
 })

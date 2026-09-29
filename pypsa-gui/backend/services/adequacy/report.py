@@ -55,6 +55,12 @@ BINDING_TOLERANCE = 1e-3
 def _config_hash(cfg) -> str:
     try:
         payload = asdict(cfg) if is_dataclass(cfg) else dict(vars(cfg))
+        commercial = payload.get("commercial")
+        if isinstance(commercial, dict):
+            # Participant splits never change a design (IC P3 WP3.0, decision
+            # 9): pop the key whatever its value, since the binding dumps
+            # `value_flows: null` into every commercial dict.
+            payload["commercial"] = {k: v for k, v in commercial.items() if k != "value_flows"}
         blob = json.dumps(payload, sort_keys=True, default=str)
     except Exception:
         blob = repr(cfg)

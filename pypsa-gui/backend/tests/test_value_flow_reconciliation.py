@@ -1,0 +1,215 @@
+"""
+The ledger on a solved site reconciles to `cost_breakdown` to the cent (Edge
+Investment Case P3 WP3.1, fixtures V1 and V1b).
+
+Plan: docs/superpowers/plans/2026-09-29-edge-investment-case-p3.md WP3.1 and
+§ Conservation and reconciliation. V1: the P1 edge site under `single_owner`
+with a TOU / demand / fixed / export tariff, an export price, a firm connection
+fee, a dispatch PPA and a lease, and capital costs on PV and BESS. V1b adds a
+costed Line and Transformer and an island bus the meter reaches from neither
+side: every costed asset is in the ledger (never dropped) and it still closes.
+"""
+from __future__ import annotations
+
+import copy
+import queue
+import threading
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from tests.fixtures.investment_case.edge_15min import build_edge_15min
+
+REF = {"id": "px", "version": 1, "hash": "abcdefabcdefabcd", "source": "test"}
+TOU = {"id": "energy", "kind": "energy", "unit": "per_kwh", "periods": [
+    {"name": "night", "rate": 0.06, "start_hour": 0, "end_hour": 6},
+    {"name": "day", "rate": 0.18}]}
+DEMAND = {"id": "demand", "kind": "demand", "unit": "per_kw_month",
+          "periods": [{"name": "all", "rate": 9.0}]}
+FIXED = {"id": "standing", "kind": "fixed", "unit": "per_month",
+         "periods": [{"name": "all", "rate": 150.0}]}
+FEED_IN = {"id": "feed_in", "kind": "energy", "unit": "per_kwh", "measured_on": "export",
+           "direction": "revenue", "periods": [{"name": "all", "rate": 0.01}]}
+LEVY = {"id": "levy", "kind": "tax_levy", "unit": "per_kwh",
+        "periods": [{"name": "all", "rate": 0.02}]}
+PPA = {"type": "ppa", "id": "ppa1", "kind": "pay_as_produced", "price": 20.0,
+       "tenor_years": 10, "seller": "Solar BV", "buyer": "site", "asset_ids": ["pv"],
+       "changes_dispatch": True}
+LEASE = {"type": "lease", "id": "lease1", "lessor": "Leasing GmbH", "lessee": "site",
+         "annual_payment": 120_000.0, "tenor_years": 10, "asset_ids": ["bess"]}
+FEE = {"kind": "firm", "import_cap_mw": 70.0, "available_from": "2029-01-01",
+       "capacity_fee": {"id": "cap_fee", "kind": "capacity", "unit": "per_kw_year",
+                        "periods": [{"name": "all", "rate": 45.0}]}}
+VF = {"template": "single_owner",
+      "participants": [{"id": "site", "name": "Site", "role": "site_owner"}],
+      "externals": ["retailer", "dso", "tso", "market", "tax_authority", "capex_supplier",
+                    "om_contractor", "Solar BV", "Leasing GmbH"]}
+
+
+def _network(*, multi=False, extras=False):
+    n = build_edge_15min()
+    n.generators.loc["grid_supply", "marginal_cost"] = 50.0
+    n.generators.loc["grid_supply", "p_min_pu"] = -1.0        # the grid absorbs export
+    n.add("Link", "export", bus0="poc", bus1="grid", p_nom=80.0, carrier="AC",
+          marginal_cost=0.01)
+    n.generators.loc["pv", "p_nom_extendable"] = True
+    n.generators.loc["pv", "p_nom_max"] = 60.0
+    n.generators.loc["pv", "capital_cost"] = 40_000.0
+    if "fom_cost" in n.generators.columns:
+        n.generators.loc["pv", "fom_cost"] = 5_000.0
+    n.storage_units.loc["bess", "capital_cost"] = 25_000.0
+    n.links.loc["import", "p_nom_extendable"] = True
+    n.links.loc["import", "p_nom_max"] = 80.0
+    n.links.loc["import", "capital_cost"] = 1_000.0
+    price = 30.0 + 20.0 * np.sin(np.arange(len(n.snapshots)) / 96 * 2 * np.pi)
+    if extras:
+        n.add("Bus", "site2", carrier="AC", v_nom=20.0)
+        n.add("Line", "feeder", bus0="site", bus1="site2", x=0.1, r=0.01, s_nom=50.0,
+              capital_cost=3_000.0)
+        n.add("Bus", "lv", carrier="AC", v_nom=0.4)
+        n.add("Transformer", "tx", bus0="site2", bus1="lv", x=0.05, s_nom=20.0,
+              capital_cost=2_000.0)
+        n.add("Load", "lv_load", bus="lv", p_set=1.0)
+        n.add("Bus", "island", carrier="AC")
+        n.add("Generator", "island_gen", bus="island", p_nom=5.0, marginal_cost=80.0,
+              capital_cost=10_000.0)
+        n.add("Load", "island_load", bus="island", p_set=2.0)
+    if multi:
+        n.set_investment_periods([2030, 2040])
+        n.investment_period_weightings["years"] = 10.0
+        n.investment_period_weightings["objective"] = 10.0
+        price = np.concatenate([price, price])
+    n.links_t["ic_export_price"] = pd.DataFrame({"export": price}, index=n.snapshots)
+    return n
+
+
+def _commercial(vf=VF, **extra):
+    out = {"poc_link": "import", "export_link": "export", "export_price_ref": REF,
+           "import_tariff": {"id": "t", "name": "t", "jurisdiction": "US",
+                             "valid_from": "2029-01-01",
+                             "items": [TOU, DEMAND, FIXED, FEED_IN, LEVY]},
+           "contracts": [PPA, LEASE], "connection": FEE, "value_flows": vf}
+    out.update(extra)
+    return out
+
+
+def _solve(n, commercial, *, multi=False):
+    from services.pypsa_service import PyPSAService
+    from services.solver_service import SolverConfig, run_simulation
+    import routers.simulation as sim_router
+    from tests.conftest import install_network_into_backend
+
+    install_network_into_backend(n)
+    cfg = SolverConfig(commercial=commercial, multi_investment_periods=multi)
+    sim_router._state["solver_config"] = cfg
+    n = PyPSAService.get_network()
+    status, cond = run_simulation(cfg, n, PyPSAService.get_lock(), threading.Event(),
+                                  queue.SimpleQueue(), state_update=lambda **k: None)
+    assert status in ("ok", "optimal"), (status, cond)
+    return n, cfg
+
+
+def _ledger(n, cfg):
+    import routers.results as R
+    from services.results.value_flows import value_flow_ledger
+
+    got = value_flow_ledger(n, cfg, result_df=R._result_df)
+    assert got is not None
+    return got
+
+
+def _checks(res, p):
+    return {c["name"]: c for c in res.periods[p].checks}
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("multi", [False, True], ids=["flat", "multi"])
+def test_v1_single_owner_reconciles_to_cost_breakdown_to_the_cent(reset_backend, multi):
+    n, cfg = _solve(_network(multi=multi), _commercial(), multi=multi)
+    inputs, vf, ledger, res = _ledger(n, cfg)
+    for p in inputs.periods:
+        checks = _checks(res, p)
+        assert res.periods[p].ok is True, checks
+        rec = checks["reconciliation"]["detail"]
+        assert abs(rec["difference"]) < 0.005, rec
+    p = inputs.periods[0]
+    lines = ledger.periods[p]
+    sources = {ln.source for ln in lines}
+    assert {"bill", "connection", "export_price", "contract", "asset"} <= sources
+    grid = [ln for ln in lines if ln.asset == "grid_supply"]
+    assert grid and all(ln.payee == "market" for ln in grid)
+    assert any("commodity_from_grid_side_generator" in ln.flags for ln in grid)
+    pv = {ln.value_stream for ln in lines if ln.asset == "pv"}
+    assert "capex" in pv
+    fee = [ln for ln in lines if ln.source == "connection"]
+    assert fee and fee[0].payee == "dso" and fee[0].amount > 0
+    exp = [ln for ln in lines if ln.source == "export_price"]
+    assert exp and exp[0].payer == "market"
+    ppa = [ln for ln in lines if ln.contract_id == "ppa1"]
+    assert ppa and ppa[0].payee == "Solar BV"
+
+
+@pytest.mark.live_solve
+def test_v1b_every_costed_asset_is_in_the_ledger_and_it_still_closes(reset_backend):
+    n, cfg = _solve(_network(extras=True), _commercial())
+    inputs, vf, ledger, res = _ledger(n, cfg)
+    assert res.periods["_"].ok is True, _checks(res, "_")
+    by_asset = {(a.component, a.name): a for a in inputs.assets}
+    assert by_asset[("Line", "feeder")].side == "site"
+    assert by_asset[("Transformer", "tx")].side == "site"
+    assert by_asset[("Generator", "island_gen")].side == "unclassified"
+    lines = ledger.periods["_"]
+    assert any(ln.asset == "feeder" and ln.value_stream == "capex" for ln in lines)
+    assert any(ln.asset == "tx" for ln in lines)
+    island = [ln for ln in lines if ln.asset == "island_gen"]
+    assert island and all("asset_side_unclassified" in ln.flags for ln in island)
+
+
+@pytest.mark.live_solve
+def test_an_internal_retailer_and_dso_still_close(reset_backend):
+    """V4's shape on a real solve: payees that are participants drop out of
+    both sides of check 4."""
+    vf = copy.deepcopy(VF)
+    vf["participants"] += [{"id": "dso", "name": "DSO", "role": "dso"},
+                           {"id": "retailer", "name": "R", "role": "retailer"}]
+    vf["externals"] = [e for e in vf["externals"] if e not in ("dso", "retailer")]
+    n, cfg = _solve(_network(), _commercial(vf))
+    inputs, _vf, ledger, res = _ledger(n, cfg)
+    assert res.periods["_"].ok is True, _checks(res, "_")
+
+
+@pytest.mark.live_solve
+def test_export_revenue_to_the_asset_owner_splits_both_export_sources(reset_backend):
+    vf = {**copy.deepcopy(VF), "export_revenue_to": "asset_owner",
+          "participants": [{"id": "site", "name": "Site", "role": "offtaker"},
+                           {"id": "developer", "name": "Dev", "role": "developer"}],
+          "asset_owners": [{"asset_id": "pv", "component": "Generator",
+                            "owner": "developer"}]}
+    n, cfg = _solve(_network(), _commercial(vf))
+    inputs, _vf, ledger, res = _ledger(n, cfg)
+    assert res.periods["_"].ok is True, _checks(res, "_")
+    lines = ledger.periods["_"]
+    to_dev = [ln for ln in lines if ln.source in ("export_price", "bill")
+              and ln.payee == "developer"]
+    assert {ln.source for ln in to_dev} == {"export_price", "bill"}
+    # Hand formula: per interval, the export revenue × pv's share of site generation.
+    w = n.snapshot_weightings.objective.to_numpy(float)
+    exp_mw = n.links_t.p0["export"].to_numpy(float)
+    price = n.links_t["ic_export_price"]["export"].to_numpy(float)
+    pv = np.clip(n.generators_t.p["pv"].to_numpy(float), 0, None)
+    hand = float((w * exp_mw * price * np.where(pv > 0, 1.0, 0.0)).sum())
+    got = sum(ln.amount for ln in lines if ln.source == "export_price"
+              and ln.payee == "developer")
+    assert got == pytest.approx(hand, abs=0.005)
+
+
+@pytest.mark.live_solve
+def test_a_corrupted_value_flows_means_no_ledger_but_a_named_error(reset_backend):
+    from services.commercial.participants import ValueFlowsInvalid
+    from services.results.value_flows import value_flow_ledger
+    import routers.results as R
+
+    n, cfg = _solve(_network(), _commercial({"participants": "x"}))
+    with pytest.raises(ValueFlowsInvalid):
+        value_flow_ledger(n, cfg, result_df=R._result_df)
