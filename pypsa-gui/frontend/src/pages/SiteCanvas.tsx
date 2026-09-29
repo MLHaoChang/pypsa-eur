@@ -48,7 +48,12 @@ import { screenToGround, groundToScreen } from '../site3d/raycast'
 import { registerSiteDropTarget, unregisterSiteDropTarget } from '../site3d/dropRegistry'
 import SiteOverlay from '../components/SiteOverlay'
 import { useDispatchFresh, useSolveSettled } from '../site3d/useDispatchFresh'
-import { useSiteResults, type SiteComponents, type SiteResultObject, type SiteResults } from '../site3d/useSiteResults'
+import { useSiteResults, type SiteComponents, type SiteResultObject } from '../site3d/useSiteResults'
+import { ResultsLayer, ObjectRegistryContext, useRegisterObject, type EasedVisual, type ObjectRegistry } from '../site3d/resultsLayer'
+import { createResultsStore, type ResultsStore } from '../site3d/resultsStore'
+import { siteVisuals, type Visual } from '../site3d/resultStyle'
+import SiteLegend from '../components/SiteLegend'
+import SiteResultsReadout from '../components/SiteResultsReadout'
 import { effectiveSizing } from '../site3d/sizing'
 import { toScene, fitCamera, chooseSite, unionBounds, halfSizeFor, type Bounds } from '../site3d/scene'
 import { useSitesStore } from '../site3d/sitesStore'
@@ -117,6 +122,11 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
   useEffect(() => () => { all.body?.dispose(); for (const r of all.rotors) r.geometry.dispose() }, [all])
   useEffect(() => () => { rest?.body?.dispose(); for (const r of rest?.rotors ?? []) r.geometry.dispose() }, [rest])
   const glow = emissiveFor({ selected, hovered, outside }, obj.color)
+  // The results layer drives this group per frame (gauge, glow, spin, flow).
+  const groupRef = useRef<THREE.Group>(null)
+  const registered = useMemo(() => ({ type: obj.type, name: obj.name, kind: obj.kind, bus: obj.bus, color: obj.color, anchors: obj.anchors }),
+    [obj.type, obj.name, obj.kind, obj.bus, obj.color, obj.anchors])
+  useRegisterObject(objectKey(obj), groupRef, registered, selected || hovered || outside)
   const material = (
     <meshStandardMaterial vertexColors emissive={glow.color} emissiveIntensity={glow.intensity} roughness={0.7} metalness={0.1} />
   )
@@ -132,6 +142,7 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
   )
   return (
     <group
+      ref={groupRef}
       name={`${obj.type}:${obj.name}`}
       position={toScene(ox, oy, obj.elevation ?? 0)}
       // Heading is clockwise from north; a rotation about the up axis by −heading.
@@ -166,16 +177,26 @@ const SiteObjectMesh = React.memo(function SiteObjectMesh({ obj, selected, hover
 // The labels are ordinary elements in the page's own tree; this component
 // only moves them, once per frame, to the projected top of their object.
 
-function LabelTracker({ keys, refs }: { keys: string[]; refs: React.MutableRefObject<Record<string, HTMLDivElement | null>> }) {
+function LabelTracker({ keys, refs, results, objects }: {
+  keys: string[]; refs: React.MutableRefObject<Record<string, HTMLDivElement | null>>
+  /** The label's last line is the object's result at this snapshot (spec §6.4). */
+  results: ResultsStore; objects: readonly SiteObject[]
+}) {
   const scene = useThree(s => s.scene)
   const camera = useThree(s => s.camera)
   const size = useThree(s => s.size)
   const box = useMemo(() => new THREE.Box3(), [])
   const v = useMemo(() => new THREE.Vector3(), [])
+  const cache = useRef<{ r: unknown; visuals: Map<string, Visual> }>({ r: null, visuals: new Map() })
   useFrame(() => {
+    const r = results.get()
+    if (cache.current.r !== r) cache.current = { r, visuals: siteVisuals(r.states, objects) }
     for (const key of keys) {
       const el = refs.current[key]
       if (!el) continue
+      const line = el.querySelector('[data-result-line]')
+      const text = cache.current.visuals.get(key)?.label ?? ''
+      if (line && line.textContent !== text) line.textContent = text
       const o = scene.getObjectByName(key)
       if (!o) { el.style.visibility = 'hidden'; continue }
       box.setFromObject(o)
@@ -344,7 +365,7 @@ function countRender(name: string): void {
   if (DEBUG_ENABLED) renderCounts[name] = (renderCounts[name] ?? 0) + 1
 }
 
-function Site3dDebugHook({ objects, site, context, groundMode: mode, heightAt, results }: { objects: SiteObject[]; site: Site; context: SiteContext | null; groundMode: string; heightAt: HeightAt; results: React.MutableRefObject<SiteResults> }) {
+function Site3dDebugHook({ objects, site, context, groundMode: mode, heightAt, results, eased }: { objects: SiteObject[]; site: Site; context: SiteContext | null; groundMode: string; heightAt: HeightAt; results: ResultsStore; eased: React.MutableRefObject<Map<string, EasedVisual>> }) {
   const camera = useThree(s => s.camera)
   const scene = useThree(s => s.scene)
   const gl = useThree(s => s.gl)
@@ -377,7 +398,9 @@ function Site3dDebugHook({ objects, site, context, groundMode: mode, heightAt, r
       heroMeshes: () => { let n = 0; scene.traverse(o => { if (o.name === 'hero' || o.name === 'hero-rotor') n++ }); return n },
       renders: () => ({ ...renderCounts }),
       /** The results map the driver last wrote (spec §6.1): snapshot, timestamp, per-object state. */
-      results: () => ({ idx: results.current.idx, iso: results.current.iso, states: Object.fromEntries(results.current.states) }),
+      results: () => { const r = results.get(); return { idx: r.idx, iso: r.iso, states: Object.fromEntries(r.states) } },
+      /** What the results layer showed on the last frame for one object: gauge, spin, glow, flow, loading. */
+      visual: (key: string) => { const v = eased.current.get(key); return v ? { ...v } : null },
       site: { id: site.id, name: site.name, placements: site.placements },
       context: context ? { buildings: context.buildings.length, lines: context.lines.length, areas: context.areas.length, terrain: !!context.terrain, missingTiles: context.terrain?.missing_tiles ?? null } : null,
       groundMode: mode,
@@ -385,7 +408,7 @@ function Site3dDebugHook({ objects, site, context, groundMode: mode, heightAt, r
     }
     ;(window as unknown as { __site3d?: unknown }).__site3d = hook
     return () => { delete (window as unknown as { __site3d?: unknown }).__site3d }
-  }, [camera, scene, gl, size, objects, site, context, mode, heightAt, results])
+  }, [camera, scene, gl, size, objects, site, context, mode, heightAt, results, eased])
   return null
 }
 
@@ -393,12 +416,13 @@ function Site3dDebugHook({ objects, site, context, groundMode: mode, heightAt, r
 
 /**
  * The only component that renders per snapshot: it reads the timeline and
- * the Eye from the store and writes the snapshot's results map into `out`,
- * which the scene reads per frame — SiteCanvas and the meshes never
- * re-render for a snapshot step.
+ * the Eye from the store and writes the snapshot's results map into the
+ * results store, which the scene reads per frame and the readout, legend
+ * and labels subscribe to — SiteCanvas and the meshes never re-render for a
+ * snapshot step.
  */
 const SiteResultsDriver = React.memo(function SiteResultsDriver({ out, project, current, freshSince, objects, components }: {
-  out: React.MutableRefObject<SiteResults>; project: string | null; current: boolean; freshSince: number
+  out: ResultsStore; project: string | null; current: boolean; freshSince: number
   objects: readonly SiteResultObject[]; components: SiteComponents
 }) {
   countRender('results-driver')
@@ -406,7 +430,7 @@ const SiteResultsDriver = React.memo(function SiteResultsDriver({ out, project, 
   const idx = useUIStore(s => s.resultsSnapshotIdx)
   const source = useUIStore(s => s.resultSource)
   const results = useSiteResults({ project, enabled, current, freshSince, idx, source, objects, components })
-  useLayoutEffect(() => { out.current = results }, [out, results])
+  useLayoutEffect(() => { out.set(results) }, [out, results])
   return null
 })
 
@@ -557,8 +581,11 @@ function SiteCanvas() {
   const solved = dispatchFresh && solveCurrent
   const components = useMemo<SiteComponents>(() => ({ generators, storageUnits, stores, loads, transformers, lines, links }),
     [generators, storageUnits, stores, loads, transformers, lines, links])
-  // The results driver writes the snapshot's map here; the scene reads it per frame (WP6).
-  const resultsRef = useRef<SiteResults>({ states: new Map(), idx: 0, iso: '' })
+  // The results driver writes the snapshot's map here; the layer reads it
+  // per frame, the readout / legend / labels subscribe (spec §6.1, §6.4).
+  const [resultsStore] = useState(createResultsStore)
+  const [registry] = useState<ObjectRegistry>(() => new Map())
+  const easedRef = useRef(new Map<string, EasedVisual>())
   const siteSizing = useUIStore(s => s.siteSizing)
   const sizing = effectiveSizing(siteSizing, solved)
 
@@ -755,7 +782,7 @@ function SiteCanvas() {
   const labelObjects = objects.filter(o => { const k = objectKey(o); return k === selectedKey || k === hovered })
 
   return (
-    <div className="relative h-full w-full bg-canvas">
+    <div className="relative h-full w-full bg-canvas" data-site-pane>
       {/* key: a new site gets a fresh camera; a parameter edit does not. */}
       <Canvas
         key={site.id}
@@ -790,6 +817,7 @@ function SiteCanvas() {
         />
         {context && <ContextScenery context={context} origin={site.origin} heightAt={heightAt} />}
         <BoundaryRibbon site={site} heightAt={heightAt} />
+        <ObjectRegistryContext.Provider value={registry}>
         {objects.map(o => {
           const key = objectKey(o)
           const isSelected = key === selectedKey
@@ -822,6 +850,7 @@ function SiteCanvas() {
             </group>
           )
         })}
+        </ObjectRegistryContext.Provider>
         <OrbitControls
           makeDefault
           maxPolarAngle={Math.PI / 2 - 0.05}
@@ -831,9 +860,10 @@ function SiteCanvas() {
         />
         <FitCamera bounds={plotExtent} />
         <DropTargetRegistrar siteId={site.id} />
-        <LabelTracker keys={labelObjects.map(objectKey)} refs={labelRefs} />
-        {DEBUG_ENABLED && <Site3dDebugHook objects={objects} site={site} context={context} groundMode={mode} heightAt={heightAt} results={resultsRef} />}
-        <SiteResultsDriver out={resultsRef} project={currentProject} current={solved} freshSince={freshSince} objects={objects} components={components} />
+        <LabelTracker keys={labelObjects.map(objectKey)} refs={labelRefs} results={resultsStore} objects={objects} />
+        {DEBUG_ENABLED && <Site3dDebugHook objects={objects} site={site} context={context} groundMode={mode} heightAt={heightAt} results={resultsStore} eased={easedRef} />}
+        <SiteResultsDriver out={resultsStore} project={currentProject} current={solved} freshSince={freshSince} objects={objects} components={components} />
+        <ResultsLayer store={resultsStore} registry={registry} debug={easedRef} />
       </Canvas>
 
       {/* Hover / selection labels (LabelTracker positions them every frame). */}
@@ -846,6 +876,8 @@ function SiteCanvas() {
               style={{ visibility: 'hidden' }}>
               <div className="font-semibold">{o.name}{outsideSet.has(key) ? <span className="ml-2 text-[10px] text-accent">outside the boundary</span> : null}</div>
               <div className="text-muted">{o.summary}</div>
+              {/* The result at this snapshot (LabelTracker writes it every frame). */}
+              <div data-result-line className="text-text empty:hidden" />
             </div>
           )
         })}
@@ -868,15 +900,13 @@ function SiteCanvas() {
           onResetPlacement={() => { if (selectedPlacedKey) removePlacement(currentProject, site.id, selectedPlacedKey) }}
         />
 
-        {/* Legend — under the picker. */}
-        <div className="flex flex-wrap gap-x-3 gap-y-1 rounded-md border border-border bg-bg/95 px-2 py-1.5 text-[11px] shadow max-w-[min(100%,36rem)]">
-          {legend.map(e => (
-            <span key={e.id} className="flex items-center gap-1 text-muted">
-              <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: e.color }} />
-              {e.label}
-            </span>
-          ))}
-        </div>
+        {/* Legend — under the picker; the result bands only while results show. */}
+        <SiteLegend entries={legend} results={resultsStore} />
+      </div>
+
+      {/* Results readout — top-right, only while results show (spec §6.4: not hover-only). */}
+      <div className="absolute right-3 top-12 z-[400] w-[min(20rem,40%)]">
+        <SiteResultsReadout store={resultsStore} objects={objects} />
       </div>
 
       {/* Attribution — bottom-right above the snapshot bar: required for the

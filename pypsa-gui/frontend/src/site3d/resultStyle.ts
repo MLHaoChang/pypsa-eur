@@ -2,7 +2,7 @@
 // §6.2, §6.4). Pure, no three: the renderer asks, this module decides —
 // glow precedence, and what a result looks like (gauge, glow, spin, flow)
 // with the label that says it in numbers (never colour only).
-import type { AssetType } from './assetLibrary'
+import { DEFAULT_LIBRARY, type AssetType } from './assetLibrary'
 import { loadingColor, socColor } from '../components/CanvasResultsContext'
 
 export const OUTSIDE_COLOR = '#dc2626'
@@ -103,4 +103,16 @@ export function visualFor(type: AssetType, state: AssetState, obj: { name: strin
       return { flow: { dir, pct: loading }, ...(loading != null ? { color: loadingColor(loading) } : {}), label }
     }
   }
+}
+
+/** Every site object's visual at this snapshot (objects without a state have none), in site order. */
+export function siteVisuals(states: ReadonlyMap<string, AssetState>, objects: readonly { type: string; name: string; kind: string; bus: string }[], lib: readonly AssetType[] = DEFAULT_LIBRARY): Map<string, Visual> {
+  const out = new Map<string, Visual>()
+  for (const o of objects) {
+    const key = `${o.type}:${o.name}`
+    const st = states.get(key)
+    const type = lib.find(t => t.id === o.kind)
+    if (st && type) out.set(key, visualFor(type, st, o))
+  }
+  return out
 }

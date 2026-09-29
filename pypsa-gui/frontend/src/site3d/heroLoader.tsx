@@ -142,6 +142,16 @@ export function HeroInstances({ parts, pieces, model, tint, glow }: HeroInstance
       if (!mesh) return
       bases.forEach((b, i) => mesh.setMatrixAt(i, (p.rotor ? rotorMatrix(b, model, 0, instances[i].rotorScale ?? 1) : b.clone()).multiply(p.matrix)))
       mesh.instanceMatrix.needsUpdate = true
+      if (p.rotor) {
+        // The results layer spins the blades (plan Task 6.2): each turbine
+        // about its own hub, phased like the parametric rotors. The blades
+        // turn about model X, which the 90° yaw points north — the opposite
+        // sense to the parametric rotors' scene z — hence −angle.
+        mesh.userData.setRotorAngle = (angle: number) => {
+          bases.forEach((b, i) => mesh.setMatrixAt(i, rotorMatrix(b, model, -(angle + i * 0.7), instances[i].rotorScale ?? 1).multiply(p.matrix)))
+          mesh.instanceMatrix.needsUpdate = true
+        }
+      }
       mesh.computeBoundingBox()
       mesh.computeBoundingSphere()
     })

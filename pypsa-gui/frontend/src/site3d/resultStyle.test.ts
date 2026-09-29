@@ -2,7 +2,7 @@
 // decides it, with a fixed precedence: selected > outside the boundary >
 // hovered > outside the boundary > a result.
 import { describe, it, expect } from 'vitest'
-import { emissiveFor, visualFor, OUTSIDE_COLOR, HOVER_COLOR, type AssetState } from './resultStyle'
+import { emissiveFor, visualFor, siteVisuals, OUTSIDE_COLOR, HOVER_COLOR, type AssetState } from './resultStyle'
 import { DEFAULT_LIBRARY } from './assetLibrary'
 import { loadingColor, socColor } from '../components/CanvasResultsContext'
 
@@ -108,5 +108,23 @@ describe('visualFor', () => {
       const v = visualFor(T(id), st, obj('X'))
       if (v.color || v.fillColor) expect(v.label).toMatch(/\d+ %/)
     }
+  })
+})
+
+describe('siteVisuals', () => {
+  it('one visual per object that has a state, in site order, keyed like the map', () => {
+    const objects = [
+      { type: 'Generator', name: 'PV', kind: 'pv', bus: 'B' },
+      { type: 'Generator', name: 'Ghost', kind: 'pv', bus: 'B' },
+      { type: 'StorageUnit', name: 'BESS', kind: 'bess', bus: 'B' },
+    ]
+    const states = new Map<string, AssetState>([
+      ['StorageUnit:BESS', { kind: 'storage', mw: 0, energy: 5, energyCap: 10 }],
+      ['Generator:PV', { kind: 'output', mw: 1, cap: 2 }],
+    ])
+    const v = siteVisuals(states, objects)
+    expect([...v.keys()]).toEqual(['Generator:PV', 'StorageUnit:BESS'])
+    expect(v.get('Generator:PV')!.emissive).toBeCloseTo(0.5)
+    expect(v.get('StorageUnit:BESS')!.fill).toBeCloseTo(0.5)
   })
 })
