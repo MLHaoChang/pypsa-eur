@@ -218,10 +218,62 @@ worktree of `origin/master`. One frontend test
 5 s default timeout on this box under full-suite load; it passes alone and
 with `--testTimeout=20000`, which the gate run used.
 
+## §6b — Second `master` merge before the PR merge, 2026-09-29
+
+`master` moved again after PR #64 opened (128 commits: #60, #61, #62 —
+the semantic Energy Hub merge with per-class FMEA ranks, guided mode,
+gridspine dynamics, macOS CI). Merged at `70fd1d2`; four conflicts
+(`route_inventory_phase0.txt`, `App.tsx`, `Sidebar.tsx`, `uiStore.ts`),
+each resolved as the union of both sides. The gate below ran on that tree
+plus the three fixes it found.
+
+| Tier | Command | Result |
+|---|---|---|
+| Unit + integration | report, chat-tool, parity, manifest, packaging files | green after the fixes below (exit 0, no FAILED) |
+| Regression | chat chunk | green except `test_openpyxl_parses_uploads_with_defusedxml_in_this_environment` — the container's venv lacked the `defusedxml` pin after a restart; installed, file green |
+| Regression | uploads / desktop / projects | green |
+| Regression | Energy Hub | green |
+| Regression | adequacy | green |
+| Regression | remainder, four groups (now 209 files incl. the report tests) | green after one fixture re-record (item 4 below); groups 0, 2, 3 green first time |
+| Regression | frontend `vitest` + `tsc` | 246 files, 2796 tests passed after one snapshot re-record (below); tsc clean |
+| End-to-end QA | drivers 0, 1, 2, 4, 5 | 18/18, 38/38, 47/47, 47/47, 37/37 after the `fmea_top` fix |
+| CI on the PR head | CodeQL, GUI frontend, Unit, Integration, Gridspine | green on `c62da83`; the GUI backend job re-runs on this push (item 4 below was red there) |
+
+**Found by this gate, fixed on the branch.**
+
+1. **`fmea_top` payload shape** (`e68776d`). Every driver failed at
+   "fmea_top is established with at least one ranked mode — status=ok
+   rows=0" and the Word export carried no top mode and no Pareto figure.
+   `master`'s per-class ranks (`19e9460`) store the Class-B sweep under
+   `rows` and the class-A screening under `class_a.rows`; the branch base
+   merged both under `top`, which is all the evidence collector, the two
+   Pareto callers and the drivers read. `evidence.fmea_top_modes` now reads
+   a report as it was written (`top` if present, else class-B then class-A
+   rows, ranked within class — the EH panel's order); unit test added.
+2. **CodeQL `py/path-injection`, eight alerts** (`8ff90aa`, `c62da83`).
+   Six were the route's `report_id`/`figure_id` returned unchanged by the
+   validators and joined onto the project directory: the validators now
+   re-spell an accepted id from a constant alphabet (the
+   `routers/snapshots._slug` pattern; identity for every accepted id,
+   pinned by a test). The remaining two were `load_report` spelling
+   `v<version>.json` from the route's int: the version file is now found
+   by matching directory entries, the caller's number used only in an
+   equality comparison. The CodeQL check is green on `c62da83`.
+3. **Expert sidebar snapshot** (`8ff90aa`). `master`'s guided-mode work
+   pins the Expert sidebar DOM; this branch adds the Reports entry. The
+   snapshot is re-recorded (diff: exactly that entry) and the test's
+   comment says when a re-record is the right response.
+4. **Pre-P25 system-prompt fixture** (this commit).
+   `test_build_system_prompt_matches_the_pre_p25_snapshot[True-tools]`
+   pins the system prompt so guided mode cannot touch it; this branch's
+   report-tool sentence in the study guidance is the only difference
+   (one paragraph). The tools fixture is re-recorded and the test's
+   docstring says so; the no-tools variant was unaffected.
+
 ## Increment 1 — status
 
 Phases 0–5 delivered on `claude/fmea-llm-reporting-feasibility-jtm6w1`
-(increments 1, 2 and 3). Not done: the workstation checks listed per phase,
-the live LLM probe (no key or local model in the container), and the
-"remainder" regression groups' re-run before a merge to `master`. `export_eh_report_docx` (WP0) remains alongside
+(increments 1, 2 and 3), gated twice against `master` (§6, §6b). Not done:
+the workstation checks listed per phase and the live LLM probe (no key or
+local model in the container). `export_eh_report_docx` (WP0) remains alongside
 `export_report_docx`; keep as the no-LLM shortcut or remove in review.
