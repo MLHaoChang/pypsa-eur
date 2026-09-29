@@ -409,3 +409,41 @@ def test_contracts_compare_without_an_import_tariff():
     c = gap["periods"][None]["contracts"]
     assert c["lp"] > 0 and c["lp"] == pytest.approx(c["billed"], rel=1e-9)
     assert set(gap["periods"][None]) == {"contracts"}
+
+
+@pytest.mark.live_solve
+@pytest.mark.parametrize("corrupt", ["volume", "rate", "width"])
+def test_an_energy_edit_does_not_hide_a_tier_record_mismatch(corrupt):
+    """Round 2 R1 (a TOU edit left the convex tiers' own mismatch hidden) and
+    R2 (rate and width guards on the windowed record)."""
+    build, extra = CASES["windowed_tiers"]
+    n = build()
+    commercial = {"poc_link": "import",
+                  **copy.deepcopy({**extra, "import_tariff": _tariff(
+                      TOU, *extra["import_tariff"]["items"])})}
+    _solve(n, commercial)
+    recs = list(n.meta[L.META_TIERS].values())
+    if corrupt == "volume":
+        for v in recs:
+            v["q_mwh"] = float(v["q_mwh"]) * 0.5
+    elif corrupt == "rate":
+        for v in recs:
+            v["rate_eur_per_mwh"] = float(v["rate_eur_per_mwh"]) * 0.8
+    else:   # every window's volume moved to its cheapest tier: sums kept, widths broken
+        by = {}
+        for v in recs:
+            by.setdefault((v["month"], v["period"]), []).append(v)
+        for group in by.values():
+            total = sum(float(v["q_mwh"]) for v in group)
+            cheapest = min(group, key=lambda v: float(v["rate_eur_per_mwh"]))
+            for v in group:
+                v["q_mwh"] = total if v is cheapest else 0.0
+    edited = copy.deepcopy(commercial)
+    edited["import_tariff"]["items"][0]["periods"][2]["rate"] = 0.30
+    bill = B.bill_site(n, edited)
+    assert bill.provenance["drift"]["energy"] and not bill.provenance["drift"]["tiers"]
+    gap = G.billing_vs_lp_gap(n, edited, bill)
+    tiers = gap["periods"][None]["tiers"]
+    assert all(c["cause"] != "config_changed_since_solve" for c in tiers["causes"])
+    assert any(f.startswith("tier_allocation_not_established:wtiers:") for f in tiers["flags"])
+    assert (None, "tiers") in {(g["period"], g["kind"]) for g in gap["gates"]}

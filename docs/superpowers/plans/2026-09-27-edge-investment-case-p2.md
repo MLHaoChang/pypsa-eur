@@ -1024,6 +1024,12 @@ the spec text of §15 (and §5.5's cause list) in the same commit.
   - L7 (a kind with one unknown item has no gap): no action. ADR-0001, and the per-item `items` rows show which item is unknown.
   - L8 (period keys None / int): carried to WP2.5, which serialises the payload.
   - L9: new tests cover export revenue on Europe/Berlin, M1, M2, M3, M4, L6, and per-period months in the fixture test. `test_billing_gap.py` now has 34 tests.
+- **WP2.3 review round 2 → PASS WITH CONDITIONS; fixed:**
+  - Verified: M1–M4, L5 and L6. The regression probes are unchanged, including multi-period with every kind, netCDF, and JSON with `allow_nan=False`.
+  - R1: an energy drift still relabelled the whole `tiers` kind, convex items included. → Tier drift is per ITEM. A non-convex item follows the energy record, and a convex one the tier record. A recipe change concerns the windowed items. Only the drifted item's billed − LP is the change.
+  - R2: `_tier_allocation_ok` also checks that each record's €/MWh equals the item's rate for its window and tier, and that a month's volume per tier fits the tier's width. What remains is an engine error in the proportional split itself, which no record check can see (disclosed).
+  - R3: the legacy fallback (no per-record drift in provenance) no longer relabels the PPA.
+  - Test: a TOU edit with the tier record's volume, rate or width corrupted still gates `tiers`. `test_billing_gap.py` has 37 tests.
 
 ## WP2.4b-i URDB importer
 
@@ -1119,6 +1125,7 @@ values other than 15/30/60.
   - M1a/M1b: the free-month check now uses the engine's `_charged` rule. A window is free when every effective rate is 0: `tier_rates`, else the item's tier rates, else its rate. A tiered season at [0, 0] is refused. A tiered catch-all facility (period rate 0, rates on the tiers) imports.
   - L1: the cyclic notes are recorded only once the ratchet is attached.
   - `test_urdb_import.py` has 39 tests.
+- **WP2.4b-i review round 3 → PASS** (no residue). Probes: a zero-rate tiered winter is refused; a one-set tiered facility with a ratchet bills 95,000 by hand; an all-zero tiered facility is refused; the cyclic notes appear only when attached; property 800/0; R1 unchanged.
 
 ## WP2.4b-ii Series and meter-data import
 

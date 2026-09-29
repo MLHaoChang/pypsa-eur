@@ -312,6 +312,23 @@ def _tier_allocation_ok(n, cfg, item, period, ax: _Axis, local) -> str | None:
     for key, energy in metered.items():
         if not _close(float(q.get(key, 0.0)), float(energy)):
             return "tier_volumes_do_not_match_the_dispatch"
+    # Each record's €/MWh is the item's rate for its window and tier, and a
+    # month's volume per tier fits the tier's width (round 2 R2).
+    names = [p.name for p in item.periods]
+    rates = _lp.item_tier_rates(item)
+    th = [t.threshold / _KWH_PER_MWH for t in item.tiers] + [np.inf]
+    widths = {-1: th[0]} if th[0] > 0 else {}
+    widths.update({k: th[k + 1] - th[k] for k in range(len(item.tiers))})
+    per_tier: dict = {}
+    for v in recs:
+        k = int(v["tier"])
+        want = 0.0 if k < 0 else float(rates[names.index(v["period"])][k]) * _KWH_PER_MWH
+        if not _close(float(v["rate_eur_per_mwh"]), want):
+            return "tier_rates_do_not_match_the_tariff"
+        per_tier[(v["month"], k)] = per_tier.get((v["month"], k), 0.0) + float(v["q_mwh"])
+    for (_, k), q_k in per_tier.items():
+        if q_k > widths.get(k, np.inf) * (1 + _TOL_REL) + _TOL_REL:
+            return "tier_volumes_exceed_the_tier_width"
     return None
 
 
@@ -407,12 +424,11 @@ def billing_vs_lp_gap(n, commercial, site_bill, *, settlement_lines: list | None
         rc = prov.get("recipe_changed") or {}
     else:   # a bill without per-record states: the global flags, tariff kinds only
         glob = "config_changed_since_solve" in site_bill.flags
-        dr = {k: glob for k in ("energy", "demand", "tiers", "capacity", "ppa")}
+        dr = {k: glob for k in ("energy", "demand", "tiers", "capacity")}   # not the PPA
         rc = {k: sorted(f for f in site_bill.flags if f in _RECIPE_FLAGS)
               for k in ("energy", "demand", "tiers", "capacity", "contracts")}
     drift_of = {"energy": dr.get("energy", False), "demand": dr.get("demand", False),
-                "tiers": dr.get("tiers", False) or dr.get("energy", False),
-                "capacity": dr.get("capacity", False)}
+                "capacity": dr.get("capacity", False)}   # tiers: per item, below
     local = _lp._local_clock(n.snapshots, cfg.timezone)
     items = cfg.import_tariff.items if cfg.import_tariff is not None else []
     by_kind: dict[str, list] = {k: [i for i in items if item_kind(i) == k] for k in KINDS}
@@ -521,7 +537,7 @@ def billing_vs_lp_gap(n, commercial, site_bill, *, settlement_lines: list | None
                 else:
                     lp_i = (None if tiers is None and wanted_convex
                             else (tiers or {}).get(item.id, {}).get(period, 0.0))
-                    if is_windowed_tiered(item):
+                    if is_windowed_tiered(item) and not (dr.get("tiers") or rc.get("tiers")):
                         amount = None if b is None or lp_i is None else b - lp_i
                         why = None if tiers is None else \
                             _tier_allocation_ok(n, cfg, item, period, ax, local)
@@ -534,10 +550,24 @@ def billing_vs_lp_gap(n, commercial, site_bill, *, settlement_lines: list | None
                         causes.append({"cause": "tier_allocation", "item": item.id,
                                        "amount": amount})
                 rows[item.id] = {"lp": lp_i, "billed": b}
+                # Drift per ITEM (round 2 R1): a non-convex item is priced by
+                # the energy record, a convex one by the tier record; a recipe
+                # change concerns the windowed items. The item's billed − LP
+                # is then the change, and its by-construction cause goes.
+                if reason is None:
+                    changed = dr.get("energy") if item.id in nonconvex_p else dr.get("tiers")
+                    recipe_i = rc.get("tiers") if is_windowed_tiered(item) else None
+                    if changed or recipe_i:
+                        causes = [c for c in causes if c.get("item") != item.id]
+                        amount = None if b is None or lp_i is None else b - lp_i
+                        causes.append(
+                            {"cause": "config_changed_since_solve", "item": item.id,
+                             "amount": amount} if changed else
+                            {"cause": "lp_recipe_changed", "item": item.id, "amount": amount,
+                             "flags": sorted(recipe_i)})
             lp = _sum_known(r["lp"] for r in rows.values())
             billed = _sum_known(r["billed"] for r in rows.values())
-            per["tiers"] = _kind(lp, billed, causes, flags, rows, drift=drift_of["tiers"],
-                                 recipe=rc.get("tiers") or ())
+            per["tiers"] = _kind(lp, billed, causes, flags, rows)
 
         # capacity
         if by_kind["capacity"]:
