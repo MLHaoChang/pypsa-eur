@@ -632,6 +632,20 @@ NO_ADAPTER_REASONS: dict[str, str] = {
         "dimensionless cycles count — no cost field of any kind exists on "
         "StorageCyclingComparison or StorageUnitCycles."
     ),
+    # ── Plan S5: the pro forma ──────────────────────────────────────────
+    "investment_case": (
+        "Upfront (overnight) CAPEX booked once in year 0 plus replacements, "
+        "on the SITE golden fixture — not the annuitised horizon CAPEX this "
+        "loop compares, and the multi-period golden network has no site, "
+        "tariff or bill for a case to exist on. Reconciled instead by "
+        "tests/test_proforma_golden.py: CAPEX against the ledger oracle, FOM "
+        "against asset_economics.fom_cost_eur and cost_breakdown, NPV against "
+        "the oracle NPV and against the LP objective saving."
+    ),
+    "investment_case_xlsx": (
+        "The same case written to a workbook; its NPV cell is evaluated "
+        "against the case's NPV by tests/test_proforma_xlsx.py."
+    ),
 }
 
 

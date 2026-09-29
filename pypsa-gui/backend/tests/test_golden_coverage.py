@@ -98,6 +98,8 @@ ROUTE_FILES: dict[str, str] = {
     "routers/simulation.py": "router",
     "routers/compare.py": "router",
     "routers/asset_results.py": "router",
+    # Plan S5 (review v1 S8): the decision-study routes serve the pro forma.
+    "routers/studies.py": "router",
 }
 
 # (file, function name) -> frozenset of `coverage.SURFACES` ids this route
@@ -205,6 +207,22 @@ ROUTE_SURFACES: dict[tuple[str, str], frozenset[str]] = {
     ("routers/asset_results.py", "list_assets"):                frozenset(),
     ("routers/asset_results.py", "export_asset_results_xlsx"):   frozenset({"asset_results_xlsx"}),
     ("routers/asset_results.py", "get_asset_results"):           frozenset({"asset_results"}),
+    # ── routers/studies.py (decision studies, guided investment study) ──
+    # Only the two case routes report investment economics; the rest are the
+    # study record, its run lifecycle and the assumptions ledger (inputs).
+    ("routers/studies.py", "list_studies"):          frozenset(),
+    ("routers/studies.py", "create_study"):          frozenset(),
+    ("routers/studies.py", "get_study"):             frozenset(),
+    ("routers/studies.py", "patch_study"):           frozenset(),
+    ("routers/studies.py", "delete_study"):          frozenset(),
+    ("routers/studies.py", "run_study"):             frozenset(),
+    ("routers/studies.py", "get_study_run"):         frozenset(),
+    ("routers/studies.py", "abort_study_run"):       frozenset(),
+    ("routers/studies.py", "get_ledger"):            frozenset(),
+    ("routers/studies.py", "put_ledger"):            frozenset(),
+    ("routers/studies.py", "get_ledger_csv"):        frozenset(),
+    ("routers/studies.py", "get_option_case"):       frozenset({"investment_case"}),
+    ("routers/studies.py", "get_option_case_xlsx"):  frozenset({"investment_case_xlsx"}),
 }
 
 

@@ -47,6 +47,13 @@ SURFACES = (
     "compare_curtailment",
     "compare_lost_load",
     "compare_storage_cycling",
+    # ── Plan S5 (guided investment study): the pro forma, JSON and XLSX.
+    # Checked against the SITE golden fixture (`tests/golden/site_fixture.py`,
+    # `tests/test_proforma_golden.py`), not the multi-period one: the case is
+    # an upfront-cost cash flow of one flat year, a different quantity from
+    # the annuitised horizon CAPEX the generic loop compares.
+    "investment_case",
+    "investment_case_xlsx",
 )
 
 FIXTURE_CLASSES = frozenset({"Generator", "Line", "Link", "StorageUnit"})
@@ -151,6 +158,14 @@ COVERAGE: dict[str, set[str]] = {
     # routers/compare.py::_compute_storage_cycling_summary(). Walks
     # `n.storage_units` / `n.storage_units_t.p` only.
     "compare_storage_cycling": {"StorageUnit"},
+    # routers/studies.py::get_option_case -> services/study/proforma.py::
+    # build_investment_case. Asset-scoped: the option's battery StorageUnit
+    # (CAPEX from the ledger, FOM/VOM and market revenue from asset_economics)
+    # and its PV Generator (CAPEX from upfront_cost_series).
+    "investment_case":         {"Generator", "StorageUnit"},
+    # routers/studies.py::get_option_case_xlsx -> services/study/
+    # proforma_xlsx.py::write_proforma_xlsx over the same case.
+    "investment_case_xlsx":    {"Generator", "StorageUnit"},
 }
 
 EXCLUSIONS: dict[tuple[str, str], str] = {
@@ -343,5 +358,24 @@ EXCLUSIONS: dict[tuple[str, str], str] = {
     ("compare_storage_cycling", "Link"): (
         "Same reasoning as Generator: this surface never reads `n.links` — "
         "cycling is a storage-only concept."
+    ),
+    ("investment_case", "Line"): (
+        "The pro forma is asset-scoped to the option's own battery and PV "
+        "(services/study/proforma.py::build_investment_case); the site pack "
+        "has no Line, and a line's cost is never an asset the site owner buys."
+    ),
+    ("investment_case", "Link"): (
+        "The site's only Links are grid_import / grid_export, the connection "
+        "the tariff prices: their energy is costed by the bill calculator "
+        "(savings = bill_baseline - bill_option), never as an asset CAPEX or "
+        "OPEX line, which would count the grid bill twice."
+    ),
+    ("investment_case_xlsx", "Line"): (
+        "Same case as investment_case written to a workbook "
+        "(services/study/proforma_xlsx.py); asset-scoped, no Line in the pack."
+    ),
+    ("investment_case_xlsx", "Link"): (
+        "Same case as investment_case: the grid links are priced by the bill "
+        "calculator, not booked as an asset of the case."
     ),
 }

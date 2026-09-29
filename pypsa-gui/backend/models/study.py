@@ -37,6 +37,8 @@ __all__ = [
     "LedgerDomain",
     "DecisionStudy", "DemandCharge", "Fidelity", "Figure", "FinancialBasis",
     "Findings", "InvestmentCase", "LedgerRow", "OptionResult", "OptionSpec",
+    "CaseKpis", "CaseProvenance", "CashFlowYear", "MarketRevenueAtDuals",
+    "UpfrontGap", "ValueStream",
     "Perspective", "SectionState", "SectionStatus", "StudyMaturity", "Tariff",
     "VerdictClass",
 ]
@@ -636,7 +638,7 @@ class BaselineResult(_FigureBlock):
 class CashFlowYear(_FigureBlock):
     _figure_fields: ClassVar[tuple[str, ...]] = (
         "bill_baseline", "bill_option", "resilience_value", "tax",
-        "depreciation", "debt_service",
+        "depreciation", "debt_service", "salvage",
     )
 
     year: int
@@ -656,7 +658,10 @@ class CashFlowYear(_FigureBlock):
     depreciation: float | None
     debt_service: float | None
     # Residual value at horizon end, non-zero only in the last year (S5).
-    salvage: float = 0.0
+    # S5 (gate S1 re-gate): null with an `unavailable["salvage"]` flag when it
+    # could not be computed, so a forgotten salvage never reads as a real 0.0;
+    # a non-zero value needs the case's `salvage_basis` (InvestmentCase).
+    salvage: float | None = 0.0
     net_cash_flow: float
     discounted_cash_flow: float
     cumulative_discounted: float
@@ -665,7 +670,7 @@ class CashFlowYear(_FigureBlock):
 class CaseKpis(_FigureBlock):
     _figure_fields: ClassVar[tuple[str, ...]] = (
         "irr", "payback_simple", "payback_discounted", "lcoe", "lcos", "lcoh",
-        "dscr_min",
+        "dscr_min", "salvage_eur",
     )
 
     npv: float
@@ -677,17 +682,66 @@ class CaseKpis(_FigureBlock):
     lcoh: float | None
     dscr_min: float | None
     capex_total: float
-    salvage_eur: float = 0.0
+    # S5: null plus `unavailable["salvage_eur"]` when not computed (ADR-0001).
+    salvage_eur: float | None = 0.0
 
 
 class ValueStream(_FigureBlock):
     _figure_fields: ClassVar[tuple[str, ...]] = ("annual_value", "share")
 
+    # S5 (gate S1 carry): a stable key; for the pro forma, the bill component
+    # the stream is the saving on (`energy`, `demand`, `fixed`, `network`,
+    # `capacity`, `export_credit`).
+    key: str | None = None
     label: str
     annual_value: float | None
     share: float | None
     engine: Engine
     basis: FinancialBasis = Field(default_factory=FinancialBasis)
+
+
+class MarketRevenueAtDuals(_FigureBlock):
+    """
+    The option's assets' revenue at the LP's bus prices (S5, BC-7): the
+    battery's ``discharge_revenue_eur - charge_cost_eur``, PV's
+    ``revenue_eur``. Reported beside the case and EXCLUDED from
+    ``net_cash_flow``: the bill already prices the same energy, and the duals
+    include the demand-charge shadow price.
+    """
+
+    _figure_fields: ClassVar[tuple[str, ...]] = ("annual_value",)
+
+    annual_value: float | None
+    by_asset: dict[str, float] = Field(default_factory=dict)
+    engine: Literal["lp_duals"] = "lp_duals"
+    excluded_from_net_cash_flow: Literal[True] = True
+
+
+class UpfrontGap(_Model):
+    """
+    Gate S4: where an existing surface (Capacity Expansion's lifetime CAPEX,
+    Asset Detail) shows an asset's upfront cost as ``upfront_cost_series``
+    (a single-lifetime back-calculation from ``capital_cost``), the case
+    names the figure it books instead and the gap between the two.
+    """
+
+    asset: str
+    ledger_upfront_eur: float
+    back_calculated_upfront_eur: float | None
+    gap_eur: float | None
+    basis: Literal["upfront_back_calculated_single_lifetime"] = (
+        "upfront_back_calculated_single_lifetime")
+
+
+class CaseProvenance(_Model):
+    """What the case was computed from (S5; the XLSX Provenance sheet)."""
+
+    ledger_hash: str | None = None
+    library_version: str | None = None
+    tariff_id: str | None = None
+    project_ref: str | None = None
+    model_hash: str | None = None
+    engines: list[str] = Field(default_factory=list)
 
 
 class CaseSources(_Model):
@@ -725,6 +779,35 @@ class InvestmentCase(_Model):
     sources: CaseSources = Field(default_factory=CaseSources)
     completeness: dict[str, SectionStatus] = Field(default_factory=dict)
     honesty_notes: tuple[str, ...] = ()
+    # S5 additions (all optional; S1 payloads validate unchanged).
+    market_revenue_at_duals: MarketRevenueAtDuals | None = None
+    upfront_gaps: list[UpfrontGap] = Field(default_factory=list)
+    provenance: CaseProvenance | None = None
+
+    @model_validator(mode="after")
+    def _salvage_has_a_basis(self):
+        """
+        Gate S1 re-gate: a non-zero salvage names how it was valued; a
+        salvage that was not computed is null with a flag (see the fields)
+        and then has no basis; the last year and the KPI agree.
+        """
+        in_years = [y.salvage for y in self.years]
+        kpi = self.kpis.salvage_eur if self.kpis is not None else 0.0
+        nonzero = any(v not in (None, 0.0) for v in in_years) or kpi not in (None, 0.0)
+        if nonzero and self.salvage_basis is None:
+            raise ValueError("a non-zero salvage needs its salvage_basis")
+        missing = kpi is None or any(v is None for v in in_years)
+        if missing and self.salvage_basis is not None:
+            raise ValueError(
+                "a salvage that was not computed has no salvage_basis")
+        if self.kpis is not None and self.years:
+            total = None if any(v is None for v in in_years) else sum(in_years)
+            if (total is None) != (kpi is None) or (
+                    total is not None and abs(total - kpi) > 1e-6 * max(1.0, abs(kpi))):
+                raise ValueError(
+                    f"kpis.salvage_eur {kpi!r} disagrees with the years' "
+                    f"salvage {total!r}")
+        return self
 
     @model_validator(mode="after")
     def _kpis_iff_ok(self):

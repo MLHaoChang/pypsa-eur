@@ -814,3 +814,122 @@ def get_ledger_csv(study_id: str,
         headers={"Content-Disposition": content_disposition(
             f"{study.name} - ledger.csv")},
     )
+
+
+# ── S5: the investment case (pro forma), JSON and XLSX ────────────────────
+
+def _case_error(status: int, code: str, message: str) -> HTTPException:
+    return HTTPException(status, detail={"error_kind": code, "message": message})
+
+
+def _option_case(study_id: str, option_id: str, project: AuthorizedProject,
+                 db: DBSession, user: User | None):
+    """
+    (study, ledger, case) for one solved option of a finished run.
+
+    Built from the option fork's saved network (its own frames), the run
+    record's bills and asset economics, and the ledger the run was built
+    from — a ledger edited since is refused (409), never mixed with results
+    it did not produce. 404 for a study never run, an option the question
+    does not have, and an option the run did not solve or whose fork the
+    study does not own; 422 for the baseline (every case is measured
+    against it) and for a case the engine refuses (a second currency year).
+    """
+    from db.models import Project
+    from services.study import proforma
+
+    study = _load(project, study_id)
+    base_dir = _project_dir(project)
+    try:
+        run = store.load_aux(base_dir, study_id, "run")
+        findings = store.load_aux(base_dir, study_id, "findings")
+    except store.StudyUnreadable:
+        raise HTTPException(500, detail={"code": "study_unreadable",
+                                         "message": "The run record cannot be read."}) from None
+    question = study_questions.get_question(study.question_id)
+    if run is None or findings is None or question is None:
+        raise _case_error(404, "study_never_run", "this study has not been run")
+    if option_id not in {o.option_id for o in question.options}:
+        raise _case_error(404, "option_unknown", f"the question has no option {option_id!r}")
+    if not any(o.free_assets for o in question.options if o.option_id == option_id):
+        raise _case_error(422, "baseline_has_no_case",
+                          f"{option_id!r} is the baseline every case is measured against")
+    _refuse_if_running(project, db, user, study_id)
+    result = next((o for o in findings.get("options") or []
+                   if o.get("option_id") == option_id), None)
+    if result is None or result.get("solve_status") != "ok" or not result.get("project_ref"):
+        raise _case_error(404, "option_not_solved",
+                          f"the last run did not solve option {option_id!r}")
+    if _base_row(project, db, user) is None:
+        raise HTTPException(404, f"Project '{project.name}' not found")
+    try:
+        fork = db.get(Project, uuid.UUID(str(result["project_ref"])))
+    except (TypeError, ValueError):
+        fork = None
+    if fork is None or not study_forks.is_study_owned(
+            fork, study_id=study_id, base_uuid=project.uuid):
+        raise _case_error(404, "option_not_solved",
+                          f"option {option_id!r} has no fork this study owns")
+    ledger, _stored = _current_ledger(study)
+    if packs.ledger_hash(ledger) != (findings.get("hashes") or {}).get("ledger_hash"):
+        raise _case_error(409, "ledger_changed_since_run", (
+            "the assumptions ledger changed after the run; re-run the study "
+            "before reading its cases (the LP sized the options on the old one)"))
+    library = _library_or_500()
+    network = study_runner._solved_network(fork)
+    details = (run.get("details") or {})
+    bills = {"baseline": (details.get("none") or {}).get("bill"),
+             "option": (details.get(option_id) or {}).get("bill")}
+    try:
+        tariff = packs.effective_tariff(study.intake, ledger, library, network.snapshots)
+        cfg = packs.option_solver_config(ledger, tariff)
+        case = proforma.build_investment_case(
+            network, cfg, None, ledger, bills, option_id, study_id=study_id,
+            tariff=tariff, fidelity=result.get("fidelity"),
+            asset_economics=(details.get(option_id) or {}).get("asset_economics"),
+            study_currency_year=study.currency_year, question=question,
+            project_ref=str(fork.id),
+            model_hash=((findings.get("hashes") or {}).get("option_network_hashes")
+                        or {}).get(str(fork.id)))
+    except (proforma.ProformaError, packs.PackError) as exc:
+        raise _case_error(422, exc.code, exc.message) from None
+    return study, ledger, case
+
+
+@router.get("/{study_id}/options/{option_id}/case")
+def get_option_case(study_id: str, option_id: str,
+                    project: AuthorizedProject = ProjectAccessDep,
+                    db: DBSession = Depends(get_db),
+                    user: User | None = Depends(optional_user)) -> dict:
+    """
+    The option's investment case (plan S5): a year-by-year cash flow on one
+    basis, its KPIs, the bill's value streams and the market revenue at
+    duals (reported, excluded from the cash flow). ``available`` is false
+    when the case is not established (a bill or the asset economics missing).
+    """
+    _refuse_unless_enabled()
+    _study, _ledger, case = _option_case(study_id, option_id, project, db, user)
+    return {"available": case.status == "ok",
+            **case.model_dump(mode="json", by_alias=True)}
+
+
+@router.get("/{study_id}/options/{option_id}/case.xlsx")
+def get_option_case_xlsx(study_id: str, option_id: str,
+                         project: AuthorizedProject = ProjectAccessDep,
+                         db: DBSession = Depends(get_db),
+                         user: User | None = Depends(optional_user)) -> Response:
+    """
+    The same case as a workbook: cash flows with live discounting formulas
+    and the NPV pinned as ``=CF0 + NPV(rate, CF1:CFn)``, the KPIs, the
+    ledger and the provenance (`services/study/proforma_xlsx.py`).
+    """
+    _refuse_unless_enabled()
+    from services.study.proforma_xlsx import write_proforma_xlsx
+
+    study, ledger, case = _option_case(study_id, option_id, project, db, user)
+    return Response(
+        content=write_proforma_xlsx(case, ledger),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": content_disposition(
+            f"{study.name} - {option_id} - pro forma.xlsx")},
+    )
